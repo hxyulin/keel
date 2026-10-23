@@ -46,7 +46,7 @@ impl InstKinds {
                 InstData::ReturnCall { .. } | InstData::ReturnCallIndirect { .. } => {
                     kinds.return_call = true
                 }
-                InstData::Intrinsic { .. } => kinds.intrinsic = true,
+                InstData::Intrinsic { .. } | InstData::X86RflagsRegion { .. } => kinds.intrinsic = true,
                 InstData::SymbolAddr { .. } => kinds.symbol_addr = true,
                 InstData::Binary {
                     op: BinaryOp::Umulhi | BinaryOp::Smulhi,

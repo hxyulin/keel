@@ -7,11 +7,34 @@ errors never silently switch linkers.
 
 The reusable `keel-link` crate takes named object/archive bytes and explicit
 `Dylib` interfaces. `link` returns a **not yet signed** Mach-O image and warnings;
-`write_signed` writes a sibling temporary file, runs `/usr/bin/codesign` with an
-ad-hoc identity, and installs the executable only after signing succeeds.
-It does not invoke Clang, ld, or lld. macOS signing is an explicit platform tool
-dependency, not a linker fallback. The in-memory API can run on another host,
-but those bytes must be signed on macOS before execution on Apple Silicon.
+`write_signed` and the streaming `link_signed` write a sibling temporary file,
+produce a native in-process ad-hoc signature, and atomically install the executable
+only after signing succeeds. Signed output is host independent; no Clang, ld,
+lld, or codesign subprocess is needed. Cross-host CLI use requires a macOS SDK
+via `--sysroot` or `SDKROOT`. Execution still requires macOS arm64.
+
+The signer implements the narrow linker ad-hoc contract described by LLVM's
+[lld CodeSignatureSection](https://github.com/llvm/llvm-project/blob/main/lld/MachO/SyntheticSections.cpp):
+`LC_CODE_SIGNATURE` points to an embedded SuperBlob containing one version
+0x20400 CodeDirectory, SHA-256 hashes of 4 KiB file pages (the last page hashes
+only its actual bytes), identifier `keel.native`, `CS_ADHOC | CS_LINKER_SIGNED`,
+and the `__TEXT` executable segment extent with `CS_EXECSEG_MAIN_BINARY`.
+There are no special slots, entitlements, requirements, CMS identity, certificate
+chain, or timestamp. This supports local execution and integrity checking; it
+provides no Developer ID identity, notarization, or Gatekeeper distribution trust.
+It is not a general-purpose signer or re-signer for arbitrary Mach-O files.
+
+The unsigned API remains unchanged. The writer finalizes its content-derived
+UUID before signing; the signer then finalizes the signature load command and
+`__LINKEDIT` file/VM sizes before hashing any page. The code limit excludes the
+signature itself. Complete signed files are limited to 32-bit Mach-O file bounds,
+with overflow rejected before patching. Signing reads at most 64 KiB at a time
+and retains at most 16 page hashes, without allocating the whole image.
+
+Output is never memory mapped while being written or signed. A fresh temporary
+inode is closed before atomic replacement, avoiding premature Darwin signature
+cache entries and keeping previously running executables intact. Failed writes
+or signatures leave the destination unchanged and remove the temporary file.
 
 ## Source audit and decisions
 
@@ -44,8 +67,9 @@ the producer contract and the implementation decisions.
   pointer-difference relocations. Runtime unwind is needed even for plain C
   backtraces. The linker builds a version-1 `__unwind_info` with regular pages,
   explicit no-unwind gaps, three-slot personality table pointing at GOT slots,
-  LSDA indexes, and DWARF FDE section offsets. Whole sections retain CIE/FDE
-  relative layout. Foreign implicit FDE fixups are rejected.
+  LSDA indexes, and DWARF FDE section offsets. Without collection, whole sections retain CIE/FDE relative layout; opt-in
+  collection rebuilds owned records as described below. Foreign implicit FDE
+  fixups are rejected.
 * Keel IR supports invoke/landingpad and emits `__gcc_except_tab`, personality
   and typeinfo references. Those references must resolve through selected dylib
   interfaces, e.g. `-lc++`; language-level C++ compilation is not implied.
@@ -68,8 +92,11 @@ the producer contract and the implementation decisions.
 * `LC_MAIN` enters `_main` using dyld's normal libSystem startup and return
   convention. No synthetic crt trampoline or raw kernel entry is used.
   `S_MOD_INIT_FUNC_POINTERS` sections are retained for dyld initializers. The
-  initializer fixture uses an Apple-assembled section because Keel's assembler
-  does not expose this section kind yet.
+  C frontend and assembler emit this section kind directly. C destructors use
+  private initializer thunks calling libSystem `atexit` for executable shutdown;
+  see [C lifecycle](c-lifecycle.md) for the default-priority subset and unload limits.
+  Clang destructor thunks needing `___dso_handle` remain diagnosed as undefined;
+  this linker does not synthesize that executable/DSO registration handle.
 * Imports use eager non-lazy binding, one GOT slot per referenced symbol and
   12-byte `ADRP/LDR/BR x16` stubs for external calls. Both ordinary imported
   pointers and local PIE pointers are represented in dyld bind/rebase streams.
@@ -77,7 +104,7 @@ the producer contract and the implementation decisions.
   trie and external definitions, allowing dynamic symbol lookup by applications.
 * This first writer deliberately uses `LC_DYLD_INFO_ONLY` opcode streams rather
   than `LC_DYLD_CHAINED_FIXUPS`. Modern load commands include `LC_BUILD_VERSION`
-  and `LC_MAIN`, plus a content-derived SHA-256 UUID in `LC_UUID`; `codesign` adds
+  and `LC_MAIN`, plus a content-derived SHA-256 UUID in `LC_UUID`; the native signer adds
   `LC_CODE_SIGNATURE`. The current dyld aborted an early prototype without
   `LC_UUID`, so this is validated as a launch requirement. Chained fixups,
   authenticated pointers, arm64e output, and function-start/data-in-code synthesis
@@ -101,7 +128,7 @@ the producer contract and the implementation decisions.
   summaries and input mappings; it is not an out-of-core linker.
   All parsed members must meet the basic object contract;
   thin/GNU long-name archives, LTO/bitcode and universal archives require the
-  system linker. Extraction is whole-member, without atom splitting/dead strip.
+  system linker. Extraction is whole-member. Opt-in section collection runs after extraction.
 
 ## TLS, weak symbols, and source debugging
 
@@ -179,7 +206,7 @@ them. Snapshot files may remain after a failed signing/dsymutil operation.
 Native `N_SO`, `N_OSO`, `N_FUN`, `N_GSYM`, and `N_STSYM` records describe selected
 function/data addresses and function extents. dsymutil handles DWARF relocation
 and dSYM construction; this is an explicit platform-tool dependency, never a
-call to Apple's linker. codesign remains the explicit signer. Real LLDB tests
+call to Apple's linker. Ad-hoc signing itself is in process. Real LLDB tests
 on unoptimized Clang and Keel `-g` C objects, including multiple compilation
 units, static functions, archived debug input, and input bytes whose original
 object has been deleted, prove source-line breakpoints, argument/local values,
@@ -201,7 +228,7 @@ framework search, arbitrary dylib parsing, rpaths, custom entry points, legacy
 `S_COALESCED` sections (except existing `__eh_frame` handling), local/absolute weak
 definitions, symbol aliases/resolvers, general interposition, Objective-C metadata
 linking, legacy TLS initializer-pointer sections, arm64e/PAC, chained fixups,
-dead stripping, ICF, relaxation, LOH optimization, branch islands, or
+symbol-level atom splitting, ICF, relaxation, LOH optimization, branch islands, or
 linker-script/order-file support.
 Unsupported options/forms are diagnosed. LOH hints can be ignored safely because
 this implementation does not relax their instruction sequences. Data-in-code
@@ -343,7 +370,7 @@ patched bytes. Relocated `__eh_frame` and `__compact_unwind` payloads stay alive
 until unwind generation. The byte API reserves its complete known image size. `link_to` writes directly
 into an empty `Write + Seek` sink, emitting bounded padding and hashing bytes in
 file order before patching the UUID. `link_signed` writes to a sibling temporary
-file, signs it, and atomically installs it. The CLI uses this path, avoiding a
+file, signs it with bounded reads and hash buffers, and atomically installs it. The CLI uses this path, avoiding a
 complete executable byte buffer.
 
 DWARF section bounds and metadata are validated even when source debugging is
@@ -372,3 +399,166 @@ python3 suite/link_memory_compare.py --baseline /path/to/before/keel \
   --corpus target/streaming-investigation-20261019/raw.json \
   --out target/link-memory-comparison
 ```
+
+
+## In-process ad-hoc signing validation
+
+`cargo test -p keel-link` covers deterministic equivalence of buffered and
+streaming signed output, independent SuperBlob/CodeDirectory decoding, every
+final-file page hash, partial and exact final pages, multiple read batches,
+short reads/writes, injected I/O failures, malformed headers, re-signing rejection,
+and file-size overflow bounds without allocating oversized images. Native arm64
+tests use `/usr/bin/codesign --verify --strict` solely as an independent oracle,
+launch twenty alternating executable replacements, and prove that tampering on
+a fresh inode fails strict verification and is killed by the kernel on launch.
+`cargo test -p keel --test macho_link` exercises an explicit minimal SDK with an
+empty `PATH`, signed CLI output, input-as-output replacement, and preservation
+of an installed executable after invalid input. These portable tests run on
+non-macOS hosts too; runtime and codesign assertions are gated to native macOS
+arm64. Signing does not add an SDK or replace the optional dsymutil dependency.
+
+### Registration-table boundaries
+
+Raw assembler names `section$start$SEG$SECT` and `section$end$SEG$SECT` resolve
+to the beginning and the byte after the end of an ordinary merged regular or
+zerofill section. C callers can use these exact names through assembler labels;
+no extra C ABI underscore is part of the boundary name. Boundaries include
+inter-contribution alignment padding but exclude padding after the final
+contribution. They are deferred section address expressions, resolved after
+layout, with private-extern symbol-table visibility and no dyld export, import,
+or branch stub. GOT slots and image-relative pointer rebases work normally.
+Selected input definitions, including weak definitions and commons, take
+precedence over synthesis independently for each name. As in ld64, a name
+exported by a selected dylib interface resolves as an import before synthesis.
+
+Only supported `__TEXT`, `__DATA`, and `__DATA_CONST` segment names are accepted.
+The linker's existing `__DATA_CONST` to `__DATA` mapping also applies to boundary
+requests: either spelling addresses the resulting `__DATA` section, including
+contributions originally in both segments. Special section types (including
+TLS) and reserved linker sections are excluded. A syntactically valid request
+for an absent ordinary section creates an empty regular output section, with
+equal start/end addresses, even for a weak reference. It does not extract an
+archive member merely containing that section. This follows
+[Apple ld64's boundary atoms](https://github.com/apple-oss-distributions/ld64/blob/main/src/ld/Resolver.cpp)
+and [LLD's empty-section boundary handling](https://github.com/llvm/llvm-project/blob/main/lld/MachO/SymbolTable.cpp).
+Native ARM64 tests execute the same registration objects through Keel and Apple
+ld, including empty/absent sections and weak requests. ELF's absent-section
+policy intentionally differs. With `--dead-strip`, these boundaries describe
+only surviving contributions; a boundary reference does not retain a table.
+Mark registration records `retain`/`.no_dead_strip` to preserve a table and its
+callback relocation edges.
+
+Executable entry validation accepts `_main` inside any file-backed `__TEXT`
+output section marked with `S_ATTR_PURE_INSTRUCTIONS` or
+`S_ATTR_SOME_INSTRUCTIONS`, including a custom code section. Zerofill sections
+cannot supply an entry point even if they carry instruction attributes.
+
+## C custom sections and retention
+
+Regular custom code/data sections and MH_OBJECT symbol `N_NO_DEAD_STRIP`
+metadata are accepted. Weak resolution and ordinary archive demand are unchanged.
+The native linker supports opt-in input-section collection (below); symbol
+subsections within one input section remain indivisible. `N_NO_DEAD_STRIP` is an object-only descriptor, not copied
+to executable symbols. See [C sections and retain](c-sections-retain.md).
+
+
+## Opt-in native dead stripping
+
+Use `keel link --dead-strip ...` (alias `-dead_strip`), or set
+`keel_link::Options::dead_strip = true`. The default is false and keeps the
+existing link behavior. This is **whole input-section collection**, even when
+an object carries `MH_SUBSECTIONS_VIA_SYMBOLS`. Two functions in the same input
+text section stay together; separate objects or custom code sections permit
+independent collection. No individual-function stripping is promised for a
+shared text contribution. Original `(object, section)` IDs survive selection,
+weak resolution and collection, before output concatenation or import/GOT/stub
+allocation. Commons have independent nodes and keep their existing max-size /
+max-alignment policy when live. Absolute definitions occupy no section and
+remain in the symbol/export tables.
+
+Roots are `_main` (including a custom file-backed executable `__TEXT` section),
+input symbols marked `N_NO_DEAD_STRIP`, sections marked
+`S_ATTR_NO_DEAD_STRIP`, module-init registration sections, and explicitly required
+exports. `retain` produces a linker root; compiler-only `used` does not. A live
+TLS descriptor retains its referenced template contribution and bootstrap import;
+TLS does not make unrelated sections roots. A retained descriptor also roots its
+template through its relocations. Descriptors or templates sharing one input
+section are indivisible. Existing TLS initialization/destruction and DSO teardown
+limits are unchanged; native ELF TLS remains unsupported independently.
+
+Pass repeated `--require-export _api` options or populate
+`Options::required_exports` for executable definitions consumed only through
+`dlsym`, runtime-loaded DSOs, or callbacks absent from static relocation edges.
+Names use their exact Mach-O spelling, including the C ABI underscore. These
+are **roots, not an export allowlist**: all surviving public definitions retain
+the existing export policy. Private extern and absent definitions produce a
+specific error when collection is enabled. Selected common definitions can also
+be required; their merged visibility is public if any selected common declaration
+is public, independently of input order. TBD interfaces describe dylib exports, not their undefined runtime
+consumers; the caller must list these required executable exports or leave
+collection disabled. The linker cannot infer runtime symbol strings.
+
+Archive extraction remains the ordinary pre-GC fixed point: even a dead reference
+can select a member before collection. Retention inside an unselected member does
+not extract it, nor do section-boundary references extract registration records.
+Required exports must already be defined in selected inputs and do not force
+archive extraction. Strong duplicate definitions are still diagnosed before GC;
+external relocation edges follow the resolved strong/weak winner, and unwind
+records belonging to discarded losing weak definitions are omitted. A live
+indivisible contribution containing a losing weak unwind owner is diagnosed:
+splitting that contribution or using the system linker avoids ambiguous local
+entry ownership.
+
+The graph decodes ARM64 ADDEND prefixes and SUBTRACTOR/UNSIGNED pairs before
+interpreting symbol indices. Both difference operands, branch, page, GOT, TLVP
+and pointer references contribute edges. Local pointer payloads use original
+section addresses/addends. Only live undefined references participate in import
+resolution and weak-import strength; dead imports, GOT slots and stubs disappear,
+while live undefined references still fail. Selected dylib load commands are
+retained; this option does not implement `-dead_strip_dylibs`.
+
+Unwind ownership is directional: live code retains its compact records and native
+FDEs; live FDEs retain their shared CIE and personality/LSDA relocation targets.
+Metadata does not indiscriminately root code. Compact records, FDEs and CIEs are
+pruned/rebuilt before sizing/layout; local metadata symbols, FDE CIE back-pointers
+and section-base-relative subtraction addends are remapped. The final
+`__unwind_info` is rebuilt with the surviving ranges, personalities and LSDAs.
+Unwind ownership requires a function range wholly inside one file-backed code
+contribution, one 64-bit UNSIGNED compact function pointer, or native-width
+SUBTRACTOR/UNSIGNED FDE fixups with a local anchor in their own metadata section
+and a symbolic code target. Unsupported implicit/foreign FDEs, external symbols
+in moving unwind metadata, ordinary incoming references into that metadata, and
+local section-ordinal references into it are diagnosed. Keel's existing bounded
+CIE encoding contract remains in force. This stage deliberately does not add
+foreign unwind encoding support or atomize LSDA sections.
+Relocations crossing unwind record boundaries are rejected before pruning,
+including fixups starting in records that would otherwise be discarded.
+
+`__DATA_CONST` contributions continue to map into writable `__DATA`; GC and
+`section$start/end` use that same mapping. Boundary spans cover only surviving
+contributions, including their layout padding; missing tables yield empty spans.
+Debug maps omit discarded code/data/common ranges and retain exact original
+object snapshots. Surviving code addresses still map to original object section
+addresses. The finalized image goes through the existing UUID, signing and atomic
+installation path after collection.
+
+Reference contracts: [Apple ld64's manual](https://github.com/apple-oss-distributions/ld64/blob/main/doc/man/man1/ld-classic.1),
+[LLD's mark-live traversal](https://github.com/llvm/llvm-project/blob/main/lld/MachO/MarkLive.cpp),
+[LLD's unwind ownership](https://github.com/llvm/llvm-project/blob/main/lld/MachO/UnwindInfoSection.cpp),
+and [LLVM's subsection granularity explanation](https://lld.llvm.org/MachO/ld64-vs-lld.html#subsections-via-symbols-and-warn-missing-subsections-via-symbols).
+Keel's whole-input-section granularity is intentionally more conservative than
+Apple/LLD symbol subdivision when that header flag is present.
+
+Validation includes native ARM64 execution against Apple ld for retained callback
+tables, compiler-only `used`, module initialization, shared-CIE DWARF backtraces,
+and the existing four-thread TLS matrix in default and GC modes. Structural tests
+cover dead cycles/imports, weak winners, commons, section flags, required exports,
+archive non-extraction, boundary spans, runtime DSO exports and relocation pairs. The native debug-map
+fixture runs dsymutil/LLDB after discarding a custom code contribution. Signed
+replacement tests include GC, strict verification and fresh-inode tamper rejection.
+
+Native milestone checks (macOS ARM64): `cargo test -p keel-link -p keel`
+passed 267 tests (one existing ignored test); `cargo test -p keel-c` passed all
+241 tests, including the section/lifecycle/weak/cleanup matrices.
+`cargo check --workspace --all-targets` passed. The dedicated signature
+replacement/tamper test was rerun after making its final image use collection.

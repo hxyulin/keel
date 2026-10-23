@@ -4,8 +4,8 @@
 //!
 //! The output is for the GNU assembler (`.intel_syntax noprefix`):
 //! destination first, as in the Intel manuals and keel's arm64 output.
-//! The baseline is x86-64-v2 (SSE4.1 `roundsd`, `popcnt`), which every
-//! x86-64 CPU since 2009 has.
+//! The legacy baseline uses SSE4.1 `roundsd` and `popcnt`; explicit v1 uses
+//! software fallbacks. CPU feature legality is independent of tuning tiers.
 //!
 //! # Registers
 //!
@@ -70,19 +70,49 @@
 //! which the loader fills in, and calls to it go through the procedure
 //! linkage table (`call puts@PLT`).
 
+mod aggregate_va_arg;
+mod byte_shuffle;
+mod cache_stream;
 mod constant_division;
+mod cpu_control;
+mod cx16;
+mod f80;
+mod flags_state;
+mod legacy_x87_images;
+mod owned_x87_stack;
+pub mod linux_syscall;
+mod packed_pair;
+mod packed_search;
+mod packed_shift;
+mod raw_div;
+mod raw_rflags;
+mod rflags_region;
+mod port_io;
+mod string_port_io;
+mod selector_queries;
+mod descriptor_queries;
+mod sign_blend;
+mod x87_basic;
+mod x87_bcd;
+mod x87_binary;
+mod x87_compare;
+mod x87_constants;
+mod x87_fi_arithmetic;
+mod x87_integer;
+mod x87_numerical;
+mod x87_region;
+mod x87_state;
+mod xstate;
 
 use crate::dwarf::{self, FrameDebug};
 use crate::fold::{self, iconst};
 use crate::integer_division::{reducible_divisor, signed_reciprocal, unsigned_reciprocal};
 use crate::metadata::{Cfi, Directive, Expression, Sink};
-use crate::parallel_copy::sequentialize;
+use crate::parallel_copy::for_each_move;
 use crate::regalloc::{self, Allocation, Loc, Pools};
 use crate::sysv::{self, ArgKind, ArgLoc, RAX, RCX, RDI, RDX, Slot};
 use crate::{CodegenError, Format, data, loc_reg, pieces};
-use keel_asm_ir::x86::{
-    Address, Memory, Modifier, Opcode, Operand as AsmOperand, Register, RegisterClass,
-};
+use keel_asm_ir::x86::{Memory, Modifier, Opcode, Operand as AsmOperand, Register, RegisterClass};
 use keel_ir::fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use keel_ir::{
     AbiParam, ArgExt, BinaryOp, Block, BlockCall, CallConv, ConvertOp, DebugScope, EntityRef,
@@ -90,10 +120,17 @@ use keel_ir::{
     Purpose, RmwOp, SourceFile, SourceLoc, Type, UnaryOp, Value, ValueDef,
 };
 use std::fmt::Write;
+mod avx256;
+mod gather;
+mod mmx_value;
+mod mxcsr_access;
+mod numeric;
 mod output;
 mod packed_load;
 mod packed_positive;
 mod packed_sign;
+mod raw_fma;
+mod strings;
 mod vector;
 use output::*;
 
@@ -161,7 +198,7 @@ pub fn compile_with_pipeline(
     let Output::Text(text) = compile_output(module, pools, pipeline, false, None)? else {
         unreachable!()
     };
-    Ok(text)
+    Ok(text.into_string())
 }
 pub fn compile_program_with_pipeline(
     module: &Module,
@@ -195,8 +232,29 @@ fn compile_output(
     structured: bool,
     mut sink: Option<&mut dyn FnMut(keel_asm_ir::Program)>,
 ) -> Result<Output, CodegenError> {
+    keel_ir::section::validate_module(module, crate::Target::X86_64LinuxGnu).map_err(
+        |message| CodegenError {
+            func: String::new(),
+            message,
+        },
+    )?;
     crate::validate_odr(module, crate::Target::X86_64LinuxGnu)?;
     validate_vector_abi(module)?;
+    f80::validate(module)?;
+    crate::validate_vector_width_with_memory_policy(
+        module,
+        8,
+        if pipeline.selector.x86_features().avx {
+            32
+        } else {
+            16
+        },
+        |producer, layout, unnamed| producer.and_then(|p| sysv::producer_aggregate(layout,p)).is_some_and(|policy| {
+            matches!(policy, sysv::ProducerAggregate::Memory)
+                || (unnamed && matches!(policy, sysv::ProducerAggregate::Vector(ty) if ty.bytes()==Some(32)))
+        }),
+    )?;
+
     pipeline.validate_target(crate::Target::X86_64LinuxGnu)?;
     let subset = |pool: &[u8], of: &[u8]| pool.iter().all(|r| of.contains(r));
     assert!(
@@ -222,7 +280,7 @@ fn compile_output(
     let mut frames = Vec::new();
     let symbols = crate::symbols::Symbols::new(module);
     for original in &module.functions {
-        let func = vector::lower(original);
+        let func = vector::lower(original, pipeline.selector.x86_features());
         let mut compiler = FunctionCompiler::new(&func, &symbols, pools, pipeline, structured)?;
         compiler.debug = debug;
         let slots = if debug {
@@ -230,10 +288,39 @@ fn compile_output(
         } else {
             Vec::new()
         };
+        let frame_register = compiler.frame_register;
         let scope_marks = compiler.compile(&mut out);
-        frames.push(FrameDebug { slots, scope_marks });
+        frames.push(FrameDebug {
+            slots,
+            scope_marks,
+            frame_register,
+        });
         if let (Some(sink), Output::Structured(program)) = (&mut sink, &mut out) {
             sink(std::mem::take(program));
+        }
+    }
+    for f in &module.functions {
+        for (enabled, section) in [
+            (f.attrs.constructor, ".init_array"),
+            (f.attrs.destructor, ".fini_array"),
+        ] {
+            if enabled {
+                out.directive(Directive::ElfLifecycleArray {
+                    fini: section == ".fini_array",
+                });
+                out.align(3);
+                out.integer(8, crate::metadata::Expression::symbol(&f.name));
+            }
+        }
+    }
+    for d in &module.decls {
+        if d.attrs.weak {
+            out.directive(Directive::ElfWeak(d.name.clone()));
+        }
+    }
+    for d in &module.data {
+        if d.weak && d.init.is_none() {
+            out.directive(Directive::ElfWeak(d.name.clone()));
         }
     }
     for data in &module.data {
@@ -253,8 +340,8 @@ fn compile_output(
     Ok(out)
 }
 
-// Vector scalars use one XMM register. Aggregate SSEUP classification is a
-// separate ABI feature; reject it rather than treating vector fields as integers.
+// Vector scalars and single-vector aggregate wrappers share one physical SIMD
+// register. Larger mixed vector aggregates use the MEMORY convention.
 fn validate_vector_abi(module: &Module) -> Result<(), CodegenError> {
     fn contains(l: &Layout) -> bool {
         match l {
@@ -263,28 +350,106 @@ fn validate_vector_abi(module: &Module) -> Result<(), CodegenError> {
             Layout::Array(elem, _) => contains(elem),
         }
     }
-    let check = |name: &str, sig: &keel_ir::Signature| {
-        if sig
-            .params
-            .iter()
-            .chain(&sig.returns)
-            .any(|p| p.layout().is_some_and(contains))
+    const F64X1_ABI: &str = "f64x1 SysV C ABI is unsupported: observed GCC and Clang use stack arguments, with GCC hidden-sret versus Clang XMM scalar returns; use pointer/scalar f64 boundaries or private cc(fast)";
+    let f64x1 = Type::Vector(keel_ir::VectorType::F64x1);
+    fn contains_f64x1(layout: &Layout) -> bool {
+        match layout {
+            Layout::Scalar(ty) => *ty == Type::Vector(keel_ir::VectorType::F64x1),
+            Layout::Struct(fields) => fields.iter().any(contains_f64x1),
+            Layout::Array(element, _) => contains_f64x1(element),
+        }
+    }
+    let check = |name: &str, sig: &keel_ir::Signature, extra: &[&AbiParam]| {
+        let params = || sig.params.iter().chain(&sig.returns).chain(extra.iter().copied());
+        let mut aggregate_bytes=0u64;
+        for layout in params().filter_map(|p|p.layout()) {
+            let Some(size)=layout.checked_size() else { return Err(CodegenError {func:name.into(),message:"aggregate ABI layout size overflows u64".into()}); };
+            aggregate_bytes=aggregate_bytes.checked_add(size).filter(|n|*n<=sysv::MAX_AGGREGATE_ABI_BYTES)
+                .ok_or_else(||CodegenError {func:name.into(),message:"aggregate ABI contract exceeds backend frame range".into()})?;
+        }
+
+        if sig.x86_vector_abi.is_some() && sig.cc != CallConv::C {
+            return Err(CodegenError { func: name.into(), message: "x86_vector_abi requires cc(c), excluding private Fast".into() });
+        }
+        // Untagged C f64x1 remains ambiguous. Tagged natural aggregate
+        // layouts must satisfy the independently established producer policy.
+        if sig.cc == CallConv::C && params().any(|p| {
+            (p.ty == f64x1 && sig.x86_vector_abi.is_none())
+                || p.layout().is_some_and(|layout| contains_f64x1(layout) && (sig.x86_vector_abi.is_none() || sig.x86_vector_abi.and_then(|p| sysv::producer_aggregate(layout,p)).is_none()))
+        }) {
+            return Err(CodegenError { func: name.into(), message: F64X1_ABI.into() });
+        }
+        if params()
+            .any(|p| p.layout().is_some_and(|l| sig.x86_vector_abi.and_then(|p| sysv::producer_aggregate(l,p)).is_none() && sysv::ambiguous_vector_wrapper(l)))
         {
+            return Err(CodegenError {func:name.into(),message:"256-bit vector wrapper with empty aggregate members has compiler-dependent SysV ABI (Clang MEMORY versus GCC YMM); use a true single-member wrapper".into()});
+        }
+        // Independent 125-layout GCC/Clang/expected-register primary probes
+        // establish recursive natural D8 fixed and named-variadic boundaries.
+        // Unnamed operands carry the same classifier contract on CallArgs.
+        if params().any(|p| {
+            p.layout()
+                .is_some_and(|l| l.size() <= 16 && contains(l)
+                    && sysv::vector_wrapper(l).is_none()
+                    && !(sig.cc == CallConv::C && (sysv::natural_d8_aggregate(l) || sig.x86_vector_abi.and_then(|p| sysv::producer_aggregate(l,p)).is_some())))
+        }) {
             Err(CodegenError {func:name.into(),message:"SIMD vector fields in byval/sret aggregates require SSEUP ABI classification and are not supported yet".into()})
         } else {
             Ok(())
         }
     };
     for d in &module.decls {
-        check(&d.name, &d.sig)?;
+        check(&d.name, &d.sig, &[])?;
     }
     for f in &module.functions {
-        check(&f.name, &f.sig)?;
+        check(&f.name, &f.sig, &[])?;
         for (_, d) in f.callees() {
-            check(&f.name, &d.sig)?;
+            check(&f.name, &d.sig, &[])?;
         }
         for (_, s) in f.signatures() {
-            check(&f.name, s)?;
+            check(&f.name, s, &[])?;
+        }
+        for (_, inst) in f.layout_insts() {
+            let call = match f.inst_data(inst) {
+                InstData::Call { func, args } | InstData::ReturnCall { func, args }
+                | InstData::Invoke { func, args, .. } => Some((&f.callee(*func).sig, args)),
+                InstData::CallIndirect { sig, args, .. }
+                | InstData::ReturnCallIndirect { sig, args, .. } => Some((f.signature(*sig), args)),
+                InstData::VaArg { ty, x86_vector_abi, .. } => {
+                    if *ty == f64x1 {
+                        if !x86_vector_abi.is_some_and(|abi| f.has_x86_va_arg_provenance(inst, abi)) {
+                            return Err(CodegenError { func: f.name.clone(), message: "f64x1 va_arg requires explicit matching local variadic provenance".into() });
+                        }
+                    } else if x86_vector_abi.is_some() {
+                        return Err(CodegenError { func: f.name.clone(), message: "x86_vector_abi VaArg metadata requires f64x1".into() });
+                    }
+                    None
+                }
+                _ => None,
+            };
+            if let Some((sig, args)) = call {
+                let extra: Vec<_> = (0..args.len()).filter_map(|i| args.abi(i)).collect();
+                check(&f.name, sig, &extra)?;
+
+            }
+            if let InstData::AggregateVaArg { layout, x86_vector_abi, .. } = f.inst_data(inst) {
+                let param = AbiParam { ty: Type::Ptr, ext: ArgExt::None, purpose: Purpose::ByVal(layout.clone()) };
+                check(&f.name, &f.sig, &[&param])?;
+                if contains_f64x1(layout) {
+                    if !x86_vector_abi.is_some_and(|p| sysv::producer_aggregate(layout,p).is_some() && f.has_x86_va_arg_provenance(inst,p)) {
+                        return Err(CodegenError { func: f.name.clone(), message: "aggregate f64x1 va_arg requires explicit matching current-signature local provenance".into() });
+                    }
+                } else if x86_vector_abi.is_some() {
+                    return Err(CodegenError { func: f.name.clone(), message: "aggregate producer metadata requires an f64x1 layout".into() });
+                }
+            }
+            if let Some((sig, args)) = call
+                && sig.cc == CallConv::C
+                && sig.x86_vector_abi.is_none()
+                && args.iter().skip(sig.params.len()).any(|&v| f.value_type(f.resolve(v)) == f64x1)
+            {
+                return Err(CodegenError { func: f.name.clone(), message: F64X1_ABI.into() });
+            }
         }
     }
     Ok(())
@@ -314,6 +479,7 @@ fn unsupported(func: &Function, inst: Inst) -> Option<&'static str> {
         InstData::Invoke { .. } | InstData::LandingPad { .. } | InstData::EhTypeid { .. } => {
             "exceptions"
         }
+        InstData::Neon { .. } => "ARM NEON architectural intrinsic",
         InstData::InlineAsm { .. } => "inline assembly",
         _ => return None,
     })
@@ -321,16 +487,25 @@ fn unsupported(func: &Function, inst: Inst) -> Option<&'static str> {
 
 /// Instructions that clobber the caller-saved registers: calls, and the
 /// operations that are calls to libc or libgcc (`i128` division).
-fn is_call(func: &Function, data: &InstData) -> bool {
+fn is_call(func: &Function, data: &InstData, features: keel_asm_ir::x86::Features) -> bool {
     match data {
         InstData::Binary { op, args } => {
             op.can_trap() && func.value_type(func.resolve(args[0])) == Type::I128
         }
-        InstData::Call { .. } | InstData::CallIndirect { .. } | InstData::Fma { .. } => true,
+        InstData::Call { .. } | InstData::CallIndirect { .. } => true,
+        InstData::Fma { args } => {
+            func.value_type(func.resolve(args[0])) == Type::F80 || !(features.avx && features.fma)
+        }
         InstData::Intrinsic { id, .. } => {
             matches!(
                 id,
-                Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset | Intrinsic::Memcmp
+                Intrinsic::Memcpy
+                    | Intrinsic::Memmove
+                    | Intrinsic::Memset
+                    | Intrinsic::Memcmp
+                    | Intrinsic::X86AvxVzeroall
+                    | Intrinsic::X86Xrstor64
+                    | Intrinsic::X86Fxrstor64
             )
         }
         _ => false,
@@ -430,6 +605,12 @@ fn stack_slot(func: &Function, addr: Value) -> Option<usize> {
     }
 }
 
+enum AggregateResult<'a> {
+    Registers(Vec<sysv::RegPiece>, &'a Layout),
+    X87,
+    ScalarMemory,
+}
+
 struct FunctionCompiler<'a> {
     features: keel_asm_ir::x86::Features,
     func: &'a Function,
@@ -454,11 +635,28 @@ struct FunctionCompiler<'a> {
     /// Offset from `rsp` of spill slot 0. Slots past the allocator's are
     /// staging for struct arguments in registers; see [`Self::move_args`].
     spill_base: usize,
-    vector_spills: HashSet<u32>,
+    /// Full-copy capacities, independent of a slot's currently live type.
+    vector_spills: HashMap<u32, u16>,
+    wide_vectors: bool,
+    frame_align: usize,
+    frame_register: Option<u8>,
     copy_temp: Option<u32>,
     /// Offset from `rsp` of an 8-byte slot keeping a call's `sret` address
     /// across the call, for results that come back in registers.
     sret_save: Option<usize>,
+    /// Isolated eight-byte object for an outgoing GNU scalar result.
+    scalar_result: Option<usize>,
+    /// Private MXCSR readback slot for strict-v1 floating rounding.
+    mxcsr_save: Option<usize>,
+    /// Dedicated aligned old/new raw architectural MXCSR slots.
+    mxcsr_access: Option<usize>,
+    x87_state: Option<usize>,
+    /// Preserve an allocated RBX for fixed-register CX16 and CPUID operations.
+    cx16_save: Option<usize>,
+    string_io_home: Option<usize>,
+    string_io_programs: HashMap<Inst, keel_asm_ir::Program>,
+    rflags_home: Option<usize>,
+    rflags_programs: HashMap<Inst, keel_asm_ir::Program>,
     /// Offset from `rsp` of the slot keeping this function's own `sret`
     /// address, which it returns in rax.
     sret_ptr: Option<usize>,
@@ -491,12 +689,27 @@ struct FunctionCompiler<'a> {
     /// The lexical scope of the code being emitted, and where it changed.
     scope: Option<DebugScope>,
     scope_marks: Vec<(String, Option<DebugScope>)>,
+    /// The moves of a call's arguments or an edge's block arguments, kept
+    /// between parallel copies rather than allocated for each.
+    copies: Vec<(Loc, Loc)>,
+    /// Where a call's arguments go, kept between calls likewise.
+    arg_places: sysv::Placement,
+    /// Whether the function's name is written in its labels as it is,
+    /// without quotes or escapes.
+    bare_name: bool,
 }
 
 impl<'a> FunctionCompiler<'a> {
     /// The offset of each stack slot from rbp, where debuggers find the
     /// variables in them: rbp stays put while `rsp` may move.
     fn slot_frame_offsets(&self) -> Vec<i64> {
+        if self.frame_register.is_some() {
+            return self
+                .stack_slot_offsets
+                .debug_offsets()
+                .map(|o| o as i64)
+                .collect();
+        }
         let top = (self.frame_size + 8 * self.saved.len()) as i64;
         self.stack_slot_offsets
             .debug_offsets()
@@ -512,10 +725,88 @@ impl<'a> FunctionCompiler<'a> {
         structured: bool,
     ) -> Result<Self, CodegenError> {
         let module = symbols.module;
+        let abi_align = |sig: &keel_ir::Signature| {
+            sig.params
+                .iter()
+                .chain(&sig.returns)
+                .filter_map(|p| p.layout())
+                .map(|l| l.align() as usize)
+                .max()
+                .unwrap_or(16)
+        };
+        let abi_align = std::iter::once(abi_align(&func.sig))
+            .chain(func.callees().map(|(_, d)| abi_align(&d.sig)))
+            .chain(func.signatures().map(|(_, s)| abi_align(s)))
+            .chain(func.layout_insts().flat_map(|(_, i)| {
+                let d = func.inst_data(i);
+                let mut align = Vec::new();
+                if let Some(args) = d.call_args() { align.extend((0..args.len()).filter_map(|i| args.abi(i).and_then(|p| p.layout()).map(|l| l.align() as usize))); }
+                if let InstData::AggregateVaArg { layout, .. } = d { align.push(layout.align() as usize); }
+                align
+            }))
+            .max()
+            .unwrap_or(16);
+        let wrappers = |sig: &keel_ir::Signature| {
+            sig.params
+                .iter()
+                .chain(&sig.returns)
+                .filter_map(|p| p.layout())
+                .filter_map(|layout| match sysv::aggregate_policy(layout, sig.x86_vector_abi) {
+                    sysv::ProducerAggregate::Vector(ty) => Some(ty),
+                    _ => None,
+                })
+                .map(|t| t.bytes().unwrap())
+                .max()
+                .unwrap_or(0)
+        };
+        let wrapper_bytes = std::iter::once(wrappers(&func.sig))
+            .chain(func.callees().map(|(_, d)| wrappers(&d.sig)))
+            .chain(func.signatures().map(|(_, s)| wrappers(s)))
+            .max()
+            .unwrap_or(0);
+        let wide_vectors = (0..func.num_values())
+            .any(|i| func.value_type(Value::new(i)).bytes() == Some(32))
+            || wrapper_bytes == 32;
+        let frame_align = func
+            .stack_slots()
+            .map(|(_, s)| s.align as usize)
+            .max()
+            .unwrap_or(16)
+            .max(if wide_vectors { 32 } else { 16 })
+            .max(abi_align);
+        let frame_register = (frame_align > 16).then_some(15);
+        let saved_pool = pools
+            .callee_saved
+            .iter()
+            .copied()
+            .filter(|r| frame_register != Some(*r))
+            .collect::<Vec<_>>();
+        let simd_pool = pools
+            .float_caller_saved
+            .iter()
+            .copied()
+            .filter(|r| !wide_vectors || *r != 12)
+            .collect::<Vec<_>>();
+        let width_pools = Pools {
+            float_caller_saved: &simd_pool,
+            callee_saved: &saved_pool,
+            ..*pools
+        };
+        let pools = if frame_register.is_some() {
+            &width_pools
+        } else {
+            pools
+        };
         let err = |message: String| CodegenError {
             func: func.name.clone(),
             message,
         };
+        if func
+            .layout_insts()
+            .any(|(_, i)| matches!(func.inst_data(i), InstData::VaArg { ty: Type::I128, .. }))
+        {
+            return Err(err("va_arg.i128 requires AArch64 Linux".into()));
+        }
         let (CallConv::C | CallConv::Fast) = func.sig.cc;
         let not_yet = |what: &str| err(format!("{what} not supported on x86-64 yet"));
         match func.sig.returns.as_slice() {
@@ -544,6 +835,325 @@ impl<'a> FunctionCompiler<'a> {
             return Err(not_yet("exceptions are"));
         }
         for (_, inst) in func.layout_insts() {
+            if let InstData::X86RflagsRegion { plan, args } = func.inst_data(inst) {
+                keel_ir::rflags_region::analyze(plan).map_err(|e| err(e.to_string()))?;
+                if args.len() != plan.captures.len() || args.iter().any(|&v| func.value_type(func.resolve(v)) != Type::I64)
+                    || func.inst_results(inst).len() != plan.observations
+                    || func.inst_results(inst).iter().any(|&v|func.value_type(v) != Type::I64) {
+                    return Err(err("FLAGS region exact I64 capture/result signature mismatch".into()));
+                }
+            }
+            if let InstData::Intrinsic { id, args } = func.inst_data(inst) {
+                if *id == Intrinsic::X86RflagsSwap {
+                    return Err(err(raw_rflags::SWAP_BLOCKER.into()));
+                }
+                if let Some((_, _, immediate)) = id.x86_port_io() {
+                    if args.len() != id.info().params.len()
+                        || args.iter().zip(id.info().params).any(|(&v, &ty)| func.value_type(v) != ty)
+                    {
+                        return Err(err("port I/O operand types or arity mismatch".into()));
+                    }
+                    if immediate
+                        && !args.first().and_then(|&v| iconst(func, v))
+                            .is_some_and(|n| (0..=255).contains(&n))
+                    {
+                        return Err(err("port I/O immediate requires iconst.i16 in0..=255".into()));
+                    }
+                }
+                if *id == Intrinsic::X86X87Region {
+                    let control = iconst(func, args[1])
+                        .and_then(keel_ir::x87_region_control)
+                        .ok_or_else(|| {
+                            err("x87 region control must be a valid iconst.i32".into())
+                        })?;
+                    if control.0.opcode == "fisttp" && !pipeline.selector.x86_features().sse3 {
+                        return Err(err("x87 region FISTTP requires SSE3".into()));
+                    }
+                }
+                if id.is_x86_cache_stream() {
+                    let f = pipeline.selector.x86_features();
+                    let name = id.info().name;
+                    if *id == Intrinsic::X86Clflush && !f.clflush {
+                        return Err(err(format!("{id} requires CLFSH (+clflush)")));
+                    }
+                    if name.starts_with("x86_avx2_") && !(f.avx && f.avx2) {
+                        return Err(err(format!("{id} requires AVX2")));
+                    }
+                    if name.starts_with("x86_avx_") && !f.avx {
+                        return Err(err(format!("{id} requires AVX")));
+                    }
+                    if *id == Intrinsic::X86Sse41Movntdqa128 && !f.sse41 {
+                        return Err(err(format!("{id} requires SSE4.1")));
+                    }
+                }
+                if id.is_x86_pure_bits() {
+                    let f = pipeline.selector.x86_features();
+                    let avx2 = id.info().name.starts_with("x86_avx2_");
+                    if !f.avx || avx2 && !f.avx2 {
+                        return Err(err(format!(
+                            "{id} requires AVX{}",
+                            if avx2 { "2" } else { "" }
+                        )));
+                    }
+                }
+                if *id == Intrinsic::X86AvxVmaskmovdqu && !pipeline.selector.x86_features().avx {
+                    return Err(err(format!("{id} requires AVX")));
+                }
+                if id.is_x86_x87_fisttp() && !pipeline.selector.x86_features().sse3 {
+                    return Err(err(format!("{id} requires SSE3")));
+                }
+                if id.is_x86_raw_fma() {
+                    let f = pipeline.selector.x86_features();
+                    if !f.avx || !f.fma {
+                        return Err(err(format!("{id} requires AVX+FMA")));
+                    }
+                }
+                if id.is_x86_fp_misc() {
+                    if !pipeline.selector.x86_features().avx {
+                        return Err(err(format!("{id} requires AVX")));
+                    }
+                    if id.has_x86_round_control()
+                        && !args
+                            .get(1)
+                            .and_then(|&v| iconst(func, v))
+                            .is_some_and(|n| (0..16).contains(&n))
+                    {
+                        return Err(err("AVX round control must be iconst.i32 in0..=15".into()));
+                    }
+                }
+                if id.is_x86_legacy_fp_compare()
+                    && !args
+                        .get(2)
+                        .and_then(|&v| iconst(func, v))
+                        .is_some_and(|n| (0..8).contains(&n))
+                {
+                    return Err(err(
+                        "legacy SSE compare predicate must be iconst.i32 in0..=7".into(),
+                    ));
+                }
+                if id.is_x86_legacy_fp_v2() {
+                    let f = pipeline.selector.x86_features();
+                    let sse3 = id.info().name.starts_with("x86_sse3_");
+                    if !(if sse3 { f.sse3 } else { f.sse41 }) {
+                        return Err(err(format!(
+                            "{id} requires {}",
+                            if sse3 { "SSE3" } else { "SSE4.1" }
+                        )));
+                    }
+                    if let Some((index, limit)) = id.x86_legacy_fp_v2_control() {
+                        if !args
+                            .get(index)
+                            .and_then(|&v| iconst(func, v))
+                            .is_some_and(|n| (0..limit).contains(&n))
+                        {
+                            return Err(err(format!(
+                                "legacy FP control must be iconst.i32 in0..{}",
+                                limit - 1
+                            )));
+                        }
+                    }
+                }
+                if id.is_x86_legacy_ptest() && !pipeline.selector.x86_features().sse41 {
+                    return Err(err(format!("{id} requires SSE4.1")));
+                }
+                if *id == Intrinsic::X86AvxVzeroall && !pipeline.selector.x86_features().avx {
+                    return Err(err("VZEROALL requires AVX".into()));
+                }
+                if let Some((_, tier)) = id.x86_sign_blend() {
+                    let f = pipeline.selector.x86_features();
+                    if !match tier {
+                        0 => f.sse41,
+                        1 => f.avx,
+                        2 => f.avx && f.avx2,
+                        _ => false,
+                    } {
+                        return Err(err(format!("{id} requires its SSE4.1/AVX/AVX2 feature")));
+                    }
+                }
+                if let Some((_, tier, sad)) = id.x86_packed_search() {
+                    let f = pipeline.selector.x86_features();
+                    if !match tier {
+                        2 => f.sse41,
+                        3 => f.avx,
+                        4 => f.avx && f.avx2,
+                        _ => false,
+                    } {
+                        return Err(err(format!("{id} requires its SSE4.1/AVX/AVX2 feature")));
+                    }
+                    if sad
+                        && !args
+                            .get(2)
+                            .and_then(|&v| iconst(func, v))
+                            .is_some_and(|n| (0..256).contains(&n))
+                    {
+                        return Err(err("MPSADBW requires iconst.i32 in0..255".into()));
+                    }
+                }
+                if let Some((_, tier)) = id.x86_packed_pair() {
+                    let f = pipeline.selector.x86_features();
+                    let supported = match tier {
+                        0 => true,
+                        1 => f.ssse3,
+                        2 => f.sse41,
+                        3 => f.avx,
+                        4 => f.avx && f.avx2,
+                        _ => unreachable!(),
+                    };
+                    if !supported {
+                        return Err(err(format!(
+                            "{id} requires its SSSE3/SSE4.1/AVX/AVX2 feature"
+                        )));
+                    }
+                }
+                if id.x86_byte_shift().is_some()
+                    && !args
+                        .get(1)
+                        .and_then(|&v| iconst(func, v))
+                        .is_some_and(|n| (0..256).contains(&n))
+                {
+                    return Err(err("packed byte shift requires iconst.i32 in0..255".into()));
+                }
+                if let Some(tier) = id
+                    .x86_packed_shift()
+                    .map(|(_, _, tier)| tier)
+                    .or_else(|| id.x86_byte_shift().map(|(_, tier)| tier))
+                {
+                    let f = pipeline.selector.x86_features();
+                    if (tier == 1 && !f.avx) || (tier == 2 && !(f.avx && f.avx2)) {
+                        return Err(err(format!("{id} requires its AVX/AVX2 feature")));
+                    }
+                }
+                if id.is_x86_byte_shuffle() {
+                    let f = pipeline.selector.x86_features();
+                    let enabled = match id {
+                        Intrinsic::X86Ssse3Pshufb128 => f.ssse3,
+                        Intrinsic::X86AvxVpshufb128 => f.avx,
+                        Intrinsic::X86Avx2Vpshufb256 => f.avx && f.avx2,
+                        _ => unreachable!(),
+                    };
+                    if !enabled {
+                        return Err(err(format!("{id} requires its SSSE3/AVX/AVX2 feature")));
+                    }
+                }
+                if matches!(
+                    id,
+                    Intrinsic::X86Xgetbv0 | Intrinsic::X86Xsave64 | Intrinsic::X86Xrstor64
+                ) {
+                    let f = pipeline.selector.x86_features();
+                    if !(f.xsave && f.osxsave) {
+                        return Err(err(format!("{id} requires XSAVE and OSXSAVE")));
+                    }
+                }
+                if matches!(id, Intrinsic::X86Lahf | Intrinsic::X86SahfExchange)
+                    && !pipeline.selector.x86_features().lahf_sahf
+                {
+                    return Err(err(format!("{id} requires LAHF/SAHF")));
+                }
+                if *id == Intrinsic::X86Cx16Cmpxchg16b && !pipeline.selector.x86_features().cx16 {
+                    return Err(err(format!("{id} requires CX16")));
+                }
+                if id.is_x86_crc32() && !pipeline.selector.x86_features().sse42 {
+                    return Err(err(format!("{id} requires SSE4.2")));
+                }
+                if let Some((opcode, index, _)) = id.x86_string_info() {
+                    let f = pipeline.selector.x86_features();
+                    let avx = opcode.starts_with('v');
+                    if !(if avx { f.avx } else { f.sse42 }) {
+                        return Err(err(format!(
+                            "{id} requires {}",
+                            if avx { "AVX" } else { "SSE4.2" }
+                        )));
+                    }
+                    if !args
+                        .get(index)
+                        .and_then(|&v| iconst(func, v))
+                        .is_some_and(|n| (0..256).contains(&n))
+                    {
+                        return Err(err(
+                            "packed string control must be iconst.i32 in0..=255".into()
+                        ));
+                    }
+                }
+                if id.is_x86_fp_horizontal_dot() {
+                    if !pipeline.selector.x86_features().avx {
+                        return Err(err(format!("{id} requires AVX")));
+                    }
+                    if id.has_x86_dot_control()
+                        && !args
+                            .get(2)
+                            .and_then(|&v| iconst(func, v))
+                            .is_some_and(|n| (0..256).contains(&n))
+                    {
+                        return Err(err("AVX dot control must be iconst.i32 in0..=255".into()));
+                    }
+                }
+                if id.is_x86_fp_compare() {
+                    if !pipeline.selector.x86_features().avx {
+                        return Err(err(format!("{id} requires AVX")));
+                    }
+                    if !args
+                        .get(2)
+                        .and_then(|&v| iconst(func, v))
+                        .is_some_and(|n| (0..32).contains(&n))
+                    {
+                        return Err(err(
+                            "AVX compare predicate must be iconst.i32 in0..=31".into()
+                        ));
+                    }
+                }
+                if id.is_x86_raw_fp_convert() && !pipeline.selector.x86_features().avx {
+                    return Err(err(format!("{id} requires AVX")));
+                }
+                if id.is_x86_masked_mem() {
+                    let f = pipeline.selector.x86_features();
+                    let avx2 = id.info().name.starts_with("x86_avx2_");
+                    if !f.avx || avx2 && !f.avx2 {
+                        return Err(err(format!(
+                            "{id} requires AVX{}",
+                            if avx2 { "2" } else { "" }
+                        )));
+                    }
+                }
+                if id.is_x86_gather() {
+                    let f = pipeline.selector.x86_features();
+                    if !(f.avx && f.avx2) {
+                        return Err(err("AVX2 gather requires AVX and AVX2 features".into()));
+                    }
+                    if !args
+                        .get(4)
+                        .and_then(|&v| iconst(func, v))
+                        .is_some_and(|n| matches!(n, 1 | 2 | 4 | 8))
+                    {
+                        return Err(err("AVX2 gather scale must be iconst.i32 in1,2,4,8".into()));
+                    }
+                }
+                if id.is_x86_bmi() {
+                    let f = pipeline.selector.x86_features();
+                    let bmi1 = matches!(id, Intrinsic::X86Bmi1Bextr32 | Intrinsic::X86Bmi1Bextr64);
+                    if !(if bmi1 { f.bmi1 } else { f.bmi2 }) {
+                        return Err(err(format!(
+                            "{id} requires BMI{}",
+                            if bmi1 { 1 } else { 2 }
+                        )));
+                    }
+                }
+                if id.is_x86_f16c() {
+                    let features = pipeline.selector.x86_features();
+                    if !(features.avx && features.f16c) {
+                        return Err(err("F16C intrinsic requires AVX and F16C features".into()));
+                    }
+                    if id.has_f16c_rounding()
+                        && !args
+                            .get(1)
+                            .and_then(|&v| iconst(func, v))
+                            .is_some_and(|n| (0..=7).contains(&n))
+                    {
+                        return Err(err(
+                            "F16C rounding control must be iconst.i32 in0..=7".into()
+                        ));
+                    }
+                }
+            }
             if let Some(what) = unsupported(func, inst) {
                 return Err(err(format!(
                     "`{}`: {what} not supported on x86-64 yet",
@@ -551,11 +1161,10 @@ impl<'a> FunctionCompiler<'a> {
                 )));
             }
         }
-        let named = sysv::arg_locs(&param_kinds(&func.sig.params));
+        let named = sysv::signature_arg_locs(&func.sig, &param_kinds(&func.sig));
         // A tail call jumps to the callee with our caller's return address
         // on the stack, so its stack arguments go where ours came in:
-        // they must fit there. Structs are not supported.
-        let byval_on_stack = named.locs.iter().any(|l| matches!(l, ArgLoc::OnStack(_)));
+        // they must fit there. Register-only single-vector wrappers also fit.
         // One walk finds which (mostly rare) instruction kinds occur, so the
         // checks and covers below only scan functions that can match.
         let (present, uses) = crate::kinds::InstKinds::with_uses(func);
@@ -565,59 +1174,110 @@ impl<'a> FunctionCompiler<'a> {
                 InstData::ReturnCallIndirect { sig, args, .. } => (args, func.signature(*sig)),
                 _ => continue,
             };
-            let placement = sysv::arg_locs(&arg_kinds(func, &sig.params, args));
-            let scalars = placement.locs.iter().all(|l| matches!(l, ArgLoc::Value(_)));
-            let has_sret = func
-                .sig
-                .params
-                .iter()
-                .any(|p| matches!(p.purpose, Purpose::Sret(_)));
-            if !scalars || has_sret || byval_on_stack || placement.stack > named.stack {
-                return Err(err(format!(
-                    "`{}` needs more stack arguments than this function received, or \
-                     involves structs, which tail calls do not support",
-                    func.display_inst(inst)
-                )));
+            let placement = sysv::signature_arg_locs(sig, &arg_kinds(func, sig, args));
+            if placement.stack > named.stack {
+                return Err(err(format!("`{}`: guaranteed tail outgoing stack area grows from {} to {} bytes",
+                    func.display_inst(inst), named.stack, placement.stack)));
+            }
+            if placement.stack_align > named.stack_align.max(16) {
+                return Err(err(format!("`{}`: guaranteed tail requires unsupported incoming stack alignment {} (received {})",
+                    func.display_inst(inst), placement.stack_align, named.stack_align.max(16))));
+            }
+            // Logical void is insufficient: aggregate results may use ST0,
+            // GP/SIMD registers, or a hidden RDI pointer. Require the same
+            // result layout and placement, and forward the original IR result
+            // parameter (also needed when the physical result is in registers).
+            let result_param = |s: &keel_ir::Signature| s.params.iter()
+                .position(|p| matches!(p.purpose, Purpose::Sret(_)));
+            let incoming_result = result_param(&func.sig);
+            let outgoing_result = result_param(sig);
+            let matching_result = match (incoming_result, outgoing_result) {
+                (None, None) => true,
+                (Some(a), Some(b)) => {
+                    func.sig.params[a] == sig.params[b]
+                        && named.locs[a] == placement.locs[b]
+                        && func.entry_block().is_some_and(|entry|
+                            func.resolve(args[b]) == func.resolve(func.block_params(entry)[a]))
+                }
+                _ => false,
+            };
+            if !matching_result || func.sig.returns != sig.returns
+                || sysv::scalar_memory_result(&func.sig) != sysv::scalar_memory_result(sig)
+            {
+                return Err(err(format!("`{}`: guaranteed tail return protocol mismatch or non-forwarded sret destination",
+                    func.display_inst(inst))));
             }
         }
 
         // The bottom of the frame holds what calls need: their stack
         // arguments, staging for struct arguments in registers, and a slot
         // for an `sret` address.
-        let (mut outgoing, mut staging, mut needs_sret_save) = (0, 0, false);
-        for (_, inst) in func.layout_insts().filter(|_| present.call) {
-            let (args, params) = match func.inst_data(inst) {
-                InstData::Call { func: callee, args } => (args, &func.callee(*callee).sig.params),
-                InstData::CallIndirect { sig, args, .. } => (args, &func.signature(*sig).params),
+        let f80_fma = func.layout_insts().any(|(_, i)| matches!(*func.inst_data(i), InstData::Fma { args } if func.value_type(func.resolve(args[0])) == Type::F80));
+        let (mut outgoing, mut staging, mut needs_sret_save) =
+            (if f80_fma { 48 } else { 0 }, 0, false);
+        for (_, inst) in func
+            .layout_insts()
+            .filter(|_| present.call || present.return_call)
+        {
+            let (args, sig) = match func.inst_data(inst) {
+                InstData::Call { func: callee, args } => (args, &func.callee(*callee).sig),
+                InstData::CallIndirect { sig, args, .. }
+                | InstData::ReturnCallIndirect { sig, args, .. } => {
+                    (args, func.signature(*sig))
+                }
+                InstData::ReturnCall { func: callee, args } => {
+                    (args, &func.callee(*callee).sig)
+                }
                 _ => continue,
             };
-            let placement = sysv::arg_locs(&arg_kinds(func, params, args));
+            let params = &sig.params;
+            // Up to three scalars take at most six integer registers: they
+            // need neither stack nor staging.
+            if !sysv::scalar_memory_result(sig) && args.len() <= 3
+                && params.iter().all(|p| p.purpose == Purpose::Normal)
+                && !(sig.params.len()..args.len()).any(|i| args.abi(i).is_some_and(|p| p.purpose != Purpose::Normal))
+                && !args.iter().any(|&v| {
+                    matches!(func.value_type(func.resolve(v)), Type::F80 | Type::Vector(keel_ir::VectorType::F64x1))
+                        || func.value_type(func.resolve(v)).bytes() == Some(32)
+                })
+            {
+                continue;
+            }
+            let placement = sysv::signature_arg_locs(sig, &arg_kinds(func, sig, args));
             outgoing = outgoing.max(placement.stack);
             let mut halves = 0;
-            for loc in &placement.locs {
+            for (i, loc) in placement.locs.iter().enumerate() {
                 match loc {
-                    ArgLoc::InRegs(regs) => halves += regs.len(),
-                    ArgLoc::SretRegs(_) => needs_sret_save = true,
+                    ArgLoc::InRegs(regs) => {
+                        halves += args.abi(i).or_else(|| params.get(i))
+                            .and_then(|p| p.layout())
+                            .and_then(sysv::register_vector)
+                            .map_or(regs.len(), |t| (t.bytes().unwrap() / 8) as usize)
+                    }
+                    ArgLoc::SretRegs(_) | ArgLoc::SretX87 => needs_sret_save = true,
                     _ => {}
                 }
             }
             staging = staging.max(halves);
         }
-        let outgoing = (outgoing as usize).next_multiple_of(16);
+        let outgoing = (outgoing as usize).next_multiple_of(frame_align);
         let mut offset = outgoing;
         let slot8 = |offset: &mut usize| {
             *offset += 8;
             *offset - 8
         };
+        let scalar_result = func.layout_insts().any(|(_, inst)| match func.inst_data(inst) {
+            InstData::Call { func: callee, .. } => sysv::scalar_memory_result(&func.callee(*callee).sig),
+            InstData::CallIndirect { sig, .. } => sysv::scalar_memory_result(func.signature(*sig)),
+            _ => false,
+        }).then(|| slot8(&mut offset));
         let sret_save = needs_sret_save.then(|| slot8(&mut offset));
-        let sret_ptr = named
-            .locs
-            .contains(&ArgLoc::SretMemory)
+        let sret_ptr = (named.locs.contains(&ArgLoc::SretMemory) || sysv::scalar_memory_result(&func.sig))
             .then(|| slot8(&mut offset));
         let mut param_areas = Vec::new();
         for (loc, param) in named.locs.iter().zip(&func.sig.params) {
             param_areas.push(match loc {
-                ArgLoc::InRegs(_) | ArgLoc::SretRegs(_) => {
+                ArgLoc::InRegs(_) | ArgLoc::SretRegs(_) | ArgLoc::SretX87 => {
                     let layout = param.layout().expect("a struct");
                     offset = offset.next_multiple_of(layout.align().max(8) as usize);
                     let area = offset;
@@ -633,9 +1293,12 @@ impl<'a> FunctionCompiler<'a> {
             offset - 176
         });
 
-        let mut selection = pipeline
-            .selector
-            .select(func, crate::select::Target::X86, &|data| folds(func, data));
+        let mut selection = pipeline.selector.select_with_uses(
+            func,
+            crate::select::Target::X86,
+            &|data| folds(func, data),
+            &uses,
+        );
         // Each cover is anchored at an instruction kind; without one it
         // selects nothing and leaves the selection untouched.
         let fused_compares = if present.compare && present.brif {
@@ -667,7 +1330,7 @@ impl<'a> FunctionCompiler<'a> {
         } else {
             HashMap::default()
         };
-        let is_call = |data: &InstData| is_call(func, data);
+        let is_call = |data: &InstData| is_call(func, data, pipeline.selector.x86_features());
         let returns_twice = |data: &InstData| returns_twice(func, data);
         let input = crate::regalloc::AllocationInput {
             func,
@@ -677,39 +1340,139 @@ impl<'a> FunctionCompiler<'a> {
             returns_twice: &returns_twice,
         };
         let mut alloc = pipeline.allocator.allocate(&input);
+        let f80_homes = f80::stack_homes(&input, &mut alloc).map_err(err)?;
         alloc.finish(&input);
         alloc.validate(&input).map_err(err)?;
-        let mut vector_spills = HashSet::default();
-        let has_vectors = (0..func.num_values()).any(|i| {
-            func.value_type(Value::new(i)).is_vector() && alloc.loc(Value::new(i)).is_some()
-        });
+        f80::validate_homes(&input, &alloc).map_err(err)?;
+        let mut vector_spills = HashMap::default();
+        let has_vectors = wrapper_bytes != 0
+            || (0..func.num_values()).any(|i| func.value_type(Value::new(i)) == Type::F80)
+            || (0..func.num_values()).any(|i| {
+                func.value_type(Value::new(i)).is_vector() && alloc.loc(Value::new(i)).is_some()
+            });
         if has_vectors {
             for i in 0..func.num_values() {
                 let value = Value::new(i);
-                if func.value_type(value).is_vector()
+                if (func.value_type(value).is_vector() || func.value_type(value) == Type::F80)
                     && let Some(Loc::Stack(slot)) = alloc.loc(value)
                 {
-                    vector_spills.insert(slot);
+                    vector_spills.insert(
+                        slot,
+                        if func.value_type(value) == Type::F80 {
+                            128
+                        } else {
+                            ptr(func.value_type(value))
+                        },
+                    );
                 }
             }
         }
+        for slot in f80_homes {
+            vector_spills.insert(slot, 128);
+        }
         let copy_temp = has_vectors.then_some(alloc.spill_slots + staging as u32);
         if let Some(slot) = copy_temp {
-            vector_spills.insert(slot);
+            vector_spills.insert(slot, if wide_vectors { 256 } else { 128 });
         }
-        let spill_base = offset.next_multiple_of(8);
+        let spill_base = offset.next_multiple_of(if wide_vectors { 32 } else { 8 });
         let offset = spill_base
-            + 8 * (alloc.spill_slots as usize + staging + if has_vectors { 2 } else { 0 });
+            + 8 * (alloc.spill_slots as usize
+                + staging
+                + if has_vectors {
+                    if wide_vectors { 4 } else { 2 }
+                } else {
+                    0
+                });
+        let mxcsr_save = (!pipeline.selector.x86_features().sse41
+            && func.layout_insts().any(|(_, i)| {
+                matches!(
+                    func.inst_data(i),
+                    InstData::Unary {
+                        op: UnaryOp::Fnearest | UnaryOp::Ffloor | UnaryOp::Fceil | UnaryOp::Ftrunc,
+                        ..
+                    }
+                )
+            }))
+        .then_some(offset);
+        let offset = offset + if mxcsr_save.is_some() { 4 } else { 0 };
+        let mxcsr_access = func
+            .layout_insts()
+            .any(|(_, i)| {
+                matches!(
+                    func.inst_data(i),
+                    InstData::Intrinsic {
+                        id: Intrinsic::X86SseReadMxcsr | Intrinsic::X86SseSwapMxcsr,
+                        ..
+                    }
+                )
+            })
+            .then_some(offset.next_multiple_of(4));
+        let offset = mxcsr_access.map_or(offset, |slot| slot + 8);
+        let x87_state = func
+            .layout_insts()
+            .any(|(_, i)| {
+                matches!(
+                    func.inst_data(i),
+                    InstData::Intrinsic {
+                        id: Intrinsic::X86X87ReadCwNowait
+                            | Intrinsic::X86X87ReadSwNowait
+                            | Intrinsic::X86X87ReadCwWait
+                            | Intrinsic::X86X87ReadSwWait
+                            | Intrinsic::X86X87ExchangeCw,
+                        ..
+                    }
+                )
+            })
+            .then_some(offset.next_multiple_of(2));
+        let offset = x87_state.map_or(offset, |slot| slot + 4);
+        let cx16_save = func
+            .layout_insts()
+            .any(|(_, i)| {
+                matches!(
+                    func.inst_data(i),
+                    InstData::Intrinsic {
+                        id: Intrinsic::X86Cx16Cmpxchg16b | Intrinsic::X86Cpuid,
+                        ..
+                    }
+                )
+            })
+            .then_some(offset.next_multiple_of(8));
+        let offset = cx16_save.map_or(offset, |slot| slot + 8);
+        let string_io_home = func.layout_insts().any(|(_, i)| {
+            matches!(func.inst_data(i), InstData::Intrinsic { id, .. } if id.x86_string_port_io().is_some())
+        }).then_some(offset.next_multiple_of(8));
+        let offset = string_io_home.map_or(offset, |home| home + string_port_io::FRAME_BYTES);
+        let rflags_bytes = func.layout_insts().filter_map(|(_, i)| match func.inst_data(i) {
+            InstData::X86RflagsRegion { plan, .. } => Some(8 * (1 + plan.captures.len() + plan.observations)),
+            _ => None,
+        }).max().unwrap_or(0);
+        let rflags_home = (rflags_bytes != 0).then_some(offset.next_multiple_of(8));
+        let offset = rflags_home.map_or(offset, |home| home + rflags_bytes);
         let (stack_slot_offsets, offset) =
             crate::stack_frame::SlotOffsets::layout(func, offset, !module.files.is_empty());
         // rsp is 16-byte aligned after `push rbp`; the pushes and the frame
         // together keep it so.
-        let saved = alloc.callee_saved_used.clone();
-        let frame_size = (offset + 8 * saved.len()).next_multiple_of(16) - 8 * saved.len();
+        let mut saved = alloc.callee_saved_used.clone();
+        // A fault can interrupt CX16 while RBX holds desired.low. The normal
+        // prologue save/CFI must describe the original caller value even when
+        // the allocator never used RBX (including an empty custom pool).
+        if cx16_save.is_some() && !saved.contains(&3) {
+            saved.push(3);
+        }
+        if let Some(r) = frame_register {
+            saved.push(r);
+        }
+        let frame_size = (offset + 8 * saved.len()).next_multiple_of(16) - 8 * saved.len()
+            + if frame_register.is_some() {
+                frame_align - 1
+            } else {
+                0
+            };
         if frame_size > i32::MAX as usize / 2 {
             return Err(err(format!("frame of {frame_size} bytes is too large")));
         }
         let has_tls_address = present.symbol_addr
+            && symbols.has_thread_locals()
             && func.layout_insts().any(|(_, i)| match func.inst_data(i) {
                 InstData::SymbolAddr { symbol } => symbols
                     .data_object(func.symbol_name(*symbol))
@@ -730,6 +1493,7 @@ impl<'a> FunctionCompiler<'a> {
                     || matches!(
                         d,
                         InstData::Intrinsic { .. }
+                            | InstData::X86RflagsRegion { .. }
                             | InstData::InlineAsm { .. }
                             | InstData::ReturnCall { .. }
                             | InstData::ReturnCallIndirect { .. }
@@ -737,7 +1501,7 @@ impl<'a> FunctionCompiler<'a> {
                             | InstData::LandingPad { .. }
                     )
             });
-        Ok(Self {
+        let mut compiler = Self {
             func,
             symbols,
             alloc,
@@ -756,8 +1520,20 @@ impl<'a> FunctionCompiler<'a> {
             outgoing,
             spill_base,
             vector_spills,
+            wide_vectors,
+            frame_align,
+            frame_register,
             copy_temp,
             sret_save,
+            scalar_result,
+            mxcsr_save,
+            mxcsr_access,
+            x87_state,
+            cx16_save,
+            string_io_home,
+            string_io_programs: HashMap::default(),
+            rflags_home,
+            rflags_programs: HashMap::default(),
             sret_ptr,
             param_areas,
             reg_save,
@@ -774,7 +1550,13 @@ impl<'a> FunctionCompiler<'a> {
             prologue_end: false,
             scope: None,
             scope_marks: Vec::new(),
-        })
+            copies: Vec::new(),
+            arg_places: sysv::Placement::default(),
+            bare_name: bare_label(&func.name),
+        };
+        compiler.prepare_rflags_regions().map_err(err)?;
+        compiler.prepare_string_port_io().map_err(err)?;
+        Ok(compiler)
     }
 
     /// Appends the function's assembly to `out`; gives where its lexical
@@ -784,13 +1566,39 @@ impl<'a> FunctionCompiler<'a> {
         let func = self.func;
         let name = &func.name;
         let symbol = name.clone();
-        out.directive(Directive::ElfSection {
-            name: ".text".into(),
-            flags: 6,
-            nobits: false,
-        });
+        if func.weak_odr {
+            out.directive(Directive::ElfSectionMetadata {
+                name: format!(".text.{}", func.name),
+                flags: 6 | 0x200,
+                nobits: false,
+                entry_size: 0,
+                group: Some(func.name.clone()),
+            });
+        } else {
+            out.directive(Directive::ElfSection {
+                name: func
+                    .attrs
+                    .section
+                    .map(|s| s.as_str().to_owned())
+                    .unwrap_or_else(|| {
+                        if func.attrs.retain {
+                            format!(".text.keel.retain.{}", func.name)
+                        } else {
+                            ".text".into()
+                        }
+                    }),
+                flags: 6 | if func.attrs.retain { 0x200000 } else { 0 },
+                nobits: false,
+            });
+        }
         if !func.local {
             out.directive(Directive::Global(symbol.clone()));
+        }
+        if func.attrs.weak || func.weak_odr {
+            out.directive(Directive::ElfWeak(symbol.clone()));
+        }
+        if func.hidden {
+            out.directive(Directive::ElfHidden(symbol.clone()));
         }
         out.align(4);
         out.directive(Directive::ElfType {
@@ -824,28 +1632,32 @@ impl<'a> FunctionCompiler<'a> {
                 offset: 8,
             }));
         } else {
-            self.emit(Opcode::Push, [asm_arg(&(r64(5)))]);
+            self.emit(Opcode::Push, [asm_arg(r64(5))]);
             self.out.directive(Directive::Cfi(Cfi::DefCfaOffset(16)));
             self.out.directive(Directive::Cfi(Cfi::Offset {
                 register: 6,
                 offset: -16,
             }));
-            self.emit(Opcode::Mov, [asm_arg(&(r64(5))), asm_arg(&(r64(4)))]);
+            self.emit(Opcode::Mov, [asm_arg(r64(5)), asm_arg(r64(4))]);
             self.out.directive(Directive::Cfi(Cfi::DefCfaRegister(6)));
         }
         // Each push is 8 bytes further from the CFA, which is rbp + 16.
         for (k, r) in self.saved.clone().into_iter().enumerate() {
-            self.emit(Opcode::Push, [asm_arg(&(r64(r)))]);
+            self.emit(Opcode::Push, [asm_arg(r64(r))]);
             self.out.directive(Directive::Cfi(Cfi::Offset {
                 register: dwarf_register(r),
                 offset: -((24 + 8 * k) as i64),
             }));
         }
         if self.frame_size > 0 {
+            self.emit(Opcode::Sub, [asm_arg(r64(4)), asm_arg(self.frame_size)]);
+        }
+        if let Some(r) = self.frame_register {
             self.emit(
-                Opcode::Sub,
-                [asm_arg(&(r64(4))), asm_arg(&(self.frame_size))],
+                Opcode::And,
+                [asm_arg(r64(4)), asm_arg(-(self.frame_align as i64))],
             );
+            self.emit(Opcode::Mov, [asm_arg(r64(r)), asm_arg(r64(4))]);
         }
         self.entry();
 
@@ -853,7 +1665,7 @@ impl<'a> FunctionCompiler<'a> {
         let order = self.alloc.order.clone();
         for (i, &block) in order.iter().enumerate() {
             self.next_block = order.get(i + 1).copied();
-            self.out.label(self.label(block));
+            self.out.block_label(&func.name, self.bare_name, block);
             for &inst in func.block_insts(block) {
                 self.out.inst_comment(func, inst);
                 if self.debug {
@@ -932,20 +1744,17 @@ impl<'a> FunctionCompiler<'a> {
                 let at = self.frame(area + 8 * k);
                 self.emit(
                     Opcode::Mov,
-                    [asm_arg(&(sized((at).clone(), 64))), asm_arg(&(r64(r)))],
+                    [asm_arg(sized((at).clone(), 64)), asm_arg(r64(r))],
                 );
             }
             let skip = format!(".L{}_saved", func.name);
-            self.emit(Opcode::Test, [asm_arg(&(r8(0))), asm_arg(&(r8(0)))]);
-            self.emit(Opcode::Jcc(4), [asm_arg(&(skip))]);
+            self.emit(Opcode::Test, [asm_arg(r8(0)), asm_arg(r8(0))]);
+            self.emit(Opcode::Jcc(4), [asm_arg(&skip)]);
             for k in 0..8 {
                 let at = self.frame(area + 48 + 16 * k);
                 self.emit(
                     Opcode::Movaps,
-                    [
-                        asm_arg(&(sized((at).clone(), 128))),
-                        asm_arg(&(xmm((k) as u8))),
-                    ],
+                    [asm_arg(sized((at).clone(), 128)), asm_arg(xmm((k) as u8))],
                 );
             }
             self.out.label(skip.clone());
@@ -954,7 +1763,7 @@ impl<'a> FunctionCompiler<'a> {
             let at = self.frame(slot);
             self.emit(
                 Opcode::Mov,
-                [asm_arg(&(sized((at).clone(), 64))), asm_arg(&(r64(7)))],
+                [asm_arg(sized((at).clone(), 64)), asm_arg(r64(7))],
             );
         }
         let params = func.block_params(entry).to_vec();
@@ -975,13 +1784,13 @@ impl<'a> FunctionCompiler<'a> {
             };
             let abi_param = &func.sig.params[i];
             match loc {
-                ArgLoc::Value(Slot::Regs(regs)) => {
-                    moves.push((dst, regs[0]));
+                ArgLoc::Value(Slot::Regs(lo, high)) => {
+                    moves.push((dst, lo));
                     if let Some(hi) = self
                         .alloc
                         .param_loc(entry, crate::regalloc::ValuePart::high(param))
                     {
-                        moves.push((hi, regs[1]));
+                        moves.push((hi, high.expect("an i128 in two registers")));
                     }
                 }
                 ArgLoc::Value(Slot::Stack(offset)) => {
@@ -997,17 +1806,32 @@ impl<'a> FunctionCompiler<'a> {
                         None => later.push(Later::Load(dst, abi_param.ty, at(0))),
                     }
                 }
+                ArgLoc::SretX87 => {
+                    let area = self.param_areas[i].expect("planned x87 result object");
+                    later.push(Later::Address(dst, self.frame(area)));
+                }
                 ArgLoc::SretMemory => moves.push((dst, Loc::Reg(RDI))),
+                ArgLoc::InRegs(regs)
+                    if abi_param.layout().and_then(sysv::register_vector).is_some() =>
+                {
+                    let ty = abi_param.layout().and_then(sysv::register_vector).unwrap();
+                    let area = self.param_areas[i].expect("planned");
+                    self.emit(
+                        movs(ty),
+                        [
+                            asm_arg(sized(self.frame(area), ptr(ty))),
+                            asm_arg(simd(loc_reg(regs[0].loc), ty)),
+                        ],
+                    );
+                    later.push(Later::Address(dst, self.frame(area)));
+                }
                 ArgLoc::InRegs(regs) => {
                     let area = self.param_areas[i].expect("planned");
-                    for (k, r) in regs.into_iter().enumerate() {
-                        let at = sized(self.frame(area + 8 * k), 64);
+                    for sysv::RegPiece { offset, loc: r } in regs {
+                        let at = sized(self.frame(area + offset as usize), 64);
                         match r {
-                            Loc::Reg(r) => {
-                                self.emit(Opcode::Mov, [asm_arg(&(at)), asm_arg(&(r64(r)))])
-                            }
-                            _ => self
-                                .emit(Opcode::Movsd, [asm_arg(&(at)), asm_arg(&(xmm(loc_reg(r))))]),
+                            Loc::Reg(r) => self.emit(Opcode::Mov, [asm_arg(at), asm_arg(r64(r))]),
+                            _ => self.emit(Opcode::Movsd, [asm_arg(at), asm_arg(xmm(loc_reg(r)))]),
                         }
                     }
                     later.push(Later::Address(dst, self.frame(area)));
@@ -1040,7 +1864,7 @@ impl<'a> FunctionCompiler<'a> {
             at.index = Some(r64(a));
             at.scale = 2;
             let d = self.def_reg(result);
-            self.emit(Opcode::Lea, [asm_arg(&wide(d, ty)), asm_arg(&at)]);
+            self.emit(Opcode::Lea, [asm_arg(wide(d, ty)), asm_arg(&at)]);
             self.def_done(result, d);
             return;
         }
@@ -1049,8 +1873,8 @@ impl<'a> FunctionCompiler<'a> {
         self.emit(
             Opcode::Lea,
             [
-                asm_arg(&(wide(d, ty))),
-                asm_arg(&(indexed(r64(a), r64(b), 1u8 << matched.shift))),
+                asm_arg(wide(d, ty)),
+                asm_arg(indexed(r64(a), r64(b), 1u8 << matched.shift)),
             ],
         );
         self.def_done(result, d);
@@ -1126,7 +1950,7 @@ impl<'a> FunctionCompiler<'a> {
         if let Some(&addr) = self.packed_low_loads.get(&inst) {
             let at = self.mem(addr, S0, Type::I64);
             let d = self.def_freg(result);
-            self.emit(Opcode::Movq, [asm_arg(&xmm(d)), asm_arg(&at)]);
+            self.emit(Opcode::Movq, [asm_arg(xmm(d)), asm_arg(&at)]);
             self.def_done(result, d);
             return;
         }
@@ -1137,7 +1961,13 @@ impl<'a> FunctionCompiler<'a> {
         if self.lower_i128(inst, func.inst_data(inst), result) {
             return;
         }
-        match func.inst_data(inst).clone() {
+        if self.avx256(func.inst_data(inst), result) {
+            return;
+        }
+        if self.f80_inst(inst, result) {
+            return;
+        }
+        match *func.inst_data(inst) {
             InstData::VectorIcmp { cond, args } => self.vector_compare(cond, args, result),
             InstData::VectorSelect { args } => self.vector_select(args, result),
             InstData::VectorBinary { op, args } => {
@@ -1150,25 +1980,22 @@ impl<'a> FunctionCompiler<'a> {
                     .then(|| vector::packed_avx(op, self.ty(args[0]).vector().unwrap()))
                     .flatten()
                 {
-                    self.emit(
-                        opcode,
-                        [asm_arg(&xmm(d)), asm_arg(&xmm(a)), asm_arg(&xmm(b))],
-                    );
+                    self.emit(opcode, [asm_arg(xmm(d)), asm_arg(xmm(a)), asm_arg(xmm(b))]);
                     self.def_done(result, d);
                     return;
                 }
                 // Preserve the second source if writing d would overwrite it.
                 let dst = if d == b && a != d { FS2 } else { d };
                 if dst != a {
-                    self.emit(Opcode::Movaps, [asm_arg(&xmm(dst)), asm_arg(&xmm(a))]);
+                    self.emit(Opcode::Movaps, [asm_arg(xmm(dst)), asm_arg(xmm(a))]);
                 }
                 self.emit(
                     vector::packed(op, self.ty(args[0]).vector().unwrap())
                         .expect("legalized packed op"),
-                    [asm_arg(&xmm(dst)), asm_arg(&xmm(b))],
+                    [asm_arg(xmm(dst)), asm_arg(xmm(b))],
                 );
                 if dst != d {
-                    self.emit(Opcode::Movaps, [asm_arg(&xmm(d)), asm_arg(&xmm(dst))]);
+                    self.emit(Opcode::Movaps, [asm_arg(xmm(d)), asm_arg(xmm(dst))]);
                 }
                 self.def_done(result, d);
             }
@@ -1183,7 +2010,7 @@ impl<'a> FunctionCompiler<'a> {
                 } else {
                     Opcode::Sqrtpd
                 };
-                self.emit(op, [asm_arg(&xmm(d)), asm_arg(&xmm(a))]);
+                self.emit(op, [asm_arg(xmm(d)), asm_arg(xmm(a))]);
                 self.def_done(result, d);
             }
             InstData::VectorUnary {
@@ -1198,14 +2025,15 @@ impl<'a> FunctionCompiler<'a> {
                     source
                 } else {
                     // Use reserved scratch; the input may still be live.
-                    self.emit(Opcode::Movhlps, [asm_arg(&xmm(FS1)), asm_arg(&xmm(source))]);
+                    self.emit(Opcode::Movhlps, [asm_arg(xmm(FS1)), asm_arg(xmm(source))]);
                     FS1
                 };
-                self.emit(Opcode::Movq, [asm_arg(&r64(d)), asm_arg(&xmm(source))]);
+                self.emit(Opcode::Movq, [asm_arg(r64(d)), asm_arg(xmm(source))]);
                 self.def_done(result, d);
             }
             InstData::VectorSplat { ty, arg } => self.vector_splat(ty, arg, result),
             InstData::VectorUnary { .. }
+            | InstData::VectorReduce { .. }
             | InstData::VectorInsert { .. }
             | InstData::VectorFcmp { .. } => unreachable!("legalized vector operation"),
             InstData::StackAddr { .. } | InstData::Iconst { .. }
@@ -1231,43 +2059,59 @@ impl<'a> FunctionCompiler<'a> {
                 self.materialize(d, imm, ty);
                 self.def_done(result, d);
             }
+            InstData::F80const {
+                significand,
+                sign_exp,
+            } => self.f80_constant(result, significand, sign_exp),
             InstData::Fconst { bits, .. } => {
                 let d = self.def_freg(result);
                 if bits == 0 {
-                    self.emit(Opcode::Xorps, [asm_arg(&(xmm(d))), asm_arg(&(xmm(d)))]);
+                    self.emit(Opcode::Xorps, [asm_arg(xmm(d)), asm_arg(xmm(d))]);
                 } else {
-                    self.emit(Opcode::Movabs, [asm_arg(&(r64(0))), asm_arg(&(bits))]);
-                    self.emit(Opcode::Movq, [asm_arg(&(xmm(d))), asm_arg(&(r64(0)))]);
+                    self.emit(Opcode::Movabs, [asm_arg(r64(0)), asm_arg(bits)]);
+                    self.emit(Opcode::Movq, [asm_arg(xmm(d)), asm_arg(r64(0))]);
                 }
                 self.def_done(result, d);
             }
-            InstData::Call { func: callee, args } => {
+            InstData::Call {
+                func: callee,
+                ref args,
+            } => {
                 let decl = func.callee(callee);
-                let sret = self.move_args(&args, &decl.sig, None, false);
-                let target = self.call_target(&decl.name);
-                self.emit(Opcode::Call, [asm_arg(&(target))]);
+                let sret = self.move_args(args, &decl.sig, None, false);
+                self.call_function(Opcode::Call, &decl.name);
                 self.call_result(result, sret);
             }
-            InstData::CallIndirect { sig, callee, args } => {
-                let sret = self.move_args(&args, func.signature(sig), Some(callee), false);
-                self.emit(Opcode::Call, [asm_arg(&(r64(R10)))]);
+            InstData::CallIndirect {
+                sig,
+                callee,
+                ref args,
+            } => {
+                let sret = self.move_args(args, func.signature(sig), Some(callee), false);
+                self.emit(Opcode::Call, [asm_arg(r64(R10))]);
                 self.call_result(result, sret);
             }
             // Arguments into registers, then this function's epilogue, then
             // a jump: the callee returns straight to our caller.
-            InstData::ReturnCall { func: callee, args } => {
+            InstData::ReturnCall {
+                func: callee,
+                ref args,
+            } => {
                 let decl = func.callee(callee);
-                self.move_args(&args, &decl.sig, None, true);
+                self.move_args(args, &decl.sig, None, true);
                 self.epilogue();
-                let target = self.call_target(&decl.name);
-                self.emit(Opcode::Jmp, [asm_arg(&(target))]);
+                self.call_function(Opcode::Jmp, &decl.name);
             }
             // The epilogue only restores callee-saved registers and rbp,
             // so the target stays in r10.
-            InstData::ReturnCallIndirect { sig, callee, args } => {
-                self.move_args(&args, func.signature(sig), Some(callee), true);
+            InstData::ReturnCallIndirect {
+                sig,
+                callee,
+                ref args,
+            } => {
+                self.move_args(args, func.signature(sig), Some(callee), true);
                 self.epilogue();
-                self.emit(Opcode::Jmp, [asm_arg(&(r64(R10)))]);
+                self.emit(Opcode::Jmp, [asm_arg(r64(R10))]);
             }
             InstData::SymbolAddr { symbol } => {
                 let d = self.def_reg(result);
@@ -1288,41 +2132,41 @@ impl<'a> FunctionCompiler<'a> {
                 if thread_local && defined {
                     self.emit(
                         Opcode::Mov,
-                        [asm_arg(&(r64(d))), asm_arg(&(sized(fs_zero(), 64)))],
+                        [asm_arg(r64(d)), asm_arg(sized(fs_zero(), 64))],
                     );
                     self.emit(
                         Opcode::Lea,
                         [
-                            asm_arg(&(r64(d))),
-                            asm_arg(&(symbol_memory(r64(d), &name, Modifier::TpOff))),
+                            asm_arg(r64(d)),
+                            asm_arg(symbol_memory(r64(d), &name, Modifier::TpOff)),
                         ],
                     );
                 } else if thread_local {
                     self.emit(
                         Opcode::Mov,
                         [
-                            asm_arg(&(r64(d))),
-                            asm_arg(&(sized(symbol_memory(rip(), &name, Modifier::GotTpOff), 64))),
+                            asm_arg(r64(d)),
+                            asm_arg(sized(symbol_memory(rip(), &name, Modifier::GotTpOff), 64)),
                         ],
                     );
                     self.emit(
                         Opcode::Add,
-                        [asm_arg(&(r64(d))), asm_arg(&(sized(fs_zero(), 64)))],
+                        [asm_arg(r64(d)), asm_arg(sized(fs_zero(), 64))],
                     );
                 } else if defined {
                     self.emit(
                         Opcode::Lea,
                         [
-                            asm_arg(&(r64(d))),
-                            asm_arg(&(symbol_memory(rip(), &name, Modifier::None))),
+                            asm_arg(r64(d)),
+                            asm_arg(symbol_memory(rip(), &name, Modifier::None)),
                         ],
                     );
                 } else {
                     self.emit(
                         Opcode::Mov,
                         [
-                            asm_arg(&(r64(d))),
-                            asm_arg(&(sized(symbol_memory(rip(), &name, Modifier::GotPcRel), 64))),
+                            asm_arg(r64(d)),
+                            asm_arg(sized(symbol_memory(rip(), &name, Modifier::GotPcRel), 64)),
                         ],
                     );
                 }
@@ -1331,18 +2175,21 @@ impl<'a> FunctionCompiler<'a> {
             InstData::StackAddr { slot } => {
                 let d = self.def_reg(result);
                 let at = self.frame(self.stack_slot_offsets[slot.index()]);
-                self.emit(Opcode::Lea, [asm_arg(&(r64(d))), asm_arg(&(at))]);
+                self.emit(Opcode::Lea, [asm_arg(r64(d)), asm_arg(at)]);
                 self.def_done(result, d);
             }
             InstData::Unary { op, arg } if op.is_float() => {
                 let d = self.def_freg(result);
-                self.float_unary(op, arg, d);
+                self.float_unary(inst, op, arg, d);
                 self.def_done(result, d);
             }
             InstData::Unary { op, arg } => {
                 let d = self.def_reg(result);
                 self.unary(op, arg, d);
                 self.def_done(result, d);
+            }
+            InstData::Fma { args } if self.features.avx && self.features.fma => {
+                self.native_fma(args, result)
             }
             InstData::Fma { args } => {
                 let ty = self.ty(args[0]);
@@ -1353,7 +2200,7 @@ impl<'a> FunctionCompiler<'a> {
                 let name = if ty == Type::F32 { "fmaf" } else { "fma" };
                 self.emit(
                     Opcode::Call,
-                    [asm_arg(&(symbol_address(&name, Modifier::Plt)))],
+                    [asm_arg(symbol_address(&name, Modifier::Plt))],
                 );
                 self.call_result(result, None);
             }
@@ -1365,7 +2212,7 @@ impl<'a> FunctionCompiler<'a> {
             }
             InstData::Binary { .. } if self.selection.division_remainders.contains_key(&inst) => {
                 let d = self.def_reg(result);
-                self.emit(Opcode::Mov, [asm_arg(&r64(d)), asm_arg(&r64(S2))]);
+                self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(S2))]);
                 self.def_done(result, d);
             }
             InstData::Binary { op, args } => {
@@ -1381,11 +2228,11 @@ impl<'a> FunctionCompiler<'a> {
                 self.test_value(args[0]);
                 let a = self.use_freg(args[1], FS1);
                 let b = self.use_freg(args[2], FS2);
-                self.emit(Opcode::Movaps, [asm_arg(&(xmm(FS0))), asm_arg(&(xmm(b)))]);
-                self.emit(Opcode::Jcc(4), [asm_arg(&(skip))]);
-                self.emit(Opcode::Movaps, [asm_arg(&(xmm(FS0))), asm_arg(&(xmm(a)))]);
+                self.emit_move(Loc::FReg(FS0), Loc::FReg(b));
+                self.emit(Opcode::Jcc(4), [asm_arg(&skip)]);
+                self.emit_move(Loc::FReg(FS0), Loc::FReg(a));
                 self.out.label(skip.clone());
-                self.emit(Opcode::Movaps, [asm_arg(&(xmm(d))), asm_arg(&(xmm(FS0)))]);
+                self.emit_move(Loc::FReg(d), Loc::FReg(FS0));
                 self.def_done(result, d);
             }
             // The false value in rax, replaced by the true one if the
@@ -1401,18 +2248,18 @@ impl<'a> FunctionCompiler<'a> {
                     let cc = self.compare(compare);
                     self.emit(
                         Opcode::Cmovcc(condition(cc)),
-                        [asm_arg(&r64(S2)), asm_arg(&r64(S3))],
+                        [asm_arg(r64(S2)), asm_arg(r64(S3))],
                     );
-                    self.emit(Opcode::Mov, [asm_arg(&r64(d)), asm_arg(&r64(S2))]);
+                    self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(S2))]);
                     self.def_done(result, d);
                     return;
                 }
                 self.test_value(args[0]);
                 let a = self.use_reg(args[1], S1);
                 let b = self.use_reg(args[2], S2);
-                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(r64(b)))]);
-                self.emit(Opcode::Cmovcc(5), [asm_arg(&(r64(0))), asm_arg(&(r64(a)))]);
-                self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(0)))]);
+                self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(r64(b))]);
+                self.emit(Opcode::Cmovcc(5), [asm_arg(r64(0)), asm_arg(r64(a))]);
+                self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(0))]);
                 self.def_done(result, d);
             }
             InstData::Convert { op, ty, arg } if ty.is_vector() && self.ty(arg).is_vector() => {
@@ -1427,34 +2274,26 @@ impl<'a> FunctionCompiler<'a> {
                 let from = self.ty(arg);
                 match op {
                     ConvertOp::Sext => match from {
-                        Type::I32 => {
-                            self.emit(Opcode::Movsxd, [asm_arg(&(r64(d))), asm_arg(&(r32(a)))])
+                        Type::I32 => self.emit(Opcode::Movsxd, [asm_arg(r64(d)), asm_arg(r32(a))]),
+                        _ => {
+                            self.emit(Opcode::Movsx, [asm_arg(wide(d, ty)), asm_arg(reg(a, from))])
                         }
-                        _ => self.emit(
-                            Opcode::Movsx,
-                            [asm_arg(&(wide(d, ty))), asm_arg(&(reg(a, from)))],
-                        ),
                     },
                     // Writing a 32-bit register clears the upper 32 bits.
                     ConvertOp::Uext if self.zero_extended_narrow(arg) => {
                         if d != a {
-                            self.emit(Opcode::Mov, [asm_arg(&r32(d)), asm_arg(&r32(a))]);
+                            self.emit(Opcode::Mov, [asm_arg(r32(d)), asm_arg(r32(a))]);
                         }
                     }
                     ConvertOp::Uext => match from {
-                        Type::I32 => {
-                            self.emit(Opcode::Mov, [asm_arg(&(r32(d))), asm_arg(&(r32(a)))])
-                        }
-                        _ => self.emit(
-                            Opcode::Movzx,
-                            [asm_arg(&(r32(d))), asm_arg(&(reg(a, from)))],
-                        ),
+                        Type::I32 => self.emit(Opcode::Mov, [asm_arg(r32(d)), asm_arg(r32(a))]),
+                        _ => self.emit(Opcode::Movzx, [asm_arg(r32(d)), asm_arg(reg(a, from))]),
                     },
                     // The low bits are already right; upper bits are
                     // unspecified. A pointer is a 64-bit address already.
                     ConvertOp::Trunc | ConvertOp::PtrToInt | ConvertOp::IntToPtr => {
                         if a != d {
-                            self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(a)))]);
+                            self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(a))]);
                         }
                     }
                     _ => unreachable!("float conversions are lowered by float_convert"),
@@ -1468,17 +2307,17 @@ impl<'a> FunctionCompiler<'a> {
                 {
                     // Eq/Ne already combined the two flags into canonical al.
                     if d != S0 {
-                        self.emit(Opcode::Mov, [asm_arg(&r8(d)), asm_arg(&r8(S0))]);
+                        self.emit(Opcode::Mov, [asm_arg(r8(d)), asm_arg(r8(S0))]);
                     }
                 } else {
-                    self.emit(Opcode::Setcc(condition(cc)), [asm_arg(&(r8(d)))]);
+                    self.emit(Opcode::Setcc(condition(cc)), [asm_arg(r8(d))]);
                 }
                 self.def_done(result, d);
             }
             InstData::Load { ty, addr, .. } if ty.is_float() || ty.is_vector() => {
                 let d = self.def_freg(result);
                 let a = self.mem(addr, S0, ty);
-                self.emit(movs(ty), [asm_arg(&(xmm(d))), asm_arg(&(a))]);
+                self.emit(movs(ty), [asm_arg(simd(d, ty)), asm_arg(a)]);
                 self.def_done(result, d);
             }
             // A narrow load zero-extends to 32 bits, which avoids writing
@@ -1487,10 +2326,8 @@ impl<'a> FunctionCompiler<'a> {
                 let d = self.def_reg(result);
                 let a = self.mem(addr, S0, ty);
                 match ty {
-                    Type::I8 | Type::I16 => {
-                        self.emit(Opcode::Movzx, [asm_arg(&(r32(d))), asm_arg(&(a))])
-                    }
-                    _ => self.emit(Opcode::Mov, [asm_arg(&(reg(d, ty))), asm_arg(&(a))]),
+                    Type::I8 | Type::I16 => self.emit(Opcode::Movzx, [asm_arg(r32(d)), asm_arg(a)]),
+                    _ => self.emit(Opcode::Mov, [asm_arg(reg(d, ty)), asm_arg(a)]),
                 }
                 self.def_done(result, d);
             }
@@ -1500,16 +2337,16 @@ impl<'a> FunctionCompiler<'a> {
                 let ty = self.ty(value);
                 let v = self.use_freg(value, FS0);
                 let a = self.mem(addr, S1, ty);
-                self.emit(movs(ty), [asm_arg(&(a)), asm_arg(&(xmm(v)))]);
+                self.emit(movs(ty), [asm_arg(a), asm_arg(simd(v, ty))]);
             }
             InstData::Store { value, addr, .. } => {
                 let ty = self.ty(value);
                 let v = match folded_imm(func, func.inst_data(inst)) {
-                    Some((_, k)) => asm_arg(&k),
-                    None => asm_arg(&reg(self.use_reg(value, S0), ty)),
+                    Some((_, k)) => asm_arg(k),
+                    None => asm_arg(reg(self.use_reg(value, S0), ty)),
                 };
                 let a = self.mem(addr, S1, ty);
-                self.emit(Opcode::Mov, [asm_arg(&(a)), asm_arg(&(v))]);
+                self.emit(Opcode::Mov, [asm_arg(a), asm_arg(v)]);
             }
             // x86 is strongly ordered: every load is an acquire and every
             // store a release. Only a sequentially consistent store needs
@@ -1521,9 +2358,9 @@ impl<'a> FunctionCompiler<'a> {
                 let src = sized(memory(r64(a), 0), ptr(ty));
                 match ty {
                     Type::I8 | Type::I16 => {
-                        self.emit(Opcode::Movzx, [asm_arg(&(r32(d))), asm_arg(&(src))])
+                        self.emit(Opcode::Movzx, [asm_arg(r32(d)), asm_arg(src)])
                     }
-                    _ => self.emit(Opcode::Mov, [asm_arg(&(reg(d, ty))), asm_arg(&(src))]),
+                    _ => self.emit(Opcode::Mov, [asm_arg(reg(d, ty)), asm_arg(src)]),
                 }
                 self.def_done(result, d);
             }
@@ -1542,14 +2379,14 @@ impl<'a> FunctionCompiler<'a> {
                 };
                 if op == Opcode::Xchg && v != S0 {
                     // xchg writes its register operand.
-                    self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(r64(v)))]);
+                    self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(r64(v))]);
                 }
                 let v = if op == Opcode::Xchg { S0 } else { v };
                 self.emit(
                     op,
                     [
-                        asm_arg(&(sized(memory(r64(a), 0), ptr(ty)))),
-                        asm_arg(&(reg(v, ty))),
+                        asm_arg(sized(memory(r64(a), 0), ptr(ty))),
+                        asm_arg(reg(v, ty)),
                     ],
                 );
             }
@@ -1560,13 +2397,13 @@ impl<'a> FunctionCompiler<'a> {
                 let ty = self.ty(args[1]);
                 let a = self.use_reg(args[0], S1);
                 let expected = self.use_reg(args[1], S0);
-                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(r64(expected)))]);
+                self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(r64(expected))]);
                 let new = self.use_reg(args[2], S2);
                 self.emit_locked(
                     Opcode::Cmpxchg,
                     [
-                        asm_arg(&(sized(memory(r64(a), 0), ptr(ty)))),
-                        asm_arg(&(reg(new, ty))),
+                        asm_arg(sized(memory(r64(a), 0), ptr(ty))),
+                        asm_arg(reg(new, ty)),
                     ],
                 );
                 if let Some(loc) = result.and_then(|r| self.defined(r)) {
@@ -1578,13 +2415,13 @@ impl<'a> FunctionCompiler<'a> {
                     self.emit(Opcode::Mfence, []);
                 }
             }
-            InstData::Jump { dest } => {
-                self.block_args(&dest, 0);
+            InstData::Jump { ref dest } => {
+                self.block_args(dest, 0);
                 self.branch_unless_next(dest.block);
             }
             InstData::Brif {
                 cond,
-                dests: [then_dest, else_dest],
+                dests: [ref then_dest, ref else_dest],
             } => {
                 // To the else-branch when the condition is zero, or when a
                 // fused compare's condition does not hold.
@@ -1602,31 +2439,360 @@ impl<'a> FunctionCompiler<'a> {
                 // Branch directly to a copy-free true edge when the false
                 // successor is next, copying its arguments on fallthrough.
                 // Otherwise keep copies on their own edges with landing pads.
-                if self.next_block == Some(else_dest.block) && self.block_args_noop(&then_dest, 0) {
-                    self.emit(
-                        Opcode::Jcc(condition(invert_cond(not))),
-                        [asm_arg(&(self.label(then_dest.block)))],
-                    );
-                    self.block_args(&else_dest, 1);
+                if self.next_block == Some(else_dest.block) && self.block_args_noop(then_dest, 0) {
+                    self.jump_to_block(Opcode::Jcc(condition(invert_cond(not))), then_dest.block);
+                    self.block_args(else_dest, 1);
                 } else if else_dest.args.is_empty() && self.edge_moves(1).is_empty() {
-                    self.emit(
-                        Opcode::Jcc(condition(not)),
-                        [asm_arg(&(self.label(else_dest.block)))],
-                    );
-                    self.block_args(&then_dest, 0);
+                    self.jump_to_block(Opcode::Jcc(condition(not)), else_dest.block);
+                    self.block_args(then_dest, 0);
                     self.branch_unless_next(then_dest.block);
                 } else {
                     let pad = format!(".L{}_{inst}_else", func.name);
-                    self.emit(Opcode::Jcc(condition(not)), [asm_arg(&(pad))]);
-                    self.block_args(&then_dest, 0);
-                    self.emit(Opcode::Jmp, [asm_arg(&(self.label(then_dest.block)))]);
+                    self.emit(Opcode::Jcc(condition(not)), [asm_arg(&pad)]);
+                    self.block_args(then_dest, 0);
+                    self.jump_to_block(Opcode::Jmp, then_dest.block);
                     self.out.label(pad.clone());
-                    self.block_args(&else_dest, 1);
+                    self.block_args(else_dest, 1);
                     self.branch_unless_next(else_dest.block);
                 }
             }
-            InstData::Switch { arg, dests, cases } => self.switch(inst, arg, &dests, &cases),
-            InstData::Intrinsic { id, args } => match id {
+            InstData::Switch {
+                arg,
+                ref dests,
+                ref cases,
+            } => self.switch(inst, arg, dests, cases),
+            InstData::Intrinsic {
+                id: Intrinsic::X86X87Region,
+                ref args,
+            } => self.native_x87_region(inst, args),
+            InstData::Intrinsic { id, ref args } if id.x86_string_port_io().is_some() => {
+                self.native_string_port_io(inst, id, args)
+            }
+            InstData::Intrinsic { id, ref args } if id.x86_port_io().is_some() => {
+                self.native_port_io(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args } if id.x86_descriptor_query().is_some() => {
+                self.native_descriptor_query(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args } if id.x86_selector_query().is_some() => {
+                self.native_selector_query(inst, id, args)
+            }
+            InstData::Intrinsic { id, ref args } if id.x86_raw_div().is_some() => {
+                self.native_raw_div(inst, id, args)
+            }
+            InstData::Intrinsic { id, ref args } if id.is_x86_x87_numerical() => {
+                self.native_x87_numerical(inst, id, args)
+            }
+            InstData::Intrinsic { id, ref args } if id.x86_sign_blend().is_some() => {
+                self.native_sign_blend(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args } if id.x86_packed_search().is_some() => {
+                self.native_packed_search(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args } if id.x86_packed_pair().is_some() => {
+                self.native_packed_pair(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args }
+                if id.x86_packed_shift().is_some() || id.x86_byte_shift().is_some() =>
+            {
+                self.native_packed_shift(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args } if id.is_x86_byte_shuffle() => {
+                self.native_byte_shuffle(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args } if id.is_x86_cache_stream() => {
+                self.native_cache_stream(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args }
+                if id.is_x86_pure_bits()
+                    || id.is_x86_legacy_sign_mask()
+                    || id.is_x86_legacy_ptest() =>
+            {
+                self.native_pure_bits(id, args, result)
+            }
+            InstData::Intrinsic {
+                id: id @ (Intrinsic::X86AvxVmaskmovdqu | Intrinsic::X86SseMaskmovdqu),
+                ref args,
+            } => self.native_byte_mask_store(id, args),
+            InstData::Intrinsic {
+                id:
+                    id @ (Intrinsic::X86Xgetbv0
+                    | Intrinsic::X86Cpuid
+                    | Intrinsic::X86Rdtsc
+                    | Intrinsic::X86Rdpmc
+                    | Intrinsic::X86Lfence
+                    | Intrinsic::X86Sfence
+                    | Intrinsic::X86Mfence
+                    | Intrinsic::X86Pause),
+                ref args,
+            } => self.native_cpu_control(id, args, result),
+            InstData::Intrinsic {
+                id: id @ (Intrinsic::X86Xsave64 | Intrinsic::X86Xrstor64),
+                ref args,
+            } => self.native_xstate(id, args),
+            InstData::Intrinsic {
+                id: id @ (Intrinsic::X86Lahf | Intrinsic::X86SahfExchange),
+                ref args,
+            } => self.native_flags_state(id, args, result),
+            InstData::Intrinsic { id, .. } if id.x86_owned_x87_stack().is_some() => {
+                self.native_owned_x87_stack(id)
+            }
+            InstData::Intrinsic { id: Intrinsic::X86RflagsRead, .. } => {
+                self.native_rflags_read(result)
+            }
+            InstData::Intrinsic { id, ref args }
+                if id.x86_legacy_x87_image().is_some() => self.native_legacy_x87_image(id, args),
+            InstData::Intrinsic {
+                id: id @ (Intrinsic::X86Fxsave64 | Intrinsic::X86Fxrstor64),
+                ref args,
+            } => self.native_fxstate(id, args),
+            InstData::Intrinsic {
+                id:
+                    id @ (Intrinsic::X86X87ReadCwNowait
+                    | Intrinsic::X86X87ReadSwNowait
+                    | Intrinsic::X86X87ReadCwWait
+                    | Intrinsic::X86X87ReadSwWait
+                    | Intrinsic::X86X87ExchangeCw
+                    | Intrinsic::X86X87ClexNowait
+                    | Intrinsic::X86X87ClexWait
+                    | Intrinsic::X86X87InitNowait
+                    | Intrinsic::X86X87InitWait
+                    | Intrinsic::X86X87Wait
+                    | Intrinsic::X86X87Fist16
+                    | Intrinsic::X86X87Fist32
+                    | Intrinsic::X86X87Fistp16
+                    | Intrinsic::X86X87Fistp32
+                    | Intrinsic::X86X87Fistp64
+                    | Intrinsic::X86X87Fisttp16
+                    | Intrinsic::X86X87Fisttp32
+                    | Intrinsic::X86X87Fisttp64
+                    | Intrinsic::X86X87Fild16
+                    | Intrinsic::X86X87Fild32
+                    | Intrinsic::X86X87Fild64
+                    | Intrinsic::X86X87Fbld
+                    | Intrinsic::X86X87Fbstp
+                    | Intrinsic::X86X87Fldpi
+                    | Intrinsic::X86X87Fldl2e
+                    | Intrinsic::X86X87Fldl2t
+                    | Intrinsic::X86X87Fldlg2
+                    | Intrinsic::X86X87Fldln2
+                    | Intrinsic::X86X87Fiadd16
+                    | Intrinsic::X86X87Fiadd32
+                    | Intrinsic::X86X87Fimul16
+                    | Intrinsic::X86X87Fimul32
+                    | Intrinsic::X86X87Fisub16
+                    | Intrinsic::X86X87Fisub32
+                    | Intrinsic::X86X87Fisubr16
+                    | Intrinsic::X86X87Fisubr32
+                    | Intrinsic::X86X87Fidiv16
+                    | Intrinsic::X86X87Fidiv32
+                    | Intrinsic::X86X87Fidivr16
+                    | Intrinsic::X86X87Fidivr32
+                    | Intrinsic::X86X87Fcom
+                    | Intrinsic::X86X87Fcomp
+                    | Intrinsic::X86X87Fcompp
+                    | Intrinsic::X86X87Fucom
+                    | Intrinsic::X86X87Fucomp
+                    | Intrinsic::X86X87Fucompp
+                    | Intrinsic::X86X87Fcomi
+                    | Intrinsic::X86X87Fcomip
+                    | Intrinsic::X86X87Fucomi
+                    | Intrinsic::X86X87Fucomip
+                    | Intrinsic::X86X87FaddSt1
+                    | Intrinsic::X86X87FmulSt1
+                    | Intrinsic::X86X87FsubSt1
+                    | Intrinsic::X86X87FsubrSt1
+                    | Intrinsic::X86X87FdivSt1
+                    | Intrinsic::X86X87FdivrSt1
+                    | Intrinsic::X86X87Fadd
+                    | Intrinsic::X86X87Fmul
+                    | Intrinsic::X86X87Fsub
+                    | Intrinsic::X86X87Fsubr
+                    | Intrinsic::X86X87Fdiv
+                    | Intrinsic::X86X87Fdivr
+                    | Intrinsic::X86X87Faddp
+                    | Intrinsic::X86X87Fmulp
+                    | Intrinsic::X86X87Fsubp
+                    | Intrinsic::X86X87Fsubrp
+                    | Intrinsic::X86X87Fdivp
+                    | Intrinsic::X86X87Fdivrp
+                    | Intrinsic::X86X87Fabs
+                    | Intrinsic::X86X87Fchs
+                    | Intrinsic::X86X87Fsqrt
+                    | Intrinsic::X86X87Frndint
+                    | Intrinsic::X86X87Ftst
+                    | Intrinsic::X86X87Fxam
+                    | Intrinsic::X86X87Fsincos
+                    | Intrinsic::X86X87Fptan
+                    | Intrinsic::X86X87Fxtract
+                    | Intrinsic::X86X87Fsin
+                    | Intrinsic::X86X87Fcos
+                    | Intrinsic::X86X87F2xm1
+                    | Intrinsic::X86X87Fpatan
+                    | Intrinsic::X86X87Fyl2x
+                    | Intrinsic::X86X87Fyl2xp1
+                    | Intrinsic::X86X87Fscale
+                    | Intrinsic::X86X87Fprem
+                    | Intrinsic::X86X87Fprem1
+                    | Intrinsic::X86MmxEmms),
+                ref args,
+            } => self.native_x87_state(id, args, result),
+            InstData::Intrinsic {
+                id: Intrinsic::X86AvxVzeroall,
+                ..
+            } => {
+                self.emit(Opcode::parse("vzeroall").unwrap(), []);
+            }
+            InstData::Intrinsic { id, ref args } if id.is_x86_raw_fma() => {
+                self.native_raw_fma(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args }
+                if id.is_x86_fp_misc() || id.is_x86_fp_horizontal_dot() =>
+            {
+                self.native_fp_misc(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args }
+                if id.is_x86_legacy_fp_compare()
+                    || id.is_x86_legacy_fp_misc()
+                    || id.is_x86_legacy_fp_v2() =>
+            {
+                self.native_legacy_fp_misc(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args } if id.is_x86_fp_compare() => {
+                self.native_fp_compare(id, args, result)
+            }
+            InstData::Intrinsic {
+                id: id @ (Intrinsic::X86SseReadMxcsr | Intrinsic::X86SseSwapMxcsr),
+                ref args,
+            } => self.native_mxcsr_access(id, args, result),
+            InstData::Intrinsic { id, ref args } if id.is_x86_mmx_value_convert() => {
+                self.native_mmx_value_convert(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args } if id.is_x86_legacy_raw_fp_convert() => {
+                self.native_legacy_raw_fp_convert(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args } if id.is_x86_raw_fp_convert() => {
+                self.native_raw_fp_convert(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args } if id.is_x86_masked_mem() => {
+                self.native_masked_mem(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args } if id.is_x86_gather() => {
+                self.native_gather(id, args, result)
+            }
+            InstData::Intrinsic {
+                id: Intrinsic::X86Cx16Cmpxchg16b,
+                ref args,
+            } => self.native_cx16(args, result),
+            InstData::Intrinsic { id, ref args } if id.is_x86_crc32() => {
+                self.native_crc32(args, result)
+            }
+            InstData::Intrinsic { id, ref args } if id.is_x86_string() => {
+                self.native_string(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args } if id.is_x86_bmi() => {
+                self.native_bmi(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args } if id.is_x86_f16c() => {
+                self.native_f16c(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args } => match id {
+                Intrinsic::X86FmaVfmadd132pd128
+                | Intrinsic::X86FmaVfmadd132pd256
+                | Intrinsic::X86FmaVfmadd132ps128
+                | Intrinsic::X86FmaVfmadd132ps256
+                | Intrinsic::X86FmaVfmadd132sd128
+                | Intrinsic::X86FmaVfmadd132ss128
+                | Intrinsic::X86FmaVfmadd213pd128
+                | Intrinsic::X86FmaVfmadd213pd256
+                | Intrinsic::X86FmaVfmadd213ps128
+                | Intrinsic::X86FmaVfmadd213ps256
+                | Intrinsic::X86FmaVfmadd213sd128
+                | Intrinsic::X86FmaVfmadd213ss128
+                | Intrinsic::X86FmaVfmadd231pd128
+                | Intrinsic::X86FmaVfmadd231pd256
+                | Intrinsic::X86FmaVfmadd231ps128
+                | Intrinsic::X86FmaVfmadd231ps256
+                | Intrinsic::X86FmaVfmadd231sd128
+                | Intrinsic::X86FmaVfmadd231ss128
+                | Intrinsic::X86FmaVfmaddsub132pd128
+                | Intrinsic::X86FmaVfmaddsub132pd256
+                | Intrinsic::X86FmaVfmaddsub213pd128
+                | Intrinsic::X86FmaVfmaddsub213pd256
+                | Intrinsic::X86FmaVfmaddsub231pd128
+                | Intrinsic::X86FmaVfmaddsub231pd256
+                | Intrinsic::X86FmaVfmaddsub132ps128
+                | Intrinsic::X86FmaVfmaddsub132ps256
+                | Intrinsic::X86FmaVfmaddsub213ps128
+                | Intrinsic::X86FmaVfmaddsub213ps256
+                | Intrinsic::X86FmaVfmaddsub231ps128
+                | Intrinsic::X86FmaVfmaddsub231ps256
+                | Intrinsic::X86FmaVfmsubadd132pd128
+                | Intrinsic::X86FmaVfmsubadd132pd256
+                | Intrinsic::X86FmaVfmsubadd213pd128
+                | Intrinsic::X86FmaVfmsubadd213pd256
+                | Intrinsic::X86FmaVfmsubadd231pd128
+                | Intrinsic::X86FmaVfmsubadd231pd256
+                | Intrinsic::X86FmaVfmsubadd132ps128
+                | Intrinsic::X86FmaVfmsubadd132ps256
+                | Intrinsic::X86FmaVfmsubadd213ps128
+                | Intrinsic::X86FmaVfmsubadd213ps256
+                | Intrinsic::X86FmaVfmsubadd231ps128
+                | Intrinsic::X86FmaVfmsubadd231ps256
+                | Intrinsic::X86FmaVfmsub132pd128
+                | Intrinsic::X86FmaVfmsub132pd256
+                | Intrinsic::X86FmaVfmsub132ps128
+                | Intrinsic::X86FmaVfmsub132ps256
+                | Intrinsic::X86FmaVfmsub132sd128
+                | Intrinsic::X86FmaVfmsub132ss128
+                | Intrinsic::X86FmaVfmsub213pd128
+                | Intrinsic::X86FmaVfmsub213pd256
+                | Intrinsic::X86FmaVfmsub213ps128
+                | Intrinsic::X86FmaVfmsub213ps256
+                | Intrinsic::X86FmaVfmsub213sd128
+                | Intrinsic::X86FmaVfmsub213ss128
+                | Intrinsic::X86FmaVfmsub231pd128
+                | Intrinsic::X86FmaVfmsub231pd256
+                | Intrinsic::X86FmaVfmsub231ps128
+                | Intrinsic::X86FmaVfmsub231ps256
+                | Intrinsic::X86FmaVfmsub231sd128
+                | Intrinsic::X86FmaVfmsub231ss128
+                | Intrinsic::X86FmaVfnmadd132pd128
+                | Intrinsic::X86FmaVfnmadd132pd256
+                | Intrinsic::X86FmaVfnmadd132ps128
+                | Intrinsic::X86FmaVfnmadd132ps256
+                | Intrinsic::X86FmaVfnmadd132sd128
+                | Intrinsic::X86FmaVfnmadd132ss128
+                | Intrinsic::X86FmaVfnmadd213pd128
+                | Intrinsic::X86FmaVfnmadd213pd256
+                | Intrinsic::X86FmaVfnmadd213ps128
+                | Intrinsic::X86FmaVfnmadd213ps256
+                | Intrinsic::X86FmaVfnmadd213sd128
+                | Intrinsic::X86FmaVfnmadd213ss128
+                | Intrinsic::X86FmaVfnmadd231pd128
+                | Intrinsic::X86FmaVfnmadd231pd256
+                | Intrinsic::X86FmaVfnmadd231ps128
+                | Intrinsic::X86FmaVfnmadd231ps256
+                | Intrinsic::X86FmaVfnmadd231sd128
+                | Intrinsic::X86FmaVfnmadd231ss128
+                | Intrinsic::X86FmaVfnmsub132pd128
+                | Intrinsic::X86FmaVfnmsub132pd256
+                | Intrinsic::X86FmaVfnmsub132ps128
+                | Intrinsic::X86FmaVfnmsub132ps256
+                | Intrinsic::X86FmaVfnmsub132sd128
+                | Intrinsic::X86FmaVfnmsub132ss128
+                | Intrinsic::X86FmaVfnmsub213pd128
+                | Intrinsic::X86FmaVfnmsub213pd256
+                | Intrinsic::X86FmaVfnmsub213ps128
+                | Intrinsic::X86FmaVfnmsub213ps256
+                | Intrinsic::X86FmaVfnmsub213sd128
+                | Intrinsic::X86FmaVfnmsub213ss128
+                | Intrinsic::X86FmaVfnmsub231pd128
+                | Intrinsic::X86FmaVfnmsub231pd256
+                | Intrinsic::X86FmaVfnmsub231ps128
+                | Intrinsic::X86FmaVfnmsub231ps256
+                | Intrinsic::X86FmaVfnmsub231sd128
+                | Intrinsic::X86FmaVfnmsub231ss128 => unreachable!("dispatched raw FMA"),
                 // The libc functions take the same arguments in the same
                 // order. memset's `int c` only uses its low byte, so the
                 // unspecified upper bits of the i8 are harmless.
@@ -1640,13 +2806,14 @@ impl<'a> FunctionCompiler<'a> {
                             .map(|&t| AbiParam::new(t))
                             .collect(),
                         cc: CallConv::C,
+                        x86_vector_abi: None,
                         variadic: false,
                         returns_twice: false,
                     };
-                    self.move_args(&args, &sig, None, false);
+                    self.move_args(&args.clone().into(), &sig, None, false);
                     self.emit(
                         Opcode::Call,
-                        [asm_arg(&(symbol_address(&id.to_string(), Modifier::Plt)))],
+                        [asm_arg(symbol_address(&id.to_string(), Modifier::Plt))],
                     );
                     if id == Intrinsic::Memcmp {
                         self.call_result(result, None);
@@ -1661,40 +2828,709 @@ impl<'a> FunctionCompiler<'a> {
                     let size = self.use_reg(args[0], S0);
                     self.emit(
                         Opcode::Lea,
-                        [asm_arg(&(r64(0))), asm_arg(&(memory(r64(size), 15i128)))],
+                        [
+                            asm_arg(r64(0)),
+                            asm_arg(memory(r64(size), (self.frame_align - 1) as i128)),
+                        ],
                     );
-                    self.emit(Opcode::And, [asm_arg(&(r64(0))), asm_arg(&(-16i128))]);
-                    self.emit(Opcode::Sub, [asm_arg(&(r64(4))), asm_arg(&(r64(0)))]);
+                    self.emit(
+                        Opcode::And,
+                        [asm_arg(r64(0)), asm_arg(-(self.frame_align as i128))],
+                    );
+                    self.emit(Opcode::Sub, [asm_arg(r64(4)), asm_arg(r64(0))]);
                     let d = self.def_reg(result);
                     self.emit(
                         Opcode::Lea,
                         [
-                            asm_arg(&(r64(d))),
-                            asm_arg(&(memory(r64(4), (self.outgoing) as i128))),
+                            asm_arg(r64(d)),
+                            asm_arg(memory(r64(4), (self.outgoing) as i128)),
                         ],
                     );
                     self.def_done(result, d);
                 }
                 Intrinsic::StackSave => {
                     let d = self.def_reg(result);
-                    self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(4)))]);
+                    self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(4))]);
                     self.def_done(result, d);
                 }
                 Intrinsic::StackRestore => {
                     let mark = self.use_reg(args[0], S0);
-                    self.emit(Opcode::Mov, [asm_arg(&(r64(4))), asm_arg(&(r64(mark)))]);
+                    self.emit(Opcode::Mov, [asm_arg(r64(4)), asm_arg(r64(mark))]);
                 }
                 // Where the prologue points rbp: the saved rbp, with the
                 // return address above it.
                 Intrinsic::FrameAddress => {
                     let d = self.def_reg(result);
-                    self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(5)))]);
+                    self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(5))]);
                     self.def_done(result, d);
                 }
                 // SysV's va_list: the offsets of the next general and vector
                 // register in the save area (vector registers are 16 bytes,
                 // after the 48 of the general ones), the next stack argument
                 // and the save area.
+                Intrinsic::X86Bmi1Bextr32
+                | Intrinsic::X86Bmi1Bextr64
+                | Intrinsic::X86Bmi2Pdep32
+                | Intrinsic::X86Bmi2Pdep64
+                | Intrinsic::X86Bmi2Pext32
+                | Intrinsic::X86Bmi2Pext64 => unreachable!("handled BMI"),
+                Intrinsic::X86Avx2Vgatherdps128
+                | Intrinsic::X86Avx2Vgatherdps256
+                | Intrinsic::X86Avx2Vgatherdpd128
+                | Intrinsic::X86Avx2Vgatherdpd256
+                | Intrinsic::X86Avx2Vgatherqps128
+                | Intrinsic::X86Avx2Vgatherqps256
+                | Intrinsic::X86Avx2Vgatherqpd128
+                | Intrinsic::X86Avx2Vgatherqpd256
+                | Intrinsic::X86Avx2Vpgatherdd128
+                | Intrinsic::X86Avx2Vpgatherdd256
+                | Intrinsic::X86Avx2Vpgatherdq128
+                | Intrinsic::X86Avx2Vpgatherdq256
+                | Intrinsic::X86Avx2Vpgatherqd128
+                | Intrinsic::X86Avx2Vpgatherqd256
+                | Intrinsic::X86Avx2Vpgatherqq128
+                | Intrinsic::X86Avx2Vpgatherqq256 => unreachable!("handled gather"),
+                Intrinsic::X86AvxVmaskmovpsLoad128
+                | Intrinsic::X86AvxVmaskmovpsStore128
+                | Intrinsic::X86AvxVmaskmovpsLoad256
+                | Intrinsic::X86AvxVmaskmovpsStore256
+                | Intrinsic::X86AvxVmaskmovpdLoad128
+                | Intrinsic::X86AvxVmaskmovpdStore128
+                | Intrinsic::X86AvxVmaskmovpdLoad256
+                | Intrinsic::X86AvxVmaskmovpdStore256
+                | Intrinsic::X86Avx2VpmaskmovdLoad128
+                | Intrinsic::X86Avx2VpmaskmovdStore128
+                | Intrinsic::X86Avx2VpmaskmovdLoad256
+                | Intrinsic::X86Avx2VpmaskmovdStore256
+                | Intrinsic::X86Avx2VpmaskmovqLoad128
+                | Intrinsic::X86Avx2VpmaskmovqStore128
+                | Intrinsic::X86Avx2VpmaskmovqLoad256
+                | Intrinsic::X86Avx2VpmaskmovqStore256 => unreachable!("handled masked memory"),
+                Intrinsic::X86AvxVcvtdq2pd128
+                | Intrinsic::X86AvxVcvtdq2pd256
+                | Intrinsic::X86AvxVcvtdq2ps128
+                | Intrinsic::X86AvxVcvtdq2ps256
+                | Intrinsic::X86AvxVcvtpd2dq128
+                | Intrinsic::X86AvxVcvtpd2dq256
+                | Intrinsic::X86AvxVcvtpd2ps128
+                | Intrinsic::X86AvxVcvtpd2ps256
+                | Intrinsic::X86AvxVcvtps2dq128
+                | Intrinsic::X86AvxVcvtps2dq256
+                | Intrinsic::X86AvxVcvtps2pd128
+                | Intrinsic::X86AvxVcvtps2pd256
+                | Intrinsic::X86AvxVcvttpd2dq128
+                | Intrinsic::X86AvxVcvttpd2dq256
+                | Intrinsic::X86AvxVcvttps2dq128
+                | Intrinsic::X86AvxVcvttps2dq256
+                | Intrinsic::X86AvxVcvtss2si32
+                | Intrinsic::X86AvxVcvttss2si32
+                | Intrinsic::X86AvxVcvtss2si64
+                | Intrinsic::X86AvxVcvttss2si64
+                | Intrinsic::X86AvxVcvtsd2si32
+                | Intrinsic::X86AvxVcvttsd2si32
+                | Intrinsic::X86AvxVcvtsd2si64
+                | Intrinsic::X86AvxVcvttsd2si64
+                | Intrinsic::X86AvxVcvtsi2ss32
+                | Intrinsic::X86AvxVcvtsi2ss64
+                | Intrinsic::X86AvxVcvtsi2sd32
+                | Intrinsic::X86AvxVcvtsi2sd64
+                | Intrinsic::X86AvxVcvtsd2ss
+                | Intrinsic::X86AvxVcvtss2sd => unreachable!("handled raw FP"),
+                Intrinsic::X86AvxVcmpps128
+                | Intrinsic::X86AvxVcmpps256
+                | Intrinsic::X86AvxVcmppd128
+                | Intrinsic::X86AvxVcmppd256
+                | Intrinsic::X86AvxVcmpss
+                | Intrinsic::X86AvxVcmpsd => unreachable!("handled FP compare"),
+                Intrinsic::X86AvxVpermilps128
+                | Intrinsic::X86AvxVpermilps256
+                | Intrinsic::X86AvxVpermilpd128
+                | Intrinsic::X86AvxVpermilpd256
+                | Intrinsic::X86Avx2Vpermd256
+                | Intrinsic::X86Avx2Vpermps256
+                | Intrinsic::X86AvxVmovmskps128
+                | Intrinsic::X86AvxVmovmskps256
+                | Intrinsic::X86AvxVmovmskpd128
+                | Intrinsic::X86AvxVmovmskpd256
+                | Intrinsic::X86AvxVpmovmskb128
+                | Intrinsic::X86Avx2Vpmovmskb256
+                | Intrinsic::X86AvxVtestps128
+                | Intrinsic::X86AvxVtestps256
+                | Intrinsic::X86AvxVtestpd128
+                | Intrinsic::X86AvxVtestpd256
+                | Intrinsic::X86AvxVptest128
+                | Intrinsic::X86AvxVptest256 => unreachable!("handled pure bits"),
+                Intrinsic::X86AvxVroundps128
+                | Intrinsic::X86AvxVroundps256
+                | Intrinsic::X86AvxVroundpd128
+                | Intrinsic::X86AvxVroundpd256
+                | Intrinsic::X86AvxVroundss
+                | Intrinsic::X86AvxVroundsd
+                | Intrinsic::X86AvxVminps128
+                | Intrinsic::X86AvxVminps256
+                | Intrinsic::X86AvxVminpd128
+                | Intrinsic::X86AvxVminpd256
+                | Intrinsic::X86AvxVminss
+                | Intrinsic::X86AvxVminsd
+                | Intrinsic::X86AvxVmaxps128
+                | Intrinsic::X86AvxVmaxps256
+                | Intrinsic::X86AvxVmaxpd128
+                | Intrinsic::X86AvxVmaxpd256
+                | Intrinsic::X86AvxVmaxss
+                | Intrinsic::X86AvxVmaxsd
+                | Intrinsic::X86AvxVrcpps128
+                | Intrinsic::X86AvxVrcpps256
+                | Intrinsic::X86AvxVrcpss
+                | Intrinsic::X86AvxVrsqrtps128
+                | Intrinsic::X86AvxVrsqrtps256
+                | Intrinsic::X86AvxVrsqrtss
+                | Intrinsic::X86AvxVcomiss
+                | Intrinsic::X86AvxVucomiss
+                | Intrinsic::X86AvxVcomisd
+                | Intrinsic::X86AvxVucomisd => unreachable!("handled FP misc"),
+                Intrinsic::X86AvxVmaskmovdqu => unreachable!("handled byte mask"),
+                Intrinsic::X86SseReadMxcsr
+                | Intrinsic::X86SseSwapMxcsr
+                | Intrinsic::X86SseMmxvalueCvtpi2ps
+                | Intrinsic::X86SseMmxvalueCvtps2pi
+                | Intrinsic::X86SseMmxvalueCvttps2pi
+                | Intrinsic::X86SseMmxvalueCvtpi2pd
+                | Intrinsic::X86SseMmxvalueCvtpd2pi
+                | Intrinsic::X86SseMmxvalueCvttpd2pi
+                | Intrinsic::X86Ssecvtdq2pd128
+                | Intrinsic::X86Ssecvtdq2ps128
+                | Intrinsic::X86Ssecvtpd2dq128
+                | Intrinsic::X86Ssecvtpd2ps128
+                | Intrinsic::X86Ssecvtps2dq128
+                | Intrinsic::X86Ssecvtps2pd128
+                | Intrinsic::X86Ssecvttpd2dq128
+                | Intrinsic::X86Ssecvttps2dq128
+                | Intrinsic::X86Ssecvtss2si32
+                | Intrinsic::X86Ssecvttss2si32
+                | Intrinsic::X86Ssecvtss2si64
+                | Intrinsic::X86Ssecvttss2si64
+                | Intrinsic::X86Ssecvtsd2si32
+                | Intrinsic::X86Ssecvttsd2si32
+                | Intrinsic::X86Ssecvtsd2si64
+                | Intrinsic::X86Ssecvttsd2si64
+                | Intrinsic::X86Ssecvtsi2ss32
+                | Intrinsic::X86Ssecvtsi2ss64
+                | Intrinsic::X86Ssecvtsi2sd32
+                | Intrinsic::X86Ssecvtsi2sd64
+                | Intrinsic::X86Ssecvtsd2ss
+                | Intrinsic::X86Ssecvtss2sd => unreachable!("handled legacy raw FP"),
+                Intrinsic::X86SseMinps128
+                | Intrinsic::X86SseMinpd128
+                | Intrinsic::X86SseMinss
+                | Intrinsic::X86SseMinsd
+                | Intrinsic::X86SseMaxps128
+                | Intrinsic::X86SseMaxpd128
+                | Intrinsic::X86SseMaxss
+                | Intrinsic::X86SseMaxsd
+                | Intrinsic::X86SseRcpps128
+                | Intrinsic::X86SseRcpss
+                | Intrinsic::X86SseRsqrtps128
+                | Intrinsic::X86SseRsqrtss
+                | Intrinsic::X86SseComiss
+                | Intrinsic::X86SseUcomiss
+                | Intrinsic::X86SseComisd
+                | Intrinsic::X86SseUcomisd
+                | Intrinsic::X86SseCmpps128
+                | Intrinsic::X86SseCmppd128
+                | Intrinsic::X86SseCmpss
+                | Intrinsic::X86SseCmpsd => unreachable!("handled legacy FP"),
+                Intrinsic::X86SseAddps128
+                | Intrinsic::X86SseAddpd128
+                | Intrinsic::X86SseAddss
+                | Intrinsic::X86SseAddsd
+                | Intrinsic::X86SseSubps128
+                | Intrinsic::X86SseSubpd128
+                | Intrinsic::X86SseSubss
+                | Intrinsic::X86SseSubsd
+                | Intrinsic::X86SseMulps128
+                | Intrinsic::X86SseMulpd128
+                | Intrinsic::X86SseMulss
+                | Intrinsic::X86SseMulsd
+                | Intrinsic::X86SseDivps128
+                | Intrinsic::X86SseDivpd128
+                | Intrinsic::X86SseDivss
+                | Intrinsic::X86SseDivsd
+                | Intrinsic::X86SseSqrtps128
+                | Intrinsic::X86SseSqrtpd128
+                | Intrinsic::X86SseSqrtss
+                | Intrinsic::X86SseSqrtsd => unreachable!("handled raw arithmetic"),
+                Intrinsic::X86SseMovmskps128
+                | Intrinsic::X86SseMovmskpd128
+                | Intrinsic::X86SsePmovmskb128
+                | Intrinsic::X86SseMaskmovdqu => unreachable!("handled legacy masks"),
+                Intrinsic::X86Sse3Haddps
+                | Intrinsic::X86Sse3Haddpd
+                | Intrinsic::X86Sse3Hsubps
+                | Intrinsic::X86Sse3Hsubpd
+                | Intrinsic::X86Sse3Addsubps
+                | Intrinsic::X86Sse3Addsubpd
+                | Intrinsic::X86Sse41Roundps128
+                | Intrinsic::X86Sse41Roundpd128
+                | Intrinsic::X86Sse41Roundss
+                | Intrinsic::X86Sse41Roundsd
+                | Intrinsic::X86Sse41Dpps
+                | Intrinsic::X86Sse41Dppd => unreachable!("handled legacy v2 FP"),
+                Intrinsic::X86Ssse3Pshufb128
+                | Intrinsic::X86Sse41Blendvps128
+                | Intrinsic::X86Sse41Blendvpd128
+                | Intrinsic::X86Sse41Pblendvb128
+                | Intrinsic::X86AvxVblendvps128
+                | Intrinsic::X86AvxVblendvpd128
+                | Intrinsic::X86AvxVpblendvb128
+                | Intrinsic::X86AvxVblendvps256
+                | Intrinsic::X86AvxVblendvpd256
+                | Intrinsic::X86Avx2Vpblendvb256
+                | Intrinsic::X86Sse41Mpsadbw128
+                | Intrinsic::X86AvxVmpsadbw128
+                | Intrinsic::X86Avx2Vmpsadbw256
+                | Intrinsic::X86Sse41Phminposuw128
+                | Intrinsic::X86AvxVphminposuw128
+                | Intrinsic::X86Ssse3Phaddw128
+                | Intrinsic::X86Ssse3Phaddd128
+                | Intrinsic::X86Ssse3Phaddsw128
+                | Intrinsic::X86Ssse3Phsubw128
+                | Intrinsic::X86Ssse3Phsubd128
+                | Intrinsic::X86Ssse3Phsubsw128
+                | Intrinsic::X86Sse2Paddsb128
+                | Intrinsic::X86Sse2Paddsw128
+                | Intrinsic::X86Sse2Paddusb128
+                | Intrinsic::X86Sse2Paddusw128
+                | Intrinsic::X86Sse2Psubsb128
+                | Intrinsic::X86Sse2Psubsw128
+                | Intrinsic::X86Sse2Psubusb128
+                | Intrinsic::X86Sse2Psubusw128
+                | Intrinsic::X86Sse2Pavgb128
+                | Intrinsic::X86Sse2Pavgw128
+                | Intrinsic::X86Ssse3Psignb128
+                | Intrinsic::X86Ssse3Psignw128
+                | Intrinsic::X86Ssse3Psignd128
+                | Intrinsic::X86Ssse3Pabsb128
+                | Intrinsic::X86Ssse3Pabsw128
+                | Intrinsic::X86Ssse3Pabsd128
+                | Intrinsic::X86AvxVphaddw128
+                | Intrinsic::X86AvxVphaddd128
+                | Intrinsic::X86AvxVphaddsw128
+                | Intrinsic::X86AvxVphsubw128
+                | Intrinsic::X86AvxVphsubd128
+                | Intrinsic::X86AvxVphsubsw128
+                | Intrinsic::X86AvxVpaddsb128
+                | Intrinsic::X86AvxVpaddsw128
+                | Intrinsic::X86AvxVpaddusb128
+                | Intrinsic::X86AvxVpaddusw128
+                | Intrinsic::X86AvxVpsubsb128
+                | Intrinsic::X86AvxVpsubsw128
+                | Intrinsic::X86AvxVpsubusb128
+                | Intrinsic::X86AvxVpsubusw128
+                | Intrinsic::X86AvxVpavgb128
+                | Intrinsic::X86AvxVpavgw128
+                | Intrinsic::X86AvxVpsignb128
+                | Intrinsic::X86AvxVpsignw128
+                | Intrinsic::X86AvxVpsignd128
+                | Intrinsic::X86AvxVpabsb128
+                | Intrinsic::X86AvxVpabsw128
+                | Intrinsic::X86AvxVpabsd128
+                | Intrinsic::X86Avx2Vphaddw256
+                | Intrinsic::X86Avx2Vphaddd256
+                | Intrinsic::X86Avx2Vphaddsw256
+                | Intrinsic::X86Avx2Vphsubw256
+                | Intrinsic::X86Avx2Vphsubd256
+                | Intrinsic::X86Avx2Vphsubsw256
+                | Intrinsic::X86Avx2Vpaddsb256
+                | Intrinsic::X86Avx2Vpaddsw256
+                | Intrinsic::X86Avx2Vpaddusb256
+                | Intrinsic::X86Avx2Vpaddusw256
+                | Intrinsic::X86Avx2Vpsubsb256
+                | Intrinsic::X86Avx2Vpsubsw256
+                | Intrinsic::X86Avx2Vpsubusb256
+                | Intrinsic::X86Avx2Vpsubusw256
+                | Intrinsic::X86Avx2Vpavgb256
+                | Intrinsic::X86Avx2Vpavgw256
+                | Intrinsic::X86Avx2Vpsignb256
+                | Intrinsic::X86Avx2Vpsignw256
+                | Intrinsic::X86Avx2Vpsignd256
+                | Intrinsic::X86Avx2Vpabsb256
+                | Intrinsic::X86Avx2Vpabsw256
+                | Intrinsic::X86Avx2Vpabsd256
+                | Intrinsic::X86Sse2Packsswb128
+                | Intrinsic::X86Sse2Packssdw128
+                | Intrinsic::X86Sse2Packuswb128
+                | Intrinsic::X86Sse41Packusdw128
+                | Intrinsic::X86AvxVpacksswb128
+                | Intrinsic::X86AvxVpackssdw128
+                | Intrinsic::X86AvxVpackuswb128
+                | Intrinsic::X86AvxVpackusdw128
+                | Intrinsic::X86Avx2Vpacksswb256
+                | Intrinsic::X86Avx2Vpackssdw256
+                | Intrinsic::X86Avx2Vpackuswb256
+                | Intrinsic::X86Avx2Vpackusdw256
+                | Intrinsic::X86Sse2Pmaddwd128
+                | Intrinsic::X86Ssse3Pmaddubsw128
+                | Intrinsic::X86Sse2Pmulhw128
+                | Intrinsic::X86Sse2Pmulhuw128
+                | Intrinsic::X86Ssse3Pmulhrsw128
+                | Intrinsic::X86Sse41Pmuldq128
+                | Intrinsic::X86Sse2Pmuludq128
+                | Intrinsic::X86Sse2Psadbw128
+                | Intrinsic::X86AvxVpmaddwd128
+                | Intrinsic::X86AvxVpmaddubsw128
+                | Intrinsic::X86AvxVpmulhw128
+                | Intrinsic::X86AvxVpmulhuw128
+                | Intrinsic::X86AvxVpmulhrsw128
+                | Intrinsic::X86AvxVpmuldq128
+                | Intrinsic::X86AvxVpmuludq128
+                | Intrinsic::X86AvxVpsadbw128
+                | Intrinsic::X86Avx2Vpmaddwd256
+                | Intrinsic::X86Avx2Vpmaddubsw256
+                | Intrinsic::X86Avx2Vpmulhw256
+                | Intrinsic::X86Avx2Vpmulhuw256
+                | Intrinsic::X86Avx2Vpmulhrsw256
+                | Intrinsic::X86Avx2Vpmuldq256
+                | Intrinsic::X86Avx2Vpmuludq256
+                | Intrinsic::X86Avx2Vpsadbw256
+                | Intrinsic::X86Sse2Pslldq128
+                | Intrinsic::X86Sse2Psrldq128
+                | Intrinsic::X86AvxVpslldq128
+                | Intrinsic::X86AvxVpsrldq128
+                | Intrinsic::X86Avx2Vpslldq256
+                | Intrinsic::X86Avx2Vpsrldq256
+                | Intrinsic::X86Sse2Psllw128
+                | Intrinsic::X86Sse2Pslld128
+                | Intrinsic::X86Sse2Psllq128
+                | Intrinsic::X86Sse2Psrlw128
+                | Intrinsic::X86Sse2Psrld128
+                | Intrinsic::X86Sse2Psrlq128
+                | Intrinsic::X86Sse2Psraw128
+                | Intrinsic::X86Sse2Psrad128
+                | Intrinsic::X86AvxVpsllw128
+                | Intrinsic::X86AvxVpslld128
+                | Intrinsic::X86AvxVpsllq128
+                | Intrinsic::X86AvxVpsrlw128
+                | Intrinsic::X86AvxVpsrld128
+                | Intrinsic::X86AvxVpsrlq128
+                | Intrinsic::X86AvxVpsraw128
+                | Intrinsic::X86AvxVpsrad128
+                | Intrinsic::X86Avx2Vpsllw256
+                | Intrinsic::X86Avx2Vpslld256
+                | Intrinsic::X86Avx2Vpsllq256
+                | Intrinsic::X86Avx2Vpsrlw256
+                | Intrinsic::X86Avx2Vpsrld256
+                | Intrinsic::X86Avx2Vpsrlq256
+                | Intrinsic::X86Avx2Vpsraw256
+                | Intrinsic::X86Avx2Vpsrad256
+                | Intrinsic::X86Avx2Vpsllvd128
+                | Intrinsic::X86Avx2Vpsllvq128
+                | Intrinsic::X86Avx2Vpsrlvd128
+                | Intrinsic::X86Avx2Vpsrlvq128
+                | Intrinsic::X86Avx2Vpsravd128
+                | Intrinsic::X86Avx2Vpsllvd256
+                | Intrinsic::X86Avx2Vpsllvq256
+                | Intrinsic::X86Avx2Vpsrlvd256
+                | Intrinsic::X86Avx2Vpsrlvq256
+                | Intrinsic::X86Avx2Vpsravd256
+                | Intrinsic::X86AvxVpshufb128
+                | Intrinsic::X86Avx2Vpshufb256
+                | Intrinsic::X86Xrstor64
+                | Intrinsic::X86Xgetbv0
+                | Intrinsic::X86Xsave64
+                | Intrinsic::X86RflagsRead
+                | Intrinsic::X86RflagsSwap
+                | Intrinsic::X86Lahf
+                | Intrinsic::X86SahfExchange
+                | Intrinsic::X86X87Region
+                | Intrinsic::X86Lar16
+                | Intrinsic::X86Lar16Mem
+                | Intrinsic::X86Lar32
+                | Intrinsic::X86Lar32Mem
+                | Intrinsic::X86Lar64
+                | Intrinsic::X86Lar64Mem
+                | Intrinsic::X86Lsl16
+                | Intrinsic::X86Lsl16Mem
+                | Intrinsic::X86Lsl32
+                | Intrinsic::X86Lsl32Mem
+                | Intrinsic::X86Lsl64
+                | Intrinsic::X86Lsl64Mem
+                | Intrinsic::X86Verr
+                | Intrinsic::X86VerrMem
+                | Intrinsic::X86Verw
+                | Intrinsic::X86VerwMem
+                | Intrinsic::X86In8
+                | Intrinsic::X86Ins8
+                | Intrinsic::X86Ins16
+                | Intrinsic::X86Ins32
+                | Intrinsic::X86Outs8
+                | Intrinsic::X86Outs16
+                | Intrinsic::X86Outs32
+                | Intrinsic::X86RepIns8
+                | Intrinsic::X86RepIns16
+                | Intrinsic::X86RepIns32
+                | Intrinsic::X86RepOuts8
+                | Intrinsic::X86RepOuts16
+                | Intrinsic::X86RepOuts32
+                | Intrinsic::X86Ins8OwnedTerminal
+                | Intrinsic::X86Ins16OwnedTerminal
+                | Intrinsic::X86Ins32OwnedTerminal
+                | Intrinsic::X86Outs8OwnedTerminal
+                | Intrinsic::X86Outs16OwnedTerminal
+                | Intrinsic::X86Outs32OwnedTerminal
+                | Intrinsic::X86RepIns8OwnedTerminal
+                | Intrinsic::X86RepIns16OwnedTerminal
+                | Intrinsic::X86RepIns32OwnedTerminal
+                | Intrinsic::X86RepOuts8OwnedTerminal
+                | Intrinsic::X86RepOuts16OwnedTerminal
+                | Intrinsic::X86RepOuts32OwnedTerminal
+                | Intrinsic::X86In16
+                | Intrinsic::X86In32
+                | Intrinsic::X86Out8
+                | Intrinsic::X86Out16
+                | Intrinsic::X86Out32
+                | Intrinsic::X86In8Imm
+                | Intrinsic::X86In16Imm
+                | Intrinsic::X86In32Imm
+                | Intrinsic::X86Out8Imm
+                | Intrinsic::X86Out16Imm
+                | Intrinsic::X86Out32Imm
+                | Intrinsic::X86DivU8
+                | Intrinsic::X86DivU16
+                | Intrinsic::X86DivU32
+                | Intrinsic::X86DivU64
+                | Intrinsic::X86DivS8
+                | Intrinsic::X86DivS16
+                | Intrinsic::X86DivS32
+                | Intrinsic::X86DivS64
+                | Intrinsic::X86Sgdt
+                | Intrinsic::X86Sidt
+                | Intrinsic::X86SldtMem
+                | Intrinsic::X86Sldt16
+                | Intrinsic::X86Sldt32
+                | Intrinsic::X86Sldt64
+                | Intrinsic::X86StrMem
+                | Intrinsic::X86Str16
+                | Intrinsic::X86Str32
+                | Intrinsic::X86Str64
+                | Intrinsic::X86SmswMem
+                | Intrinsic::X86Smsw16
+                | Intrinsic::X86Smsw32
+                | Intrinsic::X86Smsw64
+                | Intrinsic::X86X87Fnstenv16
+                | Intrinsic::X86X87Fnstenv32
+                | Intrinsic::X86X87Fstenv16
+                | Intrinsic::X86X87Fstenv32
+                | Intrinsic::X86X87Fldenv16
+                | Intrinsic::X86X87Fldenv32
+                | Intrinsic::X86X87Fnsave16
+                | Intrinsic::X86X87Fnsave32
+                | Intrinsic::X86X87Fsave16
+                | Intrinsic::X86X87Fsave32
+                | Intrinsic::X86X87Frstor16
+                | Intrinsic::X86X87Frstor32
+                | Intrinsic::X86Fxsave64
+                | Intrinsic::X86Fxrstor64
+                | Intrinsic::X86X87ReadCwNowait
+                | Intrinsic::X86X87ReadSwNowait
+                | Intrinsic::X86X87ReadCwWait
+                | Intrinsic::X86X87ReadSwWait
+                | Intrinsic::X86X87ExchangeCw
+                | Intrinsic::X86X87ClexNowait
+                | Intrinsic::X86X87ClexWait
+                | Intrinsic::X86X87InitNowait
+                | Intrinsic::X86X87InitWait
+                | Intrinsic::X86X87Wait
+                | Intrinsic::X86X87Fist16
+                | Intrinsic::X86X87Fist32
+                | Intrinsic::X86X87Fistp16
+                | Intrinsic::X86X87Fistp32
+                | Intrinsic::X86X87Fistp64
+                | Intrinsic::X86X87Fisttp16
+                | Intrinsic::X86X87Fisttp32
+                | Intrinsic::X86X87Fisttp64
+                | Intrinsic::X86X87Fild16
+                | Intrinsic::X86X87Fild32
+                | Intrinsic::X86X87Fild64
+                | Intrinsic::X86X87Fbld
+                | Intrinsic::X86X87Fbstp
+                | Intrinsic::X86X87Fldpi
+                | Intrinsic::X86X87Fldl2e
+                | Intrinsic::X86X87Fldl2t
+                | Intrinsic::X86X87Fldlg2
+                | Intrinsic::X86X87Fldln2
+                | Intrinsic::X86X87Fiadd16
+                | Intrinsic::X86X87Fiadd32
+                | Intrinsic::X86X87Fimul16
+                | Intrinsic::X86X87Fimul32
+                | Intrinsic::X86X87Fisub16
+                | Intrinsic::X86X87Fisub32
+                | Intrinsic::X86X87Fisubr16
+                | Intrinsic::X86X87Fisubr32
+                | Intrinsic::X86X87Fidiv16
+                | Intrinsic::X86X87Fidiv32
+                | Intrinsic::X86X87Fidivr16
+                | Intrinsic::X86X87Fidivr32
+                | Intrinsic::X86X87FaddSt1
+                | Intrinsic::X86X87Fcom
+                | Intrinsic::X86X87Fcomp
+                | Intrinsic::X86X87Fcompp
+                | Intrinsic::X86X87Fucom
+                | Intrinsic::X86X87Fucomp
+                | Intrinsic::X86X87Fucompp
+                | Intrinsic::X86X87Fcomi
+                | Intrinsic::X86X87Fcomip
+                | Intrinsic::X86X87Fucomi
+                | Intrinsic::X86X87Fucomip
+                | Intrinsic::X86X87FmulSt1
+                | Intrinsic::X86X87FsubSt1
+                | Intrinsic::X86X87FsubrSt1
+                | Intrinsic::X86X87FdivSt1
+                | Intrinsic::X86X87FdivrSt1
+                | Intrinsic::X86X87Fadd
+                | Intrinsic::X86X87Fmul
+                | Intrinsic::X86X87Fsub
+                | Intrinsic::X86X87Fsubr
+                | Intrinsic::X86X87Fdiv
+                | Intrinsic::X86X87Fdivr
+                | Intrinsic::X86X87Faddp
+                | Intrinsic::X86X87Fmulp
+                | Intrinsic::X86X87Fsubp
+                | Intrinsic::X86X87Fsubrp
+                | Intrinsic::X86X87Fdivp
+                | Intrinsic::X86X87Fdivrp
+                | Intrinsic::X86X87Fabs
+                | Intrinsic::X86X87Fchs
+                | Intrinsic::X86X87Fsqrt
+                | Intrinsic::X86X87Frndint
+                | Intrinsic::X86X87Ftst
+                | Intrinsic::X86X87Fxam
+                | Intrinsic::X86X87Fsincos
+                | Intrinsic::X86X87Fptan
+                | Intrinsic::X86X87Fxtract
+                | Intrinsic::X86X87Fsin
+                | Intrinsic::X86X87Fcos
+                | Intrinsic::X86X87F2xm1
+                | Intrinsic::X86X87Fpatan
+                | Intrinsic::X86X87Fyl2x
+                | Intrinsic::X86X87Fyl2xp1
+                | Intrinsic::X86X87Fscale
+                | Intrinsic::X86X87Fprem
+                | Intrinsic::X86X87Fprem1
+                | Intrinsic::X86MmxEmms
+                | Intrinsic::X86Clflush
+                | Intrinsic::X86Prefetchnta
+                | Intrinsic::X86Prefetcht0
+                | Intrinsic::X86Prefetcht1
+                | Intrinsic::X86Prefetcht2
+                | Intrinsic::X86SseMovntps128
+                | Intrinsic::X86SseMovntpd128
+                | Intrinsic::X86SseMovntdq128
+                | Intrinsic::X86AvxVmovntps128
+                | Intrinsic::X86AvxVmovntps256
+                | Intrinsic::X86AvxVmovntpd128
+                | Intrinsic::X86AvxVmovntpd256
+                | Intrinsic::X86AvxVmovntdq128
+                | Intrinsic::X86AvxVmovntdq256
+                | Intrinsic::X86Movnti32
+                | Intrinsic::X86Movnti64
+                | Intrinsic::X86Sse41Movntdqa128
+                | Intrinsic::X86Avx2Vmovntdqa256
+                | Intrinsic::X86Cpuid
+                | Intrinsic::X86Rdtsc
+                | Intrinsic::X86Rdpmc
+                | Intrinsic::X86X87Ffree0
+                | Intrinsic::X86X87Ffree1
+                | Intrinsic::X86X87Ffree2
+                | Intrinsic::X86X87Ffree3
+                | Intrinsic::X86X87Ffree4
+                | Intrinsic::X86X87Ffree5
+                | Intrinsic::X86X87Ffree6
+                | Intrinsic::X86X87Ffree7
+                | Intrinsic::X86X87Fdecstp
+                | Intrinsic::X86X87Fincstp
+                | Intrinsic::X86X87Fnop
+                | Intrinsic::X86Lfence
+                | Intrinsic::X86Sfence
+                | Intrinsic::X86Mfence
+                | Intrinsic::X86Pause
+                | Intrinsic::X86AvxVzeroall
+                | Intrinsic::X86Cx16Cmpxchg16b => {
+                    unreachable!("handled state/CX16")
+                }
+                Intrinsic::X86Sse41Ptest128
+                | Intrinsic::X86Sse42Crc32b
+                | Intrinsic::X86Sse42Crc32w
+                | Intrinsic::X86Sse42Crc32d
+                | Intrinsic::X86Sse42Crc32q => unreachable!("handled CRC/PTEST"),
+                Intrinsic::X86Sse42PcmpistriIndex
+                | Intrinsic::X86Sse42Pcmpistri64Index
+                | Intrinsic::X86Sse42PcmpistrmMask
+                | Intrinsic::X86Sse42PcmpistriFlags
+                | Intrinsic::X86Sse42PcmpestriIndex
+                | Intrinsic::X86Sse42PcmpestrmMask
+                | Intrinsic::X86Sse42PcmpestriFlags
+                | Intrinsic::X86Sse42Pcmpestri64Index
+                | Intrinsic::X86Sse42Pcmpestrm64Mask
+                | Intrinsic::X86Sse42Pcmpestri64Flags => unreachable!("handled strings"),
+                Intrinsic::X86AvxPcmpistriIndex
+                | Intrinsic::X86AvxPcmpistri64Index
+                | Intrinsic::X86AvxPcmpistrmMask
+                | Intrinsic::X86AvxPcmpistriFlags
+                | Intrinsic::X86AvxPcmpestriIndex
+                | Intrinsic::X86AvxPcmpestrmMask
+                | Intrinsic::X86AvxPcmpestriFlags
+                | Intrinsic::X86AvxPcmpestri64Index
+                | Intrinsic::X86AvxPcmpestrm64Mask
+                | Intrinsic::X86AvxPcmpestri64Flags => unreachable!("handled strings"),
+                Intrinsic::X86AvxVaddps128
+                | Intrinsic::X86AvxVaddpd128
+                | Intrinsic::X86AvxVaddss
+                | Intrinsic::X86AvxVaddsd
+                | Intrinsic::X86AvxVaddps256
+                | Intrinsic::X86AvxVaddpd256
+                | Intrinsic::X86AvxVsubps128
+                | Intrinsic::X86AvxVsubpd128
+                | Intrinsic::X86AvxVsubss
+                | Intrinsic::X86AvxVsubsd
+                | Intrinsic::X86AvxVsubps256
+                | Intrinsic::X86AvxVsubpd256
+                | Intrinsic::X86AvxVmulps128
+                | Intrinsic::X86AvxVmulpd128
+                | Intrinsic::X86AvxVmulss
+                | Intrinsic::X86AvxVmulsd
+                | Intrinsic::X86AvxVmulps256
+                | Intrinsic::X86AvxVmulpd256
+                | Intrinsic::X86AvxVdivps128
+                | Intrinsic::X86AvxVdivpd128
+                | Intrinsic::X86AvxVdivss
+                | Intrinsic::X86AvxVdivsd
+                | Intrinsic::X86AvxVdivps256
+                | Intrinsic::X86AvxVdivpd256
+                | Intrinsic::X86AvxVsqrtps128
+                | Intrinsic::X86AvxVsqrtpd128
+                | Intrinsic::X86AvxVsqrtss
+                | Intrinsic::X86AvxVsqrtsd
+                | Intrinsic::X86AvxVsqrtps256
+                | Intrinsic::X86AvxVsqrtpd256 => unreachable!("handled raw arithmetic"),
+                Intrinsic::X86AvxVhaddps128
+                | Intrinsic::X86AvxVhaddps256
+                | Intrinsic::X86AvxVhaddpd128
+                | Intrinsic::X86AvxVhaddpd256
+                | Intrinsic::X86AvxVhsubps128
+                | Intrinsic::X86AvxVhsubps256
+                | Intrinsic::X86AvxVhsubpd128
+                | Intrinsic::X86AvxVhsubpd256
+                | Intrinsic::X86AvxVaddsubps128
+                | Intrinsic::X86AvxVaddsubps256
+                | Intrinsic::X86AvxVaddsubpd128
+                | Intrinsic::X86AvxVaddsubpd256
+                | Intrinsic::X86AvxVdpps128
+                | Intrinsic::X86AvxVdpps256
+                | Intrinsic::X86AvxVdppd128 => unreachable!("handled AVX horizontal/dot"),
+                Intrinsic::X86F16cPhToPs128
+                | Intrinsic::X86F16cPhToPs256
+                | Intrinsic::X86F16cPsToPh128
+                | Intrinsic::X86F16cPsToPh256 => unreachable!("handled F16C"),
                 Intrinsic::VaStart => {
                     let p = self.use_reg(args[0], S1);
                     let p = r64(p);
@@ -1702,50 +3538,64 @@ impl<'a> FunctionCompiler<'a> {
                     self.emit(
                         Opcode::Mov,
                         [
-                            asm_arg(&(sized(memory(p, 0), 32))),
-                            asm_arg(&(8 * u32::from(ints))),
+                            asm_arg(sized(memory(p, 0), 32)),
+                            asm_arg(8 * u32::from(ints)),
                         ],
                     );
                     self.emit(
                         Opcode::Mov,
                         [
-                            asm_arg(&(sized(memory(p, 4i128), 32))),
-                            asm_arg(&(48 + 16 * u32::from(floats))),
+                            asm_arg(sized(memory(p, 4i128), 32)),
+                            asm_arg(48 + 16 * u32::from(floats)),
                         ],
                     );
                     self.emit(
                         Opcode::Lea,
                         [
-                            asm_arg(&(r64(0))),
-                            asm_arg(&(memory(r64(5), (16 + self.named.stack) as i128))),
+                            asm_arg(r64(0)),
+                            asm_arg(memory(r64(5), (16 + self.named.stack) as i128)),
                         ],
                     );
                     self.emit(
                         Opcode::Mov,
-                        [asm_arg(&(sized(memory(p, 8i128), 64))), asm_arg(&(r64(0)))],
+                        [asm_arg(sized(memory(p, 8i128), 64)), asm_arg(r64(0))],
                     );
                     let save = self.frame(self.reg_save.expect("a variadic function"));
-                    self.emit(Opcode::Lea, [asm_arg(&(r64(0))), asm_arg(&(save))]);
+                    self.emit(Opcode::Lea, [asm_arg(r64(0)), asm_arg(save)]);
                     self.emit(
                         Opcode::Mov,
-                        [asm_arg(&(sized(memory(p, 16i128), 64))), asm_arg(&(r64(0)))],
+                        [asm_arg(sized(memory(p, 16i128), 64)), asm_arg(r64(0))],
                     );
                 }
             },
             InstData::Trap => self.emit(Opcode::Ud2, []),
-            InstData::Return { args } => {
+            InstData::Return { ref args } => {
+                if self.named.locs.first() == Some(&ArgLoc::SretX87) {
+                    let area = self.param_areas[0].expect("planned x87 result object");
+                    self.emit(Opcode::Fld, [asm_arg(sized(self.frame(area), 80))]);
+                }
                 // A struct result in registers is loaded from where the
                 // function wrote it; one in memory returns its address.
                 if let Some(ArgLoc::SretRegs(regs)) = self.named.locs.first().cloned() {
                     let area = self.param_areas[0].expect("planned");
-                    for (k, r) in regs.into_iter().enumerate() {
-                        let at = sized(self.frame(area + 8 * k), 64);
-                        match r {
-                            Loc::Reg(r) => {
-                                self.emit(Opcode::Mov, [asm_arg(&(r64(r))), asm_arg(&(at))])
+                    if let Some(ty) = func.sig.params[0].layout().and_then(sysv::register_vector) {
+                        self.emit(
+                            movs(ty),
+                            [
+                                asm_arg(simd(0, ty)),
+                                asm_arg(sized(self.frame(area), ptr(ty))),
+                            ],
+                        );
+                    } else {
+                        for sysv::RegPiece { offset, loc: r } in regs {
+                            let at = sized(self.frame(area + offset as usize), 64);
+                            match r {
+                                Loc::Reg(r) => {
+                                    self.emit(Opcode::Mov, [asm_arg(r64(r)), asm_arg(at)])
+                                }
+                                _ => self
+                                    .emit(Opcode::Movsd, [asm_arg(xmm(loc_reg(r))), asm_arg(at)]),
                             }
-                            _ => self
-                                .emit(Opcode::Movsd, [asm_arg(&(xmm(loc_reg(r)))), asm_arg(&(at))]),
                         }
                     }
                 }
@@ -1753,26 +3603,50 @@ impl<'a> FunctionCompiler<'a> {
                     let at = self.frame(slot);
                     self.emit(
                         Opcode::Mov,
-                        [asm_arg(&(r64(0))), asm_arg(&(sized((at).clone(), 64)))],
+                        [asm_arg(r64(0)), asm_arg(sized((at).clone(), 64))],
                     );
                 }
                 if let Some(&value) = args.first() {
                     let ty = self.ty(value);
-                    self.emit_move(sysv::return_loc(ty), self.loc(value));
+                    if ty == Type::F80 {
+                        self.f80_push(value);
+                    } else if sysv::scalar_memory_result(&func.sig) {
+                        let r = self.use_freg(value, FS0);
+                        self.emit(Opcode::Movsd, [asm_arg(sized(memory(r64(RAX), 0), 64)), asm_arg(xmm(r))]);
+                    } else {
+                        self.emit_move(sysv::return_loc(ty), self.loc(value));
+                    }
                     if ty == Type::I128 {
                         self.emit_move(Loc::Reg(RDX), self.hi(value));
                     }
                     let ret = &func.sig.returns[0];
                     self.extend_in_place(RAX, ret.ty, ret.ext);
                 }
+                let wide_wrapper_return = func.sig.params.first().is_some_and(|p| {
+                    matches!(p.purpose, Purpose::Sret(_))
+                        && p.layout()
+                            .and_then(sysv::register_vector)
+                            .is_some_and(|t| t.bytes() == Some(32))
+                });
+                if self.wide_vectors
+                    && !wide_wrapper_return
+                    && !args
+                        .first()
+                        .is_some_and(|&v| self.ty(v).bytes() == Some(32))
+                {
+                    self.emit(Opcode::Vzeroupper, []);
+                }
                 self.epilogue();
                 self.emit(Opcode::Ret, []);
             }
-            InstData::VaArg { ty, list } => self.va_arg(inst, ty, list, result),
+            InstData::X86RflagsRegion { ref args, .. } => self.native_rflags_region(inst, args),
+            InstData::VaArg { ty, list, .. } => self.va_arg(inst, ty, list, result),
+            InstData::AggregateVaArg { ref layout, list, home, x86_vector_abi } => self.aggregate_va_arg(inst, layout, list, home, x86_vector_abi, result),
             InstData::Invoke { .. }
             | InstData::LandingPad { .. }
             | InstData::EhTypeid { .. }
-            | InstData::InlineAsm { .. } => unreachable!("rejected in `new`"),
+            | InstData::InlineAsm { .. }
+            | InstData::Neon { .. } => unreachable!("rejected in `new`"),
         }
     }
 
@@ -1781,8 +3655,34 @@ impl<'a> FunctionCompiler<'a> {
     /// offset is below 48 for general ones, 176 for vector ones), then from
     /// the stack, 8 bytes each. Its address ends up in rax.
     fn va_arg(&mut self, inst: Inst, ty: Type, list: Value, result: Option<Value>) {
+        if ty.bytes() == Some(32) || ty == Type::Vector(keel_ir::VectorType::F64x1) {
+            // __m256 and explicitly proven producer f64x1 are overflow-only.
+            // Preflight requires explicit matching local va_start provenance.
+            let bytes = ty.bytes().expect("sized overflow vector");
+            let p = r64(self.use_reg(list, S2));
+            self.emit(
+                Opcode::Mov,
+                [asm_arg(r64(S0)), asm_arg(sized(memory(p, 8), 64))],
+            );
+            if bytes == 32 {
+                self.emit(Opcode::Add, [asm_arg(r64(S0)), asm_arg(31)]);
+                self.emit(Opcode::And, [asm_arg(r64(S0)), asm_arg(-32)]);
+            }
+            self.emit(
+                Opcode::Lea,
+                [asm_arg(r64(S1)), asm_arg(memory(r64(S0), i128::from(bytes)))],
+            );
+            self.emit(
+                Opcode::Mov,
+                [asm_arg(sized(memory(p, 8), 64)), asm_arg(r64(S1))],
+            );
+            let d = self.def_freg(result);
+            self.load_into(Loc::FReg(d), ty, &memory(r64(S0), 0));
+            self.def_done(result, d);
+            return;
+        }
         let p = r64(self.use_reg(list, S2));
-        let (field, end, step) = if ty.is_float() {
+        let (field, end, step) = if ty.is_float() || ty.is_vector() {
             (4, 176, 16)
         } else {
             (0, 48, 8)
@@ -1794,45 +3694,63 @@ impl<'a> FunctionCompiler<'a> {
         self.emit(
             Opcode::Mov,
             [
-                asm_arg(&(r32(1))),
-                asm_arg(&(sized(memory(p, (field) as i128), 32))),
+                asm_arg(r32(1)),
+                asm_arg(sized(memory(p, (field) as i128), 32)),
             ],
         );
-        self.emit(Opcode::Cmp, [asm_arg(&(r32(1))), asm_arg(&(end))]);
-        self.emit(Opcode::Jcc(3), [asm_arg(&(stack))]);
+        self.emit(Opcode::Cmp, [asm_arg(r32(1)), asm_arg(end)]);
+        self.emit(Opcode::Jcc(3), [asm_arg(&stack)]);
         self.emit(
             Opcode::Mov,
-            [asm_arg(&(r64(0))), asm_arg(&(sized(memory(p, 16i128), 64)))],
+            [asm_arg(r64(0)), asm_arg(sized(memory(p, 16i128), 64))],
         );
-        self.emit(Opcode::Add, [asm_arg(&(r64(0))), asm_arg(&(r64(1)))]);
-        self.emit(Opcode::Add, [asm_arg(&(r32(1))), asm_arg(&(step))]);
+        self.emit(Opcode::Add, [asm_arg(r64(0)), asm_arg(r64(1))]);
+        self.emit(Opcode::Add, [asm_arg(r32(1)), asm_arg(step)]);
         self.emit(
             Opcode::Mov,
             [
-                asm_arg(&(sized(memory(p, (field) as i128), 32))),
-                asm_arg(&(r32(1))),
+                asm_arg(sized(memory(p, (field) as i128), 32)),
+                asm_arg(r32(1)),
             ],
         );
-        self.emit(Opcode::Jmp, [asm_arg(&(load))]);
+        self.emit(Opcode::Jmp, [asm_arg(&load)]);
         self.out.label(stack.clone());
         self.emit(
             Opcode::Mov,
-            [asm_arg(&(r64(0))), asm_arg(&(sized(memory(p, 8i128), 64)))],
+            [asm_arg(r64(0)), asm_arg(sized(memory(p, 8i128), 64))],
         );
+        if ty.is_vector() && ty.bytes() == Some(16) {
+            self.emit(Opcode::Add, [asm_arg(r64(S0)), asm_arg(15)]);
+            self.emit(Opcode::And, [asm_arg(r64(S0)), asm_arg(-16)]);
+        }
         self.emit(
             Opcode::Lea,
-            [asm_arg(&(r64(1))), asm_arg(&(memory(r64(0), 8i128)))],
+            [
+                asm_arg(r64(S1)),
+                asm_arg(memory(
+                    r64(S0),
+                    if ty.is_vector() {
+                        i128::from(ty.bytes().unwrap())
+                    } else {
+                        8
+                    },
+                )),
+            ],
         );
         self.emit(
             Opcode::Mov,
-            [asm_arg(&(sized(memory(p, 8i128), 64))), asm_arg(&(r64(1)))],
+            [asm_arg(sized(memory(p, 8i128), 64)), asm_arg(r64(1))],
         );
         self.out.label(load.clone());
-        if ty.is_float() {
+        if ty.is_vector() {
+            let d = self.def_freg(result);
+            self.load_into(Loc::FReg(d), ty, &memory(r64(S0), 0));
+            self.def_done(result, d);
+        } else if ty.is_float() {
             let d = self.def_freg(result);
             self.emit(
                 Opcode::Movsd,
-                [asm_arg(&(xmm(d))), asm_arg(&(sized(memory(r64(0), 0), 64)))],
+                [asm_arg(xmm(d)), asm_arg(sized(memory(r64(0), 0), 64))],
             );
             self.def_done(result, d);
         } else {
@@ -1840,8 +3758,8 @@ impl<'a> FunctionCompiler<'a> {
             self.emit(
                 Opcode::Mov,
                 [
-                    asm_arg(&(reg(d, ty))),
-                    asm_arg(&(sized(memory(r64(0), 0), ptr(ty)))),
+                    asm_arg(reg(d, ty)),
+                    asm_arg(sized(memory(r64(0), 0), ptr(ty))),
                 ],
             );
             self.def_done(result, d);
@@ -1880,11 +3798,11 @@ impl<'a> FunctionCompiler<'a> {
                 let code = match cond {
                     // Equal if both halves are: their XORs are zero.
                     IntCC::Eq | IntCC::Ne => {
-                        self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(a0))]);
-                        self.emit(Opcode::Xor, [asm_arg(&(r64(0))), asm_arg(&(b0))]);
-                        self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(a1))]);
-                        self.emit(Opcode::Xor, [asm_arg(&(r64(2))), asm_arg(&(b1))]);
-                        self.emit(Opcode::Or, [asm_arg(&(r64(0))), asm_arg(&(r64(2)))]);
+                        self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(a0)]);
+                        self.emit(Opcode::Xor, [asm_arg(r64(0)), asm_arg(b0)]);
+                        self.emit(Opcode::Mov, [asm_arg(r64(2)), asm_arg(a1)]);
+                        self.emit(Opcode::Xor, [asm_arg(r64(2)), asm_arg(b1)]);
+                        self.emit(Opcode::Or, [asm_arg(r64(0)), asm_arg(r64(2))]);
                         cond_code(cond)
                     }
                     // a - b, with the borrow of the low halves feeding the
@@ -1898,10 +3816,10 @@ impl<'a> FunctionCompiler<'a> {
                         } else {
                             ((a0, a1), (b0, b1))
                         };
-                        self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(x0))]);
-                        self.emit(Opcode::Cmp, [asm_arg(&(r64(0))), asm_arg(&(y0))]);
-                        self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(x1))]);
-                        self.emit(Opcode::Sbb, [asm_arg(&(r64(2))), asm_arg(&(y1))]);
+                        self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(x0)]);
+                        self.emit(Opcode::Cmp, [asm_arg(r64(0)), asm_arg(y0)]);
+                        self.emit(Opcode::Mov, [asm_arg(r64(2)), asm_arg(x1)]);
+                        self.emit(Opcode::Sbb, [asm_arg(r64(2)), asm_arg(y1)]);
                         match cond {
                             IntCC::Slt | IntCC::Sgt => "l",
                             IntCC::Sle | IntCC::Sge => "ge",
@@ -1911,23 +3829,23 @@ impl<'a> FunctionCompiler<'a> {
                     }
                 };
                 let d = self.def_reg(result);
-                self.emit(Opcode::Setcc(condition(code)), [asm_arg(&(r8(d)))]);
+                self.emit(Opcode::Setcc(condition(code)), [asm_arg(r8(d))]);
                 self.def_done(result, d);
             }
             InstData::Select { args } if wide(self, args[1]) => {
                 if wide(self, args[0]) {
                     let [c0, c1] = self.halves(args[0]);
-                    self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(c0))]);
-                    self.emit(Opcode::Or, [asm_arg(&(r64(0))), asm_arg(&(c1))]);
+                    self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(c0)]);
+                    self.emit(Opcode::Or, [asm_arg(r64(0)), asm_arg(c1)]);
                 } else {
                     self.test_value(args[0]);
                 }
                 let [t0, t1] = self.halves(args[1]);
                 let [f0, f1] = self.halves(args[2]);
-                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(f0))]);
-                self.emit(Opcode::Cmovcc(5), [asm_arg(&(r64(0))), asm_arg(&(t0))]);
-                self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(f1))]);
-                self.emit(Opcode::Cmovcc(5), [asm_arg(&(r64(2))), asm_arg(&(t1))]);
+                self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(f0)]);
+                self.emit(Opcode::Cmovcc(5), [asm_arg(r64(0)), asm_arg(t0)]);
+                self.emit(Opcode::Mov, [asm_arg(r64(2)), asm_arg(f1)]);
+                self.emit(Opcode::Cmovcc(5), [asm_arg(r64(2)), asm_arg(t1)]);
                 self.pair_out(result);
             }
             InstData::Convert {
@@ -1939,29 +3857,23 @@ impl<'a> FunctionCompiler<'a> {
                 let a = self.use_reg(arg, S0);
                 let signed = op == ConvertOp::Sext;
                 match (from, signed) {
-                    (Type::I64, _) => {
-                        self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(r64(a)))])
-                    }
+                    (Type::I64, _) => self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(r64(a))]),
                     (Type::I32, true) => {
-                        self.emit(Opcode::Movsxd, [asm_arg(&(r64(0))), asm_arg(&(r32(a)))])
+                        self.emit(Opcode::Movsxd, [asm_arg(r64(0)), asm_arg(r32(a))])
                     }
                     (Type::I32, false) => {
-                        self.emit(Opcode::Mov, [asm_arg(&(r32(0))), asm_arg(&(r32(a)))])
+                        self.emit(Opcode::Mov, [asm_arg(r32(0)), asm_arg(r32(a))])
                     }
-                    (_, true) => self.emit(
-                        Opcode::Movsx,
-                        [asm_arg(&(r64(0))), asm_arg(&(reg(a, from)))],
-                    ),
-                    (_, false) => self.emit(
-                        Opcode::Movzx,
-                        [asm_arg(&(r32(0))), asm_arg(&(reg(a, from)))],
-                    ),
+                    (_, true) => self.emit(Opcode::Movsx, [asm_arg(r64(0)), asm_arg(reg(a, from))]),
+                    (_, false) => {
+                        self.emit(Opcode::Movzx, [asm_arg(r32(0)), asm_arg(reg(a, from))])
+                    }
                 }
                 if signed {
-                    self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(r64(0)))]);
-                    self.emit(Opcode::Sar, [asm_arg(&(r64(2))), asm_arg(&(63i128))]);
+                    self.emit(Opcode::Mov, [asm_arg(r64(2)), asm_arg(r64(0))]);
+                    self.emit(Opcode::Sar, [asm_arg(r64(2)), asm_arg(63i128)]);
                 } else {
-                    self.emit(Opcode::Xor, [asm_arg(&(r32(2))), asm_arg(&(r32(2)))]);
+                    self.emit(Opcode::Xor, [asm_arg(r32(2)), asm_arg(r32(2))]);
                 }
                 self.pair_out(result);
             }
@@ -1973,26 +3885,26 @@ impl<'a> FunctionCompiler<'a> {
                 let a = r64(self.use_reg(addr, S1));
                 self.emit(
                     Opcode::Mov,
-                    [asm_arg(&(r64(0))), asm_arg(&(sized(memory(a, 0), 64)))],
+                    [asm_arg(r64(0)), asm_arg(sized(memory(a, 0), 64))],
                 );
                 self.emit(
                     Opcode::Mov,
-                    [asm_arg(&(r64(2))), asm_arg(&(sized(memory(a, 8i128), 64)))],
+                    [asm_arg(r64(2)), asm_arg(sized(memory(a, 8i128), 64))],
                 );
                 self.pair_out(result);
             }
             InstData::Store { value, addr, .. } if wide(self, value) => {
                 let [v0, v1] = self.halves(value);
                 let a = r64(self.use_reg(addr, S1));
-                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(v0))]);
+                self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(v0)]);
                 self.emit(
                     Opcode::Mov,
-                    [asm_arg(&(sized(memory(a, 0), 64))), asm_arg(&(r64(0)))],
+                    [asm_arg(sized(memory(a, 0), 64)), asm_arg(r64(0))],
                 );
-                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(v1))]);
+                self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(v1)]);
                 self.emit(
                     Opcode::Mov,
-                    [asm_arg(&(sized(memory(a, 8i128), 64))), asm_arg(&(r64(0)))],
+                    [asm_arg(sized(memory(a, 8i128), 64)), asm_arg(r64(0))],
                 );
             }
             // The carry or borrow of the low halves feeds the high; the
@@ -2008,11 +3920,11 @@ impl<'a> FunctionCompiler<'a> {
                     OverflowOp::Ssub => (Opcode::Sub, Opcode::Sbb, "o"),
                     OverflowOp::Umul | OverflowOp::Smul => unreachable!("rejected"),
                 };
-                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(a0))]);
-                self.emit(lo, [asm_arg(&(r64(0))), asm_arg(&(b0))]);
-                self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(a1))]);
-                self.emit(hi, [asm_arg(&(r64(2))), asm_arg(&(b1))]);
-                self.emit(Opcode::Setcc(condition(code)), [asm_arg(&(r8(1)))]);
+                self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(a0)]);
+                self.emit(lo, [asm_arg(r64(0)), asm_arg(b0)]);
+                self.emit(Opcode::Mov, [asm_arg(r64(2)), asm_arg(a1)]);
+                self.emit(hi, [asm_arg(r64(2)), asm_arg(b1)]);
+                self.emit(Opcode::Setcc(condition(code)), [asm_arg(r8(1))]);
                 self.pair_out(result);
                 let flag = self.func.inst_results(inst)[1];
                 if let Some(loc) = self.defined(flag) {
@@ -2033,8 +3945,8 @@ impl<'a> FunctionCompiler<'a> {
     /// Integer location `loc` as a 64-bit operand.
     fn operand(&self, loc: Loc) -> AsmOperand {
         match loc {
-            Loc::Reg(r) => asm_arg(&r64(r)),
-            Loc::Stack(s) => asm_arg(&self.slot(s)),
+            Loc::Reg(r) => asm_arg(r64(r)),
+            Loc::Stack(s) => asm_arg(self.slot(s)),
             Loc::FReg(_) => unreachable!("not an integer"),
             Loc::Remat(_) => unreachable!("i128 halves are not rematerialized"),
         }
@@ -2074,18 +3986,18 @@ impl<'a> FunctionCompiler<'a> {
             let count = match self.loc(args[1]) {
                 Loc::Remat(value) => {
                     self.rematerialize(S1, value);
-                    asm_arg(&r64(S1))
+                    asm_arg(r64(S1))
                 }
                 loc => self.operand(loc),
             };
-            [count, asm_arg(&0i128)]
+            [count, asm_arg(0i128)]
         };
         let label = |what: &str| format!(".L{}_{inst}_{what}", self.func.name);
         let pair = |this: &mut Self, lo: Opcode, hi: Opcode| {
-            this.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(a0))]);
-            this.emit(lo, [asm_arg(&(r64(0))), asm_arg(&(b0))]);
-            this.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(a1))]);
-            this.emit(hi, [asm_arg(&(r64(2))), asm_arg(&(b1))]);
+            this.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(&a0)]);
+            this.emit(lo, [asm_arg(r64(0)), asm_arg(&b0)]);
+            this.emit(Opcode::Mov, [asm_arg(r64(2)), asm_arg(&a1)]);
+            this.emit(hi, [asm_arg(r64(2)), asm_arg(&b1)]);
         };
         match op {
             BinaryOp::Iadd => pair(self, Opcode::Add, Opcode::Adc),
@@ -2096,34 +4008,34 @@ impl<'a> FunctionCompiler<'a> {
             // (a1:a0)(b1:b0) mod 2^128 = a0 b0 + 2^64 (a0 b1 + a1 b0); `mul`
             // gives the full 128-bit a0 b0 in rdx:rax.
             BinaryOp::Imul => {
-                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(a0))]);
-                self.emit(Opcode::Mul, [asm_arg(&(b0))]);
-                self.emit(Opcode::Mov, [asm_arg(&(r64(1))), asm_arg(&(a0))]);
-                self.emit(Opcode::Imul, [asm_arg(&(r64(1))), asm_arg(&(b1))]);
-                self.emit(Opcode::Add, [asm_arg(&(r64(2))), asm_arg(&(r64(1)))]);
-                self.emit(Opcode::Mov, [asm_arg(&(r64(1))), asm_arg(&(a1))]);
-                self.emit(Opcode::Imul, [asm_arg(&(r64(1))), asm_arg(&(b0))]);
-                self.emit(Opcode::Add, [asm_arg(&(r64(2))), asm_arg(&(r64(1)))]);
+                self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(&a0)]);
+                self.emit(Opcode::Mul, [asm_arg(&b0)]);
+                self.emit(Opcode::Mov, [asm_arg(r64(1)), asm_arg(a0)]);
+                self.emit(Opcode::Imul, [asm_arg(r64(1)), asm_arg(b1)]);
+                self.emit(Opcode::Add, [asm_arg(r64(2)), asm_arg(r64(1))]);
+                self.emit(Opcode::Mov, [asm_arg(r64(1)), asm_arg(a1)]);
+                self.emit(Opcode::Imul, [asm_arg(r64(1)), asm_arg(b0)]);
+                self.emit(Opcode::Add, [asm_arg(r64(2)), asm_arg(r64(1))]);
             }
             // `shld`/`shrd` shift one half while filling from the other,
             // by the count modulo 64; at 64 or more (bit 6 of the count),
             // the result is the other half shifted, and zeros or the sign.
             BinaryOp::Shl | BinaryOp::Ushr | BinaryOp::Sshr => {
                 let done = label("shifted");
-                self.emit(Opcode::Mov, [asm_arg(&(r64(1))), asm_arg(&(b0))]);
-                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(a0))]);
-                self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(a1))]);
+                self.emit(Opcode::Mov, [asm_arg(r64(1)), asm_arg(b0)]);
+                self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(a0)]);
+                self.emit(Opcode::Mov, [asm_arg(r64(2)), asm_arg(a1)]);
                 match op {
                     BinaryOp::Shl => {
                         self.emit(
                             Opcode::Shld,
-                            [asm_arg(&(r64(2))), asm_arg(&(r64(0))), asm_arg(&(r8(1)))],
+                            [asm_arg(r64(2)), asm_arg(r64(0)), asm_arg(r8(1))],
                         );
-                        self.emit(Opcode::Shl, [asm_arg(&(r64(0))), asm_arg(&(r8(1)))]);
-                        self.emit(Opcode::Test, [asm_arg(&(r8(1))), asm_arg(&(64i128))]);
-                        self.emit(Opcode::Jcc(4), [asm_arg(&(done))]);
-                        self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(r64(0)))]);
-                        self.emit(Opcode::Xor, [asm_arg(&(r32(0))), asm_arg(&(r32(0)))]);
+                        self.emit(Opcode::Shl, [asm_arg(r64(0)), asm_arg(r8(1))]);
+                        self.emit(Opcode::Test, [asm_arg(r8(1)), asm_arg(64i128)]);
+                        self.emit(Opcode::Jcc(4), [asm_arg(&done)]);
+                        self.emit(Opcode::Mov, [asm_arg(r64(2)), asm_arg(r64(0))]);
+                        self.emit(Opcode::Xor, [asm_arg(r32(0)), asm_arg(r32(0))]);
                     }
                     _ => {
                         let shr = if op == BinaryOp::Sshr {
@@ -2133,16 +4045,16 @@ impl<'a> FunctionCompiler<'a> {
                         };
                         self.emit(
                             Opcode::Shrd,
-                            [asm_arg(&(r64(0))), asm_arg(&(r64(2))), asm_arg(&(r8(1)))],
+                            [asm_arg(r64(0)), asm_arg(r64(2)), asm_arg(r8(1))],
                         );
-                        self.emit(shr, [asm_arg(&(r64(2))), asm_arg(&(r8(1)))]);
-                        self.emit(Opcode::Test, [asm_arg(&(r8(1))), asm_arg(&(64i128))]);
-                        self.emit(Opcode::Jcc(4), [asm_arg(&(done))]);
-                        self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(r64(2)))]);
+                        self.emit(shr, [asm_arg(r64(2)), asm_arg(r8(1))]);
+                        self.emit(Opcode::Test, [asm_arg(r8(1)), asm_arg(64i128)]);
+                        self.emit(Opcode::Jcc(4), [asm_arg(&done)]);
+                        self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(r64(2))]);
                         if op == BinaryOp::Sshr {
-                            self.emit(Opcode::Sar, [asm_arg(&(r64(2))), asm_arg(&(63i128))]);
+                            self.emit(Opcode::Sar, [asm_arg(r64(2)), asm_arg(63i128)]);
                         } else {
-                            self.emit(Opcode::Xor, [asm_arg(&(r32(2))), asm_arg(&(r32(2)))]);
+                            self.emit(Opcode::Xor, [asm_arg(r32(2)), asm_arg(r32(2))]);
                         }
                     }
                 }
@@ -2152,49 +4064,46 @@ impl<'a> FunctionCompiler<'a> {
             // rest, filling from the other's original bits.
             BinaryOp::Rotl | BinaryOp::Rotr => {
                 let swapped = label("swapped");
-                self.emit(Opcode::Mov, [asm_arg(&(r64(1))), asm_arg(&(b0))]);
-                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(a0))]);
-                self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(a1))]);
-                self.emit(Opcode::Test, [asm_arg(&(r8(1))), asm_arg(&(64i128))]);
-                self.emit(Opcode::Jcc(4), [asm_arg(&(swapped))]);
-                self.emit(Opcode::Xchg, [asm_arg(&(r64(0))), asm_arg(&(r64(2)))]);
+                self.emit(Opcode::Mov, [asm_arg(r64(1)), asm_arg(b0)]);
+                self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(a0)]);
+                self.emit(Opcode::Mov, [asm_arg(r64(2)), asm_arg(a1)]);
+                self.emit(Opcode::Test, [asm_arg(r8(1)), asm_arg(64i128)]);
+                self.emit(Opcode::Jcc(4), [asm_arg(&swapped)]);
+                self.emit(Opcode::Xchg, [asm_arg(r64(0)), asm_arg(r64(2))]);
                 self.out.label(swapped.clone());
                 let fill = if op == BinaryOp::Rotl {
                     Opcode::Shld
                 } else {
                     Opcode::Shrd
                 };
-                self.emit(Opcode::Mov, [asm_arg(&r64(11)), asm_arg(&r64(0))]);
-                self.emit(
-                    fill,
-                    [asm_arg(&(r64(0))), asm_arg(&(r64(2))), asm_arg(&(r8(1)))],
-                );
-                self.emit(fill, [asm_arg(&r64(2)), asm_arg(&r64(11)), asm_arg(&r8(1))]);
+                self.emit(Opcode::Mov, [asm_arg(r64(11)), asm_arg(r64(0))]);
+                self.emit(fill, [asm_arg(r64(0)), asm_arg(r64(2)), asm_arg(r8(1))]);
+                self.emit(fill, [asm_arg(r64(2)), asm_arg(r64(11)), asm_arg(r8(1))]);
             }
             // libgcc takes the pairs in rdi:rsi and rdx:rcx and returns
             // rdx:rax. Traps first, as for narrower types.
             BinaryOp::Udiv | BinaryOp::Sdiv | BinaryOp::Urem | BinaryOp::Srem => {
                 let trap = self.trap_label();
-                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(b0))]);
-                self.emit(Opcode::Or, [asm_arg(&(r64(0))), asm_arg(&(b1))]);
-                self.emit(Opcode::Jcc(4), [asm_arg(&(trap))]);
+                self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(&b0)]);
+                self.emit(Opcode::Or, [asm_arg(r64(0)), asm_arg(&b1)]);
+                self.emit(Opcode::Jcc(4), [asm_arg(&trap)]);
                 if op == BinaryOp::Sdiv {
                     // MIN / -1: the divisor's halves are both all ones and
                     // the dividend is 2^127.
                     let ok = label("divok");
-                    self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(b0))]);
-                    self.emit(Opcode::And, [asm_arg(&(r64(0))), asm_arg(&(b1))]);
-                    self.emit(Opcode::Cmp, [asm_arg(&(r64(0))), asm_arg(&(-1i128))]);
-                    self.emit(Opcode::Jcc(5), [asm_arg(&(ok))]);
-                    self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(a0))]);
-                    self.emit(Opcode::Test, [asm_arg(&(r64(0))), asm_arg(&(r64(0)))]);
-                    self.emit(Opcode::Jcc(5), [asm_arg(&(ok))]);
+                    self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(b0)]);
+                    self.emit(Opcode::And, [asm_arg(r64(0)), asm_arg(b1)]);
+                    self.emit(Opcode::Cmp, [asm_arg(r64(0)), asm_arg(-1i128)]);
+                    self.emit(Opcode::Jcc(5), [asm_arg(&ok)]);
+                    self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(a0)]);
+                    self.emit(Opcode::Test, [asm_arg(r64(0)), asm_arg(r64(0))]);
+                    self.emit(Opcode::Jcc(5), [asm_arg(&ok)]);
                     self.emit(
                         Opcode::Movabs,
-                        [asm_arg(&(r64(0))), asm_arg(&(0x8000000000000000i128))],
+                        [asm_arg(r64(0)), asm_arg(0x8000000000000000i128)],
                     );
-                    self.emit(Opcode::Cmp, [asm_arg(&(r64(0))), asm_arg(&(a1))]);
-                    self.emit(Opcode::Jcc(4), [asm_arg(&(trap))]);
+                    self.emit(Opcode::Cmp, [asm_arg(r64(0)), asm_arg(a1)]);
+                    self.emit(Opcode::Jcc(4), [asm_arg(trap)]);
                     self.out.label(ok.clone());
                 }
                 let moves = [
@@ -2212,7 +4121,7 @@ impl<'a> FunctionCompiler<'a> {
                 };
                 self.emit(
                     Opcode::Call,
-                    [asm_arg(&(symbol_address(&function, Modifier::Plt)))],
+                    [asm_arg(symbol_address(&function, Modifier::Plt))],
                 );
             }
             _ => unreachable!("{op} on i128 is rejected or not an integer operation"),
@@ -2227,88 +4136,95 @@ impl<'a> FunctionCompiler<'a> {
             // -x = ~x + 1: `neg` the low half sets the carry unless it was
             // zero, which the high half then absorbs.
             UnaryOp::Ineg => {
-                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(a0))]);
-                self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(a1))]);
-                self.emit(Opcode::Neg, [asm_arg(&(r64(0)))]);
-                self.emit(Opcode::Adc, [asm_arg(&(r64(2))), asm_arg(&(0i128))]);
-                self.emit(Opcode::Neg, [asm_arg(&(r64(2)))]);
+                self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(a0)]);
+                self.emit(Opcode::Mov, [asm_arg(r64(2)), asm_arg(a1)]);
+                self.emit(Opcode::Neg, [asm_arg(r64(0))]);
+                self.emit(Opcode::Adc, [asm_arg(r64(2)), asm_arg(0i128)]);
+                self.emit(Opcode::Neg, [asm_arg(r64(2))]);
             }
             UnaryOp::Bnot => {
-                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(a0))]);
-                self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(a1))]);
-                self.emit(Opcode::Not, [asm_arg(&(r64(0)))]);
-                self.emit(Opcode::Not, [asm_arg(&(r64(2)))]);
+                self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(a0)]);
+                self.emit(Opcode::Mov, [asm_arg(r64(2)), asm_arg(a1)]);
+                self.emit(Opcode::Not, [asm_arg(r64(0))]);
+                self.emit(Opcode::Not, [asm_arg(r64(2))]);
             }
             // The high half's count, or 64 plus the low half's (see
             // `unary` for the `bsr` arithmetic).
             UnaryOp::Clz => {
                 let (low, done) = (label("low"), label("counted"));
-                self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(a1))]);
-                self.emit(Opcode::Test, [asm_arg(&(r64(2))), asm_arg(&(r64(2)))]);
-                self.emit(Opcode::Jcc(4), [asm_arg(&(low))]);
-                self.emit(Opcode::Bsr, [asm_arg(&(r64(0))), asm_arg(&(r64(2)))]);
-                self.emit(Opcode::Xor, [asm_arg(&(r32(0))), asm_arg(&(63i128))]);
-                self.emit(Opcode::Jmp, [asm_arg(&(done))]);
+                self.emit(Opcode::Mov, [asm_arg(r64(2)), asm_arg(a1)]);
+                self.emit(Opcode::Test, [asm_arg(r64(2)), asm_arg(r64(2))]);
+                self.emit(Opcode::Jcc(4), [asm_arg(&low)]);
+                self.emit(Opcode::Bsr, [asm_arg(r64(0)), asm_arg(r64(2))]);
+                self.emit(Opcode::Xor, [asm_arg(r32(0)), asm_arg(63i128)]);
+                self.emit(Opcode::Jmp, [asm_arg(&done)]);
                 self.out.label(low.clone());
-                self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(a0))]);
-                self.emit(Opcode::Bsr, [asm_arg(&(r64(0))), asm_arg(&(r64(2)))]);
-                self.emit(Opcode::Mov, [asm_arg(&(r32(1))), asm_arg(&(127i128))]);
-                self.emit(Opcode::Cmovcc(4), [asm_arg(&(r32(0))), asm_arg(&(r32(1)))]);
-                self.emit(Opcode::Xor, [asm_arg(&(r32(0))), asm_arg(&(63i128))]);
-                self.emit(Opcode::Add, [asm_arg(&(r32(0))), asm_arg(&(64i128))]);
+                self.emit(Opcode::Mov, [asm_arg(r64(2)), asm_arg(a0)]);
+                self.emit(Opcode::Bsr, [asm_arg(r64(0)), asm_arg(r64(2))]);
+                self.emit(Opcode::Mov, [asm_arg(r32(1)), asm_arg(127i128)]);
+                self.emit(Opcode::Cmovcc(4), [asm_arg(r32(0)), asm_arg(r32(1))]);
+                self.emit(Opcode::Xor, [asm_arg(r32(0)), asm_arg(63i128)]);
+                self.emit(Opcode::Add, [asm_arg(r32(0)), asm_arg(64i128)]);
                 self.out.label(done.clone());
-                self.emit(Opcode::Xor, [asm_arg(&(r32(2))), asm_arg(&(r32(2)))]);
+                self.emit(Opcode::Xor, [asm_arg(r32(2)), asm_arg(r32(2))]);
             }
             UnaryOp::Ctz => {
                 let (high, done) = (label("high"), label("counted"));
-                self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(a0))]);
-                self.emit(Opcode::Test, [asm_arg(&(r64(2))), asm_arg(&(r64(2)))]);
-                self.emit(Opcode::Jcc(4), [asm_arg(&(high))]);
-                self.emit(Opcode::Bsf, [asm_arg(&(r64(0))), asm_arg(&(r64(2)))]);
-                self.emit(Opcode::Jmp, [asm_arg(&(done))]);
+                self.emit(Opcode::Mov, [asm_arg(r64(2)), asm_arg(a0)]);
+                self.emit(Opcode::Test, [asm_arg(r64(2)), asm_arg(r64(2))]);
+                self.emit(Opcode::Jcc(4), [asm_arg(&high)]);
+                self.emit(Opcode::Bsf, [asm_arg(r64(0)), asm_arg(r64(2))]);
+                self.emit(Opcode::Jmp, [asm_arg(&done)]);
                 self.out.label(high.clone());
-                self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(a1))]);
-                self.emit(Opcode::Bsf, [asm_arg(&(r64(0))), asm_arg(&(r64(2)))]);
-                self.emit(Opcode::Mov, [asm_arg(&(r32(1))), asm_arg(&(64i128))]);
-                self.emit(Opcode::Cmovcc(4), [asm_arg(&(r32(0))), asm_arg(&(r32(1)))]);
-                self.emit(Opcode::Add, [asm_arg(&(r32(0))), asm_arg(&(64i128))]);
+                self.emit(Opcode::Mov, [asm_arg(r64(2)), asm_arg(a1)]);
+                self.emit(Opcode::Bsf, [asm_arg(r64(0)), asm_arg(r64(2))]);
+                self.emit(Opcode::Mov, [asm_arg(r32(1)), asm_arg(64i128)]);
+                self.emit(Opcode::Cmovcc(4), [asm_arg(r32(0)), asm_arg(r32(1))]);
+                self.emit(Opcode::Add, [asm_arg(r32(0)), asm_arg(64i128)]);
                 self.out.label(done.clone());
-                self.emit(Opcode::Xor, [asm_arg(&(r32(2))), asm_arg(&(r32(2)))]);
+                self.emit(Opcode::Xor, [asm_arg(r32(2)), asm_arg(r32(2))]);
+            }
+            UnaryOp::Popcnt if !self.features.popcnt => {
+                // Preserve the second limb and first count outside the GPR scratch set.
+                self.emit(Opcode::Movq, [asm_arg(xmm(FS1)), asm_arg(a1)]);
+                self.emit(Opcode::Mov, [asm_arg(r64(S0)), asm_arg(a0)]);
+                self.software_popcount();
+                self.emit(Opcode::Movq, [asm_arg(xmm(FS2)), asm_arg(r64(S0))]);
+                self.emit(Opcode::Movq, [asm_arg(r64(S0)), asm_arg(xmm(FS1))]);
+                self.software_popcount();
+                self.emit(Opcode::Movq, [asm_arg(r64(S1)), asm_arg(xmm(FS2))]);
+                self.emit(Opcode::Add, [asm_arg(r64(S0)), asm_arg(r64(S1))]);
+                self.emit(Opcode::Xor, [asm_arg(r32(S2)), asm_arg(r32(S2))]);
             }
             UnaryOp::Popcnt => {
-                self.emit(Opcode::Popcnt, [asm_arg(&(r64(0))), asm_arg(&(a0))]);
-                self.emit(Opcode::Popcnt, [asm_arg(&(r64(2))), asm_arg(&(a1))]);
-                self.emit(Opcode::Add, [asm_arg(&(r64(0))), asm_arg(&(r64(2)))]);
-                self.emit(Opcode::Xor, [asm_arg(&(r32(2))), asm_arg(&(r32(2)))]);
+                self.emit(Opcode::Popcnt, [asm_arg(r64(0)), asm_arg(a0)]);
+                self.emit(Opcode::Popcnt, [asm_arg(r64(2)), asm_arg(a1)]);
+                self.emit(Opcode::Add, [asm_arg(r64(0)), asm_arg(r64(2))]);
+                self.emit(Opcode::Xor, [asm_arg(r32(2)), asm_arg(r32(2))]);
             }
             UnaryOp::Bswap => {
-                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(a1))]);
-                self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(a0))]);
-                self.emit(Opcode::Bswap, [asm_arg(&(r64(0)))]);
-                self.emit(Opcode::Bswap, [asm_arg(&(r64(2)))]);
+                self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(a1)]);
+                self.emit(Opcode::Mov, [asm_arg(r64(2)), asm_arg(a0)]);
+                self.emit(Opcode::Bswap, [asm_arg(r64(0))]);
+                self.emit(Opcode::Bswap, [asm_arg(r64(2))]);
             }
             _ => unreachable!("{op} is not an integer operation"),
         }
     }
 
-    /// The operand of a `call` or `jmp` to function `name`: through the
-    /// PLT if it is in another module.
-    fn call_target(&self, name: &str) -> Address {
-        symbol_address(
-            name,
-            if self.symbols.defines(name) {
-                Modifier::None
-            } else {
-                Modifier::Plt
-            },
-        )
+    /// A `call` or `jmp` to function `name`: through the PLT if it is in
+    /// another module.
+    fn call_function(&mut self, opcode: Opcode, name: &str) {
+        let plt = !self.symbols.defines(name);
+        self.out.branch_to_function(opcode, name, plt);
     }
 
     /// Moves call arguments into their registers and the stack, for
     /// signature `sig`; any arguments past its parameters are variadic.
     /// `callee`, for an indirect call, moves into r10 in the same parallel
     /// copy, since it may be in an argument register. A tail call (`tail`)
-    /// puts stack arguments where this function's own came in.
+    /// stages stack arguments locally, then copies them to the incoming area
+    /// after every source has been captured.
     ///
     /// Stack arguments and struct copies come first: their sources are
     /// allocated locations, and storing them only uses the scratch
@@ -2325,47 +4241,64 @@ impl<'a> FunctionCompiler<'a> {
     /// in registers, for [`Self::call_result`] to store.
     fn move_args<'s>(
         &mut self,
-        args: &[Value],
+        args: &'s keel_ir::CallArgs,
         sig: &'s keel_ir::Signature,
         callee: Option<Value>,
         tail: bool,
-    ) -> Option<(Vec<Loc>, &'s Layout)> {
-        let kinds = arg_kinds(self.func, &sig.params, args);
-        let placement = sysv::arg_locs(&kinds);
-        let mut moves = Vec::new();
+    ) -> Option<AggregateResult<'s>> {
+        let func = self.func;
+        // Live wide values crossing a call have spill homes. Keep upper halves
+        // intact whenever an argument still needs its YMM source.
+        if self.wide_vectors && !args.iter().any(|&v| self.ty(v).bytes() == Some(32)) {
+            self.emit(Opcode::Vzeroupper, []);
+        }
+        let kind = |i: usize, arg: Value| arg_kind(func, sig, args, i, arg);
+        let mut placement = std::mem::take(&mut self.arg_places);
+        placement.fill_signature(sig, args.iter().enumerate().map(|(i, &arg)| kind(i, arg)));
+        let mut moves = std::mem::take(&mut self.copies);
         let mut extend = Vec::new();
+        self.vector_spills
+            .retain(|&slot, _| slot < self.alloc.spill_slots || Some(slot) == self.copy_temp);
         let mut staged = self.alloc.spill_slots;
         let mut sret = None;
-        let stack_base = if tail {
-            memory(r64(5), 16)
-        } else {
-            memory(r64(4), 0)
-        };
-        for (i, ((&arg, loc), kind)) in args.iter().zip(placement.locs).zip(&kinds).enumerate() {
-            let layout = match kind {
-                ArgKind::ByVal(layout) | ArgKind::Sret(layout) => Some(*layout),
-                ArgKind::Value(_) => None,
+        // Capture every stack source below our frame before writing any
+        // incoming argument byte. Byval pointers may alias or reorder those
+        // bytes, or point into local homes that disappear at the jump.
+        let stack_base = memory(r64(4), 0);
+        let stack_bytes = placement.stack;
+        for (i, (&arg, loc)) in args.iter().zip(placement.locs.drain(..)).enumerate() {
+            let layout = match kind(i, arg) {
+                ArgKind::ByVal(layout) | ArgKind::Sret(layout) | ArgKind::MemoryByVal(layout) | ArgKind::ProducerByVal(layout, _) | ArgKind::ProducerSret(layout, _) => Some(layout),
+                ArgKind::Value(_) | ArgKind::StackValue(_) => None,
             };
             match loc {
-                ArgLoc::Value(Slot::Regs(regs)) => {
-                    moves.push((regs[0], self.loc(arg)));
+                ArgLoc::Value(Slot::Regs(lo, high)) => {
+                    moves.push((lo, self.loc(arg)));
                     if self.ty(arg) == Type::I128 {
-                        moves.push((regs[1], self.hi(arg)));
+                        moves.push((high.expect("an i128 in two registers"), self.hi(arg)));
                     }
-                    if let (Some(param), Loc::Reg(r)) = (sig.params.get(i), regs[0]) {
+                    // Only an extension needs a register's argument again.
+                    if let (Some(param), Loc::Reg(r)) = (args.abi(i).or_else(|| sig.params.get(i)), lo)
+                        && param.ext != ArgExt::None
+                    {
                         extend.push((r, param.ty, param.ext));
                     }
                 }
                 ArgLoc::Value(Slot::Stack(offset)) => {
                     let at = |o: u32| offset_memory(&stack_base, i128::from(offset + o));
-                    if self.ty(arg) == Type::I128 {
+                    if self.ty(arg) == Type::F80 {
+                        self.f80_copy(&at(0), &self.f80_home(arg));
+                    } else if self.ty(arg) == Type::I128 {
                         self.store_stack_arg(self.loc(arg), &at(0));
                         self.store_stack_arg(self.hi(arg), &at(8));
                     } else if self.ty(arg).is_vector() {
                         let r = self.use_freg(arg, FS0);
                         self.emit(
-                            Opcode::Movups,
-                            [asm_arg(&sized(at(0), 128)), asm_arg(&xmm(r))],
+                            movs(self.ty(arg)),
+                            [
+                                asm_arg(sized(at(0), ptr(self.ty(arg)))),
+                                asm_arg(simd(r, self.ty(arg))),
+                            ],
                         );
                     } else {
                         self.store_stack_arg(self.loc(arg), &at(0));
@@ -2376,29 +4309,54 @@ impl<'a> FunctionCompiler<'a> {
                     let size = layout.expect("a struct").size();
                     self.copy_bytes(&memory(r64(4), i128::from(offset)), p, size);
                 }
+                ArgLoc::InRegs(regs) if layout.and_then(sysv::register_vector).is_some() => {
+                    let ty = layout.and_then(sysv::register_vector).unwrap();
+                    let p = self.use_reg(arg, S1);
+                    self.emit(
+                        movs(ty),
+                        [
+                            asm_arg(simd(FS0, ty)),
+                            asm_arg(sized(memory(r64(p), 0), ptr(ty))),
+                        ],
+                    );
+                    self.emit(
+                        movs(ty),
+                        [
+                            asm_arg(sized(self.slot(staged), ptr(ty))),
+                            asm_arg(simd(FS0, ty)),
+                        ],
+                    );
+                    self.vector_spills.insert(staged, ptr(ty));
+                    moves.push((regs[0].loc, Loc::Stack(staged)));
+                    staged += ty.bytes().unwrap() / 8;
+                }
                 ArgLoc::InRegs(regs) => {
                     let p = self.use_reg(arg, S1);
                     let size = layout.expect("a struct").size();
-                    for (k, r) in regs.into_iter().enumerate() {
-                        let offset = 8 * k as u64;
+                    for sysv::RegPiece { offset, loc: r } in regs {
                         self.load_chunk(S0, p, offset, (size - offset).min(8));
-                        self.emit(
-                            Opcode::Mov,
-                            [asm_arg(&(self.slot(staged))), asm_arg(&(r64(0)))],
-                        );
+                        self.emit(Opcode::Mov, [asm_arg(self.slot(staged)), asm_arg(r64(0))]);
                         moves.push((r, Loc::Stack(staged)));
                         staged += 1;
                     }
                 }
                 ArgLoc::SretMemory => moves.push((Loc::Reg(RDI), self.loc(arg))),
+                ArgLoc::SretX87 if tail => {}
+                ArgLoc::SretX87 => {
+                    let p = self.use_reg(arg, S1);
+                    let save = self.frame(self.sret_save.expect("planned x87 result destination"));
+                    self.emit(Opcode::Mov, [asm_arg(sized(save, 64)), asm_arg(r64(p))]);
+                    sret = Some(AggregateResult::X87);
+                }
+                ArgLoc::SretRegs(_) if tail => {}
                 ArgLoc::SretRegs(regs) => {
                     let p = self.use_reg(arg, S1);
                     let save = self.frame(self.sret_save.expect("planned"));
                     self.emit(
                         Opcode::Mov,
-                        [asm_arg(&(sized((save).clone(), 64))), asm_arg(&(r64(p)))],
+                        [asm_arg(sized((save).clone(), 64)), asm_arg(r64(p))],
                     );
-                    sret = Some((regs, layout.expect("a struct")));
+                    sret = Some(AggregateResult::Registers(regs, layout.expect("a struct")));
                 }
             }
         }
@@ -2406,24 +4364,58 @@ impl<'a> FunctionCompiler<'a> {
             moves.push((Loc::Reg(R10), self.loc(callee)));
         }
         self.parallel_copy(&moves);
+        moves.clear();
+        self.copies = moves;
+        if tail {
+            // All sources (including the indirect target and register pieces)
+            // have now been captured. RAX is not an argument register; using
+            // it here preserves RCX/RDX arguments and R10. The two areas are
+            // disjoint, so this is safe for arbitrary incoming-source overlap.
+            for offset in (0..stack_bytes).step_by(8) {
+                self.emit(Opcode::Mov, [asm_arg(r64(RAX)),
+                    asm_arg(sized(memory(r64(4), i128::from(offset)), 64))]);
+                self.emit(Opcode::Mov, [
+                    asm_arg(sized(memory(r64(5), 16 + i128::from(offset)), 64)),
+                    asm_arg(r64(RAX))]);
+            }
+        }
+        if sysv::scalar_memory_result(sig) {
+            if tail {
+                // A guaranteed GNU scalar tail forwards the original caller's
+                // result object. A local temporary would die with this frame.
+                let saved = self.frame(self.sret_ptr.expect("matching incoming GNU result pointer"));
+                self.emit(Opcode::Mov, [asm_arg(r64(RDI)), asm_arg(sized(saved, 64))]);
+            } else {
+                let area = self.frame(self.scalar_result.expect("planned GNU scalar result"));
+                self.emit(Opcode::Mov, [asm_arg(sized(area.clone(), 64)), asm_arg(0)]);
+                self.emit(Opcode::Lea, [asm_arg(r64(RDI)), asm_arg(area)]);
+                sret = Some(AggregateResult::ScalarMemory);
+            }
+        }
         for (r, ty, ext) in extend {
             self.extend_in_place(r, ty, ext);
         }
         // A variadic callee saves this many vector registers.
         if sig.variadic {
-            self.emit(
-                Opcode::Mov,
-                [asm_arg(&(r32(0))), asm_arg(&(placement.floats))],
-            );
+            self.emit(Opcode::Mov, [asm_arg(r32(0)), asm_arg(placement.floats)]);
         }
+        self.arg_places = placement;
         sret
     }
 
     /// Moves a call's result, if it has one, from rax or xmm0 to its place,
     /// and stores a struct result that came back in registers to its
     /// `sret` address.
-    fn call_result(&mut self, result: Option<Value>, sret: Option<(Vec<Loc>, &Layout)>) {
-        if let Some(value) = result
+    fn call_result(&mut self, result: Option<Value>, sret: Option<AggregateResult<'_>>) {
+        if matches!(sret, Some(AggregateResult::ScalarMemory)) {
+            if let Some(value) = result && let Some(loc) = self.defined(value) {
+                let area = self.frame(self.scalar_result.expect("planned GNU scalar result"));
+                self.emit(Opcode::Movsd, [asm_arg(xmm(FS0)), asm_arg(sized(area, 64))]);
+                self.emit_move(loc, Loc::FReg(FS0));
+            }
+        } else if let Some(value) = result.filter(|&v| self.func.value_type(v) == Type::F80) {
+            self.f80_pop_result(Some(value));
+        } else if let Some(value) = result
             && let Some(loc) = self.defined(value)
         {
             self.emit_move(loc, sysv::return_loc(self.func.value_type(value)));
@@ -2431,28 +4423,42 @@ impl<'a> FunctionCompiler<'a> {
                 self.emit_move(hi, Loc::Reg(RDX));
             }
         }
-        if let Some((regs, layout)) = sret {
+        if matches!(sret, Some(AggregateResult::X87)) {
+            let save = self.frame(self.sret_save.expect("planned"));
+            self.emit(Opcode::Mov, [asm_arg(r64(S3)), asm_arg(sized(save, 64))]);
+            self.emit(Opcode::Fstp, [asm_arg(sized(memory(r64(S3), 0), 80))]);
+        }
+        if let Some(AggregateResult::Registers(regs, layout)) = sret {
             let save = self.frame(self.sret_save.expect("planned"));
             self.emit(
                 Opcode::Mov,
-                [asm_arg(&r64(11)), asm_arg(&sized(save.clone(), 64))],
+                [asm_arg(r64(11)), asm_arg(sized(save.clone(), 64))],
             );
-            for (k, r) in regs.into_iter().enumerate() {
-                let offset = 8 * k as u64;
-                let n = (layout.size() - offset).min(8);
-                match r {
-                    Loc::Reg(r) => self.store_chunk(r, S3, offset, n),
-                    _ => {
-                        let mov = if n == 4 { Opcode::Movss } else { Opcode::Movsd };
-                        let size = if n == 4 { 32 } else { 64 };
-                        let x = xmm(loc_reg(r));
-                        self.emit(
-                            mov,
-                            [
-                                asm_arg(&sized(memory(r64(11), offset as i128), size)),
-                                asm_arg(&x),
-                            ],
-                        );
+            if let Some(ty) = sysv::register_vector(layout) {
+                self.emit(
+                    movs(ty),
+                    [
+                        asm_arg(sized(memory(r64(S3), 0), ptr(ty))),
+                        asm_arg(simd(loc_reg(regs[0].loc), ty)),
+                    ],
+                );
+            } else {
+                for sysv::RegPiece { offset, loc: r } in regs {
+                    let n = (layout.size() - offset).min(8);
+                    match r {
+                        Loc::Reg(r) => self.store_chunk(r, S3, offset, n),
+                        _ => {
+                            let mov = if n == 4 { Opcode::Movss } else { Opcode::Movsd };
+                            let size = if n == 4 { 32 } else { 64 };
+                            let x = xmm(loc_reg(r));
+                            self.emit(
+                                mov,
+                                [
+                                    asm_arg(sized(memory(r64(11), offset as i128), size)),
+                                    asm_arg(x),
+                                ],
+                            );
+                        }
                     }
                 }
             }
@@ -2467,27 +4473,27 @@ impl<'a> FunctionCompiler<'a> {
         match n {
             8 => self.emit(
                 Opcode::Mov,
-                [asm_arg(&(r64(d))), asm_arg(&(sized((at(0)).clone(), 64)))],
+                [asm_arg(r64(d)), asm_arg(sized((at(0)).clone(), 64))],
             ),
             4 => self.emit(
                 Opcode::Mov,
-                [asm_arg(&(r32(d))), asm_arg(&(sized((at(0)).clone(), 32)))],
+                [asm_arg(r32(d)), asm_arg(sized((at(0)).clone(), 32))],
             ),
             2 => self.emit(
                 Opcode::Movzx,
-                [asm_arg(&(r32(d))), asm_arg(&(sized((at(0)).clone(), 16)))],
+                [asm_arg(r32(d)), asm_arg(sized((at(0)).clone(), 16))],
             ),
             1 => self.emit(
                 Opcode::Movzx,
-                [asm_arg(&(r32(d))), asm_arg(&(sized((at(0)).clone(), 8)))],
+                [asm_arg(r32(d)), asm_arg(sized((at(0)).clone(), 8))],
             ),
             _ => {
                 let low = if n > 4 { 4 } else { 2 };
                 self.load_chunk(d, p, offset, low);
                 for (piece, at_byte) in pieces(n - low).into_iter().map(|(o, k)| (k, low + o)) {
                     self.load_chunk(S2, p, offset + at_byte, piece);
-                    self.emit(Opcode::Shl, [asm_arg(&(r64(2))), asm_arg(&(8 * at_byte))]);
-                    self.emit(Opcode::Or, [asm_arg(&(r64(d))), asm_arg(&(r64(2)))]);
+                    self.emit(Opcode::Shl, [asm_arg(r64(2)), asm_arg(8 * at_byte)]);
+                    self.emit(Opcode::Or, [asm_arg(r64(d)), asm_arg(r64(2))]);
                 }
             }
         }
@@ -2500,10 +4506,7 @@ impl<'a> FunctionCompiler<'a> {
         let mut done = 0;
         for (o, k) in pieces(n) {
             if o > done {
-                self.emit(
-                    Opcode::Shr,
-                    [asm_arg(&(r64(r))), asm_arg(&(8 * (o - done)))],
-                );
+                self.emit(Opcode::Shr, [asm_arg(r64(r)), asm_arg(8 * (o - done))]);
                 done = o;
             }
             let (size, src) = match k {
@@ -2515,8 +4518,8 @@ impl<'a> FunctionCompiler<'a> {
             self.emit(
                 Opcode::Mov,
                 [
-                    asm_arg(&(sized(memory(r64(p), (offset + o) as i128), size))),
-                    asm_arg(&(src)),
+                    asm_arg(sized(memory(r64(p), (offset + o) as i128), size)),
+                    asm_arg(src),
                 ],
             );
         }
@@ -2539,15 +4542,15 @@ impl<'a> FunctionCompiler<'a> {
                 self.emit(
                     Opcode::Mov,
                     [
-                        asm_arg(&(rax)),
-                        asm_arg(&(sized(memory(r64(src), (at) as i128), ptr_kw))),
+                        asm_arg(rax),
+                        asm_arg(sized(memory(r64(src), (at) as i128), ptr_kw)),
                     ],
                 );
                 self.emit(
                     Opcode::Mov,
                     [
-                        asm_arg(&(sized(offset_memory(to, (at) as i128), ptr_kw))),
-                        asm_arg(&(rax)),
+                        asm_arg(sized(offset_memory(to, (at) as i128), ptr_kw)),
+                        asm_arg(rax),
                     ],
                 );
             }
@@ -2558,9 +4561,9 @@ impl<'a> FunctionCompiler<'a> {
     /// Sets `dst` to the address of memory operand `at` (`[rbp - 16]`).
     fn address(&mut self, dst: Loc, at: &Memory) {
         match dst {
-            Loc::Reg(r) => self.emit(Opcode::Lea, [asm_arg(&(r64(r))), asm_arg(&(at))]),
+            Loc::Reg(r) => self.emit(Opcode::Lea, [asm_arg(r64(r)), asm_arg(at)]),
             _ => {
-                self.emit(Opcode::Lea, [asm_arg(&(r64(0))), asm_arg(&(at))]);
+                self.emit(Opcode::Lea, [asm_arg(r64(0)), asm_arg(at)]);
                 self.emit_move(dst, Loc::Reg(S0));
             }
         }
@@ -2574,7 +4577,7 @@ impl<'a> FunctionCompiler<'a> {
             ArgExt::Uext => Opcode::Movzx,
         };
         if matches!(ty, Type::I8 | Type::I16) {
-            self.emit(op, [asm_arg(&(r32(r))), asm_arg(&(reg(r, ty)))]);
+            self.emit(op, [asm_arg(r32(r)), asm_arg(reg(r, ty))]);
         }
     }
 
@@ -2584,27 +4587,27 @@ impl<'a> FunctionCompiler<'a> {
         match src {
             Loc::Reg(r) => self.emit(
                 Opcode::Mov,
-                [asm_arg(&(sized((at).clone(), 64))), asm_arg(&(r64(r)))],
+                [asm_arg(sized((at).clone(), 64)), asm_arg(r64(r))],
             ),
             Loc::FReg(r) => self.emit(
                 Opcode::Movsd,
-                [asm_arg(&(sized((at).clone(), 64))), asm_arg(&(xmm(r)))],
+                [asm_arg(sized((at).clone(), 64)), asm_arg(xmm(r))],
             ),
             Loc::Stack(s) => {
                 self.emit(
                     Opcode::Mov,
-                    [asm_arg(&(r64(0))), asm_arg(&(sized(self.slot(s), 64)))],
+                    [asm_arg(r64(0)), asm_arg(sized(self.slot(s), 64))],
                 );
                 self.emit(
                     Opcode::Mov,
-                    [asm_arg(&(sized((at).clone(), 64))), asm_arg(&(r64(0)))],
+                    [asm_arg(sized((at).clone(), 64)), asm_arg(r64(0))],
                 );
             }
             Loc::Remat(value) => {
                 self.rematerialize(S0, value);
                 self.emit(
                     Opcode::Mov,
-                    [asm_arg(&sized(at.clone(), 64)), asm_arg(&r64(S0))],
+                    [asm_arg(sized(at.clone(), 64)), asm_arg(r64(S0))],
                 );
             }
         }
@@ -2612,17 +4615,21 @@ impl<'a> FunctionCompiler<'a> {
 
     /// Loads a value of type `ty` from memory `src` into `dst`.
     fn load_into(&mut self, dst: Loc, ty: Type, src: &Memory) {
+        if ty == Type::F80 {
+            let Loc::Stack(slot) = dst else {
+                unreachable!("F80 has a stack home")
+            };
+            self.f80_copy(&self.slot(slot), src);
+            return;
+        }
         match dst {
             Loc::Reg(r) => self.emit(
                 Opcode::Mov,
-                [asm_arg(&(r64(r))), asm_arg(&(sized((src).clone(), 64)))],
+                [asm_arg(r64(r)), asm_arg(sized((src).clone(), 64))],
             ),
             Loc::FReg(r) => self.emit(
                 movs(ty),
-                [
-                    asm_arg(&(xmm(r))),
-                    asm_arg(&(sized((src).clone(), ptr(ty)))),
-                ],
+                [asm_arg(simd(r, ty)), asm_arg(sized((src).clone(), ptr(ty)))],
             ),
             Loc::Stack(_) => {
                 let tmp = if ty.is_float() || ty.is_vector() {
@@ -2643,20 +4650,20 @@ impl<'a> FunctionCompiler<'a> {
             return;
         }
         if self.saved.is_empty() {
-            self.emit(Opcode::Mov, [asm_arg(&(r64(4))), asm_arg(&(r64(5)))]);
+            self.emit(Opcode::Mov, [asm_arg(r64(4)), asm_arg(r64(5))]);
         } else {
             self.emit(
                 Opcode::Lea,
                 [
-                    asm_arg(&r64(4)),
-                    asm_arg(&memory(r64(5), -((8 * self.saved.len()) as i128))),
+                    asm_arg(r64(4)),
+                    asm_arg(memory(r64(5), -((8 * self.saved.len()) as i128))),
                 ],
             );
             for r in self.saved.clone().into_iter().rev() {
-                self.emit(Opcode::Pop, [asm_arg(&(r64(r)))]);
+                self.emit(Opcode::Pop, [asm_arg(r64(r))]);
             }
         }
-        self.emit(Opcode::Pop, [asm_arg(&(r64(5)))]);
+        self.emit(Opcode::Pop, [asm_arg(r64(5))]);
     }
 
     /// Computes `args[0] op args[1]` into `d`.
@@ -2671,7 +4678,7 @@ impl<'a> FunctionCompiler<'a> {
             // a distinct d early could destroy an allocated address leaf.
             let accumulator = if d == a { a } else { S0 };
             if a != accumulator {
-                self.emit(Opcode::Mov, [asm_arg(&r64(accumulator)), asm_arg(&r64(a))]);
+                self.emit(Opcode::Mov, [asm_arg(r64(accumulator)), asm_arg(r64(a))]);
             }
             let at = self.mem(addr, S1, ty);
             let mnemonic = match op {
@@ -2683,17 +4690,17 @@ impl<'a> FunctionCompiler<'a> {
                 BinaryOp::Imul => Opcode::Imul,
                 _ => unreachable!("selected integer memory RHS"),
             };
-            self.emit(mnemonic, [asm_arg(&reg(accumulator, ty)), asm_arg(&at)]);
+            self.emit(mnemonic, [asm_arg(reg(accumulator, ty)), asm_arg(&at)]);
             // IR narrow arithmetic is modular. Normalize the partial-register
             // result explicitly before any subsequent extension or spill.
             if matches!(ty, Type::I8 | Type::I16) {
                 self.emit(
                     Opcode::Movzx,
-                    [asm_arg(&r32(accumulator)), asm_arg(&reg(accumulator, ty))],
+                    [asm_arg(r32(accumulator)), asm_arg(reg(accumulator, ty))],
                 );
             }
             if d != accumulator {
-                self.emit(Opcode::Mov, [asm_arg(&r64(d)), asm_arg(&r64(accumulator))]);
+                self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(accumulator))]);
             }
             return;
         }
@@ -2721,11 +4728,7 @@ impl<'a> FunctionCompiler<'a> {
                 let k = imm.expect("register form handled above");
                 self.emit(
                     Opcode::Imul,
-                    [
-                        asm_arg(&(wide(d, ty))),
-                        asm_arg(&(wide(a, ty))),
-                        asm_arg(&(k)),
-                    ],
+                    [asm_arg(wide(d, ty)), asm_arg(wide(a, ty)), asm_arg(k)],
                 );
             }
             BinaryOp::Shl | BinaryOp::Ushr | BinaryOp::Sshr | BinaryOp::Rotl | BinaryOp::Rotr => {
@@ -2738,9 +4741,9 @@ impl<'a> FunctionCompiler<'a> {
                         // the count before masking, preserving any live input.
                         if let Some(bits) = narrow_bits(ty) {
                             if b != S1 {
-                                self.emit(Opcode::Mov, [asm_arg(&r32(S1)), asm_arg(&r32(b))]);
+                                self.emit(Opcode::Mov, [asm_arg(r32(S1)), asm_arg(r32(b))]);
                             }
-                            self.emit(Opcode::And, [asm_arg(&r32(S1)), asm_arg(&(bits - 1))]);
+                            self.emit(Opcode::And, [asm_arg(r32(S1)), asm_arg(bits - 1)]);
                             b = S1;
                         }
                         let a = match op {
@@ -2756,9 +4759,9 @@ impl<'a> FunctionCompiler<'a> {
                         self.emit(
                             mnemonic,
                             [
-                                asm_arg(&wide(d, ty)),
-                                asm_arg(&wide(a, ty)),
-                                asm_arg(&wide(b, ty)),
+                                asm_arg(wide(d, ty)),
+                                asm_arg(wide(a, ty)),
+                                asm_arg(wide(b, ty)),
                             ],
                         );
                         return;
@@ -2771,11 +4774,7 @@ impl<'a> FunctionCompiler<'a> {
                         let count = if op == BinaryOp::Rotl { -k } else { k } & (bits - 1);
                         self.emit(
                             Opcode::Rorx,
-                            [
-                                asm_arg(&wide(d, ty)),
-                                asm_arg(&wide(a, ty)),
-                                asm_arg(&count),
-                            ],
+                            [asm_arg(wide(d, ty)), asm_arg(wide(a, ty)), asm_arg(count)],
                         );
                         return;
                     }
@@ -2791,17 +4790,17 @@ impl<'a> FunctionCompiler<'a> {
                 // narrower type needs its own mask. Rotates of narrow
                 // registers already rotate modulo their width.
                 let count = match imm {
-                    Some(k) => asm_arg(&k),
+                    Some(k) => asm_arg(k),
                     None => {
                         let b = self.use_reg(args[1], S1);
                         if b != RCX {
-                            self.emit(Opcode::Mov, [asm_arg(&(r32(1))), asm_arg(&(r32(b)))]);
+                            self.emit(Opcode::Mov, [asm_arg(r32(1)), asm_arg(r32(b))]);
                         }
                         let rotate = matches!(op, BinaryOp::Rotl | BinaryOp::Rotr);
                         if let (Some(bits), false) = (narrow_bits(ty), rotate) {
-                            self.emit(Opcode::And, [asm_arg(&(r32(1))), asm_arg(&(bits - 1))]);
+                            self.emit(Opcode::And, [asm_arg(r32(1)), asm_arg(bits - 1)]);
                         }
-                        asm_arg(&r8(1))
+                        asm_arg(r8(1))
                     }
                 };
                 // Right shifts read the upper bits, so a narrow value is
@@ -2813,9 +4812,9 @@ impl<'a> FunctionCompiler<'a> {
                     _ => (a, ty),
                 };
                 if a != d {
-                    self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(a)))]);
+                    self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(a))]);
                 }
-                self.emit(mnemonic, [asm_arg(&(reg(d, width))), asm_arg(&(count))]);
+                self.emit(mnemonic, [asm_arg(reg(d, width)), asm_arg(count)]);
             }
             // The double-width product of the extended operands: rdx:rax
             // from a one-operand `mul`/`imul` for 32 and 64 bits; for
@@ -2826,22 +4825,22 @@ impl<'a> FunctionCompiler<'a> {
                 match narrow_bits(ty) {
                     None => {
                         if a != S0 {
-                            self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(r64(a)))]);
+                            self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(r64(a))]);
                         }
                         let mnemonic = if signed { Opcode::Imul } else { Opcode::Mul };
-                        self.emit(mnemonic, [asm_arg(&(reg(b, ty)))]);
-                        self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(2)))]);
+                        self.emit(mnemonic, [asm_arg(reg(b, ty))]);
+                        self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(2))]);
                     }
                     Some(bits) => {
                         let x = self.extend(S0, a, ty, signed);
                         let y = self.extend(S1, b, ty, signed);
                         if x != S0 {
-                            self.emit(Opcode::Mov, [asm_arg(&(r32(0))), asm_arg(&(r32(x)))]);
+                            self.emit(Opcode::Mov, [asm_arg(r32(0)), asm_arg(r32(x))]);
                         }
-                        self.emit(Opcode::Imul, [asm_arg(&(r32(0))), asm_arg(&(r32(y)))]);
+                        self.emit(Opcode::Imul, [asm_arg(r32(0)), asm_arg(r32(y))]);
                         let shr = if signed { Opcode::Sar } else { Opcode::Shr };
-                        self.emit(shr, [asm_arg(&(r32(0))), asm_arg(&(bits))]);
-                        self.emit(Opcode::Mov, [asm_arg(&(r32(d))), asm_arg(&(r32(0)))]);
+                        self.emit(shr, [asm_arg(r32(0)), asm_arg(bits)]);
+                        self.emit(Opcode::Mov, [asm_arg(r32(d)), asm_arg(r32(0))]);
                     }
                 }
             }
@@ -2869,37 +4868,34 @@ impl<'a> FunctionCompiler<'a> {
         if x != S0 {
             self.emit(
                 Opcode::Mov,
-                [asm_arg(&(reg(S0, width))), asm_arg(&(reg(x, width)))],
+                [asm_arg(reg(S0, width)), asm_arg(reg(x, width))],
             );
         }
         let rb = reg(b, width);
         let trap = self.trap_label();
         // Hardware division faults on a zero divisor; the IR traps.
-        self.emit(Opcode::Test, [asm_arg(&(rb)), asm_arg(&(rb))]);
-        self.emit(Opcode::Jcc(4), [asm_arg(&(trap))]);
+        self.emit(Opcode::Test, [asm_arg(rb), asm_arg(rb)]);
+        self.emit(Opcode::Jcc(4), [asm_arg(&trap)]);
         let name = &self.func.name;
         let done = format!(".L{name}_{inst}_div");
         if signed {
             // MIN / -1 overflows, which faults too. The IR traps on the
             // quotient and gives 0 for the remainder.
-            self.emit(Opcode::Cmp, [asm_arg(&(rb)), asm_arg(&(-1i128))]);
+            self.emit(Opcode::Cmp, [asm_arg(rb), asm_arg(-1i128)]);
             let go = format!(".L{name}_{inst}_divide");
-            self.emit(Opcode::Jcc(5), [asm_arg(&(go))]);
+            self.emit(Opcode::Jcc(5), [asm_arg(&go)]);
             if op == BinaryOp::Sdiv {
                 let min = min_value(ty);
                 if width == Type::I64 {
-                    self.emit(Opcode::Movabs, [asm_arg(&(r64(2))), asm_arg(&(min))]);
-                    self.emit(Opcode::Cmp, [asm_arg(&(r64(0))), asm_arg(&(r64(2)))]);
+                    self.emit(Opcode::Movabs, [asm_arg(r64(2)), asm_arg(min)]);
+                    self.emit(Opcode::Cmp, [asm_arg(r64(0)), asm_arg(r64(2))]);
                 } else {
-                    self.emit(
-                        Opcode::Cmp,
-                        [asm_arg(&(r32(0))), asm_arg(&(min as u32 as i32))],
-                    );
+                    self.emit(Opcode::Cmp, [asm_arg(r32(0)), asm_arg(min as u32 as i32)]);
                 }
-                self.emit(Opcode::Jcc(4), [asm_arg(&(trap))]);
+                self.emit(Opcode::Jcc(4), [asm_arg(trap)]);
             } else {
-                self.emit(Opcode::Xor, [asm_arg(&(r32(2))), asm_arg(&(r32(2)))]);
-                self.emit(Opcode::Jmp, [asm_arg(&(done))]);
+                self.emit(Opcode::Xor, [asm_arg(r32(2)), asm_arg(r32(2))]);
+                self.emit(Opcode::Jmp, [asm_arg(&done)]);
             }
             self.out.label(go.clone());
             self.emit(
@@ -2910,17 +4906,17 @@ impl<'a> FunctionCompiler<'a> {
                 },
                 [],
             );
-            self.emit(Opcode::Idiv, [asm_arg(&(rb))]);
+            self.emit(Opcode::Idiv, [asm_arg(rb)]);
         } else {
-            self.emit(Opcode::Xor, [asm_arg(&(r32(2))), asm_arg(&(r32(2)))]);
-            self.emit(Opcode::Div, [asm_arg(&(rb))]);
+            self.emit(Opcode::Xor, [asm_arg(r32(2)), asm_arg(r32(2))]);
+            self.emit(Opcode::Div, [asm_arg(rb)]);
         }
         self.out.label(done.clone());
         let src = match op {
             BinaryOp::Udiv | BinaryOp::Sdiv => S0,
             _ => S2,
         };
-        self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(src)))]);
+        self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(src))]);
     }
 
     /// `d = a op b` with a two-address instruction `op d, b`, for an
@@ -2938,7 +4934,7 @@ impl<'a> FunctionCompiler<'a> {
                 Opcode::Add | Opcode::And | Opcode::Or | Opcode::Xor | Opcode::Imul
             )
         {
-            self.emit(mnemonic, [asm_arg(&reg(d, width)), asm_arg(&reg(a, width))]);
+            self.emit(mnemonic, [asm_arg(reg(d, width)), asm_arg(reg(a, width))]);
             return;
         }
         // `mov d, a` would overwrite b.
@@ -2947,15 +4943,15 @@ impl<'a> FunctionCompiler<'a> {
             _ => d,
         };
         if dst != a {
-            self.emit(Opcode::Mov, [asm_arg(&(r64(dst))), asm_arg(&(r64(a)))]);
+            self.emit(Opcode::Mov, [asm_arg(r64(dst)), asm_arg(r64(a))]);
         }
         let b = match b {
-            Operand::Reg(r) => asm_arg(&reg(r, width)),
-            Operand::Imm(k) => asm_arg(&k),
+            Operand::Reg(r) => asm_arg(reg(r, width)),
+            Operand::Imm(k) => asm_arg(k),
         };
-        self.emit(mnemonic, [asm_arg(&(reg(dst, width))), asm_arg(&(b))]);
+        self.emit(mnemonic, [asm_arg(reg(dst, width)), asm_arg(b)]);
         if dst != d {
-            self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(dst)))]);
+            self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(dst))]);
         }
     }
 
@@ -2966,14 +4962,14 @@ impl<'a> FunctionCompiler<'a> {
         match op {
             UnaryOp::Ineg | UnaryOp::Bnot => {
                 if a != d {
-                    self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(a)))]);
+                    self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(a))]);
                 }
                 let mnemonic = if op == UnaryOp::Ineg {
                     Opcode::Neg
                 } else {
                     Opcode::Not
                 };
-                self.emit(mnemonic, [asm_arg(&(reg(d, width)))]);
+                self.emit(mnemonic, [asm_arg(reg(d, width))]);
             }
             // `bsr` gives the index of the highest set bit, i, and leaves
             // ZF set for zero. The count is (bits - 1) - i, which is
@@ -2983,17 +4979,14 @@ impl<'a> FunctionCompiler<'a> {
                 let x = self.extend(S0, a, ty, false);
                 let bits = if width == Type::I64 { 64 } else { 32 };
                 let (rx, rax) = (reg(x, width), reg(S0, width));
-                self.emit(Opcode::Bsr, [asm_arg(&(rax)), asm_arg(&(rx))]);
-                self.emit(Opcode::Mov, [asm_arg(&(r32(1))), asm_arg(&(2 * bits - 1))]);
-                self.emit(
-                    Opcode::Cmovcc(4),
-                    [asm_arg(&(rax)), asm_arg(&(reg(S1, width)))],
-                );
-                self.emit(Opcode::Xor, [asm_arg(&(r32(0))), asm_arg(&(bits - 1))]);
+                self.emit(Opcode::Bsr, [asm_arg(rax), asm_arg(rx)]);
+                self.emit(Opcode::Mov, [asm_arg(r32(1)), asm_arg(2 * bits - 1)]);
+                self.emit(Opcode::Cmovcc(4), [asm_arg(rax), asm_arg(reg(S1, width))]);
+                self.emit(Opcode::Xor, [asm_arg(r32(0)), asm_arg(bits - 1)]);
                 if let Some(narrow) = narrow_bits(ty) {
-                    self.emit(Opcode::Sub, [asm_arg(&(r32(0))), asm_arg(&(32 - narrow))]);
+                    self.emit(Opcode::Sub, [asm_arg(r32(0)), asm_arg(32 - narrow)]);
                 }
-                self.emit(Opcode::Mov, [asm_arg(&(r32(d))), asm_arg(&(r32(0)))]);
+                self.emit(Opcode::Mov, [asm_arg(r32(d)), asm_arg(r32(0))]);
             }
             // `bsf` gives the index of the lowest set bit. A narrow value
             // gets a bit set just above it, which is the answer for zero.
@@ -3001,61 +4994,241 @@ impl<'a> FunctionCompiler<'a> {
                 if let Some(bits) = narrow_bits(ty) {
                     // Sentinel forces zero to return the IR type's width;
                     // bits above it cannot influence the first set bit.
-                    self.emit(Opcode::Mov, [asm_arg(&r32(S0)), asm_arg(&r32(a))]);
-                    self.emit(Opcode::Or, [asm_arg(&r32(S0)), asm_arg(&(1u32 << bits))]);
-                    self.emit(Opcode::Tzcnt, [asm_arg(&r32(d)), asm_arg(&r32(S0))]);
+                    self.emit(Opcode::Mov, [asm_arg(r32(S0)), asm_arg(r32(a))]);
+                    self.emit(Opcode::Or, [asm_arg(r32(S0)), asm_arg(1u32 << bits)]);
+                    self.emit(Opcode::Tzcnt, [asm_arg(r32(d)), asm_arg(r32(S0))]);
                 } else {
                     self.emit(
                         Opcode::Tzcnt,
-                        [asm_arg(&reg(d, width)), asm_arg(&reg(a, width))],
+                        [asm_arg(reg(d, width)), asm_arg(reg(a, width))],
                     );
                 }
             }
             UnaryOp::Ctz => match narrow_bits(ty) {
                 Some(bits) => {
-                    self.emit(Opcode::Mov, [asm_arg(&(r32(0))), asm_arg(&(r32(a)))]);
-                    self.emit(Opcode::Or, [asm_arg(&(r32(0))), asm_arg(&(1u32 << bits))]);
-                    self.emit(Opcode::Bsf, [asm_arg(&(r32(0))), asm_arg(&(r32(0)))]);
-                    self.emit(Opcode::Mov, [asm_arg(&(r32(d))), asm_arg(&(r32(0)))]);
+                    self.emit(Opcode::Mov, [asm_arg(r32(0)), asm_arg(r32(a))]);
+                    self.emit(Opcode::Or, [asm_arg(r32(0)), asm_arg(1u32 << bits)]);
+                    self.emit(Opcode::Bsf, [asm_arg(r32(0)), asm_arg(r32(0))]);
+                    self.emit(Opcode::Mov, [asm_arg(r32(d)), asm_arg(r32(0))]);
                 }
                 None => {
                     let bits = if width == Type::I64 { 64 } else { 32 };
                     self.emit(
                         Opcode::Bsf,
-                        [asm_arg(&(reg(S0, width))), asm_arg(&(reg(a, width)))],
+                        [asm_arg(reg(S0, width)), asm_arg(reg(a, width))],
                     );
-                    self.emit(Opcode::Mov, [asm_arg(&(r32(1))), asm_arg(&(bits))]);
+                    self.emit(Opcode::Mov, [asm_arg(r32(1)), asm_arg(bits)]);
                     self.emit(
                         Opcode::Cmovcc(4),
-                        [asm_arg(&(reg(S0, width))), asm_arg(&(reg(S1, width)))],
+                        [asm_arg(reg(S0, width)), asm_arg(reg(S1, width))],
                     );
-                    self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(S0)))]);
+                    self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(S0))]);
                 }
             },
+            UnaryOp::Popcnt if !self.features.popcnt => {
+                let x = self.extend(S0, a, ty, false);
+                // A 32-bit write also removes the unspecified upper half of i32.
+                self.emit(
+                    Opcode::Mov,
+                    [asm_arg(reg(S0, width)), asm_arg(reg(x, width))],
+                );
+                self.software_popcount();
+                self.emit(Opcode::Mov, [asm_arg(r32(d)), asm_arg(r32(S0))]);
+            }
             UnaryOp::Popcnt => {
                 let x = self.extend(S0, a, ty, false);
                 self.emit(
                     Opcode::Popcnt,
-                    [asm_arg(&(reg(d, width))), asm_arg(&(reg(x, width)))],
+                    [asm_arg(reg(d, width)), asm_arg(reg(x, width))],
                 );
             }
             UnaryOp::Bswap => {
                 if a != d {
-                    self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(a)))]);
+                    self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(a))]);
                 }
                 match ty {
                     Type::I8 => {}
-                    Type::I16 => self.emit(Opcode::Rol, [asm_arg(&(r16(d))), asm_arg(&(8i128))]),
-                    _ => self.emit(Opcode::Bswap, [asm_arg(&(reg(d, ty)))]),
+                    Type::I16 => self.emit(Opcode::Rol, [asm_arg(r16(d)), asm_arg(8i128)]),
+                    _ => self.emit(Opcode::Bswap, [asm_arg(reg(d, ty))]),
                 }
             }
             _ => unreachable!("{op} is not an integer operation"),
         }
     }
 
+    /// SWAR population count. Only reserved GPRs are clobbered; result is in rax.
+    fn software_popcount(&mut self) {
+        self.emit(Opcode::Mov, [asm_arg(r64(S1)), asm_arg(r64(S0))]);
+        self.emit(Opcode::Shr, [asm_arg(r64(S1)), asm_arg(1)]);
+        self.emit(
+            Opcode::Movabs,
+            [asm_arg(r64(S2)), asm_arg(0x5555555555555555i128)],
+        );
+        self.emit(Opcode::And, [asm_arg(r64(S1)), asm_arg(r64(S2))]);
+        self.emit(Opcode::Sub, [asm_arg(r64(S0)), asm_arg(r64(S1))]);
+        self.emit(Opcode::Mov, [asm_arg(r64(S1)), asm_arg(r64(S0))]);
+        self.emit(Opcode::Shr, [asm_arg(r64(S1)), asm_arg(2)]);
+        self.emit(
+            Opcode::Movabs,
+            [asm_arg(r64(S2)), asm_arg(0x3333333333333333i128)],
+        );
+        self.emit(Opcode::And, [asm_arg(r64(S0)), asm_arg(r64(S2))]);
+        self.emit(Opcode::And, [asm_arg(r64(S1)), asm_arg(r64(S2))]);
+        self.emit(Opcode::Add, [asm_arg(r64(S0)), asm_arg(r64(S1))]);
+        self.emit(Opcode::Mov, [asm_arg(r64(S1)), asm_arg(r64(S0))]);
+        self.emit(Opcode::Shr, [asm_arg(r64(S1)), asm_arg(4)]);
+        self.emit(Opcode::Add, [asm_arg(r64(S0)), asm_arg(r64(S1))]);
+        self.emit(
+            Opcode::Movabs,
+            [asm_arg(r64(S2)), asm_arg(0x0f0f0f0f0f0f0f0fi128)],
+        );
+        self.emit(Opcode::And, [asm_arg(r64(S0)), asm_arg(r64(S2))]);
+        for shift in [8, 16, 32] {
+            self.emit(Opcode::Mov, [asm_arg(r64(S1)), asm_arg(r64(S0))]);
+            self.emit(Opcode::Shr, [asm_arg(r64(S1)), asm_arg(shift)]);
+            self.emit(Opcode::Add, [asm_arg(r64(S0)), asm_arg(r64(S1))]);
+        }
+        self.emit(Opcode::And, [asm_arg(r32(S0)), asm_arg(127)]);
+    }
+
+    /// Round IEEE binary32/binary64 by manipulating the significand. No integer
+    /// conversion, floating rounding-mode dependence, or hidden library call.
+    /// Preserve the sign of zero and pass NaNs through SSE arithmetic to quiet
+    /// signaling inputs with the same invalid exception behavior as ROUNDSS/SD.
+    fn software_round(&mut self, inst: Inst, op: UnaryOp, ty: Type, a: u8, d: u8) {
+        let (mantissa, bias, sign, mov) = if ty == Type::F32 {
+            (23, 127, 31, Opcode::Movd)
+        } else {
+            (52, 1023, 63, Opcode::Movq)
+        };
+        let bits_reg = |n| if ty == Type::F32 { r32(n) } else { r64(n) };
+        let label = |suffix: &str| format!(".L{}_{inst}_round_{suffix}", self.func.name);
+        let (small, truncate, increment, sign_result, done, nan) = (
+            label("small"),
+            label("truncate"),
+            label("increment"),
+            label("sign"),
+            label("done"),
+            label("nan"),
+        );
+        // FS1 retains the original bits, FS2 the unsigned magnitude.
+        self.emit(Opcode::Movaps, [asm_arg(xmm(FS1)), asm_arg(xmm(a))]);
+        self.emit(mov, [asm_arg(bits_reg(S0)), asm_arg(xmm(FS1))]);
+        self.emit(Opcode::Btr, [asm_arg(r64(S0)), asm_arg(sign)]);
+        self.emit(mov, [asm_arg(xmm(FS2)), asm_arg(bits_reg(S0))]);
+        self.emit(Opcode::Mov, [asm_arg(r64(S1)), asm_arg(r64(S0))]);
+        self.emit(Opcode::Shr, [asm_arg(r64(S1)), asm_arg(mantissa)]);
+        // Large finite values and infinities are integral. NaNs use SSE below.
+        self.emit(Opcode::Cmp, [asm_arg(r64(S1)), asm_arg(2 * bias + 1)]);
+        self.emit(Opcode::Jcc(4), [asm_arg(&nan)]);
+        self.emit(Opcode::Cmp, [asm_arg(r64(S1)), asm_arg(bias + mantissa)]);
+        self.emit(Opcode::Jcc(3), [asm_arg(&sign_result)]); // unsigned >=
+        self.emit(Opcode::Cmp, [asm_arg(r64(S1)), asm_arg(bias)]);
+        self.emit(Opcode::Jcc(2), [asm_arg(&small)]);
+        // unit = 1 << (mantissa - unbiased_exponent).
+        self.emit(Opcode::Neg, [asm_arg(r64(S1))]);
+        self.emit(Opcode::Add, [asm_arg(r64(S1)), asm_arg(bias + mantissa)]);
+        self.emit(Opcode::Mov, [asm_arg(r32(S2)), asm_arg(1)]);
+        self.emit(Opcode::Shl, [asm_arg(r64(S2)), asm_arg(r8(S1))]);
+        self.emit(Opcode::Sub, [asm_arg(r64(S2)), asm_arg(1)]);
+        self.emit(Opcode::And, [asm_arg(r64(S0)), asm_arg(r64(S2))]); // remainder
+        self.emit(Opcode::Add, [asm_arg(r64(S2)), asm_arg(1)]); // unit
+        self.emit(Opcode::Test, [asm_arg(r64(S0)), asm_arg(r64(S0))]);
+        self.emit(Opcode::Jcc(4), [asm_arg(&truncate)]);
+        match op {
+            UnaryOp::Fnearest => {
+                self.emit(Opcode::Mov, [asm_arg(r64(S1)), asm_arg(r64(S2))]);
+                self.emit(Opcode::Shr, [asm_arg(r64(S1)), asm_arg(1)]);
+                self.emit(Opcode::Cmp, [asm_arg(r64(S0)), asm_arg(r64(S1))]);
+                self.emit(Opcode::Jcc(7), [asm_arg(&increment)]);
+                self.emit(Opcode::Jcc(2), [asm_arg(&truncate)]);
+                self.emit(mov, [asm_arg(bits_reg(S0)), asm_arg(xmm(FS2))]);
+                self.emit(Opcode::Test, [asm_arg(r64(S0)), asm_arg(r64(S2))]);
+                self.emit(Opcode::Jcc(5), [asm_arg(&increment)]); // ties to even
+            }
+            UnaryOp::Ffloor | UnaryOp::Fceil => {
+                self.emit(mov, [asm_arg(bits_reg(S0)), asm_arg(xmm(FS1))]);
+                self.emit(Opcode::Bt, [asm_arg(r64(S0)), asm_arg(sign)]);
+                self.emit(
+                    Opcode::Jcc(if op == UnaryOp::Ffloor { 2 } else { 3 }),
+                    [asm_arg(&increment)],
+                );
+            }
+            _ => {}
+        }
+        self.emit(Opcode::Jmp, [asm_arg(&truncate)]);
+        self.out.label(increment.clone());
+        self.emit(mov, [asm_arg(bits_reg(S0)), asm_arg(xmm(FS2))]);
+        self.emit(Opcode::Add, [asm_arg(r64(S0)), asm_arg(r64(S2))]);
+        self.emit(mov, [asm_arg(xmm(FS2)), asm_arg(bits_reg(S0))]);
+        self.out.label(truncate.clone());
+        self.emit(mov, [asm_arg(bits_reg(S0)), asm_arg(xmm(FS2))]);
+        self.emit(Opcode::Neg, [asm_arg(r64(S2))]); // -unit clears fractional bits
+        self.emit(Opcode::And, [asm_arg(r64(S0)), asm_arg(r64(S2))]);
+        self.emit(Opcode::Jmp, [asm_arg(&sign_result)]);
+        self.out.label(small.clone());
+        // ROUND treats subnormal input as signed zero when MXCSR.DAZ is set.
+        // Read MXCSR without modifying it, using a private fixed-frame slot.
+        // This leaves stack/unwind state unchanged at the operation.
+        let normal_small = label("normal_small");
+        self.emit(Opcode::Test, [asm_arg(r64(S1)), asm_arg(r64(S1))]);
+        self.emit(Opcode::Jcc(5), [asm_arg(&normal_small)]);
+        let mxcsr = sized(self.frame(self.mxcsr_save.expect("planned MXCSR slot")), 32);
+        self.emit(Opcode::Stmxcsr, [asm_arg(mxcsr.clone())]);
+        self.emit(Opcode::Mov, [asm_arg(r32(S1)), asm_arg(mxcsr)]);
+        self.emit(Opcode::Test, [asm_arg(r32(S1)), asm_arg(64)]);
+        self.emit(Opcode::Jcc(4), [asm_arg(&normal_small)]);
+        self.emit(Opcode::Xor, [asm_arg(r32(S0)), asm_arg(r32(S0))]);
+        self.emit(Opcode::Jmp, [asm_arg(&sign_result)]);
+        self.out.label(normal_small);
+        // For |x| < 1, the result is signed zero or signed one.
+        self.emit(Opcode::Mov, [asm_arg(r64(S1)), asm_arg(r64(S0))]);
+        self.emit(Opcode::Xor, [asm_arg(r32(S0)), asm_arg(r32(S0))]);
+        let small_done = label("small_done");
+        if op == UnaryOp::Fnearest {
+            self.emit(
+                Opcode::Movabs,
+                [asm_arg(r64(S2)), asm_arg(((bias - 1) as i128) << mantissa)],
+            );
+            self.emit(Opcode::Cmp, [asm_arg(r64(S1)), asm_arg(r64(S2))]);
+            self.emit(Opcode::Jcc(6), [asm_arg(&small_done)]); // <= half, including tie
+        } else if op == UnaryOp::Ftrunc {
+            self.emit(Opcode::Jmp, [asm_arg(&small_done)]);
+        } else {
+            self.emit(Opcode::Test, [asm_arg(r64(S1)), asm_arg(r64(S1))]);
+            self.emit(Opcode::Jcc(4), [asm_arg(&small_done)]);
+            self.emit(mov, [asm_arg(bits_reg(S1)), asm_arg(xmm(FS1))]);
+            self.emit(Opcode::Bt, [asm_arg(r64(S1)), asm_arg(sign)]);
+            self.emit(
+                Opcode::Jcc(if op == UnaryOp::Ffloor { 3 } else { 2 }),
+                [asm_arg(&small_done)],
+            );
+        }
+        self.emit(
+            Opcode::Movabs,
+            [asm_arg(r64(S0)), asm_arg((bias as i128) << mantissa)],
+        );
+        self.out.label(small_done);
+        self.out.label(sign_result.clone());
+        self.emit(mov, [asm_arg(bits_reg(S1)), asm_arg(xmm(FS1))]);
+        self.emit(Opcode::Shr, [asm_arg(r64(S1)), asm_arg(sign)]);
+        self.emit(Opcode::Shl, [asm_arg(r64(S1)), asm_arg(sign)]);
+        self.emit(Opcode::Or, [asm_arg(r64(S0)), asm_arg(r64(S1))]);
+        self.emit(mov, [asm_arg(xmm(d)), asm_arg(bits_reg(S0))]);
+        self.emit(Opcode::Jmp, [asm_arg(&done)]);
+        self.out.label(nan);
+        self.emit(Opcode::Movaps, [asm_arg(xmm(FS0)), asm_arg(xmm(FS1))]);
+        self.emit(
+            scalar(Opcode::Addsd, ty),
+            [asm_arg(xmm(FS0)), asm_arg(xmm(FS1))],
+        );
+        self.emit(Opcode::Movaps, [asm_arg(xmm(d)), asm_arg(xmm(FS0))]);
+        self.out.label(done);
+    }
+
     /// Float negation, absolute value and copysign flip or clear the sign
     /// bit; the rest are SSE instructions (`roundsd` is SSE4.1).
-    fn float_unary(&mut self, op: UnaryOp, arg: Value, d: u8) {
+    fn float_unary(&mut self, inst: Inst, op: UnaryOp, arg: Value, d: u8) {
         let ty = self.ty(arg);
         let a = self.use_freg(arg, FS0);
         let (gpr, sign) = if ty == Type::F32 {
@@ -3075,9 +5248,9 @@ impl<'a> FunctionCompiler<'a> {
                 } else {
                     Opcode::Btr
                 };
-                self.emit(mov, [asm_arg(&(gpr)), asm_arg(&(xmm(a)))]);
-                self.emit(bit_op, [asm_arg(&(gpr)), asm_arg(&(sign))]);
-                self.emit(mov, [asm_arg(&(xmm(d))), asm_arg(&(gpr))]);
+                self.emit(mov, [asm_arg(gpr), asm_arg(xmm(a))]);
+                self.emit(bit_op, [asm_arg(gpr), asm_arg(sign)]);
+                self.emit(mov, [asm_arg(xmm(d)), asm_arg(gpr)]);
             }
             UnaryOp::Fsqrt if self.features.avx => self.emit(
                 if ty == Type::F32 {
@@ -3085,12 +5258,13 @@ impl<'a> FunctionCompiler<'a> {
                 } else {
                     Opcode::Vsqrtsd
                 },
-                [asm_arg(&xmm(d)), asm_arg(&xmm(a)), asm_arg(&xmm(a))],
+                [asm_arg(xmm(d)), asm_arg(xmm(a)), asm_arg(xmm(a))],
             ),
             UnaryOp::Fsqrt => self.emit(
                 scalar(Opcode::Sqrtsd, ty),
-                [asm_arg(&(xmm(d))), asm_arg(&(xmm(a)))],
+                [asm_arg(xmm(d)), asm_arg(xmm(a))],
             ),
+            _ if !self.features.sse41 => self.software_round(inst, op, ty, a, d),
             _ => {
                 // Bit 3 suppresses the inexact exception; bits 1:0 are the
                 // rounding mode.
@@ -3103,7 +5277,7 @@ impl<'a> FunctionCompiler<'a> {
                 };
                 self.emit(
                     scalar(Opcode::Roundsd, ty),
-                    [asm_arg(&(xmm(d))), asm_arg(&(xmm(a))), asm_arg(&(mode))],
+                    [asm_arg(xmm(d)), asm_arg(xmm(a)), asm_arg(mode)],
                 );
             }
         }
@@ -3127,10 +5301,7 @@ impl<'a> FunctionCompiler<'a> {
                 _ => None,
             };
             if let Some(opcode) = opcode {
-                self.emit(
-                    opcode,
-                    [asm_arg(&xmm(d)), asm_arg(&xmm(a)), asm_arg(&xmm(b))],
-                );
+                self.emit(opcode, [asm_arg(xmm(d)), asm_arg(xmm(a)), asm_arg(xmm(b))]);
                 return;
             }
         }
@@ -3139,7 +5310,7 @@ impl<'a> FunctionCompiler<'a> {
         let dst = if b == d && a != d { FS0 } else { d };
         let (xd, xb) = (xmm(dst), xmm(b));
         if dst != a {
-            self.emit(Opcode::Movaps, [asm_arg(&(xd)), asm_arg(&(xmm(a)))]);
+            self.emit(Opcode::Movaps, [asm_arg(xd), asm_arg(xmm(a))]);
         }
         match op {
             BinaryOp::Fadd | BinaryOp::Fsub | BinaryOp::Fmul | BinaryOp::Fdiv => {
@@ -3149,7 +5320,7 @@ impl<'a> FunctionCompiler<'a> {
                     BinaryOp::Fmul => Opcode::Mul,
                     _ => Opcode::Div,
                 };
-                self.emit(scalar(mnemonic, ty), [asm_arg(&(xd)), asm_arg(&(xb))]);
+                self.emit(scalar(mnemonic, ty), [asm_arg(xd), asm_arg(xb)]);
             }
             // `minsd`/`maxsd` give the second operand for a NaN or two
             // zeros. IEEE minimum wants NaN, and -0 below +0: for equal
@@ -3164,22 +5335,19 @@ impl<'a> FunctionCompiler<'a> {
                     format!(".L{name}_{inst}_done"),
                 );
 
-                self.emit(
-                    scalar(Opcode::Ucomisd, ty),
-                    [asm_arg(&(xd)), asm_arg(&(xb))],
-                );
-                self.emit(Opcode::Jcc(10), [asm_arg(&(nan))]);
-                self.emit(Opcode::Jcc(5), [asm_arg(&(ne))]);
+                self.emit(scalar(Opcode::Ucomisd, ty), [asm_arg(xd), asm_arg(xb)]);
+                self.emit(Opcode::Jcc(10), [asm_arg(&nan)]);
+                self.emit(Opcode::Jcc(5), [asm_arg(&ne)]);
                 let bits = if min { Opcode::Or } else { Opcode::And };
-                self.emit(packed(bits, ty), [asm_arg(&(xd)), asm_arg(&(xb))]);
-                self.emit(Opcode::Jmp, [asm_arg(&(done))]);
+                self.emit(packed(bits, ty), [asm_arg(xd), asm_arg(xb)]);
+                self.emit(Opcode::Jmp, [asm_arg(&done)]);
                 self.out.label(ne.clone());
                 let pick = scalar(if min { Opcode::Minsd } else { Opcode::Maxsd }, ty);
-                self.emit(pick, [asm_arg(&(xd)), asm_arg(&(xb))]);
-                self.emit(Opcode::Jmp, [asm_arg(&(done))]);
+                self.emit(pick, [asm_arg(xd), asm_arg(xb)]);
+                self.emit(Opcode::Jmp, [asm_arg(&done)]);
                 // Adding gives a quiet NaN.
                 self.out.label(nan.clone());
-                self.emit(scalar(Opcode::Addsd, ty), [asm_arg(&(xd)), asm_arg(&(xb))]);
+                self.emit(scalar(Opcode::Addsd, ty), [asm_arg(xd), asm_arg(xb)]);
                 self.out.label(done.clone());
             }
             // The sign bit of b with the rest of a, spliced in rax.
@@ -3189,18 +5357,18 @@ impl<'a> FunctionCompiler<'a> {
                 } else {
                     (Opcode::Movq, r64(0), r64(1), 63)
                 };
-                self.emit(mov, [asm_arg(&(ra)), asm_arg(&(xd))]);
-                self.emit(mov, [asm_arg(&(rc)), asm_arg(&(xb))]);
-                self.emit(Opcode::Btr, [asm_arg(&(ra)), asm_arg(&(sign))]);
-                self.emit(Opcode::Shr, [asm_arg(&(rc)), asm_arg(&(sign))]);
-                self.emit(Opcode::Shl, [asm_arg(&(rc)), asm_arg(&(sign))]);
-                self.emit(Opcode::Or, [asm_arg(&(ra)), asm_arg(&(rc))]);
-                self.emit(mov, [asm_arg(&(xd)), asm_arg(&(ra))]);
+                self.emit(mov, [asm_arg(ra), asm_arg(xd)]);
+                self.emit(mov, [asm_arg(rc), asm_arg(xb)]);
+                self.emit(Opcode::Btr, [asm_arg(ra), asm_arg(sign)]);
+                self.emit(Opcode::Shr, [asm_arg(rc), asm_arg(sign)]);
+                self.emit(Opcode::Shl, [asm_arg(rc), asm_arg(sign)]);
+                self.emit(Opcode::Or, [asm_arg(ra), asm_arg(rc)]);
+                self.emit(mov, [asm_arg(xd), asm_arg(ra)]);
             }
             _ => unreachable!("{op} is not a float operation"),
         }
         if dst != d {
-            self.emit(Opcode::Movaps, [asm_arg(&(xmm(d))), asm_arg(&(xd))]);
+            self.emit(Opcode::Movaps, [asm_arg(xmm(d)), asm_arg(xd)]);
         }
     }
 
@@ -3224,7 +5392,7 @@ impl<'a> FunctionCompiler<'a> {
                 } else {
                     Opcode::Cvtsd2ss
                 };
-                self.emit(mnemonic, [asm_arg(&(xmm(d))), asm_arg(&(xmm(a)))]);
+                self.emit(mnemonic, [asm_arg(xmm(d)), asm_arg(xmm(a))]);
                 self.def_done(result, d);
             }
             // `cvtsi2sd` reads a signed 32- or 64-bit integer. Narrow and
@@ -3238,18 +5406,14 @@ impl<'a> FunctionCompiler<'a> {
                 let xd = xmm(d);
                 // `cvtsi2sd` only writes the low lane; clearing the
                 // register first breaks the dependency on its old value.
-                self.emit(Opcode::Xorps, [asm_arg(&(xd)), asm_arg(&(xd))]);
+                self.emit(Opcode::Xorps, [asm_arg(xd), asm_arg(xd)]);
                 match (from, signed) {
-                    (Type::I64, true) => self.emit(
-                        scalar(Opcode::Cvtsi2sd, to),
-                        [asm_arg(&(xd)), asm_arg(&(r64(a)))],
-                    ),
+                    (Type::I64, true) => {
+                        self.emit(scalar(Opcode::Cvtsi2sd, to), [asm_arg(xd), asm_arg(r64(a))])
+                    }
                     (_, true) => {
                         let x = self.extend(S0, a, from, true);
-                        self.emit(
-                            scalar(Opcode::Cvtsi2sd, to),
-                            [asm_arg(&(xd)), asm_arg(&(r32(x)))],
-                        );
+                        self.emit(scalar(Opcode::Cvtsi2sd, to), [asm_arg(xd), asm_arg(r32(x))]);
                     }
                     (Type::I64, false) => {
                         // Below 2^63 the signed conversion is right. Above,
@@ -3257,35 +5421,26 @@ impl<'a> FunctionCompiler<'a> {
                         // right), convert and double.
                         let (big, done) = (label("big"), label("done"));
                         if a != S0 {
-                            self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(r64(a)))]);
+                            self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(r64(a))]);
                         }
-                        self.emit(Opcode::Test, [asm_arg(&(r64(0))), asm_arg(&(r64(0)))]);
-                        self.emit(Opcode::Jcc(8), [asm_arg(&(big))]);
-                        self.emit(
-                            scalar(Opcode::Cvtsi2sd, to),
-                            [asm_arg(&(xd)), asm_arg(&(r64(0)))],
-                        );
-                        self.emit(Opcode::Jmp, [asm_arg(&(done))]);
+                        self.emit(Opcode::Test, [asm_arg(r64(0)), asm_arg(r64(0))]);
+                        self.emit(Opcode::Jcc(8), [asm_arg(&big)]);
+                        self.emit(scalar(Opcode::Cvtsi2sd, to), [asm_arg(xd), asm_arg(r64(0))]);
+                        self.emit(Opcode::Jmp, [asm_arg(&done)]);
                         self.out.label(big.clone());
-                        self.emit(Opcode::Mov, [asm_arg(&(r64(1))), asm_arg(&(r64(0)))]);
-                        self.emit(Opcode::Shr, [asm_arg(&(r64(1))), asm_arg(&(1i128))]);
-                        self.emit(Opcode::And, [asm_arg(&(r32(0))), asm_arg(&(1i128))]);
-                        self.emit(Opcode::Or, [asm_arg(&(r64(1))), asm_arg(&(r64(0)))]);
-                        self.emit(
-                            scalar(Opcode::Cvtsi2sd, to),
-                            [asm_arg(&(xd)), asm_arg(&(r64(1)))],
-                        );
-                        self.emit(scalar(Opcode::Addsd, to), [asm_arg(&(xd)), asm_arg(&(xd))]);
+                        self.emit(Opcode::Mov, [asm_arg(r64(1)), asm_arg(r64(0))]);
+                        self.emit(Opcode::Shr, [asm_arg(r64(1)), asm_arg(1i128)]);
+                        self.emit(Opcode::And, [asm_arg(r32(0)), asm_arg(1i128)]);
+                        self.emit(Opcode::Or, [asm_arg(r64(1)), asm_arg(r64(0))]);
+                        self.emit(scalar(Opcode::Cvtsi2sd, to), [asm_arg(xd), asm_arg(r64(1))]);
+                        self.emit(scalar(Opcode::Addsd, to), [asm_arg(xd), asm_arg(xd)]);
                         self.out.label(done.clone());
                     }
                     (_, false) => {
                         let x = self.extend(S0, a, from, false);
                         // A 32-bit move zero-extends to 64.
-                        self.emit(Opcode::Mov, [asm_arg(&(r32(0))), asm_arg(&(r32(x)))]);
-                        self.emit(
-                            scalar(Opcode::Cvtsi2sd, to),
-                            [asm_arg(&(xd)), asm_arg(&(r64(0)))],
-                        );
+                        self.emit(Opcode::Mov, [asm_arg(r32(0)), asm_arg(r32(x))]);
+                        self.emit(scalar(Opcode::Cvtsi2sd, to), [asm_arg(xd), asm_arg(r64(0))]);
                     }
                 }
                 self.def_done(result, d);
@@ -3294,7 +5449,7 @@ impl<'a> FunctionCompiler<'a> {
                 let d = self.def_reg(result);
                 let a = self.use_freg(arg, FS0);
                 self.float_to_int(op == ConvertOp::Fptosi, from, to, a, &label);
-                self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(0)))]);
+                self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(0))]);
                 self.def_done(result, d);
             }
             // The same bits in the other register class.
@@ -3307,12 +5462,12 @@ impl<'a> FunctionCompiler<'a> {
                 if to.is_float() {
                     let d = self.def_freg(result);
                     let a = self.use_reg(arg, S0);
-                    self.emit(mov, [asm_arg(&(xmm(d))), asm_arg(&(reg(a, from)))]);
+                    self.emit(mov, [asm_arg(xmm(d)), asm_arg(reg(a, from))]);
                     self.def_done(result, d);
                 } else {
                     let d = self.def_reg(result);
                     let a = self.use_freg(arg, FS0);
-                    self.emit(mov, [asm_arg(&(reg(d, to))), asm_arg(&(xmm(a)))]);
+                    self.emit(mov, [asm_arg(reg(d, to)), asm_arg(xmm(a))]);
                     self.def_done(result, d);
                 }
             }
@@ -3341,8 +5496,8 @@ impl<'a> FunctionCompiler<'a> {
             } else {
                 2f64.powi(n).to_bits()
             };
-            this.emit(Opcode::Movabs, [asm_arg(&r64(11)), asm_arg(&bits)]);
-            this.emit(Opcode::Movq, [asm_arg(&xmm(FS1)), asm_arg(&r64(11))]);
+            this.emit(Opcode::Movabs, [asm_arg(r64(11)), asm_arg(bits)]);
+            this.emit(Opcode::Movq, [asm_arg(xmm(FS1)), asm_arg(r64(11))]);
         };
         if signed {
             let (rax, rcx) = if to64 {
@@ -3351,23 +5506,20 @@ impl<'a> FunctionCompiler<'a> {
                 (r32(0), r32(1))
             };
             let bits = if to64 { 63 } else { 31 };
-            self.emit(
-                scalar(Opcode::Cvttsd2si, from),
-                [asm_arg(&(rax)), asm_arg(&(xa))],
-            );
+            self.emit(scalar(Opcode::Cvttsd2si, from), [asm_arg(rax), asm_arg(xa)]);
             power(self, bits);
             self.emit(
                 scalar(Opcode::Ucomisd, from),
-                [asm_arg(&(xa)), asm_arg(&(xmm(FS1)))],
+                [asm_arg(xa), asm_arg(xmm(FS1))],
             );
             // At or above 2^bits (and not NaN): the maximum.
             self.emit(
                 Opcode::Movabs,
-                [asm_arg(&(r64(1))), asm_arg(&((1u64 << bits) - 1))],
+                [asm_arg(r64(1)), asm_arg((1u64 << bits) - 1)],
             );
-            self.emit(Opcode::Cmovcc(3), [asm_arg(&(rax)), asm_arg(&(rcx))]);
-            self.emit(Opcode::Mov, [asm_arg(&(r32(1))), asm_arg(&(0i128))]);
-            self.emit(Opcode::Cmovcc(10), [asm_arg(&(rax)), asm_arg(&(rcx))]);
+            self.emit(Opcode::Cmovcc(3), [asm_arg(rax), asm_arg(rcx)]);
+            self.emit(Opcode::Mov, [asm_arg(r32(1)), asm_arg(0i128)]);
+            self.emit(Opcode::Cmovcc(10), [asm_arg(rax), asm_arg(rcx)]);
             return;
         }
         if !to64 {
@@ -3375,23 +5527,20 @@ impl<'a> FunctionCompiler<'a> {
             // which convert to the minimum) gives 0; then clamp above.
             self.emit(
                 scalar(Opcode::Cvttsd2si, from),
-                [asm_arg(&(r64(0))), asm_arg(&(xa))],
+                [asm_arg(r64(0)), asm_arg(xa)],
             );
-            self.emit(Opcode::Mov, [asm_arg(&(r32(1))), asm_arg(&(0i128))]);
-            self.emit(Opcode::Test, [asm_arg(&(r64(0))), asm_arg(&(r64(0)))]);
-            self.emit(Opcode::Cmovcc(8), [asm_arg(&(r64(0))), asm_arg(&(r64(1)))]);
-            self.emit(
-                Opcode::Mov,
-                [asm_arg(&(r32(1))), asm_arg(&(0xffffffffi128))],
-            );
-            self.emit(Opcode::Cmp, [asm_arg(&(r64(0))), asm_arg(&(r64(1)))]);
-            self.emit(Opcode::Cmovcc(7), [asm_arg(&(r64(0))), asm_arg(&(r64(1)))]);
+            self.emit(Opcode::Mov, [asm_arg(r32(1)), asm_arg(0i128)]);
+            self.emit(Opcode::Test, [asm_arg(r64(0)), asm_arg(r64(0))]);
+            self.emit(Opcode::Cmovcc(8), [asm_arg(r64(0)), asm_arg(r64(1))]);
+            self.emit(Opcode::Mov, [asm_arg(r32(1)), asm_arg(0xffffffffi128)]);
+            self.emit(Opcode::Cmp, [asm_arg(r64(0)), asm_arg(r64(1))]);
+            self.emit(Opcode::Cmovcc(7), [asm_arg(r64(0)), asm_arg(r64(1))]);
             power(self, 32);
             self.emit(
                 scalar(Opcode::Ucomisd, from),
-                [asm_arg(&(xa)), asm_arg(&(xmm(FS1)))],
+                [asm_arg(xa), asm_arg(xmm(FS1))],
             );
-            self.emit(Opcode::Cmovcc(3), [asm_arg(&(r64(0))), asm_arg(&(r64(1)))]);
+            self.emit(Opcode::Cmovcc(3), [asm_arg(r64(0)), asm_arg(r64(1))]);
             return;
         }
         // Below 2^63 (or NaN) the signed conversion, clamped at 0. At or
@@ -3401,33 +5550,33 @@ impl<'a> FunctionCompiler<'a> {
         power(self, 63);
         self.emit(
             scalar(Opcode::Ucomisd, from),
-            [asm_arg(&(xa)), asm_arg(&(xmm(FS1)))],
+            [asm_arg(xa), asm_arg(xmm(FS1))],
         );
-        self.emit(Opcode::Jcc(3), [asm_arg(&(big))]);
+        self.emit(Opcode::Jcc(3), [asm_arg(&big)]);
         self.emit(
             scalar(Opcode::Cvttsd2si, from),
-            [asm_arg(&(r64(0))), asm_arg(&(xa))],
+            [asm_arg(r64(0)), asm_arg(xa)],
         );
-        self.emit(Opcode::Mov, [asm_arg(&(r32(1))), asm_arg(&(0i128))]);
-        self.emit(Opcode::Test, [asm_arg(&(r64(0))), asm_arg(&(r64(0)))]);
-        self.emit(Opcode::Cmovcc(8), [asm_arg(&(r64(0))), asm_arg(&(r64(1)))]);
-        self.emit(Opcode::Jmp, [asm_arg(&(done))]);
+        self.emit(Opcode::Mov, [asm_arg(r32(1)), asm_arg(0i128)]);
+        self.emit(Opcode::Test, [asm_arg(r64(0)), asm_arg(r64(0))]);
+        self.emit(Opcode::Cmovcc(8), [asm_arg(r64(0)), asm_arg(r64(1))]);
+        self.emit(Opcode::Jmp, [asm_arg(&done)]);
         self.out.label(big.clone());
-        self.emit(Opcode::Movaps, [asm_arg(&(xmm(FS2))), asm_arg(&(xa))]);
+        self.emit(Opcode::Movaps, [asm_arg(xmm(FS2)), asm_arg(xa)]);
         self.emit(
             scalar(Opcode::Subsd, from),
-            [asm_arg(&(xmm(FS2))), asm_arg(&(xmm(FS1)))],
+            [asm_arg(xmm(FS2)), asm_arg(xmm(FS1))],
         );
         self.emit(
             scalar(Opcode::Cvttsd2si, from),
-            [asm_arg(&(r64(0))), asm_arg(&(xmm(FS2)))],
+            [asm_arg(r64(0)), asm_arg(xmm(FS2))],
         );
-        self.emit(Opcode::Test, [asm_arg(&(r64(0))), asm_arg(&(r64(0)))]);
-        self.emit(Opcode::Jcc(8), [asm_arg(&(max))]);
-        self.emit(Opcode::Btc, [asm_arg(&(r64(0))), asm_arg(&(63i128))]);
-        self.emit(Opcode::Jmp, [asm_arg(&(done))]);
+        self.emit(Opcode::Test, [asm_arg(r64(0)), asm_arg(r64(0))]);
+        self.emit(Opcode::Jcc(8), [asm_arg(&max)]);
+        self.emit(Opcode::Btc, [asm_arg(r64(0)), asm_arg(63i128)]);
+        self.emit(Opcode::Jmp, [asm_arg(&done)]);
         self.out.label(max.clone());
-        self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(-1i128))]);
+        self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(-1i128)]);
         self.out.label(done.clone());
     }
 
@@ -3442,19 +5591,17 @@ impl<'a> FunctionCompiler<'a> {
         let b = self.extend(S1, b, ty, signed);
         let width = wide_ty(ty);
         if a != S0 {
-            self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(r64(a)))]);
+            self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(r64(a))]);
         }
         let rb = reg(b, width);
         match op {
-            OverflowOp::Umul => self.emit(Opcode::Mul, [asm_arg(&(rb))]),
-            OverflowOp::Smul => {
-                self.emit(Opcode::Imul, [asm_arg(&(reg(S0, width))), asm_arg(&(rb))])
-            }
+            OverflowOp::Umul => self.emit(Opcode::Mul, [asm_arg(rb)]),
+            OverflowOp::Smul => self.emit(Opcode::Imul, [asm_arg(reg(S0, width)), asm_arg(rb)]),
             OverflowOp::Uadd | OverflowOp::Sadd => {
-                self.emit(Opcode::Add, [asm_arg(&(reg(S0, width))), asm_arg(&(rb))])
+                self.emit(Opcode::Add, [asm_arg(reg(S0, width)), asm_arg(rb)])
             }
             OverflowOp::Usub | OverflowOp::Ssub => {
-                self.emit(Opcode::Sub, [asm_arg(&(reg(S0, width))), asm_arg(&(rb))])
+                self.emit(Opcode::Sub, [asm_arg(reg(S0, width)), asm_arg(rb)])
             }
         }
         match narrow_bits(ty) {
@@ -3462,15 +5609,15 @@ impl<'a> FunctionCompiler<'a> {
             // narrow type if it differs from its own extension.
             Some(_) => {
                 let x = self.extend(S1, S0, ty, signed);
-                self.emit(Opcode::Cmp, [asm_arg(&(r32(0))), asm_arg(&(r32(x)))]);
-                self.emit(Opcode::Setcc(5), [asm_arg(&(r8(1)))]);
+                self.emit(Opcode::Cmp, [asm_arg(r32(0)), asm_arg(r32(x))]);
+                self.emit(Opcode::Setcc(5), [asm_arg(r8(1))]);
             }
             None => {
                 let cc = match op {
                     OverflowOp::Uadd | OverflowOp::Usub | OverflowOp::Umul => "c",
                     _ => "o",
                 };
-                self.emit(Opcode::Setcc(condition(cc)), [asm_arg(&(r8(1)))]);
+                self.emit(Opcode::Setcc(condition(cc)), [asm_arg(r8(1))]);
             }
         }
         let results = self.func.inst_results(inst);
@@ -3495,11 +5642,11 @@ impl<'a> FunctionCompiler<'a> {
         let at = sized(memory(r64(a), 0), ptr(ty));
         match op {
             RmwOp::Add | RmwOp::Sub | RmwOp::Xchg => {
-                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(r64(v)))]);
+                self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(r64(v))]);
                 if op == RmwOp::Sub {
-                    self.emit(Opcode::Neg, [asm_arg(&(reg(S0, ty)))]);
+                    self.emit(Opcode::Neg, [asm_arg(reg(S0, ty))]);
                 }
-                let operands = [asm_arg(&at), asm_arg(&reg(S0, ty))];
+                let operands = [asm_arg(&at), asm_arg(reg(S0, ty))];
                 if op == RmwOp::Xchg {
                     self.emit(Opcode::Xchg, operands);
                 } else {
@@ -3510,19 +5657,19 @@ impl<'a> FunctionCompiler<'a> {
                 let retry = format!(".L{}_{inst}_retry", self.func.name);
                 match ty {
                     Type::I8 | Type::I16 => {
-                        self.emit(Opcode::Movzx, [asm_arg(&(r32(0))), asm_arg(&(at))])
+                        self.emit(Opcode::Movzx, [asm_arg(r32(0)), asm_arg(&at)])
                     }
-                    _ => self.emit(Opcode::Mov, [asm_arg(&(reg(S0, ty))), asm_arg(&(at))]),
+                    _ => self.emit(Opcode::Mov, [asm_arg(reg(S0, ty)), asm_arg(&at)]),
                 }
                 self.out.label(retry.clone());
-                self.emit(Opcode::Mov, [asm_arg(&(r64(1))), asm_arg(&(r64(0)))]);
+                self.emit(Opcode::Mov, [asm_arg(r64(1)), asm_arg(r64(0))]);
                 let (rc, rv) = (reg(S1, ty), reg(v, ty));
                 let w = wide_ty(ty);
                 let (wc, wv) = (reg(S1, w), reg(v, w));
                 match op {
-                    RmwOp::And => self.emit(Opcode::And, [asm_arg(&(wc)), asm_arg(&(wv))]),
-                    RmwOp::Or => self.emit(Opcode::Or, [asm_arg(&(wc)), asm_arg(&(wv))]),
-                    RmwOp::Xor => self.emit(Opcode::Xor, [asm_arg(&(wc)), asm_arg(&(wv))]),
+                    RmwOp::And => self.emit(Opcode::And, [asm_arg(wc), asm_arg(wv)]),
+                    RmwOp::Or => self.emit(Opcode::Or, [asm_arg(wc), asm_arg(wv)]),
+                    RmwOp::Xor => self.emit(Opcode::Xor, [asm_arg(wc), asm_arg(wv)]),
                     // Replace the old value by v where v wins, comparing at
                     // the type's width (`cmov` has no 8-bit form, but the
                     // low bits are what matter).
@@ -3533,15 +5680,12 @@ impl<'a> FunctionCompiler<'a> {
                             RmwOp::Smin => "g",
                             _ => "l",
                         };
-                        self.emit(Opcode::Cmp, [asm_arg(&(rc)), asm_arg(&(rv))]);
-                        self.emit(
-                            Opcode::Cmovcc(condition(cc)),
-                            [asm_arg(&(wc)), asm_arg(&(wv))],
-                        );
+                        self.emit(Opcode::Cmp, [asm_arg(rc), asm_arg(rv)]);
+                        self.emit(Opcode::Cmovcc(condition(cc)), [asm_arg(wc), asm_arg(wv)]);
                     }
                 }
-                self.emit_locked(Opcode::Cmpxchg, [asm_arg(&(at)), asm_arg(&(rc))]);
-                self.emit(Opcode::Jcc(5), [asm_arg(&(retry))]);
+                self.emit_locked(Opcode::Cmpxchg, [asm_arg(at), asm_arg(rc)]);
+                self.emit(Opcode::Jcc(5), [asm_arg(retry)]);
             }
         }
         if let Some(loc) = result.and_then(|r| self.defined(r)) {
@@ -3576,10 +5720,10 @@ impl<'a> FunctionCompiler<'a> {
         // A value that fits a sign-extended 32-bit immediate.
         let imm = |this: &mut Self, value: u64| -> AsmOperand {
             if width == Type::I64 && i32::try_from(value as i64).is_err() {
-                this.emit(Opcode::Movabs, [asm_arg(&(r64(1))), asm_arg(&(value))]);
-                asm_arg(&r64(1))
+                this.emit(Opcode::Movabs, [asm_arg(r64(1)), asm_arg(value)]);
+                asm_arg(r64(1))
             } else {
-                asm_arg(&(value as i64))
+                asm_arg(value as i64)
             }
         };
         if values.len() >= 4 && span < 3 * values.len() as u64 && span < 4096 {
@@ -3587,35 +5731,35 @@ impl<'a> FunctionCompiler<'a> {
             // A 32-bit index is zero-extended by writing it.
             let rax = reg(S0, width);
             if min == 0 {
-                self.emit(Opcode::Mov, [asm_arg(&(rax)), asm_arg(&(reg(x, width)))]);
+                self.emit(Opcode::Mov, [asm_arg(rax), asm_arg(reg(x, width))]);
             } else {
                 let sub = imm(self, min);
                 if x != S0 {
-                    self.emit(Opcode::Mov, [asm_arg(&(rax)), asm_arg(&(reg(x, width)))]);
+                    self.emit(Opcode::Mov, [asm_arg(rax), asm_arg(reg(x, width))]);
                 }
-                self.emit(Opcode::Sub, [asm_arg(&(rax)), asm_arg(&(sub))]);
+                self.emit(Opcode::Sub, [asm_arg(rax), asm_arg(sub)]);
             }
-            self.emit(Opcode::Cmp, [asm_arg(&(rax)), asm_arg(&(span))]);
-            self.emit(Opcode::Jcc(7), [asm_arg(&(targets[0]))]);
+            self.emit(Opcode::Cmp, [asm_arg(rax), asm_arg(span)]);
+            self.emit(Opcode::Jcc(7), [asm_arg(&targets[0])]);
             let table = format!(".L{}_{inst}_table", self.func.name);
             // Offsets from the table to each target, so the table needs no
             // relocations: position independent.
             self.emit(
                 Opcode::Lea,
                 [
-                    asm_arg(&(r64(1))),
-                    asm_arg(&(symbol_memory(rip(), &table, Modifier::None))),
+                    asm_arg(r64(1)),
+                    asm_arg(symbol_memory(rip(), &table, Modifier::None)),
                 ],
             );
             self.emit(
                 Opcode::Movsxd,
                 [
-                    asm_arg(&(r64(0))),
-                    asm_arg(&(sized(indexed(r64(1), r64(0), (4i128) as u8), 32))),
+                    asm_arg(r64(0)),
+                    asm_arg(sized(indexed(r64(1), r64(0), (4i128) as u8), 32)),
                 ],
             );
-            self.emit(Opcode::Add, [asm_arg(&(r64(0))), asm_arg(&(r64(1)))]);
-            self.emit(Opcode::Jmp, [asm_arg(&(r64(0)))]);
+            self.emit(Opcode::Add, [asm_arg(r64(0)), asm_arg(r64(1))]);
+            self.emit(Opcode::Jmp, [asm_arg(r64(0))]);
             self.out.align(2);
             self.out.label(table.clone());
             for k in 0..=span {
@@ -3629,11 +5773,8 @@ impl<'a> FunctionCompiler<'a> {
         } else {
             for (i, &value) in values.iter().enumerate() {
                 let operand = imm(self, value);
-                self.emit(
-                    Opcode::Cmp,
-                    [asm_arg(&(reg(x, width))), asm_arg(&(operand))],
-                );
-                self.emit(Opcode::Jcc(4), [asm_arg(&(targets[i + 1]))]);
+                self.emit(Opcode::Cmp, [asm_arg(reg(x, width)), asm_arg(operand)]);
+                self.emit(Opcode::Jcc(4), [asm_arg(&targets[i + 1])]);
             }
             // Case landing pads are emitted before the next IR block. The
             // default may fall through only when none of those pads intervene.
@@ -3644,14 +5785,14 @@ impl<'a> FunctionCompiler<'a> {
             {
                 self.branch_unless_next(dests[0].block);
             } else {
-                self.emit(Opcode::Jmp, [asm_arg(&(targets[0]))]);
+                self.emit(Opcode::Jmp, [asm_arg(&targets[0])]);
             }
         }
         for (i, (dest, target)) in dests.iter().zip(&targets).enumerate() {
             if !dest.args.is_empty() || !self.edge_moves(i).is_empty() {
                 self.out.label(target.clone());
                 self.block_args(dest, i);
-                self.emit(Opcode::Jmp, [asm_arg(&(self.label(dest.block)))]);
+                self.jump_to_block(Opcode::Jmp, dest.block);
             }
         }
     }
@@ -3674,18 +5815,21 @@ impl<'a> FunctionCompiler<'a> {
                 let a = self.use_reg(args[0], S0);
                 if let Some(&addr) = self.selection.compare_memory.get(&inst) {
                     let at = self.mem(addr, S1, ty);
-                    self.emit(Opcode::Cmp, [asm_arg(&reg(a, ty)), asm_arg(&at)]);
+                    self.emit(Opcode::Cmp, [asm_arg(reg(a, ty)), asm_arg(&at)]);
                     return cond_code(cond);
                 }
                 let b = match folded_imm(self.func, self.func.inst_data(inst)) {
-                    Some((_, k)) => asm_arg(&k),
-                    None => asm_arg(&reg(self.use_reg(args[1], S1), ty)),
+                    Some((_, k)) => asm_arg(k),
+                    None => asm_arg(reg(self.use_reg(args[1], S1), ty)),
                 };
-                self.emit(Opcode::Cmp, [asm_arg(&(reg(a, ty))), asm_arg(&(b))]);
+                self.emit(Opcode::Cmp, [asm_arg(reg(a, ty)), asm_arg(b)]);
                 cond_code(cond)
             }
             InstData::Fcmp { cond, args } => {
                 let ty = self.ty(args[0]);
+                if ty == Type::F80 {
+                    return self.f80_compare(cond, args);
+                }
                 let a = self.use_freg(args[0], FS0);
                 let b = self.use_freg(args[1], FS1);
                 let (xa, xb) = (xmm(a), xmm(b));
@@ -3698,24 +5842,24 @@ impl<'a> FunctionCompiler<'a> {
                     FloatCC::Ord => (xa, xb, "np"),
                     FloatCC::Uno => (xa, xb, "p"),
                     FloatCC::Eq | FloatCC::Ne => {
-                        self.emit(ucomi, [asm_arg(&(xa)), asm_arg(&(xb))]);
+                        self.emit(ucomi, [asm_arg(xa), asm_arg(xb)]);
                         if self.func.resolve(args[0]) == self.func.resolve(args[1]) {
                             return if cond == FloatCC::Eq { "np" } else { "p" };
                         }
                         if cond == FloatCC::Eq {
-                            self.emit(Opcode::Setcc(4), [asm_arg(&(r8(0)))]);
-                            self.emit(Opcode::Setcc(11), [asm_arg(&(r8(1)))]);
-                            self.emit(Opcode::And, [asm_arg(&(r8(0))), asm_arg(&(r8(1)))]);
+                            self.emit(Opcode::Setcc(4), [asm_arg(r8(0))]);
+                            self.emit(Opcode::Setcc(11), [asm_arg(r8(1))]);
+                            self.emit(Opcode::And, [asm_arg(r8(0)), asm_arg(r8(1))]);
                         } else {
-                            self.emit(Opcode::Setcc(5), [asm_arg(&(r8(0)))]);
-                            self.emit(Opcode::Setcc(10), [asm_arg(&(r8(1)))]);
-                            self.emit(Opcode::Or, [asm_arg(&(r8(0))), asm_arg(&(r8(1)))]);
+                            self.emit(Opcode::Setcc(5), [asm_arg(r8(0))]);
+                            self.emit(Opcode::Setcc(10), [asm_arg(r8(1))]);
+                            self.emit(Opcode::Or, [asm_arg(r8(0)), asm_arg(r8(1))]);
                         }
                         // AND/OR already set ZF from canonical al.
                         return "ne";
                     }
                 };
-                self.emit(ucomi, [asm_arg(&(first)), asm_arg(&(second))]);
+                self.emit(ucomi, [asm_arg(first), asm_arg(second)]);
                 cc
             }
             _ => unreachable!("not a compare"),
@@ -3728,13 +5872,13 @@ impl<'a> FunctionCompiler<'a> {
         let ty = self.ty(value);
         if ty == Type::I128 {
             let [lo, hi] = self.halves(value);
-            self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(lo))]);
-            self.emit(Opcode::Or, [asm_arg(&(r64(0))), asm_arg(&(hi))]);
+            self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(lo)]);
+            self.emit(Opcode::Or, [asm_arg(r64(0)), asm_arg(hi)]);
             return;
         }
         let c = self.use_reg(value, S0);
         let r = reg(c, ty);
-        self.emit(Opcode::Test, [asm_arg(&(r)), asm_arg(&(r))]);
+        self.emit(Opcode::Test, [asm_arg(r), asm_arg(r)]);
     }
 
     /// Whether an edge can branch directly without executing any copies.
@@ -3765,7 +5909,8 @@ impl<'a> FunctionCompiler<'a> {
     /// once (`jump block1(v4, v3)` may swap two parameters).
     fn block_args(&mut self, call: &BlockCall, successor: usize) {
         let params = self.func.block_params(call.block);
-        let mut moves = self.edge_moves(successor).to_vec();
+        let mut moves = std::mem::take(&mut self.copies);
+        moves.extend_from_slice(self.edge_moves(successor));
         for (&param, &arg) in params.iter().zip(&call.args) {
             // A parameter with no location is an alias, never read.
             let Some(dst) = self
@@ -3783,6 +5928,8 @@ impl<'a> FunctionCompiler<'a> {
             }
         }
         self.parallel_copy(&moves);
+        moves.clear();
+        self.copies = moves;
     }
 
     /// Emits `moves`, each `(dst, src)`, as if they all happened at once.
@@ -3790,9 +5937,7 @@ impl<'a> FunctionCompiler<'a> {
     /// 16-byte stack temporary preserves complete XMM values instead.
     fn parallel_copy(&mut self, moves: &[(Loc, Loc)]) {
         let temp = self.copy_temp.map_or(Loc::Reg(S3), Loc::Stack);
-        for (dst, src) in sequentialize(moves, temp) {
-            self.emit_move(dst, src);
-        }
+        for_each_move(moves, temp, |dst, src| self.emit_move(dst, src));
     }
 
     /// Copy between allocated locations. Scalar slots carry 64 bits; vector
@@ -3804,7 +5949,7 @@ impl<'a> FunctionCompiler<'a> {
             (Loc::Reg(d), Loc::Remat(value)) => self.rematerialize(d, value),
             (Loc::FReg(d), Loc::Remat(value)) => {
                 self.rematerialize(S0, value);
-                self.emit(Opcode::Movq, [asm_arg(&xmm(d)), asm_arg(&r64(S0))]);
+                self.emit(Opcode::Movq, [asm_arg(xmm(d)), asm_arg(r64(S0))]);
             }
             (Loc::Stack(d), Loc::Remat(value)) => {
                 // Match stack-to-stack copies: rax is reserved, while
@@ -3813,72 +5958,89 @@ impl<'a> FunctionCompiler<'a> {
                 self.rematerialize(S0, value);
                 self.emit(
                     Opcode::Mov,
-                    [asm_arg(&sized(self.slot(d), 64)), asm_arg(&r64(S0))],
+                    [asm_arg(sized(self.slot(d), 64)), asm_arg(r64(S0))],
                 );
             }
             (Loc::Reg(d), Loc::Reg(s)) => {
-                self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(s)))])
+                self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(s))])
             }
-            (Loc::FReg(d), Loc::FReg(s)) => {
-                self.emit(Opcode::Movaps, [asm_arg(&(xmm(d))), asm_arg(&(xmm(s)))])
-            }
+            (Loc::FReg(d), Loc::FReg(s)) => self.emit(
+                if self.wide_vectors {
+                    Opcode::Vmovups
+                } else {
+                    Opcode::Movaps
+                },
+                [
+                    asm_arg(simd_width(d, if self.wide_vectors { 256 } else { 128 })),
+                    asm_arg(simd_width(s, if self.wide_vectors { 256 } else { 128 })),
+                ],
+            ),
             (Loc::Reg(d), Loc::FReg(s)) => {
-                self.emit(Opcode::Movq, [asm_arg(&(r64(d))), asm_arg(&(xmm(s)))])
+                self.emit(Opcode::Movq, [asm_arg(r64(d)), asm_arg(xmm(s))])
             }
             (Loc::FReg(d), Loc::Reg(s)) => {
-                self.emit(Opcode::Movq, [asm_arg(&(xmm(d))), asm_arg(&(r64(s)))])
+                self.emit(Opcode::Movq, [asm_arg(xmm(d)), asm_arg(r64(s))])
             }
             (Loc::Reg(d), Loc::Stack(s)) => self.emit(
                 Opcode::Mov,
-                [asm_arg(&(r64(d))), asm_arg(&(sized(self.slot(s), 64)))],
+                [asm_arg(r64(d)), asm_arg(sized(self.slot(s), 64))],
             ),
-            (Loc::FReg(d), Loc::Stack(s)) => self.emit(
-                if self.vector_spills.contains(&s) {
-                    Opcode::Movups
-                } else {
-                    Opcode::Movsd
-                },
-                [asm_arg(&(xmm(d))), asm_arg(&(self.slot(s)))],
-            ),
+            (Loc::FReg(d), Loc::Stack(s)) => {
+                let bits = self.vector_spills.get(&s).copied().unwrap_or(64);
+                self.emit(
+                    move_bits(bits),
+                    [asm_arg(simd_width(d, bits)), asm_arg(self.copy_slot(s))],
+                );
+            }
             (Loc::Stack(d), Loc::Reg(s)) => self.emit(
                 Opcode::Mov,
-                [asm_arg(&(sized(self.slot(d), 64))), asm_arg(&(r64(s)))],
+                [asm_arg(sized(self.slot(d), 64)), asm_arg(r64(s))],
             ),
-            (Loc::Stack(d), Loc::FReg(s)) => self.emit(
-                if self.vector_spills.contains(&d) {
-                    Opcode::Movups
-                } else {
-                    Opcode::Movsd
-                },
-                [asm_arg(&(self.slot(d))), asm_arg(&(xmm(s)))],
-            ),
-            (Loc::Stack(d), Loc::Stack(s)) if self.vector_spills.contains(&d) => {
+            (Loc::Stack(d), Loc::FReg(s)) => {
+                let bits = self.vector_spills.get(&d).copied().unwrap_or(64);
                 self.emit(
-                    if self.vector_spills.contains(&s) {
-                        Opcode::Movups
-                    } else {
-                        Opcode::Movsd
-                    },
-                    [asm_arg(&xmm(FS2)), asm_arg(&self.slot(s))],
+                    move_bits(bits),
+                    [asm_arg(self.copy_slot(d)), asm_arg(simd_width(s, bits))],
                 );
-                self.emit(Opcode::Movups, [asm_arg(&self.slot(d)), asm_arg(&xmm(FS2))]);
+            }
+            (Loc::Stack(d), Loc::Stack(s)) if self.vector_spills.contains_key(&d) => {
+                let bits = self.vector_spills[&d];
+                let source_bits = self.vector_spills.get(&s).copied().unwrap_or(64);
+                self.emit(
+                    move_bits(source_bits),
+                    [
+                        asm_arg(simd_width(FS2, source_bits)),
+                        asm_arg(self.copy_slot(s)),
+                    ],
+                );
+                self.emit(
+                    move_bits(bits),
+                    [asm_arg(self.copy_slot(d)), asm_arg(simd_width(FS2, bits))],
+                );
             }
             (Loc::Stack(d), Loc::Stack(s)) => {
                 self.emit(
                     Opcode::Mov,
-                    [asm_arg(&(r64(0))), asm_arg(&(sized(self.slot(s), 64)))],
+                    [asm_arg(r64(0)), asm_arg(sized(self.slot(s), 64))],
                 );
                 self.emit(
                     Opcode::Mov,
-                    [asm_arg(&(sized(self.slot(d), 64))), asm_arg(&(r64(0)))],
+                    [asm_arg(sized(self.slot(d), 64)), asm_arg(r64(0))],
                 );
             }
         }
     }
 
+    /// A jump (`jmp` or `jcc`) to `block`.
+    fn jump_to_block(&mut self, opcode: Opcode, block: Block) {
+        let function = &self.func.name;
+        self.out
+            .jump_to_block(opcode, function, self.bare_name, block);
+    }
+
     fn branch_unless_next(&mut self, target: Block) {
         if self.next_block != Some(target) {
-            self.emit(Opcode::Jmp, [asm_arg(&(self.label(target)))]);
+            self.jump_to_block(Opcode::Jmp, target);
         }
     }
 
@@ -3895,7 +6057,7 @@ impl<'a> FunctionCompiler<'a> {
             return src;
         }
         let op = if signed { Opcode::Movsx } else { Opcode::Movzx };
-        self.emit(op, [asm_arg(&(r32(scratch))), asm_arg(&(reg(src, ty)))]);
+        self.emit(op, [asm_arg(r32(scratch)), asm_arg(reg(src, ty))]);
         scratch
     }
 
@@ -3905,13 +6067,13 @@ impl<'a> FunctionCompiler<'a> {
     fn materialize(&mut self, d: u8, imm: i64, ty: Type) {
         let bits = imm as u64 & mask(ty);
         if bits == 0 {
-            self.emit(Opcode::Xor, [asm_arg(&(r32(d))), asm_arg(&(r32(d)))]);
+            self.emit(Opcode::Xor, [asm_arg(r32(d)), asm_arg(r32(d))]);
         } else if bits <= u64::from(u32::MAX) {
-            self.emit(Opcode::Mov, [asm_arg(&(r32(d))), asm_arg(&(bits))]);
+            self.emit(Opcode::Mov, [asm_arg(r32(d)), asm_arg(bits)]);
         } else if i32::try_from(bits as i64).is_ok() {
-            self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(bits as i64))]);
+            self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(bits as i64)]);
         } else {
-            self.emit(Opcode::Movabs, [asm_arg(&(r64(d))), asm_arg(&(bits))]);
+            self.emit(Opcode::Movabs, [asm_arg(r64(d)), asm_arg(bits)]);
         }
     }
 
@@ -3924,23 +6086,23 @@ impl<'a> FunctionCompiler<'a> {
                 #[cfg(feature = "backend-profile")]
                 crate::backend_profile::count(crate::backend_profile::Counter::RematConstants);
                 if bits <= u64::from(u32::MAX) {
-                    self.emit(Opcode::Mov, [asm_arg(&r32(d)), asm_arg(&bits)]);
+                    self.emit(Opcode::Mov, [asm_arg(r32(d)), asm_arg(bits)]);
                 } else if i32::try_from(bits as i64).is_ok() {
-                    self.emit(Opcode::Mov, [asm_arg(&r64(d)), asm_arg(&(bits as i64))]);
+                    self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(bits as i64)]);
                 } else {
-                    self.emit(Opcode::Movabs, [asm_arg(&r64(d)), asm_arg(&bits)]);
+                    self.emit(Opcode::Movabs, [asm_arg(r64(d)), asm_arg(bits)]);
                 }
             }
             RematRecipe::NullPtr => {
                 #[cfg(feature = "backend-profile")]
                 crate::backend_profile::count(crate::backend_profile::Counter::RematConstants);
-                self.emit(Opcode::Mov, [asm_arg(&r32(d)), asm_arg(&0u32)]);
+                self.emit(Opcode::Mov, [asm_arg(r32(d)), asm_arg(0u32)]);
             }
             RematRecipe::StackAddr(slot) => {
                 #[cfg(feature = "backend-profile")]
                 crate::backend_profile::count(crate::backend_profile::Counter::RematStackAddresses);
                 let at = self.frame(self.stack_slot_offsets[slot.index()]);
-                self.emit(Opcode::Lea, [asm_arg(&r64(d)), asm_arg(&at)]);
+                self.emit(Opcode::Lea, [asm_arg(r64(d)), asm_arg(&at)]);
             }
         }
     }
@@ -3999,10 +6161,7 @@ impl<'a> FunctionCompiler<'a> {
         match self.loc(value) {
             Loc::Reg(r) => r,
             Loc::Stack(s) => {
-                self.emit(
-                    Opcode::Mov,
-                    [asm_arg(&(r64(scratch))), asm_arg(&(self.slot(s)))],
-                );
+                self.emit(Opcode::Mov, [asm_arg(r64(scratch)), asm_arg(self.slot(s))]);
                 scratch
             }
             Loc::Remat(value) => {
@@ -4018,13 +6177,18 @@ impl<'a> FunctionCompiler<'a> {
         match self.loc(value) {
             Loc::FReg(r) => r,
             Loc::Stack(s) => {
+                let ty = self.ty(value);
+                let bits = if ty.is_vector() { ptr(ty) } else { 64 };
                 self.emit(
-                    if self.ty(value).is_vector() {
-                        Opcode::Movups
+                    if ty.is_vector() {
+                        movs(ty)
                     } else {
                         Opcode::Movsd
                     },
-                    [asm_arg(&(xmm(scratch))), asm_arg(&(self.slot(s)))],
+                    [
+                        asm_arg(simd(scratch, ty)),
+                        asm_arg(sized(self.slot(s), bits)),
+                    ],
                 );
                 scratch
             }
@@ -4056,20 +6220,19 @@ impl<'a> FunctionCompiler<'a> {
     fn def_done(&mut self, result: Option<Value>, reg: u8) {
         let Some(value) = result else { return };
         if let Some(Loc::Stack(s)) = self.defined(value) {
-            if self.func.value_type(value).is_float() || self.func.value_type(value).is_vector() {
+            let ty = self.func.value_type(value);
+            let bits = if ty.is_vector() { ptr(ty) } else { 64 };
+            if ty.is_float() || ty.is_vector() {
                 self.emit(
-                    if self.func.value_type(value).is_vector() {
-                        Opcode::Movups
+                    if ty.is_vector() {
+                        movs(ty)
                     } else {
                         Opcode::Movsd
                     },
-                    [asm_arg(&(self.slot(s))), asm_arg(&(xmm(reg)))],
+                    [asm_arg(sized(self.slot(s), bits)), asm_arg(simd(reg, ty))],
                 );
             } else {
-                self.emit(
-                    Opcode::Mov,
-                    [asm_arg(&(self.slot(s))), asm_arg(&(r64(reg)))],
-                );
+                self.emit(Opcode::Mov, [asm_arg(self.slot(s)), asm_arg(r64(reg))]);
             }
         }
     }
@@ -4081,19 +6244,24 @@ impl<'a> FunctionCompiler<'a> {
     /// The fixed frame at `offset` from `rsp` after the prologue, from rbp,
     /// which stays put if `rsp` moves.
     fn frame(&self, offset: usize) -> Memory {
+        if let Some(r) = self.frame_register {
+            return memory(r64(r), offset as i128);
+        }
         let top = self.frame_size + 8 * self.saved.len();
         memory(r64(5), -((top - offset) as i128))
     }
 
-    /// Spill slot `index`, with its fixed scalar or vector memory width.
+    /// Spill address with the scalar transport width. A home may hold
+    /// different types at different times; copy capacity is not its type.
     fn slot(&self, index: u32) -> Memory {
+        sized(self.frame(self.spill_base + 8 * index as usize), 64)
+    }
+
+    /// Full-payload width for untyped transfers and dedicated copy staging.
+    fn copy_slot(&self, index: u32) -> Memory {
         sized(
-            self.frame(self.spill_base + 8 * index as usize),
-            if self.vector_spills.contains(&index) {
-                128
-            } else {
-                64
-            },
+            self.slot(index),
+            self.vector_spills.get(&index).copied().unwrap_or(64),
         )
     }
 
@@ -4119,23 +6287,47 @@ enum Operand {
 }
 
 /// The convention's view of a function's own parameters.
-fn param_kinds(params: &[AbiParam]) -> Vec<ArgKind<'_>> {
-    params
+fn param_kinds(sig: &keel_ir::Signature) -> Vec<ArgKind<'_>> {
+    sig.params
         .iter()
-        .map(|p| ArgKind::of(p.ty, &p.purpose))
+        .map(|p| sysv::signature_param_kind(sig, p))
         .collect()
 }
 
 /// The convention's view of a call's arguments: the parameters `params`,
 /// then any variadic arguments by their types.
-fn arg_kinds<'s>(func: &Function, params: &'s [AbiParam], args: &[Value]) -> Vec<ArgKind<'s>> {
-    args.iter()
-        .enumerate()
-        .map(|(i, &arg)| match params.get(i) {
-            Some(p) => ArgKind::of(p.ty, &p.purpose),
-            None => ArgKind::Value(func.value_type(func.resolve(arg))),
-        })
+fn arg_kinds<'s>(func: &Function, sig: &'s keel_ir::Signature, args: &'s keel_ir::CallArgs) -> Vec<ArgKind<'s>> {
+    (args.iter().enumerate())
+        .map(|(i, &arg)| arg_kind(func, sig, args, i, arg))
         .collect()
+}
+
+/// How argument `i`, `arg`, of a call with `params` crosses it.
+fn arg_kind<'s>(func: &Function, sig: &'s keel_ir::Signature, args: &'s keel_ir::CallArgs, i: usize, arg: Value) -> ArgKind<'s> {
+    if sig.x86_vector_abi.is_some() && func.value_type(func.resolve(arg)) == Type::Vector(keel_ir::VectorType::F64x1) {
+        return ArgKind::StackValue(Type::Vector(keel_ir::VectorType::F64x1));
+    }
+    if i >= sig.params.len() {
+        if let Some(p) = args.abi(i) {
+            if let Purpose::ByVal(layout) = &p.purpose {
+                if sysv::register_vector(layout).is_some_and(|t| t.bytes() == Some(32)) {
+                    return ArgKind::MemoryByVal(layout);
+                }
+                return sysv::signature_param_kind(sig, p);
+            }
+        }
+    }
+    match args.abi(i).or_else(|| sig.params.get(i)) {
+        Some(p) => sysv::signature_param_kind(sig, p),
+        None => {
+            let ty = func.value_type(func.resolve(arg));
+            if ty.bytes() == Some(32) {
+                ArgKind::StackValue(ty)
+            } else {
+                ArgKind::Value(ty)
+            }
+        }
+    }
 }
 
 fn gpr(n: u8, width: u16) -> Register {
@@ -4176,6 +6368,21 @@ fn wide(n: u8, ty: Type) -> Register {
     reg(n, wide_ty(ty))
 }
 
+fn simd_width(n: u8, bits: u16) -> Register {
+    if bits == 256 {
+        Register {
+            class: RegisterClass::Ymm,
+            number: n,
+            width: 256,
+            high_byte: false,
+        }
+    } else {
+        xmm(n)
+    }
+}
+fn simd(n: u8, ty: Type) -> Register {
+    simd_width(n, ptr(ty))
+}
 fn xmm(n: u8) -> Register {
     Register {
         class: RegisterClass::Xmm,
@@ -4188,9 +6395,10 @@ fn xmm(n: u8) -> Register {
 /// The size keyword of a memory operand of type `ty`.
 fn ptr(ty: Type) -> u16 {
     match ty {
-        Type::Vector(_) => 128,
+        Type::Vector(v) => (v.bytes() * 8) as u16,
         Type::I8 => 8,
         Type::I16 => 16,
+        Type::F80 => 80,
         Type::I32 | Type::F32 => 32,
         _ => 64,
     }
@@ -4198,8 +6406,13 @@ fn ptr(ty: Type) -> u16 {
 
 /// The scalar float or unaligned vector move.
 fn movs(ty: Type) -> Opcode {
-    if ty.is_vector() {
-        return Opcode::Movups;
+    if let Type::Vector(v) = ty {
+        return match v.bytes() {
+            8 => Opcode::Movq,
+            16 => Opcode::Movups,
+            32 => Opcode::Vmovups,
+            _ => unreachable!(),
+        };
     }
     if ty == Type::F32 {
         Opcode::Movss
@@ -4319,5 +6532,52 @@ fn packed(op: Opcode, ty: Type) -> Opcode {
         (Opcode::And, true) => Opcode::Andps,
         (Opcode::And, false) => Opcode::Andpd,
         _ => unreachable!("compiler packed opcode"),
+    }
+}
+
+fn move_bits(bits: u16) -> Opcode {
+    match bits {
+        256 => Opcode::Vmovups,
+        128 => Opcode::Movups,
+        _ => Opcode::Movsd,
+    }
+}
+
+#[cfg(test)]
+mod bounded_unnamed_selection_tests {
+    use super::*;
+    #[test]
+    fn huge_unnamed_memory_operand_selects_without_copy_or_frame_emission() {
+        for producer in ["gnu", "clang"] {
+            for indirect in [false, true] {
+                let call = if indirect {
+                    format!(
+                        "call_indirect v1(v0 : ptr byval [100000000 x f64x1]) : (...) x86_vector_abi({producer})"
+                    )
+                } else {
+                    "call @sink(v0 : ptr byval [100000000 x f64x1])".to_owned()
+                };
+                let module = keel_ir::parse(&format!(
+                    "decl @sink(...) x86_vector_abi({producer})\nfunc @send(ptr,ptr) {{\nentry(v0:ptr,v1:ptr):\n {call}\n return\n}}"
+                )).unwrap();
+                keel_ir::verify_module(&module).unwrap();
+                let func = &module.functions[0];
+                let mut selected = 0;
+                for (_, inst) in func.layout_insts() {
+                    let (sig, args) = match func.inst_data(inst) {
+                        InstData::Call { func: callee, args } => (&func.callee(*callee).sig, args),
+                        InstData::CallIndirect { sig, args, .. } => (func.signature(*sig), args),
+                        _ => continue,
+                    };
+                    let kinds = arg_kinds(func, sig, args);
+                    assert_eq!(kinds.len(), 1);
+                    let plan = sysv::arg_locs(&kinds);
+                    assert_eq!(plan.locs, vec![ArgLoc::OnStack(0)]);
+                    assert_eq!(plan.stack, 800_000_000);
+                    selected += 1;
+                }
+                assert_eq!(selected, 1);
+            }
+        }
     }
 }

@@ -135,43 +135,79 @@ pub(super) fn packed(op: V, shape: VectorType) -> Option<Opcode> {
         _ => return None,
     })
 }
-pub(super) fn lower(func: &Function) -> Cow<'_, Function> {
-    crate::vector::lower(func, |func, data| match data {
-        InstData::VectorShuffle { args, lanes } => {
-            lanes.as_slice() == [1, 2]
-                && matches!(
-                    func.value_type(args[0]),
-                    Type::Vector(VectorType::I64x2 | VectorType::F64x2)
-                )
-                && func.value_type(args[0]) == func.value_type(args[1])
+pub(super) fn lower(func: &Function, features: keel_asm_ir::x86::Features) -> Cow<'_, Function> {
+    crate::vector::lower(func, |func, data| {
+        // D values share the physical XMM bank with Q/Y values, but the packed
+        // recipes below assume 128 bits. Scalarize every operation touching D,
+        // including D -> Q/Y conversions and FMA, before choosing native ops.
+        // Lane buffers are exactly sized and initialized by the shared lowerer;
+        // no result depends on the unspecified upper half of an incoming XMM.
+        let d = |ty: Type| ty.vector().is_some_and(|s| s.bytes() == 8);
+        let mut touches_d = false;
+        data.for_each_operand(|v| touches_d |= d(func.value_type(func.resolve(v))));
+        if let InstData::VectorSplat { ty, .. } | InstData::Convert { ty, .. } = data {
+            touches_d |= d(*ty);
         }
-        InstData::VectorExtract { arg, .. } => {
-            func.value_type(*arg) == Type::Vector(VectorType::I64x2)
+        if touches_d {
+            return false;
         }
-        InstData::VectorBinary { op, args } => {
-            packed(*op, func.value_type(args[0]).vector().unwrap()).is_some()
+        if matches!(data, InstData::Fma { .. }) {
+            return features.avx && features.fma;
         }
-        InstData::Convert {
-            op: ConvertOp::SwidenLow | ConvertOp::UwidenLow,
-            ..
-        } => true,
-        InstData::Convert {
-            op: ConvertOp::Bitcast,
-            ty,
-            arg,
-        } => ty.is_vector() && func.value_type(*arg).is_vector(),
-        InstData::VectorSelect { .. } | InstData::VectorSplat { .. } => true,
-        InstData::VectorIcmp { cond, args } => {
-            packed_compare(*cond, func.value_type(args[0]).vector().unwrap()).is_some()
+        if avx256::keep(func, data, features) {
+            return true;
         }
-        InstData::VectorUnary {
-            op: UnaryOp::Ineg,
-            arg,
-        } => func.value_type(*arg) == Type::Vector(VectorType::I64x2),
-        InstData::VectorUnary {
-            op: UnaryOp::Fsqrt, ..
-        } => true,
-        _ => false,
+        let mut wide = false;
+        data.for_each_operand(|v| {
+            wide |= func
+                .value_type(func.resolve(v))
+                .vector()
+                .is_some_and(|s| s.bytes() != 16)
+        });
+        if matches!(data,InstData::VectorSplat{ty,..} if ty.vector().is_some_and(|s|s.bytes()!=16))
+        {
+            wide = true;
+        }
+        if wide {
+            return false;
+        }
+        match data {
+            InstData::VectorShuffle { args, lanes } => {
+                lanes.as_slice() == [1, 2]
+                    && matches!(
+                        func.value_type(args[0]),
+                        Type::Vector(VectorType::I64x2 | VectorType::F64x2)
+                    )
+                    && func.value_type(args[0]) == func.value_type(args[1])
+            }
+            InstData::VectorExtract { arg, .. } => {
+                func.value_type(*arg) == Type::Vector(VectorType::I64x2)
+            }
+            InstData::VectorBinary { op, args } => {
+                packed(*op, func.value_type(args[0]).vector().unwrap()).is_some()
+            }
+            InstData::Convert {
+                op: ConvertOp::SwidenLow | ConvertOp::UwidenLow,
+                ..
+            } => true,
+            InstData::Convert {
+                op: ConvertOp::Bitcast,
+                ty,
+                arg,
+            } => ty.is_vector() && func.value_type(*arg).is_vector(),
+            InstData::VectorSelect { .. } | InstData::VectorSplat { .. } => true,
+            InstData::VectorIcmp { cond, args } => {
+                packed_compare(*cond, func.value_type(args[0]).vector().unwrap()).is_some()
+            }
+            InstData::VectorUnary {
+                op: UnaryOp::Ineg,
+                arg,
+            } => func.value_type(*arg) == Type::Vector(VectorType::I64x2),
+            InstData::VectorUnary {
+                op: UnaryOp::Fsqrt, ..
+            } => true,
+            _ => false,
+        }
     })
 }
 
@@ -222,7 +258,7 @@ impl FunctionCompiler<'_> {
         self.vector_stage(args[1], FS1);
         self.emit(
             Opcode::Shufpd,
-            [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1)), asm_arg(&1)],
+            [asm_arg(xmm(FS0)), asm_arg(xmm(FS1)), asm_arg(1)],
         );
         self.vector_publish(result);
     }
@@ -232,7 +268,7 @@ impl FunctionCompiler<'_> {
     fn vector_stage(&mut self, value: Value, scratch: u8) {
         let r = self.use_freg(value, scratch);
         if r != scratch {
-            self.emit(Opcode::Movaps, [asm_arg(&xmm(scratch)), asm_arg(&xmm(r))]);
+            self.emit(Opcode::Movaps, [asm_arg(xmm(scratch)), asm_arg(xmm(r))]);
         }
     }
     // Each qword sign comes from its high dword. Copy before destructive shifts:
@@ -242,28 +278,28 @@ impl FunctionCompiler<'_> {
         let d = self.def_freg(result);
         // Capture the sign before overwriting a coalesced input/result. Neither
         // reserved FS1 nor a spilled result's FS0 can hold an allocated input.
-        self.emit(Opcode::Movaps, [asm_arg(&xmm(FS1)), asm_arg(&xmm(a))]);
+        self.emit(Opcode::Movaps, [asm_arg(xmm(FS1)), asm_arg(xmm(a))]);
         if d != a {
-            self.emit(Opcode::Movaps, [asm_arg(&xmm(d)), asm_arg(&xmm(a))]);
+            self.emit(Opcode::Movaps, [asm_arg(xmm(d)), asm_arg(xmm(a))]);
         }
-        self.emit(Opcode::Psrad, [asm_arg(&xmm(FS1)), asm_arg(&31i64)]);
+        self.emit(Opcode::Psrad, [asm_arg(xmm(FS1)), asm_arg(31i64)]);
         self.emit(
             Opcode::Pshufd,
-            [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS1)), asm_arg(&0xf5i64)],
+            [asm_arg(xmm(FS1)), asm_arg(xmm(FS1)), asm_arg(0xf5i64)],
         );
-        self.emit(Opcode::Pxor, [asm_arg(&xmm(d)), asm_arg(&xmm(FS1))]);
-        self.emit(Opcode::Psubq, [asm_arg(&xmm(d)), asm_arg(&xmm(FS1))]);
+        self.emit(Opcode::Pxor, [asm_arg(xmm(d)), asm_arg(xmm(FS1))]);
+        self.emit(Opcode::Psubq, [asm_arg(xmm(d)), asm_arg(xmm(FS1))]);
         self.def_done(result, d);
     }
     /// Load before defining the result; only reserved vector scratch is touched.
     pub(super) fn vector_positive32(&mut self, addr: Value, result: Option<Value>) {
         let at = self.mem(addr, S0, Type::I64);
-        self.emit(Opcode::Movq, [asm_arg(&xmm(FS0)), asm_arg(&at)]);
-        self.emit(Opcode::Xorps, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS1))]);
-        self.emit(Opcode::Movaps, [asm_arg(&xmm(FS2)), asm_arg(&xmm(FS0))]);
-        self.emit(Opcode::Pcmpgtd, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
-        self.emit(Opcode::Andps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS2))]);
-        self.emit(Opcode::Punpckldq, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+        self.emit(Opcode::Movq, [asm_arg(xmm(FS0)), asm_arg(&at)]);
+        self.emit(Opcode::Xorps, [asm_arg(xmm(FS1)), asm_arg(xmm(FS1))]);
+        self.emit(Opcode::Movaps, [asm_arg(xmm(FS2)), asm_arg(xmm(FS0))]);
+        self.emit(Opcode::Pcmpgtd, [asm_arg(xmm(FS0)), asm_arg(xmm(FS1))]);
+        self.emit(Opcode::Andps, [asm_arg(xmm(FS0)), asm_arg(xmm(FS2))]);
+        self.emit(Opcode::Punpckldq, [asm_arg(xmm(FS0)), asm_arg(xmm(FS1))]);
         self.vector_publish(result);
     }
     pub(super) fn vector_positive64(&mut self, value: Value, result: Option<Value>) {
@@ -271,10 +307,10 @@ impl FunctionCompiler<'_> {
         self.vector_stage(value, FS1);
         self.emit(
             Opcode::Pshufd,
-            [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1)), asm_arg(&0xf5i64)],
+            [asm_arg(xmm(FS0)), asm_arg(xmm(FS1)), asm_arg(0xf5i64)],
         );
-        self.emit(Opcode::Psrad, [asm_arg(&xmm(FS0)), asm_arg(&31i64)]);
-        self.emit(Opcode::Andnps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+        self.emit(Opcode::Psrad, [asm_arg(xmm(FS0)), asm_arg(31i64)]);
+        self.emit(Opcode::Andnps, [asm_arg(xmm(FS0)), asm_arg(xmm(FS1))]);
         self.vector_publish(result);
     }
     pub(super) fn vector_sign_select(&mut self, x: Value, otherwise: Value, result: Option<Value>) {
@@ -284,24 +320,24 @@ impl FunctionCompiler<'_> {
         self.vector_stage(otherwise, FS2);
         self.emit(
             Opcode::Pshufd,
-            [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1)), asm_arg(&0xf5i64)],
+            [asm_arg(xmm(FS0)), asm_arg(xmm(FS1)), asm_arg(0xf5i64)],
         );
-        self.emit(Opcode::Psrad, [asm_arg(&xmm(FS0)), asm_arg(&31i64)]);
-        self.emit(Opcode::Xorps, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS2))]);
-        self.emit(Opcode::Andps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
-        self.emit(Opcode::Xorps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS2))]);
+        self.emit(Opcode::Psrad, [asm_arg(xmm(FS0)), asm_arg(31i64)]);
+        self.emit(Opcode::Xorps, [asm_arg(xmm(FS1)), asm_arg(xmm(FS2))]);
+        self.emit(Opcode::Andps, [asm_arg(xmm(FS0)), asm_arg(xmm(FS1))]);
+        self.emit(Opcode::Xorps, [asm_arg(xmm(FS0)), asm_arg(xmm(FS2))]);
         self.vector_publish(result);
     }
     pub(super) fn vector_ineg(&mut self, value: Value, result: Option<Value>) {
         self.vector_stage(value, FS1);
-        self.emit(Opcode::Xorps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS0))]);
-        self.emit(Opcode::Psubq, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+        self.emit(Opcode::Xorps, [asm_arg(xmm(FS0)), asm_arg(xmm(FS0))]);
+        self.emit(Opcode::Psubq, [asm_arg(xmm(FS0)), asm_arg(xmm(FS1))]);
         self.vector_publish(result);
     }
     fn vector_publish(&mut self, result: Option<Value>) {
         let d = self.def_freg(result);
         if d != FS0 {
-            self.emit(Opcode::Movaps, [asm_arg(&xmm(d)), asm_arg(&xmm(FS0))]);
+            self.emit(Opcode::Movaps, [asm_arg(xmm(d)), asm_arg(xmm(FS0))]);
         }
         self.def_done(result, d);
     }
@@ -320,7 +356,7 @@ impl FunctionCompiler<'_> {
             let mut width = self.ty(arg).vector().unwrap().lane_type().bytes().unwrap();
             let target = to.vector().unwrap().lane_type().bytes().unwrap();
             if op == ConvertOp::UwidenLow {
-                self.emit(Opcode::Xorps, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS1))]);
+                self.emit(Opcode::Xorps, [asm_arg(xmm(FS1)), asm_arg(xmm(FS1))]);
             }
             while width < target {
                 let (unpack, compare) = match width {
@@ -332,10 +368,10 @@ impl FunctionCompiler<'_> {
                 if op == ConvertOp::SwidenLow {
                     // 0 > lane produces its sign extension, then low unpack
                     // interleaves each original lane with those high bits.
-                    self.emit(Opcode::Xorps, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS1))]);
-                    self.emit(compare, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS0))]);
+                    self.emit(Opcode::Xorps, [asm_arg(xmm(FS1)), asm_arg(xmm(FS1))]);
+                    self.emit(compare, [asm_arg(xmm(FS1)), asm_arg(xmm(FS0))]);
                 }
-                self.emit(unpack, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+                self.emit(unpack, [asm_arg(xmm(FS0)), asm_arg(xmm(FS1))]);
                 width *= 2;
             }
         }
@@ -353,24 +389,24 @@ impl FunctionCompiler<'_> {
             let shuffle = if shape == VectorType::F32x4 { 0 } else { 0x44 };
             self.emit(
                 Opcode::Pshufd,
-                [asm_arg(&xmm(d)), asm_arg(&xmm(a)), asm_arg(&shuffle)],
+                [asm_arg(xmm(d)), asm_arg(xmm(a)), asm_arg(shuffle)],
             );
         } else {
             let a = self.use_reg(arg, S0);
             if shape == VectorType::I64x2 {
-                self.emit(Opcode::Movq, [asm_arg(&xmm(d)), asm_arg(&r64(a))]);
-                self.emit(Opcode::Punpcklqdq, [asm_arg(&xmm(d)), asm_arg(&xmm(d))]);
+                self.emit(Opcode::Movq, [asm_arg(xmm(d)), asm_arg(r64(a))]);
+                self.emit(Opcode::Punpcklqdq, [asm_arg(xmm(d)), asm_arg(xmm(d))]);
             } else {
-                self.emit(Opcode::Movd, [asm_arg(&xmm(d)), asm_arg(&r32(a))]);
+                self.emit(Opcode::Movd, [asm_arg(xmm(d)), asm_arg(r32(a))]);
                 if shape == VectorType::I8x16 {
-                    self.emit(Opcode::Punpcklbw, [asm_arg(&xmm(d)), asm_arg(&xmm(d))]);
+                    self.emit(Opcode::Punpcklbw, [asm_arg(xmm(d)), asm_arg(xmm(d))]);
                 }
                 if matches!(shape, VectorType::I8x16 | VectorType::I16x8) {
-                    self.emit(Opcode::Punpcklwd, [asm_arg(&xmm(d)), asm_arg(&xmm(d))]);
+                    self.emit(Opcode::Punpcklwd, [asm_arg(xmm(d)), asm_arg(xmm(d))]);
                 }
                 self.emit(
                     Opcode::Pshufd,
-                    [asm_arg(&xmm(d)), asm_arg(&xmm(d)), asm_arg(&0i64)],
+                    [asm_arg(xmm(d)), asm_arg(xmm(d)), asm_arg(0i64)],
                 );
             }
         }
@@ -382,12 +418,12 @@ impl FunctionCompiler<'_> {
                 self.vector_stage(x, FS0);
                 self.emit(
                     Opcode::Pshufd,
-                    [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS0)), asm_arg(&0xf5i64)],
+                    [asm_arg(xmm(FS0)), asm_arg(xmm(FS0)), asm_arg(0xf5i64)],
                 );
-                self.emit(Opcode::Psrad, [asm_arg(&xmm(FS0)), asm_arg(&31i64)]);
+                self.emit(Opcode::Psrad, [asm_arg(xmm(FS0)), asm_arg(31i64)]);
                 if complement {
-                    self.emit(Opcode::Pcmpeqd, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS1))]);
-                    self.emit(Opcode::Xorps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+                    self.emit(Opcode::Pcmpeqd, [asm_arg(xmm(FS1)), asm_arg(xmm(FS1))]);
+                    self.emit(Opcode::Xorps, [asm_arg(xmm(FS0)), asm_arg(xmm(FS1))]);
                 }
                 self.vector_publish(result);
                 return;
@@ -410,58 +446,58 @@ impl FunctionCompiler<'_> {
             // high dwords, breaking ties by unsigned low dwords: signed i64
             // biases only low dwords, unsigned i64 biases BOTH dwords.
             // Three reserved registers suffice even with all values spilled.
-            self.emit(Opcode::Pcmpeqd, [asm_arg(&xmm(FS2)), asm_arg(&xmm(FS2))]);
+            self.emit(Opcode::Pcmpeqd, [asm_arg(xmm(FS2)), asm_arg(xmm(FS2))]);
             match shape {
                 VectorType::I8x16 => {
-                    self.emit(Opcode::Psllw, [asm_arg(&xmm(FS2)), asm_arg(&15i64)]);
-                    self.emit(Opcode::Psrlw, [asm_arg(&xmm(FS2)), asm_arg(&8i64)]);
-                    self.emit(Opcode::Punpcklbw, [asm_arg(&xmm(FS2)), asm_arg(&xmm(FS2))]);
+                    self.emit(Opcode::Psllw, [asm_arg(xmm(FS2)), asm_arg(15i64)]);
+                    self.emit(Opcode::Psrlw, [asm_arg(xmm(FS2)), asm_arg(8i64)]);
+                    self.emit(Opcode::Punpcklbw, [asm_arg(xmm(FS2)), asm_arg(xmm(FS2))]);
                     // The first unpack duplicates bytes as 80,80,00,00.
                     // Replicate the low word and then the low dword so every
                     // byte lane receives the unsigned sign-bit bias.
-                    self.emit(Opcode::Punpcklwd, [asm_arg(&xmm(FS2)), asm_arg(&xmm(FS2))]);
+                    self.emit(Opcode::Punpcklwd, [asm_arg(xmm(FS2)), asm_arg(xmm(FS2))]);
                     self.emit(
                         Opcode::Pshufd,
-                        [asm_arg(&xmm(FS2)), asm_arg(&xmm(FS2)), asm_arg(&0i64)],
+                        [asm_arg(xmm(FS2)), asm_arg(xmm(FS2)), asm_arg(0i64)],
                     );
                 }
                 VectorType::I16x8 => {
-                    self.emit(Opcode::Psllw, [asm_arg(&xmm(FS2)), asm_arg(&15i64)]);
+                    self.emit(Opcode::Psllw, [asm_arg(xmm(FS2)), asm_arg(15i64)]);
                 }
                 VectorType::I32x4 | VectorType::I64x2 if unsigned => {
-                    self.emit(Opcode::Pslld, [asm_arg(&xmm(FS2)), asm_arg(&31i64)]);
+                    self.emit(Opcode::Pslld, [asm_arg(xmm(FS2)), asm_arg(31i64)]);
                 }
                 VectorType::I64x2 => {
-                    self.emit(Opcode::Psrlq, [asm_arg(&xmm(FS2)), asm_arg(&63i64)]);
-                    self.emit(Opcode::Psllq, [asm_arg(&xmm(FS2)), asm_arg(&31i64)]);
+                    self.emit(Opcode::Psrlq, [asm_arg(xmm(FS2)), asm_arg(63i64)]);
+                    self.emit(Opcode::Psllq, [asm_arg(xmm(FS2)), asm_arg(31i64)]);
                 }
                 _ => unreachable!(),
             }
-            self.emit(Opcode::Xorps, [asm_arg(&xmm(dst)), asm_arg(&xmm(FS2))]);
-            self.emit(Opcode::Xorps, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS2))]);
+            self.emit(Opcode::Xorps, [asm_arg(xmm(dst)), asm_arg(xmm(FS2))]);
+            self.emit(Opcode::Xorps, [asm_arg(xmm(FS1)), asm_arg(xmm(FS2))]);
             if shape != VectorType::I64x2 {
                 self.emit(
                     packed_compare(cond, shape).unwrap(),
-                    [asm_arg(&xmm(dst)), asm_arg(&xmm(FS1))],
+                    [asm_arg(xmm(dst)), asm_arg(xmm(FS1))],
                 );
             } else {
-                self.emit(Opcode::Movaps, [asm_arg(&xmm(FS2)), asm_arg(&xmm(dst))]);
-                self.emit(Opcode::Pcmpgtd, [asm_arg(&xmm(FS2)), asm_arg(&xmm(FS1))]);
-                self.emit(Opcode::Pcmpeqd, [asm_arg(&xmm(dst)), asm_arg(&xmm(FS1))]);
+                self.emit(Opcode::Movaps, [asm_arg(xmm(FS2)), asm_arg(xmm(dst))]);
+                self.emit(Opcode::Pcmpgtd, [asm_arg(xmm(FS2)), asm_arg(xmm(FS1))]);
+                self.emit(Opcode::Pcmpeqd, [asm_arg(xmm(dst)), asm_arg(xmm(FS1))]);
                 self.emit(
                     Opcode::Pshufd,
-                    [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS2)), asm_arg(&0xa0i64)],
+                    [asm_arg(xmm(FS1)), asm_arg(xmm(FS2)), asm_arg(0xa0i64)],
                 );
                 self.emit(
                     Opcode::Pshufd,
-                    [asm_arg(&xmm(dst)), asm_arg(&xmm(dst)), asm_arg(&0xf5i64)],
+                    [asm_arg(xmm(dst)), asm_arg(xmm(dst)), asm_arg(0xf5i64)],
                 );
-                self.emit(Opcode::Andps, [asm_arg(&xmm(dst)), asm_arg(&xmm(FS1))]);
+                self.emit(Opcode::Andps, [asm_arg(xmm(dst)), asm_arg(xmm(FS1))]);
                 self.emit(
                     Opcode::Pshufd,
-                    [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS2)), asm_arg(&0xf5i64)],
+                    [asm_arg(xmm(FS1)), asm_arg(xmm(FS2)), asm_arg(0xf5i64)],
                 );
-                self.emit(Opcode::Orps, [asm_arg(&xmm(dst)), asm_arg(&xmm(FS1))]);
+                self.emit(Opcode::Orps, [asm_arg(xmm(dst)), asm_arg(xmm(FS1))]);
             }
         } else {
             let a = self.use_freg(lhs, FS0);
@@ -470,29 +506,29 @@ impl FunctionCompiler<'_> {
             // Reserved FS2 is disjoint from allocated registers and spill loads.
             dst = if d == b && a != d { FS2 } else { d };
             if dst != a {
-                self.emit(Opcode::Movaps, [asm_arg(&xmm(dst)), asm_arg(&xmm(a))]);
+                self.emit(Opcode::Movaps, [asm_arg(xmm(dst)), asm_arg(xmm(a))]);
             }
             self.emit(
                 packed_compare(cond, shape).unwrap(),
-                [asm_arg(&xmm(dst)), asm_arg(&xmm(b))],
+                [asm_arg(xmm(dst)), asm_arg(xmm(b))],
             );
             if shape == VectorType::I64x2 {
                 self.emit(
                     Opcode::Pshufd,
-                    [asm_arg(&xmm(FS1)), asm_arg(&xmm(dst)), asm_arg(&0xb1i64)],
+                    [asm_arg(xmm(FS1)), asm_arg(xmm(dst)), asm_arg(0xb1i64)],
                 );
-                self.emit(Opcode::Andps, [asm_arg(&xmm(dst)), asm_arg(&xmm(FS1))]);
+                self.emit(Opcode::Andps, [asm_arg(xmm(dst)), asm_arg(xmm(FS1))]);
             }
         }
         if matches!(
             cond,
             IntCC::Ne | IntCC::Sle | IntCC::Sge | IntCC::Ule | IntCC::Uge
         ) {
-            self.emit(Opcode::Pcmpeqd, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS1))]);
-            self.emit(Opcode::Xorps, [asm_arg(&xmm(dst)), asm_arg(&xmm(FS1))]);
+            self.emit(Opcode::Pcmpeqd, [asm_arg(xmm(FS1)), asm_arg(xmm(FS1))]);
+            self.emit(Opcode::Xorps, [asm_arg(xmm(dst)), asm_arg(xmm(FS1))]);
         }
         if dst != d {
-            self.emit(Opcode::Movaps, [asm_arg(&xmm(d)), asm_arg(&xmm(dst))]);
+            self.emit(Opcode::Movaps, [asm_arg(xmm(d)), asm_arg(xmm(dst))]);
         }
         self.def_done(result, d);
     }
@@ -501,32 +537,56 @@ impl FunctionCompiler<'_> {
         let canonical = canonical_mask(self.func, args[0]);
         self.vector_stage(args[0], FS0);
         if !canonical {
-            self.emit(Opcode::Xorps, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS1))]);
+            self.emit(Opcode::Xorps, [asm_arg(xmm(FS1)), asm_arg(xmm(FS1))]);
             self.emit(
                 packed_compare(IntCC::Eq, shape).unwrap(),
-                [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))],
+                [asm_arg(xmm(FS0)), asm_arg(xmm(FS1))],
             );
             if shape == VectorType::I64x2 {
                 self.emit(
                     Opcode::Pshufd,
-                    [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS0)), asm_arg(&0xb1i64)],
+                    [asm_arg(xmm(FS1)), asm_arg(xmm(FS0)), asm_arg(0xb1i64)],
                 );
-                self.emit(Opcode::Andps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+                self.emit(Opcode::Andps, [asm_arg(xmm(FS0)), asm_arg(xmm(FS1))]);
             }
         }
         self.vector_stage(args[1], FS1);
         self.vector_stage(args[2], FS2);
         // b ^ ((a ^ b) & !is_zero(mask)); masks need not be canonical.
-        self.emit(Opcode::Xorps, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS2))]);
+        self.emit(Opcode::Xorps, [asm_arg(xmm(FS1)), asm_arg(xmm(FS2))]);
         self.emit(
             if canonical {
                 Opcode::Andps
             } else {
                 Opcode::Andnps
             },
-            [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))],
+            [asm_arg(xmm(FS0)), asm_arg(xmm(FS1))],
         );
-        self.emit(Opcode::Xorps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS2))]);
+        self.emit(Opcode::Xorps, [asm_arg(xmm(FS0)), asm_arg(xmm(FS2))]);
         self.vector_publish(result);
+    }
+}
+
+#[cfg(test)]
+mod d_tests {
+    use super::*;
+
+    #[test]
+    fn d_operations_scalarize_before_packed_feature_selection() {
+        let source = "func @f(f32x2,f32x2,f32x2)->f32x2 {\nentry(v0:f32x2,v1:f32x2,v2:f32x2):\n v3 = fma v0,v1,v2\n return v3\n}\nfunc @w(i8x8)->i16x8 {\nentry(v0:i8x8):\n v1 = uwiden_low.i16x8 v0\n return v1\n}\nfunc @n(i16x8)->i8x8 {\nentry(v0:i16x8):\n v1 = narrow_low.i8x8 v0\n return v1\n}";
+        let m = keel_ir::parse(source).unwrap();
+        keel_ir::verify_module(&m).unwrap();
+        for features in [keel_asm_ir::x86::Features::NONE, keel_asm_ir::x86::Features::all()] {
+            for f in &m.functions {
+                let lowered = lower(f, features);
+                keel_ir::verify(&lowered).unwrap();
+                for (_, i) in lowered.layout_insts() {
+                    let data = lowered.inst_data(i);
+                    assert!(!data.is_vector_instruction(), "{data:?}");
+                    assert!(!matches!(data, InstData::Fma { args } if lowered.value_type(args[0]).is_vector()));
+                    assert!(!matches!(data, InstData::Convert { op: ConvertOp::NarrowLow | ConvertOp::UwidenLow, .. }));
+                }
+            }
+        }
     }
 }

@@ -12,3 +12,11 @@
 /perf.data.old
 *.profraw
 *.profdata
+
+# Cargo/private outputs and archived proof work are not source inputs.
+**/target/
+/PRIVATE/
+/suite/evidence/
+/artifacts.lock.json
+/docs/*202610*.json
+/docs/*202610*.html

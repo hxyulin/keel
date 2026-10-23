@@ -4,6 +4,8 @@ use std::path::PathBuf;
 pub fn run(args: &[String]) -> Result<(), String> {
     let mut target = if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
         Some(Target::X86_64LinuxGnu)
+    } else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+        Some(Target::Aarch64LinuxGnu)
     } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         Some(Target::Aarch64AppleDarwin)
     } else {
@@ -22,6 +24,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
                         .as_str()
                     {
                         "x86_64-unknown-linux-gnu" => Target::X86_64LinuxGnu,
+                        "aarch64-unknown-linux-gnu" | "aarch64-linux-gnu" => {
+                            Target::Aarch64LinuxGnu
+                        }
                         "aarch64-apple-darwin" => Target::Aarch64AppleDarwin,
                         other => return Err(format!("unsupported archive target `{other}`")),
                     },

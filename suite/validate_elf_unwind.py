@@ -20,6 +20,7 @@ def main():
     parser.add_argument("--libc", type=Path, default=Path("/usr/lib/libc.so.6"))
     parser.add_argument("--libgcc", type=Path, default=Path("/usr/lib/libgcc_s.so.1"))
     parser.add_argument("--gdb", type=Path, help="also require debugger CFI discovery and a complete backtrace")
+    parser.add_argument("--gc-sections", action="store_true", help="also collect unreachable ELF sections")
     args = parser.parse_args()
     if platform.system() != "Linux" or platform.machine() != "x86_64":
         parser.error("run on x86-64 Linux")
@@ -120,8 +121,8 @@ int main(void) { return outer() == 7 ? 42 : 1; }
                 checked([keel, "cc", "--target", "x86_64-unknown-linux-gnu", *flags, "--emit-object", source, "-o", obj], True)
             inputs = [out / "start.o", *frames, obj, args.libgcc, args.libc]
             native, reference = out / (name + ".keel"), out / (name + ".gnu")
-            checked([keel, "link", "--target", "x86_64-unknown-linux-gnu", *inputs, "-o", native], True)
-            checked(["ld", "--eh-frame-hdr", "--dynamic-linker", "/lib64/ld-linux-x86-64.so.2", "-o", reference, *inputs])
+            checked([keel, "link", "--target", "x86_64-unknown-linux-gnu", *( ["--gc-sections"] if args.gc_sections else []), *inputs, "-o", native], True)
+            checked(["ld", *( ["--gc-sections"] if args.gc_sections else []), "--eh-frame-hdr", "--dynamic-linker", "/lib64/ld-linux-x86-64.so.2", "-o", reference, *inputs])
             for exe in [native, reference]:
                 result = run([exe])
                 assert (result.returncode, result.stdout, result.stderr) == (42, b"", b""), (exe, result)

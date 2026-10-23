@@ -1,4 +1,4 @@
-//! AVX XMM forms only. W=0 and L=0, including WIG/LIG forms, for
+//! AVX forms. Canonical W=0 for WIG forms, for
 //! predictable encodings. Reuses legacy address emission and final fixup bias.
 use super::*;
 
@@ -11,6 +11,19 @@ impl<'a> Encoding<'a> {
         field: u8,
         source: Option<u8>,
         rm: &'a Operand,
+    ) -> Result<(), String> {
+        self.vex_rm_bits(map, pp, byte, field, source, rm, false, false)
+    }
+    pub(super) fn vex_rm_bits(
+        &mut self,
+        map: u8,
+        pp: u8,
+        byte: u8,
+        field: u8,
+        source: Option<u8>,
+        rm: &'a Operand,
+        l: bool,
+        w: bool,
     ) -> Result<(), String> {
         let (b, x) = match rm {
             R(r) => (r.number >> 3, 0),
@@ -28,9 +41,9 @@ impl<'a> Encoding<'a> {
             self.bytes.push(segment);
         }
         // None means reserved encoded vvvv=1111, not register 15.
-        let v = source.map_or(0x78, |r| ((!r) & 15) << 3);
+        let v = source.map_or(0x78, |r| ((!r) & 15) << 3) | (u8::from(l) << 2) | (u8::from(w) << 7);
         let r = ((!field >> 3) & 1) << 7;
-        if map == 1 && b == 0 && x == 0 {
+        if map == 1 && b == 0 && x == 0 && !w {
             self.bytes.extend([0xc5, r | v | pp]);
         } else {
             self.bytes

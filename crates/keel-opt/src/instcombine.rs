@@ -15,7 +15,7 @@
 
 mod constant_division;
 
-use crate::const_fold::{self, constant_data as constant};
+use crate::const_fold::{self, constant_ref as constant};
 use crate::scratch::Scratch;
 use keel_ir::{
     BinaryOp, ConvertOp, EntityRef, Function, InsertPoint, Inst, InstData, IntCC, Type, UnaryOp,
@@ -754,9 +754,34 @@ fn select(func: &Function, cond: Value, a: Value, b: Value, ty: Type, full: bool
     None
 }
 
+/// Whether `simplify` has rules for the opcode of `data`, or `simplify_branch`
+/// for a terminator's.
+fn has_rules(data: &InstData) -> bool {
+    matches!(
+        data,
+        InstData::Binary { .. }
+            | InstData::Unary { .. }
+            | InstData::Convert { .. }
+            | InstData::Icmp { .. }
+            | InstData::Fcmp { .. }
+            | InstData::Fma { .. }
+            | InstData::Select { .. }
+            | InstData::Overflow { .. }
+            | InstData::Brif { .. }
+    )
+}
+
 /// `canonical` promises that `inst` is in canonical form, which spares the
 /// normalization check.
 fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Option<Fold> {
+    // Other opcodes have no rules here; at most canonicalization changes them.
+    // The opcode decides that before results are read.
+    let data = func.inst_data(inst);
+    debug_assert!(!canonical || !crate::canonicalize::needs_normalize(func, data));
+    let normalize = !canonical && crate::canonicalize::needs_normalize(func, data);
+    if !normalize && !has_rules(data) {
+        return None;
+    }
     let result = *func.inst_results(inst).first()?;
     // A stale layout instruction can remain after its result was aliased.
     // Never let a later fold overwrite that existing replacement.
@@ -765,26 +790,7 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
     {
         return None;
     }
-    // Other opcodes have no rules here; at most canonicalization changes them.
-    let data = func.inst_data(inst);
-    debug_assert!(!canonical || !crate::canonicalize::needs_normalize(func, data));
-    let normalize = !canonical && crate::canonicalize::needs_normalize(func, data);
-    if !normalize
-        && !matches!(
-            data,
-            InstData::Binary { .. }
-                | InstData::Unary { .. }
-                | InstData::Convert { .. }
-                | InstData::Icmp { .. }
-                | InstData::Fcmp { .. }
-                | InstData::Fma { .. }
-                | InstData::Select { .. }
-                | InstData::Overflow { .. }
-        )
-    {
-        return None;
-    }
-    let mut data = data.clone();
+    let mut data = func.inst_data(inst).clone();
     let canonicalized = normalize && {
         crate::canonicalize::normalize(func, &mut data);
         data != *func.inst_data(inst)
@@ -1196,6 +1202,11 @@ fn run_from(func: &mut Function, canonical: bool) -> bool {
     while let Some(inst) = work.pop() {
         queued[inst.index()] = false;
         if func.is_removed(inst) {
+            continue;
+        }
+        // Canonical instructions without rules here stay as they are; the
+        // opcode alone says so, without reading results or their values.
+        if canonical && !has_rules(func.inst_data(inst)) {
             continue;
         }
         if func.inst_results(inst).is_empty() {

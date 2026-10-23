@@ -104,14 +104,78 @@ impl fmt::Display for AbiParam {
     }
 }
 
+/// Call operands with ABI contracts attached to operand positions. Value rewrites
+/// can mutate the fixed-length slice but cannot change descriptor association.
+/// Missing descriptors retain the declared named ABI / legacy scalar varargs.
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Default)]
+pub struct CallArgs {
+    values: Vec<Value>,
+    abi: Vec<Option<AbiParam>>,
+}
+
+impl CallArgs {
+    pub fn with_abi(args: impl IntoIterator<Item = (Value, AbiParam)>) -> Self {
+        let (values, abi) = args.into_iter().map(|(v, p)| (v, Some(p))).unzip();
+        Self { values, abi }
+    }
+
+    pub fn from_optional(args: impl IntoIterator<Item = (Value, Option<AbiParam>)>) -> Self {
+        let (values, abi) = args.into_iter().unzip();
+        Self { values, abi }
+    }
+
+    pub fn abi(&self, index: usize) -> Option<&AbiParam> {
+        self.abi.get(index).and_then(Option::as_ref)
+    }
+
+    pub fn has_explicit_abi(&self) -> bool {
+        self.abi.iter().any(Option::is_some)
+    }
+}
+
+impl From<Vec<Value>> for CallArgs {
+    fn from(values: Vec<Value>) -> Self {
+        Self { abi: vec![None; values.len()], values }
+    }
+}
+
+impl std::ops::Deref for CallArgs {
+    type Target = [Value];
+    fn deref(&self) -> &[Value] { &self.values }
+}
+impl std::ops::DerefMut for CallArgs {
+    fn deref_mut(&mut self) -> &mut [Value] { &mut self.values }
+}
+impl<'a> IntoIterator for &'a CallArgs {
+    type Item = &'a Value;
+    type IntoIter = std::slice::Iter<'a, Value>;
+    fn into_iter(self) -> Self::IntoIter { self.values.iter() }
+}
+impl<'a> IntoIterator for &'a mut CallArgs {
+    type Item = &'a mut Value;
+    type IntoIter = std::slice::IterMut<'a, Value>;
+    fn into_iter(self) -> Self::IntoIter { self.values.iter_mut() }
+}
+
+/// Explicit producer extension ABI for x86 SysV short-vector boundaries.
+/// Untagged C signatures retain the common target ABI and reject ambiguous
+/// extension types. This policy is independent of CPU features and `cc(fast)`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum X86VectorAbi {
+    Gnu,
+    Clang,
+}
+
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Signature {
     pub params: Vec<AbiParam>,
     pub returns: Vec<AbiParam>,
     pub cc: CallConv,
+    pub x86_vector_abi: Option<X86VectorAbi>,
     /// Takes more arguments after `params`, like C's `...`. A call passes
     /// `params` and then any number of `i32`, `i64`, `ptr` or `f64`: the
-    /// types C's default argument promotions leave.
+    /// types C's default argument promotions leave. Explicit call operand
+    /// ABI contracts can also pass aggregate objects through ByVal pointers.
     pub variadic: bool,
     /// May return more than once, like `setjmp`: after a `longjmp`, the
     /// call returns again with the registers it saved. Written
@@ -145,6 +209,16 @@ impl fmt::Display for Signature {
             CallConv::C => f.write_str(" cc(c)")?,
             CallConv::Fast => f.write_str(" cc(fast)")?,
         }
+        if let Some(abi) = self.x86_vector_abi {
+            write!(
+                f,
+                " x86_vector_abi({})",
+                match abi {
+                    X86VectorAbi::Gnu => "gnu",
+                    X86VectorAbi::Clang => "clang",
+                }
+            )?;
+        }
         if self.returns_twice {
             f.write_str(" returns_twice")?;
         }
@@ -159,6 +233,7 @@ impl Signature {
             params: params.iter().map(|&ty| AbiParam::new(ty)).collect(),
             returns: returns.iter().map(|&ty| AbiParam::new(ty)).collect(),
             cc: CallConv::C,
+            x86_vector_abi: None,
             variadic: false,
             returns_twice: false,
         }
@@ -173,9 +248,21 @@ impl Signature {
     }
 }
 
-/// Function promises and optimization policy, deliberately separate from ABI types.
+/// Function symbol binding, promises and optimization policy, separate from ABI types.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct FunctionAttrs {
+    /// Ordinary weak symbol binding (definition or optional external reference).
+    /// This never permits substituting a local body for a call.
+    pub weak: bool,
+    /// Default-priority executable lifecycle registration; requires void(void).
+    pub constructor: bool,
+    /// Default-priority executable shutdown registration; requires void(void).
+    pub destructor: bool,
+    /// Compiler emission root only; does not request linker retention.
+    pub used: bool,
+    /// Compiler emission and linker garbage-collection root.
+    pub retain: bool,
+    pub section: Option<crate::SectionName>,
     /// Producer promises that direct references cannot resolve to a different
     /// definition, even though the symbol may remain externally visible.
     /// This does not change linkage, visibility, ABI, or linker options.
@@ -189,6 +276,12 @@ pub struct FunctionAttrs {
 
 impl FunctionAttrs {
     pub fn merge(&mut self, other: Self) {
+        self.weak |= other.weak;
+        self.constructor |= other.constructor;
+        self.used |= other.used;
+        self.retain |= other.retain;
+        self.section = self.section.or(other.section);
+        self.destructor |= other.destructor;
         self.noninterposable |= other.noninterposable;
         self.inlinehint |= other.inlinehint;
         self.alwaysinline |= other.alwaysinline;
@@ -211,6 +304,11 @@ impl FunctionAttrs {
 impl fmt::Display for FunctionAttrs {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (set, name) in [
+            (self.weak, "weak"),
+            (self.constructor, "constructor"),
+            (self.used, "used"),
+            (self.retain, "retain"),
+            (self.destructor, "destructor"),
             (self.noninterposable, "noninterposable"),
             (self.inlinehint, "inlinehint"),
             (self.alwaysinline, "alwaysinline"),
@@ -221,6 +319,9 @@ impl fmt::Display for FunctionAttrs {
             if set {
                 write!(f, " {name}")?;
             }
+        }
+        if let Some(section) = self.section {
+            write!(f, " section {section}")?;
         }
         Ok(())
     }
@@ -406,6 +507,10 @@ pub struct Function {
     pub local: bool,
     /// ODR definition coalesced by the linker across translation units.
     pub weak_odr: bool,
+    /// A nonlocal definition visible to the other objects of a link but not
+    /// exported from the linked image (ELF `STV_HIDDEN`, Mach-O private
+    /// extern).
+    pub hidden: bool,
     /// The source-level return type, `dreturn dt0`, for debuggers; none
     /// for `void` or if unknown.
     pub debug_return: Option<crate::DebugType>,
@@ -475,6 +580,7 @@ impl fmt::Debug for Function {
             .field("personality", &self.personality)
             .field("local", &self.local)
             .field("weak_odr", &self.weak_odr)
+            .field("hidden", &self.hidden)
             .field("debug_return", &self.debug_return)
             .field("debug_loc", &self.debug_loc)
             .field("debug_scopes", &self.debug_scopes)
@@ -511,6 +617,7 @@ impl Function {
             personality: None,
             local: false,
             weak_odr: false,
+            hidden: false,
             debug_return: None,
             debug_loc: None,
             debug_scopes: Vec::new(),
@@ -651,6 +758,7 @@ impl Function {
     /// allocations in the verifier's hot path.
     pub(crate) fn for_each_result_type(&self, data: &InstData, mut visit: impl FnMut(Type)) {
         match data {
+            InstData::F80const { .. } => visit(Type::F80),
             InstData::VectorSplat { ty, .. }
             | InstData::Iconst { ty, .. }
             | InstData::Fconst { ty, .. }
@@ -662,8 +770,13 @@ impl Function {
             InstData::AtomicCas { args, .. } | InstData::Select { args } => {
                 visit(self.value_type(args[1]))
             }
-            InstData::StackAddr { .. } | InstData::SymbolAddr { .. } => visit(Type::Ptr),
-            InstData::VectorExtract { arg, .. } => visit(
+            InstData::StackAddr { .. } | InstData::SymbolAddr { .. } | InstData::AggregateVaArg { .. } => visit(Type::Ptr),
+            InstData::Neon { op, ty, .. } => {
+                for _ in 0..op.result_count() {
+                    visit(*ty);
+                }
+            }
+            InstData::VectorExtract { arg, .. } | InstData::VectorReduce { arg, .. } => visit(
                 self.value_type(*arg)
                     .vector()
                     .map_or(Type::I8, |v| v.lane_type()),
@@ -707,6 +820,7 @@ impl Function {
                     visit(ty);
                 }
             }
+            InstData::X86RflagsRegion { plan, .. } => { for _ in 0..plan.observations { visit(Type::I64); } }
             InstData::InlineAsm { asm, .. } => {
                 for &(_, ty) in &asm.outputs {
                     visit(ty);
@@ -867,6 +981,34 @@ impl Function {
     pub fn move_inst(&mut self, inst: Inst, at: InsertPoint) {
         self.remove_inst(inst);
         self.place(inst, at);
+    }
+
+    /// Moves the instructions of `from`, from index `start` on, to the end
+    /// of `to` in order: [`Function::move_inst`] to [`InsertPoint::End`] for
+    /// each, without a search and a shift per instruction.
+    pub fn move_insts_to_end(&mut self, from: Block, start: usize, to: Block) {
+        assert_ne!(from, to, "cannot move a block's instructions into itself");
+        let source = self.blocks[from].insts;
+        assert!(start <= source.len(), "instruction index out of bounds");
+        if start == source.len() {
+            return;
+        }
+        let mut dest = self.blocks[to].insts;
+        for i in start..source.len() {
+            // Pushing only appends to the pool, so `source` stays valid.
+            let inst = self.block_insts.get(source)[i];
+            self.block_insts.push(&mut dest, inst);
+            self.insts[inst].block = to.index() as u32;
+        }
+        self.blocks[to].insts = dest;
+        let moved = source.len() - start;
+        let from = &mut self.blocks[from];
+        self.block_insts.truncate(&mut from.insts, start);
+        self.layout_len -= if from.in_layout { moved } else { 0 };
+        self.layout_len += if self.blocks[to].in_layout { moved } else { 0 };
+        // The last instruction of `from` moved.
+        self.cfg_stamp = fresh_cfg_stamp();
+        self.compact_insts_if_wasteful();
     }
 
     /// Whether `inst` has been removed from the layout.
@@ -1064,6 +1206,62 @@ impl Function {
         self.block_values.get(self.blocks[block].params)
     }
 
+    /// Bounded proof for the initial tagged-va_arg policy. Only a direct local
+    /// va_list initialized by this signature's va_start in the same block is
+    /// accepted. Calls and potentially aliasing writes break the proof. A
+    /// bounded write wholly inside a distinct local slot is disjoint, including
+    /// private spills inserted by vector legalization.
+    pub fn has_x86_va_arg_provenance(&self, inst: Inst, abi: X86VectorAbi) -> bool {
+        if self.sig.cc != CallConv::C || !self.sig.variadic || self.sig.x86_vector_abi != Some(abi) {
+            return false;
+        }
+        let (InstData::VaArg { list, .. } | InstData::AggregateVaArg { list, .. }) = self.inst_data(inst) else { return false; };
+        let list = self.resolve(*list);
+        let ValueDef::Result(address, _) = self.value_def(list) else { return false; };
+        let InstData::StackAddr { slot } = self.inst_data(address) else { return false; };
+        if !self.stack_slots().any(|(s,d)| s == *slot && d.size >= 24 && d.align >= 8) { return false; }
+        if matches!(self.inst_data(inst), InstData::AggregateVaArg { home, .. } if home == slot) { return false; }
+        // Follow only constant in-bounds offsets from an actual local slot.
+        // Unknown pointers, negative offsets, oversized writes and long chains
+        // remain unproven. This also keeps backend-inserted private lane spills
+        // from invalidating an otherwise verified current-signature va_list.
+        let disjoint_store = |value: Value, mut addr: Value| {
+            let Some(width) = self.value_type(self.resolve(value)).bytes() else { return false; };
+            let mut offset = 0i64;
+            for _ in 0..32 {
+                let ValueDef::Result(at, _) = self.value_def(self.resolve(addr)) else { return false; };
+                match self.inst_data(at) {
+                    InstData::StackAddr { slot: other } => return *other != *slot && offset >= 0
+                        && self.stack_slots().any(|(s,d)| s == *other
+                            && offset.checked_add(i64::from(width)).is_some_and(|end| end <= i64::from(d.size))),
+                    InstData::Binary { op: crate::BinaryOp::Ptradd, args } => {
+                        let ValueDef::Result(constant, _) = self.value_def(self.resolve(args[1])) else { return false; };
+                        let InstData::Iconst { imm, .. } = self.inst_data(constant) else { return false; };
+                        let Some(sum) = offset.checked_add(*imm) else { return false; };
+                        offset = sum;
+                        addr = args[0];
+                    }
+                    _ => return false,
+                }
+            }
+            false
+        };
+        let mut initialized = false;
+        for &before in self.block_insts(self.inst_block(inst)) {
+            if before == inst { return initialized; }
+            let data = self.inst_data(before);
+            match data {
+                InstData::Intrinsic { id: crate::Intrinsic::VaStart, args } if args.first().is_some_and(|&v| self.resolve(v) == list) => initialized = true,
+                InstData::AggregateVaArg { list: other, home, .. } if self.resolve(*other) == list && home == slot => initialized = false,
+                InstData::VaArg { list: other, .. } | InstData::AggregateVaArg { list: other, .. } if self.resolve(*other) == list => {},
+                InstData::Store { value, addr, .. } if disjoint_store(*value, *addr) => {},
+                _ if data.memory_effects().may_write() => initialized = false,
+                _ => {},
+            }
+        }
+        false
+    }
+
     #[inline]
     pub fn block_insts(&self, block: Block) -> &[Inst] {
         self.block_insts.get(self.blocks[block].insts)
@@ -1172,7 +1370,15 @@ impl Iterator for LayoutInsts<'_> {
     fn size_hint(&self) -> (usize, Option<usize>) {
         (self.remaining, Some(self.remaining))
     }
+
+    /// The length is known, so counting walks nothing.
+    #[inline]
+    fn count(self) -> usize {
+        self.remaining
+    }
 }
+
+impl ExactSizeIterator for LayoutInsts<'_> {}
 
 /// The first entry of `arena` whose key is `key`, or else the hash to index
 /// a new entry under (0 while the arena is scanned). Builds `index` once the
@@ -1216,6 +1422,9 @@ impl fmt::Display for Function {
         }
         if self.weak_odr {
             f.write_str(" weak_odr")?;
+        }
+        if self.hidden {
+            f.write_str(" hidden")?;
         }
         if let Some(personality) = &self.personality {
             write!(f, " personality @{personality}")?;
@@ -1312,6 +1521,9 @@ impl Function {
                 f.write_str(" ")?;
                 write_decimal(f, "", imm.is_negative(), imm.unsigned_abs())
             }
+            InstData::F80const { significand, sign_exp } => {
+                write!(f, "fconst.f80 {sign_exp:#06x}, {significand:#018x}")
+            }
             InstData::Fconst { ty, bits } => {
                 write!(f, "fconst.{ty} {}", crate::inst::float_text(*ty, *bits))
             }
@@ -1323,7 +1535,7 @@ impl Function {
                 f.write_str("call @")?;
                 f.write_str(&self.callees[*func].name)?;
                 f.write_str("(")?;
-                self.write_args(f, a)?;
+                self.write_call_args(f, a)?;
                 f.write_str(")")
             }
             InstData::SymbolAddr { symbol } => {
@@ -1337,7 +1549,7 @@ impl Function {
                 f.write_str("invoke @")?;
                 f.write_str(&self.callees[*func].name)?;
                 f.write_str("(")?;
-                self.write_args(f, a)?;
+                self.write_call_args(f, a)?;
                 f.write_str("), ")?;
                 self.write_block_call(f, &dests[0])?;
                 f.write_str(", ")?;
@@ -1364,7 +1576,7 @@ impl Function {
                 f.write_str("return_call @")?;
                 f.write_str(&self.callees[*func].name)?;
                 f.write_str("(")?;
-                self.write_args(f, a)?;
+                self.write_call_args(f, a)?;
                 f.write_str(")")
             }
             InstData::ReturnCallIndirect {
@@ -1375,7 +1587,7 @@ impl Function {
                 f.write_str("return_call_indirect ")?;
                 write_value(f, v(*callee))?;
                 f.write_str("(")?;
-                self.write_args(f, a)?;
+                self.write_call_args(f, a)?;
                 write!(f, ") : {}", self.signatures[*sig])
             }
             InstData::CallIndirect {
@@ -1386,11 +1598,16 @@ impl Function {
                 f.write_str("call_indirect ")?;
                 write_value(f, v(*callee))?;
                 f.write_str("(")?;
-                self.write_args(f, a)?;
+                self.write_call_args(f, a)?;
                 write!(f, ") : {}", self.signatures[*sig])
             }
             InstData::Intrinsic { id, args: a } => {
                 write!(f, "intrinsic {id}(")?;
+                self.write_args(f, a)?;
+                f.write_str(")")
+            }
+            InstData::X86RflagsRegion { plan, args: a } => {
+                write!(f, "x86_rflags_region terminal {}(", Quoted(plan.to_string().as_bytes()))?;
                 self.write_args(f, a)?;
                 f.write_str(")")
             }
@@ -1417,6 +1634,17 @@ impl Function {
                 f.write_str("vsplat.")?;
                 write_name(f, Name::Type(*ty))?;
                 f.write_str(" ")?;
+                write_value(f, v(*arg))
+            }
+            InstData::Neon { op, ty, args } => {
+                write!(f, "{op}.")?;
+                write_name(f, Name::Type(*ty))?;
+                f.write_str("(")?;
+                self.write_args(f, args)?;
+                f.write_str(")")
+            }
+            InstData::VectorReduce { op, arg } => {
+                write!(f, "{op} ")?;
                 write_value(f, v(*arg))
             }
             InstData::VectorUnary { op, arg } => {
@@ -1514,11 +1742,22 @@ impl Function {
                 write_flags(f, flags)?;
                 write_value(f, v(*addr))
             }
-            InstData::VaArg { ty, list } => {
+            InstData::AggregateVaArg { layout, list, home, x86_vector_abi } => {
+                write!(f, "va_arg_aggregate {layout}, ")?;
+                write_value(f, v(*list))?;
+                write!(f, ", {home}")?;
+                if let Some(abi) = x86_vector_abi {
+                    write!(f, " x86_vector_abi({})", match abi { X86VectorAbi::Gnu => "gnu", X86VectorAbi::Clang => "clang" })?;
+                }
+                Ok(())
+            }
+            InstData::VaArg { ty, list, x86_vector_abi } => {
                 f.write_str("va_arg.")?;
                 write_name(f, Name::Type(*ty))?;
                 f.write_str(" ")?;
-                write_value(f, v(*list))
+                write_value(f, v(*list))?;
+                if let Some(abi) = x86_vector_abi { write!(f, " x86_vector_abi({})", match abi { X86VectorAbi::Gnu => "gnu", X86VectorAbi::Clang => "clang" })?; }
+                Ok(())
             }
             InstData::Store { value, addr, flags } => {
                 f.write_str("store ")?;
@@ -1586,6 +1825,15 @@ impl Function {
                 Ok(())
             }
         }
+    }
+
+    fn write_call_args<W: fmt::Write + ?Sized>(&self, f: &mut W, args: &CallArgs) -> fmt::Result {
+        for (i, &value) in args.iter().enumerate() {
+            if i != 0 { f.write_str(", ")?; }
+            write_value(f, self.resolve(value))?;
+            if let Some(abi) = args.abi(i) { write!(f, " : {abi}")?; }
+        }
+        Ok(())
     }
 
     fn write_args<W: fmt::Write + ?Sized>(&self, f: &mut W, args: &[Value]) -> fmt::Result {
@@ -1684,6 +1932,7 @@ impl Name {
                     Type::F32 => 5,
                     Type::F64 => 6,
                     Type::Ptr => 7,
+                    Type::F80 => 63,
                     Type::Vector(v) => 8 + v as usize,
                 },
             ),
@@ -1895,6 +2144,24 @@ mod tests {
         );
         assert_eq!(func.inst_block(def_inst(&func, two)), entry);
         verify(&func).unwrap();
+    }
+
+    #[test]
+    fn moving_a_tail_matches_moving_each_instruction() {
+        let mut each = build_sum();
+        let mut tail = each.clone();
+        let blocks: Vec<_> = each.blocks().collect();
+        let (body, exit) = (blocks[2], blocks[3]);
+        for &inst in &each.block_insts(body)[3..].to_vec() {
+            each.move_inst(inst, InsertPoint::End(exit));
+        }
+        tail.move_insts_to_end(body, 3, exit);
+        assert_eq!(tail.to_string(), each.to_string());
+        assert_eq!(tail.block_insts(body), each.block_insts(body));
+        assert_eq!(tail.block_insts(exit), each.block_insts(exit));
+        let moved = tail.block_insts(exit)[1];
+        assert_eq!(tail.inst_block(moved), exit);
+        assert_eq!(tail.layout_insts().count(), each.layout_insts().count());
     }
 
     #[test]

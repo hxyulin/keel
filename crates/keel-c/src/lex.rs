@@ -29,6 +29,11 @@ pub enum Tok<'a> {
         /// `f` suffix: the value is already rounded to `f32`.
         single: bool,
     },
+    /// GNU floating imaginary constant, with a positive-zero real component.
+    Imaginary {
+        value: f64,
+        single: bool,
+    },
     /// A character constant, already the value of its `int` (or `wchar_t`).
     Char(i64),
     /// A string literal's bytes, without the terminating zero. Wide
@@ -63,7 +68,7 @@ const PUNCTS: [&str; 48] = [
 
 // Longest-match dispatch reads at most three bounded bytes. A punctuation
 // token never walks unrelated spellings or calls a general string comparator.
-#[inline]
+#[inline(always)]
 fn punctuation(bytes: &[u8]) -> Option<&'static str> {
     let a = *bytes.first()?;
     let b = bytes.get(1).copied().unwrap_or(0);
@@ -141,12 +146,54 @@ const IDENT: [bool; 256] = {
     table
 };
 
+/// What a token's first byte starts.
+#[derive(Clone, Copy)]
+enum Start {
+    Ident,
+    /// An identifier, or the prefix of a wide or UTF-8 literal.
+    Prefix,
+    Digit,
+    /// A number if a digit follows, else punctuation.
+    Dot,
+    Quote,
+    /// The end of the input.
+    Nul,
+    Other,
+}
+
+const START: [Start; 256] = {
+    let mut table = [Start::Other; 256];
+    let mut i = 0;
+    while i < 256 {
+        let c = i as u8;
+        table[i] = if matches!(c, b'L' | b'u' | b'U') {
+            Start::Prefix
+        } else if c.is_ascii_alphabetic() || c == b'_' || c == b'$' {
+            Start::Ident
+        } else if c.is_ascii_digit() {
+            Start::Digit
+        } else {
+            match c {
+                b'.' => Start::Dot,
+                b'"' | b'\'' => Start::Quote,
+                0 => Start::Nul,
+                _ => Start::Other,
+            }
+        };
+        i += 1;
+    }
+    table
+};
+
 /// Bytes that may start whitespace, a comment or a directive.
 const SPACE: [bool; 256] = {
     let mut table = [false; 256];
     let mut i = 0;
     while i < 256 {
-        table[i] = matches!(i as u8, b' ' | b'\t' | b'\r' | b'\x0c' | b'\x0b' | b'\n' | b'\\' | b'/' | b'#');
+        table[i] = matches!(
+            i as u8,
+            b' ' | b'\t' | b'\r' | b'\x0c' | b'\x0b' | b'\n' | b'\\' | b'/' | b'#'
+        );
         i += 1;
     }
     table
@@ -230,6 +277,31 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Appends at least `n` more tokens to `out`, or fewer ending with
+    /// `Eof`; returns whether `Eof` was reached. A batch keeps the lexer's
+    /// position in registers from one token to the next.
+    pub fn tokens(
+        &mut self,
+        text: &mut Strings<'a>,
+        out: &mut Vec<Token<'a>>,
+        n: usize,
+    ) -> Result<bool, Error> {
+        out.reserve(n);
+        let mut left = n;
+        while left > 0 {
+            let tok = self.next(text)?;
+            if matches!(&tok.tok, Tok::Ident(s) if *s == "__extension__") {
+                continue;
+            }
+            out.push(tok);
+            if tok.tok == Tok::Eof {
+                return Ok(true);
+            }
+            left -= 1;
+        }
+        Ok(false)
+    }
+
     fn peek(&self, n: usize) -> u8 {
         self.src.get(self.pos + n).copied().unwrap_or(0)
     }
@@ -256,13 +328,22 @@ impl<'a> Lexer<'a> {
     /// `#` lines, applying line markers.
     #[inline]
     fn skip_space(&mut self, text: &mut Strings<'a>) -> Result<(), Error> {
-        // Most tokens follow the last directly or after one blank.
+        // Most tokens follow the last directly, after one blank, or at the
+        // start of the next line after its indentation.
         let mut pos = self.pos;
         if self.src.get(pos) == Some(&b' ') {
             pos += 1;
         }
+        if self.src.get(pos) == Some(&b'\n') {
+            pos += 1;
+            self.line += 1;
+            self.line_start = pos;
+            while self.src.get(pos) == Some(&b' ') {
+                pos += 1;
+            }
+        }
+        self.pos = pos;
         if !self.src.get(pos).is_some_and(|&c| SPACE[c as usize]) {
-            self.pos = pos;
             return Ok(());
         }
         self.skip_space_slow(text)
@@ -378,38 +459,42 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    #[inline(always)]
     fn next(&mut self, text: &mut Strings<'a>) -> Result<Token<'a>, Error> {
         self.skip_space(text)?;
         let loc = self.loc();
         let c = self.peek(0);
-        let tok = if c == 0 {
-            Tok::Eof
-        } else if (c == b'L' || c == b'u' || c == b'U') && matches!(self.peek(1), b'"' | b'\'') {
-            // `u` and `U` literals are treated like `L` (32-bit units).
-            self.pos += 1;
-            self.quoted(true, text)?
-        } else if c == b'u' && self.peek(1) == b'8' && self.peek(2) == b'"' {
-            self.pos += 2;
-            self.quoted(false, text)?
-        } else if c.is_ascii_alphabetic() || c == b'_' || c == b'$' {
-            let start = self.pos;
-            let rest = &self.src[start..];
-            self.pos += rest
-                .iter()
-                .position(|&c| !IDENT[c as usize])
-                .unwrap_or(rest.len());
-            Tok::Ident(text.intern_utf8(&self.src[start..self.pos]))
-        } else if c.is_ascii_digit() || (c == b'.' && self.peek(1).is_ascii_digit()) {
-            self.number(text)?
-        } else if c == b'"' || c == b'\'' {
-            self.quoted(false, text)?
-        } else {
-            let rest = &self.src[self.pos..];
-            let Some(p) = punctuation(rest) else {
-                return Err(self.error(format!("unexpected character `{}`", c as char)));
-            };
-            self.pos += p.len();
-            Tok::Punct(p)
+        let tok = match START[c as usize] {
+            Start::Prefix if matches!(self.peek(1), b'"' | b'\'') => {
+                // `u` and `U` literals are treated like `L` (32-bit units).
+                self.pos += 1;
+                self.quoted(true, text)?
+            }
+            Start::Prefix if c == b'u' && self.peek(1) == b'8' && self.peek(2) == b'"' => {
+                self.pos += 2;
+                self.quoted(false, text)?
+            }
+            Start::Ident | Start::Prefix => {
+                let start = self.pos;
+                let rest = &self.src[start..];
+                self.pos += rest
+                    .iter()
+                    .position(|&c| !IDENT[c as usize])
+                    .unwrap_or(rest.len());
+                Tok::Ident(text.intern_utf8(&self.src[start..self.pos]))
+            }
+            Start::Digit => self.number(text)?,
+            Start::Dot if self.peek(1).is_ascii_digit() => self.number(text)?,
+            Start::Quote => self.quoted(false, text)?,
+            Start::Nul => Tok::Eof,
+            Start::Dot | Start::Other => {
+                let rest = &self.src[self.pos..];
+                let Some(p) = punctuation(rest) else {
+                    return Err(self.error(format!("unexpected character `{}`", c as char)));
+                };
+                self.pos += p.len();
+                Tok::Punct(p)
+            }
         };
         let pack = self.pack_limits.len() as u32 - 1;
         Ok(Token { tok, loc, pack })
@@ -586,6 +671,23 @@ impl<'a> Lexer<'a> {
 
 /// The value of an integer or floating constant.
 fn parse_number<'a>(text: &str) -> Option<Tok<'a>> {
+    // GNU accepts i/j before or after f. Deliberately exclude integer and
+    // long-double imaginary constants rather than silently narrowing them.
+    if text.bytes().any(|b| matches!(b, b'i' | b'I' | b'j' | b'J')) {
+        let mut body = text.to_owned();
+        let position = body.find(['i', 'I', 'j', 'J'])?;
+        if position + 2 < body.len() {
+            return None;
+        }
+        body.remove(position);
+        if body.ends_with(['l', 'L']) {
+            return None;
+        }
+        return match parse_number(&body)? {
+            Tok::Float { value, single } => Some(Tok::Imaginary { value, single }),
+            _ => None,
+        };
+    }
     let hex = text.starts_with("0x") || text.starts_with("0X");
     let is_float = text.bytes().any(|b| {
         b == b'.'
@@ -602,7 +704,7 @@ fn parse_number<'a>(text: &str) -> Option<Tok<'a>> {
             _ => (text, false),
         };
         let value = if hex {
-            parse_hex_float(&body[2..])?
+            parse_hex_float_precision(&body[2..], single)?
         } else if single {
             f64::from(body.parse::<f32>().ok()?)
         } else {
@@ -653,14 +755,17 @@ fn parse_number<'a>(text: &str) -> Option<Tok<'a>> {
     })
 }
 
-/// `1.8p3` (the part after `0x`): hex digits with an optional point, and
-/// a binary exponent. Exact while the digits fit in 64 bits.
-fn parse_hex_float(text: &str) -> Option<f64> {
-    let (mantissa, exp) = match text.split_once(['p', 'P']) {
-        Some((m, e)) => (m, e.parse::<i32>().ok()?),
-        None => (text, 0),
-    };
+/// Decode a hexadecimal significand with guard/sticky bits, then round once
+/// directly to the destination IEEE precision, including the subnormal range.
+fn parse_hex_float_precision(text: &str, single: bool) -> Option<f64> {
+    // C hexadecimal floating constants require a binary exponent, including
+    // when the token carries a GNU imaginary suffix.
+    let (mantissa, exp) = text.split_once(['p', 'P'])?;
+    let exp = exp.parse::<i32>().ok()? as i64;
     let (int, frac) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    if int.is_empty() && frac.is_empty() {
+        return None;
+    }
     let mut bits: u64 = 0;
     let mut shift = exp;
     let mut lost = false;
@@ -672,8 +777,6 @@ fn parse_hex_float(text: &str) -> Option<f64> {
                 shift -= 4;
             }
         } else {
-            // Further digits only scale (integer part) or are dropped
-            // (fraction); a non-zero one is folded into the sticky bit.
             lost |= d != 0;
             if i < int.len() {
                 shift += 4;
@@ -683,19 +786,56 @@ fn parse_hex_float(text: &str) -> Option<f64> {
     if lost {
         bits |= 1;
     }
-    // Rounds once, to 53 bits, then scales exactly (unless the result is
-    // subnormal). The scaling is done in steps, since 2^-1074 itself is
-    // representable but 2^1074 is not.
-    let mut value = bits as f64;
-    while shift < -1000 {
-        value *= 2f64.powi(-1000);
-        shift += 1000;
+    if bits == 0 {
+        return Some(0.0);
     }
-    while shift > 1000 {
-        value *= 2f64.powi(1000);
-        shift -= 1000;
+    let (fraction, bias) = if single { (23, 127) } else { (52, 1023) };
+    let high = 63 - bits.leading_zeros() as i64;
+    let exponent = high + shift;
+    if exponent > bias {
+        return Some(f64::INFINITY);
     }
-    Some(value * 2f64.powi(shift))
+    let quantum = (exponent - fraction).max(1 - bias - fraction);
+    let discard = quantum - shift;
+    let rounded = if discard > 64 {
+        0
+    } else if discard == 64 {
+        u64::from(bits > (1u64 << 63))
+    } else if discard > 0 {
+        let whole = bits >> discard;
+        let remainder = bits & ((1u64 << discard) - 1);
+        let half = 1u64 << (discard - 1);
+        whole + u64::from(remainder > half || (remainder == half && whole & 1 != 0))
+    } else {
+        bits << -discard
+    };
+    if rounded == 0 {
+        return Some(0.0);
+    }
+    let high = 63 - rounded.leading_zeros() as i64;
+    let exponent = high + quantum;
+    let payload = if exponent > bias {
+        ((2 * bias + 1) as u64) << fraction
+    } else if exponent < 1 - bias {
+        rounded
+    } else {
+        let significand = if high > fraction {
+            rounded >> (high - fraction)
+        } else {
+            rounded << (fraction - high)
+        };
+        (((exponent + bias) as u64) << fraction) | (significand & ((1u64 << fraction) - 1))
+    };
+    Some(if single {
+        f64::from(f32::from_bits(payload as u32))
+    } else {
+        f64::from_bits(payload)
+    })
+}
+
+#[cfg(test)]
+fn parse_hex_float(text: &str) -> Option<f64> {
+    parse_hex_float_precision(text, false)
 }
 
 #[cfg(test)]

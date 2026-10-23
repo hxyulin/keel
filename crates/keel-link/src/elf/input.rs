@@ -1,5 +1,6 @@
 //! Input ordering and demand-driven archive extraction. No filesystem access.
 use super::dynamic::Library;
+use super::groups::Plan;
 use crate::{Input, Result};
 use object::{Object, ObjectSymbol};
 use std::collections::{BTreeMap, BTreeSet};
@@ -7,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub(super) struct Named<'a> {
     pub name: String,
     pub bytes: &'a [u8],
+    pub groups: Plan,
 }
 #[derive(Default)]
 // Archive members and selected inputs retain their original input storage.
@@ -16,10 +18,18 @@ struct Symbols<'data> {
     defined: BTreeMap<&'data str, u8>,
     required: BTreeSet<&'data str>,
 }
-fn symbols(bytes: &[u8]) -> Result<Symbols<'_>> {
-    let file = object::File::parse(bytes).map_err(|e| e.to_string())?;
+fn symbols<'a>(bytes: &'a [u8], selected: &BTreeSet<String>) -> Result<(Symbols<'a>, Plan)> {
+    let file = object::read::elf::ElfFile64::<object::Endianness>::parse(bytes)
+        .map_err(|e| e.to_string())?;
+    let plan = Plan::new(&file, selected)?;
     let mut out = Symbols::default();
     for s in file.symbols() {
+        if plan.dead_symbol(s.index().0, s.section()) {
+            if plan.live.contains(&s.index().0) && s.is_global() && !s.is_weak() {
+                out.required.insert(s.name().map_err(|e| e.to_string())?);
+            }
+            continue;
+        }
         if !s.is_global() && !s.is_weak() {
             continue;
         }
@@ -41,7 +51,7 @@ fn symbols(bytes: &[u8]) -> Result<Symbols<'_>> {
             );
         }
     }
-    Ok(out)
+    Ok((out, plan))
 }
 /// Normal left-to-right archives, rescanned to a fixed point within each
 /// archive. Undefined weak references do not cause extraction. Thin archives
@@ -51,6 +61,7 @@ pub(super) fn prepare<'a>(
     entry: &str,
 ) -> Result<(Vec<Named<'a>>, Vec<Library<'a>>)> {
     let mut selected = Vec::new();
+    let mut signatures = BTreeSet::new();
     let mut libraries = Vec::new();
     let mut defined = BTreeMap::<&str, u8>::new();
     let mut required = BTreeSet::from([entry]);
@@ -68,18 +79,34 @@ pub(super) fn prepare<'a>(
                     let bytes = member.data(input.bytes).map_err(|e| e.to_string())?;
                     let name =
                         format!("{}({})", input.name, String::from_utf8_lossy(member.name()));
-                    let summary = symbols(bytes).map_err(|e| format!("{name}: {e}"))?;
-                    members.push((Named { name, bytes }, summary));
+                    members.push((name, bytes));
                 }
-                while let Some(index) = members.iter().position(|(_, s)| {
-                    s.defined.iter().any(|(n, rank)| {
-                        (required.contains(n) && !defined.contains_key(n))
-                            || (defined.get(n) == Some(&2) && *rank == 3)
-                    })
-                }) {
-                    let (member, summary) = members.remove(index);
+                loop {
+                    // Recompute against selected signatures: an unextracted
+                    // member must never reserve a COMDAT signature.
+                    let mut candidate = None;
+                    for (index, (name, bytes)) in members.iter().enumerate() {
+                        let (summary, groups) =
+                            symbols(bytes, &signatures).map_err(|e| format!("{name}: {e}"))?;
+                        if summary.defined.iter().any(|(n, rank)| {
+                            (required.contains(n) && !defined.contains_key(n))
+                                || (defined.get(n) == Some(&2) && *rank == 3)
+                        }) {
+                            candidate = Some((index, summary, groups));
+                            break;
+                        }
+                    }
+                    let Some((index, summary, groups)) = candidate else {
+                        break;
+                    };
+                    let (name, bytes) = members.remove(index);
+                    signatures.extend(groups.signatures.iter().cloned());
                     absorb(summary, &mut defined, &mut required);
-                    selected.push(member);
+                    selected.push(Named {
+                        name,
+                        bytes,
+                        groups,
+                    });
                 }
             } else {
                 let file = object::File::parse(input.bytes).map_err(|e| {
@@ -112,11 +139,13 @@ pub(super) fn prepare<'a>(
                     }
                     libraries.push(library);
                 } else {
-                    let summary = symbols(input.bytes)?;
+                    let (summary, groups) = symbols(input.bytes, &signatures)?;
+                    signatures.extend(groups.signatures.iter().cloned());
                     absorb(summary, &mut defined, &mut required);
                     selected.push(Named {
                         name: input.name.into(),
                         bytes: input.bytes,
+                        groups,
                     });
                 }
             }

@@ -9,6 +9,7 @@
 //! data @hidden = local align 4 { i32 1 }
 //! data @name = weak_odr hidden const align 1 { b"Name\0" }
 //! data @rtti = weak_odr hidden const align 8 { rtti_name @name }
+//! data @internal = hidden align 4 { i32 0 }
 //! decl data thread_local @errno_value
 //! ```
 //!
@@ -30,9 +31,14 @@ pub struct DataObject {
     pub local: bool,
     /// ODR definition coalesced by the linker across translation units.
     pub weak_odr: bool,
-    /// Hidden weak ODR data, exported within a link but not from its image.
-    /// Other hidden linkage is deliberately unsupported.
+    /// Ordinary weak binding; also valid for undefined optional references.
+    pub weak: bool,
+    /// A nonlocal definition visible to the other objects of a link but not
+    /// exported from the linked image (ELF `STV_HIDDEN`, Mach-O private
+    /// extern).
     pub hidden: bool,
+    pub retain: bool,
+    pub section: Option<crate::SectionName>,
     pub init: Option<DataInit>,
 }
 
@@ -109,22 +115,29 @@ impl DataInit {
 
 impl fmt::Display for DataObject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let weak = if self.weak { "weak " } else { "" };
         let thread_local = if self.thread_local {
             "thread_local "
         } else {
             ""
         };
         let Some(init) = &self.init else {
-            return write!(f, "decl data {thread_local}@{}", self.name);
+            return write!(f, "decl data {weak}{thread_local}@{}", self.name);
         };
         let local = if self.local { "local " } else { "" };
         let weak_odr = if self.weak_odr { "weak_odr " } else { "" };
         let hidden = if self.hidden { "hidden " } else { "" };
         write!(
             f,
-            "data @{} = {local}{weak_odr}{hidden}{thread_local}",
+            "data @{} = {local}{weak}{weak_odr}{hidden}{thread_local}",
             self.name
         )?;
+        if self.retain {
+            f.write_str("retain ")?;
+        }
+        if let Some(section) = self.section {
+            write!(f, "section {section} ")?;
+        }
         if init.constant {
             f.write_str("const ")?;
         }

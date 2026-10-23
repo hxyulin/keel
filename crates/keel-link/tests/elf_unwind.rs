@@ -51,6 +51,45 @@ fn symbol(file: &object::File<'_>, name: &str) -> u64 {
 }
 
 #[test]
+fn fde_ranges_stay_within_one_executable_section() {
+    for alignment in [1, 64] {
+        for (offset, range, valid) in [
+            (0, 4, true),
+            (3, 1, true),
+            (0, 0, true),
+            (3, 0, true),
+            (3, 2, false),          // Crossing even adjacent executable sections fails.
+            (4, 0, alignment == 1), // The exclusive end is valid only in the next section.
+            (4, 1, alignment == 1),
+            (alignment.max(4), 4, true),
+            (alignment.max(4) + 4, 0, false),
+            (0, u64::MAX, false),
+        ] {
+            let input = object(&format!(
+                ".text\n.globl _start\n_start: .byte 144,144,144,195\n\
+                 .section .text.next,\"ax\",@progbits\n.balign {alignment}\n\
+                 next: .byte 144,144,144,195\n\
+                 .section .eh_frame,\"a\",@progbits\n.p2align 3\n\
+                 .long 12,0\n.byte 1,0,1,120,16,0,0,0\n\
+                 .long 20,20\n.quad _start+{offset},{range}\n"
+            ));
+            let result = link(&[input]);
+            if valid {
+                result
+                    .unwrap_or_else(|e| panic!("align={alignment} pc=+{offset} size={range}: {e}"));
+            } else {
+                let expected = if range == u64::MAX {
+                    "unwind FDE range overflow"
+                } else {
+                    "unwind FDE range is outside executable section data"
+                };
+                assert_eq!(result.unwrap_err(), expected);
+            }
+        }
+    }
+}
+
+#[test]
 fn empty_frame_contributions_keep_extended_records_aligned() {
     for fde in [false, true] {
         for padding in 0..8 {
@@ -433,5 +472,36 @@ fn absolute_pointers_cie_versions_and_terminators_are_supported() {
                 .unwrap_err()
                 .contains("outside executable")
         );
+    }
+}
+
+#[test]
+fn registration_code_grouping_relocates_and_sorts_unwind_index() {
+    let code = |section: &str, name: &str| {
+        object(&format!(
+            ".section {section},\"ax\",@progbits\n.globl {name}\n{name}:\n.cfi_startproc\nret\n.cfi_endproc\n"
+        ))
+    };
+    let exe = link(&[
+        code("registry", "_start"),
+        code("other", "middle"),
+        code("registry", "last"),
+    ])
+    .unwrap();
+    let file = object::File::parse(exe.bytes.as_slice()).unwrap();
+    let functions = ["_start", "last", "middle"].map(|n| symbol(&file, n));
+    assert!(functions.windows(2).all(|p| p[0] < p[1]));
+    let hdr = file.section_by_name(".eh_frame_hdr").unwrap();
+    let data = hdr.data().unwrap();
+    assert_eq!(u32_at(data, 8), 3);
+    let frame = file.section_by_name(".eh_frame").unwrap();
+    for (i, pc) in functions.into_iter().enumerate() {
+        let relative = |at| (hdr.address() as i64 + i64::from(u32_at(data, at) as i32)) as u64;
+        assert_eq!(relative(12 + i * 8), pc);
+        let fde = relative(16 + i * 8);
+        let at = (fde - frame.address()) as usize;
+        let target =
+            (fde as i64 + 8 + i64::from(u32_at(frame.data().unwrap(), at + 8) as i32)) as u64;
+        assert_eq!(target, pc);
     }
 }

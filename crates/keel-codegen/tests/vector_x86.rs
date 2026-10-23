@@ -1,4 +1,4 @@
-use keel_asm_ir::x86::Features;
+use keel_asm_ir::x86::{CpuLevel, Features};
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools},
@@ -22,6 +22,28 @@ const SPILLED: Pools = Pools {
     float_caller_saved: &[],
     ..TINY
 };
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn host_supports_level(level: CpuLevel) -> bool {
+    use std::arch::x86_64::{__cpuid, __cpuid_count};
+    // AVX detection below includes OSXSAVE/XCR0, not merely CPUID.AVX.
+    let (basic, extended, leaf7) =
+        unsafe { (__cpuid(1), __cpuid(0x80000001), __cpuid_count(7, 0)) };
+    let v2_bits = (1 << 0) | (1 << 9) | (1 << 13) | (1 << 19) | (1 << 20) | (1 << 23);
+    let v2 = basic.ecx & v2_bits == v2_bits && extended.ecx & 1 != 0;
+    match level {
+        CpuLevel::V1 => true,
+        CpuLevel::V2 => v2,
+        CpuLevel::V3 => {
+            let basic_bits = (1 << 12) | (1 << 22) | (1 << 26) | (1 << 27) | (1 << 28) | (1 << 29);
+            let leaf7_bits = (1 << 3) | (1 << 5) | (1 << 8);
+            v2 && basic.ecx & basic_bits == basic_bits
+                && leaf7.ebx & leaf7_bits == leaf7_bits
+                && extended.ecx & (1 << 5) != 0
+                && std::is_x86_feature_detected!("avx")
+        }
+    }
+}
 fn compile(
     source: &str,
     selection: SelectionTier,
@@ -86,6 +108,28 @@ fn all_vector_operations_emit_zero_text_and_identical_typed_objects() {
 }
 
 #[test]
+fn strict_v1_vector_corpus_emits_without_post_sse2_requirements() {
+    let source = fixture();
+    for selection in [
+        SelectionTier::Baseline,
+        SelectionTier::Trees,
+        SelectionTier::Full,
+    ] {
+        for allocation in [AllocationTier::Fast, AllocationTier::Full] {
+            for tiny in [false, true] {
+                compile(
+                    &source,
+                    selection,
+                    allocation,
+                    tiny,
+                    Features::for_level(CpuLevel::V1),
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn vector_runtime_reference_harness_compiles() {
     let dir = temp("syntax");
     let c = dir.join("test.c");
@@ -111,15 +155,16 @@ fn vector_operations_execute_unaligned_edges_masks_and_spills() {
     ] {
         for allocation in [AllocationTier::Fast, AllocationTier::Full] {
             for tiny in [false, true] {
-                let mut features = vec![Features::default()];
+                let mut features = vec![Features::for_level(CpuLevel::V1), Features::default()];
+                if host_supports_level(CpuLevel::V2) {
+                    features.push(Features::for_level(CpuLevel::V2));
+                }
                 if std::is_x86_feature_detected!("avx") {
                     features.push(Features {
                         avx: true,
                         ..Features::default()
                     });
-                    if std::is_x86_feature_detected!("bmi1")
-                        && std::is_x86_feature_detected!("bmi2")
-                    {
+                    if host_supports_level(CpuLevel::V3) {
                         features.push(Features::all());
                     }
                 }

@@ -87,11 +87,15 @@ impl Module {
         self.decls.iter().any(|d| d.name == name)
     }
 
-    /// Whether `name` is a function or data object defined in this module,
-    /// so its address is fixed relative to this module's code.
+    /// Whether `name` has a definition codegen may address directly.
+    /// Ordinary weak definitions must use symbol binding instead.
     pub fn defines(&self, name: &str) -> bool {
-        self.functions.iter().any(|f| f.name == name)
-            || self.data_object(name).is_some_and(|d| d.init.is_some())
+        self.functions
+            .iter()
+            .any(|f| f.name == name && !f.attrs.weak)
+            || self
+                .data_object(name)
+                .is_some_and(|d| d.init.is_some() && !d.weak)
     }
 
     /// Adds a source file for instruction locations to refer to.

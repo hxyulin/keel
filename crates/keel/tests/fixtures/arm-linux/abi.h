@@ -1,0 +1,20 @@
+#include <stdarg.h>
+struct pair { long a, b; };
+struct big { long a, b, c, d; };
+struct hfa { double a, b; };
+long stack_mix(long,long,long,long,long,long,long,long,unsigned char,short,int,long);
+__int128 wide_add(long, __int128, long);
+struct pair pair_swap(struct pair);
+struct big big_add(struct big);
+struct hfa hfa_swap(struct hfa);
+long hfa_stack(double,double,double,double,double,double,double,double,struct hfa,long);
+long sum_ints(int, ...);
+double sum_doubles(int, double, ...);
+__int128 sum_wide(int, ...);
+long copy_args(int, ...);
+int format_args(char *, const char *, ...);
+long tls_next(void);
+int char_is_unsigned(char);
+struct __attribute__((aligned(16))) aligned_pair { long a, b; };
+long aligned_sum(long, struct aligned_pair, long);
+long hfa_boundary(double,double,double,double,double,double,double,struct hfa,double);

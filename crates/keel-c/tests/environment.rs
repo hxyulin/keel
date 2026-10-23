@@ -183,6 +183,7 @@ fn sysroot_system_paths_frameworks_and_user_override_order() {
     for d in [
         dir.join("usr/include"),
         dir.join("usr/include/x86_64-linux-gnu"),
+        dir.join("usr/include/aarch64-linux-gnu"),
         dir.join("System/Library/Frameworks/Demo.framework/Headers"),
         user.clone(),
         system.clone(),
@@ -206,6 +207,11 @@ fn sysroot_system_paths_frameworks_and_user_override_order() {
     )
     .unwrap();
     std::fs::write(system.join("extra.h"), "#define EXTRA 9\n").unwrap();
+    std::fs::write(
+        dir.join("usr/include/aarch64-linux-gnu/arch.h"),
+        "#define ARCH_VALUE 64\n",
+    )
+    .unwrap();
     for target in Target::ALL {
         let opts = PreprocessOptions {
             target,

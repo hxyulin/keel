@@ -15,7 +15,10 @@ pub enum Type {
     I128,
     F32,
     F64,
-    /// A fixed 128-bit SIMD value, distinct from scalar integers/floats.
+    /// x87 extended: 64-bit significand and 15-bit exponent plus sign.
+    /// The value payload is 10 bytes; SysV object storage is 16 bytes.
+    F80,
+    /// A fixed-width SIMD value, distinct from scalar integers/floats.
     Vector(VectorType),
     /// Opaque address. Pointer width is a target property.
     Ptr,
@@ -32,7 +35,7 @@ impl Type {
 
     #[inline]
     pub fn is_float(self) -> bool {
-        matches!(self, Type::F32 | Type::F64)
+        matches!(self, Type::F32 | Type::F64 | Type::F80)
     }
 
     #[inline]
@@ -56,7 +59,9 @@ impl Type {
             Type::I16 => Some(2),
             Type::I32 | Type::F32 => Some(4),
             Type::I64 | Type::F64 => Some(8),
-            Type::I128 | Type::Vector(_) => Some(16),
+            Type::F80 => Some(10),
+            Type::I128 => Some(16),
+            Type::Vector(v) => Some(v.bytes()),
             Type::Ptr => None,
         }
     }
@@ -75,6 +80,7 @@ impl fmt::Display for Type {
             Type::I128 => "i128",
             Type::F32 => "f32",
             Type::F64 => "f64",
+            Type::F80 => "f80",
             Type::Ptr => "ptr",
             Type::Vector(_) => unreachable!(),
         })

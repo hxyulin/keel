@@ -122,8 +122,28 @@ pub struct Selection {
     // (including addresses known only after allocation) does not remove them twice.
     allocation_folds: HashMap<Inst, Vec<Value>>,
     /// Result-to-input affinities, never constraints: interference wins.
-    pub hints: HashMap<Value, Vec<Value>>,
+    pub hints: Hints,
 }
+
+/// The input each result would like to share a register with, if any,
+/// indexed by the result rather than hashed: most results have one.
+#[derive(Default)]
+pub struct Hints(Vec<Option<Value>>);
+impl Hints {
+    pub fn insert(&mut self, result: Value, input: Value) {
+        if self.0.len() <= result.index() {
+            self.0.resize(result.index() + 1, None);
+        }
+        self.0[result.index()] = Some(input);
+    }
+    pub fn get(&self, result: Value) -> Option<Value> {
+        self.0.get(result.index()).copied().flatten()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 impl Selection {
     fn select_indexed_address(
         &mut self,
@@ -569,8 +589,19 @@ impl Selection {
     }
     /// Remove operands encoded as immediates/addresses from the allocation
     /// graph. A value used elsewhere remains materialized for those uses.
+    ///
+    /// `folds` names only `stack_addr` and `iconst` results, as for
+    /// [`crate::fold::folded_values`], which also gives each instruction's.
     pub fn fold_operands(&mut self, func: &Function, folds: impl Fn(&InstData) -> Vec<Value>) {
-        let elided = crate::fold::folded_values(func, self, |data, out| out.extend(folds(data)));
+        let mut record = crate::fold::FoldRecord::default();
+        let elided = crate::fold::folded_values_recording(
+            func,
+            self,
+            |data, out| out.extend(folds(data)),
+            &mut record,
+        );
+        // Elided results are defined by instructions without operands, which
+        // fold nothing themselves.
         for (_, inst) in func.layout_insts() {
             if func
                 .inst_results(inst)
@@ -579,14 +610,9 @@ impl Selection {
             {
                 self.cover(inst);
             }
-            if self.covered(inst) || self.matches.contains_key(&inst) {
-                continue;
-            }
-            let mut folded = folds(self.folded_data(func, inst));
-            self.remaining_folds(func, inst, &mut folded);
-            if folded.is_empty() {
-                continue;
-            }
+        }
+        for &(inst, start, end) in &record.insts {
+            let mut folded = record.values[start as usize..end as usize].to_vec();
             let mut args = self.operands(func, inst);
             folded.retain(|value| {
                 if let Some(i) = args.iter().position(|v| v == value) {
@@ -615,22 +641,27 @@ impl Selection {
         target: Target,
         options: crate::SelectionOptions,
     ) -> Self {
+        Self::compute_with_uses(func, target, options, None)
+    }
+    /// [`Self::compute_with_options`], with the raw IR use counts of
+    /// [`crate::fold::use_counts`] if the caller has them.
+    pub fn compute_with_uses(
+        func: &Function,
+        target: Target,
+        options: crate::SelectionOptions,
+        counted: Option<&[u8]>,
+    ) -> Self {
         let mut plan = Self::default();
         if !options.trees && !options.register_hints {
             return plan;
         }
         // Tree legality only distinguishes exactly one use from zero/many.
         // Hint-only selection does not need any whole-function use counts.
-        let mut uses = Vec::new();
-        if options.trees {
-            uses.resize(func.num_values(), 0u8);
-            for (_, inst) in func.layout_insts() {
-                func.inst_data(inst).for_each_operand(|v| {
-                    let count = &mut uses[func.resolve(v).index()];
-                    *count = (*count + 1).min(2);
-                });
-            }
-        }
+        let uses = match counted {
+            _ if !options.trees => std::borrow::Cow::Owned(Vec::new()),
+            Some(uses) => std::borrow::Cow::Borrowed(uses),
+            None => std::borrow::Cow::Owned(crate::fold::use_counts(func)),
+        };
         // Reverse block/instruction order gives larger consumers first choice
         // without allocating another entry for every instruction. Block ownership
         // is already stored in Function; no Inst-to-Block hash table is needed.
@@ -1031,6 +1062,9 @@ impl Selection {
         }
         // Generate affinities only for instructions that survive selection.
         // Three-address fused instructions need no destructive-input copy.
+        if options.register_hints {
+            plan.hints.0.reserve(func.num_values());
+        }
         for (_, inst) in func.layout_insts().filter(|_| options.register_hints) {
             if plan.covered(inst) {
                 continue;
@@ -1041,7 +1075,7 @@ impl Selection {
             if !plan.matches.contains_key(&inst)
                 && let Some(input) = generated_hint(target, func.inst_data(inst))
             {
-                plan.hints.insert(result, vec![func.resolve(input)]);
+                plan.hints.insert(result, func.resolve(input));
             }
         }
         plan

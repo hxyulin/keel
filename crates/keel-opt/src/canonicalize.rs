@@ -101,23 +101,34 @@ pub(crate) fn normalize(func: &Function, data: &mut InstData) {
 /// Whether `normalize` would change `data`. Most instructions are already
 /// normal, and checking first avoids copying them.
 pub(crate) fn needs_normalize(func: &Function, data: &InstData) -> bool {
-    let mut aliased = false;
-    data.for_each_operand(|v| aliased |= func.resolve(v) != v);
-    if aliased {
-        return true;
-    }
+    // An operand resolves to another value exactly when it is an alias.
+    let aliased = |v: Value| matches!(func.value_def(v), ValueDef::Alias(_));
+    // The common shapes are matched once for both checks.
     match *data {
         InstData::Binary { op, args } => {
-            (op == BinaryOp::Or && rotate(func, args).is_some())
+            aliased(args[0])
+                || aliased(args[1])
+                || (op == BinaryOp::Or && rotate(func, args).is_some())
                 || (!op.is_float()
                     && crate::gvn::is_commutative(op)
                     && out_of_order(func, args[0], args[1]))
         }
         InstData::Overflow { op, args } => {
-            crate::gvn::is_commutative_overflow(op) && out_of_order(func, args[0], args[1])
+            aliased(args[0])
+                || aliased(args[1])
+                || (crate::gvn::is_commutative_overflow(op) && out_of_order(func, args[0], args[1]))
         }
-        InstData::Icmp { args, .. } => out_of_order(func, args[0], args[1]),
-        _ => false,
+        InstData::Icmp { args, .. } => {
+            aliased(args[0]) || aliased(args[1]) || out_of_order(func, args[0], args[1])
+        }
+        InstData::Iconst { .. } | InstData::Fconst { .. } => false,
+        InstData::Load { addr, .. } => aliased(addr),
+        InstData::Store { value, addr, .. } => aliased(value) || aliased(addr),
+        _ => {
+            let mut any = false;
+            data.for_each_operand(|v| any |= aliased(v));
+            any
+        }
     }
 }
 

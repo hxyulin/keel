@@ -91,7 +91,13 @@ fn avx_feature_gating_roundtrips_and_invalid_forms() {
     ] {
         let i = Instruction::parse_intel(source).unwrap();
         assert_eq!(Instruction::parse_intel(&i.to_string()).unwrap(), i);
-        assert_eq!(i.opcode.required_features(), avx());
+        assert_eq!(
+            i.opcode.required_features(),
+            Features {
+                avx: true,
+                ..Features::NONE
+            }
+        );
         let e = assemble_object(source).unwrap_err().to_string();
         assert!(e.contains("avx"), "{e}");
         let mut p = Program::new();
@@ -134,7 +140,6 @@ fn avx_feature_gating_roundtrips_and_invalid_forms() {
         "vaddsd [rax],xmm1,xmm2",
         "vaddss xmm0,[rax],xmm1",
         "vaddss xmm0,xmm1,7",
-        "vaddps ymm0,ymm1,ymm2",
         "vsqrtss xmm0,xmm1",
         "vsqrtsd xmm0,xmm1,dword ptr [rax]",
         "vucomiss xmm0,xmm1,xmm2",
@@ -320,7 +325,13 @@ fn avx_matrix_matches_clang_and_gnu() {
     );
     for case in &cases {
         let instruction = Instruction::parse_intel(case).unwrap();
-        assert_eq!(instruction.opcode.required_features(), avx());
+        assert_eq!(
+            instruction.opcode.required_features(),
+            Features {
+                avx: true,
+                ..Features::NONE
+            }
+        );
         assert_eq!(
             Instruction::parse_intel(&instruction.to_string()).unwrap(),
             instruction

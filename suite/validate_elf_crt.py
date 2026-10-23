@@ -21,6 +21,7 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--prepare-only', action='store_true')
     mode.add_argument('--verify-only', action='store_true')
+    parser.add_argument("--gc-sections", action="store_true", help="link and execute intact CRT inputs with GC in both Keel and GNU ld")
     args = parser.parse_args()
     if platform.system() != 'Linux' or platform.machine() != 'x86_64':
         parser.error('run on x86-64 Linux')
@@ -68,7 +69,7 @@ def main():
             (out/name).write_text(text)
         checked(['clang','-shared','-fPIC','-O2',out/'callbacks.c','-Wl,-soname,libkeel-crt-callbacks.so','-o',out/'libkeel-crt-callbacks.so'])
         cases=[]
-        for source,stdout,extra in [('hello.c','hello crt\n',[]),('divide.c','builtin\n',['libgcc.a']),('dynamic.c','dynamic\n',[]),('init-lite.cc','ctor\nmain\ndtor\n',[]),('clone.c','empty clones\n',['libkeel-crt-callbacks.so'])]:
+        for source,stdout,extra in [('hello.c','hello crt\n',[]),('divide.c','builtin\n',['libgcc.a']),('dynamic.c','dynamic\n',[]),('init-lite.cc','ctor\nmain\ndtor\n',[]),('clone.c','empty clones\n',['libkeel-crt-callbacks.so']),('template.cc','',[])]:
             compiler='clang++' if source.endswith('.cc') else 'clang'
             for level in ['O0','O2']:
                 name=source.split('.')[0]+'-'+level
@@ -81,26 +82,30 @@ def main():
                 assert (r.returncode,r.stdout,r.stderr)==(42,stdout.encode(),b''),(name,r)
         (out/'cases.json').write_text(json.dumps(cases,indent=2)+'\n')
         # Negative fixtures retain their unsupported contracts unchanged.
-        checked(['clang++','-O0','-c',out/'template.cc','-o',out/'template.o'])
         checked(['clang','-O2','-fcf-protection=full','-c',out/'hello.c','-o',out/'hello-cet.o'])
         (out/'extra-sframe.s').write_text('.text\n.globl extra_frame\n.type extra_frame,@function\nextra_frame:\n.cfi_startproc\nret\n.cfi_endproc\n.section .note.GNU-stack,"",@progbits\n')
         checked(['as','--64','--gsframe',out/'extra-sframe.s','-o',out/'extra-sframe.o'])
-        hashes={n:hashlib.sha256((out/n).read_bytes()).hexdigest() for n in sorted({n for c in cases for n in c['inputs']}|{'template.o','hello-cet.o','extra-sframe.o'})}
+        hashes={n:hashlib.sha256((out/n).read_bytes()).hexdigest() for n in sorted({n for c in cases for n in c['inputs']}|{'hello-cet.o','extra-sframe.o'})}
         (out/'input-hashes.json').write_text(json.dumps(hashes,indent=2)+'\n')
         if args.prepare_only:
-            print('Prepared 10 actual CRT cases and intact negative fixtures')
+            print('Prepared 12 actual CRT cases and intact negative fixtures')
             return
     cases=json.loads((out/'cases.json').read_text())
     hashes=json.loads((out/'input-hashes.json').read_text())
     for n,h in hashes.items():
         assert hashlib.sha256((out/n).read_bytes()).hexdigest()==h,n
+    gc_flags = ['--gc-sections'] if args.gc_sections else []
+    native_suffix = '.gc.keel' if args.gc_sections else '.keel'
+    gnu_suffix = '.gc.gnu' if args.gc_sections else '.gnu'
     for case in cases:
-        native=out/(case['name']+'.keel')
+        native=out/(case['name']+native_suffix)
         if not args.verify_only:
-            checked([args.keel.resolve(),'link','--target','x86_64-unknown-linux-gnu','--rpath','$ORIGIN',*[out/n for n in case['inputs']],'-o',native],True)
-        for suffix in ['keel','gnu']:
+            checked([args.keel.resolve(),'link','--target','x86_64-unknown-linux-gnu','--rpath','$ORIGIN',*gc_flags,*[out/n for n in case['inputs']],'-o',native],True)
+        if args.gc_sections and not args.verify_only:
+            checked(['ld',*gc_flags,'--eh-frame-hdr','--dynamic-linker','/lib64/ld-linux-x86-64.so.2','-rpath','$ORIGIN',*[out/n for n in case['inputs']],'-o',out/(case['name']+gnu_suffix)])
+        for suffix in [native_suffix,gnu_suffix]:
             for _ in range(3):
-                r=run([out/(case['name']+'.'+suffix),*case['argv']], True)
+                r=run([out/(case['name']+suffix),*case['argv']], True)
                 assert (r.returncode,r.stdout,r.stderr)==(case['status'],case['stdout'].encode(),b''),(case['name'],suffix,r)
         header=checked(['readelf','-lWS',native]).stdout.decode()
         assert 'GNU_PROPERTY' in header and 'SFRAME' in header and 'GNU_EH_FRAME' in header,header
@@ -108,16 +113,16 @@ def main():
         (out/(case['name']+'.notes.txt')).write_bytes(checked(['readelf','-nW',native]).stdout)
         (out/(case['name']+'.sframe.txt')).write_bytes(checked(['readelf','--sframe',native]).stdout)
     if not args.verify_only:
-        for name,user,extra,expected in [('template','template.o',[],'COMDAT'),('cet','hello-cet.o',[],'IBT'),('two-sframe','hello-O0.o',['extra-sframe.o'],'SFrame')]:
+        for name,user,extra,expected in [('cet','hello-cet.o',[],'IBT'),('two-sframe','hello-O0.o',['extra-sframe.o'],'SFrame')]:
             dest=out/(name+'.rejected');dest.write_bytes(b'preserved previous output')
             inputs=['crt1.o','crti.o','crtbegin.o',user,*extra,'libc.so.6','crtend.o','crtn.o']
-            r=run([args.keel.resolve(),'link','--target','x86_64-unknown-linux-gnu',*[out/n for n in inputs],'-o',dest],True)
+            r=run([args.keel.resolve(),'link','--target','x86_64-unknown-linux-gnu',*gc_flags,*[out/n for n in inputs],'-o',dest],True)
             assert r.returncode and expected.lower() in r.stderr.decode().lower(),(name,r)
             assert dest.read_bytes()==b'preserved previous output',name
     for n,h in hashes.items():
         assert hashlib.sha256((out/n).read_bytes()).hexdigest()==h,n
-    (out/'report.json').write_text(json.dumps(dict(cases=cases,result='passed',installed_crt=True,full_driver=False,links_executed=not args.verify_only,negative_checks_executed=not args.verify_only,executions_per_tool_per_case=3),indent=2)+'\n')
-    print('10 installed-CRT cases passed native/GNU checks (three executions each)')
+    (out/'report.json').write_text(json.dumps(dict(cases=cases,result='passed',installed_crt=True,gc_sections=args.gc_sections,full_driver=False,links_executed=not args.verify_only,negative_checks_executed=not args.verify_only,executions_per_tool_per_case=3),indent=2)+'\n')
+    print('12 installed-CRT cases passed native/GNU checks (three executions each)')
 
 
 if __name__ == '__main__':

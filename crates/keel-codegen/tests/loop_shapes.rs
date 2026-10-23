@@ -51,6 +51,11 @@ fn loop_shape_objects_match_text_on_both_targets() {
                     keel_codegen::compile_program_with_pipeline(&module, target, &pipeline)
                         .unwrap();
                 let (structured, parsed) = match target {
+                    keel_codegen::Target::Aarch64LinuxGnu => (
+                        keel_asm::assemble_elf_program_object(&program, Default::default())
+                            .unwrap(),
+                        keel_asm::assemble_elf_object(&text).unwrap(),
+                    ),
                     keel_codegen::Target::Aarch64AppleDarwin => (
                         keel_asm::assemble_program_object(&program, Default::default()).unwrap(),
                         keel_asm::assemble_object(&text).unwrap(),

@@ -14,13 +14,14 @@ struct Entry {
 pub(crate) struct Symbols<'m> {
     pub module: &'m Module,
     index: FxHashMap<&'m str, Entry>,
+    thread_locals: bool,
 }
 
 impl<'m> Symbols<'m> {
     pub fn new(module: &'m Module) -> Self {
         let mut index = FxHashMap::<&str, Entry>::default();
         for f in &module.functions {
-            index.entry(&f.name).or_default().function = true;
+            index.entry(&f.name).or_default().function = !f.attrs.weak;
         }
         for d in &module.decls {
             index.entry(&d.name).or_default().external = true;
@@ -29,7 +30,21 @@ impl<'m> Symbols<'m> {
             let entry = index.entry(&d.name).or_default();
             entry.data.get_or_insert(i as u32);
         }
-        Self { module, index }
+        let thread_locals = module.data.iter().any(|d| d.thread_local);
+        Self {
+            module,
+            index,
+            thread_locals,
+        }
+    }
+
+    /// Whether any data object is thread-local.
+    pub fn has_thread_locals(&self) -> bool {
+        self.thread_locals
+    }
+
+    pub fn contains(&self, name: &str) -> bool {
+        self.index.contains_key(name)
     }
 
     /// Same as [`Module::data_object`].
@@ -46,7 +61,9 @@ impl<'m> Symbols<'m> {
     /// Same as [`Module::defines`].
     pub fn defines(&self, name: &str) -> bool {
         self.index.get(name).is_some_and(|e| e.function)
-            || self.data_object(name).is_some_and(|d| d.init.is_some())
+            || self
+                .data_object(name)
+                .is_some_and(|d| d.init.is_some() && !d.weak)
     }
 }
 

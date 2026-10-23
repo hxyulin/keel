@@ -23,7 +23,7 @@ pub(super) fn validate(
     if name.is_empty() || name.contains('\0') {
         return Err("invalid ELF section name".into());
     }
-    if flags & !0x8000_0637 != 0 {
+    if flags & !0x8020_0637 != 0 {
         return Err("unsupported ELF section flags".into());
     }
     if flags & 0x20 != 0 && flags & 0x10 == 0 {
@@ -107,6 +107,7 @@ pub(super) fn parse(parts: &[&str]) -> Result<Declaration, String> {
                 b'S' => 0x20,
                 b'G' => 0x200,
                 b'T' => 0x400,
+                b'R' => 0x200000,
                 _ => return Err(format!("unsupported ELF section flag `{}`", b as char)),
             };
         }
@@ -231,6 +232,10 @@ pub(super) fn finalize(
     synthetic_signatures: &BTreeSet<String>,
     addrsig: Option<&[String]>,
 ) -> Result<(), String> {
+    // GNU retain is OS-specific; GNU ld recognizes it with ELFOSABI_GNU.
+    if sections.iter().any(|s| s.flags & 0x200000 != 0) {
+        bytes[7] = 3;
+    }
     if groups.is_empty()
         && sections
             .iter()

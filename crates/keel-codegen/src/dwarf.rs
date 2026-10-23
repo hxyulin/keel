@@ -11,6 +11,7 @@ use keel_ir::{
 
 /// What the debug info needs to know of a compiled function.
 pub(crate) struct FrameDebug {
+    pub frame_register: Option<u8>,
     /// Where each stack slot is, from the frame base register.
     pub slots: Vec<i64>,
     /// The labels where the code's lexical scope changes, and the new
@@ -36,6 +37,10 @@ pub(crate) fn emit_debug_info<T: Sink>(
 ) {
     let l = format.local();
     let elf = format == Format::Elf;
+    let split_code = module
+        .functions
+        .iter()
+        .any(|f| f.attrs.section.is_some() || (elf && f.attrs.retain));
 
     out.debug_section(format, "abbrev");
 
@@ -95,9 +100,11 @@ pub(crate) fn emit_debug_info<T: Sink>(
 
     out.number(1, 8);
 
-    let abbrev = match module.debug_language {
-        Some(_) => Abbrev::CompileUnitLanguage,
-        None => Abbrev::CompileUnit,
+    let abbrev = match (module.debug_language, split_code) {
+        (Some(_), true) => Abbrev::CompileUnitLanguageRanges,
+        (None, true) => Abbrev::CompileUnitRanges,
+        (Some(_), false) => Abbrev::CompileUnitLanguage,
+        (None, false) => Abbrev::CompileUnit,
     };
 
     out.number(1, abbrev as u8);
@@ -126,17 +133,31 @@ pub(crate) fn emit_debug_info<T: Sink>(
     } else {
         out.number(4, 0);
     }
-    // The unit's size spans several functions, which `.subsections_via_
-    // symbols` makes separate atoms: written directly, the difference
-    // becomes a relocation pair dsymutil does not support ("unsupported
-    // relocation in __debug_info"). Through `.set` the assembler computes
-    // it as a constant, as clang does.
-    out.directive(Directive::Set {
-        name: format!("{l}debug_unit_size"),
-        expression: Expression::difference(format!("{l}{last}_end"), format!("{l}{first}_begin")),
-    });
-    out.integer(8, Expression::symbol(format!("{l}{first}_begin")));
-    out.integer(4, Expression::symbol(format!("{l}debug_unit_size")));
+    if split_code {
+        if elf {
+            out.integer(4, Expression::symbol(format!("{l}debug_cu_ranges")));
+        } else {
+            out.integer(
+                4,
+                Expression::difference(format!("{l}debug_cu_ranges"), format!("{l}debug_ranges")),
+            );
+        }
+    } else {
+        // The unit's size spans several functions, which `.subsections_via_
+        // symbols` makes separate atoms: written directly, the difference
+        // becomes a relocation pair dsymutil does not support ("unsupported
+        // relocation in __debug_info"). Through `.set` the assembler computes
+        // it as a constant, as clang does.
+        out.directive(Directive::Set {
+            name: format!("{l}debug_unit_size"),
+            expression: Expression::difference(
+                format!("{l}{last}_end"),
+                format!("{l}{first}_begin"),
+            ),
+        });
+        out.integer(8, Expression::symbol(format!("{l}{first}_begin")));
+        out.integer(4, Expression::symbol(format!("{l}debug_unit_size")));
+    }
     let die = |out: &mut T, abbrev: Abbrev| {
         out.number(1, abbrev as u8);
     };
@@ -178,7 +199,7 @@ pub(crate) fn emit_debug_info<T: Sink>(
         // The frame base: an expression of one byte, DW_OP_reg<n>.
 
         out.number(1, 1);
-        out.number(1, 0x50 + frame_reg);
+        out.number(1, 0x50 + frame.frame_register.unwrap_or(frame_reg));
 
         let ranges = scope_ranges(format, func, &frame.scope_marks);
         let var = |out: &mut T, var: &keel_ir::DebugVar| {
@@ -279,7 +300,12 @@ pub(crate) fn emit_debug_info<T: Sink>(
         );
         string(out, &global.name);
         type_ref(out, global.ty);
-        if data.thread_local && elf {
+        if data.thread_local && elf && frame_reg == 29 {
+            // AAELF64 has no static DTPREL64 data relocation. Preserve the
+            // DIE with an unavailable location, rather than emit a dynamic
+            // loader relocation into .debug_info (GNU ld rejects it).
+            out.number(1, 0);
+        } else if data.thread_local && elf {
             // The variable's offset in its module's TLS block
             // (DW_OP_const8u), which DW_OP_GNU_push_tls_address turns into
             // this thread's copy, as GCC writes it.
@@ -485,7 +511,7 @@ pub(crate) fn emit_debug_info<T: Sink>(
 
     out.label(format!("{}debug_info_end", l));
 
-    if !range_lists.is_empty() {
+    if !range_lists.is_empty() || split_code {
         // Each list starts from its function (a base address entry, -1
         // and the address), so the entries are differences within one
         // function, which the assembler computes.
@@ -493,6 +519,25 @@ pub(crate) fn emit_debug_info<T: Sink>(
         out.debug_section(format, "ranges");
         out.label(format!("{}debug_ranges", l));
 
+        if split_code {
+            out.label(format!("{l}debug_cu_ranges"));
+            // Each function may occupy a different input section. Base entries
+            // avoid cross-section differences and describe only real code.
+            for f in &module.functions {
+                out.number(8, -1);
+                out.integer(8, Expression::symbol(format!("{l}{}_begin", f.name)));
+                out.number(8, 0);
+                out.integer(
+                    8,
+                    Expression::difference(
+                        format!("{l}{}_end", f.name),
+                        format!("{l}{}_begin", f.name),
+                    ),
+                );
+            }
+            out.number(8, 0);
+            out.number(8, 0);
+        }
         for (i, (base, ranges)) in range_lists.iter().enumerate() {
             out.label(format!("{}debug_ranges{}", l, i));
             out.number(8, -1);
@@ -586,6 +631,8 @@ enum Abbrev {
     Enum,
     AnonEnum,
     Enumerator,
+    CompileUnitRanges,
+    CompileUnitLanguageRanges,
 }
 
 // DWARF attributes and forms.
@@ -721,6 +768,29 @@ const ABBREVS: &[AbbrevDecl] = {
         (0x04, true, &[NAME, TYPE, SIZE]), // DW_TAG_enumeration_type
         (0x04, true, &[TYPE, SIZE]),
         (0x28, false, &[NAME, (AT_CONST_VALUE, FORM_SDATA)]), // DW_TAG_enumerator
+        (
+            0x11,
+            true,
+            &[
+                (AT_PRODUCER, FORM_STRING),
+                NAME,
+                (AT_COMP_DIR, FORM_STRING),
+                (AT_STMT_LIST, FORM_SEC_OFFSET),
+                (AT_RANGES, FORM_SEC_OFFSET),
+            ],
+        ),
+        (
+            0x11,
+            true,
+            &[
+                (AT_PRODUCER, FORM_STRING),
+                (AT_LANGUAGE, FORM_DATA2),
+                NAME,
+                (AT_COMP_DIR, FORM_STRING),
+                (AT_STMT_LIST, FORM_SEC_OFFSET),
+                (AT_RANGES, FORM_SEC_OFFSET),
+            ],
+        ),
     ]
 };
 

@@ -280,6 +280,12 @@ they do not wrap at 65,536 entries.
 
 ## Inline assembly
 
+The C frontend implements a [checked GNU AArch64 subset](c-inline-asm.md),
+including register outputs, read/write and matching operands, named references,
+memory inputs and clobbers. The following describes the broader IR contract;
+C fixed-register constraints and memory outputs are not supported. C asm-goto
+and x86 assembly statements diagnose.
+
 `v2 = asm "add %0, %1, %2", "=r,r,r"(v0, v1) -> i64` runs target
 instructions with operands substituted. The constraint string is the one
 GCC and LLVM use, so a C frontend passes `asm` statements through after
@@ -1091,12 +1097,13 @@ Compiler identity is deliberately separate: `__KEEL__` and `__KEEL_VERSION__`
 identify Keel, with pinned Clang 18.0.0 and GCC 4.2.1 compatibility identities.
 These are source-selection profiles, not promises of full compiler parity.
 CPU/vector feature macros are not copied from the host. Standard capability
-macros declare the lack of complex arithmetic, VLAs, and a supplied C threads
+macros declare the lack of complete complex/VLA support and a supplied C threads
 implementation. Native feature queries use a conservative registry of supported
 builtins, features, and semantic attributes; unknown capabilities return zero.
 The fixed-type and generic overflow-builtin registry shares the parser's
 family recognition.
-Ignored attributes such as `cleanup` are not reported as implemented.
+Ignored attributes are not reported as implemented; bounded `cleanup` support
+also keeps its capability query zero for conservative library fallbacks.
 
 The local Apple Clang 21 audit produced 482 Darwin arm64 and 407 Linux x86-64
 predefined macros. Differential tests compare over 300 generated ABI/standard
@@ -1218,7 +1225,7 @@ inputs across compiler configurations for comparable compiler measurements.
     `va_copy` is an assignment and `va_arg` works on a passed `va_list`.
   - x86-64 Linux: `va_list` is SysV's one-element array of
     `__va_list_tag`, so `va_copy` copies the struct. `long double`, like
-    glibc's `__float128` and `_Complex`, is an opaque type: it has its
+    glibc's `__float128` and `_Complex long double`, is an opaque type: it has its
     size, so headers that declare it parse, but a variable or value of it
     is an error. x87's 80-bit arithmetic is not implemented, and SQLite is
     built with `-DLONGDOUBLE_TYPE=double`.
@@ -1295,9 +1302,15 @@ Some accepted extensions have deliberately limited behavior:
   [Attribute ownership, merging and emission](function-attributes.md) distinguish
   named declarations from returned-function types and indirect calls.
   GNU function-pointer `noreturn` attributes are not represented.
-  Selected unsupported linkage and lifetime attributes, including `cleanup`,
-  `weak`, `alias` and `constructor`, are diagnosed. Only default visibility
-  is accepted. Other attributes, including `vector_size`, remain ignored;
+  Selected unsupported linkage and lifetime attributes, including `alias` and
+  `constructor`, are diagnosed. Automatic-local `cleanup` has a
+  [bounded scope-exit implementation](c-language-implementation-plan.md#3-reusable-scope-exit-actions-and-cleanup--bounded-milestone-implemented).
+  Ordinary external weak definitions
+  and references preserve their binding on both native targets; unsupported weak
+  forms remain diagnosed (see [weak symbol support](c-weak-symbols.md)). Hidden and internal
+  visibility emit hidden symbols; protected visibility is diagnosed. Other
+  attributes may still be ignored, while `vector_size`/integer `mode` have
+  [bounded type/ABI support](gnu-vector-mode.md);
   see the [C compatibility audit](c-frontend-coverage.md) for the exact boundary.
 - `inline` affects emission and supplies `inlinehint` to the bounded
   private-only [inliner](#bounded-function-inlining). Block-pointer declarators (`^`) are
@@ -1345,7 +1358,8 @@ mapping source annotations onto unrelated flags:
   hint builtins. Preserving these on CFG edges and using them in block layout
   is a concrete next step for Lua and QuickJS. Probabilities are advisory;
   probability zero or one must not make an edge unreachable.
-- `hot`/`cold` and visibility remain unrepresented. Inline policies now
+- `hot`/`cold` remain unrepresented. Hidden visibility is emitted but does
+  not yet make definitions noninterposable for optimization. Inline policies now
   reach the private-only inliner under the
   [function attribute contract](function-attributes.md); public/interposable
   definitions retain calls.
@@ -1421,14 +1435,20 @@ compared against Clang.
   fusion retains shared-state moves/stores and the backend's checked
   indexed branch; it does not provide direct threaded dispatch.
 - **Atomics.** `_Atomic(T)` is a type of its own (`Ty::Atomic`), for
-  integers and pointers: the one place a value is read from an object
+  native-width integers, pointers, float and double: the place a value is read from an object
   (`rvalue`) makes reading one an atomic load, and assignment, `+=` and
   `++` atomic stores and read-modify-writes, all seq_cst. Treating it as
   `T` would compile plain accesses to non-atomic ones silently. The
   builtins, GCC's `__atomic_*` and `__sync_*` and clang's `__c11_atomic_*`
   (which `<stdatomic.h>` expands to), are put in one shape and become the
   IR's atomic instructions; `compare_exchange` is a `cas` whose old value
-  is stored back to `*expected`. Atomic pointer `++` and `--` scale by the
+  is stored back to `*expected` only on failure. Float/double operations use
+  bit-preserving integer representations; floating compound arithmetic and
+  increments use CAS loops, evaluating operands once. Generic buffer operations
+  support naturally aligned 1/2/4/8-byte objects, including small aggregates
+  and padding bytes, with explicit diagnostics outside that subset and no
+  implicit runtime dependency. See the implementation plan for exact limits.
+  Atomic pointer `++` and `--` scale by the
   pointee's size and use an integer RMW on the 64-bit address, converting
   the old (postfix) or new (prefix) address back to a pointer. Pointer
   compound assignments (`+=` and `-=`) are not supported yet.
@@ -1448,11 +1468,29 @@ compared against Clang.
 
 ### Remaining coverage
 
-Not supported: `_Complex` arithmetic, variable-length arrays, K&R
-definitions, nested functions, `_Atomic` structs and floats, the generic
-(non-`_n`) `__atomic_*` forms, vector types/intrinsics, and inline assembly
-statements. The ARM64 IR backend has inline assembly; the C frontend does
-not pass it through, and the x86-64 backend does not support it yet.
+Multidimensional automatic block VLAs have captured runtime bounds/strides,
+runtime `sizeof` and lexical stack restoration. Block VM typedefs, VM pointers
+and runtime type names are supported. Dependent function parameter bounds,
+definition-entry captures and prototype-only `[*]` have a bounded implementation.
+Selected type/control-flow contexts, including goto/switch/alloca combinations, remain
+diagnosed. See [the staged C implementation plan](c-language-implementation-plan.md).
+
+Float/double complex values support a bounded arithmetic and ABI subset; see
+[the complex implementation stage](c-language-implementation-plan.md#6-complex-arithmetic--first-floatdouble-subset-implemented).
+Multiplication/division, extended complex types and complex varargs remain
+diagnosed.
+
+Explicitly typed old-style (K&R) definitions support fixed-size integer,
+float/double and pointer parameters, array/function adjustment and promoted ABI
+entry conversions. Implicit types, VM declaration lists and other limits are
+listed in [the implementation plan](c-language-implementation-plan.md#8-kr-definitions--explicit-fixed-size-parameter-milestone-implemented).
+
+Not supported: full variably modified types, nested functions, `_Atomic` structs, generic atomics outside the
+native size/alignment subset, vector features beyond the
+[bounded GNU subset](gnu-vector-mode.md), and C vector intrinsic headers.
+C inline assembly has a [bounded AArch64 frontend subset](c-inline-asm.md);
+asm-goto, memory outputs, broader constraints and x86 inline assembly remain
+unsupported and diagnosed.
 
 Useful candidates for small follow-up patches, rather than current support:
 
@@ -1461,8 +1499,8 @@ Useful candidates for small follow-up patches, rather than current support:
   metadata would require additional IR and optimizer support. See
   [GCC's builtin documentation](https://gcc.gnu.org/onlinedocs/gcc-14.2.0/gcc/Other-Builtins.html).
 
-Linkage attributes (`weak`, `alias`, `visibility`), scope-exit `cleanup`
-and C inline assembly are useful larger additions. Attributes whose
+Linkage attributes (`alias`, protected visibility), broader scope-exit cleanup
+and C inline assembly support remain useful larger additions. Attributes whose
 semantics are required by a program must be implemented or diagnosed;
 silently parsing them does not establish compatibility.
 

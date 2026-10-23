@@ -101,6 +101,22 @@ impl InstBuilder<'_> {
     pub fn vector_unary(self, op: UnaryOp, arg: Value) -> Value {
         self.value(InstData::VectorUnary { op, arg })
     }
+    pub fn neon(self, op: crate::NeonIntrinsic, ty: Type, args: &[Value]) -> Value {
+        self.value(InstData::Neon {
+            op,
+            ty,
+            args: args.to_vec(),
+        })
+    }
+    /// Structured loads return 1–4 vectors; stores return no values.
+    /// Query the returned instruction with `Function::inst_results`.
+    pub fn neon_memory(self, op: crate::NeonIntrinsic, ty: Type, args: &[Value]) -> Inst {
+        assert!(op.memory().is_some());
+        self.build(InstData::Neon { op, ty, args: args.to_vec() })
+    }
+    pub fn vector_reduce(self, op: crate::VectorReduceOp, arg: Value) -> Value {
+        self.value(InstData::VectorReduce { op, arg })
+    }
     pub fn vector_binary(self, op: VectorBinaryOp, a: Value, b: Value) -> Value {
         self.value(InstData::VectorBinary { op, args: [a, b] })
     }
@@ -181,6 +197,10 @@ impl InstBuilder<'_> {
         })
     }
 
+    pub fn f80const(self, significand: u64, sign_exp: u16) -> Value {
+        self.value(InstData::F80const { significand, sign_exp })
+    }
+
     pub fn f64const(self, x: f64) -> Value {
         self.value(InstData::Fconst {
             ty: Type::F64,
@@ -230,8 +250,25 @@ impl InstBuilder<'_> {
         self.build(InstData::Store { value, addr, flags })
     }
 
+    pub fn aggregate_va_arg(self, layout: crate::Layout, list: Value) -> Value {
+        let home = self.func.create_stack_slot(layout.size().try_into().expect("aggregate home size fits u32"), layout.align().try_into().expect("aggregate home alignment fits u32"));
+        self.value(InstData::AggregateVaArg { layout, list, home, x86_vector_abi: None })
+    }
+
+    pub fn call_abi(self, func: FuncRef, args: crate::CallArgs) -> Inst {
+        self.build(InstData::Call { func, args })
+    }
+
+    pub fn call_indirect_abi(self, sig: SigRef, callee: Value, args: crate::CallArgs) -> Inst {
+        self.build(InstData::CallIndirect { sig, callee, args })
+    }
+
     pub fn va_arg(self, ty: Type, list: Value) -> Value {
-        self.value(InstData::VaArg { ty, list })
+        self.value(InstData::VaArg { ty, list, x86_vector_abi: None })
+    }
+
+    pub fn va_arg_with_x86_vector_abi(self, ty: Type, list: Value, abi: crate::X86VectorAbi) -> Value {
+        self.value(InstData::VaArg { ty, list, x86_vector_abi: Some(abi) })
     }
 
     pub fn atomic_load(self, ty: Type, ordering: Ordering, addr: Value) -> Value {
@@ -280,7 +317,7 @@ impl InstBuilder<'_> {
     pub fn call(self, func: FuncRef, args: &[Value]) -> Inst {
         self.build(InstData::Call {
             func,
-            args: args.to_vec(),
+            args: args.to_vec().into(),
         })
     }
 
@@ -296,7 +333,7 @@ impl InstBuilder<'_> {
         self.build(InstData::CallIndirect {
             sig,
             callee,
-            args: args.to_vec(),
+            args: args.to_vec().into(),
         })
     }
 

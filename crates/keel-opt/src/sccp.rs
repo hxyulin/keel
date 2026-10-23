@@ -129,7 +129,7 @@ impl<'a> Solver<'a> {
             return State::Unknown;
         }
         const_fold::fold(data, |v| match self.state(v) {
-            State::Constant(c) => Some(c.clone()),
+            State::Constant(c) => Some(c),
             _ => None,
         })
         .map(normalize)
@@ -143,7 +143,7 @@ impl<'a> Solver<'a> {
             self.update(results[0], self.evaluate(data));
         } else if matches!(data, InstData::Overflow { .. }) {
             if let Some(constants) = const_fold::fold_overflow(data, |v| match self.state(v) {
-                State::Constant(c) => Some(c.clone()),
+                State::Constant(c) => Some(c),
                 _ => None,
             }) {
                 for (&result, constant) in results.iter().zip(constants) {

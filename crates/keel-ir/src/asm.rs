@@ -7,6 +7,9 @@
 //! v3 = asm "ldr %0, %1", "=r,m,~{memory}"(v0) -> i64
 //! ```
 //!
+//! Bracketed numeric references (`%[0]`, `%c[1]`) delimit an operand
+//! number when literal digits immediately follow the substitution.
+//!
 //! Constraints are comma-separated: outputs (`=`) first, one per result,
 //! then inputs, one per argument, then clobbers (`~`). Operands are numbered
 //! in that order, outputs first. What a register name looks like in the

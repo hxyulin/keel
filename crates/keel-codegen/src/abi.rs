@@ -1,4 +1,5 @@
-//! Apple arm64's C calling convention: where each argument and result goes.
+//! Darwin arm64 and base AAPCS64 argument/return placement.
+//! The default helpers retain Darwin; Linux selects the base AAPCS64 rules.
 //! The code generator turns these placements into moves.
 //!
 //! Scalars:
@@ -9,7 +10,7 @@
 //!   its natural size and alignment: Apple packs them, where standard AAPCS64
 //!   gives each its own 8-byte slot.
 //! - Variadic arguments always go on the stack. Promoted scalars use 8-byte
-//!   slots; 128-bit vectors use 16-byte slots aligned to 16.
+//!   slots; vectors use slots of their exact size and alignment.
 //!
 //! Structs (`byval`), by [`classify`]:
 //!
@@ -125,6 +126,7 @@ fn result_regs(class: StructClass) -> Option<Vec<Loc>> {
 struct Cursor {
     /// Next general-purpose and FP argument register; 8 means none left.
     ints: u8,
+    linux: bool,
     floats: u8,
     /// Bytes of stack arguments so far.
     stack: u32,
@@ -142,6 +144,9 @@ impl Cursor {
         // round up to an even one, as AAPCS64 does), or 16 aligned bytes
         // of stack, closing the general registers.
         if ty == Type::I128 {
+            if self.linux {
+                self.ints = self.ints.next_multiple_of(2);
+            }
             return match Self::regs(&mut self.ints, 2, Loc::Reg) {
                 Some(regs) => Slot::Reg(regs[0]),
                 None => Slot::Stack(self.stack(16, 16)),
@@ -157,7 +162,10 @@ impl Cursor {
             return Slot::Reg(class(*next - 1));
         }
         let size = ty.bytes().unwrap_or(8);
-        Slot::Stack(self.stack(size, size))
+        Slot::Stack(self.stack(
+            if self.linux { size.max(8) } else { size },
+            if self.linux { size.max(8) } else { size },
+        ))
     }
 
     /// `count` consecutive registers of a class starting at `*next`, or
@@ -180,41 +188,82 @@ impl Cursor {
                     Some(regs) => ArgLoc::InRegs(regs),
                     None => {
                         let size = ty.bytes().unwrap();
-                        ArgLoc::OnStack(self.stack(size * count, size))
+                        ArgLoc::OnStack(self.stack(
+                            if self.linux {
+                                (size * count).next_multiple_of(8)
+                            } else {
+                                size * count
+                            },
+                            if self.linux { size.max(8) } else { size },
+                        ))
                     }
                 }
             }
             // Even a 16-byte aligned struct takes the next registers, with no
             // rounding to an even one: Apple differs from AAPCS64 here.
-            StructClass::Gprs { count } => match Self::regs(&mut self.ints, count, Loc::Reg) {
-                Some(regs) => ArgLoc::InRegs(regs),
-                None => ArgLoc::OnStack(self.stack(8 * count, layout.align().max(8) as u32)),
-            },
+            StructClass::Gprs { count } => {
+                if self.linux && layout.align() >= 16 {
+                    self.ints = self.ints.next_multiple_of(2);
+                }
+                match Self::regs(&mut self.ints, count, Loc::Reg) {
+                    Some(regs) => ArgLoc::InRegs(regs),
+                    None => ArgLoc::OnStack(self.stack(8 * count, layout.align().max(8) as u32)),
+                }
+            }
         }
     }
 }
 
 /// Places arguments `args`, the first `named` of them named and the rest
 /// variadic. Returns each one's location and the bytes of stack they take.
+#[cfg(test)]
 pub fn arg_locs(args: &[ArgKind], named: usize) -> (Vec<ArgLoc>, u32) {
-    let mut cursor = Cursor::default();
-    let locs = args
-        .iter()
-        .enumerate()
-        .map(|(i, arg)| match *arg {
-            ArgKind::Value(ty) if i >= named && ty.is_vector() => {
-                ArgLoc::Value(Slot::Stack(cursor.stack(16, 16)))
-            }
-            _ if i >= named => ArgLoc::Value(Slot::Stack(cursor.stack(8, 8))),
-            ArgKind::Value(ty) => ArgLoc::Value(cursor.scalar(ty)),
-            ArgKind::ByVal(layout) => cursor.by_val(layout),
-            ArgKind::Sret(layout) => match result_regs(classify(layout)) {
-                Some(regs) => ArgLoc::SretRegs(regs),
-                None => ArgLoc::SretMemory,
-            },
-        })
-        .collect();
-    (locs, cursor.stack)
+    let mut locs = Vec::new();
+    let stack = arg_locs_into(args.iter().copied(), named, &mut locs);
+    (locs, stack)
+}
+
+/// [`arg_locs`] into `locs`, which it replaces.
+#[cfg(test)]
+pub fn arg_locs_into<'a>(
+    args: impl IntoIterator<Item = ArgKind<'a>>,
+    named: usize,
+    locs: &mut Vec<ArgLoc>,
+) -> u32 {
+    arg_locs_into_for(args, named, false, locs)
+}
+
+pub fn arg_locs_for(args: &[ArgKind], named: usize, linux: bool) -> (Vec<ArgLoc>, u32) {
+    let mut locs = Vec::new();
+    let stack = arg_locs_into_for(args.iter().copied(), named, linux, &mut locs);
+    (locs, stack)
+}
+
+pub fn arg_locs_into_for<'a>(
+    args: impl IntoIterator<Item = ArgKind<'a>>,
+    named: usize,
+    linux: bool,
+    locs: &mut Vec<ArgLoc>,
+) -> u32 {
+    let mut cursor = Cursor {
+        linux,
+        ..Cursor::default()
+    };
+    locs.clear();
+    locs.extend(args.into_iter().enumerate().map(|(i, arg)| match arg {
+        ArgKind::Value(ty) if !linux && i >= named && ty.is_vector() => {
+            let bytes = ty.bytes().unwrap();
+            ArgLoc::Value(Slot::Stack(cursor.stack(bytes, bytes)))
+        }
+        _ if !linux && i >= named => ArgLoc::Value(Slot::Stack(cursor.stack(8, 8))),
+        ArgKind::Value(ty) => ArgLoc::Value(cursor.scalar(ty)),
+        ArgKind::ByVal(layout) => cursor.by_val(layout),
+        ArgKind::Sret(layout) => match result_regs(classify(layout)) {
+            Some(regs) => ArgLoc::SretRegs(regs),
+            None => ArgLoc::SretMemory,
+        },
+    }));
+    cursor.stack
 }
 
 #[cfg(test)]
@@ -327,4 +376,24 @@ mod tests {
         let (locs, _) = arg_locs(&[ArgKind::Sret(&d2)], 1);
         assert_eq!(locs, [ArgLoc::SretRegs(vec![Loc::FReg(0), Loc::FReg(1)])]);
     }
+}
+
+/// Register cursors after placing a variadic function's named parameters.
+pub fn named_registers(args: &[ArgKind]) -> (u8, u8) {
+    let mut cursor = Cursor {
+        linux: true,
+        ..Default::default()
+    };
+    for arg in args {
+        match arg {
+            ArgKind::Value(t) => {
+                cursor.scalar(*t);
+            }
+            ArgKind::ByVal(l) => {
+                cursor.by_val(l);
+            }
+            ArgKind::Sret(_) => {}
+        }
+    }
+    (cursor.ints, cursor.floats)
 }

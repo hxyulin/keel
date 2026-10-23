@@ -1,18 +1,23 @@
 # SIMD values in Keel IR
 
-The IR supports six fixed 128-bit shapes: `i8x16`, `i16x8`, `i32x4`, `i64x2`,
-`f32x4`, and `f64x2`. In Rust these are `Type::Vector(VectorType::...)`.
-`is_int()` and `is_float()` continue to mean scalar types; use `is_vector()`
-and `vector()` for vector classification and shape queries. Signedness belongs
-to operations. Every vector occupies 16 bytes with natural alignment 16 in an
-aggregate layout. Lane zero occupies the lowest-addressed bytes in memory.
+The IR has six lane families at each fixed width: integer lanes of 8, 16, 32,
+and 64 bits, and floating lanes of 32 and 64 bits. The 64-bit D shapes are
+`i8x8/i16x4/i32x2/i64x1/f32x2/f64x1`; the 128-bit Q shapes are
+`i8x16/i16x8/i32x4/i64x2/f32x4/f64x2`; the 256-bit shapes double Q's lane counts.
+Each value has its width's exact size and natural alignment: 8, 16, or 32 bytes.
+Lane zero occupies the lowest-addressed bytes. `Type::Vector(VectorType::...)`
+represents these values; scalar `is_int()`/`is_float()` remain scalar predicates.
+Use `VectorType::ALL_64`, `ALL_128`, or `ALL_256` for a particular width;
+`ALL` includes all widths. Signedness belongs to operations.
 
-These are target-independent IR operations. Parsing, verification, typed builders,
-printing, operand rewriting and generic optimization support them. The x86-64 Linux
-and AArch64 Apple backends compile every operation below, with packed SSE/SSE2 or
-NEON instructions for common cases and shared scalar lane expansion for the rest. IR clients can construct these values explicitly. The C frontend emits scalar
-loops that Full optimization can now vectorize, as described below. Explicit C
-vector types and intrinsics are not part of this change.
+Target support is explicit: Apple AArch64 supports D/Q and rejects 256-bit
+values; x86-64 supports Q and AVX-enabled 256-bit values, and rejects D values.
+A valid target-independent type does not guarantee target ABI support.
+Parsing, verification, builders, printing and generic rewriting support the
+shapes. Codegen combines packed instructions with scalar lane legalization.
+The C frontend's bounded `vector_size(16)` surface is documented separately in
+[GNU C modes and vectors](gnu-vector-mode.md). General frontend intrinsic
+coverage is separate from explicit IR construction.
 
 ```text
 func @add_lane(ptr, i32) -> i32 {
@@ -26,13 +31,12 @@ block0(v0: ptr, v1: i32):
 }
 ```
 
-Vector loads and stores use the existing memory instructions and flags, including
-unaligned accesses. Loads read all 16 bytes, stores write all 16 bytes, and their
-trapping/volatile behavior is unchanged. Vectors can also appear as block arguments and function arguments/results.
-The backends implement the SysV x86 scalar-vector ABI and Apple arm64 vector ABI.
-AArch64 also supports vector fields in byval/sret aggregates; x86 aggregate vector
-fields remain rejected until SSEUP classification is implemented. Atomic accesses, `va_arg`, scalar conditions and scalar arithmetic
-continue to require their existing scalar types.
+Vector loads and stores access exactly the value's 8, 16, or 32 bytes using the
+existing memory flags. Unaligned accesses retain their existing trapping and
+volatile behavior. Vectors may be block arguments and function arguments/results
+within the target's supported ABI. Scalar conditions and scalar arithmetic keep
+their scalar contracts; vector atomics are not introduced. Supported vector
+`va_arg` and aggregate rules are described by target below.
 
 ## Operations
 
@@ -66,10 +70,11 @@ continue to require their existing scalar types.
   nonzero, otherwise from `b`. The arms have equal vector shapes; the mask has
   integer lanes of the same width and count. Any nonzero mask works. This is lane
   selection, not arbitrary bit blending. Scalar `select` may select a whole vector.
-- `bitcast.<type>` preserves all 128 bits between vector shapes or between a vector
-  and `i128`. It does not convert individual lanes. Other vector conversions,
-  integer division, saturation, reductions, gather/scatter, scalable vectors,
-  256/512-bit types and fused vector FMA are outside this initial set.
+- `bitcast.<type>` preserves bits between equal-size vector/scalar types; it
+  does not convert individual lanes. Widening, narrowing and pairwise conversion
+  operations are described below. Generic packed integer division, scalable and
+  512-bit vectors remain outside this set. Typed AVX2 gathers have a separate
+  target-specific memory contract; ordinary loads are not masked gathers.
 
 Vector computation and lane operations are pure, non-trapping and have no memory
 effects. Loads/stores retain their existing effect classification. Generic GVN,
@@ -79,105 +84,89 @@ There is no vector-specific constant folding or arithmetic combining yet.
 
 ## x86 lowering and calling convention
 
-Packed lowering uses PADDB/W/D/Q and PSUBB/W/D/Q for wrapping integer addition
-and subtraction, PMULLW for i16 multiplication, ANDPS/ORPS/XORPS for bitwise
-operations, ADD/SUB/MUL/DIVPS/PD for floating arithmetic and SQRTPS/PD for sqrt.
-These 19 additional instruction forms and the existing bitwise forms use the
-[Intel SSE/SSE2 encodings](https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html).
-No new AVX feature flag is required for these packed instructions. Scalar lane
-fallbacks inherit the existing scalar backend's CPU requirements (for example,
-POPCNT and SSE4.1 rounding), rather than adding new feature detection.
+Q values use packed SSE/SSE2 operations or exact scalar lane expansion. Explicit
+`--cpu v1` selects baseline fallbacks without requiring POPCNT/SSE4.1; v2 and v3
+are cumulative profiles. The historical default remains the legacy feature
+configuration. CPU features, instruction-selection tiers, allocation tiers and
+optimization profiles are independent controls.
 
-Other operations expand into scalar IR before instruction selection and allocation.
-Private 16-byte stack buffers snapshot the inputs and assemble the result. Only
-needed buffers are allocated, then reused across expansions. Scalar min/max,
-comparisons, shifts, unary operations and selection preserve their existing exact
-semantics, including noncanonical masks, per-lane shift count masking, NaNs and
-signed zero. Lane shuffles, insertion, extraction, splats and all 128-bit bitcasts
-are supported this way too. No optimizer runs after legalization, so snapshots
-stay ordered. These fallbacks favor coverage and correctness; they can be much
-slower than future packed lowering for the same operation.
+AVX-enabled 256-bit values use packed primitives, conversions, integer reductions
+and lane recipes, with scalar legalization where needed. XMM/YMM share physical
+register indices. Spill homes and copies retain exact widths. Functions requiring
+32-byte local alignment realign the frame and use a reserved stable local base;
+incoming arguments and unwind state retain the original frame reference.
+Unaligned Q/Y memory operations use width-appropriate unaligned transfers.
+SysV has no callee-saved SIMD registers, so live values across ordinary calls
+need preservation. Scalar ABI boundaries receive conservative `vzeroupper`.
 
-Vector SSA values occupy one XMM register. Spilled vectors occupy two 8-byte units;
-scalar and vector spill pools remain separate so slot widths never change on reuse.
-Copies and spills preserve all 128 bits. Copy cycles use a reserved 16-byte stack
-temporary in functions with live vectors, including mixed scalar/vector argument
-copies. Unaligned memory accesses use MOVUPS. Values live across ordinary calls
-spill because SysV provides no callee-saved XMM registers.
+Named Q/Y arguments share SIMD0–7 with scalar floating arguments. Q overflow
+slots are 16-byte aligned; Y overflow slots are 32-byte aligned. Results use
+SIMD0. Unnamed Q variadic values use the SIMD save area when available and then
+16-byte aligned overflow storage. Unnamed Y variadic values always use 32-byte
+aligned overflow storage. IR vector `va_arg` implements those widths; D values
+remain rejected. Direct/indirect calls and supported register-only tails retain
+width-aware staging, parallel copies and result transport.
 
-Named vector arguments share XMM0–XMM7 with scalar floating arguments. Each vector
-uses one XMM register; overflow arguments use a 16-byte stack slot aligned to 16.
-Vector results use XMM0. Direct and indirect calls, register-only tail calls, block
-argument cycles and passing vectors to external variadic functions are supported.
-Variadic vectors are not default-promoted; the caller includes their XMM registers
-in AL's register count. Reading a vector with IR `va_arg` remains unsupported by
-the verifier. Vector fields inside byval/sret aggregates return a specific SSEUP
-ABI diagnostic. Existing stack-argument tail-call restrictions remain unchanged.
+True single-vector Q/Y aggregate wrappers use the SSE/SSEUP register class,
+including supported nested single-member layouts. Genuine MEMORY aggregates use
+byval/sret transport and layout-derived stack alignment. GNU empty-member Y
+layouts that Clang and GCC classify differently reject explicitly. Stack-byval
+aggregate tail calls and unnamed compound aggregate varargs retain separate
+planner/IR limitations; vector support does not establish arbitrary aggregate ABI
+coverage. See the exact supported and rejected layouts in
+[x86 coverage](x86-v3-codegen-coverage.html).
 
-Native validation on the i7-1360P Linux NUC includes all six shapes and every
-operation under three selection tiers, both allocation tiers and normal/tiny
-register pools, with default and AVX/BMI feature settings. It checks unaligned
-buffers, integer boundaries, NaNs/signed zero, noncanonical masks and i128 bitcasts.
-Clang harnesses exercise direct/indirect calls, register and stack arguments,
-returns, variadic calls, tail calls, copy cycles, and vector pressure across calls.
-The new encoding matrix compares 6,992 cases plus relocations against Clang and
-GNU as. Typed and parsed native object output matches with zero text IR emission.
+Portable FP operations retain their numerical contract, not exact incidental
+MXCSR exception effects. Explicit x86 architectural intrinsics separately expose
+raw conversions, all 32 AVX compare controls, hardware approximations, raw
+source-biased min/max, rounding controls and F16C. These status-observing
+operations are pinned and retain effects when their value is unused. Portable
+explicit FMA separately guarantees a fused numerical result; its software fallback
+and incidental exception flags do not become an architectural status contract. Typed
+BMI, runtime permutations, movemasks and flag-result tests have their own
+contracts. Gather and sign-masked memory operations preserve inactive-lane fault
+suppression; the byte-mask non-temporal store instead requires a fully writable
+16-byte destination and emits `SFENCE`. These operations require their declared
+features and reject foreign backends. Legacy architectural SSE equivalents are
+being staged separately; AVX support does not prove strict-v1/v2 exposure. The
+[unmasked FP audit and proof](x86-unmasked-fp.md) records the existing raw
+barrier/trap contract, export-only native packet and separate masked-CW x87 gap;
+its local checks do not establish native acceptance or fullprofile completion.
 
-The builder API exposes `vsplat`, `vector_unary`, `vector_binary`, `vextract`,
-`vinsert`, `vshuffle`, `vicmp`, `vfcmp`, and `vselect`. `VectorBinaryOp` is separate
-from scalar `BinaryOp` so scalar folds cannot accidentally apply whole-value
-integer semantics to independent lanes. The verifier checks both typed API and
-text inputs, including mask/result shapes and every lane index.
-
-Validation: `cargo test -p keel-codegen --test vector_x86 --test vector_ir` and
-`cargo test -p keel-asm --test x86_packed`. Linux x86-64 executes the runtime
-harnesses; other hosts check emission and cross-compile the ABI harness.
+The native evidence includes three selection tiers, two allocation tiers,
+normal/forced spill pools, direct/text object parity, Clang/GCC ABI interop,
+guard pages and numerical/status oracles. Finite corpus results and encoder
+inventories do not establish exhaustive architectural correctness or performance.
+Current commands, source hashes, failures and limits are retained in
+[the stage ledger](isa-stages-20261022.json) and per-family reports.
 
 ## AArch64 NEON lowering and Apple calling convention
 
-Packed integer operations include add/subtract at every lane width, multiply at
-8/16/32 bits, bitwise operations, negation, CLZ through 32 bits, byte popcount,
-and byte reversal within 16/32/64-bit lanes. Both float shapes use packed
-add/subtract/multiply/divide, NaN-propagating min/max, negation, absolute value,
-square root and all four rounding operations. These use typed instruction
-encodings directly, with no text assembly fallback.
+D/Q values use exact-width 8/16-byte memory, copies and spill homes. Packed
+operations cover arithmetic, comparisons, lane selection, widening/narrowing,
+reductions and common permutations; shared legalization supplies other portable
+recipes. Exact static ZIP/UZP/TRN and window permutations select native forms.
+Architectural intrinsics additionally preserve the named ARM instruction's
+FPCR/FPSR behavior. Their scalar forms use valid B/H/S/D encodings rather than
+reserved vector arrangements. Details and exceptions are listed below.
 
-Comparisons, lane selection, shifts, shuffles, extract/insert, bitcasts,
-copy-sign, 64-bit multiplication and the remaining integer unary operations use
-the same scalar legalization as x86. This is complete operation coverage, not
-complete packed-instruction coverage. SVE/SME and scalable vector IR are not part
-of these six fixed-width types.
+Named vectors share v0–v7 with scalar floating arguments; overflow arguments
+retain each value's size/alignment. Results use v0. Apple variadic D/Q values
+use exact 8/16-byte stack slots, and vector `va_arg` aligns and advances them
+accordingly. Homogeneous vector aggregates of up to four members use one SIMD
+register per member when the bank has capacity; otherwise the aggregate uses
+the stack. Other aggregates use the applicable indirect-copy/x8-result ABI.
+D/Q callers, mixed scalar/vector varargs and aggregate boundaries are tested
+against Clang. Upper SIMD halves are not assumed preserved across ordinary calls.
 
-Values occupy one 128-bit Q register or a 16-byte spill slot. Copies, parallel
-copy cycles, unaligned accesses and spills preserve all bits. Large unaligned
-spill offsets materialize an address when immediate Q addressing cannot encode
-them; dynamic stack allocation retains a stable frame base. Vectors live across
-calls spill because [AAPCS64 preserves only the low 64 bits of v8–v15](https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst).
-Scalar floating values can still use those callee-saved registers.
-
-Named vector arguments share v0–v7 with scalar floats; overflow arguments use
-16-byte stack slots aligned to 16. Results use v0. Direct/indirect calls,
-register-only tail calls, block argument cycles and external variadic calls are
-supported. Apple variadic vectors go on the stack with size/alignment 16;
-IR vector `va_arg` remains unsupported. Homogeneous vector aggregates of one to
-four 128-bit members use one vector register per member, or the stack when the
-FP bank has insufficient registers. Lane types do not affect homogeneity.
-Larger aggregates use the existing indirect-copy and x8 result-address convention.
-These rules follow [AAPCS64](https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst)
-with [Apple's arm64 ABI changes](https://developer.apple.com/documentation/xcode/writing-arm64-code-for-apple-platforms).
-
-Native Mac tests execute every operation and shape under three selection tiers,
-both allocation tiers, and normal/tiny register pools. Clang C harnesses check
-unaligned memory, integer boundaries, NaNs/signed zero, noncanonical masks, i128
-bitcasts, calls, stack arguments, variadics, return values, register pressure,
-and clobbering the upper halves of v8–v15. Aggregate tests cover one through five
-members, mixed lane types, FP-bank exhaustion, and dynamic stack allocation with
-large unaligned spills. Packed instruction bytes match Clang, and typed versus
-parsed Keel Mach-O objects match with zero text IR emission.
-
-Validation: `cargo test -p keel-codegen --test vector_aarch64 --test vector_ir`.
-AArch64 macOS executes the runtime harnesses; other hosts check emission and
-instruction encodings.
+Native ARM witnesses cover protected memory, exact access footprints, source and
+result aliases, status flags, forced spills, all selector/allocation combinations
+and both object routes. The baseline 519-record reconciliation distinguishes
+principal-operation signatures from helper instructions and semantic recipes.
+It does not equate semantic coverage with universal one-instruction lowering.
+Optional FP16 arithmetic, crypto, SVE and SME are separate from baseline NEON.
+See [the reconciliation](neon-519-reconciliation-20261022.html) for per-record
+witnesses and limitations.
 
 ## Automatic loop vectorization
 
@@ -390,3 +379,148 @@ separate source lines; shared values, volatile reads, and unsupported address
 selection retain their original instructions. This is a foundation for mixed-width reductions;
 compound narrowing, packed division and the full `k_narrow` expression remain
 outside this subset.
+
+## Baseline NEON semantic extensions (2026-10-22)
+
+The implementation and outstanding families are tracked separately from assembler
+encoding coverage in `neon-ir-coverage-20261022.json` and its HTML rendering. A
+519-record assembler inventory does not establish IR or semantic completeness.
+
+Portable integer binary operations now include `vsmin/vsmax/vumin/vumax`,
+`vsabd/vuabd`, signed/unsigned halving add/subtract (`vshadd/vuhadd/vshsub/vuhsub`),
+rounding halving add (`vsrhadd/vurhadd`), and saturating add/subtract
+(`vsadd_sat/vuadd_sat/vssub_sat/vusub_sat`). ABD returns the low W bits of the exact
+mathematical magnitude. Halving computes floor((a +/- b)/2) with an extended
+intermediate; rounding halving add computes floor((a+b+1)/2). Saturation clamps
+the exact mathematical result to the named signed or unsigned W-bit range.
+Portable clamps do **not** update FPSR.QC.
+
+`vpadd/vpsmin/vpsmax/vpumin/vpumax` and `vfpadd/vfpmin/vfpmax` pair adjacent lanes
+of the concatenation of both input vectors. Output lane i applies the named
+binary operation to concatenated lanes 2i and 2i+1. Floating operand order,
+NaN propagation and signed-zero behavior follow the corresponding scalar
+operation; these operations do not authorize further reassociation.
+
+`vreduce_add/and/or/xor/smin/smax/umin/umax` reduce all integer input lanes to a
+scalar of the lane type. Addition wraps at that width. No floating reassociation
+is implied. The loop vectorizer uses `vreduce_add` for integer sums.
+
+`swiden_high/uwiden_high` extend the highest destination-lane-count source lanes,
+including multi-step width changes. `narrow_low.DEST` truncates every input lane
+into the lowest output lanes and zero-fills every remaining lane. The pure
+`snarrow_sat_low/unarrow_sat_low/sunarrow_sat_low` forms first clamp to signed,
+unsigned, or signed-source-to-unsigned destination range respectively; they do
+not update QC. `spairwise_add_long/upairwise_add_long` require exactly doubled
+lane width and add each adjacent input pair in that wider output lane. High
+placement of a narrow result and high-half long arithmetic can be expressed
+with checked `vshuffle` operations.
+
+### Architectural state and explicit intrinsics
+
+`neon_<operation>.RESULT(args...)` is a typed ARM intrinsic. Every operation has
+an explicit accepted result type, operand types and arity in
+`NeonIntrinsic::operand_types`; x86 rejects these target-specific operations.
+Examples include `neon_sqadd.i8x16(a,b)`,
+`neon_smlal.i64x2(accumulator,low_i32_vector_a,low_i32_vector_b)`, and
+`neon_fcvtzs.i32x4(float_vector)`. Long operands use their low half; narrow
+results zero all unused upper lanes. Architecture-defined rounding, doubling,
+intermediate saturation, NaN handling and accumulation are those of the named
+baseline ARM instruction. FMLA/FMLS take accumulator first, then multiplicands
+in written instruction order. They round once; generic multiply/add remains
+unfused. Immediate shift and fixed-point forms take a final literal `i32` SSA
+constant whose range is verified. Dynamic counts use the separate variable
+shift intrinsics, which interpret the signed low byte of each count lane;
+portable shifts continue to mask counts modulo lane width.
+
+Explicit intrinsics execute with the current FPCR and update FPSR, including
+sticky QC and exception flags, according to the named ARM instruction. They are
+pinned barriers, conservatively may trap, and retain status effects when their
+value result is unused. `neon_read_fpsr.i64()` and `neon_read_fpcr.i64()` read
+state. `neon_swap_fpsr.i64(value)` and `neon_swap_fpcr.i64(value)` return the
+previous register value and then write the supplied value, following ARM rules
+for reserved register bits.
+
+**Portable floating operations retain their pre-existing numerical contract;
+their interaction with FPSR is unspecified.** In particular, mixing `vfadd`,
+scalar floating arithmetic, or other portable FP operations with an explicit
+FPSR read/swap does not make their intermediate exception flags observable IR
+semantics. Their scalar or packed implementation and optimization can change
+those incidental flags. Clients requiring architectural FPCR/FPSR behavior must
+use explicit architectural intrinsics for the operations they observe. Portable
+integer saturation remains independently specified to preserve QC.
+
+Baseline half-storage conversions use `i16x8` to carry IEEE binary16 bit patterns;
+this does not add optional FP16 arithmetic types or instructions. Numeric/crypto
+extensions, SVE and SME remain outside the baseline inventory.
+
+### D transport and structured memory
+
+The six D shapes have 8-byte size and alignment. ARM ordinary memory,
+spills, stack arguments, and homogeneous vector aggregate members transfer
+exactly eight bytes. Named arguments and results use the low SIMD register
+bits. Packed architectural D forms use explicit Q=0 encodings; single-lane
+64-bit architectural forms use the corresponding scalar encoding.
+
+Structured memory operations use the existing `neon_` instruction syntax,
+with a vector shape suffix. `neon_ld2`, `neon_ld3`, and `neon_ld4` return
+2–4 vectors in structure order; `neon_ld1` returns one. `neon_ld1x2`,
+`neon_ld1x3`, and `neon_ld1x4` read contiguous vector lists. Stores take the
+address followed by the vectors and have no results. `neon_ldNr` reads one
+lane per structure and replicates it. `neon_ldN_lane` takes an address,
+N original vectors, and a literal i32 lane index, returning N updated vectors;
+`neon_stN_lane` takes the same inputs and returns nothing. N ranges from 1
+through 4. All six D and six Q shapes are supported; lane indices are checked
+against the shape. Address writeback is an explicit `ptradd` in SSA.
+
+For example:
+
+```text
+v2, v3 = neon_ld2.i16x4(v0)
+neon_st2.i16x4(v1, v2, v3)
+```
+
+These instructions remain pinned memory barriers. They make no alignment or
+fault-freedom promise and are not atomic. Full transfers access exactly N
+vector widths; lane and replicate transfers access exactly N element widths.
+The backend selects native list, interleaved, lane and replicate structure
+instructions where their arrangements are legal, retaining exact scalar
+legalization for arrangements without a native structure encoding. Native
+guard-page tests cover every shape, count and lane, overlaps, normal/forced
+spill pools, all pipeline tiers and FPSR preservation. Post-index recipes
+perform the pinned memory access before computing the next SSA pointer with
+`ptradd`; successful pointer values and early/late memory faults are checked
+against raw post-index instructions. Physical exception-context register
+contents are outside the exposed SSA semantics.
+
+### Scalar architectural forms
+
+Explicit NEON saturation accepts scalar i8/i16/i32/i64 where the scalar
+instruction defines that size. Plain variable/immediate shifts accept i64;
+saturating scalar shifts accept all four widths. Doubling multiply-high
+accepts i16/i32, doubling long multiply/accumulate i32/i64 results, and
+saturating narrowing i8/i16/i32 results with twice-width inputs. Raw scalar
+FP operations and conversions use f32/f64 and i32/i64 as appropriate. Scalar
+pairwise FP results consume f32x2 or f64x2. One-lane D64 forms use these scalar
+encodings rather than reserved Q=0,size=64 vector encodings.
+
+Integer SSA values are transferred into and out of low SIMD lanes without
+arithmetic conversion. All explicit operations retain pinned FPCR/FPSR
+semantics, including when the numeric result is dead. Scalar `neon_fmla` and
+`neon_fmls` use architectural fused instructions with accumulator first and
+written multiplicand order. Indexed recipes extract a lane then invoke these
+pinned operations. Portable FMA does not supply this architectural-status
+contract. `neon_frecpx` accepts f32/f64 and one-lane f64 vectors.
+
+`neon_cls` and `neon_rbit` expose the baseline sign-count and per-byte bit
+reversal operations. `neon_mla`, `neon_mls`, `neon_saba`, and `neon_uaba` take
+the accumulator first; `neon_sadalp` and `neon_uadalp` consume a same-size
+vector of half-width source lanes after the accumulator. Accepted D/Q lane
+widths are checked per operation. These architectural intrinsics preserve
+FPSR for the integer operations whose instruction definitions leave it alone.
+
+The 519-record reconciliation links each pinned baseline record to a native
+execution witness or an executed recipe. That semantic route closure does
+not imply direct one-operation lowering of every record. Indexed broadcasts,
+constant materialization, explicit high-half placement, table sequences and
+post-index `ptradd` remain valid multi-instruction routes. Optional FP16
+arithmetic and crypto/SVE/SME extensions remain outside this baseline.

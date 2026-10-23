@@ -32,7 +32,29 @@ pub(super) fn leb(out: &mut Vec<u8>, mut n: i128, signed: bool) -> Result<(), St
     }
     Ok(())
 }
-fn dwarf_register(s: &str) -> Result<u8, String> {
+fn dwarf_register(s: &str, arm: bool) -> Result<u8, String> {
+    if arm {
+        if s == "sp" {
+            return Ok(31);
+        }
+        if let Some(n) = s
+            .strip_prefix('x')
+            .and_then(|s| s.parse::<u8>().ok())
+            .filter(|n| *n <= 30)
+        {
+            return Ok(n);
+        }
+        if let Some(n) = s
+            .strip_prefix('d')
+            .and_then(|s| s.parse::<u8>().ok())
+            .filter(|n| *n <= 31)
+        {
+            return Ok(n + 64);
+        }
+        return s
+            .parse::<u8>()
+            .map_err(|_| "invalid AArch64 DWARF register".into());
+    }
     let s = s.strip_prefix('%').unwrap_or(s);
     if let Some(r) = x86::Register::parse(s) {
         if r.class != RegisterClass::Gpr {
@@ -55,7 +77,7 @@ pub(super) fn cfi(a: &mut Assembler, op: &str, args: &str) -> Result<(), String>
             last: at,
             code: Vec::new(),
             state_depth: 0,
-            cfa_offset: 8,
+            cfa_offset: if a.arm.is_some() { 0 } else { 8 },
             saved_offsets: Vec::new(),
             personality: None,
             lsda: None,
@@ -91,16 +113,24 @@ pub(super) fn cfi(a: &mut Assembler, op: &str, args: &str) -> Result<(), String>
                 return Err("invalid .cfi_def_cfa_register".into());
             }
             f.code.push(0x0d);
-            leb(&mut f.code, dwarf_register(args)?.into(), false)?
+            leb(
+                &mut f.code,
+                dwarf_register(args, a.arm.is_some())?.into(),
+                false,
+            )?
         }
         ".cfi_def_cfa" if p.len() == 2 => {
             f.code.push(0x0c);
-            leb(&mut f.code, dwarf_register(p[0])?.into(), false)?;
+            leb(
+                &mut f.code,
+                dwarf_register(p[0], a.arm.is_some())?.into(),
+                false,
+            )?;
             f.cfa_offset = x86::integer(p[1])?;
             leb(&mut f.code, f.cfa_offset, false)?
         }
         ".cfi_offset" if p.len() == 2 => {
-            let reg = dwarf_register(p[0])?;
+            let reg = dwarf_register(p[0], a.arm.is_some())?;
             let offset = x86::integer(p[1])?;
             if offset > 0 || offset % 8 != 0 {
                 return Err("CFI offset must be a nonpositive multiple of eight".into());
@@ -114,7 +144,7 @@ pub(super) fn cfi(a: &mut Assembler, op: &str, args: &str) -> Result<(), String>
             leb(&mut f.code, offset / -8, false)?
         }
         ".cfi_restore" if p.len() == 1 => {
-            let reg = dwarf_register(args)?;
+            let reg = dwarf_register(args, a.arm.is_some())?;
             if reg < 64 {
                 f.code.push(0xc0 | reg)
             } else {
@@ -210,7 +240,7 @@ pub(super) fn finish(a: &mut Assembler) -> Result<(), String> {
                 if f.lsda.is_some() {
                     bytes.push(b'L');
                 }
-                bytes.extend([b'R', 0, 1, 0x78, 16]);
+                bytes.extend([b'R', 0, 1, 0x78, if a.arm.is_some() { 30 } else { 16 }]);
                 bytes.push(
                     1 + if f.personality.is_some() { 5 } else { 0 } + u8::from(f.lsda.is_some()),
                 );
@@ -231,7 +261,11 @@ pub(super) fn finish(a: &mut Assembler) -> Result<(), String> {
                 if f.lsda.is_some() {
                     bytes.push(0x1b);
                 }
-                bytes.extend([0x1b, 0x0c, 7, 8, 0x90, 1]);
+                if a.arm.is_some() {
+                    bytes.extend([0x1b, 0x0c, 31, 0]);
+                } else {
+                    bytes.extend([0x1b, 0x0c, 7, 8, 0x90, 1]);
+                }
                 while !bytes.len().is_multiple_of(8) {
                     bytes.push(0);
                 }

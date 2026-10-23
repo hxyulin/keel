@@ -169,7 +169,7 @@ impl Linker {
         let mut fdes = BTreeMap::new();
         for o in &self.objects {
             for s in &o.sections {
-                if s.name != "__eh_frame" {
+                if s.name != "__eh_frame" || s.data.is_empty() {
                     continue;
                 }
                 let output = &self.outputs[s.output.ok_or("eh_frame discarded")?];
@@ -408,7 +408,7 @@ fn function_ranges(mut entries: Vec<Entry>) -> Result<Vec<Entry>> {
 // alignment 1/-8, native-width PC-relative FDE pointers. Personality uses an
 // indirect PC-relative signed 32-bit GOT reference. Reject other encodings
 // until they have their own relocation and runtime coverage.
-fn validate_cie(bytes: &[u8], at: usize) -> Result<()> {
+pub(crate) fn validate_cie(bytes: &[u8], at: usize) -> Result<()> {
     let r = Reader(bytes);
     let len = r.u32(at)? as usize;
     if len < 9 || r.u32(at + 4)? != 0 {

@@ -1,0 +1,878 @@
+decl @c_gp(ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64})->i64
+func @tail_gp_0_0(ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_gp(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_gp_0_1(ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_gp(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_gp_1_0(ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64})->i64
+}
+func @tail_gp_1_1(ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64})->i64
+}
+decl @id_gp(ptr sret {i64,i64},ptr byval {i64,i64})
+func @result_gp(ptr sret {i64,i64},ptr byval {i64,i64}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_gp(v0,v1)
+}
+func @result_ind_gp(ptr sret {i64,i64},ptr byval {i64,i64},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {i64,i64},ptr byval {i64,i64})
+}
+func @only_gp(ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},ptr byval {i64,i64},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @c_mem(ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64})->i64
+func @tail_mem_0_0(ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_mem(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_mem_0_1(ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_mem(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_mem_1_0(ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64})->i64
+}
+func @tail_mem_1_1(ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64})->i64
+}
+decl @id_mem(ptr sret {i64,i64,i64},ptr byval {i64,i64,i64})
+func @result_mem(ptr sret {i64,i64,i64},ptr byval {i64,i64,i64}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_mem(v0,v1)
+}
+func @result_ind_mem(ptr sret {i64,i64,i64},ptr byval {i64,i64,i64},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {i64,i64,i64},ptr byval {i64,i64,i64})
+}
+func @only_mem(ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},ptr byval {i64,i64,i64},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @c_q(ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4})->i64
+func @tail_q_0_0(ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_q(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_q_0_1(ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_q(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_q_1_0(ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4})->i64
+}
+func @tail_q_1_1(ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4})->i64
+}
+decl @id_q(ptr sret {i32x4},ptr byval {i32x4})
+func @result_q(ptr sret {i32x4},ptr byval {i32x4}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_q(v0,v1)
+}
+func @result_ind_q(ptr sret {i32x4},ptr byval {i32x4},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {i32x4},ptr byval {i32x4})
+}
+func @only_q(ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},ptr byval {i32x4},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @c_y(ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8})->i64
+func @tail_y_0_0(ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_y(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_y_0_1(ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_y(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_y_1_0(ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8})->i64
+}
+func @tail_y_1_1(ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8})->i64
+}
+decl @id_y(ptr sret {i32x8},ptr byval {i32x8})
+func @result_y(ptr sret {i32x8},ptr byval {i32x8}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_y(v0,v1)
+}
+func @result_ind_y(ptr sret {i32x8},ptr byval {i32x8},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {i32x8},ptr byval {i32x8})
+}
+func @only_y(ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},ptr byval {i32x8},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @c_qm(ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64})->i64
+func @tail_qm_0_0(ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_qm(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_qm_0_1(ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_qm(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_qm_1_0(ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64})->i64
+}
+func @tail_qm_1_1(ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64})->i64
+}
+decl @id_qm(ptr sret {i32x4,i64},ptr byval {i32x4,i64})
+func @result_qm(ptr sret {i32x4,i64},ptr byval {i32x4,i64}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_qm(v0,v1)
+}
+func @result_ind_qm(ptr sret {i32x4,i64},ptr byval {i32x4,i64},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {i32x4,i64},ptr byval {i32x4,i64})
+}
+func @only_qm(ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},ptr byval {i32x4,i64},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @c_fx(ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80})->i64
+func @tail_fx_0_0(ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_fx(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_fx_0_1(ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_fx(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_fx_1_0(ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80})->i64
+}
+func @tail_fx_1_1(ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80})->i64
+}
+decl @id_fx(ptr sret {f80},ptr byval {f80})
+func @result_fx(ptr sret {f80},ptr byval {f80}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_fx(v0,v1)
+}
+func @result_ind_fx(ptr sret {f80},ptr byval {f80},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {f80},ptr byval {f80})
+}
+func @only_fx(ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},ptr byval {f80},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @c_di8_i64_0(ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64})->i64
+func @tail_di8_i64_0_0_0(ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di8_i64_0(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_di8_i64_0_0_1(ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di8_i64_0(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_di8_i64_0_1_0(ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64})->i64
+}
+func @tail_di8_i64_0_1_1(ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64})->i64
+}
+decl @id_di8_i64_0(ptr sret {i8x8,i64},ptr byval {i8x8,i64})
+func @result_di8_i64_0(ptr sret {i8x8,i64},ptr byval {i8x8,i64}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_di8_i64_0(v0,v1)
+}
+func @result_ind_di8_i64_0(ptr sret {i8x8,i64},ptr byval {i8x8,i64},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {i8x8,i64},ptr byval {i8x8,i64})
+}
+func @only_di8_i64_0(ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},ptr byval {i8x8,i64},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @c_di8_i64_1(ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8})->i64
+func @tail_di8_i64_1_0_0(ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di8_i64_1(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_di8_i64_1_0_1(ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di8_i64_1(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_di8_i64_1_1_0(ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8})->i64
+}
+func @tail_di8_i64_1_1_1(ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8})->i64
+}
+decl @id_di8_i64_1(ptr sret {i64,i8x8},ptr byval {i64,i8x8})
+func @result_di8_i64_1(ptr sret {i64,i8x8},ptr byval {i64,i8x8}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_di8_i64_1(v0,v1)
+}
+func @result_ind_di8_i64_1(ptr sret {i64,i8x8},ptr byval {i64,i8x8},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {i64,i8x8},ptr byval {i64,i8x8})
+}
+func @only_di8_i64_1(ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},ptr byval {i64,i8x8},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @c_di8_f64_0(ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64})->i64
+func @tail_di8_f64_0_0_0(ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di8_f64_0(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_di8_f64_0_0_1(ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di8_f64_0(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_di8_f64_0_1_0(ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64})->i64
+}
+func @tail_di8_f64_0_1_1(ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64})->i64
+}
+decl @id_di8_f64_0(ptr sret {i8x8,f64},ptr byval {i8x8,f64})
+func @result_di8_f64_0(ptr sret {i8x8,f64},ptr byval {i8x8,f64}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_di8_f64_0(v0,v1)
+}
+func @result_ind_di8_f64_0(ptr sret {i8x8,f64},ptr byval {i8x8,f64},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {i8x8,f64},ptr byval {i8x8,f64})
+}
+func @only_di8_f64_0(ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},ptr byval {i8x8,f64},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @c_di8_f64_1(ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8})->i64
+func @tail_di8_f64_1_0_0(ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di8_f64_1(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_di8_f64_1_0_1(ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di8_f64_1(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_di8_f64_1_1_0(ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8})->i64
+}
+func @tail_di8_f64_1_1_1(ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8})->i64
+}
+decl @id_di8_f64_1(ptr sret {f64,i8x8},ptr byval {f64,i8x8})
+func @result_di8_f64_1(ptr sret {f64,i8x8},ptr byval {f64,i8x8}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_di8_f64_1(v0,v1)
+}
+func @result_ind_di8_f64_1(ptr sret {f64,i8x8},ptr byval {f64,i8x8},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {f64,i8x8},ptr byval {f64,i8x8})
+}
+func @only_di8_f64_1(ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},ptr byval {f64,i8x8},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @c_di16_i64_0(ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64})->i64
+func @tail_di16_i64_0_0_0(ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di16_i64_0(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_di16_i64_0_0_1(ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di16_i64_0(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_di16_i64_0_1_0(ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64})->i64
+}
+func @tail_di16_i64_0_1_1(ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64})->i64
+}
+decl @id_di16_i64_0(ptr sret {i16x4,i64},ptr byval {i16x4,i64})
+func @result_di16_i64_0(ptr sret {i16x4,i64},ptr byval {i16x4,i64}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_di16_i64_0(v0,v1)
+}
+func @result_ind_di16_i64_0(ptr sret {i16x4,i64},ptr byval {i16x4,i64},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {i16x4,i64},ptr byval {i16x4,i64})
+}
+func @only_di16_i64_0(ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},ptr byval {i16x4,i64},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @c_di16_i64_1(ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4})->i64
+func @tail_di16_i64_1_0_0(ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di16_i64_1(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_di16_i64_1_0_1(ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di16_i64_1(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_di16_i64_1_1_0(ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4})->i64
+}
+func @tail_di16_i64_1_1_1(ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4})->i64
+}
+decl @id_di16_i64_1(ptr sret {i64,i16x4},ptr byval {i64,i16x4})
+func @result_di16_i64_1(ptr sret {i64,i16x4},ptr byval {i64,i16x4}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_di16_i64_1(v0,v1)
+}
+func @result_ind_di16_i64_1(ptr sret {i64,i16x4},ptr byval {i64,i16x4},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {i64,i16x4},ptr byval {i64,i16x4})
+}
+func @only_di16_i64_1(ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},ptr byval {i64,i16x4},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @c_di16_f64_0(ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64})->i64
+func @tail_di16_f64_0_0_0(ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di16_f64_0(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_di16_f64_0_0_1(ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di16_f64_0(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_di16_f64_0_1_0(ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64})->i64
+}
+func @tail_di16_f64_0_1_1(ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64})->i64
+}
+decl @id_di16_f64_0(ptr sret {i16x4,f64},ptr byval {i16x4,f64})
+func @result_di16_f64_0(ptr sret {i16x4,f64},ptr byval {i16x4,f64}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_di16_f64_0(v0,v1)
+}
+func @result_ind_di16_f64_0(ptr sret {i16x4,f64},ptr byval {i16x4,f64},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {i16x4,f64},ptr byval {i16x4,f64})
+}
+func @only_di16_f64_0(ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},ptr byval {i16x4,f64},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @c_di16_f64_1(ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4})->i64
+func @tail_di16_f64_1_0_0(ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di16_f64_1(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_di16_f64_1_0_1(ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di16_f64_1(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_di16_f64_1_1_0(ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4})->i64
+}
+func @tail_di16_f64_1_1_1(ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4})->i64
+}
+decl @id_di16_f64_1(ptr sret {f64,i16x4},ptr byval {f64,i16x4})
+func @result_di16_f64_1(ptr sret {f64,i16x4},ptr byval {f64,i16x4}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_di16_f64_1(v0,v1)
+}
+func @result_ind_di16_f64_1(ptr sret {f64,i16x4},ptr byval {f64,i16x4},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {f64,i16x4},ptr byval {f64,i16x4})
+}
+func @only_di16_f64_1(ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},ptr byval {f64,i16x4},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @c_di32_i64_0(ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64})->i64
+func @tail_di32_i64_0_0_0(ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di32_i64_0(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_di32_i64_0_0_1(ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di32_i64_0(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_di32_i64_0_1_0(ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64})->i64
+}
+func @tail_di32_i64_0_1_1(ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64})->i64
+}
+decl @id_di32_i64_0(ptr sret {i32x2,i64},ptr byval {i32x2,i64})
+func @result_di32_i64_0(ptr sret {i32x2,i64},ptr byval {i32x2,i64}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_di32_i64_0(v0,v1)
+}
+func @result_ind_di32_i64_0(ptr sret {i32x2,i64},ptr byval {i32x2,i64},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {i32x2,i64},ptr byval {i32x2,i64})
+}
+func @only_di32_i64_0(ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},ptr byval {i32x2,i64},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @c_di32_i64_1(ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2})->i64
+func @tail_di32_i64_1_0_0(ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di32_i64_1(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_di32_i64_1_0_1(ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di32_i64_1(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_di32_i64_1_1_0(ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2})->i64
+}
+func @tail_di32_i64_1_1_1(ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2})->i64
+}
+decl @id_di32_i64_1(ptr sret {i64,i32x2},ptr byval {i64,i32x2})
+func @result_di32_i64_1(ptr sret {i64,i32x2},ptr byval {i64,i32x2}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_di32_i64_1(v0,v1)
+}
+func @result_ind_di32_i64_1(ptr sret {i64,i32x2},ptr byval {i64,i32x2},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {i64,i32x2},ptr byval {i64,i32x2})
+}
+func @only_di32_i64_1(ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},ptr byval {i64,i32x2},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @c_di32_f64_0(ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64})->i64
+func @tail_di32_f64_0_0_0(ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di32_f64_0(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_di32_f64_0_0_1(ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di32_f64_0(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_di32_f64_0_1_0(ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64})->i64
+}
+func @tail_di32_f64_0_1_1(ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64})->i64
+}
+decl @id_di32_f64_0(ptr sret {i32x2,f64},ptr byval {i32x2,f64})
+func @result_di32_f64_0(ptr sret {i32x2,f64},ptr byval {i32x2,f64}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_di32_f64_0(v0,v1)
+}
+func @result_ind_di32_f64_0(ptr sret {i32x2,f64},ptr byval {i32x2,f64},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {i32x2,f64},ptr byval {i32x2,f64})
+}
+func @only_di32_f64_0(ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},ptr byval {i32x2,f64},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @c_di32_f64_1(ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2})->i64
+func @tail_di32_f64_1_0_0(ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di32_f64_1(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_di32_f64_1_0_1(ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di32_f64_1(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_di32_f64_1_1_0(ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2})->i64
+}
+func @tail_di32_f64_1_1_1(ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2})->i64
+}
+decl @id_di32_f64_1(ptr sret {f64,i32x2},ptr byval {f64,i32x2})
+func @result_di32_f64_1(ptr sret {f64,i32x2},ptr byval {f64,i32x2}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_di32_f64_1(v0,v1)
+}
+func @result_ind_di32_f64_1(ptr sret {f64,i32x2},ptr byval {f64,i32x2},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {f64,i32x2},ptr byval {f64,i32x2})
+}
+func @only_di32_f64_1(ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},ptr byval {f64,i32x2},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @c_di64_i64_0(ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64})->i64
+func @tail_di64_i64_0_0_0(ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di64_i64_0(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_di64_i64_0_0_1(ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di64_i64_0(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_di64_i64_0_1_0(ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64})->i64
+}
+func @tail_di64_i64_0_1_1(ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64})->i64
+}
+decl @id_di64_i64_0(ptr sret {i64x1,i64},ptr byval {i64x1,i64})
+func @result_di64_i64_0(ptr sret {i64x1,i64},ptr byval {i64x1,i64}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_di64_i64_0(v0,v1)
+}
+func @result_ind_di64_i64_0(ptr sret {i64x1,i64},ptr byval {i64x1,i64},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {i64x1,i64},ptr byval {i64x1,i64})
+}
+func @only_di64_i64_0(ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},ptr byval {i64x1,i64},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @c_di64_i64_1(ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1})->i64
+func @tail_di64_i64_1_0_0(ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di64_i64_1(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_di64_i64_1_0_1(ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di64_i64_1(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_di64_i64_1_1_0(ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1})->i64
+}
+func @tail_di64_i64_1_1_1(ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1})->i64
+}
+decl @id_di64_i64_1(ptr sret {i64,i64x1},ptr byval {i64,i64x1})
+func @result_di64_i64_1(ptr sret {i64,i64x1},ptr byval {i64,i64x1}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_di64_i64_1(v0,v1)
+}
+func @result_ind_di64_i64_1(ptr sret {i64,i64x1},ptr byval {i64,i64x1},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {i64,i64x1},ptr byval {i64,i64x1})
+}
+func @only_di64_i64_1(ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},ptr byval {i64,i64x1},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @c_di64_f64_0(ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64})->i64
+func @tail_di64_f64_0_0_0(ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di64_f64_0(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_di64_f64_0_0_1(ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di64_f64_0(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_di64_f64_0_1_0(ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64})->i64
+}
+func @tail_di64_f64_0_1_1(ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64})->i64
+}
+decl @id_di64_f64_0(ptr sret {i64x1,f64},ptr byval {i64x1,f64})
+func @result_di64_f64_0(ptr sret {i64x1,f64},ptr byval {i64x1,f64}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_di64_f64_0(v0,v1)
+}
+func @result_ind_di64_f64_0(ptr sret {i64x1,f64},ptr byval {i64x1,f64},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {i64x1,f64},ptr byval {i64x1,f64})
+}
+func @only_di64_f64_0(ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},ptr byval {i64x1,f64},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @c_di64_f64_1(ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1})->i64
+func @tail_di64_f64_1_0_0(ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di64_f64_1(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_di64_f64_1_0_1(ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_di64_f64_1(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_di64_f64_1_1_0(ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1})->i64
+}
+func @tail_di64_f64_1_1_1(ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1})->i64
+}
+decl @id_di64_f64_1(ptr sret {f64,i64x1},ptr byval {f64,i64x1})
+func @result_di64_f64_1(ptr sret {f64,i64x1},ptr byval {f64,i64x1}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_di64_f64_1(v0,v1)
+}
+func @result_ind_di64_f64_1(ptr sret {f64,i64x1},ptr byval {f64,i64x1},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {f64,i64x1},ptr byval {f64,i64x1})
+}
+func @only_di64_f64_1(ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},ptr byval {f64,i64x1},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @c_df32_i64_0(ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64})->i64
+func @tail_df32_i64_0_0_0(ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_df32_i64_0(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_df32_i64_0_0_1(ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_df32_i64_0(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_df32_i64_0_1_0(ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64})->i64
+}
+func @tail_df32_i64_0_1_1(ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64})->i64
+}
+decl @id_df32_i64_0(ptr sret {f32x2,i64},ptr byval {f32x2,i64})
+func @result_df32_i64_0(ptr sret {f32x2,i64},ptr byval {f32x2,i64}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_df32_i64_0(v0,v1)
+}
+func @result_ind_df32_i64_0(ptr sret {f32x2,i64},ptr byval {f32x2,i64},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {f32x2,i64},ptr byval {f32x2,i64})
+}
+func @only_df32_i64_0(ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @c_df32_i64_1(ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2})->i64
+func @tail_df32_i64_1_0_0(ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_df32_i64_1(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_df32_i64_1_0_1(ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_df32_i64_1(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_df32_i64_1_1_0(ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2})->i64
+}
+func @tail_df32_i64_1_1_1(ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2})->i64
+}
+decl @id_df32_i64_1(ptr sret {i64,f32x2},ptr byval {i64,f32x2})
+func @result_df32_i64_1(ptr sret {i64,f32x2},ptr byval {i64,f32x2}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_df32_i64_1(v0,v1)
+}
+func @result_ind_df32_i64_1(ptr sret {i64,f32x2},ptr byval {i64,f32x2},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {i64,f32x2},ptr byval {i64,f32x2})
+}
+func @only_df32_i64_1(ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},ptr byval {i64,f32x2},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @c_df32_f64_0(ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64})->i64
+func @tail_df32_f64_0_0_0(ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_df32_f64_0(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_df32_f64_0_0_1(ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_df32_f64_0(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_df32_f64_0_1_0(ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64})->i64
+}
+func @tail_df32_f64_0_1_1(ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64})->i64
+}
+decl @id_df32_f64_0(ptr sret {f32x2,f64},ptr byval {f32x2,f64})
+func @result_df32_f64_0(ptr sret {f32x2,f64},ptr byval {f32x2,f64}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_df32_f64_0(v0,v1)
+}
+func @result_ind_df32_f64_0(ptr sret {f32x2,f64},ptr byval {f32x2,f64},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {f32x2,f64},ptr byval {f32x2,f64})
+}
+func @only_df32_f64_0(ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},ptr byval {f32x2,f64},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @c_df32_f64_1(ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2})->i64
+func @tail_df32_f64_1_0_0(ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_df32_f64_1(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_df32_f64_1_0_1(ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_df32_f64_1(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_df32_f64_1_1_0(ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2})->i64
+}
+func @tail_df32_f64_1_1_1(ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2})->i64
+}
+decl @id_df32_f64_1(ptr sret {f64,f32x2},ptr byval {f64,f32x2})
+func @result_df32_f64_1(ptr sret {f64,f32x2},ptr byval {f64,f32x2}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_df32_f64_1(v0,v1)
+}
+func @result_ind_df32_f64_1(ptr sret {f64,f32x2},ptr byval {f64,f32x2},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {f64,f32x2},ptr byval {f64,f32x2})
+}
+func @only_df32_f64_1(ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},ptr byval {f64,f32x2},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @c_d8(ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64})->i64
+func @tail_d8_0_0(ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_d8(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_d8_0_1(ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64})->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr):
+ return_call @c_d8(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0)
+}
+func @tail_d8_1_0(ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64})->i64
+}
+func @tail_d8_1_1(ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:ptr):
+ return_call_indirect v10(v0,v0,v0,v0,v0,v0,v0,v0,v0,v0) : (ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64})->i64
+}
+decl @id_d8(ptr sret {f32x2,i64},ptr byval {f32x2,i64})
+func @result_d8(ptr sret {f32x2,i64},ptr byval {f32x2,i64}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_d8(v0,v1)
+}
+func @result_ind_d8(ptr sret {f32x2,i64},ptr byval {f32x2,i64},ptr) {
+entry(v0:ptr,v1:ptr,v2:ptr):
+ return_call_indirect v2(v0,v1) : (ptr sret {f32x2,i64},ptr byval {f32x2,i64})
+}
+func @only_d8(ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},ptr byval {f32x2,i64},i64)->i64 {
+entry(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:ptr,v6:ptr,v7:ptr,v8:ptr,v9:ptr,v10:i64):
+ return_call @scalar(v10)
+}
+decl @scalar(i64)->i64
+decl @pressure(i64,i64,i64,i64,i64,i64,f64,f64,f64,f64,f64,f64,f64,f64,ptr byval {f32x2,i64},ptr byval {f32x2,i64},i64,f64)->i64
+func @tail_pressure(i64,i64,i64,i64,i64,i64,f64,f64,f64,f64,f64,f64,f64,f64,ptr byval {f32x2,i64},ptr byval {f32x2,i64},i64,f64)->i64 {
+entry(v0:i64,v1:i64,v2:i64,v3:i64,v4:i64,v5:i64,v6:f64,v7:f64,v8:f64,v9:f64,v10:f64,v11:f64,v12:f64,v13:f64,v14:ptr,v15:ptr,v16:i64,v17:f64):
+ return_call @pressure(v0,v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13,v15,v14,v16,v17)
+}
+decl @rollback_gp(i64,i64,i64,i64,i64,i64,f64,f64,f64,f64,f64,f64,f64,ptr byval {f32x2,i64},i64,f64)->i64
+func @tail_rollback_gp(i64,i64,i64,i64,i64,i64,f64,f64,f64,f64,f64,f64,f64,ptr byval {f32x2,i64},i64,f64)->i64 {
+entry(v0:i64,v1:i64,v2:i64,v3:i64,v4:i64,v5:i64,v6:f64,v7:f64,v8:f64,v9:f64,v10:f64,v11:f64,v12:f64,v13:ptr,v14:i64,v15:f64):
+ return_call @rollback_gp(v0,v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13,v14,v15)
+}
+decl @rollback_fp(i64,i64,i64,i64,i64,f64,f64,f64,f64,f64,f64,f64,f64,ptr byval {f32x2,i64},i64,f64)->i64
+func @tail_rollback_fp(i64,i64,i64,i64,i64,f64,f64,f64,f64,f64,f64,f64,f64,ptr byval {f32x2,i64},i64,f64)->i64 {
+entry(v0:i64,v1:i64,v2:i64,v3:i64,v4:i64,v5:f64,v6:f64,v7:f64,v8:f64,v9:f64,v10:f64,v11:f64,v12:f64,v13:ptr,v14:i64,v15:f64):
+ return_call @rollback_fp(v0,v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13,v14,v15)
+}
+decl @scalar_int(i64,i64,i64,i64,i64,i64,i64,i64,i64,i64)->i64
+func @tail_scalar_int_0(i64,i64,i64,i64,i64,i64,i64,i64,i64,i64)->i64 {
+entry(v0:i64,v1:i64,v2:i64,v3:i64,v4:i64,v5:i64,v6:i64,v7:i64,v8:i64,v9:i64):
+ return_call @scalar_int(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_scalar_int_1(i64,i64,i64,i64,i64,i64,i64,i64,i64,i64,ptr)->i64 {
+entry(v0:i64,v1:i64,v2:i64,v3:i64,v4:i64,v5:i64,v6:i64,v7:i64,v8:i64,v9:i64,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (i64,i64,i64,i64,i64,i64,i64,i64,i64,i64)->i64
+}
+decl @scalar_fp(f64,f64,f64,f64,f64,f64,f64,f64,f64,f64)->i64
+func @tail_scalar_fp_0(f64,f64,f64,f64,f64,f64,f64,f64,f64,f64)->i64 {
+entry(v0:f64,v1:f64,v2:f64,v3:f64,v4:f64,v5:f64,v6:f64,v7:f64,v8:f64,v9:f64):
+ return_call @scalar_fp(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0)
+}
+func @tail_scalar_fp_1(f64,f64,f64,f64,f64,f64,f64,f64,f64,f64,ptr)->i64 {
+entry(v0:f64,v1:f64,v2:f64,v3:f64,v4:f64,v5:f64,v6:f64,v7:f64,v8:f64,v9:f64,v10:ptr):
+ return_call_indirect v10(v9,v8,v7,v6,v5,v4,v3,v2,v1,v0) : (f64,f64,f64,f64,f64,f64,f64,f64,f64,f64)->i64
+}
+decl @scalar_wideint(i128,i128,i128,i128,i128)->i64
+func @tail_scalar_wideint_0(i128,i128,i128,i128,i128)->i64 {
+entry(v0:i128,v1:i128,v2:i128,v3:i128,v4:i128):
+ return_call @scalar_wideint(v4,v3,v2,v1,v0)
+}
+func @tail_scalar_wideint_1(i128,i128,i128,i128,i128,ptr)->i64 {
+entry(v0:i128,v1:i128,v2:i128,v3:i128,v4:i128,v5:ptr):
+ return_call_indirect v5(v4,v3,v2,v1,v0) : (i128,i128,i128,i128,i128)->i64
+}
+decl @scalar_extended(f80,f80,f80)->i64
+func @tail_scalar_extended_0(f80,f80,f80)->i64 {
+entry(v0:f80,v1:f80,v2:f80):
+ return_call @scalar_extended(v2,v1,v0)
+}
+func @tail_scalar_extended_1(f80,f80,f80,ptr)->i64 {
+entry(v0:f80,v1:f80,v2:f80,v3:ptr):
+ return_call_indirect v3(v2,v1,v0) : (f80,f80,f80)->i64
+}
+decl @depth_target(ptr byval {i64,i64,i64},ptr byval {i64,i64,i64})->i64
+func @tail_depth(ptr byval {i64,i64,i64},ptr byval {i64,i64,i64})->i64 {
+entry(v0:ptr,v1:ptr):
+ return_call @depth_target(v1,v0)
+}
+decl @alias_target(ptr byval {i64,i64,i64},ptr byval {i64,i64,i64})->i64
+func @overlap(ptr byval {i64,i64,i64},ptr byval {i64,i64,i64})->i64 {
+entry(v0:ptr,v1:ptr):
+ v2 = iconst.i64 8
+ v3 = ptradd v0,v2
+ return_call @alias_target(v1,v3)
+}
+func @sret_alias(ptr sret {i64,i64,i64},ptr byval {i64,i64,i64}) {
+entry(v0:ptr,v1:ptr):
+ return_call @id_mem(v0,v0)
+}

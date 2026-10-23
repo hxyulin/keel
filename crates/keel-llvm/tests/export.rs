@@ -291,3 +291,69 @@ fn low_lane_widening_keeps_the_exporters_explicit_vector_rejection() {
         assert!(error.contains("vector types are unsupported"), "{error}");
     }
 }
+
+#[test]
+fn lifecycle_metadata_cannot_be_silently_exported() {
+    for attr in ["constructor", "destructor"] {
+        let src = format!("func @callback() cc(c) {attr} {{\nblock0:\n return\n}}\n");
+        assert!(translate(&src).unwrap_err().contains("lifecycle"));
+    }
+}
+
+#[test]
+#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+fn compiler_used_survives_llvm_optimization_without_linker_retention() {
+    let ll = translate("func @emitted() cc(c) used local {\nblock0:\n return\n}\nfunc @main() -> i32 cc(c) {\nblock0:\n v0 = iconst.i32 0\n return v0\n}\n").unwrap();
+    let dir = std::env::temp_dir().join(format!("keel-llvm-used-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("used.ll");
+    let object = dir.join("used.o");
+    let exe = dir.join("used");
+    std::fs::write(&input, ll).unwrap();
+    for args in [
+        vec![
+            "-O2",
+            "-c",
+            input.to_str().unwrap(),
+            "-o",
+            object.to_str().unwrap(),
+        ],
+        vec![
+            object.to_str().unwrap(),
+            "-Wl,-dead_strip",
+            "-o",
+            exe.to_str().unwrap(),
+        ],
+    ] {
+        let output = Command::new("clang").args(args).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let symbols = Command::new("nm").arg(&object).output().unwrap();
+    assert!(symbols.status.success());
+    assert!(String::from_utf8_lossy(&symbols.stdout).contains("_emitted"));
+    let symbols = Command::new("nm").arg(&exe).output().unwrap();
+    assert!(symbols.status.success());
+    assert!(!String::from_utf8_lossy(&symbols.stdout).contains("_emitted"));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn custom_placement_and_retention_cannot_be_silently_exported() {
+    for src in [
+        "func @f() retain {\nblock0:\n return\n}\n",
+        "func @f() section \".custom\" {\nblock0:\n return\n}\n",
+        "data @x = retain align 4 { i32 7 }\n",
+        "data @x = section \".custom\" align 4 { i32 7 }\n",
+        "data @x = thread_local retain section \".tls_custom\" align 4 { i32 7 }\n",
+    ] {
+        assert!(
+            translate(src)
+                .unwrap_err()
+                .contains("custom sections or linker retention")
+        );
+    }
+}

@@ -17,6 +17,7 @@ pub enum Const {
     /// The bits of an integer (or of a pointer made from one).
     Int(i64),
     Float(f64),
+    Complex(f64, f64),
     /// An address plus a byte offset.
     Addr(Base, i64),
 }
@@ -62,11 +63,15 @@ pub fn normalize(v: i64, ty: &Ty) -> i64 {
     }
 }
 
-fn truthy(c: Const) -> bool {
+fn truthy(c: Const, nonnull: &dyn Fn(usize) -> bool) -> Option<bool> {
     match c {
-        Const::Int(v) => v != 0,
-        Const::Float(f) => f != 0.0,
-        Const::Addr(..) => true,
+        Const::Int(v) => Some(v != 0),
+        Const::Float(f) => Some(f != 0.0),
+        Const::Complex(r, i) => Some(r != 0.0 || i != 0.0),
+        // Before final binding is known, a later weak redeclaration may
+        // make a global address null.
+        Const::Addr(Base::Global(g), _) => nonnull(g).then_some(true),
+        Const::Addr(Base::Str(_), _) => Some(true),
     }
 }
 
@@ -76,116 +81,242 @@ fn truthy(c: Const) -> bool {
 /// Integer alignment expressions exclude commas, while GNU constant
 /// floating expressions for probabilities may include constant commas.
 pub fn eval_constant(e: &Expr<'_>, allow_comma: bool) -> Option<Const> {
+    eval_constant_with(e, allow_comma, &|_| false)
+}
+
+fn eval_constant_with(
+    e: &Expr<'_>,
+    allow_comma: bool,
+    nonnull: &dyn Fn(usize) -> bool,
+) -> Option<Const> {
     match &e.kind {
         ExprKind::Cast(a) | ExprKind::Unary(_, a) => {
-            eval_constant(a, allow_comma)?;
+            eval_constant_with(a, allow_comma, nonnull)?;
         }
         ExprKind::Binary(_, a, b) | ExprKind::PtrAdd(a, b, _) | ExprKind::PtrDiff(a, b, _) => {
-            eval_constant(a, allow_comma)?;
-            eval_constant(b, allow_comma)?;
+            eval_constant_with(a, allow_comma, nonnull)?;
+            eval_constant_with(b, allow_comma, nonnull)?;
         }
         ExprKind::Comma(a, b) => {
             if !allow_comma {
                 return None;
             }
-            eval_constant(a, allow_comma)?;
-            eval_constant(b, allow_comma)?;
+            eval_constant_with(a, allow_comma, nonnull)?;
+            eval_constant_with(b, allow_comma, nonnull)?;
         }
         ExprKind::LogAnd(a, b) | ExprKind::LogOr(a, b) => {
-            let first = truthy(eval_constant(a, allow_comma)?);
+            let first = truthy(eval_constant_with(a, allow_comma, nonnull)?, nonnull)?;
             if first == matches!(e.kind, ExprKind::LogAnd(..)) {
-                eval_constant(b, allow_comma)?;
+                eval_constant_with(b, allow_comma, nonnull)?;
             }
         }
         ExprKind::Cond(c, a, b) => {
-            let selected = if truthy(eval_constant(c, allow_comma)?) {
+            let selected = if truthy(eval_constant_with(c, allow_comma, nonnull)?, nonnull)? {
                 a
             } else {
                 b
             };
-            eval_constant(selected, allow_comma)?;
+            eval_constant_with(selected, allow_comma, nonnull)?;
         }
         _ => {}
     }
-    eval(e)
+    eval_with(e, nonnull)
 }
 
 pub fn eval(e: &Expr<'_>) -> Option<Const> {
+    eval_with(e, &|_| false)
+}
+
+/// Evaluate after declaration merging, using final binding for address truth.
+/// Parser-time evaluation must keep using `eval`, since binding can change.
+pub fn eval_with(e: &Expr<'_>, nonnull: &dyn Fn(usize) -> bool) -> Option<Const> {
     Some(match &e.kind {
         ExprKind::Int(v) => Const::Int(*v),
         ExprKind::Float(f) => Const::Float(*f),
+        ExprKind::Builtin(Builtin::Complex, args) => {
+            let (Const::Float(r), Const::Float(i)) =
+                (eval_with(&args[0], nonnull)?, eval_with(&args[1], nonnull)?)
+            else {
+                return None;
+            };
+            Const::Complex(r, i)
+        }
+        ExprKind::Member { base, offset, .. } if base.ty.is_complex() => {
+            let Const::Complex(r, i) = eval_with(base, nonnull)? else {
+                return None;
+            };
+            Const::Float(if *offset == 0 { r } else { i })
+        }
         ExprKind::Builtin(Builtin::Hint | Builtin::AssumeAligned(_), args) => {
-            let value = eval_constant(&args[0], true)?;
+            let value = eval_constant_with(&args[0], true, nonnull)?;
             for arg in &args[1..] {
-                eval_constant(arg, true)?;
+                eval_constant_with(arg, true, nonnull)?;
             }
             value
         }
         ExprKind::LabelAddr(n) => Const::Int(*n as i64),
-        ExprKind::Addr(inner) => eval_addr(inner)?,
-        ExprKind::Cast(inner) => cast(eval(inner)?, &inner.ty, &e.ty)?,
+        ExprKind::Addr(inner) => eval_addr(inner, nonnull)?,
+        ExprKind::Cast(inner) => cast(eval_with(inner, nonnull)?, &inner.ty, &e.ty, nonnull)?,
         ExprKind::Unary(op, a) => {
-            let a = eval(a)?;
+            let a = eval_with(a, nonnull)?;
             match (op, a) {
-                (UnOp::Not, a) => Const::Int(i64::from(!truthy(a))),
+                (UnOp::Not, a) => Const::Int(i64::from(!truthy(a, nonnull)?)),
                 (UnOp::Neg, Const::Int(v)) => Const::Int(normalize(v.wrapping_neg(), &e.ty)),
                 (UnOp::Neg, Const::Float(f)) => Const::Float(-f),
+                (UnOp::Neg, Const::Complex(r, i)) => Const::Complex(-r, -i),
                 (UnOp::BitNot, Const::Int(v)) => Const::Int(normalize(!v, &e.ty)),
                 _ => return None,
             }
         }
-        ExprKind::Binary(op, a, b) => binary(*op, &a.ty, &e.ty, eval(a)?, eval(b)?)?,
+        ExprKind::Binary(op, a, b) if a.ty.is_complex() || b.ty.is_complex() => {
+            let (x, y) = (eval_with(a, nonnull)?, eval_with(b, nonnull)?);
+            if matches!(op, BinOp::Eq | BinOp::Ne) {
+                let (Const::Complex(xr, xi), Const::Complex(yr, yi)) = (x, y) else {
+                    return None;
+                };
+                let eq = xr == yr && xi == yi;
+                Const::Int(i64::from(if *op == BinOp::Eq { eq } else { !eq }))
+            } else {
+                let (xr, xi) = match x {
+                    Const::Complex(r, i) => (r, Some(i)),
+                    Const::Float(r) => (r, None),
+                    _ => return None,
+                };
+                let (yr, yi) = match y {
+                    Const::Complex(r, i) => (r, Some(i)),
+                    Const::Float(r) => (r, None),
+                    _ => return None,
+                };
+                if matches!(op, BinOp::Mul | BinOp::Div) {
+                    let Ty::Complex(elem) = e.ty else { return None };
+                    let (r, i) =
+                        crate::complex_eval::arithmetic(*op, *elem == Ty::Float, xr, xi, yr, yi)?;
+                    return Some(Const::Complex(r, i));
+                }
+                let r = match op {
+                    BinOp::Add => xr + yr,
+                    BinOp::Sub => xr - yr,
+                    _ => return None,
+                };
+                let i = match (xi, yi) {
+                    (Some(x), Some(y)) => {
+                        if *op == BinOp::Add {
+                            x + y
+                        } else {
+                            x - y
+                        }
+                    }
+                    (Some(x), None) => x,
+                    (None, Some(y)) => {
+                        if *op == BinOp::Add {
+                            y
+                        } else {
+                            -y
+                        }
+                    }
+                    _ => return None,
+                };
+                let Ty::Complex(elem) = e.ty else { return None };
+                let round = |v: f64| {
+                    if *elem == Ty::Float {
+                        f64::from(v as f32)
+                    } else {
+                        v
+                    }
+                };
+                Const::Complex(round(r), round(i))
+            }
+        }
+        ExprKind::Binary(op, a, b) => binary(
+            *op,
+            &a.ty,
+            &e.ty,
+            eval_with(a, nonnull)?,
+            eval_with(b, nonnull)?,
+        )?,
         ExprKind::PtrAdd(p, n, size) => {
-            let Const::Int(n) = eval(n)? else {
+            let Const::Int(n) = eval_with(n, nonnull)? else {
                 return None;
             };
             let delta = n.wrapping_mul(*size as i64);
-            match eval(p)? {
+            match eval_with(p, nonnull)? {
                 Const::Addr(base, off) => Const::Addr(base, off + delta),
                 Const::Int(v) => Const::Int(v.wrapping_add(delta)),
-                Const::Float(_) => return None,
+                Const::Float(_) | Const::Complex(..) => return None,
             }
         }
-        ExprKind::PtrDiff(a, b, size) => match (eval(a)?, eval(b)?) {
+        ExprKind::PtrDiff(a, b, size) => match (eval_with(a, nonnull)?, eval_with(b, nonnull)?) {
             (Const::Addr(x, i), Const::Addr(y, j)) if x == y => Const::Int((i - j) / *size as i64),
             (Const::Int(i), Const::Int(j)) => Const::Int(i.wrapping_sub(j) / *size as i64),
             _ => return None,
         },
-        ExprKind::LogAnd(a, b) => Const::Int(i64::from(truthy(eval(a)?) && truthy(eval(b)?))),
-        ExprKind::LogOr(a, b) => Const::Int(i64::from(truthy(eval(a)?) || truthy(eval(b)?))),
+        ExprKind::LogAnd(a, b) => Const::Int(i64::from(
+            truthy(eval_with(a, nonnull)?, nonnull)? && truthy(eval_with(b, nonnull)?, nonnull)?,
+        )),
+        ExprKind::LogOr(a, b) => Const::Int(i64::from(
+            truthy(eval_with(a, nonnull)?, nonnull)? || truthy(eval_with(b, nonnull)?, nonnull)?,
+        )),
         ExprKind::Cond(c, a, b) => {
-            if truthy(eval(c)?) {
-                eval(a)?
+            if truthy(eval_with(c, nonnull)?, nonnull)? {
+                eval_with(a, nonnull)?
             } else {
-                eval(b)?
+                eval_with(b, nonnull)?
             }
         }
-        ExprKind::Comma(_, b) => eval(b)?,
+        ExprKind::Comma(_, b) => eval_with(b, nonnull)?,
         _ => return None,
     })
 }
 
 /// The address of an lvalue with static storage.
-fn eval_addr(e: &Expr<'_>) -> Option<Const> {
+fn eval_addr(e: &Expr<'_>, nonnull: &dyn Fn(usize) -> bool) -> Option<Const> {
     match &e.kind {
         ExprKind::Global(g) => Some(Const::Addr(Base::Global(*g), 0)),
         ExprKind::Str(s) => Some(Const::Addr(Base::Str(*s), 0)),
-        ExprKind::Member { base, offset, .. } => match eval_addr(base)? {
+        ExprKind::Member { base, offset, .. } => match eval_addr(base, nonnull)? {
             Const::Addr(b, off) => Some(Const::Addr(b, off + *offset as i64)),
             Const::Int(v) => Some(Const::Int(v + *offset as i64)),
-            Const::Float(_) => None,
+            Const::Float(_) | Const::Complex(..) => None,
         },
-        ExprKind::Deref(p) => match eval(p)? {
+        ExprKind::Deref(p) => match eval_with(p, nonnull)? {
             c @ (Const::Addr(..) | Const::Int(_)) => Some(c),
-            Const::Float(_) => None,
+            Const::Float(_) | Const::Complex(..) => None,
         },
         _ => None,
     }
 }
 
-fn cast(c: Const, from: &Ty, to: &Ty) -> Option<Const> {
+fn cast(c: Const, from: &Ty, to: &Ty, nonnull: &dyn Fn(usize) -> bool) -> Option<Const> {
+    // Match runtime conversion limits before decomposing a complex value.
+    // Const::Int holds only 64 bits: folding a complex-to-__int128 cast
+    // would otherwise silently saturate/truncate through that representation.
+    let wide = |ty: &Ty| ty.int_kind().is_some_and(|k| k.size() == 16);
+    if (from.is_complex() && wide(to)) || (to.is_complex() && wide(from)) {
+        return None;
+    }
+    if *to == Ty::Int(IntKind::Bool) {
+        return Some(Const::Int(i64::from(truthy(c, nonnull)?)));
+    }
+    if let Ty::Complex(elem) = to {
+        let (r, i) = if let Const::Complex(r, i) = c {
+            let Ty::Complex(src) = from else { return None };
+            (
+                cast(Const::Float(r), src, elem, nonnull)?,
+                cast(Const::Float(i), src, elem, nonnull)?,
+            )
+        } else {
+            (cast(c, from, elem, nonnull)?, Const::Float(0.0))
+        };
+        let (Const::Float(r), Const::Float(i)) = (r, i) else {
+            return None;
+        };
+        return Some(Const::Complex(r, i));
+    }
+    if let Const::Complex(r, _) = c {
+        let Ty::Complex(elem) = from else { return None };
+        return cast(Const::Float(r), elem, to, nonnull);
+    }
     Some(match (c, to) {
-        (_, Ty::Int(IntKind::Bool)) => Const::Int(i64::from(truthy(c))),
         (Const::Int(v), Ty::Int(_)) if fits_i64(v, from, to) => Const::Int(normalize(v, to)),
         (Const::Int(_), Ty::Int(_)) => return None,
         (Const::Float(f), Ty::Int(k)) => {

@@ -436,6 +436,12 @@ impl<T: EntityRef> ListPool<T> {
         item
     }
 
+    /// Keeps the first `len` items of `list`.
+    pub(crate) fn truncate(&mut self, list: &mut ListRange<T>, len: usize) {
+        assert!(len <= list.len as usize, "list index out of bounds");
+        list.len = len as u32;
+    }
+
     /// Makes room for at least one more item in `list`.
     #[cold]
     fn grow(&mut self, list: &mut ListRange<T>) {

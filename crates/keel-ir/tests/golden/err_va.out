@@ -1,6 +1,6 @@
 verifier errors:
   @not_variadic inst0 `intrinsic va_start(v0)`: va_start in a function that is not variadic
-  @bad_types inst0 `v1 = va_arg.f32 v0`: va_arg reads i32, i64, ptr or f64 (C's promoted types), got f32
+  @bad_types inst0 `v1 = va_arg.f32 v0`: va_arg reads C promoted scalars or vectors, got f32
   @bad_types inst0 `v1 = va_arg.f32 v0`: va_arg list must be ptr, got i64
-  @bad_types inst1 `v2 = va_arg.i8 v0`: va_arg reads i32, i64, ptr or f64 (C's promoted types), got i8
+  @bad_types inst1 `v2 = va_arg.i8 v0`: va_arg reads C promoted scalars or vectors, got i8
   @bad_types inst1 `v2 = va_arg.i8 v0`: va_arg list must be ptr, got i64

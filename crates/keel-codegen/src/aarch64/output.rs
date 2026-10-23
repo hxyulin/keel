@@ -1,10 +1,50 @@
 use keel_asm_ir::{Instruction, Item, Program};
 use std::fmt::{self, Write};
 
+/// A label or branch target, written straight into text; only a structured
+/// program needs it as a string of its own.
+#[derive(Clone, Copy)]
+pub(super) enum Name<'a> {
+    /// `L{function}_block{n}`.
+    Block(&'a str, keel_ir::Block),
+    /// `_{name}`, the symbol of a C name.
+    Symbol(&'a str),
+    Text(&'a str),
+}
+impl Name<'_> {
+    fn write(self, out: &mut crate::text::Text) {
+        match self {
+            Self::Block(function, block) => {
+                use keel_ir::EntityRef;
+                out.push('L');
+                out.push_str(function);
+                crate::text::write_decimal(out, "_block", block.index() as i128).unwrap();
+            }
+            Self::Symbol(name) => {
+                out.push('_');
+                out.push_str(name);
+            }
+            Self::Text(text) => out.push_str(text),
+        }
+    }
+    fn to_owned(self) -> String {
+        match self {
+            Self::Block(function, block) => crate::text::block_label("L", function, block),
+            Self::Symbol(name) => ["_", name].concat(),
+            Self::Text(text) => text.to_owned(),
+        }
+    }
+}
+
+const CONDITIONS: [&str; 16] = [
+    "eq", "ne", "hs", "lo", "mi", "pl", "vs", "vc", "hi", "ls", "ge", "lt", "gt", "le", "al", "nv",
+];
+
 /// Compiler instructions and metadata have typed emission paths. Only explicit
 /// user inline assembly is permitted to enter a structured program as text.
 pub(super) enum Output {
-    Text(String),
+    Text(crate::text::Text),
+    ElfText(crate::text::Text),
     Structured(Program),
 }
 impl Output {
@@ -12,7 +52,7 @@ impl Output {
         if structured {
             Self::Structured(Program::new())
         } else {
-            Self::Text(String::new())
+            Self::Text(Default::default())
         }
     }
     pub(super) fn structured(&self) -> bool {
@@ -27,17 +67,17 @@ impl Output {
             writeln!(normalized, "\t{}", line.trim()).unwrap();
         }
         match self {
-            Self::Text(out) => out.push_str(&normalized),
+            Self::Text(out) | Self::ElfText(out) => out.push_str(&normalized),
             Self::Structured(out) => out.text(&normalized),
         }
     }
     pub(super) fn native(
         &mut self,
         instruction: impl FnOnce() -> Instruction,
-        text: impl FnOnce(&mut String) -> fmt::Result,
+        text: impl FnOnce(&mut crate::text::Text) -> fmt::Result,
     ) {
         match self {
-            Self::Text(out) => {
+            Self::Text(out) | Self::ElfText(out) => {
                 out.push('\t');
                 text(out).unwrap();
                 out.push('\n');
@@ -47,7 +87,7 @@ impl Output {
     }
     pub(super) fn label(&mut self, label: String) {
         match self {
-            Self::Text(out) => {
+            Self::Text(out) | Self::ElfText(out) => {
                 out.push_str(&label);
                 out.push_str(":\n");
             }
@@ -56,7 +96,7 @@ impl Output {
     }
     pub(super) fn branch(&mut self, link: bool, target: String) {
         match self {
-            Self::Text(out) => {
+            Self::Text(out) | Self::ElfText(out) => {
                 out.push_str(if link { "\tbl\t" } else { "\tb\t" });
                 out.push_str(&target);
                 out.push('\n');
@@ -64,9 +104,77 @@ impl Output {
             Self::Structured(out) => out.branch(link, target),
         }
     }
+    /// [`Self::label`] by name.
+    pub(super) fn label_name(&mut self, name: Name<'_>) {
+        match self {
+            Self::Text(out) | Self::ElfText(out) => {
+                name.write(out);
+                out.push_str(":\n");
+            }
+            Self::Structured(out) => out.label(name.to_owned()),
+        }
+    }
+    /// [`Self::branch`] by name.
+    pub(super) fn branch_name(&mut self, link: bool, target: Name<'_>) {
+        match self {
+            Self::Text(out) | Self::ElfText(out) => {
+                out.push_str(if link { "\tbl\t" } else { "\tb\t" });
+                target.write(out);
+                out.push('\n');
+            }
+            Self::Structured(out) => out.branch(link, target.to_owned()),
+        }
+    }
+    /// A conditional branch: [`keel_asm_ir::SymbolicInstruction::Conditional`].
+    pub(super) fn conditional(&mut self, condition: u8, target: Name<'_>) {
+        match self {
+            Self::Text(out) | Self::ElfText(out) => {
+                out.push_str("\tb.");
+                out.push_str(CONDITIONS[condition as usize]);
+                out.push('\t');
+                target.write(out);
+                out.push('\n');
+            }
+            Self::Structured(out) => out.items.push(Item::Symbolic(
+                keel_asm_ir::SymbolicInstruction::Conditional {
+                    condition,
+                    target: target.to_owned(),
+                },
+            )),
+        }
+    }
+    /// `cbz` or `cbnz`: [`keel_asm_ir::SymbolicInstruction::Compare`].
+    pub(super) fn compare_branch(
+        &mut self,
+        register: u8,
+        is64: bool,
+        nonzero: bool,
+        target: Name<'_>,
+    ) {
+        match self {
+            Self::Text(out) | Self::ElfText(out) => {
+                out.push_str(if nonzero { "\tcbnz\t" } else { "\tcbz\t" });
+                out.push(if is64 { 'x' } else { 'w' });
+                crate::text::write_decimal(out, "", register.into()).unwrap();
+                out.push_str(", ");
+                target.write(out);
+                out.push('\n');
+            }
+            Self::Structured(out) => {
+                out.items
+                    .push(Item::Symbolic(keel_asm_ir::SymbolicInstruction::Compare {
+                        register,
+                        is64,
+                        nonzero,
+                        target: target.to_owned(),
+                    }))
+            }
+        }
+    }
     pub(super) fn symbolic(&mut self, s: keel_asm_ir::SymbolicInstruction) {
         match self {
             Self::Text(out) => write_symbolic(out, &s),
+            Self::ElfText(out) => write_elf_symbolic(out, &s),
             Self::Structured(out) => out.items.push(Item::Symbolic(s)),
         }
     }
@@ -74,7 +182,9 @@ impl Output {
     /// its own string and copying it over. Gives where the function begins.
     /// Structured functions keep their own program until [`Self::end_function`].
     pub(super) fn begin_function(&mut self, module: &mut Self) -> usize {
-        if let (Self::Text(own), Self::Text(text)) = (&mut *self, module) {
+        if let (Self::Text(own), Self::Text(text)) | (Self::ElfText(own), Self::ElfText(text)) =
+            (&mut *self, module)
+        {
             debug_assert!(own.is_empty());
             std::mem::swap(own, text);
             return own.len();
@@ -84,13 +194,17 @@ impl Output {
     /// Hands the module's output, now ending with this function, back.
     pub(super) fn end_function(self, module: &mut Self) {
         match (self, module) {
-            (Self::Text(own), Self::Text(text)) => *text = own,
+            (Self::Text(own), Self::Text(text)) | (Self::ElfText(own), Self::ElfText(text)) => {
+                *text = own
+            }
             (own, module) => module.append(own),
         }
     }
     pub(super) fn append(&mut self, other: Self) {
         match (self, other) {
-            (Self::Text(out), Self::Text(other)) => out.push_str(&other),
+            (Self::Text(out), Self::Text(other)) | (Self::ElfText(out), Self::ElfText(other)) => {
+                out.push_str(&other)
+            }
             (Self::Structured(out), Self::Structured(other)) => out.append(other),
 
             _ => unreachable!("structured output cannot be implicitly serialized"),
@@ -104,7 +218,7 @@ impl Output {
     }
     /// Relaxes the function's branches; text before `start` is not its own.
     pub(super) fn relax(&mut self, name: &str, start: usize) {
-        if let Self::Text(text) = self {
+        if let Self::Text(text) | Self::ElfText(text) = self {
             super::relax_branches(text, start, name);
             return;
         }
@@ -175,7 +289,7 @@ impl Output {
     }
 }
 /// Exactly the `Display` text of `s` and a newline, without `fmt::write`.
-fn write_symbolic(out: &mut String, s: &keel_asm_ir::SymbolicInstruction) {
+fn write_symbolic(out: &mut crate::text::Text, s: &keel_asm_ir::SymbolicInstruction) {
     use keel_asm_ir::{PageKind, SymbolicInstruction as S};
     let suffix = |kind: PageKind, offset| match (kind, offset) {
         (PageKind::Direct, false) => "@PAGE",
@@ -185,19 +299,14 @@ fn write_symbolic(out: &mut String, s: &keel_asm_ir::SymbolicInstruction) {
         (PageKind::ThreadLocal, false) => "@TLVPPAGE",
         (PageKind::ThreadLocal, true) => "@TLVPPAGEOFF",
     };
-    let x = |out: &mut String, register: u8| {
+    let x = |out: &mut crate::text::Text, register: u8| {
         crate::text::write_decimal(out, "x", register.into()).unwrap();
     };
     out.push('\t');
     match s {
         S::Conditional { condition, target } => {
             out.push_str("b.");
-            out.push_str(
-                [
-                    "eq", "ne", "hs", "lo", "mi", "pl", "vs", "vc", "hi", "ls", "ge", "lt", "gt",
-                    "le", "al", "nv",
-                ][*condition as usize],
-            );
+            out.push_str(CONDITIONS[*condition as usize]);
             out.push('\t');
             out.push_str(target);
         }
@@ -255,14 +364,14 @@ fn write_symbolic(out: &mut String, s: &keel_asm_ir::SymbolicInstruction) {
 impl Write for Output {
     fn write_str(&mut self, text: &str) -> fmt::Result {
         match self {
-            Self::Text(s) => s.push_str(text),
+            Self::Text(s) | Self::ElfText(s) => s.push_str(text),
             Self::Structured(_) => panic!("compiler-generated text must use a typed emission path"),
         }
         Ok(())
     }
     fn write_char(&mut self, c: char) -> fmt::Result {
         match self {
-            Self::Text(s) => s.push(c),
+            Self::Text(s) | Self::ElfText(s) => s.push(c),
             Self::Structured(_) => panic!("compiler-generated text must use a typed emission path"),
         }
         Ok(())
@@ -272,7 +381,7 @@ impl Write for Output {
 impl crate::metadata::Sink for Output {
     fn directive(&mut self, d: keel_asm_ir::Directive) {
         match self {
-            Self::Text(text) => {
+            Self::Text(text) | Self::ElfText(text) => {
                 if !write_common_directive(text, &d) {
                     writeln!(text, "\t{d}").unwrap();
                 }
@@ -288,7 +397,7 @@ impl crate::metadata::Sink for Output {
             return;
         }
         match self {
-            Self::Text(text) => write_bytes(text, bytes),
+            Self::Text(text) | Self::ElfText(text) => write_bytes(text, bytes),
             Self::Structured(p) => p.items.push(Item::Directive(keel_asm_ir::Directive::Bytes(
                 bytes.to_vec(),
             ))),
@@ -298,11 +407,11 @@ impl crate::metadata::Sink for Output {
 
 /// Writes `\t{d}\n` without `fmt::write` for the directives functions and
 /// data use most, and returns whether `d` was one of them.
-fn write_common_directive(out: &mut String, d: &keel_asm_ir::Directive) -> bool {
+fn write_common_directive(out: &mut crate::text::Text, d: &keel_asm_ir::Directive) -> bool {
     use crate::text::write_decimal;
     use keel_asm_ir::{Cfi, Directive as D};
     // The DWARF register numbering of `.cfi` directives.
-    let register = |out: &mut String, r: u8| match r {
+    let register = |out: &mut crate::text::Text, r: u8| match r {
         0..=30 => write_decimal(out, "x", r.into()),
         64..=95 => write_decimal(out, "d", (r - 64).into()),
         _ => write_decimal(out, "", r.into()),
@@ -377,11 +486,52 @@ fn write_common_directive(out: &mut String, d: &keel_asm_ir::Directive) -> bool 
 }
 
 /// `\t.byte\t` and the decimal bytes separated by `, `, then a newline.
-fn write_bytes(out: &mut String, bytes: &[u8]) {
+fn write_bytes(out: &mut crate::text::Text, bytes: &[u8]) {
     out.push_str("\t.byte\t");
     for (i, &b) in bytes.iter().enumerate() {
         let separator = if i > 0 { ", " } else { "" };
         crate::text::write_decimal(out, separator, b.into()).unwrap();
     }
     out.push('\n');
+}
+
+fn write_elf_symbolic(out: &mut crate::text::Text, s: &keel_asm_ir::SymbolicInstruction) {
+    use keel_asm_ir::{PageKind, SymbolicInstruction as S};
+    match s {
+        S::PageAddress {
+            register,
+            kind,
+            target,
+        } => writeln!(
+            out,
+            "\tadrp\tx{register}, {}{target}",
+            match kind {
+                PageKind::Got => ":got:",
+                PageKind::ThreadLocal => ":gottprel:",
+                _ => "",
+            }
+        )
+        .unwrap(),
+        S::PageOffset {
+            register,
+            base,
+            load,
+            kind,
+            target,
+        } => {
+            let modifier = match kind {
+                PageKind::Got => ":got_lo12:",
+                PageKind::ThreadLocal => ":gottprel_lo12:",
+                _ => ":lo12:",
+            };
+            if *load {
+                writeln!(out, "\tldr\tx{register}, [x{base}, {modifier}{target}]").unwrap();
+            } else {
+                writeln!(out, "\tadd\tx{register}, x{base}, {modifier}{target}").unwrap();
+            }
+        }
+        _ => {
+            writeln!(out, "\t{s}").unwrap();
+        }
+    }
 }

@@ -1,0 +1,160 @@
+; F80 allocation coalescing and temporal mixed-width witnesses.
+func @share_fcopysign(f80,f80)->f80 {
+entry(v0:f80,v1:f80):
+ v2 = fcopysign v0,v1
+ return v2
+}
+func @share_fmin(f80,f80)->f80 {
+entry(v0:f80,v1:f80):
+ v2 = fmin v0,v1
+ return v2
+}
+func @share_fmax(f80,f80)->f80 {
+entry(v0:f80,v1:f80):
+ v2 = fmax v0,v1
+ return v2
+}
+func @share_fadd(f80,f80)->f80 {
+entry(v0:f80,v1:f80):
+ v2 = fadd v0,v1
+ return v2
+}
+func @share_fsub(f80,f80)->f80 {
+entry(v0:f80,v1:f80):
+ v2 = fsub v0,v1
+ return v2
+}
+func @share_fmul(f80,f80)->f80 {
+entry(v0:f80,v1:f80):
+ v2 = fmul v0,v1
+ return v2
+}
+func @share_fdiv(f80,f80)->f80 {
+entry(v0:f80,v1:f80):
+ v2 = fdiv v0,v1
+ return v2
+}
+func @share_eq(f80,f80)->i32 {
+entry(v0:f80,v1:f80):
+ v2 = fcmp.eq v0,v1
+ v3 = uext.i32 v2
+ return v3
+}
+func @share_ne(f80,f80)->i32 {
+entry(v0:f80,v1:f80):
+ v2 = fcmp.ne v0,v1
+ v3 = uext.i32 v2
+ return v3
+}
+func @share_lt(f80,f80)->i32 {
+entry(v0:f80,v1:f80):
+ v2 = fcmp.lt v0,v1
+ v3 = uext.i32 v2
+ return v3
+}
+func @share_le(f80,f80)->i32 {
+entry(v0:f80,v1:f80):
+ v2 = fcmp.le v0,v1
+ v3 = uext.i32 v2
+ return v3
+}
+func @share_gt(f80,f80)->i32 {
+entry(v0:f80,v1:f80):
+ v2 = fcmp.gt v0,v1
+ v3 = uext.i32 v2
+ return v3
+}
+func @share_ge(f80,f80)->i32 {
+entry(v0:f80,v1:f80):
+ v2 = fcmp.ge v0,v1
+ v3 = uext.i32 v2
+ return v3
+}
+func @share_ord(f80,f80)->i32 {
+entry(v0:f80,v1:f80):
+ v2 = fcmp.ord v0,v1
+ v3 = uext.i32 v2
+ return v3
+}
+func @share_uno(f80,f80)->i32 {
+entry(v0:f80,v1:f80):
+ v2 = fcmp.uno v0,v1
+ v3 = uext.i32 v2
+ return v3
+}
+func @reuse_s64(f80)->i64 {
+entry(v0:f80):
+ v1 = fptosi.i64 v0
+ return v1
+}
+func @reuse_u64(f80)->i64 {
+entry(v0:f80):
+ v1 = fptoui.i64 v0
+ return v1
+}
+func @reuse_s32(f80)->i32 {
+entry(v0:f80):
+ v1 = fptosi.i32 v0
+ return v1
+}
+func @reuse_u32(f80)->i32 {
+entry(v0:f80):
+ v1 = fptoui.i32 v0
+ return v1
+}
+func @reuse_f64(f80)->f64 {
+entry(v0:f80):
+ v1 = fptrunc.f64 v0
+ return v1
+}
+func @reuse_f32(f80)->f32 {
+entry(v0:f80):
+ v1 = fptrunc.f32 v0
+ return v1
+}
+func @roundtrip_f32(f32)->f32 {
+entry(v0:f32):
+ v1 = fpext.f80 v0
+ v2 = fptrunc.f32 v1
+ return v2
+}
+func @roundtrip_f64(f64)->f64 {
+entry(v0:f64):
+ v1 = fpext.f80 v0
+ v2 = fptrunc.f64 v1
+ return v2
+}
+func @roundtrip_s64(i64)->i64 {
+entry(v0:i64):
+ v1 = sitofp.f80 v0
+ v2 = fptosi.i64 v1
+ return v2
+}
+func @roundtrip_u64(i64)->i64 {
+entry(v0:i64):
+ v1 = uitofp.f80 v0
+ v2 = fptoui.i64 v1
+ return v2
+}
+func @roundtrip_ptr(ptr)->ptr {
+entry(v0:ptr):
+ v1 = ptrtoint.i64 v0
+ v2 = uitofp.f80 v1
+ v3 = fptoui.i64 v2
+ v4 = inttoptr.ptr v3
+ return v4
+}
+func @reuse_int_component(f80)->i64 {
+entry(v0:f80):
+ v1 = fptosi.i64 v0
+ v2 = iconst.i64 3
+ v3 = iadd v1,v2
+ return v3
+}
+func @reuse_float_component(f80)->f64 {
+entry(v0:f80):
+ v1 = fptrunc.f64 v0
+ v2 = fconst.f64 0.5
+ v3 = fadd v1,v2
+ return v3
+}

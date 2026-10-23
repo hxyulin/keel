@@ -374,12 +374,35 @@ pub(super) fn prepare(
     });
     Ok(Some(header))
 }
+/// Final layout gives sections disjoint intervals, but registration grouping
+/// can change their address order. Keep boundaries separate: an FDE must fit
+/// in one section even when two executable sections are adjacent.
+struct ExecutableRanges(Vec<(u64, u64)>);
+impl ExecutableRanges {
+    fn new(sections: &[Section]) -> Self {
+        let mut ranges: Vec<_> = sections
+            .iter()
+            .filter(|s| s.flags & 4 != 0 && s.size != 0)
+            // Layout has already bounded offset + size to the image limit.
+            .map(|s| (BASE + s.offset, BASE + s.offset + s.size))
+            .collect();
+        ranges.sort_unstable();
+        Self(ranges)
+    }
+
+    fn contains(&self, pc: u64, end: u64) -> bool {
+        let i = self.0.partition_point(|&(start, _)| start <= pc);
+        i != 0 && pc < self.0[i - 1].1 && end <= self.0[i - 1].1
+    }
+}
+
 pub(super) fn emit(
     bytes: &mut [u8],
     sections: &[Section],
     frames: &BTreeMap<usize, Frames>,
     header: usize,
 ) -> Result<()> {
+    let executable = ExecutableRanges::new(sections);
     let mut entries = Vec::new();
     for (&index, records) in frames {
         let section = &sections[index];
@@ -389,12 +412,7 @@ pub(super) fn emit(
             let pc = f.pc.value(data, address)?;
             let range = f.range.value(data, address)?;
             let end = pc.checked_add(range).ok_or("unwind FDE range overflow")?;
-            if !sections.iter().any(|s| {
-                s.flags & 4 != 0
-                    && pc >= BASE + s.offset
-                    && pc < BASE + s.offset + s.size
-                    && end <= BASE + s.offset + s.size
-            }) {
+            if !executable.contains(pc, end) {
                 return Err("unwind FDE range is outside executable section data".into());
             }
             entries.push((pc, address + f.record as u64));
@@ -430,4 +448,436 @@ pub(super) fn emit(
         put32(out, 16 + i * 8, relative(fde, address)?);
     }
     Ok(())
+}
+
+/// Compact only FDEs whose initial-location relocation targets discarded
+/// COMDAT code, and their now unused CIEs. This is metadata selection, not GC.
+pub(super) struct Filtered {
+    pub data: Vec<u8>,
+    ranges: Vec<(u64, u64, u64)>,
+}
+impl Filtered {
+    pub fn offset(&self, offset: u64) -> Option<u64> {
+        let i = self
+            .ranges
+            .partition_point(|&(start, _, _)| start <= offset);
+        let &(start, end, base) = self.ranges.get(i.checked_sub(1)?)?;
+        (offset < end).then(|| base + offset - start)
+    }
+}
+pub(super) fn filter(
+    section: &object::read::elf::ElfSection64<'_, '_, object::Endianness>,
+    file: &object::read::elf::ElfFile64<'_, object::Endianness>,
+    discarded: &std::collections::BTreeSet<usize>,
+) -> Result<Option<Filtered>> {
+    use object::{Object, ObjectSection, ObjectSymbol, RelocationTarget, SymbolSection};
+    let data = section.data().map_err(|e| e.to_string())?;
+    let parsed = Frames::parse(data).map_err(|e| format!(".eh_frame: {e}"))?;
+    section.elf_linked_rela().map_err(|e| e.to_string())?;
+    let mut relocs = BTreeMap::new();
+    for (offset, r) in section.relocations() {
+        // R_NONE has no target or pointer semantics. In particular its symbol
+        // index must not cause a live FDE (and its CIE) to be discarded.
+        if matches!(r.flags(), object::RelocationFlags::Elf { r_type: 0 }) {
+            continue;
+        }
+        if relocs.insert(offset, r).is_some() {
+            return Err("duplicate .eh_frame pointer relocation".into());
+        }
+    }
+    let mut dead = std::collections::BTreeSet::new();
+    for frame in &parsed.frames {
+        if let Some(r) = relocs.get(&(frame.pc.offset as u64)) {
+            if let object::RelocationFlags::Elf { r_type } = r.flags() {
+                parsed.relocation(frame.pc.offset as u64, r_type)?;
+            }
+            let RelocationTarget::Symbol(i) = r.target() else {
+                continue;
+            };
+            let symbol = file.symbol_by_index(i).map_err(|e| e.to_string())?;
+            if matches!(symbol.section(), SymbolSection::Section(i) if discarded.contains(&i.0)) {
+                dead.insert(frame.record);
+            }
+        }
+    }
+    if dead.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(parsed.compact(
+        data,
+        &dead,
+        &relocs.keys().copied().collect(),
+    )?))
+}
+impl Frames {
+    /// FDE owner PC fields and all relocation fields in the FDE and its CIE.
+    pub(super) fn owners(&self, data: &[u8]) -> Result<Vec<(usize, u64, u64, Vec<u64>)>> {
+        self.frames
+            .iter()
+            .map(|f| {
+                let id = u32::from_le_bytes(data[f.record + 4..f.record + 8].try_into().unwrap())
+                    as usize;
+                let cie = f.record + 4 - id;
+                let end = |at: usize| {
+                    at + 4 + u32::from_le_bytes(data[at..at + 4].try_into().unwrap()) as usize
+                };
+                let fields = self
+                    .fields
+                    // A referenced CIE precedes its FDE, so these disjoint
+                    // ranges retain the original ascending field order.
+                    .range(cie as u64..end(cie) as u64)
+                    .chain(self.fields.range(f.record as u64..end(f.record) as u64))
+                    .map(|(&offset, _)| offset)
+                    .collect();
+                Ok((
+                    f.record,
+                    f.pc.offset as u64,
+                    f.range.value(data, 0)?,
+                    fields,
+                ))
+            })
+            .collect()
+    }
+    pub(super) fn compact(
+        &self,
+        data: &[u8],
+        dead: &std::collections::BTreeSet<usize>,
+        relocated: &std::collections::BTreeSet<u64>,
+    ) -> Result<Filtered> {
+        // CIE offsets come from validated FDEs, not a potentially sparse input
+        // index. Store only referenced CIEs and avoid repeated tree insertion
+        // for the common case of many adjacent FDEs sharing one CIE.
+        let mut used_cies = Vec::new();
+        for frame in &self.frames {
+            if !dead.contains(&frame.record) {
+                let id = u32::from_le_bytes(
+                    data[frame.record + 4..frame.record + 8].try_into().unwrap(),
+                ) as usize;
+                let cie = frame.record + 4 - id;
+                if used_cies.last() != Some(&cie) {
+                    used_cies.push(cie);
+                }
+            }
+        }
+        used_cies.sort_unstable();
+        used_cies.dedup();
+        let mut filtered = Filtered {
+            data: Vec::new(),
+            ranges: Vec::new(),
+        };
+        let mut at = 0;
+        while at + 4 <= data.len() {
+            let start = at;
+            let length = u32::from_le_bytes(data[start..start + 4].try_into().unwrap()) as usize;
+            if length == 0 {
+                break;
+            }
+            let end = start + 4 + length;
+            let id = u32::from_le_bytes(data[start + 4..start + 8].try_into().unwrap()) as usize;
+            at = end;
+            if (id == 0 && used_cies.binary_search(&start).is_err()) || dead.contains(&start) {
+                continue;
+            }
+            let base = filtered.data.len();
+            // Kept CIEs already appear in the sorted output ranges. Reuse that
+            // mapping instead of building a second record-to-base index.
+            let cie = if id != 0 {
+                filtered.offset((start + 4 - id) as u64)
+            } else {
+                None
+            };
+            filtered
+                .ranges
+                .push((start as u64, end as u64, base as u64));
+            filtered.data.extend_from_slice(&data[start..end]);
+            if id != 0 {
+                put32(
+                    &mut filtered.data,
+                    base + 4,
+                    (base + 4 - cie.unwrap() as usize) as u32,
+                );
+            }
+        }
+        // Both fields and kept ranges are ordered. Visit each range once,
+        // retaining the original field validation and error order.
+        let mut ranges = filtered.ranges.iter().peekable();
+        for (&offset, pointer) in &self.fields {
+            while ranges.peek().is_some_and(|&&(_, end, _)| end <= offset) {
+                ranges.next();
+            }
+            if ranges.peek().is_some_and(|&&(start, _, _)| start <= offset)
+                && !relocated.contains(&offset)
+                && pointer.encoding & 0x70 != 0
+                && data[pointer.offset..pointer.offset + pointer.width()?]
+                    .iter()
+                    .any(|b| *b != 0)
+            {
+                return Err(
+                    "unrelocated relative pointer in filtered .eh_frame is unsupported".into(),
+                );
+            }
+        }
+        Frames::parse(&filtered.data)?;
+        Ok(filtered)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn section(offset: u64, size: u64, flags: u64) -> Section {
+        Section {
+            name: String::new(),
+            flags,
+            kind: object::elf::SHT_PROGBITS,
+            align: 1,
+            size,
+            bss: false,
+            data: Vec::new(),
+            offset,
+        }
+    }
+
+    #[test]
+    fn executable_lookup_matches_section_scan_for_final_layouts() {
+        // Deliberately not in address order, as with registration grouping.
+        // Empty sections at a live start must not hide its nonempty interval.
+        // Non-executable data, alignment gaps and adjacent code stay distinct.
+        let sections = [
+            section(40, 4, 6),
+            section(12, 4, 6),
+            section(8, 4, 6),
+            section(8, 0, 6),
+            section(10, 0, 6),
+            section(16, 0, 6),
+            section(16, 8, 2),
+            section(28, 0, 6),
+            section(32, 4, 6),
+        ];
+        for len in 0..=sections.len() {
+            let sections = &sections[..len];
+            let lookup = ExecutableRanges::new(sections);
+            for offset in 0..=48 {
+                let pc = BASE + offset;
+                for range in 0..=48 {
+                    let end = pc + range;
+                    let expected = sections.iter().any(|s| {
+                        s.flags & 4 != 0
+                            && pc >= BASE + s.offset
+                            && pc < BASE + s.offset + s.size
+                            && end <= BASE + s.offset + s.size
+                    });
+                    assert_eq!(
+                        lookup.contains(pc, end),
+                        expected,
+                        "sections={len} offset={offset} range={range}"
+                    );
+                }
+            }
+            for pc in [0, BASE - 1, u64::MAX] {
+                assert!(!lookup.contains(pc, pc));
+            }
+        }
+    }
+
+    // Frozen pre-optimization algorithm: independent output/error oracle and
+    // same-build baseline for the ignored local performance comparison.
+    fn compact_reference(
+        parsed: &Frames,
+        data: &[u8],
+        dead: &std::collections::BTreeSet<usize>,
+        relocated: &std::collections::BTreeSet<u64>,
+    ) -> Result<Filtered> {
+        let mut records = Vec::new();
+        let mut used_cies = std::collections::BTreeSet::new();
+        let mut at = 0;
+        while at + 4 <= data.len() {
+            let length = u32::from_le_bytes(data[at..at + 4].try_into().unwrap()) as usize;
+            if length == 0 {
+                break;
+            }
+            let end = at + 4 + length;
+            let id = u32::from_le_bytes(data[at + 4..at + 8].try_into().unwrap()) as usize;
+            if id != 0 && !dead.contains(&at) {
+                used_cies.insert(at + 4 - id);
+            }
+            records.push((at, end, id));
+            at = end;
+        }
+        let mut filtered = Filtered {
+            data: Vec::new(),
+            ranges: Vec::new(),
+        };
+        let mut bases = BTreeMap::new();
+        for (start, end, id) in records {
+            if (id == 0 && !used_cies.contains(&start)) || dead.contains(&start) {
+                continue;
+            }
+            let base = filtered.data.len();
+            filtered
+                .ranges
+                .push((start as u64, end as u64, base as u64));
+            bases.insert(start, base);
+            filtered.data.extend_from_slice(&data[start..end]);
+            if id != 0 {
+                let cie = bases[&(start + 4 - id)];
+                put32(&mut filtered.data, base + 4, (base + 4 - cie) as u32);
+            }
+        }
+        for (&offset, pointer) in &parsed.fields {
+            if filtered.offset(offset).is_some()
+                && !relocated.contains(&offset)
+                && pointer.encoding & 0x70 != 0
+                && data[pointer.offset..pointer.offset + pointer.width()?]
+                    .iter()
+                    .any(|b| *b != 0)
+            {
+                return Err(
+                    "unrelocated relative pointer in filtered .eh_frame is unsupported".into(),
+                );
+            }
+        }
+        Frames::parse(&filtered.data)?;
+        Ok(filtered)
+    }
+
+    fn compact_fixture(count: usize, cies: usize, relative: bool) -> Vec<u8> {
+        fn record(data: &mut Vec<u8>, body: &[u8]) -> usize {
+            let start = data.len();
+            data.extend_from_slice(&0u32.to_le_bytes());
+            data.extend_from_slice(body);
+            while !data.len().is_multiple_of(4) {
+                data.push(0);
+            }
+            let length = (data.len() - start - 4) as u32;
+            put32(data, start, length);
+            start
+        }
+        let mut data = Vec::new();
+        let encoding = if relative { 0x1b } else { 0x03 };
+        let mut starts = Vec::new();
+        for _ in 0..cies {
+            // Personality and LSDA fields exercise ownership shared by FDEs.
+            starts.push(record(
+                &mut data,
+                &[
+                    0, 0, 0, 0, 1, b'z', b'P', b'L', b'R', 0, 1, 120, 16, 7, encoding, 0, 0, 0, 0,
+                    encoding, encoding, // Opaque CFI bytes must survive unchanged.
+                    0xff, 0x80, 0x12,
+                ],
+            ));
+        }
+        for i in 0..count {
+            let cie = starts[i % cies];
+            let id = (data.len() + 4 - cie) as u32;
+            let mut body = id.to_le_bytes().to_vec();
+            body.extend_from_slice(&[0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0xff, 0x81]);
+            record(&mut data, &body);
+        }
+        data.extend_from_slice(&[0; 12]);
+        data
+    }
+
+    #[test]
+    fn compact_matches_reference_for_shared_cies_fields_and_sparse_dead_records() {
+        for relative in [false, true] {
+            let original = compact_fixture(8, 4, relative);
+            let parsed = Frames::parse(&original).unwrap();
+            for mask in 0..256 {
+                let mut dead: std::collections::BTreeSet<_> = parsed
+                    .frames
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| mask & (1 << i) != 0)
+                    .map(|(_, f)| f.record)
+                    .collect();
+                // Unrelated sparse indices never determine an allocation size.
+                dead.insert(usize::MAX);
+                for nonzero in [false, true] {
+                    let mut data = original.clone();
+                    if nonzero {
+                        for pointer in parsed.fields.values() {
+                            data[pointer.offset] = 1;
+                        }
+                    }
+                    for relocations in [0, 1, 2] {
+                        let relocated = parsed
+                            .fields
+                            .keys()
+                            .enumerate()
+                            .filter(|(i, _)| relocations == 2 || (relocations == 1 && i % 2 == 0))
+                            .map(|(_, &offset)| offset)
+                            .collect();
+                        let expected = compact_reference(&parsed, &data, &dead, &relocated);
+                        let actual = parsed.compact(&data, &dead, &relocated);
+                        match (actual, expected) {
+                            (Ok(actual), Ok(expected)) => {
+                                assert_eq!(actual.data, expected.data);
+                                assert_eq!(actual.ranges, expected.ranges);
+                                for offset in 0..=data.len() as u64 + 4 {
+                                    assert_eq!(actual.offset(offset), expected.offset(offset));
+                                }
+                                assert_eq!(actual.offset(u64::MAX), None);
+                            }
+                            (Err(actual), Err(expected)) => assert_eq!(actual, expected),
+                            _ => panic!(
+                                "compaction result differs: relative={relative} mask={mask} nonzero={nonzero} relocations={relocations}"
+                            ),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "local compaction microbenchmark; run in release mode with --nocapture"]
+    fn compact_local_comparison() {
+        use std::{hint::black_box, time::Instant};
+        for cies in [1, 64, 4096] {
+            let data = compact_fixture(4096, cies, true);
+            let parsed = Frames::parse(&data).unwrap();
+            let dead = parsed
+                .frames
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| i % 4 != 0)
+                .map(|(_, f)| f.record)
+                .collect();
+            let relocated = parsed.fields.keys().copied().collect();
+            let expected = compact_reference(&parsed, &data, &dead, &relocated).unwrap();
+            let actual = parsed.compact(&data, &dead, &relocated).unwrap();
+            assert_eq!(actual.data, expected.data);
+            assert_eq!(actual.ranges, expected.ranges);
+            let mut samples = [Vec::new(), Vec::new()];
+            for round in 0..21 {
+                for candidate in if round % 2 == 0 { [0, 1] } else { [1, 0] } {
+                    let start = Instant::now();
+                    for _ in 0..100 {
+                        let output = if candidate == 0 {
+                            compact_reference(&parsed, &data, &dead, &relocated)
+                        } else {
+                            parsed.compact(&data, &dead, &relocated)
+                        }
+                        .unwrap();
+                        black_box(output);
+                    }
+                    samples[candidate].push(start.elapsed().as_secs_f64() * 10.0);
+                }
+            }
+            for values in &mut samples {
+                values.sort_by(f64::total_cmp);
+            }
+            eprintln!(
+                "4096 FDEs {cies} CIEs, ms/compact baseline median={:.4} candidate={:.4}; ranges {:.4}..{:.4} / {:.4}..{:.4}",
+                samples[0][10],
+                samples[1][10],
+                samples[0][0],
+                samples[0][20],
+                samples[1][0],
+                samples[1][20]
+            );
+        }
+    }
 }

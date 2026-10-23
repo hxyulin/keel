@@ -130,6 +130,14 @@ impl DebugTypes {
                 let pointee = self.plain(module, p, pointee);
                 self.pointer(module, pointee)
             }
+            Ty::Vector(elem, shape) => {
+                let elem = self.plain(module, p, elem)?;
+                self.array(module, elem, Some(u64::from(shape.lanes())))
+            }
+            Ty::Complex(elem) => {
+                let elem = self.plain(module, p, elem)?;
+                self.array(module, elem, Some(2))
+            }
             Ty::Array(a) => {
                 let elem = self.plain(module, p, &a.elem)?;
                 self.array(module, elem, a.len)
@@ -208,6 +216,7 @@ fn base(ty: &Ty) -> (&'static str, Encoding, u32) {
     let (name, encoding) = match kind {
         IntKind::Bool => ("_Bool", Bool),
         IntKind::Char => ("char", SignedChar),
+        IntKind::UPlainChar => ("char", UnsignedChar),
         IntKind::SChar => ("signed char", SignedChar),
         IntKind::UChar => ("unsigned char", UnsignedChar),
         IntKind::Short => ("short", Signed),

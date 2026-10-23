@@ -1,4 +1,4 @@
-//! Native AArch64 Mach-O and x86-64 Linux ELF assemblers.
+//! Native AArch64 Mach-O/Linux ELF and x86-64 Linux ELF assemblers.
 //!
 //! The original root API targets AArch64; [`x86`] exposes Intel syntax and
 //! structured x86 instruction assembly without changing that API.
@@ -56,6 +56,9 @@ pub struct Symbol {
     pub private_extern: bool,
     /// Mach-O N_WEAK_DEF: a definition that can be coalesced or overridden.
     pub weak_definition: bool,
+    pub no_dead_strip: bool,
+    /// Optional undefined external reference, N_WEAK_REF.
+    pub weak_reference: bool,
     /// Mach-O N_WEAK_REF on a weak definition: the linker may hide it.
     pub weak_can_be_hidden: bool,
     /// Tentative common definition: byte size and power-of-two alignment.
@@ -906,4 +909,45 @@ mod tests {
             );
         }
     }
+}
+
+/// Assemble GNU AArch64 syntax into a little-endian Linux ELF relocatable.
+/// Unsupported ELF directives (including CFI/TLS) are diagnosed.
+pub fn assemble_elf_object(source: &str) -> Result<Vec<u8>, Error> {
+    assemble_elf_object_with_features(source, TargetFeatures::default())
+}
+
+pub fn assemble_elf_object_with_features(
+    source: &str,
+    features: TargetFeatures,
+) -> Result<Vec<u8>, Error> {
+    let mut assembler = ElfProgramAssembler::new(features);
+    let mut program = keel_asm_ir::Program::new();
+    program.text(source);
+    assembler.push(program);
+    assembler.finish()
+}
+
+/// Incremental AArch64 ELF assembly using the shared ELF metadata/DWARF writer.
+pub struct ElfProgramAssembler(x86::ProgramAssembler);
+impl ElfProgramAssembler {
+    pub fn new(features: TargetFeatures) -> Self {
+        Self(x86::ProgramAssembler::new_aarch64(features))
+    }
+    pub fn push(&mut self, program: keel_asm_ir::Program) {
+        self.0.push(program);
+    }
+    pub fn finish(self) -> Result<Vec<u8>, Error> {
+        self.0.finish()
+    }
+}
+
+/// Assemble a typed AArch64 Linux program into ELF, including CFI/DWARF.
+pub fn assemble_elf_program_object(
+    program: &keel_asm_ir::Program,
+    features: TargetFeatures,
+) -> Result<Vec<u8>, Error> {
+    let mut assembler = ElfProgramAssembler::new(features);
+    assembler.push(program.clone());
+    assembler.finish()
 }

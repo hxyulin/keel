@@ -22,6 +22,103 @@ def sections(data):
     return {names[h[0]:].split(b"\0", 1)[0].decode(): h for h in headers}
 
 
+def structural_gc(args):
+    """Cross-host GC/reconstruction oracle; never executes an ELF image."""
+    out = args.out.resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    commands, cases = [], []
+
+    def run(argv, ok=True):
+        r = subprocess.run([str(v) for v in argv], capture_output=True, timeout=60)
+        commands.append(dict(argv=[str(v) for v in argv], rc=r.returncode,
+                             stdout=r.stdout.decode(errors="replace"), stderr=r.stderr.decode(errors="replace")))
+        (out / "commands.json").write_text(json.dumps(commands, indent=2) + "\n")
+        if ok:
+            assert r.returncode == 0, commands[-1]
+        return r
+
+    def records(image):
+        data = image.read_bytes()
+        ss = sections(data)
+        # GNU removes a zero-record table; Keel retains its exact empty header.
+        if ".sframe" not in ss:
+            return []
+        sh = ss[".sframe"]
+        sf = data[sh[4]:sh[4] + sh[5]]
+        if not sf:
+            assert image.suffix == ".gnu"
+            return []
+        count, rows, length, indexoff, freoff = struct.unpack_from("<IIIII", sf, 8)
+        assert indexoff == 0 and freoff == 16 * count and len(sf) == 28 + freoff + length
+        assert sf[3] == 5
+        symbols = ss[".symtab"]
+        headers = [struct.unpack_from("<IIQQQQIIQQ", data, struct.unpack_from("<Q", data, 40)[0] + i * 64)
+                   for i in range(struct.unpack_from("<H", data, 60)[0])]
+        strings = headers[symbols[6]]
+        names = data[strings[4]:strings[4] + strings[5]]
+        addresses = {}
+        for at in range(symbols[4], symbols[4] + symbols[5], 24):
+            name, _, _, _, value, _ = struct.unpack_from("<IBBHQQ", data, at)
+            if name:
+                addresses[value] = names[name:].split(b"\0", 1)[0].decode()
+        offsets = [struct.unpack_from("<I", sf, 40 + 16 * i)[0] for i in range(count)]
+        result, previous, total = [], 0, 0
+        for i, offset in enumerate(offsets):
+            field = 28 + 16 * i
+            pc = sh[3] + field + struct.unpack_from("<q", sf, field)[0]
+            size = struct.unpack_from("<I", sf, field + 8)[0]
+            assert pc >= previous
+            previous = pc + size
+            stop = min([n for n in offsets if n > offset] + [length])
+            block = sf[28 + freoff + offset:28 + freoff + stop]
+            total += struct.unpack_from("<H", block)[0]
+            result.append((addresses[pc], size, block.hex()))
+        assert total == rows
+        return result
+
+    for tool in [args.assembler, args.ld, args.readelf]:
+        run([tool, "--version"])
+    # Distinct FRE blocks and deliberately reversed indices expose accidental
+    # index/block coupling. Every liveness mask is compared with GNU ld.
+    for mask in range(8):
+        name = f"mask-{mask}"
+        source = '.text\n.globl _start\n_start: ret\n'
+        for i, symbol in enumerate(["first", "middle", "last"]):
+            source += f'.section .text.{symbol},"ax{"R" if mask & (1 << i) else ""}",@progbits\n.globl {symbol}\n{symbol}:\n.cfi_startproc\n.zero 40\n.cfi_endproc\n'
+        source += '''.section .sframe,"a",@0x6ffffff4
+.p2align 3
+.byte 226,222,3,4,3,0,248,0
+.long 3,4,26,0,48
+.quad middle-.
+.long 5,0
+.quad last-.
+.long 5,10
+.quad first-.
+.long 38,18
+.byte 2,0,0,0,0,0,3,8,4,0
+.byte 1,0,0,0,0,0,3,16
+.byte 1,0,0,0,0,0,3,24
+.section .note.GNU-stack,"",@progbits
+'''
+        assembly, obj = out / (name + ".s"), out / (name + ".o")
+        assembly.write_text(source)
+        run([args.assembler, "--64", assembly, "-o", obj])
+        native, gnu = out / (name + ".keel"), out / (name + ".gnu")
+        run([args.keel.resolve(), "link", "--target", "x86_64-unknown-linux-gnu", "--gc-sections", obj, "-o", native])
+        run([args.ld, "--gc-sections", "--eh-frame-hdr", obj, "-o", gnu])
+        actual, expected = records(native), records(gnu)
+        assert actual == expected, (name, actual, expected)
+        assert len(actual) == bin(mask).count("1")
+        for image in [native, gnu]:
+            (out / (image.name + ".headers.txt")).write_bytes(run([args.readelf, "-lWS", image]).stdout)
+            (out / (image.name + ".sframe.txt")).write_bytes(run([args.readelf, "--sframe", image]).stdout)
+        cases.append(dict(name=name, records=actual, sha256=hashlib.sha256(native.read_bytes()).hexdigest()))
+    report = dict(mode="cross-host structural GC", cases=cases, executed_images=False,
+                  libsframe_runtime=False, scope="all eight liveness masks, reordered indices, exact FRE bytes, DWARF coexistence")
+    (out / "report.json").write_text(json.dumps(report, indent=2) + "\n")
+    print("8 SFrame GC structural GNU comparisons passed; no runtime execution")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--keel", type=Path, required=True)
@@ -29,7 +126,16 @@ def main():
     p.add_argument("--libc", type=Path, default=Path("/usr/lib/libc.so.6"))
     p.add_argument("--libsframe", type=Path, default=Path("/usr/lib/libsframe.so.3"))
     p.add_argument("--crt1", type=Path, default=Path("/usr/lib/crt1.o"))
+    p.add_argument("--structural-gc", action="store_true", help="cross-host GNU GC comparison, no execution")
+    p.add_argument("--as", dest="assembler", default="as")
+    p.add_argument("--ld", default="ld")
+    p.add_argument("--readelf", default="readelf")
+    p.add_argument("--gc-sections", action="store_true", help="also enable GC in the Linux libsframe replay")
     args = p.parse_args()
+    if args.structural_gc:
+        structural_gc(args)
+        return
+    gc_flags = ["--gc-sections"] if args.gc_sections else []
     if platform.system() != "Linux" or platform.machine() != "x86_64":
         p.error("run on x86-64 Linux")
     keel, out = args.keel.resolve(), args.out.resolve()
@@ -178,8 +284,8 @@ int main(void) {
     run(["clang", "-O2", "-fPIC", "-fno-plt", "-c", consumer, "-o", out / "consumer.o"])
     inputs = [out / "start.o", out / "metadata.o", out / "consumer.o", args.libsframe, args.libc]
     native, reference = out / "consumer.keel", out / "consumer.gnu"
-    run([keel, "link", "--target", "x86_64-unknown-linux-gnu", *inputs, "-o", native], True)
-    run(["ld", "--dynamic-linker", "/lib64/ld-linux-x86-64.so.2", "-o", reference, *inputs])
+    run([keel, "link", "--target", "x86_64-unknown-linux-gnu", *gc_flags, *inputs, "-o", native], True)
+    run(["ld", *gc_flags, "--dynamic-linker", "/lib64/ld-linux-x86-64.so.2", "-o", reference, *inputs])
     for exe in [native, reference]:
         run([exe], rc=42)
         (out / (exe.name + ".headers.txt")).write_bytes(run(["readelf", "-lWS", exe]).stdout)
@@ -227,6 +333,55 @@ int main(void) {
             # Installed GNU ld reserves extra segment bytes for generated PLT
             # records. Record that discrepancy; Keel must have exact sizes.
             assert h[5] >= s[5]
+    filtering_runtime = None
+    if args.gc_sections:
+        # Exercise actual record removal and reordering through installed
+        # libsframe, rather than only running an all-live table with GC enabled.
+        # The dead function is local so executable-export roots cannot retain it.
+        filtered = out / "filtering.s"
+        filtered.write_text(metadata.read_text().split('.section .sframe,', 1)[0] + '''
+.section .text.sframe_dead,"ax",@progbits
+.Ldead: ret
+.zero 4
+.section .sframe,"a",@0x6ffffff4
+.p2align 3
+.byte 226,222,3,4,3,0,248,0
+.long 4,5,34,0,64
+.quad gamma-.
+.long 5,10
+.quad .Ldead-.
+.long 5,18
+.quad beta-.
+.long 5,26
+.quad alpha-.
+.long 38,0
+.byte 2,0,0,0,0,0,3,8,4,0
+.byte 1,0,0,0,0,0,3,8
+.byte 1,0,0,0,0,0,3,16
+.byte 1,0,0,0,0,0,3,8
+.section .note.GNU-stack,"",@progbits
+''')
+        filtered_object = out / "filtering.o"
+        run(["as", "-mx86-used-note=no", filtered, "-o", filtered_object])
+        filtered_inputs = [out / "start.o", filtered_object, out / "consumer.o", args.libsframe, args.libc]
+        filtered_native, filtered_gnu = out / "filtering.keel", out / "filtering.gnu"
+        run([keel, "link", "--target", "x86_64-unknown-linux-gnu", "--gc-sections",
+             *filtered_inputs, "-o", filtered_native], True)
+        run(["ld", "--gc-sections", "--dynamic-linker", "/lib64/ld-linux-x86-64.so.2",
+             "-o", filtered_gnu, *filtered_inputs])
+        for image in [filtered_native, filtered_gnu]:
+            run([image], rc=42)
+            data = image.read_bytes()
+            ss = sections(data)
+            assert ".text.sframe_dead" not in ss
+            sh = ss[".sframe"]
+            table = data[sh[4]:sh[4] + sh[5]]
+            assert struct.unpack_from("<IIIII", table, 8) == (3, 4, 26, 0, 48)
+            assert len(table) == 102 and table[3] == 5
+            (out / (image.name + ".sframe.txt")).write_bytes(run(["readelf", "--sframe", image]).stdout)
+        filtering_runtime = dict(input_records=4, output_records=3,
+                                 reordered_indices=True, independent_fre_order=True,
+                                 native_exit=42, gnu_exit=42)
     # Separate controls prove discovery and sorted lookup matter to the consumer.
     data = bytearray(native.read_bytes())
     phoff = struct.unpack_from("<Q", data, 32)[0]
@@ -249,17 +404,18 @@ int main(void) {
     run(["as", "--gsframe", "-mx86-used-note=no", second, "-o", out / "second.o"])
     preserved = out / "preserved"
     preserved.write_bytes(b"existing output\n")
-    result = run([keel, "link", "--target", "x86_64-unknown-linux-gnu", *inputs, out / "second.o", "-o", preserved], True, rc=None)
+    result = run([keel, "link", "--target", "x86_64-unknown-linux-gnu", *gc_flags, *inputs, out / "second.o", "-o", preserved], True, rc=None)
     assert result.returncode and b"second selected SFrame producer" in result.stderr
     assert preserved.read_bytes() == b"existing output\n"
     # Selection, rather than archive presence, determines producer count.
     run(["ar", "rcs", out / "unused.a", out / "second.o"])
-    run([keel, "link", "--target", "x86_64-unknown-linux-gnu", *inputs, out / "unused.a", "-o", out / "unused.keel"], True)
+    run([keel, "link", "--target", "x86_64-unknown-linux-gnu", *gc_flags, *inputs, out / "unused.a", "-o", out / "unused.keel"], True)
     run([out / "unused.keel"], rc=42)
     (out / "report.json").write_text(json.dumps(dict(host=platform.node(),
-        native_exit=42, gnu_exit=42, discovery_control=1, sorted_control=5,
+        native_exit=42, gnu_exit=42, gc_sections=args.gc_sections, discovery_control=1, sorted_control=5,
         second_producer_rejected=True, unused_archive_ignored=True,
         installed_crt1_structure_matches=True, spans=spans,
+        filtering_runtime=filtering_runtime,
         installed_header_sha256=hashlib.sha256(Path("/usr/include/sframe.h").read_bytes()).hexdigest(),
         installed_libsframe_sha256=hashlib.sha256(args.libsframe.read_bytes()).hexdigest(),
         scope="single AMD64 v3 producer, installed libsframe lookup; custom startup, no CRT or CFI unwinding claim"), indent=2) + "\n")

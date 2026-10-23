@@ -60,6 +60,12 @@ fn tokens(src: &str) -> Vec<String> {
         .unwrap()
         .lines()
         .filter(|l| l.contains("Loc=<") && !l.starts_with("eof "))
+        // Clang 23 pads with spaces where older releases used tabs. Keep
+        // the token kind and quoted spelling, excluding flags and locations.
+        .map(|l| {
+            let prefix = l.rsplit_once("Loc=<").unwrap().0;
+            &prefix[..=prefix.rfind('\'').unwrap()]
+        })
         .filter(|l| {
             l.split_once(" '").is_some_and(|(kind, _)| {
                 !kind.is_empty() && kind.bytes().all(|b| b.is_ascii_alphabetic() || b == b'_')
@@ -68,19 +74,13 @@ fn tokens(src: &str) -> Vec<String> {
         .filter(|l| {
             !l.starts_with("unknown '")
                 || !l
-                    .split('\t')
-                    .next()
-                    .unwrap()
                     .trim_start_matches("unknown '")
                     .trim_end_matches('\'')
                     .trim()
                     .is_empty()
         })
         .map(|l| {
-            l.split("\t")
-                .next()
-                .unwrap()
-                .to_string()
+            l.to_string()
                 .replace("'<:'", "'['")
                 .replace("':>'", "']'")
                 .replace("'<%'", "'{'")
@@ -279,6 +279,7 @@ fn target_environment_matches_abi_and_queries() {
         let expected = match target {
             keel_ir::Target::Aarch64AppleDarwin => "8 8 1 1 8 arm",
             keel_ir::Target::X86_64LinuxGnu => "8 8 1 1 16 x86",
+            keel_ir::Target::Aarch64LinuxGnu => "8 8 1 1 16 arm",
         };
         assert_eq!(tokens(&got), tokens(expected));
     }

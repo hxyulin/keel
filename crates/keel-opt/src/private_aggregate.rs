@@ -115,6 +115,7 @@ fn source_order_preserved(sig: &Signature) -> bool {
 }
 fn plan(f: &Function) -> Option<Plan> {
     if !f.local
+        || f.attrs.weak
         || f.weak_odr
         || f.sig.variadic
         || f.sig.returns_twice
@@ -134,7 +135,8 @@ fn plan(f: &Function) -> Option<Plan> {
         | InstData::AtomicStore { .. }
         | InstData::AtomicRmw { .. }
         | InstData::AtomicCas { .. }
-        | InstData::VaArg { .. } => true,
+        | InstData::VaArg { .. }
+        | InstData::AggregateVaArg { .. } => true,
         _ => false,
     }) {
         return None;
@@ -261,6 +263,9 @@ pub fn run(m: &mut Module) -> usize {
             if work > MAX_MODULE_WORK {
                 return 0;
             }
+            if let InstData::Call { func, args } = f.inst_data(i) {
+                if args.has_explicit_abi() { blocked.insert(f.callee(*func).name.clone()); }
+            }
             match f.inst_data(i) {
                 // Textual symbols disable the module; intrinsic/frame facilities
                 // exclude the containing definition from this prototype.
@@ -337,7 +342,7 @@ pub fn run(m: &mut Module) -> usize {
         for (i, args, p) in calls {
             let at = InsertPoint::Before(i);
             let mut new = Vec::new();
-            for (v, split) in args.into_iter().zip(p.split) {
+            for (v, split) in args.iter().copied().zip(p.split) {
                 if split {
                     // Byval supplies bytes, not an explicit source-address
                     // alignment promise. Only the fresh home is known aligned.
@@ -366,7 +371,7 @@ pub fn run(m: &mut Module) -> usize {
                 }
             }
             if let InstData::Call { args, .. } = f.inst_data_mut(i) {
-                *args = new;
+                *args = new.into();
             }
         }
         let updates: Vec<_> = f

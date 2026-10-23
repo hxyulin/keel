@@ -40,7 +40,7 @@ fn assembly(
             };
             keel_codegen::x86_64::compile_with_pipeline(&module, &pools, &pipeline).unwrap()
         }
-        Target::Aarch64AppleDarwin => {
+        Target::Aarch64AppleDarwin | Target::Aarch64LinuxGnu => {
             let pools = if tiny {
                 Pools {
                     caller_saved: &[9],
@@ -51,7 +51,12 @@ fn assembly(
             } else {
                 keel_codegen::aarch64::REGISTERS
             };
-            keel_codegen::aarch64::compile_with_pipeline(&module, &pools, &pipeline).unwrap()
+            if target == Target::Aarch64LinuxGnu {
+                keel_codegen::aarch64::compile_linux_with_pipeline(&module, &pools, &pipeline)
+                    .unwrap()
+            } else {
+                keel_codegen::aarch64::compile_with_pipeline(&module, &pools, &pipeline).unwrap()
+            }
         }
     }
 }
@@ -61,7 +66,7 @@ fn extensions(output: &str, target: Target) -> usize {
         .lines()
         .filter(|line| match target {
             Target::X86_64LinuxGnu => line.trim_start().starts_with("movzx\t"),
-            Target::Aarch64AppleDarwin => ["uxtb\t", "uxth\t"]
+            Target::Aarch64AppleDarwin | Target::Aarch64LinuxGnu => ["uxtb\t", "uxth\t"]
                 .iter()
                 .any(|op| line.trim_start().starts_with(op)),
         })
@@ -255,7 +260,7 @@ fn distinct_conversion_destination_still_copies_the_value() {
         // The forced source/destination are rdi/r8 on x86 and w10/w11 on ARM.
         let copy = match target {
             Target::X86_64LinuxGnu => "mov\tr8d, edi",
-            Target::Aarch64AppleDarwin => "mov\tw11, w10",
+            Target::Aarch64AppleDarwin | Target::Aarch64LinuxGnu => "mov\tw11, w10",
         };
         assert!(output.contains(copy), "{output}");
         assert_eq!(

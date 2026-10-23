@@ -12,6 +12,108 @@ impl Opcode {
     /// The mnemonic, split into a fixed part and a condition-code suffix.
     fn mnemonic(self) -> (&'static str, Option<u8>) {
         let name = match self {
+            Opcode::Core(op) => op.mnemonic(),
+            Opcode::X87(op) => op.mnemonic(),
+            Opcode::Fixed(op) => op.mnemonic(),
+            Opcode::V2(op) => op.spec().mnemonic,
+            Opcode::Movq6e => "movq.6e",
+            Opcode::Movq7e => "movq.7e",
+            Opcode::MovqD6 => "movq.d6",
+            Opcode::Movq7f => "movq.7f",
+            Opcode::MovssStore => "movss.store",
+            Opcode::MovsdStore => "movsd.store",
+            Opcode::MovapsStore => "movaps.store",
+            Opcode::MovupsStore => "movups.store",
+            Opcode::MovapdStore => "movapd.store",
+            Opcode::MovupdStore => "movupd.store",
+            Opcode::MovdqaStore => "movdqa.store",
+            Opcode::MovdquStore => "movdqu.store",
+
+            Opcode::Comiss => "comiss",
+            Opcode::Comisd => "comisd",
+            Opcode::Cvtss2si => "cvtss2si",
+            Opcode::Cvtsd2si => "cvtsd2si",
+            Opcode::Cvtpi2ps => "cvtpi2ps",
+            Opcode::Cvtpi2pd => "cvtpi2pd",
+            Opcode::Cvtps2pi => "cvtps2pi",
+            Opcode::Cvtpd2pi => "cvtpd2pi",
+            Opcode::Cvttps2pi => "cvttps2pi",
+            Opcode::Cvttpd2pi => "cvttpd2pi",
+            Opcode::Rcpps => "rcpps",
+            Opcode::Rcpss => "rcpss",
+            Opcode::Rsqrtps => "rsqrtps",
+            Opcode::Rsqrtss => "rsqrtss",
+            Opcode::Movhps => "movhps",
+            Opcode::Movlps => "movlps",
+            Opcode::Movhpd => "movhpd",
+            Opcode::Movlpd => "movlpd",
+            Opcode::Movlhps => "movlhps",
+            Opcode::Movdq2q => "movdq2q",
+            Opcode::Movq2dq => "movq2dq",
+            Opcode::Movntq => "movntq",
+            Opcode::Movntdq => "movntdq",
+            Opcode::Movntps => "movntps",
+            Opcode::Movntpd => "movntpd",
+            Opcode::Movnti => "movnti",
+            Opcode::Maskmovq => "maskmovq",
+            Opcode::Maskmovdqu => "maskmovdqu",
+            Opcode::Prefetchnta => "prefetchnta",
+            Opcode::Prefetcht0 => "prefetcht0",
+            Opcode::Prefetcht1 => "prefetcht1",
+            Opcode::Prefetcht2 => "prefetcht2",
+            Opcode::Fxsave => "fxsave",
+            Opcode::Fxsave64 => "fxsave64",
+            Opcode::Fxrstor => "fxrstor",
+            Opcode::Fxrstor64 => "fxrstor64",
+            Opcode::Cmpeqps => "cmpeqps",
+            Opcode::Cmpltps => "cmpltps",
+            Opcode::Cmpleps => "cmpleps",
+            Opcode::Cmpunordps => "cmpunordps",
+            Opcode::Cmpneqps => "cmpneqps",
+            Opcode::Cmpnleps => "cmpnleps",
+            Opcode::Cmpordps => "cmpordps",
+            Opcode::Cmpeqpd => "cmpeqpd",
+            Opcode::Cmpltpd => "cmpltpd",
+            Opcode::Cmplepd => "cmplepd",
+            Opcode::Cmpunordpd => "cmpunordpd",
+            Opcode::Cmpneqpd => "cmpneqpd",
+            Opcode::Cmpnltpd => "cmpnltpd",
+            Opcode::Cmpnlepd => "cmpnlepd",
+            Opcode::Cmpordpd => "cmpordpd",
+            Opcode::Cmpeqss => "cmpeqss",
+            Opcode::Cmpless => "cmpless",
+            Opcode::Cmpunordss => "cmpunordss",
+            Opcode::Cmpneqss => "cmpneqss",
+            Opcode::Cmpnltss => "cmpnltss",
+            Opcode::Cmpnless => "cmpnless",
+            Opcode::Cmpordss => "cmpordss",
+            Opcode::Cmpunordsd => "cmpunordsd",
+            Opcode::Cmpnltsd => "cmpnltsd",
+            Opcode::Cmpnlesd => "cmpnlesd",
+
+            Opcode::Packssdw => "packssdw",
+            Opcode::Packsswb => "packsswb",
+            Opcode::Packuswb => "packuswb",
+            Opcode::Paddsb => "paddsb",
+            Opcode::Paddsw => "paddsw",
+            Opcode::Paddusb => "paddusb",
+            Opcode::Paddusw => "paddusw",
+            Opcode::Psubsb => "psubsb",
+            Opcode::Psubsw => "psubsw",
+            Opcode::Psubusb => "psubusb",
+            Opcode::Psubusw => "psubusw",
+            Opcode::Pavgb => "pavgb",
+            Opcode::Pavgw => "pavgw",
+            Opcode::Pmaxsw => "pmaxsw",
+            Opcode::Pmaxub => "pmaxub",
+            Opcode::Pminsw => "pminsw",
+            Opcode::Pminub => "pminub",
+            Opcode::Psadbw => "psadbw",
+            Opcode::Pshufw => "pshufw",
+            Opcode::Pinsrw => "pinsrw",
+            Opcode::Pextrw => "pextrw",
+
+            Opcode::V3(op) => op.mnemonic(),
             Opcode::Mov => "mov",
             Opcode::Movabs => "movabs",
             Opcode::Lea => "lea",
@@ -244,6 +346,8 @@ impl Opcode {
             Opcode::Fldcw => "fldcw",
             Opcode::Fnstcw => "fnstcw",
             Opcode::Fldz => "fldz",
+            Opcode::Ldmxcsr => "ldmxcsr",
+            Opcode::Stmxcsr => "stmxcsr",
             Opcode::Cmpnltps => "cmpnltps",
             Opcode::Pmovmskb => "pmovmskb",
             Opcode::Movmskps => "movmskps",
@@ -277,6 +381,9 @@ impl Opcode {
         (name, None)
     }
     fn write_to<W: Write + ?Sized>(self, w: &mut W) -> fmt::Result {
+        if let Opcode::Core(op) = self {
+            return op.write_to(w);
+        }
         let (name, cc) = self.mnemonic();
         w.write_str(name)?;
         match cc {
@@ -293,9 +400,29 @@ impl fmt::Display for Opcode {
 impl Register {
     fn write_to<W: Write + ?Sized>(&self, w: &mut W) -> fmt::Result {
         match self.class {
-            RegisterClass::Rip => w.write_str("rip"),
+            RegisterClass::Segment => match self.number {
+                0 => w.write_str("es"),
+                1 => w.write_str("cs"),
+                2 => w.write_str("ss"),
+                3 => w.write_str("ds"),
+                4 => w.write_str("fs"),
+                5 => w.write_str("gs"),
+                _ => Err(fmt::Error),
+            },
+            RegisterClass::Rip => w.write_str(if self.width == 32 { "eip" } else { "rip" }),
+            RegisterClass::Ymm => {
+                w.write_str("ymm")?;
+                write_int(w, self.number.into(), false)
+            }
             RegisterClass::Xmm => {
                 w.write_str("xmm")?;
+                write_int(w, self.number.into(), false)
+            }
+            RegisterClass::Mmx => {
+                if self.number >= 8 || self.width != 64 || self.high_byte {
+                    return Err(fmt::Error);
+                }
+                w.write_str("mm")?;
                 write_int(w, self.number.into(), false)
             }
             RegisterClass::X87 => {
@@ -303,8 +430,9 @@ impl Register {
                     return Err(fmt::Error);
                 }
                 w.write_str(
-                    ["st(0)", "st(1)", "st(2)", "st(3)", "st(4)", "st(5)", "st(6)", "st(7)"]
-                        [usize::from(self.number)],
+                    [
+                        "st(0)", "st(1)", "st(2)", "st(3)", "st(4)", "st(5)", "st(6)", "st(7)",
+                    ][usize::from(self.number)],
                 )
             }
             RegisterClass::Gpr => {
@@ -370,7 +498,12 @@ fn symbol<W: Write + ?Sized>(w: &mut W, name: &str) -> fmt::Result {
             w.write_char('\\')?;
             w.write_char(b as char)?;
         } else {
-            let octal = [b'\\', b'0' + (b >> 6), b'0' + ((b >> 3) & 7), b'0' + (b & 7)];
+            let octal = [
+                b'\\',
+                b'0' + (b >> 6),
+                b'0' + ((b >> 3) & 7),
+                b'0' + (b & 7),
+            ];
             w.write_str(std::str::from_utf8(&octal).map_err(|_| fmt::Error)?)?;
         }
     }
@@ -428,8 +561,10 @@ impl Operand {
                         16 => "word ptr ",
                         32 => "dword ptr ",
                         64 => "qword ptr ",
+                        48 => "fword ptr ",
                         80 => "tbyte ptr ",
                         128 => "xmmword ptr ",
+                        256 => "ymmword ptr ",
                         _ => return Err(fmt::Error),
                     })?;
                 }
@@ -486,15 +621,25 @@ pub fn write_instruction<W: Write + ?Sized>(
     if lock {
         w.write_str("lock ")?;
     }
+    let environment = matches!(opcode, Opcode::X87(op) if op.environment());
+    if environment && matches!(operands, [Operand::Memory(m)] if m.width == 16) {
+        w.write_str("data16 ")?;
+    }
     opcode.write_to(w)?;
     for (i, o) in operands.iter().enumerate() {
         w.write_str(if i == 0 { "\t" } else { ", " })?;
         if matches!(o,Operand::Immediate(a) if a.expression.add.is_some()||a.expression.subtract.is_some())
-            && !matches!(opcode, Opcode::Call | Opcode::Jmp | Opcode::Jcc(_))
+            && !opcode.is_direct_branch()
         {
             w.write_str("offset ")?;
         }
-        o.write_to(w)?;
+        if environment && let Operand::Memory(m) = o {
+            let mut m = m.clone();
+            m.width = 0;
+            Operand::Memory(m).write_to(w)?;
+        } else {
+            o.write_to(w)?;
+        }
     }
     Ok(())
 }
@@ -534,20 +679,26 @@ mod tests {
             assert_eq!(constant(n).to_string(), n.to_string());
         }
         let reg = |s| Register::parse(s).unwrap();
-        let i = Instruction::parse_intel(
-            "lock add qword ptr fs:[r12 + r13 * 8 + \"x\"-\"y\"+3], r9",
-        )
-        .unwrap();
+        let i =
+            Instruction::parse_intel("lock add qword ptr fs:[r12 + r13 * 8 + \"x\"-\"y\"+3], r9")
+                .unwrap();
         assert_eq!(
             i.to_string(),
             "lock add\tqword ptr fs:[r12 + r13 * 8 + \"x\"-\"y\"+3], r9"
         );
-        for r in ["r8b", "r15w", "r10d", "r11", "sil", "ah", "xmm15", "st(3)", "rip"] {
+        for r in [
+            "r8b", "r15w", "r10d", "r11", "sil", "ah", "xmm15", "st(3)", "rip",
+        ] {
             assert_eq!(reg(r).to_string(), r);
         }
         let mut s = String::new();
-        write_instruction(&mut s, Opcode::Jcc(14), &[Operand::Immediate(symbol("L", 0))], false)
-            .unwrap();
+        write_instruction(
+            &mut s,
+            Opcode::Jcc(14),
+            &[Operand::Immediate(symbol("L", 0))],
+            false,
+        )
+        .unwrap();
         assert_eq!(s, "jle\t\"L\"@PLT");
     }
 }

@@ -671,7 +671,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         self.search_dirs.push(crate::headers::ROOT.into());
         // With an explicit root, never consult host system include directories.
         let root = self.options.sysroot.clone().or_else(|| {
-            (self.options.target == keel_ir::Target::X86_64LinuxGnu
+            (self.options.target != keel_ir::Target::Aarch64AppleDarwin
                 && keel_ir::Target::host() == Some(self.options.target))
             .then(|| PathBuf::from("/"))
         });
@@ -681,6 +681,10 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         if self.options.target == keel_ir::Target::X86_64LinuxGnu {
             self.search_dirs
                 .push(root.join("usr/include/x86_64-linux-gnu"));
+        }
+        if self.options.target == keel_ir::Target::Aarch64LinuxGnu {
+            self.search_dirs
+                .push(root.join("usr/include/aarch64-linux-gnu"));
         }
         self.search_dirs.push(root.join("usr/include"));
         if self.options.target == keel_ir::Target::Aarch64AppleDarwin {

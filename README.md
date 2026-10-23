@@ -1,7 +1,7 @@
 # keel
 
 An educational compiler written in Rust: a low-level SSA IR, optimizer,
-assembly generators for aarch64 macOS and x86-64 Linux, and a C frontend.
+assembly generators for AArch64 macOS/Linux and x86-64 Linux, and a C frontend.
 Keel preprocesses and compiles one C translation unit or compiles textual IR
 to assembly without invoking Clang. The examples use Clang for assembly and
 linking, and the tests use it as an independent reference compiler.
@@ -39,20 +39,21 @@ cargo run -p keel -- cc --sysroot /path/to/sdk hello.c -o hello.s
 adds an explicit system header directory. On macOS, the driver uses `SDKROOT`
 or discovers the SDK with `xcrun --sdk macosx --show-sdk-path` when no root is
 specified. An explicit root needs no discovery command. On native Linux it
-searches `/usr/include/x86_64-linux-gnu` and `/usr/include` by default.
+searches the target multiarch directory (`/usr/include/x86_64-linux-gnu` or
+`/usr/include/aarch64-linux-gnu`) and `/usr/include` by default.
 
 macOS deployment macros default to 11.0, the first arm64 macOS release.
 `-mmacosx-version-min=14.0` or `MACOSX_DEPLOYMENT_TARGET` overrides this; the
 SDK version and the minimum deployment version are separate settings.
 
 Preprocessing always uses Keel's target-derived macros, embedded compiler
-headers, and native feature queries. The same headers serve both supported
+headers, and native feature queries. The same headers serve all supported
 targets, with target differences expressed through ABI macros and conditional
 definitions. `keel_c::preprocess` exposes this pipeline to library callers;
 `keel_c::compile` continues to accept preprocessed text.
 
-Both commands take `--target aarch64-apple-darwin` or
-`--target x86_64-unknown-linux-gnu`; the default is the host. Cross compilation
+Both commands take `--target aarch64-apple-darwin`,
+`--target aarch64-unknown-linux-gnu`, or `--target x86_64-unknown-linux-gnu`; the default is the host. Cross compilation
 needs a matching sysroot. An explicit root does not inherit host system header
 paths; `-I` and `-isystem` remain paths supplied by the caller. Passing
 `--target` cannot change an already preprocessed file. You can still use
@@ -110,6 +111,15 @@ The read comparison requires an archived release driver from before mapping
 became the default, such as commit `cc01b96`. Historical reports retain the
 commands and flags used at the time.
 
+## AArch64 Linux
+
+C/IR compilation, ELF assembly, archives and freestanding static linking support
+`--target aarch64-unknown-linux-gnu`, with native defaults in an ARM Linux
+container. The backend implements Linux AAPCS64 argument/return placement,
+variadics, baseline atomics, TLS and DWARF. Use `keel link --system` for libc/CRT
+and shared-library linking. See [ARM Linux support and Docker setup](docs/arm-linux.md)
+for commands, validation and remaining language/linker restrictions.
+
 ## x86-64 Linux
 
 The native Linux path targets x86-64-v2 and the System V ABI. It can emit ELF
@@ -141,7 +151,7 @@ optimization; macOS LLDB checks also exercise both allocators, including
 source stepping, variable inspection and state mutation. Compressed logs and
 the temporary Lua matrix definitions accompany the report.
 
-`--emit-object` and the shared `Program` API support AArch64 Mach-O and x86-64
+`--emit-object` and the shared `Program` API support AArch64 Mach-O and AArch64/x86-64
 ELF. Standalone Intel syntax uses `keel asm --target x86_64-unknown-linux-gnu`.
 See [native x86 assembly](docs/native-x86-assembler.md) for the boundary audit,
 coverage, validation and remaining gaps. The x86 backend still diagnoses
@@ -267,15 +277,54 @@ and separates frontend, verification, optimization, codegen and object costs.
   elimination (`phi-simplify`).
 - A C11-oriented frontend with GNU extensions including `typeof`,
   `__auto_type`, statement expressions, computed goto and case ranges.
-  Atomic pointer prefix/postfix `++` and `--`, fixed-type and
+  Atomic pointer prefix/postfix `++` and `--`,
+  [floating and bounded generic atomics](docs/c-language-implementation-plan.md#5-atomic-floats-and-generic-atomics--bounded-native-stage-implemented), fixed-type and
   [generic mixed-type overflow builtins through 128 bits](docs/generic-overflow-builtins.md),
   alignment/branch hints and resumable `__builtin_debugtrap`
   are supported, along with GNU member packing and GNU/C11 object
   alignment. Hints preserve values and side effects but do not
   currently guide optimization.
-- C variable-length arrays, complex arithmetic, nested functions and
-  inline assembly statements are not supported. The ARM64 IR backend
-  supports inline assembly and exceptions; the x86-64 backend does not.
+- [GNU integer modes and 16-byte vectors](docs/gnu-vector-mode.md) have real
+  type/layout, expression and bounded ABI support. Unsupported calling-convention
+  attributes, including `ms_abi`, produce diagnostics.
+- [Float/double complex values](docs/c-language-implementation-plan.md#6-complex-arithmetic--first-floatdouble-subset-implemented)
+  support explicit pair construction, real/imaginary access, conversions,
+  initialization, assignment, unary signs, add/subtract/multiply/divide and compound
+  forms, equality/truth, GNU float/double imaginary literals and bounded
+  direct/indirect call ABIs. Complex multiply/divide use the explicit compiler
+  builtins runtime ABI (Darwin division needs compiler-rt, supplied by the Clang
+  driver or explicitly to Apple `ld`; `keel link` does not yet accept the tested
+  SDK archive). Ordinary finite static arithmetic folds at component precision;
+  exceptional/range-sensitive static expressions diagnose. Complex varargs and
+  complex long double remain unsupported; full Annex G/fenv is not claimed.
+  Raw platform `<complex.h>` and native arm64 interoperability are tested;
+  x86-64 has verified IR/object generation but no runtime test on this host.
+- [Multidimensional automatic block VLAs and bounded VM types](docs/c-language-implementation-plan.md)
+  support captured bounds, dynamic pointer strides, block typedefs, runtime
+  type names/`sizeof`, dependent function parameters with captured entry strides,
+  prototype scopes/unevaluated bounds/`[*]`, adjusted array parameter qualifiers
+  and `static` bounds, and lexical stack restoration. Selected VM type contexts,
+  control-flow interactions and nested functions remain unsupported.
+- [Old-style (K&R) definitions](docs/c-language-implementation-plan.md#8-kr-definitions--explicit-fixed-size-parameter-milestone-implemented)
+  support explicitly typed, fixed-size scalar/pointer parameters, array/function
+  adjustment, declaration ordering, prototype compatibility and promoted ABI
+  entry conversions into original local types. Native arm64 Clang linkage is
+  tested in both directions; both targets have verified IR and actual objects.
+  Implicit types, VM declaration lists, new declaration-list tags/enumerators,
+  variadic combinations and nonscalar parameters by value remain diagnosed.
+- [GNU automatic-local cleanup](docs/c-language-implementation-plan.md#3-reusable-scope-exit-actions-and-cleanup--bounded-milestone-implemented)
+  runs callbacks in reverse declaration order on scope exit, return, break and
+  continue, including for-init scopes and statement expressions. Return values
+  are captured before cleanup; VLA cleanup precedes storage restoration.
+  Goto, switch and known nonlocal exits in cleanup functions remain diagnosed;
+  no exception/longjmp unwinding is provided. `__has_attribute(cleanup)` stays
+  zero for conservative library fallbacks.
+- [GNU C inline assembly](docs/c-inline-asm.md) supports a checked AArch64 Darwin
+  subset: scalar register outputs/inputs, read/write and matching operands,
+  named references, integer immediates, memory inputs and clobbers. Basic asm
+  is limited to empty/nop templates. All asm is pinned. Unsupported constraints,
+  memory outputs, asm-goto and x86 asm statements diagnose. The ARM64 IR backend
+  also supports exceptions; the x86-64 backend does not.
 - [Function attributes](docs/function-attributes.md) transport `inlinehint`,
   `alwaysinline`, `noinline`, `noreturn` and `nounwind`, including C `nothrow`,
   with declaration ownership, merging and emission rules. Inlining remains
@@ -286,13 +335,21 @@ and separates frontend, verification, optimization, codegen and object costs.
   `__builtin_unreachable` still traps. `_overflow_p` remains deferred; the
   largest 128-bit multiply fixtures have a measured code-size cost, without a
   runtime speedup claim (see the overflow contract above).
-- [Packed AVX arithmetic](docs/x86-avx-subset.md#packed-arithmetic-extension)
-  uses the existing opt-in `--target-features avx` for 128-bit `f32x4`/`f64x2`;
-  AVX2, AVX-512 and wider vectors remain outside this feature.
+- [Userspace SIMD and ISA support](docs/userspace-isa-status.md) includes
+  baseline NEON, feature-gated SSE families, AVX/AVX2 128/256-bit vectors,
+  FMA and F16C. Select x86 `--cpu-level v1`, `v2` or `v3` explicitly.
+  AVX-512 and kernel/privileged completion are separate from this userspace goal.
 - Attribute parsing is broader than attribute semantics: many attributes
   are ignored. Selected unsupported linkage/lifetime attributes and non-default
   visibility are diagnosed; see the [C compatibility audit](docs/c-frontend-coverage.md).
   Keel does not claim full GCC or Clang compatibility.
+- [Ordinary C weak symbols](docs/c-weak-symbols.md) preserve weak definitions,
+  optional references and strong overrides through both native object/link paths.
+  Weak TLS, static symbols and selected visibility combinations diagnose.
+- [C executable lifecycle](docs/c-lifecycle.md) supports defined `void(void)`
+  constructors/destructors at default priority and compiler emission via `used`.
+  Darwin shutdown requires libSystem `atexit`; ELF dispatch requires suitable
+  loader/libc startup. Other priorities, `retain` and user sections diagnose.
 
 See [the C frontend design](docs/design.md#c-frontend) for supported
 extensions, compatibility limits and possible next additions.
@@ -594,6 +651,15 @@ file pages still count toward residency. These generated files are scaling
 inputs, not complete applications; the measurements use a warm filesystem cache.
 
 ## Development
+
+Use [cargo](https://doc.rust-lang.org/cargo/) for Rust compilation and tests
+(`cargo build`, `cargo check`, `cargo test`). Each checkout keeps its own target
+directory while sharing the default compilation cache. Native-link caching stays
+disabled (`CARGO_CACHE_LINKS=0`); keep toolchain, feature and warning flags unchanged.
+Plain Cargo remains supported when cargo is unavailable.
+
+See [userspace ISA status](docs/userspace-isa-status.md) for supported targets,
+vector features and current limitations.
 
 - `cargo test -p keel-asm` checks encodings against clang and, on Apple Silicon,
   links and runs the assembler’s examples and memory-operation checks.

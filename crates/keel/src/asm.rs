@@ -14,13 +14,18 @@ struct Options {
     out_dir: Option<PathBuf>,
     features: TargetFeatures,
     x86_features: keel_asm::x86::Features,
+    x86_level: Option<keel_asm::x86::CpuLevel>,
     x86: bool,
+    arm_elf: bool,
     x86_syntax: Option<keel_asm::x86::Syntax>,
 }
 
 impl Options {
     fn parse(args: &[String]) -> Result<Self, String> {
-        let mut opts = Self::default();
+        let mut opts = Self {
+            arm_elf: cfg!(all(target_os = "linux", target_arch = "aarch64")),
+            ..Self::default()
+        };
         let mut args = args.iter();
         let mut positional = false;
         while let Some(arg) = args.next() {
@@ -43,11 +48,14 @@ impl Options {
                     }
                 }
                 "--target" => {
-                    opts.x86 = match args.next().map(String::as_str) {
-                        Some("x86_64-unknown-linux-gnu" | "x86_64-linux-gnu") => true,
-                        Some("aarch64-apple-darwin") => false,
-                        _ => return Err("assembler --target expects x86_64-unknown-linux-gnu or aarch64-apple-darwin".into()),
+                    let (x86, arm_elf) = match args.next().map(String::as_str) {
+                        Some("x86_64-unknown-linux-gnu" | "x86_64-linux-gnu") => (true, false),
+                        Some("aarch64-unknown-linux-gnu" | "aarch64-linux-gnu") => (false, true),
+                        Some("aarch64-apple-darwin") => (false, false),
+                        _ => return Err("assembler --target expects x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu or aarch64-apple-darwin".into()),
                     };
+                    opts.x86 = x86;
+                    opts.arm_elf = arm_elf;
                 }
                 "--x86-syntax" => {
                     opts.x86_syntax = Some(match args.next().map(String::as_str) {
@@ -56,11 +64,29 @@ impl Options {
                         _ => return Err("--x86-syntax expects intel or att".into()),
                     });
                 }
+                "--cpu-level" => {
+                    let name = args
+                        .next()
+                        .ok_or("--cpu-level needs v1, v2, v3 or legacy")?;
+                    opts.x86_level = if name == "legacy" {
+                        None
+                    } else {
+                        Some(keel_asm::x86::CpuLevel::parse(name)?)
+                    };
+                    opts.x86_features = opts
+                        .x86_level
+                        .map(keel_asm::x86::Features::for_level)
+                        .unwrap_or_default();
+                }
                 "--target-features" => {
-                    opts.x86_features = keel_asm::x86::Features::parse(
-                        args.next()
-                            .ok_or("--target-features needs avx,bmi1,bmi2 or none")?,
-                    )?;
+                    opts.x86_features = opts
+                        .x86_level
+                        .map(keel_asm::x86::Features::for_level)
+                        .unwrap_or_default()
+                        .with_features(
+                            args.next()
+                                .ok_or("--target-features needs avx,bmi1,bmi2 or none")?,
+                        )?;
                 }
                 "--cpu" => {
                     opts.features = match args.next().map(String::as_str) {
@@ -199,6 +225,8 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
                 opts.x86_syntax.unwrap_or_default(),
                 opts.x86_features,
             )
+        } else if opts.arm_elf {
+            keel_asm::assemble_elf_object_with_features(&text, opts.features)
         } else {
             keel_asm::assemble_object_with_features(&text, opts.features)
         }

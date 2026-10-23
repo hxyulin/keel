@@ -102,7 +102,7 @@ use crate::dwarf::{self, FrameDebug};
 use crate::fold::{self, iconst};
 use crate::integer_division::{reducible_divisor, signed_reciprocal, unsigned_reciprocal};
 use crate::metadata::{Cfi, Directive, Expression, SectionKind, Sink};
-use crate::parallel_copy::sequentialize;
+use crate::parallel_copy::for_each_move;
 use crate::regalloc::{self, Allocation, Loc, Pools, RematRecipe};
 use crate::{CodegenError, Format, loc_reg, pieces};
 use keel_ir::fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
@@ -115,21 +115,27 @@ use keel_ir::{
 use std::fmt::Write;
 mod absolute;
 mod absolute_diff;
+mod compare_neon;
 mod constant_plan;
 #[cfg(feature = "experimental-dispatch")]
 mod dispatch_tail;
 mod extended_add;
+mod integer_neon;
 mod leaf_calls;
+mod linux;
 mod native;
+mod neon;
 mod output;
 mod packed_load;
 mod packed_minmax;
+mod scalar_neon;
+mod structured;
 mod vector;
-use keel_asm_ir::{FieldId, Instruction as NativeInstruction, Opcode};
+use keel_asm_ir::{FieldId, Opcode};
 use keel_asm_ir::{PageKind, SymbolicInstruction as Symbolic};
 use native::Piece::{Class, Hex, Number, Reg as R, Text};
 use native::{Address, Arg, Reg};
-use output::Output;
+use output::{Name, Output};
 
 /// The registers values are allocated to.
 pub const REGISTERS: Pools = Pools {
@@ -195,8 +201,8 @@ pub fn compile_with_pipeline(
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
 ) -> Result<String, CodegenError> {
-    match compile_output(module, pools, pipeline, false, None)? {
-        Output::Text(text) => Ok(text),
+    match compile_output(module, pools, pipeline, false, None, false)? {
+        Output::Text(text) => Ok(text.into_string()),
         _ => unreachable!(),
     }
 }
@@ -208,7 +214,7 @@ pub fn compile_program_with_pipeline(
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
 ) -> Result<keel_asm_ir::Program, CodegenError> {
-    match compile_output(module, pools, pipeline, true, None)? {
+    match compile_output(module, pools, pipeline, true, None, false)? {
         Output::Structured(program) => Ok(program),
         _ => unreachable!(),
     }
@@ -221,11 +227,52 @@ pub fn compile_program_chunks_with_pipeline(
     pipeline: &crate::CodegenPipeline<'_>,
     sink: &mut dyn FnMut(keel_asm_ir::Program),
 ) -> Result<(), CodegenError> {
-    match compile_output(module, pools, pipeline, true, Some(&mut *sink))? {
+    match compile_output(module, pools, pipeline, true, Some(&mut *sink), false)? {
         Output::Structured(program) => sink(program),
         _ => unreachable!(),
     }
     Ok(())
+}
+
+/// Compile AArch64 Linux with an explicitly selected register pool.
+pub fn compile_linux_with_pipeline(
+    module: &Module,
+    pools: &Pools,
+    pipeline: &crate::CodegenPipeline<'_>,
+) -> Result<String, CodegenError> {
+    match compile_output(module, pools, pipeline, false, None, true)? {
+        Output::ElfText(s) => Ok(s.into_string()),
+        _ => unreachable!(),
+    }
+}
+
+/// Emit a typed AArch64 Linux program with an explicit register pool.
+pub fn compile_linux_program_with_pipeline(
+    module: &Module,
+    pools: &Pools,
+    pipeline: &crate::CodegenPipeline<'_>,
+) -> Result<keel_asm_ir::Program, CodegenError> {
+    match compile_output(module, pools, pipeline, true, None, true)? {
+        Output::Structured(p) => Ok(p),
+        _ => unreachable!(),
+    }
+}
+
+pub(crate) fn compile_linux(
+    module: &Module,
+    pipeline: &crate::CodegenPipeline<'_>,
+) -> Result<String, CodegenError> {
+    compile_linux_with_pipeline(module, &REGISTERS, pipeline)
+}
+pub(crate) fn compile_linux_program(
+    module: &Module,
+    pipeline: &crate::CodegenPipeline<'_>,
+    sink: Option<&mut dyn FnMut(keel_asm_ir::Program)>,
+) -> Result<keel_asm_ir::Program, CodegenError> {
+    match compile_output(module, &REGISTERS, pipeline, true, sink, true)? {
+        Output::Structured(p) => Ok(p),
+        _ => unreachable!(),
+    }
 }
 
 fn compile_output(
@@ -234,10 +281,33 @@ fn compile_output(
     pipeline: &crate::CodegenPipeline<'_>,
     structured: bool,
     mut sink: Option<&mut dyn FnMut(keel_asm_ir::Program)>,
+    linux: bool,
 ) -> Result<Output, CodegenError> {
-    crate::validate_odr(module, crate::Target::Aarch64AppleDarwin)?;
+    let target = if linux {
+        crate::Target::Aarch64LinuxGnu
+    } else {
+        crate::Target::Aarch64AppleDarwin
+    };
+    for f in &module.functions {
+        if f.layout_insts().any(|(_, i)| {
+            matches!(f.inst_data(i), keel_ir::InstData::AggregateVaArg { .. })
+                || f.inst_data(i)
+                    .call_args()
+                    .is_some_and(|a| a.has_explicit_abi())
+        }) {
+            return Err(CodegenError { func: f.name.clone(), message: "explicit call operand ABI and aggregate va_arg homes are unsupported by AArch64".into() });
+        }
+    }
+    crate::reject_x86_vector_abi(module, "AArch64")?;
+    crate::reject_f80(module, "AArch64")?;
+    crate::validate_vector_width(module, 8, 16)?;
+    keel_ir::section::validate_module(module, target).map_err(|message| CodegenError {
+        func: String::new(),
+        message,
+    })?;
+    crate::validate_odr(module, target)?;
     backend_scope!(Module);
-    pipeline.validate_target(crate::Target::Aarch64AppleDarwin)?;
+    pipeline.validate_target(target)?;
     let subset = |pool: &[u8], of: &[u8]| pool.iter().all(|r| of.contains(r));
     assert!(
         subset(pools.caller_saved, REGISTERS.caller_saved)
@@ -246,8 +316,20 @@ fn compile_output(
             && subset(pools.float_callee_saved, REGISTERS.float_callee_saved),
         "register pools must be subsets of REGISTERS"
     );
-    let mut out = Output::new(structured);
-    out.section("__TEXT", "__text", SectionKind::Data);
+    let mut out = if linux && !structured {
+        Output::ElfText(Default::default())
+    } else {
+        Output::new(structured)
+    };
+    if linux {
+        out.directive(Directive::ElfSection {
+            name: ".text".into(),
+            flags: 6,
+            nobits: false,
+        });
+    } else {
+        out.section("__TEXT", "__text", SectionKind::Data);
+    }
     let debug = !module.files.is_empty() && !module.functions.is_empty();
     if debug {
         for (i, path) in module.files.iter().enumerate() {
@@ -258,13 +340,20 @@ fn compile_output(
         }
     }
     let symbols = crate::symbols::Symbols::new(module);
-    let (leaf_summaries, mut prepared_leaves) =
-        leaf_calls::prepare(&symbols, pools, pipeline, structured)?;
+    let (leaf_summaries, mut prepared_leaves) = if linux {
+        (
+            leaf_calls::Summaries::default(),
+            leaf_calls::Prepared::default(),
+        )
+    } else {
+        leaf_calls::prepare(&symbols, pools, pipeline, structured)?
+    };
     let mut frames = Vec::new();
     for (index, original) in module.functions.iter().enumerate() {
         if let Some((body, scope_marks)) = prepared_leaves.remove(&index) {
             out.append(body);
             frames.push(FrameDebug {
+                frame_register: None,
                 slots: Vec::new(),
                 scope_marks,
             });
@@ -274,13 +363,14 @@ fn compile_output(
         #[cfg(feature = "backend-profile")]
         let _function_profile = crate::backend_profile::function(&original.name);
         let func = vector::lower(original);
-        let mut compiler = FunctionCompiler::new(
+        let mut compiler = FunctionCompiler::new_for_target(
             &func,
             &symbols,
             pools,
             pipeline,
             structured,
             &leaf_summaries,
+            linux,
         )?;
         compiler.debug = debug;
         let slots = if debug {
@@ -289,23 +379,89 @@ fn compile_output(
             Vec::new()
         };
         let scope_marks = compiler.compile(&mut out);
-        frames.push(FrameDebug { slots, scope_marks });
+        frames.push(FrameDebug {
+            slots,
+            scope_marks,
+            frame_register: None,
+        });
         out.flush(&mut sink);
+    }
+    for f in &module.functions {
+        if linux {
+            for (enabled, fini) in [(f.attrs.constructor, false), (f.attrs.destructor, true)] {
+                if enabled {
+                    out.directive(Directive::ElfLifecycleArray { fini });
+                    out.align(3);
+                    out.integer(8, crate::metadata::Expression::symbol(&f.name));
+                }
+            }
+            continue;
+        }
+        if f.attrs.destructor {
+            return Err(CodegenError {
+                func: f.name.clone(),
+                message: "Darwin destructor requires frontend atexit lowering".into(),
+            });
+        }
+        if f.attrs.constructor {
+            out.section("__DATA", "__mod_init_func", SectionKind::ModuleInit);
+            out.align(3);
+            out.integer(
+                8,
+                crate::metadata::Expression::symbol(Format::MachO.symbol(&f.name)),
+            );
+        }
+    }
+    for d in &module.decls {
+        if d.attrs.weak {
+            out.directive(if linux {
+                Directive::ElfWeak(d.name.clone())
+            } else {
+                Directive::WeakReference(Format::MachO.symbol(&d.name))
+            });
+        }
+    }
+    for d in &module.data {
+        if d.weak && d.init.is_none() {
+            out.directive(if linux {
+                Directive::ElfWeak(d.name.clone())
+            } else {
+                Directive::WeakReference(Format::MachO.symbol(&d.name))
+            });
+        }
     }
     {
         backend_scope!(Data);
         for data in &module.data {
             if let Some(init) = &data.init {
-                data::emit_macho(&mut out, data, init);
+                if linux {
+                    data::emit_elf(&mut out, data, init);
+                } else {
+                    data::emit_macho(&mut out, data, init, &symbols);
+                }
             }
         }
     }
     if debug {
         backend_scope!(Debug);
         // x29 is DWARF register 29.
-        dwarf::emit_debug_info(&mut out, Format::MachO, 29, module, &frames);
+        dwarf::emit_debug_info(
+            &mut out,
+            if linux { Format::Elf } else { Format::MachO },
+            29,
+            module,
+            &frames,
+        );
     }
-    out.directive(Directive::SubsectionsViaSymbols);
+    if !linux {
+        out.directive(Directive::SubsectionsViaSymbols);
+    } else {
+        out.directive(Directive::ElfSection {
+            name: ".note.GNU-stack".into(),
+            flags: 0,
+            nobits: false,
+        });
+    }
     Ok(out)
 }
 
@@ -587,7 +743,764 @@ fn is_call(func: &Function, data: &InstData) -> bool {
             | Intrinsic::StackAlloc
             | Intrinsic::StackSave
             | Intrinsic::StackRestore
-            | Intrinsic::FrameAddress => false,
+            | Intrinsic::FrameAddress
+            | Intrinsic::X86F16cPhToPs128
+            | Intrinsic::X86F16cPhToPs256
+            | Intrinsic::X86F16cPsToPh128
+            | Intrinsic::X86Avx2Vgatherdps128
+            | Intrinsic::X86Avx2Vgatherdps256
+            | Intrinsic::X86Avx2Vgatherdpd128
+            | Intrinsic::X86Avx2Vgatherdpd256
+            | Intrinsic::X86Avx2Vgatherqps128
+            | Intrinsic::X86Avx2Vgatherqps256
+            | Intrinsic::X86Avx2Vgatherqpd128
+            | Intrinsic::X86Avx2Vgatherqpd256
+            | Intrinsic::X86Avx2Vpgatherdd128
+            | Intrinsic::X86Avx2Vpgatherdd256
+            | Intrinsic::X86Avx2Vpgatherdq128
+            | Intrinsic::X86Avx2Vpgatherdq256
+            | Intrinsic::X86Avx2Vpgatherqd128
+            | Intrinsic::X86Avx2Vpgatherqd256
+            | Intrinsic::X86Avx2Vpgatherqq128
+            | Intrinsic::X86Avx2Vpgatherqq256
+            | Intrinsic::X86AvxVmaskmovpsLoad128
+            | Intrinsic::X86AvxVmaskmovpsStore128
+            | Intrinsic::X86AvxVmaskmovpsLoad256
+            | Intrinsic::X86AvxVmaskmovpsStore256
+            | Intrinsic::X86AvxVmaskmovpdLoad128
+            | Intrinsic::X86AvxVmaskmovpdStore128
+            | Intrinsic::X86AvxVmaskmovpdLoad256
+            | Intrinsic::X86AvxVmaskmovpdStore256
+            | Intrinsic::X86Avx2VpmaskmovdLoad128
+            | Intrinsic::X86Avx2VpmaskmovdStore128
+            | Intrinsic::X86Avx2VpmaskmovdLoad256
+            | Intrinsic::X86Avx2VpmaskmovdStore256
+            | Intrinsic::X86Avx2VpmaskmovqLoad128
+            | Intrinsic::X86Avx2VpmaskmovqStore128
+            | Intrinsic::X86Avx2VpmaskmovqLoad256
+            | Intrinsic::X86Avx2VpmaskmovqStore256
+            | Intrinsic::X86AvxVcvtdq2pd128
+            | Intrinsic::X86AvxVcvtdq2pd256
+            | Intrinsic::X86AvxVcvtdq2ps128
+            | Intrinsic::X86AvxVcvtdq2ps256
+            | Intrinsic::X86AvxVcvtpd2dq128
+            | Intrinsic::X86AvxVcvtpd2dq256
+            | Intrinsic::X86AvxVcvtpd2ps128
+            | Intrinsic::X86AvxVcvtpd2ps256
+            | Intrinsic::X86AvxVcvtps2dq128
+            | Intrinsic::X86AvxVcvtps2dq256
+            | Intrinsic::X86AvxVcvtps2pd128
+            | Intrinsic::X86AvxVcvtps2pd256
+            | Intrinsic::X86AvxVcvttpd2dq128
+            | Intrinsic::X86AvxVcvttpd2dq256
+            | Intrinsic::X86AvxVcvttps2dq128
+            | Intrinsic::X86AvxVcvttps2dq256
+            | Intrinsic::X86AvxVcvtss2si32
+            | Intrinsic::X86AvxVcvttss2si32
+            | Intrinsic::X86AvxVcvtss2si64
+            | Intrinsic::X86AvxVcvttss2si64
+            | Intrinsic::X86AvxVcvtsd2si32
+            | Intrinsic::X86AvxVcvttsd2si32
+            | Intrinsic::X86AvxVcvtsd2si64
+            | Intrinsic::X86AvxVcvttsd2si64
+            | Intrinsic::X86AvxVcvtsi2ss32
+            | Intrinsic::X86AvxVcvtsi2ss64
+            | Intrinsic::X86AvxVcvtsi2sd32
+            | Intrinsic::X86AvxVcvtsi2sd64
+            | Intrinsic::X86AvxVcvtsd2ss
+            | Intrinsic::X86AvxVcvtss2sd
+            | Intrinsic::X86AvxVcmpps128
+            | Intrinsic::X86AvxVcmpps256
+            | Intrinsic::X86AvxVcmppd128
+            | Intrinsic::X86AvxVcmppd256
+            | Intrinsic::X86AvxVcmpss
+            | Intrinsic::X86AvxVcmpsd
+            | Intrinsic::X86AvxVpermilps128
+            | Intrinsic::X86AvxVpermilps256
+            | Intrinsic::X86AvxVpermilpd128
+            | Intrinsic::X86AvxVpermilpd256
+            | Intrinsic::X86Avx2Vpermd256
+            | Intrinsic::X86Avx2Vpermps256
+            | Intrinsic::X86AvxVmovmskps128
+            | Intrinsic::X86AvxVmovmskps256
+            | Intrinsic::X86AvxVmovmskpd128
+            | Intrinsic::X86AvxVmovmskpd256
+            | Intrinsic::X86AvxVpmovmskb128
+            | Intrinsic::X86Avx2Vpmovmskb256
+            | Intrinsic::X86AvxVtestps128
+            | Intrinsic::X86AvxVtestps256
+            | Intrinsic::X86AvxVtestpd128
+            | Intrinsic::X86AvxVtestpd256
+            | Intrinsic::X86AvxVptest128
+            | Intrinsic::X86AvxVptest256
+            | Intrinsic::X86AvxVroundps128
+            | Intrinsic::X86AvxVroundps256
+            | Intrinsic::X86AvxVroundpd128
+            | Intrinsic::X86AvxVroundpd256
+            | Intrinsic::X86AvxVroundss
+            | Intrinsic::X86AvxVroundsd
+            | Intrinsic::X86AvxVminps128
+            | Intrinsic::X86AvxVminps256
+            | Intrinsic::X86AvxVminpd128
+            | Intrinsic::X86AvxVminpd256
+            | Intrinsic::X86AvxVminss
+            | Intrinsic::X86AvxVminsd
+            | Intrinsic::X86AvxVmaxps128
+            | Intrinsic::X86AvxVmaxps256
+            | Intrinsic::X86AvxVmaxpd128
+            | Intrinsic::X86AvxVmaxpd256
+            | Intrinsic::X86AvxVmaxss
+            | Intrinsic::X86AvxVmaxsd
+            | Intrinsic::X86AvxVrcpps128
+            | Intrinsic::X86AvxVrcpps256
+            | Intrinsic::X86AvxVrcpss
+            | Intrinsic::X86AvxVrsqrtps128
+            | Intrinsic::X86AvxVrsqrtps256
+            | Intrinsic::X86AvxVrsqrtss
+            | Intrinsic::X86AvxVcomiss
+            | Intrinsic::X86AvxVucomiss
+            | Intrinsic::X86AvxVcomisd
+            | Intrinsic::X86AvxVucomisd
+            | Intrinsic::X86AvxVmaskmovdqu
+            | Intrinsic::X86Ssecvtdq2pd128
+            | Intrinsic::X86Ssecvtdq2ps128
+            | Intrinsic::X86Ssecvtpd2dq128
+            | Intrinsic::X86Ssecvtpd2ps128
+            | Intrinsic::X86Ssecvtps2dq128
+            | Intrinsic::X86Ssecvtps2pd128
+            | Intrinsic::X86Ssecvttpd2dq128
+            | Intrinsic::X86Ssecvttps2dq128
+            | Intrinsic::X86Ssecvtss2si32
+            | Intrinsic::X86Ssecvttss2si32
+            | Intrinsic::X86Ssecvtss2si64
+            | Intrinsic::X86Ssecvttss2si64
+            | Intrinsic::X86Ssecvtsd2si32
+            | Intrinsic::X86Ssecvttsd2si32
+            | Intrinsic::X86Ssecvtsd2si64
+            | Intrinsic::X86Ssecvttsd2si64
+            | Intrinsic::X86Ssecvtsi2ss32
+            | Intrinsic::X86Ssecvtsi2ss64
+            | Intrinsic::X86Ssecvtsi2sd32
+            | Intrinsic::X86Ssecvtsi2sd64
+            | Intrinsic::X86Ssecvtsd2ss
+            | Intrinsic::X86Ssecvtss2sd
+            | Intrinsic::X86SseMinps128
+            | Intrinsic::X86SseMinpd128
+            | Intrinsic::X86SseMinss
+            | Intrinsic::X86SseMinsd
+            | Intrinsic::X86SseMaxps128
+            | Intrinsic::X86SseMaxpd128
+            | Intrinsic::X86SseMaxss
+            | Intrinsic::X86SseMaxsd
+            | Intrinsic::X86SseRcpps128
+            | Intrinsic::X86SseRcpss
+            | Intrinsic::X86SseRsqrtps128
+            | Intrinsic::X86SseRsqrtss
+            | Intrinsic::X86SseComiss
+            | Intrinsic::X86SseUcomiss
+            | Intrinsic::X86SseComisd
+            | Intrinsic::X86SseUcomisd
+            | Intrinsic::X86SseCmpps128
+            | Intrinsic::X86SseCmppd128
+            | Intrinsic::X86SseCmpss
+            | Intrinsic::X86SseCmpsd
+            | Intrinsic::X86SseAddps128
+            | Intrinsic::X86SseAddpd128
+            | Intrinsic::X86SseAddss
+            | Intrinsic::X86SseAddsd
+            | Intrinsic::X86SseSubps128
+            | Intrinsic::X86SseSubpd128
+            | Intrinsic::X86SseSubss
+            | Intrinsic::X86SseSubsd
+            | Intrinsic::X86SseMulps128
+            | Intrinsic::X86SseMulpd128
+            | Intrinsic::X86SseMulss
+            | Intrinsic::X86SseMulsd
+            | Intrinsic::X86SseDivps128
+            | Intrinsic::X86SseDivpd128
+            | Intrinsic::X86SseDivss
+            | Intrinsic::X86SseDivsd
+            | Intrinsic::X86SseSqrtps128
+            | Intrinsic::X86SseSqrtpd128
+            | Intrinsic::X86SseSqrtss
+            | Intrinsic::X86SseSqrtsd
+            | Intrinsic::X86SseMovmskps128
+            | Intrinsic::X86SseMovmskpd128
+            | Intrinsic::X86SsePmovmskb128
+            | Intrinsic::X86SseMaskmovdqu
+            | Intrinsic::X86Sse3Haddps
+            | Intrinsic::X86Sse3Haddpd
+            | Intrinsic::X86Sse3Hsubps
+            | Intrinsic::X86Sse3Hsubpd
+            | Intrinsic::X86Sse3Addsubps
+            | Intrinsic::X86Sse3Addsubpd
+            | Intrinsic::X86Sse41Roundps128
+            | Intrinsic::X86Sse41Roundpd128
+            | Intrinsic::X86Sse41Roundss
+            | Intrinsic::X86Sse41Roundsd
+            | Intrinsic::X86Sse41Dpps
+            | Intrinsic::X86Sse41Dppd
+            | Intrinsic::X86Sse41Ptest128
+            | Intrinsic::X86Sse42Crc32b
+            | Intrinsic::X86Sse42Crc32w
+            | Intrinsic::X86Sse42Crc32d
+            | Intrinsic::X86Sse42Crc32q
+            | Intrinsic::X86Sse42PcmpistriIndex
+            | Intrinsic::X86Sse42Pcmpistri64Index
+            | Intrinsic::X86Sse42PcmpistrmMask
+            | Intrinsic::X86Sse42PcmpistriFlags
+            | Intrinsic::X86Sse42PcmpestriIndex
+            | Intrinsic::X86Sse42PcmpestrmMask
+            | Intrinsic::X86Sse42PcmpestriFlags
+            | Intrinsic::X86Sse42Pcmpestri64Index
+            | Intrinsic::X86Sse42Pcmpestrm64Mask
+            | Intrinsic::X86Sse42Pcmpestri64Flags
+            | Intrinsic::X86AvxPcmpistriIndex
+            | Intrinsic::X86AvxPcmpistri64Index
+            | Intrinsic::X86AvxPcmpistrmMask
+            | Intrinsic::X86AvxPcmpistriFlags
+            | Intrinsic::X86AvxPcmpestriIndex
+            | Intrinsic::X86AvxPcmpestrmMask
+            | Intrinsic::X86AvxPcmpestriFlags
+            | Intrinsic::X86AvxPcmpestri64Index
+            | Intrinsic::X86AvxPcmpestrm64Mask
+            | Intrinsic::X86AvxPcmpestri64Flags
+            | Intrinsic::X86AvxVaddps128
+            | Intrinsic::X86AvxVaddpd128
+            | Intrinsic::X86AvxVaddss
+            | Intrinsic::X86AvxVaddsd
+            | Intrinsic::X86AvxVaddps256
+            | Intrinsic::X86AvxVaddpd256
+            | Intrinsic::X86AvxVsubps128
+            | Intrinsic::X86AvxVsubpd128
+            | Intrinsic::X86AvxVsubss
+            | Intrinsic::X86AvxVsubsd
+            | Intrinsic::X86AvxVsubps256
+            | Intrinsic::X86AvxVsubpd256
+            | Intrinsic::X86AvxVmulps128
+            | Intrinsic::X86AvxVmulpd128
+            | Intrinsic::X86AvxVmulss
+            | Intrinsic::X86AvxVmulsd
+            | Intrinsic::X86AvxVmulps256
+            | Intrinsic::X86AvxVmulpd256
+            | Intrinsic::X86AvxVdivps128
+            | Intrinsic::X86AvxVdivpd128
+            | Intrinsic::X86AvxVdivss
+            | Intrinsic::X86AvxVdivsd
+            | Intrinsic::X86AvxVdivps256
+            | Intrinsic::X86AvxVdivpd256
+            | Intrinsic::X86AvxVsqrtps128
+            | Intrinsic::X86AvxVsqrtpd128
+            | Intrinsic::X86AvxVsqrtss
+            | Intrinsic::X86AvxVsqrtsd
+            | Intrinsic::X86AvxVsqrtps256
+            | Intrinsic::X86AvxVsqrtpd256
+            | Intrinsic::X86Ssse3Pshufb128
+            | Intrinsic::X86Sse41Blendvps128
+            | Intrinsic::X86Sse41Blendvpd128
+            | Intrinsic::X86Sse41Pblendvb128
+            | Intrinsic::X86AvxVblendvps128
+            | Intrinsic::X86AvxVblendvpd128
+            | Intrinsic::X86AvxVpblendvb128
+            | Intrinsic::X86AvxVblendvps256
+            | Intrinsic::X86AvxVblendvpd256
+            | Intrinsic::X86Avx2Vpblendvb256
+            | Intrinsic::X86Sse41Mpsadbw128
+            | Intrinsic::X86AvxVmpsadbw128
+            | Intrinsic::X86Avx2Vmpsadbw256
+            | Intrinsic::X86Sse41Phminposuw128
+            | Intrinsic::X86AvxVphminposuw128
+            | Intrinsic::X86Ssse3Phaddw128
+            | Intrinsic::X86Ssse3Phaddd128
+            | Intrinsic::X86Ssse3Phaddsw128
+            | Intrinsic::X86Ssse3Phsubw128
+            | Intrinsic::X86Ssse3Phsubd128
+            | Intrinsic::X86Ssse3Phsubsw128
+            | Intrinsic::X86Sse2Paddsb128
+            | Intrinsic::X86Sse2Paddsw128
+            | Intrinsic::X86Sse2Paddusb128
+            | Intrinsic::X86Sse2Paddusw128
+            | Intrinsic::X86Sse2Psubsb128
+            | Intrinsic::X86Sse2Psubsw128
+            | Intrinsic::X86Sse2Psubusb128
+            | Intrinsic::X86Sse2Psubusw128
+            | Intrinsic::X86Sse2Pavgb128
+            | Intrinsic::X86Sse2Pavgw128
+            | Intrinsic::X86Ssse3Psignb128
+            | Intrinsic::X86Ssse3Psignw128
+            | Intrinsic::X86Ssse3Psignd128
+            | Intrinsic::X86Ssse3Pabsb128
+            | Intrinsic::X86Ssse3Pabsw128
+            | Intrinsic::X86Ssse3Pabsd128
+            | Intrinsic::X86AvxVphaddw128
+            | Intrinsic::X86AvxVphaddd128
+            | Intrinsic::X86AvxVphaddsw128
+            | Intrinsic::X86AvxVphsubw128
+            | Intrinsic::X86AvxVphsubd128
+            | Intrinsic::X86AvxVphsubsw128
+            | Intrinsic::X86AvxVpaddsb128
+            | Intrinsic::X86AvxVpaddsw128
+            | Intrinsic::X86AvxVpaddusb128
+            | Intrinsic::X86AvxVpaddusw128
+            | Intrinsic::X86AvxVpsubsb128
+            | Intrinsic::X86AvxVpsubsw128
+            | Intrinsic::X86AvxVpsubusb128
+            | Intrinsic::X86AvxVpsubusw128
+            | Intrinsic::X86AvxVpavgb128
+            | Intrinsic::X86AvxVpavgw128
+            | Intrinsic::X86AvxVpsignb128
+            | Intrinsic::X86AvxVpsignw128
+            | Intrinsic::X86AvxVpsignd128
+            | Intrinsic::X86AvxVpabsb128
+            | Intrinsic::X86AvxVpabsw128
+            | Intrinsic::X86AvxVpabsd128
+            | Intrinsic::X86Avx2Vphaddw256
+            | Intrinsic::X86Avx2Vphaddd256
+            | Intrinsic::X86Avx2Vphaddsw256
+            | Intrinsic::X86Avx2Vphsubw256
+            | Intrinsic::X86Avx2Vphsubd256
+            | Intrinsic::X86Avx2Vphsubsw256
+            | Intrinsic::X86Avx2Vpaddsb256
+            | Intrinsic::X86Avx2Vpaddsw256
+            | Intrinsic::X86Avx2Vpaddusb256
+            | Intrinsic::X86Avx2Vpaddusw256
+            | Intrinsic::X86Avx2Vpsubsb256
+            | Intrinsic::X86Avx2Vpsubsw256
+            | Intrinsic::X86Avx2Vpsubusb256
+            | Intrinsic::X86Avx2Vpsubusw256
+            | Intrinsic::X86Avx2Vpavgb256
+            | Intrinsic::X86Avx2Vpavgw256
+            | Intrinsic::X86Avx2Vpsignb256
+            | Intrinsic::X86Avx2Vpsignw256
+            | Intrinsic::X86Avx2Vpsignd256
+            | Intrinsic::X86Avx2Vpabsb256
+            | Intrinsic::X86Avx2Vpabsw256
+            | Intrinsic::X86Avx2Vpabsd256
+            | Intrinsic::X86Sse2Packsswb128
+            | Intrinsic::X86Sse2Packssdw128
+            | Intrinsic::X86Sse2Packuswb128
+            | Intrinsic::X86Sse41Packusdw128
+            | Intrinsic::X86AvxVpacksswb128
+            | Intrinsic::X86AvxVpackssdw128
+            | Intrinsic::X86AvxVpackuswb128
+            | Intrinsic::X86AvxVpackusdw128
+            | Intrinsic::X86Avx2Vpacksswb256
+            | Intrinsic::X86Avx2Vpackssdw256
+            | Intrinsic::X86Avx2Vpackuswb256
+            | Intrinsic::X86Avx2Vpackusdw256
+            | Intrinsic::X86Sse2Pmaddwd128
+            | Intrinsic::X86Ssse3Pmaddubsw128
+            | Intrinsic::X86Sse2Pmulhw128
+            | Intrinsic::X86Sse2Pmulhuw128
+            | Intrinsic::X86Ssse3Pmulhrsw128
+            | Intrinsic::X86Sse41Pmuldq128
+            | Intrinsic::X86Sse2Pmuludq128
+            | Intrinsic::X86Sse2Psadbw128
+            | Intrinsic::X86AvxVpmaddwd128
+            | Intrinsic::X86AvxVpmaddubsw128
+            | Intrinsic::X86AvxVpmulhw128
+            | Intrinsic::X86AvxVpmulhuw128
+            | Intrinsic::X86AvxVpmulhrsw128
+            | Intrinsic::X86AvxVpmuldq128
+            | Intrinsic::X86AvxVpmuludq128
+            | Intrinsic::X86AvxVpsadbw128
+            | Intrinsic::X86Avx2Vpmaddwd256
+            | Intrinsic::X86Avx2Vpmaddubsw256
+            | Intrinsic::X86Avx2Vpmulhw256
+            | Intrinsic::X86Avx2Vpmulhuw256
+            | Intrinsic::X86Avx2Vpmulhrsw256
+            | Intrinsic::X86Avx2Vpmuldq256
+            | Intrinsic::X86Avx2Vpmuludq256
+            | Intrinsic::X86Avx2Vpsadbw256
+            | Intrinsic::X86Sse2Pslldq128
+            | Intrinsic::X86Sse2Psrldq128
+            | Intrinsic::X86AvxVpslldq128
+            | Intrinsic::X86AvxVpsrldq128
+            | Intrinsic::X86Avx2Vpslldq256
+            | Intrinsic::X86Avx2Vpsrldq256
+            | Intrinsic::X86Sse2Psllw128
+            | Intrinsic::X86Sse2Pslld128
+            | Intrinsic::X86Sse2Psllq128
+            | Intrinsic::X86Sse2Psrlw128
+            | Intrinsic::X86Sse2Psrld128
+            | Intrinsic::X86Sse2Psrlq128
+            | Intrinsic::X86Sse2Psraw128
+            | Intrinsic::X86Sse2Psrad128
+            | Intrinsic::X86AvxVpsllw128
+            | Intrinsic::X86AvxVpslld128
+            | Intrinsic::X86AvxVpsllq128
+            | Intrinsic::X86AvxVpsrlw128
+            | Intrinsic::X86AvxVpsrld128
+            | Intrinsic::X86AvxVpsrlq128
+            | Intrinsic::X86AvxVpsraw128
+            | Intrinsic::X86AvxVpsrad128
+            | Intrinsic::X86Avx2Vpsllw256
+            | Intrinsic::X86Avx2Vpslld256
+            | Intrinsic::X86Avx2Vpsllq256
+            | Intrinsic::X86Avx2Vpsrlw256
+            | Intrinsic::X86Avx2Vpsrld256
+            | Intrinsic::X86Avx2Vpsrlq256
+            | Intrinsic::X86Avx2Vpsraw256
+            | Intrinsic::X86Avx2Vpsrad256
+            | Intrinsic::X86Avx2Vpsllvd128
+            | Intrinsic::X86Avx2Vpsllvq128
+            | Intrinsic::X86Avx2Vpsrlvd128
+            | Intrinsic::X86Avx2Vpsrlvq128
+            | Intrinsic::X86Avx2Vpsravd128
+            | Intrinsic::X86Avx2Vpsllvd256
+            | Intrinsic::X86Avx2Vpsllvq256
+            | Intrinsic::X86Avx2Vpsrlvd256
+            | Intrinsic::X86Avx2Vpsrlvq256
+            | Intrinsic::X86Avx2Vpsravd256
+            | Intrinsic::X86AvxVpshufb128
+            | Intrinsic::X86Avx2Vpshufb256
+            | Intrinsic::X86Xgetbv0
+            | Intrinsic::X86Xsave64
+            | Intrinsic::X86RflagsRead
+            | Intrinsic::X86RflagsSwap
+            | Intrinsic::X86Lahf
+            | Intrinsic::X86SahfExchange
+            | Intrinsic::X86X87Region
+            | Intrinsic::X86Lar16
+            | Intrinsic::X86Lar16Mem
+            | Intrinsic::X86Lar32
+            | Intrinsic::X86Lar32Mem
+            | Intrinsic::X86Lar64
+            | Intrinsic::X86Lar64Mem
+            | Intrinsic::X86Lsl16
+            | Intrinsic::X86Lsl16Mem
+            | Intrinsic::X86Lsl32
+            | Intrinsic::X86Lsl32Mem
+            | Intrinsic::X86Lsl64
+            | Intrinsic::X86Lsl64Mem
+            | Intrinsic::X86Verr
+            | Intrinsic::X86VerrMem
+            | Intrinsic::X86Verw
+            | Intrinsic::X86VerwMem
+            | Intrinsic::X86In8
+                | Intrinsic::X86Ins8
+                | Intrinsic::X86Ins16
+                | Intrinsic::X86Ins32
+                | Intrinsic::X86Outs8
+                | Intrinsic::X86Outs16
+                | Intrinsic::X86Outs32
+                | Intrinsic::X86RepIns8
+                | Intrinsic::X86RepIns16
+                | Intrinsic::X86RepIns32
+                | Intrinsic::X86RepOuts8
+                | Intrinsic::X86RepOuts16
+                | Intrinsic::X86RepOuts32
+                | Intrinsic::X86Ins8OwnedTerminal
+                | Intrinsic::X86Ins16OwnedTerminal
+                | Intrinsic::X86Ins32OwnedTerminal
+                | Intrinsic::X86Outs8OwnedTerminal
+                | Intrinsic::X86Outs16OwnedTerminal
+                | Intrinsic::X86Outs32OwnedTerminal
+                | Intrinsic::X86RepIns8OwnedTerminal
+                | Intrinsic::X86RepIns16OwnedTerminal
+                | Intrinsic::X86RepIns32OwnedTerminal
+                | Intrinsic::X86RepOuts8OwnedTerminal
+                | Intrinsic::X86RepOuts16OwnedTerminal
+                | Intrinsic::X86RepOuts32OwnedTerminal
+            | Intrinsic::X86In16
+            | Intrinsic::X86In32
+            | Intrinsic::X86Out8
+            | Intrinsic::X86Out16
+            | Intrinsic::X86Out32
+            | Intrinsic::X86In8Imm
+            | Intrinsic::X86In16Imm
+            | Intrinsic::X86In32Imm
+            | Intrinsic::X86Out8Imm
+            | Intrinsic::X86Out16Imm
+            | Intrinsic::X86Out32Imm
+            | Intrinsic::X86DivU8
+            | Intrinsic::X86DivU16
+            | Intrinsic::X86DivU32
+            | Intrinsic::X86DivU64
+            | Intrinsic::X86DivS8
+            | Intrinsic::X86DivS16
+            | Intrinsic::X86DivS32
+            | Intrinsic::X86DivS64
+            | Intrinsic::X86Sgdt
+            | Intrinsic::X86Sidt
+            | Intrinsic::X86SldtMem
+            | Intrinsic::X86Sldt16
+            | Intrinsic::X86Sldt32
+            | Intrinsic::X86Sldt64
+            | Intrinsic::X86StrMem
+            | Intrinsic::X86Str16
+            | Intrinsic::X86Str32
+            | Intrinsic::X86Str64
+            | Intrinsic::X86SmswMem
+            | Intrinsic::X86Smsw16
+            | Intrinsic::X86Smsw32
+            | Intrinsic::X86Smsw64
+            | Intrinsic::X86X87Fnstenv16
+            | Intrinsic::X86X87Fnstenv32
+            | Intrinsic::X86X87Fstenv16
+            | Intrinsic::X86X87Fstenv32
+            | Intrinsic::X86X87Fldenv16
+            | Intrinsic::X86X87Fldenv32
+            | Intrinsic::X86X87Fnsave16
+            | Intrinsic::X86X87Fnsave32
+            | Intrinsic::X86X87Fsave16
+            | Intrinsic::X86X87Fsave32
+            | Intrinsic::X86X87Frstor16
+            | Intrinsic::X86X87Frstor32
+            | Intrinsic::X86Fxsave64
+            | Intrinsic::X86Fxrstor64
+            | Intrinsic::X86X87ReadCwNowait
+            | Intrinsic::X86X87ReadSwNowait
+            | Intrinsic::X86X87ReadCwWait
+            | Intrinsic::X86X87ReadSwWait
+            | Intrinsic::X86X87ExchangeCw
+            | Intrinsic::X86X87ClexNowait
+            | Intrinsic::X86X87ClexWait
+            | Intrinsic::X86X87InitNowait
+            | Intrinsic::X86X87InitWait
+            | Intrinsic::X86X87Wait
+            | Intrinsic::X86X87Fist16
+            | Intrinsic::X86X87Fist32
+            | Intrinsic::X86X87Fistp16
+            | Intrinsic::X86X87Fistp32
+            | Intrinsic::X86X87Fistp64
+            | Intrinsic::X86X87Fisttp16
+            | Intrinsic::X86X87Fisttp32
+            | Intrinsic::X86X87Fisttp64
+            | Intrinsic::X86X87Fild16
+            | Intrinsic::X86X87Fild32
+            | Intrinsic::X86X87Fild64
+            | Intrinsic::X86X87Fbld
+            | Intrinsic::X86X87Fbstp
+            | Intrinsic::X86X87Fldpi
+            | Intrinsic::X86X87Fldl2e
+            | Intrinsic::X86X87Fldl2t
+            | Intrinsic::X86X87Fldlg2
+            | Intrinsic::X86X87Fldln2
+            | Intrinsic::X86X87Fiadd16
+            | Intrinsic::X86X87Fiadd32
+            | Intrinsic::X86X87Fimul16
+            | Intrinsic::X86X87Fimul32
+            | Intrinsic::X86X87Fisub16
+            | Intrinsic::X86X87Fisub32
+            | Intrinsic::X86X87Fisubr16
+            | Intrinsic::X86X87Fisubr32
+            | Intrinsic::X86X87Fidiv16
+            | Intrinsic::X86X87Fidiv32
+            | Intrinsic::X86X87Fidivr16
+            | Intrinsic::X86X87Fidivr32
+            | Intrinsic::X86X87Fcom
+            | Intrinsic::X86X87Fcomp
+            | Intrinsic::X86X87Fcompp
+            | Intrinsic::X86X87Fucom
+            | Intrinsic::X86X87Fucomp
+            | Intrinsic::X86X87Fucompp
+            | Intrinsic::X86X87Fcomi
+            | Intrinsic::X86X87Fcomip
+            | Intrinsic::X86X87Fucomi
+            | Intrinsic::X86X87Fucomip
+            | Intrinsic::X86X87FaddSt1
+            | Intrinsic::X86X87FmulSt1
+            | Intrinsic::X86X87FsubSt1
+            | Intrinsic::X86X87FsubrSt1
+            | Intrinsic::X86X87FdivSt1
+            | Intrinsic::X86X87FdivrSt1
+            | Intrinsic::X86X87Fadd
+            | Intrinsic::X86X87Fmul
+            | Intrinsic::X86X87Fsub
+            | Intrinsic::X86X87Fsubr
+            | Intrinsic::X86X87Fdiv
+            | Intrinsic::X86X87Fdivr
+            | Intrinsic::X86X87Faddp
+            | Intrinsic::X86X87Fmulp
+            | Intrinsic::X86X87Fsubp
+            | Intrinsic::X86X87Fsubrp
+            | Intrinsic::X86X87Fdivp
+            | Intrinsic::X86X87Fdivrp
+            | Intrinsic::X86X87Fabs
+            | Intrinsic::X86X87Fchs
+            | Intrinsic::X86X87Fsqrt
+            | Intrinsic::X86X87Frndint
+            | Intrinsic::X86X87Ftst
+            | Intrinsic::X86X87Fxam
+            | Intrinsic::X86X87Fsincos
+            | Intrinsic::X86X87Fptan
+            | Intrinsic::X86X87Fxtract
+            | Intrinsic::X86X87Fsin
+            | Intrinsic::X86X87Fcos
+            | Intrinsic::X86X87F2xm1
+            | Intrinsic::X86X87Fpatan
+            | Intrinsic::X86X87Fyl2x
+            | Intrinsic::X86X87Fyl2xp1
+            | Intrinsic::X86X87Fscale
+            | Intrinsic::X86X87Fprem
+            | Intrinsic::X86X87Fprem1
+            | Intrinsic::X86MmxEmms
+            | Intrinsic::X86Clflush
+            | Intrinsic::X86Prefetchnta
+            | Intrinsic::X86Prefetcht0
+            | Intrinsic::X86Prefetcht1
+            | Intrinsic::X86Prefetcht2
+            | Intrinsic::X86SseMovntps128
+            | Intrinsic::X86SseMovntpd128
+            | Intrinsic::X86SseMovntdq128
+            | Intrinsic::X86AvxVmovntps128
+            | Intrinsic::X86AvxVmovntps256
+            | Intrinsic::X86AvxVmovntpd128
+            | Intrinsic::X86AvxVmovntpd256
+            | Intrinsic::X86AvxVmovntdq128
+            | Intrinsic::X86AvxVmovntdq256
+            | Intrinsic::X86Movnti32
+            | Intrinsic::X86Movnti64
+            | Intrinsic::X86Sse41Movntdqa128
+            | Intrinsic::X86Avx2Vmovntdqa256
+            | Intrinsic::X86Xrstor64
+            | Intrinsic::X86Cpuid
+            | Intrinsic::X86Rdtsc
+            | Intrinsic::X86Rdpmc
+            | Intrinsic::X86X87Ffree0
+            | Intrinsic::X86X87Ffree1
+            | Intrinsic::X86X87Ffree2
+            | Intrinsic::X86X87Ffree3
+            | Intrinsic::X86X87Ffree4
+            | Intrinsic::X86X87Ffree5
+            | Intrinsic::X86X87Ffree6
+            | Intrinsic::X86X87Ffree7
+            | Intrinsic::X86X87Fdecstp
+            | Intrinsic::X86X87Fincstp
+            | Intrinsic::X86X87Fnop
+            | Intrinsic::X86Lfence
+            | Intrinsic::X86Sfence
+            | Intrinsic::X86Mfence
+            | Intrinsic::X86Pause
+            | Intrinsic::X86AvxVzeroall
+            | Intrinsic::X86Cx16Cmpxchg16b
+            | Intrinsic::X86AvxVhaddps128
+            | Intrinsic::X86AvxVhaddps256
+            | Intrinsic::X86AvxVhaddpd128
+            | Intrinsic::X86AvxVhaddpd256
+            | Intrinsic::X86AvxVhsubps128
+            | Intrinsic::X86AvxVhsubps256
+            | Intrinsic::X86AvxVhsubpd128
+            | Intrinsic::X86AvxVhsubpd256
+            | Intrinsic::X86AvxVaddsubps128
+            | Intrinsic::X86AvxVaddsubps256
+            | Intrinsic::X86AvxVaddsubpd128
+            | Intrinsic::X86AvxVaddsubpd256
+            | Intrinsic::X86AvxVdpps128
+            | Intrinsic::X86AvxVdpps256
+            | Intrinsic::X86AvxVdppd128
+            | Intrinsic::X86F16cPsToPh256
+            | Intrinsic::X86Bmi1Bextr32
+            | Intrinsic::X86Bmi1Bextr64
+            | Intrinsic::X86Bmi2Pdep32
+            | Intrinsic::X86Bmi2Pdep64
+            | Intrinsic::X86Bmi2Pext32
+            | Intrinsic::X86SseReadMxcsr
+            | Intrinsic::X86SseSwapMxcsr
+            | Intrinsic::X86SseMmxvalueCvtpi2ps
+            | Intrinsic::X86SseMmxvalueCvtps2pi
+            | Intrinsic::X86SseMmxvalueCvttps2pi
+            | Intrinsic::X86SseMmxvalueCvtpi2pd
+            | Intrinsic::X86SseMmxvalueCvtpd2pi
+            | Intrinsic::X86SseMmxvalueCvttpd2pi
+            | Intrinsic::X86FmaVfmadd132pd128
+            | Intrinsic::X86FmaVfmadd132pd256
+            | Intrinsic::X86FmaVfmadd132ps128
+            | Intrinsic::X86FmaVfmadd132ps256
+            | Intrinsic::X86FmaVfmadd132sd128
+            | Intrinsic::X86FmaVfmadd132ss128
+            | Intrinsic::X86FmaVfmadd213pd128
+            | Intrinsic::X86FmaVfmadd213pd256
+            | Intrinsic::X86FmaVfmadd213ps128
+            | Intrinsic::X86FmaVfmadd213ps256
+            | Intrinsic::X86FmaVfmadd213sd128
+            | Intrinsic::X86FmaVfmadd213ss128
+            | Intrinsic::X86FmaVfmadd231pd128
+            | Intrinsic::X86FmaVfmadd231pd256
+            | Intrinsic::X86FmaVfmadd231ps128
+            | Intrinsic::X86FmaVfmadd231ps256
+            | Intrinsic::X86FmaVfmadd231sd128
+            | Intrinsic::X86FmaVfmadd231ss128
+            | Intrinsic::X86FmaVfmaddsub132pd128
+            | Intrinsic::X86FmaVfmaddsub132pd256
+            | Intrinsic::X86FmaVfmaddsub213pd128
+            | Intrinsic::X86FmaVfmaddsub213pd256
+            | Intrinsic::X86FmaVfmaddsub231pd128
+            | Intrinsic::X86FmaVfmaddsub231pd256
+            | Intrinsic::X86FmaVfmaddsub132ps128
+            | Intrinsic::X86FmaVfmaddsub132ps256
+            | Intrinsic::X86FmaVfmaddsub213ps128
+            | Intrinsic::X86FmaVfmaddsub213ps256
+            | Intrinsic::X86FmaVfmaddsub231ps128
+            | Intrinsic::X86FmaVfmaddsub231ps256
+            | Intrinsic::X86FmaVfmsubadd132pd128
+            | Intrinsic::X86FmaVfmsubadd132pd256
+            | Intrinsic::X86FmaVfmsubadd213pd128
+            | Intrinsic::X86FmaVfmsubadd213pd256
+            | Intrinsic::X86FmaVfmsubadd231pd128
+            | Intrinsic::X86FmaVfmsubadd231pd256
+            | Intrinsic::X86FmaVfmsubadd132ps128
+            | Intrinsic::X86FmaVfmsubadd132ps256
+            | Intrinsic::X86FmaVfmsubadd213ps128
+            | Intrinsic::X86FmaVfmsubadd213ps256
+            | Intrinsic::X86FmaVfmsubadd231ps128
+            | Intrinsic::X86FmaVfmsubadd231ps256
+            | Intrinsic::X86FmaVfmsub132pd128
+            | Intrinsic::X86FmaVfmsub132pd256
+            | Intrinsic::X86FmaVfmsub132ps128
+            | Intrinsic::X86FmaVfmsub132ps256
+            | Intrinsic::X86FmaVfmsub132sd128
+            | Intrinsic::X86FmaVfmsub132ss128
+            | Intrinsic::X86FmaVfmsub213pd128
+            | Intrinsic::X86FmaVfmsub213pd256
+            | Intrinsic::X86FmaVfmsub213ps128
+            | Intrinsic::X86FmaVfmsub213ps256
+            | Intrinsic::X86FmaVfmsub213sd128
+            | Intrinsic::X86FmaVfmsub213ss128
+            | Intrinsic::X86FmaVfmsub231pd128
+            | Intrinsic::X86FmaVfmsub231pd256
+            | Intrinsic::X86FmaVfmsub231ps128
+            | Intrinsic::X86FmaVfmsub231ps256
+            | Intrinsic::X86FmaVfmsub231sd128
+            | Intrinsic::X86FmaVfmsub231ss128
+            | Intrinsic::X86FmaVfnmadd132pd128
+            | Intrinsic::X86FmaVfnmadd132pd256
+            | Intrinsic::X86FmaVfnmadd132ps128
+            | Intrinsic::X86FmaVfnmadd132ps256
+            | Intrinsic::X86FmaVfnmadd132sd128
+            | Intrinsic::X86FmaVfnmadd132ss128
+            | Intrinsic::X86FmaVfnmadd213pd128
+            | Intrinsic::X86FmaVfnmadd213pd256
+            | Intrinsic::X86FmaVfnmadd213ps128
+            | Intrinsic::X86FmaVfnmadd213ps256
+            | Intrinsic::X86FmaVfnmadd213sd128
+            | Intrinsic::X86FmaVfnmadd213ss128
+            | Intrinsic::X86FmaVfnmadd231pd128
+            | Intrinsic::X86FmaVfnmadd231pd256
+            | Intrinsic::X86FmaVfnmadd231ps128
+            | Intrinsic::X86FmaVfnmadd231ps256
+            | Intrinsic::X86FmaVfnmadd231sd128
+            | Intrinsic::X86FmaVfnmadd231ss128
+            | Intrinsic::X86FmaVfnmsub132pd128
+            | Intrinsic::X86FmaVfnmsub132pd256
+            | Intrinsic::X86FmaVfnmsub132ps128
+            | Intrinsic::X86FmaVfnmsub132ps256
+            | Intrinsic::X86FmaVfnmsub132sd128
+            | Intrinsic::X86FmaVfnmsub132ss128
+            | Intrinsic::X86FmaVfnmsub213pd128
+            | Intrinsic::X86FmaVfnmsub213pd256
+            | Intrinsic::X86FmaVfnmsub213ps128
+            | Intrinsic::X86FmaVfnmsub213ps256
+            | Intrinsic::X86FmaVfnmsub213sd128
+            | Intrinsic::X86FmaVfnmsub213ss128
+            | Intrinsic::X86FmaVfnmsub231pd128
+            | Intrinsic::X86FmaVfnmsub231pd256
+            | Intrinsic::X86FmaVfnmsub231ps128
+            | Intrinsic::X86FmaVfnmsub231ps256
+            | Intrinsic::X86FmaVfnmsub231sd128
+            | Intrinsic::X86FmaVfnmsub231ss128
+            | Intrinsic::X86Bmi2Pext64 => false,
         },
         _ => false,
     }
@@ -633,6 +1546,8 @@ struct RegisterSret<'a> {
 }
 
 struct FunctionCompiler<'a> {
+    linux: bool,
+    variadic_area: Option<usize>,
     func: &'a Function,
     symbols: &'a crate::symbols::Symbols<'a>,
     alloc: Allocation,
@@ -670,7 +1585,9 @@ struct FunctionCompiler<'a> {
     param_areas: Vec<Option<usize>>,
     /// Offset from `sp` of spill slot 0, above the areas for calls.
     spill_base: usize,
-    vector_spills: HashSet<u32>,
+    /// Width of each vector spill home. The allocator keeps one-, two- and
+    /// four-unit homes in separate pools, so a D home cannot alias a Q home.
+    vector_spills: HashMap<u32, u32>,
     copy_temp: Option<u32>,
     /// The register the fixed frame is addressed from: `sp`, or x19 in a
     /// function that moves `sp`.
@@ -699,6 +1616,11 @@ struct FunctionCompiler<'a> {
     /// The lexical scope of the code being emitted, and where it changed.
     scope: Option<DebugScope>,
     scope_marks: Vec<(String, Option<DebugScope>)>,
+    /// The moves of a call's arguments or an edge's block arguments, kept
+    /// between parallel copies rather than allocated for each.
+    copies: Vec<(Loc, Loc)>,
+    /// Where a call's arguments go, kept between calls likewise.
+    arg_places: Vec<ArgLoc>,
 }
 
 impl<'a> FunctionCompiler<'a> {
@@ -726,14 +1648,45 @@ impl<'a> FunctionCompiler<'a> {
         structured: bool,
         leaf_summaries: &leaf_calls::Summaries,
     ) -> Result<Self, CodegenError> {
+        Self::new_for_target(
+            func,
+            symbols,
+            pools,
+            pipeline,
+            structured,
+            leaf_summaries,
+            false,
+        )
+    }
+    fn new_for_target(
+        func: &'a Function,
+        symbols: &'a crate::symbols::Symbols<'a>,
+        pools: &Pools,
+        pipeline: &crate::CodegenPipeline<'_>,
+        structured: bool,
+        leaf_summaries: &leaf_calls::Summaries,
+        linux: bool,
+    ) -> Result<Self, CodegenError> {
         let module = symbols.module;
         let err = |message: String| CodegenError {
             func: func.name.clone(),
             message,
         };
+        if !linux
+            && func
+                .layout_insts()
+                .any(|(_, i)| matches!(func.inst_data(i), InstData::VaArg { ty: Type::I128, .. }))
+        {
+            return Err(err("va_arg.i128 requires AArch64 Linux".into()));
+        }
+        if linux && func.personality.is_some() {
+            return Err(err(
+                "exception handling on AArch64 Linux is not supported yet".into(),
+            ));
+        }
         let (CallConv::C | CallConv::Fast) = func.sig.cc;
         let param_kinds = param_kinds(&func.sig.params);
-        let (param_locs, incoming) = abi::arg_locs(&param_kinds, param_kinds.len());
+        let (param_locs, incoming) = abi::arg_locs_for(&param_kinds, param_kinds.len(), linux);
         if incoming > MAX_STACK_ARGS {
             return Err(err(format!(
                 "{incoming} bytes of stack parameters is more than the {MAX_STACK_ARGS} supported"
@@ -749,7 +1702,7 @@ impl<'a> FunctionCompiler<'a> {
                     ext: ArgExt::None,
                     ..
                 },
-            ] if func.sig.cc == CallConv::C => {
+            ] if func.sig.cc == CallConv::C && !linux => {
                 return Err(err(
                     "an i8/i16 return value needs `sext` or `uext`: C callers expect 32 bits"
                         .into(),
@@ -764,17 +1717,30 @@ impl<'a> FunctionCompiler<'a> {
         }
         for (_, callee) in func.callees() {
             let what = || format!("call to @{}", callee.name);
-            check_call_signature(what, &callee.sig, symbols.is_external(&callee.name))
-                .map_err(err)?;
+            check_call_signature(
+                what,
+                &callee.sig,
+                !linux && symbols.is_external(&callee.name),
+            )
+            .map_err(err)?;
         }
         // The target of an indirect call may be an external function.
         for (_, sig) in func.signatures() {
-            check_call_signature(|| format!("indirect call {sig}"), sig, true).map_err(err)?;
+            check_call_signature(|| format!("indirect call {sig}"), sig, !linux).map_err(err)?;
         }
         // One walk finds which (mostly rare) instruction kinds occur, so the
         // checks and covers below only scan functions that can match. Raw IR
         // use counts never change while selecting this function.
         let (present, uses) = crate::kinds::InstKinds::with_uses(func);
+        for (_, inst) in func.layout_insts().filter(|_| present.intrinsic) {
+            if matches!(func.inst_data(inst), InstData::X86RflagsRegion { .. }) || matches!(func.inst_data(inst), InstData::Intrinsic { id,.. } if id.is_x86_target()) {
+                return Err(err(
+                    "x86 architectural intrinsic (including F16C) is not supported on AArch64"
+                        .into(),
+                ));
+            }
+        }
+
         for (_, inst) in func.layout_insts().filter(|_| present.high_multiply) {
             if let InstData::Binary {
                 op: op @ (BinaryOp::Umulhi | BinaryOp::Smulhi),
@@ -809,7 +1775,7 @@ impl<'a> FunctionCompiler<'a> {
                 _ => continue,
             };
             let kinds = arg_kinds(func, &sig.params, args);
-            let (locs, stack) = abi::arg_locs(&kinds, sig.params.len());
+            let (locs, stack) = abi::arg_locs_for(&kinds, sig.params.len(), linux);
             let in_regs = locs
                 .iter()
                 .all(|loc| matches!(loc, ArgLoc::Value(Slot::Reg(_))));
@@ -843,8 +1809,26 @@ impl<'a> FunctionCompiler<'a> {
                 InstData::CallIndirect { sig, args, .. } => (args, &func.signature(*sig).params),
                 _ => continue,
             };
+            if !linux
+                && args
+                    .iter()
+                    .skip(params.len())
+                    .any(|&v| func.value_type(func.resolve(v)) == Type::I128)
+            {
+                return Err(err(
+                    "variadic i128 arguments are unsupported on AArch64 Darwin".into(),
+                ));
+            }
+            // Up to four named scalars take at most eight registers of a
+            // class: they need neither stack nor copies.
+            if args.len() == params.len()
+                && args.len() <= 4
+                && params.iter().all(|p| p.purpose == Purpose::Normal)
+            {
+                continue;
+            }
             let kinds = arg_kinds(func, params, args);
-            let (locs, stack) = abi::arg_locs(&kinds, params.len());
+            let (locs, stack) = abi::arg_locs_for(&kinds, params.len(), linux);
             outgoing = outgoing.max(stack);
             let mut bytes: u64 = 0;
             for (loc, kind) in locs.iter().zip(&kinds) {
@@ -882,6 +1866,14 @@ impl<'a> FunctionCompiler<'a> {
                 _ => None,
             });
         }
+        let variadic_area = if linux && func.sig.variadic {
+            offset = offset.next_multiple_of(16);
+            let area = offset;
+            offset += 192;
+            Some(area)
+        } else {
+            None
+        };
         let spill_base = offset.next_multiple_of(8);
 
         let moves_sp = present.intrinsic
@@ -928,6 +1920,7 @@ impl<'a> FunctionCompiler<'a> {
             }
         }
         let has_tls_getter = present.symbol_addr
+            && symbols.has_thread_locals()
             && func.layout_insts().any(|(_, i)| match func.inst_data(i) {
                 InstData::SymbolAddr { symbol } => symbols
                     .data_object(func.symbol_name(*symbol))
@@ -937,7 +1930,8 @@ impl<'a> FunctionCompiler<'a> {
         // A scalar integer private leaf never runs the wide-ABI staging or
         // call helpers that reserve x0-x7. Let it compute in its argument/result
         // bank directly. Respect custom pools, including forced-spill tests.
-        let argument_bank = func.sig.cc == CallConv::Fast
+        let argument_bank = !linux
+            && func.sig.cc == CallConv::Fast
             && !has_tls_getter
             && module.files.is_empty()
             && func.personality.is_none()
@@ -985,15 +1979,18 @@ impl<'a> FunctionCompiler<'a> {
         };
         let mut selection = {
             backend_scope!(Selection);
-            pipeline
-                .selector
-                .select(func, crate::select::Target::Aarch64, &|data| {
+            pipeline.selector.select_with_uses(
+                func,
+                crate::select::Target::Aarch64,
+                &|data| {
                     folded_imm(func, data)
                         .map(|(v, _)| v)
                         .into_iter()
                         .chain(folded_divisor(func, data))
                         .collect()
-                })
+                },
+                &uses,
+            )
         };
         // Each cover is anchored at an instruction kind; without one it
         // selects nothing and leaves the selection untouched.
@@ -1087,7 +2084,7 @@ impl<'a> FunctionCompiler<'a> {
             used.sort_unstable();
             used.dedup();
         }
-        let mut vector_spills = HashSet::default();
+        let mut vector_spills = HashMap::default();
         let has_vectors = (0..func.num_values()).any(|i| {
             func.value_type(Value::new(i)).is_vector() && alloc.loc(Value::new(i)).is_some()
         });
@@ -1097,13 +2094,13 @@ impl<'a> FunctionCompiler<'a> {
                 if func.value_type(v).is_vector()
                     && let Some(Loc::Stack(slot)) = alloc.loc(v)
                 {
-                    vector_spills.insert(slot);
+                    vector_spills.insert(slot, func.value_type(v).bytes().unwrap());
                 }
             }
         }
         let copy_temp = has_vectors.then_some(alloc.spill_slots);
         if let Some(slot) = copy_temp {
-            vector_spills.insert(slot);
+            vector_spills.insert(slot, 16);
         }
         let offset =
             spill_base + 8 * (alloc.spill_slots as usize + if has_vectors { 2 } else { 0 });
@@ -1161,6 +2158,8 @@ impl<'a> FunctionCompiler<'a> {
                 && pipeline.allocator.name() != "fast",
         );
         Ok(Self {
+            linux,
+            variadic_area,
             #[cfg(feature = "experimental-dispatch")]
             dispatch_tails,
             func,
@@ -1192,7 +2191,11 @@ impl<'a> FunctionCompiler<'a> {
             frame_size,
             frameless,
             next_block: None,
-            out: Output::new(structured),
+            out: if linux && !structured {
+                Output::ElfText(Default::default())
+            } else {
+                Output::new(structured)
+            },
             uses_trap: false,
             eh,
             debug: false,
@@ -1200,6 +2203,8 @@ impl<'a> FunctionCompiler<'a> {
             prologue_end: false,
             scope: None,
             scope_marks: Vec::new(),
+            copies: Vec::new(),
+            arg_places: Vec::new(),
         })
     }
 
@@ -1210,18 +2215,68 @@ impl<'a> FunctionCompiler<'a> {
         backend_scope!(Lowering);
         let func = self.func;
         let name = &func.name;
+        if self.linux {
+            out.directive(Directive::ElfSection {
+                name: func
+                    .attrs
+                    .section
+                    .map(|s| s.as_str().to_owned())
+                    .unwrap_or_else(|| {
+                        if func.attrs.retain {
+                            format!(".text.keel.retain.{}", name)
+                        } else {
+                            ".text".into()
+                        }
+                    }),
+                flags: 6 | if func.attrs.retain { 0x200000 } else { 0 },
+                nobits: false,
+            });
+        } else if let Some(section) = func.attrs.section {
+            let (segment, name) = section.as_str().split_once(',').unwrap();
+            out.section(
+                segment,
+                name,
+                if name == "__text" {
+                    SectionKind::Data
+                } else {
+                    SectionKind::Code
+                },
+            );
+        } else {
+            out.section("__TEXT", "__text", SectionKind::Data);
+        }
+        if func.attrs.retain && !self.linux {
+            out.directive(Directive::NoDeadStrip(Format::MachO.symbol(name)));
+        }
         #[cfg(feature = "backend-profile")]
         let entry_profile =
             crate::backend_profile::scope(crate::backend_profile::Stage::LoweringEntry);
         if !func.local {
-            out.directive(Directive::Global(["_", name].concat()));
+            out.directive(Directive::Global(self.symbol(name)));
         }
-        if func.weak_odr {
-            out.directive(Directive::WeakDefinition(["_", name].concat()));
+        if func.hidden {
+            out.directive(if self.linux {
+                Directive::ElfHidden(name.clone())
+            } else {
+                Directive::PrivateExtern(["_", name].concat())
+            });
+        }
+        if func.attrs.weak || func.weak_odr {
+            out.directive(if self.linux {
+                Directive::ElfWeak(name.clone())
+            } else {
+                Directive::WeakDefinition(["_", name].concat())
+            });
         }
         out.align(2);
-        out.label(["_", name].concat());
-        out.label(["L", name, "_begin"].concat());
+        out.label(self.symbol(name));
+        if self.linux {
+            out.directive(Directive::ElfType {
+                name: name.clone(),
+                function: true,
+            });
+        }
+        out.label([if self.linux { ".L" } else { "L" }, name, "_begin"].concat());
         let start = self.out.begin_function(out);
         self.allocation_comment();
 
@@ -1366,6 +2421,24 @@ impl<'a> FunctionCompiler<'a> {
         if self.base != "sp" {
             self.mach("mov", [(self.base).into(), (Reg::SP).into()]);
         }
+        if let Some(area) = self.variadic_area {
+            for r in 0..8 {
+                self.mach(
+                    "str",
+                    [
+                        Reg::x(r).into(),
+                        Address::offset(self.base, area + r as usize * 8).into(),
+                    ],
+                );
+                self.mach(
+                    "str",
+                    [
+                        Reg::q(r).into(),
+                        Address::offset(self.base, area + 64 + r as usize * 16).into(),
+                    ],
+                );
+            }
+        }
         // Arguments arrive in x0–x7 and v0–v7. Scalar private leaves
         // may allocate the integer argument bank, so use a parallel copy
         // that also handles cycles; it may still store to spill slots.
@@ -1376,7 +2449,7 @@ impl<'a> FunctionCompiler<'a> {
         if let Some(entry) = func.entry_block() {
             let params = func.block_params(entry).to_vec();
             let kinds = param_kinds(&func.sig.params);
-            let (locs, _) = abi::arg_locs(&kinds, kinds.len());
+            let (locs, _) = abi::arg_locs_for(&kinds, kinds.len(), self.linux);
             let mut moves = Vec::new();
             let mut addresses = Vec::new();
             for (i, (param, loc)) in params.into_iter().zip(locs).enumerate() {
@@ -1434,11 +2507,10 @@ impl<'a> FunctionCompiler<'a> {
             let order = self.alloc.order.clone();
             for (i, &block) in order.iter().enumerate() {
                 self.next_block = order.get(i + 1).copied();
-                let label = self.label(block);
-                self.out.label(label);
+                self.out.label_name(self.block_name(block));
                 for &inst in func.block_insts(block) {
-                    if let Output::Text(text) = &mut self.out {
-                        text.push_str("\t; ");
+                    if let Output::Text(text) | Output::ElfText(text) = &mut self.out {
+                        text.push_str(if self.linux { "\t// " } else { "\t; " });
                         func.write_inst_to(text, inst).unwrap();
                         text.push('\n');
                     }
@@ -1457,7 +2529,14 @@ impl<'a> FunctionCompiler<'a> {
                     out.write_str("brk\t#1")
                 });
             }
-            self.out.label(["L", name, "_end"].concat());
+            self.out
+                .label([if self.linux { ".L" } else { "L" }, name, "_end"].concat());
+            if self.linux {
+                self.out.directive(Directive::Size {
+                    name: name.clone(),
+                    expression: Expression::difference(format!(".L{name}_end"), name),
+                });
+            }
             {
                 backend_scope!(Relaxation);
                 self.out.relax(name, start);
@@ -1725,17 +2804,26 @@ impl<'a> FunctionCompiler<'a> {
         if self.lower_i128(inst, func.inst_data(inst), result) {
             return;
         }
-        match func.inst_data(inst).clone() {
+        match *func.inst_data(inst) {
+            InstData::Neon { op, ty, ref args } => {
+                if op.memory().is_some() {
+                    self.neon_memory(op, ty, args, func.inst_results(inst));
+                } else {
+                    self.neon(op, ty, args, result);
+                }
+            }
             InstData::VectorIcmp { cond, args } => self.vector_compare(cond, args, result),
             InstData::VectorSelect { args } => self.vector_select(args, result),
             InstData::VectorBinary { op, args } => self.vector_binary(op, args, result),
+            InstData::VectorReduce { op, arg } => self.vector_reduce(op, arg, result),
             InstData::VectorUnary { op, arg } => self.vector_unary(op, arg, result),
             InstData::VectorSplat { ty, arg } => self.vector_splat(ty, arg, result),
-            InstData::VectorShuffle { args, lanes } => {
-                self.vector_shuffle_window(args, &lanes, result)
+            InstData::VectorShuffle { args, ref lanes } => {
+                self.vector_shuffle_window(args, lanes, result)
             }
             InstData::VectorExtract { arg, lane } => self.vector_extract(arg, lane, result),
-            InstData::VectorInsert { .. } | InstData::VectorFcmp { .. } => {
+            InstData::VectorInsert { args, lane } => self.vector_insert(args, lane, result),
+            InstData::VectorFcmp { .. } => {
                 unreachable!("legalized vector operation")
             }
             InstData::StackAddr { .. } | InstData::Iconst { .. }
@@ -1761,6 +2849,7 @@ impl<'a> FunctionCompiler<'a> {
                 self.materialize(d, imm as u64, true);
                 self.def_done(result, d);
             }
+            InstData::F80const { .. } => unreachable!("f80 rejected before lowering"),
             InstData::Fconst { ty, bits } => {
                 let d = self.def_freg(result);
                 let fd = freg(d, ty);
@@ -1775,24 +2864,41 @@ impl<'a> FunctionCompiler<'a> {
                 }
                 self.def_done(result, d);
             }
-            InstData::Call { func: callee, args } => {
+            InstData::Call {
+                func: callee,
+                ref args,
+            } => {
                 let decl = func.callee(callee);
-                let sret = self.move_args(&args, &decl.sig.params);
-                self.out.branch(true, ["_", decl.name.as_str()].concat());
+                let sret = self.move_args(args, &decl.sig.params);
+                self.out.branch_name(
+                    true,
+                    if self.linux {
+                        Name::Text(&decl.name)
+                    } else {
+                        Name::Symbol(&decl.name)
+                    },
+                );
                 self.call_result(result, sret);
             }
             // Only the call itself can throw, so the call-site entry
             // covers just the `bl`.
             InstData::Invoke {
                 func: callee,
-                args,
-                dests,
+                ref args,
+                ref dests,
             } => {
                 let decl = func.callee(callee);
-                let sret = self.move_args(&args, &decl.sig.params);
+                let sret = self.move_args(args, &decl.sig.params);
                 let site = format!("L{}_{inst}", func.name);
                 self.out.label(format!("{site}_begin"));
-                self.out.branch(true, ["_", decl.name.as_str()].concat());
+                self.out.branch_name(
+                    true,
+                    if self.linux {
+                        Name::Text(&decl.name)
+                    } else {
+                        Name::Symbol(&decl.name)
+                    },
+                );
                 self.out.label(format!("{site}_end"));
                 let pad = self.label(dests[1].block);
                 self.eh.sites.push((site, pad, dests[1].block));
@@ -1820,14 +2926,28 @@ impl<'a> FunctionCompiler<'a> {
             }
             // Arguments into registers, then this function's epilogue, then
             // a jump: the callee returns straight to our caller.
-            InstData::ReturnCall { func: callee, args } => {
+            InstData::ReturnCall {
+                func: callee,
+                ref args,
+            } => {
                 let decl = func.callee(callee);
-                self.move_args(&args, &decl.sig.params);
+                self.move_args(args, &decl.sig.params);
                 self.epilogue();
-                self.out.branch(false, ["_", decl.name.as_str()].concat());
+                self.out.branch_name(
+                    false,
+                    if self.linux {
+                        Name::Text(&decl.name)
+                    } else {
+                        Name::Symbol(&decl.name)
+                    },
+                );
             }
-            InstData::ReturnCallIndirect { sig, callee, args } => {
-                self.move_args(&args, &func.signature(sig).params);
+            InstData::ReturnCallIndirect {
+                sig,
+                callee,
+                ref args,
+            } => {
+                self.move_args(args, &func.signature(sig).params);
                 // The epilogue restores callee-saved registers, which may
                 // hold the target, so it moves to x16 first.
                 let target = self.use_reg(callee, S0);
@@ -1835,8 +2955,12 @@ impl<'a> FunctionCompiler<'a> {
                 self.epilogue();
                 self.mach("br", [(Reg::x(S0)).into()]);
             }
-            InstData::CallIndirect { sig, callee, args } => {
-                let sret = self.move_args(&args, &func.signature(sig).params);
+            InstData::CallIndirect {
+                sig,
+                callee,
+                ref args,
+            } => {
+                let sret = self.move_args(args, &func.signature(sig).params);
                 // The callee is in an allocated register, which the argument
                 // moves leave alone (they write x0–x8, x16 and x17), or in a
                 // spill slot, reloaded after the moves so x16 is free.
@@ -1851,7 +2975,9 @@ impl<'a> FunctionCompiler<'a> {
                     .symbols
                     .data_object(name)
                     .is_some_and(|d| d.thread_local);
-                if thread_local {
+                if thread_local && self.linux {
+                    self.linux_tls_address(d, name);
+                } else if thread_local {
                     // The symbol is the variable's descriptor; calling its
                     // getter with the descriptor in x0 returns the address
                     // in x0. The getter preserves every register but x0,
@@ -1859,14 +2985,14 @@ impl<'a> FunctionCompiler<'a> {
                     self.out.symbolic(Symbolic::PageAddress {
                         register: 0,
                         kind: PageKind::ThreadLocal,
-                        target: ["_", name].concat(),
+                        target: self.symbol(name),
                     });
                     self.out.symbolic(Symbolic::PageOffset {
                         register: 0,
                         base: 0,
                         load: true,
                         kind: PageKind::ThreadLocal,
-                        target: ["_", name].concat(),
+                        target: self.symbol(name),
                     });
                     self.mach(
                         "ldr",
@@ -1878,27 +3004,27 @@ impl<'a> FunctionCompiler<'a> {
                     self.out.symbolic(Symbolic::PageAddress {
                         register: d,
                         kind: PageKind::Direct,
-                        target: ["_", name].concat(),
+                        target: self.symbol(name),
                     });
                     self.out.symbolic(Symbolic::PageOffset {
                         register: d,
                         base: d,
                         load: false,
                         kind: PageKind::Direct,
-                        target: ["_", name].concat(),
+                        target: self.symbol(name),
                     });
                 } else {
                     self.out.symbolic(Symbolic::PageAddress {
                         register: d,
                         kind: PageKind::Got,
-                        target: ["_", name].concat(),
+                        target: self.symbol(name),
                     });
                     self.out.symbolic(Symbolic::PageOffset {
                         register: d,
                         base: d,
                         load: true,
                         kind: PageKind::Got,
-                        target: ["_", name].concat(),
+                        target: self.symbol(name),
                     });
                 }
                 self.def_done(result, d);
@@ -2018,7 +3144,7 @@ impl<'a> FunctionCompiler<'a> {
                 let b = self.use_freg(args[2], FS2);
                 let skip = format!("L{}_{inst}_vselect", func.name);
                 self.move_vector(FS0, b);
-                self.conditional("eq", skip.clone());
+                self.conditional("eq", Name::Text(&skip));
                 self.move_vector(FS0, a);
                 self.out.label(skip);
                 self.move_vector(d, FS0);
@@ -2056,7 +3182,21 @@ impl<'a> FunctionCompiler<'a> {
                 self.def_done(result, d);
             }
             InstData::Convert {
-                op: op @ (ConvertOp::SwidenLow | ConvertOp::UwidenLow),
+                op: op @ (ConvertOp::SpairwiseAddLong | ConvertOp::UpairwiseAddLong),
+                ty,
+                arg,
+            } => self.vector_pairwise_long(op, ty, arg, result),
+            InstData::Convert {
+                op: ConvertOp::NarrowLow,
+                ty,
+                arg,
+            } => self.vector_narrow(ty, arg, result),
+            InstData::Convert {
+                op:
+                    op @ (ConvertOp::SwidenLow
+                    | ConvertOp::UwidenLow
+                    | ConvertOp::SwidenHigh
+                    | ConvertOp::UwidenHigh),
                 ty,
                 arg,
             } => {
@@ -2113,21 +3253,40 @@ impl<'a> FunctionCompiler<'a> {
             }
             // Load the pointer, store it advanced by a slot, then read the
             // argument: the result may share the list's register.
-            InstData::VaArg { ty, list } => {
+            InstData::AggregateVaArg { .. } => {
+                unreachable!("aggregate va_arg rejected before AArch64 emission")
+            }
+            InstData::VaArg { ty, list, .. } if self.linux => {
+                self.linux_va_arg(ty, list, result, inst)
+            }
+            InstData::VaArg { ty, list, .. } => {
                 let a = self.use_reg(list, S2);
                 self.mach(
                     "ldr",
                     [(Reg::x(S0)).into(), Address::base(Reg::x(a)).into()],
                 );
+                let bytes = if ty.is_vector() {
+                    ty.bytes().unwrap()
+                } else {
+                    8
+                };
+                if bytes == 16 {
+                    self.mach("add", [Reg::x(S0).into(), Reg::x(S0).into(), Arg::imm(15)]);
+                    self.mach("and", [Reg::x(S0).into(), Reg::x(S0).into(), Arg::imm(-16)]);
+                }
                 self.mach(
                     "add",
-                    [(Reg::x(S1)).into(), (Reg::x(S0)).into(), Arg::imm(8)],
+                    [
+                        (Reg::x(S1)).into(),
+                        (Reg::x(S0)).into(),
+                        Arg::imm(i64::from(bytes)),
+                    ],
                 );
                 self.mach(
                     "str",
                     [(Reg::x(S1)).into(), Address::base(Reg::x(a)).into()],
                 );
-                if ty.is_float() {
+                if ty.is_float() || ty.is_vector() {
                     let d = self.def_freg(result);
                     self.mach(
                         "ldr",
@@ -2219,6 +3378,12 @@ impl<'a> FunctionCompiler<'a> {
                     [reg(v, ty).into(), Address::base(Reg::x(a)).into()],
                 );
             }
+            InstData::AtomicRmw { op, args, .. } if self.linux => {
+                self.linux_atomic(op, &args, result, inst, false)
+            }
+            InstData::AtomicCas { args, .. } if self.linux => {
+                self.linux_atomic(RmwOp::Xchg, &args, result, inst, true)
+            }
             InstData::AtomicRmw { op, ordering, args } => {
                 let ty = self.ty(args[1]);
                 let a = self.use_reg(args[0], S0);
@@ -2288,8 +3453,8 @@ impl<'a> FunctionCompiler<'a> {
                 };
                 self.mach("dmb", [barrier]);
             }
-            InstData::Jump { dest } => {
-                self.block_args(&dest, 0);
+            InstData::Jump { ref dest } => {
+                self.block_args(dest, 0);
                 #[cfg(feature = "experimental-dispatch")]
                 if !self.emit_dispatch_tail(inst) {
                     self.branch_unless_next(dest.block);
@@ -2299,7 +3464,7 @@ impl<'a> FunctionCompiler<'a> {
             }
             InstData::Brif {
                 cond,
-                dests: [then_dest, else_dest],
+                dests: [ref then_dest, ref else_dest],
             } => {
                 // Take the same false edge, with the same landing pads and
                 // edge copies, whether testing a register or a comparison.
@@ -2320,32 +3485,40 @@ impl<'a> FunctionCompiler<'a> {
                 };
                 // Copy block arguments only on their own edge. A fallthrough
                 // edge can copy inline; otherwise it needs a landing pad.
-                if self.next_block == Some(else_dest.block) && self.block_args_noop(&then_dest, 0) {
+                if self.next_block == Some(else_dest.block) && self.block_args_noop(then_dest, 0) {
                     match &test {
                         BrifTest::Flags(condition) => {
-                            self.conditional(invert_cond(condition), self.label(then_dest.block));
+                            self.conditional(
+                                invert_cond(condition),
+                                self.block_name(then_dest.block),
+                            );
                         }
                         BrifTest::Zero(register) => {
-                            self.compare_branch(*register, true, self.label(then_dest.block));
+                            self.compare_branch(*register, true, self.block_name(then_dest.block));
                         }
                     }
-                    self.block_args(&else_dest, 1);
-                } else if self.block_args_noop(&else_dest, 1) {
-                    self.brif_false(&test, self.label(else_dest.block));
-                    self.block_args(&then_dest, 0);
+                    self.block_args(else_dest, 1);
+                } else if self.block_args_noop(else_dest, 1) {
+                    self.brif_false(&test, self.block_name(else_dest.block));
+                    self.block_args(then_dest, 0);
                     self.branch_unless_next(then_dest.block);
                 } else {
                     let pad = format!("L{}_{inst}_else", func.name);
-                    self.brif_false(&test, pad.clone());
-                    self.block_args(&then_dest, 0);
-                    self.out.branch(false, self.label(then_dest.block));
+                    self.brif_false(&test, Name::Text(&pad));
+                    self.block_args(then_dest, 0);
+                    self.out
+                        .branch_name(false, self.block_name(then_dest.block));
                     self.out.label(pad.clone());
-                    self.block_args(&else_dest, 1);
+                    self.block_args(else_dest, 1);
                     self.branch_unless_next(else_dest.block);
                 }
             }
-            InstData::Switch { arg, dests, cases } => self.switch(inst, arg, &dests, &cases, None),
-            InstData::Intrinsic { id, args } => match id {
+            InstData::Switch {
+                arg,
+                ref dests,
+                ref cases,
+            } => self.switch(inst, arg, dests, cases, None),
+            InstData::Intrinsic { id, ref args } => match id {
                 // The libc functions take the same arguments in the same
                 // order. memset's `int c` only uses its low byte, so the
                 // unspecified upper bits of the i8 are harmless.
@@ -2356,8 +3529,8 @@ impl<'a> FunctionCompiler<'a> {
                         .iter()
                         .map(|&ty| AbiParam::new(ty))
                         .collect();
-                    self.move_args(&args, &params);
-                    self.out.branch(true, format!("_{id}"));
+                    self.move_args(args, &params);
+                    self.out.branch(true, self.symbol(&id.to_string()));
                     if id == Intrinsic::Memcmp {
                         self.call_result(result, None);
                     }
@@ -2366,6 +3539,7 @@ impl<'a> FunctionCompiler<'a> {
                 // step past it.
                 Intrinsic::Debugtrap => self.mach("brk", [Arg::imm(0xf000)]),
                 // Apple's va_list is a pointer to the next argument slot.
+                Intrinsic::VaStart if self.linux => self.linux_va_start(args[0]),
                 Intrinsic::VaStart => {
                     let list = self.use_reg(args[0], S1);
                     self.mach(
@@ -2418,14 +3592,776 @@ impl<'a> FunctionCompiler<'a> {
                     self.mach("mov", [(Reg::SP).into(), (Reg::x(mark)).into()]);
                 }
                 // The frame record is where the prologue points x29.
+                Intrinsic::X86Avx2Vgatherdps128
+                | Intrinsic::X86Avx2Vgatherdps256
+                | Intrinsic::X86Avx2Vgatherdpd128
+                | Intrinsic::X86Avx2Vgatherdpd256
+                | Intrinsic::X86Avx2Vgatherqps128
+                | Intrinsic::X86Avx2Vgatherqps256
+                | Intrinsic::X86Avx2Vgatherqpd128
+                | Intrinsic::X86Avx2Vgatherqpd256
+                | Intrinsic::X86Avx2Vpgatherdd128
+                | Intrinsic::X86Avx2Vpgatherdd256
+                | Intrinsic::X86Avx2Vpgatherdq128
+                | Intrinsic::X86Avx2Vpgatherdq256
+                | Intrinsic::X86Avx2Vpgatherqd128
+                | Intrinsic::X86Avx2Vpgatherqd256
+                | Intrinsic::X86Avx2Vpgatherqq128
+                | Intrinsic::X86Avx2Vpgatherqq256 => unreachable!("rejected x86 gather"),
+                Intrinsic::X86AvxVmaskmovpsLoad128
+                | Intrinsic::X86AvxVmaskmovpsStore128
+                | Intrinsic::X86AvxVmaskmovpsLoad256
+                | Intrinsic::X86AvxVmaskmovpsStore256
+                | Intrinsic::X86AvxVmaskmovpdLoad128
+                | Intrinsic::X86AvxVmaskmovpdStore128
+                | Intrinsic::X86AvxVmaskmovpdLoad256
+                | Intrinsic::X86AvxVmaskmovpdStore256
+                | Intrinsic::X86Avx2VpmaskmovdLoad128
+                | Intrinsic::X86Avx2VpmaskmovdStore128
+                | Intrinsic::X86Avx2VpmaskmovdLoad256
+                | Intrinsic::X86Avx2VpmaskmovdStore256
+                | Intrinsic::X86Avx2VpmaskmovqLoad128
+                | Intrinsic::X86Avx2VpmaskmovqStore128
+                | Intrinsic::X86Avx2VpmaskmovqLoad256
+                | Intrinsic::X86Avx2VpmaskmovqStore256 => {
+                    unreachable!("rejected x86 masked memory")
+                }
+                Intrinsic::X86AvxVcvtdq2pd128
+                | Intrinsic::X86AvxVcvtdq2pd256
+                | Intrinsic::X86AvxVcvtdq2ps128
+                | Intrinsic::X86AvxVcvtdq2ps256
+                | Intrinsic::X86AvxVcvtpd2dq128
+                | Intrinsic::X86AvxVcvtpd2dq256
+                | Intrinsic::X86AvxVcvtpd2ps128
+                | Intrinsic::X86AvxVcvtpd2ps256
+                | Intrinsic::X86AvxVcvtps2dq128
+                | Intrinsic::X86AvxVcvtps2dq256
+                | Intrinsic::X86AvxVcvtps2pd128
+                | Intrinsic::X86AvxVcvtps2pd256
+                | Intrinsic::X86AvxVcvttpd2dq128
+                | Intrinsic::X86AvxVcvttpd2dq256
+                | Intrinsic::X86AvxVcvttps2dq128
+                | Intrinsic::X86AvxVcvttps2dq256
+                | Intrinsic::X86AvxVcvtss2si32
+                | Intrinsic::X86AvxVcvttss2si32
+                | Intrinsic::X86AvxVcvtss2si64
+                | Intrinsic::X86AvxVcvttss2si64
+                | Intrinsic::X86AvxVcvtsd2si32
+                | Intrinsic::X86AvxVcvttsd2si32
+                | Intrinsic::X86AvxVcvtsd2si64
+                | Intrinsic::X86AvxVcvttsd2si64
+                | Intrinsic::X86AvxVcvtsi2ss32
+                | Intrinsic::X86AvxVcvtsi2ss64
+                | Intrinsic::X86AvxVcvtsi2sd32
+                | Intrinsic::X86AvxVcvtsi2sd64
+                | Intrinsic::X86AvxVcvtsd2ss
+                | Intrinsic::X86AvxVcvtss2sd => unreachable!("rejected x86 raw FP"),
+                Intrinsic::X86AvxVcmpps128
+                | Intrinsic::X86AvxVcmpps256
+                | Intrinsic::X86AvxVcmppd128
+                | Intrinsic::X86AvxVcmppd256
+                | Intrinsic::X86AvxVcmpss
+                | Intrinsic::X86AvxVcmpsd => unreachable!("rejected x86 FP compare"),
+                Intrinsic::X86AvxVpermilps128
+                | Intrinsic::X86AvxVpermilps256
+                | Intrinsic::X86AvxVpermilpd128
+                | Intrinsic::X86AvxVpermilpd256
+                | Intrinsic::X86Avx2Vpermd256
+                | Intrinsic::X86Avx2Vpermps256
+                | Intrinsic::X86AvxVmovmskps128
+                | Intrinsic::X86AvxVmovmskps256
+                | Intrinsic::X86AvxVmovmskpd128
+                | Intrinsic::X86AvxVmovmskpd256
+                | Intrinsic::X86AvxVpmovmskb128
+                | Intrinsic::X86Avx2Vpmovmskb256
+                | Intrinsic::X86AvxVtestps128
+                | Intrinsic::X86AvxVtestps256
+                | Intrinsic::X86AvxVtestpd128
+                | Intrinsic::X86AvxVtestpd256
+                | Intrinsic::X86AvxVptest128
+                | Intrinsic::X86AvxVptest256 => unreachable!("rejected x86 pure bits"),
+                Intrinsic::X86AvxVroundps128
+                | Intrinsic::X86AvxVroundps256
+                | Intrinsic::X86AvxVroundpd128
+                | Intrinsic::X86AvxVroundpd256
+                | Intrinsic::X86AvxVroundss
+                | Intrinsic::X86AvxVroundsd
+                | Intrinsic::X86AvxVminps128
+                | Intrinsic::X86AvxVminps256
+                | Intrinsic::X86AvxVminpd128
+                | Intrinsic::X86AvxVminpd256
+                | Intrinsic::X86AvxVminss
+                | Intrinsic::X86AvxVminsd
+                | Intrinsic::X86AvxVmaxps128
+                | Intrinsic::X86AvxVmaxps256
+                | Intrinsic::X86AvxVmaxpd128
+                | Intrinsic::X86AvxVmaxpd256
+                | Intrinsic::X86AvxVmaxss
+                | Intrinsic::X86AvxVmaxsd
+                | Intrinsic::X86AvxVrcpps128
+                | Intrinsic::X86AvxVrcpps256
+                | Intrinsic::X86AvxVrcpss
+                | Intrinsic::X86AvxVrsqrtps128
+                | Intrinsic::X86AvxVrsqrtps256
+                | Intrinsic::X86AvxVrsqrtss
+                | Intrinsic::X86AvxVcomiss
+                | Intrinsic::X86AvxVucomiss
+                | Intrinsic::X86AvxVcomisd
+                | Intrinsic::X86AvxVucomisd => unreachable!("rejected x86 FP misc"),
+                Intrinsic::X86AvxVmaskmovdqu => unreachable!("rejected x86 byte masked store"),
+                Intrinsic::X86Ssecvtdq2pd128
+                | Intrinsic::X86Ssecvtdq2ps128
+                | Intrinsic::X86Ssecvtpd2dq128
+                | Intrinsic::X86Ssecvtpd2ps128
+                | Intrinsic::X86Ssecvtps2dq128
+                | Intrinsic::X86Ssecvtps2pd128
+                | Intrinsic::X86Ssecvttpd2dq128
+                | Intrinsic::X86Ssecvttps2dq128
+                | Intrinsic::X86Ssecvtss2si32
+                | Intrinsic::X86Ssecvttss2si32
+                | Intrinsic::X86Ssecvtss2si64
+                | Intrinsic::X86Ssecvttss2si64
+                | Intrinsic::X86Ssecvtsd2si32
+                | Intrinsic::X86Ssecvttsd2si32
+                | Intrinsic::X86Ssecvtsd2si64
+                | Intrinsic::X86Ssecvttsd2si64
+                | Intrinsic::X86Ssecvtsi2ss32
+                | Intrinsic::X86Ssecvtsi2ss64
+                | Intrinsic::X86Ssecvtsi2sd32
+                | Intrinsic::X86Ssecvtsi2sd64
+                | Intrinsic::X86Ssecvtsd2ss
+                | Intrinsic::X86Ssecvtss2sd => unreachable!("rejected legacy x86 raw FP"),
+                Intrinsic::X86SseMinps128
+                | Intrinsic::X86SseMinpd128
+                | Intrinsic::X86SseMinss
+                | Intrinsic::X86SseMinsd
+                | Intrinsic::X86SseMaxps128
+                | Intrinsic::X86SseMaxpd128
+                | Intrinsic::X86SseMaxss
+                | Intrinsic::X86SseMaxsd
+                | Intrinsic::X86SseRcpps128
+                | Intrinsic::X86SseRcpss
+                | Intrinsic::X86SseRsqrtps128
+                | Intrinsic::X86SseRsqrtss
+                | Intrinsic::X86SseComiss
+                | Intrinsic::X86SseUcomiss
+                | Intrinsic::X86SseComisd
+                | Intrinsic::X86SseUcomisd
+                | Intrinsic::X86SseCmpps128
+                | Intrinsic::X86SseCmppd128
+                | Intrinsic::X86SseCmpss
+                | Intrinsic::X86SseCmpsd => unreachable!("rejected legacy x86 FP"),
+                Intrinsic::X86SseReadMxcsr
+                | Intrinsic::X86SseSwapMxcsr
+                | Intrinsic::X86SseMmxvalueCvtpi2ps
+                | Intrinsic::X86SseMmxvalueCvtps2pi
+                | Intrinsic::X86SseMmxvalueCvttps2pi
+                | Intrinsic::X86SseMmxvalueCvtpi2pd
+                | Intrinsic::X86SseMmxvalueCvtpd2pi
+                | Intrinsic::X86SseMmxvalueCvttpd2pi
+                | Intrinsic::X86SseAddps128
+                | Intrinsic::X86SseAddpd128
+                | Intrinsic::X86SseAddss
+                | Intrinsic::X86SseAddsd
+                | Intrinsic::X86SseSubps128
+                | Intrinsic::X86SseSubpd128
+                | Intrinsic::X86SseSubss
+                | Intrinsic::X86SseSubsd
+                | Intrinsic::X86SseMulps128
+                | Intrinsic::X86SseMulpd128
+                | Intrinsic::X86SseMulss
+                | Intrinsic::X86SseMulsd
+                | Intrinsic::X86SseDivps128
+                | Intrinsic::X86SseDivpd128
+                | Intrinsic::X86SseDivss
+                | Intrinsic::X86SseDivsd
+                | Intrinsic::X86SseSqrtps128
+                | Intrinsic::X86SseSqrtpd128
+                | Intrinsic::X86SseSqrtss
+                | Intrinsic::X86SseSqrtsd => unreachable!("rejected raw x86 arithmetic"),
+                Intrinsic::X86SseMovmskps128
+                | Intrinsic::X86SseMovmskpd128
+                | Intrinsic::X86SsePmovmskb128
+                | Intrinsic::X86SseMaskmovdqu => unreachable!("rejected legacy x86 masks"),
+                Intrinsic::X86Sse3Haddps
+                | Intrinsic::X86Sse3Haddpd
+                | Intrinsic::X86Sse3Hsubps
+                | Intrinsic::X86Sse3Hsubpd
+                | Intrinsic::X86Sse3Addsubps
+                | Intrinsic::X86Sse3Addsubpd
+                | Intrinsic::X86Sse41Roundps128
+                | Intrinsic::X86Sse41Roundpd128
+                | Intrinsic::X86Sse41Roundss
+                | Intrinsic::X86Sse41Roundsd
+                | Intrinsic::X86Sse41Dpps
+                | Intrinsic::X86Sse41Dppd => unreachable!("rejected legacy v2 FP"),
+                Intrinsic::X86Ssse3Pshufb128
+                | Intrinsic::X86Sse41Blendvps128
+                | Intrinsic::X86Sse41Blendvpd128
+                | Intrinsic::X86Sse41Pblendvb128
+                | Intrinsic::X86AvxVblendvps128
+                | Intrinsic::X86AvxVblendvpd128
+                | Intrinsic::X86AvxVpblendvb128
+                | Intrinsic::X86AvxVblendvps256
+                | Intrinsic::X86AvxVblendvpd256
+                | Intrinsic::X86Avx2Vpblendvb256
+                | Intrinsic::X86Sse41Mpsadbw128
+                | Intrinsic::X86AvxVmpsadbw128
+                | Intrinsic::X86Avx2Vmpsadbw256
+                | Intrinsic::X86Sse41Phminposuw128
+                | Intrinsic::X86AvxVphminposuw128
+                | Intrinsic::X86Ssse3Phaddw128
+                | Intrinsic::X86Ssse3Phaddd128
+                | Intrinsic::X86Ssse3Phaddsw128
+                | Intrinsic::X86Ssse3Phsubw128
+                | Intrinsic::X86Ssse3Phsubd128
+                | Intrinsic::X86Ssse3Phsubsw128
+                | Intrinsic::X86Sse2Paddsb128
+                | Intrinsic::X86Sse2Paddsw128
+                | Intrinsic::X86Sse2Paddusb128
+                | Intrinsic::X86Sse2Paddusw128
+                | Intrinsic::X86Sse2Psubsb128
+                | Intrinsic::X86Sse2Psubsw128
+                | Intrinsic::X86Sse2Psubusb128
+                | Intrinsic::X86Sse2Psubusw128
+                | Intrinsic::X86Sse2Pavgb128
+                | Intrinsic::X86Sse2Pavgw128
+                | Intrinsic::X86Ssse3Psignb128
+                | Intrinsic::X86Ssse3Psignw128
+                | Intrinsic::X86Ssse3Psignd128
+                | Intrinsic::X86Ssse3Pabsb128
+                | Intrinsic::X86Ssse3Pabsw128
+                | Intrinsic::X86Ssse3Pabsd128
+                | Intrinsic::X86AvxVphaddw128
+                | Intrinsic::X86AvxVphaddd128
+                | Intrinsic::X86AvxVphaddsw128
+                | Intrinsic::X86AvxVphsubw128
+                | Intrinsic::X86AvxVphsubd128
+                | Intrinsic::X86AvxVphsubsw128
+                | Intrinsic::X86AvxVpaddsb128
+                | Intrinsic::X86AvxVpaddsw128
+                | Intrinsic::X86AvxVpaddusb128
+                | Intrinsic::X86AvxVpaddusw128
+                | Intrinsic::X86AvxVpsubsb128
+                | Intrinsic::X86AvxVpsubsw128
+                | Intrinsic::X86AvxVpsubusb128
+                | Intrinsic::X86AvxVpsubusw128
+                | Intrinsic::X86AvxVpavgb128
+                | Intrinsic::X86AvxVpavgw128
+                | Intrinsic::X86AvxVpsignb128
+                | Intrinsic::X86AvxVpsignw128
+                | Intrinsic::X86AvxVpsignd128
+                | Intrinsic::X86AvxVpabsb128
+                | Intrinsic::X86AvxVpabsw128
+                | Intrinsic::X86AvxVpabsd128
+                | Intrinsic::X86Avx2Vphaddw256
+                | Intrinsic::X86Avx2Vphaddd256
+                | Intrinsic::X86Avx2Vphaddsw256
+                | Intrinsic::X86Avx2Vphsubw256
+                | Intrinsic::X86Avx2Vphsubd256
+                | Intrinsic::X86Avx2Vphsubsw256
+                | Intrinsic::X86Avx2Vpaddsb256
+                | Intrinsic::X86Avx2Vpaddsw256
+                | Intrinsic::X86Avx2Vpaddusb256
+                | Intrinsic::X86Avx2Vpaddusw256
+                | Intrinsic::X86Avx2Vpsubsb256
+                | Intrinsic::X86Avx2Vpsubsw256
+                | Intrinsic::X86Avx2Vpsubusb256
+                | Intrinsic::X86Avx2Vpsubusw256
+                | Intrinsic::X86Avx2Vpavgb256
+                | Intrinsic::X86Avx2Vpavgw256
+                | Intrinsic::X86Avx2Vpsignb256
+                | Intrinsic::X86Avx2Vpsignw256
+                | Intrinsic::X86Avx2Vpsignd256
+                | Intrinsic::X86Avx2Vpabsb256
+                | Intrinsic::X86Avx2Vpabsw256
+                | Intrinsic::X86Avx2Vpabsd256
+                | Intrinsic::X86Sse2Packsswb128
+                | Intrinsic::X86Sse2Packssdw128
+                | Intrinsic::X86Sse2Packuswb128
+                | Intrinsic::X86Sse41Packusdw128
+                | Intrinsic::X86AvxVpacksswb128
+                | Intrinsic::X86AvxVpackssdw128
+                | Intrinsic::X86AvxVpackuswb128
+                | Intrinsic::X86AvxVpackusdw128
+                | Intrinsic::X86Avx2Vpacksswb256
+                | Intrinsic::X86Avx2Vpackssdw256
+                | Intrinsic::X86Avx2Vpackuswb256
+                | Intrinsic::X86Avx2Vpackusdw256
+                | Intrinsic::X86Sse2Pmaddwd128
+                | Intrinsic::X86Ssse3Pmaddubsw128
+                | Intrinsic::X86Sse2Pmulhw128
+                | Intrinsic::X86Sse2Pmulhuw128
+                | Intrinsic::X86Ssse3Pmulhrsw128
+                | Intrinsic::X86Sse41Pmuldq128
+                | Intrinsic::X86Sse2Pmuludq128
+                | Intrinsic::X86Sse2Psadbw128
+                | Intrinsic::X86AvxVpmaddwd128
+                | Intrinsic::X86AvxVpmaddubsw128
+                | Intrinsic::X86AvxVpmulhw128
+                | Intrinsic::X86AvxVpmulhuw128
+                | Intrinsic::X86AvxVpmulhrsw128
+                | Intrinsic::X86AvxVpmuldq128
+                | Intrinsic::X86AvxVpmuludq128
+                | Intrinsic::X86AvxVpsadbw128
+                | Intrinsic::X86Avx2Vpmaddwd256
+                | Intrinsic::X86Avx2Vpmaddubsw256
+                | Intrinsic::X86Avx2Vpmulhw256
+                | Intrinsic::X86Avx2Vpmulhuw256
+                | Intrinsic::X86Avx2Vpmulhrsw256
+                | Intrinsic::X86Avx2Vpmuldq256
+                | Intrinsic::X86Avx2Vpmuludq256
+                | Intrinsic::X86Avx2Vpsadbw256
+                | Intrinsic::X86Sse2Pslldq128
+                | Intrinsic::X86Sse2Psrldq128
+                | Intrinsic::X86AvxVpslldq128
+                | Intrinsic::X86AvxVpsrldq128
+                | Intrinsic::X86Avx2Vpslldq256
+                | Intrinsic::X86Avx2Vpsrldq256
+                | Intrinsic::X86Sse2Psllw128
+                | Intrinsic::X86Sse2Pslld128
+                | Intrinsic::X86Sse2Psllq128
+                | Intrinsic::X86Sse2Psrlw128
+                | Intrinsic::X86Sse2Psrld128
+                | Intrinsic::X86Sse2Psrlq128
+                | Intrinsic::X86Sse2Psraw128
+                | Intrinsic::X86Sse2Psrad128
+                | Intrinsic::X86AvxVpsllw128
+                | Intrinsic::X86AvxVpslld128
+                | Intrinsic::X86AvxVpsllq128
+                | Intrinsic::X86AvxVpsrlw128
+                | Intrinsic::X86AvxVpsrld128
+                | Intrinsic::X86AvxVpsrlq128
+                | Intrinsic::X86AvxVpsraw128
+                | Intrinsic::X86AvxVpsrad128
+                | Intrinsic::X86Avx2Vpsllw256
+                | Intrinsic::X86Avx2Vpslld256
+                | Intrinsic::X86Avx2Vpsllq256
+                | Intrinsic::X86Avx2Vpsrlw256
+                | Intrinsic::X86Avx2Vpsrld256
+                | Intrinsic::X86Avx2Vpsrlq256
+                | Intrinsic::X86Avx2Vpsraw256
+                | Intrinsic::X86Avx2Vpsrad256
+                | Intrinsic::X86Avx2Vpsllvd128
+                | Intrinsic::X86Avx2Vpsllvq128
+                | Intrinsic::X86Avx2Vpsrlvd128
+                | Intrinsic::X86Avx2Vpsrlvq128
+                | Intrinsic::X86Avx2Vpsravd128
+                | Intrinsic::X86Avx2Vpsllvd256
+                | Intrinsic::X86Avx2Vpsllvq256
+                | Intrinsic::X86Avx2Vpsrlvd256
+                | Intrinsic::X86Avx2Vpsrlvq256
+                | Intrinsic::X86Avx2Vpsravd256
+                | Intrinsic::X86AvxVpshufb128
+                | Intrinsic::X86Avx2Vpshufb256
+                | Intrinsic::X86Xrstor64
+                | Intrinsic::X86Xgetbv0
+                | Intrinsic::X86Xsave64
+                | Intrinsic::X86RflagsRead
+                | Intrinsic::X86RflagsSwap
+                | Intrinsic::X86Lahf
+                | Intrinsic::X86SahfExchange
+                | Intrinsic::X86X87Region
+                | Intrinsic::X86Lar16
+                | Intrinsic::X86Lar16Mem
+                | Intrinsic::X86Lar32
+                | Intrinsic::X86Lar32Mem
+                | Intrinsic::X86Lar64
+                | Intrinsic::X86Lar64Mem
+                | Intrinsic::X86Lsl16
+                | Intrinsic::X86Lsl16Mem
+                | Intrinsic::X86Lsl32
+                | Intrinsic::X86Lsl32Mem
+                | Intrinsic::X86Lsl64
+                | Intrinsic::X86Lsl64Mem
+                | Intrinsic::X86Verr
+                | Intrinsic::X86VerrMem
+                | Intrinsic::X86Verw
+                | Intrinsic::X86VerwMem
+                | Intrinsic::X86In8
+                | Intrinsic::X86Ins8
+                | Intrinsic::X86Ins16
+                | Intrinsic::X86Ins32
+                | Intrinsic::X86Outs8
+                | Intrinsic::X86Outs16
+                | Intrinsic::X86Outs32
+                | Intrinsic::X86RepIns8
+                | Intrinsic::X86RepIns16
+                | Intrinsic::X86RepIns32
+                | Intrinsic::X86RepOuts8
+                | Intrinsic::X86RepOuts16
+                | Intrinsic::X86RepOuts32
+                | Intrinsic::X86Ins8OwnedTerminal
+                | Intrinsic::X86Ins16OwnedTerminal
+                | Intrinsic::X86Ins32OwnedTerminal
+                | Intrinsic::X86Outs8OwnedTerminal
+                | Intrinsic::X86Outs16OwnedTerminal
+                | Intrinsic::X86Outs32OwnedTerminal
+                | Intrinsic::X86RepIns8OwnedTerminal
+                | Intrinsic::X86RepIns16OwnedTerminal
+                | Intrinsic::X86RepIns32OwnedTerminal
+                | Intrinsic::X86RepOuts8OwnedTerminal
+                | Intrinsic::X86RepOuts16OwnedTerminal
+                | Intrinsic::X86RepOuts32OwnedTerminal
+                | Intrinsic::X86In16
+                | Intrinsic::X86In32
+                | Intrinsic::X86Out8
+                | Intrinsic::X86Out16
+                | Intrinsic::X86Out32
+                | Intrinsic::X86In8Imm
+                | Intrinsic::X86In16Imm
+                | Intrinsic::X86In32Imm
+                | Intrinsic::X86Out8Imm
+                | Intrinsic::X86Out16Imm
+                | Intrinsic::X86Out32Imm
+                | Intrinsic::X86DivU8
+                | Intrinsic::X86DivU16
+                | Intrinsic::X86DivU32
+                | Intrinsic::X86DivU64
+                | Intrinsic::X86DivS8
+                | Intrinsic::X86DivS16
+                | Intrinsic::X86DivS32
+                | Intrinsic::X86DivS64
+                | Intrinsic::X86Sgdt
+                | Intrinsic::X86Sidt
+                | Intrinsic::X86SldtMem
+                | Intrinsic::X86Sldt16
+                | Intrinsic::X86Sldt32
+                | Intrinsic::X86Sldt64
+                | Intrinsic::X86StrMem
+                | Intrinsic::X86Str16
+                | Intrinsic::X86Str32
+                | Intrinsic::X86Str64
+                | Intrinsic::X86SmswMem
+                | Intrinsic::X86Smsw16
+                | Intrinsic::X86Smsw32
+                | Intrinsic::X86Smsw64
+                | Intrinsic::X86X87Fnstenv16
+                | Intrinsic::X86X87Fnstenv32
+                | Intrinsic::X86X87Fstenv16
+                | Intrinsic::X86X87Fstenv32
+                | Intrinsic::X86X87Fldenv16
+                | Intrinsic::X86X87Fldenv32
+                | Intrinsic::X86X87Fnsave16
+                | Intrinsic::X86X87Fnsave32
+                | Intrinsic::X86X87Fsave16
+                | Intrinsic::X86X87Fsave32
+                | Intrinsic::X86X87Frstor16
+                | Intrinsic::X86X87Frstor32
+                | Intrinsic::X86Fxsave64
+                | Intrinsic::X86Fxrstor64
+                | Intrinsic::X86X87ReadCwNowait
+                | Intrinsic::X86X87ReadSwNowait
+                | Intrinsic::X86X87ReadCwWait
+                | Intrinsic::X86X87ReadSwWait
+                | Intrinsic::X86X87ExchangeCw
+                | Intrinsic::X86X87ClexNowait
+                | Intrinsic::X86X87ClexWait
+                | Intrinsic::X86X87InitNowait
+                | Intrinsic::X86X87InitWait
+                | Intrinsic::X86X87Wait
+                | Intrinsic::X86X87Fist16
+                | Intrinsic::X86X87Fist32
+                | Intrinsic::X86X87Fistp16
+                | Intrinsic::X86X87Fistp32
+                | Intrinsic::X86X87Fistp64
+                | Intrinsic::X86X87Fisttp16
+                | Intrinsic::X86X87Fisttp32
+                | Intrinsic::X86X87Fisttp64
+                | Intrinsic::X86X87Fild16
+                | Intrinsic::X86X87Fild32
+                | Intrinsic::X86X87Fild64
+                | Intrinsic::X86X87Fbld
+                | Intrinsic::X86X87Fbstp
+                | Intrinsic::X86X87Fldpi
+                | Intrinsic::X86X87Fldl2e
+                | Intrinsic::X86X87Fldl2t
+                | Intrinsic::X86X87Fldlg2
+                | Intrinsic::X86X87Fldln2
+                | Intrinsic::X86X87Fiadd16
+                | Intrinsic::X86X87Fiadd32
+                | Intrinsic::X86X87Fimul16
+                | Intrinsic::X86X87Fimul32
+                | Intrinsic::X86X87Fisub16
+                | Intrinsic::X86X87Fisub32
+                | Intrinsic::X86X87Fisubr16
+                | Intrinsic::X86X87Fisubr32
+                | Intrinsic::X86X87Fidiv16
+                | Intrinsic::X86X87Fidiv32
+                | Intrinsic::X86X87Fidivr16
+                | Intrinsic::X86X87Fidivr32
+                | Intrinsic::X86X87Fcom
+                | Intrinsic::X86X87Fcomp
+                | Intrinsic::X86X87Fcompp
+                | Intrinsic::X86X87Fucom
+                | Intrinsic::X86X87Fucomp
+                | Intrinsic::X86X87Fucompp
+                | Intrinsic::X86X87Fcomi
+                | Intrinsic::X86X87Fcomip
+                | Intrinsic::X86X87Fucomi
+                | Intrinsic::X86X87Fucomip
+                | Intrinsic::X86X87FaddSt1
+                | Intrinsic::X86X87FmulSt1
+                | Intrinsic::X86X87FsubSt1
+                | Intrinsic::X86X87FsubrSt1
+                | Intrinsic::X86X87FdivSt1
+                | Intrinsic::X86X87FdivrSt1
+                | Intrinsic::X86X87Fadd
+                | Intrinsic::X86X87Fmul
+                | Intrinsic::X86X87Fsub
+                | Intrinsic::X86X87Fsubr
+                | Intrinsic::X86X87Fdiv
+                | Intrinsic::X86X87Fdivr
+                | Intrinsic::X86X87Faddp
+                | Intrinsic::X86X87Fmulp
+                | Intrinsic::X86X87Fsubp
+                | Intrinsic::X86X87Fsubrp
+                | Intrinsic::X86X87Fdivp
+                | Intrinsic::X86X87Fdivrp
+                | Intrinsic::X86X87Fabs
+                | Intrinsic::X86X87Fchs
+                | Intrinsic::X86X87Fsqrt
+                | Intrinsic::X86X87Frndint
+                | Intrinsic::X86X87Ftst
+                | Intrinsic::X86X87Fxam
+                | Intrinsic::X86X87Fsincos
+                | Intrinsic::X86X87Fptan
+                | Intrinsic::X86X87Fxtract
+                | Intrinsic::X86X87Fsin
+                | Intrinsic::X86X87Fcos
+                | Intrinsic::X86X87F2xm1
+                | Intrinsic::X86X87Fpatan
+                | Intrinsic::X86X87Fyl2x
+                | Intrinsic::X86X87Fyl2xp1
+                | Intrinsic::X86X87Fscale
+                | Intrinsic::X86X87Fprem
+                | Intrinsic::X86X87Fprem1
+                | Intrinsic::X86MmxEmms
+                | Intrinsic::X86Clflush
+                | Intrinsic::X86Prefetchnta
+                | Intrinsic::X86Prefetcht0
+                | Intrinsic::X86Prefetcht1
+                | Intrinsic::X86Prefetcht2
+                | Intrinsic::X86SseMovntps128
+                | Intrinsic::X86SseMovntpd128
+                | Intrinsic::X86SseMovntdq128
+                | Intrinsic::X86AvxVmovntps128
+                | Intrinsic::X86AvxVmovntps256
+                | Intrinsic::X86AvxVmovntpd128
+                | Intrinsic::X86AvxVmovntpd256
+                | Intrinsic::X86AvxVmovntdq128
+                | Intrinsic::X86AvxVmovntdq256
+                | Intrinsic::X86Movnti32
+                | Intrinsic::X86Movnti64
+                | Intrinsic::X86Sse41Movntdqa128
+                | Intrinsic::X86Avx2Vmovntdqa256
+                | Intrinsic::X86Cpuid
+                | Intrinsic::X86Rdtsc
+                | Intrinsic::X86Rdpmc
+                | Intrinsic::X86X87Ffree0
+                | Intrinsic::X86X87Ffree1
+                | Intrinsic::X86X87Ffree2
+                | Intrinsic::X86X87Ffree3
+                | Intrinsic::X86X87Ffree4
+                | Intrinsic::X86X87Ffree5
+                | Intrinsic::X86X87Ffree6
+                | Intrinsic::X86X87Ffree7
+                | Intrinsic::X86X87Fdecstp
+                | Intrinsic::X86X87Fincstp
+                | Intrinsic::X86X87Fnop
+                | Intrinsic::X86Lfence
+                | Intrinsic::X86Sfence
+                | Intrinsic::X86Mfence
+                | Intrinsic::X86Pause
+                | Intrinsic::X86AvxVzeroall
+                | Intrinsic::X86Cx16Cmpxchg16b => {
+                    unreachable!("rejected x86 state/CX16")
+                }
+                Intrinsic::X86Sse41Ptest128
+                | Intrinsic::X86Sse42Crc32b
+                | Intrinsic::X86Sse42Crc32w
+                | Intrinsic::X86Sse42Crc32d
+                | Intrinsic::X86Sse42Crc32q => unreachable!("rejected x86 CRC/PTEST"),
+                Intrinsic::X86Sse42PcmpistriIndex
+                | Intrinsic::X86Sse42Pcmpistri64Index
+                | Intrinsic::X86Sse42PcmpistrmMask
+                | Intrinsic::X86Sse42PcmpistriFlags
+                | Intrinsic::X86Sse42PcmpestriIndex
+                | Intrinsic::X86Sse42PcmpestrmMask
+                | Intrinsic::X86Sse42PcmpestriFlags
+                | Intrinsic::X86Sse42Pcmpestri64Index
+                | Intrinsic::X86Sse42Pcmpestrm64Mask
+                | Intrinsic::X86Sse42Pcmpestri64Flags => unreachable!("rejected x86 strings"),
+                Intrinsic::X86AvxPcmpistriIndex
+                | Intrinsic::X86AvxPcmpistri64Index
+                | Intrinsic::X86AvxPcmpistrmMask
+                | Intrinsic::X86AvxPcmpistriFlags
+                | Intrinsic::X86AvxPcmpestriIndex
+                | Intrinsic::X86AvxPcmpestrmMask
+                | Intrinsic::X86AvxPcmpestriFlags
+                | Intrinsic::X86AvxPcmpestri64Index
+                | Intrinsic::X86AvxPcmpestrm64Mask
+                | Intrinsic::X86AvxPcmpestri64Flags => unreachable!("rejected x86 strings"),
+                Intrinsic::X86AvxVaddps128
+                | Intrinsic::X86AvxVaddpd128
+                | Intrinsic::X86AvxVaddss
+                | Intrinsic::X86AvxVaddsd
+                | Intrinsic::X86AvxVaddps256
+                | Intrinsic::X86AvxVaddpd256
+                | Intrinsic::X86AvxVsubps128
+                | Intrinsic::X86AvxVsubpd128
+                | Intrinsic::X86AvxVsubss
+                | Intrinsic::X86AvxVsubsd
+                | Intrinsic::X86AvxVsubps256
+                | Intrinsic::X86AvxVsubpd256
+                | Intrinsic::X86AvxVmulps128
+                | Intrinsic::X86AvxVmulpd128
+                | Intrinsic::X86AvxVmulss
+                | Intrinsic::X86AvxVmulsd
+                | Intrinsic::X86AvxVmulps256
+                | Intrinsic::X86AvxVmulpd256
+                | Intrinsic::X86AvxVdivps128
+                | Intrinsic::X86AvxVdivpd128
+                | Intrinsic::X86AvxVdivss
+                | Intrinsic::X86AvxVdivsd
+                | Intrinsic::X86AvxVdivps256
+                | Intrinsic::X86AvxVdivpd256
+                | Intrinsic::X86AvxVsqrtps128
+                | Intrinsic::X86AvxVsqrtpd128
+                | Intrinsic::X86AvxVsqrtss
+                | Intrinsic::X86AvxVsqrtsd
+                | Intrinsic::X86AvxVsqrtps256
+                | Intrinsic::X86AvxVsqrtpd256 => unreachable!("rejected raw x86 arithmetic"),
+                Intrinsic::X86AvxVhaddps128
+                | Intrinsic::X86AvxVhaddps256
+                | Intrinsic::X86AvxVhaddpd128
+                | Intrinsic::X86AvxVhaddpd256
+                | Intrinsic::X86AvxVhsubps128
+                | Intrinsic::X86AvxVhsubps256
+                | Intrinsic::X86AvxVhsubpd128
+                | Intrinsic::X86AvxVhsubpd256
+                | Intrinsic::X86AvxVaddsubps128
+                | Intrinsic::X86AvxVaddsubps256
+                | Intrinsic::X86AvxVaddsubpd128
+                | Intrinsic::X86AvxVaddsubpd256
+                | Intrinsic::X86AvxVdpps128
+                | Intrinsic::X86AvxVdpps256
+                | Intrinsic::X86AvxVdppd128 => unreachable!("rejected AVX horizontal/dot"),
+                Intrinsic::X86F16cPhToPs128
+                | Intrinsic::X86F16cPhToPs256
+                | Intrinsic::X86F16cPsToPh128
+                | Intrinsic::X86F16cPsToPh256
+                | Intrinsic::X86Bmi1Bextr32
+                | Intrinsic::X86Bmi1Bextr64
+                | Intrinsic::X86Bmi2Pdep32
+                | Intrinsic::X86Bmi2Pdep64
+                | Intrinsic::X86Bmi2Pext32
+                | Intrinsic::X86FmaVfmadd132pd128
+                | Intrinsic::X86FmaVfmadd132pd256
+                | Intrinsic::X86FmaVfmadd132ps128
+                | Intrinsic::X86FmaVfmadd132ps256
+                | Intrinsic::X86FmaVfmadd132sd128
+                | Intrinsic::X86FmaVfmadd132ss128
+                | Intrinsic::X86FmaVfmadd213pd128
+                | Intrinsic::X86FmaVfmadd213pd256
+                | Intrinsic::X86FmaVfmadd213ps128
+                | Intrinsic::X86FmaVfmadd213ps256
+                | Intrinsic::X86FmaVfmadd213sd128
+                | Intrinsic::X86FmaVfmadd213ss128
+                | Intrinsic::X86FmaVfmadd231pd128
+                | Intrinsic::X86FmaVfmadd231pd256
+                | Intrinsic::X86FmaVfmadd231ps128
+                | Intrinsic::X86FmaVfmadd231ps256
+                | Intrinsic::X86FmaVfmadd231sd128
+                | Intrinsic::X86FmaVfmadd231ss128
+                | Intrinsic::X86FmaVfmaddsub132pd128
+                | Intrinsic::X86FmaVfmaddsub132pd256
+                | Intrinsic::X86FmaVfmaddsub213pd128
+                | Intrinsic::X86FmaVfmaddsub213pd256
+                | Intrinsic::X86FmaVfmaddsub231pd128
+                | Intrinsic::X86FmaVfmaddsub231pd256
+                | Intrinsic::X86FmaVfmaddsub132ps128
+                | Intrinsic::X86FmaVfmaddsub132ps256
+                | Intrinsic::X86FmaVfmaddsub213ps128
+                | Intrinsic::X86FmaVfmaddsub213ps256
+                | Intrinsic::X86FmaVfmaddsub231ps128
+                | Intrinsic::X86FmaVfmaddsub231ps256
+                | Intrinsic::X86FmaVfmsubadd132pd128
+                | Intrinsic::X86FmaVfmsubadd132pd256
+                | Intrinsic::X86FmaVfmsubadd213pd128
+                | Intrinsic::X86FmaVfmsubadd213pd256
+                | Intrinsic::X86FmaVfmsubadd231pd128
+                | Intrinsic::X86FmaVfmsubadd231pd256
+                | Intrinsic::X86FmaVfmsubadd132ps128
+                | Intrinsic::X86FmaVfmsubadd132ps256
+                | Intrinsic::X86FmaVfmsubadd213ps128
+                | Intrinsic::X86FmaVfmsubadd213ps256
+                | Intrinsic::X86FmaVfmsubadd231ps128
+                | Intrinsic::X86FmaVfmsubadd231ps256
+                | Intrinsic::X86FmaVfmsub132pd128
+                | Intrinsic::X86FmaVfmsub132pd256
+                | Intrinsic::X86FmaVfmsub132ps128
+                | Intrinsic::X86FmaVfmsub132ps256
+                | Intrinsic::X86FmaVfmsub132sd128
+                | Intrinsic::X86FmaVfmsub132ss128
+                | Intrinsic::X86FmaVfmsub213pd128
+                | Intrinsic::X86FmaVfmsub213pd256
+                | Intrinsic::X86FmaVfmsub213ps128
+                | Intrinsic::X86FmaVfmsub213ps256
+                | Intrinsic::X86FmaVfmsub213sd128
+                | Intrinsic::X86FmaVfmsub213ss128
+                | Intrinsic::X86FmaVfmsub231pd128
+                | Intrinsic::X86FmaVfmsub231pd256
+                | Intrinsic::X86FmaVfmsub231ps128
+                | Intrinsic::X86FmaVfmsub231ps256
+                | Intrinsic::X86FmaVfmsub231sd128
+                | Intrinsic::X86FmaVfmsub231ss128
+                | Intrinsic::X86FmaVfnmadd132pd128
+                | Intrinsic::X86FmaVfnmadd132pd256
+                | Intrinsic::X86FmaVfnmadd132ps128
+                | Intrinsic::X86FmaVfnmadd132ps256
+                | Intrinsic::X86FmaVfnmadd132sd128
+                | Intrinsic::X86FmaVfnmadd132ss128
+                | Intrinsic::X86FmaVfnmadd213pd128
+                | Intrinsic::X86FmaVfnmadd213pd256
+                | Intrinsic::X86FmaVfnmadd213ps128
+                | Intrinsic::X86FmaVfnmadd213ps256
+                | Intrinsic::X86FmaVfnmadd213sd128
+                | Intrinsic::X86FmaVfnmadd213ss128
+                | Intrinsic::X86FmaVfnmadd231pd128
+                | Intrinsic::X86FmaVfnmadd231pd256
+                | Intrinsic::X86FmaVfnmadd231ps128
+                | Intrinsic::X86FmaVfnmadd231ps256
+                | Intrinsic::X86FmaVfnmadd231sd128
+                | Intrinsic::X86FmaVfnmadd231ss128
+                | Intrinsic::X86FmaVfnmsub132pd128
+                | Intrinsic::X86FmaVfnmsub132pd256
+                | Intrinsic::X86FmaVfnmsub132ps128
+                | Intrinsic::X86FmaVfnmsub132ps256
+                | Intrinsic::X86FmaVfnmsub132sd128
+                | Intrinsic::X86FmaVfnmsub132ss128
+                | Intrinsic::X86FmaVfnmsub213pd128
+                | Intrinsic::X86FmaVfnmsub213pd256
+                | Intrinsic::X86FmaVfnmsub213ps128
+                | Intrinsic::X86FmaVfnmsub213ps256
+                | Intrinsic::X86FmaVfnmsub213sd128
+                | Intrinsic::X86FmaVfnmsub213ss128
+                | Intrinsic::X86FmaVfnmsub231pd128
+                | Intrinsic::X86FmaVfnmsub231pd256
+                | Intrinsic::X86FmaVfnmsub231ps128
+                | Intrinsic::X86FmaVfnmsub231ps256
+                | Intrinsic::X86FmaVfnmsub231sd128
+                | Intrinsic::X86FmaVfnmsub231ss128
+                | Intrinsic::X86Bmi2Pext64 => unreachable!("rejected x86 intrinsic"),
                 Intrinsic::FrameAddress => {
                     let d = self.def_reg(result);
                     self.mach("mov", [(Reg::x(d)).into(), (Reg::x(29)).into()]);
                     self.def_done(result, d);
                 }
             },
-            InstData::InlineAsm { asm, args } => {
-                let regs = asm_regs(&asm).expect("checked when the compiler was made");
+            InstData::X86RflagsRegion { .. } => unreachable!("rejected x86 FLAGS region"),
+            InstData::InlineAsm { ref asm, ref args } => {
+                let regs = asm_regs(asm).expect("checked when the compiler was made");
                 let n_out = asm.outputs.len();
                 // Inputs into their registers. No value is allocated to
                 // those, so no move overwrites another's source and they
@@ -2436,7 +4372,7 @@ impl<'a> FunctionCompiler<'a> {
                         self.emit_move(asm_loc(r), self.loc(arg));
                     }
                 }
-                let text = asm_text(func, &asm, &args, &regs).expect("checked");
+                let text = asm_text(func, asm, args, &regs).expect("checked");
                 self.out.inline_assembly(&text);
                 for (k, &output) in func.inst_results(inst).iter().enumerate() {
                     if let (Some(dst), Some(r)) = (self.defined(output), regs[k]) {
@@ -2445,7 +4381,7 @@ impl<'a> FunctionCompiler<'a> {
                 }
             }
             InstData::Trap => self.mach("brk", [Arg::imm(1)]),
-            InstData::Return { args } => {
+            InstData::Return { ref args } => {
                 // A struct result in registers is loaded from where the
                 // function wrote it.
                 if let Some(Purpose::Sret(layout)) = func.sig.params.first().map(|p| &p.purpose)
@@ -2493,9 +4429,12 @@ impl<'a> FunctionCompiler<'a> {
         args: &[Value],
         params: &'s [AbiParam],
     ) -> Option<RegisterSret<'s>> {
-        let kinds = arg_kinds(self.func, params, args);
-        let (locs, _) = abi::arg_locs(&kinds, params.len());
-        let mut moves = Vec::new();
+        let func = self.func;
+        let kind = |i: usize, arg: Value| arg_kind(func, params, i, arg);
+        let mut locs = std::mem::take(&mut self.arg_places);
+        let kinds = args.iter().enumerate().map(|(i, &arg)| kind(i, arg));
+        abi::arg_locs_into_for(kinds, params.len(), self.linux, &mut locs);
+        let mut moves = std::mem::take(&mut self.copies);
         let mut extend = Vec::new();
         // Registers filled after the moves.
         enum Late<'l> {
@@ -2506,9 +4445,9 @@ impl<'a> FunctionCompiler<'a> {
         let mut late = Vec::new();
         let mut copied: u64 = 0;
         let mut sret = None;
-        for (i, ((&arg, loc), kind)) in args.iter().zip(locs).zip(&kinds).enumerate() {
-            let layout = match kind {
-                ArgKind::ByVal(layout) | ArgKind::Sret(layout) => Some(*layout),
+        for (i, (&arg, loc)) in args.iter().zip(locs.drain(..)).enumerate() {
+            let layout = match kind(i, arg) {
+                ArgKind::ByVal(layout) | ArgKind::Sret(layout) => Some(layout),
                 ArgKind::Value(_) => None,
             };
             match loc {
@@ -2517,7 +4456,10 @@ impl<'a> FunctionCompiler<'a> {
                     if self.ty(arg) == Type::I128 {
                         moves.push((Loc::Reg(loc_reg(dst) + 1), self.hi(arg)));
                     }
-                    if let (Some(param), Loc::Reg(r)) = (params.get(i), dst) {
+                    // Only an extension needs a register's argument again.
+                    if let (Some(param), Loc::Reg(r)) = (params.get(i), dst)
+                        && param.ext != ArgExt::None
+                    {
                         extend.push((r, param.ty, param.ext));
                     }
                 }
@@ -2569,7 +4511,10 @@ impl<'a> FunctionCompiler<'a> {
                 }
             }
         }
+        self.arg_places = locs;
         self.parallel_copy(&moves);
+        moves.clear();
+        self.copies = moves;
         for (r, ty, ext) in extend {
             self.extend_in_place(r, ty, ext);
         }
@@ -2669,7 +4614,7 @@ impl<'a> FunctionCompiler<'a> {
         );
         if let Some(s) = scratch {
             if ty.is_vector() {
-                self.vector_spill(true, r, s);
+                self.vector_spill(true, r, s, ty.bytes().unwrap());
                 return;
             }
             let class = if ty.is_float() { 'd' } else { 'x' };
@@ -2986,7 +4931,7 @@ impl<'a> FunctionCompiler<'a> {
                     "orr",
                     [(Reg::x(S0)).into(), (Reg::x(2)).into(), (Reg::x(3)).into()],
                 );
-                self.compare_branch(Reg::x(S0), false, trap.clone());
+                self.compare_branch(Reg::x(S0), false, Name::Text(&trap));
                 if op == BinaryOp::Sdiv {
                     // MIN / -1: the divisor's halves are both all ones and
                     // the dividend is 2^127.
@@ -2996,11 +4941,11 @@ impl<'a> FunctionCompiler<'a> {
                         [(Reg::x(S0)).into(), (Reg::x(2)).into(), (Reg::x(3)).into()],
                     );
                     self.mach("cmn", [(Reg::x(S0)).into(), Arg::imm(1)]);
-                    self.conditional("ne", ok.clone());
-                    self.compare_branch(Reg::x(0), true, ok.clone());
+                    self.conditional("ne", Name::Text(&ok));
+                    self.compare_branch(Reg::x(0), true, Name::Text(&ok));
                     self.materialize(S0, 1 << 63, true);
                     self.mach("cmp", [(Reg::x(1)).into(), (Reg::x(S0)).into()]);
-                    self.conditional("eq", trap.clone());
+                    self.conditional("eq", Name::Text(&trap));
                     self.out.label(ok.clone());
                 }
                 let function = match op {
@@ -3009,7 +4954,14 @@ impl<'a> FunctionCompiler<'a> {
                     BinaryOp::Urem => "___umodti3",
                     _ => "___modti3",
                 };
-                self.out.branch(true, function.to_string());
+                self.out.branch(
+                    true,
+                    if self.linux {
+                        function[1..].to_string()
+                    } else {
+                        function.to_string()
+                    },
+                );
                 return (0, 1);
             }
             _ => unreachable!("{op} on i128 is rejected or not an integer operation"),
@@ -3777,7 +5729,7 @@ impl<'a> FunctionCompiler<'a> {
                     (BinaryOp::Xor, true) => ("eor", Opcode::EOR_64_log_imm),
                     _ => unreachable!(),
                 };
-                let text = |out: &mut String| {
+                let text = |out: &mut crate::text::Text| {
                     write!(
                         out,
                         "{mnemonic}\t{}, {}, #0x{:x}",
@@ -4107,7 +6059,7 @@ impl<'a> FunctionCompiler<'a> {
                 // Hardware division returns 0 for a zero divisor; the IR traps.
                 if divisor.is_none_or(|n| n == 0) {
                     let trap = self.trap_label();
-                    self.compare_branch(b, false, trap);
+                    self.compare_branch(b, false, Name::Text(&trap));
                 }
                 if op == BinaryOp::Sdiv && divisor.is_none_or(|n| n == mask) {
                     // MIN / -1 overflows. Hardware wraps; the IR traps.
@@ -4119,7 +6071,7 @@ impl<'a> FunctionCompiler<'a> {
                         [(a).into(), (min).into(), Arg::imm(0), Arg::from("eq")],
                     );
                     let trap = self.trap_label();
-                    self.conditional("eq", trap);
+                    self.conditional("eq", Name::Text(&trap));
                 }
                 let div = if signed { "sdiv" } else { "udiv" };
                 match op {
@@ -4467,7 +6419,7 @@ impl<'a> FunctionCompiler<'a> {
                 S0
             };
             self.mach("cmp", [(reg(idx, ty)).into(), Arg::imm(span)]);
-            self.conditional("hi", targets[0].clone());
+            self.conditional("hi", Name::Text(&targets[0]));
             let table = format!("L{}_{inst}_table", self.func.name);
             let index = Address::index(
                 Reg::x(S1),
@@ -4503,7 +6455,7 @@ impl<'a> FunctionCompiler<'a> {
             for (i, &value) in values.iter().enumerate() {
                 let operand = self.operand(S1, value, is64);
                 self.mach("cmp", [(reg(x, ty)).into(), (operand).into()]);
-                self.conditional("eq", targets[i + 1].clone());
+                self.conditional("eq", Name::Text(&targets[i + 1]));
             }
             // Case landing pads are emitted before the next IR block. The
             // default may fall through only when none of those pads intervene.
@@ -4521,8 +6473,7 @@ impl<'a> FunctionCompiler<'a> {
             if !dest.args.is_empty() || !self.edge_moves(i).is_empty() {
                 self.out.label(target.clone());
                 self.block_args(dest, i);
-                let label = self.label(dest.block);
-                self.out.branch(false, label);
+                self.out.branch_name(false, self.block_name(dest.block));
             }
         }
     }
@@ -4638,7 +6589,8 @@ impl<'a> FunctionCompiler<'a> {
 
     fn block_args(&mut self, call: &BlockCall, successor: usize) {
         let params = self.func.block_params(call.block);
-        let mut moves = self.edge_moves(successor).to_vec();
+        let mut moves = std::mem::take(&mut self.copies);
+        moves.extend_from_slice(self.edge_moves(successor));
         for (&param, &arg) in params.iter().zip(&call.args) {
             // A parameter with no location is an alias, never read.
             let Some(dst) = self
@@ -4656,6 +6608,8 @@ impl<'a> FunctionCompiler<'a> {
             }
         }
         self.parallel_copy(&moves);
+        moves.clear();
+        self.copies = moves;
     }
 
     /// Emits `moves`, each `(dst, src)`, as if they all happened at once.
@@ -4678,9 +6632,7 @@ impl<'a> FunctionCompiler<'a> {
         } else {
             self.copy_temp.map_or(Loc::Reg(S0), Loc::Stack)
         };
-        for (dst, src) in sequentialize(moves, temp) {
-            self.emit_move(dst, src);
-        }
+        for_each_move(moves, temp, |dst, src| self.emit_move(dst, src));
     }
 
     /// One 64-bit move between any two locations. Narrow values have
@@ -4750,7 +6702,7 @@ impl<'a> FunctionCompiler<'a> {
             (Loc::FReg(d), Loc::Stack(s)) => self.spill(false, true, d, s),
             (Loc::Stack(d), Loc::Reg(s)) => self.spill(true, false, s, d),
             (Loc::Stack(d), Loc::FReg(s)) => self.spill(true, true, s, d),
-            (Loc::Stack(d), Loc::Stack(s)) if self.vector_spills.contains(&d) => {
+            (Loc::Stack(d), Loc::Stack(s)) if self.vector_spills.contains_key(&d) => {
                 self.spill(false, true, FS2, s);
                 self.spill(true, true, FS2, d);
             }
@@ -4763,8 +6715,7 @@ impl<'a> FunctionCompiler<'a> {
 
     fn branch_unless_next(&mut self, target: Block) {
         if self.next_block != Some(target) {
-            let label = self.label(target);
-            self.out.branch(false, label);
+            self.out.branch_name(false, self.block_name(target));
         }
     }
 
@@ -5092,25 +7043,24 @@ impl<'a> FunctionCompiler<'a> {
         crate::text::block_label("L", &self.func.name, block)
     }
 
-    fn conditional(&mut self, condition: &str, target: String) {
-        self.out.symbolic(Symbolic::Conditional {
-            condition: native::condition(condition) as u8,
-            target,
-        });
+    /// The label of `block`.
+    fn block_name(&self, block: Block) -> Name<'a> {
+        Name::Block(&self.func.name, block)
     }
-    fn brif_false(&mut self, test: &BrifTest, target: String) {
+
+    fn conditional(&mut self, condition: &str, target: Name<'_>) {
+        self.out
+            .conditional(native::condition(condition) as u8, target);
+    }
+    fn brif_false(&mut self, test: &BrifTest, target: Name<'_>) {
         match test {
             BrifTest::Flags(condition) => self.conditional(condition, target),
             BrifTest::Zero(register) => self.compare_branch(*register, false, target),
         }
     }
-    fn compare_branch(&mut self, r: Reg, nonzero: bool, target: String) {
-        self.out.symbolic(Symbolic::Compare {
-            register: r.number as u8,
-            is64: r.bits() == 64,
-            nonzero,
-            target,
-        });
+    fn compare_branch(&mut self, r: Reg, nonzero: bool, target: Name<'_>) {
+        self.out
+            .compare_branch(r.number as u8, r.bits() == 64, nonzero, target);
     }
     fn atomic<const N: usize>(&mut self, root: &str, order: &str, ty: Type, args: [Arg; N]) {
         let width = width_suffix(ty);
@@ -5135,7 +7085,7 @@ impl<'a> FunctionCompiler<'a> {
                 let instruction = native::lower(op, &args);
                 self.out.native(|| instruction, |_| unreachable!());
             }
-            Output::Text(text) => {
+            Output::Text(text) | Output::ElfText(text) => {
                 text.push('\t');
                 text.push_str(op);
                 for (i, a) in args.iter().enumerate() {
@@ -5151,10 +7101,10 @@ impl<'a> FunctionCompiler<'a> {
         &mut self,
         opcode: Opcode,
         fields: [(FieldId, u32); N],
-        text: impl FnOnce(&mut String) -> std::fmt::Result,
+        text: impl FnOnce(&mut crate::text::Text) -> std::fmt::Result,
     ) {
         self.out
-            .native(|| NativeInstruction::new(opcode, fields), text);
+            .native(|| native::instruction(opcode, fields), text);
     }
 
     fn spill(&mut self, store: bool, float: bool, register: u8, slot: u32) {
@@ -5164,8 +7114,8 @@ impl<'a> FunctionCompiler<'a> {
         } else {
             crate::backend_profile::Counter::SpillHelperLoads
         });
-        if float && self.vector_spills.contains(&slot) {
-            self.vector_spill(store, register, slot);
+        if float && let Some(&bytes) = self.vector_spills.get(&slot) {
+            self.vector_spill(store, register, slot, bytes);
             return;
         }
         let opcode = match (store, float) {
@@ -5419,13 +7369,17 @@ fn param_kinds(params: &[AbiParam]) -> Vec<ArgKind<'_>> {
 /// The convention's view of a call's arguments: the parameters `params`,
 /// then any variadic arguments by their types.
 fn arg_kinds<'s>(func: &Function, params: &'s [AbiParam], args: &[Value]) -> Vec<ArgKind<'s>> {
-    args.iter()
-        .enumerate()
-        .map(|(i, &arg)| match params.get(i) {
-            Some(p) => ArgKind::of(p.ty, &p.purpose),
-            None => ArgKind::Value(func.value_type(func.resolve(arg))),
-        })
+    (args.iter().enumerate())
+        .map(|(i, &arg)| arg_kind(func, params, i, arg))
         .collect()
+}
+
+/// How argument `i`, `arg`, of a call with `params` crosses it.
+fn arg_kind<'s>(func: &Function, params: &'s [AbiParam], i: usize, arg: Value) -> ArgKind<'s> {
+    match params.get(i) {
+        Some(p) => ArgKind::of(p.ty, &p.purpose),
+        None => ArgKind::Value(func.value_type(func.resolve(arg))),
+    }
 }
 
 /// Picks a register for each operand of `asm`, outputs then inputs, from
@@ -5502,7 +7456,8 @@ fn asm_loc(r: PhysReg) -> Loc {
 /// a register named for its type (`x0` or `w0`, `d0` or `s0`), `[x0]` for
 /// memory, or the number for a constant. A modifier picks another view of
 /// a register (`%w0`, `%x0`; `%s0`, `%d0`, `%q0`, `%h0`, `%b0`), and `%c0`
-/// is a constant; `%%` is `%`.
+/// is a constant; `%%` is `%`. `%[N]` (also `%c[N]`, etc.) delimits a number
+/// when literal digits follow the reference.
 fn asm_text(
     func: &Function,
     asm: &InlineAsm,
@@ -5522,9 +7477,13 @@ fn asm_text(
             continue;
         }
         let modifier = chars.next_if(|c| c.is_ascii_alphabetic());
+        let delimited = chars.next_if_eq(&'[').is_some();
         let mut digits = String::new();
         while let Some(d) = chars.next_if(char::is_ascii_digit) {
             digits.push(d);
+        }
+        if delimited && chars.next() != Some(']') {
+            return Err("bracketed asm operand must end with `]`".into());
         }
         let n: usize = digits
             .parse()
@@ -5599,6 +7558,7 @@ fn reg(n: u8, ty: Type) -> Reg {
 /// `s<n>` for f32, `d<n>` for f64, `q<n>` for vectors.
 fn freg(n: u8, ty: Type) -> Reg {
     match ty {
+        Type::Vector(v) if v.bytes() == 8 => Reg::d(n),
         Type::Vector(_) => Reg::q(n),
         Type::F32 => Reg::s(n),
         _ => Reg::d(n),

@@ -24,6 +24,7 @@ fn ty(t: Type) -> ExportResult<String> {
     Ok(match t {
         Type::F32 => "float".into(),
         Type::F64 => "double".into(),
+        Type::F80 => return Err("f80 is unsupported on the AppleArm64 exporter".into()),
         Type::Vector(_) => return Err("vector types are unsupported".into()),
         _ => t.to_string(),
     })
@@ -49,6 +50,9 @@ fn abi(p: &AbiParam) -> ExportResult<String> {
     Ok(format!("{}{ext}", ty(p.ty)?))
 }
 fn signature(s: &Signature) -> ExportResult<(String, Vec<String>)> {
+    if s.x86_vector_abi.is_some() {
+        return Err("explicit x86 vector ABI is unsupported by this exporter".into());
+    }
     if s.variadic || s.returns_twice || s.returns.len() > 1 {
         return Err(
             "variadic, returns_twice and multiple-result signatures are unsupported".into(),
@@ -90,9 +94,49 @@ fn attrs(a: FunctionAttrs) -> String {
 /// Verify and translate the complete module in memory. Errors never return
 /// partial LLVM text. The caller must not publish output until this succeeds.
 pub fn export(module: &Module, target: TargetProfile) -> ExportResult<String> {
-    if module.functions.iter().any(|f| f.weak_odr)
+
+    if module.functions.iter().any(|f| f.layout_insts().any(|(_, i)| matches!(f.inst_data(i), keel_ir::InstData::AggregateVaArg { .. }) || f.inst_data(i).call_args().is_some_and(|a| a.has_explicit_abi()))) {
+        return Err("explicit call operand ABI and aggregate va_arg homes are unsupported by LLVM".into());
+    }
+    if module.decls.iter().any(|d| d.sig.x86_vector_abi.is_some())
+        || module.functions.iter().any(|f| {
+            f.sig.x86_vector_abi.is_some()
+                || f.callees().any(|(_, d)| d.sig.x86_vector_abi.is_some())
+                || f.signatures().any(|(_, s)| s.x86_vector_abi.is_some())
+                || f.layout_insts().any(|(_,i)| matches!(f.inst_data(i), keel_ir::InstData::VaArg { x86_vector_abi: Some(_), .. }))
+        })
+    {
+        return Err("explicit x86 vector ABI is unsupported by LLVM".into());
+    }
+
+    if module
+        .functions
+        .iter()
+        .any(|f| f.attrs.retain || f.attrs.section.is_some())
+        || module
+            .decls
+            .iter()
+            .any(|f| f.attrs.retain || f.attrs.section.is_some())
+        || module.data.iter().any(|d| d.retain || d.section.is_some())
+    {
+        return Err("export does not support custom sections or linker retention".into());
+    }
+
+    if module
+        .functions
+        .iter()
+        .any(|f| f.attrs.constructor || f.attrs.destructor)
+    {
+        return Err("LLVM export does not support lifecycle registration".into());
+    }
+    if module.decls.iter().any(|d| d.attrs.weak)
+        || module
+            .functions
+            .iter()
+            .any(|f| f.attrs.weak || f.weak_odr || f.hidden)
         || module.data.iter().any(|d| {
-            d.weak_odr
+            d.weak
+                || d.weak_odr
                 || d.hidden
                 || d.init.as_ref().is_some_and(|i| {
                     i.items
@@ -101,7 +145,7 @@ pub fn export(module: &Module, target: TargetProfile) -> ExportResult<String> {
                 })
         })
     {
-        return Err("weak_odr is unsupported by this exporter".into());
+        return Err("weak, weak_odr and hidden linkage are unsupported by this exporter".into());
     }
     verify_module(module).map_err(|e| format!("invalid Keel IR: {e:?}"))?;
     if !module.files.is_empty()
@@ -205,6 +249,23 @@ pub fn export(module: &Module, target: TargetProfile) -> ExportResult<String> {
         }
         emit_function(f, &mut out, &mut intrinsics)
             .map_err(|e| format!("function @{}: {e}", f.name))?;
+    }
+    // Keep compiler-emission roots through LLVM optimization without granting
+    // linker retention (`llvm.used` would impose that stronger contract).
+    let used: Vec<_> = module
+        .functions
+        .iter()
+        .filter(|f| f.attrs.used)
+        .map(|f| format!("ptr {}", symbol(&f.name)))
+        .collect();
+    if !used.is_empty() {
+        writeln!(
+            out,
+            "@llvm.compiler.used = appending global [{} x ptr] [{}], section \"llvm.metadata\"",
+            used.len(),
+            used.join(", ")
+        )
+        .unwrap();
     }
     for decl in intrinsics {
         writeln!(out, "{decl}").unwrap();
@@ -507,7 +568,16 @@ impl Emitter<'_> {
                     // This diagnostic exporter intentionally rejects every
                     // vector type; keep the new vector conversions in that
                     // same explicit unsupported subset.
-                    ConvertOp::SwidenLow | ConvertOp::UwidenLow => {
+                    ConvertOp::SwidenLow
+                    | ConvertOp::UwidenLow
+                    | ConvertOp::SwidenHigh
+                    | ConvertOp::UwidenHigh
+                    | ConvertOp::NarrowLow
+                    | ConvertOp::SnarrowSatLow
+                    | ConvertOp::UnarrowSatLow
+                    | ConvertOp::SunarrowSatLow
+                    | ConvertOp::SpairwiseAddLong
+                    | ConvertOp::UpairwiseAddLong => {
                         return Err("vector types are unsupported".into());
                     }
                     ConvertOp::Sext => "sext",

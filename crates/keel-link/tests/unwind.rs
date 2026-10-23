@@ -157,9 +157,19 @@ fn planning_accounts_for_address_dependent_gap_changes() {
     // At the conservative size __DATA starts at 0xc000. Shrinking unwind moves
     // it to 0x8000 and removes the gap following _f2. Another plan is required.
     let source = ".text\n.globl _main\n_main:\nret\n_f1:\nret\n_f2:\nret\n.space 16268\n.data\n_f3:\n.long 0\n.quad _main\n.section __LD,__compact_unwind\n.quad _main\n.long 4\n.long 0x02001000\n.quad 0\n.quad 0\n.quad _f1\n.long 4\n.long 0x02001000\n.quad 0\n.quad 0\n.quad _f2\n.long 16376\n.long 0x02001000\n.quad 0\n.quad 0\n.quad _f3\n.long 4\n.long 0x02001000\n.quad 0\n.quad 0\n";
-    for (length, expected_size, data_address, range_count) in
-        [(16376, 92, 0x8000, 4), (16380, 148, 0xc000, 5)]
-    {
+    for (length, expected_size, data_address, range_count, boundary) in [
+        (16376, 92, 0x8000, 4, false),
+        (16380, 148, 0xc000, 5, false),
+        (16376, 92, 0x8000, 4, true),
+        (16380, 148, 0xc000, 5, true),
+    ] {
+        // A deferred boundary target must move with the section during both
+        // provisional planning and final relocation, just like its definition.
+        let source = if boundary {
+            source.replace(".quad _f3\n", ".quad section$start$__DATA$__data\n")
+        } else {
+            source.to_owned()
+        };
         let exe = link(&source.replace(".long 16376", &format!(".long {length}"))).unwrap();
         let file = object::File::parse(exe.bytes.as_slice()).unwrap();
         let b = file

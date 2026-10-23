@@ -39,6 +39,7 @@ mod compact;
 mod control;
 mod data;
 mod debug;
+pub(crate) mod elf;
 mod float;
 mod memory;
 mod preprocess;
@@ -405,16 +406,44 @@ fn symbol(s: &str) -> Result<(), String> {
     }
 }
 fn is_symbol(s: &str) -> bool {
-    // Bytes of non-ASCII characters are rejected like the characters.
-    let valid = |b: &u8| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'$');
-    matches!(s.as_bytes(), [first, rest @ ..]
-        if valid(first) && !first.is_ascii_digit() && rest.iter().all(valid))
+    // Bytes of non-ASCII characters are rejected like the characters. Every
+    // label and branch target is checked: classify bytes without branches,
+    // so that whole names are checked a vector at a time.
+    let valid = |b: u8| {
+        (b | 0x20).wrapping_sub(b'a') < 26
+            || b.wrapping_sub(b'0') < 10
+            || b == b'_'
+            || b == b'.'
+            || b == b'$'
+    };
+    match s.as_bytes() {
+        [first, rest @ ..] => {
+            valid(*first)
+                && !first.is_ascii_digit()
+                && rest.iter().fold(true, |all, &b| all & valid(b))
+        }
+        [] => false,
+    }
 }
 struct Branch<'a> {
     section: usize,
     line: usize,
     offset: usize,
+    /// A structured target, already checked to be a plain symbol.
+    symbol: bool,
     spec: control::Branch<'a>,
+}
+
+/// A branch's description in diagnostics, named only when one is reported.
+struct BranchKind(keel_asm_ir::Opcode);
+impl std::fmt::Display for BranchKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.0.name().ends_with("_loadlit") {
+            "literal load"
+        } else {
+            "branch"
+        })
+    }
 }
 
 struct DataFixup<'a> {
@@ -557,7 +586,9 @@ fn assemble_pass(
     labels.reserve(label_count + reservations.frames);
     let mut globals: FxHashMap<&str, usize> = FxHashMap::default();
     let mut private_externs = FxHashMap::default();
+    let mut weak_references = FxHashMap::default();
     let mut weak_definitions = FxHashMap::default();
+    let mut no_dead_strip = FxHashMap::default();
     let mut weak_hidden = FxHashMap::default();
     let mut common = BTreeMap::new();
     let mut branches = BumpVec::with_capacity_in(branch_count, &arena);
@@ -573,9 +604,12 @@ fn assemble_pass(
                 use keel_asm_ir::Directive as D;
                 d.validate().map_err(err)?;
                 match d {
-                    D::ElfSection { .. }
+                    D::ElfLifecycleArray { .. }
+                    | D::ElfSection { .. }
                     | D::ElfSectionMetadata { .. }
                     | D::ElfType { .. }
+                    | D::ElfWeak(_)
+                    | D::ElfHidden(_)
                     | D::Size { .. }
                     | D::X86Integer { .. } => {
                         return Err(err("ELF directive in AArch64 Mach-O program".into()));
@@ -587,6 +621,12 @@ fn assemble_pass(
                     } => current = data::select(&mut result, segment, name, *kind).map_err(err)?,
                     D::Global(name) => {
                         globals.insert(name.as_str(), line);
+                    }
+                    D::WeakReference(name) => {
+                        weak_references.insert(name.as_str(), line);
+                    }
+                    D::NoDeadStrip(name) => {
+                        no_dead_strip.insert(name.as_str(), line);
                     }
                     D::WeakDefinition(name) => {
                         symbol(name).map_err(err)?;
@@ -810,6 +850,7 @@ fn assemble_pass(
                             section: current,
                             line,
                             offset,
+                            symbol: true,
                             spec: control::Branch {
                                 encoding: instruction.opcode,
                                 field: FieldId::imm19,
@@ -877,6 +918,7 @@ fn assemble_pass(
                     section: current,
                     line,
                     offset: data::position(&result, current) as usize,
+                    symbol: true,
                     spec: control::Branch {
                         encoding: if link {
                             keel_asm_ir::Opcode::BL_only_branch_imm
@@ -911,7 +953,9 @@ fn assemble_pass(
                 data::instruction(&mut result, current, &word.to_le_bytes()).map_err(err)?;
                 continue;
             }
-            program::Entry::Word(word) => {
+            program::Entry::Words(words) => {
+                // One statement per word, from `line`. Each keeps the
+                // section and its alignment, so only the first can fail.
                 if !data::is_code(&result, current)
                     || !data::position(&result, current).is_multiple_of(4)
                 {
@@ -920,30 +964,26 @@ fn assemble_pass(
                     ));
                 }
                 if metrics {
-                    locations.push(InstructionLocation {
+                    let start = data::position(&result, current) as usize;
+                    locations.extend((0..words.len()).map(|i| InstructionLocation {
                         section: current,
-                        line,
-                        offset: data::position(&result, current) as usize,
-                    });
+                        line: line + i,
+                        offset: start + 4 * i,
+                    }));
                 }
-                data::instruction(&mut result, current, &word.to_le_bytes()).map_err(err)?;
+                data::instructions(&mut result, current, words, line)?;
                 continue;
             }
             program::Entry::Label(name) => {
                 symbol(name).map_err(err)?;
-                if labels
-                    .insert(
-                        name,
-                        data::Location {
-                            section: current,
-                            offset: data::position(&result, current),
-                        },
-                    )
-                    .is_some()
-                {
+                let location = data::Location {
+                    section: current,
+                    offset: data::position(&result, current),
+                };
+                if labels.insert(name, location).is_some() {
                     return Err(err(format!("duplicate label `{name}`")));
                 }
-                label_order.push((name, labels[name]));
+                label_order.push((name, location));
                 continue;
             }
             program::Entry::Text(raw) => raw,
@@ -955,19 +995,14 @@ fn assemble_pass(
         {
             let name = name.trim_fast();
             symbol(name).map_err(err)?;
-            if labels
-                .insert(
-                    name,
-                    data::Location {
-                        section: current,
-                        offset: data::position(&result, current),
-                    },
-                )
-                .is_some()
-            {
+            let location = data::Location {
+                section: current,
+                offset: data::position(&result, current),
+            };
+            if labels.insert(name, location).is_some() {
                 return Err(err(format!("duplicate label `{name}`")));
             }
-            label_order.push((name, labels[name]));
+            label_order.push((name, location));
             s = rest.trim_fast();
         }
         if s.is_empty() {
@@ -1254,6 +1289,25 @@ fn assemble_pass(
                 current = data::section(&mut result, &args).map_err(err)?;
                 continue;
             }
+            ".no_dead_strip" => {
+                count(&args, 1, usize::MAX).map_err(err)?;
+                for name in args.iter().copied() {
+                    symbol(name).map_err(err)?;
+                    no_dead_strip.insert(name, line);
+                }
+                continue;
+            }
+            ".weak_reference" => {
+                count(&args, 1, usize::MAX).map_err(err)?;
+                for name in args.iter().copied() {
+                    symbol(name).map_err(err)?;
+                    if name.starts_with('L') {
+                        return Err(err("weak reference requires a non-local symbol".into()));
+                    }
+                    weak_references.insert(name, line);
+                }
+                continue;
+            }
             ".weak_definition" | ".weak_def_can_be_hidden" => {
                 count(&args, 1, usize::MAX).map_err(err)?;
                 for name in args.iter().copied() {
@@ -1341,14 +1395,12 @@ fn assemble_pass(
                 )
                 .map_err(err)?;
                 data::align(&mut result, section, alignment).map_err(err)?;
-                labels.insert(
-                    name,
-                    data::Location {
-                        section,
-                        offset: data::position(&result, section),
-                    },
-                );
-                label_order.push((name, labels[name]));
+                let location = data::Location {
+                    section,
+                    offset: data::position(&result, section),
+                };
+                labels.insert(name, location);
+                label_order.push((name, location));
                 data::reserve(&mut result, section, size, 0).map_err(err)?;
                 continue;
             }
@@ -1389,6 +1441,7 @@ fn assemble_pass(
                 section: current,
                 line,
                 offset: data::position(&result, current) as usize,
+                symbol: false,
                 spec,
             });
             data::instruction(&mut result, current, &[0; 4]).map_err(err)?;
@@ -1541,15 +1594,19 @@ fn assemble_pass(
     let temporary_globals = globals.keys().any(|name| name.starts_with('L'));
     for mut branch in branches {
         let err = |message| Error::new(branch.line, message);
-        let kind = if branch.spec.encoding.name().ends_with("_loadlit") {
-            "literal load"
-        } else {
-            "branch"
-        };
-        let delta = if is_integer(branch.spec.target) {
+        let kind = BranchKind(branch.spec.encoding);
+        let delta = if !branch.symbol && is_integer(branch.spec.target) {
             integer(branch.spec.target).map_err(err)?
         } else {
-            let expr = relocate::expression(branch.spec.target).map_err(err)?;
+            let expr = if branch.symbol {
+                relocate::Expression {
+                    name: branch.spec.target,
+                    modifier: None,
+                    addend: 0,
+                }
+            } else {
+                relocate::expression(branch.spec.target).map_err(err)?
+            };
             let target = labels.get(expr.name);
             let local = expr.name.starts_with('L')
                 && !(temporary_globals && globals.contains_key(expr.name));
@@ -1846,8 +1903,10 @@ fn assemble_pass(
     // here so that only distinct names are sorted.
     let mut names = if compact {
         // Look up only the global and relocated names, not every label.
-        let mut names =
-            BumpVec::from_iter_in(labels.keys().copied().filter(|n| !n.starts_with('L')), &arena);
+        let mut names = BumpVec::from_iter_in(
+            labels.keys().copied().filter(|n| !n.starts_with('L')),
+            &arena,
+        );
         let mut kept = FxHashSet::default();
         let referenced = result
             .relocations
@@ -1871,7 +1930,12 @@ fn assemble_pass(
             names.push(name);
         }
     };
-    for &name in globals.keys().chain(weak_definitions.keys()) {
+    for &name in globals
+        .keys()
+        .chain(weak_definitions.keys())
+        .chain(weak_references.keys())
+        .chain(no_dead_strip.keys())
+    {
         add(name);
     }
     for relocation in &result.relocations {
@@ -1911,7 +1975,9 @@ fn assemble_pass(
                 common: common.get(name).copied(),
                 global: location.is_none() || globals.contains_key(&name),
                 private_extern: private_externs.contains_key(name),
+                weak_reference: location.is_none() && weak_references.contains_key(name),
                 weak_definition: weak_definitions.contains_key(definition),
+                no_dead_strip: no_dead_strip.contains_key(name),
                 weak_can_be_hidden: weak_hidden.contains_key(definition),
                 offset: location.map(|l| l.offset),
                 section: location.map(|l| l.section),

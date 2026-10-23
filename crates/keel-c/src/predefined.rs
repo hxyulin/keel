@@ -10,6 +10,7 @@ pub fn predefined_macros(
     darwin_deployment: Option<&str>,
 ) -> Result<String, String> {
     let apple = target == Target::Aarch64AppleDarwin;
+    let arm_linux = target == Target::Aarch64LinuxGnu;
     if !apple && darwin_deployment.is_some() {
         return Err("macOS deployment target requires aarch64-apple-darwin".into());
     }
@@ -60,9 +61,19 @@ pub fn predefined_macros(
         ("__ORDER_PDP_ENDIAN__", "3412"),
         ("__BYTE_ORDER__", "__ORDER_LITTLE_ENDIAN__"),
         ("__LITTLE_ENDIAN__", "1"),
-        ("__WCHAR_TYPE__", "int"),
+        (
+            "__WCHAR_TYPE__",
+            if arm_linux { "unsigned int" } else { "int" },
+        ),
         ("__WCHAR_WIDTH__", "32"),
-        ("__WCHAR_MAX__", "2147483647"),
+        (
+            "__WCHAR_MAX__",
+            if arm_linux {
+                "4294967295U"
+            } else {
+                "2147483647"
+            },
+        ),
         ("__CHAR16_TYPE__", "unsigned short"),
         ("__CHAR32_TYPE__", "unsigned int"),
         ("__SIG_ATOMIC_TYPE__", "int"),
@@ -279,6 +290,22 @@ pub fn predefined_macros(
                 "2.2204460492503131e-16",
                 "4.9406564584124654e-324",
             )
+        } else if arm_linux {
+            (
+                "LDBL",
+                "L",
+                113,
+                33,
+                36,
+                -16381,
+                16384,
+                -4931,
+                4932,
+                "3.36210314311209350626267781732175260e-4932",
+                "1.18973149535723176508575932662800702e+4932",
+                "1.92592994438723585305597794258492732e-34",
+                "6.47517511943802511092443895822764655e-4966",
+            )
         } else {
             (
                 "LDBL",
@@ -355,11 +382,25 @@ pub fn predefined_macros(
             "__gnu_linux__",
             "__unix",
             "__unix__",
-            "__x86_64",
-            "__x86_64__",
-            "__amd64",
-            "__amd64__",
         ] {
+            def(name, "1");
+        }
+    }
+    if arm_linux {
+        for name in [
+            "__aarch64__",
+            "__AARCH64EL__",
+            "__ARM_64BIT_STATE",
+            "__ARM_PCS_AAPCS64",
+            "__ARM_ARCH_ISA_A64",
+            "__CHAR_UNSIGNED__",
+            "__WCHAR_UNSIGNED__",
+        ] {
+            def(name, if name == "__ARM_NEON_FP" { "0xE" } else { "1" });
+        }
+        def("__ARM_ARCH", "8");
+    } else if !apple {
+        for name in ["__x86_64", "__x86_64__", "__amd64", "__amd64__"] {
             def(name, "1");
         }
     }

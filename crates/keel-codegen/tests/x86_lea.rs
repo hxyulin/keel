@@ -114,6 +114,11 @@ fn retained_actual_bridge_ir_selects_only_in_tree_modes_and_both_targets_assembl
                     )
                     .unwrap();
                     let (object, parsed) = match target {
+                        Target::Aarch64LinuxGnu => (
+                            keel_asm::assemble_elf_program_object(&program, Default::default())
+                                .unwrap(),
+                            keel_asm::assemble_elf_object(&text).unwrap(),
+                        ),
                         Target::Aarch64AppleDarwin => (
                             keel_asm::assemble_program_object(
                                 &program,

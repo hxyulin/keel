@@ -73,7 +73,7 @@ fn duplicate_immediate_operand_keeps_its_register_definition() {
                 return None;
             }
             let initialized = match target {
-                Target::Aarch64AppleDarwin => {
+                Target::Aarch64AppleDarwin | Target::Aarch64LinuxGnu => {
                     *definition == "movz"
                         && operands.len() == 2
                         && operands[1] == "#0x7"

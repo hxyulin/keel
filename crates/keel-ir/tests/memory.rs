@@ -133,7 +133,7 @@ fn effects_and_faults_do_not_conflate_reads_volatility_and_scheduling() {
     );
     let call = InstData::Call {
         func: keel_ir::FuncRef::new(0),
-        args: vec![],
+        args: (vec![]).into(),
     };
     assert_eq!(call.memory_effects(), MemoryEffects::Barrier);
     assert!(call.may_trap());

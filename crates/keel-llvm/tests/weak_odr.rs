@@ -1,6 +1,10 @@
 #[test]
 fn unsupported_odr_linkage_fails_whole_module_export() {
     for src in [
+        "decl @optional() weak\nfunc @f() {\nblock0:\n return\n}\n",
+        "func @f() weak {\nblock0:\n return\n}\n",
+        "data @d = weak align 8 { i64 1 }\n",
+        "decl data weak @d\n",
         "func @f() weak_odr {\nblock0:\n return\n}\n",
         "data @d = weak_odr align 8 { i64 1 }\n",
         "data @d = weak_odr hidden align 8 { i64 1 }\n",

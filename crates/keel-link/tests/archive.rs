@@ -6,6 +6,7 @@ use object::read::archive::ArchiveFile;
 
 fn object(target: Target, source: &str) -> Vec<u8> {
     match target {
+        Target::Aarch64LinuxGnu => keel_asm::assemble_elf_object(source).unwrap(),
         Target::X86_64LinuxGnu => keel_asm::x86::assemble_object(source).unwrap(),
         Target::Aarch64AppleDarwin => keel_asm::assemble(source).unwrap().to_macho().unwrap(),
     }

@@ -45,6 +45,10 @@ fn conditional_reload_removed_for_both_targets_and_tiers() {
                     let program =
                         keel_codegen::compile_program_with_pipeline(&m, target, &pipeline).unwrap();
                     let object = match target {
+                        Target::Aarch64LinuxGnu => {
+                            keel_asm::assemble_elf_program_object(&program, Default::default())
+                                .unwrap()
+                        }
                         Target::Aarch64AppleDarwin => {
                             keel_asm::assemble_program_object(&program, Default::default()).unwrap()
                         }
@@ -126,6 +130,11 @@ fn branch_and_merge_facts_emit_on_both_targets() {
                 let program =
                     keel_codegen::compile_program_with_pipeline(&m, target, &pipeline).unwrap();
                 match target {
+                    Target::Aarch64LinuxGnu => assert_eq!(
+                        keel_asm::assemble_elf_object(&text).unwrap(),
+                        keel_asm::assemble_elf_program_object(&program, Default::default())
+                            .unwrap()
+                    ),
                     Target::Aarch64AppleDarwin => assert_eq!(
                         keel_asm::assemble_object(&text).unwrap(),
                         keel_asm::assemble_program_object(&program, Default::default()).unwrap()

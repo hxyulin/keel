@@ -121,6 +121,7 @@ fn parse_module(src: &str, ir_path: Option<&str>) -> Result<Module, ParseError> 
                 debug_globals.push(DebugGlobal { name, ty, symbol });
             }
             "decl" if parser.eat(&Tok::Ident("data".into())) => {
+                let weak = parser.eat(&Tok::Ident("weak".into()));
                 let thread_local = parser.eat(&Tok::Ident("thread_local".into()));
                 let name = parser.global("a data name like `@environ`")?;
                 parser.expect(Tok::Newline)?;
@@ -128,8 +129,11 @@ fn parse_module(src: &str, ir_path: Option<&str>) -> Result<Module, ParseError> 
                     name,
                     thread_local,
                     local: false,
+                    weak,
                     weak_odr: false,
                     hidden: false,
+                    retain: false,
+                    section: None,
                     init: None,
                 });
             }
@@ -486,6 +490,7 @@ struct ParsedFunction {
     sig: Signature,
     local: bool,
     weak_odr: bool,
+    hidden: bool,
     personality: Option<String>,
     slots: Vec<StackSlotData>,
     debug_return: Option<DebugType>,
@@ -718,6 +723,17 @@ impl Parser {
             };
             self.expect(Tok::Punct(')'))?;
         }
+        let mut x86_vector_abi = None;
+        if self.eat(&Tok::Ident("x86_vector_abi".into())) {
+            self.expect(Tok::Punct('('))?;
+            let (name, loc) = self.ident("an x86 vector ABI")?;
+            x86_vector_abi = Some(match name.as_str() {
+                "gnu" => crate::X86VectorAbi::Gnu,
+                "clang" => crate::X86VectorAbi::Clang,
+                _ => return Err(error(loc, format!("unknown x86 vector ABI `{name}`"))),
+            });
+            self.expect(Tok::Punct(')'))?;
+        }
         let returns_twice = self.eat(&Tok::Ident("returns_twice".into()));
         Ok(Signature {
             params,
@@ -725,6 +741,7 @@ impl Parser {
             cc,
             variadic,
             returns_twice,
+            x86_vector_abi,
         })
     }
 
@@ -777,8 +794,22 @@ impl Parser {
     fn function_attrs(&mut self) -> Result<crate::FunctionAttrs, ParseError> {
         let mut attrs = crate::FunctionAttrs::default();
         loop {
+            if self.eat(&Tok::Ident("section".into())) {
+                if attrs.section.is_some() {
+                    return Err(self.unexpected("one section attribute"));
+                }
+                let name = self.string("a section name")?;
+                attrs.section =
+                    Some(crate::SectionName::new(&name).map_err(|e| self.unexpected(e))?);
+                continue;
+            }
             let mut found = false;
             for name in [
+                "weak",
+                "constructor",
+                "used",
+                "retain",
+                "destructor",
                 "noninterposable",
                 "inlinehint",
                 "alwaysinline",
@@ -788,6 +819,11 @@ impl Parser {
             ] {
                 if self.eat(&Tok::Ident(name.into())) {
                     let flag = match name {
+                        "weak" => &mut attrs.weak,
+                        "constructor" => &mut attrs.constructor,
+                        "used" => &mut attrs.used,
+                        "retain" => &mut attrs.retain,
+                        "destructor" => &mut attrs.destructor,
                         "noninterposable" => &mut attrs.noninterposable,
                         "inlinehint" => &mut attrs.inlinehint,
                         "alwaysinline" => &mut attrs.alwaysinline,
@@ -832,6 +868,7 @@ impl Parser {
         }
         let local = self.eat(&Tok::Ident("local".into()));
         let weak_odr = self.eat(&Tok::Ident("weak_odr".into()));
+        let hidden = self.eat(&Tok::Ident("hidden".into()));
         let personality = if self.eat(&Tok::Ident("personality".into())) {
             Some(self.global("a personality function like `@__gxx_personality_v0`")?)
         } else {
@@ -914,6 +951,7 @@ impl Parser {
             sig,
             local,
             weak_odr,
+            hidden,
             personality,
             slots,
             debug_return,
@@ -1085,16 +1123,24 @@ impl Parser {
     }
 
     /// Everything after `data`:
-    /// `@name = [local] [weak_odr] [hidden] [thread_local] [const] align <n> { item, ... }`, where an item is
+    /// `@name = [local] [weak] [weak_odr] [hidden] [thread_local] [const] align <n> { item, ... }`, where an item is
     /// `b"..."`, `<int type> <n>`, `zero <n>` or `ptr @sym [+ <n>]`. Items
     /// may continue over several lines.
     fn data_definition(&mut self) -> Result<DataObject, ParseError> {
         let name = self.global("a data name like `@msg`")?;
         self.expect(Tok::Punct('='))?;
         let local = self.eat(&Tok::Ident("local".into()));
+        let weak = self.eat(&Tok::Ident("weak".into()));
         let weak_odr = self.eat(&Tok::Ident("weak_odr".into()));
         let hidden = self.eat(&Tok::Ident("hidden".into()));
         let thread_local = self.eat(&Tok::Ident("thread_local".into()));
+        let retain = self.eat(&Tok::Ident("retain".into()));
+        let section = if self.eat(&Tok::Ident("section".into())) {
+            let name = self.string("a section name")?;
+            Some(crate::SectionName::new(&name).map_err(|e| self.unexpected(e))?)
+        } else {
+            None
+        };
         let constant = self.eat(&Tok::Ident("const".into()));
         let (kw, kw_loc) = self.ident("`align`")?;
         if kw != "align" {
@@ -1120,8 +1166,11 @@ impl Parser {
             name,
             thread_local,
             local,
+            weak,
             weak_odr,
             hidden,
+            retain,
+            section,
             init: Some(DataInit {
                 constant,
                 align,
@@ -1231,10 +1280,9 @@ impl Parser {
             self.skip_newlines();
             // A new block header is `name:` or `name(`; `}` ends the function.
             let next_is_header = matches!(self.peek(), Tok::Ident(_))
-                && matches!(
-                    self.tokens[self.pos + 1].0,
-                    Tok::Punct(':') | Tok::Punct('(')
-                );
+                && (matches!(self.tokens[self.pos + 1].0, Tok::Punct(':'))
+                    || matches!(self.tokens[self.pos + 1].0, Tok::Punct('('))
+                        && self.tokens.get(self.pos + 3).is_some_and(|t| t.0 == Tok::Punct(':')));
             if next_is_header || self.at(&Tok::Punct('}')) || self.at(&Tok::Eof) {
                 break;
             }
@@ -1283,7 +1331,19 @@ impl Parser {
             }
         };
 
-        let data = if let Ok(op) = base.parse::<VectorBinaryOp>() {
+        let data = if let Ok(op) = base.parse::<crate::NeonIntrinsic>() {
+            InstData::Neon {
+                op,
+                ty: suffix_type("result type")?,
+                args: self.arg_list(names)?,
+            }
+        } else if let Ok(op) = base.parse::<crate::VectorReduceOp>() {
+            no_suffix()?;
+            InstData::VectorReduce {
+                op,
+                arg: self.value(names)?,
+            }
+        } else if let Ok(op) = base.parse::<VectorBinaryOp>() {
             no_suffix()?;
             let a = self.value(names)?;
             self.expect(Tok::Punct(','))?;
@@ -1398,7 +1458,14 @@ impl Parser {
                 }
                 "fconst" => {
                     let ty = suffix_type("type")?;
-                    if !ty.is_float() {
+                    if ty == Type::F80 {
+                        let loc = self.loc();
+                        let sign_exp = u16::try_from(self.int("16-bit sign/exponent")?)
+                            .map_err(|_| error(loc, "f80 sign/exponent is out of range".into()))?;
+                        self.expect(Tok::Punct(','))?;
+                        InstData::F80const { sign_exp, significand: self.int("64-bit significand bits")? as u64 }
+                    } else {
+                    if !matches!(ty, Type::F32 | Type::F64) {
                         return Err(error(
                             op_loc,
                             format!("`fconst` makes f32 or f64, not {ty}"),
@@ -1407,6 +1474,7 @@ impl Parser {
                     InstData::Fconst {
                         ty,
                         bits: self.float_bits(ty)?,
+                    }
                     }
                 }
                 "call" | "return_call" => {
@@ -1419,7 +1487,7 @@ impl Parser {
                         }
                     };
                     let func = names.callee(&name, loc);
-                    let args = self.arg_list(names)?;
+                    let args = self.call_arg_list(names)?;
                     if base == "call" {
                         InstData::Call { func, args }
                     } else {
@@ -1436,7 +1504,7 @@ impl Parser {
                         }
                     };
                     let func = names.callee(&name, loc);
-                    let args = self.arg_list(names)?;
+                    let args = self.call_arg_list(names)?;
                     self.expect(Tok::Punct(','))?;
                     let normal = self.block_call(names)?;
                     self.expect(Tok::Punct(','))?;
@@ -1488,7 +1556,7 @@ impl Parser {
                 "return_call_indirect" => {
                     no_suffix()?;
                     let callee = self.value(names)?;
-                    let args = self.arg_list(names)?;
+                    let args = self.call_arg_list(names)?;
                     self.expect(Tok::Punct(':'))?;
                     let sig = self.signature()?;
                     InstData::ReturnCallIndirect {
@@ -1500,7 +1568,7 @@ impl Parser {
                 "call_indirect" => {
                     no_suffix()?;
                     let callee = self.value(names)?;
-                    let args = self.arg_list(names)?;
+                    let args = self.call_arg_list(names)?;
                     self.expect(Tok::Punct(':'))?;
                     let sig = self.signature()?;
                     if sig.returns.len() != results.len() {
@@ -1542,6 +1610,16 @@ impl Parser {
                 "trap" => {
                     no_suffix()?;
                     InstData::Trap
+                }
+                "x86_rflags_region" => {
+                    no_suffix()?;
+                    let (contract, loc) = self.ident("terminal external monitor contract")?;
+                    if contract != "terminal" { return Err(error(loc, "FLAGS region requires explicit terminal contract".into())); }
+                    let text = self.string("a bounded FLAGS raw program")?;
+                    let args = self.arg_list(names)?;
+                    let plan = crate::rflags_region::Plan::parse(&text, args.len(), results.len())
+                        .map_err(|message| error(op_loc, message))?;
+                    InstData::X86RflagsRegion { plan: Box::new(plan), args }
                 }
                 "asm" => {
                     no_suffix()?;
@@ -1639,9 +1717,42 @@ impl Parser {
                         InstData::Fcmp { cond, args }
                     }
                 }
-                "va_arg" => InstData::VaArg {
-                    ty: suffix_type("type")?,
-                    list: self.value(names)?,
+                "va_arg_aggregate" => {
+                    no_suffix()?;
+                    let layout = self.layout()?;
+                    self.expect(Tok::Punct(','))?;
+                    let list = self.value(names)?;
+                    self.expect(Tok::Punct(','))?;
+                    let (slot, loc) = self.ident("an aggregate home stack slot")?;
+                    let home = *names.slots.get(&slot).ok_or_else(|| error(loc, format!("unknown stack slot `{slot}`")))?;
+                    let x86_vector_abi = if self.eat(&Tok::Ident("x86_vector_abi".into())) {
+                        self.expect(Tok::Punct('('))?;
+                        let (name, loc) = self.ident("an x86 vector ABI")?;
+                        let abi = match name.as_str() {
+                            "gnu" => crate::X86VectorAbi::Gnu,
+                            "clang" => crate::X86VectorAbi::Clang,
+                            _ => return Err(error(loc, format!("unknown x86 vector ABI `{name}`"))),
+                        };
+                        self.expect(Tok::Punct(')'))?;
+                        Some(abi)
+                    } else { None };
+                    InstData::AggregateVaArg { layout, list, home, x86_vector_abi }
+                }
+                "va_arg" => {
+                    let ty = suffix_type("type")?;
+                    let list = self.value(names)?;
+                    let mut x86_vector_abi = None;
+                    if self.eat(&Tok::Ident("x86_vector_abi".into())) {
+                        self.expect(Tok::Punct('('))?;
+                        let (name, loc) = self.ident("an x86 va_list producer ABI")?;
+                        x86_vector_abi = Some(match name.as_str() {
+                            "gnu" => crate::X86VectorAbi::Gnu,
+                            "clang" => crate::X86VectorAbi::Clang,
+                            _ => return Err(error(loc, format!("unknown x86 vector ABI `{name}`"))),
+                        });
+                        self.expect(Tok::Punct(')'))?;
+                    }
+                    InstData::VaArg { ty, list, x86_vector_abi }
                 },
                 "load" => InstData::Load {
                     flags: self.memory_flags()?,
@@ -1778,9 +1889,11 @@ impl Parser {
             | InstData::CallIndirect { .. }
             | InstData::Invoke { .. }
             | InstData::InlineAsm { .. } => None,
+            InstData::X86RflagsRegion { plan, .. } => Some(plan.observations),
             InstData::LandingPad { .. } => Some(2),
             InstData::Intrinsic { id, .. } => Some(id.info().returns.len()),
             InstData::Overflow { .. } => Some(2),
+            InstData::Neon { op, .. } => Some(op.result_count()),
             InstData::Store { .. }
             | InstData::AtomicStore { .. }
             | InstData::Fence { .. }
@@ -1811,6 +1924,12 @@ impl Parser {
                 return Err(error(
                     op_loc,
                     format!("`{base}` has two results; write `vN, vM = {base} ...`"),
+                ));
+            }
+            (Some(expected), actual) if expected != actual => {
+                return Err(error(
+                    op_loc,
+                    format!("`{base}` has {expected} results, got {actual}"),
                 ));
             }
             _ => {}
@@ -1902,6 +2021,21 @@ impl Parser {
         u8::try_from(n).map_err(|_| error(loc, "lane index must be in 0..255".into()))
     }
 
+    fn call_arg_list(&mut self, names: &mut Names) -> Result<crate::CallArgs, ParseError> {
+        self.expect(Tok::Punct('('))?;
+        let mut args = Vec::new();
+        if !self.eat(&Tok::Punct(')')) {
+            loop {
+                let value = self.value(names)?;
+                let abi = if self.eat(&Tok::Punct(':')) { Some(self.abi_param()?) } else { None };
+                args.push((value, abi));
+                if self.eat(&Tok::Punct(')')) { break; }
+                self.expect(Tok::Punct(','))?;
+            }
+        }
+        Ok(crate::CallArgs::from_optional(args))
+    }
+
     fn arg_list(&mut self, names: &mut Names) -> Result<Vec<Value>, ParseError> {
         self.expect(Tok::Punct('('))?;
         let mut args = Vec::new();
@@ -1963,6 +2097,7 @@ fn build(
         sig,
         local,
         weak_odr,
+        hidden,
         personality,
         slots,
         debug_return,
@@ -2030,6 +2165,9 @@ fn build(
                 types[v.index()] = Some(ty);
             }
         }
+        if let InstData::X86RflagsRegion { .. } = &inst.data {
+            for &v in &inst.results { types[v.index()] = Some(Type::I64); }
+        }
         if let InstData::InlineAsm { asm, .. } = &inst.data {
             for (&v, &(_, ty)) in inst.results.iter().zip(&asm.outputs) {
                 types[v.index()] = Some(ty);
@@ -2071,6 +2209,11 @@ fn build(
                 types[flag.index()] = Some(Type::I8);
                 changed = true;
             }
+            if let InstData::Neon { ty, .. } = inst.data {
+                for result in &inst.results {
+                    if types[result.index()].is_none() { types[result.index()] = Some(ty); changed = true; }
+                }
+            }
             let [result] = inst.results[..] else { continue };
             if types[result.index()].is_some() {
                 continue;
@@ -2079,15 +2222,17 @@ fn build(
                 InstData::VectorSplat { ty, .. }
                 | InstData::Iconst { ty, .. }
                 | InstData::Fconst { ty, .. }
+                | InstData::Neon { ty, .. }
                 | InstData::Convert { ty, .. }
                 | InstData::Load { ty, .. }
                 | InstData::AtomicLoad { ty, .. }
                 | InstData::VaArg { ty, .. } => Some(*ty),
                 InstData::AtomicRmw { args, .. } => types[args[1].index()],
                 InstData::AtomicCas { args, .. } => types[args[1].index()],
-                InstData::StackAddr { .. } | InstData::SymbolAddr { .. } => Some(Type::Ptr),
+                InstData::F80const { .. } => Some(Type::F80),
+                InstData::StackAddr { .. } | InstData::SymbolAddr { .. } | InstData::AggregateVaArg { .. } => Some(Type::Ptr),
                 InstData::Icmp { .. } | InstData::Fcmp { .. } => Some(Type::I8),
-                InstData::VectorExtract { arg, .. } => {
+                InstData::VectorExtract { arg, .. } | InstData::VectorReduce { arg, .. } => {
                     types[arg.index()].map(|t| t.vector().map_or(Type::I8, |v| v.lane_type()))
                 }
                 InstData::VectorIcmp { args, .. } | InstData::VectorFcmp { args, .. } => types
@@ -2121,6 +2266,7 @@ fn build(
     func.personality = personality.clone();
     func.local = *local;
     func.weak_odr = *weak_odr;
+    func.hidden = *hidden;
     func.attrs = *attrs;
     // Slots and callees were numbered in declaration order, which is
     // creation order.
@@ -2241,6 +2387,7 @@ fn parse_type(s: &str) -> Option<Type> {
         "i128" => Type::I128,
         "f32" => Type::F32,
         "f64" => Type::F64,
+        "f80" => Type::F80,
         "ptr" => Type::Ptr,
         _ => Type::Vector(s.parse().ok()?),
     })
@@ -2340,6 +2487,14 @@ fn parse_convert_op(s: &str) -> Option<ConvertOp> {
         "bitcast" => ConvertOp::Bitcast,
         "swiden_low" => ConvertOp::SwidenLow,
         "uwiden_low" => ConvertOp::UwidenLow,
+        "swiden_high" => ConvertOp::SwidenHigh,
+        "uwiden_high" => ConvertOp::UwidenHigh,
+        "narrow_low" => ConvertOp::NarrowLow,
+        "spairwise_add_long" => ConvertOp::SpairwiseAddLong,
+        "upairwise_add_long" => ConvertOp::UpairwiseAddLong,
+        "snarrow_sat_low" => ConvertOp::SnarrowSatLow,
+        "unarrow_sat_low" => ConvertOp::UnarrowSatLow,
+        "sunarrow_sat_low" => ConvertOp::SunarrowSatLow,
         _ => return None,
     })
 }

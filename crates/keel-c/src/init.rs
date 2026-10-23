@@ -34,7 +34,9 @@ impl<'a> Parser<'a> {
         };
         let count = self.init_braced_or_expr(&slot, &mut items)?;
         let ty = match ty {
-            Ty::Array(ArrayTy { elem, len: None }) => self.array_type(*elem, Some(count)),
+            Ty::Array(ArrayTy {
+                elem, len: None, ..
+            }) => self.array_type(*elem, Some(count)),
             _ => *ty,
         };
         Ok((
@@ -75,7 +77,7 @@ impl<'a> Parser<'a> {
     /// A string literal initializing a character array, if that is what
     /// comes next. Returns the number of characters with the terminator.
     fn init_string(&mut self, slot: &Slot<'a>, items: &mut Vec<InitItem<'a>>) -> R<Option<u64>> {
-        let Ty::Array(&ArrayTy { elem, len }) = slot.ty else {
+        let Ty::Array(&ArrayTy { elem, len, .. }) = slot.ty else {
             return Ok(None);
         };
         let elem_size = match elem {
@@ -110,7 +112,8 @@ impl<'a> Parser<'a> {
     /// scalar or the expression has its struct type, else its first scalar
     /// with the rest taken from the enclosing list.
     fn init_with(&mut self, slot: &Slot<'a>, e: Expr<'a>, items: &mut Vec<InitItem<'a>>) -> R<()> {
-        if slot.ty.is_scalar() || (slot.ty.is_struct() && e.ty == slot.ty) {
+        if slot.ty.is_scalar() || ((slot.ty.is_struct() || slot.ty.is_vector()) && e.ty == slot.ty)
+        {
             let expr = self.convert_for_assign(e, &slot.ty)?;
             items.push(InitItem::Expr {
                 offset: slot.offset,
@@ -128,7 +131,9 @@ impl<'a> Parser<'a> {
     /// The sub-objects of an aggregate, in initialization order.
     fn sub_slots(&self, slot: &Slot<'a>) -> Vec<Slot<'a>> {
         match slot.ty {
-            Ty::Array(&ArrayTy { elem, len: Some(n) }) => {
+            Ty::Array(&ArrayTy {
+                elem, len: Some(n), ..
+            }) => {
                 let size = self.size_of(&elem);
                 (0..n)
                     .map(|i| Slot {
@@ -138,6 +143,13 @@ impl<'a> Parser<'a> {
                     })
                     .collect()
             }
+            Ty::Vector(elem, shape) => (0..shape.lanes())
+                .map(|i| Slot {
+                    ty: *elem,
+                    offset: slot.offset + u64::from(i) * self.size_of(elem),
+                    bits: None,
+                })
+                .collect(),
             Ty::Struct(id) => {
                 let def = &self.structs[id];
                 let named = def
@@ -299,7 +311,7 @@ impl<'a> Parser<'a> {
                 i
             };
             self.expect("]")?;
-            let Ty::Array(&ArrayTy { elem, len }) = slot.ty else {
+            let Ty::Array(&ArrayTy { elem, len, .. }) = slot.ty else {
                 return Err(Error::new(loc, "`[]` designator for a non-array"));
             };
             if i < 0 || last < i || len.is_some_and(|n| last as u64 >= n) {

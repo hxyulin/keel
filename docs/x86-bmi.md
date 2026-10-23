@@ -75,8 +75,9 @@ selection remains unchanged when features are absent.
 - 2,280 encoding cases compare against both Clang's x86 Linux integrated
   assembler and GNU `as`, including high registers, aliases, inferred/explicit
   memory widths, SIB/index-only, FS, RIP-relative, and displacement boundaries.
-  GNU cross assembler defaults to `x86_64-elf-as` off Linux; override with
-  `KEEL_GNU_AS`. Both reference tools are required, not silently skipped.
+  GNU cross assembler defaults to `x86_64-elf-as` off Linux (on macOS,
+  `brew install x86_64-elf-binutils`); override with `KEEL_GNU_AS`. Both
+  reference tools are required, not silently skipped.
 - Known bytes and reserved fields, independent feature rejection, invalid
   operands, and symbolic RIP-relative relocation differential checks.
 - Zero `Item::Text` and whole-object byte equality for structured/text assembly;

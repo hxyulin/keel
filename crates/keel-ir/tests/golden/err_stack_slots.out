@@ -1,4 +1,4 @@
 verifier errors:
-  @f ss0: alignment must be a power of two up to 16, got 3
-  @f ss1: alignment must be a power of two up to 16, got 32
+  @f ss0: alignment must be a power of two up to 32, got 3
+  @f ss1: alignment must be a power of two up to 32, got 64
   @f ss2: stack slot size must be non-zero

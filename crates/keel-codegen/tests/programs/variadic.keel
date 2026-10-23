@@ -4,7 +4,7 @@
 ; Passing a va_list on is ABI-specific: see variadic_vprintf*.keel.
 ; Sum of n i64 arguments.
 func @k_sum(i32, ...) -> i64 {
-    ss0 = stack_slot 24, align 8        ; va_list: 8 bytes on Apple arm64, 24 on SysV
+    ss0 = stack_slot 32, align 8        ; va_list: 8 bytes on Darwin ARM64, 24 on SysV, 32 on Linux ARM64
 block0(v0: i32):
     v1 = stack_addr ss0
     intrinsic va_start(v1)
@@ -26,7 +26,7 @@ block3:
 
 ; Reads (i32, f64) pairs n times: sum of i * d.
 func @k_pairs(i32, ...) -> f64 {
-    ss0 = stack_slot 24, align 8
+    ss0 = stack_slot 32, align 8
 block0(v0: i32):
     v1 = stack_addr ss0
     intrinsic va_start(v1)
@@ -53,7 +53,7 @@ block3:
 ; variadic arguments start one slot further up. Returns the ninth plus
 ; the first two variadic ones (a ptr's target and an i64).
 func @k_tail(i64, i64, i64, i64, i64, i64, i64, i64, i32, ...) -> i64 {
-    ss0 = stack_slot 24, align 8
+    ss0 = stack_slot 32, align 8
 block0(v0: i64, v1: i64, v2: i64, v3: i64, v4: i64, v5: i64, v6: i64, v7: i64, v8: i32):
     v9 = stack_addr ss0
     intrinsic va_start(v9)

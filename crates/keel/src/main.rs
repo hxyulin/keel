@@ -1,11 +1,11 @@
 //! The keel driver:
 //!
 //! ```text
-//! keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--target-features <avx,bmi1,bmi2>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
-//! keel cc [-O] [-g] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--target-features <avx,bmi1,bmi2>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]  C to assembly
+//! keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <legacy|v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
+//! keel cc [-O] [-g] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <legacy|v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]  C to assembly
 //! keel opt [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
-//! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s> -o <output.o>                 assembly to native object
-//! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s>... --out-dir <directory>      batch assembly
+//! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <legacy|v1|v2|v3>] [--target-features <features>] <input.s> -o <output.o>                 assembly to native object
+//! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <legacy|v1|v2|v3>] [--target-features <features>] <input.s>... --out-dir <directory>      batch assembly
 //! keel asm-metrics <input.s> [-o <metrics.json>]     exact instruction locations and sizes
 //! keel passes                                      list the passes
 //! ```
@@ -19,10 +19,12 @@
 //! with `--emit-ir`, to keel IR; `-E` stops after preprocessing; `-g` gives it debug info, with every
 //! local in memory where a debugger can see it (link with `clang -g`).
 //! `compile`/`cc --emit-object -o output.o` compose structured codegen and
-//! object emission in-process for AArch64 Mach-O.
-//! Text output goes to stdout without `-o`; `asm` requires `-o` and always
-//! writes an Apple arm64 Mach-O object. `--target` picks the machine for codegen,
-//! `aarch64-apple-darwin` or `x86_64-unknown-linux-gnu`; the default is
+//! object emission in-process for AArch64 Mach-O and AArch64/x86-64 ELF.
+//! Text output goes to stdout without `-o`; `asm` requires `-o` or `--out-dir`
+//! and supports AArch64 Mach-O, AArch64 Linux ELF and x86-64 ELF objects.
+//! `--target` picks the machine for codegen,
+//! `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu` or
+//! `x86_64-unknown-linux-gnu`; the default is
 //! the one keel runs on.
 
 use keel_codegen::Target;
@@ -34,18 +36,19 @@ mod input;
 mod link;
 
 const USAGE: &str = "usage:
-  keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--target-features <avx,bmi1,bmi2>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
-  keel cc [-O] [-g] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--target-features <avx,bmi1,bmi2>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]
+  keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <legacy|v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
+  keel cc [-O] [-g] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <legacy|v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]
   keel opt [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
   keel compile|cc|opt [--verify-each | --no-verify-each] [--opt-report <new-report.json>] <input> [-o <output>]
-  keel compile|cc [--emit-object] <input> -o <output.o>  (AArch64 Mach-O or x86-64 ELF)
-  keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s> -o <output.o>
-  keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s>... --out-dir <directory>
+  keel compile|cc [--emit-object] <input> -o <output.o>  (AArch64 Mach-O or AArch64/x86-64 ELF)
+  keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <legacy|v1|v2|v3>] [--target-features <features>] <input.s> -o <output.o>
+  keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <legacy|v1|v2|v3>] [--target-features <features>] <input.s>... --out-dir <directory>
   keel asm-metrics <input.s> [-o <metrics.json>]
-  keel link [--system] [--target <triple>] [-e entry] [-L DIR] [--rpath PATH] [--sysroot SDK] [-l NAME] [--debug-map DIR] [--dsym PATH] <input.o|input.a|input.so>... -o executable
+  keel link [--system] [--target <triple>] [-e entry] [-L DIR] [--rpath PATH] [--sysroot SDK] [-l NAME] [--dead-strip] [--require-export SYMBOL] [--debug-map DIR] [--dsym PATH] <input.o|input.a|input.so>... -o executable
   keel archive [--target <triple>] -o <output.a> <member.o>...
   keel passes
 
+  --target also accepts aarch64-unknown-linux-gnu (Linux AAPCS64/ELF).
   -O enables full IR optimization and all target selection passes.
   --isel / --isel-tier override -O selection in either order; last selector wins.
   --opt-tier none|fast|basic|full controls IR optimization; -p overrides its pipeline in either order.
@@ -82,6 +85,7 @@ struct Options {
     remat: u8,
     tuning: keel_codegen::tuning::TuningCpu,
     x86_features: keel_asm::x86::Features,
+    x86_level: Option<keel_asm::x86::CpuLevel>,
     ir_lines: bool,
     emit_ir: bool,
     emit_object: bool,
@@ -174,7 +178,9 @@ impl Options {
 
     fn vector_target(&self) -> keel_opt::VectorTarget {
         match self.target.or_else(Target::host) {
-            Some(Target::Aarch64AppleDarwin) => keel_opt::VectorTarget::Aarch64Neon,
+            Some(Target::Aarch64AppleDarwin | Target::Aarch64LinuxGnu) => {
+                keel_opt::VectorTarget::Aarch64Neon
+            }
             Some(Target::X86_64LinuxGnu) => keel_opt::VectorTarget::X86Sse2,
             None => keel_opt::VectorTarget::Portable,
         }
@@ -399,11 +405,29 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                     }
                 }
             }
+            "--cpu-level" => {
+                let name = args
+                    .next()
+                    .ok_or("--cpu-level needs v1, v2, v3 or legacy")?;
+                opts.x86_level = if name == "legacy" {
+                    None
+                } else {
+                    Some(keel_asm::x86::CpuLevel::parse(name)?)
+                };
+                opts.x86_features = opts
+                    .x86_level
+                    .map(keel_asm::x86::Features::for_level)
+                    .unwrap_or_default();
+            }
             "--target-features" => {
-                opts.x86_features = keel_asm::x86::Features::parse(
-                    args.next()
-                        .ok_or("--target-features needs avx,bmi1,bmi2 or none")?,
-                )?;
+                opts.x86_features = opts
+                    .x86_level
+                    .map(keel_asm::x86::Features::for_level)
+                    .unwrap_or_default()
+                    .with_features(
+                        args.next()
+                            .ok_or("--target-features needs avx,bmi1,bmi2 or none")?,
+                    )?;
             }
             "--tune" => {
                 let name = args.next().ok_or("`--tune` needs generic or apple-m5")?;
@@ -564,6 +588,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--isel-tier",
                     "--tune",
                     "--target-features",
+                    "--cpu-level",
                 ],
             )?;
             let (input, mut module) = load(&opts)?;
@@ -601,6 +626,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--isel-tier",
                     "--tune",
                     "--target-features",
+                    "--cpu-level",
                 ],
             )?;
             let input = opts.input.clone().ok_or(USAGE)?;
@@ -749,7 +775,9 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
         // whole module's structured program is never resident at once.
         let mut aarch64 = keel_asm::ProgramAssembler::new(keel_asm::TargetFeatures::default());
         let mut x86 = keel_asm::x86::ProgramAssembler::new(opts.x86_features);
+        let mut arm_elf = keel_asm::ElfProgramAssembler::new(keel_asm::TargetFeatures::default());
         let mut sink = |program| match target {
+            Target::Aarch64LinuxGnu => arm_elf.push(program),
             Target::Aarch64AppleDarwin => aarch64.push(program),
             Target::X86_64LinuxGnu => x86.push(program),
         };
@@ -757,6 +785,7 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
         drop(module);
         let object = match target {
+            Target::Aarch64LinuxGnu => arm_elf.finish(),
             Target::Aarch64AppleDarwin => aarch64.finish(),
             Target::X86_64LinuxGnu => x86.finish(),
         }
@@ -765,7 +794,9 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
     } else {
         let source = keel_codegen::compile_with_pipeline(&module, target, &pipeline)
             .map_err(|e| e.to_string())?;
-        drop(module);
+        // The process exits once the text is written, and the system takes
+        // the module's memory back faster than freeing its every allocation.
+        std::mem::forget(module);
         write_output(opts, &source)
     }
 }
@@ -1249,6 +1280,8 @@ mod x86_feature_option_tests {
             options.x86_features,
             keel_asm::x86::Features {
                 bmi2: true,
+                xsave: true,
+                osxsave: true,
                 ..Default::default()
             }
         );
@@ -1265,6 +1298,87 @@ mod x86_feature_option_tests {
                 .is_err()
             );
         }
+    }
+    #[test]
+    fn explicit_cpu_levels_are_independent_of_tiers() {
+        let args = [
+            "--cpu-level",
+            "v1",
+            "--target-features",
+            "bmi2",
+            "--target",
+            "x86_64-unknown-linux-gnu",
+        ]
+        .map(str::to_owned);
+        let opts = parse_options(&args, &["--cpu-level", "--target-features", "--target"]).unwrap();
+        assert!(opts.x86_features.explicit && opts.x86_features.bmi2);
+        assert!(!opts.x86_features.popcnt && !opts.x86_features.sse41);
+        assert_eq!(opts.selection, keel_codegen::SelectionOptions::default());
+    }
+    #[test]
+    fn target_feature_lists_replace_previous_modifiers_on_the_selected_level() {
+        for level in ["legacy", "v1", "v2", "v3"] {
+            let args = [
+                "--cpu-level",
+                level,
+                "--target-features",
+                "bmi1,bmi2",
+                "--target-features",
+                "none",
+            ]
+            .map(str::to_owned);
+            let opts = parse_options(&args, &["--cpu-level", "--target-features"]).unwrap();
+            let expected = if level == "legacy" {
+                keel_asm::x86::Features::legacy()
+            } else {
+                keel_asm::x86::Features::for_level(keel_asm::x86::CpuLevel::parse(level).unwrap())
+            };
+            assert_eq!(opts.x86_features, expected);
+        }
+    }
+    #[test]
+    fn strict_v1_cli_text_and_direct_object_paths_match() {
+        let dir = std::env::temp_dir().join(format!("keel-v1-cli-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("input.keel");
+        let text = dir.join("output.s");
+        let direct = dir.join("direct.o");
+        let indirect = dir.join("indirect.o");
+        std::fs::write(&input,"func @pc(i64) -> i64 {\nblock0(v0: i64):\n v1 = popcnt v0\n return v1\n}\nfunc @round(f64) -> f64 {\nblock0(v0: f64):\n v1 = fnearest v0\n return v1\n}\n").unwrap();
+        let base = vec![
+            "compile".to_owned(),
+            "--cpu-level".into(),
+            "v1".into(),
+            "--target".into(),
+            "x86_64-unknown-linux-gnu".into(),
+            input.to_string_lossy().into_owned(),
+        ];
+        let mut args = base.clone();
+        args.extend(["-o".into(), text.to_string_lossy().into_owned()]);
+        run(args).unwrap();
+        let mut args = base;
+        args.extend([
+            "--emit-object".into(),
+            "-o".into(),
+            direct.to_string_lossy().into_owned(),
+        ]);
+        run(args).unwrap();
+        run(vec![
+            "asm".into(),
+            "--cpu-level".into(),
+            "v1".into(),
+            "--target".into(),
+            "x86_64-unknown-linux-gnu".into(),
+            text.to_string_lossy().into_owned(),
+            "-o".into(),
+            indirect.to_string_lossy().into_owned(),
+        ])
+        .unwrap();
+        assert_eq!(
+            std::fs::read(direct).unwrap(),
+            std::fs::read(indirect).unwrap()
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn null_remat_is_an_independent_experimental_fast_full_mode() {

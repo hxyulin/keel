@@ -18,6 +18,7 @@ const FEATURES: Features = Features {
     avx: true,
     bmi1: true,
     bmi2: true,
+    ..Features::legacy()
 };
 fn assemble(source: &str) -> Vec<u8> {
     assemble_object_with_syntax_and_features(source, Syntax::Att, FEATURES)
@@ -455,7 +456,7 @@ fn malformed_or_unrepresentable_forms_fail_on_the_source_line() {
         "movzwl %al,%eax",
         "cvtsi2sdq %eax,%xmm0",
         "cvttsd2sil %xmm0,%rax",
-        "movq 0(%eax),%rax",
+        "movq 0(%eax,%rcx,2),%rax",
         "movq (%rax,%rsp,2),%rdx",
         "movq (%rip,%rcx,4),%rax",
         "movq (%rax,%rcx,3),%rdx",
@@ -475,14 +476,14 @@ fn malformed_or_unrepresentable_forms_fail_on_the_source_line() {
         ".att_syntax bogus",
         ".intel_syntax prefix junk",
         "movq %st(0),%rax",
-        "fsub %st,%st(3)",
+        "fsub %st(2),%st(3)",
         "leaq external- -8(%rip),%rax",
         "leaq external--8(%rip),%rax",
         "leaq external+-8(%rip),%rax",
         "movq $--8,%rax",
         "setel (%rax)",
         "movq $external,%r11",
-        "pushw $7",
+        "pushl $7",
         "nopw",
     ] {
         let source = format!(".att_syntax\n\n{bad}\n");

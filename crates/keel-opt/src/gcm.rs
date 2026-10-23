@@ -44,6 +44,26 @@ use keel_ir::{BinaryOp, Block, EntityRef, Function, InsertPoint, Inst, InstData,
 const NONE: u32 = u32::MAX;
 
 pub fn run(func: &mut Function) -> bool {
+    // An actual FLAGS observation cannot use the usual assumption that pure
+    // arithmetic may freely cross pinned instructions. This is deliberately
+    // function-wide until IR has explicit machine-FLAGS resource dependencies.
+    // It does not promise continuity through other arithmetic/lowering passes.
+    if func.layout_insts().any(|(_, i)| {
+        matches!(func.inst_data(i), InstData::X86RflagsRegion { .. }) || matches!(func.inst_data(i), InstData::Intrinsic { id, .. }
+            if matches!(id, keel_ir::Intrinsic::X86RflagsRead | keel_ir::Intrinsic::X86RflagsSwap)
+                || id.x86_string_port_io().is_some_and(|(_, _, _, owned)| owned))
+    }) {
+        return false;
+    }
+    // Legacy FLDENV/FRSTOR may own all eight physical x87 slots until a
+    // later reset/save. A pure F80 operation moved across that interval can
+    // overflow the hardware stack and corrupt its VALUE, even when portable
+    // environment/exception ordering is otherwise unspecified. Keep F80
+    // producers/consumers in their original blocks in these functions.
+    let owned_x87 = func.layout_insts().any(|(_, i)| {
+        matches!(func.inst_data(i), InstData::Intrinsic { id, .. }
+            if id.x86_legacy_x87_image().is_some() || id.x86_owned_x87_stack().is_some())
+    });
     let analysis = crate::analysis::get(func);
     let domtree = &analysis.dom;
     let loops = analysis.loops(func);
@@ -67,7 +87,17 @@ pub fn run(func: &mut Function) -> bool {
     for &block in domtree.rpo() {
         for &inst in func.block_insts(block) {
             let data = func.inst_data(inst);
-            if !data.is_pinned() {
+            let f80 = owned_x87 && {
+                let mut found = func
+                    .inst_results(inst)
+                    .iter()
+                    .any(|&v| func.value_type(v) == keel_ir::Type::F80);
+                data.for_each_operand(|v| {
+                    found |= func.value_type(func.resolve(v)) == keel_ir::Type::F80
+                });
+                found
+            };
+            if !data.is_pinned() && !f80 {
                 floating.push(inst);
             }
             data.for_each_operand(|v| {
@@ -328,4 +358,74 @@ fn first_user_in(
         // Rematerialization creates new instructions after the membership
         // array was built; they cannot be users of an original instruction.
         .find(|inst| membership.get(inst.index()) == Some(&(producer.index() as u32)))
+}
+
+#[cfg(test)]
+mod legacy_x87_tests {
+    use super::*;
+
+    #[test]
+    fn owned_images_pin_f80_results_operands_and_constants_only() {
+        let src = r#"
+func @f(ptr,ptr,ptr,i64) {
+block0(v0:ptr,v1:ptr,v2:ptr,v3:i64):
+ v4 = load.f80 align 1 v1
+ v5 = fconst.f80 0x3fff, 0x8000000000000000
+ v6 = fadd v4,v5
+ v7 = fneg v6
+ v8 = fcmp.eq v4,v5
+ v9 = fptosi.i64 v4
+ v10 = iconst.i64 7
+ v11 = iadd v3,v10
+ intrinsic x86_x87_frstor32(v0)
+ jump block1
+block1:
+ store align 1 v5,v2
+ store align 1 v6,v2
+ store align 1 v7,v2
+ store align 1 v8,v2
+ store align 1 v9,v2
+ store align 1 v11,v2
+ intrinsic x86_x87_fnsave32(v0)
+ return
+}
+"#;
+        let mut m = keel_ir::parse(src).unwrap();
+        keel_ir::verify_module(&m).unwrap();
+        let f = &mut m.functions[0];
+        let entry = f.entry_block().unwrap();
+        let mut protected = Vec::new();
+        let mut integer = None;
+        for (_, i) in f.layout_insts() {
+            match f.inst_data(i) {
+                InstData::F80const { .. }
+                | InstData::Unary { .. }
+                | InstData::Fcmp { .. }
+                | InstData::Convert { .. }
+                | InstData::Binary {
+                    op: BinaryOp::Fadd, ..
+                } => protected.push(i),
+                InstData::Binary {
+                    op: BinaryOp::Iadd, ..
+                } => integer = Some(i),
+                _ => {}
+            }
+        }
+        assert_eq!(protected.len(), 5);
+        assert!(run(f));
+        for i in protected {
+            assert_eq!(
+                f.inst_block(i),
+                entry,
+                "F80 operation moved: {:?}",
+                f.inst_data(i)
+            );
+        }
+        assert_ne!(
+            f.inst_block(integer.unwrap()),
+            entry,
+            "integer GCM disabled"
+        );
+        keel_ir::verify_module(&m).unwrap();
+    }
 }

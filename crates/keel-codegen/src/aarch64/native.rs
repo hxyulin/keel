@@ -297,7 +297,7 @@ pub(super) enum Piece<'a> {
 }
 
 /// Writes `pieces` one after the other.
-pub(super) fn write_pieces(out: &mut String, pieces: &[Piece<'_>]) -> fmt::Result {
+pub(super) fn write_pieces(out: &mut crate::text::Text, pieces: &[Piece<'_>]) -> fmt::Result {
     for piece in pieces {
         match *piece {
             Piece::Text(text) => out.push_str(text),
@@ -329,6 +329,17 @@ impl fmt::Display for Arg {
 
 fn ins(op: &str, tag: &str, form: &str, fields: impl IntoIterator<Item = (F, u32)>) -> Instruction {
     Instruction::new(opcode(op, tag, form), fields)
+}
+
+/// [`Instruction::new`], copying the fields in one piece rather than
+/// collecting them one at a time.
+pub(super) fn instruction<const N: usize>(opcode: O, fields: [(F, u32); N]) -> Instruction {
+    let mut instruction = Instruction {
+        opcode,
+        fields: Default::default(),
+    };
+    instruction.fields.extend_from_slice(&fields);
+    instruction
 }
 fn tag(r: Reg) -> &'static str {
     match r.class {

@@ -13,8 +13,9 @@ pub(super) enum Entry<'a> {
     Text(&'a str),
     Label(&'a str),
     Instruction(&'a Instruction),
-    /// An instruction encoded when it entered a [`Compact`] program.
-    Word(u32),
+    /// Consecutive instructions encoded when they entered a [`Compact`]
+    /// program, one statement each.
+    Words(&'a [u32]),
     Directive(&'a Directive),
     Symbolic(&'a SymbolicInstruction),
     Branch(bool, &'a str),
@@ -101,7 +102,7 @@ impl<'a> Input<'a> {
                 current: Some((0, scanning::Lines::new(s, arena))),
                 items: self.items(),
                 gaps: [].iter(),
-                words: [].iter(),
+                words: &[],
                 pending: 0,
                 arena,
                 next_line: 1,
@@ -110,7 +111,7 @@ impl<'a> Input<'a> {
                 current: None,
                 items: self.items(),
                 gaps: [].iter(),
-                words: [].iter(),
+                words: &[],
                 pending: 0,
                 arena,
                 next_line: 1,
@@ -122,7 +123,7 @@ impl<'a> Input<'a> {
                     items: self.items(),
                     pending: gaps.next().copied().unwrap_or(0),
                     gaps,
-                    words: c.words.iter(),
+                    words: &c.words,
                     arena,
                     next_line: 1,
                 }
@@ -272,7 +273,7 @@ pub(super) struct Lines<'a> {
     items: Items<'a>,
     /// Compact input: the word count following each remaining item.
     gaps: std::slice::Iter<'a, u32>,
-    words: std::slice::Iter<'a, u32>,
+    words: &'a [u32],
     /// Words to yield before the next item.
     pending: u32,
     arena: &'a Bump,
@@ -297,9 +298,11 @@ impl<'a> Iterator for Lines<'a> {
             }
             let line = self.next_line;
             if self.pending > 0 {
-                self.pending -= 1;
-                self.next_line += 1;
-                return Some(Ok((line, Entry::Word(*self.words.next()?))));
+                let (words, rest) = self.words.split_at_checked(self.pending as usize)?;
+                self.words = rest;
+                self.next_line += self.pending as usize;
+                self.pending = 0;
+                return Some(Ok((line, Entry::Words(words))));
             }
             let item = self.items.next()?;
             self.pending = self.gaps.next().copied().unwrap_or(0);

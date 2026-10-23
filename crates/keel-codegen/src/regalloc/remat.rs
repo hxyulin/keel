@@ -186,7 +186,15 @@ impl RematerializingAllocator<'_> {
                         if input.func.value_type(Value::new(i)).is_vector() {
                             // Vector homes occupy two adjacent eight-byte units.
                             // Keep both while removing unused scalar recipe homes.
-                            used[s as usize + 1] = true;
+                            let units = input
+                                .func
+                                .value_type(Value::new(i))
+                                .bytes()
+                                .unwrap()
+                                .div_ceil(8);
+                            for k in 1..units {
+                                used[(s + k) as usize] = true;
+                            }
                         }
                     }
                 }

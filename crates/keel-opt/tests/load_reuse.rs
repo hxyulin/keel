@@ -320,7 +320,7 @@ fn equal_width_different_types_and_vector_shapes_do_not_match() {
             );
         assert_eq!(loads(&optimize(&src)), 2);
     }
-    for shape in keel_ir::VectorType::ALL {
+    for shape in keel_ir::VectorType::ALL_128 {
         assert_eq!(loads(&optimize(&edge("", &shape.to_string(), "v0"))), 1);
     }
 }

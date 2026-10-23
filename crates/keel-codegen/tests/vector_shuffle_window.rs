@@ -305,7 +305,7 @@ fn native_window_preserves_both_live_sources_and_exact_loads() {
     }
 }
 #[test]
-fn other_shapes_and_lane_masks_keep_general_legalization() {
+fn general_shuffles_use_packed_arm_and_conservative_x86_legalization() {
     for (shape, lanes) in [
         ("i64x2", "0,2"),
         ("i64x2", "1,3"),
@@ -323,10 +323,16 @@ fn other_shapes_and_lane_masks_keep_general_legalization() {
                 SelectionTier::Full,
             ] {
                 let (text, _) = compile(arm, &source, sel, &AllocationTier::Full, false);
-                assert!(
-                    !text.contains(if arm { "ext\t" } else { "shufpd\t" }),
-                    "{text}"
-                );
+                if arm {
+                    match (shape, lanes) {
+                        ("i64x2", "0,2") => assert!(text.contains("zip1\t"), "{text}"),
+                        ("i64x2", "1,3") => assert!(text.contains("zip2\t"), "{text}"),
+                        _ => assert!(text.contains("ext\t") || text.contains("ins\t"), "{text}"),
+                    }
+                    assert!(!text.contains(" = stack_addr"), "{text}");
+                } else {
+                    assert!(!text.contains("shufpd\t"), "{text}");
+                }
             }
         }
     }

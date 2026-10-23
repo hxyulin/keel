@@ -158,6 +158,10 @@ pub enum Directive {
         width: u8,
         address: crate::x86::Address,
     },
+    /// Pointer-sized executable lifecycle array with SHT_INIT_ARRAY/SHT_FINI_ARRAY.
+    ElfLifecycleArray {
+        fini: bool,
+    },
     /// ELF section name, SHF_* flags, and SHT_NOBITS selection.
     ElfSection {
         name: String,
@@ -178,6 +182,9 @@ pub enum Directive {
         name: String,
         function: bool,
     },
+    /// ELF STV_HIDDEN: visible to the other objects of a link but not
+    /// exported from the linked image.
+    ElfHidden(String),
     Size {
         name: String,
         expression: Expression,
@@ -187,9 +194,14 @@ pub enum Directive {
         name: String,
         kind: SectionKind,
     },
+    /// ELF STB_WEAK binding, defined or undefined.
+    ElfWeak(String),
+    /// Mach-O optional undefined symbol (N_WEAK_REF).
+    WeakReference(String),
     Global(String),
     /// Mach-O coalescable definition; the symbol must also be exported.
     WeakDefinition(String),
+    NoDeadStrip(String),
     /// Mach-O symbol visible to other objects but hidden from dynamic exports.
     PrivateExtern(String),
     SubsectionsViaSymbols,
@@ -246,7 +258,12 @@ fn quoted<W: Write + ?Sized>(f: &mut W, s: &[u8]) -> fmt::Result {
             f.write_char('\\')?;
             f.write_char(b as char)?;
         } else {
-            let octal = [b'\\', b'0' + (b >> 6), b'0' + ((b >> 3) & 7), b'0' + (b & 7)];
+            let octal = [
+                b'\\',
+                b'0' + (b >> 6),
+                b'0' + ((b >> 3) & 7),
+                b'0' + (b & 7),
+            ];
             f.write_str(std::str::from_utf8(&octal).map_err(|_| fmt::Error)?)?;
         }
     }
@@ -273,6 +290,10 @@ impl Directive {
                 })?;
                 address.write_to(f)
             }
+            Self::ElfLifecycleArray { fini } => {
+                let name = if *fini { "fini_array" } else { "init_array" };
+                write!(f, ".section .{name},\"aw\",@{name}")
+            }
             Self::ElfSection {
                 name,
                 flags,
@@ -281,7 +302,7 @@ impl Directive {
                 f.write_str(".section\t")?;
                 quoted(f, name.as_bytes())?;
                 f.write_str(",\"")?;
-                for (bit, c) in [(1, 'w'), (2, 'a'), (4, 'x'), (0x400, 'T')] {
+                for (bit, c) in [(1, 'w'), (2, 'a'), (4, 'x'), (0x400, 'T'), (0x200000, 'R')] {
                     if flags & bit != 0 {
                         f.write_char(c)?;
                     }
@@ -306,6 +327,7 @@ impl Directive {
                     (0x20, 'S'),
                     (0x200, 'G'),
                     (0x400, 'T'),
+                    (0x200000, 'R'),
                 ] {
                     if flags & bit != 0 {
                         f.write_char(c)?;
@@ -327,6 +349,10 @@ impl Directive {
                 f.write_str(".type\t")?;
                 quoted(f, name.as_bytes())?;
                 f.write_str(if *function { ",@function" } else { ",@object" })
+            }
+            Self::ElfHidden(name) => {
+                f.write_str(".hidden\t")?;
+                quoted(f, name.as_bytes())
             }
             Self::Size { name, expression } => {
                 f.write_str(".size\t")?;
@@ -357,9 +383,12 @@ impl Directive {
                     SectionKind::Data => Ok(()),
                 }
             }
+            Self::ElfWeak(s) => write!(f, ".weak {s}"),
+            Self::WeakReference(s) => write!(f, ".weak_reference {s}"),
             Self::Global(s) => write!(f, ".globl\t{s}"),
             Self::PrivateExtern(s) => write!(f, ".private_extern\t{s}"),
             Self::WeakDefinition(name) => write!(f, ".weak_definition {name}"),
+            Self::NoDeadStrip(name) => write!(f, ".no_dead_strip {name}"),
             Self::SubsectionsViaSymbols => f.write_str(".subsections_via_symbols"),
             Self::Align(n) => {
                 f.write_str(".p2align\t")?;
@@ -551,7 +580,11 @@ impl Expression {
 impl Directive {
     pub fn contains(&self, s: &str) -> bool {
         match self {
-            Self::Global(n)
+            Self::NoDeadStrip(n)
+            | Self::WeakReference(n)
+            | Self::ElfWeak(n)
+            | Self::Global(n)
+            | Self::ElfHidden(n)
             | Self::PrivateExtern(n)
             | Self::WeakDefinition(n)
             | Self::ZeroFill { symbol: n, .. } => n.contains(s),
@@ -586,7 +619,16 @@ impl Directive {
                     }
                 }
             }
-            Self::Global(s) | Self::ZeroFill { symbol: s, .. } => symbol(s)?,
+            Self::NoDeadStrip(s)
+            | Self::ElfWeak(s)
+            | Self::Global(s)
+            | Self::ZeroFill { symbol: s, .. } => symbol(s)?,
+            Self::WeakReference(s) => {
+                symbol(s)?;
+                if s.starts_with('L') {
+                    return Err("weak reference requires a non-local symbol".into());
+                }
+            }
             Self::WeakDefinition(s) => {
                 symbol(s)?;
                 if s.starts_with('L') {

@@ -128,7 +128,7 @@ fn invalid_callee_panics_before_creating_an_instruction() {
             block,
             InstData::Call {
                 func: keel_ir::FuncRef::new(999),
-                args: vec![],
+                args: (vec![]).into(),
             },
         );
     }));

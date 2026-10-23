@@ -1,13 +1,17 @@
-/* Representative library header: exported API, format checks, allocation
- * annotations, unused parameters, and capability-gated optional weak hooks.
+/* Representative library header: exported API, hidden internal API, format
+ * checks, allocation annotations, unused parameters, an unused weak prototype
+ * and capability-gated optional weak hooks.
  * Self contained; no system headers or downloaded project are required. */
 #define API __attribute__((__visibility__("default")))
+#define INTERNAL __attribute__((__visibility__("internal"))) extern
 #define PRINTF(a,b) __attribute__((__format__(__printf__, a, b)))
 #if defined(__KEEL__) && (__has_attribute(weak) || __has_attribute(alias) || __has_attribute(cleanup) || __has_attribute(constructor) || __has_attribute(visibility) || __has_attribute(used) || __has_attribute(retain) || __has_attribute(section) || __has_attribute(ifunc) || __has_attribute(destructor) || __has_attribute(weakref))
 #error unsupported semantic attribute advertised
 #endif
 extern int log_message(const char *, ...) PRINTF(1, 2);
 extern void *allocate(unsigned long) __attribute__((malloc, alloc_size(1), warn_unused_result));
+extern void unwind_next(void *) __attribute__((__noreturn__)) __attribute__((__weak__));
+INTERNAL int internal_count(int);
 API int library_sum(const int *, int) __attribute__((nonnull(1)));
 API int library_sum(const int *values, int count) {
     int sum = 0;
@@ -18,7 +22,8 @@ static int helper(int unused __attribute__((unused))) __attribute__((noinline));
 static int helper(int unused __attribute__((unused))) { return 12; }
 int old_api(void) __attribute__((deprecated("use library_sum")));
 int old_api(void) { return helper(0); }
+int internal_count(int count) { return count; }
 int main(void) {
     int values[] = { 2, 3, 7 };
-    return library_sum(values, 3) == old_api() ? 0 : 1;
+    return library_sum(values, internal_count(3)) == old_api() ? 0 : 1;
 }

@@ -78,7 +78,7 @@ impl AllocationInput<'_> {
                 visit(Operand {
                     part,
                     kind,
-                    float: ty.is_float(),
+                    float: ty.is_float() || ty.is_vector(),
                     constraint: self.selection.constraint(inst, part, kind),
                 });
             }
@@ -171,6 +171,50 @@ pub struct AllocationEdits {
 impl AllocationEdits {
     pub fn is_empty(&self) -> bool {
         self.instructions.is_empty() && self.params.is_empty() && self.edges.is_empty()
+    }
+    /// Visit typed sparse bindings without exposing the storage layout.
+    pub(crate) fn for_each_binding(&self, mut visit: impl FnMut(ValuePart, Loc)) {
+        for edit in &self.instructions {
+            for &(part, loc) in edit.uses.iter().chain(&edit.defs) {
+                visit(part, loc);
+            }
+        }
+        for (&(_, part), &loc) in &self.params {
+            visit(part, loc);
+        }
+    }
+    pub(crate) fn for_each_transfer(&self, mut visit: impl FnMut(Transfer)) {
+        for edit in &self.instructions {
+            for &pair in edit.before.iter().chain(&edit.after) {
+                visit(pair);
+            }
+        }
+        for moves in self.edges.values() {
+            for &pair in moves {
+                visit(pair);
+            }
+        }
+    }
+    /// Rewrite every sparse location together with a fallback-frame rewrite.
+    pub(crate) fn map_locations(&mut self, mut map: impl FnMut(Loc) -> Loc) {
+        for edit in &mut self.instructions {
+            for (_, loc) in edit.uses.iter_mut().chain(&mut edit.defs) {
+                *loc = map(*loc);
+            }
+            for (dst, src) in edit.before.iter_mut().chain(&mut edit.after) {
+                *dst = map(*dst);
+                *src = map(*src);
+            }
+        }
+        for loc in self.params.values_mut() {
+            *loc = map(*loc);
+        }
+        for moves in self.edges.values_mut() {
+            for (dst, src) in moves {
+                *dst = map(*dst);
+                *src = map(*src);
+            }
+        }
     }
     pub fn instruction_mut(&mut self, inst: Inst) -> &mut InstructionAllocation {
         let index = *self.indices.entry(inst).or_insert_with(|| {

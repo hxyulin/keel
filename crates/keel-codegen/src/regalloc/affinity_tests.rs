@@ -139,7 +139,7 @@ fn conditional_store_join_has_identity_copies_with_default_selection() {
 fn opcode_hint_has_priority_over_consensus() {
     let func = function(STORE_JOIN);
     let mut selection = crate::select::Selection::default();
-    selection.hints.insert(Value::new(4), vec![Value::new(0)]);
+    selection.hints.insert(Value::new(4), Value::new(0));
     let full = checked(&func, &POOLS, &selection, AllocationTier::FullAffinity);
     assert_eq!(loc(&full, 4), Some(Loc::Reg(9)));
 }
@@ -406,6 +406,7 @@ fn inactive_interference_blocks_an_otherwise_available_consensus_register() {
         preserved_gprs: 0,
         float: false,
         vector: false,
+                spill_units: 1,
     };
     let intervals = [
         iv(0, vec![(1, 2)]),

@@ -7,9 +7,11 @@
 //! it type-checks as it goes, producing the typed tree in `ast.rs`.
 //!
 //! Beyond ISO C it accepts what Apple's headers use: `__attribute__((..))`
-//! (`aligned`, `packed`, `returns_twice` and `noreturn` have semantics), `__asm`
-//! labels that rename a symbol, `__inline`, `__restrict`, nullability
-//! qualifiers, `__extension__`, `__int128` and a few `__builtin_`s.
+//! (`aligned`, `packed`, `returns_twice`, `noreturn` and `visibility` have
+//! semantics), `__asm` labels that rename a symbol, `__inline`, `__restrict`,
+//! nullability qualifiers, `__extension__`, `__int128` and a few `__builtin_`s.
+
+mod asm;
 
 use crate::arena::BodyArena;
 use crate::ast::*;
@@ -39,7 +41,7 @@ enum Sym {
     Enum(i64),
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Scope<'a> {
     /// Names first bound in this scope, restored in reverse order on exit.
     names: Vec<&'a str>,
@@ -62,7 +64,9 @@ struct DeclSpec<'a> {
     ty: Ty<'a>,
     sugar: Sugar<'a>,
     infer: bool,
+    implicit_int: bool,
     storage: Storage,
+    auto_storage: bool,
     is_const: bool,
     is_volatile: bool,
     inline: bool,
@@ -72,16 +76,55 @@ struct DeclSpec<'a> {
 
 #[derive(Default, Clone, Copy, PartialEq)]
 pub struct Attrs {
+    pub mode: Option<(u64, Loc)>,
+    pub vector_size: Option<(u64, Loc)>,
     pub aligned: Option<u64>,
     pub alignas: Option<u64>,
     pub packed: bool,
     pub returns_twice: bool,
     pub noreturn: bool,
     pub function_attrs: keel_ir::FunctionAttrs,
+    /// `visibility(..)` and where it was written; see `Global::visibility`.
+    pub visibility: Option<(Visibility, Loc)>,
+    /// Where a different visibility than `visibility` was written.
+    pub visibility_conflict: Option<Loc>,
+    /// Where `weak` was written; see `Global::weak`.
+    pub weak: Option<Loc>,
+    pub lifecycle: Option<Loc>,
+    pub used: Option<Loc>,
+    pub retain: Option<Loc>,
+    pub section: Option<(keel_ir::SectionName, Loc)>,
+    pub section_conflict: Option<Loc>,
+    pub cleanup: Option<(usize, Loc)>,
+    pub cleanup_conflict: Option<Loc>,
 }
 
 impl Attrs {
     fn merge(&mut self, other: Self) {
+        if let Some((visibility, loc)) = other.visibility {
+            self.set_visibility(visibility, loc);
+        }
+        self.visibility_conflict = self.visibility_conflict.or(other.visibility_conflict);
+        self.weak = self.weak.or(other.weak);
+        self.lifecycle = self.lifecycle.or(other.lifecycle);
+        self.used = self.used.or(other.used);
+        self.retain = self.retain.or(other.retain);
+        if self
+            .section
+            .zip(other.section)
+            .is_some_and(|(a, b)| a.0 != b.0)
+        {
+            self.section_conflict = other.section.map(|s| s.1);
+        }
+        self.section_conflict = self.section_conflict.or(other.section_conflict);
+        self.section = self.section.or(other.section);
+        if self.cleanup.is_some() && other.cleanup.is_some() {
+            self.cleanup_conflict = other.cleanup.map(|(_, loc)| loc);
+        }
+        self.cleanup_conflict = self.cleanup_conflict.or(other.cleanup_conflict);
+        self.cleanup = other.cleanup.or(self.cleanup);
+        self.mode = other.mode.or(self.mode);
+        self.vector_size = other.vector_size.or(self.vector_size);
         if let Some(a) = other.aligned {
             self.aligned = Some(self.aligned.unwrap_or(1).max(a));
         }
@@ -93,12 +136,104 @@ impl Attrs {
         self.noreturn |= other.noreturn;
         self.function_attrs.merge(other.function_attrs);
     }
+    fn set_visibility(&mut self, visibility: Visibility, loc: Loc) {
+        match self.visibility {
+            None => self.visibility = Some((visibility, loc)),
+            Some((v, _)) if v != visibility => {
+                self.visibility_conflict.get_or_insert(loc);
+            }
+            Some(_) => {}
+        }
+    }
+    /// Rejects the attributes that only a function or an object with
+    /// linkage can carry, written where no such symbol is declared.
+    fn no_type_attrs(&self) -> R<()> {
+        self.no_cleanup()?;
+        if let Some((_, loc)) = self.mode.or(self.vector_size) {
+            return Err(Error::new(
+                loc,
+                "type-changing attribute is not supported in this position",
+            ));
+        }
+        Ok(())
+    }
+    fn no_cleanup(&self) -> R<()> {
+        if let Some((_, loc)) = self.cleanup {
+            return Err(Error::new(
+                loc,
+                "cleanup applies only to automatic local objects",
+            ));
+        }
+        Ok(())
+    }
+    fn no_symbol_attrs(&self) -> R<()> {
+        self.no_cleanup()?;
+        if let Some(loc) = self
+            .lifecycle
+            .or(self.used)
+            .or(self.retain)
+            .or(self.section.map(|s| s.1))
+        {
+            return Err(Error::new(
+                loc,
+                "lifecycle/used/retain/section attributes require a function or static-storage object",
+            ));
+        }
+        if let Some(loc) = self.weak {
+            return Err(Error::new(
+                loc,
+                "weak applies only to functions and variables with external linkage",
+            ));
+        }
+        if let Some(loc) = self.visibility_conflict.or(self
+            .visibility
+            .filter(|(v, _)| v.hidden())
+            .map(|(_, loc)| loc))
+        {
+            return Err(Error::new(
+                loc,
+                "non-default visibility applies only to functions and variables with linkage",
+            ));
+        }
+        Ok(())
+    }
     fn alignment(self) -> Option<u64> {
         self.aligned
             .into_iter()
             .chain(self.alignas.filter(|a| *a != 0))
             .max()
     }
+}
+
+/// Known nonlocal calls cannot participate in lexical cleanup unwinding.
+pub(crate) fn nonlocal_exit(global: &Global<'_>) -> bool {
+    let known = |name| {
+        matches!(
+            name,
+            "setjmp"
+                | "_setjmp"
+                | "sigsetjmp"
+                | "__sigsetjmp"
+                | "savectx"
+                | "vfork"
+                | "longjmp"
+                | "_longjmp"
+                | "siglongjmp"
+                | "__longjmp_chk"
+                | "__builtin_longjmp"
+                | "__builtin_setjmp"
+        )
+    };
+    // A local C name can still call a known nonlocal runtime entry through
+    // an asm linker label, including one supplied by a later declaration.
+    global.returns_twice || known(global.name) || known(global.symbol)
+}
+
+pub(crate) fn unsupported_attribute(loc: Loc, name: &str) -> Error {
+    Error::new(
+        loc,
+        format!("attribute `{name}` requires semantics that are not supported"),
+    )
 }
 
 /// A parsed declarator: the name (if not abstract) and the full type.
@@ -122,6 +257,12 @@ pub(crate) struct SwitchCtx<'a> {
 /// Per-function state.
 pub(crate) struct FuncState<'a> {
     pub locals: Vec<Local<'a>>,
+    /// Pending captures, consumed by the declaration or type-name expression.
+    pub vla_bounds: Vec<(LocalId, Expr<'a>)>,
+    pub has_vm: bool,
+    pub cleanup_unsupported_exit: Option<(Loc, &'static str)>,
+    /// Direct calls retained for cleanup contract checks after all redeclarations.
+    pub direct_calls: Vec<(usize, Loc)>,
     /// Block scopes, by their parent, and the one being parsed.
     pub scopes: Vec<Option<usize>>,
     pub scope: Option<usize>,
@@ -171,8 +312,19 @@ pub struct Parser<'a> {
     /// `extern`), for which inline-only emission does not apply.
     /// Explicit static linkage, recorded in `Global::internal`, still wins.
     external_def: HashSet<usize>,
+    /// Runtime bounds are admitted in automatic and parameter declarators.
+    vla_allowed: bool,
+    in_parameter_list: bool,
     /// Parameters of the last parameter list parsed: those of a function
     /// definition's declarator, when its body follows.
+    last_param_function: Option<&'a FuncTy<'a>>,
+    last_param_scope: Option<Scope<'a>>,
+    last_param_bindings: Vec<(&'a str, Sym)>,
+    last_param_state: Option<FuncState<'a>>,
+    last_param_ids: Vec<LocalId>,
+    last_param_star: bool,
+    parameter_arrays: Vec<(&'a ArrayTy<'a>, (bool, bool, bool, bool))>,
+    parameter_star: bool,
     last_params: Vec<(Option<&'a str>, Ty<'a>, Sugar<'a>, Loc)>,
     /// Counts names made up for static locals and compound literals.
     unique: usize,
@@ -189,7 +341,7 @@ const RESERVED: u8 = 2;
 /// Keywords and what they are. The few type keywords that are typedef-like
 /// names (`__builtin_va_list`, `__int128_t`, `__uint128_t`) are not
 /// reserved.
-const KEYWORDS: [(&str, u8); 74] = [
+const KEYWORDS: [(&str, u8); 77] = [
     ("void", TYPE_WORD | RESERVED),
     ("_Bool", TYPE_WORD | RESERVED),
     ("char", TYPE_WORD | RESERVED),
@@ -238,6 +390,9 @@ const KEYWORDS: [(&str, u8); 74] = [
     ("_Float16", TYPE_WORD | RESERVED),
     ("__float128", TYPE_WORD | RESERVED),
     ("__builtin_va_list", TYPE_WORD),
+    ("__SVFloat32_t", TYPE_WORD),
+    ("__SVFloat64_t", TYPE_WORD),
+    ("__SVBool_t", TYPE_WORD),
     ("typeof", TYPE_WORD | RESERVED),
     ("__typeof__", TYPE_WORD | RESERVED),
     ("__typeof", TYPE_WORD | RESERVED),
@@ -360,6 +515,9 @@ const TYPE_KEYWORDS: &[&str] = &[
     "_Float16",
     "__float128",
     "__builtin_va_list",
+    "__SVFloat32_t",
+    "__SVFloat64_t",
+    "__SVBool_t",
     "typeof",
     "__typeof__",
     "__typeof",
@@ -405,6 +563,16 @@ impl<'a> Parser<'a> {
             expr_bufs: Vec::new(),
             fs: None,
             external_def: HashSet::default(),
+            vla_allowed: false,
+            in_parameter_list: false,
+            last_param_function: None,
+            last_param_scope: None,
+            last_param_bindings: Vec::new(),
+            last_param_state: None,
+            last_param_ids: Vec::new(),
+            last_param_star: false,
+            parameter_arrays: Vec::new(),
+            parameter_star: false,
             last_params: Vec::new(),
             unique: 0,
             target,
@@ -441,20 +609,38 @@ impl<'a> Parser<'a> {
             self.structs.push(StructDef {
                 tag: Some("__va_list_tag".into()),
                 is_union: false,
-                members: vec![
-                    member("gp_offset", crate::types::UINT, 0),
-                    member("fp_offset", crate::types::UINT, 4),
-                    member("overflow_arg_area", void_ptr, 8),
-                    member("reg_save_area", void_ptr, 16),
-                ],
-                size: 24,
+                members: if self.target == Target::Aarch64LinuxGnu {
+                    vec![
+                        member("__stack", void_ptr, 0),
+                        member("__gr_top", void_ptr, 8),
+                        member("__vr_top", void_ptr, 16),
+                        member("__gr_offs", crate::types::INT, 24),
+                        member("__vr_offs", crate::types::INT, 28),
+                    ]
+                } else {
+                    vec![
+                        member("gp_offset", crate::types::UINT, 0),
+                        member("fp_offset", crate::types::UINT, 4),
+                        member("overflow_arg_area", void_ptr, 8),
+                        member("reg_save_area", void_ptr, 16),
+                    ]
+                },
+                size: if self.target == Target::Aarch64LinuxGnu {
+                    32
+                } else {
+                    24
+                },
                 align: 8,
                 complete: true,
             });
             self.structs.len() - 1
         });
         let elem = Ty::Struct(id);
-        self.array_type(elem, Some(1))
+        if self.target == Target::Aarch64LinuxGnu {
+            elem
+        } else {
+            self.array_type(elem, Some(1))
+        }
     }
 
     // ---- tokens ----
@@ -500,25 +686,21 @@ impl<'a> Parser<'a> {
     /// is reported in place of whatever the parser makes of it.
     fn fill(&mut self) {
         const CHUNK: usize = 256;
-        for _ in 0..CHUNK {
-            if self.lexed_all {
-                return;
-            }
-            let tok = match self.lexer.token(&mut self.text) {
-                Ok(tok) => tok,
-                Err(e) => {
-                    let eof = Token {
-                        tok: Tok::Eof,
-                        loc: e.loc,
-                        pack: 0,
-                    };
-                    self.lex_error = Some(e);
-                    eof
-                }
-            };
-            self.lexed_all = tok.tok == Tok::Eof;
-            self.toks.push(tok);
+        if self.lexed_all {
+            return;
         }
+        self.lexed_all = match self.lexer.tokens(&mut self.text, &mut self.toks, CHUNK) {
+            Ok(eof) => eof,
+            Err(e) => {
+                self.toks.push(Token {
+                    tok: Tok::Eof,
+                    loc: e.loc,
+                    pack: 0,
+                });
+                self.lex_error = Some(e);
+                true
+            }
+        };
     }
 
     /// Drops the tokens before the current one, between declarations,
@@ -578,7 +760,7 @@ impl<'a> Parser<'a> {
             Tok::Ident(s) => format!("`{s}`"),
             Tok::Punct(p) => format!("`{p}`"),
             Tok::Int { value, .. } => format!("`{value}`"),
-            Tok::Float { value, .. } => format!("`{value}`"),
+            Tok::Float { value, .. } | Tok::Imaginary { value, .. } => format!("`{value}`"),
             Tok::Char(_) => "a character constant".into(),
             Tok::BadNumber(text) => format!("invalid number `{text}`"),
             Tok::Str { .. } => "a string".into(),
@@ -707,7 +889,11 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn array_type(&self, elem: Ty<'a>, len: Option<u64>) -> Ty<'a> {
-        Ty::Array(self.arena.alloc(ArrayTy { elem, len }))
+        Ty::Array(self.arena.alloc(ArrayTy {
+            elem,
+            len,
+            vla: None,
+        }))
     }
 
     pub(crate) fn sugar_ref(&self, sugar: Sugar<'a>) -> &'a Sugar<'a> {
@@ -821,7 +1007,8 @@ impl<'a> Parser<'a> {
         sugar: Sugar<'a>,
         volatile: bool,
     ) -> LocalId {
-        let in_memory = volatile || sugar.is_volatile(&self.typedefs) || !ty.is_scalar();
+        let in_memory =
+            volatile || sugar.is_volatile(&self.typedefs) || !ty.is_scalar() || ty.is_complex();
         let align = self.type_alignment(&ty, &sugar);
         let fs = self.fs.as_mut().unwrap();
         fs.locals.push(Local {
@@ -831,6 +1018,7 @@ impl<'a> Parser<'a> {
             align,
             scope: fs.scope,
             in_memory,
+            cleanup: None,
         });
         let id = fs.locals.len() - 1;
         self.bind(name, Sym::Local(id));
@@ -865,7 +1053,14 @@ impl<'a> Parser<'a> {
             is_const,
             thread_local: false,
             returns_twice: false,
+            incompatible_return: false,
             function_attrs: keel_ir::FunctionAttrs::default(),
+            visibility: None,
+            weak: None,
+            lifecycle: None,
+            used: false,
+            retain: None,
+            section: None,
             func: None,
         });
         self.globals.len() - 1
@@ -942,6 +1137,7 @@ impl<'a> Parser<'a> {
             ));
         }
         if !spec.infer && self.eat(";") {
+            spec.attrs.no_symbol_attrs()?;
             return Ok(());
         }
         // A block-scope `static` or `extern` declares a global, whose
@@ -978,6 +1174,8 @@ impl<'a> Parser<'a> {
     ) -> R<()> {
         loop {
             let loc = self.loc();
+            self.last_param_function = None;
+            let bound_start = self.vm_bound_mark();
             let mut d = if spec.infer {
                 let name = self.ident()?;
                 Declarator {
@@ -989,15 +1187,52 @@ impl<'a> Parser<'a> {
                     attrs: Attrs::default(),
                 }
             } else {
-                self.declarator_sugar(spec.ty, spec.sugar)?
+                let outer = self.vla_allowed;
+                self.vla_allowed =
+                    !file_scope && matches!(spec.storage, Storage::None | Storage::Typedef);
+                let result = self.declarator_sugar(spec.ty, spec.sugar);
+                self.vla_allowed = outer;
+                result?
             };
+            if d.ty.variably_modified()
+                && (file_scope || !matches!(spec.storage, Storage::None | Storage::Typedef))
+            {
+                return Err(Error::new(
+                    loc,
+                    "variably modified types require automatic block storage in this milestone",
+                ));
+            }
+            if d.ty.variably_modified() {
+                self.fs.as_mut().unwrap().has_vm = true;
+            }
+            // Evaluate only bounds introduced here. A VM typedef reuses its
+            // captured locals, even when its source variables have changed.
+            let bounds = self.take_vm_bounds(bound_start);
+            for (id, bound) in bounds {
+                out.push(Stmt::Init(
+                    id,
+                    Init {
+                        items: self.slice(&[InitItem::Expr {
+                            offset: 0,
+                            expr: self.node(bound),
+                            bits: None,
+                        }]),
+                    },
+                    loc,
+                ));
+            }
             let mut attrs = spec.attrs;
             attrs.merge(d.attrs);
             let label = self.asm_label_and_attrs(&mut attrs)?;
+            d.ty = self.apply_type_attrs(d.ty, &mut attrs)?;
             d.attrs = attrs;
             let Some((name, name_loc)) = d.name else {
                 return Err(Error::new(loc, "declaration needs a name"));
             };
+            if self.names.get(&self.name_key(name)).is_some_and(|b|
+                matches!(b.last(), Some((depth, Sym::Local(_))) if *depth == self.scopes.len() - 1)) {
+                return Err(Error::new(name_loc, "duplicate local or parameter name"));
+            }
             let inferred_init = if spec.infer {
                 if !self.eat("=") {
                     return Err(Error::new(
@@ -1047,6 +1282,14 @@ impl<'a> Parser<'a> {
             } else {
                 None
             };
+            if d.ty.variably_modified()
+                && (file_scope || !matches!(spec.storage, Storage::None | Storage::Typedef))
+            {
+                return Err(Error::new(
+                    loc,
+                    "variably modified types require automatic block storage in this milestone",
+                ));
+            }
             // The specifiers' qualifiers are on the object only if the
             // declarator adds nothing but arrays: `const char *a[2]` is an
             // array of mutable pointers.
@@ -1054,7 +1297,10 @@ impl<'a> Parser<'a> {
             while let Ty::Array(inner) = elem {
                 elem = &inner.elem;
             }
-            let base = spec.infer || *elem == spec.ty;
+            let base = spec.infer
+                || *elem == spec.ty
+                || ((elem.is_arith() || elem.is_vector())
+                    && (spec.ty.is_arith() || spec.ty.is_vector()));
             if let Some(what) = elem.unusable()
                 && !matches!(spec.storage, Storage::Typedef | Storage::Extern)
             {
@@ -1066,8 +1312,21 @@ impl<'a> Parser<'a> {
             let is_const = d.is_const || (spec.is_const && base);
             let is_volatile = d.is_volatile || (spec.is_volatile && base);
             if spec.storage == Storage::Typedef {
+                attrs.no_symbol_attrs()?;
                 if attrs.alignas.is_some() {
                     return Err(Error::new(name_loc, "`_Alignas` cannot apply to a typedef"));
+                }
+                if let Some((depth, Sym::Typedef(id))) = self
+                    .names
+                    .get(&self.name_key(name))
+                    .and_then(|bindings| bindings.last())
+                    && *depth == self.scopes.len() - 1
+                    && self.typedefs[*id].ty.numeric_redeclaration_conflict(&d.ty)
+                {
+                    return Err(Error::new(
+                        name_loc,
+                        "incompatible types in typedef redeclaration",
+                    ));
                 }
                 self.typedefs.push(TypedefDef {
                     name: name,
@@ -1076,7 +1335,43 @@ impl<'a> Parser<'a> {
                     align: attrs.aligned,
                 });
                 self.bind(name, Sym::Typedef(self.typedefs.len() - 1));
-            } else if let Ty::Func(fty) = d.ty {
+            } else if let Ty::Func(mut fty) = d.ty {
+                if spec.thread_local {
+                    return Err(Error::new(
+                        name_loc,
+                        "thread-local storage requires an object",
+                    ));
+                }
+                if !fty.prototyped && !fty.old_style && file_scope && self.is("{") {
+                    let direct = self
+                        .last_param_function
+                        .is_some_and(|f| std::ptr::eq(f, fty));
+                    fty = self.arena.alloc(FuncTy {
+                        old_style: true,
+                        ..*fty
+                    });
+                    if direct {
+                        self.last_param_function = Some(fty);
+                    }
+                }
+                if fty.old_style {
+                    if !file_scope
+                        || !self
+                            .last_param_function
+                            .is_some_and(|f| std::ptr::eq(f, fty))
+                    {
+                        return Err(Error::new(
+                            name_loc,
+                            "identifier list requires a function definition",
+                        ));
+                    }
+                    fty = self.old_style_parameters(fty)?;
+                } else if file_scope && self.is_typename() {
+                    return Err(Error::new(
+                        name_loc,
+                        "parameter declaration list requires an identifier-list definition",
+                    ));
+                }
                 if attrs.alignment().is_some() || attrs.alignas.is_some() {
                     return Err(Error::new(
                         name_loc,
@@ -1087,11 +1382,48 @@ impl<'a> Parser<'a> {
                     .declare_function(&name, label, fty, &spec, attrs, file_scope)
                     .map_err(|message| Error::new(name_loc, message))?;
                 self.globals[g].sugar = d.sugar;
+                self.symbol_attrs(g, &attrs)?;
                 if file_scope && self.is("{") {
                     self.function_body(g, fty, name_loc)?;
                     return Ok(());
                 }
             } else if !file_scope && spec.storage == Storage::None {
+                if label.is_some() {
+                    return Err(Error::new(
+                        name_loc,
+                        "asm labels on automatic locals/register variables are not supported",
+                    ));
+                }
+                let cleanup = attrs.cleanup.take();
+                if let Some((_, loc)) = cleanup
+                    && spec.thread_local
+                {
+                    return Err(Error::new(
+                        loc,
+                        "cleanup applies only to automatic local objects",
+                    ));
+                }
+                if spec.thread_local {
+                    return Err(Error::new(
+                        name_loc,
+                        "block-scope thread-local storage requires static or extern",
+                    ));
+                }
+                if let Some(loc) = attrs.cleanup_conflict {
+                    return Err(Error::new(
+                        loc,
+                        "multiple cleanup attributes on one declaration",
+                    ));
+                }
+                attrs.no_symbol_attrs()?;
+                if self
+                    .names
+                    .get(&self.name_key(name))
+                    .and_then(|b| b.last())
+                    .is_some_and(|(depth, _)| *depth == self.scopes.len() - 1)
+                {
+                    return Err(Error::new(name_loc, "redeclaration of automatic local"));
+                }
                 // In scope from the end of its declarator: `T *p =
                 // malloc(sizeof *p)` refers to itself.
                 let id = self.new_local(name, d.ty, d.sugar, is_volatile);
@@ -1099,13 +1431,24 @@ impl<'a> Parser<'a> {
                 self.fs.as_mut().unwrap().locals[id].align = align;
                 let mut ty = d.ty;
                 let mut init = inferred_init;
+                if ty.runtime_sized() && self.is("=") {
+                    return Err(Error::new(
+                        name_loc,
+                        "variable-length arrays cannot have initializers",
+                    ));
+                }
                 if init.is_none() && self.eat("=") {
                     let (i, complete) = self.initializer(&ty)?;
                     ty = complete;
                     init = Some(i);
                 }
                 let incomplete = match &ty {
-                    Ty::Array(ArrayTy { len: None, .. }) | Ty::Void => true,
+                    Ty::Array(ArrayTy {
+                        len: None,
+                        vla: None,
+                        ..
+                    })
+                    | Ty::Void => true,
                     Ty::Struct(id) => !self.structs[*id].complete,
                     _ => false,
                 };
@@ -1116,8 +1459,47 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 let local = &mut self.fs.as_mut().unwrap().locals[id];
-                local.in_memory |= !ty.is_scalar();
+                local.in_memory |= !ty.is_scalar() || ty.is_complex();
                 local.ty = ty;
+                if ty.runtime_sized() && align > 16 {
+                    return Err(Error::new(
+                        name_loc,
+                        "VLA alignment greater than 16 bytes is not supported yet",
+                    ));
+                }
+                if let Some((g, loc)) = cleanup {
+                    let Ty::Func(fty) = self.globals[g].ty else {
+                        unreachable!()
+                    };
+                    if !fty.prototyped
+                        || fty.variadic
+                        || fty.params.len() != 1
+                        || !matches!(fty.params[0], Ty::Ptr(t) if *t == Ty::Void || t.compatible(&ty))
+                    {
+                        return Err(Error::new(
+                            loc,
+                            "cleanup function must have a prototype with exactly one compatible object pointer parameter",
+                        ));
+                    }
+                    if self.globals[g].incompatible_return {
+                        return Err(Error::new(
+                            loc,
+                            "cleanup function has incompatible return-type redeclarations",
+                        ));
+                    }
+                    if fty.ret != Ty::Void && self.incomplete(&fty.ret) {
+                        return Err(Error::new(
+                            loc,
+                            "cleanup function returns an incomplete type",
+                        ));
+                    }
+                    if nonlocal_exit(&self.globals[g]) || self.globals[g].function_attrs.noreturn {
+                        return Err(Error::new(loc, "cleanup callback must return normally"));
+                    }
+                    let local = &mut self.fs.as_mut().unwrap().locals[id];
+                    local.in_memory = true;
+                    local.cleanup = cleanup;
+                }
                 out.push(match init {
                     Some(init) => Stmt::Init(id, init, loc),
                     None => Stmt::Declare(id),
@@ -1167,8 +1549,8 @@ impl<'a> Parser<'a> {
         file_scope: bool,
         inferred_init: Option<Init<'a>>,
     ) -> R<()> {
-        let name = d.name.as_ref().unwrap().0;
-        let align = self.object_alignment(&d.ty, &d.sugar, d.attrs, d.name.as_ref().unwrap().1)?;
+        let (name, name_loc) = *d.name.as_ref().unwrap();
+        let align = self.object_alignment(&d.ty, &d.sugar, d.attrs, name_loc)?;
         let local_static = !file_scope && spec.storage == Storage::Static;
         let g = if local_static {
             let func = &self.fs.as_ref().unwrap().name;
@@ -1190,17 +1572,31 @@ impl<'a> Parser<'a> {
                 is_const,
                 thread_local: spec.thread_local,
                 returns_twice: false,
+                incompatible_return: false,
                 function_attrs: keel_ir::FunctionAttrs::default(),
+                visibility: None,
+                weak: None,
+                lifecycle: None,
+                used: false,
+                retain: None,
+                section: None,
                 func: None,
             });
             let g = self.globals.len() - 1;
             self.bind(name, Sym::Global(g));
             g
         } else {
+            let previous_count = self.globals.len();
             let g = self
                 .global(&name, label, d.ty)
                 .map_err(|message| Error::new(d.name.as_ref().unwrap().1, message))?;
             let global = &mut self.globals[g];
+            if g < previous_count && global.thread_local != spec.thread_local {
+                return Err(Error::new(
+                    name_loc,
+                    "TLS and non-TLS object redeclarations conflict",
+                ));
+            }
             global.sugar = d.sugar;
             if spec.storage == Storage::Static {
                 global.internal = true;
@@ -1213,6 +1609,7 @@ impl<'a> Parser<'a> {
             }
             g
         };
+        self.symbol_attrs(g, &d.attrs)?;
         self.globals[g].align = self.globals[g].align.max(align);
         if inferred_init.is_some() || self.eat("=") {
             let loc = self.loc();
@@ -1264,12 +1661,24 @@ impl<'a> Parser<'a> {
         let g = match existing {
             Some(g) => {
                 let global = &mut self.globals[g];
+                if global.ty.numeric_redeclaration_conflict(&ty)
+                    || matches!((global.ty, ty), (Ty::Func(a), Ty::Func(b))
+                        if !a.parameters_compatible(b))
+                {
+                    return Err("incompatible types in redeclaration");
+                }
+                // Ordinary unrelated return-type redeclarations keep their existing
+                // permissive policy; cleanup callbacks must use one compatible ABI.
+                global.incompatible_return |= matches!((global.ty, ty),
+                    (Ty::Func(a), Ty::Func(b)) if !a.ret.compatible(&b.ret));
                 let more_complete = match (&global.ty, &ty) {
                     (
                         Ty::Array(ArrayTy { len: None, .. }),
                         Ty::Array(ArrayTy { len: Some(_), .. }),
                     ) => true,
-                    (Ty::Func(old), Ty::Func(new)) => !old.prototyped && new.prototyped,
+                    (Ty::Func(old), Ty::Func(new)) => {
+                        !old.prototyped && (new.prototyped || new.old_style)
+                    }
                     _ => false,
                 };
                 if more_complete {
@@ -1290,7 +1699,14 @@ impl<'a> Parser<'a> {
                     is_const: false,
                     thread_local: false,
                     returns_twice: false,
+                    incompatible_return: false,
                     function_attrs: keel_ir::FunctionAttrs::default(),
+                    visibility: None,
+                    weak: None,
+                    lifecycle: None,
+                    used: false,
+                    retain: None,
+                    section: None,
                     func: None,
                 });
                 let g = self.globals.len() - 1;
@@ -1342,6 +1758,249 @@ impl<'a> Parser<'a> {
         Ok(g)
     }
 
+    /// Merges a declaration's `visibility` and `weak` into those of the
+    /// symbol it declares.
+    fn symbol_attrs(&mut self, g: usize, attrs: &Attrs) -> R<()> {
+        attrs.no_cleanup()?;
+        if let Some(loc) = attrs.visibility_conflict {
+            return Err(Error::new(loc, "conflicting visibility attributes"));
+        }
+        let global = &mut self.globals[g];
+        if let Some(loc) = attrs.lifecycle {
+            if !matches!(global.ty, Ty::Func(_)) {
+                return Err(Error::new(
+                    loc,
+                    "constructor/destructor requires a function",
+                ));
+            }
+            global.lifecycle.get_or_insert(loc);
+        }
+        if let Some(loc) = attrs.section_conflict {
+            return Err(Error::new(loc, "conflicting section attributes"));
+        }
+        if let Some((section, loc)) = attrs.section {
+            if global.section.is_some_and(|s| s != section) {
+                return Err(Error::new(loc, "conflicting section redeclarations"));
+            }
+            global.section = Some(section);
+        }
+        global.retain = global.retain.or(attrs.retain);
+        global.used |= attrs.used.is_some();
+        if matches!(global.ty, Ty::Func(_)) {
+            global.function_attrs.used |= attrs.used.is_some();
+            global.function_attrs.retain |= attrs.retain.is_some();
+            global.function_attrs.section = global.section;
+        }
+        if let Some((visibility, loc)) = attrs.visibility {
+            if global.visibility.is_some_and(|v| v != visibility) {
+                return Err(Error::new(
+                    loc,
+                    format!(
+                        "visibility of `{}` does not match a previous declaration",
+                        global.name
+                    ),
+                ));
+            }
+            global.visibility = Some(visibility);
+        }
+        if let Some(loc) = attrs.weak {
+            global.weak.get_or_insert(loc);
+        }
+        Ok(())
+    }
+
+    /// Bind the declaration list in the retained definition scope. Nested
+    /// function declarators may replace `last_param_*`, so own all outer state
+    /// until the list is complete, then publish it for `function_body`.
+    fn old_style_parameters(&mut self, fty: &'a FuncTy<'a>) -> R<&'a FuncTy<'a>> {
+        let mut params = std::mem::take(&mut self.last_params);
+        let ids = std::mem::take(&mut self.last_param_ids);
+        let scope = self.last_param_scope.take().unwrap();
+        let bindings = std::mem::take(&mut self.last_param_bindings);
+        let outer = self.fs.take();
+        self.fs = self.last_param_state.take();
+        self.push_scope();
+        self.scopes.last_mut().unwrap().tags = scope.tags;
+        self.scopes.last_mut().unwrap().enums = scope.enums;
+        for (name, sym) in bindings {
+            self.bind(name, sym);
+        }
+        let mut declared = vec![false; params.len()];
+        while !self.is("{") {
+            if !self.is_typename() {
+                return Err(Error::new(
+                    self.loc(),
+                    "identifier list requires a function definition and explicit parameter declarations",
+                ));
+            }
+            let tags = self.structs.len();
+            let enums = self.enums.len();
+            let spec = self.decl_spec()?;
+            if spec.implicit_int {
+                return Err(Error::new(
+                    self.loc(),
+                    "old-style parameter needs an explicit type declaration",
+                ));
+            }
+            if self.structs.len() != tags || self.enums.len() != enums {
+                return Err(Error::new(
+                    self.loc(),
+                    "new tags and enumerators in old-style parameter declarations are not supported",
+                ));
+            }
+            if spec.storage != Storage::None
+                || spec.thread_local
+                || spec.auto_storage
+                || spec.inline
+                || spec.infer
+            {
+                return Err(Error::new(
+                    self.loc(),
+                    "invalid old-style parameter storage class",
+                ));
+            }
+            loop {
+                // VM declaration-list bounds have different ordering semantics;
+                // do not evaluate or capture them in this fixed-size milestone.
+                let declaration_tags = self.structs.len();
+                let declaration_enums = self.enums.len();
+                let declaration_names: Vec<_> = self
+                    .scopes
+                    .last()
+                    .unwrap()
+                    .names
+                    .iter()
+                    .map(|&name| (name, *self.lookup(name).unwrap()))
+                    .collect();
+                let mut d = self.declarator_sugar(spec.ty, spec.sugar)?;
+                // Nested callback prototypes own their tags and enumerators.
+                // New bindings in this scope instead belong to the unsupported
+                // declaration-list scope, which must not leak into the body.
+                let current = self.scopes.last().unwrap();
+                if current
+                    .tags
+                    .values()
+                    .any(|id| id.is_some_and(|id| id >= declaration_tags))
+                    || current.enums.values().any(|&id| id >= declaration_enums)
+                    || current.names.len() != declaration_names.len()
+                    || declaration_names
+                        .iter()
+                        .any(|(name, sym)| self.lookup(name) != Some(sym))
+                {
+                    return Err(Error::new(
+                        self.loc(),
+                        "new tags and enumerators in old-style parameter declarations are not supported",
+                    ));
+                }
+                if let Ty::Array(a) = d.ty
+                    && !self.complete_vm_element(&a.elem)
+                {
+                    return Err(Error::new(
+                        self.loc(),
+                        "parameter array element must be a complete object type",
+                    ));
+                }
+                let Some((name, ploc)) = d.name else {
+                    return Err(Error::new(
+                        self.loc(),
+                        "old-style parameter declaration needs a name",
+                    ));
+                };
+                let Some(index) = params.iter().position(|p| p.0 == Some(name)) else {
+                    return Err(Error::new(
+                        ploc,
+                        "declaration names no identifier-list parameter",
+                    ));
+                };
+                if declared[index] {
+                    return Err(Error::new(
+                        ploc,
+                        "duplicate old-style parameter declaration",
+                    ));
+                }
+                let mut attrs = spec.attrs;
+                attrs.merge(d.attrs);
+                self.attributes(&mut attrs)?;
+                d.ty = self.apply_type_attrs(d.ty, &mut attrs)?;
+                attrs.no_symbol_attrs()?;
+                if attrs.alignment().is_some() || attrs.alignas.is_some() {
+                    return Err(Error::new(
+                        ploc,
+                        "alignment attributes on parameters are not supported",
+                    ));
+                }
+                if d.ty.variably_modified() || !self.parameter_arrays.is_empty() {
+                    return Err(Error::new(
+                        ploc,
+                        "VM or qualified array old-style parameters are not supported",
+                    ));
+                }
+                let (ty, sugar) = match d.ty {
+                    Ty::Array(a) => (
+                        Ty::Ptr(&a.elem),
+                        Sugar::Ptr(
+                            self.sugar_ref(d.sugar.array_element(&self.typedefs, self.arena)),
+                        ),
+                    ),
+                    Ty::Func(_) => (self.ptr_type(d.ty), self.wrap_sugar(d.sugar, Sugar::Ptr)),
+                    ty => (ty, d.sugar),
+                };
+                let supported = matches!(ty, Ty::Int(k) if k.size() <= 8)
+                    || matches!(ty, Ty::Float | Ty::Double | Ty::Ptr(_));
+                if !supported || self.incomplete(&ty) {
+                    return Err(Error::new(ploc, "unsupported old-style parameter type"));
+                }
+                if self.eat("=") {
+                    return Err(Error::new(ploc, "parameter cannot have an initializer"));
+                }
+                let align = self.type_alignment(&ty, &sugar);
+                let local = &mut self.fs.as_mut().unwrap().locals[ids[index]];
+                local.ty = ty;
+                local.sugar = sugar;
+                local.align = align;
+                local.in_memory = d.is_volatile || sugar.is_volatile(&self.typedefs);
+                params[index] = (Some(name), ty, sugar, ploc);
+                declared[index] = true;
+                self.bind(name, Sym::Local(ids[index]));
+                if !self.eat(",") {
+                    break;
+                }
+            }
+            self.expect(";")?;
+        }
+        if let Some(index) = declared.iter().position(|d| !d) {
+            return Err(Error::new(
+                params[index].3,
+                "old-style parameter needs an explicit type declaration",
+            ));
+        }
+        let abi: Vec<_> = params.iter().map(|p| p.1.default_promoted()).collect();
+        let quals: Vec<_> = params
+            .iter()
+            .map(|p| self.parameter_qualifiers(p.1, p.2))
+            .collect();
+        let fty = self.arena.alloc(FuncTy {
+            params: self.arena.alloc_slice_copy(&abi),
+            param_quals: self.arena.alloc_slice_copy(&quals),
+            ..*fty
+        });
+        let scope = self.scopes.last().unwrap().clone();
+        self.last_param_bindings = scope
+            .names
+            .iter()
+            .map(|&name| (name, *self.lookup(name).unwrap()))
+            .collect();
+        self.last_param_scope = Some(scope);
+        self.pop_scope();
+        self.last_param_state = self.fs.take();
+        self.fs = outer;
+        self.last_params = params;
+        self.last_param_ids = ids;
+        self.last_param_star = false;
+        self.last_param_function = Some(fty);
+        Ok(fty)
+    }
+
     fn function_body(&mut self, g: usize, fty: &'a FuncTy<'a>, loc: Loc) -> R<()> {
         if self.globals[g].func.is_some() {
             return Err(Error::new(
@@ -1349,24 +2008,43 @@ impl<'a> Parser<'a> {
                 format!("`{}` is defined twice", self.globals[g].name),
             ));
         }
+        if !self
+            .last_param_function
+            .is_some_and(|f| std::ptr::eq(f, fty))
+        {
+            return Err(Error::new(
+                loc,
+                "function definition requires a direct parameter list",
+            ));
+        }
         let params = std::mem::take(&mut self.last_params);
         let name = self.globals[g].name;
-        self.fs = Some(FuncState {
-            locals: Vec::new(),
-            scopes: Vec::new(),
-            scope: None,
-            label_addrs: Vec::new(),
-            ret: fty.ret,
-            name,
-            switches: Vec::new(),
-        });
+        if self.last_param_star {
+            return Err(Error::new(
+                loc,
+                "VLA star bounds are only allowed in function prototypes",
+            ));
+        }
+        let mut state = self.last_param_state.take().ok_or_else(|| {
+            Error::new(loc, "function definition requires a direct parameter list")
+        })?;
+        state.ret = fty.ret;
+        state.name = name;
+        let bounds = std::mem::take(&mut state.vla_bounds);
+        self.fs = Some(state);
         self.push_scope();
-        let mut ids = Vec::new();
-        for (name, ty, sugar, ploc) in params {
+        let scope = self.last_param_scope.take().unwrap();
+        self.scopes.last_mut().unwrap().tags = scope.tags;
+        self.scopes.last_mut().unwrap().enums = scope.enums;
+        for (name, sym) in std::mem::take(&mut self.last_param_bindings) {
+            self.bind(name, sym);
+        }
+        let ids = std::mem::take(&mut self.last_param_ids);
+        for ((name, _, _, ploc), &id) in params.into_iter().zip(&ids) {
             let Some(name) = name else {
                 return Err(Error::new(ploc, "parameter needs a name"));
             };
-            ids.push(self.new_local(name, ty, sugar, false));
+            debug_assert_eq!(self.lookup(name), Some(&Sym::Local(id)));
         }
         self.expect("{")?;
         let nodes = BodyArena::new();
@@ -1375,16 +2053,46 @@ impl<'a> Parser<'a> {
         // function switch back to `arena` (see `declaration`), and on an
         // error the whole tree is dropped.
         self.nodes = unsafe { nodes.get() };
-        let body = self.block_items();
+        let body = self.block_items().map(|body| {
+            if bounds.is_empty() {
+                return body;
+            }
+            let mut entry = Vec::with_capacity(bounds.len() + body.len());
+            for (id, bound) in bounds {
+                entry.push(Stmt::Init(
+                    id,
+                    Init {
+                        items: self.slice(&[InitItem::Expr {
+                            offset: 0,
+                            expr: self.node(bound),
+                            bits: None,
+                        }]),
+                    },
+                    loc,
+                ));
+            }
+            entry.extend_from_slice(body);
+            self.slice(&entry)
+        });
         self.nodes = self.arena;
         let body = body?;
         self.pop_scope();
         let fs = self.fs.take().unwrap();
+        if fs.locals.iter().any(|l| l.cleanup.is_some())
+            && let Some((loc, kind)) = fs.cleanup_unsupported_exit
+        {
+            return Err(Error::new(
+                loc,
+                format!("{kind} in a function containing cleanup locals is not supported yet"),
+            ));
+        }
         self.funcs.push(FuncDef {
             global: g,
             ty: fty,
             params: ids,
             locals: fs.locals,
+            has_vm: fs.has_vm,
+            direct_calls: fs.direct_calls,
             scopes: fs.scopes,
             label_addrs: fs.label_addrs,
             body,
@@ -1423,7 +2131,7 @@ impl<'a> Parser<'a> {
                             ));
                         }
                     },
-                    Target::X86_64LinuxGnu => &text,
+                    Target::X86_64LinuxGnu | Target::Aarch64LinuxGnu => &text,
                 };
                 label = Some(self.text.intern(name));
             } else if !self.attributes(attrs)? {
@@ -1448,20 +2156,109 @@ impl<'a> Parser<'a> {
                 };
                 let name = name.trim_matches('_');
                 match name {
-                    // These change linkage, retention, placement or execution.
+                    // These change types, linkage, retention, placement or execution.
                     // Accepting their syntax without implementing the contract
                     // would silently change the program, even on a prototype
                     // or on an otherwise unused declaration.
-                    "weak" | "weakref" | "alias" | "ifunc" | "constructor" | "destructor"
-                    | "cleanup" | "section" | "used" | "retain" => {
-                        return Err(Error::new(
-                            loc,
-                            format!("attribute `{name}` requires semantics that are not supported"),
-                        ));
+                    "weakref" | "weak_import" | "alias" | "ifunc" | "ms_abi" | "sysv_abi"
+                    | "stdcall" | "fastcall" | "thiscall" | "vectorcall" | "regcall" | "pcs"
+                    | "aarch64_sve_pcs" | "aarch64_vector_pcs" | "preserve_most"
+                    | "preserve_all" | "cdecl" | "regparm" | "sseregparm" | "interrupt"
+                    | "naked" | "swiftcall" | "swiftasync" | "preserve_none"
+                    | "riscv_vector_cc" | "ext_vector_type" | "transparent_union" => {
+                        return Err(unsupported_attribute(loc, name));
+                    }
+                    "constructor" | "destructor" => {
+                        if self.eat("(") {
+                            let expression = self.conditional()?;
+                            self.expect(")")?;
+                            let priority = match crate::eval::eval_constant(&expression, false) {
+                                Some(crate::eval::Const::Int(n)) if expression.ty.is_integer() => n,
+                                _ => {
+                                    return Err(Error::new(
+                                        loc,
+                                        "lifecycle priority requires an integer constant expression",
+                                    ));
+                                }
+                            };
+                            if priority != 65535 {
+                                return Err(Error::new(
+                                    loc,
+                                    "only default lifecycle priority 65535 is supported",
+                                ));
+                            }
+                        }
+                        attrs.lifecycle.get_or_insert(loc);
+                        if name == "constructor" {
+                            attrs.function_attrs.constructor = true;
+                        } else {
+                            attrs.function_attrs.destructor = true;
+                        }
+                    }
+                    "section" => {
+                        self.expect("(")?;
+                        let mut bytes = Vec::new();
+                        if !matches!(self.peek(), Tok::Str { .. }) {
+                            return Err(self.unexpected("a section string"));
+                        }
+                        while let Tok::Str { bytes: part, wide } = self.peek() {
+                            if wide {
+                                return Err(Error::new(loc, "section requires a narrow string"));
+                            }
+                            bytes.extend_from_slice(part);
+                            self.advance();
+                        }
+                        self.expect(")")?;
+                        let name = std::str::from_utf8(&bytes)
+                            .map_err(|_| Error::new(loc, "section requires ASCII"))?;
+                        let section =
+                            keel_ir::SectionName::new(name).map_err(|e| Error::new(loc, e))?;
+                        if attrs.section.is_some_and(|s| s.0 != section) {
+                            attrs.section_conflict = Some(loc);
+                        }
+                        attrs.section = Some((section, loc));
+                    }
+                    "retain" => {
+                        if self.is("(") {
+                            return Err(self.unexpected("an attribute without arguments"));
+                        }
+                        attrs.retain.get_or_insert(loc);
+                    }
+                    "used" => {
+                        if self.is("(") {
+                            return Err(self.unexpected("an attribute without arguments"));
+                        }
+                        attrs.used.get_or_insert(loc);
+                    }
+                    "cleanup" => {
+                        self.expect("(")?;
+                        let callback = self.ident()?;
+                        let g = match self.lookup(callback) {
+                            Some(Sym::Global(g)) if matches!(self.globals[*g].ty, Ty::Func(_)) => {
+                                *g
+                            }
+                            _ => {
+                                return Err(Error::new(
+                                    loc,
+                                    "cleanup argument must name a declared function",
+                                ));
+                            }
+                        };
+                        self.expect(")")?;
+                        if attrs.cleanup.is_some() {
+                            attrs.cleanup_conflict = Some(loc);
+                        }
+                        attrs.cleanup = Some((g, loc));
+                    }
+                    // Ordinary weak binding is merged over the complete translation unit.
+                    "weak" => {
+                        if self.is("(") {
+                            return Err(self.unexpected("an attribute without arguments"));
+                        }
+                        attrs.weak.get_or_insert(loc);
                     }
                     "visibility" => {
                         self.expect("(")?;
-                        // Default visibility is already the emission policy.
                         // Decode adjacent string tokens just as asm labels do.
                         let mut visibility = Vec::new();
                         if !matches!(self.peek(), Tok::Str { .. }) {
@@ -1472,12 +2269,52 @@ impl<'a> Parser<'a> {
                             self.advance();
                         }
                         self.expect(")")?;
-                        if visibility != b"default" {
+                        let visibility = match &visibility[..] {
+                            b"default" => Visibility::Default,
+                            b"hidden" => Visibility::Hidden,
+                            b"internal" => Visibility::Internal,
+                            _ => {
+                                return Err(Error::new(
+                                    loc,
+                                    "non-default visibility is supported only as \"hidden\" or \"internal\"",
+                                ));
+                            }
+                        };
+                        attrs.set_visibility(visibility, loc);
+                    }
+                    "vector_size" => {
+                        self.expect("(")?;
+                        let n = self.const_int()?;
+                        self.expect(")")?;
+                        if n != 16 {
                             return Err(Error::new(
                                 loc,
-                                "non-default visibility is not supported; only visibility(\"default\") is supported",
+                                "vector_size supports only 16-byte vectors",
                             ));
                         }
+                        attrs.vector_size = Some((n as u64, loc));
+                    }
+                    "mode" => {
+                        self.expect("(")?;
+                        let name = self.ident()?;
+                        let bytes = match name.trim_matches('_') {
+                            "QI" | "byte" => 1,
+                            "HI" => 2,
+                            "SI" => 4,
+                            "DI" | "word" | "pointer" => 8,
+                            "TI" => 16,
+                            _ => {
+                                return Err(Error::new(
+                                    loc,
+                                    format!("unsupported integer mode `{name}`"),
+                                ));
+                            }
+                        };
+                        self.expect(")")?;
+                        if attrs.mode.is_some_and(|(old, _)| old != bytes) {
+                            return Err(Error::new(loc, "conflicting mode attributes"));
+                        }
+                        attrs.mode = Some((bytes, loc));
                     }
                     "aligned" if self.eat("(") => {
                         let n = self.alignment_constant(false)?;
@@ -1485,6 +2322,10 @@ impl<'a> Parser<'a> {
                         self.expect(")")?;
                     }
                     "aligned" => attrs.aligned = Some(16),
+                    // Other weak spellings/contracts cannot silently become strong.
+                    name if name.starts_with("weak") => {
+                        return Err(unsupported_attribute(loc, name));
+                    }
                     _ => {
                         match name {
                             "packed" => attrs.packed = true,
@@ -1520,6 +2361,19 @@ impl<'a> Parser<'a> {
             self.expect(")")?;
         }
         Ok(any)
+    }
+
+    /// Attributes without meaning where they are written.
+    fn ignored_attributes(&mut self) -> R<()> {
+        let mut attrs = Attrs::default();
+        self.attributes(&mut attrs)?;
+        if let Some((_, loc)) = attrs.mode.or(attrs.vector_size) {
+            return Err(Error::new(
+                loc,
+                "type-changing attribute has no type subject",
+            ));
+        }
+        attrs.no_symbol_attrs()
     }
 
     // ---- types ----
@@ -1564,7 +2418,9 @@ impl<'a> Parser<'a> {
             ty: Ty::Int(IntKind::Int),
             sugar: Sugar::Plain,
             infer: false,
+            implicit_int: false,
             storage: Storage::None,
+            auto_storage: false,
             is_const: false,
             is_volatile: false,
             inline: false,
@@ -1587,6 +2443,7 @@ impl<'a> Parser<'a> {
             if let Some(s) = storage {
                 self.advance();
                 spec.storage = s;
+                spec.auto_storage |= word == "auto";
                 continue;
             }
             match word {
@@ -1650,6 +2507,12 @@ impl<'a> Parser<'a> {
                                 let e = self.expr()?;
                                 (e.ty, e.sugar)
                             };
+                            if ty.variably_modified() {
+                                return Err(Error::new(
+                                    loc,
+                                    "typeof of a variably modified type is not supported yet",
+                                ));
+                            }
                             spec.sugar = sugar;
                             self.expect(")")?;
                             Some(ty)
@@ -1657,6 +2520,17 @@ impl<'a> Parser<'a> {
                         "__builtin_va_list" => {
                             self.advance();
                             Some(self.va_list())
+                        }
+                        "__SVFloat32_t" | "__SVFloat64_t" | "__SVBool_t"
+                            if self.target == Target::Aarch64LinuxGnu =>
+                        {
+                            self.advance();
+                            let name = match word {
+                                "__SVFloat32_t" => "__SVFloat32_t",
+                                "__SVFloat64_t" => "__SVFloat64_t",
+                                _ => "__SVBool_t",
+                            };
+                            Some(Ty::Opaque(self.arena.alloc(OpaqueTy { name, size: 0 })))
                         }
                         "__float128" => {
                             self.advance();
@@ -1719,6 +2593,7 @@ impl<'a> Parser<'a> {
         }
         use IntKind::*;
         spec.infer = counter == AUTO;
+        spec.implicit_int = counter == 0;
         spec.ty = match counter {
             AUTO => Ty::Int(Int), // Replaced after parsing the initializer.
             OTHER => other.unwrap(),
@@ -1730,7 +2605,11 @@ impl<'a> Parser<'a> {
             }
             VOID => Ty::Void,
             BOOL => Ty::Int(Bool),
-            CHAR => Ty::Int(Char),
+            CHAR => Ty::Int(if self.target == Target::Aarch64LinuxGnu {
+                UPlainChar
+            } else {
+                Char
+            }),
             c if c == SIGNED + CHAR => Ty::Int(SChar),
             c if c == UNSIGNED + CHAR => Ty::Int(UChar),
             c if c == SHORT
@@ -1765,7 +2644,7 @@ impl<'a> Parser<'a> {
             // not have: its values are refused rather than miscompiled.
             c if c == LONG + DOUBLE => match self.target {
                 Target::Aarch64AppleDarwin => Ty::Double,
-                Target::X86_64LinuxGnu => Ty::Opaque(&OpaqueTy {
+                Target::X86_64LinuxGnu | Target::Aarch64LinuxGnu => Ty::Opaque(&OpaqueTy {
                     name: "long double",
                     size: 16,
                 }),
@@ -1780,12 +2659,22 @@ impl<'a> Parser<'a> {
                     "`__auto_type` cannot be combined with `_Complex`",
                 ));
             }
-            let size = 2 * Types(&self.structs).size(&spec.ty);
-            spec.ty = Ty::Opaque(self.arena.alloc(OpaqueTy {
-                name: "_Complex",
-                size,
-            }));
+            if matches!(spec.ty, Ty::Float | Ty::Double) && counter != LONG + DOUBLE {
+                spec.ty = Ty::Complex(self.type_ref(spec.ty));
+            } else if counter == LONG + DOUBLE {
+                let size = 2 * Types(&self.structs).size(&spec.ty);
+                spec.ty = Ty::Opaque(self.arena.alloc(OpaqueTy {
+                    name: "_Complex long double",
+                    size,
+                }));
+            } else {
+                return Err(Error::new(
+                    loc,
+                    "_Complex requires float or double components",
+                ));
+            }
         }
+        spec.ty = self.apply_type_attrs(spec.ty, &mut spec.attrs)?;
         if is_atomic {
             spec.ty = self.atomic_type(spec.ty, loc)?;
         }
@@ -1801,6 +2690,69 @@ impl<'a> Parser<'a> {
         Ok(spec)
     }
 
+    /// Type-changing attributes are consumed once, before layout and compatibility.
+    fn apply_type_attrs(&mut self, ty: Ty<'a>, attrs: &mut Attrs) -> R<Ty<'a>> {
+        let mut ty = ty;
+        if let Some((bytes, loc)) = attrs.mode.take() {
+            let Ty::Int(kind) = ty else {
+                return Err(Error::new(
+                    loc,
+                    "integer mode requires an integer base type",
+                ));
+            };
+            if kind == IntKind::Bool {
+                return Err(Error::new(loc, "integer mode does not support _Bool"));
+            }
+            let signed = match bytes {
+                1 => IntKind::SChar,
+                2 => IntKind::Short,
+                4 => IntKind::Int,
+                8 => IntKind::Long,
+                _ => IntKind::Int128,
+            };
+            ty = Ty::Int(if kind.signed() {
+                signed
+            } else {
+                signed.to_unsigned()
+            });
+        }
+        if let Some((_, loc)) = attrs.vector_size.take() {
+            ty = self.vector_type(ty, loc)?;
+        }
+        Ok(ty)
+    }
+
+    fn vector_type(&mut self, ty: Ty<'a>, loc: Loc) -> R<Ty<'a>> {
+        // Declaration-specifier attributes have already changed the base type.
+        // A final declarator attribute requires a scalar subject, like Clang.
+        match ty {
+            Ty::Int(IntKind::Bool | IntKind::Int128 | IntKind::UInt128) => {
+                Err(Error::new(loc, "unsupported vector_size element type"))
+            }
+            t if t.is_integer() || matches!(t, Ty::Float | Ty::Double) => {
+                let shape = keel_ir::VectorType::ALL_128
+                    .into_iter()
+                    .find(|shape| shape.lane_type() == t.ir())
+                    .unwrap();
+                Ok(Ty::Vector(self.type_ref(t), shape))
+            }
+            _ => Err(Error::new(
+                loc,
+                "vector_size requires a supported scalar element type",
+            )),
+        }
+    }
+
+    pub(crate) fn vm_bound_mark(&self) -> usize {
+        self.fs.as_ref().map_or(0, |fs| fs.vla_bounds.len())
+    }
+
+    pub(crate) fn take_vm_bounds(&mut self, mark: usize) -> Vec<(LocalId, Expr<'a>)> {
+        self.fs
+            .as_mut()
+            .map_or_else(Vec::new, |fs| fs.vla_bounds.split_off(mark))
+    }
+
     /// A type name, as in casts and `sizeof`: specifiers and an abstract
     /// declarator.
     pub(crate) fn type_name(&mut self) -> R<Ty<'a>> {
@@ -1808,6 +2760,10 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn type_name_sugar(&mut self) -> R<(Ty<'a>, Sugar<'a>)> {
+        self.type_name_sugar_mode(false)
+    }
+
+    pub(crate) fn type_name_sugar_mode(&mut self, runtime: bool) -> R<(Ty<'a>, Sugar<'a>)> {
         let spec = self.decl_spec()?;
         if spec.infer {
             return Err(Error::new(
@@ -1815,7 +2771,19 @@ impl<'a> Parser<'a> {
                 "`__auto_type` is only allowed in variable declarations",
             ));
         }
-        let d = self.declarator_sugar(spec.ty, spec.sugar)?;
+        let outer = self.vla_allowed;
+        self.vla_allowed = runtime && self.fs.is_some() && !self.in_parameter_list;
+        let result = self.declarator_sugar(spec.ty, spec.sugar);
+        self.vla_allowed = outer;
+        let d = result?;
+        if !runtime && d.ty.variably_modified() {
+            return Err(Error::new(
+                self.loc(),
+                "variably modified type in this type-name context is not supported yet",
+            ));
+        }
+        spec.attrs.no_symbol_attrs()?;
+        d.attrs.no_symbol_attrs()?;
         if spec.attrs.alignment().is_some()
             || d.attrs.alignment().is_some()
             || spec.attrs.alignas.is_some()
@@ -1826,17 +2794,31 @@ impl<'a> Parser<'a> {
                 "alignment attributes on type names are not supported",
             ));
         }
-        Ok((d.ty, d.sugar))
+        let mut attrs = d.attrs;
+        Ok((self.apply_type_attrs(d.ty, &mut attrs)?, d.sugar))
     }
 
-    /// `_Atomic(ty)`, which keel supports for integers and pointers.
+    /// `_Atomic(ty)`, with native-width scalar representations.
     fn atomic_type(&mut self, ty: Ty<'a>, loc: Loc) -> R<Ty<'a>> {
+        if ty.variably_modified() {
+            return Err(Error::new(
+                loc,
+                "atomic variably modified pointers are not supported yet",
+            ));
+        }
         match ty {
             Ty::Atomic(_) => Ok(ty),
-            ty if ty.is_integer() || ty.is_ptr() => Ok(Ty::Atomic(self.type_ref(ty))),
+            ty if (ty.is_integer() || ty.is_ptr() || matches!(ty, Ty::Float | Ty::Double))
+                && self
+                    .types()
+                    .atomic_size(&ty, self.types().align(&ty))
+                    .is_some() =>
+            {
+                Ok(Ty::Atomic(self.type_ref(ty)))
+            }
             _ => Err(Error::new(
                 loc,
-                "`_Atomic` is only supported on integers and pointers",
+                "`_Atomic` requires a supported 1/2/4/8-byte integer, pointer, float or double",
             )),
         }
     }
@@ -2034,15 +3016,43 @@ impl<'a> Parser<'a> {
         attrs: &mut Attrs,
     ) -> R<(Ty<'a>, Sugar<'a>)> {
         if self.eat("(") {
-            let fty = self.params(ty)?;
-            let fty = Ty::Func(self.arena.alloc(fty));
+            let outer = self.vla_allowed;
+            self.vla_allowed = true;
+            let outer_parameter = self.in_parameter_list;
+            self.in_parameter_list = true;
+            let result = self.params(ty);
+            self.in_parameter_list = outer_parameter;
+            self.vla_allowed = outer;
+            let fty = result?;
+            let fty = self.arena.alloc(fty);
+            self.last_param_function = Some(fty);
+            let fty = Ty::Func(fty);
             return Ok((fty, self.wrap_sugar(sugar, Sugar::Func)));
         }
         if self.eat("[") {
             let mut array_attrs = Attrs::default();
-            while self.eat("static")
-                || self.qualifiers(&mut array_attrs)? != (false, false, false, false)
-            {}
+            let mut has_static = self.eat("static");
+            let quals = self.qualifiers(&mut array_attrs)?;
+            if self.eat("static") {
+                if has_static {
+                    return Err(Error::new(self.loc(), "duplicate static array modifier"));
+                }
+                has_static = true;
+            }
+            if (has_static || quals != (false, false, false, false)) && !self.in_parameter_list {
+                return Err(Error::new(
+                    self.loc(),
+                    "array static and qualifiers require a parameter",
+                ));
+            }
+            if quals.2 {
+                return Err(Error::new(
+                    self.loc(),
+                    "atomic array parameter qualification is not supported",
+                ));
+            }
+            array_attrs.no_symbol_attrs()?;
+            array_attrs.no_type_attrs()?;
             if array_attrs.alignment().is_some() || array_attrs.alignas.is_some() {
                 return Err(Error::new(
                     self.loc(),
@@ -2058,22 +3068,63 @@ impl<'a> Parser<'a> {
                 ..Default::default()
             });
             let loc = self.loc();
+            let mut vla = None;
             let len = if self.is("]") {
                 None
             } else if self.is("*") && matches!(self.peek_at(1), Tok::Punct("]")) {
-                return Err(Error::new(loc, "variable-length arrays are not supported"));
+                if !self.in_parameter_list || has_static {
+                    return Err(Error::new(
+                        loc,
+                        "VLA star bounds require a prototype parameter without static",
+                    ));
+                }
+                self.advance();
+                self.parameter_star = true;
+                // A disposable capture identity lets nested star dimensions
+                // participate in completeness checks, without an expression.
+                let name = self.unique_name(".prototype.star");
+                vla = Some(self.new_local(name, ULONG, Sugar::Plain, false));
+                None
             } else {
                 let e = self.assign()?;
-                match crate::eval::eval_int(&e) {
-                    Some(n) if n >= 0 => Some(n as u64),
-                    Some(_) => return Err(Error::new(loc, "array size is negative")),
-                    None => {
-                        return Err(Error::new(loc, "variable-length arrays are not supported"));
+                if !e.ty.is_integer() {
+                    return Err(Error::new(loc, "array bound must have integer type"));
+                }
+                // General constant folding can discard comma operands. Bounds
+                // must retain runtime side effects even if the result is known.
+                match crate::eval::eval_constant(&e, false) {
+                    Some(crate::eval::Const::Int(n)) if n >= 0 => Some(n as u64),
+                    Some(crate::eval::Const::Int(_)) => {
+                        return Err(Error::new(loc, "array size is negative"));
+                    }
+                    _ => {
+                        if !self.vla_allowed || self.fs.is_none() {
+                            return Err(Error::new(
+                                loc,
+                                "runtime array bounds require a supported block declaration, parameter or type name",
+                            ));
+                        }
+                        let e = self.cast(e, ULONG);
+                        let name = self.unique_name(".vla.length");
+                        let id = self.new_local(name, ULONG, Sugar::Plain, false);
+                        self.fs.as_mut().unwrap().vla_bounds.push((id, e));
+                        self.fs.as_mut().unwrap().has_vm = true;
+                        vla = Some(id);
+                        None
                     }
                 }
             };
+            if has_static && len.is_none() && vla.is_none() {
+                return Err(Error::new(loc, "static array parameter requires a bound"));
+            }
             self.expect("]")?;
             let (elem, sugar) = self.type_suffix(ty, sugar, attrs)?;
+            if (vla.is_some() || elem.runtime_sized()) && !self.complete_vm_element(&elem) {
+                return Err(Error::new(
+                    loc,
+                    "variable-length array element type must be a complete object type",
+                ));
+            }
             if !self
                 .size_of(&elem)
                 .is_multiple_of(self.type_alignment(&elem, &sugar))
@@ -2083,24 +3134,130 @@ impl<'a> Parser<'a> {
                     "array element size is not a multiple of its alignment",
                 ));
             }
-            return Ok((
-                self.array_type(elem, len),
-                self.wrap_sugar(sugar, Sugar::Array),
-            ));
+            let array = self.arena.alloc(ArrayTy { elem, len, vla });
+            if has_static || quals != (false, false, false, false) {
+                self.parameter_arrays.push((array, quals));
+            }
+            return Ok((Ty::Array(array), self.wrap_sugar(sugar, Sugar::Array)));
         }
         Ok((ty, sugar))
     }
 
     /// A parameter list, after the `(`.
     fn params(&mut self, ret: Ty<'a>) -> R<FuncTy<'a>> {
+        let outer = self.fs.take();
+        let nodes = self.nodes;
+        // Prototype expressions never live in an ephemeral enclosing body arena.
+        self.nodes = self.arena;
+        self.fs = Some(FuncState {
+            locals: outer.as_ref().map_or_else(Vec::new, |fs| fs.locals.clone()),
+            vla_bounds: Vec::new(),
+            has_vm: false,
+            cleanup_unsupported_exit: None,
+            direct_calls: Vec::new(),
+            scopes: Vec::new(),
+            scope: None,
+            label_addrs: Vec::new(),
+            ret,
+            name: "",
+            switches: Vec::new(),
+        });
+        let arrays = std::mem::take(&mut self.parameter_arrays);
+        let star = std::mem::replace(&mut self.parameter_star, false);
+        self.push_scope();
+        let result = self.params_inner(ret).and_then(|fty| {
+            if fty.old_style
+                && (outer.is_some()
+                    || !(self.is("{")
+                        || self.is_typename()
+                        || self.is(")")
+                        || self.is("__attribute__")
+                        || self.is("__attribute")))
+            {
+                Err(Error::new(
+                    self.loc(),
+                    "identifier list requires a function definition",
+                ))
+            } else {
+                Ok(fty)
+            }
+        });
+        let scope = self.scopes.last().unwrap().clone();
+        self.last_param_bindings = scope
+            .names
+            .iter()
+            .map(|&name| (name, *self.lookup(name).unwrap()))
+            .collect();
+        self.last_param_scope = Some(scope);
+        self.pop_scope();
+        self.last_param_state = self.fs.take();
+        self.last_param_star = self.parameter_star;
+        self.parameter_arrays = arrays;
+        self.parameter_star = star;
+        self.fs = outer;
+        self.nodes = nodes;
+        result
+    }
+
+    /// Remove function-local bound identities from persistent ABI types.
+    fn parameter_signature(&self, ty: Ty<'a>) -> Ty<'a> {
+        match ty {
+            Ty::Array(a) => Ty::Array(self.arena.alloc(ArrayTy {
+                elem: self.parameter_signature(a.elem),
+                len: a.len,
+                vla: None,
+            })),
+            Ty::Ptr(t) => Ty::Ptr(self.arena.alloc(self.parameter_signature(*t))),
+            _ => ty,
+        }
+    }
+
+    /// Canonical qualifier identity for a function parameter. Typedefs and
+    /// adjusted arrays retain their pointee qualifiers; only the parameter
+    /// object's own qualifiers are ignored by C function compatibility.
+    fn parameter_qualifiers(&self, mut ty: Ty<'a>, mut sugar: Sugar<'a>) -> &'a [u8] {
+        let mut quals = Vec::new();
+        loop {
+            match ty {
+                Ty::Ptr(t) => {
+                    ty = *t;
+                    sugar = sugar.pointee(&self.typedefs);
+                }
+                Ty::Array(a) => {
+                    ty = a.elem;
+                    sugar = sugar.array_element(&self.typedefs, self.arena);
+                }
+                _ => break,
+            }
+            quals.push(
+                u8::from(sugar.is_const(&self.typedefs))
+                    | (u8::from(sugar.is_volatile(&self.typedefs)) << 1)
+                    | (u8::from(sugar.is_restrict(&self.typedefs)) << 2),
+            );
+        }
+        self.arena.alloc_slice_copy(&quals)
+    }
+
+    fn params_inner(&mut self, ret: Ty<'a>) -> R<FuncTy<'a>> {
+        if ret.variably_modified() {
+            return Err(Error::new(
+                self.loc(),
+                "variably modified function return types are not supported yet",
+            ));
+        }
         let mut fty = FuncTy {
             ret,
             params: &[],
+            param_quals: &[],
             variadic: false,
             prototyped: true,
+            old_style: false,
         };
         let mut names = Vec::new();
+        let mut ids = Vec::new();
         let mut params = Vec::new();
+        let mut param_quals = Vec::new();
+        self.last_param_ids.clear();
         if self.eat(")") {
             fty.prototyped = false;
             self.last_params = names;
@@ -2112,6 +3269,46 @@ impl<'a> Parser<'a> {
             self.last_params = names;
             return Ok(fty);
         }
+        // A typedef-name starts a prototype, even if followed by a declaration
+        // list. Never backtrack and reinterpret it as an identifier.
+        if !self.is_typename() {
+            fty.prototyped = false;
+            fty.old_style = true;
+            loop {
+                let loc = self.loc();
+                if self.is_typename() {
+                    return Err(Error::new(
+                        loc,
+                        "typedef-name or type in identifier-list parameters",
+                    ));
+                }
+                let name = self.ident()?;
+                if names.iter().any(|(n, _, _, _)| *n == Some(name)) {
+                    return Err(Error::new(loc, "duplicate parameter name"));
+                }
+                // The identifier list establishes order, not visibility. A
+                // parameter enters scope only after its declaration's declarator.
+                let fs = self.fs.as_mut().unwrap();
+                ids.push(fs.locals.len());
+                fs.locals.push(Local {
+                    name,
+                    ty: INT,
+                    sugar: Sugar::Plain,
+                    align: 4,
+                    scope: fs.scope,
+                    in_memory: false,
+                    cleanup: None,
+                });
+                names.push((Some(name), INT, Sugar::Plain, loc));
+                if !self.eat(",") {
+                    break;
+                }
+            }
+            self.expect(")")?;
+            self.last_params = names;
+            self.last_param_ids = ids;
+            return Ok(fty);
+        }
         loop {
             if self.eat("...") {
                 fty.variadic = true;
@@ -2121,27 +3318,74 @@ impl<'a> Parser<'a> {
             if !self.is_typename() {
                 return Err(Error::new(
                     loc,
-                    "old-style parameter lists are not supported",
+                    "old-style parameter names cannot appear in a prototype parameter list",
                 ));
             }
             let spec = self.decl_spec()?;
             if spec.infer {
                 return Err(Error::new(loc, "`__auto_type` cannot declare a parameter"));
             }
-            let d = self.declarator_sugar(spec.ty, spec.sugar)?;
+            let mut d = self.declarator_sugar(spec.ty, spec.sugar)?;
+            if let Ty::Array(a) = d.ty {
+                if !self.complete_vm_element(&a.elem) {
+                    return Err(Error::new(
+                        loc,
+                        "parameter array element must be a complete object type",
+                    ));
+                }
+            }
+            let arrays = std::mem::take(&mut self.parameter_arrays);
+            let mut array_quals = (false, false, false, false);
+            for (array, quals) in arrays {
+                if !matches!(d.ty, Ty::Array(a) if std::ptr::eq(a, array)) {
+                    return Err(Error::new(
+                        loc,
+                        "static and qualifiers require the outermost parameter array",
+                    ));
+                }
+                array_quals = quals;
+            }
+            if spec.storage != Storage::None
+                || spec.thread_local
+                || spec.auto_storage
+                || spec.inline
+            {
+                return Err(Error::new(loc, "invalid parameter storage class"));
+            }
             let mut attrs = spec.attrs;
             attrs.merge(d.attrs);
             self.attributes(&mut attrs)?;
+            d.ty = self.apply_type_attrs(d.ty, &mut attrs)?;
+            attrs.no_symbol_attrs()?;
             if attrs.alignment().is_some() || attrs.alignas.is_some() {
                 return Err(Error::new(
                     loc,
                     "alignment attributes on parameters are not supported",
                 ));
             }
+            if d.ty == Ty::Void {
+                if d.sugar.is_const(&self.typedefs)
+                    || d.sugar.is_volatile(&self.typedefs)
+                    || d.sugar.is_restrict(&self.typedefs)
+                {
+                    return Err(Error::new(
+                        loc,
+                        "void parameter must not have type qualifiers",
+                    ));
+                }
+                if d.name.is_none() && params.is_empty() && self.eat(")") {
+                    self.last_params = names;
+                    self.last_param_ids = ids;
+                    return Ok(fty);
+                }
+                return Err(Error::new(loc, "parameter cannot have void type"));
+            }
             // Arrays and functions are passed as pointers.
-            let sugar = match (&d.ty, d.sugar) {
+            let mut sugar = match (&d.ty, d.sugar) {
                 (Ty::Func(_), s) => self.wrap_sugar(s, Sugar::Ptr),
-                (Ty::Array(_), s) => Sugar::Ptr(self.sugar_ref(s.pointee(&self.typedefs))),
+                (Ty::Array(_), s) => {
+                    Sugar::Ptr(self.sugar_ref(s.array_element(&self.typedefs, self.arena)))
+                }
                 (_, s) => s,
             };
             let ty = match d.ty {
@@ -2149,7 +3393,32 @@ impl<'a> Parser<'a> {
                 Ty::Func(_) => self.ptr_type(d.ty),
                 ty => ty,
             };
-            params.push(ty);
+            if array_quals.0 {
+                sugar = Sugar::Const(self.sugar_ref(sugar));
+            }
+            if array_quals.1 {
+                sugar = Sugar::Volatile(self.sugar_ref(sugar));
+            }
+            if array_quals.3 {
+                sugar = Sugar::Restrict(self.sugar_ref(sugar));
+            }
+            if let Some((name, _)) = d.name {
+                let key = self.name_key(name);
+                if self
+                    .names
+                    .get(&key)
+                    .is_some_and(|b| b.last().unwrap().0 == self.scopes.len() - 1)
+                {
+                    return Err(Error::new(loc, "duplicate parameter name"));
+                }
+            }
+            let name = d
+                .name
+                .map(|(n, _)| n)
+                .unwrap_or_else(|| self.unique_name(".parameter"));
+            ids.push(self.new_local(name, ty, sugar, array_quals.1));
+            params.push(self.parameter_signature(ty));
+            param_quals.push(self.parameter_qualifiers(ty, sugar));
             names.push((d.name.map(|(n, _)| n), ty, sugar, loc));
             if !self.eat(",") {
                 break;
@@ -2157,13 +3426,16 @@ impl<'a> Parser<'a> {
         }
         self.expect(")")?;
         self.last_params = names;
+        self.last_param_ids = ids;
         fty.params = self.arena.alloc_slice_copy(&params);
+        fty.param_quals = self.arena.alloc_slice_copy(&param_quals);
         Ok(fty)
     }
 
     fn struct_spec(&mut self, is_union: bool) -> R<Ty<'a>> {
         let mut attrs = Attrs::default();
         self.attributes(&mut attrs)?;
+        attrs.no_type_attrs()?;
         let loc = self.loc();
         let tag = match self.peek() {
             Tok::Ident(s) if !is_keyword(s) => {
@@ -2196,6 +3468,8 @@ impl<'a> Parser<'a> {
             }
             let id = new_struct(self, Some(tag));
             self.scopes.last_mut().unwrap().tags.insert(tag, Some(id));
+            attrs.no_symbol_attrs()?;
+            attrs.no_type_attrs()?;
             return Ok(Ty::Struct(id));
         }
         let pack = self.lexer.pack_limit(self.toks[self.pos].pack);
@@ -2226,6 +3500,7 @@ impl<'a> Parser<'a> {
             }
             if self.eat(";") {
                 // An anonymous struct or union member.
+                spec.attrs.no_symbol_attrs()?;
                 if matches!(spec.ty, Ty::Struct(_)) {
                     self.object_alignment(&spec.ty, &spec.sugar, spec.attrs, floc)?;
                     fields.push((
@@ -2241,13 +3516,23 @@ impl<'a> Parser<'a> {
             }
             loop {
                 let mut member_attrs = spec.attrs;
-                let (name, ty, sugar) = if self.is(":") {
+                let (name, mut ty, sugar) = if self.is(":") {
                     (None, spec.ty, spec.sugar)
                 } else {
-                    let d = self.declarator_sugar(spec.ty, spec.sugar)?;
+                    let outer = self.vla_allowed;
+                    self.vla_allowed = false;
+                    let result = self.declarator_sugar(spec.ty, spec.sugar);
+                    self.vla_allowed = outer;
+                    let d = result?;
                     member_attrs.merge(d.attrs);
                     (d.name.map(|(n, _)| n), d.ty, d.sugar)
                 };
+                if ty.variably_modified() {
+                    return Err(Error::new(
+                        floc,
+                        "variably modified structure members are not supported",
+                    ));
+                }
                 let width = if self.eat(":") {
                     let w = self.const_int()?;
                     if !ty.is_integer() || !(0..=self.size_of(&ty) as i64 * 8).contains(&w) {
@@ -2261,6 +3546,16 @@ impl<'a> Parser<'a> {
                     None
                 };
                 self.attributes(&mut member_attrs)?;
+                ty = self.apply_type_attrs(ty, &mut member_attrs)?;
+                if let Some(width) = width
+                    && (!ty.is_integer() || u64::from(width) > self.size_of(&ty) * 8)
+                {
+                    return Err(Error::new(
+                        floc,
+                        "invalid bit-field after type-changing attribute",
+                    ));
+                }
+                member_attrs.no_symbol_attrs()?;
                 self.object_alignment(&ty, &sugar, member_attrs, floc)?;
                 if width.is_some() && member_attrs.alignas.is_some() {
                     return Err(Error::new(floc, "`_Alignas` cannot apply to a bit-field"));
@@ -2280,6 +3575,8 @@ impl<'a> Parser<'a> {
             self.expect(";")?;
         }
         self.attributes(&mut attrs)?;
+        attrs.no_symbol_attrs()?;
+        attrs.no_type_attrs()?;
         for field in &mut fields {
             field.5 |= attrs.packed;
         }
@@ -2300,7 +3597,7 @@ impl<'a> Parser<'a> {
 
     /// An enum specifier: its values' type, and the enum for debug info.
     fn enum_spec(&mut self) -> R<(Ty<'a>, Sugar<'a>)> {
-        self.attributes(&mut Attrs::default())?;
+        self.ignored_attributes()?;
         let mut tag = None;
         if let Tok::Ident(s) = self.peek()
             && !is_keyword(s)
@@ -2327,7 +3624,7 @@ impl<'a> Parser<'a> {
         let mut next: i64 = 0;
         while !self.eat("}") {
             let name = self.ident()?;
-            self.attributes(&mut Attrs::default())?;
+            self.ignored_attributes()?;
             if self.eat("=") {
                 next = self.const_int()?;
             }
@@ -2339,7 +3636,7 @@ impl<'a> Parser<'a> {
                 break;
             }
         }
-        self.attributes(&mut Attrs::default())?;
+        self.ignored_attributes()?;
         self.enums.push(EnumDef {
             tag: tag,
             ty: ty,
@@ -2469,6 +3766,11 @@ impl<'a> Parser<'a> {
                     return Ok(Stmt::Scoped(scope, self.slice(&[for_])));
                 }
                 "switch" => {
+                    self.fs
+                        .as_mut()
+                        .unwrap()
+                        .cleanup_unsupported_exit
+                        .get_or_insert((loc, "switch"));
                     self.advance();
                     self.expect("(")?;
                     let cond = self.expr()?;
@@ -2564,6 +3866,16 @@ impl<'a> Parser<'a> {
                     return Ok(Stmt::Return(Some(e), loc));
                 }
                 "goto" => {
+                    let kind = if matches!(self.peek_at(1), Tok::Punct("*")) {
+                        "computed goto"
+                    } else {
+                        "goto"
+                    };
+                    self.fs
+                        .as_mut()
+                        .unwrap()
+                        .cleanup_unsupported_exit
+                        .get_or_insert((loc, kind));
                     self.advance();
                     if self.eat("*") {
                         let e = self.expr()?;
@@ -2579,12 +3891,12 @@ impl<'a> Parser<'a> {
                     return Ok(Stmt::Goto(label));
                 }
                 "asm" | "__asm" | "__asm__" => {
-                    return Err(Error::new(loc, "inline assembly is not supported yet"));
+                    return self.asm_statement();
                 }
                 _ if matches!(self.peek_at(1), Tok::Punct(":")) && !is_keyword(&word) => {
                     self.advance();
                     self.advance();
-                    self.attributes(&mut Attrs::default())?;
+                    self.ignored_attributes()?;
                     let stmt = self.labeled_statement()?;
                     return Ok(Stmt::Block(self.slice(&[Stmt::Label(word), stmt])));
                 }
@@ -2633,6 +3945,17 @@ impl<'a> Parser<'a> {
 
 /// A flexible array member, or GNU's zero-length array used as one.
 impl<'a> Parser<'a> {
+    fn complete_vm_element(&self, ty: &Ty<'a>) -> bool {
+        match ty {
+            Ty::Void | Ty::Func(_) => false,
+            Ty::Struct(id) => self.structs[*id].complete,
+            Ty::Array(a) => {
+                (a.len.is_some() || a.vla.is_some()) && self.complete_vm_element(&a.elem)
+            }
+            _ => true,
+        }
+    }
+
     /// A type a member cannot have. A struct or union of size 0 is
     /// complete (GNU allows empty ones, and zero-length arrays); an array
     /// with no length is a flexible array member if its element is.

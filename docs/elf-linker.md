@@ -71,14 +71,198 @@ permissions on Unix, and renames it into place. Failed linking preserves an
 existing output. Allocated image size is bounded to 512 MiB.
 
 Automatic libc/CRT startup, static libc, PIE, shared-object output, native TLS
-relocations, COMDAT groups, native IFUNC/GNU-unique definitions, REL relocations,
-other allocated notes, linker scripts, dead
-stripping, identical-code folding, relaxation and source debugging remain outside
+relocations, native IFUNC/GNU-unique definitions, REL relocations,
+other allocated notes, linker scripts, identical-code folding, relaxation and source debugging remain outside
 the supported scope. Runtime-loader IFUNC resolution and constructors inside
 input shared libraries are supported.
 Unsupported allocated sections, flags, relocations and native options are
 errors. Nonallocated metadata is omitted. This is not a general GNU ld
 replacement or a static-libc linker.
+
+## Opt-in section garbage collection
+
+`elf::Options::gc_sections = true` and native ELF CLI `--gc-sections` enable
+collection. It is **off by default**; `--no-gc-sections` disables it again, with
+the last option winning. Existing default links retain their input sections.
+This is an ELF-only option; it does not change the Mach-O implementation.
+
+The order is ordinary archive extraction, COMDAT selection, symbol winner
+resolution, GC, ownership-based unwind filtering, unwind merging, common/import/
+GOT/stub sizing, then layout and relocation. Extraction sees ordinary undefined
+demand even from sections that GC later discards. RETAIN never extracts an
+archive member; an admitted member's retained sections can become roots.
+Duplicate strong definitions and unsupported input contracts still diagnose
+before GC. TLS remains unsupported even in dead sections or losing groups.
+
+Reachability uses original selected input contribution IDs and `(object,
+symbol-index)` local identities. Global references follow the winning definition,
+including strong-over-weak and first-weak selection. Ordinary input sections are
+indivisible: a live function keeps unrelated functions sharing its section;
+mergeable strings and constants are also indivisible, without fragment folding.
+Use `-ffunction-sections -fdata-sections` when compiling for finer collection.
+Selected COMDAT groups are atomic liveness units. Selection of the first group
+and later liveness of its members are separate decisions. Commons are reached
+by individual resolved symbol, then only live commons enter `.bss.common`;
+their selected maximum size/alignment remains unchanged.
+
+Roots are:
+
+- The selected entry definition (`_start` or `-e`/`--entry`).
+- Selected allocated sections carrying `SHF_GNU_RETAIN`. Compiler `used` alone
+  only forces object emission and does **not** create a linker root.
+- Every admitted preinit/init/fini array, `.init`, `.fini`, and the currently
+  admitted empty `.tm_clone_table` CRT pieces. Their relocations retain callees
+  and data. The selected `.note.ABI-tag` contract remains present.
+- With any selected DSO, all selected default/protected-visible global
+  executable definitions, including commons. This deliberately preserves the
+  existing policy of exporting them all, and therefore also retains visible
+  providers of selected DSO required symbols, weak lookups and preemption.
+  Hidden/internal definitions are reached only by native references or other
+  roots; GC does not introduce a new export-dynamic option or runtime lookup API.
+
+A **live** undefined `__start_NAME`/`__stop_NAME` relocation retains every
+selected contribution named `NAME`, then follows their relocations. Boundary
+synthesis retains its existing C-identifier-only policy, matching GNU ld's
+conservative default group-root behavior. There is no `-z start-stop-gc` mode.
+A weak reference to an unsynthesizable boundary (for example,
+`__start_bad.name`) resolves normally without retaining `bad.name`.
+A dead boundary reference creates no root. Existing definitions of these names
+continue to override synthesis. Dead undefined references do not diagnose or
+allocate imports, GOT entries, stubs or dynamic relocations; live strong
+undefined references still diagnose, and live weak references retain their
+ordinary zero/import semantics. Selected DSOs remain `DT_NEEDED`; GC is not
+`--as-needed` library elimination.
+
+Unwind GC associates each FDE with the original code contribution addressed by
+its initial-location relocation. Live code retains its FDE, the referenced CIE,
+CIE personality references and FDE LSDA references, recursively including their
+ordinary relocation targets. Dead FDEs and unused CIEs are compacted **before**
+unwind contributions merge; CIE backreferences, relocation offsets and retained
+record symbols are adjusted. Unwind metadata never roots otherwise dead code.
+A shared CIE survives when at least one owner survives. A shared LSDA input
+section is indivisible, so its other relocations can retain additional data/code.
+CFI instructions and LSDA bytes retain the existing opaque supported ABI contract.
+
+Bounded rewrite limits are explicit: every FDE needs a selected section owner
+and an initial-location relocation. A live FDE whose global PC symbol rebinds
+to a different contribution diagnoses; a dead weak loser is removed. Live
+or dead FDEs must address an executable owner and fit its original section:
+symbol values, signed initial-location addends and range arithmetic are checked
+before pruning, so GC cannot hide malformed code ranges. Live
+native references or dynamic exports into rewritten `.eh_frame` diagnose rather
+than risk stale interior addends. Unrelocated nonzero relative encoded pointers
+in retained rewritten records remain unsupported. Earlier COMDAT rewrite limits
+continue to apply. These restrictions are stricter than a general GNU linker.
+
+SFrame supports GC for one admitted AMD64 v3 producer. Before collection,
+the linker binds original relocation identities and selected global winners,
+and validates every record's executable range, including dead records and
+available losing definitions. SFrame never roots its code. Complete records
+survive only when their selected code contribution survives; exact FRE blocks
+are preserved independently of index order. A zero-live result retains a valid
+28-byte empty header and its exact `PT_GNU_SFRAME` span. Producer counting still
+happens before GC, so a second selected producer (even empty) still rejects.
+Live references or dynamic exports into rewritten `.sframe` diagnose; section
+symbols are reset and other symbols into the rewritten table are removed.
+Ordinary non-GC ordering behavior remains unchanged.
+GNU property reduction continues over all selected objects, including objects
+whose ordinary code/data is collected; GC does not weaken their note contracts.
+
+```sh
+# Cross-link without executing the resulting x86-64 image:
+target/debug/keel link --target x86_64-unknown-linux-gnu --gc-sections start.o -o program
+cargo test -p keel-link --test elf_gc --test elf_sframe
+cargo test -p keel --test elf_link
+python3 suite/validate_elf_gc.py --keel target/debug/keel \
+  --as x86_64-linux-gnu-as --ld x86_64-linux-gnu-ld \
+  --lld ld.lld --clang clang --readelf x86_64-linux-gnu-readelf --out /tmp/elf-gc
+# Omit --lld when unavailable. Add --run only on x86-64 Linux.
+# Runtime unwind comparison on x86-64 Linux with the documented libraries:
+python3 suite/validate_elf_unwind.py --keel target/debug/keel \
+  --gc-sections --out /tmp/elf-gc-unwind
+# Intact modern CRT objects: link/execute GC replay on x86-64 Linux:
+python3 suite/validate_elf_crt.py --keel target/debug/keel \
+  --gc-sections --out /tmp/elf-gc-crt
+```
+
+Initial GC validation on macOS arm64 compared actual GNU-as input images linked
+by Keel and GNU cross-ld: live pointer chains, shared-CIE FDE pruning, retained
+registration boundaries, dead imports and unreachable cycles. Real Clang C
+function/data-section objects also verified compiler `used` versus `retain`. It inspected
+symbol tables, frame records and program/section headers and verified CLI
+failure preserves an existing output. LLD was unavailable on that host; no
+Linux x86-64 execution, actual exception execution or installed Linux CRT GC
+execution is claimed by that cross-host run. The runtime unwind validator and
+intact-CRT rejection mode above are provided for Linux validation.
+
+## COMDAT selection before native garbage collection
+
+ELF `SHT_GROUP` with exactly `GRP_COMDAT` selects the first included group for
+an equal signature name, regardless of local/global/weak signature binding.
+Selection is independent of ordinary global symbol resolution: a strong symbol
+can override a weak definition in a selected group without discarding that
+group's other members. Distinct signatures do not make duplicate strong
+symbols legal. Unnamed `STT_SECTION` signatures use the referenced section name,
+matching GNU ld/LLD. A signature alone creates no undefined-symbol demand.
+Signatures defined in `SHT_GROUP` itself (including global signatures produced
+by GAS/Clang) are metadata, not definitions for global resolution or archive
+demand. They do not conflict with another group signature or a real definition.
+
+Selection is atomic across ordinary code/data/BSS, supported lifecycle arrays,
+and their RELA attachments. Group headers, symbol-table association, member
+indices, SHF_GROUP ownership, relocation-table membership and RELA record sizes
+are validated, including tables in losing groups;
+unknown group flags, non-COMDAT groups, structural/special metadata members and
+orphan membership diagnose. References from retained ordinary or grouped
+sections to discarded named global/weak definitions use normal resolution.
+References to discarded locals or section symbols diagnose; they are never
+matched to a similarly named local in another object. Retained locals preserve
+their input identity. Unreferenced losing definitions and undefined references
+used only by losing sections do not become duplicate definitions or imports.
+
+Archive demand uses this same selection plan. Only extracted members reserve
+signatures; each archive is rescanned against current selections. Losing group
+definitions cannot satisfy demand, and relocations solely in losing groups
+cannot extract extra members. Existing left-to-right and weak-demand rules
+remain in force. Property-note participation still follows included objects;
+COMDAT is not permission to omit an object's processor/ABI contract.
+
+Selection precedes unwind merging, global resolution, imports, lifecycle
+planning, section bounds and layout. In a shared `.eh_frame`, an FDE whose
+initial-location relocation targets discarded code is removed together with its
+relocations; CIEs used only by removed FDEs are removed as well. Retained CFI
+bytes stay unchanged, CIE links and relocation offsets are rebased, and only
+retained FDEs enter the runtime index. References into a contribution requiring
+this rewrite, global anchors in rewritten contributions, symbols spanning
+discarded records, and unrelocated relative
+pointers requiring rebasing diagnose. Grouped notes/SFrame are unsupported;
+SFrame references to discarded code diagnose rather than retaining an invalid
+range. Existing single-producer SFrame and property-note policies remain intact.
+Only a real initial-location relocation with the expected pointer encoding can
+select an FDE for removal. `R_X86_64_NONE` entries are ignored, including their
+symbol indices and entries sharing a real pointer's offset.
+
+On x86-64 ELF, native IR `weak_odr` function/data definitions produce separate
+real COMDAT groups with weak signature definitions, through both text and typed
+object routes. Ordinary C `weak` remains ordinary weak binding. There is no GNU
+C COMDAT attribute or C++ frontend. IR `weak_odr` plus custom section/retain
+continues to diagnose; assembler-authored supported groups may use custom names
+and SHF_GNU_RETAIN, which survives selection without forcing extraction or
+preserving duplicate groups. Mach-O has no ELF groups: its existing AArch64
+`weak_odr` uses weak symbol atoms and does not promise arbitrary coalesced
+section semantics.
+
+COMDAT selection precedes optional native section GC. Without `--gc-sections`,
+selected supported ordinary sections remain present even when a selected weak
+symbol is overridden. With GC enabled, group reachability and unwind ownership
+follow the opt-in GC policy above; native ELF TLS remains unsupported.
+Validation: `cargo test -p keel-link --test elf_comdat`, the full linker suite,
+and `cargo test -p keel-codegen --test weak_odr`. Real freestanding C++ object
+fixtures and tool versions live in `crates/keel-link/tests/fixtures/comdat`.
+
+ABI references: [System V section groups](https://www.sco.com/developers/gabi/latest/ch4.sheader.html#section_groups),
+[signature binding clarification](https://groups.google.com/g/generic-abi/c/2X6mR-s2zoc),
+and [LLD ELF input selection](https://github.com/llvm/llvm-project/blob/main/lld/ELF/InputFiles.cpp).
 
 ## Linker-owned anchors and CRT clone-table bounds
 
@@ -161,6 +345,10 @@ fixtures and GNU oracle provenance are in
 
 ## Executable initialization and termination
 
+The [C frontend lifecycle subset](c-lifecycle.md) emits default-priority typed
+init/fini arrays. It does not supply CRT startup or broaden the dispatch scope
+below; other C attribute priorities remain explicitly diagnosed.
+
 Dynamically linked output advertises executable `.preinit_array`, `.init_array`
 and `.fini_array` contributions using their address/size dynamic tags. Array
 contributions are placed contiguously, with `.init_array.N` and `.fini_array.N`
@@ -216,8 +404,8 @@ original contribution; symbol values and relocation sites gain its merged offset
 The Linux validator below tests `_Unwind_Backtrace` discovery through three
 independent assembly functions without frame pointers, with Keel/Clang C
 callers, and compares GNU ld on the same objects. This does not establish
-arbitrary C++ exception, standard CRT or static-libgcc support; COMDAT and the
-other unsupported features above remain explicit errors. Startup/runtime setup
+arbitrary C++ exception, standard CRT or static-libgcc support; the
+unsupported features above remain explicit errors. Startup/runtime setup
 is still the caller's responsibility.
 
 ### Bounded SFrame v3 metadata
@@ -256,6 +444,180 @@ increase without overlaps; input SORTED is never trusted, and unordered indices
 are rejected until reordering is implemented. SORTED is set only after this
 proof. Raw signed displacement order is insufficient because every field has
 a different anchor. All admitted row bytes and index identities are preserved.
+
+The implementation separates validated decoding, reconstruction, code binding,
+and final address validation. `Table` owns a validated header and function
+records in original index order. Each function owns its exact five-byte
+attributes plus row/data bytes, decoded row PCs and byte spans, original start
+field bytes, original index field offset, and original FRE offset. FRE ownership
+is established in physical block order independently of index order; no shared
+block is admitted. Header counts and packed offsets are checked against the
+input length before records or rows are allocated.
+
+A checked reconstruction plan names original function identities separately in
+index order and FRE order. Both lists must describe the same set without
+duplicates. Encoding recomputes counts, lengths and packed offsets, checks u32
+format bounds and the linker's 512 MiB section limit before output allocation,
+and returns original/output relocation-field mappings. It copies admitted
+attributes and rows exactly. A changed index sequence clears SORTED; final
+address validation alone certifies resolved order. Non-GC uses the identity
+plan and checks that relocation fields do not move, preserving its output
+bytes and its rejection of unordered input. GC selects complete records,
+translates PC64 fields and code-section identities through compaction/merge,
+and sorts indices using the same permission, lifecycle and registration-group
+contribution ordering as final layout, followed by the section-relative code
+PC. Synthetic contributions are appended later and do not change that relative
+order. Rebuilt sizes and relocation maps exist before common/GOT/dynamic/note
+allocation; final relocation validation checks actual resolved PCs, complete
+ranges and nonoverlap again. No layout/reconstruction fixed point is needed.
+
+Binding retains each relocation's source unit/symbol and addend, selected
+global winner (or original local unit/symbol), executable output-section
+identity and section-relative code start. It runs before undefined symbols can
+become imports. Final fixups independently decode the relocated fields and
+validate the bound ranges and order before setting SORTED.
+
+GC preserves immutable original code identities as well as remapped selected
+code identities. Available original ranges and all selected ranges validate
+before pruning. COMDAT-grouped SFrame and references to code already discarded
+by COMDAT selection retain their earlier diagnostics; ordinary SFrame can own
+selected COMDAT code without rooting it. Common, undefined/import and non-code
+targets still diagnose. Multiple producers, new architectures, versions,
+FLEX/PCMASK/PAUTH/signal forms, shared FREs and partial-function filtering remain
+outside this contract. Native ELF TLS remains unsupported.
+
+Independent review on 2026-10-22 compared `7f03c9e8`/`dacf4bb0` with their
+pre-refactor parent `323285f2`, keeping the independently reviewed ELF and
+Mach-O GC changes in both builds. No production correctness defect was found.
+The differential corpus replaced each of the 102 metadata bytes and 72 RELA
+bytes in the byte-built CRT-shaped fixture with every u8 value, with GC both
+disabled and enabled. Controls included the unchanged real CRT with minimal
+startup stubs, unresolved/noncode targets and unordered/overlapping ranges.
+Across 89,099 calls, all 7,232 admitted complete ELF images were byte-identical;
+both builds rejected the other 81,867 calls. The only diagnostic differences
+were 956 oversized malformed inputs: the old 512 MiB error became the explicit
+reconstruction format/linker-limit error. Other rejection text and precedence
+matched, including malformed metadata before the GC rejection. This is a
+bounded differential corpus, not exhaustive malformed-input verification.
+
+The unchanged real-CRT/stub output image SHA256 in that comparison was
+`b03c891b36d693646b6e04b6b4c45970f1c71fcc834c273b8bb89424a407e242`.
+The whole retained CRT and its `.sframe`/`.rela.sframe` hashes were independently
+checked against the fixture README and the original retained evidence copy.
+The lasting real-CRT test now compares every output metadata byte against the
+input, allowing only the three independently computed PC64 values and SORTED.
+The review-stage CLI test checked destination preservation for row parsing,
+duplicate relocations, code-range binding, final overlapping ranges, and the
+then-deliberate GC rejection of nonempty metadata and empty headers. Review
+validation passed the full
+`keel-link` suite, seven ELF CLI tests and `cargo check --workspace`.
+
+GC implementation validation (2026-10-22) adds all 288 combinations of three
+record liveness masks, index permutations and independent FRE permutations.
+Tests check exact row blocks, counts, packed offsets, PC64 addresses and exact
+program-header sizes. Additional cases cover weak global winners and original
+losing ranges, local/section-symbol addends in the retained real CRT, executable
+registration grouping and start/stop roots, pointer relocations, ordinary
+metadata owning COMDAT code, simultaneous DWARF compaction, property/ABI notes,
+malformed dead ranges/rows, common/undefined/non-code targets, ignored `R_NONE`,
+and CLI atomic failures plus successful nonempty/empty GC output.
+
+A fresh non-GC CLI comparison against `b25bc616` used the retained real CRT,
+GNU-assembled startup stubs and four byte substitutions (0, 1, 127, 255) at each
+of its 102 metadata and 72 RELA bytes. All 697 cases agreed on acceptance;
+all 233 admitted complete images were byte-identical. The full linker suite,
+seven ELF CLI tests, workspace checking and the existing cross-host GNU GC
+validator also passed. The expanded focused run passed 24 unit tests and 26
+SFrame integration tests. This bounded differential does not cover every byte
+value or allocation near the admission cap.
+
+The complete workspace test run also passed with
+`KEEL_GNU_AS=x86_64-elf-as cargo test --workspace --no-fail-fast` (using the
+installed cross-as absolute path). The initial run without that setting hit
+unrelated assembler-oracle failures because macOS `/usr/bin/as` invokes Clang
+and rejects GNU `--64`; the configured rerun completed successfully. No Mach-O
+source changes were made.
+
+SFrame admission now enforces the checked estimate
+`1024 * functions + 32 * rows + 4 * serialized_bytes <= 64 MiB`, in addition to
+format/image limits. This practical cap accounts conservatively for owned row
+spans, blocks, planning maps and simultaneous metadata copies; it is not a
+whole-process RSS guarantee. Large record/row/block/output vectors use fallible
+reservation. Planning trees and bounded auxiliary vectors still use ordinary
+allocation. A bounded test roundtrips 4,096 records, reconstructs 2,048 in reverse
+index order, and rejects a roughly 2.5 MiB/110,000-record wire table before owned
+record allocation. Arithmetic boundaries are tested without allocating near the
+cap. Subsequent [LinuxHost admission-domain memory testing](../suite/evidence/sframe-memory-20261022/README.md)
+exercised nearest-admitted and first-rejected function-, row-, mixed- and
+payload-heavy shapes with GC off/on. All 174 checks passed; the largest observed
+linker peak was 66,144 KiB (64.59 MiB). This does not establish a global maximum
+for the linker or a hard RSS ceiling for every admitted encoding.
+The cap intentionally rejects some formerly admissible very large non-GC tables.
+
+Cross-host GNU structural comparison is available without running x86 images:
+
+```sh
+python3 suite/validate_elf_sframe.py --keel target/debug/keel --structural-gc \
+  --as x86_64-elf-as --ld x86_64-elf-ld --readelf x86_64-elf-readelf \
+  --out /tmp/elf-sframe-gc
+```
+
+On macOS arm64, GNU binutils `2.47.20260726` agreed on retained records, resolved
+symbol identities, sizes and exact FRE bytes across all eight liveness masks,
+with deliberately reordered indices and accompanying DWARF. GNU emitted a
+zero-byte `.sframe` for the all-dead case; Keel emitted the specified 28-byte
+empty table. The validator retains input objects, both images, header/SFrame
+dumps, command logs and hashes. Installed libsframe runtime lookup and intact
+CRT runtime replay support `--gc-sections` in their Linux validators, but these
+new GC runtime modes were **not executed** on this arm64 host. They subsequently
+passed on LinuxHost x86-64 Linux; see the [Linux runtime validation report](validation/linux-sframe-gc/report.md).
+
+Independent GC review (2026-10-22, baseline `2a5d86d9`) found and fixed two
+gaps. DWARF CIE personality/FDE LSDA pointers into `.sframe` could bypass the
+rewritten-section reference check because their metadata contribution was not
+yet marked live. A surviving section anchor could silently retain an addend
+past the rebuilt empty table; ordinary global anchors instead failed later
+with an invalid-symbol diagnostic. The check now also examines live owners'
+already canonicalized edges before any rewriting. A regression covers both
+anchor kinds, personality/LSDA fields, shared CIEs and all four two-owner
+liveness masks; discarded pointers remain harmless and non-GC still accepts
+these inputs.
+
+The parser also trusted the header row total for budget admission but checked
+the sum of block row counts only after allocating rows. An understated header
+could therefore exceed the admitted working-set estimate before rejection.
+A linear attribute preflight now proves that block declarations do not exceed
+the admitted row total before reserving any owned rows. The regression proves
+early rejection even with a malformed first PC and checks an understated-count
+budget counterexample arithmetically, without near-cap allocations. Valid
+tables and non-GC output bytes use the same reconstruction as before; only
+malformed-input diagnostic precedence can change.
+
+Review validation passed all 231 `keel-link` tests (including 27 SFrame tests
+and the 288 permutation cases), all seven ELF CLI tests, `cargo check
+--workspace`, all eight GNU SFrame structural comparisons and the existing GNU
+ELF GC structural validator. GNU cross tools report `2.47.20260726`; execution
+was on macOS arm64. The structural SFrame oracle compares resolved symbol
+identities, sizes, exact FRE bytes and counts; program-header spans/empty-table
+geometry are additionally asserted by the Rust tests. Its DWARF input is a
+coexistence case, not a runtime unwind oracle. Linux libsframe lookup and CRT
+runtime replay were not executed in that review. Subsequent
+[LinuxHost runtime validation](validation/linux-sframe-gc/report.md) passed
+libsframe lookup, actual dead-record filtering/reordering, installed CRT replay
+and unwind checks with GC enabled and disabled. Later
+[bounded memory and profiling runs](../suite/evidence/elf-link-profile-20261022/README.md)
+measured near-admission-limit inputs and oversized rejection; arbitrary
+maximum-sized ELF images and whole-process worst-case memory remain untested.
+The added SFrame work consists of linear scans and sorting/tree lookups.
+Existing GC fixed-point traversal and DWARF per-FDE field/relocation scans
+retain their pre-existing worst-case quadratic behavior; the SFrame admission
+budget does not bound those whole-linker costs. Reviewed ELF/Mach-O GC and TLS
+contracts remain unchanged.
+
+Pinned primary definitions: [binutils-2_47 `sframe.h`](https://github.com/RTEMS/sourceware-mirror-binutils-gdb/blob/binutils-2_47/include/sframe.h)
+and [the matching decoder/encoder](https://github.com/RTEMS/sourceware-mirror-binutils-gdb/blob/binutils-2_47/libsframe/sframe.c).
+The retained installed header and CRT bytes remain the ABI check; draft
+alignment descriptions do not replace the packed 28/16-byte geometry.
 
 The custom-startup Linux validator uses installed libsframe lookup and
 `dl_iterate_phdr`, comparing identical inputs with GNU ld and checking function
@@ -345,10 +707,9 @@ and `exit` are tested. This does not establish support for arbitrary libc APIs o
 standard CRT objects. Dynamic output uses separate R/RX/RW mappings and writable
 import slots; lazy binding and a GNU_RELRO segment are not implemented.
 
-Keel's C frontend currently emits an ordinary strong undefined symbol for the
-weak C declaration used by the validator. Weak-symbol tests therefore use
-Clang-produced objects; Keel-produced C inputs exercise ordinary references.
-The ELF linker does not infer weak binding from source declarations.
+Keel's C frontend now emits ordinary weak definitions and undefined references;
+see [C weak symbols](c-weak-symbols.md) for the scope and Clang/native object
+validation. The ELF linker consumes symbol binding from objects.
 
 ## Validation
 
@@ -422,11 +783,14 @@ Linux. No custom startup adapter or input-section stripping was used.
 
 The outputs contain GNU property and ABI notes, SFrame, native unwind data
 and real CRT lifecycle code together. Input and output hashes are retained.
-Intact COMDAT template, surviving IBT and second-SFrame-producer inputs still
-reject; each failed link preserves an existing destination. This is a bounded
-explicit-input, non-PIE milestone: ordinary C++ COMDAT/templates/exceptions,
+At the time of that CRT validation, intact COMDAT templates, surviving IBT
+and second-SFrame-producer inputs rejected while preserving the destination.
+COMDAT selection is now supported as described below; the current validator
+includes the template at O0/O2 among its 12 cases. A subsequent
+[LinuxHost Linux run](validation/linux-sframe-gc/report.md) passed all twelve
+cases with and without GC, with three executions per tool per case. Arbitrary C++ exceptions,
 PIE, GNU linker scripts and drop-in Clang-driver compatibility remain outside
-this validation. Concrete ELF DSO paths avoid installed GNU linker scripts.
+that original validation. Concrete ELF DSO paths avoid installed GNU linker scripts.
 
 On x86-64 Linux, reproduce with installed Clang, GNU ld/as (including SFrame
 v3 output), readelf and Python:
@@ -441,3 +805,49 @@ beside its `<name>.gnu`, then run `--verify-only` on Linux. That mode runs the
 executables and inspects metadata; rejection tests must be run on the linking
 host separately. The retained LinuxHost tool qualification is package
 `binutils 2.47-4`, while `ld`/`as`/`readelf` banners report `2.46`.
+
+### Registration-table boundaries
+
+Admitted allocated PROGBITS/NOBITS sections with ASCII C identifier names
+(for example `registry`, but not `.registry`) are placed contiguously by name,
+in input order, at the first contribution's position within their permission
+class. Same-name contributions must agree on type and WRITE/ALLOC/EXEC flags;
+otherwise linking diagnoses an incompatible registration section. Their group
+start observes the maximum input alignment. Each contribution keeps its own
+section index, symbol offsets, relocations and alignment. Inter-contribution
+alignment padding belongs to the span; padding before the next group does not.
+This deliberately does not merge ELF section headers or change the existing
+special-section, TLS, group or link-order contracts.
+
+Undefined `__start_registry` and `__stop_registry` references resolve to the
+first byte and the byte after the last contribution, after layout. These are
+hidden global NOTYPE symbols and never dynamic imports/exports. An existing
+selected strong, weak or common definition wins independently for each name.
+An admitted empty section has equal bounds. An absent section supplies neither
+synthetic symbol; its names follow ordinary undefined-symbol resolution,
+including imports from selected shared libraries. Without a selected provider,
+strong references fail and weak references resolve to zero. For a present
+section, synthesized hidden bounds take precedence over shared-library exports.
+Bounds do not select archive members merely because they contain the named
+section; ordinary archive selection by actual defined symbol names still
+applies.
+With `--gc-sections`, live synthesized boundary references root matching
+identifier-named contributions under the GC policy above.
+
+The naming, grouping and input-definition precedence follow the
+[GNU ld section rules](https://sourceware.org/binutils/docs/ld/Orphan-Sections.html)
+and [LLD's optional start/stop definitions](https://github.com/llvm/llvm-project/blob/main/lld/ELF/Writer.cpp).
+Hidden visibility is an explicit choice matching GNU ld's recommended
+[`-z start-stop-visibility=hidden`](https://sourceware.org/binutils/docs/ld/Options.html),
+rather than its historical protected default. `section_bounds` integration tests
+compare actual Clang ELF objects and images with LLD (or GNU ld via
+`KEEL_TEST_ELF_LD`), including empty, absent, weak and overridden bounds.
+
+## C custom sections and retention
+
+The native linker accepts supported allocated custom code/data/readonly/NOBITS
+sections, including `SHF_GNU_RETAIN`, and preserves the flag and GNU OSABI in
+its output. With `--gc-sections`, retained input contributions are roots; with
+the option disabled, selected supported sections survive. Retention does not
+cause archive extraction. Native and system-linker validation is recorded in
+[C sections and retain](c-sections-retain.md).

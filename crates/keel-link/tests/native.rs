@@ -127,7 +127,7 @@ fn debug_map_snapshots_in_memory_inputs_for_standalone_dsym() {
     std::fs::create_dir_all(&temp).unwrap();
     let source = temp.join("memory.c");
     let object = temp.join("original.o");
-    std::fs::write(&source, "int twice(int value) {\n int local = value * 2;\n return local;\n}\nint main(void) { return twice(21)!=42; }\n").unwrap();
+    std::fs::write(&source, "int gone(void) __attribute__((section(\"__TEXT,__gone\"))); int gone(void) { return 91; }\nint twice(int value) {\n int local = value * 2;\n return local;\n}\nint main(void) { return twice(21)!=42; }\n").unwrap();
     checked(
         Command::new("clang")
             .args(["-g", "-O0", "-c"])
@@ -147,10 +147,16 @@ fn debug_map_snapshots_in_memory_inputs_for_standalone_dsym() {
         Options {
             dylibs: vec![Dylib::from_tbd(&sdk.join("usr/lib/libSystem.tbd"), &sdk).unwrap()],
             debug_directory: Some(temp.join("snapshots")),
+            dead_strip: true,
             ..Options::default()
         },
     )
     .unwrap();
+    {
+        use object::{Object, ObjectSymbol};
+        let image = object::File::parse(exe.bytes.as_slice()).unwrap();
+        assert!(!image.symbols().any(|s| s.name().unwrap() == "_gone"));
+    }
     assert_eq!(exe.debug_objects.len(), 1);
     assert_eq!(exe.debug_objects[0].bytes, bytes);
     assert!(exe.warnings.is_empty());
@@ -165,6 +171,7 @@ fn debug_map_snapshots_in_memory_inputs_for_standalone_dsym() {
         Options {
             dylibs: vec![Dylib::from_tbd(&sdk.join("usr/lib/libSystem.tbd"), &sdk).unwrap()],
             debug_directory: Some(temp.join("snapshots")),
+            dead_strip: true,
             ..Options::default()
         },
         &executable,
@@ -177,7 +184,7 @@ fn debug_map_snapshots_in_memory_inputs_for_standalone_dsym() {
     std::fs::remove_dir_all(temp.join("snapshots")).unwrap();
     let lldb = checked(Command::new("lldb").arg("-b").arg(&executable).args([
         "-o",
-        "breakpoint set --file memory.c --line 3",
+        "breakpoint set --file memory.c --line 4",
         "-o",
         "run",
         "-o",
@@ -243,6 +250,7 @@ fn compact_lsda_and_dwarf_exception_frames_work_after_a_regular_page_boundary() 
             },
         ],
         Options {
+            dead_strip: true,
             dylibs: ["libSystem.tbd", "libc++.tbd"]
                 .iter()
                 .map(|name| Dylib::from_tbd(&sdk.join("usr/lib").join(name), &sdk).unwrap())

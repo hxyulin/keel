@@ -13,7 +13,7 @@ pub(super) type Prepared = HashMap<usize, (Output, Vec<(String, Option<DebugScop
 pub(super) fn eligible(func: &Function, symbols: &crate::symbols::Symbols<'_>) -> bool {
     let module = symbols.module;
     func.local
-        && !func.weak_odr
+        && !func.attrs.weak && !func.weak_odr
         && func.sig.cc == CallConv::Fast
         && !func.sig.variadic
         && !func.sig.returns_twice
@@ -38,7 +38,14 @@ pub(super) fn prepare(
     pipeline: &crate::CodegenPipeline<'_>,
     structured: bool,
 ) -> Result<(Summaries, Prepared), CodegenError> {
-    prepare_with_chain_output_limits(symbols, pools, pipeline, structured, 8 * 1024 * 1024, 65_536)
+    prepare_with_chain_output_limits(
+        symbols,
+        pools,
+        pipeline,
+        structured,
+        8 * 1024 * 1024,
+        65_536,
+    )
 }
 
 // Leaves retain their original IR allowance; only newly admitted chains spend
@@ -161,11 +168,11 @@ fn prepare_with_chain_output_limits(
             let marks = compiler.compile(&mut output);
             if is_chain {
                 let remaining = match &output {
-                    Output::Text(_) => &mut chain_output_bytes,
+                    Output::Text(_) | Output::ElfText(_) => &mut chain_output_bytes,
                     Output::Structured(_) => &mut chain_output_items,
                 };
                 let size = match &output {
-                    Output::Text(text) => text.len(),
+                    Output::Text(text) | Output::ElfText(text) => text.len(),
                     Output::Structured(program) => program.items.len(),
                 };
                 if size > *remaining {
@@ -387,7 +394,7 @@ block0(v0:i64):
                 prepare(&symbols, &REGISTERS, &pipeline, structured).unwrap();
             assert_eq!(all_summaries.len(), 6);
             let size = |body: &Output| match body {
-                Output::Text(text) => text.len(),
+                Output::Text(text) | Output::ElfText(text) => text.len(),
                 Output::Structured(program) => program.items.len(),
             };
             let allowance = size(&all_prepared[&2].0);

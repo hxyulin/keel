@@ -311,6 +311,7 @@ impl Linker {
                     self.outputs[self.common_section].ordinal,
                 ),
                 Target::Header => (15, 1),
+                Target::SectionBoundary(id, _) => (0x1f, self.outputs[id].ordinal),
                 Target::Import(_) => unreachable!(),
             };
             indices.insert(symbol.clone(), locals + defined);
@@ -428,11 +429,13 @@ impl Linker {
             .get("_main")
             .ok_or("missing entry symbol `_main`")?;
         let entry = self.address(main)?;
-        if !self
-            .outputs
-            .iter()
-            .any(|s| s.name == "__text" && entry >= s.address && entry < s.address + s.size as u64)
-        {
+        if !self.outputs.iter().any(|s| {
+            s.segment == "__TEXT"
+                && !matches!(s.flags & 255, 1 | 0x12)
+                && s.flags & 0x80000400 != 0
+                && entry >= s.address
+                && entry < s.address + s.size as u64
+        }) {
             return fail("_main is not a text definition");
         }
         u32le(&mut commands, 0x80000028);
@@ -448,7 +451,7 @@ impl Linker {
         // deterministic content-derived UUID after assembling the image.
         let uuid_offset = 32 + commands.len() + 8;
         cmd(&mut commands, 0x1b, &[0, 0, 0, 0]);
-        // Space after load commands lets codesign add LC_CODE_SIGNATURE without
+        // Space after load commands lets the signer add LC_CODE_SIGNATURE without
         // shifting mapped code or invalidating PC-relative relocations.
         if 32 + commands.len() + 16 > PAGE {
             return fail("load commands exceed reserved header page");
@@ -575,7 +578,7 @@ impl Linker {
                 for (si, symbol) in object.symbols.iter().enumerate() {
                     let common =
                         symbol.kind & 0xe == 0 && symbol.kind & 1 != 0 && symbol.value != 0;
-                    if common {
+                    if common && self.globals.contains_key(&symbol.name) {
                         let target = self.symbol_target(oi, si)?;
                         let ordinal = match target {
                             Target::Common(_) => self.outputs[self.common_section].ordinal,
@@ -592,6 +595,7 @@ impl Linker {
                                 }
                             }
                             Target::Header => 1,
+                            Target::SectionBoundary(id, _) => self.outputs[id].ordinal,
                             Target::Import(_) => return fail("debug common resolves to an import"),
                         };
                         nlist(
@@ -775,7 +779,9 @@ impl Linker {
     fn relocate(&mut self) -> Result<()> {
         for oi in 0..self.objects.len() {
             for si in 0..self.objects[oi].sections.len() {
-                if self.objects[oi].sections[si].segment == "__DWARF" {
+                if self.discarded.contains(&(oi, si))
+                    || self.objects[oi].sections[si].segment == "__DWARF"
+                {
                     continue;
                 }
                 self.relocate_section(oi, si).map_err(|e| {
@@ -1091,7 +1097,7 @@ impl Linker {
         }
         let mut nodes = vec![Node::default()];
         for (symbol, &target) in &self.globals {
-            if matches!(target, Target::Import(_)) {
+            if matches!(target, Target::Import(_) | Target::SectionBoundary(_, _)) {
                 continue;
             }
             if matches!(target, Target::Common(_)) && self.private_commons.contains(symbol) {

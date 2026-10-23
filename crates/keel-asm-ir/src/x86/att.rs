@@ -214,14 +214,20 @@ fn memory(s: &str, prefix: bool) -> Result<Operand, String> {
     } else {
         m.displacement = expression(s)?;
     }
-    for r in [m.base, m.index].into_iter().flatten() {
-        if r.width != 64 || !matches!(r.class, RegisterClass::Gpr | RegisterClass::Rip) {
-            return Err("addresses require 64-bit general registers".into());
+    if m.base.is_some_and(|r| {
+        !matches!(r.width, 32 | 64) || !matches!(r.class, RegisterClass::Gpr | RegisterClass::Rip)
+    }) {
+        return Err("addresses require 32-bit or 64-bit general base registers".into());
+    }
+    if let (Some(base), Some(index)) = (m.base, m.index) {
+        if index.class == RegisterClass::Gpr && base.width != index.width {
+            return Err("mixed address register widths".into());
         }
     }
-    if m.index
-        .is_some_and(|r| r.class == RegisterClass::Rip || r.number == 4)
-        || (m.base.is_some_and(|r| r.class == RegisterClass::Rip) && m.index.is_some())
+    if m.index.is_some_and(|r| {
+        !matches!(r.class, RegisterClass::Xmm | RegisterClass::Ymm)
+            && (r.class != RegisterClass::Gpr || !matches!(r.width, 32 | 64) || r.number == 4)
+    }) || (m.base.is_some_and(|r| r.class == RegisterClass::Rip) && m.index.is_some())
     {
         return Err("invalid address index".into());
     }
@@ -257,75 +263,110 @@ fn width(o: &mut Operand, bits: u16) -> Result<(), String> {
     Ok(())
 }
 fn scalar(op: Opcode) -> bool {
+    if matches!(op, V3(V3Opcode::Lzcnt | V3Opcode::Movbe)) {
+        return true;
+    }
     use Opcode::*;
-    matches!(
-        op,
-        Mov | Movabs
-            | Lea
-            | Push
-            | Pop
-            | Ret
-            | Leave
-            | Nop
-            | Add
-            | Or
-            | Adc
-            | Sbb
-            | And
-            | Sub
-            | Xor
-            | Cmp
-            | Test
-            | Neg
-            | Not
-            | Inc
-            | Dec
-            | Mul
-            | Imul
-            | Div
-            | Idiv
-            | Shl
-            | Shr
-            | Sar
-            | Rol
-            | Ror
-            | Shld
-            | Shrd
-            | Bsf
-            | Bsr
-            | Bswap
-            | Popcnt
-            | Andn
-            | Bextr
-            | Blsi
-            | Blsmsk
-            | Blsr
-            | Tzcnt
-            | Shlx
-            | Shrx
-            | Sarx
-            | Rorx
-            | Bzhi
-            | Pext
-            | Pdep
-            | Mulx
-            | Bt
-            | Bts
-            | Btr
-            | Btc
-            | Xchg
-            | Xadd
-            | Cmpxchg
-            | Call
-            | Jmp
-            | Cmovcc(_)
-            | Setcc(_)
-    )
+    matches!(op, Core(CoreOpcode::Rcl | CoreOpcode::Rcr))
+        || matches!(
+            op,
+            Mov | Movabs
+                | Lea
+                | Push
+                | Pop
+                | Ret
+                | Leave
+                | Nop
+                | Add
+                | Or
+                | Adc
+                | Sbb
+                | And
+                | Sub
+                | Xor
+                | Cmp
+                | Test
+                | Neg
+                | Not
+                | Inc
+                | Dec
+                | Mul
+                | Imul
+                | Div
+                | Idiv
+                | Shl
+                | Shr
+                | Sar
+                | Rol
+                | Ror
+                | Shld
+                | Shrd
+                | Bsf
+                | Bsr
+                | Bswap
+                | Popcnt
+                | Andn
+                | Bextr
+                | Blsi
+                | Blsmsk
+                | Blsr
+                | Tzcnt
+                | Shlx
+                | Shrx
+                | Sarx
+                | Rorx
+                | Bzhi
+                | Pext
+                | Pdep
+                | Mulx
+                | Bt
+                | Bts
+                | Btr
+                | Btc
+                | Xchg
+                | Xadd
+                | Cmpxchg
+                | Call
+                | Jmp
+                | Cmovcc(_)
+                | Setcc(_)
+        )
 }
 fn parse(s: &str, prefix: bool) -> Result<Instruction, String> {
     use Opcode::*;
     let s = s.trim();
+    if let Some(i) = super::core::parse_string(s, true, prefix) {
+        return i;
+    }
     let (first, rest) = s.split_once(char::is_whitespace).unwrap_or((s, ""));
+    if first.eq_ignore_ascii_case("data16") {
+        let i = parse(rest, prefix)?;
+        return if matches!(i.opcode, Core(_)) {
+            i.core_prefix("data16")
+        } else {
+            i.x87_data16()
+        };
+    }
+    if matches!(
+        lowercase(first).as_ref(),
+        "rep" | "repe" | "repz" | "repne" | "repnz" | "fs" | "gs"
+    ) {
+        return parse(rest, prefix)?.core_prefix(&lowercase(first));
+    }
+    if first.eq_ignore_ascii_case("addr32") {
+        return parse(rest, prefix)?.core_prefix("addr32");
+    }
+    if first.eq_ignore_ascii_case("rex64") {
+        let mut i = parse(rest, prefix)?;
+        i.opcode = match i.opcode {
+            V3(v) if !i.lock => V3(v.with_rex_w().ok_or("rex64 requires a PCMP string form")?),
+            V2(v) if !i.lock => V2(v
+                .with_rex_w()
+                .ok_or("rex64 is supported only for PCMP string forms")?),
+            _ => return Err("rex64 is supported only for PCMP string forms".into()),
+        };
+        return Ok(i);
+    }
     let (lock, s) = if first.eq_ignore_ascii_case("lock") {
         (true, rest.trim())
     } else {
@@ -342,10 +383,23 @@ fn parse(s: &str, prefix: bool) -> Result<Instruction, String> {
     // Branch targets have their own grammar: an unadorned expression is direct;
     // '*' is mandatory for a register or memory indirect call/jump.
     let branch = matches!(name, "call" | "callq" | "jmp" | "jmpq")
-        || matches!(Opcode::parse(name), Some(Jcc(_)));
+        || Opcode::parse(name).is_some_and(Opcode::is_direct_branch);
+    let far = matches!(
+        Opcode::parse(name),
+        Some(Core(CoreOpcode::CallFar | CoreOpcode::JmpFar))
+    );
     let mut ops = Vec::with_capacity(raw.len());
     for s in raw {
-        if branch {
+        if far {
+            let indirect = s
+                .strip_prefix('*')
+                .ok_or("AT&T far memory transfer requires `*`")?;
+            let memory = operand(indirect.trim(), prefix)?;
+            if !matches!(memory, Operand::Memory(_)) {
+                return Err("far transfer requires indirect memory".into());
+            }
+            ops.push(memory);
+        } else if branch {
             if let Some(s) = s.strip_prefix('*') {
                 if !matches!(name, "call" | "callq" | "jmp" | "jmpq") {
                     return Err("conditional jumps cannot be indirect".into());
@@ -365,7 +419,20 @@ fn parse(s: &str, prefix: bool) -> Result<Instruction, String> {
             ops.push(operand(s, prefix)?);
         }
     }
-    ops.reverse();
+    if !matches!(Opcode::parse(name), Some(Core(CoreOpcode::Enter { .. }))) {
+        ops.reverse();
+    }
+    if let Some(w) = match name {
+        "lcallw" | "ljmpw" => Some(32),
+        "lcall" | "ljmp" | "callf" | "jmpf" | "lcalll" | "ljmpl" => Some(48),
+        "lcallq" | "ljmpq" => Some(80),
+        _ => None,
+    } {
+        let [Operand::Memory(m)] = ops.as_mut_slice() else {
+            return Err("far control transfer requires memory".into());
+        };
+        m.width = w;
+    }
     let invalid = || format!("unsupported AT&T instruction `{mnemonic}`");
     let extension = match name {
         "movsbw" => Some((Movsx, 8, 16)),
@@ -381,13 +448,57 @@ fn parse(s: &str, prefix: bool) -> Result<Instruction, String> {
         "movzwq" => Some((Movzx, 16, 64)),
         _ => None,
     };
-    let opcode = if let Some((op, src, dst)) = extension {
+    let packed_conversion = name
+        .strip_suffix('x')
+        .map(|s| (s, 128))
+        .or_else(|| name.strip_suffix('y').map(|s| (s, 256)))
+        .and_then(|(base, w)| {
+            Opcode::parse(base)
+                .filter(|op| {
+                    matches!(
+                        op,
+                        V3(V3Opcode::Vcvtpd2dq | V3Opcode::Vcvttpd2dq | V3Opcode::Vcvtpd2ps)
+                    )
+                })
+                .map(|op| (op, w))
+        });
+    let opcode = if let Some((op, w)) = packed_conversion {
+        match ops.get_mut(1) {
+            Some(Operand::Memory(m)) => m.width = w,
+            Some(Operand::Register(r))
+                if r.width == w && matches!(r.class, RegisterClass::Xmm | RegisterClass::Ymm) => {}
+            _ => return Err("packed conversion suffix disagrees with source".into()),
+        }
+        op
+    } else if let Some(src_bits) = name.strip_prefix("crc32").and_then(|s| {
+        if s.len() == 1 {
+            bits(s.as_bytes()[0])
+        } else {
+            None
+        }
+    }) {
+        let [dst, src] = ops.as_mut_slice() else {
+            return Err(invalid());
+        };
+        width(src, src_bits)?;
+        if !matches!(dst, Operand::Register(r) if r.class == RegisterClass::Gpr && matches!(r.width, 32 | 64))
+        {
+            return Err(invalid());
+        }
+        V2(V2Opcode::Crc32)
+    } else if let Some((op, src, dst)) = extension {
         let [a, b] = ops.as_mut_slice() else {
             return Err("AT&T extension expects source and destination".into());
         };
         width(a, dst)?;
         width(b, src)?;
         op
+    } else if let Some((op, w)) = X87Opcode::att_memory(name) {
+        let [Operand::Memory(m)] = ops.as_mut_slice() else {
+            return Err("x87 memory suffix requires one memory operand".into());
+        };
+        m.width = w;
+        Opcode::X87(op)
     } else if let Some((op, w)) = match name {
         "flds" => Some((Fld, 32)),
         "fldl" => Some((Fld, 64)),
@@ -402,6 +513,9 @@ fn parse(s: &str, prefix: bool) -> Result<Instruction, String> {
         "filds" => Some((Fild, 16)),
         "fildl" => Some((Fild, 32)),
         "fildll" => Some((Fild, 64)),
+        "fisttps" => Some((V2(V2Opcode::Fisttp), 16)),
+        "fisttpl" => Some((V2(V2Opcode::Fisttp), 32)),
+        "fisttpll" => Some((V2(V2Opcode::Fisttp), 64)),
         "fistps" => Some((Fistp, 16)),
         "fistpl" => Some((Fistp, 32)),
         "fistpll" => Some((Fistp, 64)),
@@ -443,12 +557,30 @@ fn parse(s: &str, prefix: bool) -> Result<Instruction, String> {
             .filter(|w| matches!(w, 32 | 64))
             .and_then(|w| {
                 Opcode::parse(&name[..name.len() - 1])
-                    .filter(|op| matches!(op, Cvtsi2ss | Cvtsi2sd | Cvttss2si | Cvttsd2si))
+                    .filter(|op| {
+                        matches!(
+                            op,
+                            Cvtsi2ss
+                                | Cvtsi2sd
+                                | Cvttss2si
+                                | Cvttsd2si
+                                | Cvtss2si
+                                | Cvtsd2si
+                                | V3(V3Opcode::Vcvtsi2ss
+                                    | V3Opcode::Vcvtsi2sd
+                                    | V3Opcode::Vcvtss2si
+                                    | V3Opcode::Vcvtsd2si
+                                    | V3Opcode::Vcvttss2si
+                                    | V3Opcode::Vcvttsd2si)
+                        )
+                    })
                     .map(|op| (op, w))
             });
         if let Some((op, w)) = conversion {
             let index = if matches!(op, Cvtsi2ss | Cvtsi2sd) {
                 1
+            } else if matches!(op, V3(V3Opcode::Vcvtsi2ss | V3Opcode::Vcvtsi2sd)) {
+                2
             } else {
                 0
             };
@@ -460,6 +592,9 @@ fn parse(s: &str, prefix: bool) -> Result<Instruction, String> {
             op
         } else {
             let suffixed = name.as_bytes().last().and_then(|&b| bits(b)).and_then(|w| {
+                if matches!(name, "leavew" | "pushw" | "popw") {
+                    return None;
+                }
                 let base = &name[..name.len() - 1];
                 let op = if base == "sal" {
                     Some(Shl)
@@ -473,15 +608,15 @@ fn parse(s: &str, prefix: bool) -> Result<Instruction, String> {
             let simd_movq = name == "movq"
                 && ops
                     .iter()
-                    .any(|o| matches!(o, Operand::Register(r) if r.class == RegisterClass::Xmm));
+                    .any(|o| matches!(o, Operand::Register(r) if matches!(r.class, RegisterClass::Xmm | RegisterClass::Mmx)));
             if let Some((op, w)) = suffixed.filter(|_| !simd_movq) {
                 if matches!(op, Setcc(_)) && w != 8 {
                     return Err("setcc only supports the byte suffix".into());
                 }
-                if op == Nop
-                    || (matches!(op, Push | Pop)
+                if (op == Nop && ops.is_empty())
+                    || matches!(op, Push | Pop)
                         && w != 64
-                        && ops.iter().any(|o| matches!(o, Operand::Immediate(_))))
+                        && ops.iter().any(|o| matches!(o, Operand::Immediate(_)))
                 {
                     return Err(
                         "suffixed form is not representable by the instruction model".into(),
@@ -491,8 +626,17 @@ fn parse(s: &str, prefix: bool) -> Result<Instruction, String> {
                     return Err("only 64-bit near control transfers are supported".into());
                 }
                 for (index, o) in ops.iter_mut().enumerate() {
-                    if (index == 1 && matches!(op, Shl | Shr | Sar | Rol | Ror))
+                    if (index == 1
+                        && matches!(
+                            op,
+                            Shl | Shr | Sar | Rol | Ror | Core(CoreOpcode::Rcl | CoreOpcode::Rcr)
+                        ))
                         || (index == 2 && matches!(op, Shld | Shrd))
+                    {
+                        continue;
+                    }
+                    if op == Mov
+                        && matches!(o, Operand::Register(r) if r.class==RegisterClass::Segment)
                     {
                         continue;
                     }
@@ -507,6 +651,10 @@ fn parse(s: &str, prefix: bool) -> Result<Instruction, String> {
                 }
             }
         }
+    };
+    let opcode = match opcode {
+        Opcode::X87(op) => Opcode::X87(op.from_att(&ops)),
+        other => other,
     };
     // These commutative forms encode the register in ModRM.reg. Canonicalize
     // a memory source into the model's r/m destination position.
@@ -525,7 +673,11 @@ fn parse(s: &str, prefix: bool) -> Result<Instruction, String> {
         return Err("AT&T symbolic movq requires a signed 32-bit immediate relocation, not yet supported by the instruction model".into());
     }
     // AT&T's omitted shift count means one. Normalize to the existing model.
-    if matches!(opcode, Shl | Shr | Sar | Rol | Ror) && ops.len() == 1 {
+    if matches!(
+        opcode,
+        Shl | Shr | Sar | Rol | Ror | Core(CoreOpcode::Rcl | CoreOpcode::Rcr)
+    ) && ops.len() == 1
+    {
         ops.push(Operand::Immediate(Address {
             expression: Expression::constant(1),
             modifier: Modifier::None,
@@ -542,9 +694,11 @@ fn parse(s: &str, prefix: bool) -> Result<Instruction, String> {
     {
         m.width = 32;
     }
-    Ok(Instruction {
+    let opcode = opcode.with_operand_form(&ops);
+    Instruction {
         opcode,
         operands: ops,
         lock,
-    })
+    }
+    .core_suffix(name)
 }

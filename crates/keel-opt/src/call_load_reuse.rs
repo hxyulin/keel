@@ -104,7 +104,7 @@ fn scalar(data: &InstData) -> bool {
 }
 
 fn summary_candidate(f: &Function) -> bool {
-    !f.weak_odr
+    !f.attrs.weak && !f.weak_odr
         && (f.local || f.attrs.noninterposable)
         && !f.sig.returns_twice
         && !f.sig.variadic

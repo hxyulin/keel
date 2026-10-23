@@ -352,7 +352,7 @@ fn x87_rejects_invalid_operands_and_typed_registers() {
     let mut program = keel_asm_ir::Program::new();
     program.x86_instruction(instruction);
     assert!(assemble_program_object(&program).is_err());
-    for unsupported in ["fsin", "fdiv st, st(1)", ".unknown_x87_directive"] {
+    for unsupported in ["fsin st", "fdiv st(2), st(3)", ".unknown_x87_directive"] {
         let error = assemble_object(&format!("nop\n{unsupported}\nret")).unwrap_err();
         assert_eq!(error.line, 2, "{error}");
     }
@@ -413,7 +413,12 @@ fn clang_also_rejects_invalid_x87_register_and_width_forms() {
                     .arg(&output)
                     .output()
                     .unwrap();
-                assert!(!p.status.success(), "GNU accepted {bad}");
+                // GNU rewrites `fldl %st` to `fld %st` with a warning; it
+                // must still never accept one of these forms silently.
+                assert!(
+                    !p.status.success() || String::from_utf8_lossy(&p.stderr).contains("Warning:"),
+                    "GNU accepted {bad}"
+                );
             }
         }
     }

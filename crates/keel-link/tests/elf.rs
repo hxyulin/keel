@@ -70,6 +70,193 @@ fn common_merges_and_strong_overrides_weak_in_both_orders() {
         assert_eq!(file.section_by_name(".bss.common").unwrap().size(), 64);
     }
 }
+
+#[test]
+fn selected_symbol_emission_agrees_with_repeated_relocations_after_gc_and_layout() {
+    let a = object(
+        ".text\n.globl _start\n_start: ret\n\
+         .comm shared,16,16\n.comm overridden,16,16\n\
+         .section .data.a,\"awR\"\n.weak choice\nchoice: .quad 11\n\
+         local: .quad 17\n.globl pointers_a\npointers_a:\n\
+         .quad choice,choice+1,shared,shared+8,overridden,overridden+1,local,local+1\n",
+    );
+    let b = object(
+        ".comm shared,64,32\n\
+         .section .data.b,\"awR\"\n.globl choice\nchoice: .quad 29\n\
+         .globl overridden\noverridden: .quad 31\n\
+         local: .quad 37\n.globl pointers_b\npointers_b:\n\
+         .quad choice,choice+1,shared,shared+8,overridden,overridden+1,local,local+1\n",
+    );
+    for objects in [[a.clone(), b.clone()], [b, a]] {
+        for gc_sections in [false, true] {
+            let inputs: Vec<_> = objects
+                .iter()
+                .map(|bytes| Input {
+                    name: "selected.o",
+                    bytes,
+                })
+                .collect();
+            let options = || elf::Options {
+                gc_sections,
+                ..Default::default()
+            };
+            let exe = elf::link(&inputs, options()).unwrap();
+            assert_eq!(exe.bytes, elf::link(&inputs, options()).unwrap().bytes);
+            let file = object::File::parse(exe.bytes.as_slice()).unwrap();
+            assert_eq!(word(&exe.bytes, value(&file, "choice")), 29);
+            assert_eq!(word(&exe.bytes, value(&file, "overridden")), 31);
+            assert_eq!(value(&file, "shared") % 32, 0);
+            let locals: Vec<_> = file
+                .symbols()
+                .filter(|s| s.name().unwrap() == "local")
+                .map(|s| s.address())
+                .collect();
+            assert_eq!(locals.len(), 2);
+            assert_ne!(locals[0], locals[1]);
+            for (pointer, payload) in [("pointers_a", 17), ("pointers_b", 37)] {
+                let base = value(&file, pointer);
+                for (i, (name, addend)) in [
+                    ("choice", 0),
+                    ("choice", 1),
+                    ("shared", 0),
+                    ("shared", 8),
+                    ("overridden", 0),
+                    ("overridden", 1),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    assert_eq!(
+                        word(&exe.bytes, base + i as u64 * 8),
+                        value(&file, name) + addend
+                    );
+                }
+                let local = word(&exe.bytes, base + 48);
+                assert!(locals.contains(&local));
+                assert_eq!(word(&exe.bytes, local), payload);
+                assert_eq!(word(&exe.bytes, base + 56), local + 1);
+            }
+        }
+    }
+}
+
+#[test]
+fn repeated_absolute_address_keeps_addends_and_later_overflow_diagnostics() {
+    let absolute = object(".globl absolute\n.set absolute,0xffffffffffffffff\n");
+    let refs = object(&format!(
+        "{START}.data\n.globl pointers\npointers: .quad absolute,absolute-1,absolute+1\n"
+    ));
+    let exe = link(&[refs, absolute.clone()]).unwrap();
+    let file = object::File::parse(exe.bytes.as_slice()).unwrap();
+    assert_eq!(value(&file, "absolute"), u64::MAX);
+    let base = value(&file, "pointers");
+    assert_eq!(word(&exe.bytes, base), u64::MAX);
+    assert_eq!(word(&exe.bytes, base + 8), u64::MAX - 1);
+    assert_eq!(word(&exe.bytes, base + 16), 0);
+    let refs = object(&format!(
+        "{START}.data\n.quad absolute,absolute\n.long absolute\n"
+    ));
+    assert_eq!(
+        link(&[refs, absolute]).unwrap_err(),
+        "fixture.o: relocation 10 overflow for `absolute`"
+    );
+}
+
+#[test]
+fn relocation_encoding_preserves_signed_wraps_boundaries_and_adjacent_bytes() {
+    // Patch a real RELA record so every field kind exercises the linker,
+    // independently of which relocation the assembler chooses for an opcode.
+    let template = object(&format!(
+        "{START}.data\n.byte 90\n.globl field\nfield: .quad external\n.byte 165\n"
+    ));
+    let file = object::File::parse(template.as_slice()).unwrap();
+    let rela = file
+        .section_by_name(".rela.data")
+        .unwrap()
+        .file_range()
+        .unwrap()
+        .0 as usize;
+    let data = file
+        .section_by_name(".data")
+        .unwrap()
+        .file_range()
+        .unwrap()
+        .0 as usize;
+    let provider = |v: u64| object(&format!(".globl external\n.set external,{v:#x}\n"));
+    let probe = link(&[template.clone(), provider(0)]).unwrap();
+    let file = object::File::parse(probe.bytes.as_slice()).unwrap();
+    let p = value(&file, "field");
+    let mut cases = vec![
+        (1u32, u64::MAX, 1, Some(0u64.to_le_bytes().to_vec())),
+        (1, 0, -1, Some(u64::MAX.to_le_bytes().to_vec())),
+        (
+            10,
+            u32::MAX as u64,
+            0,
+            Some(u32::MAX.to_le_bytes().to_vec()),
+        ),
+        (10, u32::MAX as u64, 1, None),
+        (10, 0, -1, None),
+        (11, u64::MAX, 1, Some(0i32.to_le_bytes().to_vec())),
+        (11, 0, -1, Some((-1i32).to_le_bytes().to_vec())),
+        (
+            11,
+            i32::MIN as u64,
+            0,
+            Some(i32::MIN.to_le_bytes().to_vec()),
+        ),
+        (
+            11,
+            i32::MAX as u64,
+            0,
+            Some(i32::MAX.to_le_bytes().to_vec()),
+        ),
+        (11, i32::MIN as u64, -1, None),
+        (11, i32::MAX as u64, 1, None),
+    ];
+    for kind in [2, 4] {
+        for delta in [i32::MIN as i64, -1, i32::MAX as i64] {
+            cases.push((kind, p, delta, Some((delta as i32).to_le_bytes().to_vec())));
+        }
+        cases.push((kind, p, i32::MIN as i64 - 1, None));
+        cases.push((kind, p, i32::MAX as i64 + 1, None));
+    }
+    for delta in [-128i64, -1, 127] {
+        cases.push((15, p, delta, Some(vec![delta as u8])));
+    }
+    cases.push((15, p, -129, None));
+    cases.push((15, p, 128, None));
+    for delta in [i64::MIN, -1, i64::MAX] {
+        cases.push((24, p, delta, Some(delta.to_le_bytes().to_vec())));
+    }
+    cases.push((24, p + 1, i64::MAX, None));
+    cases.push((24, p - 1, i64::MIN, None));
+    for (kind, target, addend, expected) in cases {
+        let mut input = template.clone();
+        input[rela + 8..rela + 12].copy_from_slice(&kind.to_le_bytes());
+        input[rela + 16..rela + 24].copy_from_slice(&addend.to_le_bytes());
+        input[data + 1..data + 9].fill(0xa5);
+        let result = link(&[input, provider(target)]);
+        if let Some(expected) = expected {
+            let exe = result.unwrap();
+            let file = object::File::parse(exe.bytes.as_slice()).unwrap();
+            assert_eq!(value(&file, "field"), p);
+            let mut bytes = vec![0x5a];
+            bytes.extend_from_slice(&expected);
+            bytes.resize(10, 0xa5);
+            assert_eq!(
+                file.section_by_name(".data").unwrap().data().unwrap(),
+                bytes,
+                "kind={kind}, target={target:#x}, addend={addend}"
+            );
+        } else {
+            assert_eq!(
+                result.unwrap_err(),
+                format!("fixture.o: relocation {kind} overflow for `external`")
+            );
+        }
+    }
+}
 #[test]
 fn diagnostics_for_undefined_duplicate_missing_entry_and_overflow() {
     let start = object(START);
@@ -149,7 +336,11 @@ fn malformed_truncated_and_foreign_inputs_are_errors() {
 fn unsupported_tls_and_relocations_are_diagnostics() {
     let tls =
         object(".text\n.globl _start\n_start:\nret\n.section .tdata,\"awT\",@progbits\n.quad 1\n");
-    assert!(link(&[tls]).unwrap_err().contains("unsupported flags"));
+    let error = link(&[tls]).unwrap_err();
+    assert!(
+        error.contains("external ELF linking") && error.contains("PT_TLS"),
+        "{error}"
+    );
     let relocation = object(".text\n.globl _start\n_start:\nret\n.data\n.short _start\n");
     assert!(
         link(&[relocation])
@@ -299,4 +490,22 @@ fn strong_archive_definition_overrides_tentative_common() {
     let exe = link(&[common, archive(&[("strong.o", strong)])]).unwrap();
     let file = object::File::parse(exe.bytes.as_slice()).unwrap();
     assert_eq!(word(&exe.bytes, value(&file, "shared")), 42);
+}
+
+#[test]
+fn omitted_symbol_addresses_remain_lazy_and_errors_follow_relocation_order() {
+    let source = ".text\n.globl _start\n_start: ret\n\
+        .section .debug_info,\"\",@progbits\n\
+        .globl omitted\nomitted: .byte 0\n\
+        .globl another\nanother: .byte 0\n";
+    assert!(link(&[object(source)]).is_ok());
+    for (first, second) in [("omitted", "another"), ("another", "omitted")] {
+        assert_eq!(
+            link(&[object(&format!(
+                "{source}.data\n.quad _start,_start,{first},{second}\n"
+            ))])
+            .unwrap_err(),
+            format!("fixture.o: fixture.o: reference to omitted section for `{first}`")
+        );
+    }
 }

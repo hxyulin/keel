@@ -1,0 +1,103 @@
+use keel_asm_ir::x86::{FixedOpcode, Instruction, Opcode};
+use object::{Object, ObjectSection};
+use std::process::Command;
+
+fn text(bytes: &[u8]) -> Vec<u8> {
+    object::File::parse(bytes)
+        .unwrap()
+        .section_by_name(".text")
+        .unwrap()
+        .data()
+        .unwrap()
+        .to_vec()
+}
+
+#[test]
+fn baseline_fixed_forms_match_clang_gnu_and_typed_transport() {
+    let mut source = String::from(".intel_syntax noprefix\n.text\n");
+    let mut program = keel_asm_ir::Program::new();
+    let mut expected = Vec::new();
+    for &op in FixedOpcode::ALL {
+        source.push_str(op.mnemonic());
+        source.push('\n');
+        expected.extend_from_slice(op.bytes());
+        let parsed = Instruction::parse_intel(op.mnemonic()).unwrap();
+        assert_eq!(parsed.opcode, Opcode::Fixed(op));
+        assert_eq!(parsed.to_string(), op.mnemonic());
+        let att = Instruction::parse_att(op.mnemonic()).unwrap();
+        assert_eq!(parsed, att);
+        program.x86_instruction(parsed);
+        for bad in [
+            format!("{} rax", op.mnemonic()),
+            format!("lock {}", op.mnemonic()),
+        ] {
+            assert!(keel_asm::x86::assemble_object(&bad).is_err(), "{bad}");
+        }
+    }
+    assert_eq!(
+        Instruction::parse_intel("wait").unwrap().opcode,
+        Opcode::Fixed(FixedOpcode::Fwait)
+    );
+    let own = keel_asm::x86::assemble_object(&source).unwrap();
+    let typed = keel_asm::x86::assemble_program_object(&program).unwrap();
+    assert_eq!(text(&own), expected);
+    assert_eq!(own, typed);
+    let dir = std::env::temp_dir().join(format!("keel-fixed-baseline-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("forms.s");
+    // LLVM Intel lacks these historical mnemonic spellings. Width prefixes
+    // select the same architectural operations; UDB uses pinned XED's D6 byte
+    // because neither assembler provides its mnemonic.
+    std::fs::write(
+        &input,
+        source
+            .replace("\nleavew\n", "\ndata16 leave\n")
+            .replace("\niretw\n", "\ndata16 iretd\n")
+            .replace("\nudb\n", "\n.byte 0xd6\n"),
+    )
+    .unwrap();
+    let clang = dir.join("clang.o");
+    let p = Command::new("clang")
+        .args([
+            "-target",
+            "x86_64-unknown-linux-gnu",
+            "-c",
+            "-x",
+            "assembler",
+        ])
+        .arg(&input)
+        .arg("-o")
+        .arg(&clang)
+        .output()
+        .unwrap();
+    assert!(p.status.success(), "{}", String::from_utf8_lossy(&p.stderr));
+    assert_eq!(text(&std::fs::read(clang).unwrap()), expected);
+    let assembler = std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| {
+        if cfg!(target_os = "linux") {
+            "as".into()
+        } else {
+            "x86_64-elf-as".into()
+        }
+    });
+    // LLVM Intel syntax uses bare SYSRET for the 32-bit form. GNU Intel syntax
+    // requires SYSRETD; its bare spelling is ambiguous. Both select 0F 07.
+    let gnu_input = dir.join("gnu.s");
+    std::fs::write(
+        &gnu_input,
+        std::fs::read_to_string(&input)
+            .unwrap()
+            .replace("\nsysret\n", "\nsysretd\n"),
+    )
+    .unwrap();
+    let gnu = dir.join("gnu.o");
+    let p = Command::new(assembler)
+        .arg("--64")
+        .arg(&gnu_input)
+        .arg("-o")
+        .arg(&gnu)
+        .output()
+        .expect("GNU assembler is required");
+    assert!(p.status.success(), "{}", String::from_utf8_lossy(&p.stderr));
+    assert_eq!(text(&std::fs::read(gnu).unwrap()), expected);
+    std::fs::remove_dir_all(dir).unwrap();
+}

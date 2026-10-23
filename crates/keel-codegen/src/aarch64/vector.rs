@@ -12,13 +12,24 @@ struct Packed {
 fn arrangement(shape: VectorType) -> &'static str {
     use VectorType::*;
     match shape {
+        I8x8 => "8b",
         I8x16 => "16b",
+        I16x4 => "4h",
         I16x8 => "8h",
+        I32x2 | F32x2 => "2s",
         I32x4 | F32x4 => "4s",
+        I64x1 | F64x1 => "1d",
         I64x2 | F64x2 => "2d",
+        _ => unreachable!("SIMD width validated before AArch64 lowering"),
     }
 }
 fn binary(op: V, shape: VectorType) -> Option<Packed> {
+    if shape.bytes() == 8
+        && shape.lane_type().bytes() == Some(8)
+        && !matches!(op, V::And | V::Or | V::Xor)
+    {
+        return None;
+    }
     let (opcode, mnemonic) = match op {
         V::Iadd => (Opcode::ADD_asimdsame_only, "add"),
         V::Isub => (Opcode::SUB_asimdsame_only, "sub"),
@@ -26,6 +37,26 @@ fn binary(op: V, shape: VectorType) -> Option<Packed> {
         V::And => (Opcode::AND_asimdsame_only, "and"),
         V::Or => (Opcode::ORR_asimdsame_only, "orr"),
         V::Xor => (Opcode::EOR_asimdsame_only, "eor"),
+        V::Padd => (Opcode::ADDP_asimdsame_only, "addp"),
+        V::Psmin if shape != VectorType::I64x2 => (Opcode::SMINP_asimdsame_only, "sminp"),
+        V::Psmax if shape != VectorType::I64x2 => (Opcode::SMAXP_asimdsame_only, "smaxp"),
+        V::Pumin if shape != VectorType::I64x2 => (Opcode::UMINP_asimdsame_only, "uminp"),
+        V::Pumax if shape != VectorType::I64x2 => (Opcode::UMAXP_asimdsame_only, "umaxp"),
+        V::Fpadd => (Opcode::FADDP_asimdsame_only, "faddp"),
+        V::Fpmin => (Opcode::FMINP_asimdsame_only, "fminp"),
+        V::Fpmax => (Opcode::FMAXP_asimdsame_only, "fmaxp"),
+        V::Smin if shape != VectorType::I64x2 => (Opcode::SMIN_asimdsame_only, "smin"),
+        V::Smax if shape != VectorType::I64x2 => (Opcode::SMAX_asimdsame_only, "smax"),
+        V::Umin if shape != VectorType::I64x2 => (Opcode::UMIN_asimdsame_only, "umin"),
+        V::Umax if shape != VectorType::I64x2 => (Opcode::UMAX_asimdsame_only, "umax"),
+        V::Sabd if shape != VectorType::I64x2 => (Opcode::SABD_asimdsame_only, "sabd"),
+        V::Uabd if shape != VectorType::I64x2 => (Opcode::UABD_asimdsame_only, "uabd"),
+        V::Shadd if shape != VectorType::I64x2 => (Opcode::SHADD_asimdsame_only, "shadd"),
+        V::Uhadd if shape != VectorType::I64x2 => (Opcode::UHADD_asimdsame_only, "uhadd"),
+        V::Srhadd if shape != VectorType::I64x2 => (Opcode::SRHADD_asimdsame_only, "srhadd"),
+        V::Urhadd if shape != VectorType::I64x2 => (Opcode::URHADD_asimdsame_only, "urhadd"),
+        V::Shsub if shape != VectorType::I64x2 => (Opcode::SHSUB_asimdsame_only, "shsub"),
+        V::Uhsub if shape != VectorType::I64x2 => (Opcode::UHSUB_asimdsame_only, "uhsub"),
         V::Fadd => (Opcode::FADD_asimdsame_only, "fadd"),
         V::Fsub => (Opcode::FSUB_asimdsame_only, "fsub"),
         V::Fmul => (Opcode::FMUL_asimdsame_only, "fmul"),
@@ -38,7 +69,7 @@ fn binary(op: V, shape: VectorType) -> Option<Packed> {
     Some(Packed {
         opcode,
         mnemonic,
-        arrangement: if bitwise { "16b" } else { arrangement(shape) },
+        arrangement: if bitwise { if shape.bytes() == 8 { "8b" } else { "16b" } } else { arrangement(shape) },
         field: if bitwise {
             None
         } else if op.is_float() {
@@ -52,12 +83,17 @@ fn binary(op: V, shape: VectorType) -> Option<Packed> {
     })
 }
 fn unary(op: UnaryOp, shape: VectorType) -> Option<Packed> {
+    if shape.bytes() == 8 && shape.lane_type().bytes() == Some(8)
+        && !matches!(op, UnaryOp::Bnot | UnaryOp::Bswap)
+    {
+        return None;
+    }
     let size = shape.lane_type().bytes().unwrap().trailing_zeros();
     let (opcode, mnemonic) = match op {
         UnaryOp::Ineg => (Opcode::NEG_asimdmisc_R, "neg"),
         UnaryOp::Bnot => (Opcode::NOT_asimdmisc_R, "mvn"),
         UnaryOp::Clz if shape != VectorType::I64x2 => (Opcode::CLZ_asimdmisc_R, "clz"),
-        UnaryOp::Popcnt if shape == VectorType::I8x16 => (Opcode::CNT_asimdmisc_R, "cnt"),
+        UnaryOp::Popcnt if matches!(shape, VectorType::I8x8 | VectorType::I8x16) => (Opcode::CNT_asimdmisc_R, "cnt"),
         UnaryOp::Bswap => match size {
             1 => (Opcode::REV16_asimdmisc_R, "rev16"),
             2 => (Opcode::REV32_asimdmisc_R, "rev32"),
@@ -84,33 +120,51 @@ fn unary(op: UnaryOp, shape: VectorType) -> Option<Packed> {
     Some(Packed {
         opcode,
         mnemonic,
-        arrangement: if bytes { "16b" } else { arrangement(shape) },
+        arrangement: if bytes { if shape.bytes() == 8 { "8b" } else { "16b" } } else { arrangement(shape) },
         field,
     })
 }
 pub(super) fn lower(func: &Function) -> Cow<'_, Function> {
-    crate::vector::lower(func, |f, data| match data {
-        InstData::VectorShuffle { args, lanes } => {
-            matches!(
-                (f.value_type(args[0]), lanes.as_slice()),
-                (Type::Vector(VectorType::I64x2 | VectorType::F64x2), [1, 2])
-                    | (Type::Vector(VectorType::I32x4), [3, 4, 5, 6])
-            ) && f.value_type(args[0]) == f.value_type(args[1])
+    crate::vector::lower(func, |f, data| {
+        // Retain D widths only on paths with exact D encodings. Other paths
+        // use shared lane legalization without widening a memory access.
+        let mut narrow = matches!(
+            data,
+            InstData::VectorSplat { ty, .. } | InstData::Convert { ty, .. }
+                if ty.vector().is_some_and(|v| v.bytes() == 8)
+        );
+        data.for_each_operand(|v| {
+            narrow |= f.value_type(v).vector().is_some_and(|v| v.bytes() == 8);
+        });
+        if narrow {
+            return match data {
+                InstData::VectorBinary { op, args } => binary(*op, f.value_type(args[0]).vector().unwrap()).is_some(),
+                InstData::VectorUnary { op, arg } => unary(*op, f.value_type(*arg).vector().unwrap()).is_some(),
+                InstData::VectorShuffle { .. } => true,
+                _ => false,
+            };
         }
-        InstData::VectorExtract { arg, .. } => {
-            matches!(
-                f.value_type(*arg),
-                Type::Vector(VectorType::I64x2 | VectorType::I32x4)
-            )
-        }
+        match data {
+        InstData::VectorReduce { .. }
+        | InstData::VectorShuffle { .. }
+        | InstData::VectorExtract { .. }
+        | InstData::VectorInsert { .. } => true,
         InstData::VectorBinary { op, args } => {
-            binary(*op, f.value_type(args[0]).vector().unwrap()).is_some()
+            matches!(op, V::Shl | V::Ushr | V::Sshr)
+                || binary(*op, f.value_type(args[0]).vector().unwrap()).is_some()
         }
         InstData::VectorUnary { op, arg } => {
-            unary(*op, f.value_type(*arg).vector().unwrap()).is_some()
+            *op == UnaryOp::Popcnt || unary(*op, f.value_type(*arg).vector().unwrap()).is_some()
         }
         InstData::Convert {
-            op: ConvertOp::SwidenLow | ConvertOp::UwidenLow,
+            op:
+                ConvertOp::SwidenLow
+                | ConvertOp::UwidenLow
+                | ConvertOp::SwidenHigh
+                | ConvertOp::UwidenHigh
+                | ConvertOp::NarrowLow
+                | ConvertOp::SpairwiseAddLong
+                | ConvertOp::UpairwiseAddLong,
             ..
         } => true,
         InstData::Convert {
@@ -122,6 +176,7 @@ pub(super) fn lower(func: &Function) -> Cow<'_, Function> {
         | InstData::VectorSelect { .. }
         | InstData::VectorIcmp { .. } => true,
         _ => false,
+        }
     })
 }
 // Signed widening preserves zero/all-ones lanes. Unsigned widening does not:
@@ -188,24 +243,66 @@ impl FunctionCompiler<'_> {
         lanes: &[u8],
         result: Option<Value>,
     ) {
-        let offset = match (self.ty(args[0]), lanes) {
-            (Type::Vector(VectorType::I32x4), [3, 4, 5, 6]) => 12,
-            (Type::Vector(VectorType::I64x2 | VectorType::F64x2), [1, 2]) => 8,
-            _ => unreachable!("legalized exact window"),
-        };
+        let shape = self.ty(args[0]).vector().unwrap();
         let a = self.use_freg(args[0], FS0);
         let b = self.use_freg(args[1], FS1);
         let d = self.def_freg(result);
+        // Exact static permutations are single native instructions. Operand
+        // producers remain in place; all sources are captured before d writes.
+        let n = shape.lanes();
+        if n >= 2 {
+            for (opcode,name,kind) in [
+                (Opcode::ZIP1_asimdperm_only,"zip1",0), (Opcode::ZIP2_asimdperm_only,"zip2",1),
+                (Opcode::UZP1_asimdperm_only,"uzp1",2), (Opcode::UZP2_asimdperm_only,"uzp2",3),
+                (Opcode::TRN1_asimdperm_only,"trn1",4), (Opcode::TRN2_asimdperm_only,"trn2",5),
+            ] {
+                if lanes.iter().copied().enumerate().all(|(i,lane)| {
+                    let i=i as u8;
+                    let expected=match kind {
+                        0|1 => (kind as u8)*(n/2)+i/2+(i%2)*n,
+                        2|3 => (i/(n/2))*n+2*(i%(n/2))+(kind as u8-2),
+                        _ => (i/2)*2+(kind as u8-4)+(i%2)*n,
+                    };
+                    lane==expected
+                }) {
+                    let arr=arrangement(shape);
+                    self.native(opcode,[(FieldId::Q,u32::from(shape.bytes()==16)),
+                        (FieldId::size,shape.lane_type().bytes().unwrap().trailing_zeros()),
+                        (FieldId::Rd,d.into()),(FieldId::Rn,a.into()),(FieldId::Rm,b.into())],
+                        |out|write!(out,"{name}\tv{d}.{arr}, v{a}.{arr}, v{b}.{arr}"));
+                    self.def_done(result,d);
+                    return;
+                }
+            }
+        }
+        // A contiguous lane window is one EXT for every shape. Otherwise build
+        // in reserved FS2, so allocated destinations may alias either input.
+        let first = lanes[0];
+        if !lanes
+            .iter()
+            .enumerate()
+            .all(|(i, n)| usize::from(*n) == usize::from(first) + i)
+            || first >= shape.lanes()
+        {
+            for (i, lane) in lanes.iter().copied().enumerate() {
+                let source = if lane < shape.lanes() { a } else { b };
+                self.vector_insert_lane(FS2, i as u8, source, lane % shape.lanes(), shape);
+            }
+            self.move_vector(d, FS2);
+            self.def_done(result, d);
+            return;
+        }
+        let offset = u32::from(first) * shape.lane_type().bytes().unwrap();
         self.native(
             Opcode::EXT_asimdext_only,
             [
-                (FieldId::Q, 1),
+                (FieldId::Q, u32::from(shape.bytes()==16)),
                 (FieldId::imm4, offset),
                 (FieldId::Rd, d.into()),
                 (FieldId::Rn, a.into()),
                 (FieldId::Rm, b.into()),
             ],
-            |out| write!(out, "ext\tv{d}.16b, v{a}.16b, v{b}.16b, #{offset}"),
+            |out| {let arr=if shape.bytes()==16 {"16b"} else {"8b"};write!(out, "ext\tv{d}.{arr}, v{a}.{arr}, v{b}.{arr}, #{offset}")},
         );
         self.def_done(result, d);
     }
@@ -280,25 +377,32 @@ impl FunctionCompiler<'_> {
         let mut source = self.use_freg(arg, FS0);
         while shape != destination {
             let bytes = shape.lane_type().bytes().unwrap();
-            let next = VectorType::ALL
+            let next = VectorType::ALL_128
                 .into_iter()
                 .find(|s| s.lane_type().is_int() && s.lane_type().bytes() == Some(bytes * 2))
                 .unwrap();
-            let (opcode, name) = if op == ConvertOp::SwidenLow {
-                (Opcode::SSHLL_asimdshf_L, "sshll")
-            } else {
-                (Opcode::USHLL_asimdshf_L, "ushll")
-            };
-            let source_arrangement = match bytes {
-                1 => "8b",
-                2 => "4h",
-                4 => "2s",
+            let high = matches!(op, ConvertOp::SwidenHigh | ConvertOp::UwidenHigh);
+            let (opcode, name) = match op {
+                ConvertOp::SwidenLow => (Opcode::SSHLL_asimdshf_L, "sshll"),
+                ConvertOp::SwidenHigh => (Opcode::SSHLL_asimdshf_L, "sshll2"),
+                ConvertOp::UwidenLow => (Opcode::USHLL_asimdshf_L, "ushll"),
+                ConvertOp::UwidenHigh => (Opcode::USHLL_asimdshf_L, "ushll2"),
                 _ => unreachable!(),
+            };
+            let source_arrangement = if high {
+                arrangement(shape)
+            } else {
+                match bytes {
+                    1 => "8b",
+                    2 => "4h",
+                    4 => "2s",
+                    _ => unreachable!(),
+                }
             };
             self.native(
                 opcode,
                 [
-                    (FieldId::Q, 0),
+                    (FieldId::Q, u32::from(high)),
                     (FieldId::immh, bytes),
                     (FieldId::immb, 0),
                     (FieldId::Rd, d.into()),
@@ -317,6 +421,75 @@ impl FunctionCompiler<'_> {
         }
         self.def_done(result, d);
     }
+    pub(super) fn vector_pairwise_long(
+        &mut self,
+        op: ConvertOp,
+        ty: Type,
+        arg: Value,
+        result: Option<Value>,
+    ) {
+        let source = self.use_freg(arg, FS0);
+        let d = self.def_freg(result);
+        let shape = self.ty(arg).vector().unwrap();
+        let bytes = shape.lane_type().bytes().unwrap();
+        let (opcode, name) = if op == ConvertOp::SpairwiseAddLong {
+            (Opcode::SADDLP_asimdmisc_P, "saddlp")
+        } else {
+            (Opcode::UADDLP_asimdmisc_P, "uaddlp")
+        };
+        self.native(
+            opcode,
+            [
+                (FieldId::Q, 1),
+                (FieldId::size, bytes.trailing_zeros()),
+                (FieldId::Rd, d.into()),
+                (FieldId::Rn, source.into()),
+            ],
+            |out| {
+                write!(
+                    out,
+                    "{name}\tv{d}.{}, v{source}.{}",
+                    arrangement(ty.vector().unwrap()),
+                    arrangement(shape)
+                )
+            },
+        );
+        self.def_done(result, d);
+    }
+
+    pub(super) fn vector_narrow(&mut self, ty: Type, arg: Value, result: Option<Value>) {
+        let mut shape = self.ty(arg).vector().unwrap();
+        let dest = ty.vector().unwrap();
+        let mut source = self.use_freg(arg, FS0);
+        let d = self.def_freg(result);
+        while shape != dest {
+            let bytes = shape.lane_type().bytes().unwrap() / 2;
+            let next = VectorType::ALL_128
+                .into_iter()
+                .find(|s| s.lane_type().is_int() && s.lane_type().bytes() == Some(bytes))
+                .unwrap();
+            let narrow = match bytes {
+                1 => "8b",
+                2 => "4h",
+                4 => "2s",
+                _ => unreachable!(),
+            };
+            self.native(
+                Opcode::XTN_asimdmisc_N,
+                [
+                    (FieldId::Q, 0),
+                    (FieldId::size, bytes.trailing_zeros()),
+                    (FieldId::Rd, d.into()),
+                    (FieldId::Rn, source.into()),
+                ],
+                |out| write!(out, "xtn\tv{d}.{narrow}, v{source}.{}", arrangement(shape)),
+            );
+            source = d;
+            shape = next;
+        }
+        self.def_done(result, d);
+    }
+
     pub(super) fn vector_bitcast(&mut self, arg: Value, result: Option<Value>) {
         let source = self.use_freg(arg, FS0);
         let d = self.def_freg(result);
@@ -324,35 +497,221 @@ impl FunctionCompiler<'_> {
         self.def_done(result, d);
     }
 
-    pub(super) fn vector_extract(&mut self, arg: Value, lane: u8, result: Option<Value>) {
-        let source = self.use_freg(arg, FS0);
-        let d = self.def_reg(result);
-        let narrow = self.ty(arg) == Type::Vector(VectorType::I32x4);
-        let (opcode, imm5, gpr, element) = if narrow {
-            (
-                Opcode::UMOV_asimdins_W_w,
-                4 | (u32::from(lane) << 3),
-                "w",
-                "s",
-            )
-        } else {
-            (
-                Opcode::UMOV_asimdins_X_x,
-                8 | (u32::from(lane) << 4),
-                "x",
-                "d",
-            )
-        };
+    fn vector_insert_lane(&mut self, d: u8, lane: u8, source: u8, index: u8, shape: VectorType) {
+        let bytes = shape.lane_type().bytes().unwrap();
+        let element = ["b", "h", "s", "d"][bytes.trailing_zeros() as usize];
         self.native(
-            opcode,
+            Opcode::INS_asimdins_IV_v,
             [
-                (FieldId::imm5, imm5),
+                (FieldId::imm5, bytes | (u32::from(lane) * bytes * 2)),
+                (FieldId::imm4, u32::from(index) * bytes),
                 (FieldId::Rn, source.into()),
                 (FieldId::Rd, d.into()),
             ],
-            |out| write!(out, "umov\t{gpr}{d}, v{source}.{element}[{lane}]"),
+            |out| {
+                write!(
+                    out,
+                    "ins\tv{d}.{element}[{lane}], v{source}.{element}[{index}]"
+                )
+            },
+        );
+    }
+
+    pub(super) fn vector_insert(&mut self, args: [Value; 2], lane: u8, result: Option<Value>) {
+        let shape = self.ty(args[0]).vector().unwrap();
+        let source = self.use_freg(args[0], FS0);
+        // Preserve the scalar operand too before touching an aliased destination.
+        let scalar = if shape.lane_type().is_float() {
+            self.use_freg(args[1], FS1)
+        } else {
+            self.use_reg(args[1], S0)
+        };
+        self.move_vector(FS2, source);
+        if shape.lane_type().is_float() {
+            self.vector_insert_lane(FS2, lane, scalar, 0, shape);
+        } else {
+            let bytes = shape.lane_type().bytes().unwrap();
+            let element = ["b", "h", "s", "d"][bytes.trailing_zeros() as usize];
+            let gpr = if bytes == 8 { "x" } else { "w" };
+            self.native(
+                Opcode::INS_asimdins_IR_r,
+                [
+                    (FieldId::imm5, bytes | (u32::from(lane) * bytes * 2)),
+                    (FieldId::Rn, scalar.into()),
+                    (FieldId::Rd, FS2.into()),
+                ],
+                |out| write!(out, "ins\tv{FS2}.{element}[{lane}], {gpr}{scalar}"),
+            );
+        }
+        let d = self.def_freg(result);
+        self.move_vector(d, FS2);
+        self.def_done(result, d);
+    }
+
+    pub(super) fn vector_reduce(
+        &mut self,
+        op: keel_ir::VectorReduceOp,
+        arg: Value,
+        result: Option<Value>,
+    ) {
+        use keel_ir::VectorReduceOp as R;
+        let shape = self.ty(arg).vector().unwrap();
+        let bytes = shape.lane_type().bytes().unwrap();
+        let source = self.use_freg(arg, FS0);
+        if bytes == 8 && matches!(op, R::Smin | R::Smax | R::Umin | R::Umax) {
+            for (lane, d) in [(0, S0), (1, S1)] {
+                self.native(
+                    Opcode::UMOV_asimdins_X_x,
+                    [
+                        (FieldId::imm5, 8 | (lane << 4)),
+                        (FieldId::Rn, source.into()),
+                        (FieldId::Rd, d.into()),
+                    ],
+                    |out| write!(out, "umov\tx{d}, v{source}.d[{lane}]"),
+                );
+            }
+            let d = self.def_reg(result);
+            let cc = match op {
+                R::Smin => "lt",
+                R::Smax => "gt",
+                R::Umin => "lo",
+                R::Umax => "hi",
+                _ => unreachable!(),
+            };
+            self.mach("cmp", [Reg::x(S0).into(), Reg::x(S1).into()]);
+            self.mach(
+                "csel",
+                [
+                    Reg::x(d).into(),
+                    Reg::x(S0).into(),
+                    Reg::x(S1).into(),
+                    Arg::from(cc),
+                ],
+            );
+            self.def_done(result, d);
+            return;
+        }
+        if matches!(op, R::And | R::Or | R::Xor) {
+            self.move_vector(FS2, source);
+            let mut offset = 8;
+            let (opcode, name) = match op {
+                R::And => (Opcode::AND_asimdsame_only, "and"),
+                R::Or => (Opcode::ORR_asimdsame_only, "orr"),
+                R::Xor => (Opcode::EOR_asimdsame_only, "eor"),
+                _ => unreachable!(),
+            };
+            while offset >= bytes {
+                self.native(
+                    Opcode::EXT_asimdext_only,
+                    [
+                        (FieldId::Q, 1),
+                        (FieldId::imm4, offset),
+                        (FieldId::Rd, FS1.into()),
+                        (FieldId::Rn, FS2.into()),
+                        (FieldId::Rm, FS2.into()),
+                    ],
+                    |out| write!(out, "ext\tv{FS1}.16b, v{FS2}.16b, v{FS2}.16b, #{offset}"),
+                );
+                self.native(
+                    opcode,
+                    [
+                        (FieldId::Q, 1),
+                        (FieldId::Rd, FS2.into()),
+                        (FieldId::Rn, FS2.into()),
+                        (FieldId::Rm, FS1.into()),
+                    ],
+                    |out| write!(out, "{name}\tv{FS2}.16b, v{FS2}.16b, v{FS1}.16b"),
+                );
+                offset /= 2;
+            }
+        } else if bytes == 8 {
+            self.native(
+                Opcode::ADDP_asisdpair_only,
+                [(FieldId::Rd, FS2.into()), (FieldId::Rn, source.into())],
+                |out| write!(out, "addp\td{FS2}, v{source}.2d"),
+            );
+        } else {
+            let (opcode, name) = match op {
+                R::Add => (Opcode::ADDV_asimdall_only, "addv"),
+                R::Smin => (Opcode::SMINV_asimdall_only, "sminv"),
+                R::Smax => (Opcode::SMAXV_asimdall_only, "smaxv"),
+                R::Umin => (Opcode::UMINV_asimdall_only, "uminv"),
+                R::Umax => (Opcode::UMAXV_asimdall_only, "umaxv"),
+                _ => unreachable!(),
+            };
+            let element = ["b", "h", "s"][bytes.trailing_zeros() as usize];
+            self.native(
+                opcode,
+                [
+                    (FieldId::Q, 1),
+                    (FieldId::size, bytes.trailing_zeros()),
+                    (FieldId::Rd, FS2.into()),
+                    (FieldId::Rn, source.into()),
+                ],
+                |out| {
+                    write!(
+                        out,
+                        "{name}\t{element}{FS2}, v{source}.{}",
+                        arrangement(shape)
+                    )
+                },
+            );
+        }
+        let d = self.def_reg(result);
+        let (opcode, gpr) = if bytes == 8 {
+            (Opcode::UMOV_asimdins_X_x, "x")
+        } else {
+            (Opcode::UMOV_asimdins_W_w, "w")
+        };
+        let element = ["b", "h", "s", "d"][bytes.trailing_zeros() as usize];
+        self.native(
+            opcode,
+            [
+                (FieldId::imm5, bytes),
+                (FieldId::Rn, FS2.into()),
+                (FieldId::Rd, d.into()),
+            ],
+            |out| write!(out, "umov\t{gpr}{d}, v{FS2}.{element}[0]"),
         );
         self.def_done(result, d);
+    }
+
+    pub(super) fn vector_extract(&mut self, arg: Value, lane: u8, result: Option<Value>) {
+        let shape = self.ty(arg).vector().unwrap();
+        let bytes = shape.lane_type().bytes().unwrap();
+        let element = ["b", "h", "s", "d"][bytes.trailing_zeros() as usize];
+        let source = self.use_freg(arg, FS0);
+        let imm5 = bytes | (u32::from(lane) * bytes * 2);
+        if shape.lane_type().is_float() {
+            let d = self.def_freg(result);
+            self.native(
+                Opcode::DUP_asisdone_only,
+                [
+                    (FieldId::imm5, imm5),
+                    (FieldId::Rn, source.into()),
+                    (FieldId::Rd, d.into()),
+                ],
+                |out| write!(out, "dup\t{element}{d}, v{source}.{element}[{lane}]"),
+            );
+            self.def_done(result, d);
+        } else {
+            let d = self.def_reg(result);
+            let (opcode, gpr) = if bytes == 8 {
+                (Opcode::UMOV_asimdins_X_x, "x")
+            } else {
+                (Opcode::UMOV_asimdins_W_w, "w")
+            };
+            self.native(
+                opcode,
+                [
+                    (FieldId::imm5, imm5),
+                    (FieldId::Rn, source.into()),
+                    (FieldId::Rd, d.into()),
+                ],
+                |out| write!(out, "umov\t{gpr}{d}, v{source}.{element}[{lane}]"),
+            );
+            self.def_done(result, d);
+        }
     }
     pub(super) fn vector_splat(&mut self, ty: Type, arg: Value, result: Option<Value>) {
         let shape = ty.vector().unwrap();
@@ -388,7 +747,12 @@ impl FunctionCompiler<'_> {
     }
 
     pub(super) fn vector_binary(&mut self, op: V, args: [Value; 2], result: Option<Value>) {
-        let spec = binary(op, self.ty(args[0]).vector().unwrap()).expect("legalized NEON binary");
+        if matches!(op, V::Shl | V::Ushr | V::Sshr) {
+            self.vector_shift(op, args, result);
+            return;
+        }
+        let shape = self.ty(args[0]).vector().unwrap();
+        let spec = binary(op, shape).expect("legalized NEON binary");
         let d = self.def_freg(result);
         let a = self.use_freg(args[0], FS0);
         let b = self.use_freg(args[1], FS1);
@@ -396,9 +760,9 @@ impl FunctionCompiler<'_> {
             (FieldId::Rd, u32::from(d)),
             (FieldId::Rn, u32::from(a)),
             (FieldId::Rm, u32::from(b)),
-            (FieldId::Q, 1),
+            (FieldId::Q, u32::from(shape.bytes() == 16)),
         ];
-        let text = |out: &mut String| {
+        let text = |out: &mut crate::text::Text| {
             write!(
                 out,
                 "{}\tv{d}.{}, v{a}.{}, v{b}.{}",
@@ -416,6 +780,93 @@ impl FunctionCompiler<'_> {
         }
         self.def_done(result, d);
     }
+    fn vector_shift(&mut self, op: V, args: [Value; 2], result: Option<Value>) {
+        let shape = self.ty(args[0]).vector().unwrap();
+        let bytes = shape.lane_type().bytes().unwrap();
+        let a = self.use_freg(args[0], FS0);
+        let b = self.use_freg(args[1], FS1);
+        // SSHL/USHL interpret only the low signed byte of each count. Masking
+        // to width-1 first implements the IR's modulo-width count exactly,
+        // including counts with their high bit set and arbitrarily large lanes.
+        self.mach(
+            "mov",
+            [Reg::w(S0).into(), Arg::imm(i64::from(bytes * 8 - 1))],
+        );
+        self.native(
+            Opcode::DUP_asimdins_DR_r,
+            [
+                (FieldId::Q, 1),
+                (FieldId::imm5, bytes),
+                (FieldId::Rd, FS2.into()),
+                (FieldId::Rn, S0.into()),
+            ],
+            |out| {
+                write!(
+                    out,
+                    "dup\tv{FS2}.{}, {}{S0}",
+                    arrangement(shape),
+                    if bytes == 8 { "x" } else { "w" }
+                )
+            },
+        );
+        self.native(
+            Opcode::AND_asimdsame_only,
+            [
+                (FieldId::Q, 1),
+                (FieldId::Rd, FS2.into()),
+                (FieldId::Rn, b.into()),
+                (FieldId::Rm, FS2.into()),
+            ],
+            |out| write!(out, "and\tv{FS2}.16b, v{b}.16b, v{FS2}.16b"),
+        );
+        let size = bytes.trailing_zeros();
+        if op != V::Shl {
+            self.native(
+                Opcode::NEG_asimdmisc_R,
+                [
+                    (FieldId::Q, 1),
+                    (FieldId::size, size),
+                    (FieldId::Rd, FS2.into()),
+                    (FieldId::Rn, FS2.into()),
+                ],
+                |out| {
+                    write!(
+                        out,
+                        "neg\tv{FS2}.{}, v{FS2}.{}",
+                        arrangement(shape),
+                        arrangement(shape)
+                    )
+                },
+            );
+        }
+        let d = self.def_freg(result);
+        let (opcode, name) = if op == V::Sshr {
+            (Opcode::SSHL_asimdsame_only, "sshl")
+        } else {
+            (Opcode::USHL_asimdsame_only, "ushl")
+        };
+        self.native(
+            opcode,
+            [
+                (FieldId::Q, 1),
+                (FieldId::size, size),
+                (FieldId::Rd, d.into()),
+                (FieldId::Rn, a.into()),
+                (FieldId::Rm, FS2.into()),
+            ],
+            |out| {
+                write!(
+                    out,
+                    "{name}\tv{d}.{}, v{a}.{}, v{FS2}.{}",
+                    arrangement(shape),
+                    arrangement(shape),
+                    arrangement(shape)
+                )
+            },
+        );
+        self.def_done(result, d);
+    }
+
     pub(super) fn vector_minmax(&mut self, minmax: packed_minmax::MinMax, result: Option<Value>) {
         // Stage both reads before any destination write. Three-operand NEON
         // permits the destination to alias either input, including spill scratch.
@@ -453,15 +904,46 @@ impl FunctionCompiler<'_> {
         self.def_done(result, d);
     }
     pub(super) fn vector_unary(&mut self, op: UnaryOp, arg: Value, result: Option<Value>) {
-        let spec = unary(op, self.ty(arg).vector().unwrap()).expect("legalized NEON unary");
+        let shape = self.ty(arg).vector().unwrap();
+        if op == UnaryOp::Popcnt && !matches!(shape, VectorType::I8x8 | VectorType::I8x16) {
+            let a = self.use_freg(arg, FS0);
+            let d = self.def_freg(result);
+            self.native(
+                Opcode::CNT_asimdmisc_R,
+                [
+                    (FieldId::Q, 1),
+                    (FieldId::size, 0),
+                    (FieldId::Rd, d.into()),
+                    (FieldId::Rn, a.into()),
+                ],
+                |out| write!(out, "cnt\tv{d}.16b, v{a}.16b"),
+            );
+            for size in 0..shape.lane_type().bytes().unwrap().trailing_zeros() {
+                let source = ["16b", "8h", "4s"][size as usize];
+                let dest = ["8h", "4s", "2d"][size as usize];
+                self.native(
+                    Opcode::UADDLP_asimdmisc_P,
+                    [
+                        (FieldId::Q, 1),
+                        (FieldId::size, size),
+                        (FieldId::Rd, d.into()),
+                        (FieldId::Rn, d.into()),
+                    ],
+                    |out| write!(out, "uaddlp\tv{d}.{dest}, v{d}.{source}"),
+                );
+            }
+            self.def_done(result, d);
+            return;
+        }
+        let spec = unary(op, shape).expect("legalized NEON unary");
         let d = self.def_freg(result);
         let a = self.use_freg(arg, FS0);
         let base = [
             (FieldId::Rd, u32::from(d)),
             (FieldId::Rn, u32::from(a)),
-            (FieldId::Q, 1),
+            (FieldId::Q, u32::from(shape.bytes() == 16)),
         ];
-        let text = |out: &mut String| {
+        let text = |out: &mut crate::text::Text| {
             write!(
                 out,
                 "{}\tv{d}.{}, v{a}.{}",
@@ -476,6 +958,7 @@ impl FunctionCompiler<'_> {
         self.def_done(result, d);
     }
     pub(super) fn vector_compare(&mut self, cond: IntCC, args: [Value; 2], result: Option<Value>) {
+        if self.vector_compare_zero(cond, args, result) { return; }
         let (op, name, swap) = match cond {
             IntCC::Eq | IntCC::Ne => (Opcode::CMEQ_asimdsame_only, "cmeq", false),
             IntCC::Sgt => (Opcode::CMGT_asimdsame_only, "cmgt", false),
@@ -598,11 +1081,11 @@ impl FunctionCompiler<'_> {
             |out| write!(out, "mov\tv{d}.16b, v{s}.16b"),
         );
     }
-    pub(super) fn vector_spill(&mut self, store: bool, register: u8, slot: u32) {
+    pub(super) fn vector_spill(&mut self, store: bool, register: u8, slot: u32, bytes: u32) {
         let offset = self.spill_base + 8 * slot as usize;
         // Unaligned Q spills use unscaled addressing when possible; large
         // offsets need an address in x17. Scalar slots retain their old layout.
-        let at = if !offset.is_multiple_of(16) && offset > 255 {
+        let at = if bytes == 16 && !offset.is_multiple_of(16) && offset > 255 {
             self.address(Loc::Reg(S1), self.base, offset);
             Address::base(Reg::x(S1))
         } else {
@@ -610,7 +1093,7 @@ impl FunctionCompiler<'_> {
         };
         self.mach(
             if store { "str" } else { "ldr" },
-            [Reg::q(register).into(), at.into()],
+            [if bytes == 16 { Reg::q(register) } else { Reg::d(register) }.into(), at.into()],
         );
     }
 }

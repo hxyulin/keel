@@ -64,7 +64,7 @@ fn reference_linear_scan(
     intervals: &[Interval],
     pools: &Pools,
     locs: &mut [Vec<Option<Loc>>; 2],
-    hints: &keel_ir::fxhash::FxHashMap<Value, Vec<Value>>,
+    hints: &crate::select::Hints,
     affinity_func: Option<&Function>,
 ) -> Vec<Interval> {
     let mut sorted: Vec<&Interval> = intervals.iter().collect();
@@ -137,11 +137,9 @@ fn reference_linear_scan(
                 && !blocked_by_inactive(r)
         };
         let preferred = hints
-            .get(&cur.value)
-            .into_iter()
-            .flatten()
-            .filter_map(|v| locs[cur.half][v.index()])
-            .find(|&r| available(r));
+            .get(cur.value)
+            .and_then(|v| locs[cur.half][v.index()])
+            .filter(|&r| available(r));
         // Deliberately gather edges independently here rather than sharing the
         // production precomputed table or consensus helper.
         let consensus = || {
@@ -227,12 +225,11 @@ fn reference_linear_scan(
 fn reference_assign_spill_slots(spilled: &mut [Interval], locs: &mut [Vec<Option<Loc>>; 2]) -> u32 {
     spilled.sort_by_key(|iv| (iv.start(), iv.value, iv.half));
     let mut count = 0;
-    for vector in [false, true] {
+    for units in [1, 2, 4] {
         // Separate fixed-width pools preserve scalar/vector home sizes.
         let mut active: Vec<(u32, u32)> = Vec::new();
         let base = count;
-        let units = if vector { 2 } else { 1 };
-        for iv in spilled.iter().filter(|iv| iv.vector == vector) {
+        for iv in spilled.iter().filter(|iv| iv.spill_units == units) {
             active.retain(|&(end, _)| end >= iv.start());
             let slot = (base..)
                 .step_by(units as usize)
@@ -306,6 +303,7 @@ fn assert_reference_equivalence(
                 preserved_gprs: b.preserved_gprs,
                 float: b.float,
                 vector: b.vector,
+                spill_units: b.spill_units,
             },
             "{}",
             func.name

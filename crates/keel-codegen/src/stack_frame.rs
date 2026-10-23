@@ -16,8 +16,9 @@ impl SlotOffsets {
         let mut used = vec![debug; func.num_stack_slots()];
         for block in func.blocks() {
             for &inst in func.block_insts(block) {
-                if let InstData::StackAddr { slot } = *func.inst_data(inst) {
-                    used[slot.index()] = true;
+                match *func.inst_data(inst) {
+                    InstData::StackAddr { slot } | InstData::AggregateVaArg { home: slot, .. } => used[slot.index()] = true,
+                    _ => {}
                 }
             }
         }

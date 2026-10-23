@@ -19,7 +19,7 @@ struct Slot<'a> {
 }
 
 /// What a lookup compares before the bytes: a name's hash, length and
-/// first word, which is all of a name of up to eight bytes.
+/// head, which is all of a name of up to eight bytes.
 #[derive(Clone, Copy, Default, PartialEq)]
 struct Key {
     hash: u32,
@@ -29,27 +29,37 @@ struct Key {
 
 /// Each word of `bytes` folded in by multiplication. Only the top bits of
 /// the last product depend on every byte, so slot indices take their bits
-/// from the top.
+/// from the top. Short names are read in at most two loads, which may
+/// overlap: with the length, the head still determines every byte.
 fn key(bytes: &[u8]) -> Key {
     const K: u64 = 0x51_7c_c1_b7_27_22_0a_95;
-    let mut h = bytes.len() as u64;
-    let mut head = None;
-    let mut chunks = bytes.chunks_exact(8);
-    for chunk in &mut chunks {
-        let word = u64::from_le_bytes(chunk.try_into().unwrap());
-        head.get_or_insert(word);
-        h = (h.rotate_left(5) ^ word).wrapping_mul(K);
-    }
-    let rest = chunks.remainder();
-    if !rest.is_empty() {
-        let word = rest.iter().fold(0, |w, &b| w << 8 | u64::from(b));
-        head.get_or_insert(word);
-        h = (h.rotate_left(5) ^ word).wrapping_mul(K);
+    let word = |at: usize| u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap());
+    let half = |at: usize| u64::from(u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()));
+    let n = bytes.len();
+    let head = match n {
+        8.. => word(0),
+        4..8 => half(0) | half(n - 4) << 32,
+        1..4 => {
+            u64::from(bytes[0]) | u64::from(bytes[n / 2]) << 8 | u64::from(bytes[n - 1]) << 16
+        }
+        0 => 0,
+    };
+    let mut h = ((n as u64).rotate_left(5) ^ head).wrapping_mul(K);
+    if n > 8 {
+        let mut at = 8;
+        while at + 8 <= n {
+            h = (h.rotate_left(5) ^ word(at)).wrapping_mul(K);
+            at += 8;
+        }
+        // The last bytes, in a word that may overlap the one before.
+        if at < n {
+            h = (h.rotate_left(5) ^ word(n - 8)).wrapping_mul(K);
+        }
     }
     Key {
         hash: (h >> 32) as u32,
-        len: bytes.len() as u32,
-        head: head.unwrap_or(0),
+        len: n as u32,
+        head,
     }
 }
 

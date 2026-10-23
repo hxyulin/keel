@@ -126,7 +126,8 @@ impl Preference {
                 || ((input.is_call)(data) && !ordinary)
                 || matches!(
                     data,
-                    InstData::InlineAsm { .. }
+                    InstData::X86RflagsRegion { .. }
+                        | InstData::InlineAsm { .. }
                         | InstData::Intrinsic { .. }
                         | InstData::VaArg { .. }
                         | InstData::LandingPad { .. }

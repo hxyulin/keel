@@ -1,11 +1,13 @@
-//! Native executable linkers: arm64 Mach-O (`link`) and x86-64 ELF (`elf::link`).
+//! Native executable linkers: arm64 Mach-O (`link`) and x86-64/AArch64 ELF (`elf::link`).
 //! See docs/macos-linker.md and docs/elf-linker.md.
-//! `link` is host-independent and returns an unsigned executable image. On macOS,
-//! `write_signed` installs it atomically after Apple's ad-hoc codesign succeeds.
+//! `link` returns an unsigned executable image. `write_signed` and `link_signed`
+//! produce linker ad-hoc signatures in process on any host and install atomically.
 pub mod archive;
 pub mod elf;
 mod extract;
+mod gc;
 mod read;
+mod sign;
 mod tbd;
 mod unwind;
 mod write;
@@ -31,6 +33,12 @@ pub struct Input<'a> {
 }
 /// Explicit system interfaces. No implicit flat-namespace symbol lookup.
 pub struct Options {
+    /// Collect unreachable input sections. Default off; symbols sharing an input
+    /// section are indivisible, even with MH_SUBSECTIONS_VIA_SYMBOLS.
+    pub dead_strip: bool,
+    /// Selected-input definitions required by runtime DSO/dlsym consumers. These
+    /// are roots, not an export filter, and do not force archive extraction.
+    pub required_exports: Vec<String>,
     pub dylibs: Vec<Dylib>,
     pub minimum_macos: u32,
     pub sdk_version: u32,
@@ -43,6 +51,8 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            dead_strip: false,
+            required_exports: Vec::new(),
             dylibs: Vec::new(),
             minimum_macos: 11 << 16,
             sdk_version: 0,
@@ -82,10 +92,13 @@ pub(crate) enum Target {
     Definition(usize, usize),
     Common(usize),
     Header,
+    SectionBoundary(usize, bool),
     Import(usize),
 }
 pub(crate) struct Linker {
     objects: Vec<Object>,
+    discarded: BTreeSet<(usize, usize)>,
+    demanded: Option<BTreeSet<(usize, usize)>>,
     outputs: Vec<OutputSection>,
     globals: BTreeMap<String, Target>,
     imports: Vec<(String, i32)>,
@@ -104,6 +117,29 @@ pub(crate) struct Linker {
     binds: BTreeMap<u64, (usize, i64)>,
     options: Options,
     warnings: Vec<String>,
+}
+
+// These names are assembler labels: no C ABI underscore is added.
+fn section_boundary(name: &str) -> Result<Option<(&str, &str, bool)>> {
+    let (rest, end) = if let Some(rest) = name.strip_prefix("section$start$") {
+        (rest, false)
+    } else if let Some(rest) = name.strip_prefix("section$end$") {
+        (rest, true)
+    } else {
+        return Ok(None);
+    };
+    let (segment, section) = rest
+        .split_once('$')
+        .ok_or_else(|| format!("malformed section boundary `{name}`"))?;
+    if segment.is_empty()
+        || segment.len() > 16
+        || section.is_empty()
+        || section.len() > 16
+        || section.contains('$')
+    {
+        return fail(format!("malformed section boundary `{name}`"));
+    }
+    Ok(Some((segment, section, end)))
 }
 
 pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
@@ -192,6 +228,8 @@ fn prepare_linker(inputs: &[Input<'_>], options: Options) -> Result<Linker> {
     }
     let mut l = Linker {
         objects,
+        discarded: BTreeSet::new(),
+        demanded: None,
         outputs: Vec::new(),
         globals: BTreeMap::new(),
         imports: Vec::new(),
@@ -280,8 +318,15 @@ impl Linker {
                     .insert(s.name.clone(), Target::Definition(oi, si));
             }
         }
+        if self.options.dead_strip {
+            let live_commons = self.collect()?;
+            commons.retain(|name, _| live_commons.contains(name));
+        }
         for oi in 0..self.objects.len() {
             for si in 0..self.objects[oi].sections.len() {
+                if self.discarded.contains(&(oi, si)) {
+                    continue;
+                }
                 let s = &self.objects[oi].sections[si];
                 if s.flags & 255 == 0x13 && !s.size.is_multiple_of(24) {
                     return fail(
@@ -367,23 +412,62 @@ impl Linker {
             }
             self.globals.insert(name, Target::Common(off));
         }
-        let undefined: BTreeSet<_> = self
-            .objects
-            .iter()
-            .flat_map(|o| &o.symbols)
-            .filter(|s| s.kind & 0xe == 0 && s.value == 0)
-            .map(|s| s.name.clone())
-            .collect();
-        for name in undefined {
+        let mut undefined = BTreeMap::new();
+        for (oi, o) in self.objects.iter().enumerate() {
+            for (si, s) in o.symbols.iter().enumerate() {
+                if s.kind & 0xe == 0
+                    && s.value == 0
+                    && self.demanded.as_ref().is_none_or(|d| d.contains(&(oi, si)))
+                {
+                    let weak = undefined.entry(s.name.clone()).or_insert(true);
+                    *weak &= s.desc & 0x40 != 0;
+                }
+            }
+        }
+        for (name, weak) in undefined {
             if self.globals.contains_key(&name) {
                 continue;
             }
-            let weak = self
-                .objects
+            // ld64 searches selected libraries before inventing boundary atoms.
+            if !self
+                .options
+                .dylibs
                 .iter()
-                .flat_map(|o| &o.symbols)
-                .filter(|s| s.name == name && s.kind & 0xe == 0 && s.value == 0)
-                .all(|s| s.desc & 0x40 != 0);
+                .any(|d| d.exports.contains(&name))
+                && let Some((segment, section, end)) = section_boundary(&name)?
+            {
+                // Match the same mapping used for admitted input contributions.
+                let segment = if segment == "__DATA_CONST" {
+                    "__DATA"
+                } else {
+                    segment
+                };
+                if !matches!(segment, "__TEXT" | "__DATA") {
+                    return fail(format!("unsupported boundary segment `{segment}`"));
+                }
+                if matches!(section, "__stubs" | "__got" | "__unwind_info" | "__common") {
+                    return fail(format!(
+                        "boundary for reserved linker section `{section}` is unsupported"
+                    ));
+                }
+                let id = if let Some(id) = self
+                    .outputs
+                    .iter()
+                    .position(|s| s.segment == segment && s.name == section)
+                {
+                    if !matches!(self.outputs[id].flags & 255, 0 | 1) {
+                        return fail(format!(
+                            "boundary for special section `{section}` is unsupported"
+                        ));
+                    }
+                    id
+                } else {
+                    // Like ld64/lld, a missing section denotes an empty span.
+                    self.output(segment, section, 0, 0)?
+                };
+                self.globals.insert(name, Target::SectionBoundary(id, end));
+                continue;
+            }
             let ordinal = match self
                 .options
                 .dylibs
@@ -427,8 +511,8 @@ impl Linker {
         // Private extern definitions coalesce statically, never across images.
         self.weak_names.retain(|name| !matches!(self.globals.get(name), Some(Target::Definition(o,s)) if self.objects[*o].symbols[*s].kind & 0x10 != 0));
         for (oi, o) in self.objects.iter().enumerate() {
-            for s in &o.sections {
-                if s.segment == "__DWARF" {
+            for (si, s) in o.sections.iter().enumerate() {
+                if self.discarded.contains(&(oi, si)) || s.segment == "__DWARF" {
                     continue;
                 }
                 for r in &s.relocs {
@@ -527,13 +611,17 @@ impl Linker {
             .outputs
             .get(s.output.ok_or("reference to discarded metadata section")?)
             .ok_or("invalid output section")?;
-        Ok(out.address + s.offset as u64 + symbol.value - s.address)
+        Ok(out.address + s.offset as u64 + (symbol.value - s.address))
     }
     fn address(&self, target: Target) -> Result<u64> {
         match target {
             Target::Definition(oi, si) => self.symbol_address(oi, &self.objects[oi].symbols[si]),
             Target::Common(off) => Ok(self.outputs[self.common_section].address + off as u64),
             Target::Header => Ok(BASE),
+            Target::SectionBoundary(id, end) => {
+                let section = &self.outputs[id];
+                Ok(section.address + if end { section.size as u64 } else { 0 })
+            }
             Target::Import(_) => fail("import requires a stub, GOT, or pointer binding"),
         }
     }
@@ -542,43 +630,28 @@ impl Linker {
 /// Link directly to a sibling temporary file, sign, and atomically install it.
 /// This avoids a complete executable byte buffer. Returns linker warnings.
 pub fn link_signed(inputs: &[Input<'_>], options: Options, path: &Path) -> Result<Vec<String>> {
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = (inputs, options, path);
-        fail("ad-hoc signing requires macOS codesign")
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let mut warnings = Vec::new();
-        install_output(path, true, |file| {
-            let artifacts = link_to(inputs, options, file)?;
-            write_debug_objects(&artifacts.debug_objects)?;
-            warnings = artifacts.warnings;
-            Ok(())
-        })?;
-        Ok(warnings)
-    }
+    let mut warnings = Vec::new();
+    install_output(path, true, |file| {
+        let artifacts = link_to(inputs, options, file)?;
+        write_debug_objects(&artifacts.debug_objects)?;
+        warnings = artifacts.warnings;
+        Ok(())
+    })?;
+    Ok(warnings)
 }
 
 /// Sign to a sibling temporary file, then replace the destination only on success.
-/// No Apple linker or compiler is invoked. `codesign` is the platform's signer.
+/// Uses a host-independent linker ad-hoc signature, without external tools.
+/// The image must be an unsigned Keel executable as returned by `link`.
+/// This supplies local integrity checking, not Developer ID or notarization.
 pub fn write_signed(executable: &Executable, path: &Path) -> Result<()> {
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = (executable, path);
-        fail("ad-hoc signing requires macOS codesign")
-    }
-    #[cfg(target_os = "macos")]
-    {
-        use std::io::Write;
-        write_debug_objects(&executable.debug_objects)?;
-        install_output(path, true, |file| {
-            file.write_all(&executable.bytes).map_err(|e| e.to_string())
-        })
-    }
+    use std::io::Write;
+    write_debug_objects(&executable.debug_objects)?;
+    install_output(path, true, |file| {
+        file.write_all(&executable.bytes).map_err(|e| e.to_string())
+    })
 }
 
-#[cfg(target_os = "macos")]
 fn write_debug_objects(objects: &[DebugObject]) -> Result<()> {
     for object in objects {
         std::fs::create_dir_all(
@@ -599,13 +672,11 @@ fn write_debug_objects(objects: &[DebugObject]) -> Result<()> {
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
 fn install_output(
     path: &Path,
     sign: bool,
     write: impl FnOnce(&mut std::fs::File) -> Result<()>,
 ) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
     let parent = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -614,6 +685,7 @@ fn install_output(
     for n in 0..100 {
         let p = parent.join(format!(".keel-link-{}-{n}", std::process::id()));
         match std::fs::OpenOptions::new()
+            .read(true)
             .write(true)
             .create_new(true)
             .open(&p)
@@ -630,30 +702,18 @@ fn install_output(
     let result = (|| {
         write(&mut file)?;
         if sign {
-            file.set_permissions(std::fs::Permissions::from_mode(0o755))
-                .map_err(|e| e.to_string())?;
-        }
-        drop(file);
-        if sign {
-            let signed = std::process::Command::new("/usr/bin/codesign")
-                .args([
-                    "--force",
-                    "--sign",
-                    "-",
-                    "--timestamp=none",
-                    "--identifier",
-                    "keel.native",
-                ])
-                .arg(&temp)
-                .output()
-                .map_err(|e| format!("codesign: {e}"))?;
-            if !signed.status.success() {
-                return fail(format!(
-                    "ad-hoc signing failed: {}",
-                    String::from_utf8_lossy(&signed.stderr)
-                ));
+            sign::sign(&mut file)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                file.set_permissions(std::fs::Permissions::from_mode(0o755))
+                    .map_err(|e| e.to_string())?;
             }
         }
+        // Never mmap the output: Darwin can cache a signature at mmap time.
+        // Close this fresh, fully signed inode before atomically replacing the
+        // destination; a running executable keeps its previous inode intact.
+        drop(file);
         std::fs::rename(&temp, path).map_err(|e| e.to_string())
     })();
     if result.is_err() {

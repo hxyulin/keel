@@ -311,9 +311,45 @@ impl Compiled {
 
 /// Module-level features this bridge rejects before translating any body.
 fn check_module(module: &k::Module) -> Result<()> {
-    if module.functions.iter().any(|f| f.weak_odr)
+    if module.functions.iter().any(|f| f.layout_insts().any(|(_, i)| matches!(f.inst_data(i), k::InstData::AggregateVaArg { .. }) || f.inst_data(i).call_args().is_some_and(|a| a.has_explicit_abi()))) {
+        return Err("explicit call operand ABI and aggregate va_arg homes are unsupported by Cranelift".into());
+    }
+
+    if module.decls.iter().any(|d| d.sig.x86_vector_abi.is_some())
+        || module.functions.iter().any(|f| {
+            f.sig.x86_vector_abi.is_some()
+                || f.callees().any(|(_, d)| d.sig.x86_vector_abi.is_some())
+                || f.signatures().any(|(_, s)| s.x86_vector_abi.is_some())
+                || f.layout_insts().any(|(_,i)| matches!(f.inst_data(i), k::InstData::VaArg { x86_vector_abi: Some(_), .. }))
+        })
+    {
+        return Err("explicit x86 vector ABI is unsupported by Cranelift".into());
+    }
+
+    if module
+        .functions
+        .iter()
+        .any(|f| f.attrs.retain || f.attrs.section.is_some())
+        || module
+            .decls
+            .iter()
+            .any(|f| f.attrs.retain || f.attrs.section.is_some())
+        || module.data.iter().any(|d| d.retain || d.section.is_some())
+    {
+        return Err("export does not support custom sections or linker retention".into());
+    }
+
+    if module
+        .functions
+        .iter()
+        .any(|f| f.attrs.constructor || f.attrs.destructor)
+    {
+        return Err("Cranelift export does not support lifecycle registration".into());
+    }
+    if module.decls.iter().any(|d| d.attrs.weak)
+        || module.functions.iter().any(|f| f.attrs.weak || f.weak_odr || f.hidden)
         || module.data.iter().any(|d| {
-            d.weak_odr
+            d.weak || d.weak_odr
                 || d.hidden
                 || d.init.as_ref().is_some_and(|i| {
                     i.items
@@ -322,7 +358,7 @@ fn check_module(module: &k::Module) -> Result<()> {
                 })
         })
     {
-        return Err("weak_odr is unsupported by this exporter".into());
+        return Err("weak, weak_odr and hidden linkage are unsupported by this exporter".into());
     }
 
     if !module.files.is_empty()
@@ -352,13 +388,31 @@ fn ty(t: k::Type) -> Result<ir::Type> {
         k::Type::I128 => types::I128,
         k::Type::F32 => types::F32,
         k::Type::F64 => types::F64,
+        k::Type::F80 => return Err("f80 values are unsupported".into()),
         k::Type::Vector(v) => match v {
+            k::VectorType::I8x8
+            | k::VectorType::I16x4
+            | k::VectorType::I32x2
+            | k::VectorType::I64x1
+            | k::VectorType::F32x2
+            | k::VectorType::F64x1 => {
+                return Err(
+                    "64-bit SIMD values are not supported by the diagnostic Cranelift bridge"
+                        .into(),
+                );
+            }
             k::VectorType::I8x16 => types::I8X16,
+            k::VectorType::I8x32 => types::I8X32,
             k::VectorType::I16x8 => types::I16X8,
+            k::VectorType::I16x16 => types::I16X16,
             k::VectorType::I32x4 => types::I32X4,
+            k::VectorType::I32x8 => types::I32X8,
             k::VectorType::I64x2 => types::I64X2,
+            k::VectorType::I64x4 => types::I64X4,
             k::VectorType::F32x4 => types::F32X4,
+            k::VectorType::F32x8 => types::F32X8,
             k::VectorType::F64x2 => types::F64X2,
+            k::VectorType::F64x4 => types::F64X4,
         },
     })
 }
@@ -382,6 +436,9 @@ fn abi_param(p: &k::AbiParam) -> Result<CAbiParam> {
 }
 
 fn signature(s: &k::Signature) -> Result<ir::Signature> {
+    if s.x86_vector_abi.is_some() {
+        return Err("explicit x86 vector ABI is unsupported by Cranelift".into());
+    }
     if s.variadic {
         return Err("variadic signatures are unsupported".into());
     }
@@ -783,6 +840,7 @@ impl<'a, 'b> FnTranslator<'a, 'b> {
                 };
                 self.def(inst, 0, v);
             }
+            I::F80const { .. } => return unsupported("f80 constants"),
             I::Unary { op, arg } => {
                 let x = self.v(*arg)?;
                 let ins = self.b.ins();
@@ -908,6 +966,14 @@ impl<'a, 'b> FnTranslator<'a, 'b> {
                         }
                         value
                     }
+                    C::SwidenHigh
+                    | C::UwidenHigh
+                    | C::NarrowLow
+                    | C::SnarrowSatLow
+                    | C::UnarrowSatLow
+                    | C::SunarrowSatLow
+                    | C::SpairwiseAddLong
+                    | C::UpairwiseAddLong => return unsupported(format!("vector conversion {op}")),
                     C::Sext => self.b.ins().sextend(to_ty, x),
                     C::Uext => self.b.ins().uextend(to_ty, x),
                     C::Trunc => self.b.ins().ireduce(to_ty, x),
@@ -1074,6 +1140,8 @@ impl<'a, 'b> FnTranslator<'a, 'b> {
                 let v = self.b.ins().splat(ty(*t)?, x);
                 self.def(inst, 0, v);
             }
+            I::Neon { op, .. } => return unsupported(format!("ARM intrinsic {op}")),
+            I::VectorReduce { op, .. } => return unsupported(format!("vector reduction {op}")),
             I::VectorUnary { op, arg } => {
                 let x = self.v(*arg)?;
                 let ins = self.b.ins();
@@ -1115,6 +1183,7 @@ impl<'a, 'b> FnTranslator<'a, 'b> {
                             V::Fmax => ins.fmax(x, y),
                             V::Fcopysign => ins.fcopysign(x, y),
                             V::Shl | V::Ushr | V::Sshr => unreachable!(),
+                            _ => return unsupported(format!("vector {op}")),
                         }
                     }
                 };
@@ -1185,8 +1254,9 @@ impl<'a, 'b> FnTranslator<'a, 'b> {
             | I::AtomicRmw { .. }
             | I::AtomicCas { .. }
             | I::Fence { .. } => return unsupported("atomics and fences"),
-            I::VaArg { .. } => return unsupported("va_arg"),
+            I::VaArg { .. } | I::AggregateVaArg { .. } => return unsupported("va_arg, including aggregate homes"),
             I::InlineAsm { .. } => return unsupported("inline assembly"),
+            I::X86RflagsRegion { .. } => return unsupported("x86 FLAGS owned region"),
             I::ReturnCall { .. } | I::ReturnCallIndirect { .. } => {
                 return unsupported("guaranteed tail calls");
             }

@@ -27,7 +27,7 @@ pub fn run(func: &mut Function) -> bool {
     let mut changed = false;
     for &block in domtree.rpo() {
         for inst in func.block_insts(block).to_vec() {
-            if let Some(constants) = fold_overflow(func.inst_data(inst), |v| constant_data(func, v))
+            if let Some(constants) = fold_overflow(func.inst_data(inst), |v| constant_ref(func, v))
             {
                 replace_with_constants(func, inst, &constants);
                 changed = true;
@@ -49,7 +49,7 @@ pub fn run(func: &mut Function) -> bool {
             ) {
                 continue;
             }
-            if let Some(folded) = fold(func.inst_data(inst), |v| constant_data(func, v)) {
+            if let Some(folded) = fold(func.inst_data(inst), |v| constant_ref(func, v)) {
                 *func.inst_data_mut(inst) = folded;
                 changed = true;
             }
@@ -60,14 +60,14 @@ pub fn run(func: &mut Function) -> bool {
 
 /// Fold both results of checked arithmetic. i128 operands stay unfolded:
 /// their full result cannot generally be represented by an i64 immediate.
-pub(crate) fn fold_overflow(
+pub(crate) fn fold_overflow<'a>(
     data: &InstData,
-    lookup: impl Fn(Value) -> Option<InstData>,
+    lookup: impl Fn(Value) -> Option<&'a InstData>,
 ) -> Option<[InstData; 2]> {
     let InstData::Overflow { op, args } = *data else {
         return None;
     };
-    let get = |v| match lookup(v)? {
+    let get = |v| match *lookup(v)? {
         InstData::Iconst { ty, imm } if ty.is_int() && ty != Type::I128 => {
             Some(Const::new(ty, imm as u64))
         }
@@ -111,11 +111,16 @@ pub(crate) fn fold_overflow(
 }
 
 pub(crate) fn constant_data(func: &Function, value: Value) -> Option<InstData> {
+    constant_ref(func, value).cloned()
+}
+
+/// The `iconst` or `fconst` defining `value`, borrowed: the folding lookup.
+pub(crate) fn constant_ref(func: &Function, value: Value) -> Option<&InstData> {
     let ValueDef::Result(inst, _) = func.value_def(func.resolve(value)) else {
         return None;
     };
     match func.inst_data(inst) {
-        data @ (InstData::Iconst { .. } | InstData::Fconst { .. }) => Some(data.clone()),
+        data @ (InstData::Iconst { .. } | InstData::Fconst { .. }) => Some(data),
         _ => None,
     }
 }
@@ -135,17 +140,17 @@ pub(crate) fn replace_with_constants(func: &mut Function, inst: Inst, constants:
 
 /// Evaluate using constants supplied by the data-flow solver. The numerical
 /// kernel is shared with the direct constant queries used by CFG cleanup.
-pub(crate) fn fold(
+pub(crate) fn fold<'a>(
     data: &InstData,
-    lookup: impl Fn(Value) -> Option<InstData>,
+    lookup: impl Fn(Value) -> Option<&'a InstData>,
 ) -> Option<InstData> {
-    let int = |v: Value| match lookup(v)? {
+    let int = |v: Value| match *lookup(v)? {
         InstData::Iconst { ty, imm } if ty.is_int() && ty != Type::I128 => {
             Some(Const::new(ty, imm as u64))
         }
         _ => None,
     };
-    let float = |v: Value| match lookup(v)? {
+    let float = |v: Value| match *lookup(v)? {
         InstData::Fconst { ty, bits } => Some(Float { ty, bits }),
         _ => None,
     };
@@ -161,7 +166,7 @@ pub(crate) fn fold(
         InstData::Unary { op, arg } if op.is_float() => Folded::Float(fp::unary(op, float(arg)?)),
         InstData::Unary { op, arg } => Folded::Int(unary(op, int(arg)?)?),
         // An `i128` result does not fit `iconst`'s `i64` immediate.
-        InstData::Convert { ty: Type::I128, .. } => return None,
+        InstData::Convert { ty: Type::I128 | Type::F80, .. } => return None,
         InstData::Convert { op, ty, arg } => match op {
             ConvertOp::Fpext | ConvertOp::Fptrunc => Folded::Float(fp::convert(ty, float(arg)?)),
             ConvertOp::Fptosi | ConvertOp::Fptoui => Folded::Int(Const::new(
@@ -460,11 +465,12 @@ mod tests {
                             (r as u8, o)
                         }
                     };
+                    let operands = [x, y].map(|n| InstData::Iconst {
+                        ty: Type::I8,
+                        imm: i64::from(n),
+                    });
                     let folded = fold_overflow(&InstData::Overflow { op, args: [a, b] }, |v| {
-                        Some(InstData::Iconst {
-                            ty: Type::I8,
-                            imm: i64::from(if v == a { x } else { y }),
-                        })
+                        Some(&operands[usize::from(v != a)])
                     })
                     .unwrap();
                     assert_eq!(

@@ -595,3 +595,32 @@ fn undefined_signature_reference_resolves_to_external_definition() {
     }
     std::fs::remove_dir_all(temp).unwrap();
 }
+
+#[test]
+fn typed_lifecycle_sections_preserve_array_types() {
+    use object::read::elf::SectionHeader;
+    for fini in [false, true] {
+        let mut program = Program::new();
+        let directive = Directive::ElfLifecycleArray { fini };
+        program.directive(directive.clone());
+        program.directive(Directive::Align(3));
+        program.directive(Directive::Bytes(vec![0; 8]));
+        let text = format!("{directive}\n.p2align 3\n.quad 0\n");
+        let typed = keel_asm::x86::assemble_program_object(&program).unwrap();
+        assert_eq!(typed, keel_asm::x86::assemble_object(&text).unwrap());
+        let object::File::Elf64(file) = object::File::parse(typed.as_slice()).unwrap() else {
+            panic!("ELF expected")
+        };
+        let section = file
+            .section_by_name(if fini { ".fini_array" } else { ".init_array" })
+            .unwrap();
+        assert_eq!(
+            file.elf_section_table()
+                .section(section.index())
+                .unwrap()
+                .sh_type(object::Endianness::Little),
+            if fini { 15 } else { 14 }
+        );
+        assert!(keel_asm::assemble_program_object(&program, Default::default()).is_err());
+    }
+}

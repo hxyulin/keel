@@ -79,12 +79,12 @@ fn invalid_instruction_handles_are_errors_instead_of_panics() {
         },
         InstData::Call {
             func: FuncRef::new(999),
-            args: vec![],
+            args: (vec![]).into(),
         },
         InstData::CallIndirect {
             sig: SigRef::new(999),
             callee: Value::new(0),
-            args: vec![],
+            args: (vec![]).into(),
         },
         InstData::StackAddr {
             slot: StackSlot::new(999),
@@ -158,7 +158,7 @@ fn parameter_and_result_indices_do_not_wrap_at_65536() {
         keel_ir::InsertPoint::Before(f.block_insts(f.entry_block().unwrap())[0]),
         InstData::Call {
             func: callee,
-            args: vec![],
+            args: (vec![]).into(),
         },
     );
     let last = *f.inst_results(inst).last().unwrap();
@@ -287,7 +287,7 @@ fn large_call_and_asm_operands_keep_resolved_first_occurrence_order_with_holes(h
         keel_ir::InsertPoint::Before(defs[0]),
         InstData::Call {
             func: callee,
-            args: args.clone(),
+            args: (args.clone()).into(),
         },
     );
     let constraints = vec!["r"; args.len()].join(",");
@@ -423,7 +423,7 @@ fn malformed_operands_keep_preflight_order_and_duplicates_with_holes(holes: usiz
         block,
         InstData::Call {
             func: callee,
-            args: vec![Value::new(999), Value::new(998), Value::new(999)],
+            args: (vec![Value::new(999), Value::new(998), Value::new(999)]).into(),
         },
     );
     f.append_inst(block, InstData::Return { args: vec![] });

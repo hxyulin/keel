@@ -642,6 +642,70 @@ fn cascading_widening_rechecks_alignment_and_all_offsets() {
 }
 
 #[test]
+fn structured_relaxation_matches_layout_passes() {
+    // Structured programs settle relaxation over first-pass offsets; text
+    // lays out every pass. Branches near the rel8 limit, alignment and a
+    // second section make widening cascade over several steps.
+    use keel_asm_ir::{Directive, SectionKind};
+    let mut seed = 0x2545_f491_4f6c_dd1du64;
+    let mut next = |n: u64| {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed % n
+    };
+    for _ in 0..200 {
+        let mut source = String::from(".text\n");
+        let mut program = Program::new();
+        program.directive(Directive::Section {
+            segment: String::new(),
+            name: ".text".into(),
+            kind: SectionKind::Data,
+        });
+        let labels = 48;
+        let mut data = false;
+        for label in 0..labels {
+            source.push_str(&format!("L{label}:\n"));
+            program.label(format!("L{label}"));
+            for _ in 0..next(4) {
+                let line = match next(5) {
+                    0 => format!("jmp L{}", next(labels)),
+                    1 => format!("jne L{}", next(labels)),
+                    2 => format!("call L{}", next(labels)),
+                    3 => "mov eax, 1".into(),
+                    _ => format!("lea rax, [rip + L{}]", next(labels)),
+                };
+                source.push_str(&line);
+                source.push('\n');
+                program.append(keel_asm_ir::x86::parse_program(&line).unwrap());
+            }
+            let padding = vec![0x90; 1 + next(24) as usize];
+            source.push_str(&format!(".byte {}\n", vec!["144"; padding.len()].join(",")));
+            program.directive(Directive::Bytes(padding));
+            if next(6) == 0 {
+                source.push_str(".p2align 4\n");
+                program.directive(Directive::Align(4));
+            }
+            if next(8) == 0 {
+                data = !data;
+                let name = if data { ".data" } else { ".text" };
+                source.push_str(&format!("{name}\n"));
+                program.directive(Directive::Section {
+                    segment: String::new(),
+                    name: name.into(),
+                    kind: SectionKind::Data,
+                });
+            }
+        }
+        assert_eq!(
+            assemble_program_object(&program).unwrap(),
+            assemble_object(&source).unwrap(),
+            "{source}"
+        );
+    }
+}
+
+#[test]
 fn temporary_symbols_use_section_relocations_but_preserve_identity() {
     let bytes = assemble_object(
         r#"

@@ -1,7 +1,7 @@
 //! Multi-section MH_OBJECT with instruction, pointer, and difference relocations.
 //! Serialize fields explicitly so host layout never affects the object format.
 use super::{Assembly, Error, RelocationKind, SectionContents, SectionKind};
-use crate::fxhash::{FxHashMap, FxHashSet};
+use crate::fxhash::FxHashMap;
 use std::collections::BTreeSet;
 
 fn u32le(out: &mut Vec<u8>, value: u32) {
@@ -142,6 +142,8 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
             || by_name.insert(symbol.name.as_str(), source_index).is_some()
             || (symbol.offset.is_none() && !symbol.global)
             || (symbol.private_extern && !symbol.global)
+            || (symbol.weak_reference
+                && (symbol.offset.is_some() || !symbol.global || symbol.common.is_some()))
             || (symbol.weak_can_be_hidden && !symbol.weak_definition)
             || symbol.offset.is_some() != symbol.section.is_some()
             || symbol.common.is_some_and(|(size, alignment)| {
@@ -158,10 +160,24 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
             return Err(Error::new(0, "invalid symbol section or offset"));
         }
     }
+    // Look up each relocation's symbols once, as source indices (or NONE).
+    const NONE: u32 = u32::MAX;
+    let lookup = |name: &str| by_name.get(name).map_or(NONE, |&i| i as u32);
+    let targets: Vec<_> = assembly
+        .relocations
+        .iter()
+        .map(|r| {
+            (
+                lookup(&r.symbol),
+                r.subtract_symbol.as_deref().map_or(NONE, lookup),
+            )
+        })
+        .collect();
+    let source = |i: u32| (i != NONE).then_some(i as usize);
     // Absolute local pointers can use a section ordinal and original address,
     // so no interior temporary label has to become a linker function entry.
-    let section_target = |r: &super::Relocation| {
-        let symbol = &assembly.symbols[*by_name.get(r.symbol.as_str())?];
+    let section_target = |r: &super::Relocation, target: u32| {
+        let symbol = &assembly.symbols[source(target)?];
         if r.kind != RelocationKind::Unsigned
             || r.subtract_symbol.is_some()
             || !((!symbol.global && symbol.name.starts_with('L'))
@@ -175,22 +191,22 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
     };
     // Darwin temporary labels are not independent function entries. Keeping
     // interior L labels in nlist makes ld generate spurious no-unwind ranges.
-    let referenced: FxHashSet<_> = assembly
-        .relocations
-        .iter()
-        .flat_map(|r| {
-            let target = if section_target(r).is_some() {
-                None
-            } else {
-                Some(r.symbol.as_str())
-            };
-            target.into_iter().chain(r.subtract_symbol.as_deref())
-        })
-        .collect();
+    let mut referenced = vec![false; assembly.symbols.len()];
+    for (r, &(target, subtract)) in assembly.relocations.iter().zip(&targets) {
+        let target = if section_target(r, target).is_some() {
+            NONE
+        } else {
+            target
+        };
+        for i in [target, subtract].into_iter().filter_map(source) {
+            referenced[i] = true;
+        }
+    }
     let mut symbols: Vec<_> = assembly
         .symbols
         .iter()
-        .filter(|s| s.global || !s.name.starts_with('L') || referenced.contains(s.name.as_str()))
+        .enumerate()
+        .filter(|&(i, s)| s.global || !s.name.starts_with('L') || referenced[i])
         .collect();
     let group = |s: &super::Symbol| {
         if s.offset.is_none() {
@@ -203,10 +219,10 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
     };
     // Assemblers emit symbols in name order (and names are unique), so a
     // stable sort by group alone usually gives the same order.
-    if symbols.is_sorted_by(|a, b| a.name < b.name) {
-        symbols.sort_by_key(|s| group(s));
+    if symbols.is_sorted_by(|(_, a), (_, b)| a.name < b.name) {
+        symbols.sort_by_key(|(_, s)| group(s));
     } else {
-        symbols.sort_by(|a, b| (group(a), &a.name).cmp(&(group(b), &b.name)));
+        symbols.sort_by(|(_, a), (_, b)| (group(a), &a.name).cmp(&(group(b), &b.name)));
     }
     let nsyms = size(symbols.len())?;
     if nsyms > 1 << 24 {
@@ -215,14 +231,14 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
             "Mach-O relocation symbol index exceeds 24 bits",
         ));
     }
-    let nlocals = size(symbols.iter().filter(|s| group(s) == 0).count())?;
-    let ndefined = size(symbols.iter().filter(|s| group(s) == 1).count())?;
+    let nlocals = size(symbols.iter().filter(|(_, s)| group(s) == 0).count())?;
+    let ndefined = size(symbols.iter().filter(|(_, s)| group(s) == 1).count())?;
     let nundefined = nsyms - nlocals - ndefined;
     let mut strings = vec![0];
     let mut entries = Vec::new();
     let mut indices = vec![None; assembly.symbols.len()];
-    for (index, symbol) in symbols.into_iter().enumerate() {
-        indices[by_name[symbol.name.as_str()]] = Some(index as u32);
+    for (index, (source_index, symbol)) in symbols.into_iter().enumerate() {
+        indices[source_index] = Some(index as u32);
         let (ordinal, value) = if let Some(section) = symbol.section {
             let offset = symbol.offset.unwrap();
             (
@@ -244,7 +260,9 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
                 0xe
             }) | if symbol.private_extern { 0x10 } else { 0 },
             ordinal,
-            (if symbol.weak_definition { 0x80 } else { 0 })
+            (if symbol.no_dead_strip { 0x20 } else { 0 })
+                | (if symbol.weak_definition { 0x80 } else { 0 })
+                | (if symbol.weak_reference { 0x40 } else { 0 })
                 | (if symbol.weak_can_be_hidden { 0x40 } else { 0 }),
             if let Some((_, alignment)) = symbol.common {
                 alignment
@@ -260,14 +278,14 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
     }
     for layout in &mut layouts {
         let view = &views[layout.id];
-        let mut relocations: Vec<_> = assembly
-            .relocations
-            .iter()
-            .filter(|r| r.section == layout.id)
+        let mut relocations: Vec<_> = (0..assembly.relocations.len())
+            .filter(|&i| assembly.relocations[i].section == layout.id)
             .collect();
-        relocations.sort_by_key(|r| std::cmp::Reverse(r.offset));
+        relocations.sort_by_key(|&i| std::cmp::Reverse(assembly.relocations[i].offset));
         let mut previous_end = view.size;
-        for r in relocations {
+        for i in relocations {
+            let r = &assembly.relocations[i];
+            let (target, subtract) = targets[i];
             let instruction = !matches!(
                 r.kind,
                 RelocationKind::Unsigned | RelocationKind::PointerToGot
@@ -298,13 +316,12 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
             {
                 return Err(Error::new(0, "invalid instruction relocation addend"));
             }
-            let local = section_target(r);
+            let local = section_target(r, target);
             let index = if local.is_some() {
                 0
             } else {
-                by_name
-                    .get(r.symbol.as_str())
-                    .and_then(|&i| indices[i])
+                source(target)
+                    .and_then(|i| indices[i])
                     .ok_or_else(|| {
                         Error::new(
                             0,
@@ -312,10 +329,9 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
                         )
                     })?
             };
-            if let Some(subtract) = &r.subtract_symbol {
-                let index = by_name
-                    .get(subtract.as_str())
-                    .and_then(|&i| indices[i])
+            if r.subtract_symbol.is_some() {
+                let index = source(subtract)
+                    .and_then(|i| indices[i])
                     .ok_or_else(|| Error::new(0, "difference references missing symbol"))?;
                 u32le(&mut layout.records, r.offset);
                 u32le(
@@ -499,13 +515,13 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
     }
     // Pointer/difference addends belong in their data words, unlike the
     // explicit ADDEND records paired with instruction relocations.
-    for r in &assembly.relocations {
+    for (r, &(target, _)) in assembly.relocations.iter().zip(&targets) {
         if matches!(
             r.kind,
             RelocationKind::Unsigned | RelocationKind::PointerToGot
         ) {
             let start = section_offsets[r.section] as usize + r.offset as usize;
-            let value = section_target(r).map_or(r.addend as u64, |(section, offset)| {
+            let value = section_target(r, target).map_or(r.addend as u64, |(section, offset)| {
                 (r.addend as u64)
                     .wrapping_add(addresses[section])
                     .wrapping_add(offset)

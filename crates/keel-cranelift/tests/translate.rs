@@ -266,3 +266,38 @@ fn cli_requires_target_and_preserves_output_on_failure() {
     assert!(String::from_utf8_lossy(&text.stdout).contains("apple_aarch64"));
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn lifecycle_metadata_cannot_be_silently_exported() {
+    for attr in ["constructor", "destructor"] {
+        let src = format!("func @callback() cc(c) {attr} {{\nblock0:\n return\n}}\n");
+        assert!(compile(&src).unwrap_err().contains("lifecycle"));
+    }
+}
+
+#[test]
+fn custom_placement_and_retention_cannot_be_silently_exported() {
+    for src in [
+        "func @f() retain {\nblock0:\n return\n}\n",
+        "func @f() section \".custom\" {\nblock0:\n return\n}\n",
+        "data @x = retain align 4 { i32 7 }\n",
+        "data @x = section \".custom\" align 4 { i32 7 }\n",
+        "data @x = thread_local retain section \".tls_custom\" align 4 { i32 7 }\n",
+    ] {
+        assert!(
+            compile(src)
+                .unwrap_err()
+                .contains("custom sections or linker retention")
+        );
+    }
+}
+
+#[test]
+fn f80_values_and_constants_are_explicitly_unsupported() {
+    for src in [
+        "func @f(f80) -> f80 {\nblock0(v0: f80):\n return v0\n}\n",
+        "func @f() {\nblock0:\n v0 = fconst.f80 0x3fff, 0x8000000000000000\n return\n}\n",
+    ] {
+        assert!(compile(src).unwrap_err().contains("f80"));
+    }
+}

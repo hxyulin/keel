@@ -12,13 +12,48 @@ use keel_ir::{DataInit, DataItem, DataObject};
 ///   pointers at startup and then makes the pages read-only;
 /// - constant without pointers: `__TEXT,__const`, read-only from the start.
 ///
-/// Objects are exported (`.globl`) unless local, like functions.
-pub(crate) fn emit_macho(out: &mut impl Sink, data: &DataObject, init: &DataInit) {
+/// Objects are exported (`.globl`) unless local, like functions; hidden ones
+/// are also `.private_extern`.
+pub(crate) fn emit_macho(
+    out: &mut impl Sink,
+    data: &DataObject,
+    init: &DataInit,
+    symbols: &crate::symbols::Symbols<'_>,
+) {
     let name = Format::MachO.symbol(&data.name);
     let alignment = init.align.trailing_zeros();
+    if data.retain {
+        out.directive(Directive::NoDeadStrip(name.clone()));
+    }
     if data.thread_local {
-        let initial = format!("{name}$tlv$init");
-        if init.is_zero() {
+        // The template is private implementation storage. An asm-renamed user
+        // definition or import may legitimately use its customary spelling.
+        // Appended '$' cannot collide with another template's unsuffixed name,
+        // which always ends in '$tlv$init'. Check imports as well as definitions.
+        let mut initial = format!("{}$tlv$init", data.name);
+        while symbols.contains(&initial) {
+            initial.push('$');
+        }
+        let initial = Format::MachO.symbol(&initial);
+        if data.retain {
+            out.directive(Directive::NoDeadStrip(initial.clone()));
+        }
+        if let Some(section) = data.section {
+            let (segment, section) = section.as_str().split_once(',').unwrap();
+            let kind = if init.is_zero() {
+                SectionKind::ThreadZeroFill
+            } else {
+                SectionKind::ThreadData
+            };
+            out.section(segment, section, kind);
+            out.align(alignment);
+            out.label(initial.clone());
+            if init.is_zero() {
+                out.directive(Directive::Space(init.size()));
+            } else {
+                emit_macho_items(out, init);
+            }
+        } else if init.is_zero() {
             out.directive(Directive::ZeroFill {
                 symbol: initial.clone(),
                 size: init.size(),
@@ -35,6 +70,9 @@ pub(crate) fn emit_macho(out: &mut impl Sink, data: &DataObject, init: &DataInit
         if !data.local {
             out.directive(Directive::Global(name.clone()));
         }
+        if data.hidden {
+            out.directive(Directive::PrivateExtern(name.clone()));
+        }
         out.align(3);
         out.label(name);
         out.integer(8, Expression::symbol("__tlv_bootstrap"));
@@ -48,10 +86,10 @@ pub(crate) fn emit_macho(out: &mut impl Sink, data: &DataObject, init: &DataInit
     if data.hidden {
         out.directive(Directive::PrivateExtern(name.clone()));
     }
-    if data.weak_odr {
+    if data.weak || data.weak_odr {
         out.directive(Directive::WeakDefinition(name.clone()));
     }
-    if !data.weak_odr && !init.constant && init.is_zero() {
+    if data.section.is_none() && !data.weak && !data.weak_odr && !init.constant && init.is_zero() {
         out.directive(Directive::ZeroFill {
             symbol: name,
             size: init.size(),
@@ -65,6 +103,11 @@ pub(crate) fn emit_macho(out: &mut impl Sink, data: &DataObject, init: &DataInit
         (true, true) => ("__DATA", "__const"),
         (true, false) => ("__TEXT", "__const"),
     };
+    let (segment, section) = data
+        .section
+        .as_ref()
+        .map(|s| s.as_str().split_once(',').unwrap())
+        .unwrap_or((segment, section));
     out.section(segment, section, SectionKind::Data);
     out.align(alignment);
     out.label(name);
@@ -103,7 +146,7 @@ fn emit_macho_items(out: &mut impl Sink, init: &DataInit) {
 /// `nm` show.
 pub(crate) fn emit_elf(out: &mut impl Sink, data: &DataObject, init: &DataInit) {
     let name = data.name.clone();
-    let (section, flags, nobits) = match (data.thread_local, init.constant, init.is_zero()) {
+    let (section, flags, mut nobits) = match (data.thread_local, init.constant, init.is_zero()) {
         (true, _, true) => (".tbss", 0x403, true),
         (true, _, false) => (".tdata", 0x403, false),
         (false, false, true) => (".bss", 3, true),
@@ -111,13 +154,43 @@ pub(crate) fn emit_elf(out: &mut impl Sink, data: &DataObject, init: &DataInit) 
         (false, true, _) if init.has_relocations() => (".data.rel.ro", 3, false),
         _ => (".rodata", 2, false),
     };
-    out.directive(Directive::ElfSection {
-        name: section.into(),
-        flags,
-        nobits,
+    // Conventional data sections remain PROGBITS even for zero initializers.
+    if data.section.is_some_and(|s| {
+        s.as_str() == ".data" || s.as_str() == ".data1" || s.as_str().starts_with(".data.")
+    }) {
+        nobits = false;
+    }
+    let custom = data.section.map(|s| s.as_str().to_owned());
+    let section = custom.unwrap_or_else(|| {
+        if data.retain {
+            format!("{section}.keel.retain.{}", data.name)
+        } else {
+            section.into()
+        }
     });
+    if data.weak_odr {
+        out.directive(Directive::ElfSectionMetadata {
+            name: format!("{section}.{}", data.name),
+            flags: flags | 0x200,
+            nobits,
+            entry_size: 0,
+            group: Some(data.name.clone()),
+        });
+    } else {
+        out.directive(Directive::ElfSection {
+            name: section,
+            flags: flags | if data.retain { 0x200000 } else { 0 },
+            nobits,
+        });
+    }
     if !data.local {
         out.directive(Directive::Global(name.clone()));
+    }
+    if data.hidden {
+        out.directive(Directive::ElfHidden(name.clone()));
+    }
+    if data.weak || data.weak_odr {
+        out.directive(Directive::ElfWeak(name.clone()));
     }
     out.directive(Directive::ElfType {
         name: name.clone(),

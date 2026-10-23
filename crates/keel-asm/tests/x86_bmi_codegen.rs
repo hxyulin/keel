@@ -7,6 +7,7 @@ const BMI: Features = Features {
     avx: false,
     bmi1: true,
     bmi2: true,
+    ..Features::legacy()
 };
 
 fn fixture() -> String {

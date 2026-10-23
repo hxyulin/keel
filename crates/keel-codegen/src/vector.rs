@@ -1,6 +1,6 @@
 //! Target-independent vector lane legalization, before allocation.
 use keel_ir::{
-    BinaryOp, ConvertOp, Function, InsertPoint, Inst, InstData, MemoryFlags, Type, Value,
+    BinaryOp, ConvertOp, Function, InsertPoint, Inst, InstData, IntCC, MemoryFlags, Type, Value,
     VectorBinaryOp as V, VectorType,
 };
 use std::borrow::Cow;
@@ -12,8 +12,20 @@ fn needs_lowering(
 ) -> bool {
     // Ask the target only about vector instructions: most are scalar.
     let vector = match data {
+        InstData::Fma { args } => func.value_type(func.resolve(args[0])).is_vector(),
         InstData::Convert {
-            op: ConvertOp::Bitcast | ConvertOp::SwidenLow | ConvertOp::UwidenLow,
+            op:
+                ConvertOp::Bitcast
+                | ConvertOp::SwidenLow
+                | ConvertOp::UwidenLow
+                | ConvertOp::SwidenHigh
+                | ConvertOp::UwidenHigh
+                | ConvertOp::NarrowLow
+                | ConvertOp::SpairwiseAddLong
+                | ConvertOp::UpairwiseAddLong
+                | ConvertOp::SnarrowSatLow
+                | ConvertOp::UnarrowSatLow
+                | ConvertOp::SunarrowSatLow,
             ty,
             arg,
         } => ty.is_vector() || func.value_type(*arg).is_vector(),
@@ -35,31 +47,212 @@ pub(crate) fn lower(
     let mut f = func.clone();
     // Inputs are captured before any scalar result is produced. Reuse these
     // buffers across straight-line expansions; no optimizer runs after this pass.
-    let mut slots: [Option<keel_ir::StackSlot>; 4] = [None; 4];
+    let mut slots_by_width: [[Option<keel_ir::StackSlot>; 4]; 3] = [[None; 4]; 3];
+    let mut expanded = false;
     let work: Vec<_> = f.layout_insts().map(|(_, i)| i).collect();
     for inst in work {
         let data = f.inst_data(inst).clone();
         if !needs_lowering(&f, &data, &keep) {
             continue;
         }
+        if let InstData::Convert {
+            op:
+                op @ (ConvertOp::SnarrowSatLow | ConvertOp::UnarrowSatLow | ConvertOp::SunarrowSatLow),
+            ty,
+            arg,
+        } = data
+        {
+            let source = f.value_type(arg);
+            let width = ty.vector().unwrap().lane_type().bytes().unwrap() * 8;
+            let mut l = LaneLowering {
+                func: &mut f,
+                at: inst,
+            };
+            let signed_result = op == ConvertOp::SnarrowSatLow;
+            let signed_source = op != ConvertOp::UnarrowSatLow;
+            let min = l.integer(
+                source,
+                if signed_result {
+                    -(1i64 << (width - 1))
+                } else {
+                    0
+                },
+            );
+            let max = l.integer(
+                source,
+                if signed_result {
+                    (1i64 << (width - 1)) - 1
+                } else {
+                    ((1u64 << width) - 1) as i64
+                },
+            );
+            let below = l.cmp(
+                if signed_source {
+                    IntCC::Slt
+                } else {
+                    IntCC::Ult
+                },
+                arg,
+                min,
+            );
+            let value = l.choose(below, min, arg);
+            let above = l.cmp(
+                if signed_source {
+                    IntCC::Sgt
+                } else {
+                    IntCC::Ugt
+                },
+                value,
+                max,
+            );
+            let value = l.choose(above, max, value);
+            let result = l.emit(InstData::Convert {
+                op: ConvertOp::NarrowLow,
+                ty,
+                arg: value,
+            });
+            let old = f.first_result(inst);
+            f.replace_all_uses(old, result);
+            f.remove_inst(inst);
+            expanded = true;
+            continue;
+        }
+        if let InstData::VectorBinary { op, args } = data
+            && let Some(op) = op.pairwise_binary()
+        {
+            let shape = f.value_type(args[0]).vector().unwrap();
+            let mut l = LaneLowering {
+                func: &mut f,
+                at: inst,
+            };
+            let a = l.emit(InstData::VectorShuffle {
+                args,
+                lanes: (0..shape.lanes()).map(|i| i * 2).collect(),
+            });
+            let b = l.emit(InstData::VectorShuffle {
+                args,
+                lanes: (0..shape.lanes()).map(|i| i * 2 + 1).collect(),
+            });
+            let result = l.emit(InstData::VectorBinary { op, args: [a, b] });
+            let old = f.first_result(inst);
+            f.replace_all_uses(old, result);
+            f.remove_inst(inst);
+            expanded = true;
+            continue;
+        }
+        if let InstData::VectorBinary { op, args } = data
+            && matches!(
+                op,
+                V::Smin
+                    | V::Smax
+                    | V::Umin
+                    | V::Umax
+                    | V::Sabd
+                    | V::Uabd
+                    | V::Shadd
+                    | V::Uhadd
+                    | V::Srhadd
+                    | V::Urhadd
+                    | V::Shsub
+                    | V::Uhsub
+                    | V::SaddSat
+                    | V::UaddSat
+                    | V::SsubSat
+                    | V::UsubSat
+            )
+        {
+            let mut l = LaneLowering {
+                func: &mut f,
+                at: inst,
+            };
+            let result = l.binary(op, args[0], args[1]);
+            let old = f.first_result(inst);
+            f.replace_all_uses(old, result);
+            f.remove_inst(inst);
+            expanded = true;
+            continue;
+        }
+        if let InstData::Convert {
+            op: op @ (ConvertOp::SpairwiseAddLong | ConvertOp::UpairwiseAddLong),
+            ty,
+            arg,
+        } = data
+        {
+            let source = f.value_type(arg).vector().unwrap();
+            let mut l = LaneLowering {
+                func: &mut f,
+                at: inst,
+            };
+            let mut values = Vec::new();
+            for odd in [0, 1] {
+                let shuffled = l.emit(InstData::VectorShuffle {
+                    args: [arg, arg],
+                    lanes: (0..source.lanes())
+                        .map(|i| (2 * i + odd) % source.lanes())
+                        .collect(),
+                });
+                values.push(l.emit(InstData::Convert {
+                    op: if op == ConvertOp::SpairwiseAddLong {
+                        ConvertOp::SwidenLow
+                    } else {
+                        ConvertOp::UwidenLow
+                    },
+                    ty,
+                    arg: shuffled,
+                }));
+            }
+            let result = l.emit(InstData::VectorBinary {
+                op: V::Iadd,
+                args: [values[0], values[1]],
+            });
+            let old = f.first_result(inst);
+            f.replace_all_uses(old, result);
+            f.remove_inst(inst);
+            expanded = true;
+            continue;
+        }
         let used = match data {
             InstData::Convert {
-                op: ConvertOp::SwidenLow | ConvertOp::UwidenLow,
+                op:
+                    ConvertOp::SwidenLow
+                    | ConvertOp::UwidenLow
+                    | ConvertOp::SwidenHigh
+                    | ConvertOp::UwidenHigh
+                    | ConvertOp::NarrowLow
+                    | ConvertOp::SpairwiseAddLong
+                    | ConvertOp::UpairwiseAddLong,
                 ..
             } => [true, false, false, true],
-            InstData::Convert { .. } | InstData::VectorExtract { .. } => {
-                [true, false, false, false]
-            }
+            InstData::Convert { .. }
+            | InstData::VectorExtract { .. }
+            | InstData::VectorReduce { .. } => [true, false, false, false],
             InstData::VectorSplat { .. } => [false, false, false, true],
             InstData::VectorUnary { .. } | InstData::VectorInsert { .. } => {
                 [true, false, false, true]
             }
-            InstData::VectorSelect { .. } => [true; 4],
+            InstData::VectorSelect { .. } | InstData::Fma { .. } => [true; 4],
             _ => [true, true, false, true],
         };
+        let mut bytes = 8;
+        data.for_each_operand(|v| {
+            if let Some(t) = f.value_type(v).vector() {
+                bytes = bytes.max(t.bytes());
+            }
+        });
+        for &v in f.inst_results(inst) {
+            if let Some(t) = f.value_type(v).vector() {
+                bytes = bytes.max(t.bytes());
+            }
+        }
+        let slots = &mut slots_by_width[match bytes {
+            8 => 0,
+            16 => 1,
+            32 => 2,
+            _ => unreachable!(),
+        }];
         for i in 0..4 {
             if used[i] && slots[i].is_none() {
-                slots[i] = Some(f.create_stack_slot(16, 16));
+                slots[i] = Some(f.create_stack_slot(bytes, bytes));
             }
         }
         let mut l = LaneLowering {
@@ -79,8 +272,28 @@ pub(crate) fn lower(
             }
         }
         let result = match data {
+            InstData::Fma { args } => {
+                let ty = l.ty(args[0]);
+                let shape = ty.vector().unwrap();
+                for i in 0..3 {
+                    l.store(pointers[i], args[i]);
+                }
+                for i in 0..shape.lanes() {
+                    let a = l.lane(pointers[0], i, shape);
+                    let b = l.lane(pointers[1], i, shape);
+                    let c = l.lane(pointers[2], i, shape);
+                    let value = l.emit(InstData::Fma { args: [a, b, c] });
+                    let at = l.address(pointers[3], i, shape);
+                    l.store(at, value);
+                }
+                l.load(pointers[3], ty)
+            }
             InstData::Convert {
-                op: op @ (ConvertOp::SwidenLow | ConvertOp::UwidenLow),
+                op:
+                    op @ (ConvertOp::SwidenLow
+                    | ConvertOp::UwidenLow
+                    | ConvertOp::SwidenHigh
+                    | ConvertOp::UwidenHigh),
                 ty,
                 arg,
             } => {
@@ -88,9 +301,14 @@ pub(crate) fn lower(
                 let dest = ty.vector().unwrap();
                 l.store(pointers[0], arg);
                 for i in 0..dest.lanes() {
-                    let value = l.lane(pointers[0], i, source);
+                    let lane = if matches!(op, ConvertOp::SwidenHigh | ConvertOp::UwidenHigh) {
+                        source.lanes() - dest.lanes() + i
+                    } else {
+                        i
+                    };
+                    let value = l.lane(pointers[0], lane, source);
                     let value = l.emit(InstData::Convert {
-                        op: if op == ConvertOp::SwidenLow {
+                        op: if matches!(op, ConvertOp::SwidenLow | ConvertOp::SwidenHigh) {
                             ConvertOp::Sext
                         } else {
                             ConvertOp::Uext
@@ -98,6 +316,62 @@ pub(crate) fn lower(
                         ty: dest.lane_type(),
                         arg: value,
                     });
+                    let at = l.address(pointers[3], i, dest);
+                    l.store(at, value);
+                }
+                l.load(pointers[3], ty)
+            }
+            InstData::Convert {
+                op: op @ (ConvertOp::SpairwiseAddLong | ConvertOp::UpairwiseAddLong),
+                ty,
+                arg,
+            } => {
+                let source = l.ty(arg).vector().unwrap();
+                let dest = ty.vector().unwrap();
+                l.store(pointers[0], arg);
+                for i in 0..dest.lanes() {
+                    let a = l.lane(pointers[0], i * 2, source);
+                    let b = l.lane(pointers[0], i * 2 + 1, source);
+                    let extend = if op == ConvertOp::SpairwiseAddLong {
+                        ConvertOp::Sext
+                    } else {
+                        ConvertOp::Uext
+                    };
+                    let a = l.emit(InstData::Convert {
+                        op: extend,
+                        ty: dest.lane_type(),
+                        arg: a,
+                    });
+                    let b = l.emit(InstData::Convert {
+                        op: extend,
+                        ty: dest.lane_type(),
+                        arg: b,
+                    });
+                    let value = l.bin(BinaryOp::Iadd, a, b);
+                    let at = l.address(pointers[3], i, dest);
+                    l.store(at, value);
+                }
+                l.load(pointers[3], ty)
+            }
+            InstData::Convert {
+                op: ConvertOp::NarrowLow,
+                ty,
+                arg,
+            } => {
+                let source = l.ty(arg).vector().unwrap();
+                let dest = ty.vector().unwrap();
+                l.store(pointers[0], arg);
+                for i in 0..dest.lanes() {
+                    let value = if i < source.lanes() {
+                        let arg = l.lane(pointers[0], i, source);
+                        l.emit(InstData::Convert {
+                            op: ConvertOp::Trunc,
+                            ty: dest.lane_type(),
+                            arg,
+                        })
+                    } else {
+                        l.integer(dest.lane_type(), 0)
+                    };
                     let at = l.address(pointers[3], i, dest);
                     l.store(at, value);
                 }
@@ -114,6 +388,16 @@ pub(crate) fn lower(
                     l.store(at, arg);
                 }
                 l.load(pointers[3], ty)
+            }
+            InstData::VectorReduce { op, arg } => {
+                let shape = l.ty(arg).vector().unwrap();
+                l.store(pointers[0], arg);
+                let mut value = l.lane(pointers[0], 0, shape);
+                for i in 1..shape.lanes() {
+                    let b = l.lane(pointers[0], i, shape);
+                    value = l.binary(op.binary(), value, b);
+                }
+                value
             }
             InstData::VectorExtract { arg, lane } => {
                 let shape = l.ty(arg).vector().unwrap();
@@ -195,10 +479,12 @@ pub(crate) fn lower(
                     let a = l.lane(pointers[0], i, shape);
                     let b = l.lane(pointers[1], i, shape);
                     let scalar = match data {
-                        InstData::VectorBinary { op, .. } => InstData::Binary {
-                            op: scalar_op(op),
-                            args: [a, b],
-                        },
+                        InstData::VectorBinary { op, .. } => {
+                            let value = l.binary(op, a, b);
+                            let at = l.address(pointers[3], i, out_shape);
+                            l.store(at, value);
+                            continue;
+                        }
                         InstData::VectorIcmp { cond, .. } => InstData::Icmp { cond, args: [a, b] },
                         InstData::VectorFcmp { cond, .. } => InstData::Fcmp { cond, args: [a, b] },
                         _ => unreachable!(),
@@ -224,6 +510,9 @@ pub(crate) fn lower(
         f.remove_inst(inst);
     }
     debug_assert!(keel_ir::verify(&f).is_ok());
+    if expanded {
+        return Cow::Owned(lower(&f, keep).into_owned());
+    }
     Cow::Owned(f)
 }
 struct LaneLowering<'a> {
@@ -231,6 +520,148 @@ struct LaneLowering<'a> {
     at: Inst,
 }
 impl LaneLowering<'_> {
+    fn integer(&mut self, ty: Type, imm: i64) -> Value {
+        if let Some(shape) = ty.vector() {
+            let arg = self.emit(InstData::Iconst {
+                ty: shape.lane_type(),
+                imm,
+            });
+            self.emit(InstData::VectorSplat { ty, arg })
+        } else {
+            self.emit(InstData::Iconst { ty, imm })
+        }
+    }
+    fn bin(&mut self, op: BinaryOp, a: Value, b: Value) -> Value {
+        if self.ty(a).is_vector() {
+            let op = match op {
+                BinaryOp::Iadd => V::Iadd,
+                BinaryOp::Isub => V::Isub,
+                BinaryOp::And => V::And,
+                BinaryOp::Or => V::Or,
+                BinaryOp::Xor => V::Xor,
+                BinaryOp::Ushr => V::Ushr,
+                BinaryOp::Sshr => V::Sshr,
+                _ => unreachable!("portable compound vector arithmetic"),
+            };
+            self.emit(InstData::VectorBinary { op, args: [a, b] })
+        } else {
+            self.emit(InstData::Binary { op, args: [a, b] })
+        }
+    }
+    fn cmp(&mut self, cond: IntCC, a: Value, b: Value) -> Value {
+        self.emit(if self.ty(a).is_vector() {
+            InstData::VectorIcmp { cond, args: [a, b] }
+        } else {
+            InstData::Icmp { cond, args: [a, b] }
+        })
+    }
+    fn choose(&mut self, c: Value, a: Value, b: Value) -> Value {
+        self.emit(if self.ty(a).is_vector() {
+            InstData::VectorSelect { args: [c, a, b] }
+        } else {
+            InstData::Select { args: [c, a, b] }
+        })
+    }
+    fn binary(&mut self, op: V, a: Value, b: Value) -> Value {
+        let ty = self.ty(a);
+        match op {
+            V::Smin | V::Smax | V::Umin | V::Umax | V::Sabd | V::Uabd => {
+                let cc = match op {
+                    V::Smin | V::Sabd => IntCC::Slt,
+                    V::Smax => IntCC::Sgt,
+                    V::Umin | V::Uabd => IntCC::Ult,
+                    V::Umax => IntCC::Ugt,
+                    _ => unreachable!(),
+                };
+                let c = self.cmp(cc, a, b);
+                if matches!(op, V::Sabd | V::Uabd) {
+                    let ab = self.bin(BinaryOp::Isub, a, b);
+                    let ba = self.bin(BinaryOp::Isub, b, a);
+                    self.choose(c, ba, ab)
+                } else {
+                    self.choose(c, a, b)
+                }
+            }
+            V::Shadd | V::Uhadd | V::Srhadd | V::Urhadd | V::Shsub | V::Uhsub => {
+                // Bit identities retain the carry/borrow discarded by a W-bit
+                // add/sub. No W+1 intermediate or undefined scalar overflow.
+                let one = self.integer(ty, 1);
+                let shift = if matches!(op, V::Shadd | V::Srhadd | V::Shsub) {
+                    BinaryOp::Sshr
+                } else {
+                    BinaryOp::Ushr
+                };
+                if matches!(op, V::Shsub | V::Uhsub) {
+                    let ah = self.bin(shift, a, one);
+                    let bh = self.bin(shift, b, one);
+                    let diff = self.bin(BinaryOp::Isub, ah, bh);
+                    let na = self.emit(if ty.is_vector() {
+                        InstData::VectorUnary {
+                            op: keel_ir::UnaryOp::Bnot,
+                            arg: a,
+                        }
+                    } else {
+                        InstData::Unary {
+                            op: keel_ir::UnaryOp::Bnot,
+                            arg: a,
+                        }
+                    });
+                    let borrow = self.bin(BinaryOp::And, na, b);
+                    let borrow = self.bin(BinaryOp::And, borrow, one);
+                    self.bin(BinaryOp::Isub, diff, borrow)
+                } else {
+                    let xor = self.bin(BinaryOp::Xor, a, b);
+                    let half = self.bin(shift, xor, one);
+                    if matches!(op, V::Srhadd | V::Urhadd) {
+                        let or = self.bin(BinaryOp::Or, a, b);
+                        self.bin(BinaryOp::Isub, or, half)
+                    } else {
+                        let and = self.bin(BinaryOp::And, a, b);
+                        self.bin(BinaryOp::Iadd, and, half)
+                    }
+                }
+            }
+            V::SaddSat | V::UaddSat | V::SsubSat | V::UsubSat => {
+                let sub = matches!(op, V::SsubSat | V::UsubSat);
+                let r = self.bin(if sub { BinaryOp::Isub } else { BinaryOp::Iadd }, a, b);
+                let zero = self.integer(ty, 0);
+                if matches!(op, V::UaddSat | V::UsubSat) {
+                    let c = if sub {
+                        self.cmp(IntCC::Ult, a, b)
+                    } else {
+                        self.cmp(IntCC::Ult, r, a)
+                    };
+                    let limit = self.integer(ty, if sub { 0 } else { -1 });
+                    self.choose(c, limit, r)
+                } else {
+                    let ar = self.bin(BinaryOp::Xor, a, r);
+                    let other = self.bin(
+                        BinaryOp::Xor,
+                        if sub { a } else { b },
+                        if sub { b } else { r },
+                    );
+                    let overflow = self.bin(BinaryOp::And, ar, other);
+                    let c = self.cmp(IntCC::Slt, overflow, zero);
+                    let sign = self.cmp(IntCC::Slt, a, zero);
+                    let min = self.integer(
+                        ty,
+                        1i64.wrapping_shl(
+                            ty.vector().map_or(ty, |s| s.lane_type()).bytes().unwrap() * 8 - 1,
+                        ),
+                    );
+                    let max = self.integer(
+                        ty,
+                        (1u64.wrapping_shl(
+                            ty.vector().map_or(ty, |s| s.lane_type()).bytes().unwrap() * 8 - 1,
+                        ) - 1) as i64,
+                    );
+                    let limit = self.choose(sign, min, max);
+                    self.choose(c, limit, r)
+                }
+            }
+            _ => self.bin(scalar_op(op), a, b),
+        }
+    }
     fn emit(&mut self, data: InstData) -> Value {
         let loc = self.func.inst_loc(self.at);
         let i = self.func.insert_inst(InsertPoint::Before(self.at), data);
@@ -300,5 +731,6 @@ fn scalar_op(op: V) -> BinaryOp {
         V::Fmin => BinaryOp::Fmin,
         V::Fmax => BinaryOp::Fmax,
         V::Fcopysign => BinaryOp::Fcopysign,
+        _ => unreachable!("compound vector operation is expanded explicitly"),
     }
 }

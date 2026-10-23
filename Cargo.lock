@@ -384,12 +384,15 @@ name = "keel-c"
 version = "0.1.0"
 dependencies = [
  "bumpalo",
+ "keel-asm",
  "keel-codegen",
  "keel-frontend",
  "keel-ir",
+ "keel-link",
  "keel-opt",
  "memchr",
  "memmap2",
+ "object",
  "simdutf8",
  "smallvec",
  "typed-arena",
@@ -457,6 +460,14 @@ dependencies = [
  "serde_json",
  "sha2",
  "toml",
+]
+
+[[package]]
+name = "keel-toolchain"
+version = "0.1.0"
+dependencies = [
+ "keel-codegen",
+ "keel-ir",
 ]
 
 [[package]]

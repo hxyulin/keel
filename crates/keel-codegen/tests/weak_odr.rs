@@ -107,13 +107,13 @@ fn typed_and_text_objects_preserve_weak_atoms_and_relocations() {
         compile(&m, Target::X86_64LinuxGnu)
             .unwrap_err()
             .message
-            .contains("weak_odr")
+            .contains("rtti_name")
     );
     assert!(
         compile_program(&m, Target::X86_64LinuxGnu)
             .unwrap_err()
             .message
-            .contains("weak_odr")
+            .contains("rtti_name")
     );
 }
 
@@ -122,7 +122,7 @@ fn malformed_linkage_is_rejected_even_without_verification() {
     for suffix in [
         "local weak_odr",
         "weak_odr thread_local",
-        "hidden",
+        "local hidden",
         "weak_odr hidden thread_local",
     ] {
         let m = keel_ir::parse(&format!("data @d = {suffix} align 8 {{ i64 0 }}\n")).unwrap();
@@ -227,15 +227,46 @@ int main(void) {
 }
 
 #[test]
-fn unsupported_elf_linkage_and_rtti_are_rejected_independently() {
-    for src in [
-        "func @f() weak_odr {\nblock0:\n return\n}\n",
-        "data @d = weak_odr align 8 { i64 0 }\n",
-        "data @name = align 1 { i8 0 }\ndata @d = align 8 { rtti_name @name }\n",
-    ] {
+fn elf_rtti_tag_is_rejected_independently() {
+    for src in ["data @name = align 1 { i8 0 }\ndata @d = align 8 { rtti_name @name }\n"] {
         let m = keel_ir::parse(src).unwrap();
         keel_ir::verify_module(&m).unwrap();
         assert!(compile(&m, Target::X86_64LinuxGnu).is_err());
         assert!(compile_program(&m, Target::X86_64LinuxGnu).is_err());
     }
+}
+
+#[test]
+fn elf_weak_odr_emits_real_groups_on_typed_and_text_routes() {
+    use object::ObjectComdat;
+    let m = keel_ir::parse("data @d = weak_odr align 8 { i64 0 }\ndata @p = weak_odr const align 8 { ptr @d }\nfunc @f() -> i64 weak_odr {\nblock0:\n v0 = iconst.i64 7\n return v0\n}\nfunc @ordinary() weak {\nblock0:\n return\n}\n").unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    let asm = compile(&m, Target::X86_64LinuxGnu).unwrap();
+    let program = compile_program(&m, Target::X86_64LinuxGnu).unwrap();
+    let typed = keel_asm::x86::assemble_program_object(&program).unwrap();
+    let text = keel_asm::x86::assemble_object(&asm).unwrap();
+    assert_eq!(typed, text);
+    let f = object::File::parse(typed.as_slice()).unwrap();
+    let groups: Vec<_> = f
+        .comdats()
+        .map(|g| (g.name().unwrap().to_owned(), g.sections().count()))
+        .collect();
+    assert_eq!(groups.len(), 3);
+    for name in ["d", "p", "f"] {
+        assert!(groups.iter().any(|g| g.0 == name));
+        assert!(
+            f.symbols()
+                .find(|s| s.name().unwrap() == name)
+                .unwrap()
+                .is_weak()
+        );
+    }
+    assert!(
+        f.symbols()
+            .find(|s| s.name().unwrap() == "ordinary")
+            .unwrap()
+            .is_weak()
+    );
+    assert!(!groups.iter().any(|g| g.0 == "ordinary"));
+    assert_eq!(groups.iter().find(|g| g.0 == "p").unwrap().1, 2); // data and RELA
 }

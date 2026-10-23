@@ -175,7 +175,7 @@ fn differential(name: &str, cases: &[String]) {
         );
         assert_eq!(
             i.opcode.required_features(),
-            Features::default(),
+            Features::NONE,
             "baseline {case}"
         );
         typed.x86_instruction(i);

@@ -19,6 +19,8 @@ pub fn query(name: &str, argument: &str, target: Target) -> u64 {
                 | "c_static_assert"
                 | "c_thread_local"
         ),
+        // cleanup remains false: whole-function jump/nonlocal restrictions
+        // still require source fallbacks in general-purpose GNU C libraries.
         "__has_attribute" => matches!(
             arg,
             "aligned"
@@ -32,7 +34,7 @@ pub fn query(name: &str, argument: &str, target: Target) -> u64 {
         ),
         "__has_c_attribute" | "__has_declspec_attribute" | "__building_module" => false,
         "__is_target_arch" => {
-            if apple {
+            if target != Target::X86_64LinuxGnu {
                 matches!(arg, "aarch64" | "arm64")
             } else {
                 arg == "x86_64"
@@ -131,14 +133,15 @@ fn builtin(name: &str, target: Target) -> bool {
     {
         return true;
     }
-    if target == Target::X86_64LinuxGnu
+    if target != Target::Aarch64AppleDarwin
         && matches!(base, "infl" | "huge_vall" | "nanl" | "fabsl" | "signbitl")
     {
         return false;
     }
     matches!(
         base,
-        "va_start"
+        "complex"
+            | "va_start"
             | "va_end"
             | "va_arg"
             | "va_copy"

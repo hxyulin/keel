@@ -10,19 +10,26 @@
 //! x87 80-bit format, which keel does not have: it has its size, so
 //! declarations and layouts are right, but its values are refused.
 //!
-//! The language is C11 without `_Complex` (which only parses, in
-//! declarations), variable-length arrays and old-style (K&R) function
-//! definitions, plus GNU extensions: those the system headers (Apple's,
-//! glibc's) use and more.
+//! The language is C11-oriented, with bounded float/double complex values
+//! and automatic multidimensional VLA/VM support, explicitly typed fixed-size
+//! old-style (K&R) function definitions, plus GNU extensions: those the system
+//! headers (Apple's, glibc's) use and more.
 //! `__auto_type` follows GNU's single-variable inference and initializer
 //! scope rules. Atomic pointer prefix/postfix `++` and `--` are supported.
 //! Attribute syntax is accepted more broadly than its semantics: many
-//! attributes are ignored. Selected unimplemented linkage and lifetime
-//! attributes are diagnosed; see `docs/c-frontend-coverage.md` and
+//! attributes are ignored. `visibility("hidden")` and `("internal")` emit
+//! hidden symbols; ordinary `weak` supports external function/object definitions
+//! and undefined references on both native targets. Default-priority executable
+//! constructor/destructor callbacks, compiler-only `used`, bounded custom `section`
+//! placement and distinct linker `retain` are supported;
+//! Darwin finalization requires libSystem atexit, ELF requires runtime array dispatch.
+//! Other unimplemented linkage
+//! and lifetime attributes are diagnosed; see `docs/c-frontend-coverage.md` and
 //! `docs/design.md`'s C frontend section for compatibility limits.
 
 mod arena;
 mod ast;
+mod complex_eval;
 mod debug;
 mod eval;
 mod expr;

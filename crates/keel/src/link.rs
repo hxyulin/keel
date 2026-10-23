@@ -29,7 +29,11 @@ pub fn run(args: &[String]) -> Result<(), String> {
 
     let mut native_args = Vec::new();
     let mut target = if cfg!(target_os = "linux") {
-        "x86_64-unknown-linux-gnu"
+        if cfg!(target_arch = "aarch64") {
+            "aarch64-unknown-linux-gnu"
+        } else {
+            "x86_64-unknown-linux-gnu"
+        }
     } else {
         "aarch64-apple-darwin"
     };
@@ -46,7 +50,12 @@ pub fn run(args: &[String]) -> Result<(), String> {
         }
     }
     match target {
-        "x86_64-unknown-linux-gnu" => return run_elf(&native_args),
+        "x86_64-unknown-linux-gnu" => {
+            return run_elf(&native_args, keel_link::elf::Machine::X86_64);
+        }
+        "aarch64-unknown-linux-gnu" | "aarch64-linux-gnu" => {
+            return run_elf(&native_args, keel_link::elf::Machine::Aarch64);
+        }
         "aarch64-apple-darwin" => {}
         _ => return Err(format!("unsupported linker target `{target}`")),
     }
@@ -58,10 +67,18 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let mut root = None;
     let mut debug_directory = None;
     let mut dsym: Option<PathBuf> = None;
+    let mut dead_strip = false;
+    let mut required_exports = Vec::new();
     let mut minimum = 11 << 16;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--dead-strip" | "-dead_strip" => dead_strip = true,
+            "--require-export" => required_exports.push(
+                args.next()
+                    .ok_or("--require-export requires a symbol")?
+                    .clone(),
+            ),
             "--debug-map" => {
                 debug_directory = Some(PathBuf::from(
                     args.next().ok_or("--debug-map requires a directory")?,
@@ -104,6 +121,11 @@ pub fn run(args: &[String]) -> Result<(), String> {
     }) {
         Some(root) => root,
         None => {
+            if !cfg!(target_os = "macos") {
+                return Err(
+                    "macOS SDK required for Darwin linking; pass --sysroot or set SDKROOT".into(),
+                );
+            }
             let result = std::process::Command::new("xcrun")
                 .args(["--sdk", "macosx", "--show-sdk-path"])
                 .output()
@@ -148,6 +170,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
         &inputs,
         keel_link::Options {
             dylibs,
+            dead_strip,
+            required_exports,
             minimum_macos: minimum,
             sdk_version: sdk_version(&root),
             debug_directory,
@@ -249,7 +273,7 @@ fn sdk_version(root: &Path) -> u32 {
         .unwrap_or(0)
 }
 
-fn run_elf(args: &[String]) -> Result<(), String> {
+fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), String> {
     enum Request {
         Path(PathBuf),
         Library(String, bool),
@@ -258,7 +282,10 @@ fn run_elf(args: &[String]) -> Result<(), String> {
     let mut directories = Vec::new();
     let mut sysroot = None;
     let mut output = PathBuf::from("a.out");
-    let mut options = keel_link::elf::Options::default();
+    let mut options = keel_link::elf::Options {
+        machine,
+        ..Default::default()
+    };
     let force_static = args
         .iter()
         .take_while(|a| *a != "--")
@@ -271,6 +298,8 @@ fn run_elf(args: &[String]) -> Result<(), String> {
             "-e" | "--entry" => {
                 options.entry = args.next().ok_or("--entry requires a symbol")?.clone()
             }
+            "--gc-sections" => options.gc_sections = true,
+            "--no-gc-sections" => options.gc_sections = false,
             "--dynamic-linker" => {
                 options.interpreter = args
                     .next()
@@ -315,8 +344,16 @@ fn run_elf(args: &[String]) -> Result<(), String> {
     // Native Linux links also search conventional target-library directories.
     if let Some(root) = sysroot.or_else(|| cfg!(target_os = "linux").then(|| PathBuf::from("/"))) {
         for dir in [
-            "lib/x86_64-linux-gnu",
-            "usr/lib/x86_64-linux-gnu",
+            if machine == keel_link::elf::Machine::Aarch64 {
+                "lib/aarch64-linux-gnu"
+            } else {
+                "lib/x86_64-linux-gnu"
+            },
+            if machine == keel_link::elf::Machine::Aarch64 {
+                "usr/lib/aarch64-linux-gnu"
+            } else {
+                "usr/lib/x86_64-linux-gnu"
+            },
             "lib64",
             "usr/lib64",
             "lib",

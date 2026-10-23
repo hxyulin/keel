@@ -121,6 +121,17 @@ pub trait InstructionSelector {
         target: select::Target,
         folds: &dyn Fn(&keel_ir::InstData) -> Vec<keel_ir::Value>,
     ) -> select::Selection;
+    /// [`Self::select`], given the raw IR use count of each value, at most
+    /// two, which the targets count anyway.
+    fn select_with_uses(
+        &self,
+        func: &keel_ir::Function,
+        target: select::Target,
+        folds: &dyn Fn(&keel_ir::InstData) -> Vec<keel_ir::Value>,
+        _uses: &[u8],
+    ) -> select::Selection {
+        self.select(func, target, folds)
+    }
 }
 
 /// Explicit opt-in to bounded AArch64 dispatch-tail replication. Selection and
@@ -151,6 +162,15 @@ impl InstructionSelector for ExperimentalDispatchTails<'_> {
     ) -> select::Selection {
         self.0.select(func, target, folds)
     }
+    fn select_with_uses(
+        &self,
+        func: &keel_ir::Function,
+        target: select::Target,
+        folds: &dyn Fn(&keel_ir::InstData) -> Vec<keel_ir::Value>,
+        uses: &[u8],
+    ) -> select::Selection {
+        self.0.select_with_uses(func, target, folds, uses)
+    }
 }
 
 pub struct OptionsSelector(pub SelectionOptions);
@@ -166,6 +186,20 @@ impl InstructionSelector for OptionsSelector {
     ) -> select::Selection {
         profiling::scope!("instruction-selection");
         let mut selection = select::Selection::compute_with_options(func, target, self.0);
+        if self.0.folded_operands {
+            selection.fold_operands(func, folds);
+        }
+        selection
+    }
+    fn select_with_uses(
+        &self,
+        func: &keel_ir::Function,
+        target: select::Target,
+        folds: &dyn Fn(&keel_ir::InstData) -> Vec<keel_ir::Value>,
+        uses: &[u8],
+    ) -> select::Selection {
+        profiling::scope!("instruction-selection");
+        let mut selection = select::Selection::compute_with_uses(func, target, self.0, Some(uses));
         if self.0.folded_operands {
             selection.fold_operands(func, folds);
         }
@@ -208,25 +242,52 @@ impl InstructionSelector for SelectionTier {
     ) -> select::Selection {
         OptionsSelector(self.options()).select(func, target, folds)
     }
+    fn select_with_uses(
+        &self,
+        func: &keel_ir::Function,
+        target: select::Target,
+        folds: &dyn Fn(&keel_ir::InstData) -> Vec<keel_ir::Value>,
+        uses: &[u8],
+    ) -> select::Selection {
+        OptionsSelector(self.options()).select_with_uses(func, target, folds, uses)
+    }
 }
 
 pub(crate) fn validate_odr(module: &Module, target: Target) -> Result<(), CodegenError> {
+    if module
+        .functions
+        .iter()
+        .any(|f| f.attrs.weak && (f.local || f.weak_odr))
+        || module.data.iter().any(|d| {
+            d.weak && (d.local || d.thread_local || d.weak_odr || (d.hidden && d.init.is_none()))
+        })
+    {
+        return Err(CodegenError { func: "linkage".into(), message: "weak requires nonlocal non-TLS storage, no weak_odr, and default visibility for undefined references".into() });
+    }
     for data in &module.data {
         let tagged = data.init.as_ref().is_some_and(|init| {
             init.items
                 .iter()
                 .any(|i| matches!(i, keel_ir::DataItem::RttiName { .. }))
         });
-        if (data.hidden
-            && (!data.weak_odr || data.local || data.thread_local || data.init.is_none()))
-            || ((data.hidden || tagged) && target != Target::Aarch64AppleDarwin)
-        {
+        if data.hidden && (data.local || data.init.is_none()) {
             return Err(CodegenError {
                 func: data.name.clone(),
-                message: "hidden weak_odr data and rtti_name require AArch64 Mach-O definitions"
-                    .into(),
+                message: "hidden requires a nonlocal definition".into(),
             });
         }
+        if tagged && target != Target::Aarch64AppleDarwin {
+            return Err(CodegenError {
+                func: data.name.clone(),
+                message: "rtti_name requires AArch64 Mach-O definitions".into(),
+            });
+        }
+    }
+    if let Some(f) = module.functions.iter().find(|f| f.hidden && f.local) {
+        return Err(CodegenError {
+            func: f.name.clone(),
+            message: "hidden requires a nonlocal definition".into(),
+        });
     }
     for (name, invalid) in module
         .functions
@@ -243,8 +304,8 @@ pub(crate) fn validate_odr(module: &Module, target: Target) -> Result<(), Codege
     {
         let message = if invalid {
             "weak_odr requires a nonlocal, non-thread-local definition"
-        } else if target != Target::Aarch64AppleDarwin {
-            "weak_odr is supported only by the AArch64 Mach-O backend"
+        } else if !matches!(target, Target::Aarch64AppleDarwin | Target::X86_64LinuxGnu) {
+            "weak_odr requires the AArch64 Mach-O or x86-64 ELF backend"
         } else {
             continue;
         };
@@ -263,6 +324,7 @@ pub fn compile_with_pipeline(
 ) -> Result<String, CodegenError> {
     profiling::scope!("codegen", target.triple());
     match target {
+        Target::Aarch64LinuxGnu => aarch64::compile_linux(module, pipeline),
         Target::Aarch64AppleDarwin => {
             aarch64::compile_with_pipeline(module, &aarch64::REGISTERS, pipeline)
         }
@@ -272,7 +334,7 @@ pub fn compile_with_pipeline(
     }
 }
 
-/// Produce a shared assembly program for AArch64 Mach-O or x86-64 ELF.
+/// Produce a shared assembly program for AArch64 Mach-O or AArch64/x86-64 ELF.
 /// Both backends emit typed instructions and metadata directly. Explicit text
 /// fragments are reserved for supported user inline assembly.
 pub fn compile_program(
@@ -295,6 +357,7 @@ pub fn compile_program_with_pipeline(
     pipeline: &CodegenPipeline<'_>,
 ) -> Result<keel_asm_ir::Program, CodegenError> {
     match target {
+        Target::Aarch64LinuxGnu => aarch64::compile_linux_program(module, pipeline, None),
         Target::Aarch64AppleDarwin => {
             aarch64::compile_program_with_pipeline(module, &aarch64::REGISTERS, pipeline)
         }
@@ -314,6 +377,11 @@ pub fn compile_program_chunks_with_pipeline(
     sink: &mut dyn FnMut(keel_asm_ir::Program),
 ) -> Result<(), CodegenError> {
     match target {
+        Target::Aarch64LinuxGnu => {
+            let p = aarch64::compile_linux_program(module, pipeline, Some(&mut *sink))?;
+            sink(p);
+            Ok(())
+        }
         Target::Aarch64AppleDarwin => aarch64::compile_program_chunks_with_pipeline(
             module,
             &aarch64::REGISTERS,
@@ -394,4 +462,137 @@ pub(crate) fn pieces(n: u64) -> Vec<(u64, u64)> {
         }
     }
     out
+}
+
+/// Targets must not silently truncate a newly introduced SIMD value width or
+/// widen a narrow load/store to a 16-byte memory access.
+pub(crate) fn validate_vector_width(
+    module: &Module,
+    minimum: u32,
+    maximum: u32,
+) -> Result<(), CodegenError> {
+    validate_vector_width_with_memory_policy(module, minimum, maximum, |_, _, _| false)
+}
+
+/// A target may omit ABI layout leaves only after proving byte-copy MEMORY
+/// transport. Ordinary scalar/SSA widths and every other target stay unchanged.
+pub(crate) fn validate_vector_width_with_memory_policy(
+    module: &Module,
+    minimum: u32,
+    maximum: u32,
+    byte_copy: impl Fn(Option<keel_ir::X86VectorAbi>, &keel_ir::Layout, bool) -> bool,
+) -> Result<(), CodegenError> {
+    use keel_ir::{EntityRef, Value, InstData};
+    let unsupported = |ty: keel_ir::Type| {
+        ty.vector()
+            .is_some_and(|v| v.bytes() < minimum || v.bytes() > maximum)
+    };
+    let check_signature = |name: &str, sig: &keel_ir::Signature| -> Result<(), CodegenError> {
+        for param in sig.params.iter().chain(&sig.returns) {
+            let ty = std::iter::once(param.ty).chain(
+                param
+                    .layout()
+                    .into_iter()
+                    .filter(|layout| !byte_copy(sig.x86_vector_abi, layout, false))
+                    .flat_map(|layout| layout.leaves().into_iter().map(|(_, ty)| ty)),
+            );
+            for ty in ty {
+                if unsupported(ty) {
+                    return Err(CodegenError {
+                        func: name.into(),
+                        message: format!(
+                            "{ty} requires a backend with {}-bit SIMD value support and exact-width memory transport",
+                            ty.bytes().unwrap() * 8
+                        ),
+                    });
+                }
+            }
+        }
+        Ok(())
+    };
+    for decl in &module.decls {
+        check_signature(&decl.name, &decl.sig)?;
+    }
+    for f in &module.functions {
+        check_signature(&f.name, &f.sig)?;
+        for (_, callee) in f.callees() {
+            check_signature(&f.name, &callee.sig)?;
+        }
+        for (_, sig) in f.signatures() {
+            check_signature(&f.name, sig)?;
+        }
+        for (_, i) in f.layout_insts() {
+            let mut bad = None;
+            let data=f.inst_data(i);
+            let sig=match data {
+                InstData::Call {func,..}|InstData::ReturnCall {func,..}|InstData::Invoke {func,..} => Some(&f.callee(*func).sig),
+                InstData::CallIndirect {sig,..}|InstData::ReturnCallIndirect {sig,..} => Some(f.signature(*sig)),
+                _ => None,
+            };
+            let producer=match data { InstData::AggregateVaArg {x86_vector_abi,..} => *x86_vector_abi, _ => sig.and_then(|s| s.x86_vector_abi) };
+            data.for_each_abi_type_filtered(|ty| { if unsupported(ty) { bad=Some(ty); } }, |layout,index| {
+                !byte_copy(producer,layout,index.is_none_or(|n| sig.is_some_and(|s| n>=s.params.len())))
+            });
+            if let Some(ty) = bad {
+                return Err(CodegenError { func: f.name.clone(), message: format!("{ty} in aggregate ABI requires a backend with {}-bit SIMD support", ty.bytes().unwrap() * 8) });
+            }
+        }
+        for n in 0..f.num_values() {
+            let ty = f.value_type(Value::new(n));
+            if unsupported(ty) {
+                return Err(CodegenError {
+                    func: f.name.clone(),
+                    message: format!(
+                        "{ty} requires a backend with {}-bit SIMD value support and exact-width memory transport",
+                        ty.bytes().unwrap() * 8
+                    ),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Until the matching target transport is implemented, never silently discard
+/// an explicit producer ABI, including declarations and indirect signatures.
+pub(crate) fn reject_x86_vector_abi(module: &Module, target: &str) -> Result<(), CodegenError> {
+    for (name, sig) in module.decls.iter().map(|d| (d.name.as_str(), &d.sig)).chain(
+        module.functions.iter().flat_map(|f| {
+            std::iter::once((f.name.as_str(), &f.sig))
+                .chain(f.callees().map(move |(_, d)| (f.name.as_str(), &d.sig)))
+                .chain(f.signatures().map(move |(_, s)| (f.name.as_str(), s)))
+        }),
+    ) {
+        if sig.x86_vector_abi.is_some() {
+            return Err(CodegenError {
+                func: name.into(),
+                message: format!("explicit x86 vector ABI transport is not implemented on {target}"),
+            });
+        }
+    }
+    for f in &module.functions {
+        if f.layout_insts().any(|(_,i)| matches!(f.inst_data(i), keel_ir::InstData::VaArg { x86_vector_abi: Some(_), .. } | keel_ir::InstData::AggregateVaArg { x86_vector_abi: Some(_), .. })) {
+            return Err(CodegenError { func: f.name.clone(), message: format!("explicit x86 vector ABI transport is not implemented on {target}") });
+        }
+    }
+    Ok(())
+}
+
+/// Reject extended values before reaching scalar SIMD lowering on unsupported targets.
+pub(crate) fn reject_f80(module: &Module, target: &str) -> Result<(), CodegenError> {
+    use keel_ir::{Type, Value, EntityRef};
+    let signature_has_f80 = |sig: &keel_ir::Signature| sig.params.iter().chain(&sig.returns).any(|p| {
+        p.ty == Type::F80 || p.layout().is_some_and(|l| l.leaves().iter().any(|(_, t)| *t == Type::F80))
+    });
+    let error = |name: &str| CodegenError { func: name.into(), message: format!("f80 values and foreign ABI are unsupported on {target}") };
+    for d in &module.decls { if signature_has_f80(&d.sig) { return Err(error(&d.name)); } }
+    for f in &module.functions {
+        if signature_has_f80(&f.sig)
+            || f.callees().any(|(_, d)| signature_has_f80(&d.sig))
+            || f.signatures().any(|(_, s)| signature_has_f80(s))
+            || (0..f.num_values()).any(|n| f.value_type(Value::new(n)) == Type::F80)
+            || f.layout_insts().any(|(_, i)| { let mut found = false; f.inst_data(i).for_each_abi_type(|t| found |= t == Type::F80); found })
+        { return Err(error(&f.name)); }
+    }
+    Ok(())
 }

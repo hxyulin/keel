@@ -204,7 +204,7 @@ fn signature_and_caller_restrictions_are_site_decisions() {
                 let InstData::Call { func, args } = f.inst_data(call).clone() else {
                     unreachable!()
                 };
-                *f.inst_data_mut(call) = InstData::ReturnCall { func, args };
+                *f.inst_data_mut(call) = InstData::ReturnCall { func, args: (args).into() };
             }
         }
         // Exercise decisions directly: a deliberately mismatched ABI or replaced

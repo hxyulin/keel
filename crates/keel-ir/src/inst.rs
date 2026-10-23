@@ -24,6 +24,11 @@ pub enum InstData {
         ty: Type,
         bits: u64,
     },
+    /// Raw x87 extended payload, without the six bytes of ABI padding.
+    F80const {
+        significand: u64,
+        sign_exp: u16,
+    },
     Unary {
         op: UnaryOp,
         arg: Value,
@@ -39,6 +44,16 @@ pub enum InstData {
     },
     VectorUnary {
         op: UnaryOp,
+        arg: Value,
+    },
+    /// Explicit ARM semantics with observable FPCR/FPSR effects. Pinned barrier.
+    Neon {
+        op: crate::NeonIntrinsic,
+        ty: Type,
+        args: Vec<Value>,
+    },
+    VectorReduce {
+        op: crate::VectorReduceOp,
         arg: Value,
     },
     VectorBinary {
@@ -146,28 +161,59 @@ pub enum InstData {
         ordering: Ordering,
     },
     /// Reads the next variadic argument, of type `ty` (`i32`, `i64`, `ptr`
-    /// or `f64`), from the `va_list` at `list`, and advances it.
+    /// or `f64`; AArch64 Linux also supports `i128`), from the `va_list` at `list`, and advances it.
     VaArg {
         ty: Type,
         list: Value,
+        /// Explicit producer of this va_list; never inferred from the host.
+        x86_vector_abi: Option<crate::X86VectorAbi>,
+    },
+    /// Materializes the next aggregate in an independent private frame home,
+    /// returning its address. Overflow transport reads exactly layout.size() bytes.
+    /// Register transport reads occupied ABI eightbytes at their object offsets;
+    /// padding-only NO_CLASS eightbytes have no source and remain unspecified.
+    /// Reads finish before advancing the va_list. The snapshot is writable and
+    /// distinct from the register save area, overflow area, and other homes.
+    /// The home is an explicit stack slot in this function activation. Re-executing
+    /// this instruction, or a clone sharing its home, overwrites that storage;
+    /// a pointer carried through a phi still aliases it. To retain an earlier
+    /// value across re-execution, copy the object to explicit storage first.
+    /// The address is valid until function return; contents are mutable.
+    /// As a memory-access precondition, [home, home + layout.size()) must be
+    /// disjoint from the va_list object and every register-save/overflow byte
+    /// read by this extraction. Unknown external pointers carry this contract;
+    /// the verifier rejects provable list/home overlap. Different extractions
+    /// may intentionally share a home (for example, clones after loop rotation).
+    AggregateVaArg {
+        layout: crate::Layout,
+        list: Value,
+        /// Explicit activation-local storage identity. Cloning an instruction
+        /// preserves it; inlining remaps it like every other stack slot.
+        home: StackSlot,
+        x86_vector_abi: Option<crate::X86VectorAbi>,
     },
     /// Calls a function; results follow its signature.
     Call {
         func: FuncRef,
-        args: Vec<Value>,
+        args: crate::CallArgs,
     },
     /// Calls the function at address `callee`, which must have signature
     /// `sig`.
     CallIndirect {
         sig: SigRef,
         callee: Value,
-        args: Vec<Value>,
+        args: crate::CallArgs,
     },
     /// A call-like operation with known meaning; see [`Intrinsic`].
     Intrinsic {
         id: Intrinsic,
         args: Vec<Value>,
     },
+    /// Owned full-width FLAGS raw CFG under the explicit terminal external
+    /// monitor contract. Inputs are I64 images captured before ownership; all
+    /// results are I64 observations published after normal image reapplication.
+    /// Faults/traps produce no result, restoration, unwind or resumable ABI edge.
+    X86RflagsRegion { plan: Box<crate::rflags_region::Plan>, args: Vec<Value> },
     /// Inline assembly: one result per output, one argument per input; see
     /// [`InlineAsm`]. Pinned and never removed, as the template may do
     /// anything.
@@ -207,7 +253,7 @@ pub enum InstData {
     /// this function's does.
     ReturnCall {
         func: FuncRef,
-        args: Vec<Value>,
+        args: crate::CallArgs,
     },
     /// Calls a function that may throw: on return, continues to `dests[0]`
     /// with the results defined; on an exception, to the landing pad
@@ -215,7 +261,7 @@ pub enum InstData {
     /// with a personality.
     Invoke {
         func: FuncRef,
-        args: Vec<Value>,
+        args: crate::CallArgs,
         dests: Box<[BlockCall; 2]>,
     },
     /// The first instruction of a block an `invoke` unwinds to: gives the
@@ -233,7 +279,7 @@ pub enum InstData {
     ReturnCallIndirect {
         sig: SigRef,
         callee: Value,
-        args: Vec<Value>,
+        args: crate::CallArgs,
     },
     /// Stops the program. A terminator, since nothing after it runs.
     Trap,
@@ -247,10 +293,12 @@ impl Clone for InstData {
         match self {
             Self::Iconst { .. }
             | Self::Fconst { .. }
+            | Self::F80const { .. }
             | Self::Unary { .. }
             | Self::Binary { .. }
             | Self::VectorSplat { .. }
             | Self::VectorUnary { .. }
+            | Self::VectorReduce { .. }
             | Self::VectorBinary { .. }
             | Self::VectorExtract { .. }
             | Self::VectorInsert { .. }
@@ -279,6 +327,14 @@ impl Clone for InstData {
                 // copy is an independent, equal value.
                 unsafe { std::ptr::read(self) }
             }
+            Self::AggregateVaArg { layout, list, home, x86_vector_abi } => Self::AggregateVaArg {
+                layout: layout.clone(), list: *list, home: *home, x86_vector_abi: *x86_vector_abi,
+            },
+            Self::Neon { op, ty, args } => Self::Neon {
+                op: *op,
+                ty: *ty,
+                args: args.clone(),
+            },
             Self::VectorShuffle { args, lanes } => Self::VectorShuffle {
                 args: *args,
                 lanes: lanes.clone(),
@@ -296,6 +352,7 @@ impl Clone for InstData {
                 id: *id,
                 args: args.clone(),
             },
+            Self::X86RflagsRegion { plan, args } => Self::X86RflagsRegion { plan: plan.clone(), args: args.clone() },
             Self::InlineAsm { asm, args } => Self::InlineAsm {
                 asm: asm.clone(),
                 args: args.clone(),
@@ -484,6 +541,19 @@ pub enum ConvertOp {
     /// Unlike scalar sext/uext, the result always remains 128 bits.
     SwidenLow,
     UwidenLow,
+    /// Extend the highest destination-lane-count input lanes.
+    SwidenHigh,
+    UwidenHigh,
+    /// Truncate every input lane into the low output lanes; remaining lanes zero.
+    NarrowLow,
+    /// Add adjacent signed/unsigned input lanes in double-width output lanes.
+    SpairwiseAddLong,
+    UpairwiseAddLong,
+    /// Clamp each input lane to the signed/unsigned destination range, then
+    /// narrow into low lanes, with all remaining lanes zero. No FPSR.QC effect.
+    SnarrowSatLow,
+    UnarrowSatLow,
+    SunarrowSatLow,
     Sext,
     Uext,
     Trunc,
@@ -584,10 +654,20 @@ impl InstData {
         matches!(
             self,
             Self::Convert {
-                op: ConvertOp::SwidenLow | ConvertOp::UwidenLow,
+                op: ConvertOp::SwidenLow
+                    | ConvertOp::UwidenLow
+                    | ConvertOp::SwidenHigh
+                    | ConvertOp::UwidenHigh
+                    | ConvertOp::NarrowLow
+                    | ConvertOp::SpairwiseAddLong
+                    | ConvertOp::UpairwiseAddLong
+                    | ConvertOp::SnarrowSatLow
+                    | ConvertOp::UnarrowSatLow
+                    | ConvertOp::SunarrowSatLow,
                 ..
             } | Self::VectorSplat { .. }
                 | Self::VectorUnary { .. }
+                | Self::VectorReduce { .. }
                 | Self::VectorBinary { .. }
                 | Self::VectorExtract { .. }
                 | Self::VectorInsert { .. }
@@ -604,10 +684,12 @@ impl InstData {
     pub fn is_pinned(&self) -> bool {
         match self {
             InstData::Binary { op, .. } => op.can_trap(),
+            InstData::Neon { .. } => true,
             InstData::Intrinsic { id, .. } => !id.info().pure,
             InstData::Iconst { .. }
             | InstData::VectorSplat { .. }
             | InstData::VectorUnary { .. }
+            | InstData::VectorReduce { .. }
             | InstData::VectorBinary { .. }
             | InstData::VectorExtract { .. }
             | InstData::VectorInsert { .. }
@@ -616,6 +698,7 @@ impl InstData {
             | InstData::VectorFcmp { .. }
             | InstData::VectorSelect { .. }
             | InstData::Fconst { .. }
+            | InstData::F80const { .. }
             | InstData::Unary { .. }
             | InstData::Overflow { .. }
             | InstData::Fma { .. }
@@ -634,8 +717,10 @@ impl InstData {
             | InstData::AtomicCas { .. }
             | InstData::Fence { .. }
             | InstData::VaArg { .. }
+            | InstData::AggregateVaArg { .. }
             | InstData::Call { .. }
             | InstData::CallIndirect { .. }
+            | InstData::X86RflagsRegion { .. }
             | InstData::InlineAsm { .. }
             | InstData::Trap
             | InstData::Jump { .. }
@@ -670,21 +755,781 @@ impl InstData {
             | Self::Invoke { .. }
             | Self::ReturnCall { .. }
             | Self::ReturnCallIndirect { .. }
-            | Self::InlineAsm { .. } => Barrier,
-            Self::VaArg { .. } => ReadWrite,
+            | Self::X86RflagsRegion { .. }
+            | Self::InlineAsm { .. }
+            | Self::Neon { .. } => Barrier,
+            Self::VaArg { .. } | Self::AggregateVaArg { .. } => ReadWrite,
             Self::Intrinsic { id, .. } => match id {
+                Intrinsic::X86Sgdt
+                | Intrinsic::X86Sidt
+                | Intrinsic::X86SldtMem
+                | Intrinsic::X86Sldt16
+                | Intrinsic::X86Sldt32
+                | Intrinsic::X86Sldt64
+                | Intrinsic::X86StrMem
+                | Intrinsic::X86Str16
+                | Intrinsic::X86Str32
+                | Intrinsic::X86Str64
+                | Intrinsic::X86SmswMem
+                | Intrinsic::X86Smsw16
+                | Intrinsic::X86Smsw32
+                | Intrinsic::X86Smsw64 => Barrier,
+                Intrinsic::X86FmaVfmadd132pd128
+                | Intrinsic::X86FmaVfmadd132pd256
+                | Intrinsic::X86FmaVfmadd132ps128
+                | Intrinsic::X86FmaVfmadd132ps256
+                | Intrinsic::X86FmaVfmadd132sd128
+                | Intrinsic::X86FmaVfmadd132ss128
+                | Intrinsic::X86FmaVfmadd213pd128
+                | Intrinsic::X86FmaVfmadd213pd256
+                | Intrinsic::X86FmaVfmadd213ps128
+                | Intrinsic::X86FmaVfmadd213ps256
+                | Intrinsic::X86FmaVfmadd213sd128
+                | Intrinsic::X86FmaVfmadd213ss128
+                | Intrinsic::X86FmaVfmadd231pd128
+                | Intrinsic::X86FmaVfmadd231pd256
+                | Intrinsic::X86FmaVfmadd231ps128
+                | Intrinsic::X86FmaVfmadd231ps256
+                | Intrinsic::X86FmaVfmadd231sd128
+                | Intrinsic::X86FmaVfmadd231ss128
+                | Intrinsic::X86FmaVfmaddsub132pd128
+                | Intrinsic::X86FmaVfmaddsub132pd256
+                | Intrinsic::X86FmaVfmaddsub213pd128
+                | Intrinsic::X86FmaVfmaddsub213pd256
+                | Intrinsic::X86FmaVfmaddsub231pd128
+                | Intrinsic::X86FmaVfmaddsub231pd256
+                | Intrinsic::X86FmaVfmaddsub132ps128
+                | Intrinsic::X86FmaVfmaddsub132ps256
+                | Intrinsic::X86FmaVfmaddsub213ps128
+                | Intrinsic::X86FmaVfmaddsub213ps256
+                | Intrinsic::X86FmaVfmaddsub231ps128
+                | Intrinsic::X86FmaVfmaddsub231ps256
+                | Intrinsic::X86FmaVfmsubadd132pd128
+                | Intrinsic::X86FmaVfmsubadd132pd256
+                | Intrinsic::X86FmaVfmsubadd213pd128
+                | Intrinsic::X86FmaVfmsubadd213pd256
+                | Intrinsic::X86FmaVfmsubadd231pd128
+                | Intrinsic::X86FmaVfmsubadd231pd256
+                | Intrinsic::X86FmaVfmsubadd132ps128
+                | Intrinsic::X86FmaVfmsubadd132ps256
+                | Intrinsic::X86FmaVfmsubadd213ps128
+                | Intrinsic::X86FmaVfmsubadd213ps256
+                | Intrinsic::X86FmaVfmsubadd231ps128
+                | Intrinsic::X86FmaVfmsubadd231ps256
+                | Intrinsic::X86FmaVfmsub132pd128
+                | Intrinsic::X86FmaVfmsub132pd256
+                | Intrinsic::X86FmaVfmsub132ps128
+                | Intrinsic::X86FmaVfmsub132ps256
+                | Intrinsic::X86FmaVfmsub132sd128
+                | Intrinsic::X86FmaVfmsub132ss128
+                | Intrinsic::X86FmaVfmsub213pd128
+                | Intrinsic::X86FmaVfmsub213pd256
+                | Intrinsic::X86FmaVfmsub213ps128
+                | Intrinsic::X86FmaVfmsub213ps256
+                | Intrinsic::X86FmaVfmsub213sd128
+                | Intrinsic::X86FmaVfmsub213ss128
+                | Intrinsic::X86FmaVfmsub231pd128
+                | Intrinsic::X86FmaVfmsub231pd256
+                | Intrinsic::X86FmaVfmsub231ps128
+                | Intrinsic::X86FmaVfmsub231ps256
+                | Intrinsic::X86FmaVfmsub231sd128
+                | Intrinsic::X86FmaVfmsub231ss128
+                | Intrinsic::X86FmaVfnmadd132pd128
+                | Intrinsic::X86FmaVfnmadd132pd256
+                | Intrinsic::X86FmaVfnmadd132ps128
+                | Intrinsic::X86FmaVfnmadd132ps256
+                | Intrinsic::X86FmaVfnmadd132sd128
+                | Intrinsic::X86FmaVfnmadd132ss128
+                | Intrinsic::X86FmaVfnmadd213pd128
+                | Intrinsic::X86FmaVfnmadd213pd256
+                | Intrinsic::X86FmaVfnmadd213ps128
+                | Intrinsic::X86FmaVfnmadd213ps256
+                | Intrinsic::X86FmaVfnmadd213sd128
+                | Intrinsic::X86FmaVfnmadd213ss128
+                | Intrinsic::X86FmaVfnmadd231pd128
+                | Intrinsic::X86FmaVfnmadd231pd256
+                | Intrinsic::X86FmaVfnmadd231ps128
+                | Intrinsic::X86FmaVfnmadd231ps256
+                | Intrinsic::X86FmaVfnmadd231sd128
+                | Intrinsic::X86FmaVfnmadd231ss128
+                | Intrinsic::X86FmaVfnmsub132pd128
+                | Intrinsic::X86FmaVfnmsub132pd256
+                | Intrinsic::X86FmaVfnmsub132ps128
+                | Intrinsic::X86FmaVfnmsub132ps256
+                | Intrinsic::X86FmaVfnmsub132sd128
+                | Intrinsic::X86FmaVfnmsub132ss128
+                | Intrinsic::X86FmaVfnmsub213pd128
+                | Intrinsic::X86FmaVfnmsub213pd256
+                | Intrinsic::X86FmaVfnmsub213ps128
+                | Intrinsic::X86FmaVfnmsub213ps256
+                | Intrinsic::X86FmaVfnmsub213sd128
+                | Intrinsic::X86FmaVfnmsub213ss128
+                | Intrinsic::X86FmaVfnmsub231pd128
+                | Intrinsic::X86FmaVfnmsub231pd256
+                | Intrinsic::X86FmaVfnmsub231ps128
+                | Intrinsic::X86FmaVfnmsub231ps256
+                | Intrinsic::X86FmaVfnmsub231sd128
+                | Intrinsic::X86FmaVfnmsub231ss128 => Barrier,
                 Intrinsic::Memcpy | Intrinsic::Memmove => ReadWrite,
                 Intrinsic::Memcmp => Read,
                 Intrinsic::Memset | Intrinsic::VaStart => Write,
+                Intrinsic::X86Bmi1Bextr32
+                | Intrinsic::X86Bmi1Bextr64
+                | Intrinsic::X86Bmi2Pdep32
+                | Intrinsic::X86Bmi2Pdep64
+                | Intrinsic::X86Bmi2Pext32
+                | Intrinsic::X86Bmi2Pext64 => None,
+                Intrinsic::X86Avx2Vgatherdps128
+                | Intrinsic::X86Avx2Vgatherdps256
+                | Intrinsic::X86Avx2Vgatherdpd128
+                | Intrinsic::X86Avx2Vgatherdpd256
+                | Intrinsic::X86Avx2Vgatherqps128
+                | Intrinsic::X86Avx2Vgatherqps256
+                | Intrinsic::X86Avx2Vgatherqpd128
+                | Intrinsic::X86Avx2Vgatherqpd256
+                | Intrinsic::X86Avx2Vpgatherdd128
+                | Intrinsic::X86Avx2Vpgatherdd256
+                | Intrinsic::X86Avx2Vpgatherdq128
+                | Intrinsic::X86Avx2Vpgatherdq256
+                | Intrinsic::X86Avx2Vpgatherqd128
+                | Intrinsic::X86Avx2Vpgatherqd256
+                | Intrinsic::X86Avx2Vpgatherqq128
+                | Intrinsic::X86Avx2Vpgatherqq256 => Read,
+                Intrinsic::X86AvxVmaskmovpsLoad128
+                | Intrinsic::X86AvxVmaskmovpsLoad256
+                | Intrinsic::X86AvxVmaskmovpdLoad128
+                | Intrinsic::X86AvxVmaskmovpdLoad256
+                | Intrinsic::X86Avx2VpmaskmovdLoad128
+                | Intrinsic::X86Avx2VpmaskmovdLoad256
+                | Intrinsic::X86Avx2VpmaskmovqLoad128
+                | Intrinsic::X86Avx2VpmaskmovqLoad256 => Read,
+                Intrinsic::X86AvxVmaskmovpsStore128
+                | Intrinsic::X86AvxVmaskmovpsStore256
+                | Intrinsic::X86AvxVmaskmovpdStore128
+                | Intrinsic::X86AvxVmaskmovpdStore256
+                | Intrinsic::X86Avx2VpmaskmovdStore128
+                | Intrinsic::X86Avx2VpmaskmovdStore256
+                | Intrinsic::X86Avx2VpmaskmovqStore128
+                | Intrinsic::X86Avx2VpmaskmovqStore256 => Write,
+                Intrinsic::X86AvxVcvtdq2pd128
+                | Intrinsic::X86AvxVcvtdq2pd256
+                | Intrinsic::X86AvxVcvtdq2ps128
+                | Intrinsic::X86AvxVcvtdq2ps256
+                | Intrinsic::X86AvxVcvtpd2dq128
+                | Intrinsic::X86AvxVcvtpd2dq256
+                | Intrinsic::X86AvxVcvtpd2ps128
+                | Intrinsic::X86AvxVcvtpd2ps256
+                | Intrinsic::X86AvxVcvtps2dq128
+                | Intrinsic::X86AvxVcvtps2dq256
+                | Intrinsic::X86AvxVcvtps2pd128
+                | Intrinsic::X86AvxVcvtps2pd256
+                | Intrinsic::X86AvxVcvttpd2dq128
+                | Intrinsic::X86AvxVcvttpd2dq256
+                | Intrinsic::X86AvxVcvttps2dq128
+                | Intrinsic::X86AvxVcvttps2dq256
+                | Intrinsic::X86AvxVcvtss2si32
+                | Intrinsic::X86AvxVcvttss2si32
+                | Intrinsic::X86AvxVcvtss2si64
+                | Intrinsic::X86AvxVcvttss2si64
+                | Intrinsic::X86AvxVcvtsd2si32
+                | Intrinsic::X86AvxVcvttsd2si32
+                | Intrinsic::X86AvxVcvtsd2si64
+                | Intrinsic::X86AvxVcvttsd2si64
+                | Intrinsic::X86AvxVcvtsi2ss32
+                | Intrinsic::X86AvxVcvtsi2ss64
+                | Intrinsic::X86AvxVcvtsi2sd32
+                | Intrinsic::X86AvxVcvtsi2sd64
+                | Intrinsic::X86AvxVcvtsd2ss
+                | Intrinsic::X86AvxVcvtss2sd => Barrier,
+                Intrinsic::X86AvxVcmpps128
+                | Intrinsic::X86AvxVcmpps256
+                | Intrinsic::X86AvxVcmppd128
+                | Intrinsic::X86AvxVcmppd256
+                | Intrinsic::X86AvxVcmpss
+                | Intrinsic::X86AvxVcmpsd => Barrier,
+                Intrinsic::X86AvxVpermilps128
+                | Intrinsic::X86AvxVpermilps256
+                | Intrinsic::X86AvxVpermilpd128
+                | Intrinsic::X86AvxVpermilpd256
+                | Intrinsic::X86Avx2Vpermd256
+                | Intrinsic::X86Avx2Vpermps256
+                | Intrinsic::X86AvxVmovmskps128
+                | Intrinsic::X86AvxVmovmskps256
+                | Intrinsic::X86AvxVmovmskpd128
+                | Intrinsic::X86AvxVmovmskpd256
+                | Intrinsic::X86AvxVpmovmskb128
+                | Intrinsic::X86Avx2Vpmovmskb256
+                | Intrinsic::X86AvxVtestps128
+                | Intrinsic::X86AvxVtestps256
+                | Intrinsic::X86AvxVtestpd128
+                | Intrinsic::X86AvxVtestpd256
+                | Intrinsic::X86AvxVptest128
+                | Intrinsic::X86AvxVptest256 => None,
+                Intrinsic::X86AvxVroundps128
+                | Intrinsic::X86AvxVroundps256
+                | Intrinsic::X86AvxVroundpd128
+                | Intrinsic::X86AvxVroundpd256
+                | Intrinsic::X86AvxVroundss
+                | Intrinsic::X86AvxVroundsd
+                | Intrinsic::X86AvxVminps128
+                | Intrinsic::X86AvxVminps256
+                | Intrinsic::X86AvxVminpd128
+                | Intrinsic::X86AvxVminpd256
+                | Intrinsic::X86AvxVminss
+                | Intrinsic::X86AvxVminsd
+                | Intrinsic::X86AvxVmaxps128
+                | Intrinsic::X86AvxVmaxps256
+                | Intrinsic::X86AvxVmaxpd128
+                | Intrinsic::X86AvxVmaxpd256
+                | Intrinsic::X86AvxVmaxss
+                | Intrinsic::X86AvxVmaxsd
+                | Intrinsic::X86AvxVrcpps128
+                | Intrinsic::X86AvxVrcpps256
+                | Intrinsic::X86AvxVrcpss
+                | Intrinsic::X86AvxVrsqrtps128
+                | Intrinsic::X86AvxVrsqrtps256
+                | Intrinsic::X86AvxVrsqrtss
+                | Intrinsic::X86AvxVcomiss
+                | Intrinsic::X86AvxVucomiss
+                | Intrinsic::X86AvxVcomisd
+                | Intrinsic::X86AvxVucomisd => Barrier,
+                Intrinsic::X86X87Region
+                | Intrinsic::X86X87Fnstenv16
+                | Intrinsic::X86X87Fnstenv32
+                | Intrinsic::X86X87Fstenv16
+                | Intrinsic::X86X87Fstenv32
+                | Intrinsic::X86X87Fldenv16
+                | Intrinsic::X86X87Fldenv32
+                | Intrinsic::X86X87Fnsave16
+                | Intrinsic::X86X87Fnsave32
+                | Intrinsic::X86X87Fsave16
+                | Intrinsic::X86X87Fsave32
+                | Intrinsic::X86X87Frstor16
+                | Intrinsic::X86X87Frstor32
+                | Intrinsic::X86Xgetbv0
+                | Intrinsic::X86Xsave64
+                | Intrinsic::X86RflagsRead
+                | Intrinsic::X86RflagsSwap
+                | Intrinsic::X86Lahf
+                | Intrinsic::X86SahfExchange
+                | Intrinsic::X86Fxsave64
+                | Intrinsic::X86Fxrstor64
+                | Intrinsic::X86X87ReadCwNowait
+                | Intrinsic::X86X87ReadSwNowait
+                | Intrinsic::X86X87ReadCwWait
+                | Intrinsic::X86X87ReadSwWait
+                | Intrinsic::X86X87ExchangeCw
+                | Intrinsic::X86X87ClexNowait
+                | Intrinsic::X86X87ClexWait
+                | Intrinsic::X86X87InitNowait
+                | Intrinsic::X86X87InitWait
+                | Intrinsic::X86X87Wait
+                | Intrinsic::X86X87Fist16
+                | Intrinsic::X86X87Fist32
+                | Intrinsic::X86X87Fistp16
+                | Intrinsic::X86X87Fistp32
+                | Intrinsic::X86X87Fistp64
+                | Intrinsic::X86X87Fisttp16
+                | Intrinsic::X86X87Fisttp32
+                | Intrinsic::X86X87Fisttp64
+                | Intrinsic::X86X87Fild16
+                | Intrinsic::X86X87Fild32
+                | Intrinsic::X86X87Fild64
+                | Intrinsic::X86X87Fbld
+                | Intrinsic::X86X87Fbstp
+                | Intrinsic::X86X87Fldpi
+                | Intrinsic::X86X87Fldl2e
+                | Intrinsic::X86X87Fldl2t
+                | Intrinsic::X86X87Fldlg2
+                | Intrinsic::X86X87Fldln2
+                | Intrinsic::X86X87Fiadd16
+                | Intrinsic::X86X87Fiadd32
+                | Intrinsic::X86X87Fimul16
+                | Intrinsic::X86X87Fimul32
+                | Intrinsic::X86X87Fisub16
+                | Intrinsic::X86X87Fisub32
+                | Intrinsic::X86X87Fisubr16
+                | Intrinsic::X86X87Fisubr32
+                | Intrinsic::X86X87Fidiv16
+                | Intrinsic::X86X87Fidiv32
+                | Intrinsic::X86X87Fidivr16
+                | Intrinsic::X86X87Fidivr32
+                | Intrinsic::X86X87Fcom
+                | Intrinsic::X86X87Fcomp
+                | Intrinsic::X86X87Fcompp
+                | Intrinsic::X86X87Fucom
+                | Intrinsic::X86X87Fucomp
+                | Intrinsic::X86X87Fucompp
+                | Intrinsic::X86X87Fcomi
+                | Intrinsic::X86X87Fcomip
+                | Intrinsic::X86X87Fucomi
+                | Intrinsic::X86X87Fucomip
+                | Intrinsic::X86X87FaddSt1
+                | Intrinsic::X86X87FmulSt1
+                | Intrinsic::X86X87FsubSt1
+                | Intrinsic::X86X87FsubrSt1
+                | Intrinsic::X86X87FdivSt1
+                | Intrinsic::X86X87FdivrSt1
+                | Intrinsic::X86X87Fadd
+                | Intrinsic::X86X87Fmul
+                | Intrinsic::X86X87Fsub
+                | Intrinsic::X86X87Fsubr
+                | Intrinsic::X86X87Fdiv
+                | Intrinsic::X86X87Fdivr
+                | Intrinsic::X86X87Faddp
+                | Intrinsic::X86X87Fmulp
+                | Intrinsic::X86X87Fsubp
+                | Intrinsic::X86X87Fsubrp
+                | Intrinsic::X86X87Fdivp
+                | Intrinsic::X86X87Fdivrp
+                | Intrinsic::X86X87Fabs
+                | Intrinsic::X86X87Fchs
+                | Intrinsic::X86X87Fsqrt
+                | Intrinsic::X86X87Frndint
+                | Intrinsic::X86X87Ftst
+                | Intrinsic::X86X87Fxam
+                | Intrinsic::X86X87Fsincos
+                | Intrinsic::X86X87Fptan
+                | Intrinsic::X86X87Fxtract
+                | Intrinsic::X86X87Fsin
+                | Intrinsic::X86X87Fcos
+                | Intrinsic::X86X87F2xm1
+                | Intrinsic::X86X87Fpatan
+                | Intrinsic::X86X87Fyl2x
+                | Intrinsic::X86X87Fyl2xp1
+                | Intrinsic::X86X87Fscale
+                | Intrinsic::X86X87Fprem
+                | Intrinsic::X86X87Fprem1
+                | Intrinsic::X86MmxEmms
+                | Intrinsic::X86Clflush
+                | Intrinsic::X86Prefetchnta
+                | Intrinsic::X86Prefetcht0
+                | Intrinsic::X86Prefetcht1
+                | Intrinsic::X86Prefetcht2
+                | Intrinsic::X86SseMovntps128
+                | Intrinsic::X86SseMovntpd128
+                | Intrinsic::X86SseMovntdq128
+                | Intrinsic::X86AvxVmovntps128
+                | Intrinsic::X86AvxVmovntps256
+                | Intrinsic::X86AvxVmovntpd128
+                | Intrinsic::X86AvxVmovntpd256
+                | Intrinsic::X86AvxVmovntdq128
+                | Intrinsic::X86AvxVmovntdq256
+                | Intrinsic::X86Movnti32
+                | Intrinsic::X86Movnti64
+                | Intrinsic::X86Sse41Movntdqa128
+                | Intrinsic::X86Avx2Vmovntdqa256
+                | Intrinsic::X86Xrstor64
+                | Intrinsic::X86Cpuid
+                | Intrinsic::X86Rdtsc
+                | Intrinsic::X86Rdpmc
+                | Intrinsic::X86X87Ffree0
+                | Intrinsic::X86X87Ffree1
+                | Intrinsic::X86X87Ffree2
+                | Intrinsic::X86X87Ffree3
+                | Intrinsic::X86X87Ffree4
+                | Intrinsic::X86X87Ffree5
+                | Intrinsic::X86X87Ffree6
+                | Intrinsic::X86X87Ffree7
+                | Intrinsic::X86X87Fdecstp
+                | Intrinsic::X86X87Fincstp
+                | Intrinsic::X86X87Fnop
+                | Intrinsic::X86Lfence
+                | Intrinsic::X86Sfence
+                | Intrinsic::X86Mfence
+                | Intrinsic::X86Pause
+                | Intrinsic::X86AvxVzeroall
+                | Intrinsic::X86AvxVmaskmovdqu
+                | Intrinsic::X86Lar16
+                | Intrinsic::X86Lar16Mem
+                | Intrinsic::X86Lar32
+                | Intrinsic::X86Lar32Mem
+                | Intrinsic::X86Lar64
+                | Intrinsic::X86Lar64Mem
+                | Intrinsic::X86Lsl16
+                | Intrinsic::X86Lsl16Mem
+                | Intrinsic::X86Lsl32
+                | Intrinsic::X86Lsl32Mem
+                | Intrinsic::X86Lsl64
+                | Intrinsic::X86Lsl64Mem
+                | Intrinsic::X86Verr
+                | Intrinsic::X86VerrMem
+                | Intrinsic::X86Verw
+                | Intrinsic::X86VerwMem
+                | Intrinsic::X86In8
+                | Intrinsic::X86Ins8
+                | Intrinsic::X86Ins16
+                | Intrinsic::X86Ins32
+                | Intrinsic::X86Outs8
+                | Intrinsic::X86Outs16
+                | Intrinsic::X86Outs32
+                | Intrinsic::X86RepIns8
+                | Intrinsic::X86RepIns16
+                | Intrinsic::X86RepIns32
+                | Intrinsic::X86RepOuts8
+                | Intrinsic::X86RepOuts16
+                | Intrinsic::X86RepOuts32
+                | Intrinsic::X86Ins8OwnedTerminal
+                | Intrinsic::X86Ins16OwnedTerminal
+                | Intrinsic::X86Ins32OwnedTerminal
+                | Intrinsic::X86Outs8OwnedTerminal
+                | Intrinsic::X86Outs16OwnedTerminal
+                | Intrinsic::X86Outs32OwnedTerminal
+                | Intrinsic::X86RepIns8OwnedTerminal
+                | Intrinsic::X86RepIns16OwnedTerminal
+                | Intrinsic::X86RepIns32OwnedTerminal
+                | Intrinsic::X86RepOuts8OwnedTerminal
+                | Intrinsic::X86RepOuts16OwnedTerminal
+                | Intrinsic::X86RepOuts32OwnedTerminal
+                | Intrinsic::X86In16
+                | Intrinsic::X86In32
+                | Intrinsic::X86Out8
+                | Intrinsic::X86Out16
+                | Intrinsic::X86Out32
+                | Intrinsic::X86In8Imm
+                | Intrinsic::X86In16Imm
+                | Intrinsic::X86In32Imm
+                | Intrinsic::X86Out8Imm
+                | Intrinsic::X86Out16Imm
+                | Intrinsic::X86Out32Imm
+                | Intrinsic::X86DivU8
+                | Intrinsic::X86DivU16
+                | Intrinsic::X86DivU32
+                | Intrinsic::X86DivU64
+                | Intrinsic::X86DivS8
+                | Intrinsic::X86DivS16
+                | Intrinsic::X86DivS32
+                | Intrinsic::X86DivS64
+                | Intrinsic::X86Cx16Cmpxchg16b => Barrier,
+                Intrinsic::X86Ssecvtdq2pd128
+                | Intrinsic::X86Ssecvtdq2ps128
+                | Intrinsic::X86Ssecvtpd2dq128
+                | Intrinsic::X86Ssecvtpd2ps128
+                | Intrinsic::X86Ssecvtps2dq128
+                | Intrinsic::X86Ssecvtps2pd128
+                | Intrinsic::X86Ssecvttpd2dq128
+                | Intrinsic::X86Ssecvttps2dq128
+                | Intrinsic::X86Ssecvtss2si32
+                | Intrinsic::X86Ssecvttss2si32
+                | Intrinsic::X86Ssecvtss2si64
+                | Intrinsic::X86Ssecvttss2si64
+                | Intrinsic::X86Ssecvtsd2si32
+                | Intrinsic::X86Ssecvttsd2si32
+                | Intrinsic::X86Ssecvtsd2si64
+                | Intrinsic::X86Ssecvttsd2si64
+                | Intrinsic::X86Ssecvtsi2ss32
+                | Intrinsic::X86Ssecvtsi2ss64
+                | Intrinsic::X86Ssecvtsi2sd32
+                | Intrinsic::X86Ssecvtsi2sd64
+                | Intrinsic::X86Ssecvtsd2ss
+                | Intrinsic::X86Ssecvtss2sd => Barrier,
+                Intrinsic::X86SseMinps128
+                | Intrinsic::X86SseMinpd128
+                | Intrinsic::X86SseMinss
+                | Intrinsic::X86SseMinsd
+                | Intrinsic::X86SseMaxps128
+                | Intrinsic::X86SseMaxpd128
+                | Intrinsic::X86SseMaxss
+                | Intrinsic::X86SseMaxsd
+                | Intrinsic::X86SseRcpps128
+                | Intrinsic::X86SseRcpss
+                | Intrinsic::X86SseRsqrtps128
+                | Intrinsic::X86SseRsqrtss
+                | Intrinsic::X86SseComiss
+                | Intrinsic::X86SseUcomiss
+                | Intrinsic::X86SseComisd
+                | Intrinsic::X86SseUcomisd
+                | Intrinsic::X86SseCmpps128
+                | Intrinsic::X86SseCmppd128
+                | Intrinsic::X86SseCmpss
+                | Intrinsic::X86SseCmpsd => Barrier,
+                Intrinsic::X86SseAddps128
+                | Intrinsic::X86SseAddpd128
+                | Intrinsic::X86SseAddss
+                | Intrinsic::X86SseAddsd
+                | Intrinsic::X86SseSubps128
+                | Intrinsic::X86SseSubpd128
+                | Intrinsic::X86SseSubss
+                | Intrinsic::X86SseSubsd
+                | Intrinsic::X86SseMulps128
+                | Intrinsic::X86SseMulpd128
+                | Intrinsic::X86SseMulss
+                | Intrinsic::X86SseMulsd
+                | Intrinsic::X86SseDivps128
+                | Intrinsic::X86SseDivpd128
+                | Intrinsic::X86SseDivss
+                | Intrinsic::X86SseDivsd
+                | Intrinsic::X86SseSqrtps128
+                | Intrinsic::X86SseSqrtpd128
+                | Intrinsic::X86SseSqrtss
+                | Intrinsic::X86SseSqrtsd => Barrier,
+                Intrinsic::X86SseMovmskps128
+                | Intrinsic::X86SseMovmskpd128
+                | Intrinsic::X86SsePmovmskb128 => None,
+                Intrinsic::X86SseMaskmovdqu => Barrier,
+                Intrinsic::X86Sse3Haddps
+                | Intrinsic::X86Sse3Haddpd
+                | Intrinsic::X86Sse3Hsubps
+                | Intrinsic::X86Sse3Hsubpd
+                | Intrinsic::X86Sse3Addsubps
+                | Intrinsic::X86Sse3Addsubpd
+                | Intrinsic::X86Sse41Roundps128
+                | Intrinsic::X86Sse41Roundpd128
+                | Intrinsic::X86Sse41Roundss
+                | Intrinsic::X86Sse41Roundsd
+                | Intrinsic::X86Sse41Dpps
+                | Intrinsic::X86Sse41Dppd => Barrier,
+                Intrinsic::X86Ssse3Pshufb128
+                | Intrinsic::X86Sse41Blendvps128
+                | Intrinsic::X86Sse41Blendvpd128
+                | Intrinsic::X86Sse41Pblendvb128
+                | Intrinsic::X86AvxVblendvps128
+                | Intrinsic::X86AvxVblendvpd128
+                | Intrinsic::X86AvxVpblendvb128
+                | Intrinsic::X86AvxVblendvps256
+                | Intrinsic::X86AvxVblendvpd256
+                | Intrinsic::X86Avx2Vpblendvb256
+                | Intrinsic::X86Sse41Mpsadbw128
+                | Intrinsic::X86AvxVmpsadbw128
+                | Intrinsic::X86Avx2Vmpsadbw256
+                | Intrinsic::X86Sse41Phminposuw128
+                | Intrinsic::X86AvxVphminposuw128
+                | Intrinsic::X86Ssse3Phaddw128
+                | Intrinsic::X86Ssse3Phaddd128
+                | Intrinsic::X86Ssse3Phaddsw128
+                | Intrinsic::X86Ssse3Phsubw128
+                | Intrinsic::X86Ssse3Phsubd128
+                | Intrinsic::X86Ssse3Phsubsw128
+                | Intrinsic::X86Sse2Paddsb128
+                | Intrinsic::X86Sse2Paddsw128
+                | Intrinsic::X86Sse2Paddusb128
+                | Intrinsic::X86Sse2Paddusw128
+                | Intrinsic::X86Sse2Psubsb128
+                | Intrinsic::X86Sse2Psubsw128
+                | Intrinsic::X86Sse2Psubusb128
+                | Intrinsic::X86Sse2Psubusw128
+                | Intrinsic::X86Sse2Pavgb128
+                | Intrinsic::X86Sse2Pavgw128
+                | Intrinsic::X86Ssse3Psignb128
+                | Intrinsic::X86Ssse3Psignw128
+                | Intrinsic::X86Ssse3Psignd128
+                | Intrinsic::X86Ssse3Pabsb128
+                | Intrinsic::X86Ssse3Pabsw128
+                | Intrinsic::X86Ssse3Pabsd128
+                | Intrinsic::X86AvxVphaddw128
+                | Intrinsic::X86AvxVphaddd128
+                | Intrinsic::X86AvxVphaddsw128
+                | Intrinsic::X86AvxVphsubw128
+                | Intrinsic::X86AvxVphsubd128
+                | Intrinsic::X86AvxVphsubsw128
+                | Intrinsic::X86AvxVpaddsb128
+                | Intrinsic::X86AvxVpaddsw128
+                | Intrinsic::X86AvxVpaddusb128
+                | Intrinsic::X86AvxVpaddusw128
+                | Intrinsic::X86AvxVpsubsb128
+                | Intrinsic::X86AvxVpsubsw128
+                | Intrinsic::X86AvxVpsubusb128
+                | Intrinsic::X86AvxVpsubusw128
+                | Intrinsic::X86AvxVpavgb128
+                | Intrinsic::X86AvxVpavgw128
+                | Intrinsic::X86AvxVpsignb128
+                | Intrinsic::X86AvxVpsignw128
+                | Intrinsic::X86AvxVpsignd128
+                | Intrinsic::X86AvxVpabsb128
+                | Intrinsic::X86AvxVpabsw128
+                | Intrinsic::X86AvxVpabsd128
+                | Intrinsic::X86Avx2Vphaddw256
+                | Intrinsic::X86Avx2Vphaddd256
+                | Intrinsic::X86Avx2Vphaddsw256
+                | Intrinsic::X86Avx2Vphsubw256
+                | Intrinsic::X86Avx2Vphsubd256
+                | Intrinsic::X86Avx2Vphsubsw256
+                | Intrinsic::X86Avx2Vpaddsb256
+                | Intrinsic::X86Avx2Vpaddsw256
+                | Intrinsic::X86Avx2Vpaddusb256
+                | Intrinsic::X86Avx2Vpaddusw256
+                | Intrinsic::X86Avx2Vpsubsb256
+                | Intrinsic::X86Avx2Vpsubsw256
+                | Intrinsic::X86Avx2Vpsubusb256
+                | Intrinsic::X86Avx2Vpsubusw256
+                | Intrinsic::X86Avx2Vpavgb256
+                | Intrinsic::X86Avx2Vpavgw256
+                | Intrinsic::X86Avx2Vpsignb256
+                | Intrinsic::X86Avx2Vpsignw256
+                | Intrinsic::X86Avx2Vpsignd256
+                | Intrinsic::X86Avx2Vpabsb256
+                | Intrinsic::X86Avx2Vpabsw256
+                | Intrinsic::X86Avx2Vpabsd256
+                | Intrinsic::X86Sse2Packsswb128
+                | Intrinsic::X86Sse2Packssdw128
+                | Intrinsic::X86Sse2Packuswb128
+                | Intrinsic::X86Sse41Packusdw128
+                | Intrinsic::X86AvxVpacksswb128
+                | Intrinsic::X86AvxVpackssdw128
+                | Intrinsic::X86AvxVpackuswb128
+                | Intrinsic::X86AvxVpackusdw128
+                | Intrinsic::X86Avx2Vpacksswb256
+                | Intrinsic::X86Avx2Vpackssdw256
+                | Intrinsic::X86Avx2Vpackuswb256
+                | Intrinsic::X86Avx2Vpackusdw256
+                | Intrinsic::X86Sse2Pmaddwd128
+                | Intrinsic::X86Ssse3Pmaddubsw128
+                | Intrinsic::X86Sse2Pmulhw128
+                | Intrinsic::X86Sse2Pmulhuw128
+                | Intrinsic::X86Ssse3Pmulhrsw128
+                | Intrinsic::X86Sse41Pmuldq128
+                | Intrinsic::X86Sse2Pmuludq128
+                | Intrinsic::X86Sse2Psadbw128
+                | Intrinsic::X86AvxVpmaddwd128
+                | Intrinsic::X86AvxVpmaddubsw128
+                | Intrinsic::X86AvxVpmulhw128
+                | Intrinsic::X86AvxVpmulhuw128
+                | Intrinsic::X86AvxVpmulhrsw128
+                | Intrinsic::X86AvxVpmuldq128
+                | Intrinsic::X86AvxVpmuludq128
+                | Intrinsic::X86AvxVpsadbw128
+                | Intrinsic::X86Avx2Vpmaddwd256
+                | Intrinsic::X86Avx2Vpmaddubsw256
+                | Intrinsic::X86Avx2Vpmulhw256
+                | Intrinsic::X86Avx2Vpmulhuw256
+                | Intrinsic::X86Avx2Vpmulhrsw256
+                | Intrinsic::X86Avx2Vpmuldq256
+                | Intrinsic::X86Avx2Vpmuludq256
+                | Intrinsic::X86Avx2Vpsadbw256
+                | Intrinsic::X86Sse2Pslldq128
+                | Intrinsic::X86Sse2Psrldq128
+                | Intrinsic::X86AvxVpslldq128
+                | Intrinsic::X86AvxVpsrldq128
+                | Intrinsic::X86Avx2Vpslldq256
+                | Intrinsic::X86Avx2Vpsrldq256
+                | Intrinsic::X86Sse2Psllw128
+                | Intrinsic::X86Sse2Pslld128
+                | Intrinsic::X86Sse2Psllq128
+                | Intrinsic::X86Sse2Psrlw128
+                | Intrinsic::X86Sse2Psrld128
+                | Intrinsic::X86Sse2Psrlq128
+                | Intrinsic::X86Sse2Psraw128
+                | Intrinsic::X86Sse2Psrad128
+                | Intrinsic::X86AvxVpsllw128
+                | Intrinsic::X86AvxVpslld128
+                | Intrinsic::X86AvxVpsllq128
+                | Intrinsic::X86AvxVpsrlw128
+                | Intrinsic::X86AvxVpsrld128
+                | Intrinsic::X86AvxVpsrlq128
+                | Intrinsic::X86AvxVpsraw128
+                | Intrinsic::X86AvxVpsrad128
+                | Intrinsic::X86Avx2Vpsllw256
+                | Intrinsic::X86Avx2Vpslld256
+                | Intrinsic::X86Avx2Vpsllq256
+                | Intrinsic::X86Avx2Vpsrlw256
+                | Intrinsic::X86Avx2Vpsrld256
+                | Intrinsic::X86Avx2Vpsrlq256
+                | Intrinsic::X86Avx2Vpsraw256
+                | Intrinsic::X86Avx2Vpsrad256
+                | Intrinsic::X86Avx2Vpsllvd128
+                | Intrinsic::X86Avx2Vpsllvq128
+                | Intrinsic::X86Avx2Vpsrlvd128
+                | Intrinsic::X86Avx2Vpsrlvq128
+                | Intrinsic::X86Avx2Vpsravd128
+                | Intrinsic::X86Avx2Vpsllvd256
+                | Intrinsic::X86Avx2Vpsllvq256
+                | Intrinsic::X86Avx2Vpsrlvd256
+                | Intrinsic::X86Avx2Vpsrlvq256
+                | Intrinsic::X86Avx2Vpsravd256
+                | Intrinsic::X86AvxVpshufb128
+                | Intrinsic::X86Avx2Vpshufb256
+                | Intrinsic::X86Sse41Ptest128
+                | Intrinsic::X86Sse42Crc32b
+                | Intrinsic::X86Sse42Crc32w
+                | Intrinsic::X86Sse42Crc32d
+                | Intrinsic::X86Sse42Crc32q => None,
+                Intrinsic::X86Sse42PcmpistriIndex
+                | Intrinsic::X86Sse42Pcmpistri64Index
+                | Intrinsic::X86Sse42PcmpistrmMask
+                | Intrinsic::X86Sse42PcmpistriFlags
+                | Intrinsic::X86Sse42PcmpestriIndex
+                | Intrinsic::X86Sse42PcmpestrmMask
+                | Intrinsic::X86Sse42PcmpestriFlags
+                | Intrinsic::X86Sse42Pcmpestri64Index
+                | Intrinsic::X86Sse42Pcmpestrm64Mask
+                | Intrinsic::X86Sse42Pcmpestri64Flags => None,
+                Intrinsic::X86AvxPcmpistriIndex
+                | Intrinsic::X86AvxPcmpistri64Index
+                | Intrinsic::X86AvxPcmpistrmMask
+                | Intrinsic::X86AvxPcmpistriFlags
+                | Intrinsic::X86AvxPcmpestriIndex
+                | Intrinsic::X86AvxPcmpestrmMask
+                | Intrinsic::X86AvxPcmpestriFlags
+                | Intrinsic::X86AvxPcmpestri64Index
+                | Intrinsic::X86AvxPcmpestrm64Mask
+                | Intrinsic::X86AvxPcmpestri64Flags => None,
+                Intrinsic::X86AvxVaddps128
+                | Intrinsic::X86AvxVaddpd128
+                | Intrinsic::X86AvxVaddss
+                | Intrinsic::X86AvxVaddsd
+                | Intrinsic::X86AvxVaddps256
+                | Intrinsic::X86AvxVaddpd256
+                | Intrinsic::X86AvxVsubps128
+                | Intrinsic::X86AvxVsubpd128
+                | Intrinsic::X86AvxVsubss
+                | Intrinsic::X86AvxVsubsd
+                | Intrinsic::X86AvxVsubps256
+                | Intrinsic::X86AvxVsubpd256
+                | Intrinsic::X86AvxVmulps128
+                | Intrinsic::X86AvxVmulpd128
+                | Intrinsic::X86AvxVmulss
+                | Intrinsic::X86AvxVmulsd
+                | Intrinsic::X86AvxVmulps256
+                | Intrinsic::X86AvxVmulpd256
+                | Intrinsic::X86AvxVdivps128
+                | Intrinsic::X86AvxVdivpd128
+                | Intrinsic::X86AvxVdivss
+                | Intrinsic::X86AvxVdivsd
+                | Intrinsic::X86AvxVdivps256
+                | Intrinsic::X86AvxVdivpd256
+                | Intrinsic::X86AvxVsqrtps128
+                | Intrinsic::X86AvxVsqrtpd128
+                | Intrinsic::X86AvxVsqrtss
+                | Intrinsic::X86AvxVsqrtsd
+                | Intrinsic::X86AvxVsqrtps256
+                | Intrinsic::X86AvxVsqrtpd256 => Barrier,
+                Intrinsic::X86AvxVhaddps128
+                | Intrinsic::X86AvxVhaddps256
+                | Intrinsic::X86AvxVhaddpd128
+                | Intrinsic::X86AvxVhaddpd256
+                | Intrinsic::X86AvxVhsubps128
+                | Intrinsic::X86AvxVhsubps256
+                | Intrinsic::X86AvxVhsubpd128
+                | Intrinsic::X86AvxVhsubpd256
+                | Intrinsic::X86AvxVaddsubps128
+                | Intrinsic::X86AvxVaddsubps256
+                | Intrinsic::X86AvxVaddsubpd128
+                | Intrinsic::X86AvxVaddsubpd256
+                | Intrinsic::X86AvxVdpps128
+                | Intrinsic::X86AvxVdpps256
+                | Intrinsic::X86AvxVdppd128 => Barrier,
                 Intrinsic::FrameAddress => None,
                 Intrinsic::StackAlloc
                 | Intrinsic::StackSave
                 | Intrinsic::StackRestore
-                | Intrinsic::Debugtrap => Barrier,
+                | Intrinsic::Debugtrap
+                | Intrinsic::X86F16cPhToPs128
+                | Intrinsic::X86F16cPhToPs256
+                | Intrinsic::X86F16cPsToPh128
+                | Intrinsic::X86SseReadMxcsr
+                | Intrinsic::X86SseSwapMxcsr
+                | Intrinsic::X86SseMmxvalueCvtpi2ps
+                | Intrinsic::X86SseMmxvalueCvtps2pi
+                | Intrinsic::X86SseMmxvalueCvttps2pi
+                | Intrinsic::X86SseMmxvalueCvtpi2pd
+                | Intrinsic::X86SseMmxvalueCvtpd2pi
+                | Intrinsic::X86SseMmxvalueCvttpd2pi
+                | Intrinsic::X86F16cPsToPh256 => Barrier,
             },
             Self::Iconst { .. }
             | Self::VectorSplat { .. }
             | Self::VectorUnary { .. }
+            | Self::VectorReduce { .. }
             | Self::VectorBinary { .. }
             | Self::VectorExtract { .. }
             | Self::VectorInsert { .. }
@@ -693,6 +1538,7 @@ impl InstData {
             | Self::VectorFcmp { .. }
             | Self::VectorSelect { .. }
             | Self::Fconst { .. }
+            | Self::F80const { .. }
             | Self::Unary { .. }
             | Self::Overflow { .. }
             | Self::Fma { .. }
@@ -726,19 +1572,29 @@ impl InstData {
             | Self::AtomicRmw { .. }
             | Self::AtomicCas { .. }
             | Self::VaArg { .. }
+            | Self::AggregateVaArg { .. }
             | Self::Call { .. }
             | Self::CallIndirect { .. }
             | Self::Invoke { .. }
             | Self::ReturnCall { .. }
             | Self::ReturnCallIndirect { .. }
+            | Self::X86RflagsRegion { .. }
             | Self::InlineAsm { .. }
             | Self::Trap => true,
+            Self::Neon { .. } => true,
             Self::Intrinsic { id, .. } => {
-                !matches!(id, Intrinsic::FrameAddress | Intrinsic::StackSave)
+                !(id.is_x86_bmi()
+                    || id.is_x86_pure_bits()
+                    || id.is_x86_legacy_sign_mask()
+                    || id.is_x86_legacy_ptest()
+                    || id.is_x86_crc32()
+                    || id.is_x86_string())
+                    && !matches!(id, Intrinsic::FrameAddress | Intrinsic::StackSave)
             }
             Self::Iconst { .. }
             | Self::VectorSplat { .. }
             | Self::VectorUnary { .. }
+            | Self::VectorReduce { .. }
             | Self::VectorBinary { .. }
             | Self::VectorExtract { .. }
             | Self::VectorInsert { .. }
@@ -747,6 +1603,7 @@ impl InstData {
             | Self::VectorFcmp { .. }
             | Self::VectorSelect { .. }
             | Self::Fconst { .. }
+            | Self::F80const { .. }
             | Self::Unary { .. }
             | Self::Overflow { .. }
             | Self::Fma { .. }
@@ -803,11 +1660,48 @@ impl InstData {
         }
     }
 
+    /// Types hidden behind ABI pointers, in addition to ordinary SSA types.
+    /// Capability checks must visit these even when every SSA value is ptr.
+    pub fn for_each_abi_type(&self, visit: impl FnMut(Type)) {
+        self.for_each_abi_type_filtered(visit, |_, _| true);
+    }
+
+    /// Like for_each_abi_type, with a target-proved filter for layouts that use
+    /// byte copies rather than SIMD values. Call operand indices remain exact;
+    /// None identifies the AggregateVaArg layout. Ordinary SSA types are always
+    /// visited. The default visitor above includes every layout unchanged.
+    pub fn for_each_abi_type_filtered(&self, mut visit: impl FnMut(Type), mut include: impl FnMut(&crate::Layout, Option<usize>) -> bool) {
+        if let Some(args) = self.call_args() {
+            for i in 0..args.len() {
+                if let Some(p) = args.abi(i) {
+                    visit(p.ty);
+                    if let Some(layout) = p.layout() && include(layout, Some(i)) {
+                        for (_, ty) in layout.leaves() { visit(ty); }
+                    }
+                }
+            }
+        }
+        if let Self::AggregateVaArg { layout, .. } = self && include(layout, None) {
+            for (_, ty) in layout.leaves() { visit(ty); }
+        }
+    }
+
+    /// ABI-bearing operands for all call forms, including guaranteed tails.
+    pub fn call_args(&self) -> Option<&crate::CallArgs> {
+        match self {
+            Self::Call { args, .. } | Self::CallIndirect { args, .. }
+            | Self::Invoke { args, .. } | Self::ReturnCall { args, .. }
+            | Self::ReturnCallIndirect { args, .. } => Some(args),
+            _ => None,
+        }
+    }
+
     /// Visits every value operand, including block-call arguments.
     pub fn for_each_operand(&self, mut f: impl FnMut(Value)) {
         match self {
             InstData::Iconst { .. }
             | InstData::Fconst { .. }
+            | InstData::F80const { .. }
             | InstData::StackAddr { .. }
             | InstData::SymbolAddr { .. }
             | InstData::Fence { .. }
@@ -844,11 +1738,12 @@ impl InstData {
             | InstData::Fma { args } => args.iter().copied().for_each(f),
             InstData::VectorSplat { arg, .. }
             | InstData::VectorUnary { arg, .. }
+            | InstData::VectorReduce { arg, .. }
             | InstData::VectorExtract { arg, .. }
             | InstData::Unary { arg, .. } => f(*arg),
             InstData::Convert { arg, .. } => f(*arg),
             InstData::Load { addr, .. } => f(*addr),
-            InstData::VaArg { list, .. } => f(*list),
+            InstData::VaArg { list, .. } | InstData::AggregateVaArg { list, .. } => f(*list),
             InstData::Store { value, addr, .. } => {
                 f(*value);
                 f(*addr);
@@ -862,10 +1757,12 @@ impl InstData {
                 f(*arg);
                 dests.iter().flat_map(|d| &d.args).copied().for_each(f);
             }
+            InstData::Call { args, .. }
+            | InstData::ReturnCall { args, .. } => args.iter().copied().for_each(f),
             InstData::Return { args }
-            | InstData::Call { args, .. }
-            | InstData::ReturnCall { args, .. }
+            | InstData::X86RflagsRegion { args, .. }
             | InstData::InlineAsm { args, .. }
+            | InstData::Neon { args, .. }
             | InstData::Intrinsic { args, .. } => args.iter().copied().for_each(f),
         }
     }
@@ -874,6 +1771,7 @@ impl InstData {
         match self {
             InstData::Iconst { .. }
             | InstData::Fconst { .. }
+            | InstData::F80const { .. }
             | InstData::StackAddr { .. }
             | InstData::SymbolAddr { .. }
             | InstData::Fence { .. }
@@ -910,11 +1808,12 @@ impl InstData {
             | InstData::Fma { args } => args.iter_mut().for_each(f),
             InstData::VectorSplat { arg, .. }
             | InstData::VectorUnary { arg, .. }
+            | InstData::VectorReduce { arg, .. }
             | InstData::VectorExtract { arg, .. }
             | InstData::Unary { arg, .. } => f(arg),
             InstData::Convert { arg, .. } => f(arg),
             InstData::Load { addr, .. } => f(addr),
-            InstData::VaArg { list, .. } => f(list),
+            InstData::VaArg { list, .. } | InstData::AggregateVaArg { list, .. } => f(list),
             InstData::Store { value, addr, .. } => {
                 f(value);
                 f(addr);
@@ -928,10 +1827,12 @@ impl InstData {
                 f(arg);
                 dests.iter_mut().flat_map(|d| &mut d.args).for_each(f);
             }
+            InstData::Call { args, .. }
+            | InstData::ReturnCall { args, .. } => args.iter_mut().for_each(f),
             InstData::Return { args }
-            | InstData::Call { args, .. }
-            | InstData::ReturnCall { args, .. }
+            | InstData::X86RflagsRegion { args, .. }
             | InstData::InlineAsm { args, .. }
+            | InstData::Neon { args, .. }
             | InstData::Intrinsic { args, .. } => args.iter_mut().for_each(f),
         }
     }
@@ -1048,6 +1949,14 @@ impl fmt::Display for ConvertOp {
             ConvertOp::Bitcast => "bitcast",
             ConvertOp::SwidenLow => "swiden_low",
             ConvertOp::UwidenLow => "uwiden_low",
+            ConvertOp::SwidenHigh => "swiden_high",
+            ConvertOp::UwidenHigh => "uwiden_high",
+            ConvertOp::NarrowLow => "narrow_low",
+            ConvertOp::SpairwiseAddLong => "spairwise_add_long",
+            ConvertOp::UpairwiseAddLong => "upairwise_add_long",
+            ConvertOp::SnarrowSatLow => "snarrow_sat_low",
+            ConvertOp::UnarrowSatLow => "unarrow_sat_low",
+            ConvertOp::SunarrowSatLow => "sunarrow_sat_low",
         })
     }
 }

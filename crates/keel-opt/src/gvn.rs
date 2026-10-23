@@ -13,9 +13,11 @@
 //! Pinned instructions are never numbered: two loads of the same address
 //! may see different memory.
 
-use keel_ir::fxhash::FxHashMap;
-use keel_ir::{BinaryOp, EntityRef, Function, Inst, InstData, IntCC, OverflowOp};
-use std::collections::hash_map::Entry;
+use crate::scratch::Scratch;
+use keel_ir::fxhash::FxBuildHasher;
+use keel_ir::{BinaryOp, EntityRef, Function, Inst, InstData, IntCC, OverflowOp, ValueDef};
+use std::borrow::Cow;
+use std::hash::BuildHasher;
 
 pub fn run(func: &mut Function) -> bool {
     let analysis = crate::analysis::get(func);
@@ -28,10 +30,18 @@ pub fn run(func: &mut Function) -> bool {
     // Entries are never removed. One is in scope while its block is open on
     // the walk, i.e. while that block dominates the current one; a stale
     // entry from a closed sibling is simply overwritten.
+    //
+    // The table is open-addressed (key hash, instruction) slots, at most half
+    // full, keyed by each instruction's `canonical` form. Keys are recomputed
+    // to compare rather than stored: an instruction's operands are defined
+    // above it on the walk, so none of them is replaced after it is numbered,
+    // and its key stays what it was.
     let layout: usize = func.blocks().map(|b| func.block_insts(b).len()).sum();
-    let mut table: FxHashMap<InstData, Inst> =
-        FxHashMap::with_capacity_and_hasher(layout, Default::default());
-    let mut open = crate::scratch::Scratch::filled(func.num_blocks(), false);
+    let mask = (2 * layout).next_power_of_two().max(16) - 1;
+    // No instruction has the largest index; it marks an empty slot.
+    let empty = Inst::new(u32::MAX as usize);
+    let mut table = Scratch::filled(mask + 1, (0u32, empty));
+    let mut open = Scratch::filled(func.num_blocks(), false);
     // (block, whether its instructions were visited)
     let mut stack = vec![(entry, false)];
     let mut changed = false;
@@ -50,9 +60,21 @@ pub fn run(func: &mut Function) -> bool {
                 continue;
             }
             let key = canonical(func, data);
-            match table.entry(key) {
-                Entry::Occupied(entry) if open[func.inst_block(*entry.get()).index()] => {
-                    let existing = *entry.get();
+            let hash = FxBuildHasher::default().hash_one(&*key);
+            let tag = (hash >> 32) as u32;
+            let mut slot = hash as usize & mask;
+            let existing = loop {
+                let (t, existing) = table[slot];
+                if existing == empty {
+                    break None;
+                }
+                if t == tag && *canonical(func, func.inst_data(existing)) == *key {
+                    break Some(existing);
+                }
+                slot = (slot + 1) & mask;
+            };
+            match existing {
+                Some(existing) if open[func.inst_block(existing).index()] => {
                     let n = func.inst_results(inst).len();
                     for k in 0..n.min(func.inst_results(existing).len()) {
                         let result = func.inst_results(inst)[k];
@@ -63,12 +85,8 @@ pub fn run(func: &mut Function) -> bool {
                     func.remove_inst(inst);
                     changed = true;
                 }
-                Entry::Occupied(mut entry) => {
-                    *entry.get_mut() = inst;
-                    i += 1;
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(inst);
+                _ => {
+                    table[slot] = (tag, inst);
                     i += 1;
                 }
             }
@@ -83,7 +101,21 @@ pub fn run(func: &mut Function) -> bool {
 /// `data` with operands resolved, and operands of commutative operations
 /// sorted, so `iadd v1, v2` and `iadd v2, v1` get the same key. Integer
 /// comparisons reverse their predicate when their operands are swapped.
-fn canonical(func: &Function, data: &InstData) -> InstData {
+/// Most instructions are already in that form and lend themselves.
+fn canonical<'a>(func: &Function, data: &'a InstData) -> Cow<'a, InstData> {
+    let mut resolved = true;
+    data.for_each_operand(|v| resolved &= !matches!(func.value_def(v), ValueDef::Alias(_)));
+    let ordered = match data {
+        InstData::Binary { op, args } if is_commutative(*op) => args[0].index() <= args[1].index(),
+        InstData::Overflow { op, args } if is_commutative_overflow(*op) => {
+            args[0].index() <= args[1].index()
+        }
+        InstData::Icmp { args, .. } => args[0].index() <= args[1].index(),
+        _ => true,
+    };
+    if resolved && ordered {
+        return Cow::Borrowed(data);
+    }
     let mut key = data.clone();
     key.for_each_operand_mut(|v| *v = func.resolve(*v));
     match &mut key {
@@ -97,7 +129,7 @@ fn canonical(func: &Function, data: &InstData) -> InstData {
         }
         _ => {}
     }
-    key
+    Cow::Owned(key)
 }
 
 /// Swap the operands without negating the predicate. Signedness is retained.

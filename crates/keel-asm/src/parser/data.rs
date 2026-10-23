@@ -141,6 +141,33 @@ pub(super) fn instruction(a: &mut Assembly, section: usize, bytes: &[u8]) -> Res
     }
     append(a, section, bytes)
 }
+/// Consecutive instruction words, the first at source `line`.
+pub(super) fn instructions(
+    a: &mut Assembly,
+    section: usize,
+    words: &[u32],
+    line: usize,
+) -> Result<(), super::Error> {
+    if section != 0 {
+        a.sections[section - 1].contains_instructions = true;
+    }
+    match bytes_mut(a, section) {
+        Ok(bytes) => {
+            bytes.reserve(4 * words.len());
+            for word in words {
+                bytes.extend_from_slice(&word.to_le_bytes());
+            }
+        }
+        // Zero-fill contents fail at the first nonzero word.
+        Err(_) => {
+            for (i, word) in words.iter().enumerate() {
+                append(a, section, &word.to_le_bytes())
+                    .map_err(|e| super::Error::new(line + i, e))?;
+            }
+        }
+    }
+    Ok(())
+}
 pub(super) fn append(a: &mut Assembly, section: usize, bytes: &[u8]) -> Result<(), String> {
     if section != 0
         && let SectionContents::ZeroFill(size) = &mut a.sections[section - 1].contents

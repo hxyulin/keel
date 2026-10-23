@@ -7,6 +7,7 @@ use std::path::Path;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Target {
     X86_64LinuxGnu,
+    Aarch64LinuxGnu,
     Aarch64AppleDarwin,
 }
 
@@ -39,7 +40,14 @@ pub fn build(inputs: &[Input<'_>], target: Target) -> Result<Vec<u8>> {
             let (format, architecture) = if darwin {
                 (object::BinaryFormat::MachO, object::Architecture::Aarch64)
             } else {
-                (object::BinaryFormat::Elf, object::Architecture::X86_64)
+                (
+                    object::BinaryFormat::Elf,
+                    if target == Target::Aarch64LinuxGnu {
+                        object::Architecture::Aarch64
+                    } else {
+                        object::Architecture::X86_64
+                    },
+                )
             };
             if file.format() != format
                 || file.architecture() != architecture
@@ -354,7 +362,11 @@ fn validate_raw(file: &object::File<'_>, bytes: &[u8]) -> Result<()> {
                         if (info >> 32) as usize >= symbols.len() {
                             return Err("invalid ELF relocation symbol index".into());
                         }
-                        if let Some(width) = elf_relocation_width(info as u32) {
+                        let width = if file.architecture() == object::Architecture::Aarch64 {
+                            // Unknown relocation semantics remain packaging-only.
+                            super::elf::aarch64::width(info as u32).ok()
+                        } else { elf_relocation_width(info as u32) };
+                        if let Some(width) = width {
                             let offset = u64::from_le_bytes(relocation[..8].try_into().unwrap());
                             validate_site(offset, width, target_size)?;
                         }

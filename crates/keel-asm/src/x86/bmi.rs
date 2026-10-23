@@ -9,12 +9,12 @@ pub(super) fn encode<'a>(
 ) -> Result<(), String> {
     let invalid = || {
         format!(
-            "unsupported operands for {op:?}: expected matching 32/64-bit GPRs and at most one r/m source"
+            "unsupported operands for {op:?}: expected matching 32/64-bit GPRs (TZCNT also permits 16-bit) and at most one r/m source"
         )
     };
     let Some(dst) = operands
         .first()
-        .filter(|o| gpr(o) && matches!(width(o), 32 | 64))
+        .filter(|o| gpr(o) && (matches!(width(o), 32 | 64) || op == Tzcnt && width(o) == 16))
     else {
         return Err(invalid());
     };
@@ -24,7 +24,12 @@ pub(super) fn encode<'a>(
     let (byte, map, pp, field, v, rm) = match (op, operands) {
         (Tzcnt, [_, src]) => {
             check_width(src, w)?;
-            return e.rm(0xf3, &[0x0f, 0xbc], w, dst.number, src, None);
+            e.rm(0xf3, &[0x0f, 0xbc], w, dst.number, src, None)?;
+            if w == 16 {
+                let start = usize::from(matches!(src,M(m) if m.segment.is_some()));
+                e.bytes.swap(start, start + 1);
+            }
+            return Ok(());
         }
         (Blsi | Blsmsk | Blsr, [_, src]) => (
             0xf3,

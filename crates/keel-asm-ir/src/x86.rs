@@ -13,6 +13,111 @@ fn lowercase(s: &str) -> Cow<'_, str> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Opcode {
+    Core(CoreOpcode),
+    X87(X87Opcode),
+    Fixed(FixedOpcode),
+    /// Legacy post-SSE2 forms, carrying explicit feature metadata.
+    V2(V2Opcode),
+    // Explicit alternate legacy encodings for otherwise identical operand forms.
+    Movq6e,
+    Movq7e,
+    MovqD6,
+    Movq7f,
+    MovssStore,
+    MovsdStore,
+    MovapsStore,
+    MovupsStore,
+    MovapdStore,
+    MovupdStore,
+    MovdqaStore,
+    MovdquStore,
+
+    Comiss,
+    Comisd,
+    Cvtss2si,
+    Cvtsd2si,
+    Cvtpi2ps,
+    Cvtpi2pd,
+    Cvtps2pi,
+    Cvtpd2pi,
+    Cvttps2pi,
+    Cvttpd2pi,
+    Rcpps,
+    Rcpss,
+    Rsqrtps,
+    Rsqrtss,
+    Movhps,
+    Movlps,
+    Movhpd,
+    Movlpd,
+    Movlhps,
+    Movdq2q,
+    Movq2dq,
+    Movntq,
+    Movntdq,
+    Movntps,
+    Movntpd,
+    Movnti,
+    Maskmovq,
+    Maskmovdqu,
+    Prefetchnta,
+    Prefetcht0,
+    Prefetcht1,
+    Prefetcht2,
+    Fxsave,
+    Fxsave64,
+    Fxrstor,
+    Fxrstor64,
+    Cmpeqps,
+    Cmpltps,
+    Cmpleps,
+    Cmpunordps,
+    Cmpneqps,
+    Cmpnleps,
+    Cmpordps,
+    Cmpeqpd,
+    Cmpltpd,
+    Cmplepd,
+    Cmpunordpd,
+    Cmpneqpd,
+    Cmpnltpd,
+    Cmpnlepd,
+    Cmpordpd,
+    Cmpeqss,
+    Cmpless,
+    Cmpunordss,
+    Cmpneqss,
+    Cmpnltss,
+    Cmpnless,
+    Cmpordss,
+    Cmpunordsd,
+    Cmpnltsd,
+    Cmpnlesd,
+
+    Packssdw,
+    Packsswb,
+    Packuswb,
+    Paddsb,
+    Paddsw,
+    Paddusb,
+    Paddusw,
+    Psubsb,
+    Psubsw,
+    Psubusb,
+    Psubusw,
+    Pavgb,
+    Pavgw,
+    Pmaxsw,
+    Pmaxub,
+    Pminsw,
+    Pminub,
+    Psadbw,
+    Pshufw,
+    Pinsrw,
+    Pextrw,
+
+    /// Mandatory v3 assembler forms, independent of compiler IR.
+    V3(V3Opcode),
     Mov,
     Movabs,
     Lea,
@@ -251,6 +356,8 @@ pub enum Opcode {
     Fldcw,
     Fnstcw,
     Fldz,
+    Ldmxcsr,
+    Stmxcsr,
 
     Cmpnltps,
     Pmovmskb,
@@ -280,9 +387,115 @@ pub enum Opcode {
     Cvttpd2dq,
 }
 impl Opcode {
+    /// Select the SSE4 memory-destination form without promoting the v1
+    /// register-destination PEXTRW encoding. Explicit `pextrw.s` stays SSE4.
+    fn with_operand_form(self, operands: &[Operand]) -> Self {
+        if self == Self::Pextrw && matches!(operands.first(), Some(Operand::Memory(_))) {
+            Self::V2(V2Opcode::PextrwSse4)
+        } else {
+            self
+        }
+    }
     pub fn parse(s: &str) -> Option<Self> {
         use Opcode::*;
         Some(match s {
+            "movq.6e" => Movq6e,
+            "movq.7e" => Movq7e,
+            "movq.d6" => MovqD6,
+            "movq.7f" => Movq7f,
+            "movss.store" => MovssStore,
+            "movsd.store" => MovsdStore,
+            "movaps.store" => MovapsStore,
+            "movups.store" => MovupsStore,
+            "movapd.store" => MovapdStore,
+            "movupd.store" => MovupdStore,
+            "movdqa.store" => MovdqaStore,
+            "movdqu.store" => MovdquStore,
+
+            "comiss" => Comiss,
+            "comisd" => Comisd,
+            "cvtss2si" => Cvtss2si,
+            "cvtsd2si" => Cvtsd2si,
+            "cvtpi2ps" => Cvtpi2ps,
+            "cvtpi2pd" => Cvtpi2pd,
+            "cvtps2pi" => Cvtps2pi,
+            "cvtpd2pi" => Cvtpd2pi,
+            "cvttps2pi" => Cvttps2pi,
+            "cvttpd2pi" => Cvttpd2pi,
+            "rcpps" => Rcpps,
+            "rcpss" => Rcpss,
+            "rsqrtps" => Rsqrtps,
+            "rsqrtss" => Rsqrtss,
+            "movhps" => Movhps,
+            "movlps" => Movlps,
+            "movhpd" => Movhpd,
+            "movlpd" => Movlpd,
+            "movlhps" => Movlhps,
+            "movdq2q" => Movdq2q,
+            "movq2dq" => Movq2dq,
+            "movntq" => Movntq,
+            "movntdq" => Movntdq,
+            "movntps" => Movntps,
+            "movntpd" => Movntpd,
+            "movnti" => Movnti,
+            "maskmovq" => Maskmovq,
+            "maskmovdqu" => Maskmovdqu,
+            "prefetchnta" => Prefetchnta,
+            "prefetcht0" => Prefetcht0,
+            "prefetcht1" => Prefetcht1,
+            "prefetcht2" => Prefetcht2,
+            "fxsave" => Fxsave,
+            "fxsave64" => Fxsave64,
+            "fxrstor" => Fxrstor,
+            "fxrstor64" => Fxrstor64,
+            "cmpeqps" => Cmpeqps,
+            "cmpltps" => Cmpltps,
+            "cmpleps" => Cmpleps,
+            "cmpunordps" => Cmpunordps,
+            "cmpneqps" => Cmpneqps,
+            "cmpnleps" => Cmpnleps,
+            "cmpordps" => Cmpordps,
+            "cmpeqpd" => Cmpeqpd,
+            "cmpltpd" => Cmpltpd,
+            "cmplepd" => Cmplepd,
+            "cmpunordpd" => Cmpunordpd,
+            "cmpneqpd" => Cmpneqpd,
+            "cmpnltpd" => Cmpnltpd,
+            "cmpnlepd" => Cmpnlepd,
+            "cmpordpd" => Cmpordpd,
+            "cmpeqss" => Cmpeqss,
+            "cmpless" => Cmpless,
+            "cmpunordss" => Cmpunordss,
+            "cmpneqss" => Cmpneqss,
+            "cmpnltss" => Cmpnltss,
+            "cmpnless" => Cmpnless,
+            "cmpordss" => Cmpordss,
+            "cmpunordsd" => Cmpunordsd,
+            "cmpnltsd" => Cmpnltsd,
+            "cmpnlesd" => Cmpnlesd,
+
+            "packssdw" => Packssdw,
+            "packsswb" => Packsswb,
+            "packuswb" => Packuswb,
+            "paddsb" => Paddsb,
+            "paddsw" => Paddsw,
+            "paddusb" => Paddusb,
+            "paddusw" => Paddusw,
+            "psubsb" => Psubsb,
+            "psubsw" => Psubsw,
+            "psubusb" => Psubusb,
+            "psubusw" => Psubusw,
+            "pavgb" => Pavgb,
+            "pavgw" => Pavgw,
+            "pmaxsw" => Pmaxsw,
+            "pmaxub" => Pmaxub,
+            "pminsw" => Pminsw,
+            "pminub" => Pminub,
+            "psadbw" => Psadbw,
+            "pshufw" => Pshufw,
+            "pinsrw" => Pinsrw,
+            "pextrw" => Pextrw,
+
             "mov" => Mov,
             "movabs" => Movabs,
             "lea" => Lea,
@@ -515,6 +728,8 @@ impl Opcode {
             "fldcw" => Fldcw,
             "fnstcw" => Fnstcw,
             "fldz" => Fldz,
+            "ldmxcsr" => Ldmxcsr,
+            "stmxcsr" => Stmxcsr,
             "fucomip" | "fucompi" => Fucomip,
             "cmpnltps" => Cmpnltps,
             "pmovmskb" => Pmovmskb,
@@ -544,6 +759,21 @@ impl Opcode {
             "cvttpd2dq" => Cvttpd2dq,
             "sal" => Shl,
             _ => {
+                if let Some(op) = CoreOpcode::parse(s) {
+                    return Some(Core(op));
+                }
+                if let Some(op) = X87Opcode::parse(s) {
+                    return Some(X87(op));
+                }
+                if let Some(op) = FixedOpcode::parse(if s == "wait" { "fwait" } else { s }) {
+                    return Some(Fixed(op));
+                }
+                if let Some(op) = V3Opcode::parse(s) {
+                    return Some(V3(op));
+                }
+                if let Some(op) = V2Opcode::parse(s) {
+                    return Some(V2(op));
+                }
                 let (kind, cc) = if let Some(cc) = s.strip_prefix("cmov") {
                     (2, cc)
                 } else if let Some(cc) = s.strip_prefix("set") {
@@ -584,8 +814,14 @@ impl Opcode {
 pub enum RegisterClass {
     Gpr,
     Xmm,
+    /// MM0..MM7, the 64-bit MMX register file.
+    Mmx,
+    /// 256-bit SIMD view; aliases the same physical indices as XMM.
+    Ymm,
     /// x87 floating-point stack register ST(0)..ST(7), always 80 bits.
     X87,
+    /// ES, CS, SS, DS, FS and GS selector registers.
+    Segment,
     Rip,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -616,11 +852,35 @@ impl Register {
                 high_byte: false,
             });
         }
-        if s == "rip" {
+        if let Some(n) = s
+            .strip_prefix("mm")
+            .filter(|n| n.len() == 1)
+            .and_then(|n| n.parse::<u8>().ok())
+            .filter(|n| *n < 8)
+        {
+            return Some(Self {
+                class: RegisterClass::Mmx,
+                number: n,
+                width: 64,
+                high_byte: false,
+            });
+        }
+        if let Some(number) = ["es", "cs", "ss", "ds", "fs", "gs"]
+            .iter()
+            .position(|name| *name == s)
+        {
+            return Some(Self {
+                class: RegisterClass::Segment,
+                number: number as u8,
+                width: 16,
+                high_byte: false,
+            });
+        }
+        if matches!(s, "rip" | "eip") {
             return Some(Self {
                 class: RegisterClass::Rip,
                 number: 0,
-                width: 64,
+                width: if s == "eip" { 32 } else { 64 },
                 high_byte: false,
             });
         }
@@ -633,6 +893,18 @@ impl Register {
                 class: RegisterClass::Xmm,
                 number: n,
                 width: 128,
+                high_byte: false,
+            });
+        }
+        if let Some(n) = s
+            .strip_prefix("ymm")
+            .and_then(|n| n.parse::<u8>().ok())
+            .filter(|n| *n < 16)
+        {
+            return Some(Self {
+                class: RegisterClass::Ymm,
+                number: n,
+                width: 256,
                 high_byte: false,
             });
         }
@@ -952,9 +1224,11 @@ fn operand(s: &str, prefix: bool) -> Result<Operand, String> {
         ("byte ptr ", 8),
         ("word ptr ", 16),
         ("dword ptr ", 32),
+        ("fword ptr ", 48),
         ("qword ptr ", 64),
         ("tbyte ptr ", 80),
         ("xmmword ptr ", 128),
+        ("ymmword ptr ", 256),
     ] {
         if let Some(rest) = s.strip_prefix(prefix) {
             width = bits;
@@ -1041,7 +1315,10 @@ fn operand(s: &str, prefix: bool) -> Result<Operand, String> {
                 if sign < 0 {
                     return Err("cannot subtract an address register".into());
                 }
-                if mem.base.is_none() {
+                if matches!(r.class, RegisterClass::Xmm | RegisterClass::Ymm) && mem.index.is_none()
+                {
+                    mem.index = Some(r)
+                } else if mem.base.is_none() {
                     mem.base = Some(r)
                 } else if mem.index.is_none() {
                     mem.index = Some(r)
@@ -1060,15 +1337,21 @@ fn operand(s: &str, prefix: bool) -> Result<Operand, String> {
         if !remaining.is_empty() {
             mem.displacement = address(&remaining)?
         }
-        for r in [mem.base, mem.index].into_iter().flatten() {
-            if r.width != 64 || !matches!(r.class, RegisterClass::Gpr | RegisterClass::Rip) {
-                return Err("addresses require 64-bit general registers".into());
+        if mem.base.is_some_and(|r| {
+            !matches!(r.width, 32 | 64)
+                || !matches!(r.class, RegisterClass::Gpr | RegisterClass::Rip)
+        }) {
+            return Err("addresses require 32-bit or 64-bit general base registers".into());
+        }
+        if let (Some(base), Some(index)) = (mem.base, mem.index) {
+            if index.class == RegisterClass::Gpr && base.width != index.width {
+                return Err("mixed address register widths".into());
             }
         }
-        if mem
-            .index
-            .is_some_and(|r| r.class == RegisterClass::Rip || r.number == 4)
-            || (mem.base.is_some_and(|r| r.class == RegisterClass::Rip) && mem.index.is_some())
+        if mem.index.is_some_and(|r| {
+            !matches!(r.class, RegisterClass::Xmm | RegisterClass::Ymm)
+                && (r.class != RegisterClass::Gpr || !matches!(r.width, 32 | 64) || r.number == 4)
+        }) || (mem.base.is_some_and(|r| r.class == RegisterClass::Rip) && mem.index.is_some())
         {
             return Err("invalid address index".into());
         }
@@ -1084,7 +1367,41 @@ impl Instruction {
     }
     fn parse_intel_prefix(s: &str, prefix: bool) -> Result<Self, String> {
         let s = s.trim();
+        if let Some(i) = core::parse_string(s, false, prefix) {
+            return i;
+        }
         let (mnemonic, operands) = s.split_once(char::is_whitespace).unwrap_or((s, ""));
+        if mnemonic.eq_ignore_ascii_case("data16") {
+            let i = Self::parse_intel_prefix(operands, prefix)?;
+            return if matches!(i.opcode, Opcode::Core(_)) {
+                i.core_prefix("data16")
+            } else {
+                i.x87_data16()
+            };
+        }
+        if matches!(
+            lowercase(mnemonic).as_ref(),
+            "rep" | "repe" | "repz" | "repne" | "repnz" | "fs" | "gs"
+        ) {
+            return Self::parse_intel_prefix(operands, prefix)?.core_prefix(&lowercase(mnemonic));
+        }
+        if mnemonic.eq_ignore_ascii_case("addr32") {
+            return Self::parse_intel_prefix(operands, prefix)?.core_prefix("addr32");
+        }
+        if mnemonic.eq_ignore_ascii_case("rex64") {
+            let mut i = Self::parse_intel_prefix(operands, prefix)?;
+            i.opcode = match i.opcode {
+                Opcode::V3(v) if !i.lock => {
+                    Opcode::V3(v.with_rex_w().ok_or("rex64 requires a PCMP string form")?)
+                }
+                Opcode::V2(v) if !i.lock => Opcode::V2(
+                    v.with_rex_w()
+                        .ok_or("rex64 is supported only for PCMP string forms")?,
+                ),
+                _ => return Err("rex64 is supported only for PCMP string forms".into()),
+            };
+            return Ok(i);
+        }
         let lock = mnemonic.eq_ignore_ascii_case("lock");
         let (mnemonic, operands) = if lock {
             let rest = operands.trim();
@@ -1105,11 +1422,23 @@ impl Instruction {
                 .map(|s| operand(s, prefix))
                 .collect::<Result<_, _>>()?
         };
-        Ok(Self {
+        if matches!(opcode, Opcode::X87(op) if op.environment())
+            && operands
+                .iter()
+                .any(|o| matches!(o, Operand::Memory(m) if m.width != 0))
+        {
+            return Err(
+                "use an unsized x87 environment/state operand, with data16 for its 16-bit layout"
+                    .into(),
+            );
+        }
+        let opcode = opcode.with_operand_form(&operands);
+        Self {
             opcode,
             operands,
             lock,
-        })
+        }
+        .core_suffix(&lowercase(mnemonic))
     }
 }
 
@@ -1236,4 +1565,28 @@ mod format;
 pub use format::{write_expression, write_instruction};
 
 mod features;
-pub use features::Features;
+mod fixed;
+pub use fixed::FixedOpcode;
+mod x87_extra;
+pub use features::{CpuLevel, Features};
+pub use x87_extra::X87Opcode;
+
+mod v2;
+pub use v2::{V2Form, V2Opcode, V2Spec};
+
+mod core;
+pub use core::{CoreOpcode, LoopKind, Repeat, StringKind};
+mod v3;
+pub use v3::{V3_FORMS, V3Form, V3Opcode, V3Operand};
+
+impl Instruction {
+    /// Includes operand-specific requirements (e.g. AVX2 register broadcasts).
+    pub fn required_features(&self) -> Features {
+        let base = self.opcode.required_features();
+        if base.avx {
+            v3::form(self).map_or(base, |f| v3::requirement(f.isa))
+        } else {
+            base
+        }
+    }
+}

@@ -44,6 +44,8 @@ pub enum ExprKind<'a> {
     Unary(UnOp, &'a Expr<'a>),
     /// Operands of one type (the result's, or for comparisons the type they
     /// are compared as); shifts convert the amount to the left's type.
+    /// Mixed real/complex add/sub keeps each operand's domain, at the common
+    /// component precision, to preserve untouched imaginary zero signs.
     Binary(BinOp, &'a Expr<'a>, &'a Expr<'a>),
     /// `ptr + index * size`, `index` a `long`.
     PtrAdd(&'a Expr<'a>, &'a Expr<'a>, u64),
@@ -88,6 +90,7 @@ pub enum ExprKind<'a> {
     Call(&'a Expr<'a>, &'a [Expr<'a>]),
     /// Converts the operand to this expression's type.
     Cast(&'a Expr<'a>),
+    VectorIndex(&'a Expr<'a>, &'a Expr<'a>),
     Deref(&'a Expr<'a>),
     Addr(&'a Expr<'a>),
     /// A member of a struct-typed operand, `offset` bytes in.
@@ -144,8 +147,18 @@ impl BinOp {
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum GenericAtomicOp {
+    Load,
+    Store,
+    Exchange,
+    CompareExchange,
+}
+
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum Builtin {
+    /// Constructs a complex pair without arithmetic on either component.
+    Complex,
     /// Explicit C memory builtin; three operands, or four for its checked
     /// runtime variant. Both return the destination pointer.
     Memory(Intrinsic),
@@ -174,11 +187,20 @@ pub enum Builtin {
     FrameAddress,
     /// The atomic builtins (`__atomic_*`, `__sync_*`, `__c11_atomic_*`),
     /// with their arguments put in one shape, the C11 memory order last
-    /// (`__ATOMIC_RELAXED` 0 to `__ATOMIC_SEQ_CST` 5; a non-constant one
-    /// is taken as seq_cst).
+    /// except compare-exchange (see below). Nonconstant orders use seq_cst.
     ///
     /// `(ptr, order)`: the value.
     AtomicLoad,
+    /// GCC buffer interfaces; the object representation is an integer.
+    AtomicGeneric {
+        kind: GenericAtomicOp,
+        size: u8,
+    },
+    /// Floating arithmetic retried with representation-based CAS.
+    AtomicFloatRmw {
+        op: BinOp,
+        new: bool,
+    },
     /// `(ptr, value, order)`: the value stored, if the type is not void.
     AtomicStore,
     /// `(ptr, value, order)`: the old value, or with `new` the result.
@@ -190,8 +212,9 @@ pub enum Builtin {
     AtomicCas,
     /// `(ptr, expected, desired, order)`: whether it swapped.
     AtomicCasBool,
-    /// `(ptr, expected_ptr, desired, order)`: whether it swapped; if not,
-    /// `*expected_ptr` gets the value found.
+    /// `(ptr, expected_ptr, desired, success, failure[, weak])`: whether
+    /// it swapped; only on failure does `*expected_ptr` get the value found.
+    /// Weak is implemented as strong. Every argument is evaluated once.
     AtomicCompareExchange,
     /// `(order)`.
     Fence,
@@ -216,9 +239,20 @@ pub enum InitItem<'a> {
     Bytes { offset: u64, bytes: &'a [u8] },
 }
 
+/// Checked GNU assembly; read/write outputs also supply implicit tied inputs.
+#[derive(Copy, Clone, Debug)]
+pub struct AsmStmt<'a> {
+    pub template: &'a str,
+    pub constraints: &'a str,
+    pub outputs: &'a [(Expr<'a>, bool)],
+    pub inputs: &'a [Expr<'a>],
+    pub loc: Loc,
+}
+
 #[derive(Copy, Clone, Debug)]
 pub enum Stmt<'a> {
     Expr(Expr<'a>),
+    Asm(&'a AsmStmt<'a>),
     /// A local's initialization, at its declaration.
     Init(LocalId, Init<'a>, Loc),
     /// A local declared without an initializer. Each time its declaration
@@ -274,6 +308,8 @@ pub struct Local<'a> {
     /// Its address is taken (or it is an aggregate, or `volatile`), so it
     /// lives in memory rather than in an SSA variable.
     pub in_memory: bool,
+    /// Checked cleanup callback, registered only when this declaration executes.
+    pub cleanup: Option<(usize, Loc)>,
 }
 
 #[derive(Debug)]
@@ -281,8 +317,15 @@ pub struct FuncDef<'a> {
     /// Index in the global table.
     pub global: usize,
     pub ty: &'a FuncTy<'a>,
+    /// Declared parameter objects in argument order. Their local types may be
+    /// narrower than `ty.params`, which describes the incoming ABI values.
     pub params: Vec<LocalId>,
     pub locals: Vec<Local<'a>>,
+    /// Conservatively gate unverified jump/alloca interactions even when
+    /// VM declarations capture bounds without allocating a VLA object.
+    pub has_vm: bool,
+    /// Direct calls checked against final nonlocal-exit contracts, even in unused bodies.
+    pub direct_calls: Vec<(usize, Loc)>,
     /// The parent of each block scope; `None` for the outermost.
     pub scopes: Vec<Option<usize>>,
     /// The labels whose address is taken (`&&label`), numbered from 1.
@@ -315,7 +358,45 @@ pub struct Global<'a> {
     pub is_const: bool,
     pub thread_local: bool,
     pub returns_twice: bool,
+    /// Retained across permissive ordinary redeclarations for cleanup ABI validation.
+    pub incompatible_return: bool,
     pub function_attrs: keel_ir::FunctionAttrs,
+    /// Explicit `visibility(..)`, from any declaration. Without effect on
+    /// internal symbols.
+    pub visibility: Option<Visibility>,
+    /// Where ordinary weak binding was first written, merged across all
+    /// declarations (including declarations following definitions/references).
+    pub weak: Option<Loc>,
+    /// First executable lifecycle annotation, validated after all redeclarations.
+    pub lifecycle: Option<Loc>,
+    /// Compiler emission root; does not request linker retention.
+    pub used: bool,
+    pub retain: Option<Loc>,
+    pub section: Option<keel_ir::SectionName>,
     /// Index in the function list, for a defined function.
     pub func: Option<usize>,
+}
+
+impl Global<'_> {
+    /// Emitted hidden: an explicit hidden or internal visibility on a
+    /// symbol with external linkage.
+    pub fn hidden(&self) -> bool {
+        !self.internal && self.visibility.is_some_and(Visibility::hidden)
+    }
+}
+
+/// GNU symbol visibility. `protected` is not supported.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Visibility {
+    Default,
+    Hidden,
+    /// Hidden, and promised not to be called from outside the module; it is
+    /// emitted as hidden, which makes no such assumption.
+    Internal,
+}
+
+impl Visibility {
+    pub fn hidden(self) -> bool {
+        self != Visibility::Default
+    }
 }

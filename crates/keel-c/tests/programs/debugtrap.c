@@ -13,6 +13,9 @@ static void resume(int signal, siginfo_t *info, void *context) {
     /* ARM64 saves the PC of brk; x86-64 int3 saves the next PC. */
     ucontext_t *state = context;
     state->uc_mcontext->__ss.__pc += 4;
+#elif defined(__linux__) && defined(__aarch64__)
+    ucontext_t *state = context;
+    state->uc_mcontext.__pc += 4;
 #endif
 }
 

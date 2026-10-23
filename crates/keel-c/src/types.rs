@@ -2,7 +2,7 @@
 //! `char`, `long double` the same as `double`).
 
 use bumpalo::Bump;
-use keel_ir::{Layout, Type};
+use keel_ir::{Layout, Type, VectorType};
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum IntKind {
@@ -20,12 +20,18 @@ pub enum IntKind {
     ULLong,
     Int128,
     UInt128,
+    /// Distinct plain char on targets where it is unsigned.
+    UPlainChar,
 }
 
 impl IntKind {
     pub fn size(self) -> u64 {
         match self {
-            IntKind::Bool | IntKind::Char | IntKind::SChar | IntKind::UChar => 1,
+            IntKind::Bool
+            | IntKind::Char
+            | IntKind::SChar
+            | IntKind::UChar
+            | IntKind::UPlainChar => 1,
             IntKind::Short | IntKind::UShort => 2,
             IntKind::Int | IntKind::UInt => 4,
             IntKind::Long | IntKind::ULong | IntKind::LLong | IntKind::ULLong => 8,
@@ -51,7 +57,7 @@ impl IntKind {
     pub fn rank(self) -> u8 {
         match self {
             IntKind::Bool => 0,
-            IntKind::Char | IntKind::SChar | IntKind::UChar => 1,
+            IntKind::Char | IntKind::SChar | IntKind::UChar | IntKind::UPlainChar => 1,
             IntKind::Short | IntKind::UShort => 2,
             IntKind::Int | IntKind::UInt => 3,
             IntKind::Long | IntKind::ULong => 4,
@@ -62,7 +68,7 @@ impl IntKind {
 
     pub fn to_unsigned(self) -> IntKind {
         match self {
-            IntKind::Char | IntKind::SChar => IntKind::UChar,
+            IntKind::Char | IntKind::SChar | IntKind::UPlainChar => IntKind::UChar,
             IntKind::Short => IntKind::UShort,
             IntKind::Int => IntKind::UInt,
             IntKind::Long => IntKind::ULong,
@@ -80,12 +86,16 @@ pub enum Ty<'a> {
     Void,
     Int(IntKind),
     Float,
+    /// C complex pair, real first, with the component's alignment.
+    Complex(&'a Ty<'a>),
+    /// GNU fixed vector: C lane identity and the supported IR shape.
+    Vector(&'a Ty<'a>, VectorType),
     /// `double` and `long double`.
     Double,
     /// `_Float16`: only so headers declaring functions with it parse.
     Half,
     /// A type keel only knows the size of, so headers declaring functions
-    /// and typedefs with it parse: `__float128`, `_Complex double`, and
+    /// and typedefs with it parse: `__float128`, extended `_Complex`, and
     /// `long double` on x86-64. Its values cannot be used.
     Opaque(&'a OpaqueTy),
     Ptr(&'a Ty<'a>),
@@ -105,20 +115,51 @@ pub struct OpaqueTy {
     pub size: u64,
 }
 
-/// Element type and length; no length for `int a[]`.
+/// Element type and length. An absent length is incomplete unless `vla`
+/// identifies a captured runtime element count.
 #[derive(PartialEq, Debug)]
 pub struct ArrayTy<'a> {
     pub elem: Ty<'a>,
     pub len: Option<u64>,
+    /// Captured runtime element count, in a hidden function local.
+    pub vla: Option<usize>,
 }
 
 #[derive(PartialEq, Debug)]
 pub struct FuncTy<'a> {
     pub ret: Ty<'a>,
     pub params: &'a [Ty<'a>],
+    /// Qualifiers below each parameter's top level, in pointer/array order.
+    /// Top-level parameter qualifiers do not participate in compatibility.
+    pub param_quals: &'a [&'a [u8]],
     pub variadic: bool,
-    /// False for `int f()`, which says nothing about the parameters.
+    /// False for `int f()` declarations and old-style definitions.
     pub prototyped: bool,
+    /// Old-style definition (possibly empty); `params` are promoted ABI types,
+    /// not a prototype. An unspecified `f()` declaration has both flags false.
+    pub old_style: bool,
+}
+
+impl FuncTy<'_> {
+    /// Compare parameter contracts without changing the parser's separate
+    /// policy for unrelated return-type redeclarations.
+    pub(crate) fn parameters_compatible(&self, other: &Self) -> bool {
+        let (a, b) = (self, other);
+        if (a.prototyped || a.old_style) && (b.prototyped || b.old_style) {
+            a.variadic == b.variadic
+                && a.params.len() == b.params.len()
+                && a.params.iter().zip(b.params).all(|(a, b)| a.compatible(b))
+                && a.param_quals == b.param_quals
+        } else {
+            let known = if a.prototyped { a } else { b };
+            !known.prototyped
+                || (!known.variadic
+                    && known
+                        .params
+                        .iter()
+                        .all(|t| t.compatible(&t.default_promoted())))
+        }
+    }
 }
 
 /// What a declaration says about a type that [`Ty`] does not keep, for
@@ -180,6 +221,17 @@ impl<'a> Sugar<'a> {
         }
     }
 
+    pub fn is_const(&self, defs: &[TypedefDef<'_>]) -> bool {
+        match self {
+            Self::Const(_) => true,
+            Self::Volatile(inner) | Self::Restrict(inner) | Self::Array(inner) => {
+                inner.is_const(defs)
+            }
+            Self::Typedef(i) => defs[*i].sugar.is_const(defs),
+            _ => false,
+        }
+    }
+
     pub fn is_restrict(&self, defs: &[TypedefDef<'_>]) -> bool {
         match self {
             Self::Restrict(_) => true,
@@ -198,6 +250,20 @@ impl<'a> Sugar<'a> {
         }
     }
 
+    /// Array typedef qualifiers belong to their elements. Preserve const
+    /// during parser decay/indexing as well as volatile during memory lowering.
+    pub fn array_element(&self, defs: &[TypedefDef<'a>], arena: &'a Bump) -> Sugar<'a> {
+        let mut target = self.pointee(defs);
+        if self.is_volatile(defs) {
+            target = Self::Volatile(arena.alloc(target));
+        }
+        if self.is_const(defs) {
+            Self::Const(arena.alloc(target))
+        } else {
+            target
+        }
+    }
+
     pub fn function_return(&self, defs: &[TypedefDef<'a>]) -> Sugar<'a> {
         let target = self.pointee(defs);
         match *target.unqualified(defs) {
@@ -209,6 +275,7 @@ impl<'a> Sugar<'a> {
     /// Conditional pointers carry qualifiers from both operands. Expand
     /// aliases here so nested pointer/array qualifications merge by depth.
     pub fn merge(&self, other: &Sugar<'a>, defs: &[TypedefDef<'a>], arena: &'a Bump) -> Sugar<'a> {
+        let constant = self.is_const(defs) || other.is_const(defs);
         let volatile = self.is_volatile(defs) || other.is_volatile(defs);
         let merged = match (self.unqualified(defs), other.unqualified(defs)) {
             (Self::Ptr(a), Self::Ptr(b)) => Self::Ptr(arena.alloc(a.merge(b, defs, arena))),
@@ -217,8 +284,13 @@ impl<'a> Sugar<'a> {
             (Self::Plain, b) => *b,
             (a, _) => *a,
         };
-        if volatile {
+        let merged = if volatile {
             Self::Volatile(arena.alloc(merged))
+        } else {
+            merged
+        };
+        if constant {
+            Self::Const(arena.alloc(merged))
         } else {
             merged
         }
@@ -287,7 +359,7 @@ pub const ULONG: Ty<'static> = Ty::Int(IntKind::ULong);
 pub const CHAR: Ty<'static> = Ty::Int(IntKind::Char);
 
 /// Scalar nodes, shared by every compilation.
-static SCALAR_NODES: [Ty<'static>; IntKind::UInt128 as usize + 5] = [
+static SCALAR_NODES: [Ty<'static>; IntKind::UPlainChar as usize + 5] = [
     Ty::Void,
     Ty::Int(IntKind::Bool),
     Ty::Int(IntKind::Char),
@@ -303,6 +375,7 @@ static SCALAR_NODES: [Ty<'static>; IntKind::UInt128 as usize + 5] = [
     Ty::Int(IntKind::ULLong),
     Ty::Int(IntKind::Int128),
     Ty::Int(IntKind::UInt128),
+    Ty::Int(IntKind::UPlainChar),
     Ty::Float,
     Ty::Double,
     Ty::Half,
@@ -328,9 +401,9 @@ impl<'a> TypeNodes<'a> {
         match ty {
             Ty::Void => &SCALAR_NODES[0],
             Ty::Int(kind) => &SCALAR_NODES[1 + kind as usize],
-            Ty::Float => &SCALAR_NODES[IntKind::UInt128 as usize + 2],
-            Ty::Double => &SCALAR_NODES[IntKind::UInt128 as usize + 3],
-            Ty::Half => &SCALAR_NODES[IntKind::UInt128 as usize + 4],
+            Ty::Float => &SCALAR_NODES[IntKind::UPlainChar as usize + 2],
+            Ty::Double => &SCALAR_NODES[IntKind::UPlainChar as usize + 3],
+            Ty::Half => &SCALAR_NODES[IntKind::UPlainChar as usize + 4],
             Ty::Struct(id) => {
                 if self.structs.len() <= id {
                     self.structs.resize(id + 1, None);
@@ -344,6 +417,71 @@ impl<'a> TypeNodes<'a> {
 }
 
 impl<'a> Ty<'a> {
+    /// Whether this type depends on a captured runtime array bound.
+    pub fn variably_modified(&self) -> bool {
+        match self {
+            Ty::Array(a) => a.vla.is_some() || a.elem.variably_modified(),
+            Ty::Ptr(t) | Ty::Atomic(t) => t.variably_modified(),
+            Ty::Func(f) => f.ret.variably_modified() || f.params.iter().any(Ty::variably_modified),
+            _ => false,
+        }
+    }
+
+    /// Check numeric type identity without broadening the frontend's existing
+    /// policy for unrelated pointer/scalar and old-style redeclarations.
+    pub fn numeric_redeclaration_conflict(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Ty::Ptr(a), Ty::Ptr(b)) | (Ty::Atomic(a), Ty::Atomic(b)) => {
+                a.numeric_redeclaration_conflict(b)
+            }
+            (Ty::Array(a), Ty::Array(b)) => a.elem.numeric_redeclaration_conflict(&b.elem),
+            (Ty::Func(a), Ty::Func(b)) => {
+                a.ret.numeric_redeclaration_conflict(&b.ret)
+                    || (a.prototyped
+                        && b.prototyped
+                        && a.params
+                            .iter()
+                            .zip(b.params)
+                            .any(|(a, b)| a.numeric_redeclaration_conflict(b)))
+            }
+            (Ty::Vector(..), _) | (_, Ty::Vector(..)) => !self.compatible(other),
+            (a, b) if a.is_arith() && b.is_arith() => !a.compatible(b),
+            _ => false,
+        }
+    }
+
+    /// Compatibility for redeclarations, permitting incomplete arrays/prototypes.
+    pub fn compatible(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Ty::Ptr(a), Ty::Ptr(b)) | (Ty::Atomic(a), Ty::Atomic(b)) => a.compatible(b),
+            (Ty::Array(a), Ty::Array(b)) => {
+                a.elem.compatible(&b.elem) && (a.len.is_none() || b.len.is_none() || a.len == b.len)
+            }
+            (Ty::Func(a), Ty::Func(b)) => {
+                if !a.ret.compatible(&b.ret) {
+                    return false;
+                }
+                a.parameters_compatible(b)
+            }
+            _ => self == other,
+        }
+    }
+
+    /// Type used at an unprototyped call or old-style definition boundary.
+    pub(crate) fn default_promoted(&self) -> Self {
+        if *self == Ty::Float {
+            Ty::Double
+        } else {
+            crate::expr::promoted(self)
+        }
+    }
+
+    /// An array object whose storage size depends on runtime bounds.
+    /// Pointers to VM types still have a fixed object size.
+    pub fn runtime_sized(&self) -> bool {
+        matches!(self, Ty::Array(a) if a.vla.is_some() || a.elem.runtime_sized())
+    }
+
     /// The type without `_Atomic`.
     pub fn unatomic(&self) -> &Ty<'a> {
         match self {
@@ -359,6 +497,10 @@ impl<'a> Ty<'a> {
         }
     }
 
+    pub fn is_vector(&self) -> bool {
+        matches!(self, Ty::Vector(..))
+    }
+
     pub fn is_integer(&self) -> bool {
         matches!(self, Ty::Int(_))
     }
@@ -367,8 +509,17 @@ impl<'a> Ty<'a> {
         matches!(self, Ty::Float | Ty::Double | Ty::Half)
     }
 
+    pub fn is_complex(&self) -> bool {
+        matches!(self, Ty::Complex(_))
+    }
+
+    /// Types represented by an address and classified through an ABI layout.
+    pub fn is_pair_or_struct(&self) -> bool {
+        self.is_complex() || self.is_struct()
+    }
+
     pub fn is_arith(&self) -> bool {
-        self.is_integer() || self.is_float()
+        self.is_integer() || self.is_float() || self.is_complex()
     }
 
     pub fn is_ptr(&self) -> bool {
@@ -423,6 +574,7 @@ impl<'a> Ty<'a> {
                 8 => Type::I64,
                 _ => Type::I128,
             },
+            Ty::Vector(_, shape) => Type::Vector(*shape),
             Ty::Float => Type::F32,
             Ty::Double => Type::F64,
             Ty::Ptr(_) => Type::Ptr,
@@ -469,6 +621,8 @@ impl Types<'_> {
         match ty {
             Ty::Void => 1,
             Ty::Int(k) => k.size(),
+            Ty::Vector(_, shape) => u64::from(shape.bytes()),
+            Ty::Complex(t) => 2 * self.size(t),
             Ty::Float => 4,
             Ty::Double | Ty::Ptr(_) => 8,
             Ty::Half => 2,
@@ -480,8 +634,23 @@ impl Types<'_> {
         }
     }
 
+    /// Native atomic representations shared by the two supported targets.
+    /// The pointer's declared/proven alignment must cover the whole object.
+    pub fn atomic_size(&self, ty: &Ty, align: u64) -> Option<u8> {
+        let size = self.size(ty);
+        if matches!(ty, Ty::Void | Ty::Func(_) | Ty::Array(_))
+            || !matches!(size, 1 | 2 | 4 | 8)
+            || align < size
+        {
+            None
+        } else {
+            Some(size as u8)
+        }
+    }
+
     pub fn align(&self, ty: &Ty) -> u64 {
         match ty {
+            Ty::Complex(t) => self.align(t),
             Ty::Array(a) => self.align(&a.elem),
             Ty::Struct(id) => self.0[*id].align,
             Ty::Atomic(t) => self.align(t),
@@ -496,12 +665,30 @@ impl Types<'_> {
     /// of its float, and anything else an array of integers as wide as
     /// its alignment, which has the same size and alignment.
     pub fn abi_layout(&self, ty: &Ty) -> Layout {
+        self.abi_layout_with_alignment(ty, self.align(ty))
+    }
+
+    /// AAPCS64 ignores an aggregate's top-level over-alignment when
+    /// allocating argument registers, while retaining member alignment.
+    pub fn aapcs_layout(&self, ty: &Ty) -> Layout {
+        let alignment = match ty {
+            Ty::Struct(id) => self.0[*id]
+                .members
+                .iter()
+                .map(|m| m.align)
+                .max()
+                .unwrap_or(1),
+            _ => self.align(ty),
+        };
+        self.abi_layout_with_alignment(ty, alignment)
+    }
+
+    fn abi_layout_with_alignment(&self, ty: &Ty, align: u64) -> Layout {
         if let Some((float, n)) = self.hfa(ty)
             && n <= 4
         {
             return Layout::Array(Box::new(Layout::Scalar(float)), n as u32);
         }
-        let align = self.align(ty);
         let unit = match align {
             1 => Type::I8,
             2 => Type::I16,
@@ -526,6 +713,86 @@ impl Types<'_> {
         }
     }
 
+    pub fn contains_vector_union(&self, ty: &Ty) -> bool {
+        match ty {
+            Ty::Struct(id) => {
+                let def = &self.0[*id];
+                (def.is_union && self.contains_vector(ty))
+                    || def
+                        .members
+                        .iter()
+                        .any(|m| self.contains_vector_union(&m.ty))
+            }
+            Ty::Array(a) => self.contains_vector_union(&a.elem),
+            _ => false,
+        }
+    }
+
+    pub fn contains_vector(&self, ty: &Ty) -> bool {
+        match ty {
+            Ty::Vector(..) => true,
+            Ty::Struct(id) => self.0[*id]
+                .members
+                .iter()
+                .any(|m| self.contains_vector(&m.ty)),
+            Ty::Array(a) => self.contains_vector(&a.elem),
+            _ => false,
+        }
+    }
+
+    pub fn contains_complex(&self, ty: &Ty) -> bool {
+        match ty {
+            Ty::Complex(_) => true,
+            Ty::Opaque(o) => o.name == "_Complex long double",
+            Ty::Struct(id) => self.0[*id]
+                .members
+                .iter()
+                .any(|m| self.contains_complex(&m.ty)),
+            Ty::Array(a) => self.contains_complex(&a.elem),
+            _ => false,
+        }
+    }
+
+    /// Exact natural layout for complex-containing call types. In particular,
+    /// SysV merges SSE/INTEGER classes per eightbyte, not per entire struct.
+    /// Fail closed for unions, bit-fields and explicit/packed layout changes.
+    pub fn complex_abi_layout(&self, ty: &Ty) -> Option<Layout> {
+        let layout = match ty {
+            Ty::Atomic(elem) => self.complex_abi_layout(elem)?,
+            Ty::Complex(elem) => Layout::Array(Box::new(Layout::Scalar(elem.ir())), 2),
+            Ty::Struct(id) => {
+                let def = &self.0[*id];
+                if def.is_union {
+                    return None;
+                }
+                let mut fields = Vec::new();
+                let mut offset: u64 = 0;
+                for m in &def.members {
+                    if m.bits.is_some() {
+                        return None;
+                    }
+                    let field = self.complex_abi_layout(&m.ty)?;
+                    offset = offset.next_multiple_of(field.align());
+                    if m.offset != offset {
+                        return None;
+                    }
+                    offset += field.size();
+                    fields.push(field);
+                }
+                Layout::Struct(fields)
+            }
+            Ty::Array(a) => Layout::Array(
+                Box::new(self.complex_abi_layout(&a.elem)?),
+                a.len?.try_into().ok()?,
+            ),
+            Ty::Int(_) | Ty::Ptr(_) | Ty::Float | Ty::Double | Ty::Vector(..) => {
+                Layout::Scalar(ty.ir())
+            }
+            _ => return None,
+        };
+        (layout.size() == self.size(ty) && layout.align() == self.align(ty)).then_some(layout)
+    }
+
     pub fn contains_atomic(&self, ty: &Ty) -> bool {
         match ty {
             Ty::Atomic(_) => true,
@@ -541,9 +808,13 @@ impl Types<'_> {
     /// The float type and count if `ty` is made only of floats of one type.
     fn hfa(&self, ty: &Ty) -> Option<(Type, u64)> {
         match ty {
+            Ty::Vector(_, shape) => Some((Type::Vector(*shape), 1)),
+            Ty::Complex(t) => self.hfa(t).map(|(t, _)| (t, 2)),
             Ty::Float => Some((Type::F32, 1)),
             Ty::Double => Some((Type::F64, 1)),
-            Ty::Array(ArrayTy { elem, len: Some(n) }) => self.hfa(elem).map(|(t, k)| (t, k * n)),
+            Ty::Array(ArrayTy {
+                elem, len: Some(n), ..
+            }) => self.hfa(elem).map(|(t, k)| (t, k * n)),
             Ty::Struct(id) => {
                 let def = &self.0[*id];
                 if def.is_union {
@@ -556,7 +827,9 @@ impl Types<'_> {
                         return None;
                     }
                     let (t, k) = self.hfa(&m.ty)?;
-                    if float.is_some_and(|f| f != t) {
+                    if float.is_some_and(|f: Type| {
+                        f != t && !(f.is_vector() && t.is_vector() && f.bytes() == t.bytes())
+                    }) {
                         return None;
                     }
                     float = Some(t);
@@ -703,6 +976,7 @@ mod node_tests {
             Ty::Int(IntKind::ULLong),
             Ty::Int(IntKind::Int128),
             Ty::Int(IntKind::UInt128),
+            Ty::Int(IntKind::UPlainChar),
             Ty::Float,
             Ty::Double,
             Ty::Half,
@@ -721,6 +995,7 @@ mod node_tests {
         let composite = Ty::Array(arena.alloc(ArrayTy {
             elem: *nodes.node(INT),
             len: Some(7),
+            vla: None,
         }));
         assert_eq!(*nodes.node(composite), composite);
     }

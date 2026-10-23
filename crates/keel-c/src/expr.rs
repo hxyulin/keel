@@ -69,8 +69,38 @@ impl<'a> Parser<'a> {
     }
 
     fn assignment(&mut self, op: &str, lhs: Expr<'a>, rhs: Expr<'a>, loc: Loc) -> R<Expr<'a>> {
-        self.check_lvalue(&lhs)?;
+        self.check_modifiable_lvalue(&lhs)?;
         if let Ty::Atomic(&ty) = lhs.ty {
+            if ty.is_float() && op != "=" {
+                let bin = match op {
+                    "+=" => BinOp::Add,
+                    "-=" => BinOp::Sub,
+                    "*=" => BinOp::Mul,
+                    "/=" => BinOp::Div,
+                    _ => return Err(Error::new(loc, "invalid atomic floating arithmetic")),
+                };
+                let rhs = self.rvalue(rhs);
+                // Use the usual arithmetic type, then round to the object type.
+                let calc = if rhs.ty == Ty::Double || ty == Ty::Double {
+                    Ty::Double
+                } else {
+                    Ty::Float
+                };
+                let rhs = self.cast(rhs, calc);
+                let args = vec![
+                    self.address_of_atomic(lhs),
+                    rhs,
+                    mk(ExprKind::Int(5), INT, loc),
+                ];
+                return Ok(mk(
+                    ExprKind::Builtin(
+                        Builtin::AtomicFloatRmw { op: bin, new: true },
+                        self.slice(&args),
+                    ),
+                    ty,
+                    loc,
+                ));
+            }
             let rmw = match op {
                 "=" => None,
                 "+=" => Some(RmwOp::Add),
@@ -119,6 +149,8 @@ impl<'a> Parser<'a> {
         if ty.is_ptr() && (bin == "+" || bin == "-") && rhs.ty.is_integer() {
             let size = self.elem_size(&ty, loc)?;
             let mut n = self.cast(rhs, LONG);
+            let (scaled, size) = self.scale_vm_index(n, &ty, size, loc);
+            n = scaled;
             if bin == "-" {
                 n = mk(ExprKind::Unary(UnOp::Neg, self.node(n)), LONG, loc);
             }
@@ -133,7 +165,28 @@ impl<'a> Parser<'a> {
             )
             .with_sugar(result_sugar));
         }
+        if ty.is_vector() || rhs.ty.is_vector() {
+            // Validate through the same operator rules before building a single-evaluation assignment.
+            self.vector_binop(bin, lhs, rhs, loc)?;
+            return Ok(mk(
+                ExprKind::OpAssign {
+                    op: bin_op(bin),
+                    lhs: self.node(lhs),
+                    rhs: self.node(rhs),
+                },
+                ty,
+                loc,
+            ));
+        }
         let op = bin_op(bin);
+        if (ty.is_complex() || rhs.ty.is_complex())
+            && !matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
+        {
+            return Err(Error::new(
+                loc,
+                "this complex compound operator is not supported",
+            ));
+        }
         let comp = match op {
             BinOp::Shl | BinOp::Shr => {
                 if !ty.is_integer() || !rhs.ty.is_integer() {
@@ -154,7 +207,11 @@ impl<'a> Parser<'a> {
                 comp
             }
         };
-        let rhs = self.cast(rhs, comp);
+        let rhs_ty = match comp {
+            Ty::Complex(elem) if !rhs.ty.is_complex() => *elem,
+            _ => comp,
+        };
+        let rhs = self.cast(rhs, rhs_ty);
         Ok(mk(
             ExprKind::OpAssign {
                 op,
@@ -166,20 +223,31 @@ impl<'a> Parser<'a> {
         ))
     }
 
-    fn check_lvalue(&self, e: &Expr<'a>) -> R<()> {
+    pub(crate) fn check_lvalue(&self, e: &Expr<'a>) -> R<()> {
         let ok = match &e.kind {
             ExprKind::Local(_)
             | ExprKind::Deref(_)
             | ExprKind::Str(_)
             | ExprKind::CompoundLit(..) => true,
             ExprKind::Global(_) => !matches!(e.ty, Ty::Func(_)),
-            ExprKind::Member { base, .. } => self.check_lvalue(base).is_ok(),
+            ExprKind::Member { base, .. } | ExprKind::VectorIndex(base, _) => {
+                self.check_lvalue(base).is_ok()
+            }
             _ => false,
         };
         if ok && !matches!(e.ty, Ty::Array(..)) {
             Ok(())
         } else {
             Err(Error::new(e.loc, "not assignable"))
+        }
+    }
+
+    fn check_modifiable_lvalue(&self, e: &Expr<'a>) -> R<()> {
+        self.check_lvalue(e)?;
+        if e.sugar.is_const(&self.typedefs) {
+            Err(Error::new(e.loc, "cannot modify a const-qualified object"))
+        } else {
+            Ok(())
         }
     }
 
@@ -191,6 +259,9 @@ impl<'a> Parser<'a> {
         let loc = self.loc();
         self.advance();
         let cond = self.rvalue(cond);
+        if !cond.ty.is_scalar() {
+            return Err(Error::new(loc, "condition must be a scalar"));
+        }
         if self.eat(":") {
             // GNU's `a ?: b` is `a ? a : b` evaluating `a` once:
             // `(t = a, t ? t : b)`, with `t` a made-up local.
@@ -289,6 +360,17 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn binop(&mut self, p: &str, l: Expr<'a>, r: Expr<'a>, loc: Loc) -> R<Expr<'a>> {
         let (l, r) = (self.rvalue(l), self.rvalue(r));
+        if l.ty.is_vector() || r.ty.is_vector() {
+            return self.vector_binop(p, l, r, loc);
+        }
+        if (l.ty.is_complex() || r.ty.is_complex())
+            && !matches!(p, "+" | "-" | "*" | "/" | "==" | "!=" | "&&" | "||")
+        {
+            return Err(Error::new(
+                loc,
+                format!("complex operator `{p}` is not supported"),
+            ));
+        }
         match p {
             "&&" | "||" => {
                 if !l.ty.is_scalar() || !r.ty.is_scalar() {
@@ -306,11 +388,22 @@ impl<'a> Parser<'a> {
             "-" if l.ty.is_ptr() && r.ty.is_integer() => self.ptr_add(l, r, true, loc),
             "-" if l.ty.is_ptr() && r.ty.is_ptr() => {
                 let size = self.elem_size(&l.ty, loc)?;
-                Ok(mk(
+                let diff = mk(
                     ExprKind::PtrDiff(self.node(l), self.node(r), size),
                     LONG,
                     loc,
-                ))
+                );
+                if l.ty.pointee().unwrap().runtime_sized() {
+                    let stride = self.size_expr(l.ty.pointee().unwrap(), loc);
+                    let stride = self.cast(stride, LONG);
+                    Ok(mk(
+                        ExprKind::Binary(BinOp::Div, self.node(diff), self.node(stride)),
+                        LONG,
+                        loc,
+                    ))
+                } else {
+                    Ok(diff)
+                }
             }
             "==" | "!=" | "<" | ">" | "<=" | ">=" => {
                 let op = bin_op(p);
@@ -360,7 +453,14 @@ impl<'a> Parser<'a> {
                     return Err(Error::new(loc, format!("invalid operands to `{p}`")));
                 }
                 let ty = usual(&l.ty, &r.ty);
-                let (l, r) = (self.cast(l, ty), self.cast(r, ty));
+                // Mixed real/complex addition preserves the untouched imaginary
+                // component (including its zero sign), without adding +0.
+                let domain = |t: Ty<'a>| match ty {
+                    Ty::Complex(elem) if !t.is_complex() => *elem,
+                    _ => ty,
+                };
+                let (lt, rt) = (domain(l.ty), domain(r.ty));
+                let (l, r) = (self.cast(l, lt), self.cast(r, rt));
                 Ok(mk(
                     ExprKind::Binary(op, self.node(l), self.node(r)),
                     ty,
@@ -370,9 +470,72 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn vector_binop(&mut self, p: &str, l: Expr<'a>, r: Expr<'a>, loc: Loc) -> R<Expr<'a>> {
+        let Ty::Vector(elem, shape) = l.ty else {
+            return Err(Error::new(
+                loc,
+                "vector operations require matching vector operands; scalar broadcast is not supported",
+            ));
+        };
+        if l.ty != r.ty {
+            return Err(Error::new(
+                loc,
+                "vector operations require matching vector operands; implicit vector conversions are not supported",
+            ));
+        }
+        let allowed = if elem.is_float() {
+            matches!(
+                p,
+                "+" | "-" | "*" | "/" | "==" | "!=" | "<" | "<=" | ">" | ">="
+            )
+        } else {
+            matches!(
+                p,
+                "+" | "-"
+                    | "*"
+                    | "&"
+                    | "|"
+                    | "^"
+                    | "<<"
+                    | ">>"
+                    | "=="
+                    | "!="
+                    | "<"
+                    | "<="
+                    | ">"
+                    | ">="
+            )
+        };
+        if !allowed {
+            return Err(Error::new(
+                loc,
+                format!("unsupported vector operation `{p}`"),
+            ));
+        }
+        let op = bin_op(p);
+        let ty = if op.is_comparison() {
+            let kind = match shape.lane_type().bytes().unwrap() {
+                1 => IntKind::SChar,
+                2 => IntKind::Short,
+                4 => IntKind::Int,
+                _ => IntKind::Long,
+            };
+            Ty::Vector(self.type_ref(Ty::Int(kind)), shape.mask())
+        } else {
+            l.ty
+        };
+        Ok(mk(
+            ExprKind::Binary(op, self.node(l), self.node(r)),
+            ty,
+            loc,
+        ))
+    }
+
     fn ptr_add(&mut self, ptr: Expr<'a>, n: Expr<'a>, negate: bool, loc: Loc) -> R<Expr<'a>> {
         let size = self.elem_size(&ptr.ty, loc)?;
         let mut n = self.cast(n, LONG);
+        let (scaled, size) = self.scale_vm_index(n, &ptr.ty, size, loc);
+        n = scaled;
         if negate {
             n = mk(ExprKind::Unary(UnOp::Neg, self.node(n)), LONG, loc);
         }
@@ -397,15 +560,80 @@ impl<'a> Parser<'a> {
                 loc,
                 "arithmetic on a pointer to an incomplete type",
             )),
+            Ty::Array(a) if a.len.is_none() && a.vla.is_none() => Err(Error::new(
+                loc,
+                "arithmetic on a pointer to an incomplete type",
+            )),
+            _ if elem.runtime_sized() => Ok(1),
             _ => Ok(self.size_of(elem)),
         }
+    }
+
+    /// Runtime sizes are products of captured counts, stopping at pointers.
+    pub(crate) fn size_expr(&self, ty: &Ty<'a>, loc: Loc) -> Expr<'a> {
+        // Preserve constant sizeof nodes for fixed arrays and VM pointers.
+        if !ty.runtime_sized() {
+            return mk(ExprKind::Int(self.size_of(ty) as i64), ULONG, loc);
+        }
+        if let Ty::Array(a) = ty {
+            let count = match a.vla {
+                Some(id) => mk(ExprKind::Local(id), ULONG, loc),
+                None => mk(ExprKind::Int(a.len.unwrap_or(0) as i64), ULONG, loc),
+            };
+            let stride = self.size_expr(&a.elem, loc);
+            mk(
+                ExprKind::Binary(BinOp::Mul, self.node(count), self.node(stride)),
+                ULONG,
+                loc,
+            )
+        } else {
+            mk(ExprKind::Int(self.size_of(ty) as i64), ULONG, loc)
+        }
+    }
+
+    fn scale_vm_index(
+        &mut self,
+        n: Expr<'a>,
+        ptr: &Ty<'a>,
+        size: u64,
+        loc: Loc,
+    ) -> (Expr<'a>, u64) {
+        if ptr.pointee().unwrap().runtime_sized() {
+            let stride = self.size_expr(ptr.pointee().unwrap(), loc);
+            let stride = self.cast(stride, LONG);
+            (
+                mk(
+                    ExprKind::Binary(BinOp::Mul, self.node(n), self.node(stride)),
+                    LONG,
+                    loc,
+                ),
+                1,
+            )
+        } else {
+            (n, size)
+        }
+    }
+
+    fn capture_vm_bounds(&mut self, mark: usize, mut e: Expr<'a>) -> Expr<'a> {
+        let bounds = self.take_vm_bounds(mark);
+        for (id, bound) in bounds.into_iter().rev() {
+            let lhs = mk(ExprKind::Local(id), ULONG, bound.loc);
+            let set = mk(
+                ExprKind::Assign(self.node(lhs), self.node(bound)),
+                ULONG,
+                bound.loc,
+            );
+            e = mk(ExprKind::Comma(self.node(set), self.node(e)), e.ty, e.loc).with_sugar(e.sugar);
+        }
+        e
     }
 
     fn cast_expr(&mut self) -> R<Expr<'a>> {
         if self.is("(") && self.type_follows(1) {
             let loc = self.loc();
             self.advance();
-            let (ty, sugar) = self.type_name_sugar()?;
+            let mark = self.vm_bound_mark();
+            let (ty, sugar) = self.type_name_sugar_mode(true)?;
             self.expect(")")?;
             if self.is("{") {
                 let lit = self.compound_literal(ty, sugar, loc)?.with_sugar(sugar);
@@ -418,11 +646,17 @@ impl<'a> Parser<'a> {
             let sugar = *sugar.unqualified(&self.typedefs);
             let e = self.cast_expr()?;
             let e = self.rvalue(e);
-            let ok = ty == Ty::Void
+            let vector_cast = (ty.is_vector() || e.ty.is_vector())
+                && (ty.is_vector() || ty.is_integer())
+                && (e.ty.is_vector() || e.ty.is_integer())
+                && self.size_of(&ty) == 16
+                && self.size_of(&e.ty) == 16;
+            let ok = vector_cast
+                || ty == Ty::Void
                 || (ty.is_scalar()
                     && e.ty.is_scalar()
-                    && !(ty.is_float() && e.ty.is_ptr())
-                    && !(ty.is_ptr() && e.ty.is_float()))
+                    && !((ty.is_float() || ty.is_complex()) && e.ty.is_ptr())
+                    && !(ty.is_ptr() && (e.ty.is_float() || e.ty.is_complex())))
                 || (ty.is_struct() && ty == e.ty);
             if !ok {
                 return Err(Error::new(loc, "invalid cast"));
@@ -430,12 +664,14 @@ impl<'a> Parser<'a> {
             // Literal conversion cannot hide a qualified memory read;
             // retain the frontend's existing constant normalization.
             if matches!(e.kind, ExprKind::Int(_)) {
-                return Ok(self.cast(e, ty).with_sugar(sugar));
+                let result = self.cast(e, ty).with_sugar(sugar);
+                return Ok(self.capture_vm_bounds(mark, result));
             }
             // Keep a distinct value conversion even when the unqualified
             // types match: changing result qualifiers must not rewrite the
             // qualifiers on the operand's actual memory read.
-            return Ok(mk(ExprKind::Cast(self.node(e)), ty, loc).with_sugar(sugar));
+            let result = mk(ExprKind::Cast(self.node(e)), ty, loc).with_sugar(sugar);
+            return Ok(self.capture_vm_bounds(mark, result));
         }
         self.unary()
     }
@@ -461,15 +697,52 @@ impl<'a> Parser<'a> {
             return self.postfix();
         };
         match word {
+            "__real__" | "__real" | "__imag__" | "__imag" => {
+                self.advance();
+                let e = self.cast_expr()?;
+                let imag = word.starts_with("__imag");
+                if let Ty::Complex(elem) = e.ty {
+                    let sugar = e.sugar;
+                    return Ok(mk(
+                        ExprKind::Member {
+                            base: self.node(e),
+                            offset: if imag { self.size_of(elem) } else { 0 },
+                            bits: None,
+                            align: self.types().align(elem),
+                        },
+                        *elem,
+                        loc,
+                    )
+                    .with_sugar(sugar));
+                }
+                if !e.ty.is_integer() && !e.ty.is_float() {
+                    return Err(Error::new(
+                        loc,
+                        "real/imaginary extraction requires supported arithmetic type",
+                    ));
+                }
+                if !imag {
+                    return Ok(e);
+                }
+                let zero = self.cast(mk(ExprKind::Int(0), INT, loc), e.ty);
+                Ok(mk(
+                    ExprKind::Comma(self.node(e), self.node(zero)),
+                    zero.ty,
+                    loc,
+                ))
+            }
             "sizeof" | "_Alignof" | "__alignof__" | "__alignof" => {
                 self.advance();
+                let mark = self.vm_bound_mark();
+                let mut operand = None;
                 let (ty, alignment) = if self.is("(") && self.type_follows(1) {
                     self.advance();
-                    let (ty, sugar) = self.type_name_sugar()?;
+                    let (ty, sugar) = self.type_name_sugar_mode(true)?;
                     self.expect(")")?;
                     if self.is("{") {
                         let e = self.compound_literal(ty, sugar, loc)?;
                         let align = self.expr_alignment(&e);
+                        operand = Some(e);
                         (e.ty, align)
                     } else {
                         let align = self.type_alignment(&ty, &sugar);
@@ -478,22 +751,37 @@ impl<'a> Parser<'a> {
                 } else {
                     let e = self.unary()?;
                     let align = self.expr_alignment(&e);
+                    operand = Some(e);
                     (e.ty, align)
                 };
                 let incomplete = match &ty {
-                    Ty::Func(_) | Ty::Array(ArrayTy { len: None, .. }) => true,
+                    Ty::Func(_)
+                    | Ty::Array(ArrayTy {
+                        len: None,
+                        vla: None,
+                        ..
+                    }) => true,
                     Ty::Struct(id) => !self.structs[*id].complete,
                     _ => false,
                 };
                 if incomplete {
                     return Err(Error::new(loc, "`sizeof` of an incomplete type"));
                 }
-                let n = if word == "sizeof" {
-                    self.size_of(&ty)
+                if word == "sizeof" {
+                    let mut result = self.size_expr(&ty, loc);
+                    // A VLA operand is evaluated (e.g. sizeof *p++); a VM
+                    // pointer operand has fixed size and remains unevaluated.
+                    if ty.runtime_sized()
+                        && let Some(e) = operand
+                    {
+                        result = mk(ExprKind::Comma(self.node(e), self.node(result)), ULONG, loc);
+                    }
+                    Ok(self.capture_vm_bounds(mark, result))
                 } else {
-                    alignment
-                };
-                Ok(mk(ExprKind::Int(n as i64), ULONG, loc))
+                    // Alignment queries never execute bound expressions.
+                    self.take_vm_bounds(mark);
+                    Ok(mk(ExprKind::Int(alignment as i64), ULONG, loc))
+                }
             }
             "++" | "--" => {
                 self.advance();
@@ -538,12 +826,18 @@ impl<'a> Parser<'a> {
                 self.advance();
                 let e = self.cast_expr()?;
                 let e = self.rvalue(e);
-                if !e.ty.is_arith() || (word == "~" && !e.ty.is_integer()) {
+                let vector_ok =
+                    matches!(e.ty, Ty::Vector(elem, _) if word != "~" || elem.is_integer());
+                if !vector_ok && (!e.ty.is_arith() || (word == "~" && !e.ty.is_integer())) {
                     return Err(Error::new(loc, format!("invalid operand to `{word}`")));
                 }
                 let e = self.promote(e);
                 if word == "+" {
-                    return Ok(e);
+                    // Unary plus produces a value even when promotion does
+                    // not change its type. Retain the operand's qualified
+                    // read, but do not expose its lvalue through component
+                    // extraction (e.g. `__real__ (+z) = 1`).
+                    return Ok(mk(ExprKind::Cast(self.node(e)), e.ty, loc));
                 }
                 let op = if word == "-" { UnOp::Neg } else { UnOp::BitNot };
                 let ty = e.ty;
@@ -563,6 +857,12 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn address_of(&mut self, e: Expr<'a>, loc: Loc) -> R<Expr<'a>> {
+        if matches!(e.kind, ExprKind::VectorIndex(..)) {
+            return Err(Error::new(
+                loc,
+                "cannot take the address of a vector element",
+            ));
+        }
         if let ExprKind::Member { bits: Some(_), .. } = e.kind {
             return Err(Error::new(loc, "address of a bit-field"));
         }
@@ -585,17 +885,31 @@ impl<'a> Parser<'a> {
     fn mark_address_taken(&mut self, e: &Expr<'a>) {
         match &e.kind {
             ExprKind::Local(id) => self.mark_in_memory(*id),
-            ExprKind::Member { base, .. } => self.mark_address_taken(base),
+            ExprKind::Member { base, .. } | ExprKind::VectorIndex(base, _) => {
+                self.mark_address_taken(base)
+            }
             _ => {}
         }
     }
 
     fn incdec(&mut self, e: Expr<'a>, inc: bool, prefix: bool, loc: Loc) -> R<Expr<'a>> {
-        self.check_lvalue(&e)?;
+        self.check_modifiable_lvalue(&e)?;
+        if e.ty.is_complex() {
+            return Err(Error::new(
+                loc,
+                "complex increment/decrement is not supported",
+            ));
+        }
         if let Ty::Atomic(&ty) = e.ty {
             // Pointer RMWs operate on the address bits, with a byte step
             // scaled by the pointee's size. Both targets have 64-bit
             // pointers; the IR's add/sub RMWs take integers, not pointers.
+            if ty.variably_modified() {
+                return Err(Error::new(
+                    loc,
+                    "atomic variably modified pointers are not supported yet",
+                ));
+            }
             let (step, rmw_ty) = if ty.is_ptr() {
                 (self.elem_size(&ty, loc)? as i64, LONG)
             } else {
@@ -610,7 +924,14 @@ impl<'a> Parser<'a> {
                 step,
                 mk(ExprKind::Int(5), INT, loc),
             ];
-            let builtin = Builtin::AtomicRmw { op, new: prefix };
+            let builtin = if ty.is_float() {
+                Builtin::AtomicFloatRmw {
+                    op: if inc { BinOp::Add } else { BinOp::Sub },
+                    new: prefix,
+                }
+            } else {
+                Builtin::AtomicRmw { op, new: prefix }
+            };
             let result = mk(ExprKind::Builtin(builtin, self.slice(&args)), rmw_ty, loc);
             return Ok(self.cast(result, ty).with_sugar(sugar));
         }
@@ -650,6 +971,32 @@ impl<'a> Parser<'a> {
             if p == "[" {
                 let idx = self.expr()?;
                 self.expect("]")?;
+                if let Ty::Vector(elem, shape) = e.ty {
+                    if !idx.ty.is_integer() {
+                        return Err(Error::new(loc, "vector subscript requires an integer"));
+                    }
+                    if e.sugar.is_volatile(&self.typedefs) {
+                        return Err(Error::new(
+                            loc,
+                            "volatile vector lane access is not supported",
+                        ));
+                    }
+                    if let Some(n) = crate::eval::eval_int(&idx) {
+                        if n < 0 || n >= i64::from(shape.lanes()) {
+                            return Err(Error::new(loc, "vector subscript is out of range"));
+                        }
+                    }
+                    self.mark_address_taken(&e);
+                    let idx = self.cast(idx, LONG);
+                    let sugar = e.sugar;
+                    e = mk(
+                        ExprKind::VectorIndex(self.node(e), self.node(idx)),
+                        *elem,
+                        loc,
+                    )
+                    .with_sugar(sugar);
+                    continue;
+                }
                 let sum = self.binop("+", e, idx, loc)?;
                 let Some(elem) = sum.ty.pointee().cloned() else {
                     return Err(Error::new(loc, "subscript of a non-pointer"));
@@ -690,6 +1037,9 @@ impl<'a> Parser<'a> {
         if base.sugar.is_volatile(&self.typedefs) {
             sugar = Sugar::Volatile(self.sugar_ref(sugar));
         }
+        if base.sugar.is_const(&self.typedefs) {
+            sugar = Sugar::Const(self.sugar_ref(sugar));
+        }
         Ok(mk(
             ExprKind::Member {
                 base: self.node(base),
@@ -723,7 +1073,7 @@ impl<'a> Parser<'a> {
         };
         for i in 0..args.len() {
             let arg = args[i];
-            args[i] = if let Some(param) = fty.params.get(i) {
+            args[i] = if let Some(param) = fty.params.get(i).filter(|_| fty.prototyped) {
                 self.convert_for_assign(arg, param)?
             } else if fty.variadic || !fty.prototyped {
                 self.default_promote(arg)
@@ -731,13 +1081,23 @@ impl<'a> Parser<'a> {
                 return Err(Error::new(arg.loc, "too many arguments"));
             };
         }
-        if args.len() < fty.params.len() {
+        if fty.prototyped && args.len() < fty.params.len() {
             return Err(Error::new(loc, "too few arguments"));
         }
         if let Ty::Struct(id) = fty.ret
             && !self.structs[id].complete
         {
             return Err(Error::new(loc, "call returns an incomplete type"));
+        }
+        if let ExprKind::Addr(inner) = f.kind
+            && let ExprKind::Global(g) = inner.kind
+            && let Some(fs) = &mut self.fs
+        {
+            fs.direct_calls.push((g, loc));
+            if crate::parse::nonlocal_exit(&self.globals[g]) {
+                fs.cleanup_unsupported_exit
+                    .get_or_insert((loc, "nonlocal exit/returns-twice call"));
+            }
         }
         let returned = f.sugar.function_return(&self.typedefs);
         let sugar = *returned.unqualified(&self.typedefs);
@@ -772,11 +1132,24 @@ impl<'a> Parser<'a> {
                 int_literal_type(value, decimal, unsigned, longs),
                 loc,
             )),
+            Tok::Imaginary { value, single } => {
+                let elem = if single { Ty::Float } else { Ty::Double };
+                let args = [
+                    mk(ExprKind::Float(0.0), elem, loc),
+                    mk(ExprKind::Float(value), elem, loc),
+                ];
+                Ok(mk(
+                    ExprKind::Builtin(Builtin::Complex, self.slice(&args)),
+                    Ty::Complex(self.type_ref(elem)),
+                    loc,
+                ))
+            }
             Tok::Float { value, single } => Ok(mk(
                 ExprKind::Float(value),
                 if single { Ty::Float } else { Ty::Double },
                 loc,
             )),
+            Tok::BadNumber(text) => Err(Error::new(loc, format!("invalid number `{text}`"))),
             Tok::Char(v) => Ok(mk(ExprKind::Int(v), INT, loc)),
             Tok::Str { bytes, wide } => {
                 let mut bytes = bytes.to_vec();
@@ -871,6 +1244,12 @@ impl<'a> Parser<'a> {
         self.expect("(")?;
         let e = self.assign()?;
         let ty = *self.rvalue(e).ty.unatomic();
+        if ty.variably_modified() {
+            return Err(Error::new(
+                loc,
+                "variably modified `_Generic` selectors are not supported yet",
+            ));
+        }
         let (mut chosen, mut default) = (None, None);
         while self.eat(",") {
             let is_default = self.eat("default");
@@ -898,12 +1277,38 @@ impl<'a> Parser<'a> {
         bytes.extend(std::iter::repeat_n(0, unit));
         let len = (bytes.len() / unit) as u64;
         let i = self.add_string(bytes, wide);
-        let elem = if wide { INT } else { CHAR };
+        let elem = if wide {
+            if self.target == Target::Aarch64LinuxGnu {
+                UINT
+            } else {
+                INT
+            }
+        } else if self.target == Target::Aarch64LinuxGnu {
+            Ty::Int(IntKind::UPlainChar)
+        } else {
+            CHAR
+        };
         mk(ExprKind::Str(i), self.array_type(elem, Some(len)), loc)
     }
 
     fn builtin(&mut self, name: &str, loc: Loc) -> R<Expr<'a>> {
         let base = &name["__builtin_".len()..];
+        if base == "complex" {
+            let args = self.builtin_args(2, loc)?;
+            let elem = args[0].ty;
+            if !matches!(elem, Ty::Float | Ty::Double) || elem != args[1].ty {
+                return Err(Error::new(
+                    loc,
+                    "__builtin_complex requires two matching float or double operands",
+                ));
+            }
+            let ty = Ty::Complex(self.type_ref(elem));
+            return Ok(mk(
+                ExprKind::Builtin(Builtin::Complex, self.slice(&args)),
+                ty,
+                loc,
+            ));
+        }
         if let Some(op) = generic_overflow(base) {
             let args = self.builtin_args(3, loc)?;
             if !args[0].ty.is_integer() || !args[1].ty.is_integer() {
@@ -1004,6 +1409,9 @@ impl<'a> Parser<'a> {
                     "va_arg" => {
                         self.expect(",")?;
                         let ty = self.type_name()?;
+                        if ty.is_complex() {
+                            return Err(Error::new(loc, "complex va_arg is not supported"));
+                        }
                         if !ty.is_scalar() {
                             return Err(Error::new(loc, "`va_arg` of a non-scalar"));
                         }
@@ -1323,6 +1731,64 @@ impl<'a> Parser<'a> {
         ))
     }
 
+    /// Validate constant memory orders; runtime values select seq_cst in IR.
+    fn atomic_orders(
+        &self,
+        args: &[Expr<'a>],
+        success: usize,
+        failure: Option<usize>,
+        load: bool,
+        store: bool,
+        loc: Loc,
+    ) -> R<()> {
+        let valid = |n| (0..=5).contains(&n);
+        let order = eval_int(&args[success]);
+        if order.is_some_and(|n| {
+            !valid(n) || (load && matches!(n, 3 | 4)) || (store && matches!(n, 1 | 2 | 4))
+        }) {
+            return Err(Error::new(loc, "invalid atomic memory order"));
+        }
+        if let Some(failure) = failure {
+            let fail = eval_int(&args[failure]);
+            if fail.is_some_and(|n| !valid(n) || matches!(n, 3 | 4)) {
+                return Err(Error::new(loc, "invalid compare-exchange failure order"));
+            }
+            if let (Some(success), Some(fail)) = (order, fail) {
+                let allowed = match success {
+                    0 | 3 => fail == 0,
+                    1 => fail <= 1,
+                    2 | 4 => fail <= 2,
+                    _ => true,
+                };
+                if !allowed {
+                    return Err(Error::new(
+                        loc,
+                        "compare-exchange failure order is stronger than success order",
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn atomic_writable(&self, arg: &Expr<'a>, loc: Loc) -> R<()> {
+        fn is_const(s: &Sugar<'_>, defs: &[TypedefDef<'_>]) -> bool {
+            match s {
+                Sugar::Const(_) => true,
+                Sugar::Volatile(s) | Sugar::Restrict(s) => is_const(s, defs),
+                Sugar::Typedef(i) => is_const(&defs[*i].sugar, defs),
+                _ => false,
+            }
+        }
+        if is_const(&arg.sugar.pointee(&self.typedefs), &self.typedefs) {
+            return Err(Error::new(
+                loc,
+                "atomic destination must point to a non-const object",
+            ));
+        }
+        Ok(())
+    }
+
     /// GCC's `__atomic_load_n` and `__atomic_store_n` on a scalar.
     /// The atomic builtins: GCC's `__atomic_*` (with an order) and
     /// `__sync_*` (seq_cst), and clang's `__c11_atomic_*`, which
@@ -1369,12 +1835,114 @@ impl<'a> Parser<'a> {
                 _ => return None,
             })
         };
+        if name.starts_with("__atomic_")
+            && matches!(op, "load" | "store" | "exchange" | "compare_exchange")
+        {
+            want(
+                &args,
+                match op {
+                    "load" | "store" => 3,
+                    "exchange" => 4,
+                    _ => 6,
+                },
+            )?;
+        }
+        if name.starts_with("__atomic_")
+            && matches!(
+                (op, args.len()),
+                ("load", 3) | ("store", 3) | ("exchange", 4) | ("compare_exchange", 6)
+            )
+        {
+            let ty = args[0]
+                .ty
+                .pointee()
+                .map(|t| *t.unatomic())
+                .ok_or_else(|| Error::new(loc, "generic atomic needs an object pointer"))?;
+            let size = self.types().size(&ty);
+            let align = if let ExprKind::Addr(obj) = args[0].kind {
+                self.expr_alignment(obj)
+            } else {
+                self.type_alignment(&ty, &args[0].sugar.pointee(&self.typedefs))
+            };
+            if self.types().atomic_size(&ty, align).is_none() {
+                return Err(Error::new(
+                    loc,
+                    "generic atomic requires a naturally aligned 1/2/4/8-byte object",
+                ));
+            }
+            let kind = match op {
+                "load" => GenericAtomicOp::Load,
+                "store" => GenericAtomicOp::Store,
+                "exchange" => GenericAtomicOp::Exchange,
+                _ => GenericAtomicOp::CompareExchange,
+            };
+            let buffers = if matches!(
+                kind,
+                GenericAtomicOp::Exchange | GenericAtomicOp::CompareExchange
+            ) {
+                1..3
+            } else {
+                1..2
+            };
+            for i in buffers {
+                if args[i].ty.pointee().copied() != Some(ty) {
+                    return Err(Error::new(
+                        loc,
+                        "generic atomic buffer must point to the object type",
+                    ));
+                }
+            }
+            match kind {
+                GenericAtomicOp::Load => self.atomic_writable(&args[1], loc)?,
+                GenericAtomicOp::Store => self.atomic_writable(&args[0], loc)?,
+                GenericAtomicOp::Exchange => {
+                    self.atomic_writable(&args[0], loc)?;
+                    self.atomic_writable(&args[2], loc)?;
+                }
+                GenericAtomicOp::CompareExchange => {
+                    self.atomic_writable(&args[0], loc)?;
+                    self.atomic_writable(&args[1], loc)?;
+                }
+            }
+            self.atomic_orders(
+                &args,
+                if kind == GenericAtomicOp::CompareExchange {
+                    4
+                } else {
+                    args.len() - 1
+                },
+                if kind == GenericAtomicOp::CompareExchange {
+                    Some(5)
+                } else {
+                    None
+                },
+                kind == GenericAtomicOp::Load,
+                kind == GenericAtomicOp::Store,
+                loc,
+            )?;
+            return Ok(mk(
+                ExprKind::Builtin(
+                    Builtin::AtomicGeneric {
+                        kind,
+                        size: size as u8,
+                    },
+                    self.slice(&args),
+                ),
+                if kind == GenericAtomicOp::CompareExchange {
+                    Ty::Int(IntKind::Bool)
+                } else {
+                    Ty::Void
+                },
+                loc,
+            ));
+        }
         // The operation, and how many arguments it has once in shape.
         let (builtin, n) = match op {
             "synchronize" | "thread_fence" | "signal_fence" => {
                 // A signal fence only has to stop the compiler; a real
                 // fence is stronger than needed but correct.
                 want(&args, 1)?;
+                self.atomic_orders(&args, 0, None, false, false, loc)?;
                 return Ok(mk(
                     ExprKind::Builtin(Builtin::Fence, self.slice(&args)),
                     Ty::Void,
@@ -1382,11 +1950,33 @@ impl<'a> Parser<'a> {
                 ));
             }
             "always_lock_free" | "is_lock_free" => {
-                let size = args.first().and_then(eval_int);
-                let free = matches!(size, Some(1 | 2 | 4 | 8));
+                let c11 = name.starts_with("__c11_");
+                want(&args, if c11 { 1 } else { 2 })?;
+                let size = eval_int(&args[0]);
+                let align = if c11 {
+                    size.unwrap_or(0).max(0) as u64
+                } else if let ExprKind::Addr(obj) = args[1].kind {
+                    self.expr_alignment(obj)
+                } else {
+                    args[1]
+                        .ty
+                        .pointee()
+                        .map(|t| self.type_alignment(t, &args[1].sugar.pointee(&self.typedefs)))
+                        .unwrap_or(1)
+                };
+                let free = matches!(size, Some(1 | 2 | 4 | 8))
+                    && (c11
+                        || eval_int(&args[1]) == Some(0)
+                        || size.is_some_and(|n| align >= n as u64));
+                let result = mk(ExprKind::Int(i64::from(free)), Ty::Int(IntKind::Bool), loc);
+                if op == "always_lock_free" {
+                    return Ok(result);
+                }
+                let mut evaluated = vec![result];
+                evaluated.extend(args);
                 return Ok(mk(
-                    ExprKind::Int(i64::from(free)),
-                    Ty::Int(IntKind::Bool),
+                    ExprKind::Builtin(Builtin::Hint, self.slice(&evaluated)),
+                    result.ty,
                     loc,
                 ));
             }
@@ -1411,15 +2001,20 @@ impl<'a> Parser<'a> {
                 // failure order is never stronger, so the success one does.
                 let weak_arg = op == "compare_exchange_n";
                 want(&args, if weak_arg { 6 } else { 5 })?;
-                args.truncate(if weak_arg { 5 } else { 4 });
                 if weak_arg {
-                    args.remove(3);
+                    let weak = args.remove(3);
+                    args.push(weak);
                 }
-                (Builtin::AtomicCompareExchange, 4)
+                (Builtin::AtomicCompareExchange, args.len())
             }
             "test_and_set" | "clear" => {
                 // On a byte: set to 1 (giving whether it was set) or 0.
                 want(&args, 2)?;
+                if !args[0].ty.is_ptr() {
+                    return Err(Error::new(loc, "atomic flag operation needs a pointer"));
+                }
+                self.atomic_writable(&args[0], loc)?;
+                self.atomic_orders(&args, 1, None, false, op == "clear", loc)?;
                 let ptr = args.remove(0);
                 let ty = self.ptr_type(Ty::Int(IntKind::UChar));
                 let ptr = self.cast(ptr, ty);
@@ -1473,17 +2068,69 @@ impl<'a> Parser<'a> {
             }
         };
         want(&args, n)?;
+        let pointee = args[0].ty.pointee();
+        if name.starts_with("__c11_atomic_") {
+            if !matches!(pointee, Some(Ty::Atomic(_))) {
+                return Err(Error::new(
+                    loc,
+                    "C11 atomic builtin needs a pointer to an _Atomic object",
+                ));
+            }
+        } else if !pointee.is_some_and(|t| t.unatomic().is_integer() || t.unatomic().is_ptr()) {
+            return Err(Error::new(
+                loc,
+                "scalar GCC atomic builtin needs an integer or pointer object",
+            ));
+        }
         let Some(ty) = args[0].ty.pointee().map(|t| *t.unatomic()) else {
             return Err(Error::new(loc, format!("`{name}` needs a pointer")));
         };
-        if !(ty.is_integer() || ty.is_ptr()) {
+        if !(ty.is_integer() || ty.is_ptr() || matches!(ty, Ty::Float | Ty::Double))
+            || !matches!(self.types().size(&ty), 1 | 2 | 4 | 8)
+        {
             return Err(Error::new(
                 loc,
-                format!("`{name}` is only supported on integers and pointers"),
+                format!("`{name}` requires a supported 1/2/4/8-byte scalar"),
             ));
+        }
+        self.atomic_orders(
+            &args,
+            if builtin == Builtin::AtomicCompareExchange {
+                3
+            } else {
+                args.len() - 1
+            },
+            if builtin == Builtin::AtomicCompareExchange {
+                Some(4)
+            } else {
+                None
+            },
+            builtin == Builtin::AtomicLoad,
+            builtin == Builtin::AtomicStore,
+            loc,
+        )?;
+        if builtin != Builtin::AtomicLoad {
+            self.atomic_writable(&args[0], loc)?;
+        }
+        if builtin == Builtin::AtomicCompareExchange {
+            self.atomic_writable(&args[1], loc)?;
         }
         // Arithmetic on a pointer is on its address, in bytes.
         let arith = matches!(builtin, Builtin::AtomicRmw { op, .. } if op != RmwOp::Xchg);
+        if arith && ty.is_float() {
+            return Err(Error::new(
+                loc,
+                "floating fetch arithmetic builtin is not supported; use C compound arithmetic",
+            ));
+        }
+        let align = if let ExprKind::Addr(obj) = args[0].kind {
+            self.expr_alignment(obj)
+        } else {
+            self.type_alignment(&ty, &args[0].sugar.pointee(&self.typedefs))
+        };
+        if self.types().atomic_size(&ty, align).is_none() {
+            return Err(Error::new(loc, "atomic object is not naturally aligned"));
+        }
         let value_ty = if arith && ty.is_ptr() { ULONG } else { ty };
         let pointee = ty;
         let value_args = match builtin {
@@ -1496,7 +2143,7 @@ impl<'a> Parser<'a> {
             let v = args[i];
             args[i] = self.convert_for_assign(v, &value_ty)?;
         }
-        if builtin == Builtin::AtomicCompareExchange && !args[1].ty.is_ptr() {
+        if builtin == Builtin::AtomicCompareExchange && args[1].ty.pointee().copied() != Some(ty) {
             return Err(Error::new(
                 loc,
                 format!("`{name}` needs a pointer to the expected value"),
@@ -1550,7 +2197,7 @@ impl<'a> Parser<'a> {
         let mut sets = Vec::new();
         let mut operands = Vec::new();
         for arg in args.drain(first..) {
-            if !arg.ty.is_arith() {
+            if !arg.ty.is_arith() || arg.ty.is_complex() {
                 return Err(Error::new(
                     loc,
                     format!("`__builtin_{base}` of a non-number"),
@@ -1684,6 +2331,12 @@ impl<'a> Parser<'a> {
     /// `(type){...}`: an unnamed object, local in a function and static
     /// at file scope.
     fn compound_literal(&mut self, ty: Ty<'a>, sugar: Sugar<'a>, loc: Loc) -> R<Expr<'a>> {
+        if ty.variably_modified() {
+            return Err(Error::new(
+                loc,
+                "variably modified compound literals are not supported",
+            ));
+        }
         let (init, ty) = self.initializer(&ty)?;
         if self.fs.is_none() {
             let name = self.unique_name("__compound_literal");
@@ -1715,7 +2368,7 @@ impl<'a> Parser<'a> {
     /// and a `va_list` parameter already holds that.
     fn va_list_addr(&mut self, ap: Expr<'a>) -> Expr<'a> {
         match self.target {
-            Target::Aarch64AppleDarwin => {
+            Target::Aarch64AppleDarwin | Target::Aarch64LinuxGnu => {
                 self.mark_address_taken(&ap);
                 let ty = self.ptr_type(ap.ty);
                 let loc = ap.loc;
@@ -1773,7 +2426,8 @@ impl<'a> Parser<'a> {
                 let ty = Ty::Ptr(&a.elem);
                 let loc = e.loc;
                 self.mark_address_taken(&e);
-                let sugar = Sugar::Ptr(self.sugar_ref(e.sugar.pointee(&self.typedefs)));
+                let sugar =
+                    Sugar::Ptr(self.sugar_ref(e.sugar.array_element(&self.typedefs, self.arena)));
                 mk(ExprKind::Addr(self.node(e)), ty, loc).with_sugar(sugar)
             }
             Ty::Func(_) => {
@@ -1813,7 +2467,7 @@ impl<'a> Parser<'a> {
     /// Conversion as if by assignment, to parameters and returns too.
     pub(crate) fn convert_for_assign(&mut self, e: Expr<'a>, ty: &Ty<'a>) -> R<Expr<'a>> {
         let e = self.rvalue(e);
-        if ty.is_struct() {
+        if ty.is_struct() || ty.is_vector() {
             if e.ty != *ty {
                 return Err(Error::new(e.loc, "incompatible struct types"));
             }
@@ -1822,7 +2476,9 @@ impl<'a> Parser<'a> {
         if !ty.is_scalar() || !e.ty.is_scalar() {
             return Err(Error::new(e.loc, "incompatible types in assignment"));
         }
-        if (ty.is_ptr() && e.ty.is_float()) || (ty.is_float() && e.ty.is_ptr()) {
+        if (ty.is_ptr() && (e.ty.is_float() || e.ty.is_complex()))
+            || ((ty.is_float() || ty.is_complex()) && e.ty.is_ptr())
+        {
             return Err(Error::new(e.loc, "incompatible types in assignment"));
         }
         Ok(self.cast(e, *ty))
@@ -1952,6 +2608,17 @@ pub(crate) fn promoted<'a>(ty: &Ty<'a>) -> Ty<'a> {
 
 /// The type the usual arithmetic conversions give two arithmetic types.
 pub(crate) fn usual<'a>(a: &Ty<'a>, b: &Ty<'a>) -> Ty<'a> {
+    if a.is_complex() || b.is_complex() {
+        let component = |t: &Ty<'a>| match t {
+            Ty::Complex(e) => **e,
+            _ => *t,
+        };
+        return if component(a) == Ty::Double || component(b) == Ty::Double {
+            Ty::Complex(&Ty::Double)
+        } else {
+            Ty::Complex(&Ty::Float)
+        };
+    }
     if *a == Ty::Double || *b == Ty::Double {
         return Ty::Double;
     }

@@ -58,7 +58,7 @@ fn extended_reductions_compile_to_both_target_objects() {
                     std::fs::write(evidence.join(format!("{name}.s")), &text).unwrap();
                     std::fs::write(evidence.join(format!("{name}.keel")), m.to_string()).unwrap();
                     match target {
-                        Target::Aarch64AppleDarwin => {
+                        Target::Aarch64AppleDarwin | Target::Aarch64LinuxGnu => {
                             assert!(text.contains(".2d"), "{text}");
                             assert_eq!(
                                 keel_asm::assemble_object(&text).unwrap(),

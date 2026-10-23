@@ -37,6 +37,11 @@ fn run(module: &mut Module) -> bool {
         }
         for (_, i) in f.layout_insts() {
             match f.inst_data(i) {
+                InstData::Call { func, args } | InstData::Invoke { func, args, .. }
+                    if args.has_explicit_abi() => { blocked.insert(f.callee(*func).name.clone()); }
+                _ => {}
+            }
+            match f.inst_data(i) {
                 // Arbitrary assembly may refer to local symbols textually.
                 InstData::InlineAsm { .. } => return false,
                 InstData::SymbolAddr {
@@ -60,8 +65,15 @@ fn run(module: &mut Module) -> bool {
     let mut signatures = FxHashMap::default();
     for f in &mut module.functions {
         if !f.local
+            || f.attrs.constructor
+            || f.attrs.destructor
+            || f.attrs.used
+            || f.attrs.retain
+            || f.attrs.section.is_some()
+            || f.attrs.weak
             || f.weak_odr
             || f.sig.cc != CallConv::C
+            || f.sig.x86_vector_abi.is_some()
             || f.sig.variadic
             || f.sig.returns_twice
             || f.sig.returns.len() > 1

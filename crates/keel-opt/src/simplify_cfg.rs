@@ -237,9 +237,7 @@ pub(crate) fn merge_small_blocks(func: &mut Function, max_insts: usize) -> bool 
             // their outgoing edges (including edges back to pred). The removed
             // block cannot have a self-edge: its sole incoming edge was jump.
             edges[block.index()] -= 1;
-            for inst in func.block_insts(block).to_vec() {
-                func.move_inst(inst, keel_ir::InsertPoint::End(pred));
-            }
+            func.move_insts_to_end(block, 0, pred);
             merged.push(block);
             changed = true;
         }

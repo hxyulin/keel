@@ -99,6 +99,10 @@ fn programs() {
         let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
         let reference = out_dir.join(format!("{stem}-clang"));
         run(Command::new("clang")
+            .args(
+                cfg!(all(target_arch = "aarch64", target_os = "linux"))
+                    .then_some("--rtlib=compiler-rt"),
+            )
             .args(["-std=c11", "-w", "-o"])
             .arg(&reference)
             .arg(path)
@@ -603,7 +607,9 @@ fn debugtrap_preserves_continuation_on_both_targets() {
             assert!(text.contains("return "), "{text}");
             let asm = keel_codegen::compile(&module, target).unwrap();
             let breakpoint = match target {
-                keel_ir::Target::Aarch64AppleDarwin => "brk\t#61440",
+                keel_ir::Target::Aarch64AppleDarwin | keel_ir::Target::Aarch64LinuxGnu => {
+                    "brk\t#61440"
+                }
                 keel_ir::Target::X86_64LinuxGnu => "int3",
             };
             assert!(asm.contains(breakpoint), "{asm}");
@@ -751,16 +757,12 @@ fn alignment_abi_limits_are_diagnosed() {
 fn rejected() {
     let cases = [
         (
-            "int f(int n) { int a[n]; return 0; }",
-            "1:22: error: variable-length arrays",
+            "int f(x) { return x; }",
+            "1:7: error: old-style parameter needs an explicit type declaration",
         ),
         (
-            "int f(x) int x; { return x; }",
-            "1:7: error: old-style parameter lists",
-        ),
-        (
-            "_Complex double z;",
-            "1:17: error: `z`: objects of type `_Complex` are not supported",
+            "_Complex long double z;",
+            "1:22: error: `z`: objects of type `_Complex long double` are not supported",
         ),
         (
             "int f(void) { return g(); }",
@@ -785,10 +787,6 @@ fn rejected() {
         (
             "int f(void) { return 1 + ; }",
             "1:26: error: expected an expression, found `;`",
-        ),
-        (
-            "struct s { _Atomic double d; };",
-            "1:12: error: `_Atomic` is only supported on integers and pointers",
         ),
         (
             "struct s; void f(_Atomic(struct s *) *p) { (*p)++; }",

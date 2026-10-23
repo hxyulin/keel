@@ -387,7 +387,7 @@ impl Analyze<'_> {
                     return None;
                 };
                 let predicate_ty = self.f.value_type(operands[0]);
-                let predicate_shape = VectorType::ALL
+                let predicate_shape = VectorType::ALL_128
                     .into_iter()
                     .find(|s| s.lane_type() == predicate_ty)?;
                 if self.f.inst_block(compare) != self.c.body
@@ -440,7 +440,7 @@ impl Analyze<'_> {
                 }) =>
             {
                 let source = self.f.value_type(arg);
-                let source_shape = VectorType::ALL
+                let source_shape = VectorType::ALL_128
                     .into_iter()
                     .find(|s| s.lane_type() == source)?;
                 if !matches!(source, Type::I8 | Type::I16 | Type::I32)
@@ -678,7 +678,7 @@ fn analyze(
             value,
         });
     }
-    let shape = VectorType::ALL
+    let shape = VectorType::ALL_128
         .into_iter()
         .find(|s| s.lane_type() == f.value_type(value))?;
     let unsigned = |n: i64| {
@@ -845,7 +845,7 @@ fn reduction_load(
             addr,
         },
     );
-    let packed_shape = VectorType::ALL
+    let packed_shape = VectorType::ALL_128
         .into_iter()
         .find(|s| s.lane_type() == packed_ty)
         .unwrap();
@@ -1318,11 +1318,15 @@ fn reduce_body(
                 },
             );
         }
-        let mut scalar = initial;
-        for lane in 0..c.shape.lanes() {
-            let part = emit(f, finish, D::VectorExtract { arg: sum, lane });
-            scalar = bin(f, finish, B::Iadd, scalar, part);
-        }
+        let lanes = emit(
+            f,
+            finish,
+            D::VectorReduce {
+                op: keel_ir::VectorReduceOp::Add,
+                arg: sum,
+            },
+        );
+        let scalar = bin(f, finish, B::Iadd, initial, lanes);
         tail.push(scalar);
     }
     jump(f, finish, c.header, tail);

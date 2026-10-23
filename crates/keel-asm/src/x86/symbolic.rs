@@ -3,11 +3,11 @@
 //! layout passes copy the cached encoding and fixups. A compact operand
 //! record with interned symbols rebuilds the instruction for those cases.
 use super::{Expr, SymId, Symbols, encode};
-use smallvec::SmallVec;
 use keel_asm_ir::{
     Expression,
     x86::{self, Address, Memory, Modifier, Operand, Register, RegisterClass},
 };
+use smallvec::SmallVec;
 
 /// A fixup of a cached encoding, relative to the instruction's start, in 24
 /// bytes: symbols are ids (or [`NONE`]) and the addend of an encoded field
@@ -106,10 +106,14 @@ impl Cache {
             opcode: i.opcode,
             operands: NONE,
         };
-        self.fill(&mut s, i, &mut |name| match seen.iter().find(|(n, _)| *n == name) {
-            Some(&(_, id)) => id,
-            None => symbols.intern(name),
-        });
+        self.fill(
+            &mut s,
+            i,
+            &mut |name| match seen.iter().find(|(n, _)| *n == name) {
+                Some(&(_, id)) => id,
+                None => symbols.intern(name),
+            },
+        );
         // Folding is checked against the cached fixups: that needs exactly
         // one fixup, in order, for every operand that may fold. Compare
         // symbols only: the encoder adjusts PC-relative constants.
@@ -259,7 +263,10 @@ fn register(out: &mut Vec<u8>, r: &Register) {
         RegisterClass::Gpr => 0,
         RegisterClass::Xmm => 1,
         RegisterClass::X87 => 2,
+        RegisterClass::Mmx => 4,
         RegisterClass::Rip => 3,
+        RegisterClass::Ymm => 5,
+        RegisterClass::Segment => 6,
     });
     out.push(r.number);
     out.extend_from_slice(&r.width.to_le_bytes());
@@ -307,6 +314,9 @@ impl Reader<'_> {
             0 => RegisterClass::Gpr,
             1 => RegisterClass::Xmm,
             2 => RegisterClass::X87,
+            4 => RegisterClass::Mmx,
+            5 => RegisterClass::Ymm,
+            6 => RegisterClass::Segment,
             _ => RegisterClass::Rip,
         };
         let number = self.u8();

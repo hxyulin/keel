@@ -1,13 +1,15 @@
 //! Native x86-64 ELF assembler. Intel/AT&T source is parsed once into `keel-asm-ir`.
 //! Parsed items are laid out until optimistic short branches fit their final layout.
+mod arm;
 mod dwarf;
 mod encode;
 mod metadata;
+mod relax;
 mod sections;
 mod symbolic;
 use crate::Error;
 use crate::fxhash::{FxHashSet, FxHasher};
-pub use keel_asm_ir::x86::{Features, Syntax};
+pub use keel_asm_ir::x86::{CpuLevel, Features, Syntax};
 use keel_asm_ir::{
     Directive, Expression, Item, Program,
     x86::{self, Address, Modifier},
@@ -101,9 +103,7 @@ impl Names {
         let mut i = hash as usize & mask;
         loop {
             let slot = self.slots[i];
-            if slot == 0
-                || ((slot >> 32) as u32 == hash && self.name(slot as u32 - 1) == name)
-            {
+            if slot == 0 || ((slot >> 32) as u32 == hash && self.name(slot as u32 - 1) == name) {
                 return i;
             }
             i = (i + 1) & mask;
@@ -270,6 +270,7 @@ struct Fix {
 }
 #[derive(Default)]
 struct Assembler {
+    arm: Option<crate::TargetFeatures>,
     sections: Vec<Section>,
     symbols: Symbols,
     /// Aliases declared so far in this pass.
@@ -350,6 +351,11 @@ impl ProgramAssembler {
             error: None,
         }
     }
+    pub(crate) fn new_aarch64(features: crate::TargetFeatures) -> Self {
+        let mut out = Self::new(x86::Features::default());
+        out.items.arm = Some(features);
+        out
+    }
     pub fn push(&mut self, program: Program) {
         if self.error.is_some() {
             return;
@@ -360,7 +366,11 @@ impl ProgramAssembler {
             self.next_line += 1;
             match item {
                 Item::Text(source) => {
-                    if let Err(e) = items.parse(&source, line) {
+                    if let Err(e) = if items.arm.is_some() {
+                        arm::parse(items, &source, line)
+                    } else {
+                        items.parse(&source, line)
+                    } {
                         self.error = Some(e);
                         return;
                     }
@@ -383,24 +393,62 @@ enum Entry {
     /// Consecutive symbol-free instructions, encoded once at collection: their
     /// bytes are `encoded[previous run end..end]`. `line` is the first one's;
     /// only it can fail layout, as the section cannot change within a run.
-    Encoded { end: u32, line: u32 },
+    Encoded {
+        end: u32,
+        line: u32,
+    },
     /// An instruction with symbolic operands: `symbolic.entries[index]`.
-    Symbolic { index: u32, line: u32 },
-    Label { sym: SymId, line: u32 },
+    Symbolic {
+        index: u32,
+        line: u32,
+    },
+    Label {
+        sym: SymId,
+        line: u32,
+    },
     /// A single, in-range literal data operand, decoded once. Keep bytes rather
     /// than i128 so this variant does not increase Entry's alignment or size.
-    LiteralData { bytes: [u8; 8], width: u8, line: u32 },
+    LiteralData {
+        bytes: [u8; 8],
+        width: u8,
+        line: u32,
+    },
     /// Directive lines from explicit text (`texts[index]`), applied in order.
-    Text { index: u32, line: u32 },
-    Align { power: u8, line: u32 },
+    Text {
+        index: u32,
+        line: u32,
+    },
+    Align {
+        power: u8,
+        line: u32,
+    },
     /// A register-only CFI directive, packed by [`pack_cfi`].
-    Cfi { op: u8, register: u8, value: u64, line: u32 },
+    Cfi {
+        op: u8,
+        register: u8,
+        value: u64,
+        line: u32,
+    },
     /// ELF STT_FUNC when `function`, otherwise STT_OBJECT.
-    Type { sym: SymId, function: bool, line: u32 },
+    Type {
+        sym: SymId,
+        function: bool,
+        line: u32,
+    },
     /// `sizes[index]`: a symbol and its size expression.
-    Size { index: u32, line: u32 },
+    Size {
+        index: u32,
+        line: u32,
+    },
+    ArmWord {
+        index: u32,
+        line: u32,
+    },
     /// Any other shared item: `items[index]`.
-    Item { index: u32, line: u32 },
+    Item {
+        index: u32,
+        line: u32,
+    },
 }
 const _: () = assert!(std::mem::size_of::<Entry>() == 16);
 /// A register-only CFI directive as an operation, register and value.
@@ -445,6 +493,8 @@ fn index32(len: usize) -> u32 {
 /// operands for each pass would cost far more than their bytes. Symbolic
 /// instructions keep a cached encoding and a compact operand record.
 struct Items {
+    arm: Option<crate::TargetFeatures>,
+    arm_words: Vec<crate::parser::elf::Word>,
     entries: Vec<Entry>,
     encoded: Vec<u8>,
     symbolic: symbolic::Cache,
@@ -462,6 +512,8 @@ struct Items {
 impl Items {
     fn new(features: x86::Features) -> Self {
         Self {
+            arm: None,
+            arm_words: Vec::new(),
             entries: Vec::new(),
             encoded: Vec::new(),
             symbolic: symbolic::Cache::default(),
@@ -522,7 +574,9 @@ impl Items {
                 line,
             },
             Item::Directive(Directive::Align(power)) => Entry::Align { power, line },
-            Item::Directive(Directive::Cfi(cfi)) if let Some((op, register, value)) = pack_cfi(&cfi) => {
+            Item::Directive(Directive::Cfi(cfi))
+                if let Some((op, register, value)) = pack_cfi(&cfi) =>
+            {
                 Entry::Cfi {
                     op,
                     register,
@@ -565,7 +619,7 @@ impl Items {
     /// Encode a symbol-free instruction into the current run, if possible.
     /// Otherwise the caller retains it for per-pass layout.
     fn encode(&mut self, i: &x86::Instruction, line: usize) -> bool {
-        let required = i.opcode.required_features();
+        let required = i.required_features();
         if !self.features.contains(required) {
             self.unsupported.get_or_insert_with(|| {
                 Error::new(
@@ -609,6 +663,7 @@ impl Items {
         true
     }
     fn finish(self) -> Result<Self, Error> {
+        self.features.validate().map_err(|message| Error::new(1, message))?;
         match self.unsupported {
             Some(e) => Err(e),
             None => Ok(self),
@@ -723,15 +778,19 @@ fn assemble_items_inner<const PROFILE: bool>(
     // previous pass's (cleared) tables, and size their sections from it.
     let mut recycled = (std::mem::take(&mut items.symbols), Vec::new());
     let mut size_hints = Vec::new();
+    let mut first = true;
     loop {
         let start = PROFILE.then(std::time::Instant::now);
         let mut a = Assembler::new()?;
+        a.arm = items.arm;
         (a.symbols, a.fixes) = std::mem::take(&mut recycled);
         a.leb_widths = leb_widths.clone();
         a.pref_powers = pref_powers.clone();
         a.size_hints = std::mem::take(&mut size_hints);
         let mut branches = Vec::new();
         let mut run = 0;
+        // Only the first pass records positions for offset-only relaxation.
+        let mut trace = first.then(|| relax::Trace::new(&items.symbolic, a.symbols.names.len()));
         for entry in &items.entries {
             let (result, line) = match *entry {
                 Entry::Encoded { end, line } => {
@@ -743,19 +802,39 @@ fn assemble_items_inner<const PROFILE: bool>(
                     if items.symbolic.entries[index as usize].short {
                         branches.push((index, a.fixes.len()));
                     }
+                    if let Some(trace) = &mut trace {
+                        trace.symbolic(&items.symbolic, index, a.current, a.offset());
+                    }
                     (a.symbolic(&items.symbolic, index, line as usize), line)
                 }
-                Entry::Label { sym, line } => (a.label(sym), line),
+                Entry::Label { sym, line } => {
+                    if let Some(trace) = &mut trace {
+                        trace.label(sym, a.current, a.offset());
+                    }
+                    (a.label(sym), line)
+                }
                 Entry::LiteralData { bytes, width, line } => {
                     (a.data_bytes(&bytes[..usize::from(width)]), line)
                 }
-                Entry::Text { index, line } => (
-                    items.texts[index as usize]
-                        .lines()
-                        .try_for_each(|directive| a.directive(directive, line as usize)),
-                    line,
-                ),
-                Entry::Align { power, line } => (a.align(power.into(), None), line),
+                Entry::Text { index, line } => {
+                    if let Some(trace) = &mut trace {
+                        trace.invalidate();
+                    }
+                    (
+                        items.texts[index as usize]
+                            .lines()
+                            .try_for_each(|directive| a.directive(directive, line as usize)),
+                        line,
+                    )
+                }
+                Entry::Align { power, line } => {
+                    let at = a.offset();
+                    let result = a.align(power.into(), None);
+                    if let Some(trace) = &mut trace {
+                        trace.align(power, a.current, at, a.offset() - at);
+                    }
+                    (result, line)
+                }
                 Entry::Cfi {
                     op,
                     register,
@@ -781,6 +860,10 @@ fn assemble_items_inner<const PROFILE: bool>(
                     let (sym, e) = items.sizes[index as usize];
                     (a.size(sym, e), line)
                 }
+                Entry::ArmWord { index, line } => (
+                    arm::word(&mut a, &items.arm_words[index as usize], line as usize),
+                    line,
+                ),
                 Entry::Item { index, line } => {
                     (a.item(&items.items[index as usize], line as usize), line)
                 }
@@ -798,11 +881,10 @@ fn assemble_items_inner<const PROFILE: bool>(
         for (index, fix) in branches {
             let f = &a.fixes[fix];
             let fits = a.local_symbol(f.expr.add.unwrap(), 0)
-                && a.try_eval(&f.expr, 0)
-                    .is_some_and(|(section, value)| {
-                        section == Some(f.section)
-                            && (-128..=127).contains(&(value - i128::from(f.offset)))
-                    });
+                && a.try_eval(&f.expr, 0).is_some_and(|(section, value)| {
+                    section == Some(f.section)
+                        && (-128..=127).contains(&(value - i128::from(f.offset)))
+                });
             if !fits {
                 items.symbolic.widen(index, &mut a.symbols);
                 changed += 1;
@@ -878,6 +960,15 @@ fn assemble_items_inner<const PROFILE: bool>(
             }
             return Ok(object);
         }
+        // Settle the remaining relaxation over the first pass's positions,
+        // leaving one layout pass to confirm it, rather than a pass per step.
+        if changed != 0
+            && !variable_changed
+            && let Some(trace) = trace
+        {
+            relax::relax(&trace, &mut a, &mut items.symbolic);
+        }
+        first = false;
         if changed != 0 {
             checkpoint = None;
             period = 1;
@@ -935,8 +1026,7 @@ impl Assembler {
                 && !s.weak
                 && s.alias.as_ref().is_none_or(|e| {
                     e.add.is_none_or(|n| self.local_symbol(n, depth + 1))
-                        && e.subtract
-                            .is_none_or(|n| self.local_symbol(n, depth + 1))
+                        && e.subtract.is_none_or(|n| self.local_symbol(n, depth + 1))
                 })
         })
     }
@@ -947,6 +1037,7 @@ impl Assembler {
                 self.label(id)
             }
             Item::Directive(d) => self.shared_directive(d, line),
+            _ if self.arm.is_some() => arm::item(self, item, line),
             _ => Err("AArch64 instruction/branch in x86 program".into()),
         }
     }
@@ -986,15 +1077,17 @@ impl Assembler {
         let nobits = nobits || matches!(name, ".bss" | ".tbss");
         let section_type = section_type.unwrap_or(if nobits {
             8
-        } else if name == ".eh_frame" {
+        } else if name == ".eh_frame" && self.arm.is_none() {
             0x7000_0001
         } else {
             1
         });
-        if let Some(i) = self
-            .sections
-            .iter()
-            .position(|s| s.name == name && s.group == group && s.unique == unique)
+        // GNU as gives retained and ordinary contributions distinct input
+        // sections, even when their names match (including the default .text).
+        if let Some(i) = self.sections.iter().position(|s| {
+            s.name == name && s.group == group && s.unique == unique
+                && flags.is_none_or(|f| (s.flags ^ f) & 0x200000 == 0)
+        })
         {
             let s = &self.sections[i];
             // A bare .section name switches back without redeclaring attributes.
@@ -1149,10 +1242,7 @@ impl Assembler {
                     self.try_eval(&e, 0)
                 }
             {
-                if matches!(
-                    i.opcode,
-                    x86::Opcode::Call | x86::Opcode::Jmp | x86::Opcode::Jcc(_)
-                ) && matches!(operand, x86::Operand::Immediate(_))
+                if i.opcode.is_direct_branch() && matches!(operand, x86::Operand::Immediate(_))
                 {
                     return Err("direct branch target cannot be absolute".into());
                 }
@@ -1243,6 +1333,15 @@ impl Assembler {
                 let e = self.symbols.expr(&address.expression);
                 self.integer(*width, e, address.modifier, line)
             }
+            Directive::ElfLifecycleArray { fini } => self.section_full(
+                if *fini { ".fini_array" } else { ".init_array" },
+                Some(3),
+                false,
+                0,
+                None,
+                Some(if *fini { 15 } else { 14 }),
+                None,
+            ),
             Directive::ElfSection {
                 name,
                 flags,
@@ -1262,6 +1361,19 @@ impl Assembler {
                 } else {
                     SymbolKind::Data
                 };
+                Ok(())
+            }
+            Directive::ElfWeak(name) => {
+                let id = self.symbols.intern(name);
+                let s = self.symbols.entry(id);
+                s.weak = true;
+                s.local = false;
+                s.global = true;
+                Ok(())
+            }
+            Directive::ElfHidden(name) => {
+                let id = self.symbols.intern(name);
+                self.symbols.entry(id).hidden = true;
                 Ok(())
             }
             Directive::Size { name, expression } => {
@@ -1396,6 +1508,17 @@ impl Assembler {
         Ok(())
     }
     fn nops(&mut self, mut n: u64) -> Result<(), String> {
+        if self.arm.is_some() {
+            // Zero bytes before the next aligned instruction, then A64 NOPs.
+            let prefix = ((4 - self.offset() % 4) % 4).min(n);
+            self.zero(prefix, 0)?;
+            n -= prefix;
+            while n >= 4 {
+                self.bytes(&0xd503201fu32.to_le_bytes())?;
+                n -= 4;
+            }
+            return self.zero(n, 0);
+        }
         // LLVM's generic x86-64 backend uses NOPs of at most ten bytes.
         const NOPS: [&[u8]; 11] = [
             &[],
@@ -1761,12 +1884,7 @@ impl Assembler {
         if depth > 64 {
             return Err("cyclic or excessively nested symbol alias".into());
         }
-        let undefined = || {
-            format!(
-                "undefined symbol `{}` in expression",
-                self.symbols.name(id)
-            )
-        };
+        let undefined = || format!("undefined symbol `{}` in expression", self.symbols.name(id));
         let s = self.symbols.get(id).ok_or_else(undefined)?;
         if let Some(e) = &s.alias {
             return self.eval(e, depth + 1);
@@ -1837,6 +1955,9 @@ impl Assembler {
                     sym.section = Some(i);
                     sym.kind = SymbolKind::Section;
                 }
+                if self.arm.is_some() && matches!(f.kind, 541 | 542) {
+                    sym.kind = SymbolKind::Tls;
+                }
                 if matches!(
                     f.modifier,
                     Modifier::TpOff | Modifier::GotTpOff | Modifier::DtpOff
@@ -1884,7 +2005,15 @@ impl Assembler {
             let id = self.symbols.intern(signature);
             self.symbols.entry(id);
         }
-        let mut object = Object::new(BinaryFormat::Elf, Architecture::X86_64, Endianness::Little);
+        let mut object = Object::new(
+            BinaryFormat::Elf,
+            if self.arm.is_some() {
+                Architecture::Aarch64
+            } else {
+                Architecture::X86_64
+            },
+            Endianness::Little,
+        );
         for file in &self.source_files {
             object.add_file_symbol(file.clone());
         }
@@ -1935,6 +2064,7 @@ impl Assembler {
                     })
                 });
                 merge_target
+                    || self.arm.is_some() && matches!(f.kind, 311 | 312 | 541 | 542)
                     || f.modifier != Modifier::None
                     || pc_relative
                         && f.expr.add.is_some_and(|id| {
@@ -2075,6 +2205,17 @@ impl Assembler {
                 .add
                 .ok_or_else(|| Error::new(f.line, "relocation requires a positive symbol"))?;
             let defined = self.try_eval_symbol(name, 0);
+            if self.arm.is_some()
+                && matches!(kind, 273 | 274 | 279 | 280 | 282 | 283)
+                && defined.is_some_and(|(s, _)| s == Some(f.section))
+                && self.local_symbol(name, 0)
+            {
+                let delta = defined.unwrap().1 + addend - i128::from(f.offset);
+                let bytes =
+                    &mut self.sections[f.section].data[f.offset as usize..f.offset as usize + 4];
+                arm::resolve(kind, delta, bytes).map_err(|e| Error::new(f.line, e))?;
+                continue;
+            }
             let absolute = if expr.subtract.is_some() {
                 self.try_eval(expr, 0)
                     .filter(|(s, _)| s.is_none())
@@ -2150,7 +2291,13 @@ impl Assembler {
                         symbol,
                         addend: i64::try_from(addend)
                             .map_err(|_| Error::new(f.line, "relocation addend exceeds i64"))?,
-                        flags: RelocationFlags::Elf { r_type: kind },
+                        flags: RelocationFlags::Elf {
+                            r_type: if self.arm.is_some() {
+                                arm::relocation(kind).map_err(|e| Error::new(f.line, e))?
+                            } else {
+                                kind
+                            },
+                        },
                     },
                 )
                 .map_err(|e| Error::new(f.line, e.to_string()))?;

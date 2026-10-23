@@ -15,7 +15,9 @@
 //!
 //! `debug_info` checks the debug info in lldb.
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(target_arch = "aarch64", target_os = "linux"))]
+use keel_codegen::aarch64::{REGISTERS, compile_linux_with_pipeline as compile_with_pipeline};
+#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 use keel_codegen::aarch64::{REGISTERS, compile_with_pipeline};
 #[cfg(target_arch = "x86_64")]
 use keel_codegen::x86_64::{REGISTERS, compile_with_pipeline};
@@ -748,6 +750,30 @@ fn rejected() {
             "func @g(i64) cc(c) {
              block0(v0: i64):
                  asm \"mov x0, %1\", \"r\"(v0)
+                 return
+             }",
+            "`%1`: the asm has only 1 operand(s)",
+        ),
+        (
+            "func @g(i64) cc(c) {
+             block0(v0: i64):
+                 asm \"mov x0, %[0\", \"r\"(v0)
+                 return
+             }",
+            "bracketed asm operand must end with `]`",
+        ),
+        (
+            "func @g(i64) cc(c) {
+             block0(v0: i64):
+                 asm \"mov x0, %[]\", \"r\"(v0)
+                 return
+             }",
+            "`%` must be followed by an operand number",
+        ),
+        (
+            "func @g(i64) cc(c) {
+             block0(v0: i64):
+                 asm \"mov x0, %[1]0\", \"r\"(v0)
                  return
              }",
             "`%1`: the asm has only 1 operand(s)",

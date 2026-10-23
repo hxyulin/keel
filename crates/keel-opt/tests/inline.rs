@@ -256,7 +256,7 @@ fn remaps_debug_scopes_slots_and_callee_tables() {
         block,
         InstData::Call {
             func: decl,
-            args: vec![value],
+            args: (vec![value]).into(),
         },
     );
     let value = caller.first_result(call);

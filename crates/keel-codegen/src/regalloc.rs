@@ -163,6 +163,9 @@ impl Allocation {
 /// change at each instruction; explicit transfers preserve values between them.
 /// Registers outside the input pools remain reserved by lowering. Constraints
 /// must be satisfied or compilation rejects the allocation before emission.
+/// Implementations must preserve live values across every `input.is_call`
+/// clobber, including intrinsic SIMD clobbers without a machine CALL (VZEROALL,
+/// XRSTOR64). Structural allocation validation does not prove plug-in liveness.
 pub trait RegisterAllocator {
     fn name(&self) -> &'static str;
     fn allocate(&self, input: &AllocationInput<'_>) -> Allocation;
@@ -447,6 +450,8 @@ struct Interval {
     /// Whether it needs an FP register rather than a general-purpose one.
     float: bool,
     vector: bool,
+    /// Number of adjacent eight-byte units in the spill home.
+    spill_units: u32,
 }
 
 /// Live ranges of one value. Most values live within one contiguous range,
@@ -609,6 +614,8 @@ struct FastInterval {
     preserved_gprs: u64,
     float: bool,
     vector: bool,
+    /// Number of adjacent eight-byte units in the spill home.
+    spill_units: u32,
 }
 
 fn build_fast_intervals(
@@ -749,6 +756,11 @@ fn build_fast_intervals(
                 },
                 float: ty.is_float() || ty.is_vector(),
                 vector: ty.is_vector(),
+                spill_units: if ty.is_vector() {
+                    ty.bytes().unwrap().div_ceil(8)
+                } else {
+                    1
+                },
             });
         }
     }
@@ -846,11 +858,10 @@ fn assign_fast_spill_slots(spilled: &mut [&FastInterval], locs: &mut [Vec<Option
     let mut count = 0;
     // Separate pools keep each reused home's width stable. Vector homes take
     // two eight-byte units; the bitset still tracks one home per live vector.
-    for vector in [false, true] {
+    for units in [1, 2, 4] {
         let base = count;
-        let units = if vector { 2 } else { 1 };
         let mut slots = SpillSlots::default();
-        for iv in spilled.iter().filter(|iv| iv.vector == vector) {
+        for iv in spilled.iter().filter(|iv| iv.spill_units == units) {
             let slot = base + units * slots.assign(iv.start, iv.end);
             locs[iv.half][iv.value.index()] = Some(Loc::Stack(slot));
         }
@@ -887,6 +898,8 @@ struct Scratch {
     open: Vec<Option<(u32, u32)>>,
     touched: Vec<Value>,
     calls: Vec<u32>,
+    /// Indexed by program point: the first call read point after it.
+    next_call: Vec<u32>,
     preserved_calls: Vec<(u32, u64)>,
     twice: Vec<u32>,
     /// Closed ranges with the index of the value's next, and each value's
@@ -930,6 +943,7 @@ impl Scratch {
             + bytes(&self.open)
             + bytes(&self.touched)
             + bytes(&self.calls)
+            + bytes(&self.next_call)
             + bytes(&self.preserved_calls)
             + bytes(&self.twice)
             + bytes(&self.pieces)
@@ -1269,6 +1283,7 @@ fn intervals_from_liveness(
         open,
         touched,
         calls,
+        next_call,
         preserved_calls,
         twice,
         pieces,
@@ -1331,6 +1346,18 @@ fn intervals_from_liveness(
             points.get(next).is_some_and(|&c| c < to)
         })
     };
+    // The first call after each point, so that each range tests for a call
+    // with one lookup rather than a search of every call in the function.
+    next_call.clear();
+    if !calls.is_empty() {
+        for &call in calls.iter() {
+            next_call.resize(call as usize, call);
+        }
+        next_call.resize(2 * slot as usize + 1, u32::MAX);
+    }
+    let crosses_call = |iv: &[(u32, u32)]| {
+        !next_call.is_empty() && iv.iter().any(|&(from, to)| next_call[from as usize] < to)
+    };
     let mut intervals = Vec::with_capacity(values);
     for (i, &(first, _)) in chains.iter().enumerate() {
         if first == u32::MAX {
@@ -1342,8 +1369,8 @@ fn intervals_from_liveness(
             list.push(range);
             next = after;
         }
-        let crosses_call = crosses(calls, list);
-        let crosses_twice = crosses(twice, list);
+        let crosses_call = crosses_call(list);
+        let crosses_twice = !twice.is_empty() && crosses(twice, list);
         let preserved_gprs = if selection.preserved_call_gprs.is_empty() || crosses_twice {
             0
         } else {
@@ -1365,6 +1392,11 @@ fn intervals_from_liveness(
             preserved_gprs,
             float: ty.is_float() || ty.is_vector(),
             vector: ty.is_vector(),
+            spill_units: if ty.is_vector() {
+                ty.bytes().unwrap().div_ceil(8)
+            } else {
+                1
+            },
         });
         if let Some(ranges) = high_ranges {
             intervals.push(Interval {
@@ -1375,6 +1407,7 @@ fn intervals_from_liveness(
                 preserved_gprs,
                 float: false,
                 vector: false,
+                spill_units: 1,
             });
         }
     }
@@ -1464,7 +1497,7 @@ fn linear_scan<'a>(
     intervals: &'a [Interval],
     pools: &Pools,
     locs: &mut [Vec<Option<Loc>>; 2],
-    hints: &keel_ir::fxhash::FxHashMap<Value, Vec<Value>>,
+    hints: &crate::select::Hints,
 ) -> Vec<&'a Interval> {
     linear_scan_with_priority(intervals, pools, locs, hints, |a, b| b.end().cmp(&a.end()))
 }
@@ -1475,7 +1508,7 @@ fn linear_scan_with_priority<'a>(
     intervals: &'a [Interval],
     pools: &Pools,
     locs: &mut [Vec<Option<Loc>>; 2],
-    hints: &keel_ir::fxhash::FxHashMap<Value, Vec<Value>>,
+    hints: &crate::select::Hints,
     priority: impl Fn(&Interval, &Interval) -> std::cmp::Ordering,
 ) -> Vec<&'a Interval> {
     // The ordinary tiers build no incoming-edge table or extra scan state.
@@ -1486,7 +1519,7 @@ fn linear_scan_with_preference<'a>(
     intervals: &'a [Interval],
     pools: &Pools,
     locs: &mut [Vec<Option<Loc>>; 2],
-    hints: &keel_ir::fxhash::FxHashMap<Value, Vec<Value>>,
+    hints: &crate::select::Hints,
     preference: impl Fn(&Interval, &[Vec<Option<Loc>>; 2]) -> Option<Loc>,
     priority: impl Fn(&Interval, &Interval) -> std::cmp::Ordering,
 ) -> Vec<&'a Interval> {
@@ -1550,7 +1583,6 @@ fn linear_scan_with_preference<'a>(
     let mut active: Vec<Held> = Vec::new();
     let mut inactive: Vec<Held> = Vec::new();
     let mut spilled = Vec::new();
-    let mut moved = Vec::new();
     // No active interval leaves its current range before the point after
     // this one, and no inactive interval reaches its next range before this
     // one: until then the lists need no maintenance.
@@ -1571,8 +1603,11 @@ fn linear_scan_with_preference<'a>(
                     return true;
                 }
                 occupied[held.float as usize][held.number as usize] -= 1;
+                // Into a hole, after the intervals already in one: next live
+                // after `pos`, so unchanged by the update of those below.
                 if held.end >= pos {
-                    moved.push(*held);
+                    inactive_until = inactive_until.min(held.until);
+                    inactive.push(*held);
                 }
                 false
             });
@@ -1598,10 +1633,6 @@ fn linear_scan_with_preference<'a>(
             });
             inactive_until = until;
         }
-        for held in &moved {
-            inactive_until = inactive_until.min(held.until);
-        }
-        inactive.extend(moved.drain(..));
 
         // Live across a call: only a callee-saved register survives it.
         // Otherwise prefer caller-saved ones, which need no save/restore.
@@ -1639,16 +1670,37 @@ fn linear_scan_with_preference<'a>(
         // Compute this once, rather than rescanning inactive for every
         // candidate register and again for every eviction candidate.
         let held_by_class = &occupied[cur.float as usize];
+        // An inactive interval is next live at its `until`, after this
+        // point: `cur` can only meet it if it lives that long.
         let mut blocked = RegisterMask::default();
+        let end = cur.end();
         for held in &inactive {
-            if held.float == cur.float && !blocked.contains(held.number) && held.iv.intersects(cur)
+            if held.float == cur.float
+                && held.until <= end
+                && !blocked.contains(held.number)
+                && held.iv.intersects(cur)
             {
                 blocked.insert(held.number);
             }
         }
         let blocked_by_inactive = |reg: Loc| blocked.contains(register_number(reg));
-        let available_number =
-            |n: u8| allowed_number(n) && held_by_class[n as usize] == 0 && !blocked.contains(n);
+        // The registers `allowed_number` admits, less those blocked, so
+        // that testing each candidate takes one bit.
+        let mut unblocked = RegisterMask::default();
+        for (w, word) in unblocked.0.iter_mut().enumerate() {
+            let callers = match (cur.crosses_call, cur.float, w) {
+                (false, ..) => caller_mask.0[w],
+                (true, false, 0) => caller_mask.0[0] & cur.preserved_gprs,
+                (true, ..) => 0,
+            };
+            let callees = if vector_across_call {
+                0
+            } else {
+                callee_mask.0[w]
+            };
+            *word = (callers | callees) & !blocked.0[w];
+        }
+        let available_number = |n: u8| unblocked.contains(n) && held_by_class[n as usize] == 0;
         let available = |r: Loc| match r {
             Loc::Reg(n) if !cur.float => available_number(n),
             Loc::FReg(n) if cur.float => available_number(n),
@@ -1658,11 +1710,9 @@ fn linear_scan_with_preference<'a>(
             None
         } else {
             hints
-                .get(&cur.value)
-                .into_iter()
-                .flatten()
-                .filter_map(|v| locs[cur.half][v.index()])
-                .find(|&r| available(r))
+                .get(cur.value)
+                .and_then(|v| locs[cur.half][v.index()])
+                .filter(|&r| available(r))
         };
         let free = preferred
             .or_else(|| preference(cur, locs).filter(|&reg| available(reg)))
@@ -1764,11 +1814,10 @@ fn assign_spill_slots(spilled: &mut [&Interval], locs: &mut [Vec<Option<Loc>>; 2
     let mut count = 0;
     // Separate pools keep each reused home's width stable. Vector homes take
     // two eight-byte units; the bitset still tracks one home per live vector.
-    for vector in [false, true] {
+    for units in [1, 2, 4] {
         let base = count;
-        let units = if vector { 2 } else { 1 };
         let mut slots = SpillSlots::default();
-        for iv in spilled.iter().filter(|iv| iv.vector == vector) {
+        for iv in spilled.iter().filter(|iv| iv.spill_units == units) {
             let slot = base + units * slots.assign(iv.start(), iv.end());
             locs[iv.half][iv.value.index()] = Some(Loc::Stack(slot));
         }
@@ -1868,6 +1917,40 @@ mod tests {
     }
 
     #[test]
+    fn ymm_and_xmm_share_the_simd_bank_with_exact_wide_spill_homes() {
+        let func = function(
+            "decl @clobber()\nfunc @f(ptr, ptr) {\nblock0(v0: ptr, v1: ptr):\n v2 = load.i32x8 v0\n v3 = load.i32x8 v0\n v4 = load.f64x2 v1\n call @clobber()\n v5 = viadd v2, v3\n store v5, v0\n store v4, v1\n return\n}",
+        );
+        let pools = Pools {
+            caller_saved: &[9],
+            callee_saved: &[19],
+            float_caller_saved: &[19],
+            float_callee_saved: &[8],
+        };
+        for tier in [AllocationTier::Fast, AllocationTier::Full] {
+            let a = allocate_tier(
+                &func,
+                &pools,
+                |d: &InstData| matches!(d, InstData::Call { .. }),
+                |_: &InstData| false,
+                &crate::select::Selection::default(),
+                tier,
+            );
+            let homes: [u32; 3] = [2, 3, 4].map(|v| match a.loc(Value::new(v)).unwrap() {
+                Loc::Stack(s) => s,
+                other => panic!("cross-call SIMD value in {other:?}"),
+            });
+            for (i, units) in [4, 4, 2].into_iter().enumerate() {
+                assert!(homes[i] + units <= a.spill_slots);
+                for j in 0..i {
+                    assert!(homes[i] + units <= homes[j] || homes[j] + 4 <= homes[i]);
+                }
+            }
+            assert!(a.float_callee_saved_used.is_empty());
+        }
+    }
+
+    #[test]
     fn vector_spills_keep_two_units_and_do_not_use_partial_callee_saves() {
         let func = function(
             "decl @clobber()\nfunc @f(ptr) {\nblock0(v0: ptr):\n              v1 = load.i32x4 v0\n v2 = load.i32x4 v0\n call @clobber()\n              v3 = viadd v1, v2\n store v3, v0\n return\n}",
@@ -1917,6 +2000,7 @@ mod tests {
                 preserved_gprs: 0,
                 float: false,
                 vector: false,
+                spill_units: 1,
             },
             Interval {
                 value: Value::new(1),
@@ -1926,6 +2010,7 @@ mod tests {
                 preserved_gprs: 0,
                 float: false,
                 vector: false,
+                spill_units: 1,
             },
         ];
         let fast = intervals.each_ref().map(|iv| FastInterval {
@@ -1937,6 +2022,7 @@ mod tests {
             preserved_gprs: iv.preserved_gprs,
             float: iv.float,
             vector: iv.vector,
+            spill_units: iv.spill_units,
         });
         // With no eligible recipes, the longer interval is spilled as usual.
         // Marking the shorter first value cheap must instead preserve the
@@ -2065,6 +2151,7 @@ mod tests {
             preserved_gprs: 0,
             float: vector,
             vector,
+            spill_units: if vector { 2 } else { 1 },
         })
         .collect();
         let fast: Vec<_> = intervals
@@ -2078,6 +2165,7 @@ mod tests {
                 preserved_gprs: iv.preserved_gprs,
                 float: iv.float,
                 vector: iv.vector,
+                spill_units: iv.spill_units,
             })
             .collect();
         let mut full_spilled: Vec<_> = intervals.iter().rev().collect();

@@ -106,6 +106,16 @@ pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
         }
     }
     for decl in &module.decls {
+        if decl.attrs.constructor
+            || decl.attrs.destructor
+            || decl.attrs.retain
+            || decl.attrs.section.is_some()
+        {
+            errors.push(VerifierError {
+                location: format!("@{}", decl.name),
+                message: "lifecycle/retain/section requires a definition".into(),
+            });
+        }
         if decl.sig.cc == CallConv::Fast {
             errors.push(VerifierError {
                 location: format!("@{}", decl.name),
@@ -125,10 +135,25 @@ pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
         }
     }
     for data in &module.data {
-        if data.hidden && !data.weak_odr {
+        if (data.retain || data.section.is_some())
+            && (data.weak_odr || data.init.is_none())
+        {
             errors.push(VerifierError {
                 location: format!("@{}", data.name),
-                message: "hidden data requires weak_odr linkage".into(),
+                message: "section/retain requires a non-COMDAT definition".into(),
+            });
+        }
+        if data.weak && (data.local || data.thread_local || data.weak_odr) {
+            errors.push(VerifierError {
+                location: format!("@{}", data.name),
+                message: "weak requires nonlocal non-TLS storage and cannot combine with weak_odr"
+                    .into(),
+            });
+        }
+        if data.hidden && (data.local || data.init.is_none()) {
+            errors.push(VerifierError {
+                location: format!("@{}", data.name),
+                message: "hidden requires a nonlocal definition".into(),
             });
         }
         if data.weak_odr && (data.local || data.init.is_none() || data.thread_local) {
@@ -514,7 +539,7 @@ fn check_references(func: &Function, inserted: &mut Vec<bool>) -> Result<bool, V
                     bad("signature", sig.index());
                 }
             }
-            InstData::StackAddr { slot } => {
+            InstData::StackAddr { slot } | InstData::AggregateVaArg { home: slot, .. } => {
                 if slot.index() >= func.num_stack_slots() {
                     bad("stack slot", slot.index());
                 }
@@ -573,14 +598,39 @@ fn verify_with(func: &Function, scratch: &mut Scratch) -> Result<(), Vec<Verifie
         scratch,
         errors: Vec::new(),
     };
+    if func.weak_odr && (func.attrs.retain || func.attrs.section.is_some()) {
+        v.error(
+            "placement".into(),
+            "section/retain with COMDAT is unsupported".into(),
+        );
+    }
     if func.sig.cc == CallConv::Fast && !func.local {
         v.error(
             "linkage".into(),
             "cc(fast) requires a local definition".into(),
         );
     }
+    if (func.attrs.constructor || func.attrs.destructor)
+        && (!func.sig.params.is_empty()
+            || !func.sig.returns.is_empty()
+            || func.sig.variadic
+            || func.sig.cc != CallConv::C
+            || func.sig.returns_twice
+            || func.attrs.noreturn)
+    {
+        v.error(
+            "lifecycle".into(),
+            "lifecycle callback requires normally returning C void(void)".into(),
+        );
+    }
+    if func.attrs.weak && (func.local || func.weak_odr) {
+        v.error("linkage".into(), "weak cannot be local or weak_odr".into());
+    }
     if func.weak_odr && func.local {
         v.error("linkage".into(), "weak_odr cannot be local".into());
+    }
+    if func.hidden && func.local {
+        v.error("linkage".into(), "hidden cannot be local".into());
     }
     if let Err(message) = func.attrs.validate(func.sig.returns_twice) {
         v.error("attributes".into(), message.into());
@@ -651,11 +701,11 @@ impl Verifier<'_> {
             );
         }
         for (ss, data) in func.stack_slots() {
-            if !data.align.is_power_of_two() || data.align > 16 {
+            if !data.align.is_power_of_two() || data.align > 32 {
                 self.error(
                     ss.to_string(),
                     format!(
-                        "alignment must be a power of two up to 16, got {}",
+                        "alignment must be a power of two up to 32, got {}",
                         data.align
                     ),
                 );
@@ -745,6 +795,17 @@ impl Verifier<'_> {
     /// A tail call returns the callee's results as this function's, so
     /// they must be the same, extensions included.
     fn check_tail_returns(&mut self, inst: Inst, callee: &Signature) {
+        // Explicit producers may bridge only when the target backend proves
+        // compatible physical result and stack plans. Untagged policy cannot
+        // supply that proof for a differently tagged endpoint.
+        if callee.x86_vector_abi != self.func.sig.x86_vector_abi
+            && (callee.x86_vector_abi.is_none() || self.func.sig.x86_vector_abi.is_none())
+        {
+            self.inst_error(
+                inst,
+                "tail calls require matching x86 vector ABI policies".into(),
+            );
+        }
         if callee.returns != self.func.sig.returns {
             let list = |sig: &Signature| {
                 let returns: Vec<String> = sig.returns.iter().map(|r| r.to_string()).collect();
@@ -877,6 +938,45 @@ impl Verifier<'_> {
                     );
                 }
             }
+            InstData::Neon {
+                op,
+                ty: result,
+                args,
+            } => {
+                if !op.accepts(*result)
+                    || args.len() != op.arity_for(*result)
+                    || op
+                        .operand_types(*result)
+                        .is_none_or(|expected| args.iter().map(|v| ty(*v)).ne(expected))
+                {
+                    self.inst_error(
+                        inst,
+                        format!("{op} has invalid result/operand shapes or arity"),
+                    );
+                }
+                if let Some(range) = op.immediate_range(*result) {
+                    let imm = args.last().and_then(|&v| {
+                        let crate::ValueDef::Result(i, _) = func.value_def(func.resolve(v)) else {
+                            return None;
+                        };
+                        match *func.inst_data(i) {
+                            InstData::Iconst { ty: Type::I32, imm } => Some(imm),
+                            _ => None,
+                        }
+                    });
+                    if imm.is_none_or(|n| !range.contains(&n)) {
+                        self.inst_error(
+                            inst,
+                            format!("{op} requires a literal i32 shift in {range:?}"),
+                        );
+                    }
+                }
+            }
+            InstData::VectorReduce { op, arg } => {
+                if ty(*arg).vector().is_none_or(|s| !s.lane_type().is_int()) {
+                    self.inst_error(inst, format!("{op} needs integer vector lanes"));
+                }
+            }
             InstData::VectorUnary { op, arg } => {
                 let t = ty(*arg);
                 if t.vector().is_none_or(|v| {
@@ -946,8 +1046,9 @@ impl Verifier<'_> {
                     self.inst_error(inst, format!("iconst type must be an integer, got {ty}"));
                 }
             }
+            InstData::F80const { .. } => {}
             InstData::Fconst { ty, bits } => {
-                if !ty.is_float() {
+                if !matches!(ty, Type::F32 | Type::F64) {
                     self.inst_error(inst, format!("fconst type must be f32 or f64, got {ty}"));
                 } else if *ty == Type::F32 && *bits > u64::from(u32::MAX) {
                     self.inst_error(inst, format!("{bits:#x} is too wide for f32 bits"));
@@ -1014,10 +1115,13 @@ impl Verifier<'_> {
             }
             InstData::Fma { args } => {
                 let (a, b, c) = (ty(args[0]), ty(args[1]), ty(args[2]));
-                if !a.is_float() || a != b || a != c {
+                if !(a.is_float() || a.vector().is_some_and(|s| s.lane_type().is_float()))
+                    || a != b
+                    || a != c
+                {
                     self.inst_error(
                         inst,
-                        format!("fma takes three floats of the same type, got ({a}, {b}, {c})"),
+                        format!("fma takes three floating-point scalars or vectors of the same type, got ({a}, {b}, {c})"),
                     );
                 }
             }
@@ -1067,11 +1171,46 @@ impl Verifier<'_> {
                     self.inst_error(inst, format!("load address must be ptr, got {}", ty(*addr)));
                 }
             }
-            InstData::VaArg { ty: t, list } => {
-                if !matches!(t, Type::I32 | Type::I64 | Type::Ptr | Type::F64) {
+            InstData::AggregateVaArg { layout, list, home, x86_vector_abi } => {
+                let Some(layout_size) = layout.checked_size() else {
+                    self.inst_error(inst, "aggregate va_arg layout size overflows u64".into());
+                    return;
+                };
+                let slot = func.stack_slots().nth(home.index()).expect("checked slot reference").1;
+                if u64::from(slot.size) < layout_size || u64::from(slot.align) < layout.align() {
+                    self.inst_error(inst, "aggregate va_arg home is too small or under-aligned".into());
+                }
+                if let Some((base, offset)) = local_aggregate_address(func, *list) {
+                    if base == *home && offset < layout_size as i64
+                        && offset.checked_add(24).is_some_and(|end| end > 0)
+                    {
+                        self.inst_error(inst, "aggregate va_arg home overlaps its va_list object".into());
+                    }
+                }
+                if ty(*list) != Type::Ptr || (layout_size == 0 && x86_vector_abi.is_none()) {
+                    self.inst_error(inst, "aggregate va_arg requires a ptr list and nonempty layout".into());
+                }
+                if let Some(abi) = x86_vector_abi {
+                    if !layout_contains_f64x1(layout) || !func.has_x86_va_arg_provenance(inst,*abi) {
+                        self.inst_error(inst, "tagged aggregate va_arg requires an f64x1 layout and matching local current-signature provenance".into());
+                    }
+                }
+            }
+            InstData::VaArg { ty: t, list, x86_vector_abi } => {
+                if let Some(abi) = x86_vector_abi {
+                    if *t != Type::Vector(crate::VectorType::F64x1) {
+                        self.inst_error(inst, "x86 va_arg producer tag is only supported for f64x1".into());
+                    }
+                    if !func.has_x86_va_arg_provenance(inst, *abi) {
+                        self.inst_error(inst, "tagged va_arg requires a matching variadic C signature and uninterrupted local va_start provenance".into());
+                    }
+                }
+                if !matches!(t, Type::I32 | Type::I64 | Type::I128 | Type::Ptr | Type::F64 | Type::F80)
+                    && !t.is_vector()
+                {
                     self.inst_error(
                         inst,
-                        format!("va_arg reads i32, i64, ptr or f64 (C's promoted types), got {t}"),
+                        format!("va_arg reads C promoted scalars or vectors, got {t}"),
                     );
                 }
                 if ty(*list) != Type::Ptr {
@@ -1131,6 +1270,7 @@ impl Verifier<'_> {
             InstData::Call { func: callee, args } => {
                 let decl = func.callee(*callee);
                 let arg_types = || args.iter().map(|&a| ty(a));
+                self.call_abi(inst, &decl.sig, args);
                 if !args_match(&decl.sig, arg_types()) {
                     let got: Vec<Type> = arg_types().collect();
                     self.inst_error(
@@ -1153,6 +1293,7 @@ impl Verifier<'_> {
                     );
                 }
                 let arg_types = || args.iter().map(|&a| ty(a));
+                self.call_abi(inst, sig, args);
                 if !args_match(sig, arg_types()) {
                     let got: Vec<Type> = arg_types().collect();
                     self.inst_error(
@@ -1175,8 +1316,187 @@ impl Verifier<'_> {
             }
             InstData::SymbolAddr { .. } => {}
             InstData::Intrinsic { id, args } => {
+                if id.x86_port_io().is_some_and(|(_, _, immediate)| immediate) {
+                    let port = args.first().and_then(|&v| match func.value_def(func.resolve(v)) {
+                        ValueDef::Result(i, _) => match func.inst_data(i) {
+                            InstData::Iconst { ty: Type::I16, imm } => Some(*imm),
+                            _ => None,
+                        },
+                        _ => None,
+                    });
+                    if !port.is_some_and(|n| (0..=255).contains(&n)) {
+                        self.inst_error(inst, "port I/O immediate requires iconst.i16 in0..=255".into());
+                    }
+                }
                 if *id == Intrinsic::VaStart && !func.sig.variadic {
                     self.inst_error(inst, "va_start in a function that is not variadic".into());
+                }
+                if id.x86_packed_search().is_some_and(|(_, _, sad)| sad) {
+                    let control =
+                        args.get(2)
+                            .and_then(|&v| match func.value_def(func.resolve(v)) {
+                                ValueDef::Result(i, _) => match func.inst_data(i) {
+                                    InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                    _ => None,
+                                },
+                                _ => None,
+                            });
+                    if !control.is_some_and(|n| (0..256).contains(&n)) {
+                        self.inst_error(inst, "MPSADBW requires iconst.i32 in0..255".into());
+                    }
+                }
+                if id.x86_byte_shift().is_some() {
+                    let count = args
+                        .get(1)
+                        .and_then(|&v| match func.value_def(func.resolve(v)) {
+                            ValueDef::Result(i, _) => match func.inst_data(i) {
+                                InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                _ => None,
+                            },
+                            _ => None,
+                        });
+                    if !count.is_some_and(|n| (0..256).contains(&n)) {
+                        self.inst_error(
+                            inst,
+                            "packed byte shift requires iconst.i32 in0..255".into(),
+                        );
+                    }
+                }
+                if id.is_x86_fp_compare() {
+                    let mode = args
+                        .get(2)
+                        .and_then(|&a| match func.value_def(func.resolve(a)) {
+                            ValueDef::Result(i, _) => match func.inst_data(i) {
+                                InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                _ => None,
+                            },
+                            _ => None,
+                        });
+                    if !mode.is_some_and(|n| (0..32).contains(&n)) {
+                        self.inst_error(
+                            inst,
+                            "AVX compare predicate must be iconst.i32 in0..=31".into(),
+                        );
+                    }
+                }
+                if id.has_x86_round_control() {
+                    let mode = args
+                        .get(1)
+                        .and_then(|&a| match func.value_def(func.resolve(a)) {
+                            ValueDef::Result(i, _) => match func.inst_data(i) {
+                                InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                _ => None,
+                            },
+                            _ => None,
+                        });
+                    if !mode.is_some_and(|n| (0..16).contains(&n)) {
+                        self.inst_error(
+                            inst,
+                            "AVX round control must be iconst.i32 in0..=15".into(),
+                        );
+                    }
+                }
+                if id.is_x86_legacy_fp_compare() {
+                    let mode = args
+                        .get(2)
+                        .and_then(|&a| match func.value_def(func.resolve(a)) {
+                            ValueDef::Result(i, _) => match func.inst_data(i) {
+                                InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                _ => None,
+                            },
+                            _ => None,
+                        });
+                    if !mode.is_some_and(|n| (0..8).contains(&n)) {
+                        self.inst_error(
+                            inst,
+                            "legacy SSE compare predicate must be iconst.i32 in0..=7".into(),
+                        );
+                    }
+                }
+                if let Some((index, limit)) = id.x86_legacy_fp_v2_control() {
+                    let mode =
+                        args.get(index)
+                            .and_then(|&a| match func.value_def(func.resolve(a)) {
+                                ValueDef::Result(i, _) => match func.inst_data(i) {
+                                    InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                    _ => None,
+                                },
+                                _ => None,
+                            });
+                    if !mode.is_some_and(|n| (0..limit).contains(&n)) {
+                        self.inst_error(
+                            inst,
+                            format!("legacy FP control must be iconst.i32 in0..{}", limit - 1),
+                        );
+                    }
+                }
+                if let Some((_, index, _)) = id.x86_string_info() {
+                    let mode =
+                        args.get(index)
+                            .and_then(|&a| match func.value_def(func.resolve(a)) {
+                                ValueDef::Result(i, _) => match func.inst_data(i) {
+                                    InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                    _ => None,
+                                },
+                                _ => None,
+                            });
+                    if !mode.is_some_and(|n| (0..256).contains(&n)) {
+                        self.inst_error(
+                            inst,
+                            "packed string control must be iconst.i32 in0..=255".into(),
+                        );
+                    }
+                }
+                if id.has_x86_dot_control() {
+                    let mode = args
+                        .get(2)
+                        .and_then(|&a| match func.value_def(func.resolve(a)) {
+                            ValueDef::Result(i, _) => match func.inst_data(i) {
+                                InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                _ => None,
+                            },
+                            _ => None,
+                        });
+                    if !mode.is_some_and(|n| (0..256).contains(&n)) {
+                        self.inst_error(
+                            inst,
+                            "AVX dot control must be iconst.i32 in0..=255".into(),
+                        );
+                    }
+                }
+                if id.is_x86_gather() {
+                    let scale = args
+                        .get(4)
+                        .and_then(|&a| match func.value_def(func.resolve(a)) {
+                            ValueDef::Result(i, _) => match func.inst_data(i) {
+                                InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                _ => None,
+                            },
+                            _ => None,
+                        });
+                    if !scale.is_some_and(|n| matches!(n, 1 | 2 | 4 | 8)) {
+                        self.inst_error(
+                            inst,
+                            "AVX2 gather scale must be iconst.i32 in1,2,4,8".into(),
+                        );
+                    }
+                }
+                if id.has_f16c_rounding() {
+                    let mode = args
+                        .get(1)
+                        .and_then(|&a| match func.value_def(func.resolve(a)) {
+                            ValueDef::Result(i, _) => match func.inst_data(i) {
+                                InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                _ => None,
+                            },
+                            _ => None,
+                        });
+                    if !mode.is_some_and(|n| (0..=7).contains(&n)) {
+                        self.inst_error(
+                            inst,
+                            "F16C rounding control must be iconst.i32 in0..=7".into(),
+                        );
+                    }
                 }
                 let info = id.info();
                 if !args.iter().map(|&a| ty(a)).eq(info.params.iter().copied()) {
@@ -1189,6 +1509,12 @@ impl Verifier<'_> {
                             type_list(&got)
                         ),
                     );
+                }
+            }
+            InstData::X86RflagsRegion { plan, args } => {
+                if let Err(e) = crate::rflags_region::analyze(plan) { self.inst_error(inst, e.to_string()); }
+                if args.len() != plan.captures.len() || args.iter().any(|&v| func.value_type(func.resolve(v)) != Type::I64) {
+                    self.inst_error(inst, "FLAGS region capture arity/types must match exact I64 images".into());
                 }
             }
             InstData::InlineAsm { asm, args } => self.check_asm(inst, asm, args),
@@ -1246,6 +1572,7 @@ impl Verifier<'_> {
             } => {
                 let decl = func.callee(*callee);
                 let arg_types = || args.iter().map(|&a| ty(a));
+                self.call_abi(inst, &decl.sig, args);
                 if !args_match(&decl.sig, arg_types()) {
                     let got: Vec<Type> = arg_types().collect();
                     self.inst_error(
@@ -1329,6 +1656,7 @@ impl Verifier<'_> {
             InstData::ReturnCall { func: callee, args } => {
                 let decl = func.callee(*callee);
                 let arg_types = || args.iter().map(|&a| ty(a));
+                self.call_abi(inst, &decl.sig, args);
                 if !args_match(&decl.sig, arg_types()) {
                     let got: Vec<Type> = arg_types().collect();
                     self.inst_error(
@@ -1355,6 +1683,7 @@ impl Verifier<'_> {
                     );
                 }
                 let arg_types = || args.iter().map(|&a| ty(a));
+                self.call_abi(inst, sig, args);
                 if !args_match(sig, arg_types()) {
                     let got: Vec<Type> = arg_types().collect();
                     self.inst_error(
@@ -1479,6 +1808,32 @@ impl Verifier<'_> {
         );
     }
 
+    fn call_abi(&mut self, inst: Inst, sig: &Signature, args: &crate::CallArgs) {
+        for (i, &v) in args.iter().enumerate() {
+            let Some(p) = args.abi(i) else { continue; };
+            if p.ty != self.func.value_type(self.func.resolve(v)) {
+                self.inst_error(inst, format!("call operand {i} ABI type mismatch"));
+            }
+            if let Some(named) = sig.params.get(i) {
+                if named != p { self.inst_error(inst, format!("call operand {i} ABI differs from named parameter")); }
+            } else {
+                if !sig.variadic || matches!(p.purpose, Purpose::Sret(_)) {
+                    self.inst_error(inst, "unnamed ABI descriptor requires variadic operand and cannot be sret".into());
+                }
+                if p.ext != crate::ArgExt::None || (p.purpose != Purpose::Normal && p.ty != Type::Ptr) {
+                    self.inst_error(inst, "invalid unnamed call operand ABI".into());
+                }
+            }
+            if let Some(l) = p.layout() {
+                match l.checked_size() {
+                    None => self.inst_error(inst, "call operand aggregate layout size overflows u64".into()),
+                    Some(0) if !(sig.x86_vector_abi.is_some() && layout_contains_f64x1(l)) => self.inst_error(inst, "invalid call operand aggregate layout".into()),
+                    _ => {},
+                }
+            }
+        }
+    }
+
     fn inst_error(&mut self, inst: Inst, message: String) {
         let location = format!("{} `{}`", inst, self.func.display_inst(inst));
         self.error(location, message);
@@ -1496,11 +1851,37 @@ fn check_convert(op: ConvertOp, from: Type, to: Type) -> Result<(), &'static str
     // converts in one instruction.
     let small_int = |t: Type| t.is_int() && t != Type::I128;
     let ok = match op {
-        ConvertOp::SwidenLow | ConvertOp::UwidenLow => match (from.vector(), to.vector()) {
+        ConvertOp::SwidenLow
+        | ConvertOp::UwidenLow
+        | ConvertOp::SwidenHigh
+        | ConvertOp::UwidenHigh => match (from.vector(), to.vector()) {
             (Some(f), Some(t)) => {
                 f.lane_type().is_int()
                     && t.lane_type().is_int()
                     && f.lane_type().bytes() < t.lane_type().bytes()
+                    && f.lanes() >= t.lanes()
+            }
+            _ => false,
+        },
+        ConvertOp::SpairwiseAddLong | ConvertOp::UpairwiseAddLong => {
+            match (from.vector(), to.vector()) {
+                (Some(f), Some(t)) => {
+                    f.lane_type().is_int()
+                        && t.lane_type().is_int()
+                        && f.lane_type().bytes().unwrap() * 2 == t.lane_type().bytes().unwrap()
+                        && u16::from(f.lanes()) >= 2 * u16::from(t.lanes())
+                }
+                _ => false,
+            }
+        }
+        ConvertOp::NarrowLow
+        | ConvertOp::SnarrowSatLow
+        | ConvertOp::UnarrowSatLow
+        | ConvertOp::SunarrowSatLow => match (from.vector(), to.vector()) {
+            (Some(f), Some(t)) => {
+                f.lane_type().is_int()
+                    && t.lane_type().is_int()
+                    && f.lane_type().bytes() > t.lane_type().bytes()
             }
             _ => false,
         },
@@ -1511,8 +1892,8 @@ fn check_convert(op: ConvertOp, from: Type, to: Type) -> Result<(), &'static str
             },
             _ => false,
         },
-        ConvertOp::Fpext => (from, to) == (Type::F32, Type::F64),
-        ConvertOp::Fptrunc => (from, to) == (Type::F64, Type::F32),
+        ConvertOp::Fpext => from.is_float() && to.is_float() && from.bytes() < to.bytes(),
+        ConvertOp::Fptrunc => from.is_float() && to.is_float() && from.bytes() > to.bytes(),
         ConvertOp::Fptosi | ConvertOp::Fptoui => {
             from.is_float() && matches!(to, Type::I32 | Type::I64)
         }
@@ -1533,9 +1914,17 @@ fn check_convert(op: ConvertOp, from: Type, to: Type) -> Result<(), &'static str
         return Ok(());
     }
     Err(match op {
-        ConvertOp::SwidenLow | ConvertOp::UwidenLow => {
-            "needs integer vectors with wider destination lanes"
+        ConvertOp::SwidenLow
+        | ConvertOp::UwidenLow
+        | ConvertOp::SwidenHigh
+        | ConvertOp::UwidenHigh => "needs integer vectors with wider destination lanes",
+        ConvertOp::SpairwiseAddLong | ConvertOp::UpairwiseAddLong => {
+            "needs integer vectors with exactly double-width destination lanes"
         }
+        ConvertOp::NarrowLow
+        | ConvertOp::SnarrowSatLow
+        | ConvertOp::UnarrowSatLow
+        | ConvertOp::SunarrowSatLow => "needs integer vectors with narrower destination lanes",
         ConvertOp::Sext | ConvertOp::Uext => "must convert an integer to a wider integer",
         ConvertOp::Trunc => "must convert an integer to a narrower integer",
         ConvertOp::Fpext => "converts f32 to f64",
@@ -1550,9 +1939,20 @@ fn check_convert(op: ConvertOp, from: Type, to: Type) -> Result<(), &'static str
     })
 }
 
+fn layout_contains_f64x1(layout: &crate::Layout) -> bool {
+    match layout {
+        crate::Layout::Scalar(t) => *t == Type::Vector(crate::VectorType::F64x1),
+        crate::Layout::Struct(fields) => fields.iter().any(layout_contains_f64x1),
+        crate::Layout::Array(elem, _) => layout_contains_f64x1(elem),
+    }
+}
+
 /// Checks the ABI attributes of a signature's parameters and returns.
 fn check_signature(sig: &Signature) -> Vec<String> {
     let mut errors = Vec::new();
+    if sig.x86_vector_abi.is_some() && sig.cc != CallConv::C {
+        errors.push("x86_vector_abi requires cc(c), not the private Fast convention".into());
+    }
     if sig.cc == CallConv::Fast && (sig.variadic || sig.returns_twice || sig.returns.len() > 1) {
         errors.push("cc(fast) requires a fixed, single-result, single-return call contract".into());
     }
@@ -1566,8 +1966,10 @@ fn check_signature(sig: &Signature) -> Vec<String> {
             if param.ty != Type::Ptr {
                 errors.push(format!("`{param}`: a struct is passed as a ptr to it"));
             }
-            if layout.size() == 0 {
-                errors.push(format!("`{param}`: the struct is empty"));
+            match layout.checked_size() {
+                None => errors.push(format!("`{param}`: aggregate layout size overflows u64")),
+                Some(0) if !(sig.x86_vector_abi.is_some() && layout_contains_f64x1(layout)) => errors.push(format!("`{param}`: the struct is empty")),
+                _ => {},
             }
         }
     }
@@ -1588,6 +1990,26 @@ fn check_signature(sig: &Signature) -> Vec<String> {
     errors
 }
 
+/// Bounded local address proof; unknown external pointers retain the documented
+/// memory-access preconditions rather than being rejected wholesale.
+fn local_aggregate_address(func: &Function, mut value: Value) -> Option<(crate::StackSlot, i64)> {
+    let mut offset = 0i64;
+    for _ in 0..32 {
+        let ValueDef::Result(inst, _) = func.value_def(func.resolve(value)) else { return None; };
+        match func.inst_data(inst) {
+            InstData::StackAddr { slot } | InstData::AggregateVaArg { home: slot, .. } => return Some((*slot, offset)),
+            InstData::Binary { op: BinaryOp::Ptradd, args } => {
+                let ValueDef::Result(constant, _) = func.value_def(func.resolve(args[1])) else { return None; };
+                let InstData::Iconst { imm, .. } = func.inst_data(constant) else { return None; };
+                offset = offset.checked_add(*imm)?;
+                value = args[0];
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
 /// Whether arguments of types `got` fit `sig`: exactly its parameters, or
 /// for a variadic signature its parameters followed by any number of the
 /// types C's default argument promotions produce, or unpromoted SIMD vectors.
@@ -1602,8 +2024,13 @@ fn args_match(sig: &Signature, mut got: impl ExactSizeIterator<Item = Type>) -> 
         return false;
     }
     sig.params.iter().all(|p| got.next() == Some(p.ty))
-        && got
-            .all(|ty| ty.is_vector() || matches!(ty, Type::I32 | Type::I64 | Type::Ptr | Type::F64))
+        && got.all(|ty| {
+            ty.is_vector()
+                || matches!(
+                    ty,
+                    Type::I32 | Type::I64 | Type::I128 | Type::Ptr | Type::F64 | Type::F80
+                )
+        })
 }
 
 /// A signature's parameters for messages, with `...` if variadic.
@@ -1632,8 +2059,11 @@ mod name_tests {
             name: name.into(),
             thread_local,
             local: false,
+            weak: false,
             weak_odr: false,
             hidden: false,
+            retain: false,
+            section: None,
             init: init.map(|n| DataInit {
                 constant: false,
                 align: 8,
@@ -1808,7 +2238,11 @@ mod args_tests {
         got.len() >= n
             && got[..n] == params[..]
             && got[n..].iter().all(|ty| {
-                ty.is_vector() || matches!(ty, Type::I32 | Type::I64 | Type::Ptr | Type::F64)
+                ty.is_vector()
+                    || matches!(
+                        ty,
+                        Type::I32 | Type::I64 | Type::I128 | Type::Ptr | Type::F64 | Type::F80
+                    )
             })
     }
 

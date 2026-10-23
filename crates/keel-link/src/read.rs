@@ -143,6 +143,10 @@ impl Object {
                         let flags = r.u32(s + 64)?;
                         let len: usize =
                             r.u64(s + 40)?.try_into().map_err(|_| "section too large")?;
+                        let address = r.u64(s + 32)?;
+                        address
+                            .checked_add(len as u64)
+                            .ok_or("section address overflow")?;
                         let alignment = r.u32(s + 52)?;
                         if alignment > 16 {
                             return fail("section alignment exceeds 64 KiB");
@@ -198,7 +202,7 @@ impl Object {
                         sections.push(Section {
                             name: r.string(s, 16)?,
                             segment,
-                            address: r.u64(s + 32)?,
+                            address,
                             size: len,
                             alignment,
                             flags,

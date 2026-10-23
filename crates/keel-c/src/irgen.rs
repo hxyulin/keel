@@ -112,8 +112,141 @@ impl<'p> Gen<'p> {
     }
 
     pub fn run(mut self) -> R<Module> {
+        // Validate even discarded static/inline bodies against callback and
+        // direct-call contracts added by later declarations in the unit.
+        for def in self.funcs.iter().flatten() {
+            if def.locals.iter().any(|l| l.cleanup.is_some()) {
+                for &(g, loc) in &def.direct_calls {
+                    if crate::parse::nonlocal_exit(&self.p.globals[g]) {
+                        return Err(Error::new(
+                            loc,
+                            "nonlocal exit/returns-twice call in a function containing cleanup locals is not supported yet",
+                        ));
+                    }
+                }
+            }
+            for (g, loc) in def.locals.iter().filter_map(|l| l.cleanup) {
+                let callback = &self.p.globals[g];
+                if callback.incompatible_return {
+                    return Err(Error::new(
+                        loc,
+                        "cleanup function has incompatible return-type redeclarations",
+                    ));
+                }
+                if crate::parse::nonlocal_exit(callback) || callback.function_attrs.noreturn {
+                    return Err(Error::new(loc, "cleanup callback must return normally"));
+                }
+            }
+        }
+        let mut placements = std::collections::BTreeMap::new();
         for (g, global) in self.p.globals.iter().enumerate() {
-            if global.defined && !global.internal {
+            if (global.section.is_some() || global.retain.is_some())
+                && !matches!(global.ty, Ty::Func(_))
+                && (global.align > 4096 || !global.align.max(1).is_power_of_two())
+            {
+                return Err(Error::new(
+                    Loc::default(),
+                    "custom/retained data alignment must be a power of two up to 4096",
+                ));
+            }
+            if let Some(section) = global.section {
+                use keel_ir::section::Placement;
+                let placement = if matches!(global.ty, Ty::Func(_)) {
+                    Placement::Code
+                } else if global.defined {
+                    Placement::for_object(
+                        global.thread_local,
+                        self.data(g, false)?.init.as_ref().unwrap(),
+                    )
+                } else if global.is_const {
+                    Placement::ReadOnly
+                } else {
+                    Placement::Data
+                };
+                section
+                    .validate(self.p.target, placement)
+                    .map_err(|e| Error::new(Loc::default(), e))?;
+                let key = section.as_str().to_owned();
+                let props = (
+                    placement,
+                    self.p.target != keel_ir::Target::Aarch64AppleDarwin && global.retain.is_some(),
+                );
+                if placements
+                    .insert(key, props)
+                    .is_some_and(|old| old != props)
+                {
+                    return Err(Error::new(
+                        Loc::default(),
+                        "incompatible storage or retention in shared custom section",
+                    ));
+                }
+            }
+        }
+        let darwin_destructor = (self.p.target == keel_ir::Target::Aarch64AppleDarwin)
+            .then(|| self.p.globals.iter().find(|g| g.function_attrs.destructor))
+            .flatten();
+        for (g, global) in self.p.globals.iter().enumerate() {
+            // Check the C contract before pruning and before pointer types are
+            // erased to IR `ptr`. Include asm aliases of the runtime symbol.
+            if let Some(callback) = darwin_destructor
+                && global.symbol == "atexit"
+            {
+                let ordinary_type = matches!(global.ty, Ty::Func(f)
+                    if f.ret == Ty::Int(IntKind::Int) && f.prototyped && !f.variadic
+                    && matches!(f.params, [Ty::Ptr(Ty::Func(cb))]
+                        if cb.ret == Ty::Void && cb.prototyped && !cb.variadic && cb.params.is_empty()));
+                if !ordinary_type
+                    || global.defined
+                    || global.internal
+                    || global.weak.is_some()
+                    || global.incompatible_return
+                    || global.returns_twice
+                    || global.function_attrs.noreturn
+                {
+                    return Err(Error::new(
+                        callback.lifecycle.unwrap_or_default(),
+                        "Darwin destructor registration requires the ordinary libc atexit interface",
+                    ));
+                }
+                self.use_global(g);
+            }
+            if let Some(loc) = global.weak {
+                if global.internal
+                    || global.thread_local
+                    || (!global.defined && global.visibility.is_some_and(|v| v.hidden()))
+                {
+                    return Err(Error::new(
+                        loc,
+                        "weak requires external linkage, non-TLS storage and default visibility for undefined references",
+                    ));
+                }
+            }
+            if (global.section.is_some() || global.retain.is_some()) && !global.defined {
+                return Err(Error::new(
+                    global.retain.unwrap_or_default(),
+                    "section/retain requires a definition in this translation unit",
+                ));
+            }
+            if let Some(loc) = global.lifecycle {
+                if !matches!(global.ty, Ty::Func(f) if f.ret == Ty::Void && f.prototyped && f.params.is_empty() && !f.variadic)
+                    || global.incompatible_return
+                    || !global.defined
+                    || global.func.is_none()
+                    || global.returns_twice
+                    || global.function_attrs.noreturn
+                {
+                    return Err(Error::new(
+                        loc,
+                        "constructor/destructor requires a defined, normally returning void(void) function",
+                    ));
+                }
+            }
+            if global.defined
+                && (!global.internal
+                    || global.used
+                    || global.retain.is_some()
+                    || global.lifecycle.is_some())
+            {
                 self.use_global(g);
             }
         }
@@ -135,12 +268,15 @@ impl<'p> Gen<'p> {
                     };
                     self.module.decls.push(FuncDecl {
                         name: global.symbol.to_owned(),
-                        attrs: global.function_attrs,
+                        attrs: keel_ir::FunctionAttrs {
+                            weak: global.weak.is_some(),
+                            ..global.function_attrs
+                        },
                         sig,
                     });
                 }
                 _ if global.defined => {
-                    let data = self.data(g)?;
+                    let data = self.data(g, true)?;
                     self.module.data.push(data);
                     // Made-up names (compound literals) are not identifiers.
                     if self.debug && !global.name.contains('.') {
@@ -158,15 +294,121 @@ impl<'p> Gen<'p> {
                     name: global.symbol.to_owned(),
                     thread_local: global.thread_local,
                     local: false,
+                    weak: global.weak.is_some(),
                     weak_odr: false,
                     hidden: false,
+                    retain: false,
+                    section: None,
                     init: None,
                 }),
+            }
+        }
+        // Registration order follows definitions, not the first (possibly
+        // forward) declaration or the worklist's dependency traversal. IR and
+        // object writers use function layout order for lifecycle arrays.
+        if self
+            .module
+            .functions
+            .iter()
+            .any(|f| f.attrs.constructor || f.attrs.destructor)
+        {
+            let definition_order: HashMap<_, _> = self
+                .p
+                .globals
+                .iter()
+                .filter_map(|g| g.func.map(|index| (g.symbol, index)))
+                .collect();
+            self.module
+                .functions
+                .sort_by_key(|f| definition_order[f.name.as_str()]);
+        }
+        // An address-only import can precede the first call, even in another
+        // function. Complete those unspecified signatures after all bodies have
+        // supplied their promoted call types. This also completes aggregate
+        // results, whose address-only signature already has a hidden sret
+        // parameter. Actual calls were checked against this one signature.
+        for (&g, sig) in &self.unprototyped {
+            let name = self.p.globals[g].symbol;
+            for f in &mut self.module.functions {
+                let refs: Vec<_> = f
+                    .callees()
+                    .filter_map(|(id, d)| (d.name == name).then_some(id))
+                    .collect();
+                for id in refs {
+                    f.callee_mut(id).sig = sig.clone();
+                }
+            }
+            for d in &mut self.module.decls {
+                if d.name == name {
+                    d.sig = sig.clone();
+                }
+            }
+        }
+        if self.p.target == keel_ir::Target::Aarch64AppleDarwin {
+            // Darwin no longer uses __mod_term_func for ordinary C destructors.
+            // Executable-only subset: register with libSystem atexit at startup.
+            let callbacks: Vec<_> = self
+                .module
+                .functions
+                .iter_mut()
+                .filter_map(|f| {
+                    if !f.attrs.destructor {
+                        return None;
+                    }
+                    f.attrs.destructor = false;
+                    Some((f.name.clone(), f.sig.clone(), f.attrs))
+                })
+                .collect();
+            if !callbacks.is_empty() {
+                let sig = Signature::new(&[Type::Ptr], &[Type::I32]);
+                if self.module.has_symbol("atexit") {
+                    if !self
+                        .module
+                        .decls
+                        .iter()
+                        .any(|d| d.name == "atexit" && d.sig == sig)
+                    {
+                        return Err(Error::new(
+                            Loc::default(),
+                            "Darwin destructor registration requires the ordinary libc atexit interface",
+                        ));
+                    }
+                } else {
+                    self.module.decls.push(FuncDecl {
+                        name: "atexit".into(),
+                        sig: sig.clone(),
+                        attrs: Default::default(),
+                    });
+                }
+                for (i, (name, callback_sig, attrs)) in callbacks.into_iter().enumerate() {
+                    let mut wrapper_name = format!(".keel.atexit.{i}");
+                    // Even a pruned declaration can be named by opaque asm.
+                    // Never capture a user's external reference with a thunk.
+                    while self.module.has_symbol(&wrapper_name)
+                        || self.p.globals.iter().any(|g| g.symbol == wrapper_name)
+                    {
+                        wrapper_name.push('.');
+                    }
+                    let mut wrapper = Function::new(&wrapper_name, Signature::new(&[], &[]));
+                    wrapper.local = true;
+                    wrapper.attrs.constructor = true;
+                    let callback = wrapper.import_function(&name, callback_sig);
+                    wrapper.callee_mut(callback).attrs = attrs;
+                    let register = wrapper.import_function("atexit", sig.clone());
+                    let block = wrapper.create_block();
+                    let end = keel_ir::InsertPoint::End(block);
+                    let addr = wrapper.ins(end).symbol_addr(Symbol::Func(callback));
+                    wrapper.ins(end).call(register, &[addr]);
+                    wrapper.ins(end).return_(&[]);
+                    self.module.functions.push(wrapper);
+                }
             }
         }
         if self.debug {
             self.module.debug_language = Some(Language::C11);
         }
+        keel_ir::section::validate_module(&self.module, self.p.target)
+            .map_err(|e| Error::new(Loc::default(), e))?;
         self.module.sync_function_attrs();
         Ok(self.module)
     }
@@ -215,8 +457,11 @@ impl<'p> Gen<'p> {
                 name: name.clone(),
                 thread_local: false,
                 local: true,
+                weak: false,
                 weak_odr: false,
                 hidden: false,
+                retain: false,
+                section: None,
                 init: Some(DataInit {
                     constant: true,
                     align: if s.wide { 4 } else { 1 },
@@ -237,8 +482,11 @@ impl<'p> Gen<'p> {
             name: name.clone(),
             thread_local: false,
             local: true,
+            weak: false,
             weak_odr: false,
             hidden: false,
+            retain: false,
+            section: None,
             init: Some(DataInit {
                 constant: true,
                 align: 8,
@@ -284,7 +532,7 @@ impl<'p> Gen<'p> {
             return Err(name);
         }
         Ok(match ty {
-            Ty::Struct(_) => AbiParam {
+            Ty::Struct(_) | Ty::Complex(_) => AbiParam {
                 ty: Type::Ptr,
                 ext: ArgExt::None,
                 purpose: Purpose::ByVal(self.aggregate_layout(ty)?),
@@ -303,6 +551,14 @@ impl<'p> Gen<'p> {
     }
 
     fn aggregate_layout(&self, ty: &Ty) -> Result<keel_ir::Layout, &'static str> {
+        if self.types().contains_vector_union(ty) {
+            return Err("unions containing vectors passed by value");
+        }
+        if self.p.target == keel_ir::Target::X86_64LinuxGnu && self.types().contains_vector(ty) {
+            return Err(
+                "vector fields in by-value x86-64 aggregates require unsupported SSEUP classification",
+            );
+        }
         if self.types().align(ty) > 16 {
             return Err("aggregates aligned above 16 bytes passed by value");
         }
@@ -311,7 +567,16 @@ impl<'p> Gen<'p> {
         {
             return Err("aggregates with unaligned fields passed by value on x86-64");
         }
-        Ok(self.types().abi_layout(ty))
+        if self.types().contains_complex(ty) {
+            return self.types().complex_abi_layout(ty).ok_or(
+                "complex-containing by-value aggregate with union, bit-field or non-natural layout",
+            );
+        }
+        Ok(if self.p.target == keel_ir::Target::Aarch64LinuxGnu {
+            self.types().aapcs_layout(ty)
+        } else {
+            self.types().abi_layout(ty)
+        })
     }
 
     /// The keel signature of a C function type. A struct result becomes a
@@ -319,7 +584,7 @@ impl<'p> Gen<'p> {
     fn signature(&self, fty: &FuncTy, g: usize, extra: &[Ty]) -> R<Signature> {
         let mut sig = Signature::new(&[], &[]);
         sig.params.reserve(fty.params.len() + extra.len() + 1);
-        if let Ty::Struct(_) = fty.ret {
+        if fty.ret.is_pair_or_struct() {
             sig.params.push(AbiParam {
                 ty: Type::Ptr,
                 ext: ArgExt::None,
@@ -447,11 +712,15 @@ impl<'p> Gen<'p> {
                 && local.sugar.is_restrict(&self.p.typedefs)
             {
                 func.restrict_params
-                    .push((index + usize::from(def.ty.ret.is_struct())) as u32);
+                    .push((index + usize::from(def.ty.ret.is_pair_or_struct())) as u32);
             }
         }
-        func.attrs = global.function_attrs;
+        func.attrs = keel_ir::FunctionAttrs {
+            weak: global.weak.is_some(),
+            ..global.function_attrs
+        };
         func.local = global.internal;
+        func.hidden = global.hidden();
         let mut b = FunctionBuilder::with_context(&mut func, std::mem::take(&mut self.ssa));
         let entry = b.create_block();
         b.seal_block(entry);
@@ -482,9 +751,17 @@ impl<'p> Gen<'p> {
             scope: None,
             loop_depth: 0,
             labels_placed: false,
+            exit_actions: Vec::new(),
+            has_cleanup: def.locals.iter().any(|l| l.cleanup.is_some()),
         };
         for local in &def.locals {
-            let storage = if !fg.g.debug && !local.in_memory && local.ty.is_scalar() {
+            let storage = if local.ty.runtime_sized() {
+                Storage::Var(fg.b.declare_var(Type::Ptr))
+            } else if !fg.g.debug
+                && !local.in_memory
+                && local.ty.is_scalar()
+                && !local.ty.is_complex()
+            {
                 Storage::Var(fg.b.declare_var(local.ty.ir()))
             } else {
                 let types = fg.g.types();
@@ -565,16 +842,20 @@ impl<'p> Gen<'p> {
             }
         }
         let mut params = params.into_iter();
-        if def.ty.ret.is_struct() {
+        if def.ty.ret.is_pair_or_struct() {
             fg.sret = params.next();
         }
-        for (&id, value) in def.params.iter().zip(params) {
+        for ((&id, value), abi_ty) in def.params.iter().zip(params).zip(def.ty.params) {
+            // Old-style definitions receive promoted values but own objects of
+            // the declared type. Convert before SSA binding AND width-sensitive
+            // stores (including debug/address-taken/volatile parameter slots).
+            let value = fg.convert(value, abi_ty, &def.locals[id].ty, def.loc)?;
             match fg.locals[id] {
                 Storage::Var(var) => fg.b.def_var(var, value),
                 // The callee owns its copy of a struct passed by value.
                 // The debugger needs it at a fixed place in the frame, so
                 // with debug info it is copied there.
-                Storage::Slot(slot) if def.locals[id].ty.is_struct() => {
+                Storage::Slot(slot) if def.locals[id].ty.is_pair_or_struct() => {
                     if fg.g.debug {
                         let addr = fg.b.ins().stack_addr(slot);
                         fg.copy(addr, value, &def.locals[id].ty);
@@ -588,7 +869,7 @@ impl<'p> Gen<'p> {
                     fg.b.ins().store_with_flags(value, addr, flags);
                 }
                 Storage::Aligned { addr, .. } => {
-                    if def.locals[id].ty.is_struct() {
+                    if def.locals[id].ty.is_pair_or_struct() {
                         fg.copy(addr, value, &def.locals[id].ty);
                     } else {
                         let flags = fg.object_flags(&def.locals[id].ty, &def.locals[id].sugar);
@@ -606,7 +887,7 @@ impl<'p> Gen<'p> {
             fg.stmt(stmt)?;
         }
         if !fg.terminated {
-            fg.return_default();
+            fg.return_default()?;
         }
         fg.emit_dispatch();
         fg.b.seal_all_blocks();
@@ -617,7 +898,7 @@ impl<'p> Gen<'p> {
     }
 
     /// A defined object: its bytes, with relocations for addresses.
-    fn data(&mut self, g: usize) -> R<DataObject> {
+    fn data(&mut self, g: usize, record_references: bool) -> R<DataObject> {
         let global = &self.p.globals[g];
         let types = self.types();
         let size = types.size(&global.ty) as usize;
@@ -634,7 +915,11 @@ impl<'p> Gen<'p> {
                 }
                 InitItem::Expr { offset, expr, bits } => {
                     let offset = *offset as usize;
-                    let Some(value) = eval(expr) else {
+                    // All declarations have merged: only final strong binding
+                    // proves a global address nonnull in a static initializer.
+                    let Some(value) =
+                        crate::eval::eval_with(expr, &|g| self.p.globals[g].weak.is_none())
+                    else {
                         return Err(Error::new(expr.loc, "initializer is not a constant"));
                     };
                     let width = self.types().size(&expr.ty) as usize;
@@ -656,6 +941,21 @@ impl<'p> Gen<'p> {
                                 write_le(&mut bytes[offset..offset + width], v);
                             }
                         },
+                        Const::Complex(r, i) => {
+                            let Ty::Complex(elem) = expr.ty else {
+                                unreachable!()
+                            };
+                            let n = width / 2;
+                            for (index, f) in [r, i].into_iter().enumerate() {
+                                let bits = if *elem == Ty::Float {
+                                    u128::from((f as f32).to_bits())
+                                } else {
+                                    u128::from(f.to_bits())
+                                };
+                                let start = offset + index * n;
+                                write_le(&mut bytes[start..start + n], bits);
+                            }
+                        }
                         Const::Float(f) => {
                             let v = if expr.ty == Ty::Float {
                                 u128::from((f as f32).to_bits())
@@ -670,10 +970,18 @@ impl<'p> Gen<'p> {
                             }
                             let symbol = match base {
                                 Base::Global(target) => {
-                                    self.use_global(target);
+                                    if record_references {
+                                        self.use_global(target);
+                                    }
                                     self.p.globals[target].symbol.to_owned()
                                 }
-                                Base::Str(s) => self.string_symbol(s),
+                                Base::Str(s) => {
+                                    if record_references {
+                                        self.string_symbol(s)
+                                    } else {
+                                        "placement.validation.string".into()
+                                    }
+                                }
                             };
                             relocs.push((offset, symbol, addend));
                         }
@@ -709,8 +1017,11 @@ impl<'p> Gen<'p> {
             name: global.symbol.to_owned(),
             thread_local: global.thread_local,
             local: global.internal,
+            weak: global.weak.is_some(),
             weak_odr: false,
-            hidden: false,
+            hidden: global.hidden(),
+            retain: global.retain.is_some(),
+            section: global.section,
             init: Some(DataInit {
                 constant: global.is_const && !global.thread_local,
                 align,
@@ -915,8 +1226,8 @@ fn convertible(from: &Ty, to: &Ty) -> bool {
             && to.is_scalar()
             && from.unusable().is_none()
             && to.unusable().is_none()
-            && !(from.is_float() && (to.is_ptr() || wide(to)))
-            && !(to.is_float() && (from.is_ptr() || wide(from)))
+            && !((from.is_float() || from.is_complex()) && (to.is_ptr() || wide(to)))
+            && !((to.is_float() || to.is_complex()) && (from.is_ptr() || wide(from)))
 }
 
 /// An expression that is non-zero exactly when `e` is, and evaluates the
@@ -972,7 +1283,8 @@ fn no_statements(e: &Expr<'_>, budget: u32) -> bool {
         | ExprKind::VaArg(a)
         | ExprKind::IncDec { lhs: a, .. }
         | ExprKind::Member { base: a, .. } => all(&[a]),
-        ExprKind::Binary(_, a, b)
+        ExprKind::VectorIndex(a, b)
+        | ExprKind::Binary(_, a, b)
         | ExprKind::PtrAdd(a, b, _)
         | ExprKind::PtrDiff(a, b, _)
         | ExprKind::LogAnd(a, b)
@@ -1099,6 +1411,7 @@ impl DispatchTable {
         let Ty::Array(&ArrayTy {
             elem: element,
             len: Some(len),
+            ..
         }) = object.ty
         else {
             return None;
@@ -1149,6 +1462,14 @@ fn visit_gotos(stmt: &Stmt<'_>, f: &mut impl FnMut(&Expr<'_>) -> Option<()>) -> 
             visit_goto_expr(e, f)?;
         }
         Stmt::Init(_, init, _) => visit_goto_init(init, f)?,
+        Stmt::Asm(asm) => {
+            for (e, _) in asm.outputs {
+                visit_goto_expr(e, f)?;
+            }
+            for e in asm.inputs {
+                visit_goto_expr(e, f)?;
+            }
+        }
         Stmt::Block(stmts) | Stmt::Scoped(_, stmts) => {
             for stmt in stmts.iter() {
                 visit_gotos(stmt, f)?;
@@ -1216,7 +1537,8 @@ fn visit_goto_expr(e: &Expr<'_>, f: &mut impl FnMut(&Expr<'_>) -> Option<()>) ->
         | ExprKind::VaArg(a)
         | ExprKind::IncDec { lhs: a, .. }
         | ExprKind::Member { base: a, .. } => visit_goto_expr(a, f)?,
-        ExprKind::Binary(_, a, b)
+        ExprKind::VectorIndex(a, b)
+        | ExprKind::Binary(_, a, b)
         | ExprKind::PtrAdd(a, b, _)
         | ExprKind::PtrDiff(a, b, _)
         | ExprKind::LogAnd(a, b)
@@ -1263,6 +1585,12 @@ fn visit_goto_expr(e: &Expr<'_>, f: &mut impl FnMut(&Expr<'_>) -> Option<()>) ->
     Some(())
 }
 
+#[derive(Clone, Copy)]
+enum ExitAction {
+    Restore(Value),
+    Cleanup(LocalId),
+}
+
 struct FnGen<'g, 'p, 'f> {
     g: &'g mut Gen<'p>,
     b: FunctionBuilder<'f>,
@@ -1271,8 +1599,12 @@ struct FnGen<'g, 'p, 'f> {
     /// Facts attached to distinct SSA definitions, never to a mutable C variable.
     alignments: HashMap<Value, u32>,
     sret: Option<Value>,
-    breaks: Vec<Block>,
-    continues: Vec<Block>,
+    breaks: Vec<(Block, usize)>,
+    continues: Vec<(Block, usize)>,
+    /// Registered as declarations execute; emit in reverse order on each exit.
+    /// Branch exits do not consume the list used to compile sibling paths.
+    exit_actions: Vec<ExitAction>,
+    has_cleanup: bool,
     labels: HashMap<&'p str, Block>,
     /// Functions already imported, by global: their signatures are fixed
     /// by a prototype or definition.
@@ -1355,6 +1687,10 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
 
     fn zero(&mut self, ty: Type) -> Value {
         match ty {
+            Type::Vector(shape) => {
+                let zero = self.zero(shape.lane_type());
+                self.b.ins().vsplat(Type::Vector(shape), zero)
+            }
             Type::F32 => self.b.ins().f32const(0.0),
             Type::F64 => self.b.ins().f64const(0.0),
             Type::Ptr => {
@@ -1367,15 +1703,100 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
 
     /// Returns at the end of a function: nothing, or zero (which `main`
     /// must return).
-    fn return_default(&mut self) {
+    fn return_default(&mut self) -> R<()> {
+        self.emit_exit_actions(0)?;
         let ret = &self.def.ty.ret;
-        if *ret == Ty::Void || ret.is_struct() {
+        if *ret == Ty::Void || ret.is_pair_or_struct() {
             self.b.ins().return_(&[]);
         } else {
             let z = self.zero(ret.ir());
             self.b.ins().return_(&[z]);
         }
         self.terminated = true;
+        Ok(())
+    }
+
+    /// Compute a size from saved dimension counts; pointer size is static.
+    fn runtime_size(&mut self, ty: &Ty<'p>) -> R<Value> {
+        if let Ty::Array(a) = ty {
+            let count = if let Some(id) = a.vla {
+                self.val(&Expr {
+                    kind: ExprKind::Local(id),
+                    ty: ULONG,
+                    sugar: Sugar::Plain,
+                    loc: self.def.loc,
+                })?
+            } else {
+                self.b.ins().iconst(Type::I64, a.len.unwrap_or(0) as i64)
+            };
+            let stride = self.runtime_size(&a.elem)?;
+            Ok(self.b.ins().imul(count, stride))
+        } else {
+            let size = self.size(ty);
+            Ok(self.b.ins().iconst(Type::I64, size as i64))
+        }
+    }
+
+    fn has_vm_types(&self) -> bool {
+        self.def.has_vm
+    }
+
+    fn has_cleanup(&self) -> bool {
+        self.has_cleanup
+    }
+
+    fn emit_exit_actions(&mut self, depth: usize) -> R<()> {
+        if self.terminated {
+            return Ok(());
+        }
+        for index in (depth..self.exit_actions.len()).rev() {
+            match self.exit_actions[index] {
+                ExitAction::Restore(token) => {
+                    self.b.ins().intrinsic(Intrinsic::StackRestore, &[token]);
+                }
+                ExitAction::Cleanup(id) => {
+                    let local = &self.def.locals[id];
+                    let (g, loc) = local.cleanup.unwrap();
+                    let Ty::Func(fty) = self.g.p.globals[g].ty else {
+                        unreachable!()
+                    };
+                    let object = Expr {
+                        kind: ExprKind::Local(id),
+                        ty: local.ty,
+                        sugar: local.sugar,
+                        loc,
+                    };
+                    self.set_loc(loc);
+                    let addr = self.addr(&object)?;
+                    let mut args = Vec::new();
+                    // The normal ABI uses a hidden result address for pairs
+                    // and structs, even though cleanup discards that result.
+                    if fty.ret.is_pair_or_struct() {
+                        let size = self.size(&fty.ret);
+                        let align = self.g.types().align(&fty.ret);
+                        let slot = self.b.create_stack_slot(size.max(1) as u32, align as u32);
+                        args.push(self.b.ins().stack_addr(slot));
+                    }
+                    args.push(addr);
+                    self.g.use_global(g);
+                    let callee = self.import_global(g, fty, None)?;
+                    self.b.ins().call(callee, &args);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn leave_scope(&mut self, depth: usize) -> R<()> {
+        self.emit_exit_actions(depth)?;
+        self.exit_actions.truncate(depth);
+        Ok(())
+    }
+
+    fn register_cleanup(&mut self, id: LocalId) {
+        if self.def.locals[id].cleanup.is_some() {
+            self.exit_actions.push(ExitAction::Cleanup(id));
+        }
     }
 
     // ---- statements ----
@@ -1392,6 +1813,34 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
 
     fn stmt_kind(&mut self, s: &Stmt<'p>) -> R<()> {
         match s {
+            Stmt::Asm(asm) => {
+                self.ensure_block();
+                self.set_loc(asm.loc);
+                let mut places = Vec::new();
+                let mut readwrite = Vec::new();
+                for (e, rw) in asm.outputs {
+                    // Capture once, before inputs: postincrement and calls in
+                    // an output address must not run again on writeback.
+                    let place = self.place(e)?.expect("checked asm output");
+                    if *rw {
+                        readwrite.push(self.load_place(&place));
+                    }
+                    places.push(place);
+                }
+                let mut args = Vec::new();
+                for e in asm.inputs {
+                    args.push(self.val(e)?);
+                }
+                args.extend(readwrite);
+                let types: Vec<_> = asm.outputs.iter().map(|(e, _)| e.ty.ir()).collect();
+                let contract = keel_ir::InlineAsm::new(asm.template, asm.constraints, &types)
+                    .map_err(|e| Error::new(asm.loc, e))?;
+                let inst = self.b.ins().inline_asm(contract, &args);
+                let values = self.b.function().inst_results(inst).to_vec();
+                for (place, value) in places.iter().zip(values) {
+                    self.store_place(place, value);
+                }
+            }
             Stmt::Expr(e) => {
                 self.ensure_block();
                 self.set_loc(e.loc);
@@ -1401,6 +1850,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.ensure_block();
                 self.set_loc(*loc);
                 self.init_local(*id, init)?;
+                self.register_cleanup(*id);
             }
             // Without this, a variable read on a path that did not assign it
             // in this iteration would read the last iteration's value: a
@@ -1409,6 +1859,24 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             // no loop and with no label before it, needs no zero: a read
             // that no assignment reaches already reads as zero.
             Stmt::Declare(id) => {
+                let ty = self.def.locals[*id].ty;
+                if ty.runtime_sized() {
+                    self.ensure_block();
+                    let bytes = self.runtime_size(&ty)?;
+                    let save = self.b.ins().intrinsic(Intrinsic::StackSave, &[]);
+                    let token = self.b.function().inst_results(save)[0];
+                    self.exit_actions.push(ExitAction::Restore(token));
+                    let inst = self.b.ins().intrinsic(Intrinsic::StackAlloc, &[bytes]);
+                    let addr = self.b.function().inst_results(inst)[0];
+                    let Storage::Var(var) = self.locals[*id] else {
+                        unreachable!()
+                    };
+                    self.b.def_var(var, addr);
+                    self.alignments
+                        .insert(addr, self.def.locals[*id].align as u32);
+                    self.register_cleanup(*id);
+                    return Ok(());
+                }
                 if let Storage::Var(var) = self.locals[*id]
                     && (self.loop_depth > 0 || self.labels_placed)
                 {
@@ -1416,6 +1884,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     let zero = self.zero(self.def.locals[*id].ty.ir());
                     self.b.def_var(var, zero);
                 }
+                self.register_cleanup(*id);
             }
             Stmt::Block(stmts) => {
                 for s in stmts.iter() {
@@ -1423,12 +1892,14 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 }
             }
             Stmt::Scoped(scope, stmts) => {
+                let depth = self.exit_actions.len();
                 let outer = self.scope;
                 self.set_scope(self.scopes.get(*scope).copied().flatten());
                 for s in stmts.iter() {
                     self.stmt(s)?;
                 }
                 self.set_scope(outer);
+                self.leave_scope(depth)?;
             }
             Stmt::If(cond, then, els) => {
                 self.ensure_block();
@@ -1527,6 +1998,18 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 default,
                 labels,
             } => {
+                if self.has_cleanup() {
+                    return Err(Error::new(
+                        cond.loc,
+                        "switch in a function containing cleanup locals is not supported yet",
+                    ));
+                }
+                if self.has_vm_types() {
+                    return Err(Error::new(
+                        cond.loc,
+                        "switch in a function containing VLAs is not supported yet",
+                    ));
+                }
                 self.ensure_block();
                 self.set_loc(cond.loc);
                 let value = self.val(cond)?;
@@ -1550,7 +2033,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.b.ins().switch(value, default_call, table);
                 self.terminated = true;
                 self.cases.push(blocks.clone());
-                self.breaks.push(exit);
+                self.breaks.push((exit, self.exit_actions.len()));
                 self.stmt(body)?;
                 self.jump_to(exit);
                 self.breaks.pop();
@@ -1572,27 +2055,31 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             }
             Stmt::Break => {
                 self.ensure_block();
-                let target = *self.breaks.last().unwrap();
+                let (target, depth) = *self.breaks.last().unwrap();
+                self.emit_exit_actions(depth)?;
                 self.jump_to(target);
             }
             Stmt::Continue => {
                 self.ensure_block();
-                let target = *self.continues.last().unwrap();
+                let (target, depth) = *self.continues.last().unwrap();
+                self.emit_exit_actions(depth)?;
                 self.jump_to(target);
             }
             Stmt::Return(value, loc) => {
                 self.ensure_block();
                 self.set_loc(*loc);
                 match value {
-                    None => self.return_default(),
+                    None => self.return_default()?,
                     Some(e) => {
                         if let Some(sret) = self.sret {
                             let src = self.val(e)?;
                             let ty = e.ty;
                             self.copy(sret, src, &ty);
+                            self.emit_exit_actions(0)?;
                             self.b.ins().return_(&[]);
                         } else {
                             let v = self.val(e)?;
+                            self.emit_exit_actions(0)?;
                             self.b.ins().return_(&[v]);
                         }
                         self.terminated = true;
@@ -1600,11 +2087,35 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 }
             }
             Stmt::Goto(label) => {
+                if self.has_cleanup() {
+                    return Err(Error::new(
+                        self.def.loc,
+                        "goto in a function containing cleanup locals is not supported yet",
+                    ));
+                }
+                if self.has_vm_types() {
+                    return Err(Error::new(
+                        self.def.loc,
+                        "goto in a function containing VLAs is not supported yet",
+                    ));
+                }
                 self.ensure_block();
                 let block = self.label_block(label);
                 self.jump_to(block);
             }
             Stmt::GotoIndirect(target) => {
+                if self.has_cleanup() {
+                    return Err(Error::new(
+                        target.loc,
+                        "computed goto in a function containing cleanup locals is not supported yet",
+                    ));
+                }
+                if self.has_vm_types() {
+                    return Err(Error::new(
+                        target.loc,
+                        "computed goto in a function containing VLAs is not supported yet",
+                    ));
+                }
                 self.ensure_block();
                 self.set_loc(target.loc);
                 let n = if let Some(table) = &self.dispatch_table {
@@ -1686,8 +2197,8 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
 
     fn loop_body(&mut self, body: &Stmt<'p>, block: Block, exit: Block, cont: Block) -> R<()> {
         self.switch_to(block);
-        self.breaks.push(exit);
-        self.continues.push(cont);
+        self.breaks.push((exit, self.exit_actions.len()));
+        self.continues.push((cont, self.exit_actions.len()));
         self.stmt(body)?;
         self.breaks.pop();
         self.continues.pop();
@@ -1754,6 +2265,12 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
 
     /// `v != 0` as an `i8`.
     fn nonzero(&mut self, v: Value, ty: &Ty) -> Value {
+        if let Ty::Complex(elem) = ty {
+            let (r, i) = self.complex_parts(v, elem);
+            let r = self.nonzero(r, elem);
+            let i = self.nonzero(i, elem);
+            return self.b.ins().or(r, i);
+        }
         let z = self.zero(ty.ir());
         if ty.is_float() {
             self.b.ins().fcmp(FloatCC::Ne, v, z)
@@ -1767,13 +2284,26 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
     /// The value of a non-void expression; for aggregates, their address.
     fn val(&mut self, e: &Expr<'p>) -> R<Value> {
         match self.emit(e)? {
+            Some(v) if e.ty.is_complex() => {
+                // Complex is a C scalar: capture its value now, even when a
+                // later operand overwrites the source object.
+                let slot = self
+                    .b
+                    .create_stack_slot(self.size(&e.ty) as u32, self.g.types().align(&e.ty) as u32);
+                let addr = self.b.ins().stack_addr(slot);
+                self.copy(addr, v, &e.ty);
+                Ok(addr)
+            }
             Some(v) => Ok(v),
             None => Err(Error::new(e.loc, "a void expression has no value")),
         }
     }
 
     fn is_aggregate(ty: &Ty) -> bool {
-        matches!(ty, Ty::Struct(_) | Ty::Array(..) | Ty::Func(_))
+        matches!(
+            ty,
+            Ty::Struct(_) | Ty::Complex(_) | Ty::Array(..) | Ty::Func(_)
+        )
     }
 
     /// Evaluates `e` for its effects only. Literals, and reads of local
@@ -1831,6 +2361,19 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 Some(place) => self.load_place(&place),
                 None => return Ok(None),
             },
+            ExprKind::VectorIndex(base, index) => {
+                let vector = self.val(base)?;
+                if let Some(lane) = fold_int(index, FOLD_DEPTH) {
+                    self.b.ins().vextract(vector, lane as u8)
+                } else {
+                    let slot = self.b.create_stack_slot(16, 16);
+                    let address = self.b.ins().stack_addr(slot);
+                    self.b.ins().store(vector, address);
+                    let offset = self.scaled(index, self.size(&e.ty))?;
+                    let address = self.b.ins().ptradd(address, offset);
+                    self.b.ins().load(e.ty.ir(), address)
+                }
+            }
             ExprKind::Local(id) => match self.locals[*id] {
                 Storage::Var(var) => self.b.use_var(var),
                 _ => {
@@ -1842,6 +2385,40 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             ExprKind::Unary(UnOp::Not, a) if let Some((op, x, y)) = int_comparison(a) => {
                 let c = self.compare(negated(op), x, y)?;
                 self.b.ins().uext(Type::I32, c)
+            }
+            ExprKind::Unary(op, a) if a.ty.is_complex() => {
+                let v = self.val(a)?;
+                let Ty::Complex(elem) = a.ty else {
+                    unreachable!()
+                };
+                match op {
+                    UnOp::Neg => {
+                        let (r, i) = self.complex_parts(v, elem);
+                        let r = self.b.ins().fneg(r);
+                        let i = self.b.ins().fneg(i);
+                        self.complex_pair(r, i, elem)
+                    }
+                    UnOp::Not => {
+                        let c = self.nonzero(v, &a.ty);
+                        let one = self.b.ins().iconst(Type::I8, 1);
+                        let c = self.b.ins().xor(c, one);
+                        self.b.ins().uext(Type::I32, c)
+                    }
+                    _ => return Err(Error::new(e.loc, "unsupported complex unary operation")),
+                }
+            }
+            ExprKind::Unary(op, a) if a.ty.is_vector() => {
+                let v = self.val(a)?;
+                let Ty::Vector(elem, _) = a.ty else {
+                    unreachable!()
+                };
+                let op = match op {
+                    UnOp::Neg if elem.is_float() => keel_ir::UnaryOp::Fneg,
+                    UnOp::Neg => keel_ir::UnaryOp::Ineg,
+                    UnOp::BitNot => keel_ir::UnaryOp::Bnot,
+                    _ => return Err(Error::new(e.loc, "unsupported vector unary operation")),
+                };
+                self.b.ins().vector_unary(op, v)
             }
             ExprKind::Unary(op, a) => {
                 let v = self.val(a)?;
@@ -1860,6 +2437,9 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     }
                 }
             }
+            ExprKind::Binary(op, a, b) if op.is_comparison() && a.ty.is_vector() => {
+                self.compare(*op, a, b)?
+            }
             ExprKind::Binary(op, a, b) if op.is_comparison() => {
                 let c = self.compare(*op, a, b)?;
                 self.b.ins().uext(Type::I32, c)
@@ -1877,6 +2457,10 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     && fold_int(a, FOLD_DEPTH).is_some_and(|k| left_identity(*op, k, &e.ty)) =>
             {
                 self.val(b)?
+            }
+            ExprKind::Binary(op, a, b) if e.ty.is_complex() => {
+                let (x, y) = (self.val(a)?, self.val(b)?);
+                self.complex_arith(*op, &a.ty, &b.ty, x, y, e.loc)?
             }
             ExprKind::Binary(op, a, b) => {
                 let (x, y) = (self.val(a)?, self.val(b)?);
@@ -1934,6 +2518,28 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 // (or perform an extra read of volatile destination storage).
                 v
             }
+            ExprKind::OpAssign { op, lhs, rhs } if lhs.ty.is_complex() || rhs.ty.is_complex() => {
+                let place = self.place(lhs)?.unwrap();
+                let old = self.load_place(&place);
+                let calc = crate::expr::usual(&lhs.ty, &rhs.ty);
+                let lt = match calc {
+                    Ty::Complex(elem) if !lhs.ty.is_complex() => *elem,
+                    _ => calc,
+                };
+                let old = self.convert(old, &lhs.ty, &lt, e.loc)?;
+                // Freeze the old pair before evaluating a side-effecting rhs.
+                let old = if let Ty::Complex(elem) = lt {
+                    let (r, i) = self.complex_parts(old, elem);
+                    self.complex_pair(r, i, elem)
+                } else {
+                    old
+                };
+                let r = self.val(rhs)?;
+                let new = self.complex_arith(*op, &lt, &rhs.ty, old, r, e.loc)?;
+                let new = self.convert(new, &calc, &lhs.ty, e.loc)?;
+                self.store_place(&place, new);
+                new
+            }
             ExprKind::OpAssign { op, lhs, rhs } => {
                 let ty = &rhs.ty;
                 let place = self.place(lhs)?.unwrap();
@@ -1958,11 +2564,14 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 let old = self.load_place(&place);
                 let new = match &lhs.ty {
                     Ty::Ptr(_) => {
-                        let size = self.size(lhs.ty.pointee().unwrap()).max(1) as i64;
-                        let d = self
-                            .b
-                            .ins()
-                            .iconst(Type::I64, if *inc { size } else { -size });
+                        let elem = lhs.ty.pointee().unwrap();
+                        let size = if elem.runtime_sized() {
+                            self.runtime_size(elem)?
+                        } else {
+                            let size = self.size(elem).max(1);
+                            self.b.ins().iconst(Type::I64, size as i64)
+                        };
+                        let d = if *inc { size } else { self.b.ins().ineg(size) };
                         self.b.ins().ptradd(old, d)
                     }
                     Ty::Float | Ty::Double => {
@@ -2051,6 +2660,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 stmts,
                 value,
             } => {
+                let depth = self.exit_actions.len();
                 let outer = self.scope;
                 self.set_scope(self.scopes.get(*scope).copied().flatten());
                 for s in stmts.iter() {
@@ -2059,11 +2669,31 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 let v = match value {
                     Some(v) => {
                         self.ensure_block();
-                        self.emit(v)?
+                        let value = self.emit(v)?;
+                        // Aggregate values are represented by addresses. Freeze
+                        // the bytes before callbacks change them or VLA restores
+                        // release their storage.
+                        if self.exit_actions.len() > depth
+                            && Self::is_aggregate(&v.ty)
+                            && let Some(value) = value
+                        {
+                            let layout =
+                                self.aggregate_place(value, &v.ty, MemoryFlags::default(), v.loc)?;
+                            let Place::Aggregate { size, align, .. } = layout else {
+                                unreachable!()
+                            };
+                            let slot = self.b.create_stack_slot(size.max(1), align.min(16));
+                            let copy = self.b.ins().stack_addr(slot);
+                            self.copy(copy, value, &v.ty);
+                            Some(copy)
+                        } else {
+                            value
+                        }
                     }
                     None => None,
                 };
                 self.set_scope(outer);
+                self.leave_scope(depth)?;
                 return Ok(v);
             }
             ExprKind::Call(f, args) => return self.call(f, args, e),
@@ -2107,11 +2737,17 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             ExprKind::VaArg(ap) => {
                 let addr = self.val(ap)?;
                 match &e.ty {
+                    Ty::Vector(..) => {
+                        return Err(Error::new(e.loc, "va_arg of a vector is not supported"));
+                    }
                     Ty::Int(k) if k.size() < 4 => {
                         let v = self.b.ins().va_arg(Type::I32, addr);
                         self.b.ins().trunc(e.ty.ir(), v)
                     }
-                    Ty::Int(k) if k.size() == 16 => {
+                    Ty::Int(k)
+                        if k.size() == 16
+                            && self.g.p.target != keel_ir::Target::Aarch64LinuxGnu =>
+                    {
                         return Err(Error::new(e.loc, "`va_arg` of `__int128`"));
                     }
                     Ty::Float => {
@@ -2149,7 +2785,27 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         }
         let (x, y) = (self.val(a)?, self.val(b)?);
         let ty = &a.ty;
-        if ty.is_float() {
+        if let Ty::Complex(elem) = ty {
+            let (xr, xi) = self.complex_parts(x, elem);
+            let (yr, yi) = self.complex_parts(y, elem);
+            let cc = if op == BinOp::Eq {
+                FloatCC::Eq
+            } else {
+                FloatCC::Ne
+            };
+            let r = self.b.ins().fcmp(cc, xr, yr);
+            let i = self.b.ins().fcmp(cc, xi, yi);
+            return Ok(if op == BinOp::Eq {
+                self.b.ins().and(r, i)
+            } else {
+                self.b.ins().or(r, i)
+            });
+        }
+        let elem = match ty {
+            Ty::Vector(elem, _) => *elem,
+            _ => ty,
+        };
+        if elem.is_float() {
             let cc = match op {
                 BinOp::Eq => FloatCC::Eq,
                 BinOp::Ne => FloatCC::Ne,
@@ -2158,9 +2814,13 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 BinOp::Gt => FloatCC::Gt,
                 _ => FloatCC::Ge,
             };
-            return Ok(self.b.ins().fcmp(cc, x, y));
+            return Ok(if ty.is_vector() {
+                self.b.ins().vfcmp(cc, x, y)
+            } else {
+                self.b.ins().fcmp(cc, x, y)
+            });
         }
-        let signed = ty.is_signed();
+        let signed = elem.is_signed();
         let cc = match op {
             BinOp::Eq => IntCC::Eq,
             BinOp::Ne => IntCC::Ne,
@@ -2173,11 +2833,35 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             BinOp::Gt => IntCC::Ugt,
             _ => IntCC::Uge,
         };
-        Ok(self.b.ins().icmp(cc, x, y))
+        Ok(if ty.is_vector() {
+            self.b.ins().vicmp(cc, x, y)
+        } else {
+            self.b.ins().icmp(cc, x, y)
+        })
     }
 
     fn arith(&mut self, op: BinOp, ty: &Ty, x: Value, y: Value, loc: Loc) -> R<Value> {
         let ins = self.b.ins();
+        if let Ty::Vector(elem, _) = ty {
+            use keel_ir::VectorBinaryOp as V;
+            let vector_op = match op {
+                BinOp::Add if elem.is_float() => V::Fadd,
+                BinOp::Sub if elem.is_float() => V::Fsub,
+                BinOp::Mul if elem.is_float() => V::Fmul,
+                BinOp::Div if elem.is_float() => V::Fdiv,
+                BinOp::Add => V::Iadd,
+                BinOp::Sub => V::Isub,
+                BinOp::Mul => V::Imul,
+                BinOp::And => V::And,
+                BinOp::Or => V::Or,
+                BinOp::Xor => V::Xor,
+                BinOp::Shl => V::Shl,
+                BinOp::Shr if elem.is_signed() => V::Sshr,
+                BinOp::Shr => V::Ushr,
+                _ => return Err(Error::new(loc, "unsupported vector arithmetic")),
+            };
+            return Ok(ins.vector_binary(vector_op, x, y));
+        }
         if ty.is_float() {
             return Ok(match op {
                 BinOp::Add => ins.fadd(x, y),
@@ -2206,6 +2890,136 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         })
     }
 
+    /// Address-backed pairs share aggregate ABI machinery, but retain a
+    /// distinct C type.
+    fn complex_pair(&mut self, r: Value, i: Value, elem: &Ty) -> Value {
+        let size = self.size(elem) as u32;
+        let slot = self.b.create_stack_slot(2 * size, size);
+        let addr = self.b.ins().stack_addr(slot);
+        self.b.ins().store(r, addr);
+        let imag = self.offset(addr, u64::from(size));
+        self.b.ins().store(i, imag);
+        addr
+    }
+
+    fn complex_parts(&mut self, addr: Value, elem: &Ty) -> (Value, Value) {
+        let r = self.b.ins().load(elem.ir(), addr);
+        let imag = self.offset(addr, self.size(elem));
+        let i = self.b.ins().load(elem.ir(), imag);
+        (r, i)
+    }
+
+    fn complex_arith(
+        &mut self,
+        op: BinOp,
+        lt: &Ty,
+        rt: &Ty,
+        x: Value,
+        y: Value,
+        loc: Loc,
+    ) -> R<Value> {
+        let ty = crate::expr::usual(lt, rt);
+        let Ty::Complex(elem) = ty else {
+            unreachable!()
+        };
+        let (xr, xi) = if lt.is_complex() {
+            let (r, i) = self.complex_parts(x, elem);
+            (r, Some(i))
+        } else {
+            (x, None)
+        };
+        let (yr, yi) = if rt.is_complex() {
+            let (r, i) = self.complex_parts(y, elem);
+            (r, Some(i))
+        } else {
+            (y, None)
+        };
+        if matches!(op, BinOp::Mul | BinOp::Div) {
+            // Real multiplication and division by a real use scalar operations,
+            // avoiding spurious 0*infinity and preserving component zero signs.
+            if let (Some(i), None) = (xi, yi) {
+                let r = self.arith(op, elem, xr, yr, loc)?;
+                let i = self.arith(op, elem, i, yr, loc)?;
+                return Ok(self.complex_pair(r, i, elem));
+            }
+            if op == BinOp::Mul
+                && let (None, Some(i)) = (xi, yi)
+            {
+                let r = self.arith(op, elem, xr, yr, loc)?;
+                let i = self.arith(op, elem, xr, i, loc)?;
+                return Ok(self.complex_pair(r, i, elem));
+            }
+            let zero = self.zero(elem.ir());
+            return self.complex_runtime(
+                op,
+                elem,
+                [xr, xi.unwrap_or(zero), yr, yi.unwrap_or(zero)],
+                loc,
+            );
+        }
+        let r = self.arith(op, elem, xr, yr, loc)?;
+        let i = match (xi, yi) {
+            (Some(x), Some(y)) => self.arith(op, elem, x, y, loc)?,
+            (Some(x), None) => x,
+            (None, Some(y)) if op == BinOp::Sub => self.b.ins().fneg(y),
+            (None, Some(y)) => y,
+            _ => unreachable!(),
+        };
+        Ok(self.complex_pair(r, i, elem))
+    }
+
+    /// compiler-rt/libgcc ABI: four real arguments and a complex result. The
+    /// existing Sret layout lowers to the platform FP return registers, not a
+    /// foreign struct ABI. Linking requires the target compiler builtins runtime
+    /// (Darwin also uses libSystem; see the complex implementation contract).
+    fn complex_runtime(&mut self, op: BinOp, elem: &Ty, args: [Value; 4], loc: Loc) -> R<Value> {
+        let name = match (op, elem) {
+            (BinOp::Mul, Ty::Float) => "__mulsc3",
+            (BinOp::Mul, _) => "__muldc3",
+            (BinOp::Div, Ty::Float) => "__divsc3",
+            (BinOp::Div, _) => "__divdc3",
+            _ => unreachable!(),
+        };
+        let ty = Ty::Complex(elem);
+        // These reserved runtime names must never acquire an incompatible
+        // source-selected ABI or weak/internal binding.
+        for global in &self.g.p.globals {
+            if global.name == name || global.symbol == name {
+                return Err(Error::new(
+                    loc,
+                    "complex runtime symbol is reserved for the compiler builtins ABI",
+                ));
+            }
+        }
+        let mut sig = Signature::new(&[], &[]);
+        sig.params.push(AbiParam {
+            ty: Type::Ptr,
+            ext: ArgExt::None,
+            purpose: Purpose::Sret(
+                self.g
+                    .aggregate_layout(&ty)
+                    .map_err(|m| Error::new(loc, m))?,
+            ),
+        });
+        sig.params.extend((0..4).map(|_| AbiParam::new(elem.ir())));
+        if !self.g.module.decls.iter().any(|d| d.name == name) {
+            self.g.module.decls.push(FuncDecl {
+                name: name.to_owned(),
+                attrs: Default::default(),
+                sig: sig.clone(),
+            });
+        }
+        let slot = self
+            .b
+            .create_stack_slot(self.size(&ty) as u32, self.g.types().align(&ty) as u32);
+        let result = self.b.ins().stack_addr(slot);
+        let callee = self.b.import_function(name, sig);
+        self.b
+            .ins()
+            .call(callee, &[result, args[0], args[1], args[2], args[3]]);
+        Ok(result)
+    }
+
     /// Converts `v` from C type `from` to `to`.
     fn convert(&mut self, v: Value, from: &Ty, to: &Ty, loc: Loc) -> R<Value> {
         if from == to || (from.is_ptr() && to.is_ptr()) || to.is_struct() {
@@ -2218,8 +3032,32 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             let c = self.nonzero(v, from);
             return Ok(c);
         }
+        if let Ty::Complex(elem) = to {
+            let (r, i) = if let Ty::Complex(src) = from {
+                let (r, i) = self.complex_parts(v, src);
+                (
+                    self.convert(r, src, elem, loc)?,
+                    self.convert(i, src, elem, loc)?,
+                )
+            } else {
+                let r = self.convert(v, from, elem, loc)?;
+                (r, self.zero(elem.ir()))
+            };
+            return Ok(self.complex_pair(r, i, elem));
+        }
+        if let Ty::Complex(elem) = from {
+            let (r, _) = self.complex_parts(v, elem);
+            return self.convert(r, elem, to, loc);
+        }
         let ins = self.b.ins();
         let (fi, ti) = (from.ir(), to.ir());
+        if from.is_vector() || to.is_vector() {
+            return Ok(if fi == ti {
+                v
+            } else {
+                ins.convert(ConvertOp::Bitcast, ti, v)
+            });
+        }
         Ok(match (from, to) {
             (Ty::Int(_), Ty::Int(_)) => {
                 let (fs, ts) = (fi.bytes().unwrap(), ti.bytes().unwrap());
@@ -2314,6 +3152,16 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
     fn place(&mut self, e: &Expr<'p>) -> R<Option<Place>> {
         if e.ty == Ty::Void {
             return Ok(None);
+        }
+        if let ExprKind::VectorIndex(base, index) = &e.kind {
+            let address = self.addr(base)?;
+            let offset = self.scaled(index, self.size(&e.ty))?;
+            let address = self.b.ins().ptradd(address, offset);
+            return Ok(Some(Place::Mem(
+                address,
+                e.ty.ir(),
+                self.object_flags(&e.ty, &e.sugar),
+            )));
         }
         if let ExprKind::Local(id) = e.kind
             && let Storage::Var(var) = self.locals[id]
@@ -2486,6 +3334,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             ExprKind::Local(id) => match self.locals[*id] {
                 Storage::Slot(slot) => self.b.ins().stack_addr(slot),
                 Storage::Addr(v) | Storage::Aligned { addr: v, .. } => v,
+                Storage::Var(var) if e.ty.runtime_sized() => self.b.use_var(var),
                 Storage::Var(_) => {
                     return Err(Error::new(e.loc, "internal error: address of a register"));
                 }
@@ -2494,7 +3343,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.g.use_global(*g);
                 let global = &self.g.p.globals[*g];
                 let symbol = if let Ty::Func(fty) = &global.ty {
-                    Symbol::Func(self.import_global(*g, fty, &[])?)
+                    Symbol::Func(self.import_global(*g, fty, None)?)
                 } else {
                     Symbol::Data(self.b.import_data(&global.symbol))
                 };
@@ -2527,28 +3376,47 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
     /// Function `g` (of type `fty`), imported into this function under its
     /// symbol. Once imported, later imports find it by name, so a fixed
     /// signature need not be built again.
-    fn import_global(&mut self, g: usize, fty: &FuncTy, args: &[Ty]) -> R<keel_ir::FuncRef> {
+    fn import_global(
+        &mut self,
+        g: usize,
+        fty: &FuncTy,
+        args: Option<&[Ty]>,
+    ) -> R<keel_ir::FuncRef> {
         let fixed = fty.prototyped || self.g.p.globals[g].func.is_some();
         if fixed && let Some(&fref) = self.callees.get(&g) {
             return Ok(fref);
         }
         let sig = self.callee_signature(g, fty, args)?;
-        let fref = self.b.import_function(self.g.p.globals[g].symbol, sig);
+        let fref = self
+            .b
+            .import_function(self.g.p.globals[g].symbol, sig.clone());
+        // A preceding address-of may have imported an unspecified empty
+        // signature. The first unprototyped call supplies its promoted ABI.
+        if !fixed {
+            self.b.function_mut().callee_mut(fref).sig = sig;
+        }
         if fixed {
             self.callees.insert(g, fref);
         }
         Ok(fref)
     }
 
-    fn callee_signature(&mut self, g: usize, fty: &FuncTy, args: &[Ty]) -> R<Signature> {
-        if fty.prototyped || self.g.p.globals[g].func.is_some() {
+    fn callee_signature(&mut self, g: usize, fty: &FuncTy, args: Option<&[Ty]>) -> R<Signature> {
+        let global = &self.g.p.globals[g];
+        let final_ty = global.ty.func().unwrap();
+        if global.func.is_some() || final_ty.prototyped {
+            return self.g.signature(final_ty, g, &[]);
+        }
+        if fty.prototyped {
             return self.g.signature(fty, g, &[]);
         }
         if let Some(sig) = self.g.unprototyped.get(&g) {
             return Ok(sig.clone());
         }
-        let sig = self.g.signature(fty, g, args)?;
-        if !args.is_empty() {
+        let sig = self.g.signature(fty, g, args.unwrap_or(&[]))?;
+        // An actual zero-argument call fixes the signature too. Address-only
+        // imports do not, and are completed after all bodies are lowered.
+        if args.is_some() {
             self.g.unprototyped.insert(g, sig.clone());
         }
         Ok(sig)
@@ -2572,7 +3440,8 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             | ExprKind::Deref(a)
             | ExprKind::Addr(a)
             | ExprKind::Member { base: a, .. } => self.may_change_memory(a),
-            ExprKind::Binary(_, a, b)
+            ExprKind::VectorIndex(a, b)
+            | ExprKind::Binary(_, a, b)
             | ExprKind::PtrAdd(a, b, _)
             | ExprKind::PtrDiff(a, b, _)
             | ExprKind::LogAnd(a, b)
@@ -2589,7 +3458,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         let fty = f.ty.pointee().and_then(Ty::func).unwrap();
         self.set_loc(e.loc);
         let mut vals = Vec::new();
-        let ret_slot = if fty.ret.is_struct() {
+        let ret_slot = if fty.ret.is_pair_or_struct() {
             let (size, align) = (self.size(&fty.ret), self.g.types().align(&fty.ret));
             let slot = self.b.create_stack_slot(size.max(1) as u32, align as u32);
             vals.push(self.b.ins().stack_addr(slot));
@@ -2601,7 +3470,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         // Freeze an argument's bytes now when later evaluation could change
         // them. With no intervening effects, immediate ABI copying suffices.
         let mut snapshots = Vec::new();
-        if args.iter().any(|arg| arg.ty.is_struct()) {
+        if args.iter().any(|arg| arg.ty.is_pair_or_struct()) {
             snapshots.resize(args.len(), false);
             let mut later_effect = self.may_change_memory(f);
             for (index, arg) in args.iter().enumerate().rev() {
@@ -2610,11 +3479,13 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             }
         }
         for (index, arg) in args.iter().enumerate() {
-            if !fty.prototyped && arg.ty.is_struct() {
+            if !fty.prototyped && arg.ty.is_pair_or_struct() {
                 return Err(Error::new(arg.loc, "struct argument without a prototype"));
             }
             if vals.len() >= fty.params.len() + usize::from(ret_slot.is_some())
-                && (arg.ty.is_struct() || arg.ty == Ty::Int(IntKind::Int128))
+                && (arg.ty.is_pair_or_struct()
+                    || arg.ty.int_kind().is_some_and(|k| k.size() == 16)
+                        && self.g.p.target != keel_ir::Target::Aarch64LinuxGnu)
             {
                 return Err(Error::new(
                     arg.loc,
@@ -2622,7 +3493,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 ));
             }
             let mut value = self.val(arg)?;
-            if arg.ty.is_struct() && snapshots[index] {
+            if arg.ty.is_pair_or_struct() && snapshots[index] {
                 let layout =
                     self.aggregate_place(value, &arg.ty, MemoryFlags::default(), arg.loc)?;
                 let Place::Aggregate { size, align, .. } = layout else {
@@ -2651,13 +3522,43 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         };
         let inst = match direct {
             Some(g) => {
+                let global = &self.g.p.globals[g];
+                if self.has_cleanup() && crate::parse::nonlocal_exit(global) {
+                    return Err(Error::new(
+                        e.loc,
+                        "nonlocal exit/returns-twice call in a function containing cleanup locals is not supported yet",
+                    ));
+                }
                 self.g.use_global(g);
-                let fref = self.import_global(g, &fty, &extra)?;
+                let fref = self.import_global(g, &fty, Some(&extra))?;
+                let function = self.b.function();
+                let sig = &function.callee(fref).sig;
+                if !fty.prototyped
+                    && (sig.params.len() != vals.len()
+                        || sig
+                            .params
+                            .iter()
+                            .zip(&vals)
+                            .any(|(p, &v)| p.ty != function.value_type(function.resolve(v))))
+                {
+                    return Err(Error::new(
+                        e.loc,
+                        "unprototyped call arguments do not match the known function ABI",
+                    ));
+                }
                 self.b.ins().call(fref, &vals)
             }
             None => {
                 let callee = self.val(f)?;
-                let sig = self.g.signature(&fty, usize::MAX, &extra)?;
+                let unprototyped = FuncTy {
+                    params: &[],
+                    ..*fty
+                };
+                let sig = self.g.signature(
+                    if fty.prototyped { fty } else { &unprototyped },
+                    usize::MAX,
+                    &extra,
+                )?;
                 let sig = self.b.import_signature(sig);
                 self.b.ins().call_indirect(sig, callee, &vals)
             }
@@ -2937,6 +3838,31 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             }
             return Ok(Some(v));
         }
+        // C lvalue conversions and compound operators synthesize these builtins
+        // without passing through the explicit builtin parser's alignment gate.
+        if matches!(
+            op,
+            Builtin::AtomicLoad
+                | Builtin::AtomicStore
+                | Builtin::AtomicRmw { .. }
+                | Builtin::AtomicFloatRmw { .. }
+        ) && let ExprKind::Addr(obj) = args[0].kind
+        {
+            let align = match obj.kind {
+                ExprKind::Local(id) | ExprKind::CompoundLit(id, _) => self.def.locals[id].align,
+                ExprKind::Global(id) => self.g.p.globals[id].align,
+                ExprKind::Member { align, .. } => align,
+                _ => self.g.p.type_alignment(&obj.ty, &obj.sugar),
+            };
+            if self
+                .g
+                .types()
+                .atomic_size(obj.ty.unatomic(), align)
+                .is_none()
+            {
+                return Err(Error::new(e.loc, "atomic object is not naturally aligned"));
+            }
+        }
         let mut vals = Vec::new();
         for a in args.iter() {
             vals.push(self.val(a)?);
@@ -2946,8 +3872,118 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         {
             return self.checked_memory_builtin(id, args, &vals, e).map(Some);
         }
+        if let Builtin::AtomicGeneric { kind, size } = op {
+            let ty = match size {
+                1 => Type::I8,
+                2 => Type::I16,
+                4 => Type::I32,
+                _ => Type::I64,
+            };
+            let order_index = if kind == GenericAtomicOp::CompareExchange {
+                4
+            } else {
+                args.len() - 1
+            };
+            let order = if kind == GenericAtomicOp::CompareExchange
+                && crate::eval::eval_int(&args[5]).is_none()
+            {
+                5
+            } else {
+                crate::eval::eval_int(&args[order_index]).unwrap_or(5)
+            };
+            let ordering = atomic_order(
+                order,
+                kind == GenericAtomicOp::Load,
+                kind == GenericAtomicOp::Store,
+            );
+            let flags = |i: usize| MemoryFlags {
+                volatile: self.g.object_volatile(
+                    args[i].ty.pointee().unwrap(),
+                    &args[i].sugar.pointee(&self.g.p.typedefs),
+                ),
+                ..MemoryFlags::default()
+            };
+            let expected_flags = flags(1);
+            let desired_flags = flags(if kind == GenericAtomicOp::CompareExchange {
+                2
+            } else {
+                1
+            });
+            match kind {
+                GenericAtomicOp::Load => {
+                    let value = self.b.ins().atomic_load(ty, ordering, vals[0]);
+                    self.b
+                        .ins()
+                        .store_with_flags(value, vals[1], expected_flags);
+                }
+                GenericAtomicOp::Store => {
+                    let value = self.b.ins().load_with_flags(ty, vals[1], desired_flags);
+                    self.b.ins().atomic_store(ordering, value, vals[0]);
+                }
+                GenericAtomicOp::Exchange => {
+                    let value = self.b.ins().load_with_flags(ty, vals[1], desired_flags);
+                    let old = self
+                        .b
+                        .ins()
+                        .atomic_rmw(RmwOp::Xchg, ordering, vals[0], value);
+                    let flags = MemoryFlags {
+                        volatile: self.g.object_volatile(
+                            args[2].ty.pointee().unwrap(),
+                            &args[2].sugar.pointee(&self.g.p.typedefs),
+                        ),
+                        ..MemoryFlags::default()
+                    };
+                    self.b.ins().store_with_flags(old, vals[2], flags);
+                }
+                GenericAtomicOp::CompareExchange => {
+                    let expected = self.b.ins().load_with_flags(ty, vals[1], expected_flags);
+                    let desired = self.b.ins().load_with_flags(ty, vals[2], desired_flags);
+                    let old = self
+                        .b
+                        .ins()
+                        .atomic_cas(ordering, vals[0], expected, desired);
+                    return Ok(Some(self.atomic_expected(
+                        old,
+                        expected,
+                        vals[1],
+                        expected_flags,
+                    )));
+                }
+            }
+            return Ok(None);
+        }
+        if let Builtin::AtomicFloatRmw { op, new } = op {
+            let ty = e.ty;
+            let bits = if ty == Ty::Float {
+                Type::I32
+            } else {
+                Type::I64
+            };
+            let first = self.b.ins().atomic_load(bits, Ordering::SeqCst, vals[0]);
+            let retry = self.new_block();
+            let done = self.new_block();
+            let expected = self.b.append_block_param(retry, bits);
+            self.b.ins().jump(retry, &[first]);
+            self.switch_to(retry);
+            let old = self.b.ins().convert(ConvertOp::Bitcast, ty.ir(), expected);
+            let x = self.convert(old, &ty, &args[1].ty, e.loc)?;
+            let value = self.arith(op, &args[1].ty, x, vals[1], e.loc)?;
+            let value = self.convert(value, &args[1].ty, &ty, e.loc)?;
+            let desired = self.b.ins().convert(ConvertOp::Bitcast, bits, value);
+            let found = self
+                .b
+                .ins()
+                .atomic_cas(Ordering::SeqCst, vals[0], expected, desired);
+            let success = self.b.ins().icmp(IntCC::Eq, found, expected);
+            self.b.ins().brif(success, done, &[], retry, &[found]);
+            self.b.seal_block(retry);
+            self.b.seal_block(done);
+            self.switch_to(done);
+            return Ok(Some(if new { value } else { old }));
+        }
         let ins = self.b.ins();
         Ok(Some(match op {
+            Builtin::AtomicGeneric { .. } | Builtin::AtomicFloatRmw { .. } => unreachable!(),
             Builtin::Memory(id) => {
                 // All arguments were evaluated once above, including at
                 // length zero. Copy/fill intrinsics return dst in C; a
@@ -2961,6 +3997,12 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 } else {
                     self.b.function().inst_results(inst)[0]
                 }
+            }
+            Builtin::Complex => {
+                let Ty::Complex(elem) = e.ty else {
+                    unreachable!()
+                };
+                self.complex_pair(vals[0], vals[1], elem)
             }
             Builtin::Bswap => ins.bswap(vals[0]),
             Builtin::Fabs => ins.fabs(vals[0]),
@@ -3019,6 +4061,12 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 }
             }
             Builtin::Alloca => {
+                if self.def.has_vm {
+                    return Err(Error::new(
+                        self.def.loc,
+                        "alloca in a function containing VLAs is not supported yet",
+                    ));
+                }
                 let inst = ins.intrinsic(Intrinsic::StackAlloc, &vals);
                 self.b.function().inst_results(inst)[0]
             }
@@ -3036,33 +4084,79 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 // `__ATOMIC_RELAXED` 0 ... `__ATOMIC_SEQ_CST` 5; consume
                 // (1) is acquire. A load cannot release nor a store
                 // acquire, so those orders weaken to what applies.
-                let order = crate::eval::eval_int(args.last().unwrap()).unwrap_or(5);
+                let order_arg = if op == Builtin::AtomicCompareExchange {
+                    &args[3]
+                } else {
+                    args.last().unwrap()
+                };
+                let order = if op == Builtin::AtomicCompareExchange
+                    && crate::eval::eval_int(&args[4]).is_none()
+                {
+                    5
+                } else {
+                    crate::eval::eval_int(order_arg).unwrap_or(5)
+                };
                 let load = matches!(op, Builtin::AtomicLoad);
                 let store = matches!(op, Builtin::AtomicStore);
-                let ordering = match order {
-                    0 => Ordering::Relaxed,
-                    1 | 2 if store => Ordering::Relaxed,
-                    1 | 2 => Ordering::Acquire,
-                    3 if load => Ordering::Relaxed,
-                    3 => Ordering::Release,
-                    4 if load => Ordering::Acquire,
-                    4 if store => Ordering::Release,
-                    4 => Ordering::AcqRel,
-                    _ => Ordering::SeqCst,
+                let ordering = atomic_order(order, load, store);
+                let value_ty = args[0]
+                    .ty
+                    .pointee()
+                    .map(|t| *t.unatomic())
+                    .unwrap_or(Ty::Void);
+                let float = value_ty.is_float();
+                let repr = if value_ty == Ty::Float {
+                    Type::I32
+                } else {
+                    Type::I64
                 };
+                // Floating operands enter integer atomic IR by bitcast only.
+                if float {
+                    let range = match op {
+                        Builtin::AtomicStore | Builtin::AtomicRmw { .. } => 1..2,
+                        Builtin::AtomicCas | Builtin::AtomicCasBool => 1..3,
+                        Builtin::AtomicCompareExchange => 2..3,
+                        _ => 0..0,
+                    };
+                    for i in range {
+                        vals[i] = self.b.ins().convert(ConvertOp::Bitcast, repr, vals[i]);
+                    }
+                }
+                let ins = self.b.ins();
                 match op {
-                    Builtin::AtomicLoad => ins.atomic_load(e.ty.ir(), ordering, vals[0]),
+                    Builtin::AtomicLoad => {
+                        let v = ins.atomic_load(
+                            if float { repr } else { e.ty.ir() },
+                            ordering,
+                            vals[0],
+                        );
+                        if float {
+                            self.b.ins().convert(ConvertOp::Bitcast, e.ty.ir(), v)
+                        } else {
+                            v
+                        }
+                    }
                     Builtin::AtomicStore => {
                         ins.atomic_store(ordering, vals[1], vals[0]);
                         if e.ty == Ty::Void {
                             return Ok(None);
                         }
-                        vals[1]
+                        if float {
+                            self.b
+                                .ins()
+                                .convert(ConvertOp::Bitcast, value_ty.ir(), vals[1])
+                        } else {
+                            vals[1]
+                        }
                     }
                     Builtin::AtomicRmw { op, new } => {
                         let old = ins.atomic_rmw(op, ordering, vals[0], vals[1]);
                         if !new {
-                            return Ok(Some(old));
+                            return Ok(Some(if float {
+                                self.b.ins().convert(ConvertOp::Bitcast, value_ty.ir(), old)
+                            } else {
+                                old
+                            }));
                         }
                         let bin = match op {
                             RmwOp::Add => BinaryOp::Iadd,
@@ -3074,13 +4168,20 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                         };
                         self.b.ins().binary(bin, old, vals[1])
                     }
-                    Builtin::AtomicCas => ins.atomic_cas(ordering, vals[0], vals[1], vals[2]),
+                    Builtin::AtomicCas => {
+                        let v = ins.atomic_cas(ordering, vals[0], vals[1], vals[2]);
+                        if float {
+                            self.b.ins().convert(ConvertOp::Bitcast, value_ty.ir(), v)
+                        } else {
+                            v
+                        }
+                    }
                     Builtin::AtomicCasBool => {
                         let old = ins.atomic_cas(ordering, vals[0], vals[1], vals[2]);
                         self.b.ins().icmp(IntCC::Eq, old, vals[1])
                     }
                     Builtin::AtomicCompareExchange => {
-                        let ty = args[2].ty.ir();
+                        let ty = if float { repr } else { args[2].ty.ir() };
                         let flags = MemoryFlags {
                             volatile: args[1]
                                 .sugar
@@ -3093,9 +4194,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                             .b
                             .ins()
                             .atomic_cas(ordering, vals[0], expected, vals[2]);
-                        // Unconditionally: on success it is the same value.
-                        self.b.ins().store_with_flags(old, vals[1], flags);
-                        self.b.ins().icmp(IntCC::Eq, old, expected)
+                        self.atomic_expected(old, expected, vals[1], flags)
                     }
                     _ => {
                         if order != 0 {
@@ -3116,6 +4215,27 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 return Ok(None);
             }
         }))
+    }
+
+    /// The expected buffer is written only on failure (observable for volatile).
+    fn atomic_expected(
+        &mut self,
+        old: Value,
+        expected: Value,
+        ptr: Value,
+        flags: MemoryFlags,
+    ) -> Value {
+        let success = self.b.ins().icmp(IntCC::Eq, old, expected);
+        let fail = self.new_block();
+        let done = self.new_block();
+        self.b.ins().brif(success, done, &[], fail, &[]);
+        self.b.seal_block(fail);
+        self.switch_to(fail);
+        self.b.ins().store_with_flags(old, ptr, flags);
+        self.jump_to(done);
+        self.b.seal_block(done);
+        self.switch_to(done);
+        success
     }
 
     // ---- memory ----
@@ -3294,8 +4414,11 @@ mod alignment_tests {
 
     fn data(name: &str, align: Option<u32>) -> DataObject {
         DataObject {
+            section: None,
+            retain: false,
             name: name.into(),
             local: true,
+            weak: false,
             weak_odr: false,
             hidden: false,
             thread_local: false,
@@ -3527,5 +4650,21 @@ mod alignment_tests {
         assert_eq!(got[14], 32, "seeded value");
         assert_eq!(got[16], 1, "block parameter");
         assert_eq!(*got.last().unwrap(), 2, "alias resolves to its target");
+    }
+}
+
+// CAS IR has one ordering: the success order also supplies a legally stronger
+// failure order. Runtime orders conservatively select seq_cst.
+fn atomic_order(order: i64, load: bool, store: bool) -> Ordering {
+    match order {
+        0 => Ordering::Relaxed,
+        1 | 2 if store => Ordering::Relaxed,
+        1 | 2 => Ordering::Acquire,
+        3 if load => Ordering::Relaxed,
+        3 => Ordering::Release,
+        4 if load => Ordering::Acquire,
+        4 if store => Ordering::Release,
+        4 => Ordering::AcqRel,
+        _ => Ordering::SeqCst,
     }
 }

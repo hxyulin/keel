@@ -25,11 +25,11 @@ fn fixture() -> String {
         (Type::I16, Type::I64),
         (Type::I32, Type::I64),
     ] {
-        let a = VectorType::ALL
+        let a = VectorType::ALL_128
             .into_iter()
             .find(|s| s.lane_type() == from)
             .unwrap();
-        let b = VectorType::ALL
+        let b = VectorType::ALL_128
             .into_iter()
             .find(|s| s.lane_type() == to)
             .unwrap();

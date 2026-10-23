@@ -1,8 +1,13 @@
+mod baseline;
 #[path = "bmi.rs"]
 mod bmi;
+mod core;
 mod sse2;
+mod v2;
+mod v3;
 mod vex;
 mod x87;
+mod x87_extra;
 
 use Operand::{Immediate as I, Memory as M, Register as R};
 use keel_asm_ir::x86::{
@@ -143,6 +148,9 @@ impl<'a> Encoding<'a> {
         {
             self.bytes.push(segment)
         }
+        if matches!(rm,M(m) if m.base.into_iter().chain(m.index).any(|r| r.width==32)) {
+            self.bytes.push(0x67);
+        }
         if prefix != 0 {
             self.bytes.push(prefix)
         }
@@ -170,11 +178,19 @@ impl<'a> Encoding<'a> {
         Ok(())
     }
     fn memory(&mut self, field: u8, m: &'a Memory) -> Result<(), String> {
+        let address32 = m.base.into_iter().chain(m.index).any(|r| r.width == 32);
         let a = &m.displacement;
         let symbolic = a.expression.add.is_some()
             || a.expression.subtract.is_some()
             || a.modifier != Modifier::None;
-        let d = a.expression.constant;
+        let raw_displacement = a.expression.constant;
+        // Address arithmetic wraps at 32 bits. Canonicalize its signed view
+        // before choosing disp8, while preserving symbolic relocation addends.
+        let d = if address32 && !symbolic && (0..=u32::MAX as i128).contains(&raw_displacement) {
+            raw_displacement as u32 as i32 as i128
+        } else {
+            raw_displacement
+        };
         if m.base.is_some_and(|r| r.class == RegisterClass::Rip) {
             if a.expression.subtract.is_some() {
                 return Err("symbol differences in RIP-relative operands are unsupported".into());
@@ -196,8 +212,8 @@ impl<'a> Encoding<'a> {
                 });
                 self.number(0, 4);
             } else {
-                // A numeric RIP displacement is relative to the next instruction.
-                self.imm(a, 4, true)?;
+                // Numeric IP-relative displacements use the selected address size.
+                self.imm(a, 4, !address32)?;
             }
             return Ok(());
         }
@@ -222,7 +238,7 @@ impl<'a> Encoding<'a> {
         if mode == 1 {
             self.number(d, 1)
         } else if mode == 2 || base.is_none() {
-            self.imm(a, 4, true)?
+            self.imm(a, 4, !address32)?
         }
         Ok(())
     }
@@ -248,10 +264,12 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding<'_>, Strin
                 | Dec
                 | Xadd
                 | Cmpxchg
+                | V2(keel_asm_ir::x86::V2Opcode::Cmpxchg16b)
                 | Xchg
                 | Bts
                 | Btr
                 | Btc
+                | Core(keel_asm_ir::x86::CoreOpcode::Cmpxchg8b)
         ) || !matches!(o.first(), Some(M(_)))
         {
             return Err("lock requires a lockable memory destination".into());
@@ -260,6 +278,12 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding<'_>, Strin
     }
     let err = || format!("unsupported operands for {op:?}: {o:?}");
     match (op, o.as_slice()) {
+        (Core(op), _) => core::encode(&mut e, i, op)?,
+        (X87(op), _) => x87_extra::encode(&mut e, i, op)?,
+        _ if baseline::handles(i) => baseline::encode(&mut e, i)?,
+        (Fixed(op), []) => e.bytes.extend_from_slice(op.bytes()),
+        (V2(v), _) => v2::encode(&mut e, i, v)?,
+        (V3(_), _) => v3::encode(&mut e, i)?,
         (
             Andn | Bextr | Blsi | Blsmsk | Blsr | Tzcnt | Shlx | Shrx | Sarx | Rorx | Bzhi | Pext
             | Pdep | Mulx,
@@ -282,6 +306,16 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding<'_>, Strin
             | Fild | Fistp | Fldcw | Fnstcw | Fldz,
             _,
         ) => x87::encode(&mut e, i)?,
+        (Ldmxcsr | Stmxcsr, [m @ M(memory)]) if matches!(memory.width, 0 | 32) => {
+            e.rm(
+                0,
+                &[0x0f, 0xae],
+                32,
+                if op == Ldmxcsr { 2 } else { 3 },
+                m,
+                None,
+            )?;
+        }
         (Ret, []) => e.bytes.push(0xc3),
         (Ret, [I(a)]) => {
             e.bytes.push(0xc2);
@@ -289,6 +323,16 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding<'_>, Strin
         }
         (Leave, []) => e.bytes.push(0xc9),
         (Nop, []) => e.bytes.push(0x90),
+        (Nop, [a]) if (gpr(a) || matches!(a, M(_))) && matches!(width(a), 0 | 16 | 32 | 64) => {
+            e.rm(
+                0,
+                &[0x0f, 0x1f],
+                if width(a) == 0 { 32 } else { width(a) },
+                0,
+                a,
+                None,
+            )?;
+        }
         (Ud2, []) => e.bytes.extend([0x0f, 0x0b]),
         (Cqo, []) => e.bytes.extend([0x48, 0x99]),
         (Cdq, []) => e.bytes.push(0x99),
@@ -301,6 +345,10 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding<'_>, Strin
         (Pause, []) => e.bytes.extend([0xf3, 0x90]),
         (Syscall, []) => e.bytes.extend([0x0f, 0x05]),
         (Int3, []) => e.bytes.push(0xcc),
+        (Push | Pop, [R(r)]) if r.class == RegisterClass::Segment && matches!(r.number, 4 | 5) => {
+            e.bytes
+                .extend([0x0f, 0xa0 + 8 * (r.number - 4) + u8::from(op == Pop)]);
+        }
         (Push | Pop, [R(r)]) if r.class == RegisterClass::Gpr && matches!(r.width, 16 | 64) => {
             if r.width == 16 {
                 e.bytes.push(0x66)
@@ -361,6 +409,59 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding<'_>, Strin
         {
             e.rm(0, &[0x8d], r.width, r.number, b, None)?
         }
+        (Mov, [R(r), a]) if r.class == RegisterClass::Segment && r.number != 1 => {
+            check_width(a, 16)?;
+            // Match LLVM and GNU spelling of a register selector; memory is always m16.
+            e.rm(
+                0,
+                &[0x8e],
+                if matches!(a, R(_)) { 16 } else { 32 },
+                r.number,
+                a,
+                None,
+            )?;
+        }
+        (Mov, [a, R(r)]) if r.class == RegisterClass::Segment => {
+            let w = if matches!(a, M(_)) {
+                check_width(a, 16)?;
+                32
+            } else {
+                if !gpr(a) || !matches!(width(a), 16 | 32 | 64) {
+                    return Err(err());
+                }
+                width(a)
+            };
+            e.rm(0, &[0x8c], w, r.number, a, None)?;
+        }
+        (Movabs, [a, b]) if matches!((a, b), (R(_), M(_)) | (M(_), R(_))) => {
+            let (r, m, store) = match (a, b) {
+                (R(r), M(m)) => (r, m, false),
+                (M(m), R(r)) => (r, m, true),
+                _ => unreachable!(),
+            };
+            if r.class != RegisterClass::Gpr
+                || r.number != 0
+                || r.high_byte
+                || m.base.is_some()
+                || m.index.is_some()
+                || !matches!(r.width, 8 | 16 | 32 | 64)
+                || (m.width != 0 && m.width != r.width)
+            {
+                return Err(err());
+            }
+            if let Some(segment) = m.segment {
+                e.bytes.push(segment);
+            }
+            if r.width == 16 {
+                e.bytes.push(0x66);
+            }
+            if r.width == 64 {
+                e.bytes.push(0x48);
+            }
+            e.bytes
+                .push(0xa0 + u8::from(r.width != 8) + 2 * u8::from(store));
+            e.imm(&m.displacement, 8, false)?;
+        }
         (Mov | Movabs, [R(r), I(a)]) if r.class == RegisterClass::Gpr => {
             if op == Movabs && r.width != 64 {
                 return Err(err());
@@ -408,15 +509,18 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding<'_>, Strin
                 Some(r),
             )?;
         }
-        (Movsx | Movzx | Movsxd, [R(r), b]) if r.class == RegisterClass::Gpr => {
+        (Movsx | Movzx | Movsxd, [R(r), b])
+            if r.class == RegisterClass::Gpr && matches!(r.width, 16 | 32 | 64) =>
+        {
             let w = width(b);
             if !matches!(w, 8 | 16 | 32)
-                || r.width <= w
+                || r.width < w
                 || (w == 32 && op != Movsxd)
-                || (op == Movsxd && (w != 32 || r.width != 64))
+                || (op == Movsxd && !matches!((r.width, w), (16, 16) | (32, 32) | (64, 32)))
             {
                 return Err(err());
             }
+            check_width(b, w)?;
             if op == Movsxd {
                 e.rm(0, &[0x63], r.width, r.number, b, None)?
             } else {
@@ -659,6 +763,7 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding<'_>, Strin
             if r.class == RegisterClass::Gpr && matches!(r.width, 16 | 32 | 64) =>
         {
             check_width(b, r.width)?;
+            let start = e.bytes.len();
             e.rm(
                 if op == Popcnt { 0xf3 } else { 0 },
                 &[
@@ -674,6 +779,10 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding<'_>, Strin
                 b,
                 None,
             )?;
+            if op == Popcnt && r.width == 16 {
+                let prefix = start + usize::from(matches!(b, M(m) if m.segment.is_some()));
+                e.bytes.swap(prefix, prefix + 1);
+            }
         }
         (Bswap, [R(r)]) if r.class == RegisterClass::Gpr && matches!(r.width, 32 | 64) => {
             if r.width == 64 || r.number >= 8 {
@@ -719,7 +828,14 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding<'_>, Strin
         }
         _ => {
             if op.required_features().avx {
-                vex::encode(&mut e, i)?;
+                if i.operands
+                    .iter()
+                    .any(|o| matches!(o,R(r) if r.class==RegisterClass::Ymm))
+                {
+                    v3::encode(&mut e, i)?;
+                } else {
+                    vex::encode(&mut e, i)?;
+                }
             } else {
                 encode_sse(&mut e, i).map_err(|_| err())?;
             }
@@ -730,7 +846,7 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding<'_>, Strin
         // prefix length is unchanged, so recorded fixup offsets remain valid.
         let end = 1 + e.bytes[1..]
             .iter()
-            .take_while(|b| matches!(b, 0x64 | 0x65 | 0x66))
+            .take_while(|b| matches!(b, 0x64 | 0x65 | 0x66 | 0x67))
             .count();
         e.bytes[..end].rotate_left(1);
     }
@@ -855,6 +971,14 @@ fn encode_sse<'a>(e: &mut Encoding<'a>, i: &'a Instruction) -> Result<(), String
                 e.rm(0xf3, &[0x0f, 0x7e], 32, reg(a)?.number, b, None)?;
                 return Ok(());
             }
+            if op == Movq && xmm(a) && matches!(b, M(_)) {
+                check_width(b, 64)?;
+                return e.rm(0xf3, &[0x0f, 0x7e], 32, reg(a)?.number, b, None);
+            }
+            if op == Movq && matches!(a, M(_)) && xmm(b) {
+                check_width(a, 64)?;
+                return e.rm(0x66, &[0x0f, 0xd6], 32, reg(b)?.number, a, None);
+            }
             let (r, m, load) = if xmm(a) {
                 (reg(a)?, b, true)
             } else if xmm(b) {
@@ -943,34 +1067,110 @@ fn validate(i: &Instruction) -> Result<(), String> {
                         && (!r.high_byte || r.width == 8 && (4..8).contains(&r.number))
                 }
                 RegisterClass::Xmm => r.width == 128 && !r.high_byte,
+                RegisterClass::Mmx => r.number < 8 && r.width == 64 && !r.high_byte,
+                RegisterClass::Ymm => r.width == 256 && !r.high_byte,
                 RegisterClass::X87 => r.number < 8 && r.width == 80 && !r.high_byte,
-                RegisterClass::Rip => r.number == 0 && r.width == 64 && !r.high_byte,
+                RegisterClass::Segment => r.number < 6 && r.width == 16 && !r.high_byte,
+                RegisterClass::Rip => r.number == 0 && matches!(r.width, 32 | 64) && !r.high_byte,
             }
     }
+    let vsib = if i.opcode.required_features().avx {
+        keel_asm_ir::x86::V3_FORMS
+            .iter()
+            .find(|f| f.matches(i))
+            .map_or(0, |f| f.vsib)
+    } else {
+        0
+    };
     for o in &i.operands {
         match o {
             R(r) if !register(*r) || r.class == RegisterClass::Rip => {
                 return Err("invalid operand register".into());
             }
             M(m) => {
-                if !(matches!(m.width, 0 | 8 | 16 | 32 | 64 | 128)
-                    || matches!(i.opcode, Fld | Fstp) && m.width == 80)
+                // GOTTPOFF is an instruction-sensitive TLS relaxation, not a
+                // generic SIMD load/store relocation. GNU rejects these forms.
+                if m.displacement.modifier == Modifier::GotTpOff
+                    && (baseline::handles(i)
+                        || i.operands
+                            .iter()
+                            .any(|o| xmm(o) || matches!(o, R(r) if matches!(r.class, RegisterClass::Mmx | RegisterClass::Ymm)))
+                        || matches!(i.opcode, Ldmxcsr | Stmxcsr | V3(_)))
+                {
+                    return Err("GOTTPOFF is not supported on SIMD/state or v3 operands".into());
+                }
+                if !(matches!(m.width, 0 | 8 | 16 | 32 | 64 | 128 | 256)
+                    || matches!(i.opcode, Fld | Fstp) && m.width == 80
+                    || matches!(
+                        i.opcode,
+                        Core(
+                            keel_asm_ir::x86::CoreOpcode::Lfs
+                                | keel_asm_ir::x86::CoreOpcode::Lgs
+                                | keel_asm_ir::x86::CoreOpcode::Lss
+                        )
+                    ) && matches!(m.width, 48 | 80)
+                    || matches!(
+                        i.opcode,
+                        Core(
+                            keel_asm_ir::x86::CoreOpcode::Sgdt | keel_asm_ir::x86::CoreOpcode::Sidt
+                        )
+                    ) && m.width == 80
+                    || matches!(
+                        i.opcode,
+                        Core(
+                            keel_asm_ir::x86::CoreOpcode::CallFar
+                                | keel_asm_ir::x86::CoreOpcode::JmpFar
+                        )
+                    ) && matches!(m.width, 48 | 80)
+                    || matches!(
+                        i.opcode,
+                        X87(keel_asm_ir::x86::X87Opcode::Fbld | keel_asm_ir::x86::X87Opcode::Fbstp)
+                    ) && m.width == 80)
                     || !matches!(m.scale, 1 | 2 | 4 | 8)
                     || m.segment.is_some_and(|s| !matches!(s, 0x64 | 0x65))
                 {
                     return Err("invalid memory width/scale/segment".into());
                 }
-                for r in [m.base, m.index].into_iter().flatten() {
+                let address32 = m.base.into_iter().chain(m.index).any(|r| r.width == 32);
+                let features = i.opcode.required_features();
+                // VEX/VSIB encoders have their own prefix paths. Keep their
+                // existing address-size contract until those paths support 67.
+                if address32 && m.displacement.modifier == Modifier::GotTpOff {
+                    return Err("GOTTPOFF relaxation requires a 64-bit address".into());
+                }
+                if address32
+                    && (features.avx || features.bmi1 || features.bmi2 || matches!(i.opcode, V3(_)))
+                {
+                    return Err("32-bit addresses are not supported on VEX/v3 forms".into());
+                }
+                if let (Some(base), Some(index)) = (m.base, m.index) {
+                    if index.class == RegisterClass::Gpr && base.width != index.width {
+                        return Err("mixed address register widths".into());
+                    }
+                }
+                for (is_index, r) in [(false, m.base), (true, m.index)]
+                    .into_iter()
+                    .filter_map(|(index, r)| r.map(|r| (index, r)))
+                {
+                    if is_index
+                        && vsib != 0
+                        && register(r)
+                        && r.width == vsib
+                        && matches!(r.class, RegisterClass::Xmm | RegisterClass::Ymm)
+                    {
+                        continue;
+                    }
                     if !register(r)
-                        || r.width != 64
+                        || !matches!(r.width, 32 | 64)
                         || !matches!(r.class, RegisterClass::Gpr | RegisterClass::Rip)
                     {
                         return Err("invalid address register".into());
                     }
                 }
-                if m.index
-                    .is_some_and(|r| r.class == RegisterClass::Rip || r.number == 4)
-                    || (m.base.is_some_and(|r| r.class == RegisterClass::Rip) && m.index.is_some())
+                if m.index.is_some_and(|r| {
+                    r.class == RegisterClass::Rip || r.class == RegisterClass::Gpr && r.number == 4
+                }) || (m.base.is_some_and(|r| r.class == RegisterClass::Rip)
+                    && m.index.is_some())
                 {
                     return Err("invalid address index".into());
                 }

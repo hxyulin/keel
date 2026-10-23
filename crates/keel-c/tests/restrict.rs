@@ -26,11 +26,16 @@ fn only_definition_parameter_object_qualifiers_supply_contracts() {
         "typedef int *restrict R; int f(R *p) { return **p; }",
         "int f(int *p) { int *restrict q = p; return *q; }",
         "int f(int (*restrict p)(void)) { return p(); }",
-        "int f(int p[restrict 4]) { return p[0]; }",
+        "int f(int p[static 4]) { return p[0]; }",
+        "int f(int n, int p[restrict n]); int f(int n, int *p) { return p[0]; }",
     ] {
         let m = compile(source);
         assert!(m.functions[0].restrict_params.is_empty(), "{source}");
     }
+    let m = compile("int f(int p[restrict 4]) { return p[0]; }");
+    assert_eq!(m.functions[0].restrict_params, [0]);
+    let m = compile("int f(int n, int a[n++], int p[restrict static n]) { return a[0]+p[0]; }");
+    assert_eq!(m.functions[0].restrict_params, [2]);
     let m = compile("int f(int *p); int f(int *restrict p) { return *p; } int f(int *p);");
     assert_eq!(m.functions[0].restrict_params, [0]);
 }

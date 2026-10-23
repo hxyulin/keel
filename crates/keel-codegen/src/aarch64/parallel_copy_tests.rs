@@ -110,7 +110,7 @@ fn compiler(module: &Module, structured: bool) -> FunctionCompiler<'_> {
     // A fixed test frame: two 16-byte forced spill locations and the existing
     // 16-byte cycle temporary. Production frame construction is untouched.
     c.copy_temp = Some(4);
-    c.vector_spills = [0, 2, 4].into_iter().collect();
+    c.vector_spills = [(0, 16), (2, 16), (4, 16)].into_iter().collect();
     c.spill_base = 0;
     c
 }
@@ -201,6 +201,7 @@ fn objects() -> (String, Vec<u8>, Vec<u8>) {
     let Output::Text(text) = emit(false) else {
         unreachable!()
     };
+    let text = text.into_string();
     let Output::Structured(program) = emit(true) else {
         unreachable!()
     };
@@ -245,6 +246,7 @@ fn parallel_copy_scalar_functions_keep_original_temporary() {
     let Output::Text(text) = c.out else {
         unreachable!()
     };
+    let text = text.into_string();
     assert!(text.contains("fmov\tx16, d0"), "{text}");
     assert!(text.contains("fmov\td0, d1"), "{text}");
     assert!(!text.contains("v18"));

@@ -158,7 +158,7 @@ fn native_neon_instruction_encodings_match_clang() {
     use keel_ir::{Type, VectorType};
     use object::{Object, ObjectSection};
     let mut source = String::new();
-    for shape in VectorType::ALL {
+    for shape in VectorType::ALL_128 {
         source += &format!(
             "func @splat_{shape}({},ptr) {{\nblock0(v0: {},v1: ptr):\n v2 = vsplat.{shape} v0\n store v2,v1\n return\n}}\n",
             shape.lane_type(),
@@ -236,7 +236,7 @@ fn aggregate_fixture() -> (String, String) {
     let mut ir = String::new();
     let mut c = String::from("#include <stdint.h>\n#include <string.h>\n");
     let mut main = String::from("int main(void){\n");
-    for shape in VectorType::ALL {
+    for shape in VectorType::ALL_128 {
         let lane = shape.lane_type();
         let cty = if lane.is_float() {
             if lane == Type::F32 {

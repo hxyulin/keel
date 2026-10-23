@@ -150,6 +150,77 @@ pub(crate) fn folded_values(
     ValueSet { members }
 }
 
+/// What `folds` gave each instruction reading a `stack_addr` or `iconst`
+/// result, those it already folded removed: the instruction and the range
+/// of `values` holding them.
+#[derive(Default)]
+pub(crate) struct FoldRecord {
+    pub(crate) insts: Vec<(keel_ir::Inst, u32, u32)>,
+    pub(crate) values: Vec<Value>,
+}
+
+/// [`folded_values`], also recording in `record` what `folds` gives every
+/// instruction reading a `stack_addr` or `iconst` result: no other folds
+/// anything. A separate walk, so that [`folded_values`] stays as tight.
+pub(crate) fn folded_values_recording(
+    func: &Function,
+    selection: &crate::select::Selection,
+    folds: impl Fn(&InstData, &mut Vec<Value>),
+    record: &mut FoldRecord,
+) -> ValueSet {
+    let mut members = vec![false; func.num_values()];
+    for (_, inst) in func.layout_insts() {
+        if let InstData::StackAddr { .. } | InstData::Iconst { .. } = func.inst_data(inst) {
+            for &v in func.inst_results(inst) {
+                members[v.index()] = true;
+            }
+        }
+    }
+    if !members.contains(&true) {
+        return ValueSet { members };
+    }
+    // Instructions are recorded even once the results they read have
+    // dropped out of `members`.
+    let results = members.clone();
+    let mut folded = Vec::new();
+    for (_, inst) in func.layout_insts() {
+        if selection.covered(inst) {
+            continue;
+        }
+        let mut reads_result = false;
+        selection.for_each_operand(func, inst, |v| {
+            reads_result |= results[func.resolve(v).index()];
+        });
+        if !reads_result {
+            continue;
+        }
+        folded.clear();
+        if !selection.matches.contains_key(&inst) {
+            folds(selection.folded_data(func, inst), &mut folded);
+            selection.remaining_folds(func, inst, &mut folded);
+        }
+        if !folded.is_empty() {
+            let start = record.values.len() as u32;
+            record.values.extend_from_slice(&folded);
+            record.insts.push((inst, start, record.values.len() as u32));
+        }
+        // As in `folded_values`.
+        selection.for_each_operand(func, inst, |v| {
+            let v = func.resolve(v);
+            if !members[v.index()] {
+                return;
+            }
+            match folded.iter().position(|&f| f == v) {
+                Some(i) => {
+                    folded.swap_remove(i);
+                }
+                None => members[v.index()] = false,
+            }
+        });
+    }
+    ValueSet { members }
+}
+
 /// The `icmp` and `fcmp` results only used as the condition of the
 /// `brif` right after them: the branch tests the flags of the compare
 /// itself, a compare and a conditional branch, with no 0/1 value in between.
@@ -164,7 +235,6 @@ pub(crate) fn fused_compares(func: &Function) -> HashSet<Value> {
 /// Raw IR operand occurrences of every resolved value, saturated at 2: the
 /// selection passes only distinguish a single use from none or several.
 /// Targets count them while finding [`crate::kinds::InstKinds`].
-#[cfg(test)]
 pub(crate) fn use_counts(func: &Function) -> Vec<u8> {
     let mut uses = vec![0u8; func.num_values()];
     for (_, inst) in func.layout_insts() {

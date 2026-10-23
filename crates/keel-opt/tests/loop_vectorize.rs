@@ -57,7 +57,7 @@ fn packed(m: &keel_ir::Module) -> usize {
 #[test]
 fn vectorizes_counted_maps_preserves_scalar_tail_and_is_deterministic_and_idempotent() {
     // Byte-index addresses are deliberately expressed directly for i8.
-    for shape in VectorType::ALL {
+    for shape in VectorType::ALL_128 {
         let ty = shape.lane_type();
         let op = if ty.is_float() { "fadd" } else { "iadd" };
         for index in [Type::I32, Type::I64] {
@@ -145,7 +145,7 @@ fn read_only_wrapping_integer_sums_vectorize_and_keep_seed_once() {
                 assert_eq!(packed(&optimize(&src, target)), 0);
                 let m = reduce_sum(&src, target);
                 assert!(packed(&m) >= 2, "{m}");
-                assert!(m.to_string().contains("vextract"), "{m}");
+                assert!(m.to_string().contains("vreduce_add"), "{m}");
                 let mut twice = m.clone();
                 keel_opt::run_passes_for_target(&mut twice, &["loop-reduce"], target).unwrap();
                 assert_eq!(m.to_string(), twice.to_string());
@@ -410,7 +410,7 @@ fn analyzes_later_loops_after_rejections_and_cfg_changes() {
 
 #[test]
 fn vectorizes_invariant_starts_and_both_branch_orientations() {
-    for shape in VectorType::ALL {
+    for shape in VectorType::ALL_128 {
         let ty = shape.lane_type();
         let op = if ty.is_float() { "fadd" } else { "iadd" };
         for index in [Type::I32, Type::I64] {

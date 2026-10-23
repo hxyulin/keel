@@ -7,7 +7,7 @@ use keel_asm_ir::{Directive, Program};
 use std::fmt::{self, Write};
 
 pub(super) enum Output {
-    Text(String),
+    Text(crate::text::Text),
     Structured(Program),
 }
 impl Output {
@@ -15,7 +15,7 @@ impl Output {
         if structured {
             Self::Structured(Program::new())
         } else {
-            Self::Text(String::new())
+            Self::Text(Default::default())
         }
     }
     pub(super) fn instruction<const N: usize>(
@@ -36,6 +36,25 @@ impl Output {
                 operands: Vec::from(operands),
                 lock,
             }),
+        }
+    }
+    /// Append the already resource-checked raw region identically in both paths.
+    pub(super) fn checked_region(&mut self, program: Program) {
+        match self {
+            Self::Structured(out) => out.append(program),
+            Self::Text(out) => {
+                for item in program.items {
+                    match item {
+                        keel_asm_ir::Item::Label(label) => { write_quoted(out, &label); out.push_str(":\n"); }
+                        keel_asm_ir::Item::X86Instruction(i) => {
+                            out.push('\t');
+                            keel_asm_ir::x86::write_instruction(out, i.opcode, &i.operands, i.lock).unwrap();
+                            out.push('\n');
+                        }
+                        _ => unreachable!("resource checker excludes non-instruction region items"),
+                    }
+                }
+            }
         }
     }
     /// Continue `module`'s text in place instead of building the function in
@@ -61,6 +80,65 @@ impl Output {
             (Self::Text(s), Self::Text(t)) => s.push_str(&t),
             (Self::Structured(p), Self::Structured(q)) => p.append(q),
             _ => unreachable!(),
+        }
+    }
+    /// The label of block `block` of `function`, `.L{function}_block{n}`,
+    /// written straight into text. `bare` is [`bare_label`]`(function)`.
+    pub(super) fn block_label(&mut self, function: &str, bare: bool, block: keel_ir::Block) {
+        match self {
+            Self::Text(s) if bare => {
+                write_block_label(s, function, block);
+                s.push_str(":\n");
+            }
+            _ => self.label(crate::text::block_label(".L", function, block)),
+        }
+    }
+    /// A jump (`jmp` or `jcc`) to block `block` of `function`, as
+    /// [`Self::instruction`] would write it. `bare` is
+    /// [`bare_label`]`(function)`.
+    pub(super) fn jump_to_block(
+        &mut self,
+        opcode: Opcode,
+        function: &str,
+        bare: bool,
+        block: keel_ir::Block,
+    ) {
+        match self {
+            Self::Text(s) => {
+                s.push('\t');
+                // The mnemonic alone: no operands.
+                keel_asm_ir::x86::write_instruction(s, opcode, &[], false).unwrap();
+                s.push_str("\t\".L");
+                if bare {
+                    s.push_str(function);
+                } else {
+                    write_escaped(s, function);
+                }
+                use keel_ir::EntityRef;
+                crate::text::write_decimal(s, "_block", block.index() as i128).unwrap();
+                s.push_str("\"\n");
+            }
+            Self::Structured(_) => {
+                let label = crate::text::block_label(".L", function, block);
+                self.instruction(opcode, [asm_arg(label)], false);
+            }
+        }
+    }
+    /// A `call` or `jmp` to function `name`, through the PLT if `plt`, as
+    /// [`Self::instruction`] would write it.
+    pub(super) fn branch_to_function(&mut self, opcode: Opcode, name: &str, plt: bool) {
+        match self {
+            Self::Text(s) => {
+                s.push('\t');
+                keel_asm_ir::x86::write_instruction(s, opcode, &[], false).unwrap();
+                s.push_str("\t\"");
+                write_escaped(s, name);
+                s.push_str(if plt { "\"@PLT\n" } else { "\"\n" });
+            }
+            Self::Structured(_) => {
+                let modifier = if plt { Modifier::Plt } else { Modifier::None };
+                self.instruction(opcode, [asm_arg(symbol_address(name, modifier))], false);
+            }
         }
     }
     /// The instruction's IR text as a comment, written without `fmt::write`.
@@ -92,12 +170,7 @@ impl Sink for Output {
     fn label(&mut self, name: String) {
         match self {
             Self::Text(s) => {
-                if name.starts_with(".L")
-                    && name
-                        .as_str()
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b"_.$".contains(&b))
-                {
+                if name.starts_with(".L") && bare_label(&name) {
                     s.push_str(&name);
                     s.push_str(":\n");
                 } else {
@@ -172,7 +245,7 @@ impl Sink for Output {
 }
 
 /// `\t.byte\t` and the decimal bytes separated by `, `.
-fn write_bytes(out: &mut String, bytes: &[u8]) {
+fn write_bytes(out: &mut crate::text::Text, bytes: &[u8]) {
     out.push_str("\t.byte\t");
     for (i, &b) in bytes.iter().enumerate() {
         let separator = if i > 0 { ", " } else { "" };
@@ -215,8 +288,47 @@ impl<T: ToOperand + ?Sized> ToOperand for &T {
 }
 macro_rules! integers {($($t:ty),*)=>{$(impl ToOperand for $t {fn operand(&self)->Operand {Operand::Immediate(Address{expression:keel_asm_ir::Expression::constant(*self as i128),modifier:Modifier::None})}})*};}
 integers!(u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize);
-pub(super) fn asm_arg(v: &impl ToOperand) -> Operand {
-    v.operand()
+/// An operand taken by value, so that building one does not copy it.
+pub(super) trait IntoOperand {
+    fn into_operand(self) -> Operand;
+}
+impl<T: ToOperand + ?Sized> IntoOperand for &T {
+    fn into_operand(self) -> Operand {
+        self.operand()
+    }
+}
+impl IntoOperand for Register {
+    fn into_operand(self) -> Operand {
+        Operand::Register(self)
+    }
+}
+impl IntoOperand for Memory {
+    fn into_operand(self) -> Operand {
+        Operand::Memory(self)
+    }
+}
+impl IntoOperand for Address {
+    fn into_operand(self) -> Operand {
+        Operand::Immediate(self)
+    }
+}
+impl IntoOperand for Operand {
+    fn into_operand(self) -> Operand {
+        self
+    }
+}
+impl IntoOperand for String {
+    fn into_operand(self) -> Operand {
+        Operand::Immediate(Address {
+            expression: keel_asm_ir::Expression::symbol(self),
+            modifier: Modifier::None,
+        })
+    }
+}
+macro_rules! owned_integers {($($t:ty),*)=>{$(impl IntoOperand for $t {fn into_operand(self)->Operand {(&self).operand()}})*};}
+owned_integers!(u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize);
+pub(super) fn asm_arg(v: impl IntoOperand) -> Operand {
+    v.into_operand()
 }
 pub(super) fn memory(base: Register, offset: i128) -> Memory {
     Memory {
@@ -273,10 +385,35 @@ pub(super) fn offset_memory(m: &Memory, offset: i128) -> Memory {
     m
 }
 
+/// Whether a local label of these characters needs no quotes.
+pub(super) fn bare_label(name: &str) -> bool {
+    name.bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b"_.$".contains(&b))
+}
+
+/// `.L{function}_block{n}`.
+fn write_block_label(out: &mut crate::text::Text, function: &str, block: keel_ir::Block) {
+    use keel_ir::EntityRef;
+    out.push_str(".L");
+    out.push_str(function);
+    crate::text::write_decimal(out, "_block", block.index() as i128).unwrap();
+}
+
 /// `name` as a quoted assembler string, with `"` and `\\` escaped
 /// and other bytes outside printable ASCII in octal.
-fn write_quoted(out: &mut String, name: &str) {
+fn write_quoted(out: &mut crate::text::Text, name: &str) {
     out.push('"');
+    write_escaped(out, name);
+    out.push('"');
+}
+
+/// `name` as it reads between quotes.
+fn write_escaped(out: &mut crate::text::Text, name: &str) {
+    // Names are almost always plain: copy those whole.
+    if !(name.bytes()).any(|b| matches!(b, b'"' | b'\\') || !matches!(b, b' '..=b'~')) {
+        out.push_str(name);
+        return;
+    }
     for b in name.bytes() {
         match b {
             b'"' | b'\\' => {
@@ -292,5 +429,4 @@ fn write_quoted(out: &mut String, name: &str) {
             }
         }
     }
-    out.push('"');
 }

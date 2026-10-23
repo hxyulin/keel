@@ -486,7 +486,10 @@ fn profitability_reason(f: &Function, full: bool) -> Option<&'static str> {
 }
 
 fn eligibility_reason(f: &Function, admit_noninterposable: bool) -> Option<&'static str> {
-    if f.weak_odr || (!f.local && !(admit_noninterposable && f.attrs.noninterposable)) {
+    if f.attrs.weak
+        || f.weak_odr
+        || (!f.local && !(admit_noninterposable && f.attrs.noninterposable))
+    {
         return Some("public_definition");
     }
     if f.attrs.noinline {
@@ -541,6 +544,7 @@ fn eligibility_reason(f: &Function, admit_noninterposable: bool) -> Option<&'sta
             InstData::ReturnCall { .. } | InstData::ReturnCallIndirect { .. } => {
                 Some("callee_tail_call")
             }
+            InstData::X86RflagsRegion { .. } => Some("callee_owned_flags_region"),
             InstData::InlineAsm { .. } => Some("callee_inline_asm"),
             _ => None,
         };
@@ -1091,17 +1095,14 @@ fn inline_call(caller: &mut Function, call: Inst, callee: &Function) {
         let new = caller.append_block_param(continuation, caller.value_type(old));
         caller.replace_all_uses(old, new);
     }
-    let tail: Vec<_> = caller
+    let position = caller
         .block_insts(call_block)
         .iter()
-        .copied()
-        .skip_while(|&i| i != call)
-        .skip(1)
-        .collect();
-    for inst in tail {
-        caller.move_inst(inst, InsertPoint::End(continuation));
-    }
-    let mut args: Vec<_> = args.into_iter().map(|v| caller.resolve(v)).collect();
+        .position(|&i| i == call)
+        .expect("a call is in its block");
+    caller.move_insts_to_end(call_block, position + 1, continuation);
+    let mut args = args;
+    args.iter_mut().for_each(|v| *v = caller.resolve(*v));
     // Copy every byte, including padding. All snapshots precede callee effects.
     for (arg, param) in args.iter_mut().zip(&callee.sig.params) {
         if let Purpose::ByVal(layout) = &param.purpose {
@@ -1183,7 +1184,7 @@ fn inline_call(caller: &mut Function, call: Inst, callee: &Function) {
                 edge.block = blocks[&edge.block];
             }
             match &mut inst {
-                InstData::StackAddr { slot } => *slot = slots[slot],
+                InstData::StackAddr { slot } | InstData::AggregateVaArg { home: slot, .. } => *slot = slots[slot],
                 InstData::SymbolAddr { symbol } => {
                     *symbol = match *symbol {
                         Symbol::Func(r) => Symbol::Func(refs[&r]),
@@ -1226,7 +1227,7 @@ fn inline_call(caller: &mut Function, call: Inst, callee: &Function) {
         InstData::Jump {
             dest: BlockCall {
                 block: blocks[&callee.entry_block().unwrap()],
-                args,
+                args: args.to_vec(),
             },
         },
     );
@@ -1391,11 +1392,11 @@ mod report_tests {
                 InstData::CallIndirect {
                     sig,
                     callee: keel_ir::Value::new(0),
-                    args: vec![],
+                    args: vec![].into(),
                 }
             } else {
                 let func = f.import_function("external", sig);
-                InstData::Call { func, args: vec![] }
+                InstData::Call { func, args: vec![].into() }
             };
             let inst = f.layout_insts().next().unwrap().1;
             *f.inst_data_mut(inst) = call;

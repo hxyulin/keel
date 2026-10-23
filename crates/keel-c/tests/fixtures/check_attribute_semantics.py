@@ -49,12 +49,29 @@ def main():
                     assert (actual.stdout, actual.stderr) == (expected.stdout, expected.stderr)
                     executions += 1
 
+    weak_source = out / 'weak.c'
+    weak_source.write_text('int hook(void) __attribute__((weak)); extern int absent __attribute__((weak)); '
+                           'int value __attribute__((weak)) = 7; '
+                           'int main(void) { return (hook ? hook() : 0) || (&absent ? absent : 0) || value != 7; }\n')
+    for target in targets:
+        for optimized in [False, True]:
+            obj = out / f'weak-{target}-{int(optimized)}.o'
+            checked([keel, 'cc', '--target', target, '--emit-object',
+                     *(['-O'] if optimized else []), weak_source, '-o', obj])
+            assert obj.stat().st_size > 0
+            if target == host:
+                executable = obj.with_suffix('.exe')
+                flags = ['-Wl,-U,_hook,-U,_absent'] if target == 'aarch64-apple-darwin' else []
+                checked(['clang', obj, *flags, '-o', executable])
+                checked([executable])
+                executions += 1
+
     rejected = [
-        ('weak', 'int hook(void) __attribute__((weak));'),
+        ('weak', 'static int hook(void) __attribute__((weak));'),
         ('alias', 'int implementation(void) { return 1; } int hook(void) __attribute__((alias("implementation")));'),
         ('constructor', 'static void init(void) __attribute__((constructor)); static void init(void) {}'),
-        ('cleanup', 'void release(int *); int f(void) { int x __attribute__((cleanup(release))) = 0; return x; }'),
-        ('visibility', 'int hook(void); int hook(void) __attribute__((visibility("hidden")));'),
+        ('cleanup', 'void release(int *); int x __attribute__((cleanup(release)));'),
+        ('visibility', 'int hook(void); int hook(void) __attribute__((visibility("protected")));'),
     ]
     for target in targets:
         for name, text in rejected:
@@ -65,7 +82,7 @@ def main():
             result = subprocess.run([keel, 'cc', '--target', target, '--emit-object', str(path), '-o', str(obj)], capture_output=True, text=True)
             assert result.returncode != 0 and name in result.stderr, result
             assert not obj.exists(), obj
-    print(f'PASS: 8 objects; {executions} native executions matched Clang; 10 semantic-attribute CLI rejections')
+    print(f'PASS: 12 objects; {executions} native executions matched Clang; 10 semantic-attribute CLI rejections')
 
 
 if __name__ == '__main__':

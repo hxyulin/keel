@@ -26,3 +26,6 @@ keel-frontend = { path = "../keel-frontend" }
 [dev-dependencies]
 keel-codegen = { path = "../keel-codegen" }
 keel-opt = { path = "../keel-opt" }
+keel-asm = { path = "../keel-asm" }
+keel-link = { path = "../keel-link" }
+object = { version = "0.36", default-features = false, features = ["read", "std"] }

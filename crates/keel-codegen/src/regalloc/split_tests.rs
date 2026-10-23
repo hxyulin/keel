@@ -89,7 +89,7 @@ fn forced_baseline(input: &AllocationInput<'_>) -> (Allocation, Vec<Interval>) {
     let mut slots = 3;
     for iv in &intervals {
         locs[iv.half][iv.value.index()] = Some(Loc::Stack(slots));
-        slots += if iv.vector { 2 } else { 1 };
+        slots += iv.spill_units;
     }
     let entry = f.block_params(c.entry);
     let params = f.block_params(c.block);

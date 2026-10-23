@@ -145,7 +145,11 @@ static int callee_saved_kept(void) {
         "fmov d8, #1.0\n\tfmov d9, #2.0\n\tfmov d10, #3.0\n\tfmov d11, #4.0\n\t"
         "fmov d12, #5.0\n\tfmov d13, #6.0\n\tfmov d14, #7.0\n\tfmov d15, #8.0\n\t"
         "fmov d0, #0.5\n\t"
+#if defined(__APPLE__)
         "bl _pressure\n\t"
+#else
+        "bl pressure\n\t"
+#endif
         "stp d8, d9, [x19]\n\tstp d10, d11, [x19, #16]\n\t"
         "stp d12, d13, [x19, #32]\n\tstp d14, d15, [x19, #48]"
         :

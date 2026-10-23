@@ -2,9 +2,8 @@
 //! `{i32, [4 x f32], {i8, ptr}}`.
 //!
 //! The IR never has an aggregate *value*. A struct lives in memory and is
-//! handled through a `ptr`; a layout only appears on a signature
-//! (`ptr byval {..}`, `ptr sret {..}`), where the calling convention needs
-//! its shape to decide which registers carry it.
+//! handled through a `ptr`. Signatures, explicit call operand contracts, and
+//! aggregate va_arg carry layouts so the ABI can classify and copy the object.
 
 use crate::Type;
 use crate::data::PTR_BYTES;
@@ -21,17 +20,27 @@ pub enum Layout {
 
 impl Layout {
     /// Size in bytes, including trailing padding to the alignment.
+    /// ABI entry points validate checked_size before using this convenience API.
     pub fn size(&self) -> u64 {
+        self.checked_size()
+            .expect("aggregate layout size overflows u64")
+    }
+
+    /// Natural size without overflowing, including nested arrays and padding.
+    pub fn checked_size(&self) -> Option<u64> {
+        fn align_up(size: u64, align: u64) -> Option<u64> {
+            size.checked_add(align - 1).map(|n| n / align * align)
+        }
         match self {
-            Layout::Scalar(ty) => scalar_bytes(*ty),
+            Layout::Scalar(ty) => Some(scalar_bytes(*ty)),
             Layout::Struct(fields) => {
-                let mut offset: u64 = 0;
+                let mut offset = 0;
                 for field in fields {
-                    offset = offset.next_multiple_of(field.align()) + field.size();
+                    offset = align_up(offset, field.align())?.checked_add(field.checked_size()?)?;
                 }
-                offset.next_multiple_of(self.align())
+                align_up(offset, self.align())
             }
-            Layout::Array(elem, n) => elem.size() * u64::from(*n),
+            Layout::Array(elem, n) => elem.checked_size()?.checked_mul(u64::from(*n)),
         }
     }
 
@@ -62,6 +71,12 @@ impl Layout {
                 }
             }
             Layout::Array(elem, n) => {
+                // Empty elements have no leaves regardless of their count.
+                // Keep the AST intact: alignment and member presence still
+                // participate in structural producer classification.
+                if elem.size() == 0 {
+                    return;
+                }
                 for i in 0..u64::from(*n) {
                     elem.collect_leaves(base + i * elem.size(), out);
                 }
@@ -71,7 +86,11 @@ impl Layout {
 }
 
 fn scalar_bytes(ty: Type) -> u64 {
-    ty.bytes().map_or(PTR_BYTES, u64::from)
+    if ty == Type::F80 {
+        16
+    } else {
+        ty.bytes().map_or(PTR_BYTES, u64::from)
+    }
 }
 
 impl fmt::Display for Layout {

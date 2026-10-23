@@ -15,7 +15,7 @@ const SPILLED: Pools = Pools {
 
 #[test]
 fn vector_constant_offsets_keep_effects_and_have_typed_object_parity() {
-    for shape in keel_ir::VectorType::ALL {
+    for shape in keel_ir::VectorType::ALL_128 {
         let src = format!(
             "func @f(ptr,{shape}) -> {shape} cc(c) {{
 block0(v0: ptr,v1: {shape}):

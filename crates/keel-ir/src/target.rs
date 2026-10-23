@@ -9,10 +9,16 @@ pub enum Target {
     Aarch64AppleDarwin,
     /// x86-64 Linux: the System V psABI, ELF.
     X86_64LinuxGnu,
+    /// AArch64 Linux: base AAPCS64, ELF.
+    Aarch64LinuxGnu,
 }
 
 impl Target {
-    pub const ALL: [Target; 2] = [Target::Aarch64AppleDarwin, Target::X86_64LinuxGnu];
+    pub const ALL: [Target; 3] = [
+        Target::Aarch64AppleDarwin,
+        Target::X86_64LinuxGnu,
+        Target::Aarch64LinuxGnu,
+    ];
 
     /// The machine this program runs on, if keel supports it.
     pub fn host() -> Option<Target> {
@@ -20,6 +26,8 @@ impl Target {
             Some(Target::Aarch64AppleDarwin)
         } else if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
             Some(Target::X86_64LinuxGnu)
+        } else if cfg!(all(target_arch = "aarch64", target_os = "linux")) {
+            Some(Target::Aarch64LinuxGnu)
         } else {
             None
         }
@@ -30,10 +38,14 @@ impl Target {
         match self {
             Target::Aarch64AppleDarwin => "aarch64-apple-darwin",
             Target::X86_64LinuxGnu => "x86_64-unknown-linux-gnu",
+            Target::Aarch64LinuxGnu => "aarch64-unknown-linux-gnu",
         }
     }
 
     pub fn from_triple(triple: &str) -> Option<Target> {
+        if triple == "aarch64-linux-gnu" {
+            return Some(Self::Aarch64LinuxGnu);
+        }
         Target::ALL.into_iter().find(|t| t.triple() == triple)
     }
 }

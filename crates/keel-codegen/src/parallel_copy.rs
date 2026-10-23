@@ -21,6 +21,25 @@
 //! One temporary is enough: a chain made by step 2 always has a ready move,
 //! so step 1 drains it (freeing the temporary) before step 2 runs again.
 
+/// Runs `emit` on each of [`sequentialize`]'s moves, in order. Most copies
+/// have no move reading another's destination; those need no list.
+pub fn for_each_move<L: Copy + Eq>(moves: &[(L, L)], temp: L, mut emit: impl FnMut(L, L)) {
+    let independent = moves
+        .iter()
+        .all(|&(dst, src)| dst == src || moves.iter().all(|&(d, s)| d == s || s != dst));
+    if independent {
+        for &(dst, src) in moves {
+            if dst != src {
+                emit(dst, src);
+            }
+        }
+        return;
+    }
+    for (dst, src) in sequentialize(moves, temp) {
+        emit(dst, src);
+    }
+}
+
 /// Orders the parallel copy `moves`, each `(dst, src)`, into single moves
 /// that have the same effect when run one after another. Destinations must
 /// be distinct, and `temp` must not appear in `moves`.
@@ -72,7 +91,7 @@ pub fn sequentialize<L: Copy + Eq>(moves: &[(L, L)], temp: L) -> Vec<(L, L)> {
 
 #[cfg(test)]
 mod tests {
-    use super::sequentialize;
+    use super::{for_each_move, sequentialize};
 
     const TEMP: u8 = 99;
 
@@ -122,6 +141,9 @@ mod tests {
             );
             // Each cycle costs one extra move, and there are at most N/2.
             assert!(seq.len() <= moves.len() + N as usize / 2);
+            let mut emitted = Vec::new();
+            for_each_move(&moves, TEMP, |dst, src| emitted.push((dst, src)));
+            assert_eq!(emitted, seq);
         }
     }
 

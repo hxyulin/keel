@@ -4,6 +4,9 @@ use std::{fs, path::PathBuf, process::Command};
 pub fn operations(shape: VectorType) -> Vec<&'static str> {
     if shape.lane_type().is_float() {
         vec![
+            "vfpadd",
+            "vfpmin",
+            "vfpmax",
             "vfadd",
             "vfsub",
             "vfmul",
@@ -29,9 +32,30 @@ pub fn operations(shape: VectorType) -> Vec<&'static str> {
         ]
     } else {
         let mut v = vec![
+            "vpadd",
+            "vpsmin",
+            "vpsmax",
+            "vpumin",
+            "vpumax",
             "viadd",
             "visub",
             "vimul",
+            "vsmin",
+            "vsmax",
+            "vumin",
+            "vumax",
+            "vsabd",
+            "vuabd",
+            "vshadd",
+            "vuhadd",
+            "vsrhadd",
+            "vurhadd",
+            "vshsub",
+            "vuhsub",
+            "vsadd_sat",
+            "vuadd_sat",
+            "vssub_sat",
+            "vusub_sat",
             "vand",
             "vor",
             "vxor",
@@ -64,25 +88,7 @@ pub fn operations(shape: VectorType) -> Vec<&'static str> {
 pub fn binary(op: &str) -> bool {
     op.starts_with("vicmp.")
         || op.starts_with("vfcmp.")
-        || matches!(
-            op,
-            "viadd"
-                | "visub"
-                | "vimul"
-                | "vand"
-                | "vor"
-                | "vxor"
-                | "vshl"
-                | "vushr"
-                | "vsshr"
-                | "vfadd"
-                | "vfsub"
-                | "vfmul"
-                | "vfdiv"
-                | "vfmin"
-                | "vfmax"
-                | "vfcopysign"
-        )
+        || op.parse::<keel_ir::VectorBinaryOp>().is_ok()
 }
 
 pub fn name(shape: VectorType, op: &str) -> String {
@@ -90,8 +96,14 @@ pub fn name(shape: VectorType, op: &str) -> String {
 }
 
 pub fn fixture() -> String {
+    fixture_for(&VectorType::ALL_128)
+}
+pub fn fixture_for(shapes: &[VectorType]) -> String {
     let mut s = String::new();
-    for shape in VectorType::ALL {
+    for &shape in shapes {
+        let bytes = shape.bytes();
+        let buffer = bytes + 1;
+        let _ = (bytes, buffer);
         for op in operations(shape) {
             s += &format!(
                 "func @{}(ptr, ptr, ptr) {{\nblock0(v0: ptr, v1: ptr, v2: ptr):\n v3 = load.{shape} align 1 v0\n v4 = load.{shape} align 1 v1\n v5 = {op} v3{}\n store align 1 v5, v2\n return\n}}\n",
@@ -143,10 +155,16 @@ pub fn command(c: &mut Command) {
 }
 
 pub fn harness() -> String {
+    harness_for(&VectorType::ALL_128)
+}
+pub fn harness_for(shapes: &[VectorType]) -> String {
     let mut s = String::from(
         "#include <stdint.h>\n#include <string.h>\n#include <stdio.h>\n#include <math.h>\n#include <limits.h>\n",
     );
-    for shape in VectorType::ALL {
+    for &shape in shapes {
+        let bytes = shape.bytes();
+        let buffer = bytes + 1;
+        let _ = (bytes, buffer);
         for op in operations(shape) {
             s += &format!(
                 "extern void {}(const void*,const void*,void*);\n",
@@ -157,8 +175,12 @@ pub fn harness() -> String {
             "extern void lanes_{shape}(const void*,const void*,void*);\nextern void insert_{shape}(const void*,const void*,void*);\nextern void select_{shape}(const void*,const void*,const void*,void*);\n"
         );
     }
+    s += "static __int128 floor_half(__int128 x){return x/2-(x<0&&x%2!=0); }\n";
     s += "extern __int128 bits(__int128);\nint main(void) {\nuint64_t patterns[]={0,1,2,7,8,15,16,31,32,63,64,127,128,255,256,0xffff,0x8000,0x80000000,0x8000000000000000ull,0xffffffffffffffffull,0x0123456789abcdefull};\n";
-    for shape in VectorType::ALL {
+    for &shape in shapes {
+        let bytes = shape.bytes();
+        let buffer = bytes + 1;
+        let _ = (bytes, buffer);
         let width = shape.lane_type().bytes().unwrap() * 8;
         let n = shape.lanes();
         let u = format!("uint{width}_t");
@@ -174,7 +196,7 @@ pub fn harness() -> String {
             u.clone()
         };
         s += &format!(
-            "{{ {cty} a[{n}],b[{n}],r[{n}]; {u} mask[{n}]; unsigned char aa[17],bb[17],rr[17],mm[17];\n"
+            "{{ {cty} a[{n}],b[{n}],r[{n}]; {u} mask[{n}]; unsigned char aa[{buffer}],bb[{buffer}],rr[{buffer}],mm[{buffer}];\n"
         );
         if float {
             s += &format!(
@@ -185,20 +207,64 @@ pub fn harness() -> String {
                 "for(unsigned k=0;k<21;k++) {{for(unsigned i=0;i<{n};i++) {{a[i]=({u})patterns[(k+i)%21];b[i]=({u})patterns[(k*3+i+2)%21];mask[i]=(i+k)%3==0?0:({u})patterns[(k+i)%21];}}\n"
             );
         }
-        s += "memcpy(aa+1,a,16);memcpy(bb+1,b,16);memcpy(mm+1,mask,16);\n";
+        s += &format!("memcpy(aa+1,a,{bytes});memcpy(bb+1,b,{bytes});memcpy(mm+1,mask,{bytes});\n");
         for op in operations(shape) {
             let comparison = op.contains("cmp.");
             let out_ty = if comparison { u.clone() } else { cty.clone() };
             s += &format!(
-                "{}(aa+1,bb+1,rr+1); {{ {out_ty} out[{n}];memcpy(out,rr+1,16);for(unsigned i=0;i<{n};i++) {{\n",
+                "{}(aa+1,bb+1,rr+1); {{ {out_ty} out[{n}];memcpy(out,rr+1,{bytes});for(unsigned i=0;i<{n};i++) {{\n",
                 name(shape, op)
             );
-            let x = "a[i]";
-            let y = "b[i]";
-            let expression = match op {
+            let pair = op
+                .parse::<keel_ir::VectorBinaryOp>()
+                .ok()
+                .and_then(|p| p.pairwise_binary());
+            let x = if pair.is_some() {
+                format!("(i<{0}?a[2*i]:b[2*(i-{0})])", n / 2)
+            } else {
+                "a[i]".to_string()
+            };
+            let y = if pair.is_some() {
+                format!("(i<{0}?a[2*i+1]:b[2*(i-{0})+1])", n / 2)
+            } else {
+                "b[i]".to_string()
+            };
+            let operation = pair
+                .map(|p| p.to_string())
+                .unwrap_or_else(|| op.to_string());
+            let expression = match operation.as_str() {
                 "viadd" => format!("({u})((uint64_t){x}+(uint64_t){y})"),
                 "visub" => format!("({u})((uint64_t){x}-(uint64_t){y})"),
                 "vimul" => format!("({u})((uint64_t){x}*(uint64_t){y})"),
+                "vsmin" => format!("({signed}){x}<({signed}){y}?{x}:{y}"),
+                "vsmax" => format!("({signed}){x}>({signed}){y}?{x}:{y}"),
+                "vumin" => format!("{x}<{y}?{x}:{y}"),
+                "vumax" => format!("{x}>{y}?{x}:{y}"),
+                "vsabd" => format!(
+                    "({signed}){x}<({signed}){y}?(__int128)({signed}){y}-(__int128)({signed}){x}:(__int128)({signed}){x}-(__int128)({signed}){y}"
+                ),
+                "vuabd" => format!("{x}<{y}?{y}-{x}:{x}-{y}"),
+                "vshadd" | "vshsub" | "vsrhadd" => format!(
+                    "floor_half((__int128)({signed}){x}{}(__int128)({signed}){y}{})",
+                    if op == "vshsub" { "-" } else { "+" },
+                    if op == "vsrhadd" { "+1" } else { "" }
+                ),
+                "vuhadd" | "vuhsub" | "vurhadd" => format!(
+                    "floor_half((__int128){x}{}(__int128){y}{})",
+                    if op == "vuhsub" { "-" } else { "+" },
+                    if op == "vurhadd" { "+1" } else { "" }
+                ),
+                "vsadd_sat" | "vssub_sat" => {
+                    let v = format!(
+                        "((__int128)({signed}){x}{}(__int128)({signed}){y})",
+                        if op == "vssub_sat" { "-" } else { "+" }
+                    );
+                    let min = format!("(-((__int128)1<<{}))", width - 1);
+                    let max = format!("(((__int128)1<<{})-1)", width - 1);
+                    format!("{v}<{min}?{min}:({v}>{max}?{max}:{v})")
+                }
+                "vuadd_sat" => format!("(__uint128_t){x}+{y}>({u})~({u})0?({u})~({u})0:{x}+{y}"),
+                "vusub_sat" => format!("{x}<{y}?0:{x}-{y}"),
                 "vand" => format!("{x}&{y}"),
                 "vor" => format!("{x}|{y}"),
                 "vxor" => format!("{x}^{y}"),
@@ -270,13 +336,13 @@ pub fn harness() -> String {
             );
         }
         s += &format!(
-            "lanes_{shape}(aa+1,bb+1,rr+1);memcpy(r,rr+1,16);for(unsigned i=0;i<{n};i++){{{cty} e=i%2==0?a[{n}-1-i]:b[{n}-1];if(memcmp(&e,&r[i],sizeof(e)))return 2;}}\n"
+            "lanes_{shape}(aa+1,bb+1,rr+1);memcpy(r,rr+1,{bytes});for(unsigned i=0;i<{n};i++){{{cty} e=i%2==0?a[{n}-1-i]:b[{n}-1];if(memcmp(&e,&r[i],sizeof(e)))return 2;}}\n"
         );
         s += &format!(
-            "insert_{shape}(aa+1,bb+1,rr+1);memcpy(r,rr+1,16);for(unsigned i=0;i<{n};i++){{{cty} e=i=={n}-1?b[0]:a[i];if(memcmp(&e,&r[i],sizeof(e)))return 3;}}\n"
+            "insert_{shape}(aa+1,bb+1,rr+1);memcpy(r,rr+1,{bytes});for(unsigned i=0;i<{n};i++){{{cty} e=i=={n}-1?b[0]:a[i];if(memcmp(&e,&r[i],sizeof(e)))return 3;}}\n"
         );
         s += &format!(
-            "select_{shape}(mm+1,aa+1,bb+1,rr+1);memcpy(r,rr+1,16);for(unsigned i=0;i<{n};i++){{{cty} e=mask[i]?a[i]:b[i];if(memcmp(&e,&r[i],sizeof(e)))return 4;}}\n"
+            "select_{shape}(mm+1,aa+1,bb+1,rr+1);memcpy(r,rr+1,{bytes});for(unsigned i=0;i<{n};i++){{{cty} e=mask[i]?a[i]:b[i];if(memcmp(&e,&r[i],sizeof(e)))return 4;}}\n"
         );
         s += "} }\n";
     }
@@ -285,6 +351,9 @@ pub fn harness() -> String {
 }
 
 pub fn abi_fixture(arm64: bool) -> (String, String) {
+    abi_fixture_for(arm64, &VectorType::ALL_128)
+}
+pub fn abi_fixture_for(arm64: bool, shapes: &[VectorType]) -> (String, String) {
     let clobber = if arm64 {
         r#"__asm__ volatile("movi v31.16b,#0\n\tins v8.d[1],xzr\n\tins v9.d[1],xzr\n\tins v10.d[1],xzr\n\tins v11.d[1],xzr\n\tins v12.d[1],xzr\n\tins v13.d[1],xzr\n\tins v14.d[1],xzr\n\tins v15.d[1],xzr":::"v0","v1","v2","v3","v4","v5","v6","v7","v8","v9","v10","v11","v12","v13","v14","v15","v16","v17","v18","v19","v20","v21","v22","v23","v24","v25","v26","v27","v28","v29","v30","v31");"#
     } else {
@@ -295,7 +364,8 @@ pub fn abi_fixture(arm64: bool) -> (String, String) {
         "#include <stdint.h>\n#include <stdarg.h>\nextern int memcmp(const void*,const void*,__SIZE_TYPE__);\n",
     );
     let mut main = String::from("int main(void){\n");
-    for shape in VectorType::ALL {
+    for &shape in shapes {
+        let bytes = shape.bytes();
         let lane = shape.lane_type();
         let width = lane.bytes().unwrap() * 8;
         let cty = if lane.is_float() {
@@ -356,7 +426,7 @@ pub fn abi_fixture(arm64: bool) -> (String, String) {
             ir += &format!(
                 " v{} = iconst.i64 {}\n v{} = ptradd v0, v{}\n v{} = load.{shape} v{}\n",
                 2 + 3 * i,
-                16 * i,
+                bytes * i,
                 3 + 3 * i,
                 2 + 3 * i,
                 4 + 3 * i,
@@ -371,7 +441,7 @@ pub fn abi_fixture(arm64: bool) -> (String, String) {
         }
         ir += &format!(" store {last}, v1\n return\n}}\n");
         c += &format!(
-            "typedef {cty} V_{shape} __attribute__((vector_size(16)));\nextern V_{shape} abi_{shape}({}, uint64_t,void*);\nextern void call_abi_{shape}(const void*,void*);\nextern void cross_call_{shape}(const void*,void*);\nextern V_{shape} tail_{shape}(V_{shape});\nextern V_{shape} indirect_{shape}(V_{shape}(*)(V_{shape}),V_{shape});\nextern V_{shape} varcall_{shape}(V_{shape});\nextern V_{shape} swap_{shape}(V_{shape},V_{shape},uint64_t);\nextern V_{shape} scalar_select_{shape}(uint64_t,V_{shape},V_{shape});\nextern void pressure_{shape}(const void*,void*);\n",
+            "typedef {cty} V_{shape} __attribute__((vector_size({bytes})));\nextern V_{shape} abi_{shape}({}, uint64_t,void*);\nextern void call_abi_{shape}(const void*,void*);\nextern void cross_call_{shape}(const void*,void*);\nextern V_{shape} tail_{shape}(V_{shape});\nextern V_{shape} indirect_{shape}(V_{shape}(*)(V_{shape}),V_{shape});\nextern V_{shape} varcall_{shape}(V_{shape});\nextern V_{shape} swap_{shape}(V_{shape},V_{shape},uint64_t);\nextern V_{shape} scalar_select_{shape}(uint64_t,V_{shape},V_{shape});\nextern void pressure_{shape}(const void*,void*);\n",
             std::iter::repeat_n(format!("V_{shape}"), 10)
                 .collect::<Vec<_>>()
                 .join(", ")
@@ -380,7 +450,7 @@ pub fn abi_fixture(arm64: bool) -> (String, String) {
             "__attribute__((noinline)) V_{shape} external_{shape}(V_{shape} a) {{{clobber}return a+a;}}\nV_{shape} variadic_{shape}(uint64_t n,...) {{va_list ap;va_start(ap,n);V_{shape} r={{0}};for(uint64_t i=0;i<n;i++)r+=va_arg(ap,V_{shape});va_end(ap);return r;}}\n"
         );
         main += &format!(
-            "{{ V_{shape} a,b,r,out,inputs[18],args[10];for(unsigned i=0;i<{};i++){{a[i]=({cty})(i+1);b[i]=({cty})(2*i+1);}}\nfor(unsigned j=0;j<10;j++)for(unsigned i=0;i<sizeof(a)/sizeof(a[0]);i++)args[j][i]=({cty})((j+1)*(i+1));r=abi_{shape}({},0,&out); V_{shape} e=args[0];for(unsigned j=1;j<10;j++)e=e+e+e+args[j];if(memcmp(&r,&e,16)||memcmp(&out,&e,16))return 10;\ne=a;for(unsigned j=1;j<10;j++)e=e+e+e+a;call_abi_{shape}(&a,&out);if(memcmp(&out,&e,16))return 11;\ncross_call_{shape}(&a,&out);e=a+a+a;if(memcmp(&out,&e,16))return 12;\nr=tail_{shape}(a);e=a+a;if(memcmp(&r,&e,16))return 13;\nr=indirect_{shape}(external_{shape},a);if(memcmp(&r,&e,16))return 14;\nr=varcall_{shape}(a);e=a;for(unsigned j=1;j<10;j++)e+=a;if(memcmp(&r,&e,16))return 15;\nr=swap_{shape}(a,b,3);if(memcmp(&r,&b,16))return 16;\nr=swap_{shape}(a,b,4);if(memcmp(&r,&a,16))return 17;\nfor(unsigned k=0;k<2;k++){{r=scalar_select_{shape}(k,a,b);e=k?a:b;if(memcmp(&r,&e,16))return 18;}}\ne=a+a;for(unsigned j=0;j<18;j++){{for(unsigned l=0;l<sizeof(a)/sizeof(a[0]);l++)inputs[j][l]=({cty})(a[l]+j);e+=inputs[j];}}pressure_{shape}(inputs,&out);if(memcmp(&out,&e,16))return 19; }}\n",
+            "{{ V_{shape} a,b,r,out,inputs[18],args[10];for(unsigned i=0;i<{};i++){{a[i]=({cty})(i+1);b[i]=({cty})(2*i+1);}}\nfor(unsigned j=0;j<10;j++)for(unsigned i=0;i<sizeof(a)/sizeof(a[0]);i++)args[j][i]=({cty})((j+1)*(i+1));r=abi_{shape}({},0,&out); V_{shape} e=args[0];for(unsigned j=1;j<10;j++)e=e+e+e+args[j];if(memcmp(&r,&e,{bytes})||memcmp(&out,&e,{bytes}))return 10;\ne=a;for(unsigned j=1;j<10;j++)e=e+e+e+a;call_abi_{shape}(&a,&out);if(memcmp(&out,&e,{bytes}))return 11;\ncross_call_{shape}(&a,&out);e=a+a+a;if(memcmp(&out,&e,{bytes}))return 12;\nr=tail_{shape}(a);e=a+a;if(memcmp(&r,&e,{bytes}))return 13;\nr=indirect_{shape}(external_{shape},a);if(memcmp(&r,&e,{bytes}))return 14;\nr=varcall_{shape}(a);e=a;for(unsigned j=1;j<10;j++)e+=a;if(memcmp(&r,&e,{bytes}))return 15;\nr=swap_{shape}(a,b,3);if(memcmp(&r,&b,{bytes}))return 16;\nr=swap_{shape}(a,b,4);if(memcmp(&r,&a,{bytes}))return 17;\nfor(unsigned k=0;k<2;k++){{r=scalar_select_{shape}(k,a,b);e=k?a:b;if(memcmp(&r,&e,{bytes}))return 18;}}\ne=a+a;for(unsigned j=0;j<18;j++){{for(unsigned l=0;l<sizeof(a)/sizeof(a[0]);l++)inputs[j][l]=({cty})(a[l]+j);e+=inputs[j];}}pressure_{shape}(inputs,&out);if(memcmp(&out,&e,{bytes}))return 19; }}\n",
             shape.lanes(),
             (0..10)
                 .map(|i| format!("args[{i}]"))

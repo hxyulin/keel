@@ -1,5 +1,5 @@
 verifier errors:
   @f inst0 `v4, v5 = uadd_overflow v0, v1`: uadd_overflow takes two integers of the same type, got (i32, i64)
   @f inst1 `v6, v7 = smul_overflow v2, v2`: smul_overflow takes two integers of the same type, got (f64, f64)
-  @f inst2 `v8 = fma v2, v2, v3`: fma takes three floats of the same type, got (f64, f64, f32)
+  @f inst2 `v8 = fma v2, v2, v3`: fma takes three floating-point scalars or vectors of the same type, got (f64, f64, f32)
   @f inst3 `v9 = fcopysign v2, v0`: fcopysign takes two floats of the same type, got (f64, i32)

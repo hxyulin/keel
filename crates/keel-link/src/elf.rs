@@ -1,9 +1,14 @@
-//! Host-independent, bounded ELF64 executable linker for x86-64 Linux.
+//! Host-independent ELF64 executable linker for x86-64 and AArch64 Linux.
 //! See docs/elf-linker.md for the supported input and execution contract.
+pub(crate) mod aarch64;
+mod bounds;
 mod dynamic;
+mod gc;
+mod groups;
 mod input;
 mod lifecycle;
 mod notes;
+mod selected;
 mod sframe;
 mod unwind;
 use crate::{Input, Result};
@@ -22,7 +27,18 @@ fn linker_owned(name: &str) -> bool {
     matches!(name, "_GLOBAL_OFFSET_TABLE_" | "_DYNAMIC")
 }
 
+/// ELF machine selected independently of the host.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Machine {
+    #[default]
+    X86_64,
+    Aarch64,
+}
+
 pub struct Options {
+    /// Collect unreachable ELF input sections. Disabled by default.
+    pub gc_sections: bool,
+    pub machine: Machine,
     pub entry: String,
     pub interpreter: String,
     pub runpath: Vec<String>,
@@ -30,6 +46,8 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            gc_sections: false,
+            machine: Machine::X86_64,
             entry: "_start".into(),
             interpreter: "/lib64/ld-linux-x86-64.so.2".into(),
             runpath: Vec::new(),
@@ -103,6 +121,7 @@ struct Unit {
     symbols: BTreeMap<usize, Symbol>,
     relocs: Vec<Reloc>,
     consumed_properties: BTreeSet<usize>,
+    groups: BTreeMap<usize, usize>,
 }
 struct Segment {
     flags: u32,
@@ -135,7 +154,12 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
     if linker_owned(&options.entry) {
         return Err("a linker-owned symbol cannot be the entry point".into());
     }
+    let arm = options.machine == Machine::Aarch64;
+    let page = if arm { 65536 } else { PAGE };
     let (inputs, libraries) = input::prepare(inputs, &options.entry)?;
+    if arm && (!libraries.is_empty() || !options.runpath.is_empty()) {
+        return Err("native AArch64 ELF linking currently supports freestanding static executables; use `keel link --system` for shared libraries/libc".into());
+    }
     let mut sections = Vec::new();
     let mut units = Vec::new();
     let mut unwind_sections = BTreeMap::new();
@@ -148,19 +172,34 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         let mut parse = || -> Result<Unit> {
             let file =
                 ElfFile64::<object::Endianness>::parse(input.bytes).map_err(|e| e.to_string())?;
-            if file.architecture() != object::Architecture::X86_64
+            if file.architecture()
+                != if arm {
+                    object::Architecture::Aarch64
+                } else {
+                    object::Architecture::X86_64
+                }
                 || !file.is_64()
                 || !file.is_little_endian()
                 || file.kind() != object::ObjectKind::Relocatable
             {
-                return Err("expected a little-endian x86-64 ELF64 relocatable object".into());
+                return Err(format!(
+                    "expected a little-endian {} ELF64 relocatable object",
+                    if arm { "AArch64" } else { "x86-64" }
+                ));
             }
             let header = file.elf_header();
             if !matches!(header.e_ident().os_abi, 0 | 3) || header.e_flags(file.endian()) != 0 {
                 return Err("unsupported ELF OS ABI or machine flags".into());
             }
-            if file.comdats().next().is_some() {
-                return Err("COMDAT groups are unsupported".into());
+            let group_plan = &input.groups;
+            if let Some(symbol) = file.symbols().find(|s| {
+                matches!(s.flags(),
+                SymbolFlags::Elf { st_info, .. } if st_info & 15 == object::elf::STT_TLS)
+            }) {
+                return Err(format!(
+                    "TLS symbol {} requires external ELF linking: native PT_TLS layout and TLS relocations are unsupported",
+                    symbol.name().unwrap_or("?")
+                ));
             }
             // object ignores REL/RELA tables not linked to its chosen symbol
             // table (and sh_info=0). Validate every association before consuming
@@ -201,10 +240,36 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                 symbols: BTreeMap::new(),
                 relocs: Vec::new(),
                 consumed_properties: BTreeSet::new(),
+                groups: group_plan.membership.clone(),
             };
             for section in file.sections() {
+                if group_plan.discarded.contains(&section.index().0) {
+                    // TLS is a whole-input unsupported contract, including
+                    // losing groups without STT_TLS symbols. Keep ordinary
+                    // live-section validation (notably unwind) in its original
+                    // order, but do not let selection hide this boundary.
+                    let flags = section.elf_section_header().sh_flags(file.endian());
+                    if flags & u64::from(object::elf::SHF_ALLOC | object::elf::SHF_TLS)
+                        == u64::from(object::elf::SHF_ALLOC | object::elf::SHF_TLS)
+                    {
+                        let name = section.name().map_err(|e| e.to_string())?;
+                        return Err(format!(
+                            "TLS section {name} requires external ELF linking: native PT_TLS layout and TLS relocations are unsupported"
+                        ));
+                    }
+                    continue;
+                }
                 let name = section.name().map_err(|e| e.to_string())?.to_owned();
-                let data = section.data().map_err(|e| e.to_string())?;
+                let original_data = section.data().map_err(|e| e.to_string())?;
+                let data = group_plan
+                    .frames
+                    .get(&section.index().0)
+                    .map_or(original_data, |f| f.data.as_slice());
+                let input_size = if group_plan.frames.contains_key(&section.index().0) {
+                    data.len() as u64
+                } else {
+                    section.size()
+                };
                 let raw = section.elf_section_header();
                 match raw.sh_type(file.endian()) {
                     object::elf::SHT_REL => {
@@ -225,6 +290,17 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                     return Err("executable stack requests are unsupported".into());
                 }
                 let kind = raw.sh_type(file.endian());
+                if arm
+                    && (name == ".eh_frame_hdr"
+                        || name == ".sframe"
+                        || name.starts_with(".note.gnu.property")
+                        || name == ".note.ABI-tag"
+                        || matches!(kind, 14..=16 | 0x70000001))
+                {
+                    return Err(format!(
+                        "AArch64 ELF input section {name} is not yet supported"
+                    ));
+                }
                 let sframe = sframe::validate_section(
                     &name,
                     kind,
@@ -271,7 +347,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                 let lifecycle = lifecycle::validate(
                     &name,
                     kind,
-                    sh_flags,
+                    sh_flags & !u64::from(object::elf::SHF_GROUP),
                     section.size(),
                     section.align(),
                     raw.sh_entsize(file.endian()),
@@ -288,7 +364,8 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                             kind,
                             object::elf::SHT_PROGBITS | object::elf::SHT_X86_64_UNWIND
                         )
-                        || sh_flags != u64::from(object::elf::SHF_ALLOC)
+                        || sh_flags & !u64::from(object::elf::SHF_GROUP)
+                            != u64::from(object::elf::SHF_ALLOC)
                         || raw.sh_entsize(file.endian()) != 0)
                 {
                     return Err(".eh_frame requires PROGBITS or SHT_X86_64_UNWIND, SHF_ALLOC only, and no entry size".into());
@@ -299,9 +376,15 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                     }
                     continue;
                 }
-                // SHF_WRITE/ALLOC/EXECINSTR/MERGE/STRINGS only. In particular,
-                // TLS, compression, groups and link-order semantics are rejected.
-                if sh_flags & !0x37 != 0 || sh_flags & 5 == 5 {
+                if sh_flags & u64::from(object::elf::SHF_TLS) != 0 {
+                    return Err(format!(
+                        "TLS section {name} requires external ELF linking: native PT_TLS layout and TLS relocations are unsupported"
+                    ));
+                }
+                // SHF_WRITE/ALLOC/EXECINSTR/MERGE/STRINGS/GNU_RETAIN. In particular,
+                // TLS, compression and link-order semantics are rejected.
+                // Group membership was validated and selected before parsing.
+                if sh_flags & !0x200237 != 0 || sh_flags & 5 == 5 {
                     return Err(format!("unsupported flags {sh_flags:#x} on {name}"));
                 }
                 let bss = section.kind() == object::SectionKind::UninitializedData;
@@ -323,7 +406,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                         section.kind()
                     ));
                 }
-                let size = end(0, section.size())?;
+                let size = end(0, input_size)?;
                 let alignment = section.align().max(1);
                 align(0, alignment)?;
                 if !bss && data.len() as u64 != size {
@@ -346,12 +429,16 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                 unit.sections.insert(section.index().0, sections.len());
                 sections.push(Section {
                     name,
-                    flags: sh_flags & 7,
+                    flags: sh_flags & 0x200007,
                     kind,
                     align: alignment,
                     size,
                     bss,
-                    data: data.to_vec(),
+                    data: if sframe {
+                        sframe_section.as_ref().unwrap().1.rebuild()?
+                    } else {
+                        data.to_vec()
+                    },
                     offset: 0,
                 });
                 // The generic relocation iterator skips malformed tables. Validate
@@ -360,6 +447,9 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                 let mut unwind_relocations = BTreeSet::new();
                 let mut sframe_relocations = BTreeSet::new();
                 for (offset, r) in section.relocations() {
+                    let Some(offset) = group_plan.offset(section.index().0, offset) else {
+                        continue;
+                    };
                     let RelocationFlags::Elf { r_type: kind } = r.flags() else {
                         return Err("non-ELF relocation".into());
                     };
@@ -376,10 +466,16 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                             &mut sframe_relocations,
                         )?;
                     }
-                    let width = match kind {
-                        1 | 24 => 8,
-                        2 | 4 | 9 | 10 | 11 | 41 | 42 => 4,
-                        _ => return Err(format!("unsupported x86-64 relocation {kind}")),
+                    let width = if arm {
+                        aarch64::width(kind)?
+                    } else {
+                        match kind {
+                            15 => 1, // R_X86_64_PC8, used by LOOP/J*CXZ.
+                            1 | 24 => 8,
+                            2 | 4 | 9 | 10 | 11 | 41 | 42 => 4,
+                            _ => return Err(format!("unsupported x86-64 relocation {kind}")),
+                        }
+
                     };
                     if bss || offset.checked_add(width).is_none_or(|e| e > size) {
                         return Err("relocation field is outside file-backed section data".into());
@@ -389,7 +485,20 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                             return Err("duplicate .eh_frame pointer relocation".into());
                         }
                         frames
-                            .relocation(offset, kind)
+                            .relocation(
+                                offset,
+                                if arm {
+                                    match kind {
+                                        257 => 1,
+                                        258 => 10,
+                                        260 => 24,
+                                        261 => 2,
+                                        _ => kind,
+                                    }
+                                } else {
+                                    kind
+                                },
+                            )
                             .map_err(|e| format!(".eh_frame: {e}"))?;
                     }
                     let RelocationTarget::Symbol(symbol) = r.target() else {
@@ -412,6 +521,19 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                 }
             }
             for s in file.symbols() {
+                if group_plan.dead_symbol(s.index().0, s.section()) {
+                    // Surviving named global references rebind through the
+                    // ordinary global resolver. Locals cannot be substituted.
+                    if !group_plan.live.contains(&s.index().0) {
+                        continue;
+                    }
+                    if !s.is_global() && !s.is_weak() {
+                        return Err(format!(
+                            "reference to discarded COMDAT local `{}` is unsupported",
+                            s.name().unwrap_or("?")
+                        ));
+                    }
+                }
                 let SymbolFlags::Elf {
                     st_info: info,
                     st_other: other,
@@ -425,9 +547,13 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                         s.name().unwrap_or("?")
                     ));
                 }
-                let symbol = Symbol {
+                let mut symbol = Symbol {
                     name: s.name().map_err(|e| e.to_string())?.into(),
-                    section: s.section(),
+                    section: if group_plan.dead_symbol(s.index().0, s.section()) {
+                        SymbolSection::Undefined
+                    } else {
+                        s.section()
+                    },
                     value: s.address(),
                     size: s.size(),
                     info,
@@ -446,17 +572,31 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                         ));
                     }
                 }
+                if let SymbolSection::Section(index) = symbol.section
+                    && let Some(filtered) = group_plan.frames.get(&index.0)
+                {
+                    if symbol.info & 15 == 3 {
+                        symbol.value = 0;
+                        symbol.size = 0;
+                    } else if let Some(value) = filtered.offset(symbol.value) {
+                        // An addressable symbol must fit within one retained record.
+                        if symbol.size != 0
+                            && filtered.offset(symbol.value + symbol.size - 1)
+                                != Some(value + symbol.size - 1)
+                        {
+                            return Err("symbol spans discarded .eh_frame records".into());
+                        }
+                        symbol.value = value;
+                    } else {
+                        continue;
+                    }
+                }
                 unit.symbols.insert(s.index().0, symbol);
             }
             Ok(unit)
         };
         units.push(parse().map_err(|e| format!("{}: {e}", input.name))?);
         object_properties.push(properties);
-    }
-    let section_remap = unwind::merge(&mut sections, &mut units, &mut unwind_sections)?;
-    note_plan.abi = note_plan.abi.map(|i| section_remap[i]);
-    if let Some((section, _)) = &mut sframe_section {
-        *section = section_remap[*section];
     }
     let mut globals: BTreeMap<String, (usize, usize)> = BTreeMap::new();
     let mut commons: BTreeMap<String, (u64, u64)> = BTreeMap::new();
@@ -492,6 +632,41 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
             globals.insert(s.name.clone(), (ui, si));
         }
     }
+    // Bind original identities and validate even dead ranges before GC or merge.
+    let mut sframe_targets = sframe_section
+        .as_ref()
+        .map(|(section, table)| {
+            table.bind(*section, &units, &sections, &globals, options.gc_sections)
+        })
+        .transpose()?;
+    if options.gc_sections {
+        let remap = gc::collect(
+            &mut sections,
+            &mut units,
+            &mut unwind_sections,
+            &mut globals,
+            &options.entry,
+            !libraries.is_empty(),
+            &mut sframe_section,
+            &mut sframe_targets,
+        )?;
+        note_plan.abi = note_plan.abi.and_then(|i| remap[i]);
+        commons.retain(|name, _| globals.contains_key(name));
+    }
+    let section_remap = unwind::merge(&mut sections, &mut units, &mut unwind_sections)?;
+    note_plan.abi = note_plan.abi.map(|i| section_remap[i]);
+    if let Some((section, table)) = &mut sframe_section {
+        *section = section_remap[*section];
+        sframe_targets
+            .as_mut()
+            .unwrap()
+            .remap(&section_remap.iter().copied().map(Some).collect::<Vec<_>>())?;
+        if options.gc_sections {
+            let targets = sframe_targets.as_mut().unwrap();
+            let indices = table.order(targets, &sections);
+            table.reconstruct(targets, indices, *section, &mut sections, &mut units)?;
+        }
+    }
     let mut common_locations = BTreeMap::new();
     let mut common_sizes = BTreeMap::new();
     let mut common = Section {
@@ -516,15 +691,15 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         common.align = common.align.max(alignment);
     }
     sections.push(common);
-    let sframe_targets = sframe_section
-        .as_ref()
-        .map(|(section, table)| table.targets(*section, &units, &sections, &globals))
-        .transpose()?;
+    let bounds = bounds::symbols(&sections, &units, &globals)?;
     let mut imports: BTreeMap<String, dynamic::Import> = BTreeMap::new();
     for u in &units {
         for s in u.symbols.values() {
             if !s.global() || s.section != SymbolSection::Undefined || globals.contains_key(&s.name)
             {
+                continue;
+            }
+            if bounds.contains_key(s.name.as_str()) {
                 continue;
             }
             if linker_owned(&s.name) {
@@ -577,30 +752,14 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
     for (i, import) in imports.values_mut().enumerate() {
         import.index = (i + 1) as u32;
     }
-    let imported = |ui: usize, si: usize| -> Result<Option<&str>> {
-        let s = units[ui]
-            .symbols
-            .get(&si)
-            .ok_or("relocation references an invalid symbol index")?;
-        Ok((s.global() && imports.contains_key(&s.name)).then_some(s.name.as_str()))
-    };
-    // GOT relocations retain their original instruction; no relaxation needed.
-    // Keys use resolved definitions, so equal local names remain independent.
-    let canonical = |u: usize, s: usize| -> Result<(usize, usize)> {
-        let symbol = units[u]
-            .symbols
-            .get(&s)
-            .ok_or("relocation references an invalid symbol index")?;
-        Ok(if symbol.global() {
-            globals.get(&symbol.name).copied().unwrap_or((u, s))
-        } else {
-            (u, s)
-        })
-    };
+    // GOT keys retain selected raw identities, including independent locals.
+    // Build after the final symbol/section rewrites; address validation stays lazy.
+    let selected = selected::Index::new(&units, &globals, &imports);
     for (ui, u) in units.iter().enumerate() {
         for r in &u.relocs {
-            let (target_unit, target_symbol) = canonical(ui, r.symbol)?;
-            let target = &units[target_unit].symbols[&target_symbol];
+            let selection = selected.get(ui, r.symbol)?;
+            let target_unit = selection.key.0;
+            let target = selection.definition;
             if matches!(target.section, SymbolSection::Section(i)
                 if units[target_unit].consumed_properties.contains(&i.0))
             {
@@ -636,10 +795,13 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
     let mut got = BTreeMap::new();
     for (ui, u) in units.iter().enumerate() {
         for r in &u.relocs {
-            if matches!(r.kind, 9 | 41 | 42) && imported(ui, r.symbol)?.is_none() {
-                let key = canonical(ui, r.symbol)?;
-                let next = got.len() as u64 * 8;
-                got.entry(key).or_insert(next);
+            if if arm { aarch64::got(r.kind) } else { matches!(r.kind, 9 | 41 | 42) } {
+                let selection = selected.get(ui, r.symbol)?;
+                if selection.import.is_none() {
+                    let next = got.len() as u64 * 8;
+                    got.entry(selection.key).or_insert(next);
+                }
+
             }
         }
     }
@@ -678,7 +840,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         let mut absolute = 0;
         for (ui, u) in units.iter().enumerate() {
             for r in &u.relocs {
-                if let Some(name) = imported(ui, r.symbol)? {
+                if let Some(name) = selected.get(ui, r.symbol)?.import {
                     match r.kind {
                         1 if sections[r.section].flags & 1 != 0 => absolute += 1,
                         4 => {}
@@ -710,21 +872,28 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         &object_properties,
         dynamic.as_ref().is_some_and(|d| !d.stubs.is_empty()),
     )?;
+    let registration_alignments = bounds::alignments(&sections);
     let mut segments = Vec::new();
     // Header space holds three LOADs and a non-executable GNU_STACK header.
-    let mut cursor = PAGE;
+    let mut cursor = page;
     for permissions in [4, 5, 6] {
         let start = if permissions == 4 {
             0
         } else {
-            align(cursor, PAGE)?
+            align(cursor, page)?
         };
-        cursor = if permissions == 4 { PAGE } else { start };
+        cursor = if permissions == 4 { page } else { start };
         let mut file_end = cursor;
         for bss in [false, true] {
-            for index in lifecycle::order(&sections, permissions, bss) {
+            for index in bounds::order(&sections, lifecycle::order(&sections, permissions, bss)) {
                 let section = &mut sections[index];
-                cursor = align(cursor, section.align)?;
+                cursor = align(
+                    cursor,
+                    registration_alignments
+                        .get(&index)
+                        .copied()
+                        .unwrap_or(section.align),
+                )?;
                 section.offset = cursor;
                 cursor = end(cursor, section.size)?;
                 if !bss {
@@ -741,19 +910,21 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
             });
         }
     }
-    let mut linker_symbols = BTreeMap::from([("_GLOBAL_OFFSET_TABLE_", got_section)]);
+    let mut linker_symbols = bounds;
+    linker_symbols.insert("_GLOBAL_OFFSET_TABLE_".into(), (got_section, false));
     if let Some(d) = &dynamic {
-        linker_symbols.insert("_DYNAMIC", d.table);
+        linker_symbols.insert("_DYNAMIC".into(), (d.table, false));
     }
-    let address = |ui: usize, si: usize| -> Result<u64> {
-        let (ui, si) = canonical(ui, si)?;
-        let s = &units[ui].symbols[&si];
+    // Output symbol tables already traverse selected definitions or locals.
+    // Use those symbols directly instead of looking up and selecting them again.
+    let definition_address = |ui: usize, s: &Symbol| -> Result<u64> {
         match s.section {
             SymbolSection::Absolute => Ok(s.value),
             SymbolSection::Undefined
                 if s.global() && linker_symbols.contains_key(s.name.as_str()) =>
             {
-                Ok(BASE + sections[linker_symbols[s.name.as_str()]].offset)
+                let (index, stop) = linker_symbols[s.name.as_str()];
+                Ok(BASE + sections[index].offset + if stop { sections[index].size } else { 0 })
             }
             SymbolSection::Undefined if s.weak() => Ok(0),
             SymbolSection::Common => {
@@ -777,6 +948,10 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
             )),
         }
     };
+    let address = |ui: usize, si: usize| -> Result<u64> {
+        let selection = selected.get(ui, si)?;
+        definition_address(selection.key.0, selection.definition)
+    };
     let &(entry_u, entry_s) = globals
         .get(&options.entry)
         .ok_or_else(|| format!("missing entry symbol `{}`", options.entry))?;
@@ -792,9 +967,11 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         return Err("entry must be inside an executable section".into());
     }
     let entry = address(entry_u, entry_s)?;
-    let file_end = segments.iter().map(|s| s.file_end).max().unwrap_or(PAGE);
+    let file_end = segments.iter().map(|s| s.file_end).max().unwrap_or(page);
     let mut bytes = vec![0; file_end as usize];
-    lifecycle::code_padding(&mut bytes, &sections);
+    if !arm {
+        lifecycle::code_padding(&mut bytes, &sections);
+    }
     for s in &sections {
         if !s.bss && !s.data.is_empty() {
             bytes[s.offset as usize..s.offset as usize + s.data.len()].copy_from_slice(&s.data);
@@ -809,7 +986,8 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
     }
     for (ui, u) in units.iter().enumerate() {
         for r in &u.relocs {
-            let import = imported(ui, r.symbol)?;
+            let selection = selected.get(ui, r.symbol)?;
+            let import = selection.import;
             if let (Some(name), Some(d)) = (import, dynamic.as_mut())
                 && r.kind == 1
             {
@@ -819,7 +997,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                 bytes[offset as usize..offset as usize + 8].fill(0);
                 continue;
             }
-            let result = || -> Result<(usize, Vec<u8>)> {
+            let result = || -> Result<(usize, [u8; 8], usize)> {
                 let offset = sections[r.section].offset + r.offset;
                 let p = i128::from(BASE + offset);
                 let value = if let (Some(name), Some(d)) = (import, dynamic.as_ref()) {
@@ -828,23 +1006,31 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                     } else {
                         i128::from(d.stub(name, &sections)?)
                     }
-                } else if matches!(r.kind, 9 | 41 | 42) {
-                    i128::from(BASE + sections[got_section].offset + got[&canonical(ui, r.symbol)?])
+                } else if if arm { aarch64::got(r.kind) } else { matches!(r.kind, 9 | 41 | 42) } {
+                    i128::from(BASE + sections[got_section].offset + got[&selection.key])
                 } else {
-                    i128::from(address(ui, r.symbol)?)
+                    i128::from(definition_address(selection.key.0, selection.definition)?)
                 } + i128::from(r.addend);
+                if arm {
+                    let width = aarch64::width(r.kind)? as usize;
+                    let encoded = aarch64::apply(
+                        r.kind, value, p, &bytes[offset as usize..offset as usize + width],
+                    )?;
+                    let mut data = [0u8; 8];
+                    data[..width].copy_from_slice(&encoded);
+                    return Ok((offset as usize, data, width));
+                }
+                // Preserve the allocation-free x86 relocation path.
+
                 let data = match r.kind {
-                    1 => Some((value as u64).to_le_bytes().to_vec()),
-                    10 => u32::try_from(value).map(|v| v.to_le_bytes().to_vec()).ok(),
+                    15 => i8::try_from(value - p).map(|v| (v as u64, 1)).ok(),
+                    1 => Some((value as u64, 8)),
+                    10 => u32::try_from(value).map(|v| (u64::from(v), 4)).ok(),
                     11 => i32::try_from(value as u64 as i64)
-                        .map(|v| v.to_le_bytes().to_vec())
+                        .map(|v| (v as u64, 4))
                         .ok(),
-                    24 => i64::try_from(value - p)
-                        .map(|v| v.to_le_bytes().to_vec())
-                        .ok(),
-                    _ => i32::try_from(value - p)
-                        .map(|v| v.to_le_bytes().to_vec())
-                        .ok(),
+                    24 => i64::try_from(value - p).map(|v| (v as u64, 8)).ok(),
+                    _ => i32::try_from(value - p).map(|v| (v as u64, 4)).ok(),
                 }
                 .ok_or_else(|| {
                     format!(
@@ -852,10 +1038,10 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                         r.kind, u.symbols[&r.symbol].name
                     )
                 })?;
-                Ok((offset as usize, data))
+                Ok((offset as usize, data.0.to_le_bytes(), data.1))
             };
-            let (offset, data) = result().map_err(|e| format!("{}: {e}", u.name))?;
-            bytes[offset..offset + data.len()].copy_from_slice(&data);
+            let (offset, data, width) = result().map_err(|e| format!("{}: {e}", u.name))?;
+            bytes[offset..offset + width].copy_from_slice(&data[..width]);
         }
     }
     if let Some((section, table)) = &sframe_section {
@@ -886,7 +1072,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
             if index >= 0xff00 && index != 0xfff1 {
                 return Err("too many output sections".into());
             }
-            definitions.insert(name.clone(), (address(ui, si)?, index as u16));
+            definitions.insert(name.clone(), (definition_address(ui, s)?, index as u16));
         }
         d.emit(&mut bytes, &sections, &definitions)?;
     }
@@ -921,7 +1107,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
     // Keep local names for debugger function bounds and prologue unwinding.
     // ELF requires all local records to precede the first nonlocal record.
     for (ui, unit) in units.iter().enumerate() {
-        for (&si, s) in &unit.symbols {
+        for s in unit.symbols.values() {
             if s.global() || s.name.is_empty() {
                 continue;
             }
@@ -941,7 +1127,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
             record[4] = s.info;
             record[5] = s.other;
             put16(&mut record, 6, index as u16);
-            put64(&mut record, 8, address(ui, si)?);
+            put64(&mut record, 8, definition_address(ui, s)?);
             put64(&mut record, 16, s.size);
             symbols.extend_from_slice(&record);
         }
@@ -967,7 +1153,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         record[4] = s.info;
         record[5] = s.other;
         put16(&mut record, 6, index as u16);
-        put64(&mut record, 8, address(ui, si)?);
+        put64(&mut record, 8, definition_address(ui, s)?);
         put64(
             &mut record,
             16,
@@ -975,7 +1161,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         );
         symbols.extend_from_slice(&record);
     }
-    for (name, &index) in &linker_symbols {
+    for (name, &(index, stop)) in &linker_symbols {
         if !units.iter().any(|u| {
             u.symbols
                 .values()
@@ -988,10 +1174,14 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         }
         let mut record = [0u8; 24];
         put32(&mut record, 0, string(&mut strings, name));
-        record[4] = 0x11; // GLOBAL OBJECT, hidden and absent from .dynsym.
+        record[4] = if linker_owned(name) { 0x11 } else { 0x10 }; // GLOBAL, hidden and absent from .dynsym.
         record[5] = 2;
         put16(&mut record, 6, (index + 1) as u16);
-        put64(&mut record, 8, BASE + sections[index].offset);
+        put64(
+            &mut record,
+            8,
+            BASE + sections[index].offset + if stop { sections[index].size } else { 0 },
+        );
         symbols.extend_from_slice(&record);
     }
     let str_index = headers.len() + 1;
@@ -1048,8 +1238,11 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         bytes.extend_from_slice(h);
     }
     bytes[..16].copy_from_slice(&[0x7f, b'E', b'L', b'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    if sections.iter().any(|s| s.flags & 0x200000 != 0) {
+        bytes[7] = 3;
+    }
     put16(&mut bytes, 16, 2);
-    put16(&mut bytes, 18, 62);
+    put16(&mut bytes, 18, if arm { 183 } else { 62 });
     put32(&mut bytes, 20, 1);
     put64(&mut bytes, 24, entry);
     put64(&mut bytes, 32, 64);
@@ -1062,7 +1255,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         + usize::from(sframe_section.is_some())
         + note_plan.header_count()
         + if dynamic.is_some() { 3 } else { 0 };
-    if 64 + 56 * phnum > PAGE as usize {
+    if 64 + 56 * phnum > page as usize {
         return Err("ELF program headers exceed the reserved first page".into());
     }
     put16(&mut bytes, 56, phnum as u16);
@@ -1082,7 +1275,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
             s.offset,
             s.file_end - s.offset,
             s.memory_end - s.offset,
-            PAGE,
+            page,
         ));
     }
     if let Some(d) = &dynamic {

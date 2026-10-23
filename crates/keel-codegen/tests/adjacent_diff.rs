@@ -26,15 +26,25 @@ fn compile(
         float_callee_saved: &[],
     };
     let (text, program) = match target {
-        Target::Aarch64AppleDarwin => {
+        Target::Aarch64AppleDarwin | Target::Aarch64LinuxGnu => {
             let pools = if spills {
                 &arm
             } else {
                 &keel_codegen::aarch64::REGISTERS
             };
             (
-                keel_codegen::aarch64::compile_with_pipeline(m, pools, pipeline).unwrap(),
-                keel_codegen::aarch64::compile_program_with_pipeline(m, pools, pipeline).unwrap(),
+                if target == Target::Aarch64LinuxGnu {
+                    keel_codegen::aarch64::compile_linux_with_pipeline(m, pools, pipeline).unwrap()
+                } else {
+                    keel_codegen::aarch64::compile_with_pipeline(m, pools, pipeline).unwrap()
+                },
+                if target == Target::Aarch64LinuxGnu {
+                    keel_codegen::aarch64::compile_linux_program_with_pipeline(m, pools, pipeline)
+                        .unwrap()
+                } else {
+                    keel_codegen::aarch64::compile_program_with_pipeline(m, pools, pipeline)
+                        .unwrap()
+                },
             )
         }
         Target::X86_64LinuxGnu => {
@@ -51,7 +61,7 @@ fn compile(
     };
     if spills {
         match target {
-            Target::Aarch64AppleDarwin => assert!(
+            Target::Aarch64AppleDarwin | Target::Aarch64LinuxGnu => assert!(
                 text.lines()
                     .any(|l| l.contains("str\tq") && (l.contains("[sp") || l.contains("[x29"))),
                 "{text}"
@@ -169,15 +179,29 @@ fn simd_objects_on_both_targets_with_both_allocators_and_selectors() {
                         };
                         let (text, program) = compile(&m, target, &pipeline, spills);
                         let obj = match target {
-                            Target::Aarch64AppleDarwin => {
+                            Target::Aarch64AppleDarwin | Target::Aarch64LinuxGnu => {
                                 assert!(text.contains(".2d"), "{text}");
                                 if !spills {
                                     assert_arm_unrolled_load_cover(&text, selection);
                                 }
-                                let obj =
+                                let obj = if target == Target::Aarch64LinuxGnu {
+                                    keel_asm::assemble_elf_program_object(
+                                        &program,
+                                        Default::default(),
+                                    )
+                                    .unwrap()
+                                } else {
                                     keel_asm::assemble_program_object(&program, Default::default())
-                                        .unwrap();
-                                assert_eq!(obj, keel_asm::assemble_object(&text).unwrap());
+                                        .unwrap()
+                                };
+                                assert_eq!(
+                                    obj,
+                                    if target == Target::Aarch64LinuxGnu {
+                                        keel_asm::assemble_elf_object(&text).unwrap()
+                                    } else {
+                                        keel_asm::assemble_object(&text).unwrap()
+                                    }
+                                );
                                 obj
                             }
                             Target::X86_64LinuxGnu => {

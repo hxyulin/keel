@@ -74,12 +74,38 @@ impl InstructionSelector for TunedSelector {
         target: crate::select::Target,
         folds: &dyn Fn(&InstData) -> Vec<Value>,
     ) -> crate::select::Selection {
+        self.select_counted(func, target, folds, None)
+    }
+
+    fn select_with_uses(
+        &self,
+        func: &Function,
+        target: crate::select::Target,
+        folds: &dyn Fn(&InstData) -> Vec<Value>,
+        uses: &[u8],
+    ) -> crate::select::Selection {
+        self.select_counted(func, target, folds, Some(uses))
+    }
+}
+
+impl TunedSelector {
+    fn select_counted(
+        &self,
+        func: &Function,
+        target: crate::select::Target,
+        folds: &dyn Fn(&InstData) -> Vec<Value>,
+        uses: Option<&[u8]>,
+    ) -> crate::select::Selection {
         if self.cpu == TuningCpu::Generic {
-            return OptionsSelector(self.options).select(func, target, folds);
+            let options = OptionsSelector(self.options);
+            return match uses {
+                Some(uses) => options.select_with_uses(func, target, folds, uses),
+                None => options.select(func, target, folds),
+            };
         }
         profiling::scope!("instruction-selection", "apple-m5");
         let mut selection =
-            crate::select::Selection::compute_with_options(func, target, self.options);
+            crate::select::Selection::compute_with_uses(func, target, self.options, uses);
         if self.options.trees && target == crate::select::Target::Aarch64 {
             selection.tune_multiplications(func, self.cpu);
         }

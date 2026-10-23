@@ -1,0 +1,1459 @@
+{
+  "schema": 1,
+  "authority": "Intel SDM volumes 1 section 12 and 2 instruction reference; https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html",
+  "scope": "legacy x86-64 user-space XMM/GPR and SSSE3 MMX forms; no VEX/YMM",
+  "instructions": [
+    {
+      "mnemonic": "pextrw.s",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 58,
+      "byte": 21,
+      "memory_bits": 16,
+      "form": "Extract",
+      "operand_forms": [
+        "r32,xmm,imm8",
+        "m16,xmm,imm8"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pcmpestri64",
+      "family": "sse42",
+      "prefix": 102,
+      "map": 58,
+      "byte": 97,
+      "memory_bits": 128,
+      "form": "Control64",
+      "operand_forms": [
+        "xmm,xmm,imm8 (REX.W=1)",
+        "xmm,m128,imm8 (REX.W=1)"
+      ],
+      "implicit_operands": [
+        "rax",
+        "rdx",
+        "rcx",
+        "flags"
+      ]
+    },
+    {
+      "mnemonic": "pcmpestrm64",
+      "family": "sse42",
+      "prefix": 102,
+      "map": 58,
+      "byte": 96,
+      "memory_bits": 128,
+      "form": "Control64",
+      "operand_forms": [
+        "xmm,xmm,imm8 (REX.W=1)",
+        "xmm,m128,imm8 (REX.W=1)"
+      ],
+      "implicit_operands": [
+        "rax",
+        "rdx",
+        "xmm0",
+        "flags"
+      ]
+    },
+    {
+      "mnemonic": "pcmpistri64",
+      "family": "sse42",
+      "prefix": 102,
+      "map": 58,
+      "byte": 99,
+      "memory_bits": 128,
+      "form": "Control64",
+      "operand_forms": [
+        "xmm,xmm,imm8 (REX.W=1)",
+        "xmm,m128,imm8 (REX.W=1)"
+      ],
+      "implicit_operands": [
+        "rcx",
+        "flags"
+      ]
+    },
+    {
+      "mnemonic": "pcmpistrm64",
+      "family": "sse42",
+      "prefix": 102,
+      "map": 58,
+      "byte": 98,
+      "memory_bits": 128,
+      "form": "Control64",
+      "operand_forms": [
+        "xmm,xmm,imm8 (REX.W=1)",
+        "xmm,m128,imm8 (REX.W=1)"
+      ],
+      "implicit_operands": [
+        "xmm0",
+        "flags"
+      ]
+    },
+    {
+      "mnemonic": "addsubpd",
+      "family": "sse3",
+      "prefix": 102,
+      "map": 15,
+      "byte": 208,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "addsubps",
+      "family": "sse3",
+      "prefix": 242,
+      "map": 15,
+      "byte": 208,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "haddpd",
+      "family": "sse3",
+      "prefix": 102,
+      "map": 15,
+      "byte": 124,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "haddps",
+      "family": "sse3",
+      "prefix": 242,
+      "map": 15,
+      "byte": 124,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "hsubpd",
+      "family": "sse3",
+      "prefix": 102,
+      "map": 15,
+      "byte": 125,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "hsubps",
+      "family": "sse3",
+      "prefix": 242,
+      "map": 15,
+      "byte": 125,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "movddup",
+      "family": "sse3",
+      "prefix": 242,
+      "map": 15,
+      "byte": 18,
+      "memory_bits": 64,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m64"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "movsldup",
+      "family": "sse3",
+      "prefix": 243,
+      "map": 15,
+      "byte": 18,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "movshdup",
+      "family": "sse3",
+      "prefix": 243,
+      "map": 15,
+      "byte": 22,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "lddqu",
+      "family": "sse3",
+      "prefix": 242,
+      "map": 15,
+      "byte": 240,
+      "memory_bits": 128,
+      "form": "Memory",
+      "operand_forms": [
+        "xmm,m128"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "fisttp",
+      "family": "sse3",
+      "prefix": 0,
+      "map": 0,
+      "byte": 0,
+      "memory_bits": 0,
+      "form": "Fisttp",
+      "operand_forms": [
+        "m16",
+        "m32",
+        "m64"
+      ],
+      "memory_widths": [
+        16,
+        32,
+        64
+      ],
+      "implicit_operands": [
+        "st0 (read and pop)",
+        "x87 status"
+      ]
+    },
+    {
+      "mnemonic": "pshufb",
+      "family": "ssse3",
+      "prefix": 102,
+      "map": 56,
+      "byte": 0,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128",
+        "mm,mm",
+        "mm,m64"
+      ],
+      "implicit_operands": [],
+      "mmx_encoding": {
+        "prefix": 0,
+        "memory_bits": 64,
+        "map": 56,
+        "byte": 0
+      }
+    },
+    {
+      "mnemonic": "phaddw",
+      "family": "ssse3",
+      "prefix": 102,
+      "map": 56,
+      "byte": 1,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128",
+        "mm,mm",
+        "mm,m64"
+      ],
+      "implicit_operands": [],
+      "mmx_encoding": {
+        "prefix": 0,
+        "memory_bits": 64,
+        "map": 56,
+        "byte": 1
+      }
+    },
+    {
+      "mnemonic": "phaddd",
+      "family": "ssse3",
+      "prefix": 102,
+      "map": 56,
+      "byte": 2,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128",
+        "mm,mm",
+        "mm,m64"
+      ],
+      "implicit_operands": [],
+      "mmx_encoding": {
+        "prefix": 0,
+        "memory_bits": 64,
+        "map": 56,
+        "byte": 2
+      }
+    },
+    {
+      "mnemonic": "phaddsw",
+      "family": "ssse3",
+      "prefix": 102,
+      "map": 56,
+      "byte": 3,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128",
+        "mm,mm",
+        "mm,m64"
+      ],
+      "implicit_operands": [],
+      "mmx_encoding": {
+        "prefix": 0,
+        "memory_bits": 64,
+        "map": 56,
+        "byte": 3
+      }
+    },
+    {
+      "mnemonic": "pmaddubsw",
+      "family": "ssse3",
+      "prefix": 102,
+      "map": 56,
+      "byte": 4,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128",
+        "mm,mm",
+        "mm,m64"
+      ],
+      "implicit_operands": [],
+      "mmx_encoding": {
+        "prefix": 0,
+        "memory_bits": 64,
+        "map": 56,
+        "byte": 4
+      }
+    },
+    {
+      "mnemonic": "phsubw",
+      "family": "ssse3",
+      "prefix": 102,
+      "map": 56,
+      "byte": 5,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128",
+        "mm,mm",
+        "mm,m64"
+      ],
+      "implicit_operands": [],
+      "mmx_encoding": {
+        "prefix": 0,
+        "memory_bits": 64,
+        "map": 56,
+        "byte": 5
+      }
+    },
+    {
+      "mnemonic": "phsubd",
+      "family": "ssse3",
+      "prefix": 102,
+      "map": 56,
+      "byte": 6,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128",
+        "mm,mm",
+        "mm,m64"
+      ],
+      "implicit_operands": [],
+      "mmx_encoding": {
+        "prefix": 0,
+        "memory_bits": 64,
+        "map": 56,
+        "byte": 6
+      }
+    },
+    {
+      "mnemonic": "phsubsw",
+      "family": "ssse3",
+      "prefix": 102,
+      "map": 56,
+      "byte": 7,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128",
+        "mm,mm",
+        "mm,m64"
+      ],
+      "implicit_operands": [],
+      "mmx_encoding": {
+        "prefix": 0,
+        "memory_bits": 64,
+        "map": 56,
+        "byte": 7
+      }
+    },
+    {
+      "mnemonic": "psignb",
+      "family": "ssse3",
+      "prefix": 102,
+      "map": 56,
+      "byte": 8,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128",
+        "mm,mm",
+        "mm,m64"
+      ],
+      "implicit_operands": [],
+      "mmx_encoding": {
+        "prefix": 0,
+        "memory_bits": 64,
+        "map": 56,
+        "byte": 8
+      }
+    },
+    {
+      "mnemonic": "psignw",
+      "family": "ssse3",
+      "prefix": 102,
+      "map": 56,
+      "byte": 9,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128",
+        "mm,mm",
+        "mm,m64"
+      ],
+      "implicit_operands": [],
+      "mmx_encoding": {
+        "prefix": 0,
+        "memory_bits": 64,
+        "map": 56,
+        "byte": 9
+      }
+    },
+    {
+      "mnemonic": "psignd",
+      "family": "ssse3",
+      "prefix": 102,
+      "map": 56,
+      "byte": 10,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128",
+        "mm,mm",
+        "mm,m64"
+      ],
+      "implicit_operands": [],
+      "mmx_encoding": {
+        "prefix": 0,
+        "memory_bits": 64,
+        "map": 56,
+        "byte": 10
+      }
+    },
+    {
+      "mnemonic": "pmulhrsw",
+      "family": "ssse3",
+      "prefix": 102,
+      "map": 56,
+      "byte": 11,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128",
+        "mm,mm",
+        "mm,m64"
+      ],
+      "implicit_operands": [],
+      "mmx_encoding": {
+        "prefix": 0,
+        "memory_bits": 64,
+        "map": 56,
+        "byte": 11
+      }
+    },
+    {
+      "mnemonic": "pabsb",
+      "family": "ssse3",
+      "prefix": 102,
+      "map": 56,
+      "byte": 28,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128",
+        "mm,mm",
+        "mm,m64"
+      ],
+      "implicit_operands": [],
+      "mmx_encoding": {
+        "prefix": 0,
+        "memory_bits": 64,
+        "map": 56,
+        "byte": 28
+      }
+    },
+    {
+      "mnemonic": "pabsw",
+      "family": "ssse3",
+      "prefix": 102,
+      "map": 56,
+      "byte": 29,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128",
+        "mm,mm",
+        "mm,m64"
+      ],
+      "implicit_operands": [],
+      "mmx_encoding": {
+        "prefix": 0,
+        "memory_bits": 64,
+        "map": 56,
+        "byte": 29
+      }
+    },
+    {
+      "mnemonic": "pabsd",
+      "family": "ssse3",
+      "prefix": 102,
+      "map": 56,
+      "byte": 30,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128",
+        "mm,mm",
+        "mm,m64"
+      ],
+      "implicit_operands": [],
+      "mmx_encoding": {
+        "prefix": 0,
+        "memory_bits": 64,
+        "map": 56,
+        "byte": 30
+      }
+    },
+    {
+      "mnemonic": "palignr",
+      "family": "ssse3",
+      "prefix": 102,
+      "map": 58,
+      "byte": 15,
+      "memory_bits": 128,
+      "form": "Control",
+      "operand_forms": [
+        "xmm,xmm,imm8",
+        "xmm,m128,imm8",
+        "mm,mm,imm8",
+        "mm,m64,imm8"
+      ],
+      "implicit_operands": [],
+      "mmx_encoding": {
+        "prefix": 0,
+        "memory_bits": 64,
+        "map": 58,
+        "byte": 15
+      }
+    },
+    {
+      "mnemonic": "pminsb",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 56,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pminsd",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 57,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pminuw",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 58,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pminud",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 59,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pmaxsb",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 60,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pmaxsd",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 61,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pmaxuw",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 62,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pmaxud",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 63,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pmuldq",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 40,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pcmpeqq",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 41,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "packusdw",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 43,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pmulld",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 64,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "ptest",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 23,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": [
+        "flags"
+      ]
+    },
+    {
+      "mnemonic": "phminposuw",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 65,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pmovsxbw",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 32,
+      "memory_bits": 64,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m64"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pmovsxbd",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 33,
+      "memory_bits": 32,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m32"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pmovsxbq",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 34,
+      "memory_bits": 16,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m16"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pmovsxwd",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 35,
+      "memory_bits": 64,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m64"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pmovsxwq",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 36,
+      "memory_bits": 32,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m32"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pmovsxdq",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 37,
+      "memory_bits": 64,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m64"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pmovzxbw",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 48,
+      "memory_bits": 64,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m64"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pmovzxbd",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 49,
+      "memory_bits": 32,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m32"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pmovzxbq",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 50,
+      "memory_bits": 16,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m16"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pmovzxwd",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 51,
+      "memory_bits": 64,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m64"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pmovzxwq",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 52,
+      "memory_bits": 32,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m32"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pmovzxdq",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 53,
+      "memory_bits": 64,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m64"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "roundps",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 58,
+      "byte": 8,
+      "memory_bits": 128,
+      "form": "Control",
+      "operand_forms": [
+        "xmm,xmm,imm8",
+        "xmm,m128,imm8"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "roundpd",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 58,
+      "byte": 9,
+      "memory_bits": 128,
+      "form": "Control",
+      "operand_forms": [
+        "xmm,xmm,imm8",
+        "xmm,m128,imm8"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "blendps",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 58,
+      "byte": 12,
+      "memory_bits": 128,
+      "form": "Control",
+      "operand_forms": [
+        "xmm,xmm,imm8",
+        "xmm,m128,imm8"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "blendpd",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 58,
+      "byte": 13,
+      "memory_bits": 128,
+      "form": "Control",
+      "operand_forms": [
+        "xmm,xmm,imm8",
+        "xmm,m128,imm8"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pblendw",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 58,
+      "byte": 14,
+      "memory_bits": 128,
+      "form": "Control",
+      "operand_forms": [
+        "xmm,xmm,imm8",
+        "xmm,m128,imm8"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "dpps",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 58,
+      "byte": 64,
+      "memory_bits": 128,
+      "form": "Control",
+      "operand_forms": [
+        "xmm,xmm,imm8",
+        "xmm,m128,imm8"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "dppd",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 58,
+      "byte": 65,
+      "memory_bits": 128,
+      "form": "Control",
+      "operand_forms": [
+        "xmm,xmm,imm8",
+        "xmm,m128,imm8"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "mpsadbw",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 58,
+      "byte": 66,
+      "memory_bits": 128,
+      "form": "Control",
+      "operand_forms": [
+        "xmm,xmm,imm8",
+        "xmm,m128,imm8"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "blendvps",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 20,
+      "memory_bits": 128,
+      "form": "Blend",
+      "operand_forms": [
+        "xmm,xmm[,xmm0]",
+        "xmm,m128[,xmm0]"
+      ],
+      "implicit_operands": [
+        "xmm0"
+      ]
+    },
+    {
+      "mnemonic": "blendvpd",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 21,
+      "memory_bits": 128,
+      "form": "Blend",
+      "operand_forms": [
+        "xmm,xmm[,xmm0]",
+        "xmm,m128[,xmm0]"
+      ],
+      "implicit_operands": [
+        "xmm0"
+      ]
+    },
+    {
+      "mnemonic": "pblendvb",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 16,
+      "memory_bits": 128,
+      "form": "Blend",
+      "operand_forms": [
+        "xmm,xmm[,xmm0]",
+        "xmm,m128[,xmm0]"
+      ],
+      "implicit_operands": [
+        "xmm0"
+      ]
+    },
+    {
+      "mnemonic": "movntdqa",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 56,
+      "byte": 42,
+      "memory_bits": 128,
+      "form": "Memory",
+      "operand_forms": [
+        "xmm,m128"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pextrb",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 58,
+      "byte": 20,
+      "memory_bits": 8,
+      "form": "Extract",
+      "operand_forms": [
+        "r32,xmm,imm8",
+        "m8,xmm,imm8"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pextrd",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 58,
+      "byte": 22,
+      "memory_bits": 32,
+      "form": "Extract",
+      "operand_forms": [
+        "r32,xmm,imm8",
+        "m32,xmm,imm8"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pextrq",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 58,
+      "byte": 22,
+      "memory_bits": 64,
+      "form": "Extract",
+      "operand_forms": [
+        "r64,xmm,imm8",
+        "m64,xmm,imm8"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "extractps",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 58,
+      "byte": 23,
+      "memory_bits": 32,
+      "form": "Extract",
+      "operand_forms": [
+        "r32,xmm,imm8",
+        "m32,xmm,imm8"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pinsrb",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 58,
+      "byte": 32,
+      "memory_bits": 8,
+      "form": "Insert",
+      "operand_forms": [
+        "xmm,r32,imm8",
+        "xmm,m8,imm8"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pinsrd",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 58,
+      "byte": 34,
+      "memory_bits": 32,
+      "form": "Insert",
+      "operand_forms": [
+        "xmm,r32,imm8",
+        "xmm,m32,imm8"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pinsrq",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 58,
+      "byte": 34,
+      "memory_bits": 64,
+      "form": "Insert",
+      "operand_forms": [
+        "xmm,r64,imm8",
+        "xmm,m64,imm8"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "insertps",
+      "family": "sse41",
+      "prefix": 102,
+      "map": 58,
+      "byte": 33,
+      "memory_bits": 32,
+      "form": "Control",
+      "operand_forms": [
+        "xmm,xmm,imm8",
+        "xmm,m32,imm8"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pcmpgtq",
+      "family": "sse42",
+      "prefix": 102,
+      "map": 56,
+      "byte": 55,
+      "memory_bits": 128,
+      "form": "Binary",
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "pcmpestrm",
+      "family": "sse42",
+      "prefix": 102,
+      "map": 58,
+      "byte": 96,
+      "memory_bits": 128,
+      "form": "Control",
+      "operand_forms": [
+        "xmm,xmm,imm8",
+        "xmm,m128,imm8"
+      ],
+      "implicit_operands": [
+        "eax",
+        "edx",
+        "xmm0",
+        "flags"
+      ]
+    },
+    {
+      "mnemonic": "pcmpestri",
+      "family": "sse42",
+      "prefix": 102,
+      "map": 58,
+      "byte": 97,
+      "memory_bits": 128,
+      "form": "Control",
+      "operand_forms": [
+        "xmm,xmm,imm8",
+        "xmm,m128,imm8"
+      ],
+      "implicit_operands": [
+        "eax",
+        "edx",
+        "ecx",
+        "flags"
+      ]
+    },
+    {
+      "mnemonic": "pcmpistrm",
+      "family": "sse42",
+      "prefix": 102,
+      "map": 58,
+      "byte": 98,
+      "memory_bits": 128,
+      "form": "Control",
+      "operand_forms": [
+        "xmm,xmm,imm8",
+        "xmm,m128,imm8"
+      ],
+      "implicit_operands": [
+        "xmm0",
+        "flags"
+      ]
+    },
+    {
+      "mnemonic": "pcmpistri",
+      "family": "sse42",
+      "prefix": 102,
+      "map": 58,
+      "byte": 99,
+      "memory_bits": 128,
+      "form": "Control",
+      "operand_forms": [
+        "xmm,xmm,imm8",
+        "xmm,m128,imm8"
+      ],
+      "implicit_operands": [
+        "ecx",
+        "flags"
+      ]
+    },
+    {
+      "mnemonic": "crc32",
+      "family": "sse42",
+      "prefix": 242,
+      "map": 56,
+      "byte": 240,
+      "memory_bits": 0,
+      "form": "Crc32",
+      "operand_forms": [
+        "r32,r/m8",
+        "r32,r/m16",
+        "r32,r/m32",
+        "r64,r/m8",
+        "r64,r/m64"
+      ],
+      "memory_widths": [
+        8,
+        16,
+        32,
+        64
+      ],
+      "implicit_operands": []
+    },
+    {
+      "mnemonic": "cmpxchg16b",
+      "family": "cx16",
+      "prefix": 0,
+      "map": 15,
+      "byte": 199,
+      "memory_bits": 128,
+      "form": "Cx16",
+      "operand_forms": [
+        "m128",
+        "lock m128"
+      ],
+      "implicit_operands": [
+        "rdx:rax",
+        "rcx:rbx",
+        "flags"
+      ]
+    },
+    {
+      "mnemonic": "lahf",
+      "family": "lahf_sahf",
+      "prefix": 0,
+      "map": 0,
+      "byte": 159,
+      "memory_bits": 0,
+      "form": "Nullary",
+      "operand_forms": [
+        "no explicit operands"
+      ],
+      "implicit_operands": [
+        "flags (read)",
+        "ah (write)"
+      ]
+    },
+    {
+      "mnemonic": "sahf",
+      "family": "lahf_sahf",
+      "prefix": 0,
+      "map": 0,
+      "byte": 158,
+      "memory_bits": 0,
+      "form": "Nullary",
+      "operand_forms": [
+        "no explicit operands"
+      ],
+      "implicit_operands": [
+        "ah (read)",
+        "flags (write)"
+      ]
+    }
+  ],
+  "existing": [
+    {
+      "mnemonic": "roundss",
+      "family": "sse41",
+      "status": "existing_identity_parent_gating"
+    },
+    {
+      "mnemonic": "roundsd",
+      "family": "sse41",
+      "status": "existing_identity_parent_gating"
+    },
+    {
+      "mnemonic": "popcnt",
+      "family": "popcnt",
+      "status": "existing_identity_parent_gating"
+    }
+  ],
+  "excluded": [
+    {
+      "mnemonic": "monitor",
+      "reason": "OS-dependent monitor facility, outside ordinary user-space v2 target"
+    },
+    {
+      "mnemonic": "mwait",
+      "reason": "privileged wait, outside ordinary user-space v2 target"
+    },
+    {
+      "mnemonic": "SSSE3 MMX forms",
+      "reason": "MMX register class is absent from existing assembler; XMM equivalents are in scope"
+    }
+  ],
+  "gates": {
+    "native_execution": "pending_parent_linux",
+    "spills_aliases_abi": "pending_parent_codegen_integration",
+    "semantic_oracle": "pending_parent_linux"
+  },
+  "primary_inventory": {
+    "project": "Intel XED",
+    "commit": "0bcb6237345c5066726dcc08b3d87928df3b5b26",
+    "file": "datafiles/xed-isa.txt",
+    "reconciliation": "xed-reconciliation.json"
+  }
+}

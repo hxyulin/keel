@@ -121,6 +121,10 @@ pub fn run(func: &mut Function) -> bool {
     // must continue to observe memory even when the program never escapes
     // the address itself.
     let mut escaped: FxHashSet<_> = func.debug_vars.iter().map(|v| v.slot).collect();
+    // The ABI instruction writes this home without a StackAddr SSA operand.
+    escaped.extend(func.layout_insts().filter_map(|(_, i)| match func.inst_data(i) {
+        InstData::AggregateVaArg { home, .. } => Some(*home), _ => None,
+    }));
     // Without marks, any restore is of an unknown stack pointer.
     if marks.is_empty() && restore {
         return false;

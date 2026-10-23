@@ -114,6 +114,10 @@ fn run_impl(f: &mut Function, large: bool) -> bool {
         }
     }
     let mut escaped: FxHashSet<_> = f.debug_vars.iter().map(|v| v.slot).collect();
+    // The ABI instruction writes this home without a StackAddr SSA operand.
+    escaped.extend(f.layout_insts().filter_map(|(_, i)| match f.inst_data(i) {
+        InstData::AggregateVaArg { home, .. } => Some(*home), _ => None,
+    }));
     let mut accesses: FxHashMap<_, Field> = FxHashMap::default();
     let mut fields = Vec::new();
     let mut seen_fields = FxHashSet::default();
