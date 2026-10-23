@@ -284,7 +284,9 @@ against that object exit **1**. Each compiler's own object with the same
 harness exits **0**. The distinct inputs avoid the false positive of an
 identity function leaving incoming XMM0 unchanged. Keel disassembly and both
 oracle assembly files are retained. This is an observed ABI failure, not an
-inference from a parse-only probe. It remains unfixed in this research change.
+inference from a parse-only probe. The research change itself did not fix it;
+the subsequent [safety checkpoint](c-unsupported-values.md) rejects it before
+object emission.
 
 ### Frontend architecture and safety gaps
 
@@ -421,7 +423,17 @@ OUT/layout-clang
 
 For the ABI reproducer, compile `extended-float-aggregate-abi.c` with the Keel
 flags above, then link `extended-float-aggregate-harness.c` against its object
-using each native compiler. Both executables currently return 1. Compile the
+using each native compiler. Both baseline executables return 1. Compile the
 same function fixture with each native compiler for the two passing controls.
-These fixtures intentionally expose unsupported behavior; they are not
-automatically registered as passing Keel tests.
+The subsequent safety checkpoint registers the function fixture as a negative
+Keel compilation test; its native compiler controls continue to pass.
+
+## Existing opaque-value safety checkpoint
+
+The subsequent [unsupported-value checkpoint](c-unsupported-values.md) fixes
+the independently observed aggregate ABI miscompilation above through recursive
+value rejection and validation before pruning, and closes opaque numeric
+redeclaration conflicts. It preserves the existing declaration/layout/pointer
+subset. It does not implement the proposed `TC` or `_FloatN` support or claim
+additional application compatibility. The investigation results above describe
+the pre-checkpoint baseline; the linked checkpoint records its own native proof.
