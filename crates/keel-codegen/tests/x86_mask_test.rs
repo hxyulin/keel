@@ -525,7 +525,6 @@ if(edge<2) {{ memset(p,0x83,{width}); mem_{tag}(p,&out,marker); assert(*marker==
     }
     c += "assert(!munmap(m,3*n)); assert(!munmap(marker,n)); return 0; }\n";
     fs::write(dir.join("oracle.c"), &c).unwrap();
-    fs::write(dir.join("kernels.ir"), &ir).unwrap();
     for cc in ["gcc", "clang"] {
         let out = Command::new(cc)
             .args(["-O2", "-c"])
@@ -538,6 +537,7 @@ if(edge<2) {{ memset(p,0x83,{width}); mem_{tag}(p,&out,marker); assert(*marker==
     }
     let mut module = keel_ir::parse(&ir).unwrap();
     alias_source(&mut module);
+    fs::write(dir.join("kernels.ir"), module.to_string()).unwrap();
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
