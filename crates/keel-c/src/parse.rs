@@ -962,7 +962,13 @@ impl<'a> Parser<'a> {
     /// Whether the next token starts a type name or declaration.
     pub(crate) fn is_typename(&self) -> bool {
         match self.peek() {
-            Tok::Ident(s) => is_type_keyword(s) || self.is_typedef(s),
+            Tok::Ident(s) => {
+                is_type_keyword(s)
+                    || self.is_typedef(s)
+                    // Recognize the unsupported builtin only when no header
+                    // typedef or ordinary identifier supplies this spelling.
+                    || (s == "_Float32" && self.lookup(s).is_none())
+            }
             _ => false,
         }
     }
@@ -2553,6 +2559,14 @@ impl<'a> Parser<'a> {
                                 self.advance();
                                 spec.sugar = Sugar::Typedef(i);
                                 Some(self.typedefs[i].ty)
+                            } else if word == "_Float32" && self.lookup(word).is_none() {
+                                // glibc's Clang path can typedef this spelling to
+                                // float. GCC's builtin is a distinct type; do not
+                                // accept it via implicit int or invent an alias.
+                                return Err(Error::new(
+                                    self.loc(),
+                                    "unsupported extended floating type `_Float32`",
+                                ));
                             } else {
                                 None
                             }
