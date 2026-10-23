@@ -163,6 +163,10 @@ both guarded-page edges, canaries, call pressure and typed/text/chunked parity,
 plus debug/release legality and existing memory-cover regressions. Application
 byte/character paths need finite native correctness before any runtime claim.
 
+Implementation follow-up: the bounded [signed-byte load pilot](x86-signed-byte-load.md)
+records the implemented rule, native oracle and fresh application recount.
+The observations above remain the frozen research baseline.
+
 ## 3. Single-use i32 constant mask compared with zero
 
 Owners: `crates/keel-codegen/src/select.rs` and
