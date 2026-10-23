@@ -105,10 +105,54 @@ not pass (`/tmp/keel-cpl0-tklzkni3`). Temporary negative-control source, exact
 commands and results remain in `/tmp/keel-cpl0-validation.l8rQot` on LinuxHost;
 lock logs are `/tmp/keel-cpl0-unique.jsonl`. No Rust changed or compiled.
 
-Descriptor execution remains a subsequent combination. The maintained
-`cases/descriptor.keel` exports `descriptor_observe(out)`, not `guest_main`:
-a separate bridge must seed its known tables, fill 32 output bytes with 0xa5,
-call that function, compare the independently expected complete image, then
-return the result. Link the bridge and exactly one exported descriptor variant
-using repeated `--payload`. The generic smoke does not qualify descriptor
-footprints, SMSW wide-container semantics, or arbitrary FLAGS/x87 state.
+## SGDT/SIDT campaign
+
+The assembly bridge `cases/descriptor_bridge.S` defines `guest_main` and calls
+one separately linked `descriptor_observe`. It checks the boot selectors
+(CS=8; DS/ES/SS=16), loads a static 32-byte GDT preserving those descriptors and
+a static 512-byte IDT, and leaves mode, mappings and IF=0 intact. No exception
+resumption is provided. All tables and buffers live for the whole guest.
+The bridge fills 32 output bytes with 0xa5 and compares every byte after the
+opaque call against a separate expected image: literal limits 31/511 and
+linker-known seed-table addresses, never values read from SGDT/SIDT output.
+This checks SGDT offsets 1–10, SIDT offsets 17–26 and all twelve canary bytes.
+The bridge uses integer-only assembly, no red zone, C runtime or SIMD helpers.
+
+Export all twelve explicit V1 variants from the current source tree, then run
+on a host with the existing QEMU and GNU binutils (override tool paths as above):
+
+```sh
+env KEEL_DESCRIPTOR_EXPORT_DIR=/tmp/keel-descriptor-cpl0-exports \
+  python3 suite/fast_opt_locked.py /tmp/keel-cpl0-review-unique.jsonl \
+  cargo test --offline --locked -j2 -p keel-codegen \
+  --test x86_descriptor_cpl0 --test x86_descriptor_queries_encoding
+python3 suite/fast_opt_locked.py /tmp/keel-cpl0-review-unique.jsonl \
+  python3 suite/x86-cpl0/descriptor_campaign.py \
+  --exports /tmp/keel-descriptor-cpl0-exports --timeout 5
+```
+
+The campaign accepts exactly the twelve standard object filenames, links each
+with the bridge independently, and requires the exact two-line READY/PASS
+transcript and exit 33. Two substituted observation payloads must instead
+produce the exact READY/FAIL transcript and exit 35: one returns without any
+observation, the other observes correctly then corrupts a canary. A fault or
+timeout cannot satisfy these controls. Each campaign stores all commands,
+images, transcripts and per-case JSON in `/tmp/keel-descriptor-campaign-*`.
+It acquires no lock internally: use the wrapper once, without nested locking.
+
+On 2026-10-23, all twelve newly exported variants passed on LinuxHost with the
+existing QEMU path above; both descriptor negative controls failed as expected.
+Descriptor captures are `/tmp/keel-descriptor-campaign-q4a10yfm`, with source,
+exports and command log in `/tmp/keel-cpl0-review.5oAfls/descriptor.log`.
+The review also passed ten host tests locally and on LinuxHost, rebuilt the local
+flat image, rejected a real oversized-BSS object at link time, and reran the
+smoke, return-one and PASS-then-timeout controls (captures in
+`/tmp/keel-cpl0-review-generic-6ttqksqs`). All twelve linked reference images
+also matched `descriptor_expected.py` using only linker seed symbols. A local
+evidence copy is `/tmp/keel-cpl0-review-evidence` on MacHost. Lock receipts are
+`/tmp/keel-cpl0-review-unique.jsonl` on each host.
+
+This qualifies only the bounded emulated SGDT/SIDT comparison and canaries.
+The generic smoke and compile/encoding gates are separate evidence. Native
+bare-metal behavior, the other twelve descriptor/status APIs, SMSW wide
+containers and arbitrary FLAGS/x87 state remain outside this checkpoint.

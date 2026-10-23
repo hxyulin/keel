@@ -37,8 +37,8 @@ not CR4 enablement. Successful user-mode forced-assembly comparisons can
 therefore prove OS-observed behavior without proving this raw permitted-hardware
 contract. A native receipt must collect CS/CPL, CPUID capability and observed
 results and retain raw-mode proof pending unless independently established.
-CPL0 proof remains pending. The bounded emulated checkpoint below prepares a
-controlled table observation; it does not establish native bare-metal behavior.
+The bounded emulated CPL0 checkpoint below validates a controlled SGDT/SIDT
+table observation; native bare-metal CPL0 proof remains pending.
 No all-context or full-profile completion follows from this stage.
 
 ## Bounded CPL0 table-observation fixture
@@ -52,11 +52,10 @@ byte immediately before and after each ten-byte image. Both writes are
 deliberately unaligned. The payload has no external helpers, table setup,
 control-register mutation, or host-execution path.
 
-The external disposable-guest harness must seed a known GDT and IDT, enter
-64-bit CPL0, record actual CS/CPL and long-mode evidence, initialize the output,
-call the function, and compare all 32 bytes. It owns boot, BSS initialization,
-stack setup, freestanding/no-red-zone C compilation, table lifetime and guest
-termination. It must load a flat Multiboot image if using that boot contract;
+The maintained disposable-guest harness seeds a known GDT and IDT, enters
+64-bit CPL0, checks CS/CPL and long-mode evidence, initializes the output,
+calls the function, and compares all 32 bytes. It owns boot, BSS initialization,
+stack setup, integer-only bridge assembly, table lifetime and guest termination. It must load a flat Multiboot image if using that boot contract;
 an ELF64 container is not an equivalent QEMU Multiboot input. Accept only the
 expected exit status together with the expected transcript, never a timeout
 containing PASS, a reset or a triple fault. Guest campaigns must be serialized
@@ -91,11 +90,28 @@ export checks, not guest memory-footprint evidence or whole-fourteen-API CPL0
 qualification. SMSW wide-container semantics and old-value liveness are outside
 this two-instruction guest checkpoint.
 
-At this checkpoint the local environment has `cargo` but no
-`qemu-system-x86_64` on PATH. Combined controlled-CPL0 execution is explicitly
-pending parent harness integration; there is no native or emulated guest-pass
-claim. No toolchain installation or host privilege changes are required by the
-source/export gate.
+The maintained `cases/descriptor_bridge.S` loads a static GDT (limit 31) and
+IDT (limit 511). Its code/data descriptors preserve boot selectors 8/16, and
+it leaves IF=0 and execution mode intact. Both tables have guest-long lifetime.
+A separately encoded expected image uses literal limits and linker-known
+seed-table addresses; no expected byte is derived from query output. Assembly
+provides an opaque call boundary, uses no SIMD or red zone, and needs no C
+compiler helpers. No exception resumption is installed.
+
+Run `suite/x86-cpl0/descriptor_campaign.py --exports DIR` under the shared lock,
+with optional `--qemu`, `--as`, `--ld`, `--objcopy` and `--timeout` overrides.
+See `suite/x86-cpl0/README.md` for the complete export/campaign commands.
+On 2026-10-23, all twelve freshly exported explicit V1 variants passed the
+complete 32-byte comparison under LinuxHost QEMU 11.1.1 TCG, including Full
+optimization and forced spills. Each produced exactly READY/PASS and exit 33.
+Substituting an observation-free function or a correct observation followed by
+a canary overwrite produced exactly READY/FAIL and exit 35. Captures and exact
+QEMU commands are in `/tmp/keel-descriptor-campaign-q4a10yfm/results.jsonl` on
+LinuxHost; source/export staging and campaign stdout are in
+`/tmp/keel-cpl0-review.5oAfls`. These are finite emulated guest results, separate
+from the three Rust export/encoding tests and the generic smoke/failure checks.
+No native guest claim, Linux UMIP-emulation claim, or broader fourteen-API
+qualification follows. No packages or host privileges were required.
 
 Primary authority: Intel SDM 325462-093US, September 2026, official combined PDF
 https://cdrdv2-public.intel.com/929349/325462-093-sdm-vol-1-2abcd-3abcd-4.pdf
