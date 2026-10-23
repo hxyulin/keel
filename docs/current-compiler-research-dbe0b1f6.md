@@ -223,3 +223,11 @@ Final runner changes additionally reject missing Linux affinity, verify identiti
 at round ends and preserve the original unpaired scheduling. They do not change
 this campaign's paired order or measurements. Final check-only reruns validate
 that maintained version without spending another timing campaign.
+
+## Subsequent bounded C-intent pilot
+
+The [C lane reduction pilot](c-lane-reduction-pilot.md) traces the actual C
+SSA at baseline `81b2e71c`, recognizes only complete four-lane i32 wrapping
+extract/add trees in instcombine, and records independent native controls plus
+a separate seven-round paired campaign. Its modest reduction-only result does
+not change the frozen measurements or the widening/shuffle priorities above.

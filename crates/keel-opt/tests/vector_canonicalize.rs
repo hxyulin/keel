@@ -412,3 +412,129 @@ block2:
     assert!(m.to_string().contains("return v0"), "{m}");
     assert!(!m.to_string().contains("vsplat"), "{m}");
 }
+
+// Evaluate scalar sums independently of recognition, including overflow bits.
+fn sum_result(m: &Module, input: [u32; 4]) -> u32 {
+    let f = &m.functions[0];
+    let mut values = vec![0u32; f.num_values()];
+    for (_, inst) in f.layout_insts() {
+        let get = |v| values[f.resolve(v).index()];
+        let result = match *f.inst_data(inst) {
+            D::VectorExtract { lane, .. } => input[lane as usize],
+            D::Binary {
+                op: keel_ir::BinaryOp::Iadd,
+                args,
+            } => get(args[0]).wrapping_add(get(args[1])),
+            D::VectorReduce {
+                op: keel_ir::VectorReduceOp::Add,
+                ..
+            } => input.into_iter().fold(0u32, u32::wrapping_add),
+            D::Return { ref args } => return get(args[0]),
+            ref other => panic!("unexpected sum operation: {other:?}"),
+        };
+        values[f.first_result(inst).index()] = result;
+    }
+    panic!("no return")
+}
+
+#[test]
+fn complete_i32_lane_sums_match_wrapping_oracle() {
+    // All permutations, left/right associated and balanced trees. Input bits
+    // include signed extremes and overflow; signedness is absent from IR iadd.
+    for a in 0..4 {
+        for b in 0..4 {
+            for c in 0..4 {
+                for d in 0..4 {
+                    if [a, b, c, d]
+                        .iter()
+                        .copied()
+                        .collect::<std::collections::HashSet<_>>()
+                        .len()
+                        != 4
+                    {
+                        continue;
+                    }
+                    for tree in [
+                        "v5 = iadd v1,v2\nv6 = iadd v5,v3\nv7 = iadd v6,v4",
+                        "v5 = iadd v3,v4\nv6 = iadd v2,v5\nv7 = iadd v1,v6",
+                        "v5 = iadd v1,v2\nv6 = iadd v3,v4\nv7 = iadd v5,v6",
+                    ] {
+                        let source = body(
+                            "i32x4",
+                            "i32",
+                            "v0: i32x4",
+                            &format!(
+                                "v1 = vextract v0,{a}\nv2 = vextract v0,{b}\nv3 = vextract v0,{c}\nv4 = vextract v0,{d}\n{tree}\nreturn v7"
+                            ),
+                        );
+                        let original = keel_ir::parse(&source).unwrap();
+                        let optimized = clean(&source);
+                        let mut fast = original.clone();
+                        keel_opt::run_passes(&mut fast, &["fast-local", "dce"]).unwrap();
+                        assert!(!fast.to_string().contains("vreduce_add"));
+                        assert!(
+                            optimized.to_string().contains("vreduce_add v0"),
+                            "{optimized}"
+                        );
+                        assert_eq!(optimized.functions[0].layout_insts().count(), 2);
+                        let mut seed = 0x12345678u32;
+                        for _ in 0..256 {
+                            let input = std::array::from_fn(|_| {
+                                seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                                seed
+                            });
+                            assert_eq!(sum_result(&original, input), sum_result(&optimized, input));
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn incomplete_mixed_promoted_shared_and_fp_sums_stay_scalar() {
+    let extracts = "v2 = vextract v0,0\nv3 = vextract v0,1\nv4 = vextract v0,2\nv5 = vextract v0,3";
+    for tail in [
+        "v6 = iadd v2,v3\nv7 = iadd v6,v4\nreturn v7", // missing lane
+        "v6 = iadd v2,v3\nv7 = iadd v6,v4\nv8 = iadd v7,v4\nreturn v8", // repeated lane
+        "v6 = iadd v2,v3\nv7 = iadd v6,v4\nstore v6,v1\nv8 = iadd v7,v5\nreturn v8", // shared sum
+        "store v2,v1\nv6 = iadd v2,v3\nv7 = iadd v6,v4\nv8 = iadd v7,v5\nreturn v8", // shared extract
+        "v6 = vextract v1,3\nv7 = iadd v2,v3\nv8 = iadd v7,v4\nv9 = iadd v8,v6\nreturn v9", // mixed vectors
+    ] {
+        let arg = if tail.contains("vextract v1") {
+            "i32x4"
+        } else {
+            "ptr"
+        };
+        let source = body(
+            &format!("i32x4,{arg}"),
+            "i32",
+            &format!("v0: i32x4,v1: {arg}"),
+            &format!("{extracts}\n{tail}"),
+        );
+        assert!(!clean(&source).to_string().contains("vreduce_add"));
+    }
+    for (vector, scalar, cast, op) in [
+        ("i16x8", "i32", "sext.i32", "iadd"),
+        ("i32x4", "i64", "uext.i64", "iadd"),
+        ("f32x4", "f32", "", "fadd"),
+    ] {
+        let mut ops = String::new();
+        for lane in 0..4 {
+            ops += &format!("v{} = vextract v0,{lane}\n", lane + 1);
+            if !cast.is_empty() {
+                ops += &format!("v{} = {cast} v{}\n", lane + 5, lane + 1);
+            }
+        }
+        let start = if cast.is_empty() { 1 } else { 5 };
+        ops += &format!(
+            "v9 = {op} v{start},v{}\nv10 = {op} v9,v{}\nv11 = {op} v10,v{}\nreturn v11",
+            start + 1,
+            start + 2,
+            start + 3
+        );
+        let source = body(vector, scalar, &format!("v0: {vector}"), &ops);
+        assert!(!clean(&source).to_string().contains("vreduce_add"));
+    }
+}

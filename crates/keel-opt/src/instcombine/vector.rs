@@ -1,7 +1,10 @@
 //! Bounded, bit-preserving lane rewrites. No memory or architectural operations
 //! are inspected or created; floating lanes are transported without arithmetic.
 use super::{Fold, Uses, bits};
-use keel_ir::{ConvertOp, Function, InstData as D, Type, Value, ValueDef, VectorBinaryOp as B};
+use keel_ir::{
+    BinaryOp, ConvertOp, Function, InstData as D, Type, Value, ValueDef, VectorBinaryOp as B,
+    VectorReduceOp, VectorType,
+};
 
 fn producer(f: &Function, v: Value) -> Option<&D> {
     let ValueDef::Result(i, 0) = f.value_def(f.resolve(v)) else {
@@ -23,6 +26,10 @@ fn splat_bits(f: &Function, v: Value) -> Option<u128> {
 
 pub(super) fn simplify(f: &Function, data: &D, uses: Uses<'_>) -> Option<Fold> {
     match data {
+        D::Binary {
+            op: BinaryOp::Iadd,
+            args,
+        } => wrapping_sum(f, *args, uses),
         D::VectorExtract { arg, lane } => match producer(f, *arg)? {
             D::VectorSplat { arg, .. } => Some(Fold::Value(*arg)),
             D::VectorInsert {
@@ -159,6 +166,60 @@ pub(super) fn simplify(f: &Function, data: &D, uses: Uses<'_>) -> Option<Fold> {
         }
         _ => None,
     }
+}
+
+// Pilot for the C u32 lane sum. Inspect at most a four-leaf add tree, with
+// no casts, seeds, repeated/missing lanes or other scalar operations. All
+// intermediate sums and extracts must become dead; Fast has no use proof.
+// i32 addition and vreduce_add both wrap modulo 2^32. No FP is inspected.
+fn wrapping_sum(f: &Function, args: [Value; 2], uses: Uses<'_>) -> Option<Fold> {
+    fn visit(
+        f: &Function,
+        value: Value,
+        uses: Uses<'_>,
+        depth: u8,
+        source: &mut Option<Value>,
+        lanes: &mut u8,
+    ) -> Option<()> {
+        let value = f.resolve(value);
+        if depth == 0 || f.value_type(value) != Type::I32 || !uses.single(f, value) {
+            return None;
+        }
+        match *producer(f, value)? {
+            D::Binary {
+                op: BinaryOp::Iadd,
+                args,
+            } => {
+                visit(f, args[0], uses, depth - 1, source, lanes)?;
+                visit(f, args[1], uses, depth - 1, source, lanes)
+            }
+            D::VectorExtract { arg, lane } => {
+                let arg = f.resolve(arg);
+                if f.value_type(arg) != Type::Vector(VectorType::I32x4)
+                    || lane >= 4
+                    || *lanes & (1 << lane) != 0
+                    || source.is_some_and(|s| s != arg)
+                {
+                    return None;
+                }
+                *source = Some(arg);
+                *lanes |= 1 << lane;
+                Some(())
+            }
+            _ => None,
+        }
+    }
+    let mut source = None;
+    let mut lanes = 0;
+    for arg in args {
+        visit(f, arg, uses, 3, &mut source, &mut lanes)?;
+    }
+    (lanes == 0b1111).then(|| {
+        Fold::Data(D::VectorReduce {
+            op: VectorReduceOp::Add,
+            arg: source.expect("complete lane set"),
+        })
+    })
 }
 
 fn shuffle(f: &Function, args: [Value; 2], lanes: &[u8], uses: Uses<'_>) -> Option<Fold> {

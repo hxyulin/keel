@@ -94,6 +94,12 @@ between distinct vectors are diagnosed. The bounded scalar broadcasts below
 also preserve that vector type. Integer vector division/remainder, floating bitwise operations, vector logical
 operators/conditions, vector `!`, and reading vectors with `va_arg` are
 unsupported. Initializer designators into vector lanes are unsupported.
+Full optimization can recognize an exact four-lane 32-bit wrapping sum after
+C lowering exposes matching extract/add SSA operations. This bounded
+[reduction pilot](c-lane-reduction-pilot.md) does not bypass C promotions,
+reassociate floating arithmetic, recognize general shuffles/widening or
+promise arbitrary automatic vectorization.
+
 The backend may expand an operation into scalar **lanes**, preserving the full
 vector type, layout and ABI; that is distinct from ignoring the type attribute.
 Debug information currently presents a vector as an array of its elements.

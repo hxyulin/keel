@@ -88,6 +88,14 @@ as described below; general vector arithmetic constant folding is separate.
 `instcombine` removes extracts of splats and inserted lanes, redirects extracts
 through shuffles and unaffected inserted lanes, removes insertion of the same
 extracted lane or splatted scalar, and bypasses immediately overwritten inserts.
+A narrow C-intent pilot recognizes complete four-lane `i32x4` wrapping sums:
+exact `i32` extract/add trees become the existing `vreduce_add` only when every
+lane appears once and every intermediate extract/add is unshared. Inspection
+has a fixed depth of three below the root and rejects conversions, mixed
+sources, other widths, partial/repeated lanes and FP arithmetic. Fast retains
+the scalar tree because it has no use proof. No memory operation is inspected
+or rewritten. See [the C lane reduction evidence](c-lane-reduction-pilot.md).
+
 Identity shuffles become their selected input. Shuffles selecting only one
 splatted scalar become a splat. Unnested equal-input and other single-source
 shuffles use `vshuffle x, x` with indices in the first input's lane range.
