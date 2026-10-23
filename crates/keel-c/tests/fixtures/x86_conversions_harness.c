@@ -162,6 +162,11 @@ static int run(void) {
       for(size_t j=0;j<n;j++) {
         uint32_t in[4];for(int i=0;i<4;i++)in[i]=values[(j+i)%n];
         int result=check(op,in,csr);if(result)return result;
+        /* Isolate each value's status: adjacent NaNs/out-of-range lanes must
+           not hide an erroneous invalid flag on valid INT32_MIN, or precision
+           on an exact integer. */
+        for(int i=0;i<4;i++)in[i]=values[j];
+        result=check(op,in,csr);if(result)return result;
       }
     }
     uint32_t state=0x9e3779b9;
