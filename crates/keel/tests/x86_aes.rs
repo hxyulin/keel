@@ -53,6 +53,38 @@ fn aes_cli_level_modifiers_and_c_objects() {
             );
         }
     }
+    for aes in [false, true] {
+        for pclmul in [false, true] {
+            let features = format!(
+                "{}aes,{}pclmulqdq",
+                if aes { "+" } else { "-" },
+                if pclmul { "+" } else { "-" }
+            );
+            for (line, allowed) in [
+                ("aesenc xmm0,xmm1", aes),
+                ("pclmulqdq xmm0,xmm1,17", pclmul),
+            ] {
+                fs::write(input, line).unwrap();
+                assert_eq!(
+                    run(&[
+                        "asm",
+                        "--target",
+                        "x86_64-unknown-linux-gnu",
+                        "--cpu-level",
+                        "v1",
+                        "--target-features",
+                        &features,
+                        input,
+                        "-o",
+                        object
+                    ])
+                    .status
+                    .success(),
+                    allowed
+                );
+            }
+        }
+    }
     fs::write(input, "vaddps xmm0,xmm1,xmm2\n").unwrap();
     assert!(
         !run(&[

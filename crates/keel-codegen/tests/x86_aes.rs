@@ -137,6 +137,47 @@ fn feature_gates_signatures_controls_and_object_parity() {
         assert_eq!(on.avx, f.avx);
         assert_eq!(on.with_features("-aes").unwrap(), f);
     }
+    let pcl = "func @p(i64x2,i64x2)->i64x2 {\nblock0(v0:i64x2,v1:i64x2):\n v2 = iconst.i32 17\n v3 = intrinsic x86_pclmulqdq128(v0,v1,v2)\n return v3\n}\n";
+    for level in [CpuLevel::V1, CpuLevel::V2, CpuLevel::V3] {
+        for aes in [false, true] {
+            for pclmul in [false, true] {
+                let f = Features::for_level(level)
+                    .with_features(&format!(
+                        "{}aes,{}pclmul",
+                        if aes { "+" } else { "-" },
+                        if pclmul { "+" } else { "-" }
+                    ))
+                    .unwrap();
+                assert_eq!(f.aes, aes);
+                assert_eq!(f.pclmulqdq, pclmul);
+                assert_eq!(
+                    compile(
+                        &src,
+                        SelectionTier::Baseline,
+                        AllocationTier::Fast,
+                        false,
+                        f
+                    )
+                    .is_ok(),
+                    aes
+                );
+                assert_eq!(
+                    compile(pcl, SelectionTier::Baseline, AllocationTier::Fast, false, f).is_ok(),
+                    pclmul
+                );
+                for (line, allowed) in [
+                    ("aesenc xmm8,xmm15", aes),
+                    ("pclmulqdq xmm8,xmm15,17", pclmul),
+                ] {
+                    assert_eq!(
+                        keel_asm::x86::assemble_object_with_features(line, f).is_ok(),
+                        allowed
+                    );
+                }
+            }
+        }
+    }
+    assert!(!features().pclmulqdq);
     assert!(!features().avx && !features().avx2 && !features().sse41);
     for s in [
         SelectionTier::Baseline,
@@ -170,6 +211,8 @@ fn feature_gates_signatures_controls_and_object_parity() {
     assert!(e.message.contains("x86"), "{e:?}");
     let all = keel_ir::Intrinsic::ALL;
     assert_eq!(all[766], keel_ir::Intrinsic::X86RepOuts32OwnedTerminal);
+    assert_eq!(all[767], keel_ir::Intrinsic::X86Pclmulqdq128);
+    assert_eq!(all.len(), 774);
     assert_eq!(all[all.len() - 6], keel_ir::Intrinsic::X86Aesenc128);
     assert_eq!(keel_ir::Intrinsic::X86Aesenc128 as u16, 768);
 }
@@ -232,8 +275,7 @@ fn encoding_matches_clang_and_optional_gnu() {
     for op in OPS {
         let control = if *op == "aeskeygenassist" { ",255" } else { "" };
         let intel =
-            Instruction::parse_intel(&format!("{op} xmm15,[r12+r13*4+127]{control}"))
-                .unwrap();
+            Instruction::parse_intel(&format!("{op} xmm15,[r12+r13*4+127]{control}")).unwrap();
         let att = Instruction::parse_att(&format!(
             "{op} {}127(%r12,%r13,4),%xmm15",
             if control.is_empty() { "" } else { "$255," }

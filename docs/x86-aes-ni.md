@@ -72,7 +72,9 @@ to the corresponding checked `__builtin_ia32_<instruction>128` builtin.
 Operands must have the matching signed long-long 16-byte vector type used by
 `__m128i`; mixed vector types diagnose. AESKEYGENASSIST's control must be an
 integer constant expression in 0..255, within the frontend’s bounded
-64-bit constant evaluator (128-bit/pointer intermediates diagnose). The parser canonicalizes it to the
+64-bit constant evaluator (128-bit/pointer intermediates diagnose). The same reviewed bounded immediate proof used by PCLMUL rejects invalid
+shift counts, signed overflow, unrepresentable float casts and non-ICE floating
+expressions before folding. The parser canonicalizes it to the
 required IR constant; dynamic, floating and out-of-range controls diagnose.
 Header inclusion enables no features and emits no unused functions.
 `__has_builtin` reports frontend recognition on x86, independently of the CPU
@@ -102,7 +104,9 @@ base/index/scale/displacements, RIP-relative and FS memory forms, and immediate
 boundaries. Typed formatting/parsing, AT&T source parsing and text/typed/chunked
 codegen object parity are checked. CLI and C tests check strict-level rejection,
 explicit acceptance, frontend recognition, ICE/type/foreign diagnostics,
-unused-header behavior and single evaluation. The existing ordinary emission
+unused-header behavior and single evaluation. The C native wrapper test also
+executes all six wrappers and all 256 key-assist controls against the same
+independent oracle, including a side-effecting vector source. The existing ordinary emission
 guard test includes AES and is run in debug and release.
 
 Run serialized, using the existing toolchain and per-checkout managed targets:
@@ -118,9 +122,21 @@ python3 suite/fast_opt_locked.py /tmp/keel-aes-unique.jsonl \
   cargo test --offline --locked -j2 --release -p keel-codegen --lib feature_guard_tests
 ```
 
-Native tests were run on LinuxHost (Ryzen 9 9950X3D), with both Clang and GCC harness
-compilers. Local ARM macOS runs cross-emit x86 ELF objects and exercise encoding,
+On 2026-10-23, final validation after rebasing onto main `a55b8539` passed
+all 12 AES/PCLMUL C/codegen tests in both debug and release on LinuxHost
+(Ryzen 9 9950X3D), with both Clang and GCC harness compilers. The AES backend
+campaign covers 12 selection/allocation/pool combinations and two harness
+compilers; the C campaign adds baseline/normal and optimized/forced-spill paths.
+The 280-case encoding matrix matched both Clang and GNU `as`. Local CLI,
+C/header regressions and ordinary debug/release emission guards passed.
+Native logs are `/tmp/keel-aes-final-native-{debug,release}.log` on LinuxHost;
+the isolated snapshot is `/tmp/keel-aes-20261023.KlX8gG`. Local ARM macOS runs cross-emit x86 ELF objects and exercise encoding,
 frontend and feature diagnostics; they do not establish native x86 execution.
+Integration preserves PCLMUL intrinsic ID 767 and appends AES IDs 768–773
+(774 registry entries). The `pclmulqdq` feature and `pclmul` alias, existing
+PCLMUL wrapper and checked immediate restrictions remain independent. Feature
+matrices cover neither, AES only, PCLMUL only and both at strict v1/v2/v3.
+
 These are finite tests on an AES-capable host, not exhaustive ISA certification
 or execution on a CPU that lacks AES. Generated artifacts and logs stay outside
 Git.

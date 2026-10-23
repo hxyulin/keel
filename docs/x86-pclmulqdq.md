@@ -87,10 +87,11 @@ Including the header on a feature-disabled x86 target emits no unused wrapper;
 actually using the operation requires explicit feature enablement.
 
 `__has_builtin(__builtin_ia32_pclmulqdq128)` reports frontend support on x86-64,
-independently of selected CPU features; it is false on ARM. Include `wmmintrin.h`
-explicitly: this does not expand the existing `immintrin.h` umbrella contract.
-There is no AES, full vendor crypto-header compatibility, other CLMUL widths,
-automatic polynomial recognition or CRC algorithm framework.
+independently of selected CPU features; it is false on ARM. The bounded surface
+is available through `wmmintrin.h` and `immintrin.h`. AES has a
+[separate optional contract](x86-aes-ni.md). Full vendor crypto-header
+compatibility, other CLMUL widths, automatic polynomial recognition and CRC
+algorithm frameworks remain outside this contract.
 
 ## Validation
 
