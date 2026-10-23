@@ -1327,6 +1327,9 @@ impl<'a> FunctionCompiler<'a> {
             &|data| folds(func, data),
             &uses,
         );
+        if present.compare {
+            selection.fold_x86_mask_tests(func, &uses);
+        }
         // Each cover is anchored at an instruction kind; without one it
         // selects nothing and leaves the selection untouched.
         let fused_compares = if present.compare && present.brif {
@@ -5892,6 +5895,18 @@ impl<'a> FunctionCompiler<'a> {
     /// clear), false for NaN, and `a < b` is `b > a`. Equality needs two
     /// flags (ZF set, PF clear), combined into al and tested.
     fn compare(&mut self, inst: Inst) -> &'static str {
+        if let Some(&(source, mask)) = self.selection.mask_tests.get(&inst) {
+            let InstData::Icmp {
+                cond: cond @ (IntCC::Eq | IntCC::Ne),
+                ..
+            } = *self.func.inst_data(inst)
+            else {
+                unreachable!("ZF-only mask test")
+            };
+            let a = self.use_reg(source, S0);
+            self.emit(Opcode::Test, [asm_arg(reg(a, Type::I32)), asm_arg(mask)]);
+            return cond_code(cond);
+        }
         if let Some(&(source, invert)) = self.selection.conditions.get(&inst) {
             let cc = self.compare(source);
             return if invert { invert_cond(cc) } else { cc };

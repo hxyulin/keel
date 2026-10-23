@@ -111,6 +111,8 @@ pub struct Selection {
     pub(crate) conditions: HashMap<Inst, (Inst, bool)>,
     /// X86 exact-width adjacent ordinary load encoded as an integer CMP RHS.
     pub(crate) compare_memory: HashMap<Inst, Value>,
+    /// X86 register TEST i32 with a literal mask, consumed only for ZF.
+    pub(crate) mask_tests: HashMap<Inst, (Value, i32)>,
     /// X86 adjacent load encoded as an integer binary RHS.
     pub(crate) binary_memory: HashMap<Inst, Value>,
     /// X86 adjacent quotient/multiply/subtract using the native remainder.
@@ -147,6 +149,90 @@ impl Hints {
 }
 
 impl Selection {
+    /// Run after custom selection/constraints and before compare fusion. Keep
+    /// the unmasked leaf live at the eventual compare/branch/select boundary.
+    pub(crate) fn fold_x86_mask_tests(&mut self, func: &Function, uses: &[u8]) {
+        // Debug locations retain their existing materialized-value contract.
+        if func.debug_loc.is_some()
+            || !func.debug_vars.is_empty()
+            || func.layout_insts().any(|(_, i)| func.inst_loc(i).is_some())
+        {
+            return;
+        }
+        for block in func.blocks() {
+            let insts = func.block_insts(block);
+            for (end, &compare) in insts.iter().enumerate() {
+                let InstData::Icmp {
+                    cond: IntCC::Eq | IntCC::Ne,
+                    args,
+                } = *func.inst_data(compare)
+                else {
+                    continue;
+                };
+                let masked = func.resolve(args[0]);
+                if func.value_type(masked) != Type::I32
+                    || crate::fold::iconst(func, args[1]) != Some(0)
+                    || uses[masked.index()] != 1
+                {
+                    continue;
+                }
+                let ValueDef::Result(and, _) = func.value_def(masked) else {
+                    continue;
+                };
+                let InstData::Binary {
+                    op: BinaryOp::And,
+                    args: inputs,
+                } = *func.inst_data(and)
+                else {
+                    continue;
+                };
+                if func.inst_block(and) != block
+                    || func.resolve(func.first_result(compare)) != func.first_result(compare)
+                    || func.first_result(and) != masked
+                    || [and, compare].into_iter().any(|i| {
+                        func.is_removed(i)
+                            || self.covered(i)
+                            || self.has_constraint(i)
+                            || self.matches.contains_key(&i)
+                            || self.conditions.contains_key(&i)
+                            || self.binary_memory.contains_key(&i)
+                            || self.compare_memory.contains_key(&i)
+                    })
+                {
+                    continue;
+                }
+                let Some(start) = insts[..end].iter().rposition(|&i| i == and) else {
+                    continue;
+                };
+                if !insts[start + 1..end].iter().all(|&i| {
+                    matches!(func.inst_data(i), InstData::Iconst { .. }) && !self.has_constraint(i)
+                }) {
+                    continue;
+                }
+                for side in [1, 0] {
+                    let Some(mask) = crate::fold::iconst(func, inputs[side]) else {
+                        continue;
+                    };
+                    let source = func.resolve(inputs[1 - side]);
+                    // A prior selector may have encoded/elided a constant leaf.
+                    if let ValueDef::Result(producer, _) = func.value_def(source)
+                        && self.covered(producer)
+                    {
+                        continue;
+                    }
+                    self.mask_tests.insert(compare, (source, mask as i32));
+                    self.set_operands(compare, vec![source]);
+                    // The zero RHS is encoded by this recipe. Prevent later
+                    // folding/fusion from removing an equal-valued source leaf.
+                    self.allocation_folds
+                        .insert(compare, vec![func.resolve(args[1])]);
+                    self.cover(and);
+                    break;
+                }
+            }
+        }
+    }
+
     fn select_indexed_address(
         &mut self,
         func: &Function,
