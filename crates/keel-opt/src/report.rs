@@ -90,6 +90,7 @@ pub struct PassObservation {
     pub pipeline_index: usize,
     pub pass: &'static str,
     pub target: crate::VectorTarget,
+    pub context: crate::OptimizationContext,
     /// None denotes a module invocation.
     pub function: Option<String>,
     pub changed: bool,
@@ -143,6 +144,17 @@ impl OptimizationReport {
                 crate::VectorTarget::X86Sse2 => "x86-sse2",
             };
             write!(out, "{{\"pipeline_index\":{},\"pass\":{},\"target\":{},\"scope\":{},\"function\":{},\"changed\":{},\"pass_ns\":{},\"verification_enabled\":{},\"verification_ns\":{},\"restoration_ns\":{},\"restoration_verification_ns\":{},\"restoration_changed\":{},\"before\":{},\"after\":{},\"inline_sites\":[", p.pipeline_index, quoted(p.pass), quoted(target), quoted(if p.function.is_some() { "function" } else { "module" }), p.function.as_deref().map(quoted).unwrap_or_else(|| "null".into()), p.changed, p.pass_ns, p.verification_enabled, p.verification_ns, p.restoration_ns, p.restoration_verification_ns, p.restoration_changed.map(|v| v.to_string()).unwrap_or_else(|| "null".into()), p.before.json(), p.after.json()).unwrap();
+            let caps = p.context.capabilities;
+            // Insert metadata before the inline-site array without changing event order.
+            let array_start = out.rfind(",\"inline_sites\":[").unwrap();
+            let metadata = format!(
+                ",\"context\":{{\"value_bits\":{},\"signed_i32_sum_bits\":{},\"preferred_bits\":{},\"effective_x86_features\":{}}}",
+                caps.value_bits(),
+                caps.signed_i32_sum_bits(),
+                caps.preferred_bits(),
+                caps.effective_x86_features()
+            );
+            out.insert_str(array_start, &metadata);
             for (i, site) in p.inline_sites.iter().enumerate() {
                 if i != 0 {
                     out.push(',');

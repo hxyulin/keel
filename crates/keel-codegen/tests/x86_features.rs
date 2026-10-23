@@ -24,3 +24,62 @@ fn features_are_explicit_and_reject_the_wrong_target() {
             .contains("x86 target features require")
     );
 }
+
+#[test]
+fn effective_capabilities_distinguish_transport_recipe_and_preference() {
+    use keel_asm_ir::x86::CpuLevel;
+    use keel_codegen::x86_features::vector_capabilities;
+    for (features, value, recipe) in [
+        (Features::legacy(), 128, 128),
+        (Features::for_level(CpuLevel::V1), 128, 128),
+        (Features::for_level(CpuLevel::V2), 128, 128),
+        (Features::for_level(CpuLevel::V3), 256, 256),
+        (
+            Features::for_level(CpuLevel::V3)
+                .with_features("-avx2")
+                .unwrap(),
+            256,
+            128,
+        ),
+        (
+            Features::for_level(CpuLevel::V1)
+                .with_features("+avx,+avx2")
+                .unwrap(),
+            256,
+            256,
+        ),
+        (
+            Features::for_level(CpuLevel::V1)
+                .with_features("+aes,+pclmulqdq")
+                .unwrap(),
+            128,
+            128,
+        ),
+    ] {
+        let selector = FeatureSelector {
+            inner: &SelectionTier::Baseline,
+            features,
+        };
+        let caps = vector_capabilities(Target::X86_64LinuxGnu, &selector).unwrap();
+        assert_eq!(caps.value_bits(), value);
+        assert_eq!(caps.signed_i32_sum_bits(), recipe);
+        assert_eq!(caps.prefer_wide_signed_i32_sum(), recipe == 256);
+        if features.explicit {
+            assert!(vector_capabilities(Target::Aarch64LinuxGnu, &selector).is_err());
+        } else {
+            assert_eq!(vector_capabilities(Target::Aarch64LinuxGnu, &selector).unwrap(), keel_ir::VectorCapabilities::BASELINE);
+        }
+    }
+    let mut invalid = Features::for_level(CpuLevel::V1);
+    invalid.avx2 = true;
+    assert!(
+        vector_capabilities(
+            Target::X86_64LinuxGnu,
+            &FeatureSelector {
+                inner: &SelectionTier::Full,
+                features: invalid
+            }
+        )
+        .is_err()
+    );
+}

@@ -108,29 +108,45 @@ impl Options {
     }
 
     /// Explicit pipelines override tier presets, independently of flag order.
-    fn optimize(&self, module: &mut Module) -> Result<(), keel_opt::OptError> {
-        match &self.passes {
-            Some(names) => {
-                let names: Vec<_> = names.iter().map(String::as_str).collect();
-                keel_opt::run_passes_for_target_with_options(
-                    module,
-                    &names,
-                    self.vector_target(),
-                    self.optimizer_options(),
-                )
-            }
-            None => keel_opt::run_passes_for_target_with_options(
-                module,
-                self.optimization.pipeline(),
-                self.vector_target(),
-                self.optimizer_options(),
-            ),
-        }
+    fn optimize(&self, module: &mut Module) -> Result<(), String> {
+        let names: Vec<_> = self
+            .passes
+            .as_ref()
+            .map(|names| names.iter().map(String::as_str).collect())
+            .unwrap_or_else(|| self.optimization.pipeline().to_vec());
+        keel_opt::run_passes_with_context_and_options(
+            module,
+            &names,
+            self.optimization_context(self.vector_target())?,
+            self.optimizer_options(),
+        )
+        .map_err(|e| e.to_string())
+    }
+
+    fn optimization_context(
+        &self,
+        target: keel_opt::VectorTarget,
+    ) -> Result<keel_opt::OptimizationContext, String> {
+        let selector = keel_codegen::tuning::TunedSelector {
+            options: self.selection,
+            cpu: self.tuning,
+        };
+        let selector = keel_codegen::x86_features::FeatureSelector {
+            inner: &selector,
+            features: self.x86_features,
+        };
+        let capabilities =
+            keel_codegen::x86_features::vector_capabilities(self.target()?, &selector)
+                .map_err(str::to_string)?;
+        Ok(keel_opt::OptimizationContext {
+            target,
+            capabilities,
+        })
     }
 
     fn optimize_with_output(&self, module: &mut Module) -> Result<(), String> {
         if self.opt_report.is_none() {
-            return self.optimize(module).map_err(|e| e.to_string());
+            return self.optimize(module);
         }
         let names: Vec<_> = self
             .passes
@@ -146,20 +162,21 @@ impl Options {
         names: &[&str],
         target: keel_opt::VectorTarget,
     ) -> Result<(), String> {
+        let context = self.optimization_context(target)?;
         let Some(path) = &self.opt_report else {
-            return keel_opt::run_passes_for_target_with_options(
+            return keel_opt::run_passes_with_context_and_options(
                 module,
                 names,
-                target,
+                context,
                 self.optimizer_options(),
             )
             .map_err(|e| e.to_string());
         };
         let mut report = keel_opt::OptimizationReport::default();
-        keel_opt::run_passes_for_target_with_report_and_options(
+        keel_opt::run_passes_with_context_and_report_and_options(
             module,
             names,
-            target,
+            context,
             &mut report,
             self.optimizer_options(),
         )
@@ -700,6 +717,8 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--opt-tier",
                     "-O",
                     "--target",
+                    "--cpu-level",
+                    "--target-features",
                     "--opt-report",
                     "--verify-each",
                     "--no-verify-each",
@@ -1206,10 +1225,7 @@ mod tests {
         }
         let opts = options(&["-p", "missing"]).unwrap();
         let mut module = keel_ir::parse(source).unwrap();
-        assert!(matches!(
-            opts.optimize(&mut module),
-            Err(keel_opt::OptError::UnknownPass(_))
-        ));
+        assert!(opts.optimize(&mut module).unwrap_err().contains("missing"));
         assert!(options(&["-p"]).is_err());
     }
 }
@@ -1411,5 +1427,67 @@ mod x86_feature_option_tests {
                 bits
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod vector_context_tests {
+    use super::*;
+    fn opts(flags: &[&str]) -> Options {
+        let mut args = vec![
+            "--target".to_string(),
+            "x86_64-unknown-linux-gnu".to_string(),
+        ];
+        args.extend(flags.iter().map(|s| s.to_string()));
+        parse_options(&args, &["--target", "--cpu-level", "--target-features"]).unwrap()
+    }
+    #[test]
+    fn cli_effective_context_matches_library_and_modifier_replacement() {
+        for flags in [
+            vec!["--cpu-level", "v1"],
+            vec!["--cpu-level", "v2"],
+            vec!["--cpu-level", "v3"],
+            vec!["--cpu-level", "v3", "--target-features", "-avx2"],
+            vec!["--cpu-level", "v1", "--target-features", "+avx,+avx2"],
+            vec![
+                "--cpu-level",
+                "v3",
+                "--target-features",
+                "-avx2",
+                "--target-features",
+                "+aes",
+            ],
+        ] {
+            let opts = opts(&flags);
+            let context = opts.optimization_context(opts.vector_target()).unwrap();
+            let selector = keel_codegen::x86_features::FeatureSelector {
+                inner: &keel_codegen::SelectionTier::Full,
+                features: opts.x86_features,
+            };
+            assert_eq!(
+                context.capabilities,
+                keel_codegen::x86_features::vector_capabilities(Target::X86_64LinuxGnu, &selector)
+                    .unwrap()
+            );
+            assert_eq!(
+                context.capabilities.prefer_wide_signed_i32_sum(),
+                opts.x86_features.avx2
+            );
+        }
+        let replaced = opts(&[
+            "--cpu-level",
+            "v3",
+            "--target-features",
+            "-avx2",
+            "--target-features",
+            "+aes",
+        ]);
+        assert!(replaced.x86_features.avx2 && replaced.x86_features.aes);
+        let mut invalid = opts(&["--cpu-level", "v1"]);
+        invalid.x86_features.avx2 = true;
+        let mut module = keel_ir::parse("func @f() {\nblock0:\n return\n}").unwrap();
+        let before = module.to_string();
+        assert!(invalid.optimize(&mut module).is_err());
+        assert_eq!(before, module.to_string());
     }
 }

@@ -43,6 +43,22 @@ mod loop_unroll;
 mod loop_vectorize;
 pub mod private_aggregate;
 pub use loop_vectorize::VectorTarget;
+
+/// Per-invocation immutable target context. Legacy entrypoints retain 128-bit policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OptimizationContext {
+    pub target: VectorTarget,
+    pub capabilities: keel_ir::VectorCapabilities,
+}
+impl From<VectorTarget> for OptimizationContext {
+    fn from(target: VectorTarget) -> Self {
+        Self {
+            target,
+            capabilities: keel_ir::VectorCapabilities::BASELINE,
+        }
+    }
+}
+
 mod memory_alias;
 mod memory_forward;
 mod phi_simplify;
@@ -112,6 +128,19 @@ pub trait Pass: Sync {
     /// every instruction is canonical. Passes may rely on that to skip checks.
     fn run_canonical(&self, func: &mut Function, target: VectorTarget) -> bool {
         self.run_for_target(func, target)
+    }
+
+    /// Additive context dispatch preserves existing target-aware overrides.
+    fn run_with_context(&self, func: &mut Function, context: OptimizationContext) -> bool {
+        self.run_for_target(func, context.target)
+    }
+    /// Preserve canonical overrides independently of ordinary target dispatch.
+    fn run_canonical_with_context(
+        &self,
+        func: &mut Function,
+        context: OptimizationContext,
+    ) -> bool {
+        self.run_canonical(func, context.target)
     }
 
     /// Request the structural form documented in `docs/simplification.md`.
@@ -653,6 +682,15 @@ pub fn run_pipeline_for_target_with_options(
     target: VectorTarget,
     options: OptimizeOptions,
 ) -> Result<(), OptError> {
+    run_pipeline_with_context_and_options(module, passes, target.into(), options)
+}
+
+pub fn run_pipeline_with_context_and_options(
+    module: &mut Module,
+    passes: &[&dyn Pass],
+    context: OptimizationContext,
+    options: OptimizeOptions,
+) -> Result<(), OptError> {
     let verification_enabled = options.verification.enabled();
     profiling::scope!("optimization");
     let _clear = ClearAnalyses;
@@ -686,9 +724,9 @@ pub fn run_pipeline_for_target_with_options(
                 canonical[index] = true;
             }
             let changed = if pass.requires_canonical_form() {
-                pass.run_canonical(func, target)
+                pass.run_canonical_with_context(func, context)
             } else {
-                pass.run_for_target(func, target)
+                pass.run_with_context(func, context)
             };
             canonical[index] = pass.produces_canonical_form() || (canonical[index] && !changed);
             versions.record(pass, slot, index, changed);
@@ -760,6 +798,17 @@ pub fn run_pipeline_for_target_with_report_and_options(
     report: &mut OptimizationReport,
     options: OptimizeOptions,
 ) -> Result<(), OptError> {
+    run_pipeline_with_context_and_report_and_options(module, passes, target.into(), report, options)
+}
+
+pub fn run_pipeline_with_context_and_report_and_options(
+    module: &mut Module,
+    passes: &[&dyn Pass],
+    context: OptimizationContext,
+    report: &mut OptimizationReport,
+    options: OptimizeOptions,
+) -> Result<(), OptError> {
+    let target = context.target;
     let verification_enabled = options.verification.enabled();
     use std::time::Instant;
     profiling::scope!("optimization");
@@ -786,6 +835,7 @@ pub fn run_pipeline_for_target_with_report_and_options(
                 pipeline_index,
                 pass: pass.name(),
                 target,
+                context,
                 function: None,
                 changed,
                 pass_ns,
@@ -811,6 +861,7 @@ pub fn run_pipeline_for_target_with_report_and_options(
                     pipeline_index,
                     pass: pass.name(),
                     target,
+                    context,
                     function: Some(func.name.clone()),
                     changed: false,
                     pass_ns: 0,
@@ -847,9 +898,9 @@ pub fn run_pipeline_for_target_with_report_and_options(
             }
             let start = Instant::now();
             let changed = if pass.requires_canonical_form() {
-                pass.run_canonical(func, target)
+                pass.run_canonical_with_context(func, context)
             } else {
-                pass.run_for_target(func, target)
+                pass.run_with_context(func, context)
             };
             let pass_ns = start.elapsed().as_nanos();
             canonical[index] = pass.produces_canonical_form() || (canonical[index] && !changed);
@@ -861,6 +912,7 @@ pub fn run_pipeline_for_target_with_report_and_options(
                 pipeline_index,
                 pass: pass.name(),
                 target,
+                context,
                 function: Some(func.name.clone()),
                 changed,
                 pass_ns,
@@ -877,4 +929,32 @@ pub fn run_pipeline_for_target_with_report_and_options(
         }
     }
     Ok(())
+}
+
+/// Named pipeline using an explicit capability context.
+pub fn run_passes_with_context_and_options(
+    module: &mut Module,
+    names: &[&str],
+    context: OptimizationContext,
+    options: OptimizeOptions,
+) -> Result<(), OptError> {
+    let passes = names
+        .iter()
+        .map(|&name| find_pass(name).ok_or_else(|| OptError::UnknownPass(name.to_string())))
+        .collect::<Result<Vec<_>, _>>()?;
+    run_pipeline_with_context_and_options(module, &passes, context, options)
+}
+/// Observed named pipeline using exactly the ordinary context dispatch.
+pub fn run_passes_with_context_and_report_and_options(
+    module: &mut Module,
+    names: &[&str],
+    context: OptimizationContext,
+    report: &mut OptimizationReport,
+    options: OptimizeOptions,
+) -> Result<(), OptError> {
+    let passes = names
+        .iter()
+        .map(|&name| find_pass(name).ok_or_else(|| OptError::UnknownPass(name.to_string())))
+        .collect::<Result<Vec<_>, _>>()?;
+    run_pipeline_with_context_and_report_and_options(module, &passes, context, report, options)
 }
