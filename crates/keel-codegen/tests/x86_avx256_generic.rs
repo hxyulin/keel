@@ -1,20 +1,12 @@
 //! Full generic-operation oracle. The same scalar C reference exercises every
 //! supported wide shape, all lane widths, modulo shift counts, NaNs and zeros.
 use keel_asm_ir::x86::{CpuLevel, Features};
-use keel_codegen::{
-    CodegenPipeline, SelectionTier,
-    regalloc::{AllocationTier, Pools},
-    x86_features::FeatureSelector,
-};
+use keel_codegen::{SelectionTier, regalloc::AllocationTier};
 use std::{fs, path::PathBuf, process::Command};
 #[path = "common/vector.rs"]
 mod common;
-const EMPTY: Pools = Pools {
-    caller_saved: &[],
-    callee_saved: &[],
-    float_caller_saved: &[],
-    float_callee_saved: &[],
-};
+#[path = "common/userspace.rs"]
+mod userspace;
 fn source() -> String {
     common::fixture_for(&keel_ir::VectorType::ALL_256)
 }
@@ -36,34 +28,8 @@ fn object_for(
     empty: bool,
     features: Features,
 ) -> (Vec<u8>, String) {
-    let mut m = keel_ir::parse(source).unwrap();
-    keel_ir::verify_module(&m).unwrap();
-    if s == SelectionTier::Full {
-        keel_opt::optimize(&mut m).unwrap();
-    }
-    let selector = FeatureSelector {
-        inner: &s,
-        features,
-    };
-    let pipeline = CodegenPipeline {
-        selector: &selector,
-        allocator: &a,
-    };
-    let pools = if empty {
-        &EMPTY
-    } else {
-        &keel_codegen::x86_64::REGISTERS
-    };
-    let text = keel_codegen::x86_64::compile_with_pipeline(&m, pools, &pipeline).unwrap();
-    let p = keel_codegen::x86_64::compile_program_with_pipeline(&m, pools, &pipeline).unwrap();
-    assert_eq!(p.stats().text_bytes, 0);
-    let b = keel_asm::x86::assemble_program_object_with_features(&p, features)
-        .unwrap_or_else(|e| panic!("{e}\n{text}"));
-    assert_eq!(
-        b,
-        keel_asm::x86::assemble_object_with_features(&text, features).unwrap()
-    );
-    (b, text)
+    assert_eq!(features, Features::for_level(CpuLevel::V3));
+    userspace::compile(source, CpuLevel::V3, s, a, empty)
 }
 #[test]
 fn packed_wide_corpus_emits_typed_objects_and_native_oracle_exports() {

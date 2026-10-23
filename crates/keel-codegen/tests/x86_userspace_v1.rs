@@ -120,7 +120,11 @@ fn scalar_fallbacks_are_baseline_at_every_tier_and_keep_v2_v3_selection() {
                         fs::write(dir.join(format!("{name}.o")), &object).unwrap();
                     }
                     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-                    if level != CpuLevel::V3 {
+                    if level != CpuLevel::V3
+                        || (std::is_x86_feature_detected!("avx2")
+                            && std::is_x86_feature_detected!("fma")
+                            && std::is_x86_feature_detected!("bmi1"))
+                    {
                         execute(
                             &format!("{level:?}-{s:?}-{a:?}-{spilled}"),
                             &object,
@@ -164,7 +168,11 @@ fn helpers_are_explicit_link_requirements_and_fma_preserves_fusion() {
                     }
                     assert_eq!(undefined(&object), expected);
                     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-                    if level != CpuLevel::V3 {
+                    if level != CpuLevel::V3
+                        || (std::is_x86_feature_detected!("avx2")
+                            && std::is_x86_feature_detected!("fma")
+                            && std::is_x86_feature_detected!("bmi1"))
+                    {
                         execute(
                             &format!("helpers-{level:?}-{s:?}-{a:?}-{spilled}"),
                             &object,
