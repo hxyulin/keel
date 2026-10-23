@@ -683,7 +683,10 @@ both the complete-recipe capability and the x86 target. Feature fingerprint bits
 are metadata and never grant legality. No CLI widening experiment flag exists.
 
 The CLI uses the same projection before optimization, including when emitting
-only IR. `opt --target x86_64-unknown-linux-gnu` accepts `--cpu-level` and
+only IR. Target-free `opt` with the default feature contract keeps a baseline
+Portable context without resolving a code generation host, including on hosts
+without a supported native target.
+`opt --target x86_64-unknown-linux-gnu` accepts `--cpu-level` and
 `--target-features` as `compile` and `cc` do. Existing flag semantics remain:
 repeated feature lists replace earlier modifiers relative to the selected level;
 a later level selection resets the feature contract. Invalid dependencies fail

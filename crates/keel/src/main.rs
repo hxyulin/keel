@@ -127,6 +127,14 @@ impl Options {
         &self,
         target: keel_opt::VectorTarget,
     ) -> Result<keel_opt::OptimizationContext, String> {
+        // Target-free `opt` also works on hosts with no code generation target.
+        // Its legacy Portable policy needs neither host resolution nor features.
+        if target == keel_opt::VectorTarget::Portable
+            && self.target.is_none()
+            && self.x86_features.is_empty()
+        {
+            return Ok(target.into());
+        }
         let selector = keel_codegen::tuning::TunedSelector {
             options: self.selection,
             cpu: self.tuning,
@@ -1433,6 +1441,19 @@ mod x86_feature_option_tests {
 #[cfg(test)]
 mod vector_context_tests {
     use super::*;
+    #[test]
+    fn target_free_portable_context_needs_no_codegen_host() {
+        let opts = Options::default();
+        let context = opts
+            .optimization_context(keel_opt::VectorTarget::Portable)
+            .unwrap();
+        assert_eq!(context.target, keel_opt::VectorTarget::Portable);
+        assert_eq!(context.capabilities, keel_ir::VectorCapabilities::BASELINE);
+        let mut module = keel_ir::parse("func @f() {\nblock0:\n return\n}").unwrap();
+        opts.run_optimization(&mut module, &["dce"], context.target)
+            .unwrap();
+    }
+
     fn opts(flags: &[&str]) -> Options {
         let mut args = vec![
             "--target".to_string(),
