@@ -47,6 +47,10 @@ static int run(void) {
         /* Aliased output and input; unaligned and protected-page edges. */
         evaluations=0;memories[op](ptr[0],ptr[0],ptr[1]);
         if(evaluations!=2||memcmp(ptr[0],expect,16))return 5;
+        /* The output may also overwrite the count after both inputs are read. */
+        memcpy(ptr[0],a,16);memcpy(ptr[1],c,16);
+        evaluations=0;memories[op](ptr[1],ptr[0],ptr[1]);
+        if(evaluations!=2||memcmp(ptr[1],expect,16))return 8;
         V x=callback(av,nv),want=_mm_sll_epi16(x,nv);z=direct(av,nv);if(memcmp(&z,&want,16))return 6;
         want=_mm_srl_epi64(x,nv);z=indirect(av,nv,callback);if(memcmp(&z,&want,16))return 7;
       }

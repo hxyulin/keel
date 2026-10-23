@@ -123,6 +123,145 @@ fn checked_controls_shapes_targets_and_strict_sse2() {
     compile("#if !__has_builtin(__builtin_keel_sse2_count_psllw)\n#error missing builtin\n#endif\nint f(void){return 0;}",Target::X86_64LinuxGnu).unwrap();
 }
 
+// Review the private bridge independently of casts inserted by vendor wrappers.
+#[test]
+fn private_bridge_contract_and_header_coexistence() {
+    let target = Target::X86_64LinuxGnu;
+    for (_, op, bits) in OPS {
+        let element = match bits {
+            16 => "short",
+            32 => "int",
+            _ => "long long",
+        };
+        for mode in ["imm", "count"] {
+            let name = format!("__builtin_keel_sse2_{mode}_{op}");
+            let prefix = format!(
+                "typedef {element} V __attribute__((vector_size(16))); V f(V a,unsigned long long n){{return "
+            );
+            for args in ["a", "a,1ULL,2ULL", "1,1ULL", "a,(void*)0", "a,a"] {
+                let src = format!("{prefix}{name}({args});}}");
+                assert!(compile(&src, target).is_err(), "accepted {src}");
+            }
+            let src = format!(
+                "#if !__has_builtin({name})\n#error missing shift\n#endif\n{prefix}{name}(a,1ULL);}}"
+            );
+            compile(&src, target).unwrap();
+            for foreign in [Target::Aarch64AppleDarwin, Target::Aarch64LinuxGnu] {
+                assert!(compile(&src, foreign).is_err());
+                compile(&format!("#if __has_builtin({name})\n#error foreign shift\n#endif\nint f(void){{return 0;}}"), foreign).unwrap();
+            }
+        }
+    }
+    for control in [
+        "(1ULL<<64)",
+        "(1<<-1)",
+        "(1<<32)",
+        "(-1<<1)&255",
+        "(2147483647+1)&255",
+        "(-2147483647-2)&255",
+        "(1073741824*4)&255",
+        "(-(-2147483647-1))&255",
+        "((-2147483647-1)/-1)&255",
+        "((-2147483647-1)%-1)&255",
+        "(unsigned char)1e300",
+        "(int)2147483648.0",
+        "(unsigned long long)18446744073709551616.0",
+        "(int)(void*)17",
+        "(int)(((__int128)1<<64)/256)",
+        "1?17:n",
+        "(n,17)",
+    ] {
+        let src = format!(
+            "#include <emmintrin.h>\n__m128i f(__m128i a,int n){{return _mm_slli_epi16(a,{control});}}"
+        );
+        assert!(compile(&src, target).is_err(), "accepted {control}");
+    }
+    for control in [
+        "(int)17.0",
+        "sizeof(long long)+9",
+        "(unsigned char)273",
+        "(0xffffffffffffffffULL+18)&255",
+        "(1ULL<<63)>>63",
+        "1?17:(1/0)",
+        "0&&(1/0)",
+        "1||(1/0)",
+    ] {
+        compile(&format!("#include <emmintrin.h>\n__m128i f(__m128i a){{return _mm_slli_epi16(a,{control});}}"), target).unwrap();
+    }
+    for headers in [
+        ["emmintrin.h", "wmmintrin.h", "immintrin.h"],
+        ["immintrin.h", "wmmintrin.h", "emmintrin.h"],
+    ] {
+        let mut src = headers.map(|h| format!("#include <{h}>\n")).concat();
+        src += "__m128i f(__m128i a,__m128i n){return _mm_sra_epi32(_mm_slli_epi16(a,17),n);}";
+        // Exercise the public frontend result directly, without verifier repair.
+        let pp = keel_c::preprocess(
+            &src,
+            "review.c",
+            &keel_c::PreprocessOptions {
+                target,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let m = keel_c::compile(
+            &pp,
+            "review.c",
+            keel_c::Options {
+                target,
+                debug_info: false,
+            },
+        )
+        .unwrap();
+        for features in [
+            Features::for_level(CpuLevel::V1),
+            Features::for_level(CpuLevel::V3)
+                .with_features("-avx2,-f16c,-fma,-avx,-aes,-pclmulqdq")
+                .unwrap(),
+        ] {
+            let selector = FeatureSelector {
+                inner: &SelectionTier::Baseline,
+                features,
+            };
+            let p = keel_codegen::compile_program_with_pipeline(
+                &m,
+                target,
+                &CodegenPipeline {
+                    selector: &selector,
+                    allocator: &AllocationTier::Full,
+                },
+            )
+            .unwrap();
+            keel_asm::x86::assemble_program_object_with_features(&p, features).unwrap();
+        }
+        src += "__m128i aes(__m128i a,__m128i b){return _mm_aesenc_si128(a,b); } __m128i clmul(__m128i a,__m128i b){return _mm_clmulepi64_si128(a,b,17);}";
+        let m = compile(&src, target).unwrap();
+        for enabled in [false, true] {
+            let features = Features::for_level(CpuLevel::V1)
+                .with_features(if enabled { "+aes,+pclmulqdq" } else { "none" })
+                .unwrap();
+            let selector = FeatureSelector {
+                inner: &SelectionTier::Baseline,
+                features,
+            };
+            let p = keel_codegen::compile_program_with_pipeline(
+                &m,
+                target,
+                &CodegenPipeline {
+                    selector: &selector,
+                    allocator: &AllocationTier::Full,
+                },
+            );
+            if enabled {
+                keel_asm::x86::assemble_program_object_with_features(&p.unwrap(), features)
+                    .unwrap();
+            } else {
+                assert!(p.is_err());
+            }
+        }
+    }
+}
+
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn native_vendor_reference_abi_and_footprints() {
