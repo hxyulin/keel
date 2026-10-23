@@ -298,3 +298,72 @@ source/compiler hashes and timings live outside Git under
 Local test/lock logs use `/tmp/keel-ashr-*.{log,jsonl}`. Rust output directories
 remain cargo-managed with native-link caching disabled; no pins, cache settings,
 remote cache or other worktree outputs were changed.
+
+### Independent implementation review
+
+Reviewed candidate `2ffb3f4013ab8b92b361d2d01c49d53ef454dde7` in a separate
+worktree on `9208b9e4061bc46bd0b17d668bbfb8c1bc8d7fed`. No blocking production
+defect was found. For verified IR, the existing query supplies a superset of
+source bits; excluding i32 bit 31 therefore excludes arithmetic sign fill.
+Right-shifting that superset by the existing constant count is sound. Unknown
+signs retain the full mask even at count zero. The new host shifts are only
+by 0 through 31 on u128; the sign test uses the width-limited full mask.
+The depth-zero guard precedes any recursive call, aliases are resolved by the
+existing query, and the i32 type guard leaves other result widths unchanged.
+Mask removal still requires coverage of every possible result bit. No query
+depth, worklist, profitability policy, Fast path or release ISA guard changed.
+
+The review adds an independent scalar oracle covering six i32 source masks
+(including bit 30, bit 31, alternating bits and unknown signs), ten boundary
+counts, four count types, and covering/noncovering result masks: 720 IR cases.
+Each checks all 256 byte values, five signed boundaries and 256 deterministic
+random i32 values against the original and two optimized visits. Verification
+and change flags are checked as well. Together with the original exhaustive
+byte/count/mask and bounded alias/type tests, the final full optimizer suite
+passes **592 tests in each of debug and release**. The illegal-feature emission
+guard and all three `x86_cpu_level` CLI tests also pass in both profiles.
+
+One apparent idempotence issue was isolated and reproduced identically with
+both retained baseline and candidate compilers: after removing a zero shift,
+conservative stale use counts can defer nested-AND constant grouping until a
+second pass. This is an existing single-use profitability limitation, not a
+new signed-shift proof failure. The broader oracle checks both visits rather
+than asserting a universal fixed point after DCE; the original focused
+idempotence assertions still pass. No scheduling or user-list change was made.
+
+Read-only LinuxHost checks freshly matched all **1,857 non-document files per
+snapshot** against Git archives of the base and original candidate, all 44 raw
+TU hashes, both compiler hashes, and the current bytes of all 88 final and
+qualified application objects against their parity receipts. Native command
+receipts retain successful v1/v3 Full compilation and GCC/Clang linking and
+execution. An independent recount of the normalized IR and a fresh run of the
+retained SSA operand/effect comparison confirm five removed masks in three
+functions per level, with no other changed functions, including the documented
+SQLite extension recanonicalization. The four retained GCC/Clang v1/v3 protected-page reducer
+executables were freshly rerun under the shared lock and passed. Whole native
+applications were not rebuilt or rerun during this independent review.
+
+GCC/Clang linking and reducer execution do not establish acceptance of arbitrary
+GCC-preprocessed headers or GCC `_FloatN` builtin identities. The existing
+[system-header](c-system-header-compat.md) and
+[binary128/TC qualification](provenance/linux-binary128-tc-layout.md) boundaries
+remain intact. Frontend acceptance, lowering/encoding and finite native
+execution remain distinct evidence. Application speedup is unproven; no new
+timing campaign or v1-only hardware certification is claimed.
+
+Review scripts and receipts live under `/tmp/keel-ashr-review-*` locally and on
+LinuxHost, including `provenance.json` on LinuxHost and the baseline/candidate
+`idempotence/result.json` comparison. Final local suite logs are
+`/tmp/keel-ashr-review-final2-{debug,release}.log`; guard and CLI logs use
+`/tmp/keel-ashr-review-{guard,cli}-{debug,release}.log`. Builds use the same
+locked cargo wrapper commands as above, with native-link caching disabled.
+
+Before handoff, the review branch was rebased onto current main
+`f7c01fc6e9a755425c3fef1261bbfd19f0e10e75` without conflicts in the owned files.
+Only the same three owned files differ from that base. Fresh full optimizer
+runs pass **600 tests per profile** on the rebased tree; the emission guard
+and all three CPU-level CLI tests pass again in both profiles. Those logs and
+lock receipts use `/tmp/keel-ashr-review-rebased-*`. Native application/object
+qualification above remains evidence for the original 9208b9e4-based candidate;
+it was not repeated for the combined current-main tree. Neither main nor the
+original implementation worktree was modified by this review.

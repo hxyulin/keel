@@ -314,3 +314,66 @@ fn bounded_mask_and_or_sign_proof_covers_uri_byte_fields() {
         );
     }
 }
+
+#[test]
+fn signed_shift_i32_mask_boundaries_match_independent_scalar_oracle() {
+    let mut inputs: Vec<u64> = (0..256).collect();
+    inputs.extend([0x7fffffff, 0x80000000, 0x80000001, 0xfffffffe, 0xffffffff]);
+    let mut state = 0x92d6_3af1u32;
+    for _ in 0..256 {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        inputs.push(u64::from(state));
+    }
+    for source_mask in [
+        0x7fffffff_u32,
+        0x40000000,
+        0x55555555,
+        0x00ff00ff,
+        0x80000000,
+        0xffffffff,
+    ] {
+        for count in [0i64, 1, 31, 32, 33, -1, -32, -33, i64::MIN, i64::MAX] {
+            let n = (count as u64 % 32) as u32;
+            let cover = if source_mask & 0x80000000 == 0 {
+                source_mask >> n
+            } else {
+                u32::MAX
+            };
+            // Include a covering mask and masks missing potential result bits.
+            for output_mask in [cover, cover & 0x55555555, 7] {
+                for count_ty in ["i8", "i16", "i32", "i64"] {
+                    let source = format!(
+                        "func @f(i32) -> i32 {{\nblock0(v0: i32):\n v1 = iconst.i32 {}\n v2 = and v0, v1\n v3 = iconst.{count_ty} {count}\n v4 = sshr v2, v3\n v5 = iconst.i32 {}\n v6 = and v4, v5\n return v6\n}}",
+                        source_mask as i32, output_mask as i32,
+                    );
+                    let (original, optimized) = optimize(&source);
+                    keel_ir::verify_module(&optimized).unwrap();
+                    // Removing a zero shift can make nested AND grouping
+                    // profitable on a later visit: stale user counts are
+                    // deliberately conservative. Check both visits and the
+                    // change flag without assuming that DCE preserves a fixed
+                    // point for single-use profitability rules.
+                    let mut second = optimized.clone();
+                    let changed = keel_opt::find_pass("instcombine")
+                        .unwrap()
+                        .run(&mut second.functions[0]);
+                    assert_eq!(changed, optimized.to_string() != second.to_string());
+                    keel_ir::verify_module(&second).unwrap();
+                    for &x in &inputs {
+                        let expected =
+                            (((x as u32 & source_mask) as i32 >> n) as u32 & output_mask) as u64;
+                        assert_eq!(execute(&original.functions[0], &[x]), expected);
+                        assert_eq!(
+                            execute(&optimized.functions[0], &[x]),
+                            expected,
+                            "{source} input {x:#x}"
+                        );
+                        assert_eq!(execute(&second.functions[0], &[x]), expected);
+                    }
+                }
+            }
+        }
+    }
+}
