@@ -289,7 +289,7 @@ fn compile_output(
             Vec::new()
         };
         let frame_register = compiler.frame_register;
-        let scope_marks = compiler.compile(&mut out);
+        let scope_marks = compiler.compile(&mut out)?;
         frames.push(FrameDebug {
             slots,
             scope_marks,
@@ -613,6 +613,7 @@ enum AggregateResult<'a> {
 
 struct FunctionCompiler<'a> {
     features: keel_asm_ir::x86::Features,
+    feature_error: Option<String>,
     func: &'a Function,
     symbols: &'a crate::symbols::Symbols<'a>,
     alloc: Allocation,
@@ -1543,6 +1544,7 @@ impl<'a> FunctionCompiler<'a> {
             saved,
             next_block: None,
             features: pipeline.selector.x86_features(),
+            feature_error: None,
             out: Output::new(structured),
             uses_trap: false,
             debug: false,
@@ -1561,7 +1563,7 @@ impl<'a> FunctionCompiler<'a> {
 
     /// Appends the function's assembly to `out`; gives where its lexical
     /// scopes begin and end.
-    fn compile(mut self, out: &mut Output) -> Vec<(String, Option<DebugScope>)> {
+    fn compile(mut self, out: &mut Output) -> Result<Vec<(String, Option<DebugScope>)>, CodegenError> {
         profiling::scope!("instruction-lowering");
         let func = self.func;
         let name = &func.name;
@@ -1684,8 +1686,14 @@ impl<'a> FunctionCompiler<'a> {
             name: symbol.clone(),
             expression: Expression::difference(".", symbol),
         });
+        if let Some(message) = self.feature_error {
+            return Err(CodegenError {
+                func: name.clone(),
+                message,
+            });
+        }
         self.out.end_function(out);
-        self.scope_marks
+        Ok(self.scope_marks)
     }
 
     /// Emits a `.loc` for the code that follows, unless it would repeat
@@ -6270,12 +6278,39 @@ impl<'a> FunctionCompiler<'a> {
     }
 
     fn emit<const N: usize>(&mut self, opcode: Opcode, operands: [AsmOperand; N]) {
-        debug_assert!(self.features.contains(opcode.required_features()));
-        self.out.instruction(opcode, operands, false);
+        self.emit_instruction(opcode, operands, false);
     }
     fn emit_locked<const N: usize>(&mut self, opcode: Opcode, operands: [AsmOperand; N]) {
-        debug_assert!(self.features.contains(opcode.required_features()));
-        self.out.instruction(opcode, operands, true);
+        self.emit_instruction(opcode, operands, true);
+    }
+    fn emit_instruction<const N: usize>(
+        &mut self,
+        opcode: Opcode,
+        operands: [AsmOperand; N],
+        lock: bool,
+    ) {
+        // Keep the legality guard in release builds and on the text path too.
+        // AVX forms can require AVX2 depending on the operands. Baseline forms
+        // need no temporary operand allocation for this check.
+        if self.feature_error.is_none() {
+            let required = if opcode.required_features().avx {
+                keel_asm_ir::x86::Instruction {
+                    opcode,
+                    operands: operands.to_vec(),
+                    lock,
+                }
+                .required_features()
+            } else {
+                opcode.required_features()
+            };
+            if !self.features.contains(required) {
+                self.feature_error = Some(format!(
+                    "instruction {opcode:?} requires target features: {}",
+                    required.names().collect::<Vec<_>>().join(", ")
+                ));
+            }
+        }
+        self.out.instruction(opcode, operands, lock);
     }
 }
 
@@ -6577,6 +6612,69 @@ mod bounded_unnamed_selection_tests {
                     selected += 1;
                 }
                 assert_eq!(selected, 1);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod feature_guard_tests {
+    use super::*;
+    use keel_asm_ir::x86::{CpuLevel, Features, Instruction};
+
+    #[test]
+    fn emission_reports_illegal_features_in_text_and_structured_modes() {
+        let module = keel_ir::parse("func @f() {\nblock0:\n return\n}").unwrap();
+        let symbols = crate::symbols::Symbols::new(&module);
+        for (features, source, missing) in [
+            (
+                Features::for_level(CpuLevel::V1),
+                "popcnt rax,rax",
+                "popcnt",
+            ),
+            (
+                Features::for_level(CpuLevel::V1),
+                "roundsd xmm0,xmm0,8",
+                "sse41",
+            ),
+            // Memory broadcasts need AVX; register broadcasts need AVX2.
+            (
+                Features::for_level(CpuLevel::V1)
+                    .with_features("avx")
+                    .unwrap(),
+                "vbroadcastss ymm0,xmm1",
+                "avx2",
+            ),
+        ] {
+            for structured in [false, true] {
+                let selector = crate::x86_features::FeatureSelector {
+                    inner: &crate::SelectionTier::Baseline,
+                    features,
+                };
+                let pipeline = crate::CodegenPipeline {
+                    selector: &selector,
+                    allocator: &crate::regalloc::AllocationTier::Full,
+                };
+                let mut compiler = FunctionCompiler::new(
+                    &module.functions[0],
+                    &symbols,
+                    &REGISTERS,
+                    &pipeline,
+                    structured,
+                )
+                .unwrap();
+                let i = Instruction::parse_intel(source).unwrap();
+                match i.operands.len() {
+                    2 => compiler.emit(i.opcode, <[AsmOperand; 2]>::try_from(i.operands).unwrap()),
+                    3 => compiler.emit(i.opcode, <[AsmOperand; 3]>::try_from(i.operands).unwrap()),
+                    _ => unreachable!(),
+                }
+                // Start the function with an empty output as compile requires;
+                // the diagnostic recorded by the emission guard must survive.
+                compiler.out = Output::new(structured);
+                let error = compiler.compile(&mut Output::new(structured)).unwrap_err();
+                assert_eq!(error.func, "f");
+                assert!(error.message.contains(missing), "{error:?}");
             }
         }
     }
