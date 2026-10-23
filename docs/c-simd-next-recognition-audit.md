@@ -1,11 +1,13 @@
 # Next C SIMD recognition audit
 
-Read-only production investigation at clean main
-`d7d89d7daf6dfd8778869f4aa5487707deaa229e`, in the isolated
-`research/c-shuffle-recognition` worktree. This document is the only Git change.
-No production matcher, frontend builtin, header, pipeline or backend change is
-proposed as implemented. The wrapping i32x4 sum (`68d55bbc`) and SSE4.1 register
-widening (`d0aec154`) are already integrated and are not new recommendations.
+Design refinement at clean main
+`334d84665dce141785503dae8d26e51eb1c72d35`, in an isolated research worktree.
+This document is the only Git change; no production matcher, frontend builtin,
+header, pipeline or backend change is implemented. The original object/native
+investigation below was at `d7d89d7daf6dfd8778869f4aa5487707deaa229e`;
+its evidence is historical, not a fresh execution claim for this base.
+The wrapping i32x4 sum (`68d55bbc`) and SSE4.1 register widening (`d0aec154`)
+are already integrated and are not new recommendations.
 
 ## One next match: private low signed widening construction
 
@@ -53,67 +55,256 @@ accesses and overlapping field shapes, and proves definite initialization;
 simply enabling vector promotion does not solve mixed scalar-store/vector-load
 construction. Its broader CFG promotion is unnecessary for this pilot.
 
-## Required eligibility and correctness argument
+## Smallest production change proposed
 
-These are implementation gates, not claims that an automatic matcher was
-tested here:
+Reuse the ordinary `stack-forward` pass and its existing byte facts. Do not add
+an analysis, public API, pass name, schedule switch, use table or function-size
+admission cap. Proposed private helper signature (design only):
 
-- Admit only an exact nonvolatile i64x2 reload of a contained private 16-byte
-  slot at offset zero, using existing whole-function address-use closure.
-  Start with one block, ordinary fixed lifetime, no debug home, escaping or
-  aliased slot address, frame observer, returns-twice, stack mark/restore,
-  atomic or unsupported address use. No cross-block reconstruction or new
-  dominance inference. Ordinary calls cannot touch a proven nonescaping slot;
-  they must retain identity, operands and order.
-- At the reload, require all sixteen byte facts: bytes 0..7 are the ordered
-  bytes of one exact i64 store value, and bytes 8..15 of another. Each value
-  must resolve to `sext.i64(vextract source, lane)` with an i32 scalar and the
-  same resolved, layout-owned i32x4 source, lanes exactly 0 then 1. Resolve
-  every operand before comparison. Reject torn/overlapping final pieces,
-  incomplete coverage, alternate lane widths, casts or operations beyond this
-  exact pair, high/reversed/repeated lanes, mixed sources and zero extension.
-  Earlier overwritten zero stores do not matter; later partial stores must
-  invalidate eligibility. Verified SSA supplies dominance; do not walk through
-  aliases to instructions outside the layout.
-- The resulting two lanes equal signed extension of source lanes 0 and 1,
-  byte for byte. IR vectors have no undef/poison lanes. A partially initialized
-  C compound literal actually has zero-filled remaining lanes; reject it
-  rather than replace those zeros with a source lane. General uninitialized
-  stack bytes give no complete proof. No undef seed or invented lane is needed.
-  Byte offsets must use the supported little-endian lane layout; do not infer
-  an unvalidated big-endian memory representation contract.
-- C casts/promotions have already resolved to scalar IR. LP64 `long` is i64;
-  `(long)((S)a)[i]` yields signed i32 extension. `(long)((U)a)[i]` yields uext,
-  and signed-short lane widening has i16 input, so both fail this gate. Numeric
-  FP conversion, FP arithmetic and environment semantics remain untouched.
-  This is not recognition from source spelling or signedness guessed from
-  the integer vector shape.
-- Reuse evaluated SSA values, never re-evaluate an initializer or a source
-  expression. Keep both external input effects and output publication in order;
-  move no external load, store or call. The input remains exactly sixteen
-  bytes even though only its low eight value bytes contribute. Output remains
-  exactly sixteen bytes. This forbids an m64 PMOVSXDQ load cover here, including
-  when high source bytes would fault. Removing proven unobservable private
-  accesses uses the existing stack pass's abstraction, not a promise to
-  preserve stack-exhaustion faults or debugger edits.
-- Source vectors and replacement reload results may have multiple users:
-  neither is overwritten or duplicated. Shared scalar extracts/extensions are
-  also semantically safe but can eliminate less work. For the initial measured
-  payoff gate, require each extract and extension to have only its chain/store
-  consumer. `stack-forward` has no instcombine `Uses` table: budget one lazy
-  function-wide resolved-use scan after the first structural candidate, or
-  explicitly accept shared producers without claiming their removal. Never
-  infer single use from adjacent layout. Preserve all other slot reads/stores;
-  existing `remaining_loads` controls store deletion.
+```rust
+fn signed_low_widen_source(
+    f: &Function,
+    at: Inst,
+    slot: StackSlot,
+    bytes: &FxHashMap<(StackSlot, usize), (Value, usize)>,
+) -> Option<Value>
+```
 
-Keep work bounded: use the existing address/escape scan and sixteen byte
-lookups, inspect exactly two extension/extract pairs, with no recursive
-producer walk. An initial admission cap of 8,192 layout instructions and
-16,384 values can bound a new lazy use scan; reject larger functions. Existing
-stack-forward address closure is not constant-time and the Full pipeline still
-runs three bounded rounds, followed by its epilogue (`keel-opt/src/lib.rs`).
-Do not claim constant total work or change scheduling. Replacing a load with a
-conversion is one-way; test the helper and Full pipeline at a fixed point.
+The return is the resolved i32x4 source, not a newly constructed value or a
+producer list. `at` supplies the reload block. No new representation is needed:
+read sixteen existing `(stored_value, source_byte)` entries directly. Caller
+gates are `ty == Type::Vector(VectorType::I64x2)`, offset zero, slot size
+exactly 16 and `!local_only`, after the existing escaped-slot and aliased-load-result checks.
+Retain existing exact/global forwarding precedence; attempt this proof before
+the integer-only reconstruction fallback. Success inserts one
+`InstData::Convert { op: ConvertOp::SwidenLow, ty: Type::Vector(VectorType::I64x2), arg: source }`
+before the load, copies `inst_loc` using `set_inst_loc`, then uses the existing
+replace-uses/remove-load path. Failure does not mutate IR or byte facts.
+
+For each half `h = 0, 1`, obtain its first stored value and require bytes
+`8*h + n`, for `n = 0..8`, to resolve to that same value with source byte `n`.
+Require its resolved type to be i64 and definition exactly
+`Convert { op: Sext, ty: I64, arg }`; the resolved `arg` must be i32 defined by
+`VectorExtract { arg: source, lane: h }`. The two resolved sources must be the
+same i32x4 value. Check `ValueDef::Result(inst, 0)`, nonremoved instruction and
+matching first result for each extension/extract before inspecting data.
+`Function::is_value_defined` also accepts live block parameters for the source;
+check it before inspecting source ownership. A result source must belong to
+the indicated result index of a live instruction (`inst_results`); do not
+unnecessarily restrict a source to result zero. Arena data survive instruction
+removal: a readable `inst_data` entry alone proves nothing about availability.
+Never call `inst_block` on a removed instruction.
+
+For this first increment, require the two extensions/extracts and any source
+instruction to belong to the reload block; allow a source parameter of that
+block. Verified SSA then supplies execution order and availability without
+`inst_position` searches or a new dominance query. No producer walk through
+bitcasts, copies, phis or other operations; resolving existing SSA aliases is
+required and is distinct from interpreting a new producer operation. Reject
+malformed/detached producer states conservatively; this is not a promise to
+repair invalid SSA. Existing cross-block exact/scalar forwarding stays intact;
+the new byte-composition proof does not read global `unique`/`subranges` facts.
+A Full CFG merge may subsequently expose a valid local candidate.
+
+Shared extracts, extensions, sources and reload results are eligible. The
+matched scalar producers are pure and every reused SSA value is immutable;
+no producer is overwritten, re-evaluated, cloned or explicitly deleted.
+A use-count gate is unnecessary for correctness; its only purpose would be to guarantee removal of every scalar producer. Accept sharing
+and let existing DCE determine what dies. This supersedes the earlier proposed
+single-use payoff gate, lazy resolved-use scan and 8,192/16,384 admission caps.
+Do not promise the unshared instruction-count reduction for shared cases.
+
+The added candidate work is sixteen byte lookups and four producer inspections,
+plus alias resolution and constant-size ownership/type checks. Existing address
+closure, writer scans, instruction insertion/removal and alias chains still
+prevent a constant-total-work claim. There is no new full-function scan, recursive
+matcher, analysis invalidation scheme or tuning cap. A load becomes a conversion
+in one direction; the helper cannot match its own output. Test standalone
+idempotence and Full fixed points; retain the existing three Full rounds and
+epilogue in `keel-opt/src/lib.rs`.
+
+## Existing facts, safety barriers and correctness argument
+
+`stack_forward.rs::run` collects only live unaliased `StackAddr` results, closes
+constant nonnegative in-bounds `ptradd` chains with checked addition, and resolves
+operands during address lookup and escape checking. Unrecognized address uses
+escape the whole slot, even if they occur after the candidate. Storing the
+address as a value, passing/returning/converting it, unsupported derivations,
+volatile accesses and atomic instructions exclude it. Atomic accesses are
+separate `InstData` variants and fail the allowed-use whitelist; they are not
+ordinary loads with a missing flag check. `debug_vars` and implicit
+`AggregateVaArg` homes also exclude the slot. Inline asm, frame-address observers
+and direct/indirect/invoke returns-twice calls disable the pass. Preserve these
+existing conservative exclusions, including observations of unrelated slots.
+
+A restore without a known opaque save mark, an aliased mark, or observation of
+saved SP disables forwarding. Valid opaque marks set `local_only`, disable
+cross-block writer facts and store deletion, and clear local facts at save and
+restore. The new match rejects `local_only` entirely, including otherwise local
+intervals; scalar forwarding retains its current behavior. Ordinary calls do
+not clear facts for a proven nonescaping fixed slot. This narrower first match
+requires no changes to lifetime analysis.
+
+At every store, `exact` entries overlapping the written range are invalidated;
+all overwritten byte facts are removed. Integer i8/i16/i32/i64 stores then
+record `(resolved value, byte index)`. Vector/pointer/FP stores can establish
+exact-type facts but do not seed integer reconstruction bytes. At every block
+entry both local maps clear. The sixteen-byte proof consequently uses final
+last writers, not adjacent store syntax or zero-initialization folklore.
+
+Require final bytes 0..7 and 8..15 to be the complete ordered extension values.
+A later partial/overlapping write fails the proof; earlier zeroing, overlaps or
+torn writes fully overwritten by the final pair are harmless and should pass.
+No identity of Store instructions or extra write-history map is necessary.
+Uninitialized bytes fail coverage; zero-filled omitted C initializer lanes
+have complete coverage but fail the exact extension proof. Zero extension,
+i16 sources, mixed sources, high/reversed/repeated lanes and extra casts fail.
+C promotions/signedness have already become scalar IR; do not infer them from
+source spelling. LP64 `long` is i64 on these supported targets.
+
+With little-endian scalar byte layout and lane zero at the lowest address,
+concatenating these two complete i64 representations equals signed widening
+of i32x4 lanes 0 and 1. Current x86-64 and AArch64 targets are little endian,
+and existing integer reconstruction already uses shifts in that direction.
+The target-free pass has no endian context: this proposal explicitly shares
+that supported-target assumption, not a new big-endian contract. Before adding
+a big-endian target, gate/adapt this and existing byte reconstruction together.
+IR vector values contain no undef/poison lanes; inventing lanes is unnecessary.
+No FP operation, environment contract, vector ABI or frontend surface changes.
+
+The input is an already evaluated SSA snapshot. Keep the original exact
+16-byte external load even though only its low eight value bytes contribute;
+never form an m64 PMOVSXDQ memory cover. Preserve its flags, pointer, location
+and order with calls and all other external effects. A clobbering call between
+source evaluation and reload must not cause source reloading. Output remains
+an exact 16-byte store. Changing only a proven unobservable private reload
+preserves source effects/first-fault order; existing stack optimization does not
+promise debugger edits of excluded private homes or stack-exhaustion faults.
+A pure source instruction may move later under existing Full scheduling; the
+proof makes no new permission to move external effects.
+
+Success must bypass `remaining_loads.insert(slot)` just as existing forwarding
+does. Failure records the slot. Store deletion is a separate final whole-slot
+decision: only nonescaped, non-`local_only` slots with no remaining loads lose
+stores. One unmatched pointer/vector/uninitialized read in any block keeps
+all private stores, even if one widening reload was replaced. Do not delete
+stores or shared pure producers from the helper, or infer whole-slot deadness
+from this single reload. The live-result alias guard already in the load arm
+must run before the new proof so it cannot overwrite a preexisting SSA alias.
+
+## Bounded implementation and test handoff
+
+One implementation increment should own only `crates/keel-opt/src/stack_forward.rs`
+and a focused optimizer integration test (for example
+`crates/keel-opt/tests/stack_forward_widen.rs`), plus this document's acceptance
+update. No other research document or backend/frontend/header ownership.
+Keep the helper and call site to roughly 100 source lines; if new analysis or
+an IR API appears necessary, return the design issue instead of widening scope.
+Bound the first optimizer matrix to about 35 parameterized scenarios, reusing
+existing barrier tests. Run that suite plus existing `stack_forward`,
+`stack_forward_lifetimes` and the in-module alias tests under the shared lock.
+Then run `vector_widen_x86`, `vector_widen_aarch64` and the release
+`feature_guard_tests` filter in `keel-codegen` once; retain their existing
+features/target configuration. This is a work budget, not a semantic or
+function-size cutoff.
+
+The optimizer tests should assert semantic IR properties and preserved effect
+instructions, not mirror helper branches or demand an accidental SSA numbering:
+
+- Accept the signed low pair, zeroing then full overwrite, repaired overlap,
+  and shared extract/extension/source/result cases. Resolve aliases on both
+  stored values, extracts, sources and addresses; compare resolved values.
+  Accept an ordinary call on an external pointer between input evaluation and
+  reload while retaining that exact input-load instruction and the call.
+- Reject uninitialized, read-before-write, one-half-only, zero-filled omitted
+  lane, torn i32 overwrite, offset-four overlap, zero extension, i16 extraction,
+  mixed sources, high/repeated/reversed lanes, wrong width/slot size/offset and
+  unsupported cast chains. A preexisting exact vector store/load remains the
+  existing exact-forwarding control, not evidence for this matcher.
+- Exercise volatile load and store, atomic load and write, address escape before
+  and after reload, stored/returned address, debug home, implicit vararg home,
+  inline asm, frame observer, returns-twice direct/indirect/invoke, opaque
+  saves/restores and observed/external/aliased marks. Existing scalar tests cover
+  much of this; add representative vector negatives rather than duplicate every
+  scalar lifetime permutation.
+- Split the two stores/reload across blocks and require no new standalone
+  reconstruction. Retain a competing unreadable load in another block and prove
+  stores remain after a successful local match. Separately allow Full to merge
+  straight-line blocks; do not demand that Full retain the original block shape.
+- Use direct in-memory tests for aliases and detached extension/extract/source
+  results (text reparsing destroys those states), aliased live reload results,
+  a live block-parameter source and source locations. Verify valid input/output;
+  invalid detached fixtures check rejection/no resurrection without claiming
+  they verify. SSA verification rejects future/non-dominating definitions;
+  matcher ownership checks are not a second SSA verifier.
+- Check original external load/store/call instruction identities, flags,
+  operands and relative order after the named pass, exact widths and preserved
+  source location on the new conversion. Check returned data and surviving
+  shared producers, residual-read store retention, standalone second-run false
+  and Full fixed point modulo parser SSA renumbering.
+
+A second delegated validation increment should own only a focused C-to-object
+integration test and its native driver/guard fixtures. Keep pointer-only ABI;
+exercise single evaluation, a source retained over an external mutating/clobbering
+call, signed extrema/random values, exact aliases, canaries and protected page
+edges for both 16-byte input and output. With only eight input bytes readable,
+an explicit unaligned IR witness must fault before output publication and before
+any later external effect; this is not a defined C vector-alignment test.
+Test normal/forced-spill allocation, text/direct/chunked object parity, v1/v2/v3,
+effective v3 with `-sse41,-avx,-avx2,-fma,-f16c`, and baseline ARM. Keep release
+feature legality enabled. Existing explicit-register widening backend evidence
+below remains separate: it cannot prove the new automatic matcher, its source
+load footprint or native fault order. Native LinuxHost validation can reuse fleet
+access and existing tools; no new compiler/header/ABI/FP framework is justified.
+
+## Fresh design reductions at 334d8466
+
+On 2026-10-23 the existing default-feature debug CLI was built with the pinned
+configuration and cached compilation, using:
+
+```sh
+python3 suite/fast_opt_locked.py \
+  /tmp/keel-swiden-design-334d8466/build.jsonl \
+  cargo build --offline --locked -j2 -p keel
+python3 suite/fast_opt_locked.py \
+  /tmp/keel-swiden-design-334d8466/tests.jsonl \
+  cargo test --offline --locked -j2 -p keel-opt \
+  --test stack_forward --test stack_forward_lifetimes --lib
+```
+
+The 41 library, 24 active stack-forward and 10 lifetime tests passed; one sealed
+QuickJS profile test was ignored as declared. The live-load-result alias test,
+debug homes, scalar initialization/overlaps, calls and lifetime/observer tests
+are existing behavior checks, not implementation tests for a new matcher.
+
+A frozen CLI copy has SHA-256
+`556789b6a1d251358fd291f1d39c47d5ea0e24fdf656c7658a647adb8f74a30f`.
+Artifacts, scripts, exact lock logs and snapshots are in
+`/tmp/keel-swiden-design-334d8466` outside Git; cargo retains its managed checkout
+target/cache. `probe.py` ran 30 IR reductions through standalone `stack-forward`
+and Full with `--verify-each`: signed-low, sharing, overwritten zeros, repaired
+and final overlaps/torn writes, uninitialized/partial/zero-filled lanes,
+zero extension, mixed/high/reversed/repeated lanes, volatile/atomic reads,
+escapes before/after, ordinary/returns-twice calls, frame/asm observers,
+save/restore, block split and a residual pointer read. All 60 outputs retained
+the vector reload and formed no `swiden_low`. Thus even the proposed positives
+are still misses; negative outputs are not tested matcher rejections.
+
+An explicit hand replacement of only that reload with `swiden_low.i64x2` passed
+standalone cleanup and Full, both at fixed point modulo parser SSA renumbering.
+Both retain a full i32x4 input load and full output store and remove the private
+accesses. This proves only the current pipeline's handling of this explicit IR.
+`cprobe.py` additionally saved 32 verified frontend/Full snapshots: eight C
+shapes (signed/unsigned low, high, reversed, repeated, mixed, short, omitted lane)
+on x86-64 Linux and Apple ARM64. Two Full clobbering-call snapshots, ordinary
+and `-g`, keep the source vector load before the call and publication after it.
+Debug-home and detached/alias cases require in-memory assertions as specified
+above; this CLI experiment does not prove those future vector matcher gates.
+
+No fresh encoding, native execution or performance experiment ran in this round;
+no LinuxHost access was needed. No timing inference is made from lock/build duration
+or host load. Frontend shape, optimizer proof, decoded encoding, native values
+and native fault delivery remain separate evidence categories.
 
 ## Bounded re-probes and decoded objects
 
