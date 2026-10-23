@@ -153,7 +153,10 @@ python3 suite/fast_opt_locked.py /tmp/keel-c-header-tests.jsonl \
   cargo test --offline --locked -j2 -p keel-c
 ```
 
-## Smallest staged follow-up
+## Earlier staged follow-up
+
+The declaration-only investigation below refines the next implementation step;
+these value-support stages remain separate future work.
 
 1. Specify and implement a distinct `_Float32` scalar identity through type
    compatibility, generic selection, arithmetic rank, casts, literals and
@@ -171,3 +174,254 @@ python3 suite/fast_opt_locked.py /tmp/keel-c-header-tests.jsonl \
 
 Neither stage implies arbitrary `_FloatN`, complex/tgmath, vendor-header,
 automatic-vectorization or extended floating-environment completeness.
+
+## Declaration-only boundary investigation at 8bb21e9a
+
+This read-only production-code investigation starts from clean main
+`8bb21e9a17620184bb3571ae19221ddc673f1281`. No parser, lowering, backend,
+application, system header or predefined macro was changed. The new files are
+native oracle/reproducer fixtures, not newly passing Keel compatibility tests.
+The proposed implementation below is **not implemented**.
+
+### Reproduction and exact unchanged-input blockers
+
+LinuxHost evidence is `/tmp/keel-header-boundary-8bb21e9a/`: `source.tar` is a
+`git archive` of the base; `src/` is its independent build checkout;
+`investigate.py`, `commands.json`, `census.json`, `metadata.json`, `fixtures.json`, per-TU
+`*-provenance.json`, `build.jsonl`, `probe-lock.jsonl` and `test.jsonl` retain
+commands, source hashes, output hashes, diagnostics and lock observations.
+The compiler SHA-256 is
+`ca65de66fe32c6a8037bb5d9373c8ca0f566dacdb774dd04721d15d742b2821b`.
+Local copies of the investigation script and JSON are at the same `/tmp` path.
+The earlier evidence directories above remain untouched.
+
+The three original application sources match the retained source SHA-256
+values. Regenerated GCC `.i` files match all three frozen hashes above exactly;
+Clang `.i` files match the prior retained files exactly. Use `/usr/bin/gcc`
+16.2.1 and `/usr/bin/clang` 23.1.1 explicitly. GCC's original relative input
+spelling matters for line-marker hashes; Clang uses the retained absolute
+source paths. Flags and working directories come from the retained provenance.
+The SQLite `LONGDOUBLE_TYPE=double` flag is part of that original configuration,
+not a new workaround. Keel raw-source runs retain its existing C11 identity.
+
+There are **12 failed full object-compilation attempts**: three unchanged raw
+sources, plus each TU preprocessed by GCC, Clang and Keel. Every invocation
+uses `cc -O --opt-tier none --target x86_64-unknown-linux-gnu --cpu-level v1`;
+release legality enforcement remains active. All nine preprocessing operations
+succeed. No application object, application link or application execution
+succeeds or is inferred from preprocessing.
+
+- All three raw sources, all three Keel `.i` files and all three Clang `.i`
+  files stop at the one `__TC__` typedef per TU in `bits/floatn.h:83`.
+- GCC `libregexp.i` and `sqlite3.i` stop at `_Float32` in `stdlib.h:145`.
+- GCC `lvm.i` stops at `_Float128` in `mathcalls-helper-functions.h:20`.
+
+These are exact first-blocker counts, **not a count of all latent errors**.
+Because this investigation does not implement or bypass the first error, an
+exact count of post-fix failures cannot be measured. No declarations were
+deleted to manufacture an application pass.
+
+The token census of the unmodified `.i` files excludes line markers and
+literals. In `_Float32`, `_Float64`, `_Float32x`, `_Float64x`, `_Float128`
+order, GCC counts are respectively:
+
+- QuickJS `libregexp`: **3, 3, 3, 3, 3** (15 occurrences).
+- Lua `lvm`: **0, 0, 0, 0, 8** (8 occurrences).
+- SQLite `sqlite3`: **455, 467, 460, 472, 487** (2341 occurrences).
+
+Each corresponding Clang and Keel input has exactly one additional occurrence
+of each spelling (the five header typedefs), one `__float128` and one `__TC__`.
+All occurrences belong to system-header line-marker regions, not application
+bodies. QuickJS's 15 header sites are three groups of five declarations in
+`stdlib.h`; Lua's eight tokens occur on seven helper-declaration lines.
+SQLite has 640 lines containing family tokens in `stdlib.h`, `math.h`,
+`bits/mathcalls.h`, `bits/mathcalls-narrow.h` and
+`bits/mathcalls-helper-functions.h`. Token/line counts are deliberately not
+reported as distinct declarations, unsupported calls or independent errors.
+
+Thus GCC inputs need five distinct builtin identities for QuickJS/SQLite and
+one for Lua even to cover this declaration inventory. The Clang/Keel header
+path already supplies its own five typedefs. Correct `TC` declaration support
+is the smaller candidate for that path; adding only GCC `_Float32` still
+cannot cover its other four missing spellings. There are no `TC` value uses
+in these three retained TUs. This makes a declaration-only payoff plausible,
+not demonstrated.
+
+### Native identity, layout and ABI evidence
+
+[GCC's additional floating types documentation](https://gcc.gnu.org/onlinedocs/gcc/Floating-Types.html)
+specifies `TC` for complex binary128 and the x86 `__float128`/`_Float128`
+alias. [GCC's C type description](https://gcc.gnu.org/gcc-7/changes.html)
+states that the `_FloatN`/`_FloatNx` identities remain distinct from ordinary C
+floating types even for equal encodings. On LinuxHost, native GCC confirms:
+`_Float32` 4/4, `_Float64` and `_Float32x` 8/8, `_Float64x` 16/16 with x87
+encoding, and `_Float128` 16/16 with binary128 encoding. `_Float64` and
+`_Float32x` are distinct; `_Float64x` is distinct from `long double`;
+`_Float128` is compatible with `__float128`; `TC` is compatible with
+`_Complex _Float128`. Clang's header typedef aliases have the identities the
+headers actually declare. They do not establish GCC builtin compatibility.
+
+The maintained `extended-float-layout-oracle.c` fixture compiles, links and
+executes with **both native system compilers** (exit zero). It checks `TC`
+size/alignment **32/16**, array stride 32, real/imaginary binary128 order,
+16-byte member alignment, offsets 16 and 48 in a char/TC/char wrapper, total
+size 64 and sentinel bytes around a 32-byte copy. This is finite native
+layout evidence, not Keel arithmetic or ABI execution. The GCC-only identity
+assertions use actual builtin types; no substitute typedef is introduced.
+
+The [AMD64 psABI classification](https://gitlab.com/x86-psABIs/x86-64-ABI/-/blob/master/x86-64-ABI/low-level-sys-info.tex)
+classifies real binary128 using SSE/SSEUP and complex binary128 as a pair of
+those real fields. The 32-byte pair becomes MEMORY after aggregate cleanup;
+it must not inherit complex-float/double register transport or
+`COMPLEX_X87` return rules. No call ABI is granted by knowing its layout.
+
+An independent existing defect makes this distinction concrete:
+`extended-float-aggregate-abi.c` defines
+`struct box { __float128 x; };` and returns the second of two by-value inputs.
+Current Keel emits a real ELF object without a diagnostic, using integer
+argument/result registers. Both native GCC and native Clang callers linked
+against that object exit **1**. Each compiler's own object with the same
+harness exits **0**. The distinct inputs avoid the false positive of an
+identity function leaving incoming XMM0 unchanged. Keel disassembly and both
+oracle assembly files are retained. This is an observed ABI failure, not an
+inference from a parse-only probe. It remains unfixed in this research change.
+
+### Frontend architecture and safety gaps
+
+- `types.rs`: `Ty::Opaque` stores only name and size, compares structural
+  identity and reports `unusable()` only for the immediate type. `Types::align`
+  defaults to size: naively adding a 32-byte opaque `TC` gives wrong alignment.
+  Existing `_Alignof(_Complex long double)==16` also fails Keel's static
+  assertion while both native oracles accept it. Size is insufficient for
+  layout and never establishes a numeric format or ABI class.
+- `parse.rs`: attribute storage/parser currently reduce integer modes to a
+  byte width and `apply_type_attrs` requires an integer subject. `TC` needs a
+  typed mode selector and a distinct complex-binary128 identity; ignoring it
+  or retaining the original complex-float type changes size and meaning.
+  Definition-object rejection only unwraps arrays, not record fields.
+- `types.rs` compatibility and `parse.rs` redeclaration checks need a numeric
+  identity predicate independent of value support. Current
+  `extern __float128 object; extern double object;` incorrectly compiles;
+  both native compilers reject the conflict. Adding a non-arithmetic opaque
+  identity alone would reproduce this hole.
+- `irgen.rs`: `abi_param`, `convert` and scalar places have immediate-type
+  guards. `aggregate_layout` can fall back to integer chunks for opaque
+  fields; `contains_complex` recognizes extended complex only by the existing
+  `_Complex long double` name. `complex_abi_layout` calls `elem.ir()`, which
+  cannot represent binary128. Generalizing `Ty::Complex` to opaque elements
+  without guards risks a panic as well as wrong ABI/footprints.
+- Existing unused `__float128` typedef/prototype and real-size/alignment
+  reductions compile fully to objects. Direct/indirect scalar calls, value
+  loads, casts and direct object definitions diagnose. A discarded static
+  inline body containing an unsupported call can escape IR-generation checks;
+  a discarded empty definition with an unsupported result does too. The latter
+  is only a diagnostic-timing probe, never executed (it has no defined result).
+  Fail-closed validation for the new boundary must run before body pruning.
+- `debug.rs` and constant/initializer paths (`eval.rs`, `init.rs`) need audit:
+  preserve identity/layout without inventing binary128 constants or debug
+  encodings. Never round a binary128 initializer through host `f64`.
+
+### One proposed bounded implementation
+
+Implement **x86-64 Linux binary128/TC declaration and layout support with
+explicit value/ABI rejection**, using the existing `__float128` declaration
+model as the starting point. Do not add GCC `_Float32`/other builtin value
+support in this step. Do not change identity macros, include paths, ISA flags,
+application flags or headers.
+
+Give extended real/complex types canonical semantic identity, explicit size
+and alignment, and a separate value-support capability. For this target, `TC`
+is complex binary128 (32/16), and its real component is the existing GNU
+binary128 identity (16/16). Header typedefs retain their declared identity.
+Accept typedefs, unused prototypes/function-pointer types, extern object
+declarations, pointers and non-evaluating layout/type queries, including
+record/array layout. Initially reject materialized extended values and objects
+(including containing records/arrays), initialization, arithmetic, comparisons,
+casts, real/imaginary extraction, scalar/aggregate calls/results, definitions
+and varargs involving those values. Ordinary data-pointer transport remains legal;
+materializing an unsupported function address must also diagnose if doing so
+requires an ABI signature the frontend cannot represent safely.
+Do not publish extended-FP feature support based on this declaration subset.
+
+The same small step must add recursive unsupported-value containment and
+numeric redeclaration checks. Recursion traverses arrays, records, unions and
+atomic wrappers, stops at pointer boundaries, and tolerates recursive records.
+Use it before by-value ABI layout and before pruning unsupported bodies.
+Otherwise completing this type exposes the independently reproduced hazards.
+No new F128 IR type, software arithmetic helper or backend instruction is
+needed for the accepted subset. Reject GCC extended builtin spellings rather
+than aliasing them; `_Float32` default promotions and arithmetic rank remain a
+separate semantic project (it does not get float's default double promotion;
+see [GCC's implementation rationale](https://gcc.gnu.org/pipermail/gcc-patches/2016-August/455079.html)).
+
+Expected files: `types.rs` (identity/layout/recursive capability), `parse.rs`
+(mode subject and declaration/definition/redeclaration gates), `expr.rs`
+(unevaluated queries versus forbidden operations), `irgen.rs` (recursive ABI
+guard), and `debug.rs` as needed. Audit `eval.rs`/`init.rs`; add regressions in
+`system_header_compat.rs`, native fixtures and this document. Own no instcombine
+or AVX256 files. Keep other targets' unsupported behavior explicit; a Linux
+x86 oracle is not AArch64 or Darwin ABI validation.
+
+Acceptance gates for that follow-up:
+
+1. GCC/Clang oracle agreement on identity, 16/16 and 32/16 layout, containing
+   records/unions/arrays, offsets and exact byte footprints. Keel IR verification
+   and object emission for accepted queries/prototypes/pointer controls, with
+   and without debug info; no unsupported scalar IR or runtime helpers.
+2. Negative tests for every value category above, direct and indirect calls,
+   function pointers, variadics, returned/nested aggregates, all storage
+   durations, conflicting redeclarations and discarded inline/static bodies.
+   The maintained aggregate reproducer must diagnose instead of emitting the
+   currently failing object. Do not count the native oracle executable as a
+   Keel value/ABI pass.
+3. Re-run the exact unchanged three raw sources and all nine frozen `.i`
+   compilations at explicit v1, with legality checks active. Record the next
+   diagnostic or actual object success separately per input. GCC `.i` support
+   is not an acceptance promise of this bounded step. Only after successful
+   full compilation attempt normal native link/execution for each project;
+   a TU is not a whole application. Preserve provenance and report remaining
+   counts instead of adjusting inputs.
+4. Run focused and full `keel-c` tests with the required locked cargo command;
+   distinguish the known native-suite oracle limitations documented above.
+   Keep release legality regression checks and exact access-width tests active.
+
+Application payoff: this targets the shared first barrier on all three raw
+sources and all three Clang-preprocessed TUs. The inventory shows no application
+use of these extended types, so declaration support may enable useful progress
+without arithmetic/backend work. **Zero additional application objects or
+executables are demonstrated here**. Later frontend, lowering, encoding, linker
+or runtime failures remain unknown until the follow-up is implemented.
+
+### Validation and retained commands
+
+The unmodified base compiler built on LinuxHost using the default debug profile:
+
+```sh
+python3 suite/fast_opt_locked.py /tmp/keel-header-boundary-8bb21e9a/build.jsonl \
+  cargo build --offline --locked -j2 -p keel
+python3 suite/fast_opt_locked.py /tmp/keel-header-boundary-8bb21e9a/test.jsonl \
+  cargo test --offline --locked -j2 -p keel-c --test system_header_compat
+```
+
+The focused suite passed **4 tests**. Native probes also ran under
+`suite/fast_opt_locked.py` and the shared host lock. There are no timing or
+performance conclusions. No Rust toolchain, compiler wrapper, shared target
+directory, native-link cache setting or build output was replaced/deleted.
+
+To reproduce the native layout control from the repository root on LinuxHost,
+place all outputs in a private `/tmp` directory and run each command through
+the shared lock (replace `OUT` with that directory):
+
+```sh
+/usr/bin/gcc -std=gnu11 -march=x86-64 crates/keel-c/tests/fixtures/extended-float-layout-oracle.c -o OUT/layout-gcc
+/usr/bin/clang -std=gnu11 -march=x86-64 crates/keel-c/tests/fixtures/extended-float-layout-oracle.c -o OUT/layout-clang
+OUT/layout-gcc
+OUT/layout-clang
+```
+
+For the ABI reproducer, compile `extended-float-aggregate-abi.c` with the Keel
+flags above, then link `extended-float-aggregate-harness.c` against its object
+using each native compiler. Both executables currently return 1. Compile the
+same function fixture with each native compiler for the two passing controls.
+These fixtures intentionally expose unsupported behavior; they are not
+automatically registered as passing Keel tests.

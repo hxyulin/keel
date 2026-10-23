@@ -116,6 +116,9 @@ mechanically can change behavior.
 Lua's internal-visibility `LUAI_FUNC` builds now compile, as do glibc headers
 with unused weak prototypes: the Clang-preprocessed Linux Lua 5.4.7, QuickJS
 and SQLite inputs compile at `-S` and `--emit-object`, with and without `-O`.
+That historical result is not a current glibc compatibility claim: the frozen
+LinuxHost glibc 2.44 inputs stop at extended floating declarations on current main;
+see [the unchanged-input evidence and proposed boundary](c-system-header-compat.md#declaration-only-boundary-investigation-at-8bb21e9a).
 Native feature queries can select a fallback; Clang-preprocessed input reflects
 Clang's answers and can still enable unavailable semantics.
 
