@@ -100,8 +100,12 @@ comparison builtins only on x86-64; this reports frontend support, not enabled
 CPU features. No general GNU/Clang `__builtin_ia32_*` compatibility is claimed.
 
 Unsupported sizes/types, unequal-width vector casts, unsupported comparison
-predicates, and illegal target features fail with diagnostics. Scalar broadcasts
-in ordinary vector expressions remain unsupported; use the constructor functions.
+predicates, and illegal target features fail with diagnostics. Ordinary vector
+expressions support bounded lossless scalar broadcasts for arithmetic, integer
+bitwise operations and comparisons, including compound assignments; see
+[GNU vector mode](gnu-vector-mode.md#scalar-broadcasts) for conversion checks
+and remaining scalar-shift/cross-domain limits. Constructor functions remain
+available for explicit element conversions.
 Masked/gather/scatter memory, streaming memory/fences, scalar-lane FP intrinsics,
 saturation, horizontal operations, general shifts, conversions, FMA, AVX-512,
 full vendor header coverage and strict FP-environment compatibility are outside

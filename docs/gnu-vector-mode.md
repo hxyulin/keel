@@ -84,14 +84,78 @@ Supported expressions:
   shapes and constant in-range indices; see the
   [C x86 intrinsic subset](c-x86-intrinsics.md) for the builtin and header contract.
 
-Arithmetic operands must have the same C vector type. Scalar broadcast and
-implicit conversions between distinct vector types are diagnosed. Integer
-vector division/remainder, floating bitwise operations, vector logical
+Two vector operands must have the same C vector type; implicit conversions
+between distinct vectors are diagnosed. The bounded scalar broadcasts below
+also preserve that vector type. Integer vector division/remainder, floating bitwise operations, vector logical
 operators/conditions, vector `!`, and reading vectors with `va_arg` are
 unsupported. Initializer designators into vector lanes are unsupported.
 The backend may expand an operation into scalar **lanes**, preserving the full
 vector type, layout and ABI; that is distinct from ignoring the type attribute.
 Debug information currently presents a vector as an array of its elements.
+
+## Scalar broadcasts
+
+For `+`, `-`, `*`, integer `&`, `|`, `^`, floating `/`, and the six comparisons,
+one operand may be a scalar. Either operand order is supported, including
+noncommutative operations. The scalar is converted to the vector element type
+and replicated into every lane. Integer lanes do not undergo promotions;
+comparison masks retain the existing signed all-one/zero lane type.
+`+=`, `-=`, `*=`, integer `&=`, `|=`, `^=`, and floating `/=` accept a scalar
+right operand under the same conversion checks. Each operand and each
+compound-assignment lvalue is evaluated once. Vector widths, memory accesses,
+volatile whole-vector flags, ABI and target feature requirements are unchanged.
+This applies to 16-byte vectors on all supported targets and x86 32-byte vectors.
+
+The accepted conversions are deliberately bounded and lossless:
+
+- Integer scalars through 64 bits: the complete source type range must fit the
+  lane type, or a supported constant expression must have a value within the
+  lane's signed/unsigned range. Widening with unchanged signedness, conversion
+  from unsigned to a wider signed type, and `_Bool` to integer are accepted. Runtime signed-to-unsigned conversion is
+  diagnosed, even at equal widths; unsigned constants are interpreted as
+  unsigned values, including `ULONG_MAX`.
+- Floating scalars: `float` to `float`/`double`, and `double` to `double`.
+  A finite constant `double` also converts to `float` when exactly representable,
+  including negative zero. Runtime `double` to `float` is diagnosed.
+- Cross-domain integer/floating broadcasts, 128-bit integers, extended FP,
+  scalar shifts, and implicit scalar-to-vector assignment/initialization remain
+  diagnosed. Use an explicit **scalar** cast to the element type to request a
+  conversion before broadcasting, for example `v + (float)n` or `v + (int)n`.
+
+Constant proofs cover numeric literals, scalar casts, unary/binary numeric
+expressions, logical expressions and conditionals with supported numeric
+operands. Expressions with i128, extended FP or pointer intermediates, comma
+operators, calls or side effects cannot prove a narrowing conversion. This
+avoids using the frontend's 64-bit constant evaluator to prove an unsafe
+wide-to-narrow conversion. Runtime operands with an already safe type can
+still contain calls or side effects.
+
+This follows the safe-conversion rule in
+[GCC's vector extension documentation](https://gcc.gnu.org/onlinedocs/gcc/Vector-Extensions.html)
+for the accepted subset, without claiming all GNU scalar conversion cases.
+Clang additionally accepts some out-of-range integer constants with a warning;
+Keel diagnoses them instead of silently truncating. Numeric lane conversion
+builtins and automatic vectorization are separate work. The existing bounded
+FP contract does not promise signaling-NaN payloads, exception flags/traps or
+strict floating-environment compatibility.
+
+`gnu_vector_broadcast` checks conversion boundaries, compounds, distinct-vector
+rejection, all ten signed/unsigned/FP lane types at both widths, real x86 ELF
+object emission at v1 (16 bytes) / v3 (32 bytes), and disabled-AVX rejection at v1. The expanded `gnu_vector_abi`
+Clang oracle executes broadcasts over all ten 16-byte lane types, arithmetic,
+bitwise operations, all comparisons, compound assignments, unsigned values,
+NaNs/infinities/signed zero, operand/lvalue evaluation counts and adjacent
+memory sentinels under three selection/allocation/optimization configurations.
+On 2026-10-23 these passed native Apple ARM64 execution with Apple Clang 21;
+Linux AArch64/x86 objects were cross-emitted, not executed. No genuine GCC was
+installed on that host (`gcc` identifies as Apple Clang); GCC's documented
+safe-conversion rule was consulted, but no native GCC oracle run is claimed.
+
+```sh
+python3 suite/fast_opt_locked.py /tmp/keel-c-broadcast-<unique>.jsonl \
+  cargo test --offline --locked -j2 -p keel-c --test gnu_vector_broadcast \
+  --test gnu_vector_abi --test gnu_types --test x86_intrinsics
+```
 
 ## ABI boundary and validation
 
@@ -139,8 +203,8 @@ cargo test -p keel-codegen --test vector_ir --test vector_aarch64 --test vector_
 3. Clang layout/behavior oracles, native/cross-object ABI tests, homogeneous
    Darwin vector aggregates, and diagnostics for unsupported aggregate ABIs.
 
-Future stages can add scalar broadcasts with GNU representability checks,
-numeric lane conversions, integer division/remainder, volatile lane operations,
+Future stages can expand the bounded scalar conversion/shift subset,
+add numeric lane conversions, integer division/remainder, volatile lane operations,
 vector initializer designators, other widths/targets with explicit ABI
 gates, union classification and SysV SSEUP aggregates. Each requires dedicated
 semantic and ABI validation before expanding the accepted subset.
@@ -165,10 +229,10 @@ arithmetic, comparison, memory, debug and IR lowering machinery. The audit found
 two deliberate width limits to change: attribute shape selection and the
 16-byte cast check. The latter now requires equal widths; the existing
 `__int128` bitcast remains limited to 16 bytes. Aggregate ABI and vector
-`va_arg` restrictions are retained. No scalar broadcast, integer division,
-volatile lane access, numeric lane conversion or initializer-designator support
-is inferred from the wider type. Whole-vector accesses keep their width and
-memory flags; header unaligned copies use exact-size byte-safe memory builtins.
+`va_arg` restrictions are retained. The bounded scalar broadcasts above apply
+at both widths. No integer division, volatile lane access, numeric lane
+conversion or initializer-designator support is inferred from the wider type.
+Whole-vector accesses keep their width and memory flags; header unaligned copies use exact-size byte-safe memory builtins.
 
 `x86_intrinsics` adds layout/feature diagnostics, all-header object emission,
 and wide ABI/value/footprint checks with GCC/Clang oracles. The existing
