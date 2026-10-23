@@ -59,9 +59,11 @@ conversions and rounding, plus ordinary F80 value arithmetic and transport.
 V1 population counts use SWAR integer operations; F32/F64 nearest-even, floor,
 ceil and truncation manipulate the significand and read MXCSR for DAZ without
 changing the caller's rounding mode. Neither fallback needs a runtime helper.
-SSE/SSE2 handle native 128-bit primitives; remaining supported vector operations
-use exact-width scalar lanes. No newer feature is silently enabled to make an
-operation compile. V2/V3 retain POPCNT and hardware rounding; V3 retains native
+SSE/SSE2 handle native 128-bit primitives, including bounded wrapping
+`vreduce_add` selection for i64x2/i32x4; see the
+[reduction contract and validation](x86-wrapping-reductions.md). Remaining
+supported vector operations use exact-width scalar lanes. No newer feature is
+silently enabled to make an operation compile. V2/V3 retain POPCNT and hardware rounding; V3 retains native
 FMA where available in its contract.
 
 Ordinary SysV transport covers integer/FP register and stack arguments,

@@ -226,6 +226,13 @@ pub(super) fn lower(func: &Function, features: keel_asm_ir::x86::Features) -> Co
             return false;
         }
         match data {
+            InstData::VectorReduce {
+                op: keel_ir::VectorReduceOp::Add,
+                arg,
+            } => matches!(
+                func.value_type(func.resolve(*arg)),
+                Type::Vector(VectorType::I64x2 | VectorType::I32x4)
+            ),
             InstData::VectorShuffle { args, lanes } => shuffle_recipe(
                 func.value_type(func.resolve(args[0])).vector().unwrap(),
                 lanes,
@@ -302,6 +309,44 @@ fn canonical_mask(func: &Function, mut value: Value) -> bool {
 }
 
 impl FunctionCompiler<'_> {
+    pub(super) fn vector_reduce_add(&mut self, arg: Value, result: Option<Value>) {
+        let shape = self.ty(arg).vector().unwrap();
+        // Capture the entire input before defining a scalar destination. Only
+        // reserved XMM registers are modified, so live inputs and spilled
+        // inputs/results cannot overlap the destructive packed operations.
+        self.vector_stage(arg, FS1);
+        let add = match shape {
+            VectorType::I64x2 => Opcode::Paddq,
+            VectorType::I32x4 => Opcode::Paddd,
+            _ => unreachable!("legalized wrapping add reduction"),
+        };
+        // Swap 64-bit halves: lane zero now sums opposite halves.
+        self.emit(
+            Opcode::Pshufd,
+            [asm_arg(xmm(FS2)), asm_arg(xmm(FS1)), asm_arg(0x4e)],
+        );
+        self.emit(add, [asm_arg(xmm(FS1)), asm_arg(xmm(FS2))]);
+        if shape == VectorType::I32x4 {
+            // Swap adjacent dwords, completing a modulo-2^32 tree sum.
+            self.emit(
+                Opcode::Pshufd,
+                [asm_arg(xmm(FS2)), asm_arg(xmm(FS1)), asm_arg(0xb1)],
+            );
+            self.emit(add, [asm_arg(xmm(FS1)), asm_arg(xmm(FS2))]);
+        }
+        let d = self.def_reg(result);
+        let lane = shape.lane_type();
+        self.emit(
+            if lane == Type::I64 {
+                Opcode::Movq
+            } else {
+                Opcode::Movd
+            },
+            [asm_arg(reg(d, lane)), asm_arg(xmm(FS1))],
+        );
+        self.def_done(result, d);
+    }
+
     pub(super) fn vector_shuffle(&mut self, args: [Value; 2], lanes: &[u8], result: Option<Value>) {
         let recipe = shuffle_recipe(
             self.ty(args[0]).vector().unwrap(),

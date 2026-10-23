@@ -2096,6 +2096,10 @@ impl<'a> FunctionCompiler<'a> {
                 self.def_done(result, d);
             }
             InstData::VectorSplat { ty, arg } => self.vector_splat(ty, arg, result),
+            InstData::VectorReduce {
+                op: keel_ir::VectorReduceOp::Add,
+                arg,
+            } => self.vector_reduce_add(arg, result),
             InstData::VectorUnary { .. }
             | InstData::VectorReduce { .. }
             | InstData::VectorInsert { .. }
