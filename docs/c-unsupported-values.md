@@ -175,3 +175,13 @@ establish value support. Ordinary aggregate, complex and vector behavior is
 covered by existing regression controls; backend F80 support is unchanged.
 Native execution evidence here is finite x86-64 Linux evidence. It is not an
 application-compatibility result or an exhaustive ABI/FP/memory proof.
+
+## Binary128 declaration/layout follow-up
+
+The subsequent [TC checkpoint](c-system-header-compat.md#implemented-declarationlayout-checkpoint)
+extends the opaque declaration model with independent alignment and a canonical
+complex-binary128 identity on x86-64 Linux. It reuses this checkpoint's recursive
+containment, pre-pruning validation and ABI rejection. Unevaluated calls with
+exactly matching opaque arguments and component type queries are now typed;
+evaluated uses remain unsupported. The old aggregate ABI reproducer continues
+to diagnose. This follow-up does not grant binary128 values or ABI transport.

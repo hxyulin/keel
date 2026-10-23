@@ -1,8 +1,10 @@
 # C system-header compatibility: LinuxHost reductions
 
-This bounded investigation starts at main `1a2417f7` and retains the rejection
-of unsupported extended floating types. The change improves `_Float32`
-diagnostics; it does **not** unblock the practical application corpus.
+The current declaration/layout checkpoint implements x86-64 Linux GNU `TC`
+without binary128 values or ABI support. The earlier investigations below are
+historical evidence. See [the implemented boundary](#implemented-declarationlayout-checkpoint)
+and [the exact twelve-input provenance](provenance/linux-binary128-tc-layout.md)
+for the new object and native application results.
 
 ## Frozen failures and provenance
 
@@ -437,3 +439,64 @@ redeclaration conflicts. It preserves the existing declaration/layout/pointer
 subset. It does not implement the proposed `TC` or `_FloatN` support or claim
 additional application compatibility. The investigation results above describe
 the pre-checkpoint baseline; the linked checkpoint records its own native proof.
+
+## Implemented declaration/layout checkpoint
+
+Source `eb43eb95` starts from clean main `d0aec154`; the archived spill candidate
+was not integrated. `mode(TC)` / `__mode__(__TC__)` on complex float/double
+canonicalizes to opaque `_Complex __float128`, with size **32**, alignment **16**.
+Its real and imaginary component type queries identify GNU `__float128`, size
+**16**, alignment **16**. This is semantic declaration identity, not an IR
+floating type. Opaque types now carry alignment separately from size;
+`unusable()` and recursive containment still independently deny value support.
+No opaque element is placed in the value-bearing `Ty::Complex` variant.
+
+Accepted operations include typedefs, unused prototypes and function-pointer
+types, extern object declarations, data/callback pointer transport, arrays,
+records/unions and unevaluated size/alignment/offset/type queries. Matching
+opaque parameter/argument types can be checked in unevaluated calls. The
+existing pre-pruning walker and ABI guards continue to reject evaluated calls,
+returns, function definitions and unsafe function-symbol materialization, as
+well as scalar/containing aggregate objects, initializers, copies, casts,
+arithmetic, comparisons, real/imaginary values and varargs. Unevaluated
+compound-literal backing storage remains allowed. Atomic pointer transport is
+legal; atomic TC/containing-record subjects remain rejected by the atomic parser.
+Numeric redeclaration conflicts recurse through pointers, arrays and functions.
+
+Debug information describes TC as a two-element array of binary128 components,
+not an invented 32-byte scalar float. `-g` queries and pointer operations emit
+valid ELF objects. The existing complex-long-double declaration alignment hole
+is corrected by retaining the component alignment (16 on Linux x86-64), rather
+than using its 32-byte size. No F80 backend or value support changes. Other
+targets explicitly reject `TC` layout; their existing real opaque declarations
+remain declaration-only. Native x86 results are not cross-ABI proof.
+
+No `_Float32` or other GCC family type is aliased to ordinary float, no identity
+macro/header/include path/application flag changed, and no binary128 constant
+is rounded through a host floating value. There is no new F128 IR, arithmetic,
+helper, backend or ABI implementation. Release feature legality is unchanged.
+
+All nine raw/Clang/Keel representative inputs now emit full objects; all three
+GCC inputs retain the documented `_Float32`/`_Float128` first blockers. This is
+followed by ordinary native builds of all configured Lua, QuickJS and SQLite
+sources, not an inference from those representative TU successes. With explicit
+strict v1 and `-O --opt-tier none`, **33**, **9**, and **2** Keel objects
+respectively link through both native GCC and Clang. Lua's portable upstream
+`_U=true all.lua` passes, as do QuickJS's closure/language/builtin/loop/bignum
+tests. SQLite's maintained query output matches each compiler's own native
+implementation. These finite results qualify those exact configurations for
+further review; they are not full upstream conformance or a timing verdict.
+No benchmark timing campaign was run.
+
+`binary128_layout` maintains canonical layout/component queries, nested
+records/unions/arrays, recursive pointers/atomic pointers, conflicting
+redeclarations, forbidden value/ABI categories and native GCC/Clang fixtures.
+The native fixture owns extended storage in the harness and checks only Keel's
+pointer computations, wrapper offsets, 32/16-byte strides, alignment and the
+exact single-byte store beside TC storage. A full-byte canary comparison catches
+any overwritten TC/padding/neighbor bytes. Independent native oracle fixtures
+check the extended real/complex representation. The existing unsupported
+aggregate ABI reproducer still diagnoses before object emission.
+
+Validation details, source/compiler hashes, exact commands and all twelve
+individual outcomes are in [the maintained provenance](provenance/linux-binary128-tc-layout.md).

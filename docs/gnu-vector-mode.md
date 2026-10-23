@@ -32,7 +32,10 @@ unrelated C redeclaration categories.
 Declaration-specifier attributes change the base before composing declarators;
 final named-declarator attributes change their scalar subject. Attributes on
 pointers/functions, `_Bool`, floating types, enum tags, and unsupported modes
-(including vector machine modes and floating machine modes) are diagnosed.
+(including vector machine modes and ordinary floating machine modes) are diagnosed.
+The separate x86-64 Linux [TC declaration/layout subset](c-system-header-compat.md#implemented-declarationlayout-checkpoint)
+accepts `mode(TC)` on complex float/double, canonicalizing to complex binary128
+(32-byte size, 16-byte alignment) while rejecting evaluated values and ABI use.
 Use `vector_size`, rather than a vector `mode`, for vectors.
 
 ## Six lane shapes at 16 or 32 bytes
