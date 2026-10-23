@@ -8,7 +8,31 @@ use std::{fs, process::Command};
 
 const SOURCE: &str = r#"
 typedef unsigned U __attribute__((vector_size(16)));
+typedef int S __attribute__((vector_size(16)));
 extern void observe(void *);
+unsigned long PREFIXextended(const void *p) {
+    U a; __builtin_memcpy(&a,p,16);
+    return a[3]+(a[1]+(a[0]+a[2]));
+}
+unsigned PREFIXmixed(const void *p) {
+    S a; __builtin_memcpy(&a,p,16);
+    return (unsigned)a[0]+a[1]+a[2]+a[3];
+}
+long PREFIXsigned(const void *p) {
+    S a; __builtin_memcpy(&a,p,16);
+    return (a[0]+a[1])+(a[2]+a[3]);
+}
+long PREFIXwide(const void *p) {
+    S a; __builtin_memcpy(&a,p,16);
+    return (long)a[0]+a[1]+a[2]+a[3];
+}
+unsigned PREFIXordered(void *p) {
+    U a; __builtin_memcpy(&a,p,16);
+    unsigned s=a[0]+a[1]+a[2]+a[3];
+    observe(p);
+    unsigned changed; __builtin_memcpy(&changed,p,4);
+    return s+changed;
+}
 unsigned PREFIXsum(const void *p,void *out) {
     U a; __builtin_memcpy(&a,p,16);
     unsigned s=a[0]+a[1]+a[2]+a[3];
@@ -23,6 +47,11 @@ const ORACLE: &str = r#"
 #include <sys/mman.h>
 #include <unistd.h>
 extern unsigned before_sum(const void*,void*),after_sum(const void*,void*);
+extern unsigned long before_extended(const void*),after_extended(const void*);
+extern unsigned before_mixed(const void*),after_mixed(const void*);
+extern long before_signed(const void*),after_signed(const void*);
+extern long before_wide(const void*),after_wide(const void*);
+extern unsigned before_ordered(void*),after_ordered(void*);
 static unsigned calls;
 void observe(void *p) { calls++; ((unsigned char*)p)[0]^=0x42; }
 int main(void) {
@@ -36,6 +65,23 @@ int main(void) {
    unsigned edge[]={0,1,0xffffffffu,0x80000000u,0x7fffffffu};
    a[i]=t<625?edge[(t/(i==0?1:i==1?5:i==2?25:125))%5]:seed;
    sum+=a[i];
+  }
+  // Unsigned modulo must precede zero extension; mixed C signedness converts
+  // each operand to unsigned. Widen-before-add must retain signed i64 addition.
+  int32_t sa[4];memcpy(sa,a,16);int64_t wide=0;
+  for(unsigned i=0;i<4;i++)wide+=sa[i];
+  if(before_extended(a)!=(uint64_t)sum||after_extended(a)!=(uint64_t)sum||
+     before_mixed(a)!=sum||after_mixed(a)!=sum||
+     before_wide(a)!=wide||after_wide(a)!=wide)return 2;
+  // Keep every intermediate C signed sum in range, including negative results.
+  int32_t safe[4];int64_t signed_sum=0;
+  for(unsigned i=0;i<4;i++){safe[i]=sa[i]/8;signed_sum+=safe[i];}
+  if(before_signed(safe)!=signed_sum||after_signed(safe)!=signed_sum)return 3;
+  for(unsigned arm=0;arm<2;arm++) {
+   unsigned char bytes[16];memcpy(bytes,a,16);bytes[0]^=0x42;
+   unsigned changed;memcpy(&changed,bytes,4);memcpy(bytes,a,16);
+   unsigned n=calls,got=arm?after_ordered(bytes):before_ordered(bytes);
+   if(got!=sum+changed||calls!=n+1)return 4;
   }
   for(unsigned pos=0;pos<3;pos++)for(unsigned alias=0;alias<2;alias++) {
    unsigned char *p=pos==0?m+page:pos==1?m+2*page-16:m+page+1;
@@ -57,7 +103,11 @@ fn command(c: &mut Command) {
 
 #[test]
 fn c_wrapping_sum_effects_footprints_and_objects() {
-    let root = std::env::temp_dir().join(format!("keel-c-lane-reduce-{}", std::process::id()));
+    let root = std::env::var_os("KEEL_C_LANE_REDUCE_EVIDENCE")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::temp_dir().join(format!("keel-c-lane-reduce-{}", std::process::id()))
+        });
     fs::create_dir_all(&root).unwrap();
     fs::write(root.join("oracle.c"), ORACLE).unwrap();
     let empty = Pools {
@@ -152,6 +202,24 @@ fn c_wrapping_sum_effects_footprints_and_objects() {
                         let obj =
                             keel_asm::x86::assemble_program_object_with_features(&p, features)
                                 .unwrap();
+                        if !spills {
+                            let mut chunks = p.clone();
+                            chunks.items.clear();
+                            keel_codegen::compile_program_chunks_with_pipeline(
+                                m,
+                                target,
+                                &pipeline,
+                                &mut |part| chunks.items.extend(part.items),
+                            )
+                            .unwrap();
+                            assert_eq!(
+                                obj,
+                                keel_asm::x86::assemble_program_object_with_features(
+                                    &chunks, features,
+                                )
+                                .unwrap()
+                            );
+                        }
                         assert_eq!(
                             obj,
                             keel_asm::x86::assemble_object_with_features(&text, features).unwrap()
@@ -181,5 +249,35 @@ fn c_wrapping_sum_effects_footprints_and_objects() {
                 }
             }
         }
+    }
+}
+
+#[test]
+fn c_promotions_dynamic_indices_and_distinct_loads_stay_scalar() {
+    for (ty, expression) in [
+        ("short", "a[0]+a[1]+a[2]+a[3]"),
+        ("unsigned short", "a[0]+a[1]+a[2]+a[3]"),
+        ("int", "(long)a[0]+a[1]+a[2]+a[3]"),
+        ("unsigned", "a[0]+a[1]+a[2]+a[n]"),
+        ("unsigned", "a[0]+a[1]+a[2]+a[2]"),
+        ("unsigned", "a[0]+a[1]+a[2]+b[3]"),
+        ("float", "a[0]+a[1]+a[2]+a[3]"),
+    ] {
+        let result = if ty == "float" { "float" } else { "long" };
+        let source = format!(
+            "typedef {ty} V __attribute__((vector_size(16)));\n{result} f(V a,V b,unsigned n) {{ return {expression}; }}"
+        );
+        let mut m = keel_c::compile(
+            &source,
+            "negative.c",
+            keel_c::Options {
+                target: Target::X86_64LinuxGnu,
+                debug_info: true,
+            },
+        )
+        .unwrap();
+        keel_opt::optimize(&mut m).unwrap();
+        keel_ir::verify_module(&m).unwrap();
+        assert!(!m.to_string().contains("vreduce_add"), "{source}\n{m}");
     }
 }

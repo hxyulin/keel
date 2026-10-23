@@ -82,7 +82,8 @@ exception claim or proof for arbitrary C programs.
 
 LinuxHost baseline and candidate are separate archived checkouts built with the
 same release/default-feature command. The baseline archive is exactly
-`81b2e71c`; the candidate overlays only the optimizer source. The maintained
+`81b2e71c`; the candidate overlays the optimizer source and its regression tests; the only
+production source difference is the optimizer rule. The maintained
 runner uses identical source paths, Full optimization/selection/allocation,
 strict levels, matching Clang `-O2 -ffp-contract=off`, CPU 2 affinity, seed
 20261023, one discarded warmup and seven interleaved measured rounds with
@@ -123,3 +124,83 @@ candidate CLI `7afd86b030d663834a71f0a1c049472c051157f54e30e950441af7b4c48a8969`
 paired report `ac885d608f72deceacab8068e9659fca9eecb81e987f31b4fb292ffced233c25`.
 The measured optimizer source matches the final local source SHA-256
 `1957b4b31981247977f2494992c492ea9ca90a0d50078d1fd23cf7df9ef10ba6`.
+
+
+## Independent review, 2026-10-23
+
+Candidate `4b4f712dd4aa207d7ee20af9beb3c10cfd5e26d6` was reapplied onto
+unchanged main `81b2e71c6f69844a549e9ba916ff164332171a8a` in the isolated
+`review/c-lane-sums` worktree. No production correctness defect was found;
+review changes own only the focused optimizer/C tests and this document.
+No frontend, backend, framework, schedule or imported-byval pilot changes
+were made, and no sibling work was integrated.
+
+The audit checked resolved source identity, exact `i32x4` shape and `i32`
+intermediates, checked extract indices, instruction ownership, single-use
+counts, multiple root users, commutative operand ordering and canonicalization.
+The walk has depth three below each root operand, at most fourteen node visits,
+fixed-size state and no allocation or unbounded producer walk. Its shared lazy
+use-count table can require one function-wide operand scan; this is existing
+instcombine infrastructure, not constant total optimizer work. Fast's unknown
+use counts disable the match. Existing pass invocation and worklist caps remain
+unchanged. No new compile-cost improvement or negligible-overhead claim follows
+from the short CLI samples.
+
+All 24 lane permutations now exercise all five binary tree shapes against the
+wrapping oracle. A dedicated instcombine test uses aliased vector operands,
+multiple root consumers, signed/unsigned result extension and interleaved
+volatile loads/stores and a call. It checks effect instruction identities,
+operands, flags, layout order and source locations, plus the replacement root's
+source location. Existing fixed-point tests also cover the new tree shapes.
+Verified IR has checked immediate lane indices and no undef/poison vector
+producer; no dynamic/undefined-lane form is inferred by this matcher.
+
+The native C fixture now independently checks unsigned modulo before zero
+extension, mixed signed/unsigned operands, signed sums before sign extension,
+and signed widening **before** addition. Signed C sums use bounded inputs so
+every intermediate stays in range; only unsigned sums claim C modulo overflow.
+The widened scalar oracle includes the original signed extrema. A separate
+call mutates the input, checking the original vector read before the call and
+an observed scalar read afterward. Existing alias, guard-page, unaligned,
+canary, single-call and forced-spill checks remain. Negative C cases retain
+scalar operations for signed/unsigned short promotions, widening-before-add,
+dynamic indices, repeated lanes, distinct vector arguments and FP sums. They
+also compile with debug information. The C gate now checks chunked/text/direct
+whole-object parity at v1/v2/v3 and effective v3 without AVX/AVX2/FMA/F16C
+(normal pools; text/direct parity also covers empty pools).
+
+Fresh review validation:
+
+- Complete local debug optimizer suite: 585 passed, two existing ignored tests.
+- Focused `vector_canonicalize`: 15 passed in debug/release locally and on LinuxHost.
+- Expanded `c_lane_reduce`: two passed in debug/release on native Apple ARM64
+  and LinuxHost. Cross-target emission is distinct from native execution. LinuxHost
+  additionally executed all 18 higher/disabled-profile native object pairs
+  after checking host feature eligibility.
+- Release `x86_64::feature_guard_tests` passed locally and on LinuxHost, retaining
+  illegal-feature rejection on text and structured paths. Native execution
+  still uses a newer CPU, not a strict-v1-only machine.
+- Formatting and patch-whitespace checks passed for the changed files.
+
+The independent provenance audit compared all baseline archive files with
+main, finding no differences. Among main's files the candidate archive differs
+only in optimizer source and the original optimizer regression test file; this
+corrects the earlier overly narrow archive description above. All 87 paired
+report input/artifact identities, the two frozen CLI hashes and report hash
+match. Re-running both frozen CLIs reproduces all six retained strict-level C
+assemblies byte for byte; regenerated optimized IR contains the reduction only
+for the candidate. Recomputed paired medians/ranges and 120/108 text sizes
+match the figures above. The retained complete correctness reports contain
+231 LinuxHost and 55 Apple passing rows; those full campaigns were inspected, not
+rerun. No timing rerun or new performance conclusion is claimed.
+
+Review evidence is under `/tmp/keel-lane-review-64c8f7ab` on both hosts,
+`/tmp/keel-lane-review-*.{jsonl,log}` and
+`/tmp/keel-lane-review-{apple,linuxhost}-{debug,release}-objects`. The LinuxHost snapshot
+is a baseline archive plus this review's optimizer/test overlay, with its own
+cargo-managed target. All Rust commands used the existing toolchain and
+`python3 suite/fast_opt_locked.py LOG cargo
+COMMAND --offline --locked -j2`; native/provenance helpers held the same shared
+lock. Finite tests do not prove arbitrary fault ordering, every C program,
+exhaustive ISA exclusion or FP-environment behavior. The C construction stack
+traffic and large Clang gap remain; shuffle/widen recognition remains queued.

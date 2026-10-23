@@ -439,7 +439,7 @@ fn sum_result(m: &Module, input: [u32; 4]) -> u32 {
 
 #[test]
 fn complete_i32_lane_sums_match_wrapping_oracle() {
-    // All permutations, left/right associated and balanced trees. Input bits
+    // All permutations, all five binary tree shapes. Input bits
     // include signed extremes and overflow; signedness is absent from IR iadd.
     for a in 0..4 {
         for b in 0..4 {
@@ -458,6 +458,8 @@ fn complete_i32_lane_sums_match_wrapping_oracle() {
                         "v5 = iadd v1,v2\nv6 = iadd v5,v3\nv7 = iadd v6,v4",
                         "v5 = iadd v3,v4\nv6 = iadd v2,v5\nv7 = iadd v1,v6",
                         "v5 = iadd v1,v2\nv6 = iadd v3,v4\nv7 = iadd v5,v6",
+                        "v5 = iadd v2,v3\nv6 = iadd v1,v5\nv7 = iadd v6,v4",
+                        "v5 = iadd v2,v3\nv6 = iadd v5,v4\nv7 = iadd v1,v6",
                     ] {
                         let source = body(
                             "i32x4",
@@ -537,4 +539,77 @@ fn incomplete_mixed_promoted_shared_and_fp_sums_stay_scalar() {
         let source = body(vector, scalar, &format!("v0: {vector}"), &ops);
         assert!(!clean(&source).to_string().contains("vreduce_add"));
     }
+}
+
+#[test]
+fn lane_sum_resolved_sources_effects_and_result_extensions() {
+    let source = "decl @observe(ptr)
+func @f(ptr,ptr) -> i64 {
+block0(v0: ptr,v1: ptr):
+ v2 = load.i32x4 volatile align 1 v0
+ v3 = bitcast.i32x4 v2
+ v4 = vextract v2,3
+ store volatile v4,v1
+ v5 = vextract v3,0
+ v6 = vextract v2,1
+ v7 = iadd v5,v6
+ call @observe(v1)
+ v8 = load.i32 volatile v1
+ v9 = vextract v3,2
+ v10 = vextract v2,3
+ v11 = iadd v9,v10
+ v12 = iadd v7,v11
+ v13 = sext.i64 v12
+ v14 = uext.i64 v12
+ v15 = iadd v13,v14
+ store volatile v8,v1
+ return v15
+}";
+    let mut m = keel_ir::parse(source).unwrap();
+    m.files.push("effects.c".into());
+    // Test alias identity before canonicalization has rewritten operand IDs.
+    m.functions[0].replace_all_uses(Value::new(3), Value::new(2));
+    let f = &mut m.functions[0];
+    let insts = f.layout_insts().map(|(_, i)| i).collect::<Vec<_>>();
+    for (line, i) in insts.into_iter().enumerate() {
+        f.set_inst_loc(
+            i,
+            Some(keel_ir::SourceLoc {
+                file: keel_ir::SourceFile::new(0),
+                line: line as u32 + 1,
+                col: 1,
+                scope: None,
+            }),
+        );
+    }
+    // Instcombine replaces the root in place and retains every effect, its
+    // operands/flags, layout order and debug location. Root users stay i64
+    // sign/zero extensions of the same i32 result, even with two consumers.
+    let effects = |m: &Module| {
+        m.functions[0]
+            .layout_insts()
+            .filter_map(|(_, i)| {
+                let f = &m.functions[0];
+                matches!(
+                    f.inst_data(i),
+                    D::Load { .. } | D::Store { .. } | D::Call { .. }
+                )
+                .then(|| (i, f.inst_data(i).clone(), f.inst_loc(i)))
+            })
+            .collect::<Vec<_>>()
+    };
+    let before = effects(&m);
+    let root = m.functions[0]
+        .layout_insts()
+        .find(|(_, i)| m.functions[0].inst_results(*i).contains(&Value::new(12)))
+        .unwrap()
+        .1;
+    let loc = m.functions[0].inst_loc(root);
+    keel_opt::run_passes(&mut m, &["instcombine"]).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    assert_eq!(before, effects(&m));
+    assert_eq!(loc, m.functions[0].inst_loc(root));
+    assert!(m.to_string().contains("v12 = vreduce_add v2"), "{m}");
+    assert!(m.to_string().contains("sext.i64 v12"), "{m}");
+    assert!(m.to_string().contains("uext.i64 v12"), "{m}");
 }
