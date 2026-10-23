@@ -113,13 +113,19 @@ fn scalar_fallbacks_are_baseline_at_every_tier_and_keep_v2_v3_selection() {
                     );
                     assert_eq!(text.contains("\tpopcnt\t"), level != CpuLevel::V1);
                     assert_eq!(text.contains("\troundsd\t"), level != CpuLevel::V1);
-                    if level == CpuLevel::V1 {
+                    if level == CpuLevel::V1
+                        && let Some(dir) = &export
+                    {
                         let name = format!("{s:?}-{a:?}-{spilled}");
-                        if let Some(dir) = &export {
-                            fs::write(dir.join(format!("{name}.o")), &object).unwrap();
-                        }
-                        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-                        execute(&name, &object, &harness());
+                        fs::write(dir.join(format!("{name}.o")), &object).unwrap();
+                    }
+                    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+                    if level != CpuLevel::V3 {
+                        execute(
+                            &format!("{level:?}-{s:?}-{a:?}-{spilled}"),
+                            &object,
+                            &harness(),
+                        );
                     }
                 }
             }
@@ -141,20 +147,30 @@ fn helpers_are_explicit_link_requirements_and_fma_preserves_fusion() {
         );
     }
     for level in [CpuLevel::V1, CpuLevel::V2, CpuLevel::V3] {
-        for s in [SelectionTier::Baseline, SelectionTier::Full] {
+        for s in [
+            SelectionTier::Baseline,
+            SelectionTier::Trees,
+            SelectionTier::Full,
+        ] {
             for a in [AllocationTier::Fast, AllocationTier::Full] {
-                let (object, _) = compile(&source, level, s, a, true);
-                let mut expected: BTreeSet<_> =
-                    ["__udivti3", "__divti3", "__umodti3", "__modti3", "fmal"]
-                        .map(str::to_owned)
-                        .into();
-                if level != CpuLevel::V3 {
-                    expected.extend(["fma".into(), "fmaf".into()]);
-                }
-                assert_eq!(undefined(&object), expected);
-                #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-                if level == CpuLevel::V1 {
-                    execute(&format!("helpers-{s:?}-{a:?}"), &object, HELPER_HARNESS);
+                for spilled in [false, true] {
+                    let (object, _) = compile(&source, level, s, a, spilled);
+                    let mut expected: BTreeSet<_> =
+                        ["__udivti3", "__divti3", "__umodti3", "__modti3", "fmal"]
+                            .map(str::to_owned)
+                            .into();
+                    if level != CpuLevel::V3 {
+                        expected.extend(["fma".into(), "fmaf".into()]);
+                    }
+                    assert_eq!(undefined(&object), expected);
+                    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+                    if level != CpuLevel::V3 {
+                        execute(
+                            &format!("helpers-{level:?}-{s:?}-{a:?}-{spilled}"),
+                            &object,
+                            HELPER_HARNESS,
+                        );
+                    }
                 }
             }
         }
@@ -162,7 +178,7 @@ fn helpers_are_explicit_link_requirements_and_fma_preserves_fusion() {
 }
 
 #[test]
-fn scalar_sse2_and_ordinary_abi_corpus_is_strict_v1() {
+fn scalar_sse2_and_ordinary_abi_corpus_obeys_explicit_levels() {
     for source in [
         include_str!("programs/arith.keel"),
         include_str!("programs/floats.keel"),
@@ -176,7 +192,9 @@ fn scalar_sse2_and_ordinary_abi_corpus_is_strict_v1() {
             SelectionTier::Full,
         ] {
             for a in [AllocationTier::Fast, AllocationTier::Full] {
-                compile(source, CpuLevel::V1, s, a, true);
+                for level in [CpuLevel::V1, CpuLevel::V2, CpuLevel::V3] {
+                    compile(source, level, s, a, true);
+                }
             }
         }
     }

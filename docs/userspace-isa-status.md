@@ -18,7 +18,8 @@ prerequisite. AVX requires the normal OSXSAVE/XCR0 availability contract.
 | AVX / AVX2 | Implemented 128/256-bit typed vector support, feature gating, arithmetic, transport, masks, gathers and permutations. Finite value, alias, footprint and exception tests passed. |
 | FMA / F16C / BMI / LZCNT / MOVBE | Implemented v3 feature families with finite value/encoding/exception validation, as applicable. |
 | Strict v1 userspace | Explicit v1 is supported for the implemented scalar/SSE/SSE2 and ordinary SysV ABI paths. The userspace join below checks legality, fallbacks, transport and helper requirements. This is bounded implementation validation, not an exhaustive ISA certification. |
-| Formal v2/v3 completion | Existing feature families and selection are preserved; a separate final userspace join for these levels has not been signed off. Old broad full-machine flags must not be used as their verdict. |
+| Strict v2 userspace | Explicit v2 joins cumulative v1 behavior with SSE3, SSSE3, SSE4.1, SSE4.2, POPCNT, CX16 and long-mode LAHF/SAHF. The bounded audit and gates below validate the implemented userspace contract. |
+| Formal v3 completion | Existing feature families and selection are preserved; a separate final v3 userspace join has not been signed off. Old broad full-machine flags must not be used as its verdict. |
 
 Select the intended level explicitly with `--cpu-level v1`, `v2` or `v3` on the
 x86 target. The historical `legacy` default permits POPCNT/SSE4.1 and is not a
@@ -120,6 +121,98 @@ i128 high/overflow multiplication, i128 switches, x86 inline assembly and
 exception handling. Vendor C intrinsic-header completeness and automatic
 vectorization are separate frontend/optimization concerns. These restrictions
 must diagnose rather than silently upgrade the target.
+
+## Strict-v2 userspace contract and audit
+
+Use `--target x86_64-unknown-linux-gnu --cpu-level v2` explicitly for `compile`,
+`cc` and `asm`; the library equivalent is `Features::for_level(CpuLevel::V2)`
+through `FeatureSelector`. V2 adds SSE3, SSSE3, SSE4.1, SSE4.2, POPCNT, CX16
+and long-mode LAHF/SAHF to the v1 contract. It does not enable AVX/AVX2, BMI1/2,
+FMA, F16C, LZCNT or MOVBE. CLFSH remains independently gated at every level.
+Explicit `--target-features` modifiers intentionally change this contract.
+The v1 runtime-helper and unsupported-operation restrictions above also apply
+to v2: in particular, fused F32/F64 operations require libm `fmaf`/`fma`, F80
+requires `fmal`, and i128 division/remainder require the compiler runtime.
+Ordinary 128-bit vector SysV transport is supported; 256-bit SSA vectors and
+their register ABI require an explicitly AVX-enabled profile.
+
+The October 23 audit started at main `74ecf5db`, including the completed v1 work.
+It found concrete verification gaps before adding code: the scalar/helper join
+executed only v1 despite generating v2 objects; CLI rejection checks established
+only the v1 boundary; vector ABI execution used legacy/AVX profiles; and the
+userspace join did not compare chunked objects with text and typed objects.
+No missing v2 lowering was found in this audit, so the changes extend regression
+coverage rather than alter feature selection or add instruction implementations.
+Baseline selection may scalarize a generic vector operation even when a higher
+level permits a native instruction. That is legal and is tested separately from
+explicit architectural intrinsics.
+
+The focused gates now include:
+
+- `keel-codegen --test x86_userspace_v2`: cumulative 128-bit vector operations,
+  integer/FP masks, lanes and shuffles; ordinary SysV register/stack arguments,
+  results, direct/indirect/tail calls, varargs, block-argument cycles and values
+  live across calls. All three selection tiers, both allocators, normal pools
+  and empty pools are exercised. Representative SSE3 horizontal addition,
+  SSSE3 byte shuffle, SSE4.1 widening multiply and signed i64 comparison check
+  input/output aliases, live inputs, canaries and both guarded-page edges.
+  Text, typed and chunked objects must match, and every typed instruction's
+  operand-dependent feature requirements must fit strict v2. Representative
+  operations require no undefined helper symbols. A separate self-contained
+  LAHF/SAHF sequence checks all 256 low-status inputs in long mode; it claims
+  no arbitrary physical FLAGS preservation across calls or IR boundaries.
+- `keel-codegen --test x86_userspace_v1`: cumulative scalar/ordinary ABI emission
+  at v1/v2/v3, plus native v1/v2 scalar and fused-helper results. Helper transport
+  now covers all selection tiers, both allocators and normal/empty pools.
+  V1 keeps SWAR population counts and software rounding; v2 keeps POPCNT and
+  hardware rounding; v3 keeps native FMA and its smaller helper symbol set.
+- `keel-codegen --lib x86_64::feature_guard_tests` and
+  `keel --test x86_cpu_level`, also run with `--release`: reject representative
+  AVX/AVX2, BMI1/2, FMA, F16C, LZCNT, MOVBE and CLFSH emission under v2. The CLI
+  checks v1/v2/v3 acceptance and explicit feature overrides, including both
+  LAHF and SAHF. It compiles C with and without optimization through text and
+  direct objects using explicit CPU levels; this adds no C intrinsic headers.
+
+Existing focused native gates supplement the join: `x86_crc32` uses a software
+Castagnoli reference for every supported operand width; `x86_legacy_strings`
+checks controls, signed lengths, masks, indices and aliases; `x86_legacy_v2_fp`
+checks rounding, horizontal/dot operations and MXCSR effects;
+`x86_packed_integer` and `x86_packed_pair` cover packed arithmetic, saturation,
+register reuse and guarded memory. `x86_cx16` checks success/failure, i128 SysV
+transport, fixed-register pressure, exact 16-byte accesses and atomic counters.
+Its existing fault/unwind checks are supplemental finite tests, not a kernel or
+arbitrary saved-context contract. Existing vector wrapper/varargs and v3
+FMA/F16C/256-bit transport gates remain regression controls.
+
+Validation uses `cargo` with `--offline --locked -j2`, serialized by
+`suite/fast_opt_locked.py`; native Linux tests run on LinuxHost in an isolated
+snapshot. `KEEL_V2_EXPORT_DIR` optionally retains the join's objects and assembly
+for independent disassembly. Bulk objects and logs stay outside Git under
+`/tmp`. The final focused native run passed five userspace-join tests in both
+debug and release builds; seven additional FMA/F16C/256-bit regression tests
+passed in debug. The supplemental native batch passed 28 existing CRC, strings,
+FP, packed-integer/pair, CX16, vector-varargs and wrapper tests. Local debug and
+release CLI and emission-guard gates passed. Clippy completed with repository
+warnings; no new regression-file warning remained.
+
+An independent `llvm-objdump` scan examined 36 exported strict-v2 objects per
+profile (473,190 instruction lines each) and found no AVX-family mnemonic, YMM/ZMM
+operand, BMI1/2, FMA, F16C, LZCNT, MOVBE, CLFSH or XSAVE-family match. This is a
+mnemonic/operand exclusion scan, not a complete instruction decoder proof.
+The checked objects were produced through all 12 selection/allocation/pool
+combinations and the text/typed/chunked byte-parity checks above. Native logs
+are `/tmp/keel-v2-native-{debug,final-debug,final-release}.log`; exported objects,
+disassembly and `disassembly-audit.json` are under
+`/tmp/keel-v2-objects-{debug,release}` on LinuxHost. The isolated source snapshot is
+`/tmp/keel-strict-v2-20261023.QXrgEl`.
+
+Limits remain explicit: the execution host supports newer ISA levels. This is
+not a v2-only CPU or CPUID-masked execution test. Feature checks and finite
+instruction-byte inspection establish exclusion for the tested generated code;
+value, memory and ABI tests establish bounded behavior. They do not establish
+exhaustive ISA certification, linked-library compatibility, every FP exception
+configuration or correctness of every program. Kernel work, arbitrary physical
+state and C vendor intrinsic-header completeness remain separate.
 
 ## Separate low-level work
 
