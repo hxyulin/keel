@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -15,6 +16,19 @@ spec.loader.exec_module(r)
 
 
 class SafetyTests(unittest.TestCase):
+    def test_paired_campaign_rejects_unmatched_tiers_and_insufficient_rounds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            common = [sys.executable, str(HERE/'run.py'), '--keel', sys.executable,
+                      '--baseline-keel', sys.executable, '--output', str(Path(tmp)/'new')]
+            for flags, diagnostic in [
+                    ([], 'requires --variants full'),
+                    (['--variants', 'full', '--benchmark', '--rounds', '6'],
+                     'at least seven rounds')]:
+                result = subprocess.run([*common, *flags], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn(diagnostic, result.stderr)
+                self.assertFalse((Path(tmp)/'new').exists())
+
     def test_features_and_foreign_targets_fail_closed(self):
         self.assertFalse(r.native_allowed('v3', 'Darwin', 'arm64', {'avx2'}))
         self.assertFalse(r.native_allowed('v3', 'Linux', 'x86_64', {'sse2', 'avx2'}))

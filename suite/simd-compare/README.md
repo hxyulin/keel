@@ -44,6 +44,18 @@ compiler builds occur. `--clang` selects the reference/compiler/linker;
 `--cases add copy`, `--variants full`, and `--profiles v1` narrow a rerun.
 Use a fresh output directory under `/tmp` (recommended), ignored `target/`,
 or `suite/reports/`.
+For a frozen revision comparison, add `--baseline-keel /absolute/old/keel`
+with `--variants full`. Both compilers receive identical Full options and
+share the source, input and driver paths. One discarded warmup and at least
+seven measured rounds shuffle profile/case/route groups and then shuffle the
+old/new/Clang arms within each group, keeping those arms adjacent. Compile
+samples and runtime samples remain separate. Linux paired timing requires
+`--cpu`; before compilation and before/after runtime in every round, load above
+1 or more than 10% busy on the selected CPU or its SMT siblings defers timing.
+Partial samples survive with `complete:false` and must not be presented as a
+completed campaign. Apple correctness controls need no timing flag. Archive
+execution records null Git metadata when unavailable; frozen compiler and
+source hashes remain required evidence of identity.
 Resolved cargo-managed target symlinks are supported. Binaries, inputs, assembly,
 objects, disassembly and JSON logs/reports stay there, never in Git.
 

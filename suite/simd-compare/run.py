@@ -127,6 +127,7 @@ def inspect_assembly(source):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--keel', type=Path, required=True)
+    p.add_argument('--baseline-keel', type=Path, help='frozen revision; paired Full comparison')
     p.add_argument('--clang', default='clang')
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--profiles', nargs='+', choices=PROFILES, default=list(PROFILES))
@@ -140,6 +141,13 @@ def main():
     p.add_argument('--objdump', help='optional LLVM objdump for object disassembly')
     a = p.parse_args()
     a.output, a.keel = a.output.resolve(), a.keel.resolve()
+    if a.baseline_keel:
+        a.baseline_keel = a.baseline_keel.resolve()
+        if not a.baseline_keel.is_file(): p.error('existing baseline compiler required')
+        if a.variants != ['full']: p.error('baseline comparison requires --variants full')
+        if a.benchmark and a.rounds < 7: p.error('paired comparison requires at least seven rounds')
+        if a.benchmark and platform.system() == 'Linux' and a.cpu is None:
+            p.error('Linux paired timing requires --cpu affinity')
     if a.rounds < 1 or not 1 <= a.repeats <= 100000000:
         p.error('positive rounds and repeats in [1,100000000] required')
     output_roots = [(ROOT / base).resolve() for base in ('target', 'suite/reports')]
@@ -194,14 +202,39 @@ def main():
     def verify():
         for path, digest in report['identities'].items():
             if sha(path) != digest: raise RuntimeError(f'identity changed: {path}')
+    def preflight():
+        # A shared lock excludes cooperating builds, not unrelated host work.
+        load = os.getloadavg()
+        busy = {}
+        if a.cpu is not None:
+            siblings = Path(f'/sys/devices/system/cpu/cpu{a.cpu}/topology/thread_siblings_list').read_text().strip()
+            cpus = set()
+            for part in siblings.split(','):
+                ends = list(map(int, part.split('-')))
+                cpus.update(range(ends[0], ends[-1]+1))
+            def ticks():
+                return {int(s.split()[0][3:]): list(map(int, s.split()[1:]))
+                        for s in Path('/proc/stat').read_text().splitlines()
+                        if s.split()[0] in {f'cpu{c}' for c in cpus}}
+            before = ticks(); time.sleep(.25); after = ticks()
+            for cpu in cpus:
+                delta = [y-x for x,y in zip(before[cpu], after[cpu])]
+                busy[cpu] = 1-(delta[3]+delta[4])/max(1, sum(delta[:8]))
+        report.setdefault('preflight', []).append(dict(unix=time.time(), load=load, cpu_busy=busy))
+        save()
+        if load[0] > 1 or any(v > .1 for v in busy.values()):
+            raise RuntimeError('contended host; timing deferred')
     save()
     failed = False
     try:
         for path in [*HERE.glob('*.py'), *HERE.glob('*.c'), *HERE.glob('*.keel'), Path(clang).resolve(), a.keel,
                      HERE.parent/'profile_app_loops.py', HERE.parent/'fast_opt_locked.py']:
             freeze(path)
-        report['revision'] = run(['git', '-C', ROOT, 'rev-parse', 'HEAD'])['stdout'].strip()
-        report['dirty'] = run(['git', '-C', ROOT, 'status', '--porcelain'])['stdout']
+        if a.baseline_keel: freeze(a.baseline_keel)
+        revision = run(['git', '-C', ROOT, 'rev-parse', 'HEAD'], optional=True)
+        report['revision'] = revision['stdout'].strip() if revision['returncode'] == 0 else None
+        status = run(['git', '-C', ROOT, 'status', '--porcelain'], optional=True)
+        report['dirty'] = status['stdout'] if status['returncode'] == 0 else None
         report['clang_version'] = run([clang, '--version'])['stdout']
         if platform.system() == 'Darwin':
             cpu = run(['sysctl', '-a'], optional=True)['stdout']
@@ -248,6 +281,8 @@ def main():
                 freeze(input_path)
                 for route in ('ir', 'c'):
                     configs = [(v, str(a.keel), VARIANTS[v]) for v in a.variants]
+                    if a.baseline_keel:
+                        configs.append(('baseline-full', str(a.baseline_keel), VARIANTS['full']))
                     if route == 'c': configs.append(('clang-O2', clang, ['-O2']))
                     for variant, compiler, opts in configs:
                         stem = a.output/f'{profile}-{case}-{route}-{variant}'
@@ -306,14 +341,27 @@ def main():
             rng = random.Random(a.seed)
             for round_index in range(a.rounds+1):
                 verify()
-                rng.shuffle(jobs)
-                for row, cmd, binary, data in jobs:
+                if a.baseline_keel: preflight()
+                if a.baseline_keel:
+                    groups = collections.defaultdict(list)
+                    for job in jobs:
+                        row = job[0]
+                        groups[(row['profile'], row['case'], row['route'])].append(job)
+                    keys = list(groups); rng.shuffle(keys)
+                    ordered = []
+                    for key in keys:
+                        rng.shuffle(groups[key]); ordered.extend(groups[key])
+                else:
+                    rng.shuffle(jobs)
+                    ordered = jobs
+                for row, cmd, binary, data in ordered:
                     # Retain the primary object identity; timing writes a disposable sibling.
                     timing_cmd = [*cmd[:-1], str(binary)+'.timed.o']
                     sample = run(timing_cmd)
                     if round_index: row['compile_seconds'].append(sample['seconds'])
-                native_jobs = [job for job in jobs if job[0]['native_allowed']]
-                rng.shuffle(native_jobs)
+                if a.baseline_keel: preflight()
+                native_jobs = [job for job in ordered if job[0]['native_allowed']]
+                if not a.baseline_keel: rng.shuffle(native_jobs)
                 for row, _, binary, data in native_jobs:
                     installed = a.output/'runtime'
                     shutil.copyfile(binary, installed); installed.chmod(0o755)
@@ -324,6 +372,8 @@ def main():
                     if not math.isfinite(sample['seconds']) or not 0 < sample['seconds'] <= elapsed+0.005 or sample['calls'] != 64*a.repeats:
                         raise RuntimeError('invalid timer/work count')
                     if round_index: row['runtime_seconds'].append(sample['seconds'])
+                if a.baseline_keel: preflight()
+                verify()
                 save()
         verify()
         report['complete'] = not failed
