@@ -1,13 +1,14 @@
-//! Byte-aware forwarding in nonescaping fixed stack objects. Only integer
-//! loads up to 64 bits are reconstructed from earlier stores in the same
-//! block, or integer subranges of uniquely written dominating pieces. Exact
-//! types can also forward from uniquely written dominating pieces. This
-//! handles union temporaries exposed by aggregate helpers without assuming that
-//! arbitrary pointers cannot alias.
+//! Byte-aware forwarding in nonescaping fixed stack objects. Integer loads up
+//! to 64 bits are reconstructed from earlier stores in the same block, or from
+//! integer subranges of uniquely written dominating pieces. A bounded signed
+//! low vector construction also uses same-block byte facts. Exact types can
+//! forward from uniquely written dominating pieces. This handles union
+//! temporaries exposed by aggregate helpers without assuming that arbitrary
+//! pointers cannot alias.
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{
     BinaryOp, ConvertOp, EntityRef, Function, InsertPoint, Inst, InstData, StackSlot, Type, Value,
-    ValueDef,
+    ValueDef, VectorType,
 };
 
 /// Opt-in composite pass: retain ordinary forwarding, then clean up the CFG
@@ -122,9 +123,13 @@ pub fn run(func: &mut Function) -> bool {
     // the address itself.
     let mut escaped: FxHashSet<_> = func.debug_vars.iter().map(|v| v.slot).collect();
     // The ABI instruction writes this home without a StackAddr SSA operand.
-    escaped.extend(func.layout_insts().filter_map(|(_, i)| match func.inst_data(i) {
-        InstData::AggregateVaArg { home, .. } => Some(*home), _ => None,
-    }));
+    escaped.extend(
+        func.layout_insts()
+            .filter_map(|(_, i)| match func.inst_data(i) {
+                InstData::AggregateVaArg { home, .. } => Some(*home),
+                _ => None,
+            }),
+    );
     // Without marks, any restore is of an unknown stack pointer.
     if marks.is_empty() && restore {
         return false;
@@ -342,6 +347,27 @@ pub fn run(func: &mut Function) -> bool {
                         .copied()
                         .or(global)
                         .or_else(|| {
+                            if local_only
+                                || offset != 0
+                                || sizes[&slot] != 16
+                                || ty != Type::Vector(VectorType::I64x2)
+                            {
+                                return None;
+                            }
+                            let arg = signed_low_widen_source(func, inst, slot, &bytes)?;
+                            let loc = func.inst_loc(inst);
+                            let widened = func.insert_inst(
+                                InsertPoint::Before(inst),
+                                InstData::Convert {
+                                    op: ConvertOp::SwidenLow,
+                                    ty,
+                                    arg,
+                                },
+                            );
+                            func.set_inst_loc(widened, loc);
+                            Some(func.first_result(widened))
+                        })
+                        .or_else(|| {
                             let width = integer_width(ty)?;
                             let parts = (0..width)
                                 .map(|n| bytes.get(&(slot, offset + n)).copied())
@@ -400,6 +426,75 @@ pub fn run(func: &mut Function) -> bool {
     }
     changed
 }
+// Recognize only the final byte image of two signed low lanes. Availability
+// within this block follows from verified SSA; no producer is moved or cloned.
+fn signed_low_widen_source(
+    f: &Function,
+    at: Inst,
+    slot: StackSlot,
+    bytes: &FxHashMap<(StackSlot, usize), (Value, usize)>,
+) -> Option<Value> {
+    let block = f.inst_block(at);
+    let producer = |value: Value, ty: Type| {
+        let value = f.resolve(value);
+        if f.value_type(value) != ty {
+            return None;
+        }
+        let ValueDef::Result(inst, 0) = f.value_def(value) else {
+            return None;
+        };
+        if f.is_removed(inst)
+            || f.inst_results(inst).first() != Some(&value)
+            || f.inst_block(inst) != block
+        {
+            return None;
+        }
+        Some(inst)
+    };
+    let mut source = None;
+    for half in 0..2 {
+        let value = f.resolve(bytes.get(&(slot, half * 8))?.0);
+        for n in 0..8 {
+            let &(stored, byte) = bytes.get(&(slot, half * 8 + n))?;
+            if f.resolve(stored) != value || byte != n {
+                return None;
+            }
+        }
+        let ext = producer(value, Type::I64)?;
+        let InstData::Convert {
+            op: ConvertOp::Sext,
+            ty: Type::I64,
+            arg,
+        } = *f.inst_data(ext)
+        else {
+            return None;
+        };
+        let extract = producer(arg, Type::I32)?;
+        let InstData::VectorExtract { arg, lane } = *f.inst_data(extract) else {
+            return None;
+        };
+        if usize::from(lane) != half {
+            return None;
+        }
+        let arg = f.resolve(arg);
+        if f.value_type(arg) != Type::Vector(VectorType::I32x4) || !f.is_value_defined(arg) {
+            return None;
+        }
+        let local = match f.value_def(arg) {
+            ValueDef::Result(inst, n) => {
+                f.inst_results(inst).get(n as usize) == Some(&arg) && f.inst_block(inst) == block
+            }
+            ValueDef::Param(b, _) => b == block,
+            ValueDef::Alias(_) => unreachable!("resolved"),
+        };
+        if !local || source.is_some_and(|previous| previous != arg) {
+            return None;
+        }
+        source = Some(arg);
+    }
+    source
+}
+
 fn integer_width(ty: Type) -> Option<usize> {
     match ty {
         Type::I8 => Some(1),
