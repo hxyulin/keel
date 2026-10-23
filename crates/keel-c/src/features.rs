@@ -129,6 +129,9 @@ fn builtin(name: &str, target: Target) -> bool {
             )
         });
     };
+    if matches!(base, "ia32_cmpps256" | "ia32_cmppd256") {
+        return target == Target::X86_64LinuxGnu;
+    }
     if crate::expr::typed_overflow(base).is_some() || crate::expr::generic_overflow(base).is_some()
     {
         return true;
@@ -140,7 +143,8 @@ fn builtin(name: &str, target: Target) -> bool {
     }
     matches!(
         base,
-        "complex"
+        "shufflevector"
+            | "complex"
             | "va_start"
             | "va_end"
             | "va_arg"

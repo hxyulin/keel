@@ -1,7 +1,8 @@
 # GNU C integer modes and vectors
 
-Keel C implements a bounded GNU type-attribute subset on both
-`aarch64-apple-darwin` and `x86_64-unknown-linux-gnu`. These attributes change
+Keel C implements a bounded GNU type-attribute subset on
+`aarch64-apple-darwin`, `aarch64-unknown-linux-gnu` and
+`x86_64-unknown-linux-gnu`. These attributes change
 C type identity before layout, initialization, and IR generation. Unsupported
 sizes and element types produce diagnostics; they never fall back to a scalar.
 Double-underscore attribute and mode-name spellings are accepted.
@@ -34,16 +35,18 @@ pointers/functions, `_Bool`, floating types, enum tags, and unsupported modes
 (including vector machine modes and floating machine modes) are diagnosed.
 Use `vector_size`, rather than a vector `mode`, for vectors.
 
-## Six 16-byte vector shapes
+## Six lane shapes at 16 or 32 bytes
 
 Supported elements are signed/plain/unsigned char, signed/unsigned short, int,
 long and long long, and float/double. `_Bool`, `__int128`, `_Float16`, opaque
-floating types, structs, pointers, and vector elements are unsupported. Only
-`vector_size(16)` is supported; 8/32-byte IR shapes are intentionally not exposed
-by this C subset. The shape is one of `i8x16`, `i16x8`, `i32x4`, `i64x2`,
-`f32x4`, `f64x2`; C retains element signedness and nominal integer identity.
-Size and natural alignment are sixteen bytes. Lane zero is at the lowest
-address. Struct fields, arrays and pointer arithmetic use the complete size.
+floating types, structs, pointers, and vector elements are unsupported.
+`vector_size(16)` is supported on all targets. Bounded `vector_size(32)` is
+supported only on x86-64, using the existing AVX ABI and backend feature gates.
+Eight-byte vectors remain unsupported. The 16-byte shapes are `i8x16`, `i16x8`,
+`i32x4`, `i64x2`, `f32x4`, `f64x2`; the 32-byte shapes are `i8x32`, `i16x16`,
+`i32x8`, `i64x4`, `f32x8`, `f64x4`. C retains element signedness and nominal
+integer identity. Size and natural alignment equal the selected byte width.
+Lane zero is at the lowest address. Struct fields, arrays and pointer arithmetic use the complete size.
 
 ```c
 typedef int V __attribute__((vector_size(16)));
@@ -74,9 +77,12 @@ Supported expressions:
   Comparison results have signed integer lanes of the operand width, with
   all bits set for true and zero for false. Right shift follows element
   signedness. Shift counts must be valid C lane shift counts.
-- Explicit casts between supported vectors and between a vector and signed
-  or unsigned `__int128`, preserving all sixteen bytes. These are bit casts,
+- Explicit equal-width casts between supported vectors, and between a 16-byte
+  vector and signed or unsigned `__int128`, preserving all bytes. These are bit casts,
   not numeric lane conversions.
+- Bounded `__builtin_shufflevector` permutations with matching input/result
+  shapes and constant in-range indices; see the
+  [C x86 intrinsic subset](c-x86-intrinsics.md) for the builtin and header contract.
 
 Arithmetic operands must have the same C vector type. Scalar broadcast and
 implicit conversions between distinct vector types are diagnosed. Integer
@@ -91,7 +97,11 @@ Debug information currently presents a vector as an array of its elements.
 
 Direct vector arguments/results use the existing SIMD ABI: Darwin arm64 v0–v7
 and v0 result, or Linux x86-64 XMM0–XMM7 and XMM0 result, with aligned stack
-arguments when registers run out. Direct/indirect calls and calls in both
+arguments when registers run out. With AVX enabled, direct 32-byte x86 vectors
+use YMM0–YMM7 and YMM0 results, sharing the same SIMD argument bank and using
+32-byte-aligned stack arguments on register exhaustion. Callers and callees
+must agree on AVX ABI flags; Keel diagnoses disabled AVX rather than silently
+selecting the non-AVX ABI. Direct/indirect calls and calls in both
 directions with Clang are covered. Darwin homogeneous vector structs of one to
 four members use vector registers; equal-width vector members may have different
 lane types. Larger aggregates use the existing indirect convention. Arrays of
@@ -131,7 +141,7 @@ cargo test -p keel-codegen --test vector_ir --test vector_aarch64 --test vector_
 
 Future stages can add scalar broadcasts with GNU representability checks,
 numeric lane conversions, integer division/remainder, volatile lane operations,
-vector initializer designators, additional widths with target-specific ABI
+vector initializer designators, other widths/targets with explicit ABI
 gates, union classification and SysV SSEUP aggregates. Each requires dedicated
 semantic and ABI validation before expanding the accepted subset.
 
@@ -147,3 +157,22 @@ Clang's `ext_vector_type` and GNU `transparent_union` also produce diagnostics;
 their distinct type and ABI semantics are not implied by GNU vector support.
 Native `__has_attribute` queries remain conservative and do not advertise
 these bounded vector/mode subsets yet.
+
+## 32-byte extension and 16-byte audit
+
+The 32-byte extension reuses the 16-byte type/layout, initialization, lane,
+arithmetic, comparison, memory, debug and IR lowering machinery. The audit found
+two deliberate width limits to change: attribute shape selection and the
+16-byte cast check. The latter now requires equal widths; the existing
+`__int128` bitcast remains limited to 16 bytes. Aggregate ABI and vector
+`va_arg` restrictions are retained. No scalar broadcast, integer division,
+volatile lane access, numeric lane conversion or initializer-designator support
+is inferred from the wider type. Whole-vector accesses keep their width and
+memory flags; header unaligned copies use exact-size byte-safe memory builtins.
+
+`x86_intrinsics` adds layout/feature diagnostics, all-header object emission,
+and wide ABI/value/footprint checks with GCC/Clang oracles. The existing
+`gnu_types` and `gnu_vector_abi` tests continue to cover the 16-byte subset.
+See [C x86 intrinsics](c-x86-intrinsics.md) for the finite supported names,
+unsupported boundaries and validation commands. This extension does not claim
+complete vendor header compatibility or general auto-vectorization.

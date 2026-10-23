@@ -3998,6 +3998,18 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     self.b.function().inst_results(inst)[0]
                 }
             }
+            Builtin::VectorFloatCompare(cc) => {
+                let mask = ins.vfcmp(cc, vals[0], vals[1]);
+                self.b.ins().convert(ConvertOp::Bitcast, e.ty.ir(), mask)
+            }
+            Builtin::VectorShuffle => ins.vshuffle(
+                vals[0],
+                vals[1],
+                args[2..]
+                    .iter()
+                    .map(|e| crate::eval::eval_int(e).unwrap() as u8)
+                    .collect(),
+            ),
             Builtin::Complex => {
                 let Ty::Complex(elem) = e.ty else {
                     unreachable!()

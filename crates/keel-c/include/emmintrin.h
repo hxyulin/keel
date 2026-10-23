@@ -1,0 +1,194 @@
+/* Bounded Keel intrinsic subset; see docs/c-x86-intrinsics.md. */
+#ifndef _KEEL_EMMINTRIN_H
+#define _KEEL_EMMINTRIN_H
+#ifndef __x86_64__
+#error "Keel x86 intrinsic headers require x86-64"
+#endif
+#include <xmmintrin.h>
+typedef double __m128d __attribute__((vector_size(16)));
+static __inline__ __m128d _mm_add_pd(__m128d a, __m128d b) { return a + b; }
+static __inline__ __m128d _mm_sub_pd(__m128d a, __m128d b) { return a - b; }
+static __inline__ __m128d _mm_mul_pd(__m128d a, __m128d b) { return a * b; }
+static __inline__ __m128d _mm_div_pd(__m128d a, __m128d b) { return a / b; }
+static __inline__ __m128d _mm_cmpeq_pd(__m128d a, __m128d b) {
+  return (__m128d)(a == b);
+}
+static __inline__ __m128d _mm_cmplt_pd(__m128d a, __m128d b) {
+  return (__m128d)(a < b);
+}
+static __inline__ __m128d _mm_cmple_pd(__m128d a, __m128d b) {
+  return (__m128d)(a <= b);
+}
+static __inline__ __m128d _mm_cmpgt_pd(__m128d a, __m128d b) {
+  return (__m128d)(a > b);
+}
+static __inline__ __m128d _mm_cmpge_pd(__m128d a, __m128d b) {
+  return (__m128d)(a >= b);
+}
+static __inline__ __m128d _mm_cmpneq_pd(__m128d a, __m128d b) {
+  return (__m128d)(a != b);
+}
+static __inline__ __m128d _mm_setzero_pd(void) { return (__m128d){0}; }
+static __inline__ __m128d _mm_set1_pd(double x) { return (__m128d){x, x}; }
+static __inline__ __m128d _mm_set_pd(double x1, double x0) {
+  return (__m128d){x0, x1};
+}
+static __inline__ __m128d _mm_load_pd(const double *p) {
+  __m128d r;
+  __builtin_memcpy(&r, p, 16);
+  return r;
+}
+static __inline__ void _mm_store_pd(double *p, __m128d a) {
+  __builtin_memcpy(p, &a, 16);
+}
+static __inline__ __m128d _mm_loadu_pd(const double *p) {
+  __m128d r;
+  __builtin_memcpy(&r, p, 16);
+  return r;
+}
+static __inline__ void _mm_storeu_pd(double *p, __m128d a) {
+  __builtin_memcpy(p, &a, 16);
+}
+typedef long long __m128i __attribute__((vector_size(16)));
+typedef unsigned char __keel_u8_128 __attribute__((vector_size(16)));
+typedef signed char __keel_i8_128 __attribute__((vector_size(16)));
+static __inline__ __m128i _mm_add_epi8(__m128i a, __m128i b) {
+  return (__m128i)((__keel_u8_128)a + (__keel_u8_128)b);
+}
+static __inline__ __m128i _mm_sub_epi8(__m128i a, __m128i b) {
+  return (__m128i)((__keel_u8_128)a - (__keel_u8_128)b);
+}
+static __inline__ __m128i _mm_cmpeq_epi8(__m128i a, __m128i b) {
+  return (__m128i)((__keel_i8_128)a == (__keel_i8_128)b);
+}
+static __inline__ __m128i _mm_cmpgt_epi8(__m128i a, __m128i b) {
+  return (__m128i)((__keel_i8_128)a > (__keel_i8_128)b);
+}
+static __inline__ __m128i _mm_set1_epi8(char x) {
+  return (__m128i)(__keel_i8_128){x, x, x, x, x, x, x, x,
+                                  x, x, x, x, x, x, x, x};
+}
+typedef unsigned short __keel_u16_128 __attribute__((vector_size(16)));
+typedef signed short __keel_i16_128 __attribute__((vector_size(16)));
+static __inline__ __m128i _mm_add_epi16(__m128i a, __m128i b) {
+  return (__m128i)((__keel_u16_128)a + (__keel_u16_128)b);
+}
+static __inline__ __m128i _mm_sub_epi16(__m128i a, __m128i b) {
+  return (__m128i)((__keel_u16_128)a - (__keel_u16_128)b);
+}
+static __inline__ __m128i _mm_cmpeq_epi16(__m128i a, __m128i b) {
+  return (__m128i)((__keel_i16_128)a == (__keel_i16_128)b);
+}
+static __inline__ __m128i _mm_cmpgt_epi16(__m128i a, __m128i b) {
+  return (__m128i)((__keel_i16_128)a > (__keel_i16_128)b);
+}
+static __inline__ __m128i _mm_set1_epi16(short x) {
+  return (__m128i)(__keel_i16_128){x, x, x, x, x, x, x, x};
+}
+typedef unsigned int __keel_u32_128 __attribute__((vector_size(16)));
+typedef signed int __keel_i32_128 __attribute__((vector_size(16)));
+static __inline__ __m128i _mm_add_epi32(__m128i a, __m128i b) {
+  return (__m128i)((__keel_u32_128)a + (__keel_u32_128)b);
+}
+static __inline__ __m128i _mm_sub_epi32(__m128i a, __m128i b) {
+  return (__m128i)((__keel_u32_128)a - (__keel_u32_128)b);
+}
+static __inline__ __m128i _mm_cmpeq_epi32(__m128i a, __m128i b) {
+  return (__m128i)((__keel_i32_128)a == (__keel_i32_128)b);
+}
+static __inline__ __m128i _mm_cmpgt_epi32(__m128i a, __m128i b) {
+  return (__m128i)((__keel_i32_128)a > (__keel_i32_128)b);
+}
+static __inline__ __m128i _mm_set1_epi32(int x) {
+  return (__m128i)(__keel_i32_128){x, x, x, x};
+}
+typedef unsigned long long __keel_u64_128 __attribute__((vector_size(16)));
+typedef signed long long __keel_i64_128 __attribute__((vector_size(16)));
+static __inline__ __m128i _mm_add_epi64(__m128i a, __m128i b) {
+  return (__m128i)((__keel_u64_128)a + (__keel_u64_128)b);
+}
+static __inline__ __m128i _mm_sub_epi64(__m128i a, __m128i b) {
+  return (__m128i)((__keel_u64_128)a - (__keel_u64_128)b);
+}
+static __inline__ __m128i _mm_cmpeq_epi64(__m128i a, __m128i b) {
+  return (__m128i)((__keel_i64_128)a == (__keel_i64_128)b);
+}
+static __inline__ __m128i _mm_cmpgt_epi64(__m128i a, __m128i b) {
+  return (__m128i)((__keel_i64_128)a > (__keel_i64_128)b);
+}
+static __inline__ __m128i _mm_set1_epi64x(long long x) {
+  return (__m128i)(__keel_i64_128){x, x};
+}
+static __inline__ __m128i _mm_mullo_epi16(__m128i a, __m128i b) {
+  return (__m128i)((__keel_u16_128)a * (__keel_u16_128)b);
+}
+static __inline__ __m128i _mm_mullo_epi32(__m128i a, __m128i b) {
+  return (__m128i)((__keel_u32_128)a * (__keel_u32_128)b);
+}
+static __inline__ __m128i _mm_and_si128(__m128i a, __m128i b) { return a & b; }
+static __inline__ __m128i _mm_or_si128(__m128i a, __m128i b) { return a | b; }
+static __inline__ __m128i _mm_xor_si128(__m128i a, __m128i b) { return a ^ b; }
+static __inline__ __m128i _mm_andnot_si128(__m128i a, __m128i b) {
+  return ~a & b;
+}
+static __inline__ __m128i _mm_setzero_si128(void) { return (__m128i){0}; }
+static __inline__ __m128i _mm_load_si128(const __m128i *p) {
+  __m128i r;
+  __builtin_memcpy(&r, p, 16);
+  return r;
+}
+static __inline__ void _mm_store_si128(__m128i *p, __m128i a) {
+  __builtin_memcpy(p, &a, 16);
+}
+static __inline__ __m128i _mm_loadu_si128(const __m128i *p) {
+  __m128i r;
+  __builtin_memcpy(&r, p, 16);
+  return r;
+}
+static __inline__ void _mm_storeu_si128(__m128i *p, __m128i a) {
+  __builtin_memcpy(p, &a, 16);
+}
+static __inline__ __m128d _mm_castps_pd(__m128 a) { return (__m128d)a; }
+static __inline__ __m128i _mm_castps_si128(__m128 a) { return (__m128i)a; }
+static __inline__ __m128 _mm_castpd_ps(__m128d a) { return (__m128)a; }
+static __inline__ __m128i _mm_castpd_si128(__m128d a) { return (__m128i)a; }
+static __inline__ __m128 _mm_castsi128_ps(__m128i a) { return (__m128)a; }
+static __inline__ __m128d _mm_castsi128_pd(__m128i a) { return (__m128d)a; }
+#define _mm_shuffle_epi32(a, i)                                                \
+  __extension__({                                                              \
+    __m128i __keel_a = (a);                                                    \
+    (__m128i) __builtin_shufflevector(                                         \
+        (__keel_i32_128)__keel_a, (__keel_i32_128)__keel_a, (i) & 3,           \
+        ((i) >> 2) & 3, ((i) >> 4) & 3, ((i) >> 6) & 3);                       \
+  })
+#define _mm_shuffle_pd(a, b, i)                                                \
+  __builtin_shufflevector((a), (b), (i) & 1, 2 + (((i) >> 1) & 1))
+
+static __inline__ __m128i _mm_set_epi32(int x3, int x2, int x1, int x0) {
+  return (__m128i)(__keel_i32_128){x0, x1, x2, x3};
+}
+static __inline__ __m128i _mm_set_epi64x(long long x1, long long x0) {
+  return (__m128i){x0, x1};
+}
+static __inline__ int _mm_extract_epi16(__m128i a, int i) {
+  return ((__keel_u16_128)a)[i & 7];
+}
+static __inline__ __m128i _mm_insert_epi16(__m128i a, int x, int i) {
+  __keel_u16_128 b = (__keel_u16_128)a;
+  b[i & 7] = (unsigned short)x;
+  return (__m128i)b;
+}
+static __inline__ __m128d _mm_and_pd(__m128d a, __m128d b) {
+  return (__m128d)((__m128i)a & (__m128i)b);
+}
+static __inline__ __m128d _mm_or_pd(__m128d a, __m128d b) {
+  return (__m128d)((__m128i)a | (__m128i)b);
+}
+static __inline__ __m128d _mm_xor_pd(__m128d a, __m128d b) {
+  return (__m128d)((__m128i)a ^ (__m128i)b);
+}
+static __inline__ __m128d _mm_andnot_pd(__m128d a, __m128d b) {
+  return (__m128d)(~(__m128i)a & (__m128i)b);
+}
+
+#endif /* _KEEL_EMMINTRIN_H */

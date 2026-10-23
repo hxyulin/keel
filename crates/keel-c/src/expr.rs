@@ -649,8 +649,7 @@ impl<'a> Parser<'a> {
             let vector_cast = (ty.is_vector() || e.ty.is_vector())
                 && (ty.is_vector() || ty.is_integer())
                 && (e.ty.is_vector() || e.ty.is_integer())
-                && self.size_of(&ty) == 16
-                && self.size_of(&e.ty) == 16;
+                && self.size_of(&ty) == self.size_of(&e.ty);
             let ok = vector_cast
                 || ty == Ty::Void
                 || (ty.is_scalar()
@@ -1293,6 +1292,79 @@ impl<'a> Parser<'a> {
 
     fn builtin(&mut self, name: &str, loc: Loc) -> R<Expr<'a>> {
         let base = &name["__builtin_".len()..];
+        if matches!(base, "ia32_cmpps256" | "ia32_cmppd256") {
+            use keel_ir::{FloatCC, VectorType};
+            let args = self.builtin_args(3, loc)?;
+            let expected = if base == "ia32_cmpps256" {
+                VectorType::F32x8
+            } else {
+                VectorType::F64x4
+            };
+            if self.target != Target::X86_64LinuxGnu
+                || !matches!(args[0].ty, Ty::Vector(_, shape) if shape == expected)
+                || args[0].ty != args[1].ty
+            {
+                return Err(Error::new(
+                    loc,
+                    "AVX comparison requires matching packed floating vectors on x86-64",
+                ));
+            }
+            let cc = match args[2]
+                .ty
+                .is_integer()
+                .then(|| eval_constant(&args[2], false))
+                .flatten()
+            {
+                Some(Const::Int(0)) => FloatCC::Eq,
+                Some(Const::Int(3)) => FloatCC::Uno,
+                Some(Const::Int(4)) => FloatCC::Ne,
+                Some(Const::Int(7)) => FloatCC::Ord,
+                Some(Const::Int(17)) => FloatCC::Lt,
+                Some(Const::Int(18)) => FloatCC::Le,
+                Some(Const::Int(29)) => FloatCC::Ge,
+                Some(Const::Int(30)) => FloatCC::Gt,
+                _ => {
+                    return Err(Error::new(
+                        loc,
+                        "AVX comparison supports constant quiet predicates 0, 3, 4, 7, 17, 18, 29, 30",
+                    ));
+                }
+            };
+            let ty = args[0].ty;
+            return Ok(mk(
+                ExprKind::Builtin(Builtin::VectorFloatCompare(cc), self.slice(&args[..2])),
+                ty,
+                loc,
+            ));
+        }
+        if base == "shufflevector" {
+            let args = self.builtin_args_any()?;
+            let Some(Ty::Vector(_, shape)) = args.first().map(|e| e.ty) else {
+                return Err(Error::new(loc, "shufflevector requires vector operands"));
+            };
+            if args.len() != usize::from(shape.lanes()) + 2 || args[0].ty != args[1].ty {
+                return Err(Error::new(
+                    loc,
+                    "shufflevector requires matching vectors and exactly one index per result lane",
+                ));
+            }
+            for index in &args[2..] {
+                if !index.ty.is_integer()
+                    || !matches!(eval_constant(index, false), Some(Const::Int(n)) if n >= 0 && n < i64::from(shape.lanes()) * 2)
+                {
+                    return Err(Error::new(
+                        index.loc,
+                        "shufflevector index must be a constant in the concatenated input lane range",
+                    ));
+                }
+            }
+            let ty = args[0].ty;
+            return Ok(mk(
+                ExprKind::Builtin(Builtin::VectorShuffle, self.slice(&args)),
+                ty,
+                loc,
+            ));
+        }
         if base == "complex" {
             let args = self.builtin_args(2, loc)?;
             let elem = args[0].ty;

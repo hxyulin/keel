@@ -4,6 +4,12 @@ use std::path::Path;
 pub const ROOT: &str = "<keel>/include";
 pub fn get(name: &Path) -> Option<&'static str> {
     Some(match name.to_str()? {
+        "xmmintrin.h" => include_str!("../include/xmmintrin.h"),
+        "emmintrin.h" => include_str!("../include/emmintrin.h"),
+        "smmintrin.h" => include_str!("../include/smmintrin.h"),
+        "avxintrin.h" => include_str!("../include/avxintrin.h"),
+        "avx2intrin.h" => include_str!("../include/avx2intrin.h"),
+        "immintrin.h" => include_str!("../include/immintrin.h"),
         "stddef.h" => include_str!("../include/stddef.h"),
         "stdarg.h" => include_str!("../include/stdarg.h"),
         "stdint.h" => include_str!("../include/stdint.h"),

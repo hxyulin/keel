@@ -157,6 +157,10 @@ pub enum GenericAtomicOp {
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum Builtin {
+    /// Two equal vector inputs followed by constant lane indices.
+    VectorShuffle,
+    /// Quiet AVX comparison; the integer mask is bitcast back to the C float vector.
+    VectorFloatCompare(keel_ir::FloatCC),
     /// Constructs a complex pair without arithmetic on either component.
     Complex,
     /// Explicit C memory builtin; three operands, or four for its checked

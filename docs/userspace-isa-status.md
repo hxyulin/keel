@@ -24,6 +24,10 @@ Select the intended level explicitly with `--cpu-level v1`, `v2` or `v3` on the
 x86 target. The historical `legacy` default permits POPCNT/SSE4.1 and is not a
 strict-v1 target. IR/codegen coverage is not a promise that the C frontend
 implements every vendor intrinsic header or that every loop auto-vectorizes.
+The C frontend exposes bounded 16-byte vectors and x86-only 32-byte vectors,
+plus a [documented SSE/AVX header and builtin subset](c-x86-intrinsics.md).
+This source surface uses the same typed IR and feature gates; complete
+`immintrin.h` compatibility remains outside its contract.
 AVX-512 and optional post-baseline ARM extensions are outside this goal.
 
 ## Strict-v1 userspace contract and audit
