@@ -79,8 +79,109 @@ their scalar contracts; vector atomics are not introduced. Supported vector
 Vector computation and lane operations are pure, non-trapping and have no memory
 effects. Loads/stores retain their existing effect classification. Generic GVN,
 DCE, scheduling, CFG/phi simplification and exact-type memory forwarding work;
-scalar constant folding and integer combining do not reinterpret vector lanes.
-There is no vector-specific constant folding or arithmetic combining yet.
+scalar constant folding does not reinterpret vector lanes. Bounded vector
+transport and integer bitwise identities use the existing instruction combiner,
+as described below; general vector arithmetic constant folding is separate.
+
+## Bounded vector canonicalization
+
+`instcombine` removes extracts of splats and inserted lanes, redirects extracts
+through shuffles and unaffected inserted lanes, removes insertion of the same
+extracted lane or splatted scalar, and bypasses immediately overwritten inserts.
+Identity shuffles become their selected input. Shuffles selecting only one
+splatted scalar become a splat. Equal-input and other single-source shuffles use
+`vshuffle x, x` with indices in the first input's lane range.
+
+Composition inspects one shuffle producer level per worklist visit, requires
+unshared intermediate shuffles and at most two original source vectors, and
+creates no instructions. The existing dependency worklist revisits rewritten
+instructions and consumers. Genuine two-source shuffles retain their written
+operand order; composed forms retain source order from the written producer
+operands. This contract was coordinated with the x86 instruction-selection
+owner. It keeps the established ZIP/UZP/TRN/window surface available to selectors.
+It is an IR simplification, not a target cost model: composing packed
+permutations can still produce a permutation a backend scalarizes. Shared
+intermediates and compositions requiring three sources remain unchanged.
+
+An integer splat mask selects the appropriate entire arm using the lane-width
+constant's zero/nonzero value; `1` is true, and `256` in an i8 lane is false.
+Integer AND/OR idempotence and zero/all-ones bitwise identities are simplified.
+Arbitrary masks are never reinterpreted as all-ones comparison masks. Vector
+bitcast chains collapse without converting lane values, preserving signed zeros
+and NaN payloads. Low-lane widening chains compose signed/signed,
+unsigned/unsigned and unsigned-then-signed extensions. Signed-then-unsigned,
+high-lane, narrowing, saturation and pairwise conversions retain their original
+semantics and are not canceled by these rules.
+
+Existing GVN shares dominating duplicate splats and vector computations; aliases,
+bitcasts and scalar selects provide the existing vector copy surface. DCE removes
+dead pure producers. These rules do not create, move, narrow or widen memory
+operations, add fault-freedom promises, touch architectural intrinsics or
+reassociate floating arithmetic. Existing potentially trapping, volatile and
+atomic effects remain pinned, including loads whose result becomes unused.
+The bounded Fast local pass shares local rules but does not compose shuffle
+producers because it has no single-use information. Loop discovery and loop
+vectorization are unchanged.
+
+### Correctness evidence (2026-10-23)
+
+`cargo test -p keel-opt --offline --locked` passes. The dedicated
+`vector_canonicalize` integration test checks positive and negative rules,
+all 18 shapes, noncanonical nonzero masks, signedness boundaries, effect order,
+out-of-layout consumers, Fast cleanup and both instruction-combiner and cleanup
+pipeline idempotence. An independent lane oracle checks all 4,096 four-lane
+outer shuffle maps over two inner maps.
+
+`cargo test -p keel-codegen --lib --test vector_ir --test vector_widen_aarch64
+--test vector_widen_x86 --test vector_mask_proofs --test vector_canonicalize
+--offline --locked` passes. The new codegen test checks three selection tiers and
+two allocation tiers, exact text/direct object equality and independent Clang
+assembly on x86 Linux and Apple AArch64. On the native Apple AArch64 host, both
+original and optimized objects pass 256 bit-pattern cases per configuration,
+including infinities, signed zeros, signaling/quiet NaN payloads and all byte
+values for unsigned-then-signed widening. x86 execution was not performed in
+this track. This is finite evidence, not exhaustive FP or memory validation.
+
+### Applicability evidence
+
+The four-function codegen sample covers lane/bitcast copies, composed qword
+shuffles, a nonzero splat mask and a widening chain. Its 100-copy synthetic
+corpus (400 functions) falls from 2,500 to 1,600 IR instructions after
+`instcombine,gvn,instcombine,dce`. The sample's total text shrinks from 435 to
+233 bytes on x86 Baseline, 403 to 217 on x86 Trees/Full, and 248 to 200 on
+AArch64; both allocators give the same sizes. These are output-size results,
+not runtime speedup measurements or evidence of general application wins.
+
+Four checked-in scalar helper fixtures (198 input instructions) and 34 retained
+Lua IR files (81,220 input instructions) produce identical output before/after
+this change, with 193 and 51,442 output instructions respectively. The retained
+Lua captures are diagnostic application IR, not a versioned application corpus.
+No concrete new loop-vectorization missed case was established by these probes.
+
+### Compilation-cost evidence
+
+An external release-mode driver compares baseline
+`9ffab6bcdb610b74f9ac0fd92bfd6b1a4dd848a0` with this change on MacHost. It parses
+once, then times module cloning, the four-pass cleanup pipeline and destruction;
+parsing, backend compilation and Rust build time are excluded. Each sample runs
+50 corpus cleanups; each process takes nine samples and discards the first.
+The order is baseline/change/change/baseline, under the shared
+`suite/fast_opt_locked.py` lock. Each checkout has its own cargo-managed target.
+
+Median time per complete corpus cleanup is about 0.0198 ms for both scalar
+helper variants (+0.16%), 10.503 versus 10.553 ms for Lua (+0.48%), and 0.265
+versus 0.401 ms for the synthetic vector corpus (+51.2%). The two process
+medians span 10.481–10.524 ms before and 10.508–10.597 ms after for Lua. These
+wall-clock probes do not establish a scalar regression or improvement; the
+vector-heavy synthetic corpus clearly pays extra work for the new rewrites.
+There is no end-to-end compiler-throughput or runtime claim.
+
+Build metadata, external benchmark driver/source snapshots, corpus hashes,
+raw timings, test logs, generated IR/assembly/objects and the native oracle are
+outside Git at `/tmp/keel-vector-canonical-20261023/`. To reproduce the retained
+cost probe, run `python3 suite/fast_opt_locked.py /tmp/vector-cost.jsonl python3
+/tmp/keel-vector-canonical-20261023/measure.py`. To retain new codegen captures,
+set `KEEL_VECTOR_CANONICAL_EVIDENCE` when running its dedicated test.
 
 ## x86 lowering and calling convention
 
