@@ -1,8 +1,8 @@
 # Bounded C SSE/AVX intrinsic subset
 
 Keel owns small `xmmintrin.h`, `emmintrin.h`, `smmintrin.h`, `avxintrin.h`,
-`avx2intrin.h` and `immintrin.h` headers. They are embedded in the compiler;
-no Clang resource directory is needed. These headers are for the
+`avx2intrin.h`, `immintrin.h` and a PCLMUL-only `wmmintrin.h` header.
+They are embedded in the compiler; no Clang resource directory is needed. These headers are for the
 `x86_64-unknown-linux-gnu` target. This is a useful, finite source-compatibility
 subset, **not complete `immintrin.h` compatibility** or general C
 auto-vectorization. Other vendor headers and intrinsics remain unsupported.
@@ -21,6 +21,12 @@ void add8(float *out, const float *a, const float *b) {
     _mm256_storeu_ps(out, _mm256_add_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b)));
 }
 ```
+
+The separately included `wmmintrin.h` provides `_mm_clmulepi64_si128` and the
+checked `__builtin_ia32_pclmulqdq128`, using existing `__m128i`. This requires
+`--target-features +pclmulqdq` even at v3; header inclusion alone is legal without
+it. It adds no AES or full crypto-header support. See the
+[PCLMULQDQ contract](x86-pclmulqdq.md) for controls, semantics and finite validation.
 
 ## Supported names
 
@@ -77,10 +83,11 @@ separate names, not arbitrary suffix combinations.
   floating-environment contract for signaling NaNs, exception flags/traps, or
   differences between quiet and signaling SSE instructions.
 
-Header functions use C vectors, scalar lane access, and fixed-size
+The SSE/AVX header functions use C vectors, scalar lane access, and fixed-size
 `__builtin_memcpy`; shuffles and AVX comparisons use the checked builtins below.
 All lower through the existing typed IR, optimization, ABI, feature gating and
-instruction selection. No intrinsic-specific machine-code path is introduced.
+instruction selection. The explicit PCLMUL builtin uses its dedicated typed
+intrinsic and lowering described in the linked contract.
 
 ## Builtins and diagnostics
 

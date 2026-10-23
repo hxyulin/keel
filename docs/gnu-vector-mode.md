@@ -157,6 +157,10 @@ python3 suite/fast_opt_locked.py /tmp/keel-c-broadcast-<unique>.jsonl \
   --test gnu_vector_abi --test gnu_types --test x86_intrinsics
 ```
 
+The optional [legacy PCLMULQDQ subset](x86-pclmulqdq.md) reuses the existing
+`i64x2` representation and 128-bit ABI through an explicit intrinsic and small
+C wrapper. It adds no vector type, raw-wide ABI or automatic polynomial recognition.
+
 ## ABI boundary and validation
 
 Direct vector arguments/results use the existing SIMD ABI: Darwin arm64 v0–v7
