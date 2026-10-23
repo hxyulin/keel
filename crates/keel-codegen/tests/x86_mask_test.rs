@@ -280,6 +280,45 @@ fn commuted_mask_and_shared_condition_keep_exact_register_recipe() {
     }
 }
 
+fn signed_byte_source(name: &str, cc: &str, consumer: &str) -> String {
+    source(name, i32::MIN, cc, consumer, true)
+        .replace("(i32, i32, i32)", "(ptr, i32, i32)")
+        .replace("v0: i32", "v0: ptr")
+        .replace(
+            "v3 = iconst",
+            "v20 = load.i8 align 1 v0\n v21 = sext.i32 v20\n v3 = iconst",
+        )
+        .replace("and v0, v3", "and v21, v3")
+        .replace("xor v7, v0", "xor v7, v21")
+}
+
+#[test]
+fn signed_byte_cover_and_mask_test_compose_at_all_roots() {
+    for consumer in ["bool", "branch", "select"] {
+        let src = signed_byte_source("f", "eq", consumer);
+        for s in [
+            SelectionTier::Baseline,
+            SelectionTier::Trees,
+            SelectionTier::Full,
+        ] {
+            for a in [AllocationTier::Fast, AllocationTier::Full] {
+                for pools in [&EMPTY, &ONE, &keel_codegen::x86_64::REGISTERS] {
+                    let (text, _) = compile(&src, &s, a, pools, Features::for_level(CpuLevel::V1));
+                    assert_eq!(tests(&text).len(), 1, "{text}");
+                    assert!(!text.contains("\tand\t"), "{text}");
+                    assert_eq!(
+                        text.lines()
+                            .filter(|l| l.starts_with("\tmovsx\t") && l.contains("byte ptr"))
+                            .count(),
+                        1,
+                        "{text}"
+                    );
+                }
+            }
+        }
+    }
+}
+
 // Real SSA aliases differ from two operands assigned the same physical register.
 fn alias_source(m: &mut keel_ir::Module) {
     for f in &mut m.functions {
@@ -388,6 +427,18 @@ static uint32_t random32(void) { state ^= state<<13; state ^= state>>17; state ^
                 "(x&UINT32_C(0x80000000))?z:y"
             }
         );
+    }
+    for cc in ["eq", "ne"] {
+        for consumer in ["bool", "branch", "select"] {
+            let name = format!("combined_{cc}_{consumer}");
+            ir += &signed_byte_source(&name, cc, consumer);
+            c += &format!("extern uint32_t {name}(void*,uint32_t,uint32_t);\n");
+            checks += &format!(
+                "{{ int8_t byte=(int8_t)x; uint32_t sx=(uint32_t)(int32_t)byte; uint32_t b=((sx&UINT32_C(0x80000000)) {} 0); assert({name}(&byte,y,z)==(({})^sx)); }}\n",
+                if cc == "eq" { "==" } else { "!=" },
+                if consumer == "bool" { "b" } else { "b?y:z" }
+            );
+        }
     }
     for (name, kernel, expected) in [
         (
@@ -500,7 +551,7 @@ if(edge<2) {{ memset(p,0x83,{width}); mem_{tag}(p,&out,marker); assert(*marker==
                 for level in [CpuLevel::V1, CpuLevel::V2, CpuLevel::V3] {
                     let (text, obj) =
                         compile_module(&module, &s, a, pools, Features::for_level(level));
-                    assert_eq!(tests(&text).len(), 94, "{text}");
+                    assert_eq!(tests(&text).len(), 100, "{text}");
                     let tag = format!("{s:?}-{a:?}-{pi}-{level:?}");
                     fs::write(dir.join(format!("{tag}.o")), obj).unwrap();
                     fs::write(dir.join(format!("{tag}.s")), text).unwrap();
