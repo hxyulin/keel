@@ -1672,3 +1672,12 @@ The separate [extended runtime kernels](runtime-kernels/README.md) provide ten
 ordinary integer C workloads with independent Python oracles and locked
 None/Fast/Full/Clang measurements. Their results remain separate from the fixed
 21-kernel corpus and Lua workloads.
+
+## Small SIMD comparisons
+
+The opt-in [SIMD comparison harness](simd-compare/README.md) pairs eight explicit
+IR and supported C cases across x86 v1/v2/v3 and baseline Apple ARM64. It keeps
+frontend/backend diagnostics, correctness, instruction evidence, spill
+observations, code size, compilation time and native runtime separate. Foreign
+or unproven ISA profiles never execute. Default runs check correctness and
+code generation; `--benchmark` enables measurements under the shared suite lock.

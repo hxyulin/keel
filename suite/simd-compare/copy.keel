@@ -1,0 +1,6 @@
+func @kernel(ptr, ptr, ptr) {
+block0(v0: ptr, v1: ptr, v2: ptr):
+    v3 = load.i32x4 align 1 v1
+    store align 1 v3, v0
+    return
+}
