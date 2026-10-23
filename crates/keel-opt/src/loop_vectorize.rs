@@ -79,6 +79,11 @@ impl crate::Pass for LoopReduce {
         let changed = run_candidates(f, target, true);
         normalize_conditional_loop(f, target) || changed
     }
+    fn run_with_context(&self, f: &mut Function, context: crate::OptimizationContext) -> bool {
+        let changed = run_candidates_with_context(f, context, true, false);
+        // Conditional normalization and every other recipe retain 128-bit policy.
+        normalize_conditional_loop(f, context.target) || changed
+    }
     fn deterministic(&self) -> bool {
         true
     }
@@ -818,7 +823,11 @@ fn reduction_load(
     addr: Value,
 ) -> Value {
     flags.align = flags.align.min(source.bytes().unwrap());
-    if shape == reduction {
+    // The wide signed-i32 pilot consumes all four source lanes, exactly 16 bytes.
+    // Do not generalize grouped loads for other recipes or unused physical lanes.
+    if shape == reduction
+        || reduction == VectorType::I64x4 && shape == VectorType::I32x4 && source == Type::I32
+    {
         return emit(
             f,
             block,
@@ -1631,6 +1640,61 @@ fn run_candidates_with_budget(
     reductions: bool,
     fast: bool,
 ) -> bool {
+    run_candidates_with_context(f, target.into(), reductions, fast)
+}
+
+/// Upgrade only an already eligible plain load.i32 -> sext.i64 -> iadd recurrence.
+/// Eligibility has proved nonvolatile memory, one ordered read, no escaping values,
+/// and the existing range/pointer guards. No source arithmetic changes its ring.
+fn prefer_wide_plain_signed_sum(f: &Function, c: &mut Candidate) {
+    let Output::Sum {
+        accumulator,
+        update,
+        ..
+    } = c.output
+    else {
+        return;
+    };
+    if c.shape != VectorType::I64x2
+        || c.addresses.len() != 1
+        || !c.extra_sums.is_empty()
+        || !c.casts.is_empty()
+        || c.vectors.len() != 3
+        || c.widening_inputs.len() != 1
+    {
+        return;
+    }
+    let D::Binary { op: B::Iadd, args } = *f.inst_data(def(f, update).unwrap()) else {
+        return;
+    };
+    let contribution = if f.resolve(args[0]) == accumulator {
+        args[1]
+    } else if f.resolve(args[1]) == accumulator {
+        args[0]
+    } else {
+        return;
+    };
+    let contribution = f.resolve(contribution);
+    let Some(&(input, ConvertOp::Sext)) = c.widening_inputs.get(&contribution) else {
+        return;
+    };
+    if !def(f, input).is_some_and(
+        |i| matches!(f.inst_data(i), D::Load { ty: Type::I32, flags, .. } if !flags.volatile),
+    ) {
+        return;
+    }
+    c.shape = VectorType::I64x4;
+    c.widths.insert(contribution, VectorType::I64x4);
+    // Source stays i32x4; reduction_load now reads exactly its four lanes.
+}
+
+fn run_candidates_with_context(
+    f: &mut Function,
+    context: crate::OptimizationContext,
+    reductions: bool,
+    fast: bool,
+) -> bool {
+    let target = context.target;
     let headers: Vec<_> = f.blocks().collect();
     let mut changed = false;
     // Rejected candidates do not change the function. Share these whole-function
@@ -1640,7 +1704,7 @@ fn run_candidates_with_budget(
         if f.block_params(header).len() != if reductions { 2 } else { 1 } {
             continue;
         }
-        if let Some(c) = analyze(
+        if let Some(mut c) = analyze(
             f,
             header,
             target,
@@ -1652,6 +1716,12 @@ fn run_candidates_with_budget(
         ) {
             if fast && (c.addresses.len() != 1 || c.vectors.len() > 8) {
                 continue;
+            }
+            if !fast
+                && target == VectorTarget::X86Sse2
+                && context.capabilities.prefer_wide_signed_i32_sum()
+            {
+                prefer_wide_plain_signed_sum(f, &mut c);
             }
             transform(f, c, target);
             analysis = None;

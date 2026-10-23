@@ -67,7 +67,10 @@ fn effective_capabilities_distinguish_transport_recipe_and_preference() {
         if features.explicit {
             assert!(vector_capabilities(Target::Aarch64LinuxGnu, &selector).is_err());
         } else {
-            assert_eq!(vector_capabilities(Target::Aarch64LinuxGnu, &selector).unwrap(), keel_ir::VectorCapabilities::BASELINE);
+            assert_eq!(
+                vector_capabilities(Target::Aarch64LinuxGnu, &selector).unwrap(),
+                keel_ir::VectorCapabilities::BASELINE
+            );
         }
     }
     let mut invalid = Features::for_level(CpuLevel::V1);

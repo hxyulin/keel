@@ -651,3 +651,115 @@ not imply direct one-operation lowering of every record. Indexed broadcasts,
 constant materialization, explicit high-half placement, table sequences and
 post-index `ptradd` remain valid multi-instruction routes. Optional FP16
 arithmetic and crypto/SVE/SME extensions remain outside this baseline.
+
+## Effective optimizer target context and signed widening pilot
+
+`keel_ir::VectorCapabilities` is a small immutable value separating maximum
+accepted value width, complete signed-i32 sum recipe width, and preferred width.
+`keel_opt::OptimizationContext` pairs it with the existing `VectorTarget`.
+The additive `run_passes_with_context_and_options` and
+`run_pipeline_with_context_and_options` entrypoints have observed counterparts.
+Existing target APIs retain their 128-bit policy, and default `Pass` context
+methods delegate to the existing target/canonical overrides. `OptimizeOptions`
+is unchanged. Analyses and deterministic-pass version skips remain scoped to
+one invocation; no target-dependent persistent cache is introduced.
+
+`keel_codegen::x86_features::vector_capabilities(target, selector)` first
+validates the target and projects the selector's **effective** features, including
+explicit additions/removals. It does not detect the host or infer width from a
+CPU level name. AVX allows 256-bit values; AVX2 permits and prefers this complete
+integer recipe. V3 with `-avx2` therefore accepts wide values but keeps this
+recipe at 128 bits. Legacy, strict v1/v2, Portable and baseline ARM retain 128-bit
+optimization. AES and PCLMULQDQ do not affect width. A library caller can retain
+128-bit preference independently of accepting the wider recipe.
+
+The CLI uses the same projection before optimization, including when emitting
+only IR. `opt --target x86_64-unknown-linux-gnu` accepts `--cpu-level` and
+`--target-features` as `compile` and `cc` do. Existing flag semantics remain:
+repeated feature lists replace earlier modifiers relative to the selected level;
+a later level selection resets the feature contract. Invalid dependencies fail
+before optimization. Reports record `context.value_bits`,
+`context.signed_i32_sum_bits`, `context.preferred_bits` and a normalized
+`context.effective_x86_features` fingerprint on every invocation, alongside the
+existing target. Fingerprint bits 0–20 are, in order: aes, avx, bmi1, bmi2,
+clflush, pclmulqdq, cx16, lahf_sahf, popcnt, sse3, ssse3, sse41, sse42, avx2,
+f16c, fma, lzcnt, movbe, xsave, osxsave, explicit. Non-x86 projections and old optimizer API contexts
+use zero. The context and bit order make effective modifiers reproducible.
+
+The Full `loop-reduce` pilot upgrades only an already eligible, single-stream
+`load.i32 -> sext.i64 -> iadd` wrapping sum. It retains four independent
+accumulators, now `i64x4`, with four exact 16-byte `load.i32x4` operations followed
+by `swiden_low.i64x4`. One group consumes 16 inputs at byte offsets 0/16/32/48,
+advances 64 bytes, and requires at least 16 elements. The existing cross-half
+finish, scalar tail, initial accumulator, negative/reversed-range checks and
+pointer-overflow fallback remain in place. External arguments/results stay
+scalar. Eligibility still rejects volatile/extra faulting reads and side effects;
+no source-width arithmetic is reassociated or widened. Unsigned, conditional,
+floating, multistream and Fast recipes retain their previous widths. `ALL_128`
+is unchanged. This is not general loop widening, a cost model, ABI widening,
+implicit FMA, or a vendor-header coverage claim.
+
+### Finite validation and measurement (2026-10-23)
+
+Focused tests are `keel-opt --test vector_context --test loop_vectorize`,
+`keel --test vector_context`, and `keel-codegen --test x86_widen_sum`.
+Context plumbing also has `keel-codegen --test x86_features` and CLI unit tests.
+The native sum gate executes on Linux x86-64 with the required ISA, otherwise
+retaining cross-object validation only. It checks text/typed/chunked byte parity
+and operand-dependent feature legality at v1/v2/v3/v3-minus-AVX2, all three
+selection tiers, both allocators, and normal/empty register pools (48 profiles).
+Native guarded-page cases cover every length 0–81, both accessible-page edges,
+unaligned pointers, starts 0–5, signed extrema and a nonzero wrapping seed.
+Reversed ranges, negative starts/bounds and source-address scaling overflow
+exercise scalar fallback. This is finite correctness evidence, not exhaustive
+fault certification or execution on a strict-v1-only processor.
+
+Native release validation passed on LinuxHost (Ryzen 9 9950X3D), including the
+integrated PMULLD controls, release emission-legality guard, and independent
+optional AES/PCLMUL gates. Local clippy completed with repository warnings and
+no warning in the new regression files. Measurements used
+frozen current-main `6ff8911b` (including reviewed PMOV and PMULLD improvements) and the
+candidate, CPU 2 affinity, the shared host lock, one warmup and seven shuffled
+paired rounds. The maintained `runtime-kernels` source, driver and independent
+Python oracle were reused; all twelve cases passed at thirteen lengths for each
+compiler/profile. Runtime samples below are median ns/call, including call and
+checksum overhead, for the maintained `widen32` case:
+
+| Length | Main v3 | Wide pilot v3 | Main / pilot |
+| --- | ---: | ---: | ---: |
+| 8 | 2.06 | 3.07 | 0.670x |
+| 17 | 2.37 | 3.30 | 0.718x |
+| 257 | 14.26 | 51.95 | 0.274x |
+| 4096 | 223.59 | 835.68 | 0.268x |
+| 65536 | 3602.33 | 13228.99 | 0.272x |
+| 1048576 | 56745.42 | 209195.89 | 0.271x |
+
+**The pilot regresses on this host; wider registers are not evidence of a gain.**
+At length 1048576 the seven paired main/pilot ratios range 0.269–0.278x.
+V1/v2 `widen32` instruction bytes are identical between compilers; their long
+runtime ratios are 1.000x/1.005x, with ordinary sample noise at shorter lengths.
+At v3, function text grows 256→454 bytes. The steady loop grows from 15
+instructions/8 inputs (61 bytes) to 45/16 inputs (184 bytes); the finish grows
+8→18 instructions (31→83 bytes). Neither loop spills vector accumulators. The
+baseline finish uses one vector stack store and two scalar reads; the wide
+finish uses registers. Both functions have a scalar argument spill/reload outside
+the loop. Wide lowering emits numerous scratch-register copies and separate
+legacy SSE loads alongside AVX widening/adds. These observations identify backend
+work to investigate; they do not establish which effect causes the slowdown.
+No backend change or unroll tuning is included in this pilot.
+
+Compile time was measured separately as fresh process-to-object time for all
+twelve maintained kernels, excluding link/runtime and assembly capture. Median
+main→candidate times were 2.735→2.728 ms (v1), 2.727→2.715 ms (v2), and
+2.728→3.076 ms (v3), a 12.7% v3 increase. No compile-time or runtime improvement
+is claimed. This checkpoint supplies correctness and capability plumbing, but
+its default v3 preference needs a performance decision before integration.
+Artifacts on LinuxHost are `/tmp/keel-wide-measure-rebased-4188196c/` (compiler hashes, exact
+flags, raw rounds, objects, assembly, disassembly and summary),
+`/tmp/keel-wide-rebased-measure-lock.jsonl`, and
+`/tmp/keel-wide-rebased-native.log`. Supplemental logs are
+`/tmp/keel-wide-rebased-final-guard.log` and
+`/tmp/keel-wide-rebased-final-optionals.log`. The compiler source snapshot is
+`/tmp/keel-wide-candidate-4188196c`; subsequent checkpoint changes only update
+this documentation and remove a test-style warning. All generated artifacts stay
+outside Git.
