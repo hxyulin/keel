@@ -2,11 +2,14 @@
 
 This download-free companion to the application suite compares explicit Keel IR
 and supported GNU C vectors. It changes no production optimization policy.
-Eight paired cases cover wrapping u32 add/multiply, signed i32 comparison masks,
+Eleven paired cases cover wrapping u32 add/multiply, signed i32 comparison masks,
 signed low i32-to-i64 widening, a two-input shuffle, wrapping sum reduction,
-16-byte copy and finite f32 addition. Pointer-only boundaries avoid vector ABI
+16-byte copy, finite f32 addition, a one-source dword permutation, a two-source
+low/high-pair dword shuffle and unsigned byte ordering masks. Pointer-only boundaries avoid vector ABI
 confounders. C widening/shuffle/reduction use supported lane expressions; they
 are source equivalents, not assertions that the frontend emits the same IR.
+The two focused permutations use the supported `__builtin_shufflevector` surface;
+this does not assume complete vendor intrinsic or header compatibility.
 See [SIMD IR](../../docs/simd-ir.md) and
 [C vector limits](../../docs/gnu-vector-mode.md). This is a small maintained
 sample, not exhaustive ISA, ABI, FP exception, memory-fault or throughput coverage.
@@ -121,6 +124,67 @@ observed only in part and remain uncontrolled. Missing observations are not
 proof of identical run conditions. `modeled_estimates` is explicitly null:
 this runner does not run llvm-mca or mix model predictions with native samples.
 Existing pattern-lab model experiments remain separate.
+
+The focused selection cases are deliberately compact:
+
+- `permute-dword`: `[a2,a0,a3,a1]` retains every input lane and exercises
+  one-source packed dword selection, including C's repeated-source form.
+- `shuffle-pairs`: `[a1,a0,b3,b2]` exercises the low pair from one source and
+  high pair from the other. The original `shuffle` still covers a different,
+  interleaved mask that requires the general path.
+- `compare-u8`: unsigned byte `<` returns all-ones/zero bytes. Every lane sees
+  0/255, 127/128 in both orders and equality at all four boundary values,
+  followed by seeded random bytes. This targets the sign-bias recipe; it does
+  not claim coverage of every predicate or all 65,536 operand pairs.
+
+These cases use the existing scalar Python oracles and native driver, including
+all output bytes, exact aliases, canaries and the unaligned explicit-IR path.
+Pointer-only calls, exact memory widths and scalar evaluation rules are retained;
+no FP arithmetic or environment contract is added. Selection documentation in
+[x86 SIMD selection](../../docs/x86-simd-selection.md) describes broader semantic
+and encoding evidence. Inspect native objects for `pshufd`, `shufps` and
+`packsswb` when evaluating the improvements; those observations are not ordinary
+correctness assertions. This sample does not cover arbitrary masks, register
+pressure, exhaustive signedness combinations or whole-application performance.
+
+The prior frozen `74ecf5db` → `3f5130a2` comparison of the original eight cases
+on AMD 9950X3D and Apple M5 Max emitted identical text (old/new runtime ratios
+0.995–1.002x). The maintained longer positive32/adjacent/widen32 loops likewise
+emitted identical Keel code. That null result remains valid: these added cases
+address a coverage gap, not evidence that the earlier workloads became faster.
+For a small follow-up, reuse verified frozen binaries and the identical current
+corpus with `--cases permute-dword shuffle-pairs compare-u8 --variants full
+--benchmark --rounds 7 --repeats 1000000`; preserve host, flags and driver path.
+Inspect code alongside samples and report call-overhead sensitivity rather than
+inferring an application speedup from compact kernels.
+
+A bounded follow-up on 2026-10-23 reused those frozen release/default-feature
+binaries after verifying their recorded SHA-256s. It ran only the three new
+cases, Full selection/allocation, one warmup and seven measured rounds of
+64,000,000 calls, with identical corpus/driver sources and flags within each
+host. LinuxHost used CPU 2. Old and new were separate serial campaigns, so drift
+between revisions remains uncontrolled. Both C and explicit IR passed checks.
+
+On LinuxHost, at every v1/v2/v3 level, `permute-dword` text shrank 84 → 38 bytes
+and `shuffle-pairs` 90 → 54 bytes. Native disassembly replaced stack-based
+scalar lane movement with `pshufd 0x72` and `shufps 0xb1`, respectively.
+Old/new median runtime ratios across C/IR were 4.054–4.065x and 4.194–4.205x
+on v1/v2; v3 measured 3.360x and 3.444–3.463x. These are observations of this
+call/checksum driver on AMD 9950X3D, not isolated instruction throughput or
+application speedups. `compare-u8` text shrank 90 → 73 bytes and its six-step
+bias construction became `pcmpeqd; psllw 7; packsswb`, but runtime ratios
+0.992–1.005x were inconclusive. Unchanged Clang controls ranged 0.995–1.004x.
+CLI-to-object compile ratios for Keel ranged 0.998–1.015x; startup/I/O are
+included and no compile-time improvement is established.
+
+On Apple M5 Max, all old/new text was identical. Keel runtime ratios ranged
+0.972–1.167x while unchanged Clang controls shifted 1.075–1.101x; this run
+supports no ARM runtime improvement. Compile timings also shifted with unchanged
+code and are not attributed to selection. Raw objects, disassembly, all samples,
+commands and hashes for this finite follow-up were retained outside Git under
+`/tmp/keel-corpus-20261023/` on both hosts (the combined comparison is on MacHost).
+No compiler rebuild occurred during measurements and no benchmark threshold
+was added to CI.
 
 Normal unit tests have no timing thresholds or benchmark campaigns. They check
 CPU gating, hand-computed oracle edges, diagnostic contracts, honest spill
