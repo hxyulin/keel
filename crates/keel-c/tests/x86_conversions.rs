@@ -36,6 +36,30 @@ fn typed_bridge_diagnostics_pinning_and_v1_objects() {
         assert!(m.to_string().contains(&format!("x86_sse_{name}128")));
         let id = keel_ir::Intrinsic::from_name(&format!("x86_sse_{name}128")).unwrap();
         assert!(!id.info().pure);
+        assert_eq!(id.x86_legacy_raw_fp_opcode(), Some(name));
+        let input = if name == "cvtdq2ps" {
+            keel_ir::VectorType::I32x4
+        } else {
+            keel_ir::VectorType::F32x4
+        };
+        let output = if name == "cvtdq2ps" {
+            keel_ir::VectorType::F32x4
+        } else {
+            keel_ir::VectorType::I32x4
+        };
+        assert_eq!(id.info().params, &[keel_ir::Type::Vector(input)]);
+        assert_eq!(id.info().returns, &[keel_ir::Type::Vector(output)]);
+    }
+    for f in &m.functions {
+        for (_, inst) in f.layout_insts() {
+            let data = f.inst_data(inst);
+            if matches!(data, keel_ir::InstData::Intrinsic { id, .. } if id.is_x86_legacy_raw_fp_convert())
+            {
+                assert!(data.is_pinned());
+                assert!(data.may_trap());
+                assert_eq!(data.memory_effects(), keel_ir::MemoryEffects::Barrier);
+            }
+        }
     }
     for (index, name) in NAMES.iter().enumerate() {
         let base = format!("__builtin_keel_sse2_{name}");
@@ -56,7 +80,14 @@ fn typed_bridge_diagnostics_pinning_and_v1_objects() {
                 "typedef unsigned int U __attribute__((vector_size(16)));typedef int W __attribute__((vector_size(32)));typedef double D __attribute__((vector_size(16)));typedef long long L __attribute__((vector_size(16)));typedef short S __attribute__((vector_size(16)));{prefix}{base}({args});return a;}}"
             );
             let error = compile(&src, target).unwrap_err();
-            assert!(error.contains(if args.is_empty() || args == "a,a" { "argument" } else { "SSE2 packed conversion requires" }), "wrong diagnostic: {error}");
+            assert!(
+                error.contains(if args.is_empty() || args == "a,a" {
+                    "argument"
+                } else {
+                    "SSE2 packed conversion requires"
+                }),
+                "wrong diagnostic: {error}"
+            );
         }
         // Prove the declarations themselves are valid before testing bad calls.
         compile(&format!("typedef unsigned int U __attribute__((vector_size(16)));typedef int W __attribute__((vector_size(32)));typedef double D __attribute__((vector_size(16)));typedef long long L __attribute__((vector_size(16)));typedef short S __attribute__((vector_size(16)));{prefix}return a;}}"), target).unwrap();
@@ -118,13 +149,33 @@ fn typed_bridge_diagnostics_pinning_and_v1_objects() {
             )
             .unwrap();
             assert_eq!(p.stats().text_bytes, 0);
-            let object = keel_asm::x86::assemble_program_object_with_features(&p, features).unwrap();
-            let pipeline = CodegenPipeline { selector: &selector, allocator: &AllocationTier::Full };
-            let text = keel_codegen::x86_64::compile_with_pipeline(&m, &keel_codegen::x86_64::REGISTERS, &pipeline).unwrap();
-            assert_eq!(object, keel_asm::x86::assemble_object_with_features(&text, features).unwrap());
-            for name in NAMES { assert!(text.contains(name)); }
+            let object =
+                keel_asm::x86::assemble_program_object_with_features(&p, features).unwrap();
+            let pipeline = CodegenPipeline {
+                selector: &selector,
+                allocator: &AllocationTier::Full,
+            };
+            let text = keel_codegen::x86_64::compile_with_pipeline(
+                &m,
+                &keel_codegen::x86_64::REGISTERS,
+                &pipeline,
+            )
+            .unwrap();
+            assert_eq!(
+                object,
+                keel_asm::x86::assemble_object_with_features(&text, features).unwrap()
+            );
+            for name in NAMES {
+                assert!(text.contains(name));
+            }
             let mut chunks = keel_asm::x86::ProgramAssembler::new(features);
-            keel_codegen::x86_64::compile_program_chunks_with_pipeline(&m, &keel_codegen::x86_64::REGISTERS, &pipeline, &mut |p| chunks.push(p)).unwrap();
+            keel_codegen::x86_64::compile_program_chunks_with_pipeline(
+                &m,
+                &keel_codegen::x86_64::REGISTERS,
+                &pipeline,
+                &mut |p| chunks.push(p),
+            )
+            .unwrap();
             assert_eq!(object, chunks.finish().unwrap());
         }
     }
