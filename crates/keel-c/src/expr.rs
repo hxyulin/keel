@@ -1530,6 +1530,49 @@ impl<'a> Parser<'a> {
                 loc,
             ));
         }
+        if let Some(id) = aes_builtin(base) {
+            let keygen = id == keel_ir::Intrinsic::X86Aeskeygenassist128;
+            let unary = id == keel_ir::Intrinsic::X86Aesimc128 || keygen;
+            let mut args = self.builtin_args(if unary && !keygen { 1 } else { 2 }, loc)?;
+            if self.target != Target::X86_64LinuxGnu
+                || !matches!(
+                    args[0].ty,
+                    Ty::Vector(Ty::Int(IntKind::LLong), keel_ir::VectorType::I64x2)
+                )
+                || (!unary && args[0].ty != args[1].ty)
+            {
+                return Err(Error::new(
+                    loc,
+                    "AES builtin requires matching __m128i vectors on x86-64",
+                ));
+            }
+            if keygen {
+                let n = args[1]
+                    .ty
+                    .is_integer()
+                    .then(|| eval_constant(&args[1], false))
+                    .flatten();
+                let Some(Const::Int(n)) = n else {
+                    return Err(Error::new(
+                        loc,
+                        "AESKEYGENASSIST requires an integer constant expression in 0..255",
+                    ));
+                };
+                if !(0..=255).contains(&n) {
+                    return Err(Error::new(
+                        loc,
+                        "AESKEYGENASSIST requires an integer constant expression in 0..255",
+                    ));
+                }
+                args[1] = mk(ExprKind::Int(n), INT, args[1].loc);
+            }
+            let ty = args[0].ty;
+            return Ok(mk(
+                ExprKind::Builtin(Builtin::X86Aes(id), self.slice(&args)),
+                ty,
+                loc,
+            ));
+        }
         if matches!(base, "ia32_cmpps256" | "ia32_cmppd256") {
             use keel_ir::{FloatCC, VectorType};
             let args = self.builtin_args(3, loc)?;
@@ -2993,4 +3036,18 @@ pub(crate) fn generic_overflow(name: &str) -> Option<OverflowOp> {
         "mul_overflow" => Some(OverflowOp::Umul),
         _ => None,
     }
+}
+
+/// Frontend recognition is independent of the target CPU feature selection.
+pub(crate) fn aes_builtin(base: &str) -> Option<keel_ir::Intrinsic> {
+    use keel_ir::Intrinsic::*;
+    Some(match base {
+        "ia32_aesenc128" => X86Aesenc128,
+        "ia32_aesenclast128" => X86Aesenclast128,
+        "ia32_aesdec128" => X86Aesdec128,
+        "ia32_aesdeclast128" => X86Aesdeclast128,
+        "ia32_aesimc128" => X86Aesimc128,
+        "ia32_aeskeygenassist128" => X86Aeskeygenassist128,
+        _ => return None,
+    })
 }

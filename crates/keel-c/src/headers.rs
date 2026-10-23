@@ -10,6 +10,8 @@ pub fn get(name: &Path) -> Option<&'static str> {
         "smmintrin.h" => include_str!("../include/smmintrin.h"),
         "avxintrin.h" => include_str!("../include/avxintrin.h"),
         "avx2intrin.h" => include_str!("../include/avx2intrin.h"),
+        "__keel_aes.h" => include_str!("../include/__keel_aes.h"),
+        "wmmintrin.h" => include_str!("../include/wmmintrin.h"),
         "immintrin.h" => include_str!("../include/immintrin.h"),
         "stddef.h" => include_str!("../include/stddef.h"),
         "stdarg.h" => include_str!("../include/stdarg.h"),

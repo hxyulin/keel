@@ -129,6 +129,9 @@ fn builtin(name: &str, target: Target) -> bool {
             )
         });
     };
+    if crate::expr::aes_builtin(base).is_some() {
+        return target == Target::X86_64LinuxGnu;
+    }
     if matches!(base, "ia32_pclmulqdq128" | "ia32_cmpps256" | "ia32_cmppd256") {
         return target == Target::X86_64LinuxGnu;
     }

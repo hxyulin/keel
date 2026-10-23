@@ -160,6 +160,8 @@ pub enum Builtin {
     /// Two equal vector inputs followed by constant lane indices.
     VectorShuffle,
     Pclmulqdq(u8),
+    /// Checked legacy AES-NI builtin with canonical i64x2 operands.
+    X86Aes(Intrinsic),
     /// Internal scalar broadcast after checked element conversion.
     VectorSplat,
     /// Quiet AVX comparison; the integer mask is bitcast back to the C float vector.

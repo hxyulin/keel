@@ -5,5 +5,6 @@
 #error "Keel x86 intrinsic headers require x86-64"
 #endif
 #include <avx2intrin.h>
+#include <wmmintrin.h>
 
 #endif /* _KEEL_IMMINTRIN_H */

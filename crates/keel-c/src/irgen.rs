@@ -4006,6 +4006,10 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     .intrinsic(Intrinsic::X86Pclmulqdq128, &[vals[0], vals[1], mode]);
                 self.b.function().inst_results(inst)[0]
             }
+            Builtin::X86Aes(id) => {
+                let inst = ins.intrinsic(id, &vals);
+                self.b.function().inst_results(inst)[0]
+            }
             Builtin::VectorFloatCompare(cc) => {
                 let mask = ins.vfcmp(cc, vals[0], vals[1]);
                 self.b.ins().convert(ConvertOp::Bitcast, e.ty.ir(), mask)
