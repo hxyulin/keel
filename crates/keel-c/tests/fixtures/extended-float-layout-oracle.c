@@ -5,8 +5,8 @@
 #include <string.h>
 
 typedef _Complex float TC __attribute__((__mode__(__TC__)));
-typedef _Complex long double TC_from_ld __attribute__((mode(TC)));
-typedef _Complex __attribute__((mode(TC))) long double TC_among;
+typedef _Complex long double TC_from_ld __attribute__((mode(__TC__)));
+typedef _Complex __attribute__((mode(__TC__))) long double TC_among;
 _Static_assert(__builtin_types_compatible_p(TC, TC_from_ld), "long double mode subject");
 _Static_assert(__builtin_types_compatible_p(TC, TC_among), "specifier mode subject");
 struct wrapped_tc { char before; TC value; char after; };
