@@ -55,7 +55,11 @@ fn compile(src: &str, sel: SelectionTier, alloc: AllocationTier, spill: bool) ->
 }
 fn direct_loads(text: &str) -> usize {
     text.lines()
-        .filter(|line| line.trim_start().starts_with("movq\txmm") && line.contains("qword ptr ["))
+        .filter(|line| {
+            (line.trim_start().starts_with("movq\txmm")
+                || line.trim_start().starts_with("pmovsxdq\txmm"))
+                && line.contains("qword ptr [")
+        })
         .count()
 }
 #[test]

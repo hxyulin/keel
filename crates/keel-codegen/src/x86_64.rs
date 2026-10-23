@@ -1327,7 +1327,7 @@ impl<'a> FunctionCompiler<'a> {
             HashMap::default()
         };
         let packed_low_loads = if present.vector_splat {
-            packed_load::select(func, &mut selection)
+            packed_load::select(func, &mut selection, pipeline.selector.x86_features().sse41)
         } else {
             HashMap::default()
         };
@@ -1958,7 +1958,15 @@ impl<'a> FunctionCompiler<'a> {
         if let Some(&addr) = self.packed_low_loads.get(&inst) {
             let at = self.mem(addr, S0, Type::I64);
             let d = self.def_freg(result);
-            self.emit(Opcode::Movq, [asm_arg(xmm(d)), asm_arg(&at)]);
+            let opcode = if matches!(
+                func.inst_data(inst),
+                InstData::Convert { op: ConvertOp::SwidenLow, .. }
+            ) {
+                Opcode::V2(keel_asm_ir::x86::V2Opcode::Pmovsxdq)
+            } else {
+                Opcode::Movq
+            };
+            self.emit(opcode, [asm_arg(xmm(d)), asm_arg(&at)]);
             self.def_done(result, d);
             return;
         }

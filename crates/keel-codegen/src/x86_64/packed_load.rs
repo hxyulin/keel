@@ -5,6 +5,7 @@ use keel_ir::fxhash::FxHashMap as HashMap;
 pub(super) fn select(
     func: &Function,
     selection: &mut crate::select::Selection,
+    sse41: bool,
 ) -> HashMap<Inst, Value> {
     // Every chain contains a vector splat; skip the use counts without one.
     if !func
@@ -99,14 +100,39 @@ pub(super) fn select(
             {
                 continue;
             }
+            // This closed signed i32 -> i64 chain can read its original m64
+            // directly into the final XMM result. Keep the generic low-half
+            // load cover for every other shape and effective feature profile.
+            let signed_dwords = sse41
+                && narrow == keel_ir::VectorType::I32x4
+                && wide == keel_ir::VectorType::I64x2
+                && chain.iter().all(|&i| {
+                    func.inst_loc(i) == func.inst_loc(load)
+                        && func.resolve(func.first_result(i)) == func.first_result(i)
+                        && !selection.conditions.contains_key(&i)
+                })
+                && matches!(
+                    func.inst_data(widen),
+                    InstData::Convert {
+                        op: ConvertOp::SwidenLow,
+                        ..
+                    }
+                );
             // Every admitted widening observes exactly the low eight bytes.
             // The upper splat lane is unobservable through its sole use chain.
-            // Move only across the adjacent pure splat, retaining the original
-            // load's selected address leaves and exact eight-byte footprint.
+            // Move only across adjacent pure vector operations, retaining the
+            // original load's address leaves and exact eight-byte footprint.
             let operands = selection.operands(func, load);
             selection.cover(load);
-            selection.set_operands(splat, operands);
-            selected.insert(splat, func.resolve(addr));
+            let root = if signed_dwords {
+                selection.cover(splat);
+                selection.cover(cast);
+                widen
+            } else {
+                splat
+            };
+            selection.set_operands(root, operands);
+            selected.insert(root, func.resolve(addr));
         }
     }
     selected
