@@ -237,6 +237,47 @@ AVX2 256-bit shifts, per-lane counts, byte shifts, rotates and the remainder of
 the vendor shift families remain queued. Saturation and numeric conversion
 wrappers are separate work.
 
+An independent review reapplied implementation `1f41f4eb` and candidate
+`d4fa1b77` onto clean main `0eb22fa9` in its own worktree. No blocking source
+semantic defect was found. Review commit `1f3e6ace` closes verification gaps:
+each wrapper must lower to its specific architectural intrinsic with legacy
+SSE2 tier-0 packed-pair metadata; distinct operand calls must each appear once
+in source order; both header inclusion orders must coexist with shifts,
+AES and PCLMUL while retaining optional-crypto feature diagnostics. Existing
+negative checks cover every private builtin's arity, signedness, nominal lane
+type, shape and target, including explicit ARM diagnostics.
+
+Fresh review runs passed all five suites above in debug and release: 16 tests
+per profile locally on Apple ARM64, and 18 per profile on LinuxHost, including
+GCC 16.2.0 and Clang 23.1.1 native saturation and shift execution. Local x86
+objects establish lowering/encoding, not native execution. The native widened
+scalar oracle uses bounded `int` arithmetic and unsigned byte copies; signed
+lane interpretation is explicit, avoiding narrow signed overflow or
+out-of-range signed conversions. Its exhaustive byte pairs and finite word
+edges/random cases exercise all eight wrappers and both signedness modes.
+The existing emission-guard unit test additionally passed locally in both
+profiles. All runs used the prescribed lock, cargo, offline/locked flags, two
+jobs and disabled link caching; no toolchain or host configuration changed.
+
+The frozen tested source is commit `1f3e6ace` (the final review documentation
+is separate), archived on both hosts as `/tmp/keel-sat-review-source.tar`,
+SHA-256 `5e6b1cfa7b0bec154af5194081bf85d166f403913f026aa1e3cdd3c5fedc1cc8`.
+LinuxHost extracted it at `/tmp/keel-sat-review-79612096`. Fresh logs and lock
+records are `/tmp/keel-sat-review-native-{debug,release}.{log,jsonl}`;
+local logs/records use `/tmp/keel-sat-review-local-{debug,release}.{log,jsonl}`
+and `/tmp/keel-sat-review-guard-{debug,release}.{log,jsonl}`.
+LinuxHost artifacts are `/tmp/keel-sat-review-native-{debug,release}`, including
+copies of the exact test executables embedding the compiler as
+`frozen-test-compiler`. `/tmp/keel-sat-review-provenance.json` records source,
+compiler/test-executable, actual rustc, GCC, Clang, decoder, kernel, harness,
+object and linked-executable SHA-256 identities. The independent decoder is
+`/tmp/keel-sat-review-audit.py`; listings accompany the six objects. It examined
+8,076 instructions, finding all eight saturation mnemonics in each object and
+only the baseline inventory listed above. This is finite encoding evidence,
+not a general independent feature-decoder proof. Native execution used a
+newer CPU, not a v1-only or CPUID-masked host. No timing claim is made. Main,
+the original worktree and the separate numeric-conversion work were untouched.
+
 ## Validation and reproduction
 
 `crates/keel-c/tests/x86_intrinsics.rs` verifies all six wide shapes, C layout,
