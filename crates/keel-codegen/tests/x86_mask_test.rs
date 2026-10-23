@@ -51,16 +51,25 @@ fn compile(
     features: Features,
 ) -> (String, Vec<u8>) {
     let m = keel_ir::parse(src).unwrap();
-    keel_ir::verify_module(&m).unwrap();
+    compile_module(&m, s, a, pools, features)
+}
+fn compile_module(
+    m: &keel_ir::Module,
+    s: &dyn InstructionSelector,
+    a: AllocationTier,
+    pools: &Pools,
+    features: Features,
+) -> (String, Vec<u8>) {
+    keel_ir::verify_module(m).unwrap();
     let selector = FeatureSelector { inner: s, features };
     let p = CodegenPipeline {
         selector: &selector,
         allocator: &a,
     };
-    let text = keel_codegen::x86_64::compile_with_pipeline(&m, pools, &p).unwrap();
-    let program = keel_codegen::x86_64::compile_program_with_pipeline(&m, pools, &p).unwrap();
+    let text = keel_codegen::x86_64::compile_with_pipeline(m, pools, &p).unwrap();
+    let program = keel_codegen::x86_64::compile_program_with_pipeline(m, pools, &p).unwrap();
     let mut chunks = keel_asm_ir::Program::default();
-    keel_codegen::x86_64::compile_program_chunks_with_pipeline(&m, pools, &p, &mut |p| {
+    keel_codegen::x86_64::compile_program_chunks_with_pipeline(m, pools, &p, &mut |p| {
         chunks.items.extend(p.items)
     })
     .unwrap();
@@ -271,6 +280,50 @@ fn commuted_mask_and_shared_condition_keep_exact_register_recipe() {
     }
 }
 
+// Real SSA aliases differ from two operands assigned the same physical register.
+fn alias_source(m: &mut keel_ir::Module) {
+    for f in &mut m.functions {
+        let Some((inst, value)) = f.layout_insts().find_map(|(_, i)| {
+            matches!(
+                f.inst_data(i),
+                keel_ir::InstData::Iconst { imm: 314159, .. }
+            )
+            .then(|| (i, f.first_result(i)))
+        }) else {
+            continue;
+        };
+        let source = f.block_params(f.entry_block().unwrap())[0];
+        f.replace_all_uses(value, source);
+        f.remove_inst(inst);
+    }
+}
+
+#[test]
+fn resolved_source_aliases_transfer_to_each_allocation_root() {
+    for consumer in ["bool", "branch", "select"] {
+        let src = source("f", i32::MIN, "eq", consumer, true)
+            .replace("v3 = iconst", "v20 = iconst.i32 314159\n v3 = iconst")
+            .replace("and v0, v3", "and v3, v20");
+        let mut m = keel_ir::parse(&src).unwrap();
+        alias_source(&mut m);
+        for s in [
+            SelectionTier::Baseline,
+            SelectionTier::Trees,
+            SelectionTier::Full,
+        ] {
+            for a in [AllocationTier::Fast, AllocationTier::Full] {
+                for pools in [&EMPTY, &ONE, &keel_codegen::x86_64::REGISTERS] {
+                    let (text, _) =
+                        compile_module(&m, &s, a, pools, Features::for_level(CpuLevel::V1));
+                    assert_eq!(tests(&text).len(), 1, "{text}");
+                    assert!(!text.contains("\tand\t"), "{text}");
+                    assert_eq!(text.contains("\tset"), consumer == "bool", "{text}");
+                }
+            }
+        }
+    }
+}
+
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn native_gcc_clang_oracles_calls_aliases_and_guarded_exact_loads() {
@@ -320,6 +373,21 @@ static uint32_t random32(void) { state ^= state<<13; state ^= state>>17; state ^
                 }
             }
         }
+    }
+    for consumer in ["bool", "branch", "select"] {
+        let name = format!("resolved_alias_{consumer}");
+        ir += &source(&name, i32::MIN, "eq", consumer, true)
+            .replace("v3 = iconst", "v20 = iconst.i32 314159\n v3 = iconst")
+            .replace("and v0, v3", "and v3, v20");
+        c += &format!("extern uint32_t {name}(uint32_t,uint32_t,uint32_t);\n");
+        checks += &format!(
+            "assert({name}(x,y,z)==(({} )^x));\n",
+            if consumer == "bool" {
+                "!(x&UINT32_C(0x80000000))"
+            } else {
+                "(x&UINT32_C(0x80000000))?z:y"
+            }
+        );
     }
     for (name, kernel, expected) in [
         (
@@ -417,6 +485,8 @@ if(edge<2) {{ memset(p,0x83,{width}); mem_{tag}(p,&out,marker); assert(*marker==
             .unwrap();
         assert!(out.status.success(), "{cc}: {out:?}");
     }
+    let mut module = keel_ir::parse(&ir).unwrap();
+    alias_source(&mut module);
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -428,8 +498,9 @@ if(edge<2) {{ memset(p,0x83,{width}); mem_{tag}(p,&out,marker); assert(*marker==
                 .enumerate()
             {
                 for level in [CpuLevel::V1, CpuLevel::V2, CpuLevel::V3] {
-                    let (text, obj) = compile(&ir, &s, a, pools, Features::for_level(level));
-                    assert_eq!(tests(&text).len(), 91, "{text}");
+                    let (text, obj) =
+                        compile_module(&module, &s, a, pools, Features::for_level(level));
+                    assert_eq!(tests(&text).len(), 94, "{text}");
                     let tag = format!("{s:?}-{a:?}-{pi}-{level:?}");
                     fs::write(dir.join(format!("{tag}.o")), obj).unwrap();
                     fs::write(dir.join(format!("{tag}.s")), text).unwrap();
