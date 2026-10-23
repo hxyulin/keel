@@ -90,7 +90,6 @@ pub struct PassObservation {
     pub pipeline_index: usize,
     pub pass: &'static str,
     pub target: crate::VectorTarget,
-    pub context: crate::OptimizationContext,
     /// None denotes a module invocation.
     pub function: Option<String>,
     pub changed: bool,
@@ -131,6 +130,29 @@ fn quoted(s: &str) -> String {
     out
 }
 impl OptimizationReport {
+    /// Explicit schema-3 envelope for a report collected with one context.
+    /// The caller must supply the context used for every invocation in this report;
+    /// use separate reports for different contexts. The nested report remains schema 2.
+    /// Feature bits describe the normalized effective contract, including modifiers,
+    /// rather than the spelling/order of flags or host capabilities. Bit order is
+    /// documented by `keel_codegen::x86_features::vector_capabilities`.
+    pub fn to_json_with_context(&self, context: crate::OptimizationContext) -> String {
+        let target = match context.target {
+            crate::VectorTarget::Portable => "portable",
+            crate::VectorTarget::Aarch64Neon => "aarch64-neon",
+            crate::VectorTarget::X86Sse2 => "x86-sse2",
+        };
+        let caps = context.capabilities;
+        format!(
+            "{{\"schema_version\":3,\"context\":{{\"target\":{},\"value_bits\":{},\"signed_i32_sum_bits\":{},\"preferred_bits\":{},\"effective_x86_features\":{}}},\"report\":{}}}\n",
+            quoted(target),
+            caps.value_bits(),
+            caps.signed_i32_sum_bits(),
+            caps.preferred_bits(),
+            caps.effective_x86_features(),
+            self.to_json().trim_end()
+        )
+    }
     /// Stable field/event order. Only timing values are nondeterministic.
     pub fn to_json(&self) -> String {
         let mut out = String::from("{\"schema_version\":2,\"invocations\":[");
@@ -144,17 +166,6 @@ impl OptimizationReport {
                 crate::VectorTarget::X86Sse2 => "x86-sse2",
             };
             write!(out, "{{\"pipeline_index\":{},\"pass\":{},\"target\":{},\"scope\":{},\"function\":{},\"changed\":{},\"pass_ns\":{},\"verification_enabled\":{},\"verification_ns\":{},\"restoration_ns\":{},\"restoration_verification_ns\":{},\"restoration_changed\":{},\"before\":{},\"after\":{},\"inline_sites\":[", p.pipeline_index, quoted(p.pass), quoted(target), quoted(if p.function.is_some() { "function" } else { "module" }), p.function.as_deref().map(quoted).unwrap_or_else(|| "null".into()), p.changed, p.pass_ns, p.verification_enabled, p.verification_ns, p.restoration_ns, p.restoration_verification_ns, p.restoration_changed.map(|v| v.to_string()).unwrap_or_else(|| "null".into()), p.before.json(), p.after.json()).unwrap();
-            let caps = p.context.capabilities;
-            // Insert metadata before the inline-site array without changing event order.
-            let array_start = out.rfind(",\"inline_sites\":[").unwrap();
-            let metadata = format!(
-                ",\"context\":{{\"value_bits\":{},\"signed_i32_sum_bits\":{},\"preferred_bits\":{},\"effective_x86_features\":{}}}",
-                caps.value_bits(),
-                caps.signed_i32_sum_bits(),
-                caps.preferred_bits(),
-                caps.effective_x86_features()
-            );
-            out.insert_str(array_start, &metadata);
             for (i, site) in p.inline_sites.iter().enumerate() {
                 if i != 0 {
                     out.push(',');

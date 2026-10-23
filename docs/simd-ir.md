@@ -660,33 +660,50 @@ accepted value width, complete signed-i32 sum recipe width, and preferred width.
 The additive `run_passes_with_context_and_options` and
 `run_pipeline_with_context_and_options` entrypoints have observed counterparts.
 Existing target APIs retain their 128-bit policy, and default `Pass` context
-methods delegate to the existing target/canonical overrides. `OptimizeOptions`
-is unchanged. Analyses and deterministic-pass version skips remain scoped to
-one invocation; no target-dependent persistent cache is introduced.
+methods delegate to the existing target/canonical overrides. A new pass overriding
+`run_with_context` and requesting canonical form must explicitly override
+`run_canonical_with_context` as well (usually forwarding to `run_with_context`);
+the default canonical hook preserves existing `run_canonical` custom overrides.
+`OptimizeOptions` and all existing public report structs are unchanged. Analyses
+and deterministic-pass version skips remain scoped to one invocation; no target-dependent persistent cache is introduced.
 
 `keel_codegen::x86_features::vector_capabilities(target, selector)` first
 validates the target and projects the selector's **effective** features, including
 explicit additions/removals. It does not detect the host or infer width from a
-CPU level name. AVX allows 256-bit values; AVX2 permits and prefers this complete
-integer recipe. V3 with `-avx2` therefore accepts wide values but keeps this
-recipe at 128 bits. Legacy, strict v1/v2, Portable and baseline ARM retain 128-bit
-optimization. AES and PCLMULQDQ do not affect width. A library caller can retain
-128-bit preference independently of accepting the wider recipe.
+CPU level name. AVX allows 256-bit values; AVX2 permits this complete integer
+recipe. Every projected target, including v3/AVX2, prefers 128 bits. V3 with
+`-avx2` accepts wide values but keeps this recipe at 128 bits. Legacy, strict
+v1/v2, Portable, ARM and Fast retain their previous optimization behavior.
+AES and PCLMULQDQ do not affect width. ISA support does not establish profitability.
+A library caller can explicitly opt into the experiment with
+`capabilities.with_wide_preference(true)`. This never grants recipe support;
+preferences above accepted value width are conservatively normalized to 128.
+The constructor applies the same normalization, and the optimizer still checks
+both the complete-recipe capability and the x86 target. Feature fingerprint bits
+are metadata and never grant legality. No CLI widening experiment flag exists.
 
 The CLI uses the same projection before optimization, including when emitting
 only IR. `opt --target x86_64-unknown-linux-gnu` accepts `--cpu-level` and
 `--target-features` as `compile` and `cc` do. Existing flag semantics remain:
 repeated feature lists replace earlier modifiers relative to the selected level;
 a later level selection resets the feature contract. Invalid dependencies fail
-before optimization. Reports record `context.value_bits`,
-`context.signed_i32_sum_bits`, `context.preferred_bits` and a normalized
-`context.effective_x86_features` fingerprint on every invocation, alongside the
-existing target. Fingerprint bits 0–20 are, in order: aes, avx, bmi1, bmi2,
+before optimization. Existing report APIs, CLI reports and `to_json()` retain
+the exact schema-2 shape with no context metadata. Library callers may explicitly
+use `report.to_json_with_context(context)` for a schema-3 envelope containing
+`context` and the unchanged schema-2 `report`. This method requires that all
+invocations in the report were collected using the supplied context; callers
+must use separate reports for different contexts. It records `context.target`,
+`context.value_bits`, `context.signed_i32_sum_bits`, `context.preferred_bits` and
+a normalized `context.effective_x86_features` fingerprint. The fingerprint
+includes every effective enabled/disabled modifier, not raw flag spelling or
+order. Equivalent effective contracts produce identical metadata.
+Fingerprint bits 0–20 are, in order: aes, avx, bmi1, bmi2,
 clflush, pclmulqdq, cx16, lahf_sahf, popcnt, sse3, ssse3, sse41, sse42, avx2,
-f16c, fma, lzcnt, movbe, xsave, osxsave, explicit. Non-x86 projections and old optimizer API contexts
-use zero. The context and bit order make effective modifiers reproducible.
+f16c, fma, lzcnt, movbe, xsave, osxsave, explicit. Non-x86 projections and old
+optimizer API contexts use zero. The context and bit order make effective modifiers reproducible.
 
-The Full `loop-reduce` pilot upgrades only an already eligible, single-stream
+With explicit library wide preference, the Full `loop-reduce` pilot upgrades
+only an already eligible, single-stream
 `load.i32 -> sext.i64 -> iadd` wrapping sum. It retains four independent
 accumulators, now `i64x4`, with four exact 16-byte `load.i32x4` operations followed
 by `swiden_low.i64x4`. One group consumes 16 inputs at byte offsets 0/16/32/48,
@@ -699,7 +716,12 @@ floating, multistream and Fast recipes retain their previous widths. `ALL_128`
 is unchanged. This is not general loop widening, a cost model, ABI widening,
 implicit FMA, or a vendor-header coverage claim.
 
-### Finite validation and measurement (2026-10-23)
+### Historical wide-pilot validation and measurement (2026-10-23)
+
+Automatic widening is parked. The measurements below describe the original
+candidate (`0804a50b` recipe, originally default-wide at v3), not the revised
+128-bit defaults. No runtime gain is claimed and these measurements must not be
+reused to describe the new default behavior. There is no new benchmark campaign.
 
 Focused tests are `keel-opt --test vector_context --test loop_vectorize`,
 `keel --test vector_context`, and `keel-codegen --test x86_widen_sum`.
@@ -744,22 +766,64 @@ instructions/8 inputs (61 bytes) to 45/16 inputs (184 bytes); the finish grows
 baseline finish uses one vector stack store and two scalar reads; the wide
 finish uses registers. Both functions have a scalar argument spill/reload outside
 the loop. Wide lowering emits numerous scratch-register copies and separate
-legacy SSE loads alongside AVX widening/adds. These observations identify backend
-work to investigate; they do not establish which effect causes the slowdown.
-No backend change or unroll tuning is included in this pilot.
+legacy SSE loads alongside AVX widening/adds. A subsequent independent
+control/variant/control probe changed only the four
+legacy MOVUPS loads to VMOVUPS: 208.596 → 72.302 → 208.597 microseconds, with
+86 native oracle cases passing. This establishes a large encoding-dependent
+penalty here, not its exact microarchitectural cause. The 72.302 microsecond
+variant remains above the separately measured 56.745 microsecond baseline;
+this was not a fresh matched baseline comparison. XMM/YMM views share physical
+registers, so global mnemonic replacement
+would require an upper-half liveness proof. No backend change or unroll tuning is
+included in this context revision. Probe evidence is at
+`/tmp/keel-wide-vexload-probe-20261023` in the independent investigation.
 
 Compile time was measured separately as fresh process-to-object time for all
 twelve maintained kernels, excluding link/runtime and assembly capture. Median
 main→candidate times were 2.735→2.728 ms (v1), 2.727→2.715 ms (v2), and
 2.728→3.076 ms (v3), a 12.7% v3 increase. No compile-time or runtime improvement
 is claimed. This checkpoint supplies correctness and capability plumbing, but
-its default v3 preference needs a performance decision before integration.
+automatic widening remains parked pending independent review and fresh matched
+profitability evidence. The retained library experiment is capability-gated.
 Artifacts on LinuxHost are `/tmp/keel-wide-measure-rebased-4188196c/` (compiler hashes, exact
 flags, raw rounds, objects, assembly, disassembly and summary),
 `/tmp/keel-wide-rebased-measure-lock.jsonl`, and
 `/tmp/keel-wide-rebased-native.log`. Supplemental logs are
 `/tmp/keel-wide-rebased-final-guard.log` and
 `/tmp/keel-wide-rebased-final-optionals.log`. The compiler source snapshot is
-`/tmp/keel-wide-candidate-4188196c`; subsequent checkpoint changes only update
-this documentation and remove a test-style warning. All generated artifacts stay
+`/tmp/keel-wide-candidate-4188196c`. These are historical wide-pilot artifacts;
+they do not measure the revised default policy. All generated artifacts stay
 outside Git.
+
+### Revised 128-bit defaults: compatibility validation (2026-10-23)
+
+The focused suite and CLI units passed 81 tests locally and 80 on LinuxHost in
+release mode (one CLI test is macOS-only). Two benchmark-only PMULLD tests stayed
+ignored. The existing 48-profile signed-sum gate now requests wide preference
+explicitly; LinuxHost executes its guarded native oracle. Custom legacy target and
+canonical overrides, explicit context hooks, invocation-scoped deterministic
+skips, ordinary/observed parity, malformed capabilities, exhaustive public
+struct literals, schema-2 preservation and explicit schema-3 metadata all have
+focused coverage. Normalized feature fingerprints include added AES/PCLMULQDQ
+and removed AVX2 independently of preference. PMULLD remains the integrated
+SSE4.1 binary signature and its selection/encoding controls pass.
+
+Against frozen `6ff8911b` (all 1,943 baseline source blobs verified), 120
+IR/object comparisons and 120 schema-2 report comparisons (timings removed)
+match exactly. The finite matrix uses the signed-sum IR, conditional-reduction
+IR and maintained twelve-kernel C source; Fast/Full; legacy/v1/v2/v3,
+v3-minus-AVX2, v1-plus-AVX/AVX2, independent crypto and repeated modifier
+replacement; and ARM ELF/Mach-O. Main's `opt` predates feature flags, so its IR
+fixture comparisons use the original target-only 128-bit API; `cc` and object
+comparisons use the same effective feature flags on both revisions.
+
+Evidence is `/tmp/keel-wide-followup-parity-20261023/summary.json`, with exact
+comparison commands in `/tmp/keel-wide-followup-parity.py`. Serialized build/test
+commands are recorded in `/tmp/keel-wide-followup-unique.jsonl` on each host.
+LinuxHost logs are `/tmp/keel-wide-followup-native.log`,
+`/tmp/keel-wide-followup-native-context.log` and
+`/tmp/keel-wide-followup-native-cli.log` (also copied locally). These tests are
+finite correctness and compatibility evidence; no new runtime or compile-time
+performance measurement was made. Backend load/encoding changes are separate
+work and are not part of this revision. Independent parent review is required
+before integration.

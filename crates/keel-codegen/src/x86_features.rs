@@ -44,6 +44,7 @@ impl InstructionSelector for FeatureSelector<'_> {
 /// Fingerprint bit order: aes,avx,bmi1,bmi2,clflush,pclmulqdq,cx16,lahf_sahf,
 /// popcnt,sse3,ssse3,sse41,sse42,avx2,f16c,fma,lzcnt,movbe,xsave,osxsave,explicit.
 /// This does not inspect the host and never infers capabilities from a level name.
+/// Every target prefers 128 bits; ISA support is not evidence of profitability.
 pub fn vector_capabilities(
     target: Target,
     selector: &dyn InstructionSelector,
@@ -80,7 +81,5 @@ pub fn vector_capabilities(
     .into_iter()
     .enumerate()
     .fold(0, |bits, (i, enabled)| bits | (u64::from(enabled) << i));
-    Ok(keel_ir::VectorCapabilities::new(
-        f.avx, f.avx2, f.avx2, bits,
-    ))
+    Ok(keel_ir::VectorCapabilities::new(f.avx, f.avx2, false, bits))
 }

@@ -63,7 +63,12 @@ fn effective_capabilities_distinguish_transport_recipe_and_preference() {
         let caps = vector_capabilities(Target::X86_64LinuxGnu, &selector).unwrap();
         assert_eq!(caps.value_bits(), value);
         assert_eq!(caps.signed_i32_sum_bits(), recipe);
-        assert_eq!(caps.prefer_wide_signed_i32_sum(), recipe == 256);
+        assert_eq!(caps.preferred_bits(), 128);
+        assert!(!caps.prefer_wide_signed_i32_sum());
+        assert_eq!(
+            caps.with_wide_preference(true).prefer_wide_signed_i32_sum(),
+            recipe == 256
+        );
         if features.explicit {
             assert!(vector_capabilities(Target::Aarch64LinuxGnu, &selector).is_err());
         } else {
@@ -84,5 +89,35 @@ fn effective_capabilities_distinguish_transport_recipe_and_preference() {
             }
         )
         .is_err()
+    );
+}
+
+#[test]
+fn normalized_effective_feature_fingerprint_preserves_modifiers_reproducibly() {
+    use keel_asm_ir::x86::CpuLevel;
+    use keel_codegen::x86_features::vector_capabilities;
+    let project = |features| {
+        vector_capabilities(
+            Target::X86_64LinuxGnu,
+            &FeatureSelector {
+                inner: &SelectionTier::Full,
+                features,
+            },
+        )
+        .unwrap()
+    };
+    let base = Features::for_level(CpuLevel::V3);
+    let first = project(base.with_features("-avx2,+aes,+pclmulqdq").unwrap());
+    let equivalent = project(base.with_features("+pclmulqdq,+aes,-avx2").unwrap());
+    assert_eq!(first, equivalent);
+    assert_eq!(first.preferred_bits(), 128);
+    assert_eq!(first.signed_i32_sum_bits(), 128);
+    assert_eq!(first.effective_x86_features() & (1 << 13), 0);
+    assert_ne!(first.effective_x86_features() & 1, 0);
+    assert_ne!(first.effective_x86_features() & (1 << 5), 0);
+    assert_ne!(first.effective_x86_features() & (1 << 20), 0);
+    assert_ne!(
+        first.effective_x86_features(),
+        project(base).effective_x86_features()
     );
 }

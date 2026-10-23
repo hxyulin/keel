@@ -1469,10 +1469,8 @@ mod vector_context_tests {
                 keel_codegen::x86_features::vector_capabilities(Target::X86_64LinuxGnu, &selector)
                     .unwrap()
             );
-            assert_eq!(
-                context.capabilities.prefer_wide_signed_i32_sum(),
-                opts.x86_features.avx2
-            );
+            assert_eq!(context.capabilities.preferred_bits(), 128);
+            assert!(!context.capabilities.prefer_wide_signed_i32_sum());
         }
         let replaced = opts(&[
             "--cpu-level",

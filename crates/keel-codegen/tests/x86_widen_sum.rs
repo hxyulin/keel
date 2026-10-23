@@ -36,7 +36,8 @@ fn signed_sum_all_codegen_paths_features_allocators_and_spills() {
                     let context = keel_opt::OptimizationContext {
                         target: keel_opt::VectorTarget::X86Sse2,
                         capabilities: vector_capabilities(Target::X86_64LinuxGnu, &selector)
-                            .unwrap(),
+                            .unwrap()
+                            .with_wide_preference(true),
                     };
                     let mut module = keel_ir::parse(SOURCE).unwrap();
                     keel_opt::run_passes_with_context_and_options(

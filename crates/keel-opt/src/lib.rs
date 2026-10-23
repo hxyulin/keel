@@ -135,6 +135,10 @@ pub trait Pass: Sync {
         self.run_for_target(func, context.target)
     }
     /// Preserve canonical overrides independently of ordinary target dispatch.
+    /// A new context-aware pass that requires canonical form MUST also override
+    /// this hook, usually by forwarding to its `run_with_context`. Overriding only
+    /// `run_with_context` affects noncanonical dispatch only: the default here
+    /// deliberately calls the legacy `run_canonical` override for compatibility.
     fn run_canonical_with_context(
         &self,
         func: &mut Function,
@@ -835,7 +839,6 @@ pub fn run_pipeline_with_context_and_report_and_options(
                 pipeline_index,
                 pass: pass.name(),
                 target,
-                context,
                 function: None,
                 changed,
                 pass_ns,
@@ -861,7 +864,6 @@ pub fn run_pipeline_with_context_and_report_and_options(
                     pipeline_index,
                     pass: pass.name(),
                     target,
-                    context,
                     function: Some(func.name.clone()),
                     changed: false,
                     pass_ns: 0,
@@ -912,7 +914,6 @@ pub fn run_pipeline_with_context_and_report_and_options(
                 pipeline_index,
                 pass: pass.name(),
                 target,
-                context,
                 function: Some(func.name.clone()),
                 changed,
                 pass_ns,
