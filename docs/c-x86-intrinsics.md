@@ -203,6 +203,32 @@ Disassembly and inventories are retained beside those objects and in
 `/tmp/keel-c-shifts-decode.py`. Builds/execution used the shared suite lock and
 cargo default cache with link caching disabled. No timing conclusions were drawn.
 
+An independent review reapplied candidate `9f1fd535` (implementation
+`76a18e1b`) onto main `4611704b` in an isolated worktree. No blocking source
+semantic defect was found. The review added private-bridge arity/type and all-name
+recognition checks on x86/ARM, further defined/undefined ICE boundaries,
+both header inclusion orders with AES/PCLMUL, and effective-feature checks.
+A direct frontend-to-codegen path exercises the existing legality checks without
+an intervening explicit IR verification call. The native harness additionally
+checks output aliasing the runtime count buffer.
+
+Fresh review runs passed `x86_shifts`, `x86_intrinsics`, `x86_aes` and `pclmul`
+in debug and release: 13 tests per profile on Apple ARM64 (frontend, IR and
+object checks plus applicable native controls), and 15 per profile on LinuxHost
+(including GCC 16.2.0/Clang 23.1.1 shift execution). All runs used the shared lock
+and the documented cargo settings. Local logs are
+`/tmp/keel-shifts-review-final-{debug,release}.log`; LinuxHost logs and lock records
+are `/tmp/keel-shifts-independent-final-{debug,release}.{log,jsonl}`. The reviewed
+native snapshot is `/tmp/keel-shifts-independent-review-36692`; debug/release
+objects and harnesses are `/tmp/keel-c-shifts-{3224215,3225064}`. Independent
+`llvm-objdump` decoding found all eight legacy shifts in each of the six objects;
+the full finite mnemonic inventories contain only baseline integer/SSE/SSE2
+instructions. Object hashes, inventories and decoder are retained in
+`/tmp/keel-shifts-independent-disassembly.json` and
+`/tmp/keel-shifts-independent-decode.py` on LinuxHost. These are bounded
+frontend/lowering, encoding and native results; the newer execution host does
+not establish v1-only CPU behavior. No timing or speedup claim is made.
+
 AVX2 256-bit shifts, per-lane counts, byte shifts, rotates and the remainder of
 the vendor shift families remain queued. Saturation and numeric conversion
 wrappers are separate work.
