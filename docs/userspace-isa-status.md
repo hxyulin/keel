@@ -37,6 +37,10 @@ oversized-count zero/sign-fill, checked immediate controls and low-64-bit
 runtime vector counts. Native LinuxHost GCC/Clang, strict-v1 objects and ARM
 frontend diagnostics are validated in debug/release; this does not add AVX2
 shift wrappers or general C scalar broadcast shifts.
+The [bounded SSE2 saturation subset](c-x86-intrinsics.md#bounded-sse2-saturation)
+adds eight signed/unsigned byte/word saturating add/subtract C wrappers, reusing
+existing typed SSE2 architectural operations at strict v1. This does not add
+AVX2 saturation, narrowing packs or numeric conversions.
 AVX-512 and optional post-baseline ARM extensions are outside this goal.
 
 ## Strict-v1 userspace contract and audit

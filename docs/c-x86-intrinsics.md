@@ -60,6 +60,9 @@ separate names, not arbitrary suffix combinations.
   `mullo_epi{16,32}`, `{cmpeq,cmpgt}_epi{8,16,32,64}`,
   `set1_epi{8,16,32,64x}`, `set_epi{32,64x}`. Integer arithmetic wraps at its lane
   width. Comparisons use signed lanes and return all-one/zero lane masks.
+- SSE2 saturation: `_mm_{adds,subs}_{epi8,epi16,epu8,epu16}` clamps each
+  mathematical sum/difference to its signed/unsigned lane range. This is an
+  eight-wrapper, 128-bit subset; see the saturation contract below.
 - SSE2 packed shifts: `_mm_{slli,srli}_epi{16,32,64}` and
   `_mm_srai_epi{16,32}` with immediate controls, plus
   `_mm_{sll,srl}_epi{16,32,64}` and `_mm_sra_epi{16,32}` with vector counts.
@@ -97,7 +100,7 @@ separate names, not arbitrary suffix combinations.
   differences between quiet and signaling SSE instructions.
 
 The SSE/AVX header functions use C vectors, scalar lane access, and fixed-size
-`__builtin_memcpy`; shifts, shuffles and AVX comparisons use checked builtins.
+`__builtin_memcpy`; saturation, shifts, shuffles and AVX comparisons use checked builtins.
 All lower through the existing typed IR, optimization, ABI, feature gating and
 instruction selection. The explicit PCLMUL builtin uses its dedicated typed
 intrinsic and lowering described in the linked contract.
@@ -127,7 +130,8 @@ bitwise operations and comparisons, including compound assignments; see
 and remaining scalar-shift/cross-domain limits. Constructor functions remain
 available for explicit element conversions.
 Masked/gather/scatter memory, streaming memory/fences, scalar-lane FP intrinsics,
-saturation, horizontal operations, shifts beyond the bounded SSE2 subset,
+saturation beyond the bounded SSE2 subset, horizontal operations, shifts beyond
+the bounded SSE2 subset,
 conversions, FMA, AVX-512,
 full vendor header coverage and strict FP-environment compatibility are outside
 this header contract even where the backend already implements such operations.
@@ -285,3 +289,81 @@ paths, including disabled-AVX diagnostics and absence of implicit contraction.
 See [the bounded v3 join](userspace-isa-status.md#strict-v3-userspace-contract-and-audit)
 for exact feature, native and object-decoding evidence and remaining limits.
 This adds validation, not additional header names or FP-environment guarantees.
+
+
+## Bounded SSE2 saturation
+
+`_mm_adds_epi8`, `_mm_adds_epi16`, `_mm_adds_epu8`, `_mm_adds_epu16`,
+`_mm_subs_epi8`, `_mm_subs_epi16`, `_mm_subs_epu8`, `_mm_subs_epu16`
+accept and return `__m128i`, evaluating each argument once. Byte/word lanes
+clamp to -128..127 / -32768..32767 for signed operations and 0..255 /
+0..65535 for unsigned operations. Subtraction preserves operand order.
+These functions do not emulate saturation with overflowing narrow C arithmetic.
+They bitcast to the appropriate lane type and call the existing typed
+`x86_sse2_p{add,sub}{s,us}{b,w}128` architectural intrinsics. Their existing
+`x86_packed_pair` metadata selects legacy SSE2 instructions (tier 0), and the
+existing packed-pair preflight/lowering and release emission checks remain in
+force. No optimizer, ABI, FP or backend changes are involved.
+
+The private `__builtin_keel_sse2_p{add,sub}{s,us}{b,w}` names each require
+exactly two matching 16-byte C vectors. Their element type must be signed char,
+short, unsigned char or unsigned short, respectively. Plain char is distinct
+from signed char. Wrong signedness, nominal element type, width, shape, arity,
+scalar/FP arguments and ARM targets are diagnosed. Results retain the operand
+C type. `__has_builtin` reports these names only on x86-64, independently of
+CPU selection; these are Keel bridges, not GNU builtin compatibility promises.
+Header inclusion alone emits no additional functions or enabled features.
+
+`keel-c --test x86_saturation` verifies frontend checks and explicit strict-v1
+text/typed/chunked object parity on every host. Native execution runs only on
+Linux x86-64. Three configurations are baseline/fast, trees/fast and optimized
+full/full with empty allocation pools. GCC and Clang compile independent system
+vendor-header oracles alongside a widened scalar reference with explicit clamps.
+The harness checks all 65,536 ordered byte pairs for every byte operation in
+every lane, word boundary pairs, every word bit pattern paired with selected
+edges, and 4,096 deterministic random vector pairs per operation. Direct and
+indirect calls, inputs live across a callback, same-input and output/input
+aliases, single evaluation, unaligned 16-byte copies, byte canaries and both
+protected-page edges are covered. This is not exhaustive 16-bit pair testing.
+AVX2 widths, narrowing packs and other saturation families remain deferred.
+
+Reproduce with the existing toolchain and shared build lock:
+
+```sh
+KEEL_C_SAT_EXPORT_DIR=/tmp/keel-c-saturation-unique \
+  python3 suite/fast_opt_locked.py /tmp/keel-c-saturation-unique.jsonl \
+  cargo test --offline --locked -j2 -p keel-c \
+  --test x86_saturation --test x86_shifts --test x86_intrinsics \
+  --test x86_aes --test pclmul
+```
+
+Add `--release` for release preflight and parity. Artifacts and runtime evidence
+remain under `/tmp`; cross-object success alone is not native validation.
+
+On 2026-10-23 the implementation was rebased from clean `0beb8f7d` onto
+`0eb22fa9` after the independently reviewed shift subset landed. All sixteen
+shift wrappers and their private bridge conventions were preserved. The five
+C suites in the command above passed locally on Apple ARM64 (15 tests per
+profile, cross-object checks) and natively on LinuxHost with Clang 23.1.1 and GCC
+16.2.0 (17 tests per profile), in debug and release. Both native compilers ran
+all three saturation configurations in each profile. The existing emission
+feature-guard unit test also passed locally in debug/release, retaining optional
+ISA rejection in both text and structured paths.
+
+LinuxHost source is `/tmp/keel-c-saturation-20261023`; regression logs are
+`/tmp/keel-c-saturation-{debug,release}.log`, with final saturation-only reruns
+at `/tmp/keel-c-saturation-final-{debug,release}.log`. Objects, generated kernels,
+GCC/Clang harnesses and executables are in
+`/tmp/keel-c-saturation-native-{debug,release}`. The independent
+`llvm-objdump` inventory in `/tmp/keel-c-saturation-disassembly.json` and decoder
+`/tmp/keel-c-saturation-decode.py` examined six objects (8,076 instructions),
+finding all eight legacy saturation opcodes in each. The remaining decoded
+mnemonics were `push`, `pop`, `mov`, `movups`, `movaps`, `sub`, `add`, `lea`,
+`call`, `ret` and `nop`; no AVX or optional ISA instruction appeared. This finite
+inventory supplements strict-feature assembly and text/typed/chunked parity;
+it is not an exhaustive independent feature decoder proof. The host supports
+newer ISA levels, so execution does not establish operation on a v1-only or
+CPUID-masked CPU. Independent review and parent integration remain separate.
+No timing claim is made. All builds/native tests used the shared lock,
+`--offline --locked -j2`, existing pins and shared default cargo cache with
+`CARGO_CACHE_LINKS=0`.

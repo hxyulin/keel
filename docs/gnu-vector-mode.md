@@ -96,6 +96,11 @@ The backend may expand an operation into scalar **lanes**, preserving the full
 vector type, layout and ABI; that is distinct from ignoring the type attribute.
 Debug information currently presents a vector as an array of its elements.
 
+The [bounded SSE2 saturation wrappers](c-x86-intrinsics.md#bounded-sse2-saturation)
+provide explicit signed/unsigned byte/word clamping on x86-64 using existing
+typed architectural operations. Ordinary vector `+`/`-` retain their current
+semantics; the wrapper subset adds no numeric conversions or new vector widths.
+
 ## Scalar broadcasts
 
 For `+`, `-`, `*`, integer `&`, `|`, `^`, floating `/`, and the six comparisons,
