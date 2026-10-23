@@ -51,6 +51,12 @@ unsupported ABI. Unevaluated size, alignment, offset and type-identity queries
 retain their existing behavior. No type is rejected merely for appearing in an
 unused extern declaration.
 
+Compound-literal backing storage is distinguished from declared objects.
+The parser can record that storage while reducing an unevaluated `sizeof`
+or alignment query. Such a query does not materialize the literal. Evaluated
+literals are checked even when only their address or a supported member is
+requested; file-scope literal initializers are checked recursively when reached.
+
 Opaque numeric identity is now included in the existing numeric redeclaration
 check, including pointer/array/function nesting. For example,
 `extern __float128 x; extern double x;` diagnoses instead of changing the
@@ -99,6 +105,65 @@ Logs, exact commands, source archives, disassembly, objects and executables
 are outside Git under `/tmp/keel-opaque-safety-fd060343/` on LinuxHost; local logs
 and copied native evidence use the same path on the implementation host.
 There are no timing or performance conclusions.
+
+## Independent review on current main
+
+Candidate `254bfe01` (source `435d0418`) was copied into the isolated review
+worktree on `0e92f93a`; main and the original implementation worktree were not
+modified. Independent probes found one preservation regression: the blanket
+local/global checks rejected `sizeof((Box){})` and `_Alignof((Box){})` because
+parsing had recorded an unevaluated literal's backing storage. Source fix
+`7ac8413e` records that distinction and checks literal materialization through
+the evaluated-expression walk instead. Two new tests cover unevaluated and
+evaluated local/file-scope literals (including nested initializers), late record
+completion, recursive pointer graphs, incomplete pointees, atomic-pointer
+transport, rejected unsupported atomic subjects, and scope shadowing.
+
+The recursive predicate's visited-record set terminates repeated record visits;
+arrays and atomic/complex wrappers recurse, while pointers/functions stop.
+`abi_param` checks containment before ABI parameter construction;
+`aggregate_layout` checks before result layout/classification. Definition and
+expression validation precedes pruning. The evaluated walker checks call
+signatures and arguments independently of result use, covering direct/indirect,
+unprototyped and variadic calls. No additional evaluated-value escape was found
+in this bounded review. Atomic binary128/record subjects remain rejected by the
+existing atomic-type parser; these tests do not claim their value support.
+
+Review validation on 2026-10-23, using the locked cargo command form above:
+
+- Full local `keel-c`: **267 passed**. A full local rerun was appropriate because
+  the fix changes parser backing-storage metadata and pre-pruning traversal.
+- `unsupported_values`, debug and release: **8 passed** in each profile locally
+  and on LinuxHost. Target-loop IR/codegen checks remain distinct from native runs.
+- LinuxHost debug frontend batch: **37 passed**, adding `computed_goto` to the earlier
+  focused batch. The known `raw_platform_complex_header` oracle was excluded;
+  no passing full native-suite result is claimed.
+- Existing LinuxHost `f80`, `x86_vector_wrappers`, `x86_vector_varargs`: **8 passed**.
+  Release `x86_64::feature_guard_tests`: **1 passed**. Local `keel-c --tests`
+  clippy completed with existing warnings and none on the review's added lines.
+
+Independent native evidence is retained on LinuxHost under
+`/tmp/keel-review-c8a5914d/`, with logs/scripts copied to the same local path.
+`baseline.tar` is a fresh archive of `8bb21e9a` and `final-source.tar` is an
+archive of `7ac8413e`. All **1966** archived patched files were hash-compared
+against the native build checkout without a mismatch. `native-final.log`
+records compiler/archive/fixture hashes, exact commands, statuses and object
+disassembly. The separately built baseline compiler SHA-256 is
+`bc93209d82e11e27ae54e71017376e0ee14f849f963a4fcd3a76736246d5a235`;
+the patched compiler is
+`b1aa6392561653c70fbc33fea09569c0fff1e498db50461936706eecc65e3bc5`.
+
+The maintained ABI fixture again produces an old object that fails both native
+GCC and Clang callers (exit **1**); both native implementation controls pass
+(exit **0**). Patched strict-v1 compilation rejects it before object emission,
+with and without optimization. Independent positive native controls pass for
+both compilers, as do their callers of patched Keel objects in both modes.
+They check pointer/callback transport, an unevaluated literal size query and a
+supported integer member beside binary128 storage. Full-object byte comparison
+confirms the member store changes only its expected bytes. These are finite
+native x86-64 Linux checks; they do not demonstrate binary128 ABI support,
+other-target execution, application compatibility or exhaustive FP semantics.
+Release legality remains active. No performance measurements were taken.
 
 ## Remaining limits
 
