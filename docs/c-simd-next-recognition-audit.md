@@ -1,5 +1,70 @@
 # Next C SIMD recognition audit
 
+## Independent review on 9208b9e4
+
+The review branch `review/simd-recognition-audit` reapplies candidate
+`ebaae2c104950a215c92b79bad21ff3c32ccd540` to the requested clean main
+`9208b9e4061bc46bd0b17d668bbfb8c1bc8d7fed`. The original worktree and main
+are untouched. No production correctness defect was found in the bounded
+matcher. Review traced final byte writers, alias resolution, live result and
+parameter ownership, same-block availability under verified SSA, exact/global
+precedence, insertion through the instruction snapshot, and whole-slot
+remaining-read store retention. The existing escape, debug, atomic/volatile,
+frame-observer, returns-twice and stack-lifetime exclusions remain unchanged.
+The helper neither deletes shared producers nor changes external effects.
+
+Review strengthens two tests. A new optimizer case replaces consecutive vector
+reloads through an aliased derived address while retaining a same-block pointer
+read and both private stores, then checks verification and standalone
+idempotence. As with existing address closure, a stale live aliased `ptradd`
+remains conservatively excluded; the eligible fixture removes the replaced
+instruction while retaining its SSA alias. The ARM native callback now zeros
+the caller-saved upper halves of v8-v15 in addition to v0-v7/v16-v31, preserving
+the ABI-required low halves. Inspection of Apple Clang's generated callback
+confirmed the lane writes and low-half save/restore. This repairs a test
+coverage gap, not an observed compiler ABI failure.
+
+Fresh debug and release checks passed: 41 optimizer library tests, 24 existing
+stack-forward tests, 10 lifetime tests, and all eight focused widening tests
+(83 active tests per profile; the existing sealed-profile test stays ignored).
+Both profiles also passed the eight x86/two ARM backend widening tests, the
+emission feature guard, and the dedicated C integration test. The latter
+checks frontend versus Full formation, verified IR, strict feature legality,
+text/direct/chunked object equality and normal/forced-spill allocation. Native
+Apple ARM execution passed all six configurations in each profile with the
+stronger callback. All Rust commands used `CARGO_CACHE_LINKS=0`,
+`suite/fast_opt_locked.py`, `cargo`, `--offline --locked -j2`,
+the existing toolchain/default features and managed target directory.
+
+LinuxHost freshly linked the review's exported ELF objects, without rebuilding the
+compiler there. Clang 23.1.1 and GCC 16.2.0 each passed all 24 x86 configurations
+per profile (48 runs per profile, 96 total), after checking required flags on
+every reported CPU. The shared lock covered native builds and execution.
+Returned object hashes match the local exports. These runs include snapshot
+mutation, physical SIMD clobbers, single evaluation, signed edge/random values,
+exact aliases, canaries and protected input/output page edges. The partial-input
+fault witness is explicitly align-1 IR; C vector accesses use aligned complete
+objects. The witness faults before shared output publication and the later
+effect, and its partial output faults before the later effect.
+
+Independent LLVM decoding on LinuxHost inspected twelve x86 objects and one ARM
+object per profile. The candidate and fault witness retain full `movups` input
+loads/output stores and register `pmovsxdq` at SSE4.1; effective feature removal
+selects the SSE2 compare/unpack recipe. ARM retains `ldr q`, `sshll` and `str q`,
+including a full source spill/reload across the clobbering call. No m64 input
+cover is authorized. Encoding checks and native execution remain separate
+evidence; execution on modern CPUs does not certify feature-masked hardware.
+
+Review logs, exported IR/assembly/objects, callback assembly, native hash reports
+and the LinuxHost runner are under `/tmp/keel-swiden-review-*` on the relevant
+hosts. Lock logs include `debug`, `release`, `opt-final-{debug,release}`,
+`backend-final`, `backend-release`, `guard-release`, `c-debug-final`, `c-release`
+and `linuxhost-{debug,release}`. No new runtime or compile-cost timing was attempted;
+the original contention-deferred seven-round campaign remains deferred. This
+review changes no FP semantics, ABI, default width, pipeline or frontend/backend
+surface, and makes no application performance claim. Parent integration remains
+separate.
+
 ## Implementation acceptance from 9208b9e4
 
 On 2026-10-23 the bounded design refined in `dbfc4eb7` was implemented from

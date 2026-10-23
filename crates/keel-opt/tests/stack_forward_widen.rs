@@ -464,3 +464,54 @@ fn nonzero_source_result_is_owned_but_cross_block_producers_are_not_local() {
     let m = keel_ir::parse(&future).unwrap();
     assert!(keel_ir::verify_module(&m).is_err());
 }
+
+#[test]
+fn consecutive_reloads_and_local_remaining_read_preserve_stores() {
+    let s = fixture().replace(
+        "store align 1 v9, v1",
+        "store align 1 v9, v1\n v20 = load.i64x2 align 16 v2\n \
+         store align 1 v20, v1\n v21 = load.ptr v4\n call @effect(v21)",
+    );
+    let mut m = parse(&s);
+    // Alias the derived address as well as the root-address case above.
+    let f = &mut m.functions[0];
+    let addr = f
+        .layout_insts()
+        .find_map(|(_, i)| {
+            matches!(
+                f.inst_data(i),
+                InstData::Binary {
+                    op: keel_ir::BinaryOp::Ptradd,
+                    ..
+                }
+            )
+            .then_some(i)
+        })
+        .unwrap();
+    let copy = f.insert_inst(
+        keel_ir::InsertPoint::Before(addr),
+        f.inst_data(addr).clone(),
+    );
+    f.replace_all_uses(f.first_result(addr), f.first_result(copy));
+    f.remove_inst(addr);
+    keel_ir::verify_module(&m).unwrap();
+    assert!(pass(&mut m));
+    assert_eq!(
+        count(&m, |d| matches!(
+            d,
+            InstData::Convert {
+                op: ConvertOp::SwidenLow,
+                ..
+            }
+        )),
+        2
+    );
+    // The pointer reload cannot forward from integer byte facts. Both private
+    // writers must survive along with the two external output stores.
+    assert_eq!(count(&m, |d| matches!(d, InstData::Store { .. })), 4);
+    assert_eq!(count(&m, |d| matches!(d, InstData::Load { .. })), 2);
+    keel_ir::verify_module(&m).unwrap();
+    let once = m.to_string();
+    assert!(!pass(&mut m));
+    assert_eq!(once, m.to_string());
+}

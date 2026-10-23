@@ -44,6 +44,16 @@ void clobber(void *p) {
         "movi v5.16b, #0\n"
         "movi v6.16b, #0\n"
         "movi v7.16b, #0\n"
+        // AAPCS64 preserves only the low 64 bits of v8-v15. Exercise their
+        // volatile upper halves too, without violating the callback ABI.
+        "mov v8.d[1], xzr\n"
+        "mov v9.d[1], xzr\n"
+        "mov v10.d[1], xzr\n"
+        "mov v11.d[1], xzr\n"
+        "mov v12.d[1], xzr\n"
+        "mov v13.d[1], xzr\n"
+        "mov v14.d[1], xzr\n"
+        "mov v15.d[1], xzr\n"
         "movi v16.16b, #0\n"
         "movi v17.16b, #0\n"
         "movi v18.16b, #0\n"
@@ -60,7 +70,7 @@ void clobber(void *p) {
         "movi v29.16b, #0\n"
         "movi v30.16b, #0\n"
         "movi v31.16b, #0\n"
-        ::: "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v16", "v17", "v18", "v19", "v20", "v21", "v22", "v23", "v24", "v25", "v26", "v27", "v28", "v29", "v30", "v31");
+        ::: "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10", "v11", "v12", "v13", "v14", "v15", "v16", "v17", "v18", "v19", "v20", "v21", "v22", "v23", "v24", "v25", "v26", "v27", "v28", "v29", "v30", "v31");
 #endif
 }
 void later(void) { *published=1; }
