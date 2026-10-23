@@ -41,6 +41,12 @@ The [bounded SSE2 saturation subset](c-x86-intrinsics.md#bounded-sse2-saturation
 adds eight signed/unsigned byte/word saturating add/subtract C wrappers, reusing
 existing typed SSE2 architectural operations at strict v1. This does not add
 AVX2 saturation, narrowing packs or numeric conversions.
+The [bounded SSE2 numeric conversions](c-x86-intrinsics.md#bounded-sse2-numeric-conversions)
+add `_mm_cvtepi32_ps`, `_mm_cvttps_epi32` and `_mm_cvtps_epi32` through existing
+pinned architectural IR and legacy lowering. Masked result/MXCSR, ABI and
+exact16 memory gates passed on LinuxHost with GCC/Clang in debug/release; separate
+strict-v1 object decoding and ARM diagnostics also passed. This adds no backend
+conversion semantics, unmasked-trap proof, FP64 or AVX2 conversion wrappers.
 AVX-512 and optional post-baseline ARM extensions are outside this goal.
 
 ## Strict-v1 userspace contract and audit

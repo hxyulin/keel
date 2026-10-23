@@ -282,5 +282,6 @@ static __inline__ __m128i _mm_subs_epu8(__m128i a, __m128i b) {
 static __inline__ __m128i _mm_subs_epu16(__m128i a, __m128i b) {
   return (__m128i)__builtin_keel_sse2_psubusw((__keel_u16_128)a, (__keel_u16_128)b);
 }
+#include <__keel_sse2_conversions.h>
 
 #endif /* _KEEL_EMMINTRIN_H */

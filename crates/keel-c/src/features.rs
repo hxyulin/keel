@@ -132,10 +132,14 @@ fn builtin(name: &str, target: Target) -> bool {
     if crate::expr::aes_builtin(base).is_some()
         || crate::expr::packed_shift_builtin(base).is_some()
         || crate::expr::saturating_builtin(base).is_some()
+        || crate::expr::packed_conversion_builtin(base).is_some()
     {
         return target == Target::X86_64LinuxGnu;
     }
-    if matches!(base, "ia32_pclmulqdq128" | "ia32_cmpps256" | "ia32_cmppd256") {
+    if matches!(
+        base,
+        "ia32_pclmulqdq128" | "ia32_cmpps256" | "ia32_cmppd256"
+    ) {
         return target == Target::X86_64LinuxGnu;
     }
     if crate::expr::typed_overflow(base).is_some() || crate::expr::generic_overflow(base).is_some()

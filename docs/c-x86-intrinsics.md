@@ -67,6 +67,8 @@ separate names, not arbitrary suffix combinations.
   `_mm_srai_epi{16,32}` with immediate controls, plus
   `_mm_{sll,srl}_epi{16,32,64}` and `_mm_sra_epi{16,32}` with vector counts.
   These are 128-bit operations; see the bounded shift contract below.
+- SSE2 numeric conversions: `_mm_cvtepi32_ps`, `_mm_cvttps_epi32` and
+  `_mm_cvtps_epi32`; see the bounded architectural conversion contract below.
 - Integer bit operations: `_mm_{and,or,xor,andnot}_si128` and
   `_mm256_{and,or,xor,andnot}_si256`; `andnot(a,b)` means `~a & b`.
   `_mm_setzero_si128`, `_mm256_setzero_si256`,
@@ -77,7 +79,8 @@ separate names, not arbitrary suffix combinations.
   and among `ps`, `pd`, and `si256` under `_mm256_cast`.
   `_mm256_castps256_ps128`, `_mm256_castpd256_pd128`, and
   `_mm256_castsi256_si128` select the low half. Casts with an undefined upper
-  half, and numeric lane conversions, are not included.
+  half are not included. The three numeric conversions below are separate from
+  these bit casts.
 - `_MM_SHUFFLE`, `_mm_shuffle_ps`, `_mm_shuffle_pd`, `_mm_shuffle_epi32`,
   `_mm256_shuffle_ps`, `_mm256_shuffle_epi32`, and
   `_mm256_permute4x64_epi64`. AVX 32-bit shuffles operate independently within
@@ -101,6 +104,7 @@ separate names, not arbitrary suffix combinations.
 
 The SSE/AVX header functions use C vectors, scalar lane access, and fixed-size
 `__builtin_memcpy`; saturation, shifts, shuffles and AVX comparisons use checked builtins.
+The three numeric conversions also use checked builtins and dedicated architectural IR.
 All lower through the existing typed IR, optimization, ABI, feature gating and
 instruction selection. The explicit PCLMUL builtin uses its dedicated typed
 intrinsic and lowering described in the linked contract.
@@ -132,7 +136,7 @@ available for explicit element conversions.
 Masked/gather/scatter memory, streaming memory/fences, scalar-lane FP intrinsics,
 saturation beyond the bounded SSE2 subset, horizontal operations, shifts beyond
 the bounded SSE2 subset,
-conversions, FMA, AVX-512,
+conversions beyond the three SSE2 forms below, FMA, AVX-512,
 full vendor header coverage and strict FP-environment compatibility are outside
 this header contract even where the backend already implements such operations.
 The existing C restrictions on vector varargs, unions and by-value x86 aggregates
@@ -234,8 +238,8 @@ frontend/lowering, encoding and native results; the newer execution host does
 not establish v1-only CPU behavior. No timing or speedup claim is made.
 
 AVX2 256-bit shifts, per-lane counts, byte shifts, rotates and the remainder of
-the vendor shift families remain queued. Saturation and numeric conversion
-wrappers are separate work.
+the vendor shift families remain queued. Bounded saturation and conversion
+wrappers are documented separately here.
 
 An independent review reapplied implementation `1f41f4eb` and candidate
 `d4fa1b77` onto clean main `0eb22fa9` in its own worktree. No blocking source
@@ -277,6 +281,99 @@ only the baseline inventory listed above. This is finite encoding evidence,
 not a general independent feature-decoder proof. Native execution used a
 newer CPU, not a v1-only or CPUID-masked host. No timing claim is made. Main,
 the original worktree and the separate numeric-conversion work were untouched.
+
+## Bounded SSE2 numeric conversions
+
+`emmintrin.h` exposes exactly three full-width 128-bit conversion functions:
+
+- `__m128 _mm_cvtepi32_ps(__m128i a)`: four signed i32 lanes to f32,
+  rounded using MXCSR.RC. Inexact inputs, including integers beyond 2^24,
+  set the precision status flag.
+- `__m128i _mm_cvttps_epi32(__m128 a)`: four f32 lanes to signed i32,
+  truncating toward zero independently of MXCSR.RC.
+- `__m128i _mm_cvtps_epi32(__m128 a)`: four f32 lanes to signed i32,
+  rounded using MXCSR.RC, including nearest-even ties.
+
+These use `x86_sse_cvtdq2ps128`, `x86_sse_cvttps2dq128` and
+`x86_sse_cvtps2dq128`, respectively. Their existing impure, pinned barrier
+semantics and direct legacy SSE2 lowering preserve architectural MXCSR
+observations and status effects even with unused results. No portable
+saturating conversion, scalar C cast or constrained numerical conversion is
+substituted. With invalid exceptions masked, NaNs, infinities and out-of-range
+rounded results produce x86 integer-indefinite `0x80000000` in the affected
+lane and set invalid status. Valid negative INT32_MIN has the same result bits
+without invalid status. Fractional valid conversions set precision status;
+DAZ/FTZ and seeded status bits follow the hardware instruction. Wrappers never
+change MXCSR controls or clear flags. This narrow contract does not extend the
+ordinary C arithmetic/comparison FP-environment contract.
+
+Each operand is evaluated once. Public nominal types remain `__m128` and
+`__m128i`; the private `__builtin_keel_sse2_{cvtdq2ps,cvttps2dq,cvtps2dq}`
+bridge checks exactly one signed `int` i32x4 or `float` f32x4 C vector on
+x86-64. It returns f32x4 or signed `int` i32x4; the wrapper bitcasts the
+integer container. `__has_builtin` recognizes these names on x86-64 regardless
+of feature selection, and reports false on ARM. These private names do not
+promise GNU vendor builtin compatibility. Definitions live in the private
+`__keel_sse2_conversions.h` fragment. V1 already includes SSE2; the existing
+backend preflight, release legality guard and assembler checks remain in force.
+No backend, optimizer, ABI, feature/default-width or FP-policy change is made.
+
+`keel-c --test x86_conversions` separates frontend/IR and strict-v1 object
+checks from conditional native Linux x86 execution. The native harness compares
+integer-only independent bit/flag oracles with separately compiled GCC/Clang
+vendor-header wrappers. External calls across translation units, no LTO, and
+volatile assembly MXCSR reads/writes ensure the observed conversion executes
+between environment setup and observation. The candidate's unused-result forms
+are checked against the same status oracle. Two identical i32-to-f32 operations
+separated by an external rounding-mode change verify ordering and retention.
+
+The finite corpus covers signed extrema, exact/inexact integers near and beyond
+2^24, ties, negative zero, positive/negative subnormals, NaNs (quiet/signaling),
+infinities, and signed-i32 boundaries/out-of-range values. Every RC/DAZ/FTZ
+combination runs with clear, invalid-seeded, precision-seeded and all-seeded
+status, plus 256 deterministic random vectors per operation/environment.
+Results and full MXCSR are checked separately, with all exceptions masked and
+entry MXCSR restored. Native tests also cover direct/indirect calls, callbacks,
+live inputs/results, single evaluation, output/input aliases, unaligned pointers,
+byte sentinels and both protected-page edges for exact 16-byte accesses.
+Unmasked exception/trap delivery is **not tested or newly claimed** here.
+
+On 2026-10-23, debug/release gates passed on Apple ARM64 (14 tests/profile,
+frontend/IR/cross-object plus applicable existing native controls) and LinuxHost
+Linux x86-64 (17 tests/profile, including native conversions with GCC 16.2.0
+and Clang 23.1.1). Each conversion harness executed baseline/fast, trees/full,
+and optimized/full with empty register pools. The same runs passed existing
+`x86_intrinsics`, `x86_shifts`, `x86_aes` and `pclmul` regressions.
+
+Independent `llvm-objdump` decoding found legacy `cvtdq2ps`, `cvttps2dq` and
+`cvtps2dq` in all six debug/release candidate objects; full mnemonic inventories
+contain only baseline integer/SSE/SSE2 instructions. Encoding inspection and
+native execution are separate evidence. LinuxHost is a newer CPU, so this does not
+establish execution on a CPUID-masked v1-only machine or exhaustive FP behavior.
+No timing/performance claim is made.
+
+Reproduce under the shared build lock (add `--release` for release):
+
+```sh
+python3 suite/fast_opt_locked.py /tmp/keel-c-conversions-unique.jsonl \
+  cargo test --offline --locked -j2 -p keel-c \
+  --test x86_conversions --test x86_intrinsics --test x86_shifts \
+  --test x86_aes --test pclmul -- --nocapture
+```
+
+LinuxHost source snapshot: `/tmp/keel-c-conversions-20261023`.
+Logs/lock records: `/tmp/keel-conversions-native-debug-final.{log,jsonl}` and
+`/tmp/keel-conversions-native-release.{log,jsonl}`. Candidate objects, vendor
+sources, harnesses and executables: `/tmp/keel-c-conversions-3229213` (debug)
+and `/tmp/keel-c-conversions-3230199` (release). Disassembly is beside each
+object; hashes/inventories and decoder are `/tmp/keel-conversions-disassembly.json`
+and `/tmp/keel-conversions-decode.py`. Local logs/lock records use
+`/tmp/keel-conversions-local-debug-final.{log,jsonl}` and
+`/tmp/keel-conversions-local-release.{log,jsonl}`. Builds/native execution held
+the shared suite lock, used cargo's default cache and kept native-link caching off.
+
+FP64, scalar-lane, 256-bit/AVX2, unsigned and undefined-upper-lane conversion
+wrappers remain unsupported. There is no general numeric vector-cast extension.
 
 ## Validation and reproduction
 

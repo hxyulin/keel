@@ -1504,6 +1504,31 @@ impl<'a> Parser<'a> {
 
     fn builtin(&mut self, name: &str, loc: Loc) -> R<Expr<'a>> {
         let base = &name["__builtin_".len()..];
+        if let Some(id) = packed_conversion_builtin(base) {
+            let args = self.builtin_args(1, loc)?;
+            let to_float = id == Intrinsic::X86Ssecvtdq2ps128;
+            let input = if to_float {
+                Ty::Vector(&INT, keel_ir::VectorType::I32x4)
+            } else {
+                Ty::Vector(&Ty::Float, keel_ir::VectorType::F32x4)
+            };
+            if self.target != Target::X86_64LinuxGnu || args[0].ty != input {
+                return Err(Error::new(
+                    loc,
+                    "SSE2 packed conversion requires its matching signed i32x4 or f32x4 vector on x86-64",
+                ));
+            }
+            let result = if to_float {
+                Ty::Vector(&Ty::Float, keel_ir::VectorType::F32x4)
+            } else {
+                Ty::Vector(&INT, keel_ir::VectorType::I32x4)
+            };
+            return Ok(mk(
+                ExprKind::Builtin(Builtin::X86PackedConversion(id), self.slice(&args)),
+                result,
+                loc,
+            ));
+        }
         if let Some((id, shape, immediate)) = packed_shift_builtin(base) {
             let mut args = self.builtin_args(2, loc)?;
             if self.target != Target::X86_64LinuxGnu
@@ -3146,6 +3171,17 @@ pub(crate) fn saturating_builtin(base: &str) -> Option<(keel_ir::Intrinsic, bool
         "keel_sse2_psubsw" => (X86Sse2Psubsw128, false, true),
         "keel_sse2_psubusb" => (X86Sse2Psubusb128, true, false),
         "keel_sse2_psubusw" => (X86Sse2Psubusw128, true, true),
+        _ => return None,
+    })
+}
+
+/// Private typed bridge: preserve architectural rounding, invalid results and flags.
+pub(crate) fn packed_conversion_builtin(base: &str) -> Option<keel_ir::Intrinsic> {
+    use keel_ir::Intrinsic::*;
+    Some(match base {
+        "keel_sse2_cvtdq2ps" => X86Ssecvtdq2ps128,
+        "keel_sse2_cvttps2dq" => X86Ssecvttps2dq128,
+        "keel_sse2_cvtps2dq" => X86Ssecvtps2dq128,
         _ => return None,
     })
 }
