@@ -1307,8 +1307,9 @@ impl<'a> Parser<'a> {
                 || *elem == spec.ty
                 || ((elem.is_arith() || elem.is_vector())
                     && (spec.ty.is_arith() || spec.ty.is_vector()));
-            if let Some(what) = elem.unusable()
-                && !matches!(spec.storage, Storage::Typedef | Storage::Extern)
+            if let Some(what) = self.types().unsupported_value(&d.ty)
+                && spec.storage != Storage::Typedef
+                && (spec.storage != Storage::Extern || self.is("="))
             {
                 return Err(Error::new(
                     name_loc,

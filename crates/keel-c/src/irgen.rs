@@ -115,6 +115,26 @@ impl<'p> Gen<'p> {
         // Validate even discarded static/inline bodies against callback and
         // direct-call contracts added by later declarations in the unit.
         for def in self.funcs.iter().flatten() {
+            self.check_value_signature(def.ty, def.loc)?;
+            // Run before pruning: discarded definitions cannot hide unsafe ABI
+            // calls, varargs, aggregate reads/copies or unsupported locals.
+            for local in &def.locals {
+                self.check_value_type(&local.ty, def.loc)?;
+            }
+            let mut error = None;
+            for stmt in def.body {
+                visit_stmt_exprs(stmt, &mut |e, use_| {
+                    if let Err(e) = self.check_value_expr(e, use_) {
+                        error = Some(e);
+                        None
+                    } else {
+                        Some(())
+                    }
+                });
+                if let Some(error) = error.take() {
+                    return Err(error);
+                }
+            }
             if def.locals.iter().any(|l| l.cleanup.is_some()) {
                 for &(g, loc) in &def.direct_calls {
                     if crate::parse::nonlocal_exit(&self.p.globals[g]) {
@@ -135,6 +155,25 @@ impl<'p> Gen<'p> {
                 }
                 if crate::parse::nonlocal_exit(callback) || callback.function_attrs.noreturn {
                     return Err(Error::new(loc, "cleanup callback must return normally"));
+                }
+            }
+        }
+        for global in &self.p.globals {
+            if global.defined && !matches!(global.ty, Ty::Func(_)) {
+                self.check_value_type(&global.ty, Loc::default())?;
+                if let Some(init) = &global.init {
+                    let mut error = None;
+                    visit_init_exprs(init, &mut |e, use_| {
+                        if let Err(e) = self.check_value_expr(e, use_) {
+                            error = Some(e);
+                            None
+                        } else {
+                            Some(())
+                        }
+                    });
+                    if let Some(error) = error {
+                        return Err(error);
+                    }
                 }
             }
         }
@@ -525,10 +564,46 @@ impl<'p> Gen<'p> {
         self.dtypes.get(&mut self.module, self.p, ty, sugar)
     }
 
+    fn check_value_expr(&self, e: &Expr<'_>, use_: ExprUse) -> R<()> {
+        // Array expressions decay to pointers. Taking an object's address or
+        // computing a member address does not read the containing value.
+        if use_ != ExprUse::Address && !matches!(e.ty, Ty::Array(_)) {
+            self.check_value_type(&e.ty, e.loc)?;
+        }
+        if let ExprKind::Global(_) = e.kind
+            && let Ty::Func(fty) = e.ty
+        {
+            self.check_value_signature(fty, e.loc)?;
+        }
+        if let ExprKind::Call(callee, _) = e.kind
+            && let Some(fty) = callee.ty.pointee().and_then(Ty::func)
+        {
+            self.check_value_signature(fty, e.loc)?;
+        }
+        Ok(())
+    }
+
+    fn check_value_type(&self, ty: &Ty, loc: Loc) -> R<()> {
+        if let Some(name) = self.types().unsupported_value(ty) {
+            return Err(Error::new(
+                loc,
+                format!("values containing `{name}` are not supported"),
+            ));
+        }
+        Ok(())
+    }
+
+    fn check_value_signature(&self, fty: &FuncTy, loc: Loc) -> R<()> {
+        for ty in std::iter::once(&fty.ret).chain(fty.params) {
+            self.check_value_type(ty, loc)?;
+        }
+        Ok(())
+    }
+
     /// How a value of C type `ty` crosses a call; the name of the type if
     /// keel cannot pass it.
     fn abi_param(&self, ty: &Ty) -> Result<AbiParam, &'static str> {
-        if let Some(name) = ty.unusable() {
+        if let Some(name) = self.types().unsupported_value(ty) {
             return Err(name);
         }
         Ok(match ty {
@@ -551,6 +626,9 @@ impl<'p> Gen<'p> {
     }
 
     fn aggregate_layout(&self, ty: &Ty) -> Result<keel_ir::Layout, &'static str> {
+        if let Some(name) = self.types().unsupported_value(ty) {
+            return Err(name);
+        }
         if self.types().contains_vector_union(ty) {
             return Err("unions containing vectors passed by value");
         }
@@ -1386,7 +1464,10 @@ impl DispatchTable {
         }
         let mut selected = None;
         for stmt in def.body {
-            visit_gotos(stmt, &mut |target| {
+            visit_stmt_exprs(stmt, &mut |target, use_| {
+                if use_ != ExprUse::IndirectGoto {
+                    return Some(());
+                }
                 let (global, _) = dispatch_index(target)?;
                 if target.sugar.is_volatile(&p.typedefs) {
                     return None;
@@ -1451,44 +1532,53 @@ impl DispatchTable {
     }
 }
 
-/// Inspect every evaluated expression as well as statement bodies: GNU
-/// statement expressions can contain indirect gotos even inside an index.
-/// Returning None rejects fusion for the entire function.
-fn visit_gotos(stmt: &Stmt<'_>, f: &mut impl FnMut(&Expr<'_>) -> Option<()>) -> Option<()> {
+#[derive(Clone, Copy, PartialEq)]
+enum ExprUse {
+    Value,
+    Address,
+    IndirectGoto,
+}
+
+/// Inspect evaluated expressions, including GNU statement expressions. Keep
+/// address computations distinct from value reads and identify indirect gotos
+/// for dispatch-table recognition. Returning None stops the traversal.
+fn visit_stmt_exprs(
+    stmt: &Stmt<'_>,
+    f: &mut impl FnMut(&Expr<'_>, ExprUse) -> Option<()>,
+) -> Option<()> {
     match stmt {
-        Stmt::Expr(e) | Stmt::Return(Some(e), _) => visit_goto_expr(e, f)?,
+        Stmt::Expr(e) | Stmt::Return(Some(e), _) => visit_exprs(e, f)?,
         Stmt::GotoIndirect(e) => {
-            f(e)?;
-            visit_goto_expr(e, f)?;
+            visit_exprs_as(e, ExprUse::IndirectGoto, f)?;
         }
-        Stmt::Init(_, init, _) => visit_goto_init(init, f)?,
+        Stmt::Init(_, init, _) => visit_init_exprs(init, f)?,
         Stmt::Asm(asm) => {
             for (e, _) in asm.outputs {
-                visit_goto_expr(e, f)?;
+                visit_exprs(e, f)?;
             }
             for e in asm.inputs {
-                visit_goto_expr(e, f)?;
+                visit_exprs(e, f)?;
             }
         }
         Stmt::Block(stmts) | Stmt::Scoped(_, stmts) => {
             for stmt in stmts.iter() {
-                visit_gotos(stmt, f)?;
+                visit_stmt_exprs(stmt, f)?;
             }
         }
         Stmt::If(e, yes, no) => {
-            visit_goto_expr(e, f)?;
-            visit_gotos(yes, f)?;
+            visit_exprs(e, f)?;
+            visit_stmt_exprs(yes, f)?;
             if let Some(no) = no {
-                visit_gotos(no, f)?;
+                visit_stmt_exprs(no, f)?;
             }
         }
         Stmt::While(e, body) | Stmt::DoWhile(body, e) => {
-            visit_goto_expr(e, f)?;
-            visit_gotos(body, f)?;
+            visit_exprs(e, f)?;
+            visit_stmt_exprs(body, f)?;
         }
         Stmt::Switch { cond, body, .. } => {
-            visit_goto_expr(cond, f)?;
-            visit_gotos(body, f)?;
+            visit_exprs(cond, f)?;
+            visit_stmt_exprs(body, f)?;
         }
         Stmt::For {
             init,
@@ -1497,15 +1587,15 @@ fn visit_gotos(stmt: &Stmt<'_>, f: &mut impl FnMut(&Expr<'_>) -> Option<()>) -> 
             body,
         } => {
             if let Some(init) = init {
-                visit_gotos(init, f)?;
+                visit_stmt_exprs(init, f)?;
             }
             if let Some(cond) = cond {
-                visit_goto_expr(cond, f)?;
+                visit_exprs(cond, f)?;
             }
             if let Some(step) = step {
-                visit_goto_expr(step, f)?;
+                visit_exprs(step, f)?;
             }
-            visit_gotos(body, f)?;
+            visit_stmt_exprs(body, f)?;
         }
         Stmt::Declare(_)
         | Stmt::Case(_)
@@ -1518,25 +1608,38 @@ fn visit_gotos(stmt: &Stmt<'_>, f: &mut impl FnMut(&Expr<'_>) -> Option<()>) -> 
     Some(())
 }
 
-fn visit_goto_init(init: &Init<'_>, f: &mut impl FnMut(&Expr<'_>) -> Option<()>) -> Option<()> {
+fn visit_init_exprs(
+    init: &Init<'_>,
+    f: &mut impl FnMut(&Expr<'_>, ExprUse) -> Option<()>,
+) -> Option<()> {
     for item in init.items {
         if let InitItem::Expr { expr, .. } = item {
-            visit_goto_expr(expr, f)?;
+            visit_exprs(expr, f)?;
         }
     }
     Some(())
 }
 
-fn visit_goto_expr(e: &Expr<'_>, f: &mut impl FnMut(&Expr<'_>) -> Option<()>) -> Option<()> {
+fn visit_exprs(e: &Expr<'_>, f: &mut impl FnMut(&Expr<'_>, ExprUse) -> Option<()>) -> Option<()> {
+    visit_exprs_as(e, ExprUse::Value, f)
+}
+
+fn visit_exprs_as(
+    e: &Expr<'_>,
+    use_: ExprUse,
+    f: &mut impl FnMut(&Expr<'_>, ExprUse) -> Option<()>,
+) -> Option<()> {
+    f(e, use_)?;
     match &e.kind {
         ExprKind::Unary(_, a)
         | ExprKind::Cast(a)
         | ExprKind::Deref(a)
-        | ExprKind::Addr(a)
         | ExprKind::VaStart(a)
         | ExprKind::VaArg(a)
-        | ExprKind::IncDec { lhs: a, .. }
-        | ExprKind::Member { base: a, .. } => visit_goto_expr(a, f)?,
+        | ExprKind::IncDec { lhs: a, .. } => visit_exprs(a, f)?,
+        ExprKind::Addr(a) | ExprKind::Member { base: a, .. } => {
+            visit_exprs_as(a, ExprUse::Address, f)?;
+        }
         ExprKind::VectorIndex(a, b)
         | ExprKind::Binary(_, a, b)
         | ExprKind::PtrAdd(a, b, _)
@@ -1547,32 +1650,32 @@ fn visit_goto_expr(e: &Expr<'_>, f: &mut impl FnMut(&Expr<'_>) -> Option<()>) ->
         | ExprKind::Comma(a, b)
         | ExprKind::OpAssign { lhs: a, rhs: b, .. }
         | ExprKind::PtrOpAssign { lhs: a, rhs: b, .. } => {
-            visit_goto_expr(a, f)?;
-            visit_goto_expr(b, f)?;
+            visit_exprs(a, f)?;
+            visit_exprs(b, f)?;
         }
         ExprKind::Cond(a, b, c) => {
-            visit_goto_expr(a, f)?;
-            visit_goto_expr(b, f)?;
-            visit_goto_expr(c, f)?;
+            visit_exprs(a, f)?;
+            visit_exprs(b, f)?;
+            visit_exprs(c, f)?;
         }
         ExprKind::Call(callee, args) => {
-            visit_goto_expr(callee, f)?;
+            visit_exprs(callee, f)?;
             for arg in args.iter() {
-                visit_goto_expr(arg, f)?;
+                visit_exprs(arg, f)?;
             }
         }
         ExprKind::Builtin(_, args) => {
             for arg in args.iter() {
-                visit_goto_expr(arg, f)?;
+                visit_exprs(arg, f)?;
             }
         }
-        ExprKind::CompoundLit(_, init) => visit_goto_init(init, f)?,
+        ExprKind::CompoundLit(_, init) => visit_init_exprs(init, f)?,
         ExprKind::StmtExpr { stmts, value, .. } => {
             for stmt in stmts.iter() {
-                visit_gotos(stmt, f)?;
+                visit_stmt_exprs(stmt, f)?;
             }
             if let Some(value) = value {
-                visit_goto_expr(value, f)?;
+                visit_exprs(value, f)?;
             }
         }
         ExprKind::Int(_)

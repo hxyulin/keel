@@ -445,9 +445,17 @@ impl<'a> Ty<'a> {
                             .any(|(a, b)| a.numeric_redeclaration_conflict(b)))
             }
             (Ty::Vector(..), _) | (_, Ty::Vector(..)) => !self.compatible(other),
-            (a, b) if a.is_arith() && b.is_arith() => !a.compatible(b),
+            (a, b) if a.numeric_identity() && b.numeric_identity() => !a.compatible(b),
             _ => false,
         }
+    }
+
+    // Value support and numeric identity are separate: opaque extended floats
+    // still must not acquire a different numeric type through a redeclaration.
+    fn numeric_identity(&self) -> bool {
+        self.is_arith()
+            || matches!(self, Ty::Opaque(o) if matches!(o.name,
+                "__float128" | "long double" | "_Complex long double"))
     }
 
     /// Compatibility for redeclarations, permitting incomplete arrays/prototypes.
@@ -711,6 +719,29 @@ impl Types<'_> {
             Ty::Array(a) => self.has_unaligned_fields(&a.elem, base),
             _ => !base.is_multiple_of(self.align(ty)),
         }
+    }
+
+    /// Unsupported values contained in an object, stopping at pointers and
+    /// function types. Declarations/layout queries do not materialize values.
+    pub fn unsupported_value(&self, ty: &Ty) -> Option<&'static str> {
+        fn find(types: &Types<'_>, ty: &Ty, seen: &mut Vec<usize>) -> Option<&'static str> {
+            if let Some(name) = ty.unusable() {
+                return Some(name);
+            }
+            match ty {
+                Ty::Struct(id) if !seen.contains(id) => {
+                    seen.push(*id);
+                    types.0[*id]
+                        .members
+                        .iter()
+                        .find_map(|m| find(types, &m.ty, seen))
+                }
+                Ty::Array(a) => find(types, &a.elem, seen),
+                Ty::Atomic(t) | Ty::Complex(t) => find(types, t, seen),
+                _ => None,
+            }
+        }
+        find(self, ty, &mut Vec::new())
     }
 
     pub fn contains_vector_union(&self, ty: &Ty) -> bool {
