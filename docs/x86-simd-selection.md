@@ -102,6 +102,43 @@ mask normalization. No runtime speedup is claimed. Export with
 `KEEL_BYTE_COMPARE_EVIDENCE`; the ignored
 `measure_unsigned_byte_compare_codegen` test records the unchanged corpus.
 
+## Reproducing revision comparisons
+
+The two measurement tests were introduced by this branch, so they are absent
+from the historical base. Use a disposable archive of
+`9ffab6bcdb610b74f9ac0fd92bfd6b1a4dd848a0` and copy only
+`crates/keel-codegen/tests/x86_generic_shuffle.rs` and
+`crates/keel-codegen/tests/x86_unsigned_byte_compare.rs` from the candidate into
+that archive. Leave the base compiler sources unchanged. The byte corpus does
+not contain shuffles, so this common base also reproduces its pre-bias-change
+counts. The original intermediate comparison revision is `151e23a3`.
+
+In each checkout or archive, run the following with a distinct evidence path
+and log path under `/tmp`:
+
+```sh
+\
+KEEL_SIMD_EVIDENCE=/tmp/keel-review-candidate/shuffle \
+KEEL_BYTE_COMPARE_EVIDENCE=/tmp/keel-review-candidate/byte \
+python3 suite/fast_opt_locked.py /tmp/keel-review-candidate.jsonl \
+  cargo test --offline --locked -j2 -p keel-codegen \
+  --test x86_generic_shuffle --test x86_unsigned_byte_compare \
+  -- --ignored --nocapture
+```
+
+Run only the ignored measurements at the base: the ordinary encoding tests
+assert that the new recipes are selected. Keep each checkout's cargo-managed
+target directory and the default shared cache; do not share `CARGO_TARGET_DIR`.
+The printed instruction/byte/frame-access counts can be compared directly.
+The saved assembly can additionally be inspected for vector-width frame
+accesses; those are a subset of the printed frame-access total.
+
+Local ARM64 success for these two test targets checks cross-generated x86
+objects, typed/text equality, Clang encodings and C syntax. It does not execute
+the exported x86 C oracles. Run those separately on Linux x86-64 with the
+native runners above, under the same serialization wrapper, and retain their
+`native-results.json` reports.
+
 ## Remaining limitations
 
 Arbitrary cross-source dword masks and byte/word masks that split dword groups
