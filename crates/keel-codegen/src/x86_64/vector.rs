@@ -758,6 +758,59 @@ mod d_tests {
     }
 
     #[test]
+    fn wrapping_reduction_retention_has_exact_operation_and_result_shapes() {
+        use keel_asm_ir::x86::{CpuLevel, Features};
+        use keel_ir::VectorReduceOp;
+        for shape in [
+            VectorType::I8x8,
+            VectorType::I16x4,
+            VectorType::I32x2,
+            VectorType::I64x1,
+            VectorType::I8x16,
+            VectorType::I16x8,
+            VectorType::I32x4,
+            VectorType::I64x2,
+            VectorType::I32x8,
+            VectorType::I64x4,
+        ] {
+            for op in VectorReduceOp::ALL {
+                let source = format!(
+                    "func @f({shape}) -> {} {{\nentry(v0:{shape}):\n v1 = {op} v0\n return v1\n}}",
+                    shape.lane_type()
+                );
+                let module = keel_ir::parse(&source).unwrap();
+                keel_ir::verify_module(&module).unwrap();
+                for level in [CpuLevel::V1, CpuLevel::V2, CpuLevel::V3] {
+                    let lowered = lower(&module.functions[0], Features::for_level(level));
+                    keel_ir::verify(&lowered).unwrap();
+                    let retained: Vec<_> = lowered
+                        .layout_insts()
+                        .filter_map(|(_, i)| {
+                            matches!(lowered.inst_data(i), InstData::VectorReduce { .. })
+                                .then_some(i)
+                        })
+                        .collect();
+                    // Existing AVX2 reductions remain retained for every operation.
+                    let eligible = (op == VectorReduceOp::Add
+                        && matches!(shape, VectorType::I32x4 | VectorType::I64x2))
+                        || (shape.bytes() == 32 && level == CpuLevel::V3);
+                    assert_eq!(
+                        retained.len(),
+                        usize::from(eligible),
+                        "{shape} {op} {level:?}"
+                    );
+                    for i in retained {
+                        assert_eq!(
+                            lowered.value_type(lowered.first_result(i)),
+                            shape.lane_type()
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn dword_multiply_retains_metadata_through_owned_rounds() {
         use keel_asm_ir::x86::{CpuLevel, Features};
         use keel_ir::{EntityRef, SourceFile, SourceLoc};

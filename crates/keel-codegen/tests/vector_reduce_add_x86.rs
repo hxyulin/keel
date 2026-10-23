@@ -33,7 +33,7 @@ impl RegisterAllocator for Controlled {
                 1 => (Loc::Stack(0), Loc::Reg(6)),
                 2 => (Loc::FReg(0), Loc::Stack(0)),
                 3 => (Loc::Stack(0), Loc::Stack(0)),
-                _ => (Loc::FReg(14), Loc::Reg(6)),
+                n => (Loc::FReg(13 + n - 4), Loc::Reg(6)),
             };
             a.spill_slots = 2;
             a.locs[0][0] = Some(source);
@@ -66,7 +66,7 @@ fn fixture() -> (String, String) {
             "typedef uint{bits}_t V_{shape} __attribute__((vector_size(16)));\nextern uint{bits}_t sum_{shape}(V_{shape});extern uint64_t live_{shape}(const void*,void*,uint64_t);\n__attribute__((noinline)) V_{shape} opaque_{shape}(V_{shape} x){{__asm__ volatile(\"pxor %%xmm15,%%xmm15\"::: \"xmm15\");return x;}}\n"
         );
         main += &format!(
-            "for(unsigned k=0;k<4096;k++){{uint{bits}_t a[{n}],sum=0;for(unsigned l=0;l<{n};l++){{rng^=rng<<13;rng^=rng>>7;rng^=rng<<17;uint64_t edge[]={{0,1,UINT64_MAX,UINT64_C(0x8000000000000000),UINT64_C(0x7fffffffffffffff),UINT64_C(0x80000000),UINT64_C(0x7fffffff),UINT64_C(0xffffffff)}};a[l]=(uint{bits}_t)(k<64?edge[(k+l)%8]:rng);if(k>=64&&k<64+{n})a[l]=(l==k-64)?(uint{bits}_t)-1:0;sum+=a[l];}}V_{shape} v;memcpy(&v,a,16);if(sum_{shape}(v)!=sum)return 1;for(unsigned edge=0;edge<3;edge++){{unsigned char *p=edge==0?map+page:edge==1?map+2*page-16:map+page+1;memcpy(p,a,16);unsigned char out[34],expected[34];memset(out,0xa5,34);memset(expected,0xa5,34);memcpy(expected+1,&sum,{bits}/8);memcpy(expected+9,&sum,{bits}/8);memcpy(expected+17,a,16);uint64_t got=live_{shape}(p,out+1,UINT64_C(0xfedcba9876543210));uint64_t e=UINT64_C(0xfedcba9876543210)+(uint64_t)({signed})sum+(uint64_t)sum;if(got!=e||memcmp(out,expected,34)||memcmp(p,a,16))return 2;}}}}\n",
+            "for(unsigned k=0;k<(1u<<(3*{n}))+4096;k++){{uint{bits}_t a[{n}],sum=0;for(unsigned l=0;l<{n};l++){{rng^=rng<<13;rng^=rng>>7;rng^=rng<<17;uint64_t edge[]={{0,1,UINT64_MAX,UINT64_C(0x8000000000000000),UINT64_C(0x7fffffffffffffff),UINT64_C(0x80000000),UINT64_C(0x7fffffff),UINT64_C(0xffffffff)}};a[l]=(uint{bits}_t)(k<(1u<<(3*{n}))?edge[(k>>(3*l))%8]:rng);if(k>=(1u<<(3*{n}))&&k<(1u<<(3*{n}))+{n})a[l]=(l==k-(1u<<(3*{n})))?(uint{bits}_t)-1:0;sum+=a[l];}}V_{shape} v;memcpy(&v,a,16);if(sum_{shape}(v)!=sum)return 1;for(unsigned edge=0;edge<3;edge++){{unsigned char *p=edge==0?map+page:edge==1?map+2*page-16:map+page+1;memcpy(p,a,16);unsigned char out[34],expected[34];memset(out,0xa5,34);memset(expected,0xa5,34);memcpy(expected+1,&sum,{bits}/8);memcpy(expected+9,&sum,{bits}/8);memcpy(expected+17,a,16);uint64_t got=live_{shape}(p,out+1,UINT64_C(0xfedcba9876543210));uint64_t e=UINT64_C(0xfedcba9876543210)+(uint64_t)({signed})sum+(uint64_t)sum;if(got!=e||memcmp(out,expected,34)||memcmp(p,a,16))return 2;}}}}\n",
             signed = if bits == 32 { "int32_t" } else { "uint64_t" }
         );
     }
@@ -310,16 +310,18 @@ fn reserved_vector_scratch_cannot_be_allocated() {
         inner: &SelectionTier::Full,
         features: Features::for_level(CpuLevel::V1),
     };
-    let err = keel_codegen::x86_64::compile_with_pipeline(
-        &m,
-        &keel_codegen::x86_64::REGISTERS,
-        &CodegenPipeline {
-            selector: &selector,
-            allocator: &Controlled(4),
-        },
-    )
-    .unwrap_err();
-    assert!(err.to_string().contains("reserved register"), "{err}");
+    for scratch_case in 4..=6 {
+        let err = keel_codegen::x86_64::compile_with_pipeline(
+            &m,
+            &keel_codegen::x86_64::REGISTERS,
+            &CodegenPipeline {
+                selector: &selector,
+                allocator: &Controlled(scratch_case),
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("reserved register"), "{err}");
+    }
 }
 
 /// Run separately from native timing, using the same profile for both revisions.
