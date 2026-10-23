@@ -117,6 +117,8 @@ pub struct Selection {
     pub(crate) division_remainders: HashMap<Inst, Inst>,
     /// Scalar compare consumed directly by a select.
     pub(crate) select_compares: HashMap<Inst, Inst>,
+    /// Exact adjacent ordinary i8 load consumed by sext.i32.
+    pub(crate) signed_byte_memory: HashMap<Inst, Value>,
     allocation_operands: OperandTable,
     // Operand occurrences removed by fold_operands, so later target folding
     // (including addresses known only after allocation) does not remove them twice.
@@ -1100,6 +1102,69 @@ impl Selection {
         plan
     }
 
+    /// Preserve the byte access position; only inert constants may separate
+    /// the load and conversion. Run after address selection and before allocation.
+    pub(crate) fn fold_signed_byte_loads(&mut self, func: &Function, uses: &[u8]) {
+        for block in func.blocks() {
+            let mut previous = None;
+            for &consumer in func.block_insts(block) {
+                if matches!(func.inst_data(consumer), InstData::Iconst { .. }) {
+                    // A constrained or separately located constant is a boundary.
+                    if self.has_constraint(consumer)
+                        || self.matches.contains_key(&consumer)
+                        || self.conditions.contains_key(&consumer)
+                        || func.is_removed(consumer)
+                        || previous.is_some_and(|i| func.inst_loc(i) != func.inst_loc(consumer))
+                    {
+                        previous = None;
+                    }
+                    continue;
+                }
+                let candidate = previous;
+                previous = Some(consumer);
+                let Some(load) = candidate else { continue };
+                let InstData::Load {
+                    ty: Type::I8,
+                    addr,
+                    flags,
+                } = *func.inst_data(load)
+                else {
+                    continue;
+                };
+                let InstData::Convert {
+                    op: ConvertOp::Sext,
+                    ty: Type::I32,
+                    arg,
+                } = *func.inst_data(consumer)
+                else {
+                    continue;
+                };
+                let value = func.first_result(load);
+                if flags.volatile
+                    || func.resolve(arg) != value
+                    || uses[value.index()] != 1
+                    || [load, consumer].iter().any(|&i| {
+                        func.is_removed(i)
+                            || self.covered(i)
+                            || self.matches.contains_key(&i)
+                            || self.has_constraint(i)
+                            || self.conditions.contains_key(&i)
+                            || func.inst_loc(i) != func.inst_loc(load)
+                            || func.resolve(func.first_result(i)) != func.first_result(i)
+                    })
+                {
+                    continue;
+                }
+                // Transfer all selected leaves, including indexed and symbolic
+                // addresses. Never resurrect the covered address's SSA result.
+                let operands = self.operands(func, load);
+                self.set_operands(consumer, operands);
+                self.signed_byte_memory.insert(consumer, func.resolve(addr));
+                self.cover(load);
+            }
+        }
+    }
+
     /// Do this after address selection, so the load's selected address leaves
     /// (including a covered ptradd) move to the consumer before allocation.
     /// There is no intervening IR instruction, including a second memory read.
@@ -1160,5 +1225,65 @@ impl Selection {
                 self.cover(load);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod signed_byte_tests {
+    use super::*;
+    const SOURCE: &str = "func @f(ptr,i64,i8,i32) {\nblock0(v0:ptr,v1:i64,v2:i8,v3:i32):\n v4 = load.i8 v0\n v5 = sext.i32 v4\n return\n}\n";
+    #[test]
+    fn boundaries_and_selected_address_leaves() {
+        for at in 0..2 {
+            for boundary in 0..6 {
+                let mut m = keel_ir::parse(SOURCE).unwrap();
+                let f = &mut m.functions[0];
+                let pair: Vec<_> = f.layout_insts().take(2).map(|(_, i)| i).collect();
+                let mut s = Selection::default();
+                match boundary {
+                    0 => {
+                        s.conditions.insert(pair[at], (pair[0], false));
+                    }
+                    1 => s.cover(pair[at]),
+                    2 => {
+                        s.matches.insert(
+                            pair[at],
+                            Match {
+                                machine: Machine::Lea,
+                                args: vec![],
+                                shift: 0,
+                            },
+                        );
+                    }
+                    3 => s.set_constraint(
+                        pair[at],
+                        ValuePart::low(f.first_result(pair[at])),
+                        OperandKind::Def,
+                        Constraint::Register,
+                    ),
+                    4 => f.replace_all_uses(f.first_result(pair[at]), Value::new(at + 2)),
+                    _ => f.set_inst_loc(
+                        pair[at],
+                        Some(keel_ir::SourceLoc {
+                            file: keel_ir::SourceFile::new(0),
+                            line: 1,
+                            col: 1,
+                            scope: None,
+                        }),
+                    ),
+                }
+                s.fold_signed_byte_loads(f, &crate::fold::use_counts(f));
+                assert!(s.signed_byte_memory.is_empty(), "{at} {boundary}");
+            }
+        }
+        let m = keel_ir::parse(SOURCE).unwrap();
+        let f = &m.functions[0];
+        let pair: Vec<_> = f.layout_insts().take(2).map(|(_, i)| i).collect();
+        let mut s = Selection::default();
+        let leaves = vec![Value::new(0), Value::new(1)];
+        s.set_operands(pair[0], leaves.clone());
+        s.fold_signed_byte_loads(f, &crate::fold::use_counts(f));
+        assert!(s.covered(pair[0]));
+        assert_eq!(s.operands(f, pair[1]), leaves);
     }
 }

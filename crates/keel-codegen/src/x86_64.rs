@@ -1365,6 +1365,7 @@ impl<'a> FunctionCompiler<'a> {
                 pipeline.selector.x86_features(),
             ));
         }
+        selection.fold_signed_byte_loads(func, &uses);
         let is_call = |data: &InstData| is_call(func, data, pipeline.selector.x86_features());
         let returns_twice = |data: &InstData| returns_twice(func, data);
         let input = crate::regalloc::AllocationInput {
@@ -1987,6 +1988,10 @@ impl<'a> FunctionCompiler<'a> {
         }
         if let Some(&addr) = self.packed_positive_values.get(&inst) {
             self.vector_positive32(addr, result);
+            return;
+        }
+        if let Some(&addr) = self.selection.signed_byte_memory.get(&inst) {
+            self.signed_byte_load(addr, result);
             return;
         }
         if let Some(&addr) = self.packed_low_loads.get(&inst) {
@@ -6203,6 +6208,15 @@ impl<'a> FunctionCompiler<'a> {
                 crate::regalloc::OperandKind::Use,
             )
             .expect("operand in reachable code is allocated")
+    }
+
+    /// Resolve every address leaf before the destination write, including
+    /// an address/result register alias. Complete the ordinary i32 spill home.
+    fn signed_byte_load(&mut self, addr: Value, result: Option<Value>) {
+        let at = self.mem(addr, S0, Type::I8);
+        let d = self.def_reg(result);
+        self.emit(Opcode::Movsx, [asm_arg(r32(d)), asm_arg(at)]);
+        self.def_done(result, d);
     }
 
     /// The memory operand for an access of type `ty` at `addr`: the stack
