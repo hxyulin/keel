@@ -1,8 +1,11 @@
-//! SSE2 low widening and bitwise vector moves; native execution is a separate gate.
+//! SSE2 widening/bitcasts and the bounded SSE4.1 signed dword register pilot.
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools, RegisterAllocator},
 };
+
+use keel_asm_ir::x86::{CpuLevel, Features};
+use keel_codegen::x86_features::FeatureSelector;
 
 const PAIRS: [(u32, u32); 6] = [(8, 16), (8, 32), (8, 64), (16, 32), (16, 64), (32, 64)];
 
@@ -16,18 +19,67 @@ fn compile(
     allocator: &dyn RegisterAllocator,
     pools: &Pools,
 ) -> (String, Vec<u8>) {
-    let module = keel_ir::parse(source).unwrap();
+    compile_features(
+        source,
+        selection,
+        allocator,
+        pools,
+        Features::for_level(CpuLevel::V1),
+    )
+}
+
+fn compile_features(
+    source: &str,
+    selection: SelectionTier,
+    allocator: &dyn RegisterAllocator,
+    pools: &Pools,
+    features: Features,
+) -> (String, Vec<u8>) {
+    let mut module = keel_ir::parse(source).unwrap();
+    // Make the conversion consume an actual resolved SSA alias as well.
+    for f in &mut module.functions {
+        if f.name == "resolved_alias" {
+            use keel_ir::EntityRef;
+            f.replace_all_uses(keel_ir::Value::new(1), keel_ir::Value::new(0));
+        }
+    }
     keel_ir::verify_module(&module).unwrap();
+    let selector = FeatureSelector {
+        inner: &selection,
+        features,
+    };
     let pipeline = CodegenPipeline {
-        selector: &selection,
+        selector: &selector,
         allocator,
     };
     let text = keel_codegen::x86_64::compile_with_pipeline(&module, pools, &pipeline).unwrap();
     let program =
         keel_codegen::x86_64::compile_program_with_pipeline(&module, pools, &pipeline).unwrap();
     assert_eq!(program.stats().text_bytes, 0);
-    let direct = keel_asm::x86::assemble_program_object(&program).unwrap();
-    assert_eq!(direct, keel_asm::x86::assemble_object(&text).unwrap());
+    let mut chunks = keel_asm_ir::Program::default();
+    keel_codegen::x86_64::compile_program_chunks_with_pipeline(
+        &module,
+        pools,
+        &pipeline,
+        &mut |p| chunks.items.extend(p.items),
+    )
+    .unwrap();
+    for p in [&program, &chunks] {
+        for item in &p.items {
+            if let keel_asm_ir::Item::X86Instruction(i) = item {
+                assert!(features.contains(i.required_features()), "{i}");
+            }
+        }
+    }
+    let direct = keel_asm::x86::assemble_program_object_with_features(&program, features).unwrap();
+    assert_eq!(
+        direct,
+        keel_asm::x86::assemble_program_object_with_features(&chunks, features).unwrap()
+    );
+    assert_eq!(
+        direct,
+        keel_asm::x86::assemble_object_with_features(&text, features).unwrap()
+    );
     (text, direct)
 }
 
@@ -208,6 +260,10 @@ int main(void) {
 "#;
 
 fn fixture(controlled: bool) -> (String, String) {
+    fixture_filtered(controlled, false)
+}
+
+fn fixture_filtered(controlled: bool, pilot: bool) -> (String, String) {
     let mut source = String::new();
     let mut c = C_HEADER.to_string();
     let mut cases = String::from("static const struct Case cases[]={\n");
@@ -240,6 +296,9 @@ fn fixture(controlled: bool) -> (String, String) {
         }
     }
     for (from, to, op, from_bits, to_bits, signed, bitcast) in conversions {
+        if pilot && !(from == "i32x4" && to == "i64x2" && op == "swiden_low") {
+            continue;
+        }
         let layouts: &[&str] = if controlled { &LAYOUTS } else { &["live"] };
         for layout in layouts {
             let name = format!("{op}_{from}_{to}_{layout}");
@@ -270,7 +329,65 @@ fn fixture(controlled: bool) -> (String, String) {
         }
     }
     cases += "};\n";
-    (source, c + &cases + C_ORACLE)
+    let mut c = c + &cases + C_ORACLE;
+    if pilot {
+        // Independent signed extension above is integer-only; add single-bit
+        // and seeded random inputs without changing the older SSE2 corpus.
+        c = c.replace("int main(void) {", "int main(void) { u32 seed=0x12345678U;");
+        c = c.replace("pattern<256+sizeof(edges)/sizeof(edges[0])", "pattern<819");
+        c = c.replace(
+            "else for(unsigned l=0;l<128/cases[c].from;l++) {",
+            r#"else if(pattern>=275) {
+                for(unsigned l=0;l<4;l++) {
+                    seed^=seed<<13; seed^=seed>>17; seed^=seed<<5;
+                    u32 v=pattern<307?(1U<<((pattern-275+l)%32)):seed;
+                    memcpy(saved+4*l,&v,4);
+                }
+            } else for(unsigned l=0;l<128/cases[c].from;l++) {"#,
+        );
+        c = c.replace(
+            "munmap(a,3*page);",
+            r#"
+    // Both crossing input edges must fault before any result is published.
+    u8 *shared=mmap(0,page,3,0x21,-1,0); if(shared==(void*)-1) return 7;
+    for(unsigned k=0;k<sizeof(cases)/sizeof(cases[0]);k++) for(unsigned side=0;side<2;side++) {
+        memset(shared,0xa5,32);
+        const u8 *bad=side?a+2*page-15:a+page-1;
+        int pid=fork(); if(pid<0)return 8;
+        if(!pid){signal(11,fault);signal(7,fault);cases[k].run(bad,shared);_exit(1);}
+        int status=0;if(waitpid(pid,&status,0)!=pid||status!=(77<<8))return 9;
+        for(unsigned i=0;i<32;i++)if(shared[i]!=0xa5)return 10;
+    }
+    munmap(shared,page);
+    munmap(a,3*page);"#,
+        );
+        c = c.replace(
+            "c->run(input,dest);",
+            r#"unsigned before,after;
+    __asm__ volatile("stmxcsr %0":"=m"(before));
+    c->run(input,dest);
+    __asm__ volatile("stmxcsr %0":"=m"(after));
+    if(before!=after)return 11;"#,
+        );
+        c = format!("{PILOT_C}\n{c}");
+        if !controlled {
+            // Keep both the input and widened result live across a real
+            // external call which clobbers every XMM register, at strict v1.
+            let called = source
+                .replace("_live(", "_calls(")
+                .replace(
+                    " store align 1 v3,v1",
+                    " call @widen_clobber()\n store align 1 v3,v1",
+                )
+                .replace(
+                    " v3 = swiden_low",
+                    " call @widen_clobber()\n v3 = swiden_low",
+                );
+            source = format!("decl @widen_clobber()\n{source}{called}");
+            c = c.replace("static const struct Case cases[]={", "extern void swiden_low_i32x4_i64x2_calls(const void*,void*);\nstatic const struct Case cases[]={\n{\"calls\",swiden_low_i32x4_i64x2_calls,32,64,1,0,1},");
+        }
+    }
+    (source, c)
 }
 
 fn command(command: &mut Command) {
@@ -583,6 +700,234 @@ fn widening_recipe_encodings_match_independent_clang_sse2_assembler() {
     assert_eq!(bytes(&ours), bytes(&clang));
     if std::env::var_os("KEEL_X86_WIDEN_EVIDENCE").is_some() {
         fs::write(dir.join("recipes-keel.o"), ours).unwrap();
+    } else {
+        fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+fn profiles() -> Vec<(&'static str, Features)> {
+    let v1 = Features::for_level(CpuLevel::V1);
+    let v2 = Features::for_level(CpuLevel::V2);
+    let v3 = Features::for_level(CpuLevel::V3);
+    vec![
+        ("v1", v1),
+        ("v2", v2),
+        ("v3", v3),
+        ("v1+sse41", Features { sse41: true, ..v1 }),
+        ("v2-sse41", Features { sse41: false, ..v2 }),
+        ("v3-sse41", Features { sse41: false, ..v3 }),
+    ]
+}
+
+#[test]
+fn signed_dword_register_feature_alias_and_spill_windows() {
+    let (source, c) = fixture_filtered(true, true);
+    for (profile, features) in profiles() {
+        for selection in [
+            SelectionTier::Baseline,
+            SelectionTier::Trees,
+            SelectionTier::Full,
+        ] {
+            let (asm, object) = compile_features(
+                &source,
+                selection,
+                &Controlled,
+                &keel_codegen::x86_64::REGISTERS,
+                features,
+            );
+            assert_eq!(
+                asm.matches("pmovsxdq").count(),
+                if features.sse41 { 5 } else { 0 }
+            );
+            if features.sse41 {
+                assert!(
+                    !asm.contains("pcmpgtd")
+                        && !asm.contains("punpckldq")
+                        && !asm.contains("xorps")
+                );
+                for (layout, instruction) in [
+                    ("alias", "pmovsxdq\txmm0, xmm0"),
+                    ("distinct", "pmovsxdq\txmm1, xmm0"),
+                    ("spillsource", "pmovsxdq\txmm0, xmm13"),
+                    ("spillresult", "pmovsxdq\txmm13, xmm0"),
+                    ("allspills", "pmovsxdq\txmm13, xmm13"),
+                ] {
+                    let name = format!("\"swiden_low_i32x4_i64x2_{layout}\":");
+                    let body = asm
+                        .split(&name)
+                        .nth(1)
+                        .unwrap()
+                        .split("\tret")
+                        .next()
+                        .unwrap();
+                    let lines: Vec<_> = body
+                        .lines()
+                        .map(str::trim)
+                        .filter(|l| !l.is_empty())
+                        .collect();
+                    let at = lines
+                        .iter()
+                        .position(|l| *l == instruction)
+                        .unwrap_or_else(|| panic!("{layout}: {body}"));
+                    if matches!(layout, "spillsource" | "allspills") {
+                        assert!(
+                            lines[at - 1].starts_with("movups\txmm13, xmmword ptr [rbp"),
+                            "{body}"
+                        );
+                    }
+                    if matches!(layout, "spillresult" | "allspills") {
+                        assert!(
+                            lines[at + 1].starts_with("movups\txmmword ptr [rbp")
+                                && lines[at + 1].ends_with(", xmm13"),
+                            "{body}"
+                        );
+                    }
+                }
+            } else {
+                assert_eq!(asm.matches("pcmpgtd").count(), 5);
+                assert_eq!(asm.matches("punpckldq").count(), 5);
+            }
+            oracle(
+                &format!("register-{profile}-{selection:?}-controlled"),
+                &source,
+                &c,
+                &asm,
+                &object,
+            );
+        }
+    }
+}
+
+#[test]
+fn signed_dword_register_live_full_width_and_shape_controls() {
+    let (source, c) = fixture_filtered(false, true);
+    for (profile, features) in profiles() {
+        for selection in [
+            SelectionTier::Baseline,
+            SelectionTier::Trees,
+            SelectionTier::Full,
+        ] {
+            for allocation in [AllocationTier::Fast, AllocationTier::Full] {
+                for (pool, pools) in [
+                    ("normal", &keel_codegen::x86_64::REGISTERS),
+                    ("tiny", &TINY),
+                    ("spilled", &SPILLED),
+                ] {
+                    let (asm, object) =
+                        compile_features(&source, selection, &allocation, pools, features);
+                    assert_eq!(
+                        asm.matches("pmovsxdq").count(),
+                        2 * usize::from(features.sse41)
+                    );
+                    // Live-source full-width load cannot enter the existing m64 cover.
+                    assert!(
+                        asm.lines()
+                            .filter(|l| l.contains("pmovsxdq"))
+                            .all(|l| !l.contains("ptr ["))
+                    );
+                    assert!(asm.contains("movups") && asm.contains("xmmword ptr ["));
+                    oracle(
+                        &format!("register-{profile}-{selection:?}-{allocation:?}-{pool}"),
+                        &source,
+                        &c,
+                        &asm,
+                        &object,
+                    );
+                }
+            }
+            for negative in [
+                "func @unsigned(i32x4) -> i64x2 {\nentry(v0:i32x4):\n v1 = uwiden_low.i64x2 v0\n return v1\n}",
+                "func @high(i32x4) -> i64x2 {\nentry(v0:i32x4):\n v1 = swiden_high.i64x2 v0\n return v1\n}",
+                "func @other(i16x8) -> i64x2 {\nentry(v0:i16x8):\n v1 = swiden_low.i64x2 v0\n return v1\n}",
+                "func @narrow(i32x2) -> i64x2 {\nentry(v0:i32x2):\n v1 = swiden_low.i64x2 v0\n return v1\n}",
+                "func @fp(f32x4) -> i32x4 {\nentry(v0:f32x4):\n v1 = bitcast.i32x4 v0\n return v1\n}",
+            ] {
+                let (asm, _) = compile_features(
+                    negative,
+                    selection,
+                    &AllocationTier::Full,
+                    &keel_codegen::x86_64::REGISTERS,
+                    features,
+                );
+                assert!(!asm.contains("pmovsxdq"), "{asm}");
+            }
+            let alias = "func @resolved_alias(i32x4,i32x4) -> i64x2 {\nentry(v0:i32x4,v1:i32x4):\n v2 = swiden_low.i64x2 v1\n return v2\n}";
+            let (asm, _) = compile_features(
+                alias,
+                selection,
+                &AllocationTier::Full,
+                &keel_codegen::x86_64::REGISTERS,
+                features,
+            );
+            assert_eq!(asm.matches("pmovsxdq").count(), usize::from(features.sse41));
+        }
+    }
+}
+
+const PILOT_C: &str = r#"
+extern int fork(void);
+extern int waitpid(int,int*,int);
+extern void _exit(int);
+extern void (*signal(int,void (*)(int)))(int);
+static void fault(int sig){(void)sig;_exit(77);}
+__attribute__((noinline)) void widen_clobber(void) {
+ __asm__ volatile(
+ "pxor %%xmm0,%%xmm0; pxor %%xmm1,%%xmm1; pxor %%xmm2,%%xmm2; pxor %%xmm3,%%xmm3;"
+ "pxor %%xmm4,%%xmm4; pxor %%xmm5,%%xmm5; pxor %%xmm6,%%xmm6; pxor %%xmm7,%%xmm7;"
+ "pxor %%xmm8,%%xmm8; pxor %%xmm9,%%xmm9; pxor %%xmm10,%%xmm10; pxor %%xmm11,%%xmm11;"
+ "pxor %%xmm12,%%xmm12; pxor %%xmm13,%%xmm13; pxor %%xmm14,%%xmm14; pxor %%xmm15,%%xmm15"
+ ::: "xmm0","xmm1","xmm2","xmm3","xmm4","xmm5","xmm6","xmm7",
+ "xmm8","xmm9","xmm10","xmm11","xmm12","xmm13","xmm14","xmm15");
+}
+"#;
+
+#[test]
+fn signed_dword_register_encodings_match_clang_and_effective_feature_guards() {
+    use object::{Object, ObjectSection};
+    let mut asm = String::from(".intel_syntax noprefix\n.text\n");
+    for d in 0..16 {
+        for a in 0..16 {
+            asm += &format!("pmovsxdq xmm{d},xmm{a}\n");
+        }
+    }
+    let mut encoded = None;
+    for (_, features) in profiles() {
+        let result = keel_asm::x86::assemble_object_with_features(&asm, features);
+        assert_eq!(result.is_ok(), features.sse41);
+        if let Ok(object) = result {
+            encoded = Some(object);
+        }
+    }
+    let dir = std::env::var_os("KEEL_X86_WIDEN_EVIDENCE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::temp_dir().join(format!("keel-pmovsxdq-{}", std::process::id()))
+        });
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("pmovsxdq.s"), asm).unwrap();
+    command(
+        Command::new("clang")
+            .args(["-target", "x86_64-unknown-linux-gnu", "-c"])
+            .arg(dir.join("pmovsxdq.s"))
+            .arg("-o")
+            .arg(dir.join("pmovsxdq-clang.o")),
+    );
+    let bytes = |o: &[u8]| {
+        object::File::parse(o)
+            .unwrap()
+            .section_by_name(".text")
+            .unwrap()
+            .data()
+            .unwrap()
+            .to_vec()
+    };
+    let ours = encoded.unwrap();
+    assert_eq!(
+        bytes(&ours),
+        bytes(&fs::read(dir.join("pmovsxdq-clang.o")).unwrap())
+    );
+    if std::env::var_os("KEEL_X86_WIDEN_EVIDENCE").is_some() {
+        fs::write(dir.join("pmovsxdq-keel.o"), ours).unwrap();
     } else {
         fs::remove_dir_all(dir).unwrap();
     }

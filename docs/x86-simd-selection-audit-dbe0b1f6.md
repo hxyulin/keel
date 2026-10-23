@@ -2,8 +2,10 @@
 
 Read-only production audit, 2026-10-23. Source base is
 `dbe0b1f65f8ed0a18d84e27fe8644529a0d64810`. This document owns only the audit;
-none of the proposed selectors is implemented. The completed PMOVSXDQ m64/m128
-covers, PMULLD retention, AVX2 half-local dword shuffle, direct integer adds,
+the original audit did not implement any proposed selector. Priority 1 is now
+implemented in a bounded follow-up; see
+[its contract and evidence](x86-signed-register-widen.md).
+The completed PMOVSXDQ m64/m128 covers, PMULLD retention, AVX2 half-local dword shuffle, direct integer adds,
 constant-vector address fold, wrapping reductions and C shift/saturation/FP
 conversion work are retained controls, not recommendations to repeat.
 

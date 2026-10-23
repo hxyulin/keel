@@ -477,6 +477,23 @@ impl FunctionCompiler<'_> {
         arg: Value,
         result: Option<Value>,
     ) {
+        if op == ConvertOp::SwidenLow
+            && self.ty(arg) == Type::Vector(VectorType::I32x4)
+            && to == Type::Vector(VectorType::I64x2)
+            && self.features.sse41
+        {
+            // Capture the resolved source before defining a possibly aliased
+            // destination. use_freg retains a spilled vector's full 16-byte
+            // home; this is deliberately the register form, never an m64 fold.
+            let a = self.use_freg(arg, FS0);
+            let d = self.def_freg(result);
+            self.emit(
+                Opcode::V2(keel_asm_ir::x86::V2Opcode::Pmovsxdq),
+                [asm_arg(xmm(d)), asm_arg(xmm(a))],
+            );
+            self.def_done(result, d);
+            return;
+        }
         // Stage before defining the result. FS0/FS1 are reserved, so no
         // allocated source (including one live after this instruction) changes.
         // A spilled source and result may each use FS0 at different times.
