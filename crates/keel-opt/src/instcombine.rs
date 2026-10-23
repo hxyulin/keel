@@ -14,6 +14,7 @@
 //! worklist; the bounded Fast visit also handles literal extension masks.
 
 mod constant_division;
+mod vector;
 
 use crate::const_fold::{self, constant_ref as constant};
 use crate::scratch::Scratch;
@@ -768,6 +769,11 @@ fn has_rules(data: &InstData) -> bool {
             | InstData::Select { .. }
             | InstData::Overflow { .. }
             | InstData::Brif { .. }
+            | InstData::VectorExtract { .. }
+            | InstData::VectorInsert { .. }
+            | InstData::VectorShuffle { .. }
+            | InstData::VectorSelect { .. }
+            | InstData::VectorBinary { .. }
     )
 }
 
@@ -796,6 +802,9 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
         data != *func.inst_data(inst)
     };
 
+    if let Some(fold) = vector::simplify(func, &data, uses) {
+        return Some(fold);
+    }
     if let Some(constants) = const_fold::fold_overflow(&data, |v| constant(func, v)) {
         return Some(Fold::Multi(constants));
     }
