@@ -31,11 +31,23 @@ __m128i k_indirect(__m128 a, __m128(*f)(__m128)) {
 }
 /* Both original input and conversion result remain live across a call. */
 extern void k_capture(__m128i, __m128);
-void k_live(__m128i a) { __m128 b = _mm_cvtepi32_ps(a); k_capture(a,b); }
+extern void k_clobber(void);
+void k_live(__m128i a) { __m128 b = _mm_cvtepi32_ps(a); k_clobber(); k_capture(a,b); }
 /* An external call can observe/change MXCSR between identical conversions. */
 extern void k_change(void);
 void k_sequence(void *a, void *b, __m128i x) {
   _mm_storeu_ps(a, _mm_cvtepi32_ps(x));
   k_change();
   _mm_storeu_ps(b, _mm_cvtepi32_ps(x));
+}
+
+void k_sequence1(void *a, void *b, __m128 x) {
+  _mm_storeu_si128(a, _mm_cvttps_epi32(x));
+  k_change();
+  _mm_storeu_si128(b, _mm_cvttps_epi32(x));
+}
+void k_sequence2(void *a, void *b, __m128 x) {
+  _mm_storeu_si128(a, _mm_cvtps_epi32(x));
+  k_change();
+  _mm_storeu_si128(b, _mm_cvtps_epi32(x));
 }

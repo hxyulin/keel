@@ -16,10 +16,21 @@ static void (*kernels[])(void*,const void*)={k_mem0,k_mem1,k_mem2};
 static void (*vendors[])(void*,const void*)={v_mem0,v_mem1,v_mem2};
 static unsigned getcsr(void) { unsigned v; __asm__ volatile("stmxcsr %0":"=m"(v)::"memory");return v; }
 static void setcsr(unsigned v) { __asm__ volatile("ldmxcsr %0"::"m"(v):"memory"); }
+extern void k_sequence1(void*,void*,__m128), k_sequence2(void*,void*,__m128);
 static uint32_t captured[8];
-__m128i k_callback(__m128i a) { return a; }
+/* Clobber every SysV volatile SIMD register physically; SSA values must survive. */
+#define CLOBBER() __asm__ volatile( \
+ "pxor %%xmm0,%%xmm0\n\tpxor %%xmm1,%%xmm1\n\tpxor %%xmm2,%%xmm2\n\tpxor %%xmm3,%%xmm3\n\t" \
+ "pxor %%xmm4,%%xmm4\n\tpxor %%xmm5,%%xmm5\n\tpxor %%xmm6,%%xmm6\n\tpxor %%xmm7,%%xmm7\n\t" \
+ "pxor %%xmm8,%%xmm8\n\tpxor %%xmm9,%%xmm9\n\tpxor %%xmm10,%%xmm10\n\tpxor %%xmm11,%%xmm11\n\t" \
+ "pxor %%xmm12,%%xmm12\n\tpxor %%xmm13,%%xmm13\n\tpxor %%xmm14,%%xmm14\n\tpxor %%xmm15,%%xmm15" \
+ ::: "xmm0","xmm1","xmm2","xmm3","xmm4","xmm5","xmm6","xmm7", \
+ "xmm8","xmm9","xmm10","xmm11","xmm12","xmm13","xmm14","xmm15","memory")
+__attribute__((noinline)) void k_clobber(void) { CLOBBER(); }
+void v_clobber(void) { k_clobber(); }
+__attribute__((noinline)) __m128i k_callback(__m128i a) { CLOBBER(); return a; }
 __m128i v_callback(__m128i a) { return a; }
-static __m128 identity(__m128 a) { return a; }
+__attribute__((noinline)) static __m128 identity(__m128 a) { CLOBBER(); return a; }
 void k_capture(__m128i a,__m128 b) { memcpy(captured,&a,16);memcpy(captured+4,&b,16); }
 void v_capture(__m128i a,__m128 b) { (void)a;(void)b; }
 void k_change(void) { setcsr(0x1f80 | (2<<13)); }
@@ -131,6 +142,14 @@ static int abi(void) {
   setcsr(0x1f80);k_sequence(first,second,a);
   flags=0;reference(0,bits,expected,0x1f80,&flags);if(memcmp(first,expected,16))return 13;
   flags=0;reference(0,bits,expected,0x5f80,&flags);if(memcmp(second,expected,16)||getcsr()!=(0x5f80|flags))return 14;
+  for(unsigned op=1;op<=2;op++) {
+    setcsr(0x1f80);
+    if(op==1)k_sequence1(first,second,b);else k_sequence2(first,second,b);
+    unsigned observed=getcsr();
+    flags=0;reference(op,input,expected,0x1f80,&flags);if(memcmp(first,expected,16))return 15;
+    flags=0;reference(op,input,expected,0x5f80,&flags);
+    if(memcmp(second,expected,16)||observed!=(0x5f80|flags))return 16;
+  }
   return 0;
 }
 static int run(void) {

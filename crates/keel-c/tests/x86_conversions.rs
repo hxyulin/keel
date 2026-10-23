@@ -51,13 +51,15 @@ fn typed_bridge_diagnostics_pinning_and_v1_objects() {
             "(D){0}",
             "(L){0}",
             "(S){0}",
-            "(B){0}",
         ] {
             let src = format!(
-                "typedef unsigned int U __attribute__((vector_size(16)));typedef int W __attribute__((vector_size(32)));typedef double D __attribute__((vector_size(16)));typedef long long L __attribute__((vector_size(16)));typedef short S __attribute__((vector_size(16)));typedef int B __attribute__((vector_size(8)));{prefix}{base}({args});return a;}}"
+                "typedef unsigned int U __attribute__((vector_size(16)));typedef int W __attribute__((vector_size(32)));typedef double D __attribute__((vector_size(16)));typedef long long L __attribute__((vector_size(16)));typedef short S __attribute__((vector_size(16)));{prefix}{base}({args});return a;}}"
             );
-            assert!(compile(&src, target).is_err(), "accepted {src}");
+            let error = compile(&src, target).unwrap_err();
+            assert!(error.contains(if args.is_empty() || args == "a,a" { "argument" } else { "SSE2 packed conversion requires" }), "wrong diagnostic: {error}");
         }
+        // Prove the declarations themselves are valid before testing bad calls.
+        compile(&format!("typedef unsigned int U __attribute__((vector_size(16)));typedef int W __attribute__((vector_size(32)));typedef double D __attribute__((vector_size(16)));typedef long long L __attribute__((vector_size(16)));typedef short S __attribute__((vector_size(16)));{prefix}return a;}}"), target).unwrap();
         let src = format!(
             "#if !__has_builtin({base})\n#error missing conversion\n#endif\n{prefix}{base}(a);return a;}}"
         );
@@ -115,7 +117,15 @@ fn typed_bridge_diagnostics_pinning_and_v1_objects() {
                 },
             )
             .unwrap();
-            keel_asm::x86::assemble_program_object_with_features(&p, features).unwrap();
+            assert_eq!(p.stats().text_bytes, 0);
+            let object = keel_asm::x86::assemble_program_object_with_features(&p, features).unwrap();
+            let pipeline = CodegenPipeline { selector: &selector, allocator: &AllocationTier::Full };
+            let text = keel_codegen::x86_64::compile_with_pipeline(&m, &keel_codegen::x86_64::REGISTERS, &pipeline).unwrap();
+            assert_eq!(object, keel_asm::x86::assemble_object_with_features(&text, features).unwrap());
+            for name in NAMES { assert!(text.contains(name)); }
+            let mut chunks = keel_asm::x86::ProgramAssembler::new(features);
+            keel_codegen::x86_64::compile_program_chunks_with_pipeline(&m, &keel_codegen::x86_64::REGISTERS, &pipeline, &mut |p| chunks.push(p)).unwrap();
+            assert_eq!(object, chunks.finish().unwrap());
         }
     }
     let once = compile("#include <emmintrin.h>\nextern __m128i next(void);__m128 f(void){return _mm_cvtepi32_ps(next());}",target).unwrap().to_string();
