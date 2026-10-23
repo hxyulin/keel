@@ -135,6 +135,50 @@ pub(super) fn packed(op: V, shape: VectorType) -> Option<Opcode> {
         _ => return None,
     })
 }
+
+// These register-only SSE2 recipes also apply to FP bits and to byte/word
+// shuffles that preserve aligned dword groups. Other masks retain the shared
+// lane legalizer. No loads are folded or narrowed by this classification.
+#[derive(Clone, Copy, Debug)]
+enum ShuffleRecipe {
+    Dwords { source: usize, imm: u8 },
+    Halves { first: usize, imm: u8 },
+}
+
+fn shuffle_recipe(shape: VectorType, lanes: &[u8], same: bool) -> Option<ShuffleRecipe> {
+    if shape.bytes() != 16 {
+        return None;
+    }
+    let width = shape.lane_type().bytes().unwrap() as usize;
+    let mut dwords = [0u8; 4];
+    for (d, index) in dwords.iter_mut().enumerate() {
+        let byte_at = |byte: usize| lanes[byte / width] as usize * width + byte % width;
+        let start = byte_at(d * 4);
+        if start % 4 != 0 || (1..4).any(|b| byte_at(d * 4 + b) != start + b) {
+            return None;
+        }
+        *index = (start / 4) as u8;
+        if same {
+            *index %= 4;
+        }
+    }
+    let imm = dwords
+        .iter()
+        .enumerate()
+        .fold(0, |imm, (i, d)| imm | ((d % 4) << (2 * i)));
+    let source = usize::from(dwords[0] / 4);
+    if dwords.iter().all(|d| usize::from(d / 4) == source) {
+        return Some(ShuffleRecipe::Dwords { source, imm });
+    }
+    if dwords[0] / 4 == dwords[1] / 4
+        && dwords[2] / 4 == dwords[3] / 4
+        && dwords[0] / 4 != dwords[2] / 4
+    {
+        return Some(ShuffleRecipe::Halves { first: source, imm });
+    }
+    None
+}
+
 pub(super) fn lower(func: &Function, features: keel_asm_ir::x86::Features) -> Cow<'_, Function> {
     crate::vector::lower(func, |func, data| {
         // D values share the physical XMM bank with Q/Y values, but the packed
@@ -172,14 +216,12 @@ pub(super) fn lower(func: &Function, features: keel_asm_ir::x86::Features) -> Co
             return false;
         }
         match data {
-            InstData::VectorShuffle { args, lanes } => {
-                lanes.as_slice() == [1, 2]
-                    && matches!(
-                        func.value_type(args[0]),
-                        Type::Vector(VectorType::I64x2 | VectorType::F64x2)
-                    )
-                    && func.value_type(args[0]) == func.value_type(args[1])
-            }
+            InstData::VectorShuffle { args, lanes } => shuffle_recipe(
+                func.value_type(func.resolve(args[0])).vector().unwrap(),
+                lanes,
+                func.resolve(args[0]) == func.resolve(args[1]),
+            )
+            .is_some(),
             InstData::VectorExtract { arg, .. } => {
                 func.value_type(*arg) == Type::Vector(VectorType::I64x2)
             }
@@ -250,17 +292,49 @@ fn canonical_mask(func: &Function, mut value: Value) -> bool {
 }
 
 impl FunctionCompiler<'_> {
-    pub(super) fn vector_shuffle_window(&mut self, args: [Value; 2], result: Option<Value>) {
-        // SHUFPD destroys its first operand. Stage both inputs before defining
-        // the destination so live inputs, either destination alias and all
-        // spill combinations retain their original bits.
-        self.vector_stage(args[0], FS0);
-        self.vector_stage(args[1], FS1);
-        self.emit(
-            Opcode::Shufpd,
-            [asm_arg(xmm(FS0)), asm_arg(xmm(FS1)), asm_arg(1)],
-        );
-        self.vector_publish(result);
+    pub(super) fn vector_shuffle(&mut self, args: [Value; 2], lanes: &[u8], result: Option<Value>) {
+        let recipe = shuffle_recipe(
+            self.ty(args[0]).vector().unwrap(),
+            lanes,
+            self.func.resolve(args[0]) == self.func.resolve(args[1]),
+        )
+        .expect("native shuffle retained by vector legalization");
+        match recipe {
+            ShuffleRecipe::Dwords { source, imm } => {
+                // PSHUFD has a separate source and can safely overwrite either
+                // allocated input. Read a spilled source before defining FS0.
+                let a = self.use_freg(args[source], FS0);
+                let d = self.def_freg(result);
+                self.emit(
+                    Opcode::Pshufd,
+                    [asm_arg(xmm(d)), asm_arg(xmm(a)), asm_arg(i64::from(imm))],
+                );
+                self.def_done(result, d);
+            }
+            ShuffleRecipe::Halves { first, imm } => {
+                // SHUFPS/SHUFPD destroy the first input. Stage before publishing
+                // so either result alias, live sources and spills stay intact.
+                self.vector_stage(args[first], FS0);
+                self.vector_stage(args[1 - first], FS1);
+                // Retain the existing qword window recipe (and generalize its
+                // immediate to the other qword pairs).
+                let (opcode, imm) =
+                    if self.ty(args[0]).vector().unwrap().lane_type().bytes() == Some(8) {
+                        (Opcode::Shufpd, ((imm >> 1) & 1) | ((imm >> 4) & 2))
+                    } else {
+                        (Opcode::Shufps, imm)
+                    };
+                self.emit(
+                    opcode,
+                    [
+                        asm_arg(xmm(FS0)),
+                        asm_arg(xmm(FS1)),
+                        asm_arg(i64::from(imm)),
+                    ],
+                );
+                self.vector_publish(result);
+            }
+        }
     }
 
     // Always stage before defining the result: all operands may spill, alias,
@@ -572,19 +646,93 @@ mod d_tests {
     use super::*;
 
     #[test]
+    fn shuffle_recipes_match_all_dword_masks_and_qword_pairs() {
+        for shape in [
+            VectorType::I32x4,
+            VectorType::F32x4,
+            VectorType::I64x2,
+            VectorType::F64x2,
+        ] {
+            let width = shape.lane_type().bytes().unwrap() as usize;
+            let count = shape.lanes() as usize;
+            let radix = 2 * count;
+            for mask in 0..radix.pow(count as u32) {
+                let mut m = mask;
+                let lanes: Vec<_> = (0..count)
+                    .map(|_| {
+                        let lane = (m % radix) as u8;
+                        m /= radix;
+                        lane
+                    })
+                    .collect();
+                for same in [false, true] {
+                    let Some(recipe) = shuffle_recipe(shape, &lanes, same) else {
+                        continue;
+                    };
+                    let mut actual = [0; 16];
+                    let (imm, sources) = match recipe {
+                        ShuffleRecipe::Dwords { source, imm } => (imm, [source; 4]),
+                        ShuffleRecipe::Halves { first, imm } => {
+                            (imm, [first, first, 1 - first, 1 - first])
+                        }
+                    };
+                    for (i, byte) in actual.iter_mut().enumerate() {
+                        let source = if same { 0 } else { sources[i / 4] };
+                        *byte = source * 16 + usize::from((imm >> (2 * (i / 4))) & 3) * 4 + i % 4;
+                    }
+                    let expected: Vec<_> = lanes
+                        .iter()
+                        .flat_map(|&lane| {
+                            let lane = if same {
+                                usize::from(lane) % count
+                            } else {
+                                usize::from(lane)
+                            };
+                            (0..width).map(move |b| lane * width + b)
+                        })
+                        .collect();
+                    assert_eq!(actual.as_slice(), expected, "{shape:?} {lanes:?} {same}");
+                }
+            }
+        }
+        // Byte/word masks must preserve every byte in an aligned dword.
+        assert!(
+            shuffle_recipe(
+                VectorType::I8x16,
+                &[1, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+                false
+            )
+            .is_none()
+        );
+        assert!(shuffle_recipe(VectorType::I16x8, &[1, 0, 2, 3, 4, 5, 6, 7], false).is_none());
+        assert!(shuffle_recipe(VectorType::I32x4, &[0, 4, 1, 5], false).is_none());
+    }
+
+    #[test]
     fn d_operations_scalarize_before_packed_feature_selection() {
         let source = "func @f(f32x2,f32x2,f32x2)->f32x2 {\nentry(v0:f32x2,v1:f32x2,v2:f32x2):\n v3 = fma v0,v1,v2\n return v3\n}\nfunc @w(i8x8)->i16x8 {\nentry(v0:i8x8):\n v1 = uwiden_low.i16x8 v0\n return v1\n}\nfunc @n(i16x8)->i8x8 {\nentry(v0:i16x8):\n v1 = narrow_low.i8x8 v0\n return v1\n}";
         let m = keel_ir::parse(source).unwrap();
         keel_ir::verify_module(&m).unwrap();
-        for features in [keel_asm_ir::x86::Features::NONE, keel_asm_ir::x86::Features::all()] {
+        for features in [
+            keel_asm_ir::x86::Features::NONE,
+            keel_asm_ir::x86::Features::all(),
+        ] {
             for f in &m.functions {
                 let lowered = lower(f, features);
                 keel_ir::verify(&lowered).unwrap();
                 for (_, i) in lowered.layout_insts() {
                     let data = lowered.inst_data(i);
                     assert!(!data.is_vector_instruction(), "{data:?}");
-                    assert!(!matches!(data, InstData::Fma { args } if lowered.value_type(args[0]).is_vector()));
-                    assert!(!matches!(data, InstData::Convert { op: ConvertOp::NarrowLow | ConvertOp::UwidenLow, .. }));
+                    assert!(
+                        !matches!(data, InstData::Fma { args } if lowered.value_type(args[0]).is_vector())
+                    );
+                    assert!(!matches!(
+                        data,
+                        InstData::Convert {
+                            op: ConvertOp::NarrowLow | ConvertOp::UwidenLow,
+                            ..
+                        }
+                    ));
                 }
             }
         }

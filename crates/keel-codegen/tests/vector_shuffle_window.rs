@@ -260,9 +260,13 @@ fn native_window_controlled_aliases_and_spills() {
             let (text, obj) = compile(arm, &source, sel, &Controlled, false);
             assert_eq!(
                 text.matches(if arm { "ext\t" } else { "shufpd\t" }).count(),
-                18,
+                if arm { 18 } else { 14 },
                 "{text}"
             );
+            if !arm {
+                // The four same-input windows are single-source permutations.
+                assert_eq!(text.matches("pshufd\t").count(), 4, "{text}");
+            }
             oracle(
                 arm,
                 &format!("controlled-{sel:?}"),
@@ -305,7 +309,7 @@ fn native_window_preserves_both_live_sources_and_exact_loads() {
     }
 }
 #[test]
-fn general_shuffles_use_packed_arm_and_conservative_x86_legalization() {
+fn general_shuffles_use_packed_arm_and_supported_x86_recipes() {
     for (shape, lanes) in [
         ("i64x2", "0,2"),
         ("i64x2", "1,3"),
@@ -329,6 +333,9 @@ fn general_shuffles_use_packed_arm_and_conservative_x86_legalization() {
                         ("i64x2", "1,3") => assert!(text.contains("zip2\t"), "{text}"),
                         _ => assert!(text.contains("ext\t") || text.contains("ins\t"), "{text}"),
                     }
+                    assert!(!text.contains(" = stack_addr"), "{text}");
+                } else if shape.ends_with("64x2") {
+                    assert!(text.contains("shufpd\t"), "{text}");
                     assert!(!text.contains(" = stack_addr"), "{text}");
                 } else {
                     assert!(!text.contains("shufpd\t"), "{text}");

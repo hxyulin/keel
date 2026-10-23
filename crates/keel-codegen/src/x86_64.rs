@@ -2025,7 +2025,7 @@ impl<'a> FunctionCompiler<'a> {
                 op: UnaryOp::Ineg,
                 arg,
             } => self.vector_ineg(arg, result),
-            InstData::VectorShuffle { args, .. } => self.vector_shuffle_window(args, result),
+            InstData::VectorShuffle { args, ref lanes } => self.vector_shuffle(args, lanes, result),
             InstData::VectorExtract { arg, lane } => {
                 let source = self.use_freg(arg, FS0);
                 let d = self.def_reg(result);
