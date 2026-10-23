@@ -1413,6 +1413,27 @@ impl Verifier<'_> {
                         );
                     }
                 }
+                if *id == Intrinsic::X86Aeskeygenassist128 {
+                    let (index, limit) = (1, 256);
+                    let mode =
+                        args.get(index)
+                            .and_then(|&a| match func.value_def(func.resolve(a)) {
+                                ValueDef::Result(i, _) => match func.inst_data(i) {
+                                    InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                    _ => None,
+                                },
+                                _ => None,
+                            });
+                    if !mode.is_some_and(|n| (0..limit).contains(&n)) {
+                        self.inst_error(
+                            inst,
+                            format!(
+                                "AESKEYGENASSIST control must be iconst.i32 in0..{}",
+                                limit - 1
+                            ),
+                        );
+                    }
+                }
                 if let Some((index, limit)) = id.x86_legacy_fp_v2_control() {
                     let mode =
                         args.get(index)

@@ -20,6 +20,8 @@ impl CpuLevel {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Features {
+    /// CPUID.01H:ECX.AES[25], independent of psABI levels.
+    pub aes: bool,
     pub avx: bool,
     pub bmi1: bool,
     pub bmi2: bool,
@@ -52,6 +54,7 @@ impl Default for Features {
 }
 impl Features {
     pub const NONE: Self = Self {
+        aes: false,
         avx: false,
         bmi1: false,
         bmi2: false,
@@ -125,6 +128,7 @@ impl Features {
     }
     pub const fn all() -> Self {
         Self {
+            aes: true,
             clflush: true,
             pclmulqdq: true,
             ..Self::for_level(CpuLevel::V3)
@@ -135,7 +139,8 @@ impl Features {
         self == Self::legacy()
     }
     pub fn contains(self, required: Self) -> bool {
-        (!required.avx || self.avx)
+        (!required.aes || self.aes)
+            && (!required.avx || self.avx)
             && (!required.bmi1 || self.bmi1)
             && (!required.bmi2 || self.bmi2)
             && (!required.clflush || self.clflush)
@@ -173,6 +178,7 @@ impl Features {
                 (true, token.strip_prefix('+').unwrap_or(token))
             };
             let flag = match name {
+                "aes" => &mut self.aes,
                 "avx" => &mut self.avx,
                 "bmi1" => &mut self.bmi1,
                 "bmi2" => &mut self.bmi2,
@@ -224,6 +230,7 @@ impl Features {
     }
     pub fn names(self) -> impl Iterator<Item = &'static str> {
         [
+            (self.aes, "aes"),
             (self.avx, "avx"),
             (self.bmi1, "bmi1"),
             (self.bmi2, "bmi2"),

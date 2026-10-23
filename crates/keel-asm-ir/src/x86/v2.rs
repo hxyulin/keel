@@ -92,6 +92,12 @@ pub enum V2Opcode {
     Cmpxchg16b,
     Lahf,
     Sahf,
+    Aesenc,
+    Aesenclast,
+    Aesdec,
+    Aesdeclast,
+    Aesimc,
+    Aeskeygenassist,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum V2Form {
@@ -215,6 +221,12 @@ impl V2Opcode {
         Self::Cmpxchg16b,
         Self::Lahf,
         Self::Sahf,
+        Self::Aesenc,
+        Self::Aesenclast,
+        Self::Aesdec,
+        Self::Aesdeclast,
+        Self::Aesimc,
+        Self::Aeskeygenassist,
     ];
     pub fn parse(s: &str) -> Option<Self> {
         Some(match s {
@@ -311,11 +323,31 @@ impl V2Opcode {
             "cmpxchg16b" => Self::Cmpxchg16b,
             "lahf" => Self::Lahf,
             "sahf" => Self::Sahf,
+            "aesenc" => Self::Aesenc,
+            "aesenclast" => Self::Aesenclast,
+            "aesdec" => Self::Aesdec,
+            "aesdeclast" => Self::Aesdeclast,
+            "aesimc" => Self::Aesimc,
+            "aeskeygenassist" => Self::Aeskeygenassist,
             _ => return None,
         })
     }
     pub fn spec(self) -> V2Spec {
         let (mnemonic, family, prefix, map, byte, memory_bits, form) = match self {
+            Self::Aesenc => ("aesenc", "aes", 0x66, 0x38, 0xdc, 128, V2Form::Binary),
+            Self::Aesenclast => ("aesenclast", "aes", 0x66, 0x38, 0xdd, 128, V2Form::Binary),
+            Self::Aesdec => ("aesdec", "aes", 0x66, 0x38, 0xde, 128, V2Form::Binary),
+            Self::Aesdeclast => ("aesdeclast", "aes", 0x66, 0x38, 0xdf, 128, V2Form::Binary),
+            Self::Aesimc => ("aesimc", "aes", 0x66, 0x38, 0xdb, 128, V2Form::Binary),
+            Self::Aeskeygenassist => (
+                "aeskeygenassist",
+                "aes",
+                0x66,
+                0x3a,
+                0xdf,
+                128,
+                V2Form::Control,
+            ),
             Self::PextrwSse4 => ("pextrw.s", "sse41", 0x66, 0x3a, 0x15, 16, V2Form::Extract),
             Self::Pcmpestri64 => (
                 "pcmpestri64",
@@ -460,6 +492,7 @@ impl V2Opcode {
     pub fn required_features(self) -> Features {
         let mut f = Features::none();
         match self.spec().family {
+            "aes" => f.aes = true,
             "sse3" => f.sse3 = true,
             "ssse3" => f.ssse3 = true,
             "sse41" => f.sse41 = true,

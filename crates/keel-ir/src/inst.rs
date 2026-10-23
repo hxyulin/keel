@@ -873,7 +873,13 @@ impl InstData {
                 Intrinsic::Memcpy | Intrinsic::Memmove => ReadWrite,
                 Intrinsic::Memcmp => Read,
                 Intrinsic::Memset | Intrinsic::VaStart => Write,
-                Intrinsic::X86Bmi1Bextr32
+                Intrinsic::X86Aesenc128
+                | Intrinsic::X86Aesenclast128
+                | Intrinsic::X86Aesdec128
+                | Intrinsic::X86Aesdeclast128
+                | Intrinsic::X86Aesimc128
+                | Intrinsic::X86Aeskeygenassist128
+                | Intrinsic::X86Bmi1Bextr32
                 | Intrinsic::X86Bmi1Bextr64
                 | Intrinsic::X86Bmi2Pdep32
                 | Intrinsic::X86Bmi2Pdep64
@@ -1585,6 +1591,7 @@ impl InstData {
             Self::Neon { .. } => true,
             Self::Intrinsic { id, .. } => {
                 !(id.is_x86_bmi()
+                    || id.x86_aes_opcode().is_some()
                     || id.is_x86_pure_bits()
                     || id.is_x86_legacy_sign_mask()
                     || id.is_x86_legacy_ptest()

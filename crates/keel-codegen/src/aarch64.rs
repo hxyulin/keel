@@ -938,6 +938,12 @@ fn is_call(func: &Function, data: &InstData) -> bool {
             | Intrinsic::X86Sse41Roundpd128
             | Intrinsic::X86Sse41Roundss
             | Intrinsic::X86Sse41Roundsd
+            | Intrinsic::X86Aesenc128
+            | Intrinsic::X86Aesenclast128
+            | Intrinsic::X86Aesdec128
+            | Intrinsic::X86Aesdeclast128
+            | Intrinsic::X86Aesimc128
+            | Intrinsic::X86Aeskeygenassist128
             | Intrinsic::X86Sse41Dpps
             | Intrinsic::X86Sse41Dppd
             | Intrinsic::X86Sse41Ptest128
@@ -3794,6 +3800,12 @@ impl<'a> FunctionCompiler<'a> {
                 | Intrinsic::X86Sse41Roundpd128
                 | Intrinsic::X86Sse41Roundss
                 | Intrinsic::X86Sse41Roundsd
+                | Intrinsic::X86Aesenc128
+                | Intrinsic::X86Aesenclast128
+                | Intrinsic::X86Aesdec128
+                | Intrinsic::X86Aesdeclast128
+                | Intrinsic::X86Aesimc128
+                | Intrinsic::X86Aeskeygenassist128
                 | Intrinsic::X86Sse41Dpps
                 | Intrinsic::X86Sse41Dppd => unreachable!("rejected legacy v2 FP"),
                 Intrinsic::X86Ssse3Pshufb128

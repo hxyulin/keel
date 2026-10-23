@@ -70,6 +70,7 @@
 //! which the loader fills in, and calls to it go through the procedure
 //! linkage table (`call puts@PLT`).
 
+mod aes;
 mod aggregate_va_arg;
 mod byte_shuffle;
 mod cache_stream;
@@ -936,6 +937,19 @@ impl<'a> FunctionCompiler<'a> {
                     return Err(err(
                         "legacy SSE compare predicate must be iconst.i32 in0..=7".into(),
                     ));
+                }
+                if id.x86_aes_opcode().is_some() {
+                    if !pipeline.selector.x86_features().aes {
+                        return Err(err(format!("{id} requires AES")));
+                    }
+                    if *id == Intrinsic::X86Aeskeygenassist128
+                        && !args
+                            .get(1)
+                            .and_then(|&v| iconst(func, v))
+                            .is_some_and(|n| (0..256).contains(&n))
+                    {
+                        return Err(err("AESKEYGENASSIST requires iconst.i32 in0..255".into()));
+                    }
                 }
                 if id.is_x86_legacy_fp_v2() {
                     let f = pipeline.selector.x86_features();
@@ -2514,6 +2528,9 @@ impl<'a> FunctionCompiler<'a> {
                 id: Intrinsic::X86Pclmulqdq128,
                 ref args,
             } => self.native_pclmul(args, result),
+            InstData::Intrinsic { id, ref args } if id.x86_aes_opcode().is_some() => {
+                self.native_aes(id, args, result)
+            }
             InstData::Intrinsic { id, ref args } if id.x86_packed_pair().is_some() => {
                 self.native_packed_pair(id, args, result)
             }
@@ -3098,6 +3115,12 @@ impl<'a> FunctionCompiler<'a> {
                 | Intrinsic::X86Sse41Roundpd128
                 | Intrinsic::X86Sse41Roundss
                 | Intrinsic::X86Sse41Roundsd
+                | Intrinsic::X86Aesenc128
+                | Intrinsic::X86Aesenclast128
+                | Intrinsic::X86Aesdec128
+                | Intrinsic::X86Aesdeclast128
+                | Intrinsic::X86Aesimc128
+                | Intrinsic::X86Aeskeygenassist128
                 | Intrinsic::X86Sse41Dpps
                 | Intrinsic::X86Sse41Dppd => unreachable!("handled legacy v2 FP"),
                 Intrinsic::X86Ssse3Pshufb128
@@ -6646,6 +6669,7 @@ mod feature_guard_tests {
         let symbols = crate::symbols::Symbols::new(&module);
         for (features, source, missing) in [
             (Features::for_level(CpuLevel::V3), "pclmulqdq xmm0,xmm1,255", "pclmulqdq"),
+            (Features::for_level(CpuLevel::V3), "aesenc xmm0,xmm1", "aes"),
             (
                 Features::for_level(CpuLevel::V1),
                 "popcnt rax,rax",

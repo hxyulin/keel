@@ -894,6 +894,13 @@ pub enum Intrinsic {
     X86RepOuts32OwnedTerminal,
     /// Legacy carryless 64x64 product, selected by imm8 bits 0 and 4.
     X86Pclmulqdq128,
+    // Legacy AES-NI: append-only IDs 768..773, after PCLMULQDQ at 767.
+    X86Aesenc128 = 768,
+    X86Aesenclast128,
+    X86Aesdec128,
+    X86Aesdeclast128,
+    X86Aesimc128,
+    X86Aeskeygenassist128,
 }
 
 pub struct IntrinsicInfo {
@@ -905,7 +912,7 @@ pub struct IntrinsicInfo {
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 768] = [
+    pub const ALL: [Intrinsic; 774] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -1674,6 +1681,12 @@ impl Intrinsic {
         Intrinsic::X86RepOuts16OwnedTerminal,
         Intrinsic::X86RepOuts32OwnedTerminal,
         Intrinsic::X86Pclmulqdq128,
+        Intrinsic::X86Aesenc128,
+        Intrinsic::X86Aesenclast128,
+        Intrinsic::X86Aesdec128,
+        Intrinsic::X86Aesdeclast128,
+        Intrinsic::X86Aesimc128,
+        Intrinsic::X86Aeskeygenassist128,
     ];
 
     pub fn info(self) -> IntrinsicInfo {
@@ -1687,6 +1700,54 @@ impl Intrinsic {
                     Type::I32,
                 ],
                 &[Type::Vector(VectorType::I64x2)],
+                true,
+            ),
+            Intrinsic::X86Aesenc128 => (
+                "x86_aesenc128",
+                &[
+                    Type::Vector(crate::VectorType::I64x2),
+                    Type::Vector(crate::VectorType::I64x2),
+                ],
+                &[Type::Vector(crate::VectorType::I64x2)],
+                true,
+            ),
+            Intrinsic::X86Aesenclast128 => (
+                "x86_aesenclast128",
+                &[
+                    Type::Vector(crate::VectorType::I64x2),
+                    Type::Vector(crate::VectorType::I64x2),
+                ],
+                &[Type::Vector(crate::VectorType::I64x2)],
+                true,
+            ),
+            Intrinsic::X86Aesdec128 => (
+                "x86_aesdec128",
+                &[
+                    Type::Vector(crate::VectorType::I64x2),
+                    Type::Vector(crate::VectorType::I64x2),
+                ],
+                &[Type::Vector(crate::VectorType::I64x2)],
+                true,
+            ),
+            Intrinsic::X86Aesdeclast128 => (
+                "x86_aesdeclast128",
+                &[
+                    Type::Vector(crate::VectorType::I64x2),
+                    Type::Vector(crate::VectorType::I64x2),
+                ],
+                &[Type::Vector(crate::VectorType::I64x2)],
+                true,
+            ),
+            Intrinsic::X86Aesimc128 => (
+                "x86_aesimc128",
+                &[Type::Vector(crate::VectorType::I64x2)],
+                &[Type::Vector(crate::VectorType::I64x2)],
+                true,
+            ),
+            Intrinsic::X86Aeskeygenassist128 => (
+                "x86_aeskeygenassist128",
+                &[Type::Vector(crate::VectorType::I64x2), Type::I32],
+                &[Type::Vector(crate::VectorType::I64x2)],
                 true,
             ),
             Intrinsic::X86Ins8 => ("x86_ins8", &[Type::I16, Type::Ptr], &[Type::Ptr], false),
@@ -7078,6 +7139,7 @@ impl Intrinsic {
             || self.is_x86_masked_mem()
             || self.is_x86_raw_fp_convert()
             || self.is_x86_fp_compare()
+            || self.x86_aes_opcode().is_some()
             || self.is_x86_pure_bits()
             || self.is_x86_fp_misc()
             || self == Self::X86AvxVmaskmovdqu
@@ -7209,6 +7271,17 @@ impl Intrinsic {
         }
     }
 
+    pub fn x86_aes_opcode(self) -> Option<&'static str> {
+        match self {
+            Self::X86Aesenc128 => Some("aesenc"),
+            Self::X86Aesenclast128 => Some("aesenclast"),
+            Self::X86Aesdec128 => Some("aesdec"),
+            Self::X86Aesdeclast128 => Some("aesdeclast"),
+            Self::X86Aesimc128 => Some("aesimc"),
+            Self::X86Aeskeygenassist128 => Some("aeskeygenassist"),
+            _ => None,
+        }
+    }
     pub fn is_x86_pure_bits(self) -> bool {
         self.x86_pure_bits_opcode().is_some()
     }
