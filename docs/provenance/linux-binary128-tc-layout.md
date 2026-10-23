@@ -162,3 +162,142 @@ legality is enforced; execution on LinuxHost's newer CPU is not v1-only CPU proo
 Other-target tests are frontend/lowering/encoding evidence, not execution or
 binary128 ABI evidence on AArch64/Darwin. There are no Keel binary128 value,
 arithmetic, FP-rounding, helper or ABI claims, and no timing conclusion.
+
+
+## Independent review on d0aec154
+
+The candidate source `eb43eb95` and documentation `059848e8` were reapplied
+onto clean `d0aec154` in `~/.t3/worktrees/keel/t3-9464e6bb`,
+branch `fix/linux-binary128-tc-review`. The original worktree is
+`~/.t3/worktrees/keel/t3-8e0d7821`. Main, that worktree and all
+siblings were left untouched; no spill implementation was restored or integrated.
+There were no repository AGENTS.md files in the applicable tree; user-supplied
+build/ownership rules were followed. Fleet access used the installed fleet skill.
+
+### Finding and resolution
+
+The candidate rejected `mode(TC)` on `_Complex long double` and aliases of
+that type: unlike float/double complex bases, this declaration is represented
+by `Ty::Opaque`, so the complex-subject check missed it. Genuine native GCC
+and Clang accept this subject and give it the same TC identity. Fix
+`ec247357` recognizes that specific existing complex declaration identity,
+still gated to x86-64 Linux. It does not change the identity of unmodified
+complex long double or allow any extended value/ABI operation.
+
+Regressions cover long-double aliases; attributes before/among specifiers,
+after typedef/member declarators and in type names; pointer composition;
+idempotent TC attributes; compatible function/callback redeclarations; wrapper
+layout; and debug/plain IR verification and ELF emission. Additional negatives
+cover late record completion, recursive union/array containment, static function
+addresses, discarded definitions, evaluated compound literals and atomic
+subjects/operations. The native oracle also checks long-double TC identity.
+Its first added spelling collided with its existing `TC` typedef in GCC's
+attribute parser; `d7a27c85` uses the reserved `__TC__` spelling. The initial
+failed oracle run is retained, and the corrected native debug/release runs pass.
+
+The audit followed declaration-specifier versus final-declarator mode
+application, alias resolution and nested numeric redeclaration checks in
+`types.rs`/`parse.rs`; the matching-opaque assignment conversion and component
+query typing in `expr.rs`; initializer/constant paths; recursive unsupported
+containment; pre-pruning expression traversal and ABI checks in `irgen.rs`;
+and debug type construction. Containment traverses records/unions/arrays and
+atomic wrappers with visited-record tracking, stopping at pointers/functions.
+The parser's unsupported object checks and IR generation's definition, local,
+initializer, call-signature, argument and function-symbol checks remain active
+before materialization/classification/pruning. The compound-literal exception
+is confined to unevaluated storage. No further evaluated-value or ABI escape
+was found in this bounded audit. TC debug types remain two real components;
+there is no 32-byte scalar numeric debug encoding or new F128 IR operation.
+
+### Independent native provenance and application results
+
+Fresh source/build/evidence is `/tmp/keel-tc-review/` on LinuxHost; scripts, JSON
+and logs are copied to the same local path. The source checkpoint is
+`d7a27c85`, archived as `final-source.tar`, SHA-256
+`8d26228680b6998196220369add3a214ff7d110b0de6e13b84caccd1723acfd3`.
+`provenance-audit.py` independently compares all **1,995** archived source
+files with the native build snapshot. The fresh native debug compiler SHA-256 is
+`6fdb2d28503fd96486c9a443ee2fe368ad1b33939f84f5c3c09459905e3db52c`.
+This review record is a subsequent documentation-only commit.
+
+`probe.json`, `final-probe.log`, `final-audit.json` and the lock logs retain
+exact commands, hashes, stdout/stderr, disassembly and debug inspection.
+`final-audit.py` compares all twelve input hashes and individual outcomes with
+the candidate records, with no difference: **nine full ELF objects**, the same
+two GCC `_Float32` failures and one GCC `_Float128` failure. Raw input commands
+retain the original source working directories and flags listed above. The
+other nine commands consume the exact frozen `.i` files. There is no fresh
+preprocessing substituted for a frozen input, source identity override,
+Darwin IR replay or inference of native execution from cross objects.
+
+`apps.py` freshly compiles all **44 raw C TUs**, producing 33 Lua, nine QuickJS
+and two SQLite objects. `provenance-audit.py` compares the complete TU set,
+every source hash, working directory and compilation flag against the original
+candidate's 44 compile records. Every input is a `.c` file, not a saved `.i`.
+It also compares **every regular file** in the retained upstream distributions
+against the source directories: Lua **75**, QuickJS **66**, SQLite **4**, with
+no mismatch, covering their application headers as well as sources. Retained
+archive SHA-256 values are, respectively:
+
+- Lua: `9fbf5e28ef86c69858f6d3d34eccc32e911c1a28b4120ff3e84aaa70cfbf1e30`.
+- QuickJS: `3c4bf8f895bfa54beb486c8d1218112771ecfc5ac3be1036851ef41568212e03`.
+- SQLite: `77823cb110929c2bcb0f5d48e4833b5c59a8a6e40cdea3936b99e199dbbe5784`.
+
+These are comparisons against the retained original distributions, not a new
+upstream download/signature authentication claim. Both generated QuickJS C
+arrays (`repl.c`, `qjscalc.c`) are regenerated with the existing `gen/qjsc`
+using the upstream Makefile commands and match the original inputs byte for
+byte. Their hashes and producer hash are in `provenance-audit.json`. No
+application/system header, include search override, predefined macro identity
+or acceptance flag was introduced. In particular SQLite's `LONGDOUBLE_TYPE`
+setting belongs to the frozen original configuration, not this checkpoint.
+
+All **68** fresh application command records succeed. Both `/usr/bin/gcc`
+and `/usr/bin/clang` links pass Lua's portable `_U=true all.lua` to
+`final OK !!!`; QuickJS closure/language/builtin/loop/bignum tests; and SQLite's
+maintained query workload, matching each native compiler's own implementation
+with the same flags. The fresh executable objects are produced directly for
+x86-64 Linux strict v1 with `-O --opt-tier none`. These results establish native
+correctness for these exact configurations, not just representative TU progress.
+
+### Fresh validation and qualification
+
+All Rust commands use `python3 suite/fast_opt_locked.py
+/tmp/keel-tc-review/NAME.jsonl cargo COMMAND --offline --locked -j2`
+with the existing pins, default managed cache and targets. Native probes,
+application checks and provenance audits also run under the shared lock.
+No timing campaign or performance conclusion is made.
+
+- Full local `keel-c`: **280 passed** after the parser fix (candidate replay:
+  278 passed). These local runs are on MacHost/macOS; Linux target object checks
+  are not counted as native Linux execution.
+- LinuxHost debug frontend batch: **44 passed** across `binary128_layout`,
+  `unsupported_values`, `system_header_compat`, `gnu_types`, `gnu_vector_abi`,
+  `complex`, `x86_intrinsics` and `computed_goto`. The previously documented
+  `raw_platform_complex_header` host oracle is explicitly skipped. No full
+  native C-suite pass is claimed.
+- LinuxHost release `binary128_layout`, `unsupported_values` and
+  `system_header_compat`: **19 passed**.
+- LinuxHost existing native `f80`, `x86_vector_wrappers`, `x86_vector_varargs`:
+  **8 passed**. Release `x86_64::feature_guard_tests`: **1 passed**.
+- Local `keel-c --tests` clippy completes with existing warnings; none refers
+  to the review's new production/test lines. `git diff --check` passes.
+
+Fresh GCC/Clang oracles independently check binary128 16/16, TC 32/16,
+canonical mode identities, wrapper offsets/size and the two-component native
+representation. Both native linkers execute Keel's pointer-only fixture at
+strict v1/v3, debug/plain, checking real/complex pointer strides, nested
+array/union offsets and every byte of canary-protected wrapper storage after
+single-byte member writes. `readelf --debug-dump=info` succeeds. Independent
+`objdump` inventory finds only baseline integer operations/NOPs in the four
+pointer objects (78 instructions plain, 105 debug; `cs` is a NOP prefix).
+This finite inventory is not a complete independent ISA decoder proof.
+
+The existing unsupported aggregate ABI fixture rejects before object emission
+in both plain and `-O --opt-tier none` strict-v1 modes; no output object exists.
+Release legality remains enforced. These results qualify the unchanged native
+Lua/QuickJS/SQLite configurations for a subsequent isolated spill benchmark
+investigation. They do not validate a spill candidate or any timing claim.
+Binary128 values/arithmetic/ABI, GCC `_FloatN` completeness, other optimization
+profiles, all upstream application tests, cross-target native ABI execution and
+operation on a v1-only CPU remain outside this review's evidence.
