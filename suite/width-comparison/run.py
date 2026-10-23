@@ -10,6 +10,7 @@ import statistics
 import subprocess
 import sys
 import time
+from provenance import verify
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'suite/runtime-kernels'))
@@ -46,11 +47,17 @@ def main():
     a = ap.parse_args()
     if a.rounds < 7:
         ap.error('at least seven rounds required')
+    if sys.platform == 'linux' and a.cpu is None and not a.controls_only:
+        ap.error('Linux timing requires --cpu affinity')
+    manifest_path = ROOT/'base-manifest.json'
+    manifest = json.loads(manifest_path.read_text())
+    base = verify(ROOT, manifest)
     out = a.output.resolve()
     out.mkdir(parents=True, exist_ok=False)
     if a.cpu is not None:
         os.sched_setaffinity(0, {a.cpu})
-    report = dict(complete=False, base='8bb21e9a17620184bb3571ae19221ddc673f1281',
+    report = dict(complete=False, base=base, base_manifest=manifest,
+                  base_manifest_sha256=sha(manifest_path),
                   seed=a.seed, rounds=a.rounds, target=a.target,
                   hashes={str(p): sha(p) for p in [a.compiler, a.keel, Path(__file__),
                           ROOT/'suite/width-comparison/compiler.rs', ROOT/'suite/runtime-kernels/kernels.c',
@@ -73,22 +80,24 @@ def main():
     def preflight():
         load = os.getloadavg()
         ticks = None
-        if Path('/proc/stat').exists():
+        if Path('/proc/stat').exists() and a.cpu is not None:
             def read():
                 return list(map(int, next(x for x in Path('/proc/stat').read_text().splitlines()
                                          if x.startswith(f'cpu{a.cpu} ')).split()[1:]))
             before = read(); time.sleep(0.25); after = read()
             delta = [y-x for x, y in zip(before, after)]
             ticks = 1-(delta[3]+delta[4])/max(1, sum(delta[:8]))
-        row = dict(load=load, cpu_busy=ticks)
+        row = dict(unix=time.time(), load=load, cpu_busy=ticks)
         report['preflight'].append(row); save()
         if load[0] > 1 or (ticks is not None and ticks > .1):
             raise RuntimeError(f'contended host; timing deferred: {row}')
     try:
         report['tool_versions'] = {tool: run([tool, '--version']) for tool in ['clang']}
-        for path in ['/proc/cpuinfo', '/sys/devices/system/cpu/cpu2/cpufreq/scaling_governor',
-                     '/sys/devices/system/cpu/cpu2/cpufreq/scaling_driver', '/proc/version']:
+        for path in ['/proc/cpuinfo', f'/sys/devices/system/cpu/cpu{a.cpu}/cpufreq/scaling_governor',
+                     f'/sys/devices/system/cpu/cpu{a.cpu}/cpufreq/scaling_driver',
+                     f'/sys/devices/system/cpu/cpu{a.cpu}/topology/thread_siblings_list', '/proc/version']:
             if Path(path).exists(): report[path] = Path(path).read_text()
+        report['processes_before'] = run(['ps', '-eo', 'pid,pcpu,comm,args'])
         source = out/'kernels.c'
         source.write_bytes((ROOT/'suite/runtime-kernels/kernels.c').read_bytes())
         profiles = ['arm'] if a.target.startswith('aarch64') else ['v1', 'v2', 'avx', 'v3']
@@ -148,6 +157,7 @@ def main():
             for width in arms:
                 result = compile_arm('v3', width, out/f'compile-{width}')
                 if r: report['compile'].append(dict(round=r-1, width=width, **result))
+            preflight()
         for r, arms in paired_order(a.seed, a.rounds+1):
             preflight()
             for n in [8,17,257,4096,65536,1048576]:
@@ -155,6 +165,7 @@ def main():
                     result = json.loads(run([canonical_runtime(binaries[width], out), 'time', 'widen32', n,
                                              min(1000000,max(256, 67108864//n)), a.seed, expected[n]]))
                     if r: report['samples'].append(dict(round=r-1, width=width, **result))
+            preflight()
             save()
         report['summary'] = {}
         for n in [8,17,257,4096,65536,1048576]:
@@ -167,6 +178,7 @@ def main():
             report['summary'][n] = dict(median_ns=med, paired_ratios=ratios)
         report['complete'] = True; save()
     finally:
+        report['processes_after'] = run(['ps', '-eo', 'pid,pcpu,comm,args'])
         save()
 
 

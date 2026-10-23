@@ -23,3 +23,28 @@ class Disassembly(unittest.TestCase):
         rows = instructions(text, 'rk_widen32')
         self.assertEqual([r['mnemonic'] for r in rows], ['movabs', 'ret'])
         self.assertEqual([r['address'] for r in rows], [0, 10])
+
+class Provenance(unittest.TestCase):
+    def test_frozen_compiler_and_helpers_cannot_change(self):
+        import tempfile
+        from pathlib import Path
+        from provenance import blob_id, verify, EXAMPLE
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            helper = 'suite/width-comparison/compiler.rs'
+            for name, data in [('Cargo.lock', b'locked'), (helper, b'compiler'), (EXAMPLE, b'compiler')]:
+                (root/name).parent.mkdir(parents=True, exist_ok=True)
+                (root/name).write_bytes(data)
+            manifest = dict(base='8'*40, blobs={'Cargo.lock': blob_id(b'locked')},
+                            overlays={helper: blob_id(b'compiler'), EXAMPLE: blob_id(b'compiler')})
+            self.assertEqual(verify(root, manifest), '8'*40)
+            (root/'Cargo.lock').write_bytes(b'sibling change')
+            with self.assertRaisesRegex(ValueError, 'frozen base changed'):
+                verify(root, manifest)
+            (root/'Cargo.lock').write_bytes(b'locked')
+            (root/EXAMPLE).write_bytes(b'other compiler')
+            with self.assertRaisesRegex(ValueError, 'helper changed'):
+                verify(root, manifest)
+            manifest['overlays']['crates/keel-opt/src/lib.rs'] = blob_id(b'policy')
+            with self.assertRaisesRegex(ValueError, 'overlay outside'):
+                verify(root, manifest)
