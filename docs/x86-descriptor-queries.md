@@ -37,8 +37,65 @@ not CR4 enablement. Successful user-mode forced-assembly comparisons can
 therefore prove OS-observed behavior without proving this raw permitted-hardware
 contract. A native receipt must collect CS/CPL, CPUID capability and observed
 results and retain raw-mode proof pending unless independently established.
-CPL0 proof remains pending; a separate private bare-metal proof can follow root's
-design. No all-context or full-profile completion follows from this stage.
+CPL0 proof remains pending. The bounded emulated checkpoint below prepares a
+controlled table observation; it does not establish native bare-metal behavior.
+No all-context or full-profile completion follows from this stage.
+
+## Bounded CPL0 table-observation fixture
+
+`suite/x86-cpl0/cases/descriptor.keel` exports one SysV AMD64 function:
+`void descriptor_observe(unsigned char out[32])`. RDI carries a pointer to 32
+writable bytes initially filled with `0xa5`. The caller supplies the normal
+SysV stack alignment (RSP aligned to 16 before CALL). SGDT writes offsets 1–10;
+SIDT writes offsets 17–26. Every other byte must remain `0xa5`, including the
+byte immediately before and after each ten-byte image. Both writes are
+deliberately unaligned. The payload has no external helpers, table setup,
+control-register mutation, or host-execution path.
+
+The external disposable-guest harness must seed a known GDT and IDT, enter
+64-bit CPL0, record actual CS/CPL and long-mode evidence, initialize the output,
+call the function, and compare all 32 bytes. It owns boot, BSS initialization,
+stack setup, freestanding/no-red-zone C compilation, table lifetime and guest
+termination. It must load a flat Multiboot image if using that boot contract;
+an ELF64 container is not an equivalent QEMU Multiboot input. Accept only the
+expected exit status together with the expected transcript, never a timeout
+containing PASS, a reset or a triple fault. Guest campaigns must be serialized
+under the existing suite lock, bounded by a QEMU timeout, with no network,
+shared mounts or host devices. TCG results must be labeled emulated.
+
+`descriptor_expected.py` independently packs the harness's **seeded** limits
+and linear bases as little-endian u16/u64 images. Feed it linker/setup values,
+never values read by the generated queries. Example addresses below are oracle
+test inputs, not an assumed boot layout:
+
+```sh
+python3 suite/x86-cpl0/cases/descriptor_expected.py --self-test
+python3 suite/x86-cpl0/cases/descriptor_expected.py \
+  --gdt-base 0x1000 --gdt-limit 0x27 \
+  --idt-base 0x2000 --idt-limit 0xfff > /tmp/descriptor-expected.bin
+env KEEL_DESCRIPTOR_EXPORT_DIR=/tmp/keel-descriptor-cpl0-exports \
+  python3 suite/fast_opt_locked.py /tmp/keel-cpl0-descriptor-unique.jsonl \
+  cargo test -p keel-codegen --test x86_descriptor_cpl0 \
+  --test x86_descriptor_queries_encoding --offline --locked -j2
+```
+
+The export gate creates 12 ELF objects plus assembly, one per selection tier,
+allocator and normal/empty pool combination, under the requested temporary
+directory. `descriptor-Full-Full-false.o` is the optimized normal-pool payload;
+link one variant at a time. Text, typed and chunked objects must match at
+explicit V1; the Full selector also runs IR optimization. A separate compile
+gate confirms all fourteen descriptor/status queries remain when their results
+are unused across those paths. Existing literal complete-body encoding tests
+remain the independent operand-width control. These are compile/encoding and
+export checks, not guest memory-footprint evidence or whole-fourteen-API CPL0
+qualification. SMSW wide-container semantics and old-value liveness are outside
+this two-instruction guest checkpoint.
+
+At this checkpoint the local environment has `cargo` but no
+`qemu-system-x86_64` on PATH. Combined controlled-CPL0 execution is explicitly
+pending parent harness integration; there is no native or emulated guest-pass
+claim. No toolchain installation or host privilege changes are required by the
+source/export gate.
 
 Primary authority: Intel SDM 325462-093US, September 2026, official combined PDF
 https://cdrdv2-public.intel.com/929349/325462-093-sdm-vol-1-2abcd-3abcd-4.pdf

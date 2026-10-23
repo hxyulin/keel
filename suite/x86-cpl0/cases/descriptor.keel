@@ -1,0 +1,10 @@
+func @descriptor_observe(ptr) {
+entry(v0:ptr):
+ v1 = iconst.i64 1
+ v2 = ptradd v0,v1
+ intrinsic x86_sgdt(v2)
+ v3 = iconst.i64 17
+ v4 = ptradd v0,v3
+ intrinsic x86_sidt(v4)
+ return
+}
