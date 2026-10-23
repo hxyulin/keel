@@ -179,10 +179,14 @@ fn shuffle(f: &Function, args: [Value; 2], lanes: &[u8], uses: Uses<'_>) -> Opti
     }
     // Flatten exactly one level, only through unshared shuffles. This cannot
     // duplicate a live permutation. At most two source vectors are expressible.
-    let mut sources = Vec::with_capacity(2);
-    let mut indices = Vec::with_capacity(lanes.len());
+    // Fixed-width IR has at most 32 lanes. Do not allocate scratch vectors on
+    // every visit, especially for shuffles that will remain unchanged.
+    let mut sources = [args[0]; 2];
+    let mut source_count = 0;
+    let mut storage = [0u8; 32];
+    let indices = &mut storage[..lanes.len()];
     let mut composed = false;
-    for &index in lanes {
+    for (&index, output) in lanes.iter().zip(indices.iter_mut()) {
         let (mut value, mut lane) = lane_source(index);
         if let Some(D::VectorShuffle {
             args: inner,
@@ -195,25 +199,26 @@ fn shuffle(f: &Function, args: [Value; 2], lanes: &[u8], uses: Uses<'_>) -> Opti
             lane = i % n;
             composed = true;
         }
-        let slot = match sources.iter().position(|&v| v == value) {
+        let slot = match sources[..source_count].iter().position(|&v| v == value) {
             Some(slot) => slot,
-            None if sources.len() < 2 => {
-                sources.push(value);
-                sources.len() - 1
+            None if source_count < 2 => {
+                sources[source_count] = value;
+                source_count += 1;
+                source_count - 1
             }
             None => return None,
         };
-        indices.push(lane + slot as u8 * n);
+        *output = lane + slot as u8 * n;
     }
     if indices.iter().copied().eq(0..n) {
         return Some(Fold::Value(sources[0]));
     }
     // Preserve the written order of genuine two-source shuffles unless a
     // composition removed an intermediate permutation (ZIP/window selectors).
-    if !composed && sources.len() == 2 {
+    if !composed && source_count == 2 {
         return None;
     }
-    if composed && sources.len() == 2 {
+    if composed && source_count == 2 {
         // Retain source order from the written producer operands, rather than
         // ordering by the first selected lane. Backend two-source recipes can
         // depend on which input supplies the low and high groups.
@@ -229,17 +234,17 @@ fn shuffle(f: &Function, args: [Value; 2], lanes: &[u8], uses: Uses<'_>) -> Opti
         });
         if first == Some(sources[1]) {
             sources.swap(0, 1);
-            for i in &mut indices {
+            for i in indices.iter_mut() {
                 *i = if *i < n { *i + n } else { *i - n };
             }
         }
     }
-    let new_args = [sources[0], *sources.get(1).unwrap_or(&sources[0])];
+    let new_args = [sources[0], sources[source_count - 1]];
     if new_args == args && indices == lanes {
         return None;
     }
     Some(Fold::Data(D::VectorShuffle {
         args: new_args,
-        lanes: indices,
+        lanes: indices.to_vec(),
     }))
 }

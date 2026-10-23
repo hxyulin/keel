@@ -192,6 +192,27 @@ fn conversions_compose_only_lossless_low_lane_extensions() {
     }
 }
 
+#[test]
+fn bitcast_chains_preserve_legal_scalar_endpoints() {
+    for input in ["i64", "f64"] {
+        for output in ["i64", "f64"] {
+            for vector in ["i64x1", "f64x1", "i8x8"] {
+                let m = clean(&body(
+                    input,
+                    output,
+                    &format!("v0: {input}"),
+                    &format!("v1 = bitcast.{vector} v0\nv2 = bitcast.{output} v1\nreturn v2"),
+                ));
+                if input == output {
+                    assert_eq!(m.functions[0].layout_insts().count(), 1, "{m}");
+                } else {
+                    assert_eq!(m.functions[0].layout_insts().count(), 2, "{m}");
+                }
+            }
+        }
+    }
+}
+
 // A lane oracle independent of the optimizer: track distinct input bit patterns
 // through transport operations. No FP calculation or native selector is involved.
 fn transport(m: &Module) -> Vec<u64> {
