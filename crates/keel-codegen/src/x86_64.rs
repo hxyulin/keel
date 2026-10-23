@@ -82,6 +82,7 @@ mod legacy_x87_images;
 mod owned_x87_stack;
 pub mod linux_syscall;
 mod packed_pair;
+mod pclmul;
 mod packed_search;
 mod packed_shift;
 mod raw_div;
@@ -845,6 +846,10 @@ impl<'a> FunctionCompiler<'a> {
                 }
             }
             if let InstData::Intrinsic { id, args } = func.inst_data(inst) {
+                if *id == Intrinsic::X86Pclmulqdq128 {
+                    pclmul::validate(func, args, pipeline.selector.x86_features())
+                        .map_err(|s| err(s.into()))?;
+                }
                 if *id == Intrinsic::X86RflagsSwap {
                     return Err(err(raw_rflags::SWAP_BLOCKER.into()));
                 }
@@ -2505,6 +2510,10 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Intrinsic { id, ref args } if id.x86_packed_search().is_some() => {
                 self.native_packed_search(id, args, result)
             }
+            InstData::Intrinsic {
+                id: Intrinsic::X86Pclmulqdq128,
+                ref args,
+            } => self.native_pclmul(args, result),
             InstData::Intrinsic { id, ref args } if id.x86_packed_pair().is_some() => {
                 self.native_packed_pair(id, args, result)
             }
@@ -3477,6 +3486,7 @@ impl<'a> FunctionCompiler<'a> {
                 | Intrinsic::X86Sse42Crc32b
                 | Intrinsic::X86Sse42Crc32w
                 | Intrinsic::X86Sse42Crc32d
+                | Intrinsic::X86Pclmulqdq128
                 | Intrinsic::X86Sse42Crc32q => unreachable!("handled CRC/PTEST"),
                 Intrinsic::X86Sse42PcmpistriIndex
                 | Intrinsic::X86Sse42Pcmpistri64Index
@@ -6635,6 +6645,7 @@ mod feature_guard_tests {
         let module = keel_ir::parse("func @f() {\nblock0:\n return\n}").unwrap();
         let symbols = crate::symbols::Symbols::new(&module);
         for (features, source, missing) in [
+            (Features::for_level(CpuLevel::V3), "pclmulqdq xmm0,xmm1,255", "pclmulqdq"),
             (
                 Features::for_level(CpuLevel::V1),
                 "popcnt rax,rax",

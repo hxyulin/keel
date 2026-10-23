@@ -1442,6 +1442,7 @@ impl InstData {
                 | Intrinsic::X86Sse42Crc32b
                 | Intrinsic::X86Sse42Crc32w
                 | Intrinsic::X86Sse42Crc32d
+                | Intrinsic::X86Pclmulqdq128
                 | Intrinsic::X86Sse42Crc32q => None,
                 Intrinsic::X86Sse42PcmpistriIndex
                 | Intrinsic::X86Sse42Pcmpistri64Index
@@ -1587,6 +1588,7 @@ impl InstData {
                     || id.is_x86_pure_bits()
                     || id.is_x86_legacy_sign_mask()
                     || id.is_x86_legacy_ptest()
+                    || *id == Intrinsic::X86Pclmulqdq128
                     || id.is_x86_crc32()
                     || id.is_x86_string())
                     && !matches!(id, Intrinsic::FrameAddress | Intrinsic::StackSave)

@@ -1447,7 +1447,7 @@ impl Verifier<'_> {
                         );
                     }
                 }
-                if id.has_x86_dot_control() {
+                if *id == Intrinsic::X86Pclmulqdq128 || id.has_x86_dot_control() {
                     let mode = args
                         .get(2)
                         .and_then(|&a| match func.value_def(func.resolve(a)) {
@@ -1460,7 +1460,11 @@ impl Verifier<'_> {
                     if !mode.is_some_and(|n| (0..256).contains(&n)) {
                         self.inst_error(
                             inst,
-                            "AVX dot control must be iconst.i32 in0..=255".into(),
+                            if *id == Intrinsic::X86Pclmulqdq128 {
+                                "PCLMULQDQ control must be iconst.i32 in0..=255".into()
+                            } else {
+                                "AVX dot control must be iconst.i32 in0..=255".into()
+                            },
                         );
                     }
                 }

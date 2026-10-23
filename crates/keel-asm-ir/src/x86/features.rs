@@ -25,6 +25,8 @@ pub struct Features {
     pub bmi2: bool,
     /// CPUID.01H:EDX.CLFSH[19]; independent of SSE2 and all psABI levels.
     pub clflush: bool,
+    /// Independent CPUID.01H:ECX.PCLMULQDQ[1]; absent from psABI v3.
+    pub pclmulqdq: bool,
     pub cx16: bool,
     pub lahf_sahf: bool,
     pub popcnt: bool,
@@ -54,6 +56,7 @@ impl Features {
         bmi1: false,
         bmi2: false,
         clflush: false,
+        pclmulqdq: false,
         cx16: false,
         lahf_sahf: false,
         popcnt: false,
@@ -123,6 +126,7 @@ impl Features {
     pub const fn all() -> Self {
         Self {
             clflush: true,
+            pclmulqdq: true,
             ..Self::for_level(CpuLevel::V3)
         }
     }
@@ -135,6 +139,7 @@ impl Features {
             && (!required.bmi1 || self.bmi1)
             && (!required.bmi2 || self.bmi2)
             && (!required.clflush || self.clflush)
+            && (!required.pclmulqdq || self.pclmulqdq)
             && (!required.cx16 || self.cx16)
             && (!required.lahf_sahf || self.lahf_sahf)
             && (!required.popcnt || self.popcnt)
@@ -171,6 +176,7 @@ impl Features {
                 "avx" => &mut self.avx,
                 "bmi1" => &mut self.bmi1,
                 "bmi2" => &mut self.bmi2,
+                "pclmulqdq" | "pclmul" => &mut self.pclmulqdq,
                 "clflush" => &mut self.clflush,
                 "cx16" => &mut self.cx16,
                 "lahf_sahf" => &mut self.lahf_sahf,
@@ -222,6 +228,7 @@ impl Features {
             (self.bmi1, "bmi1"),
             (self.bmi2, "bmi2"),
             (self.clflush, "clflush"),
+            (self.pclmulqdq, "pclmulqdq"),
             (self.cx16, "cx16"),
             (self.lahf_sahf, "lahf_sahf"),
             (self.popcnt, "popcnt"),
@@ -247,6 +254,10 @@ impl super::Opcode {
         match self {
             Core(super::CoreOpcode::Clflush) => Features {
                 clflush: true,
+                ..Features::NONE
+            },
+            Pclmulqdq => Features {
+                pclmulqdq: true,
                 ..Features::NONE
             },
             V2(op) => op.required_features(),

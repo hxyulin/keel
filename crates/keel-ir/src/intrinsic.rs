@@ -7,7 +7,7 @@
 //! in its [`IntrinsicInfo`], so adding an intrinsic touches only this file
 //! and the backends.
 
-use crate::Type;
+use crate::{Type, VectorType};
 use std::fmt;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -892,6 +892,8 @@ pub enum Intrinsic {
     X86RepOuts8OwnedTerminal,
     X86RepOuts16OwnedTerminal,
     X86RepOuts32OwnedTerminal,
+    /// Legacy carryless 64x64 product, selected by imm8 bits 0 and 4.
+    X86Pclmulqdq128,
 }
 
 pub struct IntrinsicInfo {
@@ -903,7 +905,7 @@ pub struct IntrinsicInfo {
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 767] = [
+    pub const ALL: [Intrinsic; 768] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -1671,11 +1673,22 @@ impl Intrinsic {
         Intrinsic::X86RepOuts8OwnedTerminal,
         Intrinsic::X86RepOuts16OwnedTerminal,
         Intrinsic::X86RepOuts32OwnedTerminal,
+        Intrinsic::X86Pclmulqdq128,
     ];
 
     pub fn info(self) -> IntrinsicInfo {
         const MEM: &[Type] = &[Type::Ptr, Type::Ptr, Type::I64];
         let (name, params, returns, pure): (_, &'static [Type], &'static [Type], _) = match self {
+            Intrinsic::X86Pclmulqdq128 => (
+                "x86_pclmulqdq128",
+                &[
+                    Type::Vector(VectorType::I64x2),
+                    Type::Vector(VectorType::I64x2),
+                    Type::I32,
+                ],
+                &[Type::Vector(VectorType::I64x2)],
+                true,
+            ),
             Intrinsic::X86Ins8 => ("x86_ins8", &[Type::I16, Type::Ptr], &[Type::Ptr], false),
             Intrinsic::X86Ins16 => ("x86_ins16", &[Type::I16, Type::Ptr], &[Type::Ptr], false),
             Intrinsic::X86Ins32 => ("x86_ins32", &[Type::I16, Type::Ptr], &[Type::Ptr], false),
@@ -7074,6 +7087,7 @@ impl Intrinsic {
             || self.is_x86_legacy_sign_mask()
             || self == Self::X86SseMaskmovdqu
             || self.is_x86_legacy_fp_v2()
+            || self == Self::X86Pclmulqdq128
             || self.is_x86_crc32()
             || self.is_x86_legacy_ptest()
             || self.is_x86_string()

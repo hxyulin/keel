@@ -4,6 +4,7 @@ mod bmi;
 mod core;
 mod sse2;
 mod v2;
+mod pclmul;
 mod v3;
 mod vex;
 mod x87;
@@ -282,6 +283,7 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding<'_>, Strin
         (X87(op), _) => x87_extra::encode(&mut e, i, op)?,
         _ if baseline::handles(i) => baseline::encode(&mut e, i)?,
         (Fixed(op), []) => e.bytes.extend_from_slice(op.bytes()),
+        (Pclmulqdq, _) => pclmul::encode(&mut e, i)?,
         (V2(v), _) => v2::encode(&mut e, i, v)?,
         (V3(_), _) => v3::encode(&mut e, i)?,
         (

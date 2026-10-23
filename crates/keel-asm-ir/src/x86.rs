@@ -18,6 +18,7 @@ pub enum Opcode {
     Fixed(FixedOpcode),
     /// Legacy post-SSE2 forms, carrying explicit feature metadata.
     V2(V2Opcode),
+    Pclmulqdq,
     // Explicit alternate legacy encodings for otherwise identical operand forms.
     Movq6e,
     Movq7e,
@@ -770,6 +771,9 @@ impl Opcode {
                 }
                 if let Some(op) = V3Opcode::parse(s) {
                     return Some(V3(op));
+                }
+                if s == "pclmulqdq" {
+                    return Some(Pclmulqdq);
                 }
                 if let Some(op) = V2Opcode::parse(s) {
                     return Some(V2(op));

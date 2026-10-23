@@ -944,6 +944,7 @@ fn is_call(func: &Function, data: &InstData) -> bool {
             | Intrinsic::X86Sse42Crc32b
             | Intrinsic::X86Sse42Crc32w
             | Intrinsic::X86Sse42Crc32d
+            | Intrinsic::X86Pclmulqdq128
             | Intrinsic::X86Sse42Crc32q
             | Intrinsic::X86Sse42PcmpistriIndex
             | Intrinsic::X86Sse42Pcmpistri64Index
@@ -4181,6 +4182,7 @@ impl<'a> FunctionCompiler<'a> {
                 | Intrinsic::X86Sse42Crc32b
                 | Intrinsic::X86Sse42Crc32w
                 | Intrinsic::X86Sse42Crc32d
+                | Intrinsic::X86Pclmulqdq128
                 | Intrinsic::X86Sse42Crc32q => unreachable!("rejected x86 CRC/PTEST"),
                 Intrinsic::X86Sse42PcmpistriIndex
                 | Intrinsic::X86Sse42Pcmpistri64Index
