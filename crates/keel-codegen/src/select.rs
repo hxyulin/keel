@@ -804,6 +804,25 @@ impl Selection {
                             .filter(|&size| {
                                 size <= 8
                                     || target == Target::Aarch64 && ty.is_vector() && size == 16
+                                    // Bounded x86 pilot: this ordinary load emits one
+                                    // exact m128 MOVDQU, or feeds the closed AVX2
+                                    // m128 widening cover. Do not admit i128 (split
+                                    // accesses), stores, volatile or other vectors.
+                                    || target == Target::X86
+                                        && matches!(
+                                            func.inst_data(inst),
+                                            InstData::Load {
+                                                ty: Type::Vector(keel_ir::VectorType::I32x4),
+                                                flags,
+                                                ..
+                                            } if !flags.volatile
+                                        )
+                                        && !plan.has_constraint(inst)
+                                        && !plan.has_constraint(child)
+                                        && !matches!(
+                                            (func.inst_loc(child), func.inst_loc(inst)),
+                                            (Some(_), None)
+                                        )
                             })
                         && match target {
                             Target::Aarch64 => {

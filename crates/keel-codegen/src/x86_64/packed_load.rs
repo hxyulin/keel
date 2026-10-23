@@ -341,4 +341,78 @@ mod wide_tests {
         assert!(chain[..1].iter().all(|&i| selection.covered(i)));
         assert!(!selection.covered(chain[1]));
     }
+    #[test]
+    fn signed_root_inherits_real_constant_address_cover() {
+        let source = SOURCE.replace(
+            "v4 = load.i32x4 v0",
+            "v20 = iconst.i64 -17\n v21 = ptradd v0,v20\n v4 = load.i32x4 v21",
+        );
+        let module = keel_ir::parse(&source).unwrap();
+        let f = &module.functions[0];
+        let chain: Vec<_> = f.layout_insts().take(4).map(|(_, i)| i).collect();
+        let mut selection = crate::select::Selection::compute_with_options(
+            f,
+            crate::select::Target::X86,
+            crate::SelectionOptions::ALL,
+        );
+        assert!(selection.covered(chain[1]));
+        assert_eq!(selection.operands(f, chain[2]), vec![Value::new(0)]);
+        let selected = select_wide(
+            f,
+            &mut selection,
+            keel_asm_ir::x86::Features::for_level(keel_asm_ir::x86::CpuLevel::V3),
+        );
+        assert_eq!(selected.get(&chain[3]), Some(&f.first_result(chain[1])));
+        assert_eq!(selection.operands(f, chain[3]), vec![Value::new(0)]);
+        assert!(selection.covered(chain[2]));
+        assert!(!selection.covered(chain[3]));
+    }
+    #[test]
+    fn selected_address_does_not_cross_widen_constraints_or_debug_boundaries() {
+        use crate::regalloc::{Constraint, OperandKind, ValuePart};
+        let source = SOURCE.replace(
+            "v4 = load.i32x4 v0",
+            "v20 = iconst.i64 16\n v21 = ptradd v0,v20\n v4 = load.i32x4 v21",
+        );
+        for boundary in 0..3 {
+            let mut module = keel_ir::parse(&source).unwrap();
+            let f = &mut module.functions[0];
+            let chain: Vec<_> = f.layout_insts().take(4).map(|(_, i)| i).collect();
+            if boundary == 2 {
+                f.set_inst_loc(
+                    chain[3],
+                    Some(keel_ir::SourceLoc {
+                        file: keel_ir::SourceFile::new(0),
+                        line: 2,
+                        col: 1,
+                        scope: None,
+                    }),
+                );
+            }
+            let mut selection = crate::select::Selection::compute_with_options(
+                f,
+                crate::select::Target::X86,
+                crate::SelectionOptions::ALL,
+            );
+            if boundary < 2 {
+                let at = chain[2 + boundary];
+                selection.set_constraint(
+                    at,
+                    ValuePart::low(f.first_result(at)),
+                    OperandKind::Def,
+                    Constraint::Register,
+                );
+            }
+            assert!(
+                select_wide(
+                    f,
+                    &mut selection,
+                    keel_asm_ir::x86::Features::for_level(keel_asm_ir::x86::CpuLevel::V3)
+                )
+                .is_empty()
+            );
+            assert!(selection.covered(chain[1]));
+            assert!(!selection.covered(chain[2]));
+        }
+    }
 }

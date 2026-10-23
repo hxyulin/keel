@@ -422,3 +422,8 @@ is `/tmp/keel-pmulld-{baseline,candidate}/measure`,
 Frozen timing binaries remain at `/tmp/keel-pmulld-frozen-timing`.
 The final exported bundles are also retained locally under
 `/tmp/keel-pmulld-final108`. Bulk artifacts remain outside Git.
+
+The [exact 16-byte constant-address pilot](x86-constant-vector-address.md)
+allows ordinary nonvolatile `i32x4` loads to retain a selected base plus signed
+disp32 through the closed AVX2 m128 widening cover. Its scope, native footprint
+gates and fixed-width measurements are documented separately.
