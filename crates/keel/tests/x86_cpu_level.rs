@@ -14,7 +14,7 @@ fn success(command: &mut Command) {
 }
 
 #[test]
-fn explicit_v1_c_objects_and_assembly_obey_the_same_feature_contract() {
+fn explicit_cpu_levels_c_objects_and_assembly_obey_the_same_feature_contract() {
     let dir = std::env::temp_dir().join(format!("keel-c-v1-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     let source = dir.join("input.c");
@@ -64,71 +64,54 @@ fn explicit_v1_c_objects_and_assembly_obey_the_same_feature_contract() {
         }
     }
     let assembly = dir.join("optional.s");
-    for (instruction, minimum) in [
-        ("popcnt rax,rax", "v2"),
-        ("roundsd xmm0,xmm0,8", "v2"),
-        ("haddpd xmm0,xmm1", "v2"),
-        ("pshufb xmm0,xmm1", "v2"),
-        ("crc32 eax,ecx", "v2"),
-        ("lahf", "v2"),
-        ("cmpxchg16b [rax]", "v2"),
-        ("vaddps ymm0,ymm1,ymm2", "v3"),
-        ("tzcnt rax,rcx", "v3"),
-        ("lzcnt rax,rcx", "v3"),
-        ("movbe rax,qword ptr [rcx]", "v3"),
+    for (instruction, minimum, enable) in [
+        ("popcnt rax,rax", "v2", "popcnt"),
+        ("roundsd xmm0,xmm0,8", "v2", "sse41"),
+        ("haddpd xmm0,xmm1", "v2", "sse3"),
+        ("pshufb xmm0,xmm1", "v2", "ssse3"),
+        ("pcmpgtq xmm0,xmm1", "v2", "sse42"),
+        ("crc32 eax,ecx", "v2", "sse42"),
+        ("lahf", "v2", "lahf_sahf"),
+        ("sahf", "v2", "lahf_sahf"),
+        ("cmpxchg16b [rax]", "v2", "cx16"),
+        ("vaddps xmm0,xmm1,xmm2", "v3", "avx"),
+        ("vpaddd ymm0,ymm1,ymm2", "v3", "avx,avx2"),
+        ("andn rax,rcx,rdx", "v3", "bmi1"),
+        ("pext rax,rcx,rdx", "v3", "bmi2"),
+        ("vfmadd132ps xmm0,xmm1,xmm2", "v3", "avx,fma"),
+        ("vcvtph2ps xmm0,xmm1", "v3", "avx,f16c"),
+        ("tzcnt rax,rcx", "v3", "bmi1"),
+        ("lzcnt rax,rcx", "v3", "lzcnt"),
+        ("movbe rax,qword ptr [rcx]", "v3", "movbe"),
+        ("clflush [rax]", "optional", "clflush"),
     ] {
         fs::write(&assembly, format!(".text\n{instruction}\n")).unwrap();
-        let output = keel()
-            .args([
+        for level in ["v1", "v2", "v3"] {
+            let mut cmd = keel();
+            cmd.args([
                 "asm",
                 "--target",
                 "x86_64-unknown-linux-gnu",
                 "--cpu-level",
-                "v1",
+                level,
             ])
             .arg(&assembly)
             .arg("-o")
-            .arg(dir.join("reject.o"))
-            .output()
-            .unwrap();
-        assert!(!output.status.success(), "v1 accepted {instruction}");
-        assert!(
-            String::from_utf8_lossy(&output.stderr).contains("requires"),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        success(
-            keel()
-                .args([
-                    "asm",
-                    "--target",
-                    "x86_64-unknown-linux-gnu",
-                    "--cpu-level",
-                    minimum,
-                ])
-                .arg(&assembly)
-                .arg("-o")
-                .arg(dir.join("accept.o")),
-        );
+            .arg(dir.join("instruction.o"));
+            let output = cmd.output().unwrap();
+            let accepted = minimum != "optional" && level >= minimum;
+            assert_eq!(
+                output.status.success(),
+                accepted,
+                "{level}: {instruction}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            if !accepted {
+                assert!(String::from_utf8_lossy(&output.stderr).contains("requires"));
+                // Explicit modifiers change the contract, including CLFSH at every level.
+                success(cmd.arg("--target-features").arg(enable));
+            }
+        }
     }
-    // CLFSH is optional even at v3; it must never be smuggled into v1.
-    fs::write(&assembly, ".text\nclflush [rax]\n").unwrap();
-    assert!(
-        !keel()
-            .args([
-                "asm",
-                "--target",
-                "x86_64-unknown-linux-gnu",
-                "--cpu-level",
-                "v1"
-            ])
-            .arg(&assembly)
-            .arg("-o")
-            .arg(dir.join("reject.o"))
-            .output()
-            .unwrap()
-            .status
-            .success()
-    );
     fs::remove_dir_all(dir).unwrap();
 }

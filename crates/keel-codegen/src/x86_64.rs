@@ -6637,6 +6637,47 @@ mod feature_guard_tests {
                 "roundsd xmm0,xmm0,8",
                 "sse41",
             ),
+            (
+                Features::for_level(CpuLevel::V2),
+                "vaddps xmm0,xmm1,xmm2",
+                "avx",
+            ),
+            (
+                Features::for_level(CpuLevel::V2),
+                "vpaddd ymm0,ymm1,ymm2",
+                "avx2",
+            ),
+            (
+                Features::for_level(CpuLevel::V2),
+                "andn rax,rcx,rdx",
+                "bmi1",
+            ),
+            (
+                Features::for_level(CpuLevel::V2),
+                "pext rax,rcx,rdx",
+                "bmi2",
+            ),
+            (
+                Features::for_level(CpuLevel::V2),
+                "vfmadd132ps xmm0,xmm1,xmm2",
+                "fma",
+            ),
+            (
+                Features::for_level(CpuLevel::V2),
+                "vcvtph2ps xmm0,xmm1",
+                "f16c",
+            ),
+            (Features::for_level(CpuLevel::V2), "lzcnt rax,rcx", "lzcnt"),
+            (
+                Features::for_level(CpuLevel::V2),
+                "movbe rax,qword ptr [rcx]",
+                "movbe",
+            ),
+            (
+                Features::for_level(CpuLevel::V2),
+                "clflush [rax]",
+                "clflush",
+            ),
             // Memory broadcasts need AVX; register broadcasts need AVX2.
             (
                 Features::for_level(CpuLevel::V1)
@@ -6665,6 +6706,7 @@ mod feature_guard_tests {
                 .unwrap();
                 let i = Instruction::parse_intel(source).unwrap();
                 match i.operands.len() {
+                    1 => compiler.emit(i.opcode, <[AsmOperand; 1]>::try_from(i.operands).unwrap()),
                     2 => compiler.emit(i.opcode, <[AsmOperand; 2]>::try_from(i.operands).unwrap()),
                     3 => compiler.emit(i.opcode, <[AsmOperand; 3]>::try_from(i.operands).unwrap()),
                     _ => unreachable!(),
