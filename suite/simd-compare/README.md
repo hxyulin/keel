@@ -13,22 +13,23 @@ sample, not exhaustive ISA, ABI, FP exception, memory-fault or throughput covera
 
 ```sh
 # Follow the worktree's Rust build guidance; preserve any project toolchain pin.
-cargo build --release -p keel --locked
+python3 suite/fast_opt_locked.py /tmp/keel-simd-build.jsonl \
+  cargo build --release -p keel --offline --locked -j2
 python3 -B -m unittest discover -s suite/simd-compare -p 'test_*.py'
 
-# New ignored directory; default: all 4 profiles, all cases, None/Fast/Full.
+# New artifact directory; default: all 4 profiles, all cases, None/Fast/Full.
 python3 -B suite/simd-compare/run.py --keel target/release/keel \
-  --output target/simd-check-01
+  --output /tmp/keel-simd-check-01
 
 # Optional allocation/selection comparison on baseline Apple ARM64.
 python3 -B suite/simd-compare/run.py --keel /absolute/path/to/frozen/keel \
-  --output target/simd-arm-timing-01 --profiles apple-arm64 \
+  --output /tmp/keel-simd-arm-timing-01 --profiles apple-arm64 \
   --variants full full-baseline-select full-fast-alloc \
   --benchmark --rounds 7 --repeats 100000
 
 # On Linux x86: all profiles build, only proven supported profiles execute.
 python3 -B suite/simd-compare/run.py --keel /absolute/path/to/frozen/keel \
-  --clang /usr/bin/clang --output target/simd-x86-01 \
+  --clang /usr/bin/clang --output /tmp/keel-simd-x86-01 \
   --profiles v1 v2 v3 --benchmark --cpu 2
 ```
 
@@ -38,7 +39,8 @@ host idle and do not rebuild compilers during a campaign. Supply existing
 compilers; no downloads, remote execution, host configuration changes or automatic
 compiler builds occur. `--clang` selects the reference/compiler/linker;
 `--cases add copy`, `--variants full`, and `--profiles v1` narrow a rerun.
-Use a fresh output directory under ignored `target/` or `suite/reports/`.
+Use a fresh output directory under `/tmp` (recommended), ignored `target/`,
+or `suite/reports/`.
 Resolved cargo-managed target symlinks are supported. Binaries, inputs, assembly,
 objects, disassembly and JSON logs/reports stay there, never in Git.
 
@@ -49,15 +51,18 @@ NEON target is selected explicitly, and neither uses native tuning. Unsupported
 or foreign profiles are compile-only, with runtime correctness marked skipped.
 Linux execution requires the intersection of every reported processor's feature
 flags. AVX requires Linux's OS-enabled AVX flag plus XSAVE and the entire v3
-feature set. Missing evidence fails closed. Translated Apple processes and
-other OS/architecture combinations cannot execute generated kernels. There is
+feature set, including BMI1/2, F16C, FMA, LZCNT and MOVBE. Linux's `avx` flag
+already incorporates OSXSAVE/XCR0 enablement; `/proc/cpuinfo` does not expose
+a separate `osxsave` flag. Missing evidence fails closed. Translated Apple
+processes and other OS/architecture combinations cannot execute generated kernels. There is
 no force-execute override. Cross-object generation is not hardware validation.
 
 Two additional **compile-only capability probes** distinguish frontend from
-backend limits: `wide.c` must diagnose the unsupported 32-byte C vector type on
-every profile; `wide.keel` must compile only on v3 and diagnose unsupported
-256-bit values elsewhere. Expected diagnostics are checked; unrelated errors,
-crashes and timeouts fail the campaign. These probes are not performance cases.
+backend limits: `wide.c` uses 32-byte vector arguments/results and must compile
+on v3, reject the disabled AVX value/ABI support on v1/v2, and diagnose the
+unsupported C width on ARM. `wide.keel` must compile only on v3 and diagnose
+unsupported 256-bit values elsewhere. Expected diagnostics are checked;
+unrelated errors, crashes and timeouts fail the campaign. These probes are not performance cases.
 If support expands, update their contract and documentation deliberately.
 
 `report.json` separates these evidence categories:
@@ -69,7 +74,8 @@ If support expands, update their contract and documentation deliberately.
   Floating inputs are small exactly representable integers; no claim about
   NaNs, signed zero, rounding modes or architectural status follows. Clang is
   another checked participant, not the oracle. A failed build/check makes the
-  run fail and prevents all optional measurements. Partial reports survive.
+  run fail and prevents all optional measurements. Unreached stages are marked
+  not run; foreign/unproven execution is marked skipped. Partial reports survive.
 - **Frontend/backend:** C-to-IR preflight evidence is saved separately. An
   accepted C program can still fail the subsequent backend pipeline. Explicit
   IR bypasses C. Clang's compilation is a combined frontend/backend boundary.

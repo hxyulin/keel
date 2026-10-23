@@ -19,6 +19,8 @@ class SafetyTests(unittest.TestCase):
         self.assertFalse(r.native_allowed('v3', 'Darwin', 'arm64', {'avx2'}))
         self.assertFalse(r.native_allowed('v3', 'Linux', 'x86_64', {'sse2', 'avx2'}))
         self.assertTrue(r.native_allowed('v1', 'Linux', 'x86_64', {'sse2'}))
+        self.assertFalse(r.native_allowed('unknown', 'Linux', 'x86_64', {'sse2'}))
+        self.assertFalse(r.native_allowed('v1', 'Linux', 'x86_64', {'sse2'}, True))
         v2 = {'sse2', 'pni', 'ssse3', 'sse4_1', 'sse4_2', 'popcnt', 'cx16', 'lahf_lm'}
         self.assertTrue(r.native_allowed('v2', 'Linux', 'x86_64', v2))
         v3 = v2 | {'avx', 'avx2', 'bmi1', 'bmi2', 'f16c', 'fma', 'abm', 'movbe', 'xsave'}
@@ -42,11 +44,24 @@ class SafetyTests(unittest.TestCase):
             self.assertEqual(r.corpus(case), r.corpus(case))
 
     def test_expected_rejection_cannot_hide_a_crash_or_unrelated_error(self):
-        for code, stderr in ((-11, 'vector_size supports only 16-byte vectors'),
-                             (None, 'timeout'), (1, 'unknown option')):
-            self.assertFalse(r.probe_matches('c', False, {'returncode': code, 'stderr': stderr}))
-        self.assertTrue(r.probe_matches('c', False, {'returncode': 1,
-                        'stderr': 'error: vector_size supports only 16-byte vectors'}))
+        width = 'requires a backend with 256-bit SIMD value support'
+        arm_c = '32-byte C vectors require the x86-64 target and AVX/AVX2 code generation'
+        for route in ('c', 'ir'):
+            for profile in r.PROFILES:
+                with self.subTest(route=route, profile=profile):
+                    diagnostic = arm_c if route == 'c' and profile == 'apple-arm64' else width
+                    expected = profile == 'v3'
+                    for code in (-11, None):
+                        self.assertFalse(r.probe_matches(route, profile,
+                            {'returncode': code, 'stderr': diagnostic}))
+                    self.assertFalse(r.probe_matches(route, profile,
+                        {'returncode': 1, 'stderr': 'unknown option'}))
+                    self.assertEqual(r.probe_matches(route, profile,
+                        {'returncode': 0, 'stderr': ''}), expected)
+                    self.assertEqual(r.probe_matches(route, profile,
+                        {'returncode': 1, 'stderr': diagnostic}), not expected)
+        self.assertFalse(r.probe_matches('c', 'apple-arm64',
+            {'returncode': 1, 'stderr': width}))
 
     def test_stack_references_are_not_claimed_as_spills(self):
         result = r.inspect_assembly('kernel:\n  sub sp, sp, #32\n  str q0, [sp]\n  add v0.4s, v0.4s, v1.4s\n  ret\n')

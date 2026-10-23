@@ -37,9 +37,15 @@ VARIANTS = {
 
 
 def native_allowed(profile, system, machine, flags, translated=False):
-    """Fail closed. Linux exposes AVX only when the kernel enables its state."""
+    """Fail closed. Linux's AVX flag includes OSXSAVE/XCR0 state enablement.
+
+    Linux does not expose a separate `osxsave` cpuinfo flag. Requiring `avx`
+    (not just the raw CPUID AVX2 bit) relies on the kernel's OS-state check.
+    """
+    if profile not in PROFILES or translated:
+        return False
     if profile == 'apple-arm64':
-        return system == 'Darwin' and machine in ('arm64', 'aarch64') and not translated
+        return system == 'Darwin' and machine in ('arm64', 'aarch64')
     if system != 'Linux' or machine != 'x86_64':
         return False
     required = {'sse2'}
@@ -79,10 +85,11 @@ def corpus(case):
     return b''.join(rows)
 
 
-def probe_matches(route, expected, result):
-    if expected:
+def probe_matches(route, profile, result):
+    if profile == 'v3':
         return result['returncode'] == 0
-    diagnostic = ('vector_size supports only 16-byte vectors' if route == 'c'
+    diagnostic = ('32-byte C vectors require the x86-64 target and AVX/AVX2 code generation'
+                  if route == 'c' and profile == 'apple-arm64'
                   else 'requires a backend with 256-bit SIMD value support')
     return (result['returncode'] is not None and result['returncode'] > 0
             and diagnostic in result['stderr'])
@@ -123,8 +130,10 @@ def main():
     a.output, a.keel = a.output.resolve(), a.keel.resolve()
     if a.rounds < 1 or not 1 <= a.repeats <= 100000000:
         p.error('positive rounds and repeats in [1,100000000] required')
-    if not any(a.output.is_relative_to((ROOT / base).resolve()) for base in ('target', 'suite/reports')):
-        p.error('output must be under this checkout target/ or suite/reports/')
+    output_roots = [(ROOT / base).resolve() for base in ('target', 'suite/reports')]
+    output_roots.append(Path('/tmp').resolve())
+    if not any(a.output.is_relative_to(base) for base in output_roots):
+        p.error('output must be under /tmp, this checkout target/ or suite/reports/')
     if a.output.exists(): p.error('use a fresh output directory')
     clang = shutil.which(a.clang)
     if not clang or not a.keel.is_file(): p.error('existing Keel and Clang binaries required')
@@ -210,16 +219,16 @@ def main():
             # Separate the deliberately bounded C surface from backend ISA gates.
             for route in ('c', 'ir'):
                 probe = a.output/(profile+'-wide-'+route+'.o')
-                expected = route == 'ir' and profile == 'v3'
+                expected = profile == 'v3'
                 result = run([a.keel, 'cc' if route == 'c' else 'compile', *ktarget,
                               '--emit-object', HERE/('wide.c' if route == 'c' else 'wide.keel'),
                               '-o', probe], optional=True)
                 accepted = result['returncode'] == 0
                 report['capability_probes'].append({
                     'profile': profile, 'route': route, 'accepted': accepted, 'expected': expected,
-                    'limitation': 'frontend vector_size(32)' if route == 'c' else 'backend 256-bit ISA support',
-                    'diagnostic': result['stderr'], 'passed': probe_matches(route, expected, result)})
-                failed |= not probe_matches(route, expected, result)
+                    'limitation': 'C width / AVX value and ABI support' if route == 'c' else 'backend 256-bit ISA support',
+                    'diagnostic': result['stderr'], 'passed': probe_matches(route, profile, result)})
+                failed |= not probe_matches(route, profile, result)
             for case in a.cases:
                 data = corpus(case)
                 input_path = a.output/(case+'.inputs')
@@ -234,9 +243,9 @@ def main():
                         obj, asm = stem.with_suffix('.o'), stem.with_suffix('.s')
                         row = {'profile': profile, 'target': target, 'case': case, 'route': route,
                                'variant': variant, 'flags': opts, 'native_allowed': native,
-                               'correctness': 'pending' if native else 'skipped: foreign target or unproven CPU/OS features',
-                               'frontend': 'not applicable' if route == 'ir' else 'pending',
-                               'backend': 'pending', 'compile_seconds': [], 'runtime_seconds': []}
+                               'correctness': 'not run: compilation or linking did not complete' if native else 'skipped: foreign target or unproven CPU/OS features',
+                               'frontend': 'not applicable' if route == 'ir' else 'not run',
+                               'backend': 'not run', 'compile_seconds': [], 'runtime_seconds': []}
                         report['rows'].append(row)
                         if variant == 'clang-O2':
                             base = [compiler, *ctarget, *opts]
