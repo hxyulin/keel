@@ -195,3 +195,106 @@ is not a v1-only CPU. No fresh whole-application oracle or release-guard unit te
 was run, and no exhaustive ABI/ISA/FP conformance claim is made. The maintained
 [ISA](userspace-isa-status.md), [C intrinsic](c-x86-intrinsics.md) and
 [GNU vector](gnu-vector-mode.md) contracts remain unchanged.
+
+## Priority 1 implementation follow-up at 9208b9e4
+
+The isolated implementation starts from clean main
+`9208b9e4061bc46bd0b17d668bbfb8c1bc8d7fed`. Ownership is limited to
+`crates/keel-opt/src/instcombine.rs`, its focused integration tests, and this
+follow-up. No sibling changes or subagents are included.
+
+`possible` now admits constant **i32** `Sshr` only when its existing bounded
+source query proves the sign bit zero. It returns the source possible bits
+shifted by the existing modulo-width count; unknown signs, variable counts,
+other widths and exhausted producer depth retain the full-mask fallback.
+This propagates a fact without changing the signed shift itself. The depth-three
+bound, instruction worklist/caps, pass schedule and Fast behavior are unchanged.
+No global known-bits analysis, memory/ABI/C-type/FP/ISA policy or stack-forward
+change accompanies the pilot.
+
+Focused tests exhaust all 256 byte inputs against a scalar bitvector reference
+for all 256 low-byte masks and counts 0 through 32, -1/-32/-33, and i64 MIN/MAX.
+They check missing-mask-bit retention, unknown signs and signed extensions,
+resolved stale aliases, depth fallback, variable counts, deliberate exclusion of
+i8/i16/i64/i128 shifts, verification and instcombine idempotence. A masked/OR
+source matching URI byte formation additionally checks all 65,536 low-word
+inputs and i32 signed extremes. Load-fed QuickJS/SQLite reducers assert exact
+original instruction identities/data/order around calls, the byte load and a
+store, with only the covering AND removed and its result aliased.
+
+The complete local optimizer suite passed in debug and release (590 tests per
+profile before adding the final URI regression); the final ten-test instcombine
+suite passed in both profiles. The existing illegal-emission feature guard also
+passed in debug and release, covering text and structured paths. All three
+`keel --test x86_cpu_level` CLI tests passed in both profiles as well. Commands use
+the existing toolchain/default features and shared cargo cache, for example:
+
+```sh
+python3 suite/fast_opt_locked.py /tmp/keel-ashr-opt-debug.jsonl \
+  cargo test --offline --locked -j2 -p keel-opt
+python3 suite/fast_opt_locked.py /tmp/keel-ashr-guard-release.jsonl \
+  cargo test --offline --locked -j2 --release -p keel-codegen --lib \
+  emission_reports_illegal_features_in_text_and_structured_modes
+```
+
+Fresh LinuxHost release compilers were built from the base archive and that archive
+plus only the owned source/tests. Baseline compiler SHA-256 is
+`72b0c01e1bf06d2c2e57233c8f2bc213f24f64b75cc8b757aaa640b158ea7681`;
+qualified/measured candidate is
+`31c89ba4af90caaee3fc3c975b5e40bd7e2694405da72194dc1af8c7c8b46108`.
+Rebuilding with the final test/comment updates produces compiler SHA-256
+`55bd614af2bafb0bbf781455be9196464e1861e6ac83e6d6f578340ac1255fbc`;
+all 88 candidate application objects (44 TUs at each level) were freshly
+re-emitted and compared byte-for-byte against the qualified objects.
+Actual candidate `instcombine,dce`, rather than a known-bits counterfactual,
+removes both reducer field masks. Native v1/v3 GCC/Clang scalar-reference
+harnesses each pass all 256 bytes at the last byte before a protected page,
+plus unknown-sign negative controls. Independent objdump decoding retains the
+same byte loads/arithmetic shifts and removes the covering masks. Keel text
+assembly and typed object `.text` match exactly. GCC/Clang assembled function
+bytes also match; whole-section equality is intentionally not claimed because
+GCC chooses different inter-function alignment NOPs (the initial failed
+whole-section comparison is retained).
+
+All 44 hash-checked raw application TUs (nine QuickJS, 33 Lua, two SQLite) were
+freshly compiled through Full at **both v1 and v3**, for baseline and candidate.
+GCC and Clang linked each application. Both linkers' executables pass five
+QuickJS language/builtin/bignum checks, Lua's portable upstream suite, and
+matching SQLite query/hex outputs. An additional independent Python URL-encoding
+reference checks 63,494 Unicode scalar cases for both encodeURI and
+encodeURIComponent on all eight QuickJS executables. These are native application
+checks, separate from frontend acceptance and object encoding.
+
+After qualification, fresh direct raw-source Full IR and optimization-free
+serialization controls recount whole-TU activation at each ISA level:
+QuickJS removes one AND in `JS_CallInternal` and three in `js_global_encodeURI`;
+SQLite removes one in `hexFunc`; Lua `lvm.c` is unchanged. These are **five masks
+in three functions**, broader than the original two-site load-fed screen.
+SSA-mapped comparison of every changed function proves all remaining operands
+and instruction order identical except SQLite's existing recanonicalization of
+`uext.i64` to `sext.i64` on the now-proven nonnegative field. In native SQLite
+this changes a zero-extension move to `movsxd`, alongside removing the AND;
+the reduced field-only sequence loses just its AND. No new memory operation or
+footprint is introduced. These are finite checks, not a general memory/fault,
+ABI or FP conformance proof; LinuxHost supports newer ISA levels and is not a
+v1-only/CPUID-masked execution environment.
+
+One locked, CPU-2-pinned campaign used unchanged input hashes/flags, two warmups,
+seven seeded randomized pairs, CPU-18 sibling and system-utilization checks.
+It completed without triggering its contention thresholds. Candidate/baseline
+median complete raw-TU-to-object time ratios were 0.9994 QuickJS, 0.9960 Lua,
+and 0.9978 SQLite; these short samples establish no compile-speed improvement.
+The single focused runtime workload computes hex for 64 varying one-MiB blobs
+and verifies the aggregate output length. Its median ratio was 0.9933, with
+paired ratios spanning 0.9902–1.0747. **Application speedup remains unproven.**
+There is no fresh dynamic profile or historical-hot-region attribution.
+
+Artifacts, scripts, generated IR/objects/executables, exact command records,
+source/compiler hashes and timings live outside Git under
+`/tmp/keel-ashr-9208/` on LinuxHost. Key receipts are `reducer-commands.json`,
+`native-commands.json` (v3 application qualification), `apps-v1-commands.json`,
+`uri-commands.json`, `activation.json`, `effect-identity.json`, `cost.json`,
+`final-compiler-identity.json` and `final-object-parity.json`.
+Local test/lock logs use `/tmp/keel-ashr-*.{log,jsonl}`. Rust output directories
+remain cargo-managed with native-link caching disabled; no pins, cache settings,
+remote cache or other worktree outputs were changed.

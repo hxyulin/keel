@@ -291,6 +291,20 @@ fn possible(func: &Function, value: Value, depth: u32) -> u128 {
                 Some(n) => next(a) >> n,
                 None => full,
             },
+            // Bounded i32 pilot: arithmetic shift has the unsigned possible
+            // bits only when the existing source query proves a zero sign.
+            // Unknown signs keep the full mask, including sign-fill bits.
+            BinaryOp::Sshr if ty == Type::I32 => match count(func, b, width) {
+                Some(n) => {
+                    let source = next(a);
+                    if source & (full ^ (full >> 1)) == 0 {
+                        source >> n
+                    } else {
+                        full
+                    }
+                }
+                None => full,
+            },
             _ => full,
         },
         InstData::Select { args: [_, a, b] } => next(a) | next(b),
@@ -1320,4 +1334,45 @@ pub(crate) fn simplify_once(func: &mut Function, inst: Inst) -> bool {
         Fold::Multi(constants) => const_fold::replace_with_constants(func, inst, &constants),
     }
     true
+}
+
+#[cfg(test)]
+mod signed_shift_possible_tests {
+    use super::*;
+
+    #[test]
+    fn i32_sign_proof_is_bounded_and_resolves_aliases() {
+        let mut m = keel_ir::parse(
+            "func @f(i32, i32, i32) -> i32 {\nblock0(v0: i32, v1: i32, v2: i32):\n v3 = iconst.i32 2147483647\n v4 = and v0, v3\n v5 = iconst.i64 -27\n v6 = sshr v1, v5\n v7 = or v6, v2\n v8 = iconst.i32 7\n v9 = and v7, v8\n return v9\n}",
+        ).unwrap();
+        let f = &mut m.functions[0];
+        // Simulate a stale raw operand after a prior replacement.
+        f.replace_all_uses(Value::new(1), Value::new(4));
+        assert_eq!(possible(f, Value::new(6), 2), 0x03ff_ffff);
+        assert_eq!(possible(f, Value::new(6), 1), 0xffff_ffff);
+        assert_eq!(possible(f, Value::new(6), 0), 0xffff_ffff);
+        assert_eq!(possible(f, Value::new(7), DEPTH), 0xffff_ffff);
+        // A mask omitting possible source bits cannot cover the shift.
+        assert_ne!(possible(f, Value::new(6), DEPTH) & !7, 0);
+        // Unknown-sign aliases must never be treated as nonnegative.
+        f.replace_all_uses(Value::new(4), Value::new(0));
+        assert_eq!(possible(f, Value::new(6), DEPTH), 0xffff_ffff);
+    }
+
+    #[test]
+    fn only_i32_constant_shifts_admit_the_pilot() {
+        for ty in ["i8", "i16", "i32", "i64", "i128"] {
+            let source = format!(
+                "func @f({ty}, i64) -> {ty} {{\nblock0(v0: {ty}, v1: i64):\n v2 = iconst.{ty} 127\n v3 = and v0, v2\n v4 = iconst.i64 5\n v5 = sshr v3, v4\n v6 = sshr v3, v1\n return v5\n}}"
+            );
+            let m = keel_ir::parse(&source).unwrap();
+            let f = &m.functions[0];
+            let full = mask(f.value_type(Value::new(5)));
+            assert_eq!(
+                possible(f, Value::new(5), DEPTH),
+                if ty == "i32" { 3 } else { full }
+            );
+            assert_eq!(possible(f, Value::new(6), DEPTH), full);
+        }
+    }
 }

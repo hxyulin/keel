@@ -188,3 +188,129 @@ block0(v0: i8):
         }
     }
 }
+
+#[test]
+fn sign_zero_i32_shift_masks_exhaust_bytes_counts_and_masks() {
+    // Negative literals use the IR's modulo-width count, rather than C shifts.
+    for count in (0..=32i64).chain([-1, -32, -33, i64::MIN, i64::MAX]) {
+        let n = (count as u64 % 32) as u32;
+        let possible = 255u64 >> n;
+        for mask in 0..256u64 {
+            let source = format!(
+                "func @f(i8) -> i32 {{\nblock0(v0: i8):\n v1 = uext.i32 v0\n v2 = iconst.i64 {count}\n v3 = sshr v1, v2\n v4 = iconst.i32 {mask}\n v5 = and v3, v4\n return v5\n}}"
+            );
+            let (original, optimized) = optimize(&source);
+            keel_ir::verify_module(&optimized).unwrap();
+            if possible & !mask == 0 {
+                assert!(
+                    !optimized.to_string().contains(" = and "),
+                    "{source}\n{optimized}"
+                );
+            } else if possible & mask != 0 {
+                assert!(
+                    optimized.to_string().contains(" = and "),
+                    "{source}\n{optimized}"
+                );
+            }
+            for byte in 0..256 {
+                let reference = (byte >> n) & mask;
+                assert_eq!(execute(&original.functions[0], &[byte]), reference);
+                assert_eq!(
+                    execute(&optimized.functions[0], &[byte]),
+                    reference,
+                    "{source} {byte}"
+                );
+            }
+            assert!(
+                !keel_opt::find_pass("instcombine")
+                    .unwrap()
+                    .run(&mut optimized.clone().functions[0])
+            );
+        }
+    }
+}
+
+#[test]
+fn signed_unknown_and_sign_preserving_extensions_keep_the_mask() {
+    for producer in ["v1 = iadd v0, v0", "v1 = sext.i32 v0"] {
+        let ty = if producer.contains("sext") {
+            "i8"
+        } else {
+            "i32"
+        };
+        let source = format!(
+            "func @f({ty}) -> i32 {{\nblock0(v0: {ty}):\n {producer}\n v2 = iconst.i32 5\n v3 = sshr v1, v2\n v4 = iconst.i32 7\n v5 = and v3, v4\n return v5\n}}"
+        );
+        let (original, optimized) = optimize(&source);
+        assert!(optimized.to_string().contains(" = and "));
+        for x in (0..256).chain([0x80000000, 0x7fffffff, 0xffffffff]) {
+            assert_eq!(
+                execute(&original.functions[0], &[x]),
+                execute(&optimized.functions[0], &[x])
+            );
+        }
+    }
+}
+
+#[test]
+fn load_fed_field_extraction_removes_only_the_covering_mask() {
+    use keel_ir::{EntityRef, InstData, Value};
+    for (count, mask) in [(5, 7), (4, 15)] {
+        let source = format!(
+            "decl @observe(ptr)\nfunc @f(ptr) -> i32 {{\nblock0(v0: ptr):\n call @observe(v0)\n v1 = load.i8 v0\n v2 = uext.i32 v1\n v3 = iconst.i32 {count}\n v4 = sshr v2, v3\n v5 = iconst.i32 {mask}\n v6 = and v4, v5\n store v1, v0\n call @observe(v0)\n return v6\n}}"
+        );
+        let mut module = keel_ir::parse(&source).unwrap();
+        let f = &mut module.functions[0];
+        let before: Vec<_> = f
+            .layout_insts()
+            .map(|(_, i)| (i, f.inst_data(i).clone()))
+            .collect();
+        keel_opt::find_pass("instcombine").unwrap().run(f);
+        assert_eq!(f.resolve(Value::new(6)), Value::new(4));
+        let after: Vec<_> = f
+            .layout_insts()
+            .map(|(_, i)| (i, f.inst_data(i).clone()))
+            .collect();
+        let expected: Vec<_> = before
+            .into_iter()
+            .filter(|(_, d)| {
+                !matches!(
+                    d,
+                    InstData::Binary {
+                        op: keel_ir::BinaryOp::And,
+                        ..
+                    }
+                )
+            })
+            .collect();
+        assert_eq!(after, expected);
+        keel_ir::verify_module(&module).unwrap();
+    }
+}
+
+#[test]
+fn bounded_mask_and_or_sign_proof_covers_uri_byte_fields() {
+    for mask in [7u64, 15] {
+        let source = format!(
+            "func @f(i32) -> i32 {{\nblock0(v0: i32):\n v1 = iconst.i32 6\n v2 = sshr v0, v1\n v3 = iconst.i32 63\n v4 = and v2, v3\n v5 = iconst.i32 128\n v6 = or v4, v5\n v7 = iconst.i32 4\n v8 = sshr v6, v7\n v9 = iconst.i32 {mask}\n v10 = and v8, v9\n return v10\n}}"
+        );
+        let (original, optimized) = optimize(&source);
+        let f = &optimized.functions[0];
+        use keel_ir::{EntityRef, Value};
+        assert_eq!(
+            f.resolve(Value::new(10)) == f.resolve(Value::new(8)),
+            mask == 15
+        );
+        for x in (0..65536).chain([0x80000000, 0x7fffffff, 0xffffffff]) {
+            let reference = ((((x as i32 >> 6) as u32 & 63) | 128) >> 4) as u64 & mask;
+            assert_eq!(execute(&original.functions[0], &[x]), reference);
+            assert_eq!(execute(f, &[x]), reference);
+        }
+        keel_ir::verify_module(&optimized).unwrap();
+        assert!(
+            !keel_opt::find_pass("instcombine")
+                .unwrap()
+                .run(&mut optimized.clone().functions[0])
+        );
+    }
+}
