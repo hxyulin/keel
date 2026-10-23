@@ -1353,11 +1353,18 @@ impl<'a> FunctionCompiler<'a> {
         } else {
             HashMap::default()
         };
-        let packed_low_loads = if present.vector_splat {
+        let mut packed_low_loads = if present.vector_splat {
             packed_load::select(func, &mut selection, pipeline.selector.x86_features().sse41)
         } else {
             HashMap::default()
         };
+        if present.widen_low {
+            packed_low_loads.extend(packed_load::select_wide(
+                func,
+                &mut selection,
+                pipeline.selector.x86_features(),
+            ));
+        }
         let is_call = |data: &InstData| is_call(func, data, pipeline.selector.x86_features());
         let returns_twice = |data: &InstData| returns_twice(func, data);
         let input = crate::regalloc::AllocationInput {
@@ -1983,6 +1990,20 @@ impl<'a> FunctionCompiler<'a> {
             return;
         }
         if let Some(&addr) = self.packed_low_loads.get(&inst) {
+            if result
+                .is_some_and(|v| func.value_type(v) == Type::Vector(keel_ir::VectorType::I64x4))
+            {
+                // Materialize every address leaf before writing the allocated
+                // full YMM destination; normal completion handles spills.
+                let at = self.mem(addr, S0, Type::Vector(keel_ir::VectorType::I32x4));
+                let d = self.def_freg(result);
+                self.emit(
+                    Opcode::V3(keel_asm_ir::x86::V3Opcode::Vpmovsxdq),
+                    [asm_arg(simd_width(d, 256)), asm_arg(&at)],
+                );
+                self.def_done(result, d);
+                return;
+            }
             let at = self.mem(addr, S0, Type::I64);
             let d = self.def_freg(result);
             let opcode = if matches!(
