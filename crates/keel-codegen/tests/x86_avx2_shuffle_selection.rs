@@ -70,6 +70,43 @@ fn patterns(_: usize) -> Vec<Vec<usize>> {
         .collect()
 }
 
+// Check every exported oracle, so native success cannot silently exercise only
+// the general recipe after a regression in equal-source resolution or selection.
+fn assert_fixture_selection(text: &str) {
+    for (shape, width) in SHAPES {
+        for (index, lanes) in patterns(width).iter().enumerate() {
+            for mode in 0..3 {
+                let name = format!("shuffle_{shape}_{index}_{mode}");
+                let label = format!("\"{name}\":\n");
+                let body = text
+                    .split_once(&label)
+                    .unwrap_or_else(|| panic!("missing {name}"))
+                    .1
+                    .split_once("\t.cfi_endproc")
+                    .unwrap()
+                    .0;
+                let selected = body
+                    .lines()
+                    .filter(|line| line.starts_with("\tvpshufd\t"))
+                    .collect::<Vec<_>>();
+                if mode != 0 && index < 6 {
+                    assert_eq!(selected.len(), 1, "{name}");
+                    let control = (0..4).fold(0, |imm, i| imm | ((lanes[i] % 8) << (2 * i)));
+                    assert_eq!(
+                        selected[0].rsplit_once(',').unwrap().1.trim(),
+                        control.to_string(),
+                        "{name}"
+                    );
+                    assert!(!body.contains("vpshufb"), "{name}");
+                } else {
+                    assert!(selected.is_empty(), "{name}");
+                    assert!(body.contains("vpshufb"), "{name}");
+                }
+            }
+        }
+    }
+}
+
 fn fixture() -> (String, String) {
     let mut ir = String::new();
     let mut c = String::from(
@@ -146,11 +183,11 @@ int main(void) {
     (ir, c)
 }
 
-fn directory() -> PathBuf {
+fn directory(test: &str) -> PathBuf {
     std::env::var_os("KEEL_AVX2_SHUFFLE_EVIDENCE")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            std::env::temp_dir().join(format!("keel-avx2-shuffle-{}", std::process::id()))
+            std::env::temp_dir().join(format!("keel-avx2-shuffle-{}-{test}", std::process::id()))
         })
 }
 fn command(c: &mut Command) {
@@ -170,7 +207,7 @@ fn text_bytes(object: &[u8]) -> Vec<u8> {
 #[test]
 fn avx2_shuffle_encodings_and_semantic_oracles() {
     let (source, c) = fixture();
-    let dir = directory();
+    let dir = directory("semantic");
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("shuffle.c"), &c).unwrap();
     command(
@@ -199,8 +236,7 @@ fn avx2_shuffle_encodings_and_semantic_oracles() {
                     ("spilled", &EMPTY),
                 ] {
                     let (text, _, object) = compile(&source, s, &a, p, features);
-                    assert!(text.contains("vpshufd"));
-                    assert!(text.contains("vpshufb"));
+                    assert_fixture_selection(&text);
                     let stem = format!("shuffle-{level:?}-{s:?}-{a:?}-{pool}");
                     fs::write(dir.join(format!("{stem}.o")), object).unwrap();
                     fs::write(dir.join(format!("{stem}.s")), text).unwrap();
@@ -232,7 +268,7 @@ fn shuffle_immediate_encodings_match_clang() {
     for imm in 0..256 {
         asm += &format!("vpshufd ymm15,ymm14,{imm}\n");
     }
-    let dir = directory().join("encoding");
+    let dir = directory("encoding").join("encoding");
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("all.s"), &asm).unwrap();
     command(
@@ -259,7 +295,7 @@ fn shuffle_immediate_encodings_match_clang() {
 #[ignore = "code-generation measurement; run at both revisions with --nocapture"]
 fn measure_avx2_shuffle_codegen() {
     let (source, _) = fixture();
-    let dir = directory().join("measure");
+    let dir = directory("measure").join("measure");
     fs::create_dir_all(&dir).unwrap();
     let reverse = "func @halfreverse32(i32x8)->i32x8 {\nentry(v0:i32x8):\n v1 = vshuffle v0,v0,[3,2,1,0,7,6,5,4]\n return v1\n}\n";
     let (text, program, object) = compile(
@@ -427,7 +463,7 @@ fn shuffle_controlled_register_aliases_and_spills() {
     source = source
         .replace(stores, "")
         .replace(" v5 = vshuffle", &(stores.to_owned() + " v5 = vshuffle"));
-    let dir = directory();
+    let dir = directory("controlled");
     fs::create_dir_all(&dir).unwrap();
     for s in [
         SelectionTier::Baseline,
@@ -442,6 +478,7 @@ fn shuffle_controlled_register_aliases_and_spills() {
                 &keel_codegen::x86_64::REGISTERS,
                 Features::for_level(CpuLevel::V3),
             );
+            assert_fixture_selection(&text);
             let stem = format!("controlled-{s:?}-{layout}");
             fs::write(dir.join(format!("{stem}.o")), object).unwrap();
             fs::write(dir.join(format!("{stem}.s")), text).unwrap();

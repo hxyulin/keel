@@ -87,3 +87,19 @@ Copy exported root-level `.o`/`.c` pairs to LinuxHost and run the existing
 `suite/fast_opt_locked.py`, without nesting locks. The native report is
 `/tmp/keel-avx2-shuffle-evidence/native-results.json` on LinuxHost and locally.
 Generated objects, source snapshots, captures and build logs remain under `/tmp`.
+
+Independent review after rebasing onto `bfa86ed7` reproduced the dedicated
+integration tests, exhaustive classifier test, existing wide SIMD/conversion
+regression tests and ignored static measurement
+under the shared investigation lock. Every exported function now asserts its
+own fast/fallback selection and, for positives, the expected immediate across
+all 27 allocation/selection combinations. Default temporary directories are
+separate per test to prevent parallel test cleanup racing artifact writes.
+The 27 rebased object/C pairs exactly match the previously native-tested hashes;
+those hashes and passing statuses were also verified on LinuxHost. No native rerun
+was required for byte-identical exports. The native report SHA-256 is
+`aaec70ae00f7aa619b2dead78cc051eb41cbe83a36fd9a45fefc5e88b4891bf1`.
+Review artifacts are in `/tmp/keel-avx2-review-evidence`; serialized commands
+are in `/tmp/keel-avx2-review-unique.jsonl`. Whole-workspace formatting check
+reports existing unrelated formatting differences; the changed test passes
+its focused rustfmt check. The review found no selector correctness issue.
