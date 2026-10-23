@@ -132,3 +132,53 @@ JSON, logs, lock records and task-owned reproduction scripts retain provenance
 and raw evidence. Baseline/candidate source snapshots and frozen debug binaries
 are on MacHost; LinuxHost retains exact exported objects, C oracles and executables.
 Bulk outputs are outside Git. Independent review/integration remains separate.
+
+## Independent review, 2026-10-23
+
+Candidate `fbee40a1cec5e490ccebf24445eb88792ce1eabb` was reapplied onto
+unchanged main `81b2e71c6f69844a549e9ba916ff164332171a8a` as `ae9d0816`
+in the isolated `review/x86-sse41-signextend` worktree. No production defect
+was found. Review confirmed resolved use locations, allocated destinations,
+legal same-register operation, reserved FS0 for independent/all spills,
+full-width reload/completion, earlier load-cover priority and typed SSE4.1
+metadata through the ordinary release-active emission guard. No frontend,
+FP, ABI, unsigned/high/wide conversion or reduction behavior was changed.
+
+Fresh local debug and release gates each passed the 29 focused tests above
+and one emission-guard test. The retained 128-bit wrapping reduction suite
+also passed its three active tests in each profile. Its one compile-cost test
+and PMULLD's two measurement tests remained ignored. The gates include all
+three object routes, effective feature overrides and the 256-register-pair
+Clang encoding comparison. Local execution is Apple ARM64; x86 objects were
+cross-emitted there, then executed on LinuxHost.
+
+Fresh LinuxHost runs passed 126 debug register bundles with **each of Clang and
+GCC**, plus 159 release widening/bitcast/stream bundles, 108 release m64 load
+bundles and 72 release wide-load bundles with Clang. Native commands held the
+shared lock. This review did not rerun the optional GCC m64 batch or claim
+its previously failed harness compilation as a pass.
+
+The frozen benchmark baseline's production sources, Cargo files and suite
+match main; the candidate's match the submitted production change. The copied
+width driver, runtime driver and kernel input match their maintained sources,
+and all four frozen compiler hashes match the recorded provenance. The
+`candidate-source` compiler-build snapshot contains the older
+`vector_widen_x86.rs`, before the final pilot tests were added; that test file
+is not linked into the measured compiler. Final test evidence instead comes
+from the submitted tests and the fresh review runs above. This distinction
+does not alter the measured production-source identity.
+
+Re-decoding reproduced all 192 recorded symbol-bounded function inventories;
+only `rk_balance32` and `rk_clamped` differ in the enabled profiles, with the
+documented counts. V1, disabled-SSE4.1 and ARM whole-object controls are still
+byte-identical. Review recomputed the saved runtime medians and verified the
+252 checks, 288 samples, object hashes, eight quiet preflights and shared-lock
+record. No identity issue requiring another timing campaign was found, so
+timing was not rerun. Quiet checks were sampled before each round, not a
+continuous proof of an idle host. The kernel-only, single-host and finite
+ISA/value/footprint limits above remain in force; no application claim follows.
+
+Review scripts, logs, fresh objects and reports are under
+`/tmp/keel-review-f9ac` on MacHost and LinuxHost. Main, the original candidate
+worktree and sibling workers were left untouched. Integration remains the
+parent's responsibility.
