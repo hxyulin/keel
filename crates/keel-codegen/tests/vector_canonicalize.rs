@@ -76,19 +76,77 @@ fn command(c: &mut Command) {
 
 #[test]
 fn canonical_forms_compile_and_preserve_bits() {
-    let before = keel_ir::parse(&SOURCE.replace("PREFIX", "before_")).unwrap();
-    let mut after = keel_ir::parse(&SOURCE.replace("PREFIX", "after_")).unwrap();
+    check_forms(SOURCE, ORACLE, "canonical", true);
+}
+
+// These are semantic regressions and retained cost counterexamples. Fewer IR
+// shuffles need not mean fewer target instructions, even after packed selection.
+#[test]
+fn composed_shuffle_selector_boundaries_preserve_bits() {
+    check_forms(
+        "func @PREFIXbytes(ptr,ptr,ptr) {
+block0(v0: ptr,v1: ptr,v2: ptr):
+ v3 = load.i8x16 align 1 v0
+ v4 = load.i8x16 align 1 v1
+ v5 = vshuffle v3,v4,[0,16,1,17,2,18,3,19,4,20,5,21,6,22,7,23]
+ v6 = vshuffle v5,v3,[0,16,1,17,2,18,3,19,4,20,5,21,6,22,7,23]
+ store align 1 v6,v2
+ return
+}
+func @PREFIXdwords(ptr,ptr,ptr) {
+block0(v0: ptr,v1: ptr,v2: ptr):
+ v3 = load.i32x4 align 1 v0
+ v4 = load.i32x4 align 1 v1
+ v5 = vshuffle v3,v4,[0,1,4,5]
+ v6 = vshuffle v3,v4,[2,3,6,7]
+ v7 = vshuffle v5,v6,[0,2,4,6]
+ store align 1 v7,v2
+ return
+}",
+        r#"
+extern void before_bytes(const void*,const void*,void*),after_bytes(const void*,const void*,void*);
+extern void before_dwords(const void*,const void*,void*),after_dwords(const void*,const void*,void*);
+int main(void) {
+ for(unsigned t=0;t<256;t++) {
+  unsigned char a[16],b[16],x[16],y[16];
+  for(unsigned i=0;i<16;i++){a[i]=(unsigned char)(t+i);b[i]=(unsigned char)(t-i-1);}
+  before_bytes(a,b,x);after_bytes(a,b,y);
+  for(unsigned i=0;i<16;i++) {
+   unsigned j=i/2;
+   unsigned char e=(i%2)?a[j]:((j%2)?b[j/2]:a[j/2]);
+   if(x[i]!=e||y[i]!=e)return 1;
+  }
+  unsigned c[4],d[4],u[4],v[4];
+  for(unsigned i=0;i<4;i++){c[i]=t*65537+i;d[i]=~c[i];}
+  before_dwords(c,d,u);after_dwords(c,d,v);
+  for(unsigned i=0;i<4;i++) {
+   unsigned e=(i%2)?d[(i/2)*2]:c[(i/2)*2];
+   if(u[i]!=e||v[i]!=e)return 2;
+  }
+ }
+ return 0;
+}
+"#,
+        "boundaries",
+        false,
+    );
+}
+
+fn check_forms(source: &str, oracle: &str, evidence: &str, shrinks: bool) {
+    let before = keel_ir::parse(&source.replace("PREFIX", "before_")).unwrap();
+    let mut after = keel_ir::parse(&source.replace("PREFIX", "after_")).unwrap();
     keel_opt::run_passes(&mut after, &["instcombine", "gvn", "instcombine", "dce"]).unwrap();
     keel_ir::verify_module(&after).unwrap();
     let root = std::env::var_os("KEEL_VECTOR_CANONICAL_EVIDENCE")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| {
             std::env::temp_dir().join(format!("keel-vector-canonical-{}", std::process::id()))
-        });
+        })
+        .join(evidence);
     fs::create_dir_all(&root).unwrap();
     fs::write(root.join("before.keel"), before.to_string()).unwrap();
     fs::write(root.join("after.keel"), after.to_string()).unwrap();
-    fs::write(root.join("oracle.c"), ORACLE).unwrap();
+    fs::write(root.join("oracle.c"), oracle).unwrap();
     for arm in [false, true] {
         for selector in [
             SelectionTier::Baseline,
@@ -141,11 +199,17 @@ fn canonical_forms_compile_and_preserve_bits() {
                         assert_eq!(obj, keel_asm::x86::assemble_object(&text).unwrap());
                         (text, obj)
                     };
+                    if !arm && evidence == "canonical" && label == "after" {
+                        assert!(text.contains("shufpd"), "combined qword selection: {text}");
+                    }
+                    if evidence == "boundaries" && label == "before" {
+                        assert!(text.contains(if arm { "zip1" } else { "shufps" }));
+                    }
                     let parsed = object::File::parse(obj.as_slice()).unwrap();
                     let section = parsed
                         .section_by_name(if arm { "__text" } else { ".text" })
                         .unwrap();
-                    println!("{stem} {label} text_bytes={}", section.size());
+                    println!("{evidence} {stem} {label} text_bytes={}", section.size());
                     sizes.push(section.size());
                     let name = root.join(format!("{stem}-{label}"));
                     fs::write(name.with_extension("s"), text).unwrap();
@@ -169,7 +233,7 @@ fn canonical_forms_compile_and_preserve_bits() {
                     objects.push(name.with_extension("o"));
                 }
                 assert!(
-                    sizes[1] < sizes[0],
+                    !shrinks || sizes[1] < sizes[0],
                     "representative forms should shrink: {stem} {sizes:?}"
                 );
                 let native = if arm {

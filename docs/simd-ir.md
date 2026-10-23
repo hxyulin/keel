@@ -98,10 +98,27 @@ creates no instructions. The existing dependency worklist revisits rewritten
 instructions and consumers. Genuine two-source shuffles retain their written
 operand order; composed forms retain source order from the written producer
 operands. This contract was coordinated with the x86 instruction-selection
-owner. It keeps the established ZIP/UZP/TRN/window surface available to selectors.
+owner. Uncomposed forms keep the established ZIP/UZP/TRN/window operand order.
 It is an IR simplification, not a target cost model: composing packed
 permutations can still produce a permutation a backend scalarizes. Shared
 intermediates and compositions requiring three sources remain unchanged.
+
+Review on combined base `e35da377` confirms a profitability limitation with
+concrete counterexamples in `composed_shuffle_selector_boundaries_preserve_bits`.
+Two i8x16 ZIP1 shuffles compose into
+`[0,0,16,1,1,2,17,3,2,4,18,5,3,6,19,7]`, which ARM lowers with lane inserts.
+Three SSE2 SHUFPS shuffles (`[0,1,4,5]`, `[2,3,6,7]`, then `[0,2,4,6]`)
+compose into `[0,4,2,6]`, which even the combined x86 selector scalarizes.
+The latter preserves aligned dword groups but alternates sources, outside that
+selector's two-source half-group recipe. Thus a byte/word-only safeguard would
+not cover the full issue. Composition remains a target-independent IR-count
+simplification; preserving packed profitability needs a target-aware cost gate
+or additional selector recipes as follow-up. No runtime improvement is claimed.
+
+Shuffle inspection uses two stack source slots and at most 32 stack lane
+indices, allocating an output map only when it rewrites a shuffle. Source
+searches inspect at most two entries. Single-use queries reuse the existing
+lazy function analysis, rather than rescanning the function for each lane.
 
 An integer splat mask selects the appropriate entire arm using the lane-width
 constant's zero/nonzero value; `1` is true, and `256` in an i8 lane is false.
@@ -141,6 +158,24 @@ original and optimized objects pass 256 bit-pattern cases per configuration,
 including infinities, signed zeros, signaling/quiet NaN payloads and all byte
 values for unsigned-then-signed widening. x86 execution was not performed in
 this track. This is finite evidence, not exhaustive FP or memory validation.
+
+Review validation rebased onto `e35da377` passes the full optimizer suite and
+the targeted codegen suites, including the combined x86 shuffle and unsigned
+byte comparison tests. The dedicated canonicalization test also asserts packed
+SHUFPD output from the optimized qword sample. A newly built combined `keel`
+CLI passes 24 sample/target/selector/allocator configurations with text/direct
+object equality, including strict x86 v1 compilation and 12 native Apple ARM
+oracle executions. Cross-generated x86 objects were not executed. Review logs,
+the external CLI harness, compiler hash and generated captures are retained at
+`/tmp/keel-canonical-review-20261023-*`.
+Final validation includes main through `9265dcf9`: 574 optimizer tests and 131
+targeted codegen tests pass (two opt-in tests ignored in each group). The newly
+built release compiler also completes the checked-in SIMD comparison harness:
+224 rows across four profiles, eight passing capability probes, and native
+Apple ARM checks. The report is
+`/tmp/keel-canonical-review-20261023-simd-final/report.json`; this run requests
+no compilation/runtime timing measurements. The release compiler repeats the
+24-configuration CLI oracle matrix successfully.
 
 ### Applicability evidence
 
