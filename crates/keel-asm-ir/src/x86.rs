@@ -1583,14 +1583,23 @@ pub use core::{CoreOpcode, LoopKind, Repeat, StringKind};
 mod v3;
 pub use v3::{V3_FORMS, V3Form, V3Opcode, V3Operand};
 
+/// Includes operand-specific requirements (e.g. AVX2 register broadcasts).
+///
+/// Like [`Instruction::required_features`], this is a feature query, not operand
+/// validation: unmatched forms retain the opcode's requirements. Lock and
+/// segment overrides do not participate in feature selection.
+pub fn required_features(opcode: Opcode, operands: &[Operand]) -> Features {
+    let base = opcode.required_features();
+    if base.avx {
+        v3::form(opcode, operands).map_or(base, |f| v3::requirement(f.isa))
+    } else {
+        base
+    }
+}
+
 impl Instruction {
     /// Includes operand-specific requirements (e.g. AVX2 register broadcasts).
     pub fn required_features(&self) -> Features {
-        let base = self.opcode.required_features();
-        if base.avx {
-            v3::form(self).map_or(base, |f| v3::requirement(f.isa))
-        } else {
-            base
-        }
+        required_features(self.opcode, &self.operands)
     }
 }

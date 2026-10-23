@@ -6339,19 +6339,9 @@ impl<'a> FunctionCompiler<'a> {
         lock: bool,
     ) {
         // Keep the legality guard in release builds and on the text path too.
-        // AVX forms can require AVX2 depending on the operands. Baseline forms
-        // need no temporary operand allocation for this check.
+        // AVX forms can require AVX2 depending on the borrowed operands.
         if self.feature_error.is_none() {
-            let required = if opcode.required_features().avx {
-                keel_asm_ir::x86::Instruction {
-                    opcode,
-                    operands: operands.to_vec(),
-                    lock,
-                }
-                .required_features()
-            } else {
-                opcode.required_features()
-            };
+            let required = keel_asm_ir::x86::required_features(opcode, &operands);
             if !self.features.contains(required) {
                 self.feature_error = Some(format!(
                     "instruction {opcode:?} requires target features: {}",

@@ -1666,17 +1666,33 @@ pub struct V3Form {
     pub imm_reg: bool,
     pub vsib: u16,
 }
+// Capture one borrowed view in the form scan, as the owned matcher did.
+struct InstructionRef<'a> {
+    opcode: Opcode,
+    operands: &'a [Operand],
+}
 impl V3Form {
+    #[inline]
     pub fn matches(&self, i: &super::Instruction) -> bool {
-        self.opcode==i.opcode && self.operands.len()==i.operands.len()
-        && self.operands.iter().zip(&i.operands).all(|(s,o)|s.matches(o))
-        && (self.vsib==0 || i.operands.iter().any(|o|matches!(o, Operand::Memory(m) if m.index.is_some_and(|r|r.width==self.vsib && matches!(r.class,RegisterClass::Xmm | RegisterClass::Ymm)))))
+        self.matches_operands(&InstructionRef {
+            opcode: i.opcode,
+            operands: &i.operands,
+        })
+    }
+
+    fn matches_operands(&self, i: &InstructionRef<'_>) -> bool {
+        self.opcode == i.opcode
+            && self.operands.len() == i.operands.len()
+            && self.operands.iter().zip(i.operands).all(|(s, o)| s.matches(o))
+            && (self.vsib == 0
+                || i.operands.iter().any(|o| matches!(o, Operand::Memory(m) if m.index.is_some_and(|r|r.width==self.vsib && matches!(r.class,RegisterClass::Xmm | RegisterClass::Ymm)))))
     }
 }
-pub fn form(i: &super::Instruction) -> Option<&'static V3Form> {
+pub(super) fn form(opcode: Opcode, operands: &[Operand]) -> Option<&'static V3Form> {
+    let i = InstructionRef { opcode, operands };
     V3_FORMS
         .iter()
-        .filter(|f| f.matches(i))
+        .filter(|f| f.matches_operands(&i))
         .min_by_key(|f| (u8::from(f.w), f.map))
 }
 #[rustfmt::skip]
