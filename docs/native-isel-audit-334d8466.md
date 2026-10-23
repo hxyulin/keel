@@ -169,6 +169,11 @@ The observations above remain the frozen research baseline.
 
 ## 3. Single-use i32 constant mask compared with zero
 
+Implementation follow-up: [the bounded i32 register TEST pilot](x86-mask-test.md)
+implements this proposal against `2b69f9fb`, with focused native/debug/release
+gates and a new raw-application object recount. The research evidence below
+remains the original frozen-base proposal, not the implementation receipt.
+
 Owners: `crates/keel-codegen/src/select.rs` and
 `crates/keel-codegen/src/x86_64.rs::compare`; integrate with existing compare
 and branch allocation operands rather than adding an assembly rewriter.
