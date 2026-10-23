@@ -30,7 +30,13 @@ implements every vendor intrinsic header or that every loop auto-vectorizes.
 The C frontend exposes bounded 16-byte vectors and x86-only 32-byte vectors,
 plus a [documented SSE/AVX header and builtin subset](c-x86-intrinsics.md).
 This source surface uses the same typed IR and feature gates; complete
-`immintrin.h` compatibility remains outside its contract.
+`immintrin.h` compatibility remains outside its contract. The
+[bounded SSE2 packed shift subset](c-x86-intrinsics.md#bounded-sse2-packed-shifts)
+adds sixteen 128-bit C wrappers using existing architectural shifts with
+oversized-count zero/sign-fill, checked immediate controls and low-64-bit
+runtime vector counts. Native LinuxHost GCC/Clang, strict-v1 objects and ARM
+frontend diagnostics are validated in debug/release; this does not add AVX2
+shift wrappers or general C scalar broadcast shifts.
 AVX-512 and optional post-baseline ARM extensions are outside this goal.
 
 ## Strict-v1 userspace contract and audit

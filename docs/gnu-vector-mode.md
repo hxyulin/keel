@@ -76,7 +76,10 @@ Supported expressions:
   Integer vectors keep their lane width without scalar integer promotions.
   Comparison results have signed integer lanes of the operand width, with
   all bits set for true and zero for false. Right shift follows element
-  signedness. Shift counts must be valid C lane shift counts.
+  signedness. Shift counts must be valid C lane shift counts. The separate
+  [bounded SSE2 wrappers](c-x86-intrinsics.md#bounded-sse2-packed-shifts) use
+  architectural zero/sign-fill for oversized counts; they do not extend these
+  ordinary C operators or add scalar broadcast shifts.
 - Explicit equal-width casts between supported vectors, and between a 16-byte
   vector and signed or unsigned `__int128`, preserving all bytes. These are bit casts,
   not numeric lane conversions.

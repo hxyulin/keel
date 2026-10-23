@@ -60,6 +60,10 @@ separate names, not arbitrary suffix combinations.
   `mullo_epi{16,32}`, `{cmpeq,cmpgt}_epi{8,16,32,64}`,
   `set1_epi{8,16,32,64x}`, `set_epi{32,64x}`. Integer arithmetic wraps at its lane
   width. Comparisons use signed lanes and return all-one/zero lane masks.
+- SSE2 packed shifts: `_mm_{slli,srli}_epi{16,32,64}` and
+  `_mm_srai_epi{16,32}` with immediate controls, plus
+  `_mm_{sll,srl}_epi{16,32,64}` and `_mm_sra_epi{16,32}` with vector counts.
+  These are 128-bit operations; see the bounded shift contract below.
 - Integer bit operations: `_mm_{and,or,xor,andnot}_si128` and
   `_mm256_{and,or,xor,andnot}_si256`; `andnot(a,b)` means `~a & b`.
   `_mm_setzero_si128`, `_mm256_setzero_si256`,
@@ -93,7 +97,7 @@ separate names, not arbitrary suffix combinations.
   differences between quiet and signaling SSE instructions.
 
 The SSE/AVX header functions use C vectors, scalar lane access, and fixed-size
-`__builtin_memcpy`; shuffles and AVX comparisons use the checked builtins below.
+`__builtin_memcpy`; shifts, shuffles and AVX comparisons use checked builtins.
 All lower through the existing typed IR, optimization, ABI, feature gating and
 instruction selection. The explicit PCLMUL builtin uses its dedicated typed
 intrinsic and lowering described in the linked contract.
@@ -123,11 +127,85 @@ bitwise operations and comparisons, including compound assignments; see
 and remaining scalar-shift/cross-domain limits. Constructor functions remain
 available for explicit element conversions.
 Masked/gather/scatter memory, streaming memory/fences, scalar-lane FP intrinsics,
-saturation, horizontal operations, general shifts, conversions, FMA, AVX-512,
+saturation, horizontal operations, shifts beyond the bounded SSE2 subset,
+conversions, FMA, AVX-512,
 full vendor header coverage and strict FP-environment compatibility are outside
 this header contract even where the backend already implements such operations.
 The existing C restrictions on vector varargs, unions and by-value x86 aggregates
 remain in force; see [GNU vector mode](gnu-vector-mode.md).
+
+## Bounded SSE2 packed shifts
+
+The sixteen shift wrappers above use the existing architectural
+`x86_sse2_ps{ll,rl,ra}{w,d,q}128` intrinsics (arithmetic right shift has no
+64-bit form). Logical shifts zero every lane when the unsigned count is at
+least the lane width; arithmetic right shifts sign-fill instead. Counts are
+never reduced modulo the width. These semantics differ from ordinary C vector
+shifts, whose out-of-range counts are undefined.
+
+Immediate controls must be defined integer constant expressions in 0..255.
+Negative controls, 256 and larger controls, runtime controls and unsupported
+constant-expression proofs are diagnosed. This deliberately bounded diagnostic
+contract does not promise vendor acceptance/truncation of other integer controls.
+The implementation reuses the reviewed AES/PCLMUL bounded ICE proof unchanged.
+The data expression is evaluated once. An immediate wrapper does not promise
+an immediate machine encoding: the current architectural IR uses an i64 count.
+
+The runtime forms take `__m128i` data and count arguments, evaluating each once.
+Only the unsigned low 64 bits of the count vector are consumed; the upper 64
+bits are ignored. A low half with its sign bit set is a large positive count,
+not a negative C shift. Inputs and results retain the existing 16-byte vector
+ABI. No memory access or FP operation is introduced by the shift itself;
+composing load/store wrappers retains their exact 16-byte footprint.
+
+The private `__builtin_keel_sse2_{imm,count}_{psllw,pslld,psllq,psrlw,psrld,psrlq,psraw,psrad}`
+bridge requires the matching 128-bit integer lane shape on x86-64. The `imm`
+form checks the control proof; the `count` form requires an unsigned long long
+scalar count. `__has_builtin` reports these names only on x86-64, independently
+of CPU selection. This does not add general vendor shift builtin compatibility.
+Strict v1 already includes SSE2; the existing backend preflight and release
+emission guard remain authoritative. ARM inclusion and direct builtin use are
+diagnosed. No backend, optimizer, FP policy or ABI changes accompany this surface.
+
+`keel-c --test x86_shifts` separates frontend/IR/object checks from conditional
+native Linux x86 execution. On LinuxHost, debug and release both passed with GCC
+16.2.0 and Clang 23.1.1 against their vendor headers and an independent unsigned
+lane reference. Runtime counts cover every value 0..255, 256, 65536, 2^32,
+2^63 and UINT64_MAX, with a nonzero ignored upper count half. Lane patterns
+include zero, all ones, signed minimum/maximum, one and mixed bits. Immediate
+forms cover 0, width-1, width, width+1 and 255. Baseline/fast, trees/full and
+optimized/full with empty register pools execute values, single evaluation,
+direct/indirect calls and callbacks. Guard pages and sentinels check both page
+edges, unaligned pointers and aliased input/output with exact 16-byte accesses.
+
+Independent `llvm-objdump` decoding of the six native debug/release objects
+found all eight legacy SSE2 shift mnemonics. The complete finite mnemonic
+inventories contained only baseline integer/SSE/SSE2 instructions. This decoding
+and native execution supplement the typed feature checks; they do not establish
+execution on a CPUID-masked v1-only host. Existing C headers, AES and PCLMUL
+regressions passed on LinuxHost in both profiles. Local Apple ARM64 frontend/object,
+header/AES/PCLMUL and vector ABI/broadcast regressions also passed; local x86
+object emission alone is not native x86 execution.
+
+Reproduce under the shared build lock (add `--release` for release):
+
+```sh
+python3 suite/fast_opt_locked.py /tmp/keel-c-shifts-unique.jsonl \
+  cargo test --offline --locked -j2 -p keel-c \
+  --test x86_shifts --test x86_intrinsics --test x86_aes --test pclmul
+```
+
+The 2026-10-23 native source snapshot is `/tmp/keel-c-shifts-20261023` on
+LinuxHost. Logs are `/tmp/keel-c-shifts-native-{debug,debug-final,release}.log`;
+final objects and harnesses are `/tmp/keel-c-shifts-{3124846,3125706}`.
+Disassembly and inventories are retained beside those objects and in
+`/tmp/keel-c-shifts-disassembly.json`; the decoder is
+`/tmp/keel-c-shifts-decode.py`. Builds/execution used the shared suite lock and
+cargo default cache with link caching disabled. No timing conclusions were drawn.
+
+AVX2 256-bit shifts, per-lane counts, byte shifts, rotates and the remainder of
+the vendor shift families remain queued. Saturation and numeric conversion
+wrappers are separate work.
 
 ## Validation and reproduction
 
