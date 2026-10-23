@@ -75,9 +75,14 @@ only `_mm_clmulepi64_si128` as a macro. Each vector argument is evaluated once;
 the control remains an integer constant expression. It calls the checked builtin
 `__builtin_ia32_pclmulqdq128(a,b,imm8)`, accepting matching 64-bit-lane integer
 vectors. All 256 controls are legal. Unsupported/dynamic/out-of-range controls
-and mismatched vector types are diagnosed. The bounded constant proof uses the
-existing evaluator's supported integer/float scalar expression tree through
-64-bit integers; i128/pointer intermediates and comma expressions are rejected.
+and mismatched vector types are diagnosed. The bounded constant proof accepts
+integer expressions through 64-bit integers,
+including enum constants, casts, `sizeof`, conditionals and short-circuit logic.
+A floating literal is accepted only as the immediate operand of a representable
+integer cast; floating arithmetic/comparisons are outside this ICE subset.
+Evaluated signed overflow, invalid shift counts, division overflow/zero and
+unrepresentable floating casts are rejected before folding. i128/pointer
+intermediates and comma expressions are rejected.
 Including the header on a feature-disabled x86 target emits no unused wrapper;
 actually using the operation requires explicit feature enablement.
 
@@ -135,6 +140,19 @@ These finite tests do not establish exhaustive ISA/ABI certification or
 performance claims. The host supports newer extensions; strict-feature
 exclusion is established by the compiler/assembler diagnostics and emission
 checks, not execution on a PCLMUL-only machine.
+
+Independent review on 2026-10-23 found and fixed unsafe C control folding:
+invalid shifts, signed overflow and unrepresentable floating casts could previously
+become accepted immediates. The focused ICE regression also covers enum/cast/sizeof
+controls, short-circuit evaluation and rejection of non-ICE floating expressions.
+Explicit i128 casts retain their AST boundary so the bounded proof rejects them.
+The review repeated all ten focused tests in debug/release, feature/header
+regressions and both emission guards. Fresh exports passed the 12+3 LinuxHost native
+configurations, m128 page/fault gate, 80,896-byte Clang/GNU matrix and vendor
+secondary oracles. Exact commands are in `/tmp/keel-pclmul-review-unique.jsonl`;
+native commands, artifact SHA-256 identities and results are in
+`/tmp/keel-pclmul-review-native.log`. Exports use the
+`/tmp/keel-pclmul-review-{codegen,c,asm}` directories outside Git.
 
 Primary semantics references: [Intel SDM, volume 2B](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-2b-manual.pdf),
 [Intel carryless multiplication paper](https://cdrdv2-public.intel.com/836172/clmul-wp-rev-2-02-2014-04-20.pdf),

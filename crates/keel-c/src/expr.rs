@@ -42,6 +42,115 @@ fn broadcast_constant(e: &Expr<'_>) -> Option<Const> {
     supported(e).then(|| eval_constant(e, false)).flatten()
 }
 
+/// PCLMUL controls are bounded C ICEs, not arbitrary folds by the general
+/// evaluator (which deliberately wraps shifts/overflow and saturates FP casts).
+fn pclmul_control(e: &Expr<'_>) -> Option<i64> {
+    fn integer(e: &Expr<'_>) -> bool {
+        e.ty.int_kind().is_some_and(|k| k.size() <= 8)
+    }
+    fn shape(e: &Expr<'_>) -> bool {
+        if !integer(e) {
+            return false;
+        }
+        match e.kind {
+            ExprKind::Int(_) => true,
+            ExprKind::Cast(a) if matches!(a.kind, ExprKind::Float(_)) => {
+                matches!(a.ty, Ty::Float | Ty::Double)
+            }
+            ExprKind::Cast(a) | ExprKind::Unary(_, a) => shape(a),
+            ExprKind::Binary(_, a, b) | ExprKind::LogAnd(a, b) | ExprKind::LogOr(a, b) => {
+                shape(a) && shape(b)
+            }
+            ExprKind::Cond(a, b, c) => shape(a) && shape(b) && shape(c),
+            _ => false,
+        }
+    }
+    fn bounds(ty: Ty<'_>) -> (i128, i128) {
+        let k = ty.int_kind().unwrap();
+        let bits = k.size() * 8;
+        if k.signed() {
+            (-(1i128 << (bits - 1)), (1i128 << (bits - 1)) - 1)
+        } else {
+            (0, (1i128 << bits) - 1)
+        }
+    }
+    fn checked(e: &Expr<'_>) -> Option<i64> {
+        match e.kind {
+            ExprKind::Int(_) => {}
+            ExprKind::Cast(a) => {
+                if let ExprKind::Float(f) = a.kind {
+                    let (min, max) = bounds(e.ty);
+                    let f = f.trunc();
+                    // Exclusive upper power-of-two limit avoids f64 rounding
+                    // i64::MAX/u64::MAX upward into an unrepresentable value.
+                    if !f.is_finite()
+                        || (e.ty != Ty::Int(IntKind::Bool)
+                            && (f < min as f64 || f >= (max + 1) as f64))
+                    {
+                        return None;
+                    }
+                } else {
+                    checked(a)?;
+                }
+            }
+            ExprKind::Unary(op, a) => {
+                let n = checked(a)?;
+                if op == UnOp::Neg && e.ty.is_signed() && i128::from(n) == bounds(e.ty).0 {
+                    return None;
+                }
+            }
+            ExprKind::Binary(op, a, b) => {
+                let x = checked(a)?;
+                let y = checked(b)?;
+                let signed = a.ty.is_signed();
+                let (min, max) = bounds(a.ty);
+                let exact = match op {
+                    BinOp::Add if signed => Some(i128::from(x) + i128::from(y)),
+                    BinOp::Sub if signed => Some(i128::from(x) - i128::from(y)),
+                    BinOp::Mul if signed => Some(i128::from(x) * i128::from(y)),
+                    BinOp::Div | BinOp::Rem if y == 0 => return None,
+                    BinOp::Div | BinOp::Rem if signed && i128::from(x) == min && y == -1 => {
+                        return None;
+                    }
+                    BinOp::Shl | BinOp::Shr => {
+                        if y < 0 || y >= (a.ty.int_kind()?.size() * 8) as i64 {
+                            return None;
+                        }
+                        if op == BinOp::Shl && signed {
+                            if x < 0 {
+                                return None;
+                            }
+                            Some(i128::from(x) << y)
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                };
+                if exact.is_some_and(|n| n < min || n > max) {
+                    return None;
+                }
+            }
+            ExprKind::LogAnd(a, b) => {
+                if checked(a)? != 0 {
+                    checked(b)?;
+                }
+            }
+            ExprKind::LogOr(a, b) => {
+                if checked(a)? == 0 {
+                    checked(b)?;
+                }
+            }
+            ExprKind::Cond(c, a, b) => {
+                checked(if checked(c)? != 0 { a } else { b })?;
+            }
+            _ => return None,
+        }
+        eval_int(e)
+    }
+    shape(e).then(|| checked(e)).flatten()
+}
+
 fn binary_prec(p: &str) -> Option<u8> {
     Some(match p {
         "||" => 1,
@@ -760,8 +869,12 @@ impl<'a> Parser<'a> {
                 return Err(Error::new(loc, "invalid cast"));
             }
             // Literal conversion cannot hide a qualified memory read;
-            // retain the frontend's existing constant normalization.
-            if matches!(e.kind, ExprKind::Int(_)) {
+            // retain the frontend's existing constant normalization. Preserve
+            // explicit i128 conversions for bounded constant proofs.
+            if matches!(e.kind, ExprKind::Int(_))
+                && !e.ty.int_kind().is_some_and(|k| k.size() == 16)
+                && !ty.int_kind().is_some_and(|k| k.size() == 16)
+            {
                 let result = self.cast(e, ty).with_sugar(sugar);
                 return Ok(self.capture_vm_bounds(mark, result));
             }
@@ -1402,12 +1515,7 @@ impl<'a> Parser<'a> {
                     "PCLMULQDQ requires matching i64x2 integer vectors on x86-64",
                 ));
             }
-            let control = if args[2].ty.is_integer() {
-                broadcast_constant(&args[2])
-            } else {
-                None
-            };
-            let Some(Const::Int(n)) = control else {
+            let Some(n) = pclmul_control(&args[2]) else {
                 return Err(Error::new(
                     loc,
                     "PCLMULQDQ control must be an integer constant expression in0..=255",

@@ -126,6 +126,62 @@ fn pclmul_header_builtin_controls_and_targets() {
     }
 }
 #[test]
+fn pclmul_control_requires_defined_bounded_ice() {
+    let target = Target::X86_64LinuxGnu;
+    let source = |control: &str| {
+        format!(
+            "#include <wmmintrin.h>\nenum {{ HI=16 }}; __m128i f(__m128i a,__m128i b,int n){{return _mm_clmulepi64_si128(a,b,{control});}}\n"
+        )
+    };
+    for (control, expected) in [
+        ("1 ? HI+1 : 0", 17),
+        ("sizeof(long long)+9", 17),
+        ("(unsigned char)273", 17),
+        ("(int)17.0", 17),
+        ("(0xffffffffffffffffULL + 18) & 255", 17),
+        ("(1ULL << 63) >> 63", 1),
+        ("1 ? 17 : (1 / 0)", 17),
+        ("0 && (1 / 0)", 0),
+        ("1 || (1 / 0)", 1),
+    ] {
+        let m = parse(&source(control), target).unwrap_or_else(|e| panic!("{control}: {e}"));
+        keel_ir::verify_module(&m).unwrap();
+        assert!(
+            m.to_string().contains(&format!("iconst.i32 {expected}")),
+            "{control}: {m}"
+        );
+    }
+    for control in [
+        "(int)(1.0+16.0)",
+        "(int)(1.0<2.0)",
+        "(unsigned char)1e300",
+        "(int)2147483648.0",
+        "(unsigned long long)18446744073709551616.0",
+        "(1ULL << 64)",
+        "(1 << -1)",
+        "(1 << 32)",
+        "(1 << 31) & 255",
+        "(-1 << 1) & 255",
+        "(2147483647+1) & 255",
+        "(-2147483647-2) & 255",
+        "(1073741824*4) & 255",
+        "(-(-2147483647-1)) & 255",
+        "((-2147483647-1)/-1) & 255",
+        "((-2147483647-1)%-1) & 255",
+        "(1/0)",
+        "(int)(__int128)17",
+        "(int)(void*)17",
+        "1 ? 17 : n",
+        "(n,17)",
+    ] {
+        assert!(
+            parse(&source(control), target).is_err(),
+            "accepted {control}"
+        );
+    }
+}
+
+#[test]
 fn pclmul_c_single_evaluation_and_independent_values() {
     let mut s = String::from(
         "#include <wmmintrin.h>\nint eval_count;\nextern void clobber(void);\nstatic __m128i get(const void*p){__m128i v;eval_count++;__builtin_memcpy(&v,p,16);return v;}\n",
