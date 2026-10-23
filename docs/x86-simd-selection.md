@@ -318,3 +318,107 @@ and input hashes identify it. Review compared its candidate build inputs to
 `b62af511`: production source differences were whitespace and a comment only.
 The independent tests added during review do not establish a new timing result
 for the rebased tree.
+
+## Effective-feature dword multiply retention pilot
+
+Starting from `1a2417f737337dbfb285110c0591e9d684150ac7`, the target-private
+`packed(op, shape, features)` helper recognizes generic `vimul` on `i32x4` when
+`features.sse41` is enabled, returning the existing legacy PMULLD encoding.
+Legalization retention and emission call this same helper with the effective
+feature set. Explicit v2/v3 and v1+sse41 select it; v1 and v2/v3-sse41 keep
+lane legalization. The low 32 bits of each product implement the IR's modular
+integer semantics for either signed or unsigned interpretation.
+
+The existing two-address source protection, scratch registers and spill
+publication are reused. No load folds or width changes are introduced: original
+128-bit loads/stores retain their order and footprints. The AVX FP helper,
+written FP source order, ordinary ABI, release legality enforcement and
+optimizer eligibility are unchanged. No wider multiplication or multiplication
+loop recognition is added.
+
+The dedicated `x86_pmulld_selection` test checks all three selection tiers,
+Fast/Full allocation, normal/empty SIMD pools and six effective feature
+profiles. It compares text, typed and chunked objects and checks every emitted
+instruction's operand-dependent feature requirements. Controlled allocations with both allocators
+cover either input aliasing the result and independent input/result spills;
+separate cases retain live sources, repeated inputs and distinct SSA inputs
+resolving to the same value. A unit test forces shared owned legalization
+rounds with an adjacent pairwise add and verifies the retained multiply's
+instruction, result and complete source location. Clang independently checks
+all 256 register-pair PMULLD encodings, including extended registers.
+
+The fixed three-function corpus includes ordinary, repeated and resolved-equal
+inputs, with both original sources stored after the result. Full selection
+without an IR optimizer pass measures these totals at v2 and v3:
+
+- Full allocation, normal pools: 114 -> 60 instructions, 382 -> 192 `.text`
+  bytes, 24 -> 6 frame-memory instructions.
+- Fast allocation, normal pools: 117 -> 63 instructions, 384 -> 226 bytes,
+  24 -> 6 frame-memory instructions.
+- Full allocation, empty SIMD pools: 137 -> 80 instructions, 518 -> 323 bytes,
+  47 -> 29 frame-memory instructions.
+- Fast allocation, empty SIMD pools: 140 -> 83 instructions, 521 -> 326 bytes,
+  47 -> 29 frame-memory instructions.
+
+These totals include function prologues, ABI argument staging, original memory
+operations and padding. Frame-memory instructions include legalization buffers
+and ABI staging; they are not allocator spill counts. V1 and explicit -sse41
+profiles retain identical assembly. V1+sse41 has the v2/v3 counts.
+
+Export and reproduce the focused gate and measurements with distinct paths:
+
+```sh
+KEEL_PMULLD_EVIDENCE=/tmp/keel-pmulld-export \
+python3 suite/fast_opt_locked.py /tmp/keel-pmulld-unique.jsonl \
+  cargo test --release --offline --locked -j2 -p keel-codegen \
+  --test x86_pmulld_selection -- --include-ignored --nocapture
+```
+
+For the unchanged baseline, archive `1a2417f7` under `/tmp`, copy only the
+candidate's `tests/x86_pmulld_selection.rs` into its `keel-codegen` tests,
+and run only `-- --ignored --nocapture`. The ordinary tests intentionally
+assert the candidate selection. Keep separate cargo-managed targets. The ignored
+`measure_multiply_codegen` gate reports static counts; the separate
+`measure_multiply_backend_time` gate times typed-program backend compilation
+of the pre-parsed corpus, excluding parsing and assembly (100 warmups, seven
+samples of 100 compilations per level, Full selection/allocation, normal pools).
+
+Run exported ELF+C bundles on SSE4.1-capable Linux x86-64 using the existing
+`tests/x86_widen/run_native.py --dir EXPORT`, under the shared lock wrapper.
+Native LinuxHost results are finite modular extrema/random-product, live-source,
+alias, unaligned, exact128 guarded-boundary and MXCSR checks on a Ryzen 9
+9950X3D with SSE4.1 checked first. Cross-object generation on ARM64 does not
+execute these instructions. No shared backend code changed. The maintained
+runtime-kernel suite has no multiply kernel; no runtime speedup or application
+performance claim is made, and no new benchmark framework is introduced.
+
+On MacHost (Apple ARM64), the three focused tests and the owned-round metadata
+unit passed in debug and release; the release run also passed both ignored
+measurement gates. The baseline control copied only the test into an otherwise
+unchanged `1a2417f7` archive. The six existing regression targets `vector_x86`,
+`vector_x86_256`, `vector_owned_rounds`, and `x86_userspace_v1/v2/v3` passed
+22 tests locally. Clippy completed with existing library warnings and none
+from the new test. No ARM lowering code was touched.
+
+Separate backend compilation measurements used frozen release test binaries,
+100 warmup compilations per invocation, and seven shuffled baseline/candidate
+pairs (seed 20261023), each containing seven samples of 100 compilations per
+level. Median time per three-function corpus was v1 29.184 -> 29.072 us,
+v2 29.417 -> 10.201 us, and v3 28.807 -> 10.139 us. These are local backend
+micro-measurements excluding parse/assembly/build time, not whole-compiler
+throughput or native kernel timings; host load and tiny-corpus overhead limit
+extrapolation. The shared host lock serialized both builds and measurements.
+
+On LinuxHost, all 108 final ELF+C bundles passed, including both crossing-page input
+faults before any output write in shared sentinel memory. This checks fault
+ordering relative to output stores, not the signal address when both inputs
+fault. The final native report is
+`/tmp/keel-pmulld-final108-22903694/native-results.json` on LinuxHost. Local evidence
+is `/tmp/keel-pmulld-{baseline,candidate}/measure`,
+`/tmp/keel-pmulld-{baseline-release,release,regress,clippy}.log`,
+`/tmp/keel-pmulld-static-compare.json` (24 assembly comparisons: the 12 v1 and
+-sse41 controls are byte-identical as assembly), and
+`/tmp/keel-pmulld-compile-pairs.json` (raw samples and frozen binary hashes).
+Frozen timing binaries remain at `/tmp/keel-pmulld-frozen-timing`.
+The final exported bundles are also retained locally under
+`/tmp/keel-pmulld-final108`. Bulk artifacts remain outside Git.

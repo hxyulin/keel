@@ -83,7 +83,11 @@ pub(super) fn packed_avx(op: V, shape: VectorType) -> Option<Opcode> {
     })
 }
 
-pub(super) fn packed(op: V, shape: VectorType) -> Option<Opcode> {
+pub(super) fn packed(
+    op: V,
+    shape: VectorType,
+    features: keel_asm_ir::x86::Features,
+) -> Option<Opcode> {
     use VectorType::*;
     Some(match op {
         V::Iadd => match shape {
@@ -101,6 +105,10 @@ pub(super) fn packed(op: V, shape: VectorType) -> Option<Opcode> {
             _ => return None,
         },
         V::Imul if shape == I16x8 => Opcode::Pmullw,
+        // Low dword products implement modular lanes for either signedness.
+        V::Imul if shape == I32x4 && features.sse41 => {
+            Opcode::V2(keel_asm_ir::x86::V2Opcode::Pmulld)
+        }
         V::And => Opcode::Andps,
         V::Or => Opcode::Orps,
         V::Xor => Opcode::Xorps,
@@ -226,7 +234,7 @@ pub(super) fn lower(func: &Function, features: keel_asm_ir::x86::Features) -> Co
                 func.value_type(*arg) == Type::Vector(VectorType::I64x2)
             }
             InstData::VectorBinary { op, args } => {
-                packed(*op, func.value_type(args[0]).vector().unwrap()).is_some()
+                packed(*op, func.value_type(args[0]).vector().unwrap(), features).is_some()
             }
             InstData::Convert {
                 op: ConvertOp::SwidenLow | ConvertOp::UwidenLow,
@@ -700,6 +708,48 @@ mod d_tests {
         );
         assert!(shuffle_recipe(VectorType::I16x8, &[1, 0, 2, 3, 4, 5, 6, 7], false).is_none());
         assert!(shuffle_recipe(VectorType::I32x4, &[0, 4, 1, 5], false).is_none());
+    }
+
+    #[test]
+    fn dword_multiply_retains_metadata_through_owned_rounds() {
+        use keel_asm_ir::x86::{CpuLevel, Features};
+        use keel_ir::{EntityRef, SourceFile, SourceLoc};
+        let mut module = keel_ir::parse("func @f(i32x4,i32x4)->i32x4 {\nentry(v0:i32x4,v1:i32x4):\n v2 = vimul v0,v1\n v3 = vpadd v2,v0\n return v3\n}\n").unwrap();
+        let f = &mut module.functions[0];
+        let mul = f
+            .layout_insts()
+            .find(|(_, i)| matches!(f.inst_data(*i), InstData::VectorBinary { op: V::Imul, .. }))
+            .unwrap()
+            .1;
+        let loc = SourceLoc {
+            file: SourceFile::new(0),
+            line: 17,
+            col: 9,
+            scope: None,
+        };
+        f.set_inst_loc(mul, Some(loc));
+        let data = f.inst_data(mul).clone();
+        let result = f.first_result(mul);
+        for level in [CpuLevel::V1, CpuLevel::V2, CpuLevel::V3] {
+            for sse41 in [false, true] {
+                let mut features = Features::for_level(level);
+                features.sse41 = sse41;
+                let lowered = lower(f, features);
+                assert!(matches!(lowered, Cow::Owned(_))); // vpadd forces shared rounds.
+                keel_ir::verify(&lowered).unwrap();
+                let retained = lowered.layout_insts().any(|(_, i)| i == mul);
+                assert_eq!(retained, sse41);
+                if retained {
+                    assert_eq!(lowered.inst_data(mul), &data);
+                    assert_eq!(lowered.first_result(mul), result);
+                    assert_eq!(lowered.inst_loc(mul), Some(loc));
+                    assert_eq!(
+                        packed(V::Imul, VectorType::I32x4, features),
+                        Some(Opcode::V2(keel_asm_ir::x86::V2Opcode::Pmulld))
+                    );
+                }
+            }
+        }
     }
 
     #[test]

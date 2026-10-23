@@ -2033,7 +2033,7 @@ impl<'a> FunctionCompiler<'a> {
                     self.emit(Opcode::Movaps, [asm_arg(xmm(dst)), asm_arg(xmm(a))]);
                 }
                 self.emit(
-                    vector::packed(op, self.ty(args[0]).vector().unwrap())
+                    vector::packed(op, self.ty(args[0]).vector().unwrap(), self.features)
                         .expect("legalized packed op"),
                     [asm_arg(xmm(dst)), asm_arg(xmm(b))],
                 );
