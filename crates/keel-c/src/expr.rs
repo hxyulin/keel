@@ -1547,11 +1547,10 @@ impl<'a> Parser<'a> {
                 ));
             }
             if keygen {
-                let n = args[1]
-                    .ty
-                    .is_integer()
-                    .then(|| eval_constant(&args[1], false))
-                    .flatten();
+                // The shared constant evaluator stores only 64 integer bits.
+                // Prove an ICE shape before evaluation: no wide/pointer
+                // intermediates or folded runtime/FP arithmetic expressions.
+                let n = aes_control_constant(&args[1]);
                 let Some(Const::Int(n)) = n else {
                     return Err(Error::new(
                         loc,
@@ -3050,4 +3049,24 @@ pub(crate) fn aes_builtin(base: &str) -> Option<keel_ir::Intrinsic> {
         "ia32_aeskeygenassist128" => X86Aeskeygenassist128,
         _ => return None,
     })
+}
+
+fn aes_control_constant(e: &Expr<'_>) -> Option<Const> {
+    fn supported(e: &Expr<'_>) -> bool {
+        if !e.ty.int_kind().is_some_and(|k| k.size() <= 8) {
+            return false;
+        }
+        match e.kind {
+            ExprKind::Int(_) => true,
+            // C permits immediate floating constants as operands of casts.
+            ExprKind::Cast(a) => matches!(a.kind, ExprKind::Float(_)) || supported(a),
+            ExprKind::Unary(_, a) => supported(a),
+            ExprKind::Binary(_, a, b) | ExprKind::LogAnd(a, b) | ExprKind::LogOr(a, b) => {
+                supported(a) && supported(b)
+            }
+            ExprKind::Cond(a, b, c) => supported(a) && supported(b) && supported(c),
+            _ => false,
+        }
+    }
+    supported(e).then(|| eval_constant(e, false)).flatten()
 }

@@ -1,8 +1,8 @@
-# Bounded C SSE/AVX intrinsic subset
+# Bounded C x86 intrinsic subset
 
 Keel owns small `xmmintrin.h`, `emmintrin.h`, `smmintrin.h`, `avxintrin.h`,
-`avx2intrin.h`, `immintrin.h` and a PCLMUL-only `wmmintrin.h` header.
-They are embedded in the compiler; no Clang resource directory is needed. These headers are for the
+`avx2intrin.h`, `wmmintrin.h` and `immintrin.h` headers. They are embedded in the compiler;
+no Clang resource directory is needed. These headers are for the
 `x86_64-unknown-linux-gnu` target. This is a useful, finite source-compatibility
 subset, **not complete `immintrin.h` compatibility** or general C
 auto-vectorization. Other vendor headers and intrinsics remain unsupported.
@@ -22,11 +22,20 @@ void add8(float *out, const float *a, const float *b) {
 }
 ```
 
-The separately included `wmmintrin.h` provides `_mm_clmulepi64_si128` and the
+The shared `wmmintrin.h` provides `_mm_clmulepi64_si128` and the
 checked `__builtin_ia32_pclmulqdq128`, using existing `__m128i`. This requires
 `--target-features +pclmulqdq` even at v3; header inclusion alone is legal without
-it. It adds no AES or full crypto-header support. See the
+it. It retains a bounded crypto-header contract. See the
 [PCLMULQDQ contract](x86-pclmulqdq.md) for controls, semantics and finite validation.
+
+The optional [legacy AES-NI subset](x86-aes-ni.md) adds six `__m128i`
+wrappers: `_mm_aesenc_si128`, `_mm_aesenclast_si128`, `_mm_aesdec_si128`,
+`_mm_aesdeclast_si128`, `_mm_aesimc_si128` and `_mm_aeskeygenassist_si128`.
+They require explicit `--target-features +aes` at every CPU level, use checked
+builtins, and have no scalar crypto fallback. The key-assist control is an
+integer constant expression in 0..255. `__has_builtin` reports frontend
+recognition independently of CPU enablement. AES definitions reside in the
+AES-owned `__keel_aes.h` fragment of the shared `wmmintrin.h` header.
 
 ## Supported names
 
