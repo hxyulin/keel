@@ -78,5 +78,6 @@ Artifacts stay outside Git. Local and LinuxHost directories are
 `/tmp/keel-avx-fallback-comparison.json` records byte comparisons.
 Control bundles are `/tmp/keel-avx-fallback-{widen,pmulld,pmov,low64}-controls`.
 Logs use `/tmp/keel-avx-fallback-*.log`. This is finite validation on a modern
-CPU, not execution on an AVX-only physical CPU. The cover branch still needs
-its parent's independent integration/rebase and numerical rerun.
+CPU, not execution on an AVX-only physical CPU. The final combined cover review
+now passes all 72 cover configurations and 121 fallback bundles; see
+[the combined numerical gate](avx2-signed-widen-load-pilot.md#final-combined-review-2026-10-23).

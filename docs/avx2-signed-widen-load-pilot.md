@@ -3,7 +3,9 @@
 This backend-only pilot originally started at
 `6ff8911b975a7d18007d1416c9c40abfa457b67f`; review rebased it onto
 `96a1fad9eac3e9aa24dc42760ae3706aa6c5c14d`, including the reviewed conservative
-context and default 128-bit policy.
+context and default 128-bit policy. Final integration review rebased onto
+`3a5f4756416c3dbbd27d83ed2f0f425e0f49f5d6`, which repairs the preexisting
+AVX-only result-width bug. The combined numerical gates below pass.
 It emits `vpmovsxdq ymmResult,xmmword ptr [address]` for an existing native
 `load.i32x4` immediately followed by `swiden_low.i64x4`. The optimizer,
 capability context, CLI, ABI, and default 128-bit reduction policy are unchanged.
@@ -29,7 +31,7 @@ reserved scratch register. Unrelated live YMM upper halves remain allocated and
 untouched; the removed XMM intermediate has no other observer. No FP arithmetic
 or FP control instruction is introduced. Adjacency preserves fault order.
 
-## Validation, 2026-10-23
+## Historical validation before the result-width repair, 2026-10-23
 
 The dedicated `x86_signed_wide_load` integration suite passes six tests in debug
 and release. It covers all three selection tiers, both allocators, normal,
@@ -51,14 +53,16 @@ AVX2 support before calling generated code. Both normal and forced-spill cases
 run on the CPU. Existing native controls also pass: 108 m64 signed-load objects
 and 108 PMULLD objects.
 
-There is a preserved baseline limitation: all 54 AVX-without-AVX2 native objects
-fail the four-lane numerical oracle (exit 2). Their ELF objects **and C harnesses**
+**Historical failure, resolved by `3a5f4756` and the final combined gate below:**
+all 54 AVX-without-AVX2 native objects failed the four-lane numerical oracle
+(exit 2) before the repair. Their ELF objects **and C harnesses**
 are byte-identical to those emitted from an untouched frozen `6ff8911b` archive
-with the same dedicated test harness. Existing fallback lowering widens only
-into an XMM value before a YMM store. This pilot neither fixes nor bypasses that
-path. The raw 72-object native report therefore correctly has `passed:false`;
-only its 18 AVX2 cases pass. v1/v2 without AVX retain their existing rejection of
-explicit 256-bit IR. These facts are limits, not evidence that fallback works.
+with the same dedicated test harness. The old fallback lowering widened only
+into an XMM value before a YMM store. The cover itself neither fixes nor bypasses
+that path. That historical 72-object native report correctly has `passed:false`;
+only its 18 AVX2 cases passed at that time. v1/v2 without AVX retain their
+existing rejection of explicit 256-bit IR. The old report provides no evidence
+for repaired fallback correctness; that evidence comes from the final gate.
 
 Other passing local checks: all 114 codegen library tests; five baseline SSE2
 vector-widen tests; five old m64 cover tests; three active PMULLD tests (two
@@ -116,7 +120,7 @@ against main128 is made, and no second timing probe was run. These historical
 timings predate the conservative-context rebase; no runtime profitability probe
 of the combined context and cover has been performed.
 
-## Independent review after rebase, 2026-10-23
+## Historical independent review before the result-width repair, 2026-10-23
 
 At rebased cover commit `309bd8af`, the dedicated suite again passes all six
 tests in debug and release, including the independent Clang encoding oracle.
@@ -127,8 +131,8 @@ Commands are recorded in `/tmp/keel-wide-load-review-unique.jsonl`, serialized
 through `suite/fast_opt_locked.py`, using cargo with `--offline --locked -j2` and
 `CARGO_CACHE_LINKS=0`.
 
-A fresh LinuxHost run of all 72 exported configurations passes the 18 AVX2 cases
-and fails all 54 AVX-without-AVX2 cases with exit 2. All 72 ELF objects and C
+That pre-repair LinuxHost run of all 72 exported configurations passed the 18 AVX2
+cases and failed all 54 AVX-without-AVX2 cases with exit 2. All 72 ELF objects and C
 harnesses are byte-identical to the original pilot exports; all 54 negative
 ELF objects and harnesses are also byte-identical to the frozen `6ff8911b`
 baseline exports. The local report is
@@ -142,11 +146,102 @@ Those control suites were rerun locally; their native executions were not
 repeated during review. Exports are in
 `/tmp/keel-wide-load-review-{m64,pmulld}-20261023`.
 
-No cover-path correctness blocker was found. The AVX-only numerical gate is
-still **failing**, pending the separately owned fallback correction. Parent
-integration must rebase onto that correction and rerun the negative numerical
-oracles before final approval. This review does not change `vector.rs`,
-fallback tests, optimizer policy, or defaults.
+No cover-path correctness blocker was found. At that historical review, approval
+was conditional on the separately owned fallback correction and a combined
+numerical rerun. Both conditions are now satisfied by the final review below.
+
+## Final combined review, 2026-10-23
+
+Tested clean source HEAD `4e34ad1b226a86aaff53afa48fd8ec0f84eda613` combines
+cover `aa1cd06a` with main repair `3a5f4756`. The cover selector and dedicated
+tests are unchanged from reviewed `5380135a`; the width repair is unchanged
+from main. No unexpected source conflict or additional code change was found.
+
+Fresh `x86_signed_wide_load` exports pass **72/72 native configurations** on
+LinuxHost: 18 v3 AVX2, 18 v1+AVX, 18 v2+AVX, and 18 v3-minus-AVX2. Every object
+builds and exits 0; none is filtered, skipped, or treated as an expected failure.
+All 72 C harnesses and all 18 AVX2 objects remain byte-identical to the prior
+review exports. The historical 54 AVX-only failures are resolved.
+
+Fresh `x86_avx_widen_fallback` exports also pass **121/121 native bundles**:
+72 widening matrices across the same four profiles, all 48 narrow/bitcast
+controls, and the minimal signed-lane repro. These include ABI, source/live YMM,
+alias, guard-boundary, exact-footprint and feature-legality checks described in
+[the fallback repair](avx-widen-fallback.md). The independent C runner uses
+`clang -O2 -march=x86-64 -msse2 -mno-avx -Wall -Wextra -Werror`.
+
+The bounded local batch passes 40 active tests: debug cover/fallback/m64/PMULLD
+(18), release cover/fallback (10), release illegal-feature emission (1), private
+wide-cover gates (3), and CLI/library optimizer contexts (8). Only the two
+existing PMULLD measurement tests are ignored. No AVX-only correctness case is
+ignored. Default CLI/library contexts still retain 128-bit output, and explicit
+wide optimization still requires the complete capability recipe and preference.
+On LinuxHost, fresh combined-backend objects for both the frozen explicit-wide IR
+and default-128 C compilation each pass all 86 independent wrapping-sum lengths
+(0 through 81, 257, 4096, 65536, 1048576). This is a correctness-only check,
+not a new timing campaign or a profitability claim.
+
+All Rust invocations use `CARGO_CACHE_LINKS=0`, shared-default-cache cargo and the
+checkout-managed target through:
+
+```sh
+python3 suite/fast_opt_locked.py /tmp/keel-wide-load-combined-unique.jsonl cargo COMMAND
+```
+
+Exact command arrays, statuses and lock metadata are in that JSONL. The bounded
+commands are `test --offline --locked -j2` with these arguments:
+
+- `-p keel-codegen --test x86_signed_wide_load --test x86_avx_widen_fallback --test x86_signed_widen_load --test x86_pmulld_selection`
+- `--release -p keel-codegen --test x86_signed_wide_load --test x86_avx_widen_fallback`
+- `--release -p keel-codegen --lib emission_reports_illegal_features_in_text_and_structured_modes`
+- `-p keel-codegen --lib x86_64::packed_load::wide_tests`
+- `-p keel-opt -p keel --test vector_context`
+
+The debug export environment is
+`KEEL_WIDE_LOAD_EVIDENCE=/tmp/keel-wide-load-combined-20261023` and
+`KEEL_AVX_FALLBACK_EVIDENCE=/tmp/keel-wide-load-combined-fallback-20261023`.
+Those directories exist locally and on LinuxHost, with fresh ELF/C/assembly inputs
+and `run_native.py`. Each remote runner was invoked separately under
+`python3 /tmp/keel-wide-load-combined-lock.py /tmp/keel-wide-load-combined-unique.jsonl python3 DIRECTORY/run_native.py`;
+there is no nested lock. The copied lock script is the repository's
+`suite/fast_opt_locked.py`. Remote command metadata is copied locally as
+`/tmp/keel-wide-load-combined-linuxhost-unique.jsonl`.
+
+Fresh local reports and SHA-256 identities:
+
+- `/tmp/keel-wide-load-combined-native-results.json`:
+  `1cff7cc69c972d102e1dc6759233ac2f0c4c82c09b439b5c1fc99203c939779c`.
+- `/tmp/keel-wide-load-combined-fallback-native-results.json`:
+  `1f04307cf4c37208e9230f00d75660e6e97e5ae864ca7f988b7041914e5a227f`.
+- `/tmp/keel-wide-load-combined-manifest.json`:
+  `c65816d5a1d24734be2926215179dbbf2949ef3241f68290d41224e21401cdcb`.
+  This records tested HEAD, every exported artifact hash, exact source hashes,
+  command-log hashes, numerical-check runner and context results.
+- Combined `x86_64/vector.rs`:
+  `654bea43934bbb36fc2157f43ace8147115ad758559e7e948cfa8e2807b14a6a`.
+- Cover `x86_64/packed_load.rs`:
+  `3751e95f208ec50e7fca446fd7dd5dd3ec7646b4da02b1718505c6bc601d700c`.
+- Dedicated cover test:
+  `e2bf2423436999ffdc6f91adbdea02adfca4b2494b2ce776c229373dccc2512a`.
+- Dedicated fallback test:
+  `62418451c5c39e58ac842a6c1217e180db016223d8ad39dc90909601cb547396`.
+
+Context numerical results are `/tmp/keel-wide-load-combined-context-results.json`
+locally and `/tmp/keel-wide-load-combined-context-20261023/results.json` on LinuxHost.
+The correctness runner is `/tmp/keel-wide-load-combined-check.py` on both hosts;
+its hash is `709113cde8b28134de12a6d0ded625ccc687f99818d255076cf2811357e974ac`.
+The explicit-wide input and frozen driver retain the provenance hashes below.
+The fresh explicit-wide object is
+`54399ae6cbe0e0eaf0e37c19198126e49b8948228ea9d22ead3f687524823e1b`;
+the default-128 object is
+`b2794a7a2bb9f49d9cd584250d84ec360124bb3f9740e9f0a3c2c680ff0c01ff`.
+
+No new blocker was found: **unconditional integration is recommended**.
+Validation is bounded to these suites and native execution on an AVX2-capable
+CPU with AVX-only code generation; it does not include an AVX-only physical CPU,
+a full suite, a new performance campaign, or automatic wide profitability.
+The historical 208.603 -> 49.214 microsecond old-wide gain and the main128
+round-trip parity limitation above remain historical evidence only.
 
 ## Evidence outside Git
 
