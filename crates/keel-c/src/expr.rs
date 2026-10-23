@@ -1391,6 +1391,37 @@ impl<'a> Parser<'a> {
 
     fn builtin(&mut self, name: &str, loc: Loc) -> R<Expr<'a>> {
         let base = &name["__builtin_".len()..];
+        if base == "ia32_pclmulqdq128" {
+            let args = self.builtin_args(3, loc)?;
+            if self.target != Target::X86_64LinuxGnu
+                || !matches!(args[0].ty, Ty::Vector(_, keel_ir::VectorType::I64x2))
+                || args[0].ty != args[1].ty
+            {
+                return Err(Error::new(
+                    loc,
+                    "PCLMULQDQ requires matching i64x2 integer vectors on x86-64",
+                ));
+            }
+            let control = if args[2].ty.is_integer() {
+                broadcast_constant(&args[2])
+            } else {
+                None
+            };
+            let Some(Const::Int(n)) = control else {
+                return Err(Error::new(
+                    loc,
+                    "PCLMULQDQ control must be an integer constant expression in0..=255",
+                ));
+            };
+            if !(0..=255).contains(&n) {
+                return Err(Error::new(loc, "PCLMULQDQ control must be in0..=255"));
+            }
+            return Ok(mk(
+                ExprKind::Builtin(Builtin::Pclmulqdq(n as u8), self.slice(&args[..2])),
+                args[0].ty,
+                loc,
+            ));
+        }
         if matches!(base, "ia32_cmpps256" | "ia32_cmppd256") {
             use keel_ir::{FloatCC, VectorType};
             let args = self.builtin_args(3, loc)?;

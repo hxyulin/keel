@@ -5,6 +5,7 @@ pub const ROOT: &str = "<keel>/include";
 pub fn get(name: &Path) -> Option<&'static str> {
     Some(match name.to_str()? {
         "xmmintrin.h" => include_str!("../include/xmmintrin.h"),
+        "wmmintrin.h" => include_str!("../include/wmmintrin.h"),
         "emmintrin.h" => include_str!("../include/emmintrin.h"),
         "smmintrin.h" => include_str!("../include/smmintrin.h"),
         "avxintrin.h" => include_str!("../include/avxintrin.h"),
