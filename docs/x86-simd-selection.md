@@ -146,6 +146,112 @@ still use the existing lane legalizer. D (64-bit) vectors and 256-bit shuffle
 selection retain their existing paths. Single-source identity shuffles can
 still emit `pshufd` when an earlier IR optimization has not removed them.
 Two-source staging is conservative and can add copies. No generalized blend,
-FP comparison, narrowing, widening-load fusion or addressing policy is added by
-this change. Those need separate profitability and semantic checks, especially
-for noncanonical select masks and exact-width faulting loads.
+FP comparison, narrowing or addressing policy is added by the shuffle work.
+General widening-load fusion still needs separate profitability and semantic
+checks; the bounded signed-dword m64 pilot below covers one closed chain.
+Noncanonical select masks and other faulting-load shapes remain outside it.
+
+## Exact signed dword widening load pilot
+
+Starting from main `45c19d5d248ca7a8c213646ccdebf7f8beb2b339`, the existing
+exact-low-eight-byte load cover additionally recognizes this adjacent chain:
+
+```text
+v2 = load.i64 align 1 v0
+v3 = vsplat.i64x2 v2
+v4 = bitcast.i32x4 v3
+v5 = swiden_low.i64x2 v4
+```
+
+When the effective feature set permits SSE4.1, it emits `pmovsxdq xmm, m64`
+at the widen, covering the first three instructions. Each intermediate must
+have exactly one use. All four instructions must retain their own SSA result,
+share the same complete source location, and have no existing selection,
+condition or allocation constraint. Volatile loads, nonadjacent operations,
+shared intermediates, other shapes and unsigned/high widening keep existing
+lowering. Explicit v1 and `-sse41` overrides retain the SSE2 fallback; adding
+SSE4.1 to v1 permits the cover. This changes no optimizer widths or feature
+policy, general conversion lowering, positive32 DAG, or AVX2 recipe.
+
+The memory operand remains exactly the original eight-byte access, at the same
+position relative to effects and other accesses. Only adjacent pure vector
+operations precede the replacement. Selected address leaves, register
+allocation, reserved address scratch, destination XMM allocation and spill
+publication reuse the existing low-load path. The instruction changes neither
+integer flags nor MXCSR; no ABI or FP arithmetic changes are involved.
+
+`x86_signed_widen_load` checks text/typed object parity for Baseline/Trees/Full
+selection, Fast/Full allocation, normal/tiny/empty pools and six effective
+profiles: v1/v2/v3, v1+sse41, v2-sse41 and v3-sse41. It checks negative forms,
+shared operands, use/definition constraints at every chain node, source line
+and column boundaries, and independent Clang m64 encodings with extended
+registers and indexed/displaced addresses. The existing `x86_packed_low_load`
+count accepts either exact-width load encoding. Both test targets, plus
+`vector_widen_x86` and `x86_packed_positive`, passed 16 tests in debug and
+release locally on ARM64. No shared backend infrastructure changed.
+
+Export native bundles with `KEEL_SIGNED_LOAD_EVIDENCE=/tmp/EXPORT` using:
+
+```sh
+python3 suite/fast_opt_locked.py /tmp/keel-pmovsxdq-unique.jsonl \
+  cargo test --offline --locked -j2 -p keel-codegen --test x86_signed_widen_load
+```
+
+Run the exported `run_native.py --dir /tmp/EXPORT` on Linux x86-64 under the
+same lock wrapper. On LinuxHost (Ryzen 9 9950X3D), all 108 exported bundles passed:
+direct, offset and indexed addressing, live vector/address sources, destination
+memory aliasing the source, signed extrema and deterministic xorshift samples,
+all 16 alignment offsets, both protected-page edges, faulting accesses crossing
+either edge before any output write, canaries and MXCSR preservation. These
+are finite tests on a host supporting SSE4.1, not a v1-only execution proof.
+
+### Maintained widen32 measurement
+
+LinuxHost compared frozen release baseline and candidate compilers using the exact
+unchanged `suite/runtime-kernels/kernels.c`, `driver.c` and Python oracle.
+Both used `cc -O --opt-tier full --cpu-level v1|v2|v3 --emit-object`, with the
+same Clang-O2 driver object and no LTO. The existing runtime runner was copied
+under `/tmp` and bounded to six baseline/candidate Full configurations, cases
+`widen32`, `positive32`, `adjacent`, and lengths
+`0,1,7,8,17,257,4096,65536,1048576`; no maintained harness or kernel was edited.
+All 162 correctness checks preceded timing. CPU affinity was 2, seed 20261021,
+one warmup compile plus one measured compile, seven shuffled runtime rounds,
+`target_elements=4000000`, and one untimed call per sample. The public runner
+owned the existing lock; it was not nested under another wrapper.
+
+The v2/v3 `rk_widen32` body fell from 106 instructions / 378 bytes to
+78 instructions / 256 bytes. The hot loop per eight inputs fell from
+43 instructions / 180 bytes to 15 instructions / 61 bytes: four exact m64
+`pmovsxdq` loads replace the four complete chains, removing all sixteen
+`movaps` copies in that loop. V1 function bytes are identical. Independent
+object disassembly and symbol-byte hashes found only `rk_widen32` changed
+at v2/v3; all other eleven maintained kernel functions were byte-identical.
+
+Median nanoseconds per call (baseline -> candidate), seven samples per cell:
+
+| Length | v1 | v2 | v3 |
+| --- | --- | --- | --- |
+| 257 | 38.97 -> 39.11 | 39.15 -> 13.40 | 38.91 -> 13.40 |
+| 4096 | 624.99 -> 622.63 | 622.24 -> 221.14 | 622.55 -> 221.04 |
+| 65536 | 10343.84 -> 10326.95 | 10386.62 -> 3404.84 | 10348.92 -> 3448.92 |
+| 1048576 | 158800.00 -> 158816.67 | 158756.67 -> 55738.00 | 159533.67 -> 57761.33 |
+
+For those lengths the measured v2/v3 median ratio is 2.76–3.05x. V1 and the
+byte-identical positive32/adjacent controls stay within 0.9% in median runtime.
+This is a bounded warm repeated-input result on one host; short calls include
+call/checksum overhead, and physical code pages, layout, boost and load remain
+uncontrolled. It is not an application-wide or call-static speedup claim.
+
+LinuxHost artifacts remain at `/tmp/keel-pmovsxdq-{base,candidate}` (source/builds),
+`/tmp/keel-pmovsxdq-oracles-final` (108 ELF+C bundles and `native-results.json`), and
+`/tmp/keel-pmovsxdq-measure` (`results.json`, commands, correctness, raw rounds,
+objects, assembly, binaries, `static.json` and disassembly). The bounded runner
+is `candidate/suite/runtime-kernels/pmovsxdq_pilot_run.py` under that `/tmp`
+prefix. Its invocation used `--rounds 7 --compile-rounds 1 --target-elements
+4000000 --cpu 2` plus the frozen compilers, `/usr/bin/clang`, label and a fresh
+output directory. Compiler SHA-256 values are
+`c128c9db50b2a716017cc63a369da3b8186ade854cf95b6b3b21acf2814d9143`
+(baseline) and
+`95bb7d02ca725e8da528584d656b3f95b134c8dd4aba3b7121f7721c378d8d4d`
+(candidate). Builds used cargo's shared default cache, per-checkout targets,
+`CARGO_CACHE_LINKS=0`, `--offline --locked -j2` and the shared lock wrapper.
