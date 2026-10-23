@@ -136,10 +136,15 @@ fn registry_and_contract() {
         "x86_out64",
         "x86_in64_imm",
         "x86_out64_imm",
-        "x86_ins8",
-        "x86_outs8",
     ] {
         assert!(Intrinsic::from_name(name).is_none());
+    }
+    for (name, id) in [
+        ("x86_ins8", Intrinsic::X86Ins8),
+        ("x86_outs8", Intrinsic::X86Outs8),
+    ] {
+        assert_eq!(Intrinsic::from_name(name), Some(id));
+        assert!(id.x86_port_io().is_none());
     }
 }
 
