@@ -1,5 +1,6 @@
 //! Packed 256-bit selection. Inputs are captured in reserved physical SIMD
-//! indices before any result write. SIMD indices12..15 are reserved in wide
+//! indices before any result write, except direct three-operand integer adds.
+//! SIMD indices12..15 are reserved in wide
 //! functions, and alias the XMM views used for scalar/lane transfers.
 use super::*;
 use keel_ir::{FloatCC, VectorBinaryOp as V, VectorType};
@@ -418,6 +419,21 @@ impl FunctionCompiler<'_> {
                 args,
             } => {
                 let ty = self.ty(args[0]);
+                if *operation == V::Iadd {
+                    // Wide allocation excludes FS0/FS1 (including their XMM
+                    // views). use_freg resolves aliases and reloads only into
+                    // its requested scratch, at the original 32-byte width.
+                    // Capture both operands before writing: VEX integer adds
+                    // permit d == a or d == b and read the full YMM payloads.
+                    // Distinct reload scratches also cover
+                    // two spilled inputs and a spilled destination (FS0).
+                    let a = self.use_freg(args[0], FS0);
+                    let b = self.use_freg(args[1], FS1);
+                    let d = self.def_freg(result);
+                    self.w3(&format!("vpadd{}", suffix(ty)), d, a, b);
+                    self.def_done(result, d);
+                    return true;
+                }
                 self.wstage(args[0], FS0);
                 self.wstage(args[1], FS1);
                 match operation {
