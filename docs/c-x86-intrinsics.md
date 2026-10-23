@@ -158,3 +158,10 @@ supported quiet predicates for both floating widths, NaNs and signed zero,
 wide globals/lanes, ten-argument calls and protected-page/sentinel memory checks.
 Builds and native execution held `/tmp/keel-perf-20261019.lock`; Rust builds
 used the shared default cargo cache, with native-link caching left disabled.
+
+The strict-v3 userspace audit also runs this native GCC/Clang harness and checks
+ordinary wide C multiply/add through the public `cc --cpu-level v3` text/object
+paths, including disabled-AVX diagnostics and absence of implicit contraction.
+See [the bounded v3 join](userspace-isa-status.md#strict-v3-userspace-contract-and-audit)
+for exact feature, native and object-decoding evidence and remaining limits.
+This adds validation, not additional header names or FP-environment guarantees.

@@ -19,7 +19,7 @@ prerequisite. AVX requires the normal OSXSAVE/XCR0 availability contract.
 | FMA / F16C / BMI / LZCNT / MOVBE | Implemented v3 feature families with finite value/encoding/exception validation, as applicable. |
 | Strict v1 userspace | Explicit v1 is supported for the implemented scalar/SSE/SSE2 and ordinary SysV ABI paths. The userspace join below checks legality, fallbacks, transport and helper requirements. This is bounded implementation validation, not an exhaustive ISA certification. |
 | Strict v2 userspace | Explicit v2 joins cumulative v1 behavior with SSE3, SSSE3, SSE4.1, SSE4.2, POPCNT, CX16 and long-mode LAHF/SAHF. The bounded audit and gates below validate the implemented userspace contract. |
-| Formal v3 completion | Existing feature families and selection are preserved; a separate final v3 userspace join has not been signed off. Old broad full-machine flags must not be used as its verdict. |
+| Strict v3 userspace | The bounded implementation audit and join below validate cumulative v1/v2 behavior, mixed 128/256-bit SysV transport and the existing v3 families. Independent review/integration remains a separate step; old broad full-machine flags are not its verdict. |
 
 Select the intended level explicitly with `--cpu-level v1`, `v2` or `v3` on the
 x86 target. The historical `legacy` default permits POPCNT/SSE4.1 and is not a
@@ -213,6 +213,114 @@ value, memory and ABI tests establish bounded behavior. They do not establish
 exhaustive ISA certification, linked-library compatibility, every FP exception
 configuration or correctness of every program. Kernel work, arbitrary physical
 state and C vendor intrinsic-header completeness remain separate.
+
+## Strict-v3 userspace contract and audit
+
+Use `--target x86_64-unknown-linux-gnu --cpu-level v3` explicitly for `compile`,
+`cc` and `asm`; the library equivalent is `Features::for_level(CpuLevel::V3)`
+through `FeatureSelector`. V3 retains v1/v2 and adds AVX/AVX2, BMI1/2, FMA,
+F16C, LZCNT and MOVBE, with the normal XSAVE/OSXSAVE and XCR0 availability
+contract for AVX state. The target flag declares that deployment contract; it
+does not probe the deployment machine or enable OS state. CLFSH remains an
+independent optional feature. AVX-512 and other optional/post-v3 extensions
+are not implied. Explicit feature modifiers intentionally change the contract.
+
+The October 23 implementation audit started at `9265dcf9` and was rebased onto
+main `3f6a30da` before final validation, including the reviewed final vector
+canonicalization changes. Concrete remaining verification gaps were mixed-width
+SIMD argument banking, missing chunked-object
+parity in the existing wide generic/ABI suite, scalar/helper native execution
+that skipped v3, and public CLI coverage limited to scalar C. No lowering defect
+was found in this bounded audit. No optimizer, feature-policy or backend
+implementation changes were needed.
+
+The maintained join reuses the v1/v2 gates and the existing finite family suites:
+
+- `keel-codegen --test x86_userspace_v3` mixes 128/256-bit integer/FP vectors
+  and scalar FP in one SysV signature, exhausting the shared eight-register
+  SIMD argument bank and placing both widths on the stack. Direct/indirect
+  calls and supported direct/indirect tail calls transport distinct arguments
+  and a 256-bit result in both C/Keel directions. A call that clobbers every
+  SIMD register forces live arguments across calls; byte sentinels check
+  stores. Clang and GCC harnesses execute all three selection tiers, both
+  allocators, and normal/empty pools. A separate small assembled sequence
+  checks 16/32/64-bit LZCNT, TZCNT and MOVBE values, in-place aliases, unaligned
+  accesses and both protected-page edges.
+- The shared `common/userspace.rs` helper retains the v2 text/typed/chunked
+  object byte-parity and operand-dependent feature gate, and now applies it
+  to that mixed join and `x86_avx256_generic`. The latter retains its existing
+  six-shape wide scalar-reference corpus, register/stack ABI, callbacks,
+  varargs, stack-to-stack tails, block arguments and pressure tests.
+  The cumulative `x86_userspace_v1` gate now executes v3 scalar and helper
+  results on capable native hosts, retaining its smaller native-FMA helper
+  set. Native branches remain conditional on the instructions they execute;
+  passing cross-object checks alone does not claim native execution.
+- `keel --test x86_cpu_level` now compiles ordinary wide IR and the bounded C
+  AVX header surface, with/without optimization, through public text and direct
+  object paths at explicit v3. Reassembly must match direct objects. Ordinary
+  multiply/add remains unfused; v1/v2 reject the wide ABI. Existing assembly
+  gates accept v3 families, reject CLFSH without an override, and the new gate
+  rejects representative AVX-512 forms. The emission guard remains checked in
+  debug and release.
+
+Support layers remain distinct. Ordinary vector IR and the documented C subset
+use the backend's legal selection or scalar expansion. Explicit FMA preserves
+fused rounding; ordinary multiply/add does not implicitly contract. V3 F32/F64
+FMA can use hardware, while F80 still requires `fmal`. The v1 runtime/library
+and unsupported-operation restrictions still apply. BMI extraction/deposit and
+F16C have typed architectural operations. LZCNT and MOVBE have assembler
+encoding/feature support; generic CLZ currently uses BSR-based lowering and
+generic byte swaps need not select MOVBE. Their assembly checks do not claim
+new C builtins or typed intrinsics. The bounded C headers still exclude FMA,
+F16C, masks/gathers, general conversions and complete vendor-header support,
+even where typed backend operations exist.
+
+Native LinuxHost validation (Ryzen 9 9950X3D, existing rustc 1.99.0) passed the new
+join, cumulative v1/v2 joins and wide generic/ABI suite in debug and release.
+The existing debug `x86_fma`, `x86_f16c`, `x86_bmi_semantics`, `x86_masked_memory`
+and `x86_gather` suites also passed: explicit fused versus separate results,
+half-pattern conversion and rounding/MXCSR effects, integer extraction/deposit,
+mask sign bits, exact active-lane accesses, fault suppression and source aliases.
+The native `keel-c --test x86_intrinsics` suite passed with Clang 23.1.1 and
+GCC 16.2.0 across its three configurations, including guarded 16/32-byte memory,
+wide arguments, indirect calls and callbacks. Local Apple ARM64 C controls
+(`gnu_types`, `gnu_vector_broadcast`, `gnu_vector_abi`, `x86_intrinsics`) passed
+19 tests, including the maintained native 16-byte ABI/broadcast harness. Public
+CLI gates passed locally in debug/release; the guard passed local debug and
+native release. Clippy completed with existing repository warnings and no
+warning in the new join/helper or extended CLI test.
+
+Independent `llvm-objdump` decoding examined 149 exported objects (871,303
+instruction lines): 96 debug family objects, 24 release wide objects, 13 mixed/
+assembly objects per profile, and three Keel C objects. No EVEX prefix,
+ZMM/extended SIMD/opmask register, CLFSH, or scanned optional/post-v3 mnemonic
+(AES/PCLMUL/SHA/GFNI, ADX, random-number, FSGSBASE/PKU, extended XSAVE, VNNI,
+IFMA, newer conversions or AMX) appeared. The complete decoded mnemonic
+inventory was also retained. This is a finite byte/mnemonic exclusion scan,
+not a complete independent feature-decoder proof. Typed operand-feature checks
+and text/typed/chunked parity supplement it; the native C objects use the
+frontend's existing typed object path.
+
+The existing local `keel-asm --test x86_v3` oracle also passed 11 tests against
+Clang and GNU as, independently checking the maintained finite encoding forms.
+
+Builds used `cargo` with `--offline --locked -j2`, shared default caching and
+per-checkout managed targets, `CARGO_CACHE_LINKS=0`, serialized through
+`suite/fast_opt_locked.py` and `/tmp/keel-perf-20261019.lock`. No toolchains or
+host configuration changed. LinuxHost source is
+`/tmp/keel-strict-v3-final-20261023.nXp6FV`; logs are `/tmp/keel-v3-final-native-*.log`.
+Exports are `/tmp/keel-v3-final-{objects,families}-{debug,release}` and
+`/tmp/keel-v3-final-c-native`; decoded listings sit beside the objects, with the
+scan script/report at `/tmp/keel-v3-final-scan.py` and
+`/tmp/keel-v3-final-disassembly-audit.json`. Bulk evidence stays outside Git.
+
+The host supports newer features: execution does not establish behavior on a
+v3-only CPU or under CPUID masking. These checks establish finite userspace
+values, ABI, footprints and generated-instruction legality, not arbitrary
+library compatibility, every FP exception configuration or exhaustive ISA
+certification. Kernel/raw x87 experiments, arbitrary physical stack/FLAGS,
+full vendor headers and arbitrary auto-vectorization remain outside this join.
+Independent review and parent integration are still required.
 
 ## Separate low-level work
 
