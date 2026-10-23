@@ -443,7 +443,7 @@ the pre-checkpoint baseline; the linked checkpoint records its own native proof.
 ## Implemented declaration/layout checkpoint
 
 Source `eb43eb95` starts from clean main `d0aec154`; the archived spill candidate
-was not integrated. `mode(TC)` / `__mode__(__TC__)` on complex float/double
+was not integrated. `mode(TC)` / `__mode__(__TC__)` on complex float/double (and, after independent review, complex long double)
 canonicalizes to opaque `_Complex __float128`, with size **32**, alignment **16**.
 Its real and imaginary component type queries identify GNU `__float128`, size
 **16**, alignment **16**. This is semantic declaration identity, not an IR

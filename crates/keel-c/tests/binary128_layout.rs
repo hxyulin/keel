@@ -204,3 +204,64 @@ fn native_linux_layout_and_pointer_footprints_match_both_compilers() {
         }
     }
 }
+
+#[test]
+fn mode_positions_aliases_and_long_double_subject_preserve_identity() {
+    let source = r#"
+        typedef _Complex float C __attribute__((mode(TC)));
+        typedef _Complex long double LD;
+        typedef LD L __attribute__((mode(TC)));
+        typedef __attribute__((mode(TC))) _Complex double Before;
+        typedef _Complex __attribute__((mode(TC))) long double Among;
+        typedef C Again __attribute__((__mode__(__TC__)));
+        typedef _Complex double __attribute__((mode(TC))) *Pointer;
+        _Static_assert(__builtin_types_compatible_p(C,L),"long double subject");
+        _Static_assert(__builtin_types_compatible_p(C,Before),"before");
+        _Static_assert(__builtin_types_compatible_p(C,Among),"among");
+        _Static_assert(__builtin_types_compatible_p(C,Again),"idempotent");
+        _Static_assert(__builtin_types_compatible_p(C*,Pointer),"pointer base");
+        _Static_assert(sizeof(_Complex long double __attribute__((mode(TC))))==32,"type name");
+        struct Members {
+            char prefix;
+            _Complex long double field __attribute__((mode(TC)));
+            char suffix;
+        };
+        _Static_assert(__builtin_offsetof(struct Members,field)==16,"member offset");
+        _Static_assert(__builtin_offsetof(struct Members,suffix)==48,"footprint");
+        _Static_assert(sizeof(struct Members)==64,"wrapper size");
+        extern L object; extern C object;
+        extern C call(Among); extern L call(C);
+        typedef C (*Callback)(L);
+        typedef Among (*Callback)(C);
+        C *field(struct Members *p) { return &p->field; }
+        unsigned long query(void) { return sizeof(call(object)); }
+    "#;
+    for debug in [false, true] {
+        let m = compile(source, debug).unwrap();
+        keel_ir::verify_module(&m).unwrap();
+        let p = keel_codegen::compile_program(&m, Target::X86_64LinuxGnu).unwrap();
+        keel_asm::x86::assemble_program_object_with_features(&p, Default::default()).unwrap();
+    }
+}
+
+#[test]
+fn completed_recursive_types_and_long_double_tc_values_remain_guarded() {
+    for body in [
+        "typedef _Complex long double L __attribute__((mode(TC))); L object;",
+        "typedef _Complex long double L __attribute__((mode(TC))); static inline L f(L x){return x;}",
+        "struct Late; extern struct Late a; static inline void f(void){(void)a;} struct Late { C x; };",
+        "struct Late; extern struct Late get(void); static inline void f(void){get();} struct Late {C x;};",
+        "struct Late; extern struct Late get(void); static void *p=(void*)&get; struct Late {C x;};",
+        "struct Cycle { struct Cycle *next; union {C x; int i;} payload[2]; }; static inline void f(void){struct Cycle x;}",
+        "static inline void f(void){(void)&(struct B {C x; int y;}){.y=1};}",
+        "void f(void){ _Atomic(C) *p; }",
+        "extern C *p; void f(void){ __atomic_load_n(p,0); }",
+    ] {
+        for debug in [false, true] {
+            assert!(
+                compile(&format!("{TYPES}\n{body}"), debug).is_err(),
+                "accepted: {body}"
+            );
+        }
+    }
+}

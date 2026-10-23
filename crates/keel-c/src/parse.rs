@@ -2740,7 +2740,10 @@ impl<'a> Parser<'a> {
                             "TC mode declaration layout requires x86-64 Linux",
                         ));
                     }
-                    if !matches!(ty, Ty::Complex(_)) && ty != COMPLEX_BINARY128 {
+                    if !matches!(ty, Ty::Complex(_))
+                        && ty != COMPLEX_BINARY128
+                        && !matches!(ty, Ty::Opaque(o) if o.name == "_Complex long double")
+                    {
                         return Err(Error::new(
                             loc,
                             "TC mode requires a complex floating base type",
