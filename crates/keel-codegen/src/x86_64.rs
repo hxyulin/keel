@@ -942,6 +942,14 @@ impl<'a> FunctionCompiler<'a> {
                     if !pipeline.selector.x86_features().aes {
                         return Err(err(format!("{id} requires AES")));
                     }
+                    let params = id.info().params;
+                    if args.len() != params.len()
+                        || args.iter().zip(params).any(|(&v, &ty)| {
+                            func.value_type(func.resolve(v)) != ty
+                        })
+                    {
+                        return Err(err(format!("{id} operand types or arity mismatch")));
+                    }
                     if *id == Intrinsic::X86Aeskeygenassist128
                         && !args
                             .get(1)

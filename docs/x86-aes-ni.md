@@ -46,7 +46,9 @@ including Appendix C.1's AES-128 encryption and decryption example.
 The typed assembler accepts legacy XMM register sources and m128 sources,
 including extended registers and supported ordinary addressing/segment forms.
 Round destinations are destructive XMM operands; AESIMC and AESKEYGENASSIST
-replace their destination. Memory sources access exactly 16 bytes. Mandatory
+replace their destination. Legacy memory sources access exactly 16 bytes and
+require 16-byte alignment. Register intrinsics retain explicit loads, including
+unaligned loads, rather than folding them into an alignment-requiring source. Mandatory
 66, REX extension bits, 0F38 DB–DF and 0F3A DF/imm8 use the existing typed
 legacy table and encoder. Wrong register classes, explicit memory widths and
 invalid immediate controls diagnose. IR lowering stages inputs in reserved
@@ -140,3 +142,24 @@ matrices cover neither, AES only, PCLMUL only and both at strict v1/v2/v3.
 These are finite tests on an AES-capable host, not exhaustive ISA certification
 or execution on a CPU that lacks AES. Generated artifacts and logs stay outside
 Git.
+
+Independent review on 2026-10-23 rebased this branch onto main `7cbb9ce6`,
+including its owned vector-legalization change. It found and fixed missing
+backend operand-shape preflight: unverified IR could supply an i64 key-assist
+control or malformed AES arity/types. A regression first reproduced acceptance
+of the i64 control and now requires diagnostics. The review also replaced the
+native callback's empty assembly clobber declaration with physical XMM1–XMM15
+clears, added unaligned inputs to the register-intrinsic execution checks, and
+compared symbolic RIP-relative relocations for all six instructions against
+Clang and GNU `as` (including the key-assist immediate's displacement addend).
+Fresh LinuxHost debug/release validation passed all 14 AES/PCLMUL C/codegen tests
+and four owned-vector regression controls. Both harness compilers and all
+selection/allocation/pool combinations passed the strengthened AES checks.
+Local CLI/C/PCLMUL regressions and debug/release ordinary emission guards passed.
+Commands are recorded in `/tmp/keel-aes-review-unique.jsonl` on each host;
+native results are `/tmp/keel-aes-review-final-{debug,release}.log` on LinuxHost,
+using snapshot `/tmp/keel-aes-review.J9ZjcM`. A separate finite memory probe in
+`/tmp/keel-aes-review-memory.log` verified both valid page edges, alignment and
+truncated-operand faults, and unaligned register staging for each instruction.
+The truncated pointers were also unaligned, so those faults alone do not
+distinguish alignment checks from full-width page accesses.

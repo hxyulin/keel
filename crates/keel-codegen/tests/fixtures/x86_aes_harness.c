@@ -89,8 +89,8 @@ static V run(int op, V a, V b) {
 }
 extern V direct(V, V);
 extern V indirect(V, V, V (*)(V, V));
-/* This callback clobbers the SIMD bank, forcing the caller to preserve inputs.
- */
+/* Physically clobber the non-return SIMD bank, forcing the caller to preserve
+ * inputs. A clobber list alone does not overwrite hardware registers. */
 V callback(V a, V b) {
   u8 x[16], y[16];
   bytes(x, a);
@@ -98,7 +98,21 @@ V callback(V a, V b) {
   for (int i = 0; i < 16; i++)
     x[i] ^= y[15 - i];
   V r = vec(x);
-  __asm__ volatile("" ::
+  __asm__ volatile("pxor %%xmm1,%%xmm1\n\t"
+                   "pxor %%xmm2,%%xmm2\n\t"
+                   "pxor %%xmm3,%%xmm3\n\t"
+                   "pxor %%xmm4,%%xmm4\n\t"
+                   "pxor %%xmm5,%%xmm5\n\t"
+                   "pxor %%xmm6,%%xmm6\n\t"
+                   "pxor %%xmm7,%%xmm7\n\t"
+                   "pxor %%xmm8,%%xmm8\n\t"
+                   "pxor %%xmm9,%%xmm9\n\t"
+                   "pxor %%xmm10,%%xmm10\n\t"
+                   "pxor %%xmm11,%%xmm11\n\t"
+                   "pxor %%xmm12,%%xmm12\n\t"
+                   "pxor %%xmm13,%%xmm13\n\t"
+                   "pxor %%xmm14,%%xmm14\n\t"
+                   "pxor %%xmm15,%%xmm15" ::
                        : "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7",
                          "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13",
                          "xmm14", "xmm15");
@@ -241,6 +255,21 @@ int main(void) {
     return 30;
   if (mprotect(m + page, (size_t)page, PROT_READ | PROT_WRITE))
     return 31;
+  /* Register intrinsics consume explicit align-1 loads. Folding these into a
+   * legacy AES m128 source would introduce an alignment fault. Test each input. */
+  memcpy(m + page + 1, a, 16);
+  for (int input = 0; input < 2; input++) {
+    const u8 *x = input ? a : m + page + 1;
+    const u8 *y = input ? m + page + 1 : b;
+    for (int op = 0; op < 6; op++) {
+      u8 expected[16], out[48];
+      ref(op, x, y, 0, expected);
+      live[op][0](x, y, out);
+      if (!eq(out, expected, 16) || !eq(out + 16, x, 16) ||
+          !eq(out + 32, y, 16))
+        return 32;
+    }
+  }
   for (int edge = 0; edge < 2; edge++) {
     u8 *p = m + page + (edge ? page - 16 : 0);
     memcpy(p, a, 16);

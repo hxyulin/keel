@@ -227,6 +227,36 @@ fn text(bytes: &[u8]) -> Vec<u8> {
         .to_vec()
 }
 #[test]
+fn preflight_rejects_unverified_aes_operand_shapes() {
+    // Library callers can hand codegen parsed IR without running the verifier.
+    // Diagnose malformed AES before lowering indexes or stages its operands.
+    for body in [
+        "v1 = iconst.i64 17\n v2 = intrinsic x86_aeskeygenassist128(v0,v1)",
+        "v2 = intrinsic x86_aesenc128(v0)",
+        "v2 = intrinsic x86_aesimc128(v0,v0)",
+        "v1 = iconst.i64 17\n v2 = intrinsic x86_aesenc128(v0,v1)",
+    ] {
+        let module = keel_ir::parse(&format!(
+            "func @f(i64x2)->i64x2 {{\nblock0(v0:i64x2):\n {body}\n return v2\n}}\n"
+        ))
+        .unwrap();
+        assert!(keel_ir::verify_module(&module).is_err());
+        let selector = FeatureSelector {
+            inner: &SelectionTier::Baseline,
+            features: features(),
+        };
+        let result = keel_codegen::x86_64::compile_program_with_pipeline(
+            &module,
+            &keel_codegen::x86_64::REGISTERS,
+            &CodegenPipeline {
+                selector: &selector,
+                allocator: &AllocationTier::Fast,
+            },
+        );
+        assert!(result.is_err(), "accepted malformed AES: {body}");
+    }
+}
+#[test]
 fn encoding_matches_clang_and_optional_gnu() {
     use keel_asm_ir::x86::Instruction;
     let mut src = String::from(".intel_syntax noprefix\n.text\n");
@@ -320,6 +350,72 @@ fn encoding_matches_clang_and_optional_gnu() {
         assert!(
             keel_asm::x86::assemble_object_with_features(&src, Features::for_level(level)).is_err()
         );
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+#[test]
+fn symbolic_memory_relocations_match_independent_assemblers() {
+    use object::{Object, ObjectSection, ObjectSymbol};
+    let relocations = |bytes: &[u8]| {
+        let file = object::File::parse(bytes).unwrap();
+        file.section_by_name(".text")
+            .unwrap()
+            .relocations()
+            .map(|(offset, r)| {
+                let object::RelocationTarget::Symbol(index) = r.target() else {
+                    panic!("symbol expected")
+                };
+                (
+                    offset,
+                    r.kind(),
+                    r.size(),
+                    r.addend(),
+                    file.symbol_by_index(index)
+                        .unwrap()
+                        .name()
+                        .unwrap()
+                        .to_owned(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut source = String::from(".intel_syntax noprefix\n.text\n");
+    let mut program = keel_asm_ir::Program::new();
+    for op in OPS {
+        let line = format!(
+            "{op} xmm15,xmmword ptr [rip+external+7]{}",
+            if *op == "aeskeygenassist" { ",255" } else { "" }
+        );
+        program.x86_instruction(keel_asm_ir::x86::Instruction::parse_intel(&line).unwrap());
+        source += &format!("{line}\n");
+    }
+    let ours = keel_asm::x86::assemble_object_with_features(&source, features()).unwrap();
+    let typed = keel_asm::x86::assemble_program_object_with_features(&program, features()).unwrap();
+    assert_eq!(text(&ours), text(&typed));
+    assert_eq!(relocations(&ours), relocations(&typed));
+    let dir = common::temp("aes-relocations");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("aes.s"), source).unwrap();
+    for tool in [Some("clang".to_owned()), std::env::var("KEEL_GNU_AS").ok()]
+        .into_iter()
+        .flatten()
+    {
+        let mut command = Command::new(&tool);
+        if tool == "clang" {
+            command.args(["-target", "x86_64-unknown-linux-gnu", "-c"]);
+        } else {
+            command.arg("--64");
+        }
+        common::command(
+            command
+                .arg(dir.join("aes.s"))
+                .arg("-o")
+                .arg(dir.join("oracle.o")),
+        );
+        let expected = fs::read(dir.join("oracle.o")).unwrap();
+        assert_eq!(text(&ours), text(&expected), "{tool}");
+        // KEYGENASSIST's trailing immediate must be included in the PC-relative addend.
+        assert_eq!(relocations(&ours), relocations(&expected), "{tool}");
     }
     fs::remove_dir_all(dir).unwrap();
 }
