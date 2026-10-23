@@ -60,6 +60,14 @@ fn lossless_broadcast_conversion_boundaries() {
         ("float", "double", "v+1.5"),
         ("float", "double", "v+-0.0"),
         ("int", "long", "v+(int)s"),
+        ("signed char", "int", "v+((1<<6)+63)"),
+        ("unsigned char", "int", "(0?300:255)+v"),
+        ("unsigned char", "int", "v+((~0UL)>>56)"),
+        ("signed char", "int", "v+((255U+1U)==256U)"),
+        ("signed char", "int", "v+(signed char)257"),
+        ("unsigned char", "int", "v+sizeof(s++)"),
+        ("float", "int", "v+(double)0.1f"),
+        ("float", "int", "v+(float)s"),
     ] {
         let text = source(base, scalar, expression, 16);
         clang_accepts(&text);
@@ -83,6 +91,13 @@ fn lossless_broadcast_conversion_boundaries() {
         ("int", "__int128", "v+s"),
         ("signed char", "int", "v+(long)(((__int128)1<<64)/256)"),
         ("signed char", "int", "v+(s++,1)"),
+        ("signed char", "int", "v+((1<<6)+64)"),
+        ("unsigned char", "int", "v+(1?300:255)"),
+        ("signed char", "int", "v+(int)(unsigned char)255"),
+        ("unsigned char", "int", "v+sizeof(int[256])"),
+        ("float", "int", "v+(0.1+0.2)"),
+        ("float", "int", "v+((double)0.1f-0.1)"),
+        ("signed char", "int", "v+(long)(void*)1"),
         // Conservative boundaries, even when other compilers accept them.
         ("float", "int", "v+1"),
         ("int", "float", "v+1.0f"),
@@ -132,7 +147,39 @@ fn broadcasts_emit_real_x86_objects_with_explicit_feature_profiles() {
         "double",
     ] {
         for bytes in [16, 32] {
-            let text = source(base, base, "v+s", bytes);
+            let mut text = source(base, base, "v+s", bytes);
+            let floating = matches!(base, "float" | "double");
+            let mask = match base {
+                "unsigned char" => "signed char",
+                "unsigned short" => "short",
+                "unsigned" | "float" => "int",
+                "unsigned long" | "double" => "long",
+                _ => base,
+            };
+            text.push_str(&format!(
+                "typedef {mask} M __attribute__((vector_size({bytes})));"
+            ));
+            let ops = if floating {
+                vec!["+", "-", "*", "/"]
+            } else {
+                vec!["+", "-", "*", "&", "|", "^"]
+            };
+            for (i, op) in ops.into_iter().enumerate() {
+                text.push_str(&format!(
+                    "V left{i}(V v,{base} s){{return s{op}v;}} \
+                     V compound{i}(V *p,int *i,{base} *s){{return p[(*i)++]{op}=(*s)++;}}"
+                ));
+            }
+            for (i, op) in ["==", "!=", "<", "<=", ">", ">="].into_iter().enumerate() {
+                text.push_str(&format!("M compare{i}(V v,{base} s){{return s{op}v;}}"));
+            }
+            // Exhaust SIMD argument registers and forward a broadcast result across
+            // an actual call boundary, retaining the selected vector ABI.
+            text.push_str(&format!(
+                "extern V callback(V,V,V,V,V,V,V,V,V,V); \
+                 V forward(V a,V b,V c,V d,V e,V f,V g,V h,V i,V j,{base} s){{\
+                 return callback(a+s,b,c,d,e,f,g,h,i,j+s);}}"
+            ));
             let module = compile(&text, Target::X86_64LinuxGnu).unwrap();
             keel_ir::verify_module(&module).unwrap();
             use keel_codegen::x86_features::{CpuLevel, FeatureSelector, Features};

@@ -175,6 +175,18 @@ V k_temporary(V a,V b,int i) { V v=a+b; return (V){(a+b)[i],v[1],v[2],v[3]}; }
 V k_choose(int x,V a,V b) { return x?a:b; }
 V k_broadcast_operands(V *p,int *i,int *s) { return p[(*i)++] + (*s)++; }
 int k_broadcast_once(V *p,int *i,int *s) { p[(*i)++] += (*s)++; return p[0][3]; }
+int k_broadcast_proofs(int *side) {
+    typedef signed char B __attribute__((vector_size(16)));
+    typedef unsigned char U __attribute__((vector_size(16)));
+    B b={0}; U u={0}; F f={0}; V v={0};
+    b+=((1<<6)+63); u=((~0UL)>>56)+u; f+=(double)0.1f;
+    v+=sizeof((*side)++);
+    for(int i=0;i<16;i++)if(b[i]!=127||u[i]!=255)return 1;
+    b=(B){0}; b+=(signed char)257;
+    for(int i=0;i<16;i++)if(b[i]!=1)return 2;
+    for(int i=0;i<4;i++)if(v[i]!=sizeof(int)||f[i]!=0.1f)return 3;
+    return 0;
+}
 int k_once(V *p,int *i) { (*p)[(*i)++] += 3; return (*p)[0]; }
 "#,
     );
@@ -187,9 +199,12 @@ extern V k_global;
 extern V k_init(void), k_cast(F), k_temporary(V,V,int), k_choose(int,V,V);
 extern V k_broadcast_operands(V*,int*,int*);
 extern int k_once(V*,int*), k_broadcast_once(V*,int*,int*);
+extern int k_broadcast_proofs(int*),c_broadcast_proofs(int*);
 "#,
     );
     main.push_str(r#"
+{ int side=17; if(k_broadcast_proofs(&side)||side!=17)return __LINE__;
+if(c_broadcast_proofs(&side)||side!=17)return __LINE__; }
 if(k_mode(-0x123456789L)!=-0x123456789L/3 || k_umode(~0UL)!=~0UL/3)return __LINE__;
 { if(k_global[0]!=2||k_global[1]!=4||k_global[2]!=0||k_global[3]!=0)return __LINE__; V v=k_init(); if(v[0]!=1||v[1]!=2||v[2]!=0||v[3]!=9)return __LINE__; }
 { F f={0.0f,-0.0f,INFINITY,NAN}; V v=k_cast(f); if(memcmp(&v,&f,16))return __LINE__; }
