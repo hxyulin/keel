@@ -94,7 +94,7 @@ pub enum Ty<'a> {
     Double,
     /// `_Float16`: only so headers declaring functions with it parse.
     Half,
-    /// A type keel only knows the size of, so headers declaring functions
+    /// A type keel only knows the declaration layout of, so headers declaring functions
     /// and typedefs with it parse: `__float128`, extended `_Complex`, and
     /// `long double` on x86-64. Its values cannot be used.
     Opaque(&'a OpaqueTy),
@@ -113,7 +113,20 @@ pub enum Ty<'a> {
 pub struct OpaqueTy {
     pub name: &'static str,
     pub size: u64,
+    pub align: u64,
 }
+
+// Canonical GNU binary128 identities; neither has a value/IR capability.
+pub const BINARY128: Ty<'static> = Ty::Opaque(&OpaqueTy {
+    name: "__float128",
+    size: 16,
+    align: 16,
+});
+pub const COMPLEX_BINARY128: Ty<'static> = Ty::Opaque(&OpaqueTy {
+    name: "_Complex __float128",
+    size: 32,
+    align: 16,
+});
 
 /// Element type and length. An absent length is incomplete unless `vla`
 /// identifies a captured runtime element count.
@@ -455,7 +468,7 @@ impl<'a> Ty<'a> {
     fn numeric_identity(&self) -> bool {
         self.is_arith()
             || matches!(self, Ty::Opaque(o) if matches!(o.name,
-                "__float128" | "long double" | "_Complex long double"))
+                "__float128" | "_Complex __float128" | "long double" | "_Complex long double"))
     }
 
     /// Compatibility for redeclarations, permitting incomplete arrays/prototypes.
@@ -659,6 +672,7 @@ impl Types<'_> {
     pub fn align(&self, ty: &Ty) -> u64 {
         match ty {
             Ty::Complex(t) => self.align(t),
+            Ty::Opaque(o) => o.align,
             Ty::Array(a) => self.align(&a.elem),
             Ty::Struct(id) => self.0[*id].align,
             Ty::Atomic(t) => self.align(t),

@@ -146,6 +146,24 @@ impl DebugTypes {
                 .function
                 .get_or_insert_with(|| push(module, DebugTypeData::Function)),
             Ty::Atomic(t) => return self.plain(module, p, t),
+            // Extended complex declarations describe two real components,
+            // never a fictitious 32-byte scalar floating encoding.
+            Ty::Opaque(o) if o.name == "_Complex __float128" => {
+                let elem = self.plain(module, p, &crate::types::BINARY128)?;
+                self.array(module, elem, Some(2))
+            }
+            Ty::Opaque(o) if o.name == "_Complex long double" => {
+                let elem = self.plain(
+                    module,
+                    p,
+                    &Ty::Opaque(&crate::types::OpaqueTy {
+                        name: "long double",
+                        size: o.size / 2,
+                        align: o.align,
+                    }),
+                )?;
+                self.array(module, elem, Some(2))
+            }
             // Shown as a float of its size.
             Ty::Opaque(o) => *self.bases.entry(o.name).or_insert_with(|| {
                 push(

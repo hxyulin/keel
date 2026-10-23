@@ -74,9 +74,15 @@ struct DeclSpec<'a> {
     attrs: Attrs,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum TypeMode {
+    Integer(u64),
+    ComplexBinary128,
+}
+
 #[derive(Default, Clone, Copy, PartialEq)]
 pub struct Attrs {
-    pub mode: Option<(u64, Loc)>,
+    pub mode: Option<(TypeMode, Loc)>,
     pub vector_size: Option<(u64, Loc)>,
     pub aligned: Option<u64>,
     pub alignas: Option<u64>,
@@ -149,7 +155,11 @@ impl Attrs {
     /// linkage can carry, written where no such symbol is declared.
     fn no_type_attrs(&self) -> R<()> {
         self.no_cleanup()?;
-        if let Some((_, loc)) = self.mode.or(self.vector_size) {
+        if let Some(loc) = self
+            .mode
+            .map(|(_, loc)| loc)
+            .or(self.vector_size.map(|(_, loc)| loc))
+        {
             return Err(Error::new(
                 loc,
                 "type-changing attribute is not supported in this position",
@@ -2308,12 +2318,13 @@ impl<'a> Parser<'a> {
                     "mode" => {
                         self.expect("(")?;
                         let name = self.ident()?;
-                        let bytes = match name.trim_matches('_') {
-                            "QI" | "byte" => 1,
-                            "HI" => 2,
-                            "SI" => 4,
-                            "DI" | "word" | "pointer" => 8,
-                            "TI" => 16,
+                        let mode = match name.trim_matches('_') {
+                            "QI" | "byte" => TypeMode::Integer(1),
+                            "HI" => TypeMode::Integer(2),
+                            "SI" => TypeMode::Integer(4),
+                            "DI" | "word" | "pointer" => TypeMode::Integer(8),
+                            "TI" => TypeMode::Integer(16),
+                            "TC" => TypeMode::ComplexBinary128,
                             _ => {
                                 return Err(Error::new(
                                     loc,
@@ -2322,10 +2333,10 @@ impl<'a> Parser<'a> {
                             }
                         };
                         self.expect(")")?;
-                        if attrs.mode.is_some_and(|(old, _)| old != bytes) {
+                        if attrs.mode.is_some_and(|(old, _)| old != mode) {
                             return Err(Error::new(loc, "conflicting mode attributes"));
                         }
-                        attrs.mode = Some((bytes, loc));
+                        attrs.mode = Some((mode, loc));
                     }
                     "aligned" if self.eat("(") => {
                         let n = self.alignment_constant(false)?;
@@ -2378,7 +2389,11 @@ impl<'a> Parser<'a> {
     fn ignored_attributes(&mut self) -> R<()> {
         let mut attrs = Attrs::default();
         self.attributes(&mut attrs)?;
-        if let Some((_, loc)) = attrs.mode.or(attrs.vector_size) {
+        if let Some(loc) = attrs
+            .mode
+            .map(|(_, loc)| loc)
+            .or(attrs.vector_size.map(|(_, loc)| loc))
+        {
             return Err(Error::new(
                 loc,
                 "type-changing attribute has no type subject",
@@ -2541,14 +2556,15 @@ impl<'a> Parser<'a> {
                                 "__SVFloat64_t" => "__SVFloat64_t",
                                 _ => "__SVBool_t",
                             };
-                            Some(Ty::Opaque(self.arena.alloc(OpaqueTy { name, size: 0 })))
+                            Some(Ty::Opaque(self.arena.alloc(OpaqueTy {
+                                name,
+                                size: 0,
+                                align: 1,
+                            })))
                         }
                         "__float128" => {
                             self.advance();
-                            Some(Ty::Opaque(&OpaqueTy {
-                                name: "__float128",
-                                size: 16,
-                            }))
+                            Some(BINARY128)
                         }
                         "__int128_t" => {
                             self.advance();
@@ -2666,6 +2682,7 @@ impl<'a> Parser<'a> {
                 Target::X86_64LinuxGnu | Target::Aarch64LinuxGnu => Ty::Opaque(&OpaqueTy {
                     name: "long double",
                     size: 16,
+                    align: 16,
                 }),
             },
             HALF => Ty::Half,
@@ -2682,9 +2699,11 @@ impl<'a> Parser<'a> {
                 spec.ty = Ty::Complex(self.type_ref(spec.ty));
             } else if counter == LONG + DOUBLE {
                 let size = 2 * Types(&self.structs).size(&spec.ty);
+                let align = Types(&self.structs).align(&spec.ty);
                 spec.ty = Ty::Opaque(self.arena.alloc(OpaqueTy {
                     name: "_Complex long double",
                     size,
+                    align,
                 }));
             } else {
                 return Err(Error::new(
@@ -2712,28 +2731,47 @@ impl<'a> Parser<'a> {
     /// Type-changing attributes are consumed once, before layout and compatibility.
     fn apply_type_attrs(&mut self, ty: Ty<'a>, attrs: &mut Attrs) -> R<Ty<'a>> {
         let mut ty = ty;
-        if let Some((bytes, loc)) = attrs.mode.take() {
-            let Ty::Int(kind) = ty else {
-                return Err(Error::new(
-                    loc,
-                    "integer mode requires an integer base type",
-                ));
-            };
-            if kind == IntKind::Bool {
-                return Err(Error::new(loc, "integer mode does not support _Bool"));
+        if let Some((mode, loc)) = attrs.mode.take() {
+            match mode {
+                TypeMode::ComplexBinary128 => {
+                    if self.target != Target::X86_64LinuxGnu {
+                        return Err(Error::new(
+                            loc,
+                            "TC mode declaration layout requires x86-64 Linux",
+                        ));
+                    }
+                    if !matches!(ty, Ty::Complex(_)) && ty != COMPLEX_BINARY128 {
+                        return Err(Error::new(
+                            loc,
+                            "TC mode requires a complex floating base type",
+                        ));
+                    }
+                    ty = COMPLEX_BINARY128;
+                }
+                TypeMode::Integer(bytes) => {
+                    let Ty::Int(kind) = ty else {
+                        return Err(Error::new(
+                            loc,
+                            "integer mode requires an integer base type",
+                        ));
+                    };
+                    if kind == IntKind::Bool {
+                        return Err(Error::new(loc, "integer mode does not support _Bool"));
+                    }
+                    let signed = match bytes {
+                        1 => IntKind::SChar,
+                        2 => IntKind::Short,
+                        4 => IntKind::Int,
+                        8 => IntKind::Long,
+                        _ => IntKind::Int128,
+                    };
+                    ty = Ty::Int(if kind.signed() {
+                        signed
+                    } else {
+                        signed.to_unsigned()
+                    });
+                }
             }
-            let signed = match bytes {
-                1 => IntKind::SChar,
-                2 => IntKind::Short,
-                4 => IntKind::Int,
-                8 => IntKind::Long,
-                _ => IntKind::Int128,
-            };
-            ty = Ty::Int(if kind.signed() {
-                signed
-            } else {
-                signed.to_unsigned()
-            });
         }
         if let Some((bytes, loc)) = attrs.vector_size.take() {
             ty = self.vector_type(ty, bytes, loc)?;

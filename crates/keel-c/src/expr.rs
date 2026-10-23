@@ -912,7 +912,14 @@ impl<'a> Parser<'a> {
                 self.advance();
                 let e = self.cast_expr()?;
                 let imag = word.starts_with("__imag");
-                if let Ty::Complex(elem) = e.ty {
+                // Keep declaration-only TC component queries canonical without
+                // introducing opaque elements into the value-bearing Complex type.
+                let component = match e.ty {
+                    Ty::Complex(elem) => Some(elem),
+                    ty if ty == COMPLEX_BINARY128 => Some(&BINARY128),
+                    _ => None,
+                };
+                if let Some(elem) = component {
                     let sugar = e.sugar;
                     return Ok(mk(
                         ExprKind::Member {
@@ -2903,6 +2910,11 @@ impl<'a> Parser<'a> {
     /// Conversion as if by assignment, to parameters and returns too.
     pub(crate) fn convert_for_assign(&mut self, e: Expr<'a>, ty: &Ty<'a>) -> R<Expr<'a>> {
         let e = self.rvalue(e);
+        // Matching opaque declarations can occur in unevaluated calls.
+        // Evaluated uses still fail the recursive pre-pruning value guard.
+        if ty.unusable().is_some() && e.ty == *ty {
+            return Ok(e);
+        }
         if ty.is_struct() || ty.is_vector() {
             if e.ty != *ty {
                 return Err(Error::new(e.loc, "incompatible struct types"));

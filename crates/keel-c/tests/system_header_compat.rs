@@ -54,7 +54,7 @@ fn header_supplied_float32_typedef_keeps_its_declared_identity() {
 }
 
 #[test]
-fn complex_binary128_mode_is_preserved_then_diagnosed() {
+fn complex_binary128_mode_preserves_target_boundary() {
     let source = "typedef _Complex float C __attribute__((__mode__(__TC__)));";
     for target in Target::ALL {
         let pp = keel_c::preprocess(
@@ -67,11 +67,15 @@ fn complex_binary128_mode_is_preserved_then_diagnosed() {
         )
         .unwrap();
         assert!(pp.contains("__TC__"));
-        let error = compile(&pp, target).unwrap_err().to_string();
-        assert!(
-            error.contains("unsupported integer mode `__TC__`"),
-            "{error}"
-        );
+        if target == Target::X86_64LinuxGnu {
+            compile(&pp, target).unwrap();
+        } else {
+            let error = compile(&pp, target).unwrap_err().to_string();
+            assert!(
+                error.contains("TC mode declaration layout requires x86-64 Linux"),
+                "{error}"
+            );
+        }
     }
 }
 
