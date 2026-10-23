@@ -84,6 +84,26 @@ pub(super) fn keep(f: &Function, d: &InstData, features: keel_asm_ir::x86::Featu
         _ => false,
     }
 }
+/// VPSHUFD repeats one four-dword control independently in each 128-bit half.
+/// Equal resolved sources permit either spelling of each concatenated index.
+fn dword_shuffle_control(ty: Type, same: bool, lanes: &[u8]) -> Option<u8> {
+    if !same
+        || !matches!(ty, Type::Vector(VectorType::I32x8 | VectorType::F32x8))
+        || lanes.len() != 8
+        || lanes.iter().any(|&lane| lane >= 16)
+    {
+        return None;
+    }
+    let mut imm = 0;
+    for i in 0..4 {
+        let low = lanes[i] % 8;
+        if low >= 4 || lanes[i + 4] % 8 != low + 4 {
+            return None;
+        }
+        imm |= low << (2 * i);
+    }
+    Some(imm)
+}
 impl FunctionCompiler<'_> {
     fn wstage(&mut self, v: Value, d: u8) {
         let r = self.use_freg(v, d);
@@ -300,6 +320,17 @@ impl FunctionCompiler<'_> {
         }
     }
     fn wshuffle(&mut self, ty: Type, args: [Value; 2], lanes: &[u8]) {
+        if self.features.avx2
+            && let Some(imm) = dword_shuffle_control(
+                ty,
+                self.func.resolve(args[0]) == self.func.resolve(args[1]),
+                lanes,
+            )
+        {
+            self.wstage(args[0], FS1);
+            self.wi("vpshufd", FS0, FS1, i64::from(imm));
+            return;
+        }
         self.wstage(args[0], FS1);
         self.wstage(args[1], FS2);
         self.w3("vxorps", FS0, FS0, FS0);
@@ -925,5 +956,44 @@ impl FunctionCompiler<'_> {
         }
         self.wdone(result);
         true
+    }
+}
+
+#[cfg(test)]
+mod shuffle_tests {
+    use super::*;
+
+    #[test]
+    fn all_dword_controls_and_rejected_boundaries() {
+        let i32x8 = Type::Vector(VectorType::I32x8);
+        for imm in 0..=255u8 {
+            let lanes: [u8; 8] =
+                std::array::from_fn(|i| ((imm >> (2 * (i % 4))) & 3) + (i / 4 * 4) as u8);
+            for ty in [i32x8, Type::Vector(VectorType::F32x8)] {
+                // Every spelling using either equal concatenated source is valid.
+                for sources in 0..256 {
+                    let mask: [u8; 8] = std::array::from_fn(|i| {
+                        lanes[i] + if sources & (1 << i) != 0 { 8 } else { 0 }
+                    });
+                    assert_eq!(dword_shuffle_control(ty, true, &mask), Some(imm));
+                    assert_eq!(dword_shuffle_control(ty, false, &mask), None);
+                }
+            }
+            for i in 0..8 {
+                for replacement in 0..=16 {
+                    let mut mask = lanes;
+                    mask[i] = replacement;
+                    if replacement < 16 && replacement % 8 == lanes[i] {
+                        continue;
+                    }
+                    assert_eq!(dword_shuffle_control(i32x8, true, &mask), None);
+                }
+            }
+            assert_eq!(
+                dword_shuffle_control(Type::Vector(VectorType::I64x4), true, &lanes),
+                None
+            );
+            assert_eq!(dword_shuffle_control(i32x8, true, &lanes[..7]), None);
+        }
     }
 }
