@@ -180,15 +180,21 @@ allocation, reserved address scratch, destination XMM allocation and spill
 publication reuse the existing low-load path. The instruction changes neither
 integer flags nor MXCSR; no ABI or FP arithmetic changes are involved.
 
-`x86_signed_widen_load` checks text/typed object parity for Baseline/Trees/Full
+`x86_signed_widen_load` checks text/typed/chunked object parity and each typed
+instruction's required features for Baseline/Trees/Full
 selection, Fast/Full allocation, normal/tiny/empty pools and six effective
 profiles: v1/v2/v3, v1+sse41, v2-sse41 and v3-sse41. It checks negative forms,
 shared operands, use/definition constraints at every chain node, source line
 and column boundaries, and independent Clang m64 encodings with extended
 registers and indexed/displaced addresses. The existing `x86_packed_low_load`
 count accepts either exact-width load encoding. Both test targets, plus
-`vector_widen_x86` and `x86_packed_positive`, passed 16 tests in debug and
-release locally on ARM64. No shared backend infrastructure changed.
+`vector_widen_x86` and `x86_packed_positive`, originally passed 16 tests in debug
+and release locally on ARM64. Review adds optimized/unused-result coverage and
+selector unit checks for conditions, covered nodes, resolved aliases and load
+operand transfer. After rebasing onto `bfa86ed7`, review passed 17 integration
+tests plus two selector unit tests in both debug and release. The legacy test
+also requires MOVQ separately for each of its five non-pilot shapes. No shared
+backend infrastructure changed.
 
 Export native bundles with `KEEL_SIGNED_LOAD_EVIDENCE=/tmp/EXPORT` using:
 
@@ -204,6 +210,10 @@ memory aliasing the source, signed extrema and deterministic xorshift samples,
 all 16 alignment offsets, both protected-page edges, faulting accesses crossing
 either edge before any output write, canaries and MXCSR preservation. These
 are finite tests on a host supporting SSE4.1, not a v1-only execution proof.
+Review reran 108 freshly exported signed bundles plus the 13 retained generic
+low-load bundles on LinuxHost; all passed. Review artifacts are under
+`/tmp/keel-pmov-review-{export,generic}` on LinuxHost, with lock metadata at
+`/tmp/keel-pmov-review-unique.jsonl` on each host.
 
 ### Maintained widen32 measurement
 
@@ -255,3 +265,56 @@ output directory. Compiler SHA-256 values are
 `95bb7d02ca725e8da528584d656b3f95b134c8dd4aba3b7121f7721c378d8d4d`
 (candidate). Builds used cargo's shared default cache, per-checkout targets,
 `CARGO_CACHE_LINKS=0`, `--offline --locked -j2` and the shared lock wrapper.
+
+To recreate the bounded runner without relying on retained `/tmp` artifacts,
+export baseline `45c19d5d` and the candidate commit into separate clean source
+directories under `/tmp` (for example, with `git archive REF | tar -x -C DIR`).
+Build each with the following command from its own directory, preserving any
+project toolchain/configuration and using its own cargo-managed target directory:
+
+```sh
+python3 suite/fast_opt_locked.py /tmp/keel-pilot-build.jsonl \
+  cargo build --release --offline --locked -j2 -p keel
+```
+
+Set `KEEL_PILOT_BASE` and `KEEL_PILOT_CANDIDATE` to those absolute source paths.
+The following recreates the measured runner from the maintained runner; only
+the case/length lists and compiler configurations differ. All other correctness,
+shuffle, locking and timing code is retained:
+
+```sh
+python3 - "$KEEL_PILOT_CANDIDATE" <<'PY'
+from pathlib import Path
+import sys
+root = Path(sys.argv[1])
+runner = root / 'suite/runtime-kernels/run.py'
+text = runner.read_text()
+anchor = 'from oracle import CASES, LENGTHS, MASK, inputs, reference\n'
+assert text.count(anchor) == 1
+text = text.replace(anchor, anchor +
+    'CASES = ["widen32", "positive32", "adjacent"]\n' +
+    'LENGTHS = [0, 1, 7, 8, 17, 257, 4096, 65536, 1048576]\n')
+start = text.index('def compiler_configurations(')
+end = text.index('\n\ndef canonical_runtime(', start)
+text = text[:start] + '''def compiler_configurations(include_gcc=False, include_baseline=False, full_passes=None, baseline_passes=None):
+    assert include_baseline and not include_gcc and full_passes is None and baseline_passes is None
+    return {f'{version}-{level}': (family, ['cc', '-O', '--opt-tier', 'full', '--cpu-level', level, '--emit-object'])
+            for version,family in [('candidate','keel'),('baseline','baseline-keel')]
+            for level in ['v1','v2','v3']}
+''' + text[end:]
+runner.with_name('pmovsxdq_pilot_run.py').write_text(text)
+PY
+python3 "$KEEL_PILOT_CANDIDATE/suite/runtime-kernels/pmovsxdq_pilot_run.py" \
+  --keel "$KEEL_PILOT_CANDIDATE/target/release/keel" \
+  --baseline-keel "$KEEL_PILOT_BASE/target/release/keel" \
+  --clang /usr/bin/clang --label signed-widen-review \
+  --output /tmp/keel-pilot-fresh-results --cpu 2 \
+  --rounds 7 --compile-rounds 1 --target-elements 4000000
+```
+
+The output directory must be new. This entry point takes the shared lock itself.
+The archived campaign has no Git metadata (`checkout_commit` is null); binary
+and input hashes identify it. Review compared its candidate build inputs to
+`b62af511`: production source differences were whitespace and a comment only.
+The independent tests added during review do not establish a new timing result
+for the rebased tree.

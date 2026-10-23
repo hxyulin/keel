@@ -137,3 +137,64 @@ pub(super) fn select(
     }
     selected
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SOURCE: &str = "func @f(ptr,i64,i64x2,i32x4) {\nblock0(v0:ptr,v1:i64,v2:i64x2,v3:i32x4):\n v4 = load.i64 v0\n v5 = vsplat.i64x2 v4\n v6 = bitcast.i32x4 v5\n v7 = swiden_low.i64x2 v6\n return\n}\n";
+
+    #[test]
+    fn signed_root_respects_existing_conditions_covers_and_resolved_results() {
+        for at in 0..4 {
+            for boundary in 0..4 {
+                let mut module = keel_ir::parse(SOURCE).unwrap();
+                let f = &mut module.functions[0];
+                let chain: Vec<_> = f.layout_insts().take(4).map(|(_, i)| i).collect();
+                let mut selection = crate::select::Selection::default();
+                match boundary {
+                    0 => {
+                        selection.conditions.insert(chain[at], (chain[0], false));
+                    }
+                    1 => selection.cover(chain[at]),
+                    2 => {
+                        selection.matches.insert(
+                            chain[at],
+                            crate::select::Match {
+                                machine: crate::select::Machine::Lea,
+                                args: vec![],
+                                shift: 0,
+                            },
+                        );
+                    }
+                    _ => {
+                        let replacement =
+                            [Value::new(1), Value::new(2), Value::new(3), Value::new(2)][at];
+                        f.replace_all_uses(f.first_result(chain[at]), replacement);
+                    }
+                }
+                let selected = select(f, &mut selection, true);
+                assert!(
+                    !selected.contains_key(&chain[3]),
+                    "node {at}, boundary {boundary}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn signed_root_inherits_selected_load_leaves() {
+        let module = keel_ir::parse(SOURCE).unwrap();
+        let f = &module.functions[0];
+        let chain: Vec<_> = f.layout_insts().take(4).map(|(_, i)| i).collect();
+        let mut selection = crate::select::Selection::default();
+        // A selected address can expose more leaves than the raw load operand.
+        let leaves = vec![Value::new(0), Value::new(1)];
+        selection.set_operands(chain[0], leaves.clone());
+        let selected = select(f, &mut selection, true);
+        assert_eq!(selected.get(&chain[3]), Some(&Value::new(0)));
+        assert_eq!(selection.operands(f, chain[3]), leaves);
+        assert!(chain[..3].iter().all(|&i| selection.covered(i)));
+        assert!(!selection.covered(chain[3]));
+    }
+}

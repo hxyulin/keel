@@ -61,7 +61,23 @@ fn compile(
     };
     let text = keel_codegen::x86_64::compile_with_pipeline(&m, pools, &p).unwrap();
     let program = keel_codegen::x86_64::compile_program_with_pipeline(&m, pools, &p).unwrap();
+    let mut chunks = keel_asm_ir::Program::default();
+    keel_codegen::x86_64::compile_program_chunks_with_pipeline(&m, pools, &p, &mut |part| {
+        chunks.items.extend(part.items)
+    })
+    .unwrap();
+    for part in [&program, &chunks] {
+        for item in &part.items {
+            if let keel_asm_ir::Item::X86Instruction(i) = item {
+                assert!(features.contains(i.required_features()), "{i}");
+            }
+        }
+    }
     let obj = keel_asm::x86::assemble_program_object_with_features(&program, features).unwrap();
+    assert_eq!(
+        keel_asm::x86::assemble_program_object_with_features(&chunks, features).unwrap(),
+        obj
+    );
     assert_eq!(
         keel_asm::x86::assemble_object_with_features(&text, features).unwrap(),
         obj
@@ -108,6 +124,40 @@ fn exact_chain_features_and_negative_gates() {
                             0,
                             "{src}"
                         );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn optimized_and_unused_results_preserve_the_load_contract() {
+    for source in [
+        SOURCE.to_string(),
+        SOURCE.replace(" store align 1 v5,v1\n", ""),
+    ] {
+        for optimize in [false, true] {
+            let mut m = keel_ir::parse(&source).unwrap();
+            if optimize {
+                keel_opt::optimize(&mut m).unwrap();
+            }
+            keel_ir::verify_module(&m).unwrap();
+            for (_, features) in profiles() {
+                for sel in [
+                    SelectionTier::Baseline,
+                    SelectionTier::Trees,
+                    SelectionTier::Full,
+                ] {
+                    for alloc in [AllocationTier::Fast, AllocationTier::Full] {
+                        for pools in [&keel_codegen::x86_64::REGISTERS, &EMPTY] {
+                            // Dead-code removal may delete an unused ordinary load;
+                            // the unoptimized dead chain must still compile safely.
+                            let text = compile(&m.to_string(), sel, alloc, pools, features).0;
+                            if source == SOURCE {
+                                assert_eq!(fused(&text), usize::from(features.sse41), "{text}");
+                            }
+                        }
                     }
                 }
             }

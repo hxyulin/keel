@@ -73,6 +73,28 @@ fn exact_loads_and_shared_volatile_rejections() {
             for spill in [false, true] {
                 let text = compile(&source(), sel, alloc, spill).0;
                 assert_eq!(direct_loads(&text), 6, "{text}");
+                for from in [8, 16, 32] {
+                    for op in ["swiden_low", "uwiden_low"] {
+                        let label = format!("\"{op}{from}\":\n");
+                        let body = text.split_once(&label).unwrap().1;
+                        let body = body.split_once(".cfi_endproc").unwrap().0;
+                        let signed_dwords = op == "swiden_low" && from == 32;
+                        assert_eq!(
+                            body.lines()
+                                .filter(|l| l.trim_start().starts_with("pmovsxdq\t"))
+                                .count(),
+                            usize::from(signed_dwords),
+                            "{body}"
+                        );
+                        if !signed_dwords {
+                            assert!(
+                                body.lines().any(|l| l.trim_start().starts_with("movq\txmm")
+                                    && l.contains("qword ptr [")),
+                                "{body}"
+                            );
+                        }
+                    }
+                }
                 assert!(!text.contains("punpcklqdq\t"), "{text}");
                 // Larger widening ratios observe fewer than eight bytes and
                 // deliberately retain their existing lowering.
