@@ -45,6 +45,24 @@ pub(crate) fn lower(
         return Cow::Borrowed(func);
     }
     let mut f = func.clone();
+    loop {
+        let (next, expanded) = lower_round(f, &keep);
+        f = next;
+        // Match the recursive entry scan, including its short-circuiting keep
+        // calls on the current IR. A compound expansion can create more work.
+        if !expanded
+            || !f
+                .layout_insts()
+                .any(|(_, i)| needs_lowering(&f, f.inst_data(i), &keep))
+        {
+            return Cow::Owned(f);
+        }
+    }
+}
+
+fn lower_round(mut f: Function, keep: &impl Fn(&Function, &InstData) -> bool) -> (Function, bool) {
+    // Scratch slots belong to one round: sharing them across rounds changes
+    // their numbering and the lifetime of captured lane inputs.
     // Inputs are captured before any scalar result is produced. Reuse these
     // buffers across straight-line expansions; no optimizer runs after this pass.
     let mut slots_by_width: [[Option<keel_ir::StackSlot>; 4]; 3] = [[None; 4]; 3];
@@ -52,7 +70,7 @@ pub(crate) fn lower(
     let work: Vec<_> = f.layout_insts().map(|(_, i)| i).collect();
     for inst in work {
         let data = f.inst_data(inst).clone();
-        if !needs_lowering(&f, &data, &keep) {
+        if !needs_lowering(&f, &data, keep) {
             continue;
         }
         if let InstData::Convert {
@@ -510,10 +528,7 @@ pub(crate) fn lower(
         f.remove_inst(inst);
     }
     debug_assert!(keel_ir::verify(&f).is_ok());
-    if expanded {
-        return Cow::Owned(lower(&f, keep).into_owned());
-    }
-    Cow::Owned(f)
+    (f, expanded)
 }
 struct LaneLowering<'a> {
     func: &'a mut Function,
