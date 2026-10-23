@@ -4128,7 +4128,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     .intrinsic(Intrinsic::X86Pclmulqdq128, &[vals[0], vals[1], mode]);
                 self.b.function().inst_results(inst)[0]
             }
-            Builtin::X86Aes(id) | Builtin::X86PackedShift(id) => {
+            Builtin::X86Aes(id) | Builtin::X86PackedShift(id) | Builtin::X86Saturating(id) => {
                 let inst = ins.intrinsic(id, &vals);
                 self.b.function().inst_results(inst)[0]
             }

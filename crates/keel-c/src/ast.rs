@@ -162,6 +162,8 @@ pub enum Builtin {
     Pclmulqdq(u8),
     /// Checked legacy AES-NI builtin with canonical i64x2 operands.
     X86Aes(Intrinsic),
+    /// Checked 128-bit SSE2 saturating integer binary operation.
+    X86Saturating(Intrinsic),
     X86PackedShift(Intrinsic),
     /// Internal scalar broadcast after checked element conversion.
     VectorSplat,

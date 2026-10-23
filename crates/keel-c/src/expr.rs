@@ -1537,6 +1537,34 @@ impl<'a> Parser<'a> {
                 loc,
             ));
         }
+        if let Some((id, unsigned, word)) = saturating_builtin(base) {
+            let args = self.builtin_args(2, loc)?;
+            let elem = match (unsigned, word) {
+                (false, false) => IntKind::SChar,
+                (true, false) => IntKind::UChar,
+                (false, true) => IntKind::Short,
+                (true, true) => IntKind::UShort,
+            };
+            let shape = if word {
+                keel_ir::VectorType::I16x8
+            } else {
+                keel_ir::VectorType::I8x16
+            };
+            if self.target != Target::X86_64LinuxGnu
+                || !matches!(args[0].ty, Ty::Vector(Ty::Int(k), v) if *k == elem && v == shape)
+                || args[0].ty != args[1].ty
+            {
+                return Err(Error::new(
+                    loc,
+                    "SSE2 saturation requires matching signed/unsigned 128-bit byte/word vectors on x86-64",
+                ));
+            }
+            return Ok(mk(
+                ExprKind::Builtin(Builtin::X86Saturating(id), self.slice(&args)),
+                args[0].ty,
+                loc,
+            ));
+        }
         if base == "ia32_pclmulqdq128" {
             let args = self.builtin_args(3, loc)?;
             if self.target != Target::X86_64LinuxGnu
@@ -3104,4 +3132,20 @@ pub(crate) fn packed_shift_builtin(
         _ => return None,
     };
     Some((id, shape, immediate))
+}
+
+/// Bounded private frontend names; boolean fields are unsigned and word lanes.
+pub(crate) fn saturating_builtin(base: &str) -> Option<(keel_ir::Intrinsic, bool, bool)> {
+    use keel_ir::Intrinsic::*;
+    Some(match base {
+        "keel_sse2_paddsb" => (X86Sse2Paddsb128, false, false),
+        "keel_sse2_paddsw" => (X86Sse2Paddsw128, false, true),
+        "keel_sse2_paddusb" => (X86Sse2Paddusb128, true, false),
+        "keel_sse2_paddusw" => (X86Sse2Paddusw128, true, true),
+        "keel_sse2_psubsb" => (X86Sse2Psubsb128, false, false),
+        "keel_sse2_psubsw" => (X86Sse2Psubsw128, false, true),
+        "keel_sse2_psubusb" => (X86Sse2Psubusb128, true, false),
+        "keel_sse2_psubusw" => (X86Sse2Psubusw128, true, true),
+        _ => return None,
+    })
 }

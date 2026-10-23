@@ -257,4 +257,30 @@ static __inline__ __m128i _mm_sra_epi32(__m128i a, __m128i count) {
   return (__m128i)__builtin_keel_sse2_count_psrad((__keel_i32_128)a, ((__keel_u64_128)count)[0]);
 }
 
+/* SSE2 signed/unsigned byte/word saturation uses checked typed operations. */
+static __inline__ __m128i _mm_adds_epi8(__m128i a, __m128i b) {
+  return (__m128i)__builtin_keel_sse2_paddsb((__keel_i8_128)a, (__keel_i8_128)b);
+}
+static __inline__ __m128i _mm_adds_epi16(__m128i a, __m128i b) {
+  return (__m128i)__builtin_keel_sse2_paddsw((__keel_i16_128)a, (__keel_i16_128)b);
+}
+static __inline__ __m128i _mm_adds_epu8(__m128i a, __m128i b) {
+  return (__m128i)__builtin_keel_sse2_paddusb((__keel_u8_128)a, (__keel_u8_128)b);
+}
+static __inline__ __m128i _mm_adds_epu16(__m128i a, __m128i b) {
+  return (__m128i)__builtin_keel_sse2_paddusw((__keel_u16_128)a, (__keel_u16_128)b);
+}
+static __inline__ __m128i _mm_subs_epi8(__m128i a, __m128i b) {
+  return (__m128i)__builtin_keel_sse2_psubsb((__keel_i8_128)a, (__keel_i8_128)b);
+}
+static __inline__ __m128i _mm_subs_epi16(__m128i a, __m128i b) {
+  return (__m128i)__builtin_keel_sse2_psubsw((__keel_i16_128)a, (__keel_i16_128)b);
+}
+static __inline__ __m128i _mm_subs_epu8(__m128i a, __m128i b) {
+  return (__m128i)__builtin_keel_sse2_psubusb((__keel_u8_128)a, (__keel_u8_128)b);
+}
+static __inline__ __m128i _mm_subs_epu16(__m128i a, __m128i b) {
+  return (__m128i)__builtin_keel_sse2_psubusw((__keel_u16_128)a, (__keel_u16_128)b);
+}
+
 #endif /* _KEEL_EMMINTRIN_H */

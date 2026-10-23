@@ -129,7 +129,9 @@ fn builtin(name: &str, target: Target) -> bool {
             )
         });
     };
-    if crate::expr::aes_builtin(base).is_some() || crate::expr::packed_shift_builtin(base).is_some()
+    if crate::expr::aes_builtin(base).is_some()
+        || crate::expr::packed_shift_builtin(base).is_some()
+        || crate::expr::saturating_builtin(base).is_some()
     {
         return target == Target::X86_64LinuxGnu;
     }
