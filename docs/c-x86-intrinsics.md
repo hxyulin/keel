@@ -372,6 +372,65 @@ and `/tmp/keel-conversions-decode.py`. Local logs/lock records use
 `/tmp/keel-conversions-local-release.{log,jsonl}`. Builds/native execution held
 the shared suite lock, used cargo's default cache and kept native-link caching off.
 
+Independent review reapplied candidate `faf36ba0` in its own worktree and
+rebased onto main `3138975a`, preserving all eight saturation and sixteen shift
+wrappers. The frontend dispatch, builtin recognition, shared lowering arm and
+maintained documentation conflicts retain both implementations. No blocking
+production semantic defect was found. Review found that every negative builtin
+case declared an unsupported eight-byte vector, allowing unrelated declaration
+errors to hide bad-call acceptance. The tests now prove the declarations valid
+and require the intended arity/type diagnostic. They also check the exact typed
+intrinsic signatures/opcode metadata, pinned/barrier/trapping classification,
+and text/typed/incremental-chunk object byte parity at strict v1 and an effective
+v3 profile with AVX and optional crypto disabled.
+
+The original live-value callback did not physically clobber SIMD registers.
+Review now places an external call clearing all sixteen XMM registers between
+conversion and capture; direct and indirect callbacks also clobber them before
+returning. All three conversions are repeated across an external MXCSR change
+that clears status, checking retention/order as well as resulting bits/status.
+Each boundary input additionally runs in isolation across all four lanes, so
+adjacent invalid or inexact inputs cannot hide spurious flags on valid INT32_MIN
+or exact conversions. These are focused test corrections; production backend,
+optimizer, ABI, FP policy, widths and target features are unchanged.
+
+Fresh final combined runs passed `x86_conversions`, `x86_saturation`,
+`x86_shifts`, `x86_intrinsics`, `x86_aes` and `pclmul` in debug and release:
+17 tests per profile locally on Apple ARM64 and 20 per profile on LinuxHost. Local
+x86 objects establish frontend/lowering/encoding, not x86 execution. LinuxHost GCC
+16.2.0 and Clang 23.1.1 independently execute the vendor and integer-only
+bit/status oracles in each selection/allocation configuration. The unchanged
+production backend additionally passed `x86_legacy_raw_fp` and
+`x86_raw_fp_conversions` on LinuxHost (six tests per profile), and the existing
+emission-guard unit test passed locally in both profiles. All builds/tests used
+the shared lock, prescribed cargo offline/locked/two-job commands and disabled link
+caching. No timing conclusions were drawn.
+
+The final tested source is `6b3ef4d9908dac1b936cff98910d0c2c9fd346c6`; this
+review evidence documentation is a subsequent commit. Its frozen archive is
+`/tmp/keel-conversion-review-source.tar` on both hosts, SHA-256
+`2bba776ba3a73cf37e436c2e520aaedb63b30c368ef6637ef7944532628d5da8`.
+LinuxHost extracted it at `/tmp/keel-conversion-review-final-97495733`.
+Final logs/lock records are `/tmp/keel-conversion-review-final-{debug,release}.{log,jsonl}`
+on LinuxHost and `/tmp/keel-conversion-review-final-local-{debug,release}.{log,jsonl}`
+locally. Backend FP logs use `/tmp/keel-conversion-review-fp-{debug,release}.{log,jsonl}`
+on LinuxHost; local guard logs use `/tmp/keel-conversion-review-guard-{debug,release}.{log,jsonl}`.
+Native objects, harnesses, linked executables and copies of the exact Rust test
+executables embedding the compiler are below
+`/tmp/keel-conversion-review-final-{debug,release}/keel-c-conversions-*`.
+`/tmp/keel-conversion-review-provenance.json` on LinuxHost records source,
+compiler/test-executable, rustc, GCC, Clang, decoder, kernel, harness, object and
+linked-executable identities. The independent audit is
+`/tmp/keel-conversion-review-audit.py`; disassembly listings sit beside artifacts.
+It decoded 2,206 instructions across six Keel objects, finding each of the three
+legacy conversion mnemonics and checking their mandatory prefixes/opcode bytes.
+The complete finite mnemonic inventories contain only baseline integer/SSE/SSE2
+instructions. Decoding each linked GCC/Clang executable also confirms actual
+vendor conversion instructions and all sixteen physical XMM clears in the
+clobber helper. This is bounded encoding/native evidence, not an exhaustive
+feature-decoder proof, v1-only CPU execution, unmasked-trap validation or a
+performance claim.
+
 FP64, scalar-lane, 256-bit/AVX2, unsigned and undefined-upper-lane conversion
 wrappers remain unsupported. There is no general numeric vector-cast extension.
 
