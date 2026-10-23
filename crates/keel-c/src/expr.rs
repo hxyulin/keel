@@ -1504,6 +1504,39 @@ impl<'a> Parser<'a> {
 
     fn builtin(&mut self, name: &str, loc: Loc) -> R<Expr<'a>> {
         let base = &name["__builtin_".len()..];
+        if let Some((id, shape, immediate)) = packed_shift_builtin(base) {
+            let mut args = self.builtin_args(2, loc)?;
+            if self.target != Target::X86_64LinuxGnu
+                || !matches!(args[0].ty, Ty::Vector(Ty::Int(_), v) if v == shape)
+            {
+                return Err(Error::new(
+                    loc,
+                    "SSE2 packed shift requires its matching 128-bit integer lane shape on x86-64",
+                ));
+            }
+            if immediate {
+                // Reuse the reviewed bounded ICE proof, including undefined-expression checks.
+                let Some(n) = x86_immediate_control(&args[1]).filter(|n| (0..=255).contains(n))
+                else {
+                    return Err(Error::new(
+                        loc,
+                        "SSE2 packed shift control must be an integer constant expression in 0..255",
+                    ));
+                };
+                args[1] = mk(ExprKind::Int(n), Ty::Int(IntKind::ULLong), args[1].loc);
+            } else if args[1].ty != Ty::Int(IntKind::ULLong) {
+                return Err(Error::new(
+                    loc,
+                    "SSE2 packed shift count must be unsigned long long",
+                ));
+            }
+            let ty = args[0].ty;
+            return Ok(mk(
+                ExprKind::Builtin(Builtin::X86PackedShift(id), self.slice(&args)),
+                ty,
+                loc,
+            ));
+        }
         if base == "ia32_pclmulqdq128" {
             let args = self.builtin_args(3, loc)?;
             if self.target != Target::X86_64LinuxGnu
@@ -3047,4 +3080,28 @@ pub(crate) fn aes_builtin(base: &str) -> Option<keel_ir::Intrinsic> {
         "ia32_aeskeygenassist128" => X86Aeskeygenassist128,
         _ => return None,
     })
+}
+
+/// Private scalar-count bridge to architectural shifts; not generic C shift semantics.
+pub(crate) fn packed_shift_builtin(
+    base: &str,
+) -> Option<(keel_ir::Intrinsic, keel_ir::VectorType, bool)> {
+    use keel_ir::{Intrinsic::*, VectorType::*};
+    let (op, immediate) = if let Some(op) = base.strip_prefix("keel_sse2_imm_") {
+        (op, true)
+    } else {
+        (base.strip_prefix("keel_sse2_count_")?, false)
+    };
+    let (id, shape) = match op {
+        "psllw" => (X86Sse2Psllw128, I16x8),
+        "pslld" => (X86Sse2Pslld128, I32x4),
+        "psllq" => (X86Sse2Psllq128, I64x2),
+        "psrlw" => (X86Sse2Psrlw128, I16x8),
+        "psrld" => (X86Sse2Psrld128, I32x4),
+        "psrlq" => (X86Sse2Psrlq128, I64x2),
+        "psraw" => (X86Sse2Psraw128, I16x8),
+        "psrad" => (X86Sse2Psrad128, I32x4),
+        _ => return None,
+    };
+    Some((id, shape, immediate))
 }

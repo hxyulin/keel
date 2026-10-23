@@ -191,4 +191,70 @@ static __inline__ __m128d _mm_andnot_pd(__m128d a, __m128d b) {
   return (__m128d)(~(__m128i)a & (__m128i)b);
 }
 
+/* Architectural counts: oversized logical shifts zero; arithmetic shifts sign-fill. */
+#define _mm_slli_epi16(a, n) \
+  __extension__({ \
+    __m128i __keel_shift_a = (a); \
+    (__m128i)__builtin_keel_sse2_imm_psllw((__keel_i16_128)__keel_shift_a, (n)); \
+  })
+static __inline__ __m128i _mm_sll_epi16(__m128i a, __m128i count) {
+  return (__m128i)__builtin_keel_sse2_count_psllw((__keel_i16_128)a, ((__keel_u64_128)count)[0]);
+}
+#define _mm_slli_epi32(a, n) \
+  __extension__({ \
+    __m128i __keel_shift_a = (a); \
+    (__m128i)__builtin_keel_sse2_imm_pslld((__keel_i32_128)__keel_shift_a, (n)); \
+  })
+static __inline__ __m128i _mm_sll_epi32(__m128i a, __m128i count) {
+  return (__m128i)__builtin_keel_sse2_count_pslld((__keel_i32_128)a, ((__keel_u64_128)count)[0]);
+}
+#define _mm_slli_epi64(a, n) \
+  __extension__({ \
+    __m128i __keel_shift_a = (a); \
+    (__m128i)__builtin_keel_sse2_imm_psllq((__keel_i64_128)__keel_shift_a, (n)); \
+  })
+static __inline__ __m128i _mm_sll_epi64(__m128i a, __m128i count) {
+  return (__m128i)__builtin_keel_sse2_count_psllq((__keel_i64_128)a, ((__keel_u64_128)count)[0]);
+}
+#define _mm_srli_epi16(a, n) \
+  __extension__({ \
+    __m128i __keel_shift_a = (a); \
+    (__m128i)__builtin_keel_sse2_imm_psrlw((__keel_u16_128)__keel_shift_a, (n)); \
+  })
+static __inline__ __m128i _mm_srl_epi16(__m128i a, __m128i count) {
+  return (__m128i)__builtin_keel_sse2_count_psrlw((__keel_u16_128)a, ((__keel_u64_128)count)[0]);
+}
+#define _mm_srli_epi32(a, n) \
+  __extension__({ \
+    __m128i __keel_shift_a = (a); \
+    (__m128i)__builtin_keel_sse2_imm_psrld((__keel_u32_128)__keel_shift_a, (n)); \
+  })
+static __inline__ __m128i _mm_srl_epi32(__m128i a, __m128i count) {
+  return (__m128i)__builtin_keel_sse2_count_psrld((__keel_u32_128)a, ((__keel_u64_128)count)[0]);
+}
+#define _mm_srli_epi64(a, n) \
+  __extension__({ \
+    __m128i __keel_shift_a = (a); \
+    (__m128i)__builtin_keel_sse2_imm_psrlq((__keel_u64_128)__keel_shift_a, (n)); \
+  })
+static __inline__ __m128i _mm_srl_epi64(__m128i a, __m128i count) {
+  return (__m128i)__builtin_keel_sse2_count_psrlq((__keel_u64_128)a, ((__keel_u64_128)count)[0]);
+}
+#define _mm_srai_epi16(a, n) \
+  __extension__({ \
+    __m128i __keel_shift_a = (a); \
+    (__m128i)__builtin_keel_sse2_imm_psraw((__keel_i16_128)__keel_shift_a, (n)); \
+  })
+static __inline__ __m128i _mm_sra_epi16(__m128i a, __m128i count) {
+  return (__m128i)__builtin_keel_sse2_count_psraw((__keel_i16_128)a, ((__keel_u64_128)count)[0]);
+}
+#define _mm_srai_epi32(a, n) \
+  __extension__({ \
+    __m128i __keel_shift_a = (a); \
+    (__m128i)__builtin_keel_sse2_imm_psrad((__keel_i32_128)__keel_shift_a, (n)); \
+  })
+static __inline__ __m128i _mm_sra_epi32(__m128i a, __m128i count) {
+  return (__m128i)__builtin_keel_sse2_count_psrad((__keel_i32_128)a, ((__keel_u64_128)count)[0]);
+}
+
 #endif /* _KEEL_EMMINTRIN_H */
