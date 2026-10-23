@@ -105,6 +105,14 @@ fn exact_shape_and_negative_gates() {
                         ),
                         SOURCE.replace(" v3 =", " v4 = iconst.i64 2\n v5 = iadd v4,v4\n v3 ="),
                         SOURCE.replace(" return", " store v2,v1\n return"),
+                        SOURCE.replace(
+                            " v3 =",
+                            " x86_rflags_region terminal \"save; reapply; normal\"()\n v3 =",
+                        ),
+                        SOURCE.replace(" v3 =", " v4 = iconst.i64 7\n v5 = sdiv v4,v4\n v3 ="),
+                        SOURCE
+                            .replace(" v3 =", " jump block1(v2)\nblock1(v4:i8):\n v3 =")
+                            .replace("sext.i32 v2", "sext.i32 v4"),
                     ] {
                         assert_eq!(
                             fused(&compile(&src, sel, alloc, pools, features).0),
@@ -140,9 +148,17 @@ extern unsigned char cell;
 extern int32_t return_i32(const void*);
 extern int32_t symbolic(void);
 static sigjmp_buf env;
-static void fault(int sig){(void)sig;siglongjmp(env,1);}
-static int traps(void (*fn)(const void*,void*,uint64_t),const void *p,void *out){if(sigsetjmp(env,1))return 1;fn(p,out,1);return 0;}
-__attribute__((noinline)) void clobber(void){__asm__ volatile("":::"memory","rax","rcx","rdx","rsi","rdi","r8","r9","r10","r11");}
+static volatile uintptr_t fault_addr;
+static void fault(int sig,siginfo_t *info,void *context){(void)sig;(void)context;fault_addr=(uintptr_t)info->si_addr;siglongjmp(env,1);}
+static int traps(void (*fn)(const void*,void*,uint64_t),const void *p,void *out,const void *expected){if(sigsetjmp(env,1))return fault_addr==(uintptr_t)expected;fn(p,out,1);return 0;}
+extern void store_before(const void*,void*,void*);
+extern void store_after(const void*,void*,void*);
+static int order_traps(void (*fn)(const void*,void*,void*),const void *p,void *out,void *dest,const void *expected){if(sigsetjmp(env,1))return fault_addr==(uintptr_t)expected;fn(p,out,dest);return 0;}
+__attribute__((noinline)) void clobber(void){__asm__ volatile(
+ "xor %%eax,%%eax\n\txor %%ecx,%%ecx\n\txor %%edx,%%edx\n\t"
+ "xor %%esi,%%esi\n\txor %%edi,%%edi\n\txor %%r8d,%%r8d\n\t"
+ "xor %%r9d,%%r9d\n\txor %%r10d,%%r10d\n\txor %%r11d,%%r11d"
+ :::"memory","cc","rax","rcx","rdx","rsi","rdi","r8","r9","r10","r11");}
 "#,
     );
     let mut checks = String::new();
@@ -206,14 +222,36 @@ for(unsigned edge=0;edge<2;edge++)for(unsigned b=0;b<256;b++){{
  {mode}(alias+8-{bias},alias+8,1);if(memcmp(alias+8,&wide,{width}))return 3;
 }}
 for(unsigned edge=0;edge<2;edge++){{unsigned char out[32];memset(out,0xa5,sizeof out);
- if(!traps({mode},(edge?end:start-1)-{bias},out+1))return 6;
+ if(!traps({mode},(edge?end:start-1)-{bias},out+1,edge?end:start-1))return 6;
  for(unsigned k=0;k<32;k++)if(out[k]!=0xa5)return 7;
 }}
 "#
         );
     }
+    // Distinct invalid read/store addresses identify the first fault. A valid
+    // preceding store must be visible, and a following store must remain absent.
+    for (name, before, after) in [
+        ("store_before", " store v3,v2\n", ""),
+        ("store_after", "", " store v3,v2\n"),
+    ] {
+        ir += &format!(
+            "func @{name}(ptr,ptr,ptr) {{\nblock0(v0:ptr,v1:ptr,v2:ptr):\n v3 = iconst.i32 123\n{before} v4 = load.i8 v0\n v5 = sext.i32 v4\n{after} store v5,v1\n return\n}}\n"
+        );
+    }
+    checks += r#"
+unsigned char output[32],prior[4];memset(output,0xa5,sizeof output);memset(prior,0,sizeof prior);
+if(!order_traps(store_before,start-1,output,end,end))return 11;
+if(!order_traps(store_after,start-1,output,end,start-1))return 12;
+if(!order_traps(store_before,start-1,output,prior,start-1))return 13;
+int32_t marker=123;if(memcmp(prior,&marker,4))return 14;
+memset(prior,0,sizeof prior);
+if(!order_traps(store_after,start-1,output,prior,start-1))return 15;
+for(unsigned k=0;k<4;k++)if(prior[k])return 16;
+*start=255;if(!order_traps(store_after,start,output,end,end))return 17;
+for(unsigned k=0;k<32;k++)if(output[k]!=0xa5)return 18;
+"#;
     c += &format!(
-        "int main(void){{signal(SIGSEGV,fault);size_t n=(size_t)sysconf(_SC_PAGESIZE);unsigned char*p=mmap(0,3*n,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);if(p==MAP_FAILED||mprotect(p,n,PROT_NONE)||mprotect(p+2*n,n,PROT_NONE))return 1;unsigned char*start=p+n,*end=p+2*n;{checks}return 0;}}\n"
+        "int main(void){{struct sigaction action={{0}};action.sa_sigaction=fault;action.sa_flags=SA_SIGINFO;sigemptyset(&action.sa_mask);if(sigaction(SIGSEGV,&action,0))return 19;size_t n=(size_t)sysconf(_SC_PAGESIZE);unsigned char*p=mmap(0,3*n,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);if(p==MAP_FAILED||mprotect(p,n,PROT_NONE)||mprotect(p+2*n,n,PROT_NONE))return 1;unsigned char*start=p+n,*end=p+2*n;{checks}return 0;}}\n"
     );
     if let Some(dir) = &evidence {
         fs::create_dir_all(dir).unwrap();
@@ -241,7 +279,7 @@ for(unsigned edge=0;edge<2;edge++){{unsigned char out[32];memset(out,0xa5,sizeof
                     ("empty", &EMPTY),
                 ] {
                     let (text, obj) = compile(&ir, sel, alloc, pools, Features::for_level(level));
-                    assert_eq!(fused(&text), 8, "{text}");
+                    assert_eq!(fused(&text), 10, "{text}");
                     assert!(
                         !text
                             .lines()
@@ -396,7 +434,8 @@ fn symbolic_stack_address_and_resolved_input_alias() {
 #[test]
 fn encoding_matches_independent_clang() {
     use object::{Object, ObjectSection};
-    let dir = std::path::PathBuf::from("/tmp").join(format!("keel-sext8-encoding-{}", std::process::id()));
+    let dir = std::path::PathBuf::from("/tmp")
+        .join(format!("keel-sext8-encoding-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     let asm = ".intel_syntax noprefix\n.text\nmovsx edi,byte ptr [rdi]\nmovsx eax,byte ptr [rax]\nmovsx r13d,byte ptr [r12+r9*8+127]\nmovsx r9d,byte ptr [rbp-256]\n";
     fs::write(dir.join("oracle.s"), asm).unwrap();

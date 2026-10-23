@@ -164,3 +164,74 @@ lock records use `/tmp/keel-sext8-verified-{build,app-lock}.jsonl`.
 receipt identities. Initial harness parse/build warnings and the superseded
 snapshot parity failure remain in the earlier task-owned artifacts; no failed
 run is counted as passing evidence.
+
+## Independent review on main 2b69f9fb
+
+The isolated `review/sext-i8-load-isel` worktree reapplied candidate
+`05332234f72186931a68f82d13d4ff82d345b518` onto the requested clean main.
+The audit found no production correctness defect in the bounded cover or its
+emitter. It found two validation gaps: an empty inline-assembly clobber list
+allowed the original native callback to retain caller-saved register contents,
+and the original fault handler accepted any SIGSEGV without identifying its
+address. Those earlier checks alone did not prove physical call pressure or
+read/store fault ordering.
+
+The maintained harness now physically clears RAX, RCX, RDX, RSI, RDI and
+R8–R11. Independent GNU objdump output confirms all nine XOR instructions.
+SA_SIGINFO records the actual fault address. Distinct protected read and store
+addresses check both orderings; a valid preceding store must become visible,
+a following store must remain absent, and a valid byte read followed by an
+invalid store must report the store address. Output canaries remain intact on
+fault. Raw FLAGS ownership, division and cross-block negatives were added to
+the existing 54-configuration selection/allocation/feature matrix. An attempted
+inline-assembly emission negative was dropped because x86 inline assembly is
+unsupported; it is not counted as passing evidence.
+
+Fresh review validation passes 118 library tests and 26 focused integration
+tests (one existing measurement test ignored). The final five dedicated tests
+pass in debug and release, including text/typed/chunked object parity,
+operand-dependent feature checks and the independent Clang encoding oracle.
+The release illegal-feature emission guard passes separately. Both GCC and
+Clang pass all 54 final native configurations in each profile: 216 native
+runs, including all 256 byte values at both guarded edges, physical callback
+clobbers, pointer/result aliases, normal/tiny/empty pools, symbolic addresses,
+unchanged MXCSR and the separate following unsigned extension. All 162 final
+object/assembly/C exports agree byte-for-byte between debug and release.
+These results distinguish lowering/encoding from native execution; no new
+frontend or full-program semantic claim follows from the backend matrix.
+
+The application provenance audit independently hashes all tracked `crates/`,
+`suite/` and Cargo/toolchain inputs in the retained LinuxHost snapshots: 1,849
+baseline files match main `2b69f9fb`, and 1,850 candidate files match the
+original reviewed commit, with no missing or differing files. Compiler binary
+hashes, receipt hashes and candidate production source hashes agree with the
+original manifest. Normalizing only compiler/output paths, emission form and
+CPU level leaves the raw application commands identical to their original
+qualified audit commands. Retained optimized v3 IR remains byte-identical
+between baseline and candidate. A fresh objdump/nm recount of all twelve raw
+objects confirms 67 QuickJS and 244 SQLite m8 MOVSX activations and the stated
+268/969 summed-function-byte reductions at each level. All 36 retained
+application correctness invocations were executed again successfully. This
+review reuses those verified application binaries; it does not claim a new
+application rebuild or timing measurement.
+
+Review artifacts are `/tmp/keel-sext8-review-{debug,release}` locally and on
+LinuxHost. Local logs use `/tmp/keel-sext8-review-{debug,debug-focus,release,guard}.log`
+and lock records use `/tmp/keel-sext8-review-{check,release,guard}.jsonl`.
+Native reports on both hosts are
+`/tmp/keel-sext8-review-{debug,release}-{gcc,clang}-results.json`;
+LinuxHost native lock records are `/tmp/keel-sext8-review-native.jsonl`.
+Independent application/source audits and scripts are
+`/tmp/keel-sext8-review-{audit,source-audit}.{json,py}`;
+`/tmp/keel-sext8-review-clobber.dis` records physical callback writes.
+`/tmp/keel-sext8-review-manifest.json` identifies the final reviewed source
+and receipts. Failed exploratory checks remain in task-owned logs and are
+not counted as passes. Repository-wide formatting has existing differences;
+the changed test file passes its direct rustfmt check and `git diff --check`.
+
+Production changes remain exactly the signed-byte candidate; review fixes own
+only this test and this document. Main and sibling worktrees remain untouched.
+The current main remains `2b69f9fb`; combined validation after any later mask
+pilot integration belongs to the parent integration round. No archived LEA
+candidate was restored. No profitability claim, CPUID-masked execution or
+exhaustive application coverage is established by this review.
