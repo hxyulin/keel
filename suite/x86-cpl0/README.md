@@ -51,8 +51,8 @@ register values are promised. RSP is 16-byte aligned immediately before CALL
 (8 modulo 16 on entry); the dedicated stack is 64 KiB. BSS is zeroed before
 page-table setup and the first call. Payload text, rodata, data and BSS are linked
 into the same low-memory image; all unresolved helpers must be supplied. The
-linker rejects an image/BSS outside the first identity-mapped GiB. Guest RAM is
-32 MiB, so payloads and their accesses must also fit that smaller physical RAM.
+linker and flat-image validator reject an image/BSS beyond the 32 MiB guest
+RAM limit. Payload accesses must also stay within RAM and the identity map.
 No ELF executable loader, dynamic linking, TLS, libc or operating system exists.
 
 C bridges should use an existing x86-64 ELF compiler with `-ffreestanding

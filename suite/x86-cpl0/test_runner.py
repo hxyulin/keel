@@ -76,6 +76,17 @@ class RunnerTests(unittest.TestCase):
         with self.assertRaises(run.HarnessError):
             run.validate_flat(b'')
 
+    def test_bss_must_fit_physical_ram(self):
+        raw = bytearray(64)
+        struct.pack_into('<8I', raw, 0, 0x1badb002, 0x10003,
+                         (-0x1badb002 - 0x10003) & 0xffffffff,
+                         0x100000, 0x100000, 0x100040, 0x2000000, 0x100020)
+        run.validate_flat(raw)
+        for end in (0x2000001, 0x3fffffff, 0x40000000):
+            struct.pack_into('<I', raw, 24, end)
+            with self.assertRaises(run.HarnessError):
+                run.validate_flat(raw)
+
     def test_guest_is_emulated_and_disconnected(self):
         argv = run.qemu_command('qemu', Path('/tmp/guest.bin'), Path('/tmp/status'))
         for required in ('tcg,thread=single', '-nodefaults', '-no-user-config', '-no-reboot'):

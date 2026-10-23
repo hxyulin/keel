@@ -40,7 +40,7 @@ def validate_flat(raw):
     if (magic != 0x1badb002 or flags != 0x10003
             or (magic + flags + checksum) & 0xffffffff
             or header != start or start != 0x100000
-            or end - start != len(raw) or not end <= bss < 0x40000000
+            or end - start != len(raw) or not end <= bss <= 0x2000000
             or not start + 32 <= entry < end):
         raise HarnessError('invalid flat multiboot placement/bounds')
 
