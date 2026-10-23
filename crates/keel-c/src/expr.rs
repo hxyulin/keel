@@ -2697,6 +2697,7 @@ impl<'a> Parser<'a> {
         // The name cannot clash: it is not an identifier.
         let name = self.unique_name("compound literal");
         let id = self.new_local(name, ty, sugar, true);
+        self.fs.as_mut().unwrap().locals[id].compound_literal = true;
         Ok(mk(ExprKind::CompoundLit(id, self.init_node(init)), ty, loc))
     }
 

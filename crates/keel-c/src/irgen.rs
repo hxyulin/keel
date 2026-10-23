@@ -118,7 +118,7 @@ impl<'p> Gen<'p> {
             self.check_value_signature(def.ty, def.loc)?;
             // Run before pruning: discarded definitions cannot hide unsafe ABI
             // calls, varargs, aggregate reads/copies or unsupported locals.
-            for local in &def.locals {
+            for local in def.locals.iter().filter(|l| !l.compound_literal) {
                 self.check_value_type(&local.ty, def.loc)?;
             }
             let mut error = None;
@@ -159,7 +159,7 @@ impl<'p> Gen<'p> {
             }
         }
         for global in &self.p.globals {
-            if global.defined && !matches!(global.ty, Ty::Func(_)) {
+            if global.defined && !global.compound_literal && !matches!(global.ty, Ty::Func(_)) {
                 self.check_value_type(&global.ty, Loc::default())?;
                 if let Some(init) = &global.init {
                     let mut error = None;
@@ -565,6 +565,25 @@ impl<'p> Gen<'p> {
     }
 
     fn check_value_expr(&self, e: &Expr<'_>, use_: ExprUse) -> R<()> {
+        // Literal storage recorded during parsing may belong to an unevaluated
+        // query. Reaching its expression here establishes actual materialization,
+        // even when only its address (or a supported member) is requested.
+        if let ExprKind::CompoundLit(..) = e.kind {
+            self.check_value_type(&e.ty, e.loc)?;
+        }
+        if let ExprKind::Global(g) = e.kind
+            && self.p.globals[g].compound_literal
+        {
+            self.check_value_type(&e.ty, e.loc)?;
+            if let Some(init) = &self.p.globals[g].init {
+                let mut result = Ok(());
+                visit_init_exprs(init, &mut |e, use_| {
+                    result = self.check_value_expr(e, use_);
+                    result.as_ref().ok().copied()
+                });
+                result?;
+            }
+        }
         // Array expressions decay to pointers. Taking an object's address or
         // computing a member address does not read the containing value.
         if use_ != ExprUse::Address && !matches!(e.ty, Ty::Array(_)) {

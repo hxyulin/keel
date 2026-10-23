@@ -189,3 +189,79 @@ fn native_aggregate_abi_reproducer_diagnoses() {
         }
     }
 }
+
+#[test]
+fn unevaluated_compound_literals_preserve_layout_queries() {
+    for target in Target::ALL {
+        for query in [
+            "sizeof((Box){})",
+            "sizeof((Q){})",
+            "_Alignof((Box){})",
+            "sizeof((Box[2]){})",
+            "sizeof((struct Holder { Box *p; }){ &(Box){} })",
+        ] {
+            let source = format!(
+                "{TYPES} _Static_assert({query} > 0, \"layout\"); int f(void) {{ return {query}; }} static inline int unused(void) {{ return {query}; }}"
+            );
+            for debug in [false, true] {
+                let module = compile(&source, target, debug).unwrap();
+                keel_ir::verify_module(&module).unwrap();
+                assert!(module.data.is_empty(), "unevaluated literal emitted data");
+                keel_codegen::compile_program(&module, target).unwrap();
+            }
+        }
+        for source in [
+            "Box *f(void) { return &(Box){}; }",
+            "int f(void) { return (struct Tagged { Q q; int tag; }){}.tag; }",
+            "extern Box get(void); static void f(void) { (void)&(struct CB { Box (*p)(void); }){get}; }",
+            "extern Box get(void); static void *p = &(struct CB { Box (*p)(void); }){get};",
+            "static void f(void) { (void)&(Box){}; }",
+            "Box *p = &(Box){};",
+            "static Box *p = &(Box){};",
+            "struct Holder { Box *p; }; struct Holder h = { &(Box){} };",
+            "static inline void f(void) { (void)(Box[2]){}; }",
+        ] {
+            let error = compile(&format!("{TYPES}{source}"), target, false)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("__float128") && error.contains("not supported"),
+                "{source}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn late_completion_cycles_atomics_and_shadowing() {
+    for target in Target::ALL {
+        for source in [
+            "struct S; struct S object; struct S { struct S *next; __float128 q; };",
+            "struct S; static void f(void) { struct S object; } struct S { __float128 q; };",
+            "struct S; extern struct S object; static void f(void) { (void)object; } struct S { __float128 q; };",
+            "struct S { struct S *next; __float128 q; }; void f(struct S x) {}",
+            "struct S { int tag; __float128 q[]; }; struct S object;",
+        ] {
+            assert!(compile(source, target, false).is_err(), "{source}");
+        }
+        let source = r#"
+            struct Incomplete;
+            typedef __float128 Q;
+            struct S { struct S *next; Q q; };
+            struct Good { _Atomic(Q*) p; struct Incomplete *i; };
+            struct Good copy(struct Good x) { return x; }
+            extern struct Incomplete unknown;
+            struct Incomplete *address(void) { return &unknown; }
+            int f(void) { typedef double Q; Q x = 2; return x; }
+            int g(void) { int Q = 3; return Q; }
+            extern Q original;
+            _Static_assert(sizeof(original)==16,"outer typedef survives");
+        "#;
+        keel_ir::verify_module(&compile(source, target, false).unwrap()).unwrap();
+        for ty in ["__float128", "struct S"] {
+            let source = format!("struct S {{ __float128 q; }}; extern _Atomic({ty}) object;");
+            let error = compile(&source, target, false).unwrap_err().to_string();
+            assert!(error.contains("`_Atomic` requires"), "{error}");
+        }
+    }
+}

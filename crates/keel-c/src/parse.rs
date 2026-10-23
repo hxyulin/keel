@@ -1024,6 +1024,7 @@ impl<'a> Parser<'a> {
             align,
             scope: fs.scope,
             in_memory,
+            compound_literal: false,
             cleanup: None,
         });
         let id = fs.locals.len() - 1;
@@ -1055,6 +1056,7 @@ impl<'a> Parser<'a> {
             align,
             internal: true,
             defined: true,
+            compound_literal: true,
             init: Some(init),
             is_const,
             thread_local: false,
@@ -1575,6 +1577,7 @@ impl<'a> Parser<'a> {
                 align,
                 internal: true,
                 defined: true,
+                compound_literal: false,
                 init: None,
                 is_const,
                 thread_local: spec.thread_local,
@@ -1702,6 +1705,7 @@ impl<'a> Parser<'a> {
                     align: 1,
                     internal: false,
                     defined: false,
+                    compound_literal: false,
                     init: None,
                     is_const: false,
                     thread_local: false,
@@ -3323,6 +3327,7 @@ impl<'a> Parser<'a> {
                     align: 4,
                     scope: fs.scope,
                     in_memory: false,
+                    compound_literal: false,
                     cleanup: None,
                 });
                 names.push((Some(name), INT, Sugar::Plain, loc));

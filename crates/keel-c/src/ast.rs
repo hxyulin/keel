@@ -309,6 +309,8 @@ pub struct Local<'a> {
     /// `.` (`compound literal.3`).
     pub name: &'a str,
     pub ty: Ty<'a>,
+    /// Backing storage for a compound literal; validate only when evaluated.
+    pub compound_literal: bool,
     pub sugar: Sugar<'a>,
     pub align: u64,
     /// The block scope it is declared in, `None` for the function's
@@ -363,6 +365,8 @@ pub struct Global<'a> {
     /// Defined in this file: a function body, an initializer, or a
     /// tentative definition (`int x;`).
     pub defined: bool,
+    /// Backing storage for a file-scope compound literal.
+    pub compound_literal: bool,
     pub init: Option<Init<'a>>,
     pub is_const: bool,
     pub thread_local: bool,
