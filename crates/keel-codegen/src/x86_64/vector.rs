@@ -216,9 +216,11 @@ pub(super) fn lower(func: &Function, features: keel_asm_ir::x86::Features) -> Co
                 .vector()
                 .is_some_and(|s| s.bytes() != 16)
         });
-        if matches!(data,InstData::VectorSplat{ty,..} if ty.vector().is_some_and(|s|s.bytes()!=16))
-        {
-            wide = true;
+        // Conversions can widen a 128-bit operand into a 256-bit result.
+        // After AVX2 selection declines them, the SSE recipes below must not
+        // retain that result: they only initialize 128 bits. Use lane lowering.
+        if let InstData::VectorSplat { ty, .. } | InstData::Convert { ty, .. } = data {
+            wide |= ty.vector().is_some_and(|s| s.bytes() != 16);
         }
         if wide {
             return false;
