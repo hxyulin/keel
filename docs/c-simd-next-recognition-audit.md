@@ -1,9 +1,130 @@
 # Next C SIMD recognition audit
 
+## Implementation acceptance from 9208b9e4
+
+On 2026-10-23 the bounded design refined in `dbfc4eb7` was implemented from
+clean `9208b9e4061bc46bd0b17d668bbfb8c1bc8d7fed` in an isolated worktree.
+`d2422cc4` owns only `keel-opt/src/stack_forward.rs` and its new integration
+suite; `d037033a` owns the dedicated C-to-object test and two native fixtures.
+This section supersedes the future-tense acceptance requirements below; the
+original research and counterfactual evidence remain historical.
+
+The helper and call site add roughly 90 lines. They consume the existing final
+sixteen byte facts and require the exact two i64 sign extensions of lanes 0/1
+of one resolved i32x4 snapshot. The source, extracts and extensions must be
+live and owned by the reload block, with a live source block parameter also
+allowed. Nonzero source result indices are checked against their producer's
+result list. Existing exact/global forwarding keeps precedence. Success adds
+one conversion at the reload's position/location and uses the existing
+replacement/removal and whole-slot remaining-load cleanup. Failed proofs do
+not mutate IR. Shared pure producers remain eligible and DCE owns deadness.
+No analysis, use scan, cap, API, schedule, header, ABI, FP or default-width
+change was added. The existing little-endian target assumption still applies.
+
+The seven focused optimizer tests include a 35-scenario byte-composition
+matrix, direct aliases/detached producers/live parameters, nonzero source
+result ownership, source locations and unchanged effect identities/flags/order,
+shared-producer survival, residual-read store retention, standalone idempotence
+and Full fixed points/straight-line CFG exposure. They verify valid fixtures;
+detached fixtures assert rejection without claiming valid SSA. A future
+producer is rejected by the SSA verifier. Earlier overwritten zeros/torn/overlap
+writes can match; incomplete or finally damaged bytes, unsupported conversions,
+wrong lanes/sources/types, escapes, debug homes, volatile/atomic observations,
+frame observers, returns-twice and opaque stack marks do not gain permission.
+The existing alias guard and lifetime suites remain intact.
+
+Validation used the shared default cargo cache, disabled link caching and the
+shared lock, preserving the toolchain and default features:
+
+```sh
+python3 suite/fast_opt_locked.py /tmp/keel-low-widen-93690-opt-final.jsonl \
+  cargo test --offline --locked -j2 -p keel-opt \
+  --test stack_forward_widen --test stack_forward --test stack_forward_lifetimes --lib
+python3 suite/fast_opt_locked.py /tmp/keel-low-widen-93690-backend.jsonl \
+  cargo test --offline --locked -j2 -p keel-codegen \
+  --test vector_widen_x86 --test vector_widen_aarch64
+KEEL_C_STACK_WIDEN_EVIDENCE=/tmp/keel-low-widen-93690-native-final \
+  python3 suite/fast_opt_locked.py /tmp/keel-low-widen-93690-c-final.jsonl \
+  cargo test --offline --locked -j2 -p keel --test stack_forward_widen
+python3 suite/fast_opt_locked.py /tmp/keel-low-widen-93690-release.jsonl \
+  cargo test --offline --locked -j2 -p keel-codegen --release --lib feature_guard_tests
+```
+
+The optimizer run passed 41 library, 24 existing forwarding, 10 lifetime and
+seven new tests (one existing sealed-profile test remains ignored). The reused
+backend suites passed eight x86 and two ARM tests; the release legality guard
+passed. The dedicated C test passed in debug and release. It distinguishes
+unoptimized frontend construction from actual Full matcher formation, verifies
+IR and emits strict v1/v2/v3, effective v3 minus
+`sse41,avx,avx2,fma,f16c`, and baseline Apple ARM objects. Baseline/tree/full
+selection, normal/empty allocation pools, and text/typed/chunked object parity
+are checked for all configurations, including forced spills.
+
+Native Apple ARM execution passed all six selection/allocation configurations
+in both build profiles. LinuxHost (Ryzen 9 9950X3D, Linux) passed 48 runs per build
+profile: four x86 feature configurations times three selectors times two pool
+configurations times independent Clang 23.1.1/GCC 16.2.0 harness builds. CPU
+flags were checked before x86 execution. The scalar oracle covers 625 signed
+edge combinations plus seeded random inputs through 2,048 rows, single source
+pointer evaluation, original snapshots across a mutating call that also zeros
+all caller-saved SIMD registers, exact input/output aliases, canaries and both
+protected page edges. A separate align-1 IR construction activates the matcher
+and retains its full sixteen-byte input load and output store: eight readable
+input bytes fault before shared output publication and a later external effect;
+eight writable output bytes fault before the later effect. The deliberately
+unaligned fault witness makes no defined-C-alignment claim. Execution on these
+newer CPUs is not feature-masked v1 hardware certification.
+
+Frozen release compilers were built from the baseline archive and candidate
+with the same locked cargo command. Their SHA-256 identities are:
+
+- Baseline: `54b9a00678360da9b5027aa5e6c3c1ac7a61607a7654d128ff21d5bcd72ba7ec`.
+- Candidate: `f920f263c4b77403ea1f457398b5d32f52ed2f18f1a05a8f7a186aeb85310e8c`.
+
+The maintained `suite/simd-compare/run.py` paired Full `widen` campaign completed
+static/correctness checks on all four profiles. Verified Full C IR now forms
+`swiden_low.i64x2`; frontend C lowering is unchanged. Independent LinuxHost LLVM
+objdump decoding gives the following whole-function counts, including frames
+and argument moves. Text bytes come from the object section, separately from
+assembly counts:
+
+| Profile | Baseline C instructions / text bytes | Candidate C instructions / text bytes |
+| --- | ---: | ---: |
+| v1 | 26 / 93 | 17 / 55 |
+| v2 | 26 / 93 | 13 / 38 |
+| v3 | 26 / 93 | 13 / 38 |
+| Apple ARM | 22 / 88 | 12 / 48 |
+
+Candidate C text is byte-identical to the explicit IR control on each profile;
+the explicit IR text is unchanged between compiler revisions. Decoding retains
+full `movups`/`ldr q` input snapshots and full output stores; SSE4.1 uses register
+`pmovsxdq`, v1 uses the existing SSE2 recipe, and ARM uses `sshll`. This grants
+no m64 external-load cover. The smaller Clang objects still use a different
+footprint/code shape; no remaining explicit-IR-to-Clang gap is claimed closed.
+
+The requested paired seven-round benchmark was attempted with frozen baseline
+and candidate compilers. The maintained preflight deferred it at load 2.74
+(`complete:false`, `contended host; timing deferred`). No measured runtime or
+compile-cost samples were accepted. Diagnostic command/build wall times are
+not compiler-cost measurements. Static counts are not speedup ratios, and this
+finite sample establishes no application or arbitrary auto-vectorization claim.
+
+Artifacts, exact logs, Full IR, frozen compilers, object parity and static
+reports remain under `/tmp/keel-low-widen-93690-*`. Local acceptance logs end in
+`opt-final`, `c-final`, `c-release`, `backend` and `release`; the completed static
+report is `static-final/report.json`, and the deferred timing report is
+`benchmark/report.json`. LinuxHost native results are
+`/tmp/keel-low-widen-93690-native{,-release}/linuxhost-native.json`, with lock logs
+`/tmp/keel-low-widen-93690-linuxhost-{final,release}.jsonl`; independent decoded
+counts are `static-final/decoded-counts.json` on both hosts. No generated
+artifact is committed. Independent review and parent integration remain open.
+
+## Historical design and research
+
 Design refinement at clean main
 `334d84665dce141785503dae8d26e51eb1c72d35`, in an isolated research worktree.
-This document is the only Git change; no production matcher, frontend builtin,
-header, pipeline or backend change is implemented. The original object/native
+At that research revision this document was the only Git change; no production
+matcher, frontend builtin, header, pipeline or backend change was implemented. The original object/native
 investigation below was at `d7d89d7daf6dfd8778869f4aa5487707deaa229e`;
 its evidence is historical, not a fresh execution claim for this base.
 The wrapping i32x4 sum (`68d55bbc`) and SSE4.1 register widening (`d0aec154`)
