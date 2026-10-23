@@ -232,7 +232,12 @@ fn debugger() {
         for command in commands {
             lldb.arg("-o").arg(command);
         }
-        let out = run_with_timeout(lldb.arg("vars")).replace(dir.to_str().unwrap(), "DIR");
+        // LLDB reports physical executable paths. cargo manages targets through
+        // a symlink, so normalize the resolved per-build directory as well.
+        let physical_dir = dir.canonicalize().unwrap();
+        let out = run_with_timeout(lldb.arg("vars"))
+            .replace(physical_dir.to_str().unwrap(), "DIR")
+            .replace(dir.to_str().unwrap(), "DIR");
         sessions.push((build_, normalize(&out)));
     }
     let (_, clang) = &sessions[0];
