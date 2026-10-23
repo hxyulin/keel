@@ -19,6 +19,29 @@ pub(crate) fn mk<'a>(kind: ExprKind<'a>, ty: Ty<'a>, loc: Loc) -> Expr<'a> {
     }
 }
 
+/// The general constant evaluator stores integer values in 64 bits. Do not
+/// use it as a representability proof through i128 (or extended FP/pointer)
+/// intermediates, even when the final scalar type is narrower.
+fn broadcast_constant(e: &Expr<'_>) -> Option<Const> {
+    fn supported(e: &Expr<'_>) -> bool {
+        if !(e.ty.int_kind().is_some_and(|k| k.size() <= 8)
+            || matches!(e.ty, Ty::Float | Ty::Double))
+        {
+            return false;
+        }
+        match e.kind {
+            ExprKind::Int(_) | ExprKind::Float(_) => true,
+            ExprKind::Cast(a) | ExprKind::Unary(_, a) => supported(a),
+            ExprKind::Binary(_, a, b) | ExprKind::LogAnd(a, b) | ExprKind::LogOr(a, b) => {
+                supported(a) && supported(b)
+            }
+            ExprKind::Cond(a, b, c) => supported(a) && supported(b) && supported(c),
+            _ => false,
+        }
+    }
+    supported(e).then(|| eval_constant(e, false)).flatten()
+}
+
 fn binary_prec(p: &str) -> Option<u8> {
     Some(match p {
         "||" => 1,
@@ -167,12 +190,21 @@ impl<'a> Parser<'a> {
         }
         if ty.is_vector() || rhs.ty.is_vector() {
             // Validate through the same operator rules before building a single-evaluation assignment.
-            self.vector_binop(bin, lhs, rhs, loc)?;
+            if !ty.is_vector() {
+                return Err(Error::new(
+                    loc,
+                    "scalar compound assignment requires a scalar right operand",
+                ));
+            }
+            let checked = self.vector_binop(bin, lhs, rhs, loc)?;
+            let ExprKind::Binary(_, _, rhs) = checked.kind else {
+                unreachable!()
+            };
             return Ok(mk(
                 ExprKind::OpAssign {
                     op: bin_op(bin),
                     lhs: self.node(lhs),
-                    rhs: self.node(rhs),
+                    rhs,
                 },
                 ty,
                 loc,
@@ -471,18 +503,31 @@ impl<'a> Parser<'a> {
     }
 
     fn vector_binop(&mut self, p: &str, l: Expr<'a>, r: Expr<'a>, loc: Loc) -> R<Expr<'a>> {
-        let Ty::Vector(elem, shape) = l.ty else {
-            return Err(Error::new(
-                loc,
-                "vector operations require matching vector operands; scalar broadcast is not supported",
-            ));
+        let vector_ty = if l.ty.is_vector() { l.ty } else { r.ty };
+        let Ty::Vector(elem, shape) = vector_ty else {
+            unreachable!()
         };
-        if l.ty != r.ty {
-            return Err(Error::new(
-                loc,
-                "vector operations require matching vector operands; implicit vector conversions are not supported",
-            ));
-        }
+        let (l, r) = if l.ty.is_vector() && r.ty.is_vector() {
+            if l.ty != r.ty {
+                return Err(Error::new(
+                    loc,
+                    "vector operations require matching vector operands; implicit vector conversions are not supported",
+                ));
+            }
+            (l, r)
+        } else {
+            if matches!(p, "<<" | ">>") {
+                return Err(Error::new(
+                    loc,
+                    "scalar vector shift counts are not supported",
+                ));
+            }
+            if l.ty.is_vector() {
+                (l, self.vector_broadcast(r, vector_ty, loc)?)
+            } else {
+                (self.vector_broadcast(l, vector_ty, loc)?, r)
+            }
+        };
         let allowed = if elem.is_float() {
             matches!(
                 p,
@@ -526,6 +571,60 @@ impl<'a> Parser<'a> {
         };
         Ok(mk(
             ExprKind::Binary(op, self.node(l), self.node(r)),
+            ty,
+            loc,
+        ))
+    }
+
+    /// A bounded, lossless GNU scalar conversion before splatting. In particular,
+    /// never use assignment conversion to silently truncate a wide scalar.
+    fn vector_broadcast(&mut self, scalar: Expr<'a>, ty: Ty<'a>, loc: Loc) -> R<Expr<'a>> {
+        let Ty::Vector(elem, _) = ty else {
+            unreachable!()
+        };
+        let safe = match (scalar.ty.int_kind(), elem.int_kind()) {
+            (Some(from), Some(to)) if from.size() <= 8 => {
+                let range_fits = if from == IntKind::Bool {
+                    true
+                } else if from.signed() == to.signed() {
+                    from.size() <= to.size()
+                } else {
+                    !from.signed() && from.size() < to.size()
+                };
+                range_fits
+                    || broadcast_constant(&scalar).is_some_and(|c| {
+                        let Const::Int(bits) = c else { return false };
+                        let value = if from.signed() {
+                            bits as i128
+                        } else {
+                            (bits as u64) as i128
+                        };
+                        let width = to.size() * 8;
+                        let (min, max) = if to.signed() {
+                            (-(1i128 << (width - 1)), (1i128 << (width - 1)) - 1)
+                        } else {
+                            (0, (1i128 << width) - 1)
+                        };
+                        (min..=max).contains(&value)
+                    })
+            }
+            _ => match (scalar.ty, *elem) {
+                (Ty::Float, Ty::Float | Ty::Double) | (Ty::Double, Ty::Double) => true,
+                (Ty::Double, Ty::Float) => broadcast_constant(&scalar).is_some_and(
+                    |c| matches!(c, Const::Float(f) if f.is_finite() && (f as f32) as f64 == f),
+                ),
+                _ => false,
+            },
+        };
+        if !safe {
+            return Err(Error::new(
+                loc,
+                "scalar broadcast requires a lossless supported conversion to the vector element type; use an explicit scalar cast",
+            ));
+        }
+        let scalar = self.cast(scalar, *elem);
+        Ok(mk(
+            ExprKind::Builtin(Builtin::VectorSplat, self.slice(&[scalar])),
             ty,
             loc,
         ))

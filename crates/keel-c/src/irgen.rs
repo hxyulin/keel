@@ -4002,6 +4002,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 let mask = ins.vfcmp(cc, vals[0], vals[1]);
                 self.b.ins().convert(ConvertOp::Bitcast, e.ty.ir(), mask)
             }
+            Builtin::VectorSplat => ins.vsplat(e.ty.ir(), vals[0]),
             Builtin::VectorShuffle => ins.vshuffle(
                 vals[0],
                 vals[1],

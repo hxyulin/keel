@@ -231,7 +231,7 @@ fn unsupported_vectors_are_diagnosed() {
             "typedef int V __attribute__((vector_size(16))); V f(V x,V y){return x/y;}",
             "typedef int V __attribute__((vector_size(16))); V f(V x,V y){return x%y;}",
             "typedef float V __attribute__((vector_size(16))); V f(V x,V y){return x&y;}",
-            "typedef int V __attribute__((vector_size(16))); V f(V x){return x+1;}",
+            "typedef int V __attribute__((vector_size(16))); V f(V x,long n){return x+n;}",
             "typedef int V __attribute__((vector_size(16))); int f(V x){return !x;}",
             "typedef int V __attribute__((vector_size(16))); int f(V x){return x[4];}",
             "typedef int V __attribute__((vector_size(16))); int f(V x){return x[-1];}",

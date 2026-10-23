@@ -45,12 +45,25 @@ fn sources() -> (String, String) {
             ("ne", "a!=b", true),
             ("lt", "a<b", true),
             ("ge", "a>=b", true),
+            ("broadcast_add", "a+b[0]", false),
+            ("broadcast_sub", "b[0]-a", false),
+            ("broadcast_mul", "a*b[0]", false),
+            ("broadcast_eq", "a==b[0]", true),
+            ("broadcast_lt", "b[0]<a", true),
+            ("broadcast_ne", "a!=b[0]", true),
+            ("broadcast_le", "a<=b[0]", true),
+            ("broadcast_gt", "b[0]>a", true),
+            ("broadcast_ge", "a>=b[0]", true),
         ];
         if id.starts_with('f') {
             ops.push(("div", "a/b", false));
+            ops.push(("broadcast_div", "a/b[0]", false));
         } else {
             ops.extend([
                 ("and", "a&b", false),
+                ("broadcast_and", "a&b[0]", false),
+                ("broadcast_or", "b[0]|a", false),
+                ("broadcast_xor", "a^b[0]", false),
                 ("or", "a|b", false),
                 ("xor", "a^b", false),
                 ("not", "~a", false),
@@ -70,6 +83,60 @@ fn sources() -> (String, String) {
             }} }}
 "#));
         }
+        if id.starts_with('f') {
+            for op in [
+                "broadcast_add",
+                "broadcast_sub",
+                "broadcast_mul",
+                "broadcast_div",
+                "broadcast_eq",
+                "broadcast_ne",
+                "broadcast_lt",
+                "broadcast_le",
+                "broadcast_gt",
+                "broadcast_ge",
+            ] {
+                let ret = if matches!(
+                    op,
+                    "broadcast_add" | "broadcast_sub" | "broadcast_mul" | "broadcast_div"
+                ) {
+                    "V"
+                } else {
+                    "M"
+                };
+                main.push_str(&format!(r#"{{ {base} values[]={{0.0,-0.0,INFINITY,-INFINITY,NAN,1.5,-2.5}};
+                    for(int x=0;x<7;x++) for(int y=0;y<7;y++) {{
+                        V_{id} a={{0}},b={{0}}; for(int i=0;i<{lanes};i++)a[i]=values[(x+i)%7]; b[0]=values[y];
+                        {ret}_{id} k=k_{id}_{op}(a,b),c=c_{id}_{op}(a,b); if(memcmp(&k,&c,16))return __LINE__;
+                    }} }}
+"#));
+            }
+        }
+        source.push_str(&format!(
+            "V_{id} k_{id}_compound(V_{id} a,{base} s) {{ a+=s; a-=s; a*=s; return a; }}\n"
+        ));
+        harness.push_str(&format!(
+            "extern V_{id} k_{id}_compound(V_{id},{base}), c_{id}_compound(V_{id},{base});\n"
+        ));
+        main.push_str(&format!("{{ V_{id} a={{1,2}}; V_{id} k=k_{id}_compound(a,3), c=c_{id}_compound(a,3); if(memcmp(&k,&c,16))return __LINE__; }}\n"));
+        let constant = match id {
+            "i8" => "127",
+            "u8" => "255",
+            "i16" => "32767",
+            "u16" => "65535",
+            "i32" => "2147483647L",
+            "u32" => "4294967295UL",
+            "i64" => "9223372036854775807L",
+            "u64" => "18446744073709551615UL",
+            _ => "1.5",
+        };
+        source.push_str(&format!(
+            "V_{id} k_{id}_constant(V_{id} a) {{ return a+{constant}; }}\n"
+        ));
+        harness.push_str(&format!(
+            "extern V_{id} k_{id}_constant(V_{id}),c_{id}_constant(V_{id});\n"
+        ));
+        main.push_str(&format!("{{ V_{id} a={{1,2}}; V_{id} k=k_{id}_constant(a),c=c_{id}_constant(a); if(memcmp(&k,&c,16))return __LINE__; }}\n"));
         // Keel -> Clang calls and Clang -> Keel indirect calls, with overflowing FP argument banks.
         let params = (0..10)
             .map(|i| format!("V_{id} a{i}"))
@@ -106,6 +173,8 @@ V k_init(void) { V v={1,2}; v[3]=9; return v; }
 V k_cast(F v) { return (V)v; }
 V k_temporary(V a,V b,int i) { V v=a+b; return (V){(a+b)[i],v[1],v[2],v[3]}; }
 V k_choose(int x,V a,V b) { return x?a:b; }
+V k_broadcast_operands(V *p,int *i,int *s) { return p[(*i)++] + (*s)++; }
+int k_broadcast_once(V *p,int *i,int *s) { p[(*i)++] += (*s)++; return p[0][3]; }
 int k_once(V *p,int *i) { (*p)[(*i)++] += 3; return (*p)[0]; }
 "#,
     );
@@ -116,7 +185,8 @@ typedef int V __attribute__((vector_size(16)));
 typedef float F __attribute__((vector_size(16)));
 extern V k_global;
 extern V k_init(void), k_cast(F), k_temporary(V,V,int), k_choose(int,V,V);
-extern int k_once(V*,int*);
+extern V k_broadcast_operands(V*,int*,int*);
+extern int k_once(V*,int*), k_broadcast_once(V*,int*,int*);
 "#,
     );
     main.push_str(r#"
@@ -125,7 +195,12 @@ if(k_mode(-0x123456789L)!=-0x123456789L/3 || k_umode(~0UL)!=~0UL/3)return __LINE
 { F f={0.0f,-0.0f,INFINITY,NAN}; V v=k_cast(f); if(memcmp(&v,&f,16))return __LINE__; }
 { V a={1,2,3,4},b={5,6,7,8}; V v=k_temporary(a,b,2); if(v[0]!=10||v[1]!=8||v[2]!=10||v[3]!=12)return __LINE__;
 v=k_choose(0,a,b);if(memcmp(&v,&b,16))return __LINE__;v=k_choose(1,a,b);if(memcmp(&v,&a,16))return __LINE__;
-int i=0;if(k_once(&a,&i)!=4||i!=1||a[0]!=4)return __LINE__; }
+int i=0;if(k_once(&a,&i)!=4||i!=1||a[0]!=4)return __LINE__;
+struct { unsigned long before; V a; unsigned long after; } box={0x12345678,{1,2,3,4},0x87654321};
+i=0; int scalar=7; V broadcast=k_broadcast_operands(&box.a,&i,&scalar);
+if(i!=1||scalar!=8||broadcast[0]!=8||broadcast[3]!=11||box.a[0]!=1)return __LINE__;
+i=0; scalar=7; if(k_broadcast_once(&box.a,&i,&scalar)!=11||i!=1||scalar!=8)return __LINE__;
+if(box.before!=0x12345678||box.after!=0x87654321||box.a[0]!=8||box.a[1]!=9||box.a[2]!=10)return __LINE__; }
 { F a={0.0f,-0.0f,INFINITY,NAN}, b={-0.0f,0.0f,INFINITY,1.0f};
 V k=k_f32_eq(a,b),c=c_f32_eq(a,b);if(memcmp(&k,&c,16))return __LINE__;
 k=k_f32_ne(a,b);c=c_f32_ne(a,b);if(memcmp(&k,&c,16))return __LINE__;
