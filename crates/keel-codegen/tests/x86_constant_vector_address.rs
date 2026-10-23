@@ -13,12 +13,14 @@ const EMPTY: Pools = Pools {
     float_caller_saved: &[],
     float_callee_saved: &[],
 };
-const OFFSETS: [i64; 11] = [
+const OFFSETS: [i64; 13] = [
     0,
     1,
     -17,
     127,
     -128,
+    128,
+    -129,
     i32::MIN as i64,
     i32::MAX as i64,
     i32::MIN as i64 - 1,
@@ -34,6 +36,7 @@ fn source(offset: i64, wide: bool, mode: usize) -> String {
     };
     let value = if wide { "v5" } else { "v4" };
     let call = if mode == 2 { " call @clobber()\n" } else { "" };
+    let before_load = if mode == 4 { " call @clobber()\n" } else { "" };
     let extra = if mode == 1 {
         " v6 = load.i32x4 align 1 v3\n store align 1 v6,v1\n"
     } else if mode == 3 {
@@ -42,7 +45,7 @@ fn source(offset: i64, wide: bool, mode: usize) -> String {
         ""
     };
     format!(
-        "func @f(ptr,ptr) {{\nblock0(v0:ptr,v1:ptr):\n v2 = iconst.i64 {offset}\n v3 = ptradd v0,v2\n v4 = load.i32x4 align 1 v3\n{convert}{call} store align 1 {value},v1\n{extra} return\n}}\n"
+        "func @f(ptr,ptr) {{\nblock0(v0:ptr,v1:ptr):\n v2 = iconst.i64 {offset}\n v3 = ptradd v0,v2\n{before_load} v4 = load.i32x4 align 1 v3\n{convert}{call} store align 1 {value},v1\n{extra} return\n}}\n"
     )
 }
 fn dir() -> PathBuf {
@@ -153,7 +156,12 @@ fn selection_bounds_leaves_aliases_and_debug_boundaries() {
     // Cross-block, dynamic-index, volatile and other 16-byte types remain outside this pilot.
     for src in [
         source(16, false, 0).replace("load.i32x4 align 1", "load.i32x4 volatile align 1"),
+        source(16, false, 0).replace("i32x4", "i8x16"),
+        source(16, false, 0).replace("i32x4", "i16x8"),
         source(16, false, 0).replace("i32x4", "i64x2"),
+        source(16, false, 0).replace("i32x4", "f32x4"),
+        source(16, false, 0).replace("i32x4", "f64x2"),
+        source(16, false, 0).replace("i32x4", "i32x8"),
         source(16, false, 0).replace("i32x4", "i128"),
         source(16, false, 0).replace("v4 = load", "jump block1\nblock1:\n v4 = load"),
         source(16, false, 0)
@@ -223,7 +231,7 @@ fn exact_loads_features_parity_and_native_exports() {
         let mut c = String::from(include_str!("x86_constant_vector_address/harness.c"));
         let mut cases = String::from("static const struct Case cases[]={\n");
         for (i, offset) in OFFSETS.into_iter().enumerate() {
-            for mode in 0..4 {
+            for mode in 0..5 {
                 let name = format!("f_{i}_{mode}");
                 src += &source(offset, wide, mode).replace("@f(", &format!("@{name}("));
                 c += &format!("extern void {name}(const void*,void*);\n");

@@ -38,7 +38,7 @@ all eight selection-option combinations; and excluded operation shapes.
 Private `packed_load` tests exercise the real constant-address cover's leaf
 transfer to the widening root and rejection at constraints/debug boundaries.
 
-The exported corpus has 44 functions per configuration: eleven offsets times
+The original exported corpus had 44 functions per configuration: eleven offsets times
 ordinary/closed widening, shared address, live result across a clobbering call,
 and a load kept live beside its widening. Four profiles (v1, v2, AVX without
 AVX2, v3), three selectors, two allocators and normal/empty register pools produce
@@ -138,3 +138,75 @@ This is finite backend/lowering/encoding/native evidence on an AVX2-capable
 host. It does not establish execution on v1/v2-only or AVX-only hardware,
 exhaustive ISA certification, new frontend support, arbitrary FP exception
 behavior, or general address rewriting.
+
+## Independent review on current main
+
+Review replayed candidate `765e82f6aac1559252a3eabe0b5691ad33757cbd` onto
+`4611704b187f44eeafd347d29875545b89e63eac` in its own worktree. The intervening
+main commit changes benchmark helpers/documentation, not the backend. Neither
+main nor the original candidate checkout was modified. No production defect
+was found in this bounded audit; review changes only the dedicated regression
+corpus and this document.
+
+The size gate matters because `lower_i128` reads the original address through
+`use_reg` for two m64 accesses. In contrast, both admitted i32x4 consumers use
+`mem` with the original resolved address key and an exact m128 type. The
+selected base replaces the covered ptradd operand before allocation; the
+adjacent wide cover transfers that operand list to its root. Reserved integer
+address scratch is distinct from the SIMD destination/spill scratch. The
+existing indexed selector still accepts only 1/2/4/8-byte accesses. Other
+128-bit shapes, every 256-bit load, stores and volatile loads therefore gain
+no address cover from this exception. Atomics use separate instruction forms.
+
+Signed disp32 is sign-extended in a 64-bit effective address, matching ptradd's
+modular arithmetic even for synthetic wrapping bases. Outside that interval,
+the original materialized arithmetic remains. Symbolic bases retain ordinary
+symbol materialization rather than a new relocation expression. Resolved use
+counts retain shared addresses; same-block, covered-node and source-file/line
+checks retain their existing boundaries. The exception additionally rejects
+constraints and a located child under an unlocated load. The wide cover keeps
+its stronger complete-location, condition, constraint, existing-cover and
+resolved-result checks. Moving across its adjacent pure conversion changes no
+memory ordering. No physical FLAGS preservation, frontend extension, FP
+arithmetic or ABI change is implied.
+
+Review adds offsets 128 and -129 around the disp8 boundary, explicit exclusion
+checks for every other 128-bit vector shape and a representative 256-bit shape,
+five overlapping input/output placements, and both crossing-page input faults
+before any output write to shared memory. Its fifth function mode inserts a
+call between ptradd and load; the native helper clobbers all SysV caller-saved
+GP and SIMD registers to check the selected base's lifetime across the call.
+The corpus now has 65 functions (13 offsets by five modes) in each of the same
+48 feature/selection/allocation/pool configurations. Aliased-output references
+simulate the shared-address mode's reload after its first store. Fault children
+exit from SIGSEGV/SIGBUS handlers to avoid core-dump overhead.
+
+Local debug validation passed 28 integration tests across the dedicated,
+scalar-address, ARM-vector, wide-generic, wide-conversion, signed-sum and
+direct-add suites, plus all 116 codegen library tests. Release passed the same
+x86 suites (22 integration tests) and all 116 library tests, including the
+release instruction-feature guard. The final dedicated corpus was regenerated
+in both profiles. Text/typed/chunked object parity and per-instruction effective
+feature checks remain required. Repository-wide formatting reports existing
+unrelated differences; the changed Rust test passes its focused format check.
+
+Review independently matched the retained frozen source hashes for select.rs
+and packed_load.rs, report/object hashes, identical optimized IR and the exact
+three-pair assembly diff. Recomputing all three medians from the 100-row raw
+CSVs reproduces the values above. These remain the original frozen-tree
+measurements, not new timing results for the rebased review. No timing rerun or
+application performance claim is made.
+
+Fresh LinuxHost native execution passed all 48 final bundles with Clang 23.1.1 and
+all 48 with GCC 16.2.0, including overlap, call-clobber and fault-order checks.
+All 48 debug/release object pairs are byte-identical. The final native evidence
+is `/tmp/keel-address-review-167a5e84/complete` on LinuxHost, with separate reports
+`complete-clang.json` and `complete-gcc.json` and `complete-lock.jsonl` in its
+parent directory. Report SHA-256 values are respectively
+`9b15a28da8618266aad83b2d2407fbb423b9b28f2ffc77fc7117bbee846dfd98` and
+`1c24e7ed28673f28e038dcda33c152f0ca7172a37da28b2166f94fd7f9a4cfde`.
+Local final exports are `/tmp/keel-address-review-complete-{debug,release}`;
+logs and the parity report use the `/tmp/keel-address-review-` prefix.
+Every build and native invocation held the shared lock. No timing conclusions
+are drawn from these correctness runs. This is finite execution on a Ryzen 9
+9950X3D supporting newer ISA levels, not v1/v2-only or AVX-only certification.
