@@ -70,6 +70,38 @@ Builds use cargo's default shared cache and managed per-checkout targets, with
 `/tmp/keel-simd-70bb145d`, with native result JSON also retained on LinuxHost at the
 same path.
 
+## Unsigned byte comparisons
+
+The unsigned `i8x16` compare recipe now builds its sign-bit bias with
+`pcmpeqd; psllw 7; packsswb`. Each all-ones word becomes `0xff80` (-128),
+which packs exactly into one `0x80` byte. Packing the same register as both
+inputs fills all sixteen lanes. This replaces six bias-building instructions
+with three and uses the same reserved scratch register, with no new memory
+access or feature requirement. Ordering, operand swapping, canonical masks and
+non-strict comparison inversion retain their existing code paths.
+
+Against shuffle commit `151e23a3`, the unchanged four-predicate corpus in
+`x86_unsigned_byte_compare::fixture` measures the following at every CPU level:
+
+- Full allocation, normal pools: 120 -> 108 instructions, 469 -> 404 text
+  bytes, unchanged 8 frame-memory instructions (0 vector frame accesses).
+- Fast allocation, normal pools: 124 -> 112 instructions, 471 -> 406 bytes,
+  the same frame-memory counts.
+- Full allocation, empty vector pools: 144 -> 132 instructions, 601 -> 536
+  bytes, unchanged 40 frame-memory instructions (32 vector frame accesses).
+- Fast allocation, empty vector pools: 148 -> 136 instructions, 636 -> 571
+  bytes, the same frame-memory counts.
+
+The byte test checks strict v1/v2/v3 encoding through typed and textual object
+paths and compares the bias recipe bytes with Clang. On LinuxHost, all 36 exported
+byte oracles passed. Each checks all 65,536 operand pairs at every lane for all
+four unsigned ordering predicates, with unaligned/aliased outputs and live
+inputs. All 42 existing exported comparison/mask oracles also passed on LinuxHost; they cover
+destination aliases, spilled inputs/results, all integer widths, and select
+mask normalization. No runtime speedup is claimed. Export with
+`KEEL_BYTE_COMPARE_EVIDENCE`; the ignored
+`measure_unsigned_byte_compare_codegen` test records the unchanged corpus.
+
 ## Remaining limitations
 
 Arbitrary cross-source dword masks and byte/word masks that split dword groups
