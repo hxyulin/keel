@@ -97,6 +97,56 @@ fn checked_types_arity_targets_and_single_evaluation() {
         assert_eq!(m.matches("call @next()").count(), 2, "{m}");
     }
 }
+#[test]
+fn architectural_mapping_order_and_header_composition() {
+    let target = Target::X86_64LinuxGnu;
+    for (wrapper, op, _) in OPS {
+        let name = format!("x86_sse2_{op}128");
+        let id = keel_ir::Intrinsic::from_name(&name).unwrap();
+        assert_eq!(id.x86_packed_pair(), Some((op, 0)));
+        let m = compile(&format!("#include <emmintrin.h>\nextern __m128i left(void),right(void); __m128i f(void){{return _mm_{wrapper}(left(),right());}}"), target).unwrap();
+        let ir = m.to_string();
+        assert_eq!(ir.matches(&name).count(), 1, "{ir}");
+        assert_eq!(ir.matches("call @left()").count(), 1, "{ir}");
+        assert_eq!(ir.matches("call @right()").count(), 1, "{ir}");
+        assert!(ir.find("call @left()") < ir.find("call @right()"), "{ir}");
+    }
+    for headers in [
+        "#include <emmintrin.h>\n#include <wmmintrin.h>\n#include <immintrin.h>\n",
+        "#include <immintrin.h>\n#include <wmmintrin.h>\n#include <emmintrin.h>\n",
+    ] {
+        let mut src = headers.to_owned();
+        for (wrapper, _, _) in OPS {
+            src +=
+                &format!("__m128i {wrapper}(__m128i a,__m128i b){{return _mm_{wrapper}(a,b);}}\n");
+        }
+        src += "__m128i shift(__m128i a){return _mm_slli_epi16(a,3);} __m128i aes(__m128i a,__m128i b){return _mm_aesenc_si128(a,b);} __m128i clmul(__m128i a,__m128i b){return _mm_clmulepi64_si128(a,b,17);}";
+        let m = compile(&src, target).unwrap();
+        for enabled in [false, true] {
+            let features = Features::for_level(CpuLevel::V1)
+                .with_features(if enabled { "+aes,+pclmulqdq" } else { "none" })
+                .unwrap();
+            let selector = FeatureSelector {
+                inner: &SelectionTier::Baseline,
+                features,
+            };
+            let p = keel_codegen::compile_program_with_pipeline(
+                &m,
+                target,
+                &CodegenPipeline {
+                    selector: &selector,
+                    allocator: &AllocationTier::Full,
+                },
+            );
+            if enabled {
+                keel_asm::x86::assemble_program_object_with_features(&p.unwrap(), features)
+                    .unwrap();
+            } else {
+                assert!(p.is_err());
+            }
+        }
+    }
+}
 fn source() -> String {
     let mut s = String::from(
         "#include <emmintrin.h>\nint eval_count; static __m128i read(const void*p){eval_count++;return _mm_loadu_si128((const __m128i*)p);}\nextern __m128i callback(__m128i,__m128i);\n",
