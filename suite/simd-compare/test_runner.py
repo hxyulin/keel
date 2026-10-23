@@ -43,6 +43,24 @@ class SafetyTests(unittest.TestCase):
             self.assertEqual(len(r.corpus(case)), 64*48)
             self.assertEqual(r.corpus(case), r.corpus(case))
 
+    def test_selection_case_oracles_all_lanes(self):
+        # Distinct hand-computed words expose lane duplication/source mistakes.
+        self.assertEqual(struct.unpack('<4I', r.corpus('permute-dword')[32:48]),
+                         (0xffffffff, 0, 0x80000000, 1))
+        self.assertEqual(struct.unpack('<4I', r.corpus('shuffle-pairs')[32:48]),
+                         (1, 0, 0, 0x55555555))
+        data = r.corpus('compare-u8')
+        expected = bytes([255, 0, 255, 0, 0, 0, 0, 0] * 2)
+        for row in range(8):
+            self.assertEqual(data[row*48+32:row*48+48],
+                             expected[row:] + expected[:row])
+        # Every byte lane sees both directions across the sign boundary,
+        # extrema, and equality at each boundary value.
+        for lane in range(16):
+            observed = {(data[row*48+lane], data[row*48+16+lane]) for row in range(8)}
+            self.assertEqual(observed, {(0, 255), (255, 0), (127, 128), (128, 127),
+                                        (0, 0), (127, 127), (128, 128), (255, 255)})
+
     def test_expected_rejection_cannot_hide_a_crash_or_unrelated_error(self):
         width = 'requires a backend with 256-bit SIMD value support'
         arm_c = '32-byte C vectors require the x86-64 target and AVX/AVX2 code generation'

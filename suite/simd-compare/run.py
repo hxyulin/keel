@@ -20,7 +20,8 @@ ROOT = HERE.parents[1]
 sys.path.insert(0, str(HERE.parent))
 from profile_app_loops import sha, text_bytes
 
-CASES = ('add', 'multiply', 'compare', 'widen', 'shuffle', 'reduce', 'copy', 'float-add')
+CASES = ('add', 'multiply', 'compare', 'widen', 'shuffle', 'reduce', 'copy', 'float-add',
+         'permute-dword', 'shuffle-pairs', 'compare-u8')
 PROFILES = {
     'v1': ('x86_64-unknown-linux-gnu', 'x86-64'),
     'v2': ('x86_64-unknown-linux-gnu', 'x86-64-v2'),
@@ -65,6 +66,15 @@ def corpus(case):
     for i in range(64):
         a = [edges[(i+j) % len(edges)] if i < 7 else rng.getrandbits(32) for j in range(4)]
         b = [edges[(i+2*j+1) % len(edges)] if i < 7 else rng.getrandbits(32) for j in range(4)]
+        if case == 'compare-u8':
+            # Rotate boundary pairs through every lane before seeded random rows.
+            pairs = [(0, 255), (255, 0), (127, 128), (128, 127),
+                     (0, 0), (127, 127), (128, 128), (255, 255)]
+            ab = [pairs[(i+j) % len(pairs)] if i < len(pairs)
+                  else (rng.randrange(256), rng.randrange(256)) for j in range(16)]
+            aa, bb = bytes(x for x, _ in ab), bytes(y for _, y in ab)
+            rows.append(aa + bb + bytes(255 if x < y else 0 for x, y in ab))
+            continue
         if case == 'float-add':
             # Exactly representable finite sums; no FP-environment/NaN claims.
             a = [rng.randrange(-1000, 1001) for _ in range(4)]
@@ -74,6 +84,8 @@ def corpus(case):
         if case == 'add': out = [(x+y) & 0xffffffff for x,y in zip(a,b)]
         elif case == 'multiply': out = [(x*y) & 0xffffffff for x,y in zip(a,b)]
         elif case == 'compare': out = [0xffffffff if signed(x) < signed(y) else 0 for x,y in zip(a,b)]
+        elif case == 'permute-dword': out = [a[2], a[0], a[3], a[1]]
+        elif case == 'shuffle-pairs': out = [a[1], a[0], b[3], b[2]]
         elif case == 'shuffle': out = [a[3], b[0], a[1], b[2]]
         elif case == 'reduce': out = [sum(a) & 0xffffffff]*4
         elif case == 'copy': out = a
