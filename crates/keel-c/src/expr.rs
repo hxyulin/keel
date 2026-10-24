@@ -2,7 +2,10 @@
 //! parsed.
 
 use crate::ast::*;
-use crate::eval::{Const, eval_constant, eval_int, fits_i64, normalize};
+use crate::eval::{
+    Const, eval_constant, eval_constant_with_layout, eval_int, eval_int_with_layout,
+    fits_i64_with_layout, normalize_with_layout,
+};
 use crate::lex::Tok;
 use crate::parse::{Parser, R};
 use crate::types::*;
@@ -22,6 +25,8 @@ pub(crate) fn mk<'a>(kind: ExprKind<'a>, ty: Ty<'a>, loc: Loc) -> Expr<'a> {
 /// The general constant evaluator stores integer values in 64 bits. Do not
 /// use it as a representability proof through i128 (or extended FP/pointer)
 /// intermediates, even when the final scalar type is narrower.
+// Native-only proof boundary; migrating the scalar evaluator does not migrate
+// the vector range/shape checks that consume this proof.
 fn broadcast_constant(e: &Expr<'_>) -> Option<Const> {
     fn supported(e: &Expr<'_>) -> bool {
         if !(e.ty.int_kind().is_some_and(|k| k.size() <= 8)
@@ -339,7 +344,7 @@ impl<'a> Parser<'a> {
                 if !ty.is_arith() || !rhs.ty.is_arith() {
                     return Err(Error::new(loc, format!("invalid operands to `{op:?}=`")));
                 }
-                let comp = usual(&ty, &rhs.ty);
+                let comp = usual_with_layout(&ty, &rhs.ty, self.c_layout);
                 if matches!(op, BinOp::Rem | BinOp::And | BinOp::Or | BinOp::Xor)
                     && !comp.is_integer()
                 {
@@ -442,7 +447,7 @@ impl<'a> Parser<'a> {
     ) -> R<Expr<'a>> {
         let (a, b) = (self.rvalue(a), self.rvalue(b));
         let ty = if a.ty.is_arith() && b.ty.is_arith() {
-            usual(&a.ty, &b.ty)
+            usual_with_layout(&a.ty, &b.ty, self.c_layout)
         } else if a.ty.is_ptr() && is_null(&b) {
             a.ty
         } else if b.ty.is_ptr() && is_null(&a) {
@@ -549,7 +554,7 @@ impl<'a> Parser<'a> {
             "==" | "!=" | "<" | ">" | "<=" | ">=" => {
                 let op = bin_op(p);
                 let (l, r) = if l.ty.is_arith() && r.ty.is_arith() {
-                    let ty = usual(&l.ty, &r.ty);
+                    let ty = usual_with_layout(&l.ty, &r.ty, self.c_layout);
                     (self.cast(l, ty), self.cast(r, ty))
                 } else if l.ty.is_ptr() && r.ty.is_integer() {
                     let ty = l.ty;
@@ -593,7 +598,7 @@ impl<'a> Parser<'a> {
                 if !ok {
                     return Err(Error::new(loc, format!("invalid operands to `{p}`")));
                 }
-                let ty = usual(&l.ty, &r.ty);
+                let ty = usual_with_layout(&l.ty, &r.ty, self.c_layout);
                 // Mixed real/complex addition preserves the untouched imaginary
                 // component (including its zero sign), without adding +0.
                 let domain = |t: Ty<'a>| match ty {
@@ -1199,7 +1204,7 @@ impl<'a> Parser<'a> {
                             "volatile vector lane access is not supported",
                         ));
                     }
-                    if let Some(n) = crate::eval::eval_int(&idx) {
+                    if let Some(n) = crate::eval::eval_int_with_layout(&idx, self.c_layout) {
                         if n < 0 || n >= i64::from(shape.lanes()) {
                             return Err(Error::new(loc, "vector subscript is out of range"));
                         }
@@ -1347,7 +1352,7 @@ impl<'a> Parser<'a> {
                 longs,
             } => Ok(mk(
                 ExprKind::Int(value as i64),
-                int_literal_type(value, decimal, unsigned, longs),
+                int_literal_type(value, decimal, unsigned, longs, self.c_layout),
                 loc,
             )),
             Tok::Imaginary { value, single } => {
@@ -1682,7 +1687,7 @@ impl<'a> Parser<'a> {
             let cc = match args[2]
                 .ty
                 .is_integer()
-                .then(|| eval_constant(&args[2], false))
+                .then(|| eval_constant_with_layout(&args[2], false, self.c_layout))
                 .flatten()
             {
                 Some(Const::Int(0)) => FloatCC::Eq,
@@ -1720,7 +1725,7 @@ impl<'a> Parser<'a> {
             }
             for index in &args[2..] {
                 if !index.ty.is_integer()
-                    || !matches!(eval_constant(index, false), Some(Const::Int(n)) if n >= 0 && n < i64::from(shape.lanes()) * 2)
+                    || !matches!(eval_constant_with_layout(index, false, self.c_layout), Some(Const::Int(n)) if n >= 0 && n < i64::from(shape.lanes()) * 2)
                 {
                     return Err(Error::new(
                         index.loc,
@@ -1924,7 +1929,9 @@ impl<'a> Parser<'a> {
                 let value = self.convert_for_assign(args.next().unwrap(), &LONG)?;
                 let expected = self.convert_for_assign(args.next().unwrap(), &LONG)?;
                 let probability = self.convert_for_assign(args.next().unwrap(), &Ty::Double)?;
-                let Some(Const::Float(p)) = eval_constant(&probability, true) else {
+                let Some(Const::Float(p)) =
+                    eval_constant_with_layout(&probability, true, self.c_layout)
+                else {
                     return Err(Error::new(
                         loc,
                         "probability must be a constant floating-point expression",
@@ -1954,7 +1961,9 @@ impl<'a> Parser<'a> {
                     return Err(Error::new(loc, "alignment must be a constant integer"));
                 }
                 let alignment = self.cast(args[1], ULONG);
-                let Some(Const::Int(n)) = eval_constant(&alignment, false) else {
+                let Some(Const::Int(n)) =
+                    eval_constant_with_layout(&alignment, false, self.c_layout)
+                else {
                     return Err(Error::new(loc, "alignment must be a constant integer"));
                 };
                 if !(n as u64).is_power_of_two() {
@@ -1981,7 +1990,7 @@ impl<'a> Parser<'a> {
                 // The size is never known here: "unknown" is -1 for types 0
                 // and 1 (maximum), 0 for types 2 and 3 (minimum).
                 let args = self.builtin_args(2, loc)?;
-                let Some(kind) = eval_int(&args[1]) else {
+                let Some(kind) = eval_int_with_layout(&args[1], self.c_layout) else {
                     return Err(Error::new(
                         loc,
                         "`__builtin_object_size` type must be constant",
@@ -2004,7 +2013,7 @@ impl<'a> Parser<'a> {
                 // operand keeps its own type.
                 self.expect("(")?;
                 let c = self.assign()?;
-                let Some(c) = eval_int(&c) else {
+                let Some(c) = eval_int_with_layout(&c, self.c_layout) else {
                     return Err(Error::new(loc, "`__builtin_choose_expr` needs a constant"));
                 };
                 self.expect(",")?;
@@ -2016,7 +2025,7 @@ impl<'a> Parser<'a> {
             }
             "constant_p" => {
                 let args = self.builtin_args(1, loc)?;
-                let known = eval_int(&args[0]).is_some();
+                let known = eval_int_with_layout(&args[0], self.c_layout).is_some();
                 Ok(mk(ExprKind::Int(i64::from(known)), INT, loc))
             }
             "inf" | "inff" | "infl" | "huge_val" | "huge_valf" | "huge_vall" | "nan" | "nanf"
@@ -2066,7 +2075,7 @@ impl<'a> Parser<'a> {
             }
             "frame_address" => {
                 let args = self.builtin_args(1, loc)?;
-                if eval_int(&args[0]) != Some(0) {
+                if eval_int_with_layout(&args[0], self.c_layout) != Some(0) {
                     return Err(Error::new(
                         loc,
                         "`__builtin_frame_address` is only supported for frame 0",
@@ -2128,7 +2137,8 @@ impl<'a> Parser<'a> {
                 }
                 continue;
             }
-            let null = arg.ty.is_integer() && eval_constant(arg, false) == Some(Const::Int(0));
+            let null = arg.ty.is_integer()
+                && eval_constant_with_layout(arg, false, self.c_layout) == Some(Const::Int(0));
             if (!arg.ty.is_ptr() && !null) || matches!(arg.ty.pointee(), Some(Ty::Func(_))) {
                 return Err(Error::new(
                     arg.loc,
@@ -2184,14 +2194,14 @@ impl<'a> Parser<'a> {
         loc: Loc,
     ) -> R<()> {
         let valid = |n| (0..=5).contains(&n);
-        let order = eval_int(&args[success]);
+        let order = eval_int_with_layout(&args[success], self.c_layout);
         if order.is_some_and(|n| {
             !valid(n) || (load && matches!(n, 3 | 4)) || (store && matches!(n, 1 | 2 | 4))
         }) {
             return Err(Error::new(loc, "invalid atomic memory order"));
         }
         if let Some(failure) = failure {
-            let fail = eval_int(&args[failure]);
+            let fail = eval_int_with_layout(&args[failure], self.c_layout);
             if fail.is_some_and(|n| !valid(n) || matches!(n, 3 | 4)) {
                 return Err(Error::new(loc, "invalid compare-exchange failure order"));
             }
@@ -2394,7 +2404,7 @@ impl<'a> Parser<'a> {
             "always_lock_free" | "is_lock_free" => {
                 let c11 = name.starts_with("__c11_");
                 want(&args, if c11 { 1 } else { 2 })?;
-                let size = eval_int(&args[0]);
+                let size = eval_int_with_layout(&args[0], self.c_layout);
                 let align = if c11 {
                     size.unwrap_or(0).max(0) as u64
                 } else if let ExprKind::Addr(obj) = args[1].kind {
@@ -2408,7 +2418,7 @@ impl<'a> Parser<'a> {
                 };
                 let free = matches!(size, Some(1 | 2 | 4 | 8))
                     && (c11
-                        || eval_int(&args[1]) == Some(0)
+                        || eval_int_with_layout(&args[1], self.c_layout) == Some(0)
                         || size.is_some_and(|n| align >= n as u64));
                 let result = mk(ExprKind::Int(i64::from(free)), Ty::Int(IntKind::Bool), loc);
                 if op == "always_lock_free" {
@@ -2840,13 +2850,13 @@ impl<'a> Parser<'a> {
         }
         let lit = mk(
             ExprKind::Int(value as i64),
-            int_literal_type(value, decimal, unsigned, longs),
+            int_literal_type(value, decimal, unsigned, longs, self.c_layout),
             self.loc(),
         );
         let e = if lit.ty == ty {
             lit
         } else {
-            fold_int_cast(&lit, ty)?
+            fold_int_cast(&lit, ty, self.c_layout)?
         };
         self.advance();
         Some(e)
@@ -2888,7 +2898,7 @@ impl<'a> Parser<'a> {
         if e.ty == ty {
             return e;
         }
-        if let Some(folded) = fold_int_cast(&e, ty) {
+        if let Some(folded) = fold_int_cast(&e, ty, self.c_layout) {
             return folded;
         }
         let loc = e.loc;
@@ -2934,13 +2944,17 @@ impl<'a> Parser<'a> {
 }
 
 /// An integer constant converted to integer type `ty`, if it fits.
-fn fold_int_cast<'a>(e: &Expr<'a>, ty: Ty<'a>) -> Option<Expr<'a>> {
+fn fold_int_cast<'a>(e: &Expr<'a>, ty: Ty<'a>, layout: CDataLayout) -> Option<Expr<'a>> {
     if let ExprKind::Int(v) = e.kind
         && let Ty::Int(_) = ty
         && e.ty.is_integer()
-        && fits_i64(v, &e.ty, &ty)
+        && fits_i64_with_layout(v, &e.ty, &ty, layout)
     {
-        return Some(mk(ExprKind::Int(normalize(v, &ty)), ty, e.loc));
+        return Some(mk(
+            ExprKind::Int(normalize_with_layout(v, &ty, layout)),
+            ty,
+            e.loc,
+        ));
     }
     None
 }
@@ -3055,7 +3069,13 @@ pub(crate) fn promoted<'a>(ty: &Ty<'a>) -> Ty<'a> {
 }
 
 /// The type the usual arithmetic conversions give two arithmetic types.
+// Compatibility boundary for native IR generation. Parser calls use the
+// explicit model below, including when a private expression test selects ILP32.
 pub(crate) fn usual<'a>(a: &Ty<'a>, b: &Ty<'a>) -> Ty<'a> {
+    usual_with_layout(a, b, CDataLayout::NATIVE_LP64)
+}
+
+pub(crate) fn usual_with_layout<'a>(a: &Ty<'a>, b: &Ty<'a>, layout: CDataLayout) -> Ty<'a> {
     if a.is_complex() || b.is_complex() {
         let component = |t: &Ty<'a>| match t {
             Ty::Complex(e) => **e,
@@ -3085,7 +3105,7 @@ pub(crate) fn usual<'a>(a: &Ty<'a>, b: &Ty<'a>) -> Ty<'a> {
     let (s, u) = if x.signed() { (x, y) } else { (y, x) };
     if u.rank() >= s.rank() {
         Ty::Int(u)
-    } else if s.size() > u.size() {
+    } else if s.size_with_layout(layout) > u.size_with_layout(layout) {
         Ty::Int(s)
     } else {
         Ty::Int(s.to_unsigned())
@@ -3094,26 +3114,32 @@ pub(crate) fn usual<'a>(a: &Ty<'a>, b: &Ty<'a>) -> Ty<'a> {
 
 /// The type of an integer constant: the first of the allowed types its
 /// value fits.
-fn int_literal_type(value: u64, decimal: bool, unsigned: bool, longs: u8) -> Ty<'static> {
+fn int_literal_type(
+    value: u64,
+    decimal: bool,
+    unsigned: bool,
+    longs: u8,
+    layout: CDataLayout,
+) -> Ty<'static> {
     use IntKind::*;
     let candidates: &[IntKind] = match (unsigned, longs, decimal) {
-        (false, 0, true) => &[Int, Long],
-        (false, 0, false) => &[Int, UInt, Long, ULong],
-        (true, 0, _) => &[UInt, ULong],
-        (false, 1, true) => &[Long],
-        (false, 1, false) => &[Long, ULong],
-        (true, 1, _) => &[ULong],
+        (false, 0, true) => &[Int, Long, LLong],
+        (false, 0, false) => &[Int, UInt, Long, ULong, LLong, ULLong],
+        (true, 0, _) => &[UInt, ULong, ULLong],
+        (false, 1, true) => &[Long, LLong],
+        (false, 1, false) => &[Long, ULong, LLong, ULLong],
+        (true, 1, _) => &[ULong, ULLong],
         (false, _, true) => &[LLong],
         (false, _, false) => &[LLong, ULLong],
         (true, _, _) => &[ULLong],
     };
     for &k in candidates {
         let max = if k.signed() {
-            (1u64 << (k.size() * 8 - 1)) - 1
-        } else if k.size() == 8 {
+            (1u64 << (k.size_with_layout(layout) * 8 - 1)) - 1
+        } else if k.size_with_layout(layout) == 8 {
             u64::MAX
         } else {
-            (1u64 << (k.size() * 8)) - 1
+            (1u64 << (k.size_with_layout(layout) * 8)) - 1
         };
         if value <= max {
             return Ty::Int(k);
@@ -3196,4 +3222,225 @@ pub(crate) fn packed_conversion_builtin(base: &str) -> Option<keel_ir::Intrinsic
         "keel_sse2_cvtps2dq" => X86Ssecvtps2dq128,
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod integer_layout_tests {
+    use super::*;
+    use crate::eval::{self, Base};
+    use crate::strings::Strings;
+    use bumpalo::Bump;
+
+    // Expression-only seam: never invoke translation-unit parsing or IR generation
+    // with the test model. No production constructor selects WASM32.
+    fn expression<'a>(src: &'a str, arena: &'a Bump, layout: CDataLayout) -> Expr<'a> {
+        let mut p = Parser::new(
+            src,
+            "layout-expression.c",
+            Target::default(),
+            Strings::new(arena),
+        );
+        p.c_layout = layout;
+        let e = p.expr().unwrap();
+        assert!(matches!(p.peek(), Tok::Eof));
+        e
+    }
+
+    #[test]
+    fn literal_candidates_keep_rank_and_native_choices() {
+        use IntKind::*;
+        let arena = Bump::new();
+        for (src, native, wasm) in [
+            ("2147483647", Int, Int),
+            ("2147483648", Long, LLong),
+            ("4294967295", Long, LLong),
+            ("0xffffffff", UInt, UInt),
+            ("0x100000000", Long, LLong),
+            ("0xffffffffL", Long, ULong),
+            ("0x100000000L", Long, LLong),
+            ("4294967295L", Long, LLong),
+            ("4294967295UL", ULong, ULong),
+            ("4294967296UL", ULong, ULLong),
+            ("4294967296U", ULong, ULLong),
+            ("9223372036854775807L", Long, LLong),
+            ("0xffffffffffffffffL", ULong, ULLong),
+            ("18446744073709551615", ULLong, ULLong),
+            ("18446744073709551615LL", ULLong, ULLong),
+            ("0xffffffffffffffffULL", ULLong, ULLong),
+        ] {
+            for (layout, expected) in [
+                (CDataLayout::NATIVE_LP64, native),
+                (CDataLayout::WASM32, wasm),
+            ] {
+                assert_eq!(
+                    expression(src, &arena, layout).ty,
+                    Ty::Int(expected),
+                    "{src} {layout:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn recursive_evaluation_and_conversions_interleave_models() {
+        use IntKind::*;
+        let arena = Bump::new();
+        for (src, native_ty, native, wasm_ty, wasm) in [
+            ("1U + -2L", Long, -1, ULong, 4294967295),
+            ("0xffffffffUL + 1LL", ULLong, 4294967296, LLong, 4294967296),
+            (
+                "(long)(unsigned long)0xffffffffULL",
+                Long,
+                4294967295,
+                Long,
+                -1,
+            ),
+            ("(unsigned long)-1L", ULong, -1, ULong, 4294967295),
+            (
+                "(long)0x100000001ULL + (long)0xffffffffULL",
+                Long,
+                8589934592,
+                Long,
+                0,
+            ),
+            ("((long)0x80000000ULL >> 1) < 0", Int, 0, Int, 1),
+            ("((unsigned long)-1L >> 31) == 1", Int, 0, Int, 1),
+            (
+                "(unsigned long)-1L / 2UL",
+                ULong,
+                i64::MAX,
+                ULong,
+                2147483647,
+            ),
+            (
+                "(long)0x80000000ULL < 0 ? (long)0xffffffffULL : 7L",
+                Long,
+                7,
+                Long,
+                -1,
+            ),
+            ("(long)(0UL - 1UL)", Long, -1, Long, -1),
+            ("~0UL", ULong, -1, ULong, 4294967295),
+            ("(long)4294967295.0", Long, 4294967295, Long, -1),
+        ] {
+            // Return to native after wasm using shared interned type constants.
+            for (layout, ty, value) in [
+                (CDataLayout::NATIVE_LP64, native_ty, native),
+                (CDataLayout::WASM32, wasm_ty, wasm),
+                (CDataLayout::NATIVE_LP64, native_ty, native),
+            ] {
+                let e = expression(src, &arena, layout);
+                assert_eq!(e.ty, Ty::Int(ty), "{src} {layout:?}");
+                assert_eq!(
+                    eval::eval_int_with_layout(&e, layout),
+                    Some(value),
+                    "{src} {layout:?}"
+                );
+                assert_eq!(
+                    eval::eval_constant_with_layout(&e, false, layout),
+                    Some(Const::Int(value))
+                );
+                if layout == CDataLayout::NATIVE_LP64 {
+                    assert_eq!(eval_int(&e), Some(value));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn numeric_pointers_and_symbolic_relocation_boundary() {
+        let arena = Bump::new();
+        for (layout, pointer, difference) in [
+            (CDataLayout::NATIVE_LP64, -1, 4294967296),
+            (CDataLayout::WASM32, 4294967295, 0),
+        ] {
+            let e = expression("(void*)-1L", &arena, layout);
+            assert_eq!(
+                eval::eval_with_layout(&e, layout),
+                Some(Const::Int(pointer))
+            );
+            let e = expression("(char*)0xffffffffULL + 2", &arena, layout);
+            assert_eq!(
+                eval::eval_with_layout(&e, layout),
+                Some(Const::Int(if layout == CDataLayout::WASM32 {
+                    1
+                } else {
+                    4294967297
+                }))
+            );
+            let e = expression("(char*)0x100000001ULL - (char*)1", &arena, layout);
+            assert_eq!(eval::eval_int_with_layout(&e, layout), Some(difference));
+            let global = mk(ExprKind::Global(0), LONG, Loc::default());
+            let addr = mk(ExprKind::Addr(&global), Ty::Ptr(&LONG), Loc::default());
+            let cast = mk(ExprKind::Cast(&addr), LONG, Loc::default());
+            assert_eq!(
+                eval::eval_with_layout(&addr, layout),
+                Some(Const::Addr(Base::Global(0), 0))
+            );
+            assert_eq!(
+                eval::eval_with_layout(&cast, layout),
+                if layout == CDataLayout::NATIVE_LP64 {
+                    Some(Const::Addr(Base::Global(0), 0))
+                } else {
+                    None
+                }
+            );
+            let truth = mk(ExprKind::Unary(UnOp::Not, &addr), INT, Loc::default());
+            assert_eq!(eval::eval_with_layout(&truth, layout), None);
+            assert_eq!(
+                eval::eval_with_binding_and_layout(&truth, &|_| true, layout),
+                Some(Const::Int(0))
+            );
+        }
+    }
+
+    #[test]
+    fn wide_casts_and_constant_proof_safeguards_stay_bounded() {
+        let arena = Bump::new();
+        for layout in [CDataLayout::NATIVE_LP64, CDataLayout::WASM32] {
+            // A 64-bit unsigned value above i64::MAX cannot be represented by
+            // this evaluator after widening; wasm32 unsigned long can be.
+            let e = expression("(__int128)(unsigned long)-1", &arena, layout);
+            assert_eq!(
+                eval::eval_int_with_layout(&e, layout),
+                if layout == CDataLayout::WASM32 {
+                    Some(4294967295)
+                } else {
+                    None
+                }
+            );
+            let e = expression("(__int128)0xffffffffffffffffULL", &arena, layout);
+            assert_eq!(eval::eval_int_with_layout(&e, layout), None);
+            let e = expression("1 / 0", &arena, layout);
+            assert_eq!(eval::eval_int_with_layout(&e, layout), None);
+            let e = expression("(1, 2)", &arena, layout);
+            assert_eq!(eval::eval_constant_with_layout(&e, false, layout), None);
+            assert_eq!(
+                eval::eval_constant_with_layout(&e, true, layout),
+                Some(Const::Int(2))
+            );
+            let e = expression("0 && (1 / 0)", &arena, layout);
+            assert_eq!(
+                eval::eval_constant_with_layout(&e, false, layout),
+                Some(Const::Int(0))
+            );
+        }
+        // These deliberately remain native proofs with stricter validity rules
+        // than the wrapping/saturating general evaluator.
+        for src in [
+            "2147483647 + 1",
+            "1 << 32",
+            "1 << -1",
+            "(-2147483647 - 1) / -1",
+            "(int)1e100",
+            "(1, 2)",
+        ] {
+            let e = expression(src, &arena, CDataLayout::NATIVE_LP64);
+            assert_eq!(x86_immediate_control(&e), None, "{src}");
+        }
+        for src in ["(int)(__int128)1", "(int)(void*)1", "(1, 2)"] {
+            let e = expression(src, &arena, CDataLayout::NATIVE_LP64);
+            assert_eq!(broadcast_constant(&e), None, "{src}");
+        }
+    }
 }

@@ -2195,7 +2195,11 @@ impl<'a> Parser<'a> {
                         if self.eat("(") {
                             let expression = self.conditional()?;
                             self.expect(")")?;
-                            let priority = match crate::eval::eval_constant(&expression, false) {
+                            let priority = match crate::eval::eval_constant_with_layout(
+                                &expression,
+                                false,
+                                self.c_layout,
+                            ) {
                                 Some(crate::eval::Const::Int(n)) if expression.ty.is_integer() => n,
                                 _ => {
                                     return Err(Error::new(
@@ -2409,7 +2413,9 @@ impl<'a> Parser<'a> {
     fn alignment_constant(&mut self, allow_zero: bool) -> R<u64> {
         let loc = self.loc();
         let e = self.conditional()?;
-        let Some(crate::eval::Const::Int(n)) = crate::eval::eval_constant(&e, false) else {
+        let Some(crate::eval::Const::Int(n)) =
+            crate::eval::eval_constant_with_layout(&e, false, self.c_layout)
+        else {
             return Err(Error::new(loc, "alignment must be an integer constant"));
         };
         if !e.ty.is_integer()
@@ -3165,7 +3171,7 @@ impl<'a> Parser<'a> {
                 }
                 // General constant folding can discard comma operands. Bounds
                 // must retain runtime side effects even if the result is known.
-                match crate::eval::eval_constant(&e, false) {
+                match crate::eval::eval_constant_with_layout(&e, false, self.c_layout) {
                     Some(crate::eval::Const::Int(n)) if n >= 0 => Some(n as u64),
                     Some(crate::eval::Const::Int(_)) => {
                         return Err(Error::new(loc, "array size is negative"));
@@ -3727,7 +3733,8 @@ impl<'a> Parser<'a> {
     pub(crate) fn const_int(&mut self) -> R<i64> {
         let loc = self.loc();
         let e = self.conditional()?;
-        crate::eval::eval_int(&e).ok_or_else(|| Error::new(loc, "expected a constant expression"))
+        crate::eval::eval_int_with_layout(&e, self.c_layout)
+            .ok_or_else(|| Error::new(loc, "expected a constant expression"))
     }
 
     // ---- statements ----
@@ -3896,7 +3903,8 @@ impl<'a> Parser<'a> {
                     match values {
                         Some(values) => {
                             for v in values {
-                                let v = crate::eval::normalize(v, &sw.ty);
+                                let v =
+                                    crate::eval::normalize_with_layout(v, &sw.ty, self.c_layout);
                                 if sw.cases.iter().any(|&(c, _)| c == v) {
                                     return Err(Error::new(loc, format!("duplicate case {v}")));
                                 }
