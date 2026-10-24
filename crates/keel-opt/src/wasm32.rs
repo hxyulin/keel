@@ -7,6 +7,12 @@ use keel_ir::{DataLayout, Module, verify_module_with_layout};
 /// The caller must first validate the COMPLETE ORIGINAL module against the
 /// Wasm runtime subset, including unused definitions and instructions. Layout
 /// verification here cannot establish backend support or input provenance.
+/// In particular, this helper does not perform runtime capability admission;
+/// callers must also check the optimized module with their normal final emitter.
+/// The input must already use WASM32 storage layout; this is not a layout
+/// conversion API. An input-verification error leaves the module unchanged.
+/// A later verification error may leave earlier transformations applied, so
+/// callers needing transactional behavior must optimize a clone.
 /// This entry point never canonicalizes, tunes for the host, or selects a native
 /// tier. Verification after every pass is mandatory in release builds too.
 pub fn optimize_wasm32_basic(module: &mut Module) -> Result<(), OptError> {

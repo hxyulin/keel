@@ -741,6 +741,9 @@ fn wasm_basic_selector_is_explicit_and_cannot_hide_native_options() {
     for flags in [
         vec!["--wasm-opt", "full"],
         vec!["--wasm-opt", "none"],
+        vec!["--wasm-opt=basic"],
+        vec!["--wasm-opt", "full", "--wasm-opt", "basic"],
+        vec!["--wasm-opt", "basic", "--wasm-opt", "full"],
         vec!["--wasm-opt", "basic", "-O"],
         vec!["-O", "--wasm-opt", "basic"],
         vec!["--wasm-opt", "basic", "--opt-tier", "basic"],
@@ -786,4 +789,69 @@ a.throws(()=>e.frame(1),WebAssembly.RuntimeError);
 "#,
         );
     }
+}
+
+#[test]
+fn basic_preserves_pointer_phi_swaps_and_distinct_duplicate_edges() {
+    let t = Temp::new();
+    let input = t.write(
+        "edges.keel",
+        r#"
+func @swap(i32, i64, i64) -> i32 {
+block0(v0: i32, v1: i64, v2: i64):
+    v3 = inttoptr.ptr v1
+    v4 = inttoptr.ptr v2
+    v5 = iconst.i32 0
+    v6 = iconst.i32 1
+    jump block1(v3, v4, v0)
+block1(v7: ptr, v8: ptr, v9: i32):
+    v10 = icmp.eq v9, v5
+    brif v10, block3, block2
+block2:
+    v11 = isub v9, v6
+    jump block4(v8, v7, v11)
+block4(v12: ptr, v13: ptr, v14: i32):
+    jump block1(v12, v13, v14)
+block3:
+    v15 = load.i32 v7
+    return v15
+}
+func @choose(i32, i64, i64) -> i32 {
+block0(v0: i32, v1: i64, v2: i64):
+    v3 = inttoptr.ptr v1
+    v4 = inttoptr.ptr v2
+    switch v0, block1, [1: block2(v3), 2: block2(v4)]
+block1:
+    v5 = iconst.i32 0
+    v6 = icmp.eq v0, v5
+    brif v6, block2(v3), block2(v4)
+block2(v7: ptr):
+    v8 = load.i32 v7
+    return v8
+}
+"#,
+    );
+    for basic in [false, true] {
+        let out = t.0.join(if basic { "basic.wasm" } else { "plain.wasm" });
+        let mut flags = vec!["--export", "swap", "--export", "choose"];
+        if basic {
+            flags.extend(["--wasm-opt", "basic", "--wasm-opt", "basic"]);
+        }
+        success(compile("compile", &input, &out, &flags));
+        node(
+            &out,
+            r#"
+const a=require('assert/strict'),b=require('fs').readFileSync(process.argv[1]);
+a(WebAssembly.validate(b));const e=new WebAssembly.Instance(new WebAssembly.Module(b)).exports;
+const bytes=new Uint8Array(e.memory.buffer);bytes.fill(0xcc,8191,8202);
+const view=new DataView(e.memory.buffer);view.setInt32(8193,17,true);view.setInt32(8197,29,true);
+const before=[...bytes];
+// Unaligned four-byte loads, high input bits discarded before phi transport.
+for(let n=0;n<20;n++)a.equal(e.swap(n,0x100002001n,8197n),n%2?29:17);
+for(const n of [0,1,2,3,-1])a.equal(e.choose(n,8193n,0x100002005n),n===0||n===1?17:29);
+a.deepEqual([...bytes],before);
+"#,
+        );
+    }
+    t.no_temporary();
 }

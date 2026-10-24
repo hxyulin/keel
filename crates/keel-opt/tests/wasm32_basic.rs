@@ -87,6 +87,7 @@ block0:
     v2 = iadd v0, v1
     return v2
 }
+
 "#,
     )
     .unwrap();
@@ -94,4 +95,39 @@ block0:
     let error = keel_opt::optimize_wasm32_basic(&mut module).unwrap_err();
     assert!(error.to_string().contains("wasm32-input"));
     assert_eq!(before, module.to_string());
+}
+
+#[test]
+fn wasm32_addend_bounds_and_later_functions_are_checked_before_mutation() {
+    for source in [
+        // The target is 12 bytes natively but only eight bytes on WASM32.
+        "data @bytes = align 8 { i64 7 }\ndata @target = align 8 { ptr @bytes, i32 9 }\ndata @link = align 8 { ptr @target + 12 }\nfunc @f() -> i32 {\nblock0:\n v0 = iconst.i32 20\n v1 = iconst.i32 22\n v2 = iadd v0, v1\n return v2\n}\n",
+        "func @f() -> i32 {\nblock0:\n v0 = iconst.i32 20\n v1 = iconst.i32 22\n v2 = iadd v0, v1\n return v2\n}\nfunc @bad() -> i32 {\nblock0:\n v0 = iconst.i64 1\n return v0\n}\n",
+    ] {
+        let mut module = keel_ir::parse(source).unwrap();
+        let before = format!("{module:?}");
+        let error = keel_opt::optimize_wasm32_basic(&mut module).unwrap_err();
+        assert!(error.to_string().contains("wasm32-input"), "{error}");
+        assert_eq!(before, format!("{module:?}"));
+    }
+}
+
+#[test]
+fn dead_addresses_keep_all_static_slots_including_unreachable_block_slots() {
+    let mut module = keel_ir::parse(
+        "func @f() {\n ss0 = stack_slot 4, align 4\n ss1 = stack_slot 17, align 16\nblock0:\n v0 = stack_addr ss0\n return\nblock1:\n v1 = stack_addr ss1\n return\n}\n",
+    ).unwrap();
+    let slots = format!(
+        "{:?}",
+        module.functions[0].stack_slots().collect::<Vec<_>>()
+    );
+    keel_opt::optimize_wasm32_basic(&mut module).unwrap();
+    assert!(!module.to_string().contains("stack_addr"));
+    assert_eq!(
+        slots,
+        format!(
+            "{:?}",
+            module.functions[0].stack_slots().collect::<Vec<_>>()
+        )
+    );
 }
