@@ -168,3 +168,61 @@ Captures use the same paths with `.log` in place of `.jsonl`. Focused test-file
 rustfmt and `git diff --check` pass. No C, backend, target, CLI, native ABI or
 Wasm execution change is claimed by this verifier prerequisite. Parent review
 and integration remain separate.
+
+## Independent layout-verifier review
+
+Candidate `891664d7` (implementation `4d974a65`) was reapplied onto `aa326b52`
+in the assigned review checkout. Source review found no blocking production
+issue or native diagnostic change for representable initializer sizes. Native
+pointer/function relocation rules, native eight-byte RTTI storage and alignment,
+IR pointer-operation signatures, and all actual-module verification paths remain
+intact. No API change was needed: the root and verifier module both export
+`verify_module_with_layout(&Module, DataLayout) -> Result<(), Vec<VerifierError>>`.
+
+Review commit `8d6d25bb` adds four boundary regressions:
+
+- Empty item lists, empty bytes and zero-length runs remain invalid definitions;
+  their zero addend is accepted, positive addends diagnose, and external data
+  declarations retain unknown-size relocation behavior.
+- Zero runs exercise target sizes and pointer cursors around and above 2^32
+  without large allocations, including maximum-u32 one-past and out-of-bounds
+  addends. General IR storage verification does not enforce a backend's wasm32
+  address-space or memory-allocation limit.
+- Mixed ordinary pointer/RTTI streams check both alignment-requirement orders,
+  escalation from four to eight bytes, and suppression of repeated requirements;
+  native streams retain their eight-byte alignment diagnostics.
+- Actual const pointer arrays retain their initializer and storage metadata.
+  TLS/const, local/hidden and COMDAT/retain conflicts remain visible under WASM32.
+
+On 2026-10-24, the complete IR suite passed in debug and release: 141 tests
+per profile, including twelve focused layout-verifier tests. Existing native
+`keel-codegen` `weak` and `weak_odr` controls passed six tests per profile. These
+include typed/text object parity, native RTTI tag bits and 64-bit relocations,
+const function/data pointer tables, malformed linkage rejection, ELF COMDAT
+storage, and the local Apple ARM64 linker coalescing/strong-definition harness.
+They do not claim native x86 execution.
+
+All four runs used the existing shared suite lock and toolchain pins:
+
+```sh
+python3 suite/fast_opt_locked.py \
+  /tmp/keel-verifier-review-5708e5f6-debug.jsonl \
+  cargo test --offline --locked -j2 -p keel-ir
+python3 suite/fast_opt_locked.py \
+  /tmp/keel-verifier-review-5708e5f6-release.jsonl \
+  cargo test --offline --locked -j2 -p keel-ir --release
+python3 suite/fast_opt_locked.py \
+  /tmp/keel-verifier-review-5708e5f6-native-debug.jsonl \
+  cargo test --offline --locked -j2 -p keel-codegen \
+  --test weak_odr --test weak
+python3 suite/fast_opt_locked.py \
+  /tmp/keel-verifier-review-5708e5f6-native-release.jsonl \
+  cargo test --offline --locked -j2 -p keel-codegen \
+  --test weak_odr --test weak --release
+```
+
+Captures use the same paths with `.log` instead of `.jsonl`. Focused rustfmt
+and `git diff --check` pass. This review covers the IR verifier prerequisite;
+the active Wasm runtime candidate is outside its scope. No Wasm execution,
+new ABI/FP/memory behavior, or performance claim follows. Parent integration
+and checkout cleanup remain separate.
