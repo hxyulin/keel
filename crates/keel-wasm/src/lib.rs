@@ -1,13 +1,15 @@
 //! Experimental scalar core WebAssembly output with opt-in fixed wasm32 memory.
-//! No native or C ABI, software stack, static data, or host imports.
+//! No native or C ABI or host imports. Runtime placement is a separate opt-in.
+mod runtime;
 use keel_ir::{
     ArgExt, BinaryOp, Block, BlockCall, CallConv, ConvertOp, DataLayout, EntityRef, Function,
-    FunctionAttrs, InstData, IntCC, Module, Purpose, Signature, Type, Value,
+    FunctionAttrs, InstData, IntCC, Module, Purpose, Signature, Symbol, Type, Value,
 };
+pub use runtime::Wasm32RuntimeOptions;
 use std::collections::{HashMap, HashSet};
 use wasm_encoder::{
-    BlockType, CodeSection, ExportKind, ExportSection, FunctionSection, Instruction as W, MemArg,
-    MemorySection, MemoryType, TypeSection, ValType,
+    BlockType, CodeSection, ConstExpr, ExportKind, ExportSection, FunctionSection, GlobalSection,
+    GlobalType, Instruction as W, MemArg, MemorySection, MemoryType, TypeSection, ValType,
 };
 
 /// One explicitly requested function export; names are exact UTF-8 strings.
@@ -175,7 +177,7 @@ fn comparison(cc: IntCC, t: Type) -> Option<W<'static>> {
 /// contracts (including unused declarations), then encode and independently
 /// validate a complete core module. Errors never publish partial bytes.
 pub fn emit_module(module: &Module, options: &Options) -> Result<Vec<u8>, Diagnostic> {
-    emit(module, options, None)
+    emit(module, options, None, None, None)
 }
 
 /// Emit raw, unoptimized IR with fixed wasm32 memory. Offsets cross the scalar
@@ -185,6 +187,11 @@ pub fn emit_wasm32_memory_module(
     module: &Module,
     options: &Wasm32MemoryOptions,
 ) -> Result<Vec<u8>, Diagnostic> {
+    validate_memory_options(options)?;
+    emit(module, &options.scalar, Some(options), None, None)
+}
+
+fn validate_memory_options(options: &Wasm32MemoryOptions) -> Result<(), Diagnostic> {
     // Wide arithmetic also handles the valid 4 GiB maximum on 32-bit hosts.
     let bytes = u64::from(options.pages) * 65536;
     if bytes > (1u64 << 32) {
@@ -201,16 +208,40 @@ pub fn emit_wasm32_memory_module(
     {
         return Err(reject("memory export name collides with a function export"));
     }
-    emit(module, &options.scalar, Some(options))
+    Ok(())
+}
+
+/// Emit raw wasm32 IR with static data and a bounded owned-memory runtime.
+/// See `Wasm32RuntimeOptions` for placement and trap lifetime requirements.
+pub fn emit_wasm32_runtime_module(
+    module: &Module,
+    options: &Wasm32RuntimeOptions,
+) -> Result<Vec<u8>, Diagnostic> {
+    validate_memory_options(&options.memory)?;
+    let placement = runtime::Placement::new(module, options)?;
+    emit(
+        module,
+        &options.memory.scalar,
+        Some(&options.memory),
+        Some(&placement),
+        Some(options),
+    )
 }
 
 fn emit(
     module: &Module,
     options: &Options,
     memory: Option<&Wasm32MemoryOptions>,
+    placement: Option<&runtime::Placement<'_>>,
+    runtime: Option<&Wasm32RuntimeOptions>,
 ) -> Result<Vec<u8>, Diagnostic> {
     let has_memory = memory.is_some();
-    keel_ir::verify_module(module).map_err(|errors| {
+    let verified = if placement.is_some() {
+        keel_ir::verify_module_with_layout(module, DataLayout::WASM32)
+    } else {
+        keel_ir::verify_module(module)
+    };
+    verified.map_err(|errors| {
         reject(
             errors
                 .iter()
@@ -219,7 +250,7 @@ fn emit(
                 .join("\n"),
         )
     })?;
-    if !module.data.is_empty() {
+    if placement.is_none() && !module.data.is_empty() {
         return Err(reject("module data is unsupported"));
     }
     let indices: HashMap<_, _> = module
@@ -263,8 +294,8 @@ fn emit(
             attrs(f.attrs)?;
             if f.weak_odr
                 || f.personality.is_some()
-                || f.num_stack_slots() != 0
-                || f.data_symbols().next().is_some()
+                || (runtime.is_none() && f.num_stack_slots() != 0)
+                || (placement.is_none() && f.data_symbols().next().is_some())
                 || f.signatures().next().is_some()
             {
                 return Err(reject(
@@ -319,6 +350,10 @@ fn emit(
                                 && memory_bytes(ty(*value)).is_some()
                                 && flags.align.is_power_of_two()
                         }
+                        InstData::StackAddr { .. } => runtime.is_some(),
+                        InstData::SymbolAddr {
+                            symbol: Symbol::Data(_),
+                        } => placement.is_some(),
                         InstData::Select { .. }
                         | InstData::Jump { .. }
                         | InstData::Brif { .. }
@@ -336,6 +371,16 @@ fn emit(
         };
         check().map_err(|e| reject(format!("@{}: {e}", f.name)))?;
     }
+    // Complete frame preflight for every function before encoding any body.
+    let frames = runtime
+        .map(|_| {
+            module
+                .functions
+                .iter()
+                .map(runtime::Frame::new)
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?;
     let mut types = TypeSection::new();
     let mut functions = FunctionSection::new();
     let mut exports = ExportSection::new();
@@ -346,7 +391,8 @@ fn emit(
             f.sig.returns.iter().map(|p| local_type(p.ty).unwrap()),
         );
         functions.function(i as u32);
-        code.function(&Body::new(f, &indices).emit());
+        let frame = frames.as_ref().map(|frames| &frames[i]);
+        code.function(&Body::new(f, &indices, placement, frame, runtime).emit());
     }
     for e in &options.exports {
         exports.export(&e.name, ExportKind::Func, indices[e.function.as_str()]);
@@ -365,7 +411,22 @@ fn emit(
         output.section(&memories);
         exports.export(&memory.export_name, ExportKind::Memory, 0);
     }
+    if let Some(runtime) = runtime {
+        let mut globals = GlobalSection::new();
+        globals.global(
+            GlobalType {
+                val_type: ValType::I32,
+                mutable: true,
+                shared: false,
+            },
+            &ConstExpr::i32_const(runtime.stack_top as i32),
+        );
+        output.section(&globals);
+    }
     output.section(&exports).section(&code);
+    if let Some(placement) = placement {
+        output.section(&placement.segments(module, u64::from(memory.unwrap().pages) * 65536));
+    }
     let bytes = output.finish();
     // Keep the output contract independent of the validator's evolving defaults.
     wasmparser::Validator::new_with_features(wasmparser::WasmFeatures::WASM1)
@@ -377,13 +438,24 @@ fn emit(
 struct Body<'a> {
     ir: &'a Function,
     indices: &'a HashMap<&'a str, u32>,
+    placement: Option<&'a runtime::Placement<'a>>,
+    frame: Option<&'a runtime::Frame>,
+    runtime: Option<&'a Wasm32RuntimeOptions>,
+    saved_sp: u32,
+    frame_base: u32,
     locals: Vec<Option<u32>>,
     pc: u32,
     blocks: HashMap<Block, i32>,
     out: wasm_encoder::Function,
 }
 impl<'a> Body<'a> {
-    fn new(ir: &'a Function, indices: &'a HashMap<&'a str, u32>) -> Self {
+    fn new(
+        ir: &'a Function,
+        indices: &'a HashMap<&'a str, u32>,
+        placement: Option<&'a runtime::Placement<'a>>,
+        frame: Option<&'a runtime::Frame>,
+        runtime: Option<&'a Wasm32RuntimeOptions>,
+    ) -> Self {
         let mut locals = vec![None; ir.num_values()];
         let entry = ir.entry_block().unwrap();
         for (n, &v) in ir.block_params(entry).iter().enumerate() {
@@ -407,9 +479,17 @@ impl<'a> Body<'a> {
             }
         }
         declarations.push((1, ValType::I32));
+        if runtime.is_some() {
+            declarations.push((2, ValType::I32));
+        }
         Self {
             ir,
             indices,
+            placement,
+            frame,
+            runtime,
+            saved_sp: next + 1,
+            frame_base: next + 2,
             locals,
             pc: next,
             blocks: ir
@@ -511,6 +591,30 @@ impl<'a> Body<'a> {
         self.op(W::Br(depth));
     }
     fn emit(mut self) -> wasm_encoder::Function {
+        if let Some(runtime) = self.runtime {
+            let size = self.frame.unwrap().size;
+            self.op(W::GlobalGet(0));
+            self.op(W::LocalSet(self.saved_sp));
+            // Check unsigned underflow before subtracting. Neither failure path
+            // updates SP or permits any frame store/address instruction.
+            self.op(W::LocalGet(self.saved_sp));
+            self.op(W::I32Const(size as i32));
+            self.op(W::I32LtU);
+            self.op(W::If(BlockType::Empty));
+            self.op(W::Unreachable);
+            self.op(W::End);
+            self.op(W::LocalGet(self.saved_sp));
+            self.op(W::I32Const(size as i32));
+            self.op(W::I32Sub);
+            self.op(W::LocalTee(self.frame_base));
+            self.op(W::I32Const(runtime.stack_bottom as i32));
+            self.op(W::I32LtU);
+            self.op(W::If(BlockType::Empty));
+            self.op(W::Unreachable);
+            self.op(W::End);
+            self.op(W::LocalGet(self.frame_base));
+            self.op(W::GlobalSet(0));
+        }
         self.op(W::Loop(BlockType::Empty));
         for b in self.ir.blocks() {
             self.op(W::LocalGet(self.pc));
@@ -519,6 +623,18 @@ impl<'a> Body<'a> {
             self.op(W::If(BlockType::Empty));
             for &i in self.ir.block_insts(b) {
                 match self.ir.inst_data(i) {
+                    InstData::StackAddr { slot } => {
+                        self.op(W::LocalGet(self.frame_base));
+                        self.op(W::I32Const(
+                            self.frame.unwrap().offsets[slot.index()] as i32,
+                        ));
+                        self.op(W::I32Add);
+                    }
+                    InstData::SymbolAddr { symbol } => {
+                        self.op(W::I32Const(
+                            self.placement.unwrap().addresses[self.ir.symbol_name(*symbol)] as i32,
+                        ));
+                    }
                     InstData::Iconst { ty, imm } => self.constant(*ty, *imm),
                     InstData::Binary {
                         op: BinaryOp::Ptradd,
@@ -612,6 +728,10 @@ impl<'a> Body<'a> {
                     InstData::Return { args } => {
                         for &v in args {
                             self.get(v);
+                        }
+                        if self.runtime.is_some() {
+                            self.op(W::LocalGet(self.saved_sp));
+                            self.op(W::GlobalSet(0));
                         }
                         self.op(W::Return);
                     }
