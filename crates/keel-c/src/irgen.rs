@@ -32,7 +32,6 @@ use keel_ir::{
 
 type R<T> = Result<T, Error>;
 
-#[cfg(test)]
 pub(crate) mod wasm_scalar;
 
 pub struct Gen<'p> {
@@ -116,13 +115,7 @@ impl<'p> Gen<'p> {
 
     pub fn run(mut self) -> R<Module> {
         if self.p.c_layout != CDataLayout::NATIVE_LP64 {
-            #[cfg(test)]
             self.check_private_scalar_profile()?;
-            #[cfg(not(test))]
-            return Err(Error::new(
-                Loc::default(),
-                "non-native C lowering is private to tests",
-            ));
         }
         // Validate even discarded static/inline bodies against callback and
         // direct-call contracts added by later declarations in the unit.
@@ -458,8 +451,12 @@ impl<'p> Gen<'p> {
         if self.debug {
             self.module.debug_language = Some(Language::C11);
         }
-        keel_ir::section::validate_module(&self.module, self.p.target)
-            .map_err(|e| Error::new(Loc::default(), e))?;
+        // Wasm preflight above rejects every section/linkage/lifecycle attribute,
+        // including unused definitions. This validator describes native objects.
+        if self.p.target != keel_ir::Target::Wasm32UnknownUnknown {
+            keel_ir::section::validate_module(&self.module, self.p.target)
+                .map_err(|e| Error::new(Loc::default(), e))?;
+        }
         self.module.sync_function_attrs();
         Ok(self.module)
     }

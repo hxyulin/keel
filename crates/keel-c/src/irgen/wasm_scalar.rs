@@ -1,11 +1,8 @@
-//! Private integer/pointer storage lowering checkpoint, not a C ABI or production target.
+//! Bounded freestanding integer/pointer storage profile.
 use super::*;
 
 fn reject(loc: Loc, family: &str) -> Error {
-    Error::new(
-        loc,
-        format!("private wasm32 scalar profile rejects {family}"),
-    )
+    Error::new(loc, format!("wasm32 freestanding profile rejects {family}"))
 }
 
 fn integer(ty: &Ty) -> bool {
@@ -290,6 +287,9 @@ impl Gen<'_> {
                 return Err(reject(Loc::default(), "file-scope compound literals"));
             }
             if let Ty::Func(fty) = g.ty {
+                if self.p.target == keel_ir::Target::Wasm32UnknownUnknown && !g.defined {
+                    return Err(reject(Loc::default(), "external functions"));
+                }
                 signature(fty, Loc::default())?;
             } else {
                 if !g.defined {
@@ -360,6 +360,7 @@ impl Gen<'_> {
 
 /// Accepts preprocessed/header-free input only. The borrowed native parser
 /// target supplies no Wasm macros, headers or calling convention. No optimizer.
+#[cfg(test)]
 pub(crate) fn lower(src: &str, debug: bool) -> R<Module> {
     let arena = bumpalo::Bump::new();
     let mut p = Parser::declarations_with_layout(

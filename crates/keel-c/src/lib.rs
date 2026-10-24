@@ -1,4 +1,6 @@
-//! A C frontend for keel: native preprocessing and compilation to keel IR.
+//! A C frontend for keel: preprocessing and compilation to keel IR.
+//! `Wasm32UnknownUnknown` selects a bounded freestanding ILP32 profile;
+//! see `docs/wasm-c-freestanding.md` for accepted storage and call contracts.
 //! `preprocess` accepts raw C; `compile` accepts its output or `clang -E` text.
 //!
 //! The pipeline is lexer (`lex.rs`) → parser, which resolves names and
@@ -111,8 +113,10 @@ pub struct Options {
 }
 
 /// Compiles preprocessed C source, read from `path`, to a keel module.
+/// Wasm accepts only the bounded freestanding integer/storage profile and
+/// verifies against WASM32. The caller must retain that layout and avoid native
+/// code generation and target-sensitive optimizer passes.
 pub fn compile(src: &str, path: &str, opts: Options) -> Result<keel_ir::Module, Diagnostic> {
-    require_public_target(opts.target, path)?;
     let arena = bumpalo::Bump::new();
     let text = crate::strings::Strings::new(&arena);
     let diagnostic = |files: &[&str], e: Error| Diagnostic {
@@ -129,20 +133,31 @@ pub fn compile(src: &str, path: &str, opts: Options) -> Result<keel_ir::Module, 
     let files = parser.take_files();
     parsed.map_err(|e| diagnostic(&files, e))?;
     let funcs = std::mem::take(&mut parser.funcs);
-    irgen::Gen::new(&parser, funcs, &files, opts.debug_info)
+    let module = irgen::Gen::new(&parser, funcs, &files, opts.debug_info)
         .run()
-        .map_err(|e| diagnostic(&files, e))
+        .map_err(|e| diagnostic(&files, e))?;
+    if opts.target == keel_ir::Target::Wasm32UnknownUnknown {
+        keel_ir::verify_module_with_layout(&module, keel_ir::DataLayout::WASM32).map_err(|e| {
+            diagnostic(
+                &files,
+                Error::new(Loc::default(), format!("wasm32 IR verification: {e:?}")),
+            )
+        })?;
+    }
+    Ok(module)
 }
 
-/// Reject before parsing/lexing: no public Wasm C profile exists yet.
+/// Profiling compilation has no Wasm implementation; reject before lexing.
+#[cfg(feature = "profile")]
 fn require_public_target(target: keel_ir::Target, path: &str) -> Result<(), Diagnostic> {
     if target == keel_ir::Target::Wasm32UnknownUnknown {
         return Err(Diagnostic {
             file: path.into(),
             line: 1,
             col: 1,
-            message: "unsupported target wasm32-unknown-unknown: public C frontend is unavailable"
-                .into(),
+            message:
+                "unsupported target wasm32-unknown-unknown: C compile profiling is unavailable"
+                    .into(),
         });
     }
     Ok(())

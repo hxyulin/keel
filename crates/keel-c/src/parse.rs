@@ -587,7 +587,11 @@ impl<'a> Parser<'a> {
             last_params: Vec::new(),
             unique: 0,
             target,
-            c_layout: CDataLayout::NATIVE_LP64,
+            c_layout: if target == Target::Wasm32UnknownUnknown {
+                CDataLayout::WASM32
+            } else {
+                CDataLayout::NATIVE_LP64
+            },
             va_list_tag: None,
         };
         p.fill();
@@ -596,7 +600,7 @@ impl<'a> Parser<'a> {
 
     /// Private model seam for declaration tests and the separately validated
     /// integer-only lowering checkpoint. Never pass its AST to a native backend;
-    /// production construction continues to select LP64.
+    /// production construction selects a model from the explicit target.
     #[cfg(test)]
     pub(crate) fn declarations_with_layout(
         src: &'a str,
@@ -631,6 +635,14 @@ impl<'a> Parser<'a> {
     /// the next stack argument, and the save area. Being an array, it
     /// decays to a pointer when passed, and a `va_list` parameter is one.
     fn va_list(&mut self) -> Ty<'a> {
+        if self.target == Target::Wasm32UnknownUnknown {
+            // Declaration-only: do not borrow a native variadic representation.
+            return Ty::Opaque(&OpaqueTy {
+                name: "__builtin_va_list",
+                size: 4,
+                align: 4,
+            });
+        }
         if self.target == Target::Aarch64AppleDarwin {
             return self.ptr_type(crate::types::CHAR);
         }
@@ -2586,7 +2598,9 @@ impl<'a> Parser<'a> {
                             Some(ty)
                         }
                         "__builtin_va_list" => {
-                            self.require_native_layout(loc, "va_list")?;
+                            if self.target != Target::Wasm32UnknownUnknown {
+                                self.require_native_layout(loc, "va_list")?;
+                            }
                             self.advance();
                             Some(self.va_list())
                         }
@@ -2721,16 +2735,14 @@ impl<'a> Parser<'a> {
             // On x86-64 Linux it is the x87 80-bit format, which keel does
             // not have: its values are refused rather than miscompiled.
             c if c == LONG + DOUBLE => {
-                self.require_native_layout(loc, "long double declarations")?;
+                if self.target != Target::Wasm32UnknownUnknown {
+                    self.require_native_layout(loc, "long double declarations")?;
+                }
                 match self.target {
-                    Target::Wasm32UnknownUnknown => {
-                        return Err(Error::new(
-                            loc,
-                            "unsupported target wasm32-unknown-unknown: long double declarations are unavailable",
-                        ));
-                    }
                     Target::Aarch64AppleDarwin => Ty::Double,
-                    Target::X86_64LinuxGnu | Target::Aarch64LinuxGnu => Ty::Opaque(&OpaqueTy {
+                    Target::X86_64LinuxGnu
+                    | Target::Aarch64LinuxGnu
+                    | Target::Wasm32UnknownUnknown => Ty::Opaque(&OpaqueTy {
                         name: "long double",
                         size: 16,
                         align: 16,

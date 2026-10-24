@@ -1,5 +1,5 @@
 //! C type identities and explicit compilation-local storage queries.
-//! Production compilations use LP64; the private wasm32 model is test-only.
+//! Native targets use LP64; the bounded freestanding Wasm target uses ILP32.
 
 use bumpalo::Bump;
 use keel_ir::{Layout, Type, VectorType};
@@ -17,8 +17,6 @@ impl CDataLayout {
         long_bytes: 8,
         pointer_bytes: 8,
     };
-    // No production route may select this until evaluator/lowering migration.
-    #[cfg(test)]
     pub(crate) const WASM32: Self = Self {
         long_bytes: 4,
         pointer_bytes: 4,
