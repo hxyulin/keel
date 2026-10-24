@@ -273,3 +273,52 @@ python3 suite/fast_opt_locked.py /tmp/wasm-basic-measure-unique.jsonl \
 The destination directory must be new. The script declines sampling when the
 one-minute host load exceeds half the logical CPU count; all generated modules
 and reports stay under the supplied temporary directory.
+
+## Independent basic-profile review (2026-10-24)
+
+Pilot `32ab2316` was independently reviewed by reapplying only `b9059e44`,
+`546c0dab`, `9bccf212`, `c8229f02` and `32ab2316` onto reviewed admission main
+`32e96946`, skipping duplicate hook `e2989057`. The owned commits and review
+changes were then rebased onto reviewed direct-emission main `3aa3a4d1`.
+Reviewed implementation/test source is `bf0386b0`. No blocking production
+defect was found; backend emission and native optimizer source were unchanged
+by this review. In particular, DCE source is identical to `d8aeff5d`.
+
+The source audit checked the four direct builtin calls, mandatory whole-module
+WASM32 verification before mutation and after each pass, absence of native
+manager/module/restoration hooks, original runtime admission before cloning,
+and final ordinary emitter/MVP checks before atomic publication. The public
+helper documentation now states that it verifies IR with WASM32 layout rather
+than performing backend capability admission or layout conversion. It also
+states that input verification failure is nonmutating, while a later failure
+can leave transformations applied; the CLI already optimizes a clone.
+
+Three added tests cover WASM32 pointer-addend bounds and an invalid later
+function before any earlier-function mutation; retention of every static slot
+after dead/unreachable StackAddr removal; and Node execution of pointer phi
+swaps, forwarding blocks and distinct duplicate branch/switch edges. The latter
+checks unaligned four-byte loads, high-bit pointer normalization and complete
+memory invariance. Selector coverage adds repeated valid requests and invalid
+requests that cannot be hidden by later valid ones.
+
+After rebasing onto the direct emitter, all 92 focused tests passed in both
+debug and release: 38 CLI binary, 18 CLI Wasm, 2 target rejection/Portable,
+7 system-link, 3 x86 CPU, and 24 optimizer profile/DCE/CFG/phi/golden tests.
+The CLI Node cases exercise constant-CFG pruning into direct return emission
+as well as surviving dispatcher CFGs. Locked all-target checks for `keel` and
+`keel-opt`, release CLI build, targeted rustfmt and whitespace checks passed
+without compiler warnings. Rust commands used the supplied shared suite lock,
+`CARGO_CACHE_LINKS=0`, default cargo cache/targets and `--offline --locked -j2`.
+Command records are `/tmp/wasm-basic-review-combined-{debug,release,check,build}-20261024.jsonl`;
+release/check/build output uses the corresponding `.log` paths, and debug
+output is retained in the review thread. An earlier review-test insertion
+mistakenly placed Rust tests inside an IR fixture; its parse failure was fixed
+before these combined gates.
+
+The earlier measurement report's corpus hashes, saved binary hash and decoded
+artifact counts were independently checked and match. Its command record and
+plain/basic flag controls were reviewed without rerunning timings. That report
+predates direct emission and retains its original binary identity and dispatcher
+scope; it is not combined-emitter evidence or a performance claim. This bounded
+review does not establish arbitrary-program equivalence, recovery after traps,
+or new ABI/FP/SIMD/import capabilities. Parent owns integration and cleanup.
