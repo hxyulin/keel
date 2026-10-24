@@ -1,5 +1,5 @@
 use Layout::Scalar as scalar;
-use keel_ir::{DataInit, DataItem, DataLayout, Layout, Type, parse};
+use keel_ir::{DataInit, DataItem, DataLayout, Layout, Type, VectorType, parse};
 
 fn array(elem: Layout, count: u32) -> Layout {
     Layout::Array(Box::new(elem), count)
@@ -131,6 +131,84 @@ fn non_pointer_storage_is_unchanged_and_does_not_authorize_values() {
         scalar(Type::F80).checked_size_with_layout(DataLayout::WASM32),
         Some(16)
     );
+    for vector in VectorType::ALL {
+        let value = Layout::Struct(vec![scalar(Type::I8), scalar(Type::Vector(vector))]);
+        let width = u64::from(vector.bytes());
+        for layout in [DataLayout::WASM32, DataLayout::NATIVE64] {
+            assert_eq!(value.checked_size_with_layout(layout), Some(width * 2));
+            assert_eq!(value.align_with_layout(layout), width);
+            assert_eq!(
+                value.leaves_with_layout(layout),
+                [(0, Type::I8), (width, Type::Vector(vector))]
+            );
+        }
+    }
+}
+
+#[test]
+fn pointer_initializer_cursors_match_consecutive_wasm32_records() {
+    // Two { char tag; char *p; i32 n; } records, then a byte sentinel.
+    // Padding is explicit in the data stream, never supplied by the query.
+    let mut items = Vec::new();
+    for tag in [1, 2] {
+        items.extend([
+            DataItem::Bytes(vec![tag, 0, 0, 0]),
+            DataItem::Ptr {
+                symbol: "bytes".into(),
+                addend: 3,
+            },
+            DataItem::Int {
+                ty: Type::I32,
+                value: 7,
+            },
+        ]);
+    }
+    items.push(DataItem::Bytes(vec![0xa5]));
+    let init = DataInit {
+        constant: false,
+        align: 4,
+        items,
+    };
+    for (layout, expected_offsets, expected_size) in [
+        (DataLayout::WASM32, [0, 4, 8, 12, 16, 20, 24], 25),
+        (DataLayout::NATIVE64, [0, 4, 12, 16, 20, 28, 32], 33),
+    ] {
+        let mut cursor = 0;
+        for (item, expected) in init.items.iter().zip(expected_offsets) {
+            assert_eq!(cursor, expected);
+            cursor += item.size_with_layout(layout);
+        }
+        assert_eq!(cursor, expected_size);
+        assert_eq!(init.checked_size_with_layout(layout), Some(expected_size));
+    }
+    assert_eq!(init.size(), 33);
+}
+
+#[test]
+fn extended_scalar_padding_survives_pointer_layout_changes() {
+    let value = array(
+        Layout::Struct(vec![
+            scalar(Type::Ptr),
+            scalar(Type::F80),
+            scalar(Type::Ptr),
+        ]),
+        2,
+    );
+    for layout in [DataLayout::WASM32, DataLayout::NATIVE64] {
+        assert_eq!(value.checked_size_with_layout(layout), Some(96));
+        assert_eq!(value.align_with_layout(layout), 16);
+        assert_eq!(
+            value.leaves_with_layout(layout),
+            [
+                (0, Type::Ptr),
+                (16, Type::F80),
+                (32, Type::Ptr),
+                (48, Type::Ptr),
+                (64, Type::F80),
+                (80, Type::Ptr),
+            ]
+        );
+    }
 }
 
 #[test]

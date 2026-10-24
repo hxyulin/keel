@@ -76,3 +76,35 @@ python3 suite/fast_opt_locked.py \
 Generated build artifacts remain in cargo-managed storage and lock metadata is
 outside Git. No native backend behavior or Wasm execution claim follows from
 these IR tests. Parent integration and independent review remain separate.
+
+## Independent stage-1 review
+
+Candidate `68457a5d` was reapplied onto `d0a912e7` in the assigned review
+worktree. The audit found no blocking production defect in the private storage
+model, recursive sizing/alignment/strides, empty cases, overflow checks, native
+wrappers, or unchanged serialization. Checked size remains a prerequisite for
+leaf traversal, with a separate practical leaf-count bound. Neither query family
+validates target support or authorizes a Wasm ABI.
+
+Review adds consecutive pointer-initializer cursor checks with an adjacent byte
+sentinel, all eighteen existing vector shapes' unchanged storage/alignment, and
+mixed pointer/F80 aggregate-array padding. The cursor check validates the query
+contract; no data emitter or frontend cursor has been migrated in this stage.
+The complete `keel-ir` suite passed in debug and release on 2026-10-24: 128 tests
+per profile, including nine focused layout tests. Both runs used:
+
+```sh
+python3 suite/fast_opt_locked.py \
+  /tmp/keel-ir-review-20261024-a4e6cb4e-debug.jsonl \
+  cargo test --offline --locked -j2 -p keel-ir
+python3 suite/fast_opt_locked.py \
+  /tmp/keel-ir-review-20261024-a4e6cb4e-release.jsonl \
+  cargo test --offline --locked -j2 -p keel-ir --release
+```
+
+Captured output uses the same paths with `.log` in place of `.jsonl`. Focused
+test-file rustfmt and `git diff --check` pass; workspace-wide formatting reports
+pre-existing differences outside this patch. Native backend smoke tests were
+not needed after the source audit and existing IR controls passed. No Wasm
+execution, C ABI, backend, optimizer or CLI validation is claimed. Integration
+and worktree cleanup remain with the parent.
