@@ -3,7 +3,8 @@
 use keel_ir::Target;
 
 pub fn query(name: &str, argument: &str, target: Target) -> u64 {
-    // No public Wasm frontend or capability profile exists at this checkpoint.
+    // The bounded Wasm profile conservatively advertises no feature/builtin
+    // capabilities, even where a portable declaration/layout query parses.
     if target == Target::Wasm32UnknownUnknown {
         return 0;
     }

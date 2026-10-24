@@ -105,13 +105,14 @@ fn preprocess_inner<const TRACK: bool>(
     path: &str,
     options: &PreprocessOptions,
 ) -> Result<(String, PreprocessStats), Diagnostic> {
-    if options.target == keel_ir::Target::Wasm32UnknownUnknown {
+    if options.target == keel_ir::Target::Wasm32UnknownUnknown && options.sysroot.is_some() {
         return Err(Diagnostic {
             file: path.into(),
             line: 1,
             col: 1,
-            message: "unsupported target wasm32-unknown-unknown: C preprocessing is unavailable"
-                .into(),
+            message:
+                "unsupported target wasm32-unknown-unknown: freestanding C sysroot is unavailable"
+                    .into(),
         });
     }
     let arena = Bump::new();
@@ -678,6 +679,9 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         self.search_dirs
             .extend(self.options.system_include_dirs.iter().cloned());
         self.search_dirs.push(crate::headers::ROOT.into());
+        if self.options.target == keel_ir::Target::Wasm32UnknownUnknown {
+            return;
+        }
         // With an explicit root, never consult host system include directories.
         let root = self.options.sysroot.clone().or_else(|| {
             (self.options.target != keel_ir::Target::Aarch64AppleDarwin
@@ -1141,6 +1145,11 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
     }
     fn search_header(&self, name: &str, quoted: bool, next: bool) -> Option<Include> {
         let (path, origin) = self.include_stack.last()?;
+        if self.options.target == keel_ir::Target::Wasm32UnknownUnknown
+            && Path::new(name).is_absolute()
+        {
+            return None;
+        }
         if quoted && !next {
             let path = Path::new(path)
                 .parent()
@@ -1161,12 +1170,16 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 continue;
             }
             let contents = if i == builtin_index {
-                crate::headers::get(Path::new(name))
+                crate::headers::get_for_target(Path::new(name), self.options.target)
             } else {
                 None
             };
             let path = dir.join(name);
-            if contents.is_some() || path.is_file() {
+            if contents.is_some()
+                || ((i != builtin_index
+                    || self.options.target != keel_ir::Target::Wasm32UnknownUnknown)
+                    && path.is_file())
+            {
                 return Some(Include {
                     path,
                     origin: Some(i),

@@ -1,7 +1,26 @@
 //! Compiler-owned headers are embedded so installed binaries need no source tree
-//! or Clang resource directory. Libc remains supplied by the target sysroot.
+//! or Clang resource directory. Native libc comes from the target sysroot;
+//! Wasm admits only the explicitly listed freestanding declaration headers.
 use std::path::Path;
 pub const ROOT: &str = "<keel>/include";
+pub fn get_for_target(name: &Path, target: keel_ir::Target) -> Option<&'static str> {
+    if target == keel_ir::Target::Wasm32UnknownUnknown
+        && !matches!(
+            name.to_str()?,
+            "stddef.h"
+                | "stdint.h"
+                | "limits.h"
+                | "float.h"
+                | "stdbool.h"
+                | "stdalign.h"
+                | "stdarg.h"
+                | "stdnoreturn.h"
+        )
+    {
+        return None;
+    }
+    get(name)
+}
 pub fn get(name: &Path) -> Option<&'static str> {
     Some(match name.to_str()? {
         "xmmintrin.h" => include_str!("../include/xmmintrin.h"),

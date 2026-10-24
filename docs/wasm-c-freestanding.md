@@ -49,3 +49,67 @@ use the explicit Wasm runtime emitter and avoid native code generation and
 unaudited target-sensitive optimizer passes. Backend memory placement, exports,
 stack limits and trap lifetime follow [the runtime contract](wasm-memory-backend.md).
 
+## Macro and header policy
+
+`predefined_macros(Wasm32UnknownUnknown, None)` supplies freestanding C11,
+ILP32, signed plain char, little endian, four-byte long/pointers/size_t/ptrdiff_t,
+eight-byte long long/intmax_t and binary128 long-double declaration limits.
+The 64-bit integer constant macros use `LL`/`ULL`; pointer integer types and
+limits retain their proper long/unsigned-long identities. GNU `word`/`pointer`
+modes are 32-bit, while `DI` stays 64-bit. No LP64, host OS, x86/ARM, WASI,
+SIMD, atomic lock-free/CAS or optional Wasm feature claims are added. `__has_*`
+capability queries remain conservative (zero); actual `__has_include` queries
+use the same target-aware lookup as `#include`.
+
+`preprocess(raw_c, path, &PreprocessOptions { target: Wasm32UnknownUnknown, .. })`
+uses the ordinary local directory for quoted includes, explicit `include_dirs`
+and `system_include_dirs` in that order, then only embedded `stddef.h`,
+`stdint.h`, `limits.h`, `stdbool.h`, `float.h`, `stdalign.h`, `stdarg.h` and
+`stdnoreturn.h`. The existing portable headers derive declarations from this
+macro inventory; no host include-next fallback is enabled. Vendor intrinsic
+headers (including private Keel wrappers), `stdatomic.h` and libc are unavailable
+from the embedded inventory. Explicit user directories can supply their own
+headers and take precedence. The caller owns those headers' target compatibility.
+Absolute include names are rejected for Wasm; ordinary relative source/header
+includes remain supported. No implicit `/usr/include`, SDK, framework, CPATH,
+C_INCLUDE_PATH, SDKROOT or compiler resource discovery runs on this path.
+Both an explicit sysroot and any Darwin deployment setting are rejected.
+Native search and embedded-header behavior remain unchanged.
+
+Ordered user macro definitions/undefinitions retain their existing semantics;
+they cannot change the parser's explicit target/model or authorize unsupported
+operations. `dump_macros` returns this same inventory after overrides.
+`preprocess_with_stats`, when built with `profile`, uses exactly the same guarded
+preprocessing path. Compile profiling remains unavailable as described above.
+
+## Validation and scope
+
+`wasm_profile` checks public preprocessed-C layout, empty units, declaration-only
+extended types, native LP64 controls and rejection of unsupported bodies,
+prototypes, externs, debug/profiling and unused section/linkage/lifecycle attrs.
+`wasm_freestanding` preprocesses the maintained raw fixture through embedded
+headers, verifies actual WASM32 IR, emits the bounded runtime module, and uses
+Node's independent validator/runtime for repeated checksum, local array, direct
+helper and static pointer execution with memory sentinels. Existing Clang checks
+the declaration fixture and the shared target macro inventory independently.
+Native macro/header/type/ABI and private Wasm runtime tests remain controls.
+Negative tests cover host/vendor/private headers, include capability queries,
+sysroot/deployment, ordered overrides and ambient host paths in a subprocess.
+Generated evidence remains outside Git; no package/toolchain installation or
+performance campaign is part of this checkpoint.
+
+Use the shared suite lock and existing pinned toolchain/features, for example:
+
+```sh
+python3 suite/fast_opt_locked.py /tmp/wasm-c-unique.jsonl \
+  cargo test --offline --locked -j2 -p keel-c --features profile
+python3 suite/fast_opt_locked.py /tmp/wasm-c-release-unique.jsonl \
+  cargo test --release --offline --locked -j2 -p keel-c \
+  --features profile --test wasm_profile --test wasm_freestanding \
+  --test wasm_target_unavailable --test environment --test contracts \
+  --test gnu_types --test x86_intrinsics
+```
+
+This remains a bounded single-translation-unit library profile. No public CLI
+Wasm output, optimizer enablement, native bridge, general C ABI, libc/WASI,
+imports, dynamic linking, FP execution or performance claim is established.
