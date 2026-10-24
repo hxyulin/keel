@@ -53,6 +53,7 @@ pub enum IntKind {
 }
 
 impl IntKind {
+    /// Compatibility query for native LP64, independent of any `Types` instance.
     pub fn size(self) -> u64 {
         self.size_with_layout(CDataLayout::NATIVE_LP64)
     }
@@ -619,6 +620,7 @@ impl<'a> Ty<'a> {
         }
     }
 
+    /// Compatibility query for native LP64, independent of any `Types` instance.
     pub fn ir(&self) -> Type {
         self.ir_with_layout(CDataLayout::NATIVE_LP64)
     }
@@ -678,6 +680,8 @@ pub struct Types<'a> {
 }
 
 impl<'a> Types<'a> {
+    /// Completed records in `structs` must have been laid out with `layout`.
+    /// Their stored sizes/offsets are authoritative; this does not relayout them.
     pub fn new(structs: &'a [StructDef<'a>], layout: CDataLayout) -> Self {
         Self { structs, layout }
     }
@@ -1220,6 +1224,84 @@ mod layout_tests {
                 layout_struct(&types, &[], false, vec![field(CHAR), field(nested)], None).unwrap();
             assert_eq!((outer_size, outer_align), (19 * p, p));
             assert_eq!(types.size(&Ty::Atomic(&LONG)), layout.long_bytes);
+        }
+    }
+
+    #[test]
+    fn interleaved_models_do_not_change_shared_type_nodes() {
+        let arena = Bump::new();
+        let mut nodes = TypeNodes::new(&arena);
+        let long = nodes.node(LONG);
+        let ptr = nodes.node(Ty::Ptr(long));
+        let array = Ty::Array(arena.alloc(ArrayTy {
+            elem: Ty::Atomic(ptr),
+            len: Some(3),
+            vla: None,
+        }));
+        let native = Types::new(&[], CDataLayout::NATIVE_LP64);
+        let wasm = Types::new(&[], CDataLayout::WASM32);
+        // Reusing the same nodes must not cache either model's widths globally.
+        for (types, bytes) in [(&native, 8), (&wasm, 4), (&native, 8), (&wasm, 4)] {
+            assert_eq!(
+                (types.size(&array), types.align(&array)),
+                (3 * bytes, bytes)
+            );
+            assert_eq!(types.size(long), bytes);
+            assert_eq!(ptr.ir_with_layout(types.layout), Type::Ptr);
+            assert_eq!(long.ir(), Type::I64);
+            assert_eq!(IntKind::Long.size(), 8);
+        }
+        assert!(!long.compatible(&Ty::Int(IntKind::LLong)));
+    }
+
+    #[test]
+    fn aligned_record_keeps_model_stride_and_stops_at_recursive_pointer() {
+        let longs = Ty::Array(&ArrayTy {
+            elem: LONG,
+            len: Some(2),
+            vla: None,
+        });
+        let self_pointer = Ty::Ptr(&Ty::Struct(0));
+        for (layout, offsets, expected) in [
+            (CDataLayout::NATIVE_LP64, vec![0, 16, 32], (48, 16)),
+            (CDataLayout::WASM32, vec![0, 16, 24], (32, 16)),
+        ] {
+            let mut aligned = field(longs);
+            aligned.4 = Some(16);
+            // The referenced record need not be complete to lay out its pointer.
+            let (members, size, align) = layout_struct(
+                &Types::new(&[], layout),
+                &[],
+                false,
+                vec![field(CHAR), aligned, field(self_pointer)],
+                None,
+            )
+            .unwrap();
+            assert_eq!(
+                members.iter().map(|m| m.offset).collect::<Vec<_>>(),
+                offsets
+            );
+            assert_eq!((size, align), expected);
+            let defs = [StructDef {
+                tag: None,
+                is_union: false,
+                members,
+                size,
+                align,
+                complete: true,
+            }];
+            let types = Types::new(&defs, layout);
+            let records = Ty::Array(&ArrayTy {
+                elem: Ty::Struct(0),
+                len: Some(2),
+                vla: None,
+            });
+            assert_eq!(
+                (types.size(&records), types.align(&records)),
+                (2 * size, 16)
+            );
+            assert!(!types.has_unaligned_fields(&records, 0));
+            assert_eq!(types.unsupported_value(&Ty::Struct(0)), None);
         }
     }
 
