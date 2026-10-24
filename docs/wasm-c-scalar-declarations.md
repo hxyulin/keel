@@ -139,3 +139,65 @@ The first full debug run also passed 297 tests; it preceded the final private
 _Bool string-identity guard, so the final-source run above is the acceptance run.
 The release run serialized behind that run using the existing shared lock.
 No Wasm C execution or performance claim follows from these results.
+
+## Independent review
+
+Candidate `256e8d86` (implementation `92be6b9f`) was reapplied onto clean
+`4f9f49c0` in the assigned review checkout as `0234794b`/`2c274b57`.
+The audit found no blocking defect in the agreed private parser-width checkpoint;
+no production source fix was needed. Review test commit `2a3578e2` expands the
+maintained Clang/parser fixture with an explicitly aligned recursive record,
+anonymous union arrays, inferred aggregate array lengths and nested braced wide
+and narrow string initialization. Actual AST offsets, record/array size and
+alignment, recursive pointer identity and literal byte lengths are checked in
+WASM32/LP64/WASM32 order. The fixture independently asserts the corresponding
+C layout decisions in both Clang profiles.
+
+Additional regressions check coincident word/pointer underscore aliases,
+all three atomic declaration qualifier forms, zero-width and union bit-fields,
+member packing and pragma packing. Rejection tests require the intended
+boundary diagnostic. Native constructor controls cover every existing Target
+and confirm LP64 with a fresh record table after private-model parsing.
+The existing tests retain DI signedness/nominal identity, conflicting modes,
+wide-string element identity, native proof and ABI/vector/asm fences.
+
+Production `compile` still invokes only `Parser::new`, which always selects
+LP64; the alternate constructor and WASM32 constant are both `cfg(test)` in
+private modules. The constructor's initial token fill does not construct types
+or records before the model is set. Native mode mapping, string width/type
+selection, proof logic and fences take their previous LP64 branches. There is
+no public non-native selection, sibling interface change or generator handoff.
+
+The private seam calls the ordinary translation-unit parser, which can also
+build function-body ASTs. Its declaration-only purpose is a caller precondition,
+not a restricted C grammar or complete Wasm validation pass. Generic FP/complex,
+opaque declarations, variadics, runtime expressions and other unported value
+paths still need the future production target's complete validation gates.
+Selective rejection here does not establish those gates. The AST/type/record
+model pairing likewise remains a trusted private precondition. These limits are
+safe only while the non-native model stays test-only and never enters native
+IR generation. Numeric/pointer initializer serialization, generator lowering,
+macro/header policy, array object placement and Wasm ABI/runtime remain deferred;
+no serialization, executable Wasm C or general FP support follows from this review.
+
+Independent Apple Clang 21.0.0 wasm32 syntax checks also passed seven string
+controls: int wide arrays, signed/unsigned char narrow arrays and an exactly
+sized wide array are accepted; long/unsigned-int wide arrays and _Bool narrow
+arrays are rejected with `-Werror`. Exact inputs, arguments and diagnostics are
+outside Git in `/tmp/keel-declarations-review-6f2d-clang-strings.json`.
+
+Fresh review validation of `2a3578e2` on Apple ARM64 passed the full C debug
+suite (298 tests) and the focused release command listed above (114 tests),
+zero failures/ignored and no compiler warnings. Both include the expanded
+wasm32/native Clang fixture and private rejection tests. Applicable native
+runtime/ABI controls executed; local Linux/x86 frontend/object checks remain
+cross-compilation evidence rather than x86 execution. Production
+`cargo check --offline --locked -j2 -p keel-c` also passed. All three commands used
+`python3 suite/fast_opt_locked.py /tmp/<unique>.jsonl
+cargo ...`, the existing shared lock, toolchain, features and default
+cargo cache/managed targets. Logs and exact serialized invocations are
+`/tmp/keel-declarations-review-6f2d-{debug,release,check}.{log,jsonl}`.
+Focused rustfmt checks on the three candidate source files and `git diff --check`
+passed. No remote hosts, subagents, toolchain/cache changes, manual output
+deletion, performance campaign, main integration or worktree cleanup were
+performed. Parent retains integration and cleanup ownership.
