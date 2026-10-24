@@ -182,3 +182,48 @@ paths ending in `.log`. Initial debug fixture parse failures (missing explicit
 runs; the append-only command records retain those earlier failed invocations.
 No toolchain, dependency pin/feature, cache setting or native source changed.
 Independent review/integration has not been performed by this implementation task.
+
+## Independent memory review
+
+Candidate `cb55a787` (implementation `f1eebf33`) was reapplied onto `4f9f49c0`
+in the assigned review checkout. No blocking production semantic defect was
+found. The audit checked whole-module preflight, unchanged scalar API/subset,
+i32 pointer locals and unsigned normalization, wrapping pointer addition before
+zero-offset memory accesses, exact access widths and OOB-store atomicity,
+canonical narrow values/conversions, mixed-width shift counts, parallel edge
+copies, ordered volatile accesses/calls, alignment hints and retained engine
+bounds checks. The fixed memory/export contract and explicit MVP validator
+remain bounded as documented above; no production correction was needed.
+
+Review adds two maintained boundary tests and an unaligned high-alignment-hint
+case. Node's independent BigInt/byte oracle checks every i16 bit pattern and
+chained i8-to-i16-to-i32-to-i64 sign extension; all five shifts/rotates at both
+data widths with narrow count types; zero-page instantiation/access traps;
+wrapped multi-byte addresses; every partial eight-byte overlap at the configured
+upper boundary; and no wrapped or partial OOB writes. An ordered trapping direct
+call preserves earlier stores and prevents subsequent stores. The 65536-page
+case remains validation/decoding only, without allocating 4 GiB.
+
+Tested source `ee142b3d52af4aa96f10c55fa44e2e005f29e79a` passed the complete
+`keel-wasm` suite in debug and release: ten memory tests and fifteen unchanged
+scalar regressions per profile, zero failures/ignored tests. Both profiles use
+wasmparser MVP validation and Node v24.22.1 validation/compilation/execution.
+Locked `cargo check` and `cargo build` also passed. All four Rust commands used
+`python3 suite/fast_opt_locked.py`, the existing shared lock,
+`cargo`, `--offline --locked -j2 -p keel-wasm` and existing pins,
+features/default managed storage. Exact command records and output are
+`/tmp/keel-wasm-review-42cb2153-{debug,release,check,build}.{jsonl,log}`.
+`cargo fmt -p keel-wasm --check` and `git diff --check` passed.
+
+The clean review branch was subsequently rebased onto current main
+`40bd8edba76fc44a7d18e329745e813a9b09d633`, producing source `1f773a24`.
+Only disjoint C parser files, its fixture and documentation changed in the base.
+The entire `crates/keel-wasm` tree is identical before/after rebase (Git tree
+`fef6dde42e5fa0987f55f598aefdaec0bbd66540`); `keel-ir`, Cargo manifests/lock,
+toolchain and Cargo configuration are unchanged. No additional Rust run was
+needed for that rebase. This evidence documentation follows the tested source.
+
+These finite tests do not establish a C/pointer call ABI, optimized IR support,
+software-stack behavior, 4 GiB instantiation, native execution or performance.
+No dependency/native source, toolchain/cache configuration, remote host or main
+integration changed during review. Parent owns integration and cleanup.
