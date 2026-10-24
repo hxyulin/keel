@@ -52,7 +52,7 @@ func @f(i64) -> i64 {
 block0(v0: i64):
     v1 = inttoptr.ptr v0
     v2 = load.i64 v1
-    v3 = load.i32 volatile v1
+    v3 = load.i32 volatile notrap v1
     v4 = load.i64 notrap v1
     store volatile v3, v1
     v5 = iconst.i64 0
@@ -68,7 +68,10 @@ block0(v0: i64):
     .unwrap();
     let before = module.to_string();
     keel_opt::optimize_wasm32_basic(&mut module).unwrap();
-    assert_eq!(before, module.to_string());
+    assert_eq!(
+        before.replace("    v4 = load.i64 notrap v1\n", ""),
+        module.to_string()
+    );
 }
 
 #[test]

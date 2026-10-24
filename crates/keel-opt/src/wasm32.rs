@@ -41,5 +41,5 @@ const BASIC: &[(&str, fn(&mut keel_ir::Function) -> bool)] = &[
     ("const-fold", crate::const_fold::run),
     ("simplify-cfg", crate::simplify_cfg::run),
     ("phi-simplify", crate::phi_simplify::run),
-    ("dce", crate::dce::run_preserving_reads),
+    ("dce", crate::dce::run),
 ];
