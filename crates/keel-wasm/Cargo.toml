@@ -1,0 +1,11 @@
+[package]
+name = "keel-wasm"
+description = "Bounded pointer-free scalar Keel IR to core WebAssembly backend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+keel-ir = { path = "../keel-ir" }
+wasm-encoder = { version = "=0.245.1", default-features = false, features = ["std"] }
+wasmparser = { version = "=0.245.1", default-features = false, features = ["std", "validate", "features", "prefer-btree-collections"] }
