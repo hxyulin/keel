@@ -197,7 +197,16 @@ fn fallback_bodies_remain_byte_identical_including_one_block_selfedge() {
                 .step_by(2)
                 .map(|n| u8::from_str_radix(&frozen[n..n + 2], 16).unwrap())
                 .collect();
-            let (expected, _) = adjacent_tee::fold_body(&original);
+            let (expected, pairs) = adjacent_tee::fold_body(&original);
+            let expected_pairs = if profile == 2 {
+                [1, 1, 3, 3, 1]
+            } else {
+                [0, 0, 2, 2, 0]
+            };
+            assert_eq!(pairs, expected_pairs[i]);
+            if pairs == 0 {
+                assert_eq!(body.as_bytes(), original, "nonmatching frozen body {i}");
+            }
             assert_eq!(body.as_bytes(), expected, "profile {profile} function {i}");
         }
         execute(
