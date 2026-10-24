@@ -868,6 +868,9 @@ fn storage_data_boundaries_before_pruning() {
         "struct Big { char big[2147483648ULL][8589934592ULL]; }; int f(void) { return 0; }",
         "struct Big { char a[2147483648ULL], b[2147483648ULL]; }; int f(void) { return 0; }",
         "struct Big { _Alignas(16) char a[4294967295ULL]; }; int f(void) { return 0; }",
+        "int f(void) { return sizeof(long long[9223372036854775807LL]); }",
+        "static long long big[1][9223372036854775807LL]; int f(void) { return 0; }",
+        "static int unused(void) { long long (*p)[1][9223372036854775807LL]; return 0; }",
     ] {
         let error = lower(source, false).unwrap_err();
         assert!(error.message.contains("exceeds wasm32 bounds"), "{error:?}");

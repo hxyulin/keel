@@ -3239,6 +3239,20 @@ impl<'a> Parser<'a> {
                     "variable-length array element type must be a complete object type",
                 ));
             }
+            // Bound each completed dimension before an enclosing dimension,
+            // record layout or sizeof query can multiply through Types::size.
+            if self.c_layout.pointer_bytes() == 4
+                && let Some(len) = len
+                && self
+                    .size_of(&elem)
+                    .checked_mul(len)
+                    .is_none_or(|size| size > u32::MAX as u64)
+            {
+                return Err(Error::new(
+                    loc,
+                    "non-native array storage exceeds wasm32 bounds",
+                ));
+            }
             if !self
                 .size_of(&elem)
                 .is_multiple_of(self.type_alignment(&elem, &sugar))
