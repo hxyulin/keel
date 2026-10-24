@@ -112,4 +112,48 @@ checks pass. Workspace-wide `cargo fmt --all -- --check` reports pre-existing
 formatting differences across unrelated files; those files were not changed.
 
 Generated evidence stays outside Git. No performance claim is made. Independent
-review and parent integration remain outstanding.
+review is recorded below; parent integration remains outstanding.
+
+## Independent checkpoint review
+
+Candidate `40b8a6cb` (implementation `8f43be9a`) was reapplied onto `d0a912e7`
+in a separate review checkout. Source review found no blocking native behavior
+or public API defect within the approved private-model checkpoint. `types` is
+not publicly exported, `Options` is unchanged, every parser constructor selects
+LP64, and generator storage queries use that parser's `Types`. WASM32's only
+constant is behind `cfg(test)`; no production target or selection path was added.
+
+Review commit `6503b3cc` adds two regressions: alternating model queries over
+shared interned type nodes, including array/atomic/pointer recursion; and an
+explicitly aligned record with a long array and self-referential pointer,
+checking offsets, trailing padding, aggregate array stride and traversal stopping
+at the pointer. It also documents the compatibility wrappers and constructor
+provenance precondition directly at the methods.
+
+The dual APIs deliberately do not prevent every future model mix. In particular,
+`IntKind::size` and `Ty::ir` remain native even beside a WASM32 `Types`, and
+`Types::new` trusts completed `StructDef` sizes/alignments/offsets from its caller.
+Reusing an LP64 record table with WASM32 would retain those LP64 record values.
+These are migration constraints, not production wasm32 support: callers must
+thread one model consistently and build the entire record table under it before
+any production non-native selection is enabled. No provenance framework or
+cross-model relayout was introduced. Existing unchecked large-layout arithmetic
+and deferred evaluator/conversion/literal/mode/lowering work remain as listed
+above. No IR/backend/CLI/Target files were changed by this review; the sibling
+IR-layout review and parent integration are separate.
+
+Review validation on Apple ARM64 with Apple Clang 21 used the prescribed
+`python3 suite/fast_opt_locked.py /tmp/<unique>.jsonl
+cargo test --offline --locked -j2 -p keel-c` invocation, preserving
+existing pins/features and the shared lock/cache. The focused release command
+adds `--release --lib --test gnu_types --test gnu_vector_abi
+--test gnu_vector_broadcast --test binary128_layout --test atomic_representations
+--test complex --test initializers --test system_header_compat`: 66 tests passed,
+zero failures/ignored. This includes the seven model tests and applicable native
+Clang controls; Linux/x86-only runtime branches do not run on this host.
+The unmodified candidate first passed all 285 debug tests; the final full debug
+rerun including review regressions passed all 287, zero failures/ignored.
+Logs and serialized invocation records use
+`/tmp/keel-review-c-layout-fce03f1a-{debug,release,final-debug}.{log,jsonl}`.
+Focused `rustfmt --edition 2024 --check crates/keel-c/src/types.rs` and
+`git diff --check` pass. No Wasm C execution or performance claim follows.
