@@ -4338,6 +4338,16 @@ mod declaration_layout_tests {
         let aliases = "typedef int X __attribute__((mode(DI), mode(word)));";
         assert!(declarations(aliases, &arena, CDataLayout::NATIVE_LP64).is_ok());
         assert!(declarations(aliases, &arena, CDataLayout::WASM32).is_err());
+        for layout in [CDataLayout::WASM32, CDataLayout::NATIVE_LP64] {
+            assert!(
+                declarations(
+                    "typedef unsigned int X __attribute__((mode(__word__), __mode__(pointer)));",
+                    &arena,
+                    layout,
+                )
+                .is_ok()
+            );
+        }
         for src in [
             "typedef int X __attribute__((mode(DI))); typedef long X;",
             "typedef unsigned int X __attribute__((mode(pointer))); typedef int X;",
@@ -4373,6 +4383,22 @@ mod declaration_layout_tests {
             ("int text[] = \"ab\";", "wrong width"),
             ("char text[] = L\"ab\";", "wrong width"),
             ("_Bool text[] = \"ab\";", "incompatible string"),
+            ("_Atomic(long) x;", "`_Atomic` requires"),
+            ("long _Atomic x;", "`_Atomic` requires"),
+            ("long * _Atomic x;", "`_Atomic` requires"),
+            (
+                "struct B { long :0; long x; };",
+                "non-native packed records",
+            ),
+            ("union B { long bits:3; };", "non-native packed records"),
+            (
+                "struct B { long x __attribute__((packed)); };",
+                "non-native packed records",
+            ),
+            (
+                "#pragma pack(push, 1)\nstruct B { long x; };\n#pragma pack(pop)\n",
+                "non-native packed records",
+            ),
             ("struct B { long bits:3; };", "non-native packed records"),
             (
                 "struct B { long x; } __attribute__((packed));",
@@ -4402,6 +4428,60 @@ mod declaration_layout_tests {
         )
         .unwrap();
         assert!(matches!(p.globals[0].ty, Ty::Array(a) if a.elem == INT));
+    }
+
+    #[test]
+    fn recursive_records_and_nested_string_initializers_use_one_model() {
+        let arena = Bump::new();
+        for (layout, node_size, text_size, string_offsets) in [
+            (CDataLayout::WASM32, 16, 24, [32, 44]),
+            (CDataLayout::NATIVE_LP64, 32, 32, [48, 60]),
+            (CDataLayout::WASM32, 16, 24, [32, 44]),
+        ] {
+            let p = declarations(FIXTURE, &arena, layout).unwrap();
+            let global = |name| p.globals.iter().find(|g| g.name == name).unwrap();
+            let nodes = global("nodes");
+            assert_eq!(p.size_of(&nodes.ty), 2 * node_size);
+            assert_eq!(p.align_of(&nodes.ty), 16);
+            let Ty::Array(a) = nodes.ty else {
+                panic!("node array")
+            };
+            let Ty::Struct(id) = a.elem else {
+                panic!("node record")
+            };
+            let node = &p.structs[id];
+            assert!(matches!(node.members[2].ty, Ty::Ptr(t) if *t == Ty::Struct(id)));
+            for (item, offset) in nodes.init.unwrap().items.iter().zip([
+                node_size + 2 * layout.pointer_bytes(),
+                node_size + 3 * layout.pointer_bytes(),
+            ]) {
+                assert!(matches!(item, InitItem::Expr { offset: o, .. } if *o == offset));
+            }
+            assert_eq!(nodes.init.unwrap().items.len(), 2);
+            let texts = global("texts");
+            assert_eq!(p.size_of(&texts.ty), 2 * text_size);
+            assert_eq!(texts.init.unwrap().items.len(), 2);
+            for ((item, offset), len) in texts
+                .init
+                .unwrap()
+                .items
+                .iter()
+                .zip(string_offsets)
+                .zip([12, 4])
+            {
+                assert!(
+                    matches!(item, InitItem::Bytes { offset: o, bytes } if *o == offset && bytes.len() == len)
+                );
+            }
+        }
+        // Native constructor provenance must remain independent of test parses
+        // and of which native profile the private seam borrowed.
+        for target in Target::ALL {
+            let p = Parser::new("", "native.c", target, Strings::new(&arena));
+            assert_eq!(p.c_layout, CDataLayout::NATIVE_LP64);
+            assert!(p.structs.is_empty());
+            assert_eq!(p.size_of(&LONG), 8);
+        }
     }
 
     #[test]

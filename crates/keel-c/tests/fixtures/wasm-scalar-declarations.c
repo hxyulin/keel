@@ -41,3 +41,23 @@ char narrow[] = "abc";
 int wide[] = L"ab";
 int clipped[2] = L"ab";
 long scalar_values[3] = { [2] = (long)0x100000001L };
+
+/* Recursive records, anonymous unions and aggregate array stride must use the
+ * model at construction, including explicit record alignment and tail padding. */
+struct Node {
+    char head;
+    union { long lanes[2]; void *links[2]; };
+    struct Node *next;
+} __attribute__((aligned(16)));
+_Static_assert(sizeof(struct Node) == (sizeof(long) == 4 ? 16 : 32), "recursive size");
+_Static_assert(_Alignof(struct Node) == 16, "explicit record alignment");
+_Static_assert(__builtin_offsetof(struct Node, lanes[1]) == 2 * sizeof(long), "anonymous array offset");
+_Static_assert(__builtin_offsetof(struct Node, next) == 3 * sizeof(void *), "recursive pointer offset");
+struct Node nodes[] = { [1].lanes[1] = 7, [1].next = (void *)0 };
+_Static_assert(sizeof(nodes) == 2 * sizeof(struct Node), "inferred record array");
+
+struct Text { char marker; long pad; int wide[3]; char tail[4]; };
+_Static_assert(sizeof(struct Text) == (sizeof(long) == 4 ? 24 : 32), "text record padding");
+_Static_assert(__builtin_offsetof(struct Text, wide) == 2 * sizeof(long), "wide member placement");
+struct Text texts[] = { [1].wide = { L"ab" }, [1].tail = "abc" };
+_Static_assert(sizeof(texts) == 2 * sizeof(struct Text), "inferred string record array");
