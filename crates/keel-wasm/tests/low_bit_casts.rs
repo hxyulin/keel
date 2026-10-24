@@ -364,3 +364,157 @@ for(const x of [0n,-1n,0x80000000n,0x100000000n,-0x8000000000000000n])
 "#);
     }
 }
+
+
+#[test]
+fn complete_chains_keep_intermediates_used_by_calls_edges_and_control() {
+    // Each suffix uses an intermediate after an otherwise complete adjacent
+    // chain. Count operand occurrences, including duplicate operands/edges.
+    for suffix in [
+        "v7 = call @sum(v2,v2)\n return v7",
+        "brif v1,block1(v2,v2),block1(v2,v6)\nblock1(v7:i64,v8:i64):\n v9 = iadd v7,v8\n return v9",
+        "switch v2,block1(v2,v6),[1: block1(v2,v2)]\nblock1(v7:i64,v8:i64):\n v9 = iadd v7,v8\n return v9",
+        "v7 = select v1,v2,v2\n v8 = iadd v7,v6\n return v8",
+    ] {
+        let module = parse(&format!(r#"
+func @sum(i64,i64)->i64 {{
+block0(v0:i64,v1:i64):
+ v2 = iadd v0,v1
+ return v2
+}}
+func @probe(i32,i32)->i64 {{
+block0(v0:i32,v1:i32):
+ v2 = uext.i64 v0
+ v3 = trunc.i32 v2
+ v4 = uext.i64 v3
+ v5 = inttoptr.ptr v4
+ v6 = ptrtoint.i64 v5
+ {suffix}
+}}
+"#)).unwrap();
+        for profile in [1,2] {
+            assert_eq!(conversions(&emit(&module, &["probe"], profile).unwrap()), [(0,0),(2,3)]);
+            execute(&module, &["probe"], profile, r#"
+for(const x of [0n,1n,-1n,-2147483648n,0x7fffffffn,0x80000000n,0xffffffffn])
+ for(const c of [0,1])
+  assert.equal(e.probe(Number(BigInt.asIntN(32,x)),c),2n*BigInt.asUintN(32,x));
+"#);
+        }
+    }
+}
+
+#[test]
+fn saturated_occurrence_counts_cannot_turn_shared_values_into_single_use() {
+    // A wrapping u8 counter would see 257 uses as one. The chain's first
+    // intermediate must remain available to all 256 subsequent additions.
+    let mut source = String::from(r#"
+func @many(i32)->i64 {
+block0(v0:i32):
+ v1 = uext.i64 v0
+ v2 = trunc.i32 v1
+ v3 = uext.i64 v2
+ v4 = inttoptr.ptr v3
+ v5 = ptrtoint.i64 v4
+"#);
+    for n in 6..262 {
+        source.push_str(&format!(" v{n} = iadd v{},v1\n",n-1));
+    }
+    source.push_str(" return v261\n}\n");
+    let module = parse(&source).unwrap();
+    for profile in [1,2] {
+        assert_eq!(conversions(&emit(&module, &["many"], profile).unwrap()), [(2,3)]);
+        execute(&module, &["many"], profile, r#"
+for(const x of [0,1,-1,-2147483648,2147483647])
+ assert.equal(e.many(x),257n*BigInt.asUintN(32,BigInt(x)));
+"#);
+    }
+}
+
+#[test]
+fn signed_and_narrow_near_matches_and_effect_barriers_remain_literal() {
+    for (first, second, barrier, counts, expected) in [
+        ("sext.i64", "uext.i64", "", (2,2), "low(x)"),
+        ("uext.i64", "sext.i64", "", (2,2), "low(x)"),
+        ("uext.i64", "uext.i64", "call @mark()", (2,3), "low(x)"),
+        // Narrow truncation is semantically different at 0x10000 and -1.
+        ("uext.i64", "uext.i64", "narrow", (2,3), "BigInt.asUintN(16,x)"),
+    ] {
+        let trunc = if barrier == "narrow" {"i16"} else {"i32"};
+        let effect = if barrier == "narrow" {""} else {barrier};
+        let module = parse(&format!(r#"
+func @mark() {{
+block0:
+ return
+}}
+func @probe(i32)->i64 {{
+block0(v0:i32):
+ v1 = {first} v0
+ v2 = trunc.{trunc} v1
+ {effect}
+ v3 = {second} v2
+ v4 = inttoptr.ptr v3
+ v5 = ptrtoint.i64 v4
+ return v5
+}}
+"#)).unwrap();
+        for profile in [1,2] {
+            assert_eq!(conversions(&emit(&module, &["probe"], profile).unwrap()), [(0,0),counts]);
+            execute(&module, &["probe"], profile, &format!(r#"
+const low=x=>BigInt.asUintN(32,x);
+for(const x of [0n,1n,-1n,65535n,65536n,0x7fffffffn,0x80000000n,0xffffffffn])
+ assert.equal(e.probe(Number(BigInt.asIntN(32,x))),{expected});
+"#));
+        }
+    }
+}
+
+#[test]
+fn matched_chains_keep_retained_aliased_faulting_source_producers() {
+    for producer in ["sdiv v0,v1", "load.i32 align 1 volatile v3"] {
+        let mut module = parse(&format!(r#"
+func @probe(i32,i32,i64)->i64 {{
+block0(v0:i32,v1:i32,v2:i64):
+ v3 = inttoptr.ptr v2
+ v4 = iconst.i64 40
+ v5 = inttoptr.ptr v4
+ v6 = iconst.i8 85
+ store volatile v6,v5
+ v7 = {producer}
+ v8 = uext.i64 v7
+ v9 = trunc.i32 v8
+ v10 = uext.i64 v9
+ v11 = inttoptr.ptr v10
+ v12 = ptrtoint.i64 v11
+ v13 = iconst.i8 102
+ store volatile v13,v5
+ return v12
+}}
+"#)).unwrap();
+        let f = &mut module.functions[0];
+        let b = f.entry_block().unwrap();
+        let value = f.first_result(f.block_insts(b)[5]);
+        f.replace_all_uses(value, f.block_params(b)[0]);
+        for profile in [1,2] {
+            assert_eq!(conversions(&emit(&module, &["probe"], profile).unwrap()), [(2,1)]);
+            let faults = if producer.starts_with("sdiv") {
+                "[[17,0,64n],[-2147483648,-1,64n]]"
+            } else {
+                "[[17,3,65533n],[17,3,0xffffffffn]]"
+            };
+            execute(&module, &["probe"], profile, &format!(r#"
+const u=new Uint8Array(e.memory.buffer);
+for(const x of [0,1,-1,-2147483648,2147483647]) {{
+ u.fill(0xa7); const want=u.slice(); want[40]=102;
+ assert.equal(e.probe(x,3,64n),BigInt.asUintN(32,BigInt(x)));
+ assert.deepEqual(u,want);
+}}
+for(const args of {faults}) {{
+ const t=new WebAssembly.Instance(mod).exports, m=new Uint8Array(t.memory.buffer);
+ m.fill(0xa7); const want=m.slice(); want[40]=85;
+ assert.throws(()=>t.probe(...args),WebAssembly.RuntimeError);
+ assert.deepEqual(m,want,'retained source faults before the final store');
+}}
+"#));
+        }
+    }
+}
