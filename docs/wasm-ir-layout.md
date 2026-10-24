@@ -132,3 +132,39 @@ the bounded Wasm backend must separately reject RTTI and function relocations.
 The caller must pass the actual module, without replacing initializers with zero
 items to bypass native verification. Function pointer arithmetic/conversion IR
 signatures and debug storage contracts remain unchanged.
+
+The focused `crates/keel-ir/tests/layout_verifier.rs` regressions verify actual
+WASM32 modules with adjacent pointers, pointer/i32 records and a trailing byte
+sentinel; native-versus-Wasm object/item alignment and cursor diagnostics;
+layout-dependent target addend boundaries including one-past; unknown, external,
+TLS, ordinary function and fast-function relocation controls; native RTTI size,
+alignment and data-symbol requirements; and malformed integer items. Existing
+malformed function/type/call/block/dominance/debug fixtures are combined with real
+wasm32 initializers, and source-location and storage metadata errors remain
+visible. The existing parseable golden corpus is also checked through the new
+native entry point, and through WASM32 wherever initializer storage is unchanged.
+The original golden suite independently retains its expected diagnostics.
+
+The verifier's private checked cursor helper is tested at `u64::MAX`, including
+exact-end success, zero increment, and four/eight-byte overflow diagnostics. An
+actual initializer large enough to overflow u64 is not practical to allocate;
+this arithmetic test exercises the helper used by the real item loop. Target
+size queries use `DataInit::checked_size_with_layout`, whose sum is checked.
+
+On 2026-10-24 the full `keel-ir` suite passed in debug and release: 137 tests per
+profile, including the eight focused verifier tests and cursor overflow unit
+test. Reproduce with the existing shared lock and cargo-managed target storage:
+
+```sh
+python3 suite/fast_opt_locked.py \
+  /tmp/keel-verifier-20261024-4f92-debug.jsonl \
+  cargo test --offline --locked -j2 -p keel-ir
+python3 suite/fast_opt_locked.py \
+  /tmp/keel-verifier-20261024-4f92-release.jsonl \
+  cargo test --offline --locked -j2 -p keel-ir --release
+```
+
+Captures use the same paths with `.log` in place of `.jsonl`. Focused test-file
+rustfmt and `git diff --check` pass. No C, backend, target, CLI, native ABI or
+Wasm execution change is claimed by this verifier prerequisite. Parent review
+and integration remain separate.
