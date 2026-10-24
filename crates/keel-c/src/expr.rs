@@ -3395,6 +3395,53 @@ mod integer_layout_tests {
     }
 
     #[test]
+    fn recursive_addresses_hints_and_parser_queries_keep_the_model() {
+        let arena = Bump::new();
+        for (src, native, wasm) in [
+            // Member address recursion must normalize after adding the offset;
+            // the containing record also has different natural member offsets.
+            (
+                "(unsigned long)&((struct { char c; long n; }*)0xfffffffcULL)->n",
+                4294967300,
+                0,
+            ),
+            // Divide zero-extended address differences before long32 truncation.
+            (
+                "(long long*)0xfffffff8ULL - (long long*)0",
+                536870911,
+                536870911,
+            ),
+            ("(long*)0xfffffffcULL - (long*)4", 536870911, 1073741822),
+            ("__builtin_expect((long)0xffffffffULL, 0)", 4294967295, -1),
+            ("__builtin_choose_expr((long)0x100000000ULL, 9, 3)", 9, 3),
+            (
+                "((long)0x100000000ULL, (unsigned long)-1L) > 0xffffffffULL",
+                1,
+                0,
+            ),
+            ("(long)0x100000000ULL || (long)0xffffffffULL < 0", 1, 1),
+            ("(long)0x100000000ULL && (1 / 0)", -1, 0),
+        ] {
+            for (layout, expected) in [
+                (CDataLayout::NATIVE_LP64, native),
+                (CDataLayout::WASM32, wasm),
+            ] {
+                let e = expression(src, &arena, layout);
+                let expected = if src.contains("&&") && layout == CDataLayout::NATIVE_LP64 {
+                    None
+                } else {
+                    Some(expected)
+                };
+                assert_eq!(
+                    eval::eval_int_with_layout(&e, layout),
+                    expected,
+                    "{src} {layout:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn wide_casts_and_constant_proof_safeguards_stay_bounded() {
         let arena = Bump::new();
         for layout in [CDataLayout::NATIVE_LP64, CDataLayout::WASM32] {

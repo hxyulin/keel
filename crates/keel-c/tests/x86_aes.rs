@@ -153,6 +153,12 @@ fn aes_keyassist_reuses_defined_bounded_ice_proof() {
         "(-(-2147483647-1)) & 255",
         "((-2147483647-1)/-1) & 255",
         "((-2147483647-1)%-1) & 255",
+        // LP64 long bounds must survive the scalar evaluator migration even
+        // when a final narrowing cast would turn an invalid fold into imm8.
+        "(unsigned char)(9223372036854775807L + 1L)",
+        "(unsigned char)((-9223372036854775807L - 1L) / -1L)",
+        "(unsigned char)(1L << 64)",
+        "(unsigned char)(long)9223372036854775808.0",
         "(1/0)",
         "(int)(__int128)17",
         "(int)(void*)17",
