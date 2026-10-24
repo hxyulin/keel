@@ -14,7 +14,8 @@ use crate::{
     Type, UnaryOp, Value, ValueDef,
 };
 use crate::{
-    DataInit, DataItem, DataObject, DebugScope, DebugType, DebugTypeData, FunctionAttrs, Module,
+    DataInit, DataItem, DataLayout, DataObject, DebugScope, DebugType, DebugTypeData,
+    FunctionAttrs, Module,
 };
 use std::fmt;
 
@@ -85,6 +86,18 @@ impl<'m> Names<'m> {
 /// each function's callees and data match the module's declarations, and
 /// that instruction locations name the module's source files.
 pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
+    verify_module_with_layout(module, DataLayout::NATIVE64)
+}
+
+/// Verifies the actual module using explicit storage properties only for data
+/// initializer cursors, pointer alignment, and relocation target sizes. All
+/// structural, function, reference, debug, type and metadata checks are retained.
+/// This neither infers a target nor authorizes backend support. RTTI names keep
+/// their native eight-byte storage and alignment under either layout.
+pub fn verify_module_with_layout(
+    module: &Module,
+    layout: DataLayout,
+) -> Result<(), Vec<VerifierError>> {
     let mut errors = Vec::new();
     let lookup = Names::new(module);
     let mut seen = FxHashSet::with_capacity_and_hasher(
@@ -175,7 +188,7 @@ pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
             });
         }
         if let Some(init) = &data.init {
-            for message in check_data(&lookup, init) {
+            for message in check_data(&lookup, init, layout) {
                 errors.push(VerifierError {
                     location: format!("@{}", data.name),
                     message,
@@ -399,7 +412,7 @@ fn check_debug_info(module: &Module, lookup: &Names<'_>) -> Vec<VerifierError> {
 /// much as the linker can guarantee.
 const MAX_DATA_ALIGN: u32 = 4096;
 
-fn check_data(lookup: &Names<'_>, init: &DataInit) -> Vec<String> {
+fn check_data(lookup: &Names<'_>, init: &DataInit, layout: DataLayout) -> Vec<String> {
     let mut errors = Vec::new();
     if !init.align.is_power_of_two() || init.align > MAX_DATA_ALIGN {
         errors.push(format!(
@@ -407,12 +420,12 @@ fn check_data(lookup: &Names<'_>, init: &DataInit) -> Vec<String> {
             init.align
         ));
     }
-    if init.size() == 0 {
+    if init.checked_size_with_layout(layout) == Some(0) {
         // Two empty objects could share an address, which is surprising.
         errors.push("data object is empty".into());
     }
-    let mut offset = 0;
-    let mut has_aligned_ptrs = u64::from(init.align) >= PTR_BYTES;
+    let mut offset = Some(0u64);
+    let mut reported_pointer_align = 0;
     for item in &init.items {
         match item {
             DataItem::Int { ty, value } => match ty.bytes() {
@@ -452,33 +465,56 @@ fn check_data(lookup: &Names<'_>, init: &DataInit) -> Vec<String> {
                     ));
                 } else if let Some(target) =
                     lookup.data_object(symbol).and_then(|d| d.init.as_ref())
-                    && u64::from(addend) > target.size()
                 {
+                    match target.checked_size_with_layout(layout) {
+                        Some(size) if u64::from(addend) > size => errors.push(format!(
+                            "@{symbol} + {addend} is past the end of @{symbol} ({size} bytes)"
+                        )),
+                        None => errors.push(format!("target @{symbol} size overflows u64")),
+                        Some(_) => {}
+                    }
+                }
+                // Native loaders require pointer alignment. RTTI tagging is
+                // always native, even with a narrower portable pointer model.
+                let pointer_align = if matches!(item, DataItem::RttiName { .. }) {
+                    PTR_BYTES
+                } else {
+                    layout.pointer_align()
+                };
+                if let Some(offset) = offset.filter(|offset| offset % pointer_align != 0) {
                     errors.push(format!(
-                        "@{symbol} + {addend} is past the end of @{symbol} ({} bytes)",
-                        target.size()
+                        "ptr @{symbol} is at offset {offset}, which is not a multiple of {pointer_align}"
                     ));
                 }
-                // The loader rewrites pointers in place; Mach-O requires them
-                // to be pointer-aligned.
-                if offset % PTR_BYTES != 0 {
+                if u64::from(init.align) < pointer_align && reported_pointer_align < pointer_align {
                     errors.push(format!(
-                        "ptr @{symbol} is at offset {offset}, which is not a multiple of {PTR_BYTES}"
-                    ));
-                }
-                if !has_aligned_ptrs {
-                    errors.push(format!(
-                        "holds pointers, so it needs align {PTR_BYTES} or more, got {}",
+                        "holds pointers, so it needs align {pointer_align} or more, got {}",
                         init.align
                     ));
-                    has_aligned_ptrs = true; // report once
+                    reported_pointer_align = pointer_align; // report once per requirement
                 }
             }
             DataItem::Bytes(_) | DataItem::Zero(_) => {}
         }
-        offset += item.size();
+        if let Some(current) = offset {
+            offset = match checked_data_offset(current, item.size_with_layout(layout)) {
+                Ok(next) => Some(next),
+                Err(message) => {
+                    errors.push(message.into());
+                    None // Keep checking items, but do not invent a wrapped cursor.
+                }
+            };
+        }
     }
     errors
+}
+
+// Kept separate so the otherwise impractically large initializer overflow
+// boundary can be exercised without allocating billions of actual items.
+fn checked_data_offset(offset: u64, size: u64) -> Result<u64, &'static str> {
+    offset
+        .checked_add(size)
+        .ok_or("data object size overflows u64")
 }
 
 /// Check handles before building a CFG, resolving operands or formatting an
@@ -2167,6 +2203,20 @@ mod name_tests {
     }
 
     #[test]
+    fn data_cursor_overflow_is_a_diagnostic_in_both_profiles() {
+        assert_eq!(checked_data_offset(u64::MAX - 4, 4), Ok(u64::MAX));
+        assert_eq!(checked_data_offset(u64::MAX, 0), Ok(u64::MAX));
+        assert_eq!(
+            checked_data_offset(u64::MAX - 3, 4),
+            Err("data object size overflows u64")
+        );
+        assert_eq!(
+            checked_data_offset(u64::MAX, 8),
+            Err("data object size overflows u64")
+        );
+    }
+
+    #[test]
     fn data_checks_use_the_first_duplicate_object() {
         let module = module();
         let names = Names::new(&module);
@@ -2180,7 +2230,7 @@ mod name_tests {
         };
         // The first `dup` is thread-local, so this is reported before size.
         assert_eq!(
-            check_data(&names, &init(32)),
+            check_data(&names, &init(32), DataLayout::NATIVE64),
             ["points to thread-local @dup, whose address differs per thread"]
         );
         let ptr = |symbol: &str, addend| DataInit {
@@ -2192,15 +2242,15 @@ mod name_tests {
             }],
         };
         assert_eq!(
-            check_data(&names, &ptr("only_data", 17)),
+            check_data(&names, &ptr("only_data", 17), DataLayout::NATIVE64),
             ["@only_data + 17 is past the end of @only_data (16 bytes)"]
         );
-        assert!(check_data(&names, &ptr("only_data", 16)).is_empty());
+        assert!(check_data(&names, &ptr("only_data", 16), DataLayout::NATIVE64).is_empty());
         // A function, and a name that is both a function and declared data.
-        assert!(check_data(&names, &ptr("only_func", 0)).is_empty());
-        assert!(check_data(&names, &ptr("shared", 0)).is_empty());
+        assert!(check_data(&names, &ptr("only_func", 0), DataLayout::NATIVE64).is_empty());
+        assert!(check_data(&names, &ptr("shared", 0), DataLayout::NATIVE64).is_empty());
         assert_eq!(
-            check_data(&names, &ptr("missing", 0)),
+            check_data(&names, &ptr("missing", 0), DataLayout::NATIVE64),
             ["points to @missing, which is not declared"]
         );
     }

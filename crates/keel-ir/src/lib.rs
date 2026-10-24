@@ -54,7 +54,7 @@ pub use parser::{ParseError, parse, parse_with_ir_lines};
 pub use target::Target;
 pub use types::Type;
 pub use vector::{VectorBinaryOp, VectorReduceOp, VectorType};
-pub use verifier::{VerifierError, verify, verify_module};
+pub use verifier::{VerifierError, verify, verify_module, verify_module_with_layout};
 
 entity!(
     /// An SSA value: an instruction result or a block parameter.

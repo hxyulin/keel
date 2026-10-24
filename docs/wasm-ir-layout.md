@@ -108,3 +108,27 @@ pre-existing differences outside this patch. Native backend smoke tests were
 not needed after the source audit and existing IR controls passed. No Wasm
 execution, C ABI, backend, optimizer or CLI validation is claimed. Integration
 and worktree cleanup remain with the parent.
+
+## Layout-aware module verification
+
+`keel_ir::verify_module_with_layout(&Module, DataLayout)` returns
+`Result<(), Vec<VerifierError>>`. It verifies the supplied module itself, with
+all existing structural, function, reference, debug, type and metadata checks.
+Only initializer item cursors, pointer alignment and relocation-target sizes
+use the explicit layout. `verify_module` delegates to `NATIVE64`, preserving
+native validation and diagnostics for representable data sizes.
+
+Use `WASM32` for actual wasm32 initializers: adjacent pointer items consume four
+bytes each, and pointer-plus-i32 consumes eight. No padding is invented. Defined
+data relocation addends are checked against the target initializer's checked
+size under the same model; an addend equal to size remains accepted (one-past).
+Size/cursor overflow produces a verifier diagnostic rather than wrapping or
+panicking. Later items still undergo type and symbol checks after cursor overflow.
+
+RTTI names retain native eight-byte size and alignment. Function-pointer
+relocations keep the existing symbol-kind rules, including rejection of addresses
+of `cc(fast)` functions. This API does not authorize these features in a backend:
+the bounded Wasm backend must separately reject RTTI and function relocations.
+The caller must pass the actual module, without replacing initializers with zero
+items to bypass native verification. Function pointer arithmetic/conversion IR
+signatures and debug storage contracts remain unchanged.
