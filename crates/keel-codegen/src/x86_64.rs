@@ -1526,9 +1526,11 @@ impl<'a> FunctionCompiler<'a> {
                     .is_some_and(|data| data.thread_local),
                 _ => false,
             });
-        // Both conventions use the same SysV leaf protocol. Keep frames for
-        // anything that observes or changes the stack, or needs frame storage.
-        let frameless = matches!(func.sig.cc, CallConv::Fast | CallConv::C)
+        // Apply the C leaf extension only to SIMD functions. Removing scalar
+        // C frames also moves unrelated hot loops and can regress applications.
+        // Keep frames for stack observers and functions needing frame storage.
+        let frameless = (func.sig.cc == CallConv::Fast
+            || (func.sig.cc == CallConv::C && has_vectors))
             && !has_tls_address
             && module.files.is_empty()
             && func.personality.is_none()

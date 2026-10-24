@@ -1,6 +1,9 @@
 # Native x86-64 C leaf frames
 
-The SysV backend can omit the frame for both `cc(c)` and `cc(fast)` leaves.
+The SysV backend can omit the frame for `cc(c)` SIMD leaves and `cc(fast)`
+leaves. Scalar C leaves retain their frames: a controlled LZ4 compression
+comparison found that removing those frames regressed the application after
+moving unrelated code. The C extension stays limited to SIMD functions.
 An eligible function needs no stack storage, incoming stack arguments,
 callee-saved registers, special-purpose parameters, TLS addresses, debug files,
 or exception personality. Calls, including helper calls for wide division and

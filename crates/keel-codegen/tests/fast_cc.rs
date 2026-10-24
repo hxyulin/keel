@@ -167,8 +167,7 @@ fn frame_observers_calls_debug_spills_and_stack_arguments_retain_frames() {
         assert!(arm.contains("stp\tx29, x30"), "{arm}");
         // The x86 backend rejects stack intrinsics and inline asm independently.
         if let Ok(x86) = keel_codegen::compile(&m, keel_codegen::Target::X86_64LinuxGnu) {
-            let c_leaf = m.functions[0].sig.cc == keel_ir::CallConv::C;
-            assert_eq!(x86.contains("push\trbp"), !c_leaf, "{x86}");
+            assert!(x86.contains("push\trbp"), "{x86}");
         }
     }
     let m = keel_ir::parse(LEAF).unwrap();
