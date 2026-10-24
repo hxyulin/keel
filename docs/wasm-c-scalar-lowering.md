@@ -1,5 +1,8 @@
 # Private scalar C-to-IR width checkpoint
 
+The later [private pointer/data checkpoint](wasm-c-pointer-data.md) extends this
+historical integer-only boundary; production target selection remains gated.
+
 Based on `aa326b52`, following the reviewed C layout, integer evaluation and
 scalar declaration checkpoints. This completes the permitted integer-function
 stage of the [layout plan](wasm32-layout-plan.md). Production remains LP64.
