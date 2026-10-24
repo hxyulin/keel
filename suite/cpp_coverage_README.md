@@ -8,20 +8,18 @@ level. This does not measure an end-to-end replacement for Clang.
 
 ## Reproduce
 
-Use a private build directory and a new artifact directory on an Apple AArch64
-host. The current importer requires LLVM 23's shared library. All compiler and
-native validation work must use the existing shared suite lock:
+Run on an Apple AArch64 host with a new artifact directory. The importer
+requires LLVM 23's shared library.
 
 ```sh
-work=$(mktemp -d /tmp/keel-cpp-coverage.XXXXXX)
-python3 suite/fast_opt_locked.py "$work/lock.jsonl" \
-  cargo build --offline --locked -j2 -p keel --target-dir "$work/target"
-python3 suite/fast_opt_locked.py "$work/lock.jsonl" \
-  python3 suite/cpp_coverage.py \
-    --libllvm "$(rustc --print sysroot)/lib/libLLVM.dylib" \
-    --keel "$work/target/debug/keel" --abi-rustc rustc --out "$work/run"
+cargo build -p keel
+python3 suite/cpp_coverage.py \
+  --libllvm "$(rustc --print sysroot)/lib/libLLVM.dylib" \
+  --keel target/debug/keel --abi-rustc rustc --out target/cpp-coverage-1
 python3 -m unittest discover -s suite -p test_cpp_coverage.py -v
 ```
+
+`cargo suite test-frontends` also runs this as its `cpp-coverage` stage.
 
 `--clangxx` and `--clang` select compiler executables; `--target` selects an
 explicit Clang target (otherwise `clang++ -dumpmachine` is recorded and used).
@@ -34,10 +32,8 @@ Use compiler version evidence to distinguish independent implementations from
 aliases such as Apple's `/usr/bin/gcc` (which is Clang). The Rust fixture is
 only an ABI peer; it is not input to a Rust frontend or to the LLVM importer.
 
-The runner never builds Keel itself. `--keel` must name the intended frozen
-binary. The README commands keep build outputs private and use `cargo -j2`.
-The harness does not acquire the lock internally: invoke the wrapper once,
-not recursively. No timings or performance results are reported.
+The runner never builds Keel itself; `--keel` must name the intended binary.
+No timings or performance results are reported.
 
 ## Profiles and oracle
 
@@ -131,72 +127,13 @@ probes blocked is `passed_with_blockers`, not full C++ coverage. The focused
 unit tests exercise classification, missing tools, timeout artifacts, and
 existing-destination preservation.
 
-## Observed local milestone
+## Current status
 
-On 2026-10-21, base revision `1ac952c21cf043bf59d79f739644e8c37ce13cc6`,
-Apple Clang 21.0.0 (`clang-2100.3.34.2`), LLVM library 23.1.1, and rustc
-1.99.0 (`b940084d7`) produced **6 passing profiles and 7 expected probe
-rejections**, exit 0 (`passed_with_blockers`). Selected target was
-`arm64-apple-darwin27.0.0`; emitted LLVM triple was
-`arm64-apple-macosx27.0.0`. Both Clang C and independent Rust C ABI boundaries
-were enabled. All 26 native reference executions succeeded. All 36 Keel
-executions (6 accepted modules × 3 tiers × 2 boundary implementations) matched
-the complete reference output for 4,240 input pairs each. All 7 rejected
-imports preserved their sentinel destinations and emitted no stdout.
-
-Observed first blockers:
-
-- `constexpr_runtime`: `_Z6factorj` unsupported linkage/visibility.
-- `virtual`: global data, aliases and ifuncs.
-- `cfg`: multiple blocks/PHIs.
-- `gep`: unsupported opcode 29, actual `getelementptr inbounds nuw`.
-- `alloca`: unsupported opcode 26, actual stack allocation.
-- `signed_contract`: `nuw`/`nsw` arithmetic.
-- `eh`: global data, aliases and ifuncs (EH itself not reached).
-
-The private artifact directory was
-`/private/tmp/keel-cpp-t3-56c46fcd/run-2`; its `report.json` retains all 190
-commands and their output paths. Build and run locking metadata is in
-`/private/tmp/keel-cpp-t3-56c46fcd/lock.jsonl`; the build used private
-`target/` under the same parent and `cargo build --offline --locked -j2 -p keel`.
-The full native invocation was the reproduction command above with
-`--abi-rustc rustc` and this private directory. The five focused Python tests
-passed. No GCC boundary was validated on this host; `--abi-cc` remains an
-optional path. CFG/GEP integration has not been validated in this checkout.
-No importer, optimizer, backend, or native Rust frontend source was changed.
-
-### Combined importer integration
-
-After integrating CFG/PHI, GEP and fixed entry-block allocation support at
-revision `ee6f3284`, the full runner with `--abi-rustc rustc` passed **9 profiles**
-with **4 expected rejections**. All 26 native references and 54 differential
-executions passed, each checking 4,240 input pairs. CFG, GEP and alloca are now
-required regression-floor cases. The remaining first blockers are unchanged
-for runtime constexpr linkage, virtual/global data, signed no-wrap arithmetic,
-and EH/global data. This still does not establish full C++ application support.
-
-Artifacts: `/private/tmp/keel-frontend-integrated-cpp-r1/report.json`.
-The run used the reproduction command above, private Keel target directory
-`/tmp/keel-llvm-cfg-0dd17ef4/target`, and shared lock log
-`/tmp/keel-frontend-integrated-lock.jsonl`. A subsequent run after promoting
-the three cases to required is retained at
-`/private/tmp/keel-frontend-integrated-cpp-r2/report.json`.
-
-After integrating globals, scalar FP and indirect calls, the aggregate run at
-`target/frontend-globals-integration-1/` still passes nine profiles and reports
-four expected probe rejections. All 26 native references and 54 differential
-executions pass. The first virtual-dispatch blocker is now the generated
-method's unsupported linkage, and the EH blocker is the function personality;
-ordinary global storage no longer blocks these modules. Runtime constexpr
-linkage and signed no-wrap arithmetic remain unsupported. Dedicated aggregate
-stages separately cover globals, FP and indirect calls, including a combined
-global FP callback fixture; these results do not claim general C++ runtime support.
-
-After exported ODR/RTTI integration, `target/frontend-odr-final-2/` passes
-all **14 required default profiles**, with 28 native references and **84 native
-differential executions**. The separate legacy `cpp-odr` run adds six passing
-differential executions. The dedicated mixed-TU ODR validator passes 32 native
-executables, including both link orders, shared identities, virtual dispatch,
-cleanup counts and cross-module user-defined catches. No default profile is
-accepted as an expected rejection. Support remains bounded to the documented
-Apple AArch64 contracts.
+All **14 required default profiles** pass at None/Fast/Full with both the Clang
+C and the Rust C ABI boundaries. No default profile is accepted as an expected
+rejection. The separate `cpp-odr` run covers the legacy local-copy helper
+localization, and the dedicated mixed-TU ODR validator
+(`llvm_import_odr_validate.py`) covers both link orders, shared identities,
+virtual dispatch, cleanup counts and cross-module user-defined catches. Support
+remains bounded to the documented Apple AArch64 contracts and does not
+establish general C++ application support.

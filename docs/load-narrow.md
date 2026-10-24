@@ -1,12 +1,11 @@
-# Legal ordinary load narrowing: bounded source checkpoint
+# Legal ordinary load narrowing
 
-This implements only an opt-in private-stack subset. It does **not** activate on
-the actual C compiler bridge. The initial source-only checkpoint was followed by
-an explicit root-granted MacHost correctness lease. The validation results below
-come from that lease; MacHost was explicitly released after all owned jobs exited.
-Root owns final acceptance and integration. No timing or LinuxHost access occurred.
+`load-narrow` is an opt-in pass that rewrites `and.i64(load.i64 notrap addr, 255)`
+into a byte load plus zero extension. It implements only a private-stack subset
+and does **not** activate on generic pointer code produced by the C frontend.
+No default pipeline runs it.
 
-## Audited contracts
+## Contracts relied on
 
 - `crates/keel-ir/src/memory.rs`: default loads may fault. `notrap` is an existing
   producer guarantee that this particular access cannot fault; it grants neither
@@ -70,98 +69,41 @@ claimed for potentially faulting wide loads. Writes between load and mask remain
 between the byte load and extension, so the extension observes the loaded SSA
 value rather than reading memory again.
 
-## Bridge blocker and root decision
+## Why generic pointers are not narrowed
 
-The retained optimized `bridge_narrow_load` computes an index and scaled address
-from a generic pointer, then uses `load.i64 v15` and `and v16, 255` on both targets.
-It supplies neither `notrap` nor a fixed allocation. The harness's 256 valid words
-and bounded masks are caller facts, absent from the IR function's contract. C's
-source validity rules and Clang's optimization choices do not establish a new
-Keel IR contract. The bridge must remain unchanged in this checkpoint.
+A typical optimized C kernel computes an index and scaled address from a generic
+pointer, then uses `load.i64` and `and ..., 255`. It supplies neither `notrap`
+nor a fixed allocation. Caller facts such as "the buffer holds 256 valid words"
+are absent from the IR function's contract, and C's source validity rules or
+Clang's optimization choices do not establish a Keel IR contract. Such code is
+left unchanged. Activating it would require an existing valid-access proof or a
+new IR contract; the pass does not add metadata, infer `notrap`, infer bounds,
+or weaken fault preservation.
 
-Root should accept this as a bounded source checkpoint or stop the opportunity
-at the semantic blocker. Activating the generic bridge requires a separately
-approved source of existing valid-access proof, or a separately approved IR
-contract project. Do not add metadata, annotate the bridge `notrap`, infer bounds
-from the harness, or weaken fault preservation to obtain activation here.
+## Tests
 
-The prior measured microkernel x86 ratio near 0.875 and ARM null concern warmed
-ordinary memory whose index settles to zero. They establish no general compiler,
-loop or application speedup, and supply no legality proof.
+```sh
+cargo test -p keel-opt --lib load_narrow
+```
 
-## Owned interfaces and acceptance
+The tests live in `crates/keel-opt/tests/load_narrow/mod.rs`, included as unit
+tests via `#[path]` so they can exercise direct in-memory alias states. They
+cover offsets 0/1/8/16, commuted masks, identical alignment/flags, load/mask
+source lines and instruction order, output verification, idempotence, missing
+`notrap`, unknown pointers/target, volatile/atomic/lifetime effects,
+out-of-bounds original widths, shared loads, wrong masks/types, escaped
+addresses, debug homes and direct aliases. A captured C-frontend IR test asserts
+the generic case stays unsupported on both explicit targets.
 
-Owned source is `crates/keel-opt/src/load_narrow.rs`, its dedicated tests in
-`crates/keel-opt/tests/load_narrow/mod.rs`, and this document. Tests are included
-as unit tests to exercise direct in-memory alias states. The separate registration
-commit adds only `mod load_narrow;` and `&load_narrow::LoadNarrow` to `PASSES` in
-shared `lib.rs`; it changes no indexed builtins or default pipelines. Root owns
-reconciliation with the sign-extension worker. `cargo test -p keel-opt --lib
-load_narrow` discovers all eleven dedicated tests through the module's explicit
-`#[path]`; no new Cargo test target is needed.
-
-Source tests cover offsets 0/1/8/16, commuted masks, identical alignment/flags,
-load/mask source lines and instruction order, output verification, idempotence,
-missing `notrap`, unknown pointers/target, volatile/atomic/lifetime effects,
-out-of-bounds original widths, shared loads, wrong masks/types, escaped addresses,
-debug homes and direct in-memory aliases. A retained bridge-IR test asserts
-unsupported behavior on both explicit targets.
-
-After independent source review and an explicit root host lease, acceptance must
-include compiling the separate registration, running these and relevant optimizer
-tests, verifying both-target text and objects, checking the actual C bridge stays
-unsupported, and independent Clang native comparison of supported stack cases
-on each leased target. Include edge bytes 0/127/128/255, offsets, intervening
-writes, selected/debug modes, and aliases. Protected-boundary native faults are
-only relevant to the rejected generic potentially-faulting load: confirm the
-original wide access remains; never feed a false `notrap` promise to such a test.
-No performance claim or default activation follows from correctness acceptance.
-
-## Retained correctness validation
-
-Source `1690c16126ce9af662b5226ff2a677da72100cff` contains the rule and unit
-tests. Separate registration `d50d422e61d461bce91a5f2e4b24a5bc2c69bce8`
-was followed by the diagnostic-only golden update
-`1c2cab1ff7859970fd26ff94cb1d770fa84c9571`. Dedicated object/native fixtures
-and runner were committed as `37bfe7f3a46532eb6f65a5bae4e922001bdee160`.
-Production code did not change after registration.
-
-An initially cold private target directory and serial `-j2` builds were used:
-
-- Focused load-narrow unit tests: 11 passed, including direct aliases, flags,
-  positions, locations, full allocation bounds, and fallback cases.
-- Full `keel-ir` / `keel-opt` gates: 299 passed after the expected unknown-pass
-  diagnostic golden was updated to include the registered name. The original
-  failed run and exact mismatch are retained; no optimizer result was blessed.
-- Full `keel` CLI gate: 46 passed. Existing ignored tests remained ignored.
-- `tests/load_narrow/validate.py`: five known private-stack functions activate
-  from load.i64 to load.i8/uext before emission on both targets. The functions
-  cover offsets 0, 1, 8, 16 and a store between the load and mask. Missing-notrap,
-  debugger-home and generic-pointer functions remain unchanged. The actual C
-  bridge's entire optimized IR remains identical with or without the new pass.
-- Both-target text, direct objects and independent Clang-assembled objects pass
-  in the baseline/full selection by fast/full allocation matrix. The full/full
-  configurations also use `-g`. Native object headers are checked for each target;
-  emitted assembly contains the expected byte-access instructions.
-- MacHost ARM64 native: all eight direct/assembled routes passed, each with 8,393
-  direct comparisons against a separately compiled Clang `-O0 -fno-lto` oracle
-  and two protected-boundary fault checks. All 256 low bytes with four high-bit
-  patterns, unaligned offsets, intervening writes, debugger fallback, bounded C
-  bridge inputs, and null-pointer zero-count bridge calls are covered. The
-  generic wide load and the independent unaligned-wide oracle both fault when
-  their eight-byte access crosses into a protected page; no false notrap promise
-  is used. Total: 67,144 comparisons and 16 expected faults.
-
-These are finite correctness checks. Native x86 was **not run**; both-target
-object checks do not substitute for x86 execution. No generated-loop/application
-timing, benchmark, generic activation, or default expansion is claimed.
-
-The CLI binary was built at the registration checkpoint and is unchanged by the
-later test-only commits. Its SHA-256 is
-`e279548ca927d77c225909a3cb3a81e46a22f8f8a383022d153c77799a45ccdd`.
-Exact source trees, tool identities, argv, timestamps, test/native hashes, original
-failure and output streams are retained under ROOT
-`suite/reports/pattern-opt-20261017/load-narrow`. The durable coordination record
-is ROOT `.git/keel-coordination/pattern-opt-load-narrow-20261017.json`. Repeating
-the native runner requires a new explicit correctness lease and a fresh output
-directory; it is intentionally excluded from automatic Cargo test execution.
+`crates/keel-opt/tests/load_narrow/validate.py --keel <binary> --output <dir>`
+is a native runner, not part of `cargo test`. It checks that five private-stack
+functions (offsets 0, 1, 8, 16, and a store between the load and mask) become
+`load.i8`/`uext` on both targets, that missing-notrap, debugger-home and
+generic-pointer functions stay unchanged, and that the captured C kernel's
+optimized IR is identical with or without the pass. It checks both-target text
+and objects across the baseline/full selection by Fast/Full allocation matrix
+(full/full also with `-g`), and on arm64 compares each route against a Clang
+`-O0` oracle over all 256 low bytes with four high-bit patterns, unaligned
+offsets, intervening writes and debugger fallback. The generic wide load
+faults as expected when its eight-byte access crosses into a protected page.
+x86-64 native execution is not covered, and no performance claim is made.

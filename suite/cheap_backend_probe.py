@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Small Apple ARM backend probe; prebuilt binaries, fresh output, external lease.
+"""Small Apple ARM backend probe; prebuilt binaries, fresh output; run on an otherwise idle host.
 
 Complements crates/keel-cranelift/tools/compare.py with the actual Fast IR tier
 and an LLVM-compatible scalar fixture. LLVM CLI times include process startup

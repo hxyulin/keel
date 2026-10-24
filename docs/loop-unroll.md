@@ -6,11 +6,9 @@ catalog and runs in Full's late memory/loop epilogue, before
 It has no dependency on `AliasInfo` and makes no IR, ABI,
 calling-convention, memory-contract, or verifier changes.
 
-The motivation is the retained measured `hot` kernel: unsigned
-`sum += (p[i] ^ k) * (i + 1)`. Its LLVM/Clang routes use two independent scalar
-accumulators. The audited whole-route contrast also includes wrapper inlining,
-call/frame handling and address selection. It is not an estimate of this pass's
-speedup or an application gain. This checkpoint performs no measurements.
+The motivating shape is a `hot` benchmark kernel: unsigned
+`sum += (p[i] ^ k) * (i + 1)`, which LLVM/Clang compiles with two independent
+scalar accumulators. No speedup estimate is claimed for this pass alone.
 
 ## Accepted shape
 
@@ -76,47 +74,42 @@ conservative ceiling of 54) and exactly three blocks per candidate. A reverse
 liveness estimate rejects candidates exceeding 16 simultaneously live scalar
 values, including invariant operands. This is a target-independent pressure
 heuristic, not a proof that either target avoids spills. There are at most two
-loads per scalar iteration. Root's later code-size and compile-cost gates remain
-necessary.
+loads per scalar iteration.
 
-Source tests in `crates/keel-opt/tests/loop_unroll.rs` exercise deterministic actual
-unrolling, independent lanes, verifier/parse round trips, repeat-pass behavior,
-explicit pass plus default cleanup, wrapping i32/i64 sums/seeds, mixed widths,
-0/1/2/3/odd/even/many iterations, IV liveouts, exact ordered loads, unsupported
-operations, nested loops and body/pressure caps. A checked-memory execution model
-compares original and transformed IR, plus an independent modular sum oracle.
-Near-MAX checks resume the generated paired loop at states satisfying its proven
-invariant and execute at most three iterations; nonzero/near-MAX initial-IV
-shapes are rejected rather than running astronomical prefixes.
-
-After a root-granted exclusive local MacHost build/native lease, announce before
-starting jobs, then run serially:
+## Tests
 
 ```sh
-cargo test -j 2 -p keel-opt -p keel-ir
-cargo build -j 2 -p keel
-python3 crates/keel-opt/tests/loop_unroll/validate.py \
-  --keel target/debug/keel \
-  --retained-hot /path/to/retained/build/hot/scalar.keel \
-  --out suite/reports/optimization-wave7-loop-unroll-20261017-validation
+cargo test -p keel-opt --test loop_unroll
 ```
 
-The script uses an existing compiler and creates a fresh ignored evidence
-directory. It records full commands and compiler/artifact SHA-256 hashes. First
-it compiles the bounded C variants of the measured hot kernel through the frozen
-scalar pipeline, asserts one load becomes three in each function, asserts a
-three-parameter paired header and remaining-count guard, and checks idempotence.
-The retained measured hot scalar IR must also pass the same activation gate.
-Only after those assertions does it generate both AArch64 Mach-O and x86-64 ELF
-assembly/objects for scalar, explicit-unroll, and unroll-plus-default-cleanup IR.
-Unsupported C cases must remain byte-identical under the named pass.
+The tests exercise deterministic unrolling, independent lanes, verifier/parse
+round trips, repeat-pass behavior, explicit pass plus default cleanup, wrapping
+i32/i64 sums and seeds, mixed widths, 0/1/2/3/odd/even/many iterations, IV
+liveouts, exact ordered loads, unsupported operations, nested loops and
+body/pressure caps. A checked-memory execution model compares original and
+transformed IR, plus an independent modular sum oracle. Near-MAX checks resume
+the generated paired loop at states satisfying its proven invariant and execute
+at most three iterations; nonzero/near-MAX initial-IV shapes are rejected.
 
-The separate-TU driver compares scalar, unrolled, cleaned, and Clang-compiled C
-objects against unsigned arithmetic assertions. Arrays end exactly at a protected
-page; zero trips also use a null pointer. It checks exact last loads/no overread
-across 0/1/2/3/odd/even/many counts with wrapping words and seeds. There is no timer
-or speedup calculation. Release the lease explicitly after every job has ended.
-Full relevant tests, actual-C activation, both-target codegen and native assertions
-are pending at the source checkpoint; formatting and source inspection alone do
-not establish correctness. Independent correctness review is root-owned after
-the committed checkpoint. Never commit generated reports, binaries, or logs.
+A native validator runs against a built CLI:
+
+```sh
+cargo build -p keel
+python3 crates/keel-opt/tests/loop_unroll/validate.py \
+  --keel target/debug/keel \
+  --retained-hot path/to/hot/scalar.keel \
+  --out target/loop-unroll-validation
+```
+
+It compiles bounded C variants of the `hot` kernel through the scalar pipeline,
+asserts one load becomes three in each function, a three-parameter paired header
+and remaining-count guard, and idempotence. The supplied `hot` scalar IR must
+pass the same activation check. It then emits AArch64 Mach-O and x86-64 ELF
+assembly/objects for scalar, explicit-unroll, and unroll-plus-cleanup IR, and
+requires unsupported C cases to stay byte-identical under the named pass.
+
+A separate-TU driver compares scalar, unrolled, cleaned and Clang-compiled C
+objects against unsigned arithmetic assertions. Arrays end exactly at a
+protected page and zero trips also use a null pointer, so the driver checks
+exact last loads and no overread across 0/1/2/3/odd/even/many counts with
+wrapping words and seeds. It does not time anything.

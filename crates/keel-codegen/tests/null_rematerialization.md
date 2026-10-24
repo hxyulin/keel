@@ -29,21 +29,11 @@ not enable null rematerialization. No frontend, IR semantics, selector, ABI,
 source-visible memory operation, debug format, pool or dependency changes are
 part of this policy.
 
-## Current-main port validation (2026-10-20)
+## Tests
 
-The original source checkpoint added tests before compilation was authorized.
-The current-main port has now been compiled and tested on Apple Silicon with
-an isolated Cargo target directory, offline locked dependencies, and the shared
-local validation lock. This supersedes the checkpoint's uncompiled status;
-historical failures remain historical evidence.
-
-Fresh correctness gates passed: codegen library 62 tests with the feature and
-54 without; CLI 32 unit plus 26 integration tests in each feature configuration
-(one existing ignored test each); null cross-target objects 3 tests; native ARM
-null programs 1 test comprising 8 fixture/configuration runs; ARM compare spans
-5 tests and x86 memory compares 6 tests. Workspace all-target checks passed
-with features experimental-regalloc/backend-profile enabled and with default
-features. All Cargo checks used --offline --locked.
+```sh
+cargo test -p keel-codegen --features experimental-regalloc --test null_rematerialization
+```
 
 - Recognition tests cover malformed graphs before any unbounded resolve,
   alias-depth boundaries 0/1/8/9, canonical ownership, exact I64 zero, wrong
@@ -63,29 +53,22 @@ features. All Cargo checks used --offline --locked.
   across the fixture corpus. CLI tests cover feature gating, Fast/Full-only
   admission, and unchanged legacy rematerialization mode bits.
 
+The Invoke fixture declares its AArch64 target and its object matrix runs only
+there, because x86 does not support Invoke lowering. The forced-copy fixture
+uses x9/x10 on AArch64 (where allocatable caller-saved registers begin) and
+rsi/rdi on x86. It interprets the exact emitted straight-line edge moves on
+both targets: distinct input tokens must swap, the null stack cell must become
+zero, and the zero/store pair must preserve a separately live cycle temporary.
+The interpretation is bounded to this fixture's move/load/store operations and
+rejects unknown instructions; it is not a general emulator.
+
 No runtime or compilation-performance measurement is claimed. x86 object
-correctness is checked; x86 native execution was not run on this ARM host.
+correctness is checked; x86 native execution is not covered.
 
 ## Integration boundaries
 
 Null-only mode deliberately recognizes ordinary Fast/Full tiers only. A new
 experimental incoming-affinity tier must remain outside that admission test.
 New RematerializingAllocator literals need an explicit null_pointers field;
-legacy callers should set it to false. Split changes are owned separately.
-None/Fast/Full defaults and the three-round Full IR schedule are unchanged.
-
-## Historical correctness harness corrections
-
-The first LinuxHost focused object run on cd918d9 found two test harness assumptions:
-x86 does not support Invoke lowering, and AArch64 allocatable caller-saved
-registers begin at x9. The Invoke fixture now declares its AArch64 target and
-its object matrix runs only there; x86 native Invoke correctness is unavailable
-under the current backend contract. The forced-copy fixture now uses x9/x10 on
-AArch64 and rsi/rdi on x86. These corrections change no production code; the
-initial failing captures remain in the correctness report.
-
-The forced-copy test also independently interprets the exact emitted straight-
-line edge moves on both targets: distinct input tokens must swap, the null stack
-cell must become zero, and the actual zero/store pair must preserve a separately
-live cycle temporary. Interpretation is bounded to this fixture's move/load/
-store operations and rejects unknown instructions; it is not a general emulator.
+legacy callers should set it to false. None/Fast/Full defaults and the
+three-round Full IR schedule are unchanged.

@@ -165,15 +165,13 @@ Clang oracle executes broadcasts over all ten 16-byte lane types, arithmetic,
 bitwise operations, all comparisons, compound assignments, unsigned values,
 NaNs/infinities/signed zero, operand/lvalue evaluation counts and adjacent
 memory sentinels under three selection/allocation/optimization configurations.
-On 2026-10-23 these passed native Apple ARM64 execution with Apple Clang 21;
-Linux AArch64/x86 objects were cross-emitted, not executed. No genuine GCC was
-installed on that host (`gcc` identifies as Apple Clang); GCC's documented
-safe-conversion rule was consulted, but no native GCC oracle run is claimed.
+Runtime execution is on Apple arm64 with Apple Clang; Linux AArch64/x86 objects
+are cross-emitted, not executed. No native GCC oracle run is claimed; GCC's
+documented safe-conversion rule was used as the reference.
 
 ```sh
-python3 suite/fast_opt_locked.py /tmp/keel-c-broadcast-<unique>.jsonl \
-  cargo test --offline --locked -j2 -p keel-c --test gnu_vector_broadcast \
-  --test gnu_vector_abi --test gnu_types --test x86_intrinsics
+cargo test -p keel-c --test gnu_vector_broadcast --test gnu_vector_abi \
+  --test gnu_types --test x86_intrinsics
 ```
 
 The optional [legacy PCLMULQDQ subset](x86-pclmulqdq.md) reuses the existing
@@ -204,12 +202,7 @@ Clang harness on the native supported host. It covers all six shapes, both
 integer signednesses, stack arguments, callbacks, indirect calls, lane mutation,
 bit casts and integer modes under three selection/allocation/optimization
 configurations. The Darwin aggregate harness also runs with debug information.
-The initial validation on 2026-10-22 used arm64 macOS and Apple Clang 21.0.0.
-The full `keel-c` suite and the three SIMD backend suites below passed.
-Linux x86-64 was checked by IR verification and real cross-object emission;
-its runtime ABI harness was not executed on this host.
-
-Cross-target objects and the Clang harness are compiled on either host; cross
+Linux x86-64 is checked by IR verification and real cross-object emission; cross
 compilation is not evidence of runtime ABI validation on the other host.
 
 ```sh

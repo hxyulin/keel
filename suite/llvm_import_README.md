@@ -5,7 +5,7 @@ Keel IR. It uses LLVM's real parser and verifier through Python `ctypes`, then
 runs the supplied Keel executable to parse and verify its buffered output.
 It adds no Cargo dependencies and does not run LLVM optimization passes.
 
-The currently validated library is LLVM **23.1.1**, shipped with the installed
+The currently validated library is LLVM **23.1.1**, shipped with the
 Rust 1.99 toolchain. Other LLVM major versions are rejected. The library must
 export the required C API symbols; a version number alone does not establish
 compatibility. Only Apple AArch64, little-endian, 64-bit pointers are supported.
@@ -13,16 +13,13 @@ The input module must carry its target and data layout. There is no host-target
 inference or implicit retargeting.
 
 ```sh
-python3 suite/fast_opt_locked.py /tmp/keel-llvm-import-locks.jsonl \
-  cargo build --offline --locked -j2 -p keel --target-dir /tmp/keel-llvm-import-target
-python3 suite/fast_opt_locked.py /tmp/keel-llvm-import-locks.jsonl \
-  rustc --edition 2024 --crate-type lib -C opt-level=2 -C panic=abort \
+cargo build -p keel
+rustc --edition 2024 --crate-type lib -C opt-level=2 -C panic=abort \
   -C overflow-checks=off --emit=llvm-ir=scalar.ll suite/llvm_import_fixtures/scalar.rs
 python3 suite/llvm_import.py \
   --libllvm "$(rustc --print sysroot)/lib/libLLVM.dylib" \
-  --keel "/tmp/keel-llvm-import-target/debug/keel" scalar.ll -o scalar.keel
-python3 suite/fast_opt_locked.py /tmp/keel-llvm-import-locks.jsonl \
-  /tmp/keel-llvm-import-target/debug/keel compile --opt-tier fast --emit-object scalar.keel -o scalar.o
+  --keel target/debug/keel scalar.ll -o scalar.keel
+target/debug/keel compile --opt-tier fast --emit-object scalar.keel -o scalar.o
 ```
 
 For the C++ fixture, generate LLVM IR with
@@ -173,62 +170,33 @@ The semantic reference is the [LLVM language reference](https://llvm.org/docs/La
 Bindings follow the official [Core C API](https://github.com/llvm/llvm-project/blob/main/llvm/include/llvm-c/Core.h)
 and [Target C API](https://github.com/llvm/llvm-project/blob/main/llvm/include/llvm-c/Target.h).
 
-## Reproducible validation
+## Validation
 
-Use a fresh artifact directory. The wrapper serializes compiler/native work
-with the other local investigations.
+`cargo suite test-frontends` runs the validators with a stage name below (see
+[the suite guide](README.md#frontend-correctness-checks)). Each can also run
+standalone with a fresh output directory:
 
 ```sh
-python3 suite/fast_opt_locked.py /tmp/keel-llvm-import-locks.jsonl \
-  python3 suite/llvm_import_validate.py \
+python3 suite/llvm_import_validate.py \
   --libllvm "$(rustc --print sysroot)/lib/libLLVM.dylib" \
-  --keel "/tmp/keel-llvm-import-target/debug/keel" --out /tmp/keel-llvm-import-check-1
+  --keel target/debug/keel --out target/llvm-import-check-1
 ```
 
-The harness compiles eight Rust and eight C++ C-ABI exports, imports the actual
-LLVM modules, and links/runs None/Fast/Full Keel objects against a C oracle.
-Each scalar executable checks 20,289 boundary/random input pairs and volatile
-memory effects, and matches the original Rust/Clang object's checksum. Another
-LLVM fixture checks i1 truncation/sign extension, pointer low bits and narrow
-returns across 65,536 values at all three tiers. A CFG/memory fixture covers
-4,096 loop/random inputs, parallel PHI rotation, irreducible cycles, forward
-references, repeated edges, pointer/i1 PHIs, signed switch boundaries, fixed
-stack counts, negative indices, struct padding and packed layout. Independent
-C assertions check results and memory, then compare native reference/Keel
-checksums. Actual untouched Clang `-O1` and rustc `opt-level=1` CFG/GEP modules
-also run 8,192 inputs each against a C oracle with volatile memory checks.
-There are 18 native Keel builds across None/Fast/Full. The 46 rejection cases
-check errors, empty stdout and preservation of an existing output, including
-target/layout restrictions and module-wide late failures. A separate failing
-Keel-verifier check also verifies output preservation. Commands and results are
-retained in the artifact directory. These are correctness checks, not timing
-results or evidence that full Rust/C++ applications are supported.
+| Validator | Stage | Covers |
+|-----------|-------|--------|
+| `llvm_import_validate.py` | `llvm-import` | Eight Rust and eight C++ C-ABI exports imported and run at None/Fast/Full against a C oracle (boundary/random inputs, volatile memory effects, checksum match with the original object); i1 truncation/extension and narrow returns; CFG/memory shapes (parallel PHIs, irreducible cycles, forward references, repeated edges, switches, stack slots, struct padding and packed layout); untouched Clang `-O1` and rustc `opt-level=1` modules; rejection cases that must leave stdout empty and an existing output untouched |
+| `llvm_import_calls_validate.py` | `llvm-calls` | Indirect scalar calls, narrow extensions, stack-passed arguments and the bounded sret contract, with objects replaced individually and together; negative cases with source/destination preservation |
+| `llvm_import_fp_validate.py` | `llvm-fp` | Handwritten LLVM and untouched Clang O0/O1 output: NaNs, infinities, signed zeros, subnormals, ties, conversion boundaries, PHIs/selects, stack-passed FP arguments and indirect FP calls |
+| `llvm_import_globals_validate.py` | `llvm-globals` | Nested layouts, mutations, exact FP initializers, external resolution and relocations, including untouched Clang C/C++ output |
+| `llvm_import_linkage_validate.py` | `llvm-linkage` | The opt-in local-copy ODR experiment and mixed-TU controls |
+| `llvm_import_flags_validate.py`, `llvm_import_eh_validate.py` | `llvm-flags`, `llvm-eh` | Integer-flag matrices, poison-masked downstream division, typed/catch-all exceptions, destructors, resume/rethrow and edge PHIs |
+| `llvm_import_odr_validate.py` | `llvm-odr` (with the `odr-core` Rust tests and `llvm-odr-policy`) | IR/object behavior, import policy and mixed-TU execution for exported ODR definitions and RTTI |
+| `llvm_import_bool_validate.py` | standalone | Untouched Clang O0/O1/O2 i1 ABI against a native C caller and callbacks, including stack arguments |
+| `llvm_import_aggregate_validate.py` | standalone | The two-word parameter contract with untouched Clang O1/O2 C and C++17 `std::string_view` input |
+| `llvm_import_memory_validate.py`, `llvm_import_fast_validate.py` | standalone | Memory intrinsics and private fastcc (below) |
 
-Compiler-generated `-O2` LLVM input has already passed through LLVM optimization.
-Future comparisons must include or clearly exclude IR production and import
-cost, and state which optimizer prepared the common input. Importing optimized
-LLVM is a way to exercise Keel's backend, not a replacement for a native Rust
-or C++ frontend or an end-to-end compiler speed comparison.
-
-The aggregate runner also invokes `llvm_import_calls_validate.py`, which tests
-indirect scalar calls, narrow extensions, stack-passed arguments and the bounded
-sret contract. It replaces native objects individually and together at
-None/Fast/Full; independent C assertions cover both call directions. Its 38
-checks include 22 negative cases with source/destination preservation. The
-validation JSON records a dependency plan for deferred aggregate forms.
-
-`llvm_import_fp_validate.py` adds 53 rejection/preservation cases and nine native
-builds for handwritten LLVM and untouched Clang O0/O1 output at None/Fast/Full.
-Independent assertions cover NaNs, infinities, signed zeros, subnormals, ties,
-conversion boundaries, PHIs/selects, stack-passed FP arguments and indirect FP
-calls. The aggregate runner invokes it as `llvm-fp` under the same host lease.
-
-`llvm_import_globals_validate.py` covers 45 rejection cases and 12 native builds
-at None/Fast/Full, including untouched Clang C/C++ output. Independent assertions
-check nested layouts, mutations, exact FP initializers, external resolution and
-relocations. A combined case loads an FP callback from global storage, calls it
-indirectly and reads an external FP object. Source/destination and downstream
-verifier preservation checks are required. The aggregate stage is `llvm-globals`.
+Native execution is Apple AArch64 only. These are correctness checks, not
+timing results or evidence that full Rust/C++ applications are supported.
 
 `--localize-odr-functions` enables a separate bounded experiment. The caller
 asserts no outside translation unit needs the imported ODR helper symbols;
@@ -237,40 +205,20 @@ under their original names as local copies. Address escapes, named-storage
 dependencies, calls outside the defined local helper closure, weak linkage and
 COMDAT remain rejected. This is not general symbol coalescing and stays disabled
 by default. See the [ODR contract](llvm_import_linkage_fixtures/README.md).
-The `llvm-linkage` aggregate stage retains its local-copy restrictions and
-mixed-TU controls. Default mode now accepts true ODR definitions with exported
-identity; available-externally definitions still need the explicit local-copy
-contract. This is independent of the true ODR path.
+Default mode accepts true ODR definitions with exported identity;
+available-externally definitions still need the explicit local-copy contract.
 
-The aggregate stages `llvm-flags` and `llvm-eh` invoke the dedicated integer-flag
-and exception validators. They cover independently asserted integer matrices,
-poison-masked downstream division, actual compiler output, typed/catch-all
-exceptions, destructors, resume/rethrow, edge PHIs and preservation failures at
-None/Fast/Full. The C++ runner requires signed-contract and integer-EH profiles;
-`cpp-odr` separately requires the constexpr helper fixture with an explicit
-localization assertion. Default C++ coverage uses exported ODR definitions.
+Hidden Itanium class/si RTTI retains private-extern visibility, and
+`rtti_name @symbol` preserves Apple's tagged type-name relocation. Generic
+hidden symbols and arbitrary integer relocations remain rejected. See the
+[ODR/RTTI transport contract](llvm_import_odr_contract.md). All 14 default C++
+profiles are required; no probe rejection counts as a successful profile.
 
-The `odr-core`, `llvm-odr-policy` and `llvm-odr` stages verify IR/object behavior,
-import policy and mixed-TU execution. Hidden Itanium class/si RTTI retains
-private-extern visibility, and `rtti_name @symbol` preserves Apple's tagged
-type-name relocation. Generic hidden symbols and arbitrary integer relocations
-remain rejected. The mixed-TU validator has 32 native runs covering identity,
-shared storage, virtual dispatch, cleanup and cross-module user-defined catches.
-See the [ODR/RTTI transport contract](llvm_import_odr_contract.md). All 14 default
-C++ profiles are required; no probe rejection counts as a successful profile.
-
-`llvm_import_aggregate_validate.py` validates the two-word parameter contract
-with untouched Clang O1/O2 C and C++17 `std::string_view` input. Native C/C++
-drivers call Keel objects, which call native direct helpers and callbacks.
-The integer matrix covers 0–10 leading scalars, two aggregates, byte-sized
-stack arguments, register boundaries, whole-aggregate spilling, lane mutations
-and 1,408 independently asserted patterns per tier/input. The string-view case
-checks pointer returns and 22 views, including empty views, per tier/input.
-None/Fast/Full produce 12 native candidate builds; 18 rejection/preservation
-cases retain source hashes, existing destinations and empty stdout. The runner
-writes JSON command/evidence records and an HTML report. Run it under
-`fast_opt_locked.py` with `--libllvm`, `--keel` and a fresh `--out` directory.
-It is standalone; this change does not alter the default validation pipeline.
+Compiler-generated `-O2` LLVM input has already passed through LLVM optimization.
+Comparisons must include or clearly exclude IR production and import cost, and
+state which optimizer prepared the common input. Importing optimized LLVM is a
+way to exercise Keel's backend, not a replacement for a native Rust or C++
+frontend or an end-to-end compiler speed comparison.
 
 ## Bounded memory-intrinsic transport
 
@@ -290,11 +238,10 @@ are supported. Other address spaces, length overloads, inline/atomic variants,
 volatile operations, invokes, and address-taking remain rejected.
 
 The semantics reference is LLVM's [memory intrinsics](https://llvm.org/docs/LangRef.html#llvm-memcpy-intrinsic).
-Run the focused correctness gate under the suite lock:
+Run the focused correctness gate:
 
 ```sh
-python3 suite/fast_opt_locked.py target/llvm-memory-lock.jsonl \
-  python3 suite/llvm_import_memory_validate.py \
+python3 suite/llvm_import_memory_validate.py \
   --libllvm /absolute/path/to/libLLVM.dylib --keel /absolute/path/to/keel \
   --out target/llvm-memory-validation
 ```
@@ -332,8 +279,7 @@ Both native backends implement the initial transport. This gate does not
 validate fast calls through the optional Cranelift bridge.
 
 ```sh
-python3 suite/fast_opt_locked.py target/fastcc-lock.jsonl \
-  python3 suite/llvm_import_fast_validate.py \
+python3 suite/llvm_import_fast_validate.py \
   --libllvm /absolute/path/to/libLLVM.dylib --keel /absolute/path/to/keel \
   --out target/fastcc-validation
 ```
@@ -351,4 +297,3 @@ assembly-bearing modules, aggregate transport and tail-call endpoints are kept
 conservative. The pass is registered but is absent from default Fast and Full
 pipelines. When evaluating it after Full, append it to the explicit Full pass
 list: `-p` replaces the pipeline rather than extending `-O`.
-See `docs/fast-call-performance-20261022.html` for measured limits.

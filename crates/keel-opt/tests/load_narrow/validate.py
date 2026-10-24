@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Explicit correctness-lease runner; never run as an automatic Cargo test.
+"""Explicit correctness runner; never run as an automatic Cargo test.
 
 Requires a built Keel CLI, Clang, and an AArch64 macOS native host. Each command
 has retained argv, stdout, stderr, return status, and timestamps. Use a NEW output
@@ -43,7 +43,7 @@ def main():
               "keel": str(keel), "keel_sha256": digest(keel),
               "clang": str(clang), "clang_sha256": digest(clang),
               "platform": platform.platform(), "inputs": {},
-              "native_x86": "NOT RUN: no LinuxHost lease; objects only"}
+              "native_x86": "NOT RUN: no x86-64 Linux host; objects only"}
 
     def run(argv):
         argv = [str(arg) for arg in argv]

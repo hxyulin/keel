@@ -10,8 +10,7 @@ own integrated assembler does. Nothing in the `.s` is edited before the A/B.
 - `fixtures/rust/*.rs`: `extern "C"` exports (scalars/loops/slices/enums), std Vec/String/BTreeMap/
   generics/trait objects, `panic=unwind` with `catch_unwind` and Drop, and `thread_local!`/threads/atomics.
 - `run.py`: the matrix is {fixture} x {O0,O2} x {no debug, `-g` DWARF 5} x {AArch64 Mach-O, x86-64 ELF
-  AT&T, x86-64 ELF Intel}. Each case runs in one child process under
-  `suite/fast_opt_locked.py` (`/tmp/keel-perf-20261019.lock`).
+  AT&T, x86-64 ELF Intel}. Each case runs in its own child process.
 - `objinspect.py`: Mach-O/ELF structure normalization (sections, relocations, symbols).
 - `test_harness.py`: command selection across all 132 cases and focused evidence-classification tests;
   runs without compilers or native programs. The harness supports Python 3.9+.
@@ -55,12 +54,11 @@ Notes:
   reference is not assembled from the `.s`; its differences remain findings. Other rejections stay failures.
 - Rust AArch64 binaries reuse rustc's printed link line and swap only the `cgu.0` object. The
   allocator-shim and `symbols.o` objects are rustc-built and shared by both arms.
-- On this Mac host x86 ELF is structure-only; this harness does not run Linux executables.
+- On macOS hosts x86 ELF is structure-only; this harness does not run Linux executables.
 - `--report-only --recompare` reparses existing objects only after checking assembly, fixture, and
   object hashes. Missing historical hashes prevent recomparison; historical unchecked hashes/metadata
   are labeled explicitly. Recomparison does not rerun tools or establish runtime equivalence anew.
-- `--lock-log PATH` selects the shared lock log (default: `OUT/lock.jsonl`). Compiler version probes
-  and each case acquire the lock separately. Do not wrap the normal parent runner in another lock;
-  `--one CASE.json` is the internal child entry point and must already be under the shared lock.
+- Compiler version probes and cases run one at a time; `--lock-log PATH` sets the log of that
+  serialization (default: `OUT/lock.jsonl`). `--one CASE.json` is the internal child entry point.
 - Timing is optional legacy functionality; use `--no-timing` for compatibility-only runs. Increase
   `--chain-limit` explicitly when diagnostic stripping is useful; stripped output is never evidence.

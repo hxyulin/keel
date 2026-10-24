@@ -139,7 +139,7 @@ def main():
                 baseline = pathlib.Path(original['binaries']['normal'])
                 assert sha(baseline) == original['binary_sha256']['normal']
             else:
-                # LinuxHost did not need a Lua profile in the previous investigation.
+                # The x86-64 Linux run did not need a Lua profile in the previous investigation.
                 objects = []
                 for source in sources:
                     asm, obj = directory/(source.stem+'.s'), directory/(source.stem+'.o')

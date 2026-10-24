@@ -100,8 +100,7 @@ when the hidden function makes ownership ambiguous; declaration-specifier/final
 named-declarator placements and unambiguous grouping remain available. This is
 bounded ownership support, not full GNU attribute-placement or C++ grammar support.
 The classification follows [Clang's attribute definitions](https://github.com/llvm/llvm-project/blob/main/clang/include/clang/Basic/Attr.td)
-and retained per-attribute Clang AST evidence, detailed in
-the ROUND3 correction record.
+and per-attribute Clang AST behavior.
 
 Indirect call signatures carry none of these new attributes. Function
 pointer/declarator attributes do not establish indirect-call promises; no
@@ -185,9 +184,7 @@ request to report. Basic/none optimization tiers retain their existing pipelines
 `alwaysinline` is acted on when the inliner runs, not by adding new tier passes.
 
 Deferred: assume, distinct unreachable, hot/cold and branch weights, memory/alias
-contracts, and public interposable inlining. Suggested umbrella documentation
-follow-up: link this contract from `docs/design.md`; integration/suite-wide evidence
-belongs to coordinator review rather than this focused worker session.
+contracts, and public interposable inlining.
 
 ## Explicit non-interposable binding
 

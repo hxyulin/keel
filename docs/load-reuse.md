@@ -32,15 +32,25 @@ can disappear only after that original access has succeeded and without a
 possible memory mutation or lifetime barrier on the inherited path. No new
 notrap, noalias or integer-overflow flags are introduced.
 
-Regression tests are in `keel-opt/tests/load_reuse.rs` and
-`keel-codegen/tests/load_reuse.rs`. The latter exercises both targets, Fast/Full
-IR tiers, baseline/full selection and Fast/Full allocation with object encoding.
-For native macOS ARM or Linux x86 validation, first build a worktree-local CLI, then run
-`suite/check_load_reuse.py --keel <binary> --output <evidence-directory>` under
-the shared `suite/fast_opt_locked.py` lock. It emits both targets, checks all 795
-kernel driver lines against fresh Clang O0/O2, asserts Fast isort's three loads
-become two and Full's two-load result is retained,
-and runs an independent C oracle at Clang O0/O2 for each IR/allocation tier.
-The oracle checks aliasing/partial writes, unaligned accesses, integer edge
-patterns, call mutations, widths and protected-page first-fault/untaken paths.
+## Tests
+
+```sh
+cargo test -p keel-opt --test load_reuse
+cargo test -p keel-codegen --test load_reuse
+```
+
+The codegen test exercises both targets, Fast/Full IR tiers, baseline/full
+instruction selection and Fast/Full register allocation with object encoding.
+
+For native validation on macOS arm64 or x86-64 Linux, build the CLI and run:
+
+```sh
+python3 suite/check_load_reuse.py --keel target/release/keel --output <evidence-dir>
+```
+
+It emits both targets, checks all 795 kernel driver lines against Clang O0/O2,
+asserts that Fast isort's three loads become two and Full's two-load result is
+retained, and runs a C oracle at Clang O0/O2 for each IR/allocation tier. The
+oracle checks aliasing and partial writes, unaligned accesses, integer edge
+patterns, call mutations, widths, and protected-page first-fault/untaken paths.
 It performs no performance measurement.

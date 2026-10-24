@@ -16,14 +16,9 @@ cross-binutils can be selected with `--as x86_64-elf-as --ld x86_64-elf-ld
 --objcopy x86_64-elf-objcopy`. `--build-only` needs no QEMU and establishes only
 assembly/link/image-placement evidence.
 
-Run all tests, builds and guest campaigns under the existing shared lock:
-
 ```sh
-PYTHONDONTWRITEBYTECODE=1 python3 suite/fast_opt_locked.py \
-  /tmp/keel-cpl0-unique.jsonl \
-  python3 -m unittest discover -s suite/x86-cpl0 -v
-python3 suite/fast_opt_locked.py /tmp/keel-cpl0-unique.jsonl \
-  python3 suite/x86-cpl0/run.py --timeout 5
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s suite/x86-cpl0 -v
+python3 suite/x86-cpl0/run.py --timeout 5
 ```
 
 Each invocation creates a fresh `/tmp/keel-cpl0-*` directory containing ELF,
@@ -32,16 +27,14 @@ stderr. JSON on stdout reports the artifact path, exact QEMU argv, transcript,
 return code, status and evidence level. CLI exit zero means `pass`, or `built`
 when explicitly using `--build-only`. All errors/timeouts exit one. Timeout is
 positive and at most 30 seconds (default five); build subprocesses have separate
-20-second bounds. No generated artifacts or evidence receipts belong in Git.
-The wrapper serializes against `/tmp/keel-perf-20261019.lock`.
+20-second bounds. No generated artifacts belong in Git.
 
 ## External payload contract
 
 Supply one or more existing ELF64 little-endian x86-64 **relocatable** objects:
 
 ```sh
-python3 suite/fast_opt_locked.py /tmp/keel-cpl0-unique.jsonl \
-  python3 suite/x86-cpl0/run.py --payload /tmp/bridge.o --payload /tmp/case.o
+python3 suite/x86-cpl0/run.py --payload bridge.o --payload case.o
 ```
 
 Exactly one object defines `uint32_t guest_main(void)`, called using SysV AMD64.
@@ -65,9 +58,8 @@ fails through the exit/transcript check or timeout; it is not recovered.
 The multiboot flat image begins at physical/linear `0x100000`; its 32-byte
 address-bearing header and entry/load/BSS bounds are checked after GNU objcopy.
 `guest.elf` is a link/debug container; **QEMU receives `guest.bin`**, never that
-ELF64 container. The archived working boot/link source from
-`db1778f4^:suite/x86_system_harness/{boot.S,link.ld}` is retained with the entry
-call redirected to the small harness. It zeroes BSS, constructs identity-mapped
+ELF64 container. The boot/link source is adapted from an earlier
+x86 system harness, with the entry call redirected to this small harness. It zeroes BSS, constructs identity-mapped
 2 MiB pages, enables PAE/LME/paging, loads a 64-bit GDT code selector, and calls
 through a correctly aligned stack. This is boot implementation, not a compiler
 API for arbitrary control-register or page-table mutation.
@@ -91,19 +83,12 @@ Only the generated flat image and output files are passed to QEMU. There is no
 KVM, root setup, host permission change or native privileged execution.
 `-no-reboot` is set; `-no-shutdown` is deliberately absent.
 
-## Recorded finite validation
+## Validation
 
-On 2026-10-23, based on main `bfa86ed7`, nine deterministic host tests passed
-locally and on LinuxHost. Local GNU cross-binutils built and validated the smoke's
-flat image. LinuxHost's existing GNU binutils and existing QEMU 11.1.1 at
-`/nix/store/adr1v05h9jcfjfdky8hdrcyrl9vhgzjx-qemu-for-vm-tests-11.1.1/bin/qemu-system-x86_64`
-ran the default smoke with the exact expected two-line transcript and exit 33
-(`/tmp/keel-cpl0-dvxofcdz`). An external `guest_main` returning one produced
-FAIL and exit 35 (`/tmp/keel-cpl0-55g1g9tp`). Another external payload emitted
-PASS then halted forever: it was killed at one second and reported timeout,
-not pass (`/tmp/keel-cpl0-tklzkni3`). Temporary negative-control source, exact
-commands and results remain in `/tmp/keel-cpl0-validation.l8rQot` on LinuxHost;
-lock logs are `/tmp/keel-cpl0-unique.jsonl`. No Rust changed or compiled.
+The host unit tests, the default smoke (exact two-line transcript, exit 33), a
+payload returning one (FAIL, exit 35), and a payload that prints PASS and then
+hangs (reported as timeout, not pass) have been run on x86-64 Linux with GNU
+binutils and QEMU 11.1.1.
 
 ## SGDT/SIDT campaign
 
@@ -119,16 +104,14 @@ This checks SGDT offsets 1–10, SIDT offsets 17–26 and all twelve canary byte
 The bridge uses integer-only assembly, no red zone, C runtime or SIMD helpers.
 
 Export all twelve explicit V1 variants from the current source tree, then run
-on a host with the existing QEMU and GNU binutils (override tool paths as above):
+on a host with QEMU and GNU binutils (override tool paths as above):
 
 ```sh
-env KEEL_DESCRIPTOR_EXPORT_DIR=/tmp/keel-descriptor-cpl0-exports \
-  python3 suite/fast_opt_locked.py /tmp/keel-cpl0-review-unique.jsonl \
-  cargo test --offline --locked -j2 -p keel-codegen \
+KEEL_DESCRIPTOR_EXPORT_DIR=target/descriptor-cpl0-exports \
+  cargo test -p keel-codegen \
   --test x86_descriptor_cpl0 --test x86_descriptor_queries_encoding
-python3 suite/fast_opt_locked.py /tmp/keel-cpl0-review-unique.jsonl \
-  python3 suite/x86-cpl0/descriptor_campaign.py \
-  --exports /tmp/keel-descriptor-cpl0-exports --timeout 5
+python3 suite/x86-cpl0/descriptor_campaign.py \
+  --exports target/descriptor-cpl0-exports --timeout 5
 ```
 
 The campaign accepts exactly the twelve standard object filenames, links each
@@ -137,20 +120,13 @@ transcript and exit 33. Two substituted observation payloads must instead
 produce the exact READY/FAIL transcript and exit 35: one returns without any
 observation, the other observes correctly then corrupts a canary. A fault or
 timeout cannot satisfy these controls. Each campaign stores all commands,
-images, transcripts and per-case JSON in `/tmp/keel-descriptor-campaign-*`.
-It acquires no lock internally: use the wrapper once, without nested locking.
+images, transcripts and per-case JSON in a fresh
+`/tmp/keel-descriptor-campaign-*` directory.
 
-On 2026-10-23, all twelve newly exported variants passed on LinuxHost with the
-existing QEMU path above; both descriptor negative controls failed as expected.
-Descriptor captures are `/tmp/keel-descriptor-campaign-q4a10yfm`, with source,
-exports and command log in `/tmp/keel-cpl0-review.5oAfls/descriptor.log`.
-The review also passed ten host tests locally and on LinuxHost, rebuilt the local
-flat image, rejected a real oversized-BSS object at link time, and reran the
-smoke, return-one and PASS-then-timeout controls (captures in
-`/tmp/keel-cpl0-review-generic-6ttqksqs`). All twelve linked reference images
-also matched `descriptor_expected.py` using only linker seed symbols. A local
-evidence copy is `/tmp/keel-cpl0-review-evidence` on MacHost. Lock receipts are
-`/tmp/keel-cpl0-review-unique.jsonl` on each host.
+All twelve variants pass under QEMU on x86-64 Linux, both negative controls
+fail as expected, an oversized-BSS object is rejected at link time, and all
+twelve linked reference images match `descriptor_expected.py` using only linker
+seed symbols.
 
 This qualifies only the bounded emulated SGDT/SIDT comparison and canaries.
 The generic smoke and compile/encoding gates are separate evidence. Native

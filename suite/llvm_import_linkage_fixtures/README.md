@@ -1,17 +1,22 @@
 # Bounded LLVM ODR function copies
 
 `suite/llvm_import_linkage_validate.py` validates this feature independently of
-parent-owned aggregate/frontend harnesses. Invoke it through
-`suite/fast_opt_locked.py LOG.jsonl python3 suite/llvm_import_linkage_validate.py
---libllvm LLVM23 --keel KEEL --out NEW_PRIVATE_DIRECTORY`.
-It takes no lock itself. The validator saves unchanged Clang C++ LLVM output,
-commands, checks, native objects/executables, and source hashes under `--out`.
+the aggregate frontend harness:
+
+```sh
+python3 suite/llvm_import_linkage_validate.py \
+  --libllvm /path/to/LLVM23/libLLVM.dylib \
+  --keel target/debug/keel --out NEW_OUTPUT_DIR
+```
+
+The validator saves unchanged Clang C++ LLVM output, commands, checks, native
+objects/executables, and source hashes under `--out`.
 
 ## Supported contract
 
-Default mode now transports exported ODR definitions with coalesced identity.
+Default mode transports exported ODR definitions with coalesced identity.
 This document describes the separate legacy `--localize-odr-functions` mode (or Python
-`import_module(..., localize_odr=True)`) explicitly asserts that **no outside
+`import_module(..., localize_odr=True)`), which explicitly asserts that **no outside
 translation unit requires any imported `linkonce_odr` or `available_externally`
 definition's symbol**. This is a whole-module contract provided by the caller;
 it cannot be inferred from a single LLVM module. It is suitable for a bounded

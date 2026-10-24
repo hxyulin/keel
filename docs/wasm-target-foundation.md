@@ -1,307 +1,126 @@
-# Recognized wasm32 target, public pipelines unavailable
+# wasm32 target identity and native-route gates
 
-This checkpoint builds on main `05fe6c68` and the
-[layout migration gates](wasm32-layout-plan.md#variant-and-cli-migration-gates).
-It exposes target identity and storage layout with explicit rejection gates;
-it does not enable the planned public C profile. The private
-[C pointer/data](wasm-c-pointer-data.md) and [memory backend](wasm-memory-backend.md)
-checkpoints keep their existing boundaries. Parent integration and independent
-review are separate.
+`keel_ir::Target::Wasm32UnknownUnknown` makes `wasm32-unknown-unknown` a recognized
+target. Recognizing the target does not make every pipeline accept it: native code
+generation, native output, the target-tagged artifact format and the general
+optimizer reject it explicitly. Wasm output goes through the dedicated
+[CLI route](wasm-cli.md) and the [freestanding C profile](wasm-c-freestanding.md).
+This page records where the target is accepted and where it is deliberately
+rejected. The design came from the
+[layout plan](wasm32-layout-plan.md#variant-and-cli-migration-gates).
 
 ## Public contract
 
-`keel_ir::Target::Wasm32UnknownUnknown` recognizes exactly
-`wasm32-unknown-unknown`. `Target::data_layout()` is a const storage query:
-this variant returns `DataLayout::WASM32`, and all three native variants return
-`DataLayout::NATIVE64`. It is not a C data model, ABI classifier, optimizer
-context, native backend selection, or runtime configuration. No target is added
-to `Module`, and existing native layout wrappers retain their old semantics.
-`Target::host()` and `Default` are unchanged.
+- `Target::Wasm32UnknownUnknown` parses exactly `wasm32-unknown-unknown`. There is
+  no WASI, wasm64 or shortened alias.
+- `Target::data_layout()` is a const storage query: Wasm returns
+  `DataLayout::WASM32`, the three native targets return `DataLayout::NATIVE64`. It
+  is not a C data model, ABI classifier, optimizer context or backend selector.
+- `Target::ALL` lists all four **recognized** targets (the original three, then
+  Wasm). It is not a list of usable codegen targets. `Target::NATIVE` lists the
+  three native targets for native-only inventories and tests.
+- `Target::host()` and `Default` are unchanged. `Module` has no target field.
 
-`Target::ALL` now enumerates four **recognized** targets, retaining the original
-three entries in order and appending Wasm. It is not a list of usable C/codegen
-targets. The additive `Target::NATIVE` enumerates the original three targets for
-native success inventories and their existing controls. Wasm has separate public
-API and CLI rejection tests; changing native loops does not establish Wasm support.
-No WASI, wasm64, shortened Wasm triple, C ABI, object format, native bridge, or
-Wasm output mode is introduced.
+## Native routes that reject Wasm
 
-## Routing audit and gates
+Unsupported routes return errors instead of falling back to native behavior or
+panicking. Rejections leave caller-owned outputs untouched and create no reports
+or output directories.
 
-The workspace audit covered exhaustive matches and equality/default fallbacks,
-including optional profiling entry points and paths with empty modules:
+- **C frontend:** `keel_c` selects the Wasm profile only through its dedicated
+  freestanding path. `profile::compile` rejects Wasm before lexing. Native parser
+  fallbacks (va_list, char/long-double policy, aggregate classification, debug
+  types, headers) are not reachable for Wasm.
+- **Native codegen:** `keel_codegen` text, options, pipeline, typed-program and
+  chunked-program APIs return `CodegenError` before instruction selection. CPU
+  tuning, selector defaults, pipeline validation and optimizer capability
+  projection reject Wasm too, and a permissive custom selector cannot bypass this.
+- **IR sections and artifacts:** native section validation rejects Wasm, even for
+  an empty module. Toolchain artifact encode/decode reject Wasm before verification
+  or parsing. A target-tagged IR unit is not a Wasm object.
+- **CLI:** `cc` and `compile` without `--emit-wasm`, and `opt`, reject an explicit
+  Wasm target after option parsing and before tuning, input loading, include
+  discovery, optimization or output. Native CPU, optimization, selection and
+  allocation flags cannot enable Wasm. Target-free `opt` keeps its Portable
+  context. `asm`, Keel's own `link` and `archive` also reject Wasm; assembler,
+  linker and archive APIs use their own closed native enums.
+- **Optimizer:** `keel-opt`'s `VectorTarget` describes SIMD capability, not memory
+  layout, so its general APIs cannot check a target/layout pairing. Wasm modules
+  only reach the optimizer through the fixed, WASM32-verified
+  [basic profile](wasm-basic-optimization-audit.md).
 
-- `keel_c::{compile,profile::compile}` reject before lexing/parser construction.
-  `preprocess` and `preprocess_with_stats` reject before macros, include discovery,
-  source scanning or file access. `predefined_macros` already returns `Result`;
-  it rejects without constructing a native macro inventory, even with a Darwin
-  deployment argument. Internal capability queries conservatively return zero.
-  Public options/signatures and production C model mappings are unchanged.
-- Native C parser/IR generation fallbacks for va_list, char/long-double policy,
-  aggregate classification, debug types, symbols and headers remain behind the
-  public frontend gate. New exhaustive parser arms diagnose unsupported target
-  operations; they do not implement Wasm declaration semantics. Private Wasm
-  layout/lowering continues using its existing test-only entry points. Its native
-  control loop now uses `NATIVE`; lowering/runtime code is unchanged.
-- `keel_codegen` text, options, pipeline, typed-program and chunked-program APIs
-  return `CodegenError` before selection or chunk delivery. Generic CPU tuning,
-  selector defaults, pipeline validation and optimizer capability projection also
-  reject Wasm. A custom selector that accepts every target cannot bypass the
-  public codegen/capability gates. Native custom-selector dispatch is preserved.
-- IR native section and full-module section validation reject Wasm, including an
-  empty module. Toolchain artifact encode/decode reject Wasm before verification
-  or parsing; the existing IR-unit format/version is unchanged. A target-tagged
-  artifact is not a Wasm object, nor proof of the C layout that produced raw IR.
-- CLI `cc` (including `-E`, `-dM`, `.i`, `--emit-ir`), `compile` and `opt` reject
-  explicit Wasm after option parsing and before native tuning, input loading,
-  include discovery, optimization, reporting or output. Native object sinks have
-  explicit unsupported-target handling. Native CPU/features, optimization,
-  selection and allocation flags cannot authorize Wasm. Target-free `opt` retains
-  its Portable context without resolving a host target; no optimizer pass or
-  canonical/custom context dispatch is changed.
-- CLI `asm`, Keel-owned `link` and `archive` reject Wasm before input/output
-  processing. Explicit `link --system` selects external Clang functionality and
-  is outside Keel's Wasm rejection gate; see the compatibility boundary below.
-  Assembler APIs themselves are architecture-specific
-  (AArch64 or x86), with no `keel_ir::Target` argument. Link/archive APIs use
-  separate closed native machine/format enums; no Wasm-to-native conversion is
-  added. LLVM and the excluded experimental Cranelift workspace likewise retain
-  their separate closed native `TargetProfile` APIs.
-- `keel-opt` has a SIMD `VectorTarget`, not a memory-layout target. Its targetless
-  APIs cannot validate a caller-owned target/layout pairing. CLI rejection prevents
-  Wasm modules entering its default or requested pipelines; direct private Wasm
-  backend use still requires unoptimized input under its documented contract.
-  Toolchain memory instrumentation also remains a native-only, targetless API.
-  Assembly IR, architecture-specific selection/register allocation, frontend SSA
-  builders and suite host defaults do not acquire Wasm semantics.
+The LLVM exporter and the experimental Cranelift crate keep their own native-only
+target profiles.
 
-There are no ABI, FP, memory-operation, dependency, toolchain, cache-policy or
-performance changes. Existing native x86/NEON contracts in
-[userspace ISA status](userspace-isa-status.md),
-[C intrinsics](c-x86-intrinsics.md) and [GNU modes](gnu-vector-mode.md) remain
-native contracts. Unsupported public routes return errors instead of silently
-selecting native behavior or panicking. Rejections preserve caller-owned outputs
-and do not create optimization reports or batch assembly output directories.
+## Testing
 
-## Focused validation
-
-Local Apple ARM64 validation uses the existing shared suite lock, toolchain pins,
-offline/locked dependencies, two jobs and cargo's shared default cache with
-`CARGO_CACHE_LINKS=0`. Generated evidence stays under `/tmp`.
-
-The focused debug and release groups each passed 97 tests on 2026-10-24.
-Two additional native va_list/header controls passed in each profile.
-The final workspace check also includes all targets and the existing C `profile`
-feature so both public profiling guards compile. The groups are:
-
-- `keel-ir`: `targets`, `data_layout`, `sections` (enumeration, exact triple,
-  const layouts, host/default controls and native section rejection).
-- `keel-codegen`: `wasm_target_unavailable`, `selection`, `tuning`, `x86_features`
-  (all public text/program/chunk paths, permissive custom selector, zero sink
-  deliveries, capabilities and existing native selection/feature controls).
-- `keel-c --features profile`: `wasm_target_unavailable`, `gnu_types`,
-  `gnu_vector_broadcast` (ordinary/profiling APIs, macros, preprocessing and native
-  type/vector controls).
-- `keel-toolchain`: `foundations` (Wasm transport rejection and native controls).
-- `keel`: binary unit tests and `wasm_target_unavailable` (negative output routes,
-  CPU/tuning/optimization flags in both orders, output sentinels, reports,
-  target-free Portable optimization and native text/direct object controls).
-
-Reproduce each group with this wrapper, adding `--release` for release:
+| Crate | Tests |
+| --- | --- |
+| `keel-ir` | `targets`, `data_layout`, `sections` |
+| `keel-codegen` | `wasm_target_unavailable`, `selection`, `tuning`, `x86_features` |
+| `keel-c` (`--features profile`) | `wasm_target_unavailable`, `gnu_types`, `gnu_vector_broadcast` |
+| `keel-toolchain` | `foundations` |
+| `keel` | binary unit tests, `wasm_target_unavailable`, `system_link_args` |
 
 ```sh
-python3 suite/fast_opt_locked.py /tmp/wasm-target-unique.jsonl \
-  cargo test --offline --locked -j2 -p keel-ir \
-  --test targets --test data_layout --test sections
-python3 suite/fast_opt_locked.py /tmp/wasm-target-check-unique.jsonl \
-  cargo check --offline --locked -j2 --workspace --all-targets
+cargo test -p keel-ir --test targets --test data_layout --test sections
+cargo test -p keel-codegen --test wasm_target_unavailable
+cargo test -p keel --test wasm_target_unavailable --test system_link_args
+cargo check --workspace --all-targets --features keel-c/profile
 ```
-
-This is bounded routing validation. Local x86/AArch64 Linux objects are cross
-outputs, not native execution on those machines. No Wasm execution or public C
-acceptance is claimed here. The next guarded C profile still needs the complete
-macro inventory, freestanding header/include policy, declaration/type model,
-unsupported-feature diagnostics and the remaining frontend/runtime acceptance
-gates in the layout plan before public C/preprocessing can be enabled.
-
-Evidence records are `/tmp/keel-wasm-target-{debug,release}-20261024.jsonl` and
-`/tmp/keel-wasm-target-final-20261024.jsonl`. Group logs use
-`/tmp/keel-wasm-target-{debug,release}-{ir,codegen,c,toolchain,cli}-20261024.log`;
-final changed-codegen/CLI runs, native `contracts`/`environment` controls and
-workspace check use `/tmp/keel-wasm-target-final-*-20261024.log`.
-The workspace check reports existing dead-code warnings in other test helpers;
-there are no new warnings in the target foundation/rejection tests.
 
 ## System-link compatibility boundary (revised contract)
 
-The user revised the original zero-Clang-spawn requirement after the argument
-audit. `keel link --system ...` remains the explicit, opaque Clang pass-through.
-Clang owns target selection, repeated options, option operands, response files,
-configuration files and environment interpretation. This includes external Clang
-Wasm selection: it does not enable Keel's Wasm frontend, backend or native linker.
-Keel neither expands nor validates response/config files on this route. Nested,
-quoted, escaped, malformed, missing and cyclic response files are forwarded to
-Clang, which owns their diagnostics and resource limits. No Clang dependency,
-option table or partial driver scanner is added.
+`keel link --system ...` is an explicit, opaque pass-through to Clang. Clang owns
+target selection, repeated options, option operands, response files, configuration
+files and environment interpretation. Clang may therefore select Wasm on this
+route; that does not enable Keel's Wasm frontend, backend or native linker. Keel
+does not expand or validate response or config files here (nested, quoted,
+malformed, missing and cyclic response files are all forwarded), and it has no
+Clang option table.
 
-Put `--system` immediately after `link` for the full Clang argument surface.
-It may also follow a prefix of Keel native arguments: Keel skips the operands of
-its own value-taking options while locating the selector. For example,
+**Where to put `--system`.** Put it immediately after `link` for the full Clang
+argument surface. It may also follow a prefix of Keel native arguments: Keel skips
+the operands of its own value-taking options while looking for it. For example,
 `link --target x86_64-unknown-linux-gnu --system ...` selects Clang, whereas
-`link -o --system input.o` names a native output file. A standalone `--` or an
-option outside Keel's native syntax ends selector discovery; a later `--system`
-does not switch routes. In particular, put the selector **before** Clang-only
-options such as `-Xlinker`, `-Xclang` and `--config=...`. Keel does not guess their
-arity. Response-file contents cannot select the Keel route.
+`link -o --system input.o` names a native output file called `--system`. A
+standalone `--` or any option outside Keel's native syntax ends the search, so a
+later `--system` does not switch routes. In particular, put `--system` **before**
+Clang-only options such as `-Xlinker`, `-Xclang` and `--config=...`. Response-file
+contents cannot select the route.
 
-Only the selected `--system` token is removed. Every other argument retains its
-order and bytes, including subsequent `--system` operands/filenames and tokens
-after `--`, except the existing literal-token translation of `--sysroot` and
-`-syslibroot` to `-isysroot`. That legacy translation applies to direct argv
-tokens even after `--`; it does not inspect response/config contents or translate
-joined spellings. The environment is inherited. This preserves the existing
-translation rather than attempting Clang option interpretation.
+**What is forwarded.** Only the selected `--system` token is removed. Every other
+argument keeps its order and bytes, including later `--system` tokens and anything
+after `--`, except the existing literal translation of `--sysroot` and
+`-syslibroot` to `-isysroot`. That legacy translation applies to direct argv tokens
+(even after `--`), not to joined spellings or response-file contents. The
+environment is inherited.
 
-Without an explicit system selection, Keel rejects every genuine occurrence of
-`wasm32-unknown-unknown` in the four guarded target spellings (`--target VALUE`,
+**Native route.** Without `--system`, Keel rejects any genuine
+`wasm32-unknown-unknown` in the four target spellings (`--target VALUE`,
 `-target VALUE`, `--target=VALUE`, `-target=VALUE`) before native input/output
-processing or external tool discovery. This is deliberately conservative for
-repeated targets: a later native target does not cancel an earlier Wasm request.
-Known native option operands and filenames after `--` are excluded. Native target
-dispatch otherwise retains its existing syntax; the guard does not add Clang
-target aliases or response expansion to the native linker.
+processing or tool discovery. A later native target does not cancel an earlier Wasm
+request. Operands of known native options and filenames after `--` are not treated
+as targets.
 
-The scope decision follows LLVM 21.1.0 primary sources:
+The scope follows the LLVM 21.1.0 driver: the
 [driver entry point](https://github.com/llvm/llvm-project/blob/llvmorg-21.1.0/clang/tools/driver/driver.cpp)
 expands response files and handles argument-rewriting environment variables;
 [Driver.cpp](https://github.com/llvm/llvm-project/blob/llvmorg-21.1.0/clang/lib/Driver/Driver.cpp)
-loads explicit/default configuration files and computes the target;
+loads configuration files and computes the target;
 [Options.td](https://github.com/llvm/llvm-project/blob/llvmorg-21.1.0/clang/include/clang/Driver/Options.td)
-defines version-specific operand consumption and driver modes; and
+defines version-specific operand consumption; and
 [CommandLine.cpp](https://github.com/llvm/llvm-project/blob/llvmorg-21.1.0/llvm/lib/Support/CommandLine.cpp)
-implements response tokenization, encoding and nested inclusion. These establish
-why an argv substring scan cannot prove the external driver's effective target.
+implements response-file tokenization and nesting. Scanning argv for a target
+substring therefore cannot determine the external driver's effective target, which
+is why the route is opaque rather than filtered.
 
-`keel --test system_link_args` uses an isolated fake Clang recording NUL-separated
-arguments. It covers all four target spellings, repeated targets, native controls,
-target-looking output names, literal `--system` operands, `--`, native-prefix
-selection, opaque Clang options, nested/quoted response paths and malformed,
-missing/cyclic response fixtures. These are forwarding checks, not claims that
-Clang accepts every fixture. Native Wasm cases assert no driver record and an
-unchanged destination; real ELF and Mach-O tests retain native controls. No real
-Clang is invoked for the external Wasm forwarding cases.
-
-Fresh focused validation passed 17 tests in each of debug and release on Apple
-ARM64: `system_link_args` (6), `wasm_target_unavailable` (2), `elf_link` (7) and
-`macho_link` (2). This includes native Mach-O behavior and host-independent ELF
-image checks; it does not claim native Linux execution. Reproduce with:
-
-```sh
-python3 suite/fast_opt_locked.py /tmp/keel-link-args-unique.jsonl \
-  cargo test --offline --locked -j2 -p keel \
-  --test system_link_args --test wasm_target_unavailable \
-  --test elf_link --test macho_link
-```
-
-Add `--release` for release. Final lock records are
-`/tmp/keel-wasm-arg-fix-02a18ad6-final-debug.jsonl` and
-`/tmp/keel-wasm-arg-fix-02a18ad6-release.jsonl`. Focused rustfmt and
-`git diff --check` pass. These checks validate the revised compatibility
-boundary; the parent owns new independent review and integration.
-
-## Independent review round 2: revised system-link boundary
-
-Candidate `a72024dff849d38091ed0fdc0261130bb6fc6cb7` was reapplied onto
-`05fe6c68` in the assigned review checkout. No unresolved blocking finding was
-found under the parent's revised opaque-system contract. The earlier P1 is
-resolved by that contract revision; this review does not restore a promise of
-zero Clang spawns for explicit system links. The earlier P2 is covered by both
-opaque forwarding checks and real native ELF links with target-looking outputs.
-
-The compatibility change is intentional and bounded: put `--system` before
-Clang-only options. A standalone `--` or an unknown option in the prefix stops
-selector discovery; operands of known Keel native options do not. After selection,
-only the selected token is removed, and the legacy literal sysroot translation
-still applies everywhere in direct argv, including operands and tokens after
-`--`. Clang owns response/config/environment interpretation and may select Wasm.
-Keel-owned native Wasm requests still reject before external discovery or output.
-No broader Clang option parser or C frontend enablement is introduced.
-
-The review adds a fake-driver regression covering each native value-taking
-prefix option with selector-looking, target-looking and `--` operands, supported
-native flags/joined options, and diagnostics for Clang-only prefixes. Real ELF
-controls now also link outputs and `--`-protected inputs named `--target`,
-`-target` and both joined target spellings. Public C/profile/preprocessing/macros,
-all native codegen output APIs, artifact transport, sections, CLI routes, exact
-target identity/layout, native inventories and the host-independent Portable
-optimization control were audited and exercised by the focused suites.
-
-Fresh local Apple ARM64 validation passed **128 tests in each of debug and
-release**: IR targets/layout/sections (15), codegen rejection/selection/tuning/
-features (18), C rejection/types/broadcast/environment/contracts with `profile`
-(28), toolchain foundations (11), and CLI unit/routing/system/ELF/Mach-O controls
-(56). `check --workspace --all-targets --features keel-c/profile` passed with
-existing unrelated test-helper dead-code warnings. All compilation used
-`python3 suite/fast_opt_locked.py /tmp/<record>.jsonl
-cargo ... --offline --locked -j2`, the existing shared lock and pins,
-and default cargo cache/managed targets. Focused rustfmt and `git diff --check`
-passed. No remote execution, performance campaign or Wasm/C acceptance is claimed.
-
-Logs use `/tmp/keel-target-review2-{debug,release}-{ir,codegen,c,toolchain,cli}-20261024.log`;
-the final debug CLI log is
-`/tmp/keel-target-review2-debug-cli-final-20261024.log`. Workspace evidence is
-`/tmp/keel-target-review2-workspace-20261024.log`; lock records are
-`/tmp/keel-target-review2-{debug,validation}-20261024.jsonl`.
-Parent integration and cleanup remain separate.
-
-## Historical independent review: original system-link guard
-
-The findings below describe the original, now superseded pre-spawn rule. P1 is
-resolved by the explicit contract revision above, not by claiming response-file
-inspection. P2 is resolved by forwarding system-route option operands unchanged.
-The parent must obtain a new independent review before integration.
-
-Review baseline is candidate `acddcff5`, reapplied on `05fe6c68` as `e7bc6a1c`.
-The public C rejection checkpoint remains unchanged. The exhaustive and
-nonexhaustive target audit found two unresolved issues in
-`crates/keel/src/link.rs::run`; this review does not approve integration:
-
-- **P1: response files bypass the pre-spawn rejection.** With a response file
-  containing `--target=wasm32-unknown-unknown`, `keel link --system @file` forwards
-  the file to Clang without examining its arguments. A marker executable named
-  `clang` confirms that a child is spawned; real Apple Clang 21's `-###` dry run
-  confirms that this response file selects `wasm32-unknown-unknown`. The external
-  driver can therefore enter a Wasm pipeline despite this checkpoint's gate.
-  Nested response files and other driver argument indirection need consideration
-  when fixing the boundary. No Wasm object or executable was generated for review.
-- **P2: option operands are mistaken for target options.**
-  `keel link --system -o --target=wasm32-unknown-unknown missing.o` is rejected
-  as a Wasm target although the target-looking token is an output filename.
-  Clang accepts it as the operand of `-o`; this is a native argument-surface
-  regression. The gate must distinguish target options from other option values.
-
-Simply banning response files would remove part of the existing system driver's
-native argument surface. A repair must reconcile that compatibility requirement
-with rejection before spawning Clang; it must not enable public Wasm output.
-The parent owns that resolution and integration. The separate frontend worker
-must preserve the CLI and native backend gates when rebasing.
-
-An additional Unix CLI regression uses an isolated marker executable to verify
-zero Clang spawns for all four direct target spellings, with a native target
-positive control proving the marker detects actual invocation. It does not cover
-or claim to fix the response-file bypass. Probe evidence is
-`/tmp/keel-wasm-review-9e78570c-probes/{probes.json,clang-response.txt}`.
-
-Independent validation passed 105 tests in each of debug and release: the five
-focused groups above, adding the complete C `environment` integration test and
-the Clang spawn regression. The host-independent Portable-context unit control,
-predefined-macro rejection, and preprocessing rejection with nonexistent include
-paths passed. Workspace `check --workspace --all-targets --features keel-c/profile`
-also passed, with existing dead-code warnings in unrelated codegen test helpers.
-Every compilation used the prescribed suite lock, offline/locked dependencies,
-two jobs, existing toolchain and shared cargo cache with `CARGO_CACHE_LINKS=0`.
-Logs and lock records use `/tmp/keel-wasm-review-9e78570c-*`.
-The changed Rust test passes focused rustfmt checking and `git diff --check`.
-Workspace-wide `cargo fmt --all -- --check` reports pre-existing formatting
-differences in other files; those files were left unchanged. These checks do not
-supersede the unresolved system-link findings or establish Wasm execution support.
+`cargo test -p keel --test system_link_args` uses an isolated fake Clang that
+records its arguments. It covers all four target spellings, repeated targets,
+native-prefix selection with value-taking options, target-looking output names,
+literal `--system` operands, `--`, Clang-only options, and nested, quoted,
+malformed, missing and cyclic response files. These are forwarding checks, not
+claims that Clang accepts every fixture. Native Wasm cases assert that no driver
+ran and the destination is unchanged. The `elf_link` and `macho_link` tests keep
+native controls, including outputs and `--`-protected inputs named like target
+options.

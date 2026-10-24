@@ -52,7 +52,7 @@ incompatible attribute, irrespective of source declaration or call order.
 
 Both backends can emit these C ABI calls. Linking requires a runtime providing
 the checked symbols; a freestanding or alternative libc must supply them.
-The native differential test links and executes all three on macOS MacHost.
+The native differential test links and executes all three on macOS arm64.
 Linux target lowering is covered by codegen tests; no Linux native execution
 is claimed. The existing extension fixture is unchanged and exercises Clang's
 fortified-header expansion without checked-function declarations.

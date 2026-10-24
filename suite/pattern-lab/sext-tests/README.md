@@ -1,8 +1,7 @@
 # Opt-in sign-extension correctness capture
 
-Run only under an explicit root MacHost compiler/native correctness lease, with
-a compiler built from the reviewed source in a private target. This script
-never builds or measures performance. Supply an existing compiler and resolved
+Run on an otherwise idle Apple AArch64 (macOS arm64) host with an already
+built compiler. This script never builds or measures performance. Supply an existing compiler and resolved
 Clang executable, and a new output directory with an existing parent:
 
 ```
@@ -13,9 +12,8 @@ python3 suite/pattern-lab/sext-tests/validate.py --compiler /absolute/keel \
 All commands run serially with bounded subprocess deadlines, retained argv,
 return code, stdout/stderr and command endpoint times. Any failed command or
 assertion stops the capture; preserve that directory and use a new directory
-for a corrected run. Review and seal tool/compiler/source/output identities
-separately after releasing the host. The script does not install, contact
-remote hosts, infer a source revision from a binary, or self-acquire a lease.
+for a corrected run. The script does not install, contact remote hosts, infer
+a source revision from a binary, or acquire a host lock.
 
 The source includes the actual `bridge_sext8` C body verbatim. For both targets
 and full, baseline-selection, and source-debug modes, it captures optimized C
@@ -35,5 +33,5 @@ patterns, negative return values and call effects, and the bridge at counts
 0, 1, 2, 17 and 257. Null data and maximal ignored mask are passed even for
 nonzero counts because this family never accesses data. Positive return values
 also use an independent mathematical recurrence. Each route performs 24,576
-comparisons. Native x86 is not run on MacHost; x86 object validation is separate
+comparisons. Native x86 is not executed; x86 object validation is separate
 from execution. Success is correctness evidence, not acceptance or speedup.

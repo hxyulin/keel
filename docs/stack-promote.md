@@ -35,88 +35,60 @@ The initial implementation requires all blocks reachable and no entry backedge,
 and caps functions at 256 blocks, 8192 instructions and 64 distinct fields. Parameters are initially
 unpruned; `phi-simplify,dce` removes the redundant ones.
 
-## Actual corpus blocker
+## Mixed-width initialization
 
-The retained 2026-10-20 `k_stackobj` calls ordinary declared `memset` with the
-slot address. That escapes the slot. `stack-promote` deliberately leaves its
-six field loads and three stores intact (plus the input load). Existing
-`call-contracts` has no capture/alias contract that proves this use safe.
+Admission also handles `small-memory`'s i64 zero store at `acc + 16` together
+with i32 counter updates, promoting the counter recurrence alongside two i64
+accumulators. Dynamic or nonuniform wider initializers remain outside this
+subset.
 
-The diagnostic same-IR LLVM export declares the callee `nobuiltin`, without
-`nocapture`/`noalias`. Its ARM assembly keeps `bl _memset` and initial field reads,
-then promotes/vectorizes the recurrence. This is consistent with LLVM's stronger
-allocation identity/alias analysis and loop memory promotion; it does not prove
-that Keel may assume the ordinary call never captures the address. A future
-region promotion needs a proof that subsequent input accesses cannot alias the
-escaped field, no intervening observer can inspect captured memory, and correct
-entry reads, exit writes and first-fault behavior on every region exit. This
-pass supplies none of those assumptions.
+## Limitation: slots passed to `memset`
 
-`tests/stack_promote/private.keel` is an explicitly reduced fixture with ordinary
-exact private initialization stores. It is not evidence of actual corpus
-promotion. Its field memory instructions change from six loads and six stores
-(three initialization stores plus three loop stores) to zero; its one input
-load and two conditional branches remain.
+A slot whose address is passed to an ordinary declared `memset` call escapes,
+so the pass leaves its field loads and stores intact. `call-contracts` has no
+capture/alias contract that proves such a use safe. For example, the
+`k_stackobj` corpus kernel keeps its six field loads and three stores (plus the
+input load).
 
-## Validation
+LLVM, given the same IR with the callee declared `nobuiltin` and without
+`nocapture`/`noalias`, keeps `bl _memset` and the initial field reads, then
+promotes and vectorizes the recurrence. That reflects LLVM's stronger
+allocation-identity/alias analysis and loop memory promotion; it does not prove
+Keel may assume the ordinary call never captures the address. Region promotion
+past such a call would need proof that later input accesses cannot alias the
+escaped field, that no intervening observer can inspect captured memory, and
+correct entry reads, exit writes and first-fault behavior on every region exit.
+This pass assumes none of those. See `stack-cache` below for the opt-in
+alternative.
 
-All build/compiler/native subprocesses use the shared investigation lock wrapper
-and the worktree-local `CARGO_TARGET_DIR=target/kernel-gap-build`. No timings.
+## Tests
 
-- `cargo check --offline --locked -j2 -p keel-opt`.
-- `cargo test --offline --locked -j2 -p keel-opt`: 326 tests at the initial
-  seven-test fixture revision; the focused final `--test stack_promote` passes
-  nine tests, including additional exceptional/nonlocal and partial-init cases.
-- `cargo build --offline --locked -j2 -p keel`.
-- `python3 crates/keel-opt/tests/stack_promote/validate.py --keel
-  target/kernel-gap-build/debug/keel --out target/stack-field-evidence/stage1
-  --investigation target/kernel-gap-20261020
-  --lock-wrapper suite/fast_opt_locked.py
-  --lock-log target/kernel-gap-implementation-20261020/lock-events.jsonl`.
+```sh
+cargo test -p keel-opt --test stack_promote
+```
 
-The serial validator emits ARM64 Mach-O and x86-64 ELF objects plus assembly for
-five reduced-fixture variants, runs 10,401 independent unsigned-C oracle cases
-per ARM variant (baseline, promotion, duplicate promotion variant, Fast cleanup,
-Full cleanup), and compares both Fast+promotion and Full+promotion whole-driver
-outputs against a fresh Clang O2 reference: 795 lines each. Clang uses
-`-ffp-contract=off` to match Keel's separate FP operations. No native x86 execution.
-Ignored evidence is in `target/stack-field-evidence/stage1`, with exact argv,
-outputs, activation counts and SHA-256 hashes in `commands.json`/`result.json`.
+`tests/stack_promote.rs` covers all narrower integer widths and byte offsets
+inside i16/i32/i64 splat stores, several fill bytes, loop and zero-trip paths,
+independent subfields, loop-local resets, retained neighboring byte
+observations, source locations, partial overlaps, unknown/nonuniform
+initialization, escaping calls, exceptional/nonlocal control and
+frame/debug/atomic barriers.
 
-## Mixed-width initialization (2026-10-21)
+`tests/stack_promote/private.keel` is a reduced fixture with exact private
+initialization stores; promotion removes all six field loads and six field
+stores, leaving its one input load and two conditional branches. It is not
+evidence of promotion in real corpora.
 
-The existing Full-only admission now handles small-memory's i64 zero store at
-`acc + 16` together with i32 counter updates. It promotes the counter recurrence
-alongside the two i64 accumulators. No pass registration, Fast pipeline, allocator
-or libc-name rules change. Dynamic/nonuniform wider initializers remain outside
-this subset. Promotion after an ordinary escaping `memset` still requires the
-region alias/observer proof described above; no loads or writebacks are moved
-across such a call by this change.
-
-`tests/stack_promote.rs` exercises all narrower integer widths and byte offsets
-inside i16/i32/i64 splat stores, five fill bytes, loop and zero-trip paths,
-independent subfields, loop-local resets, retained neighboring byte observations,
-source locations, partial overlaps, unknown/nonuniform initialization, escaping
-calls and frame/debug/atomic barriers. The native validator now also constructs
-an i64-initialized/i32-counter variant of `private.keel`, verifies both named-pass
-and Full activation, emits ARM64 and x86-64 assembly/objects, and applies the same
-10,401-case unsigned oracle to each native variant.
-
-Validation in the isolated priority3 worktree used `target/priority3/build` and
-`suite/fast_opt_locked.py` with the shared `/tmp/keel-perf-20261019.lock`:
-
-- The complete `keel-opt` suite passed, followed by all 16 final focused tests.
-- All eight reduced native variants passed 10,401 oracle cases each. Mixed-width
-  promotion reduced seven loads/six stores to one input load/no stores.
-- Fresh Full C compilation of the retained explicit-builtin `intrinsic.c`
-  produced one input load/no stores in `k_stackobj`; its whole-driver output
-  matched fresh Clang O2 across 795 lines. Both target object routes passed.
-- Ordinary escaping-memset corpus field accesses remained intact. Native x86
-  execution and performance measurements were not performed.
-
-Exact commands, statuses, outputs and artifact hashes are retained locally in
-`target/priority3/native/result.json`, `commands.json`, `intrinsic-result.json`,
-`intrinsic-commands.json`, and `target/priority3/lock-events.jsonl`.
+`crates/keel-opt/tests/stack_promote/validate.py` is a serial native validator
+(no timing). It emits ARM64 Mach-O and x86-64 ELF objects and assembly for the
+reduced-fixture variants (including an i64-initialized/i32-counter variant),
+runs 10,401 unsigned-C oracle cases per native ARM variant, and compares
+Fast+promotion and Full+promotion whole-driver output against Clang O2
+(`-ffp-contract=off`, 795 lines). It takes the CLI binary (`--keel`), an output
+directory (`--out`), a directory holding a captured corpus `raw.keel`
+(`--investigation`), and a command wrapper plus log file (`--lock-wrapper`,
+`--lock-log`); every subprocess runs as `python3 WRAPPER LOG argv...`. `--if-convert` adds the `if-convert` stage (see
+[if-convert.md](if-convert.md)). x86 output is checked statically only.
 
 ## Post-capture read caching (opt-in)
 
@@ -136,5 +108,5 @@ calls disable the transformation. No edge may return to the entry block.
 
 Eligibility is bounded at 64 blocks, 2,048 instructions and eight cached fields;
 address discovery makes at most eight scans. Only fields read inside a natural
-loop are selected. The pass is available explicitly and is not yet part of the
-Full or Fast schedules.
+loop are selected. The pass is available explicitly and is not part of the
+Full or Fast schedules (`cargo test -p keel-opt --test stack_cache`).

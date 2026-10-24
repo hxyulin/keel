@@ -33,29 +33,26 @@ cargo rustc --offline --locked \
 For the application-object replay and runtime/structure checks on Apple ARM:
 
 ```sh
-python3 suite/fast_opt_locked.py target/cargo-smoke-lock.jsonl \
-  python3 suite/cargo_asm_probe.py --keel /path/to/release/keel \
+python3 suite/cargo_asm_probe.py --keel /path/to/release/keel \
   --out target/cargo-smoke-probe
 ```
 
 Use a fresh output directory. This pilot deliberately uses the system linker
-and keeps dependency archives unchanged. In the initial 2026-10-20 run the
-Cargo, reference-reassembled and Keel-reassembled executables agreed; code/data
-matched modulo benign metadata, but `__eh_frame` bytes/relocations differed.
-Runtime agreement does not establish unwind equivalence.
+and keeps dependency archives unchanged. The Cargo, reference-reassembled and
+Keel-reassembled executables agree; code and data match modulo benign metadata,
+but `__eh_frame` bytes and relocations differ, so runtime agreement does not
+establish unwind equivalence.
 
-A subsequent temporary C++/Rust exception probe passed 32 configurations and
-320 executions at O0/O2, with and without DWARF5. It checked destructor/Drop
-order, catches and C++ rethrows, including forced DWARF fallback with unchanged
-instruction bytes. Removing the C++ application's unwind coverage caused the
-negative control to abort. This validates those application unwind paths through
-Keel's assembler and the Apple ARM system linker; it does not establish general
-metadata equivalence or Keel-linker coverage.
+A C++/Rust exception probe at O0/O2, with and without DWARF5, checked
+destructor/Drop order, catches and C++ rethrows (including forced DWARF fallback
+with unchanged instruction bytes) through Keel's assembler and the Apple ARM
+system linker; a negative control without unwind coverage aborts as expected.
+This does not establish general metadata equivalence or Keel-linker coverage.
 
-The C++ template smoke cases also agreed at runtime at O0/O2 with and without
-DWARF5. Debug objects were not structurally identical. Both the compiler's
-reference object and Keel's object failed the O2 `dwarfdump` name-index check;
-both O0 debug objects verified. Preserve these as unresolved metadata results.
+The C++ template smoke cases also agree at runtime at O0/O2 with and without
+DWARF5, but debug objects are not structurally identical. Both the reference
+object and Keel's object fail the O2 `dwarfdump` name-index check; both O0
+debug objects verify. These remain unresolved metadata results.
 
 For a Cargo adapter, preserve Cargo's JSON artifact messages and rustc's actual
 link arguments. Keep allocator shims, system libraries, startup objects,
@@ -98,13 +95,11 @@ or a general C++ application compatibility claim.
 
 The pinned [pugixml 1.15 pilot](workload-pilots/pugixml/README.md) exercises a
 complete unmodified XML/XPath implementation and a separate driver. Both
-Clang references pass; untouched Clang O1 IR is rejected at an `i1` ABI return.
-A small independent C++ reproducer preserves the blocker. Keel None/Fast/Full
-are not reached, and the workload is not included in performance aggregates.
+Clang references pass; untouched Clang O1 IR is currently rejected at a
+two-word aggregate return. Keel None/Fast/Full are not reached, and the
+workload is not included in performance aggregates.
 Fixing that blocker may reveal additional unsupported features. Keep imported
 IR production, import cost and Keel compilation separate in future timings.
 
 The native-C [yyjson](yyjson/README.md) and [LZ4](lz4/README.md) workloads
-provide additional current runtime coverage without requiring the importer.
-See [application expansion evidence](../docs/application-expansion-20261021.html)
-for the route distinction, pinned source identities and initial ARM results.
+provide additional runtime coverage without requiring the importer.

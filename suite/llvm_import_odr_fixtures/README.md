@@ -1,27 +1,22 @@
 # General exported ODR and user-defined RTTI validator contract
 
-Owned scope: this directory and `suite/llvm_import_odr_validate.py`. This harness
-is independent of the legacy `--localize-odr-functions` local-copy tests. Full
-mode never passes that flag. No production importer, backend, shared validator,
-or shared documentation changes belong to this fixture commit.
+`suite/llvm_import_odr_validate.py` validates exported ODR definitions and
+user-defined RTTI end to end. It is independent of the legacy
+`--localize-odr-functions` local-copy tests; full mode never passes that flag.
 
-Run from the checkout root, using fresh private artifact directories:
+Run from the repository root, using new output directories:
 
 ```sh
-python3 suite/fast_opt_locked.py /tmp/odr-reference-lease.jsonl \
-  python3 suite/llvm_import_odr_validate.py --reference-only \
-  --out /tmp/odr-reference-fresh
+python3 suite/llvm_import_odr_validate.py --reference-only \
+  --out target/llvm-import-odr-reference
 
-python3 suite/fast_opt_locked.py /tmp/odr-full-lease.jsonl \
-  python3 suite/llvm_import_odr_validate.py \
-  --libllvm /absolute/path/to/libLLVM.dylib --keel /private/target/debug/keel \
-  --out /tmp/odr-full-fresh
+cargo build -p keel
+python3 suite/llvm_import_odr_validate.py \
+  --libllvm /path/to/libLLVM.dylib --keel target/debug/keel \
+  --out target/llvm-import-odr-full
 ```
 
-The caller owns the shared host lease; the harness does not nest a lock. Build
-Keel separately under that same lease with `cargo build --offline --locked -j2`
-and a private `CARGO_TARGET_DIR`. Compiler and executable commands have bounded
-180-second timeouts; waiting for the host lease has no timeout. No performance
+Compiler and executable commands have 180-second timeouts. No performance
 claim follows from these tests.
 
 ## Positive contract
@@ -97,30 +92,18 @@ multiple/virtual inheritance, dynamic_cast, virtual destructors, dynamic local
 static initialization, exception payload aggregates and indirect invokes are
 not covered. This is an executable integration contract, not broad C++ support.
 
-## Historical baseline and integrated validation
+## Apple Clang RTTI encoding
 
-On Apple Clang 21.0.0 (clang-2100.3.34.2), arm64 macOS, the reference baseline
-passes. Before integration, the importer at parent a367d868 rejected:
+Validated with Apple Clang 21.0.0 (clang-2100.3.34.2) on arm64 macOS. The
+emitted mixed modules require `linkonce_odr` data, vtable pointer relocations,
+and hidden RTTI/type-name definitions. Apple Clang emits tagged non-unique RTTI
+name pointers of the exact form
+`inttoptr (i64 add (i64 ptrtoint (ptr @_ZTS... to i64), i64 -9223372036854775808) to ptr)`,
+which the unsigned-u32 symbol-addend path cannot represent; the importer handles
+it explicitly. The original virtual and EH shapes also emit these tagged RTTI
+pointers.
 
-- left/right: `_Z15template_helperIiET_S0_`: unsupported linkage/visibility
-  (actual `define weak_odr`).
-- constexpr_runtime: `_Z6factorj`: unsupported linkage/visibility
-  (actual `define linkonce_odr`).
-- virtual: `_ZN7DerivedC1Ev`: unsupported linkage/visibility
-  (actual `define linkonce_odr`).
-- eh: `_ZTI5Error`: unsupported global linkage/storage/section/COMDAT
-  (actual `linkonce_odr hidden` user-defined RTTI).
-
-The full emitted mixed modules additionally require `linkonce_odr` data,
-vtable pointer relocations, and hidden RTTI/type-name definitions. Apple Clang
-emits tagged non-unique RTTI name pointers of the exact form
-`inttoptr (i64 add (i64 ptrtoint (ptr @_ZTS... to i64), i64 -9223372036854775808) to ptr)`.
-This cannot be represented by the existing unsigned-u32 symbol-addend path;
-it requires explicit RTTI handling or a documented dependency limitation.
-The original virtual and EH shapes also emit those tagged RTTI pointers.
-Those importer/core dependencies are now integrated. Full mode passed all
-32 native executables at `/tmp/keel-odr-integrated-native-r1/`, and again through
-`target/frontend-odr-final-2/llvm-odr/`. The latter report sets
+Full mode passes all 32 native executables and its report sets
 `keel_correctness_validated` to true. All 14 default C++ profiles also pass
 without localization, including the original optimized virtual fixture with
 its lifetime markers. This does not extend the fixture scope to multiple

@@ -9,7 +9,7 @@ driver, optimizer defaults or any production build.
 
 It is a separate Cargo workspace with its own `Cargo.lock`. The root
 `Cargo.toml` lists it in `exclude`. Main-workspace builds, including
-`--offline --locked` remote builds, never fetch or compile Cranelift.
+`--offline --locked` builds, never fetch or compile Cranelift.
 
 ## Build, test, use
 
@@ -227,5 +227,5 @@ comparable:
 - Runtime is exploratory: in-process loops on a local desktop, seeded
   random interleaving, and no core pinning or physical-page control.
 - Clang `-O2` runtimes are a C→object reference, not a same-IR result.
-- Publication-quality runtime claims need the LinuxHost fixed-page protocol,
-  which was not run.
+- Publication-quality runtime claims need the fixed-page protocol on x86-64
+  Linux (see `docs/executable-page-backing.md`), which was not run.

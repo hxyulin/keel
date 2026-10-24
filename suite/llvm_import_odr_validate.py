@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """General exported ODR/RTTI native differential checks (never localize ODR).
 
-Run through suite/fast_opt_locked.py; this script does not acquire a lease.
+This script does not acquire a host lock.
 --reference-only establishes Clang fixture behavior, not Keel correctness.
 --out must be fresh. Full mode requires Apple AArch64, LLVM 23 and Keel.
 """

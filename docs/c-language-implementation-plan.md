@@ -1,11 +1,10 @@
 # C language implementation plan
 
-Status at this milestone: **bounded VM/VLA and parameter scopes, floating/generic
-atomics, float/double complex arithmetic, automatic-local cleanup, explicitly
-typed K&R definitions, ordinary weak binding, executable lifecycle registration
-and compiler-only `used` emission are implemented and independently reviewed**.
-These stages build on the reviewed GNU integer-mode/16-byte-vector and AArch64
-inline-assembly subsets. Remaining features below are planned, not cancelled;
+Status: **bounded VM/VLA and parameter scopes, floating/generic atomics,
+float/double complex arithmetic, automatic-local cleanup, explicitly typed K&R
+definitions, ordinary weak binding, executable lifecycle registration and
+compiler-only `used` emission are implemented**. These stages build on the GNU
+integer-mode/vector and AArch64 inline-assembly subsets. Remaining features below are planned, not cancelled;
 this is not a claim of full C11 or GNU C compatibility.
 
 Toolchain boundaries remain explicit:
@@ -20,8 +19,8 @@ Toolchain boundaries remain explicit:
 - [Sanitizer and LTO foundations](sanitizer-lto-foundations.md) provide explicit
   memory-check instrumentation and a verified IR artifact, currently version 4.
   They do not supply a sanitizer runtime or production LTO/module merging.
-- Native execution was validated on Darwin arm64. x86-64 validation covers IR,
-  objects and selected linked images; native x86 runtime validation is outstanding.
+- Native execution tests run on Darwin arm64. x86-64 tests cover IR, objects
+  and selected linked images; native x86-64 runtime coverage is outstanding.
 
 Driver/preprocessor flag compatibility remains deferred. Unsupported calling
 conventions, including `ms_abi`, continue to diagnose.
@@ -337,7 +336,7 @@ three repetitions at each optimization setting). Direct CLI object validation
 also generates eight Mach-O/ELF objects and executes the four arm64 variants,
 plus two directly emitted stress objects linked with Clang workers. Undefined
 symbol inspection confirms there are no atomic runtime helper dependencies.
-x86 native execution remains unavailable on this host.
+x86-64 native execution is not covered.
 
 Next stages, still requested:
 
@@ -438,7 +437,7 @@ Arithmetic contract and runtime dependencies:
 - x86-64 Linux objects reference the analogous compiler-rt/libgcc builtins.
   A native compiler driver must supply its builtins runtime (and libm if its
   runtime requires it); freestanding linking must supply them explicitly.
-  Availability/resolution and execution there are **not verified on this host**.
+  Availability/resolution and execution there are **not yet verified**.
 - Static folding uses component-precision operations, rounding each intermediate
   independently (including float), and the same divisor scaling for ordinary
   finite expressions. Nonfinite operands, subnormal/nonfinite intermediates,
@@ -477,27 +476,15 @@ mixed-precision compound assignments, literal precision/lexical diagnostics,
 conservative static-fold rejection/final weak binding, conversions, side effects,
 component access, initialization and calls in both directions. It verifies IR and generates Mach-O/ELF objects for both targets in
 baseline/full, trees/fast with debug info, and optimized/full configurations.
-Native AArch64 Darwin execution passes. x86-64 runtime interoperability is **not
-tested on the arm64 development host**. Assembly register probes against Clang
+Native AArch64 Darwin execution is tested; x86-64 runtime interoperability is
+**not yet tested**. Assembly register probes against Clang
 also check the distinct complex-float/double argument and return classifications.
 Cross-object generation and classification checks are not a substitute for native execution there.
 
 
-Independent review of integrated commit `62da98ee` confirmed and fixed acceptance
-of hexadecimal imaginary literals missing their mandatory binary exponent
-(e.g. `0x1.0i`); the shared decoder now rejects malformed real spellings too.
-Focused regressions compare lexical rejection with Clang and add self-aliasing
-and mixed-precision compound multiplication/division to the existing native and
-both-target matrix. Validation: full `cargo test -p keel-c` passed **204 tests**;
-`cargo test -p keel-c --release --test complex --test vla --test cleanup --test
-weak_symbols` passed **26 tests**. Changed Rust files pass `rustfmt --check`, and
-`git diff --check` passes. Prior unary-plus, int128-conversion, final-weak-binding,
-VM parameter-scope and cleanup/nonlocal-exit regressions remain passing.
-No additional confirmed correctness finding remains unresolved in this review.
 Remaining limits are the runtime/linker dependencies above, unexecuted native
 x86-64 interoperability, conservative static folding, and the explicitly excluded
-Annex G/fenv, long-double and variadic behavior; no linker-runtime support was
-added.
+Annex G/fenv, long-double and variadic behavior.
 
 ## 7. x86 extended long double — not implemented
 
@@ -553,20 +540,19 @@ actual objects for AArch64 Darwin and x86-64 Linux with optimization/debug
 combinations. Native arm64 runtime differential tests cover declaration order,
 SSA and addressed entry conversions (including observable float rounding),
 array/function/pointer adjustment, side effects, scopes, function attributes,
-prototype/unprototyped calls and Clang ABI linkage in both directions. Review
-regressions add unsigned char/short versus unsigned int promotion contracts,
+prototype/unprototyped calls and Clang ABI linkage in both directions.
+Regressions also cover unsigned char/short versus unsigned int promotion contracts,
 prior/later prototypes, aggregate-return address-before-call imports, and array
 element completeness and qualifier compatibility. A combined runtime case
 exercises modern VM parameter capture, body VLAs, cleanup callbacks, weak definitions,
 atomics, vectors and complex arithmetic/literals inside an old-style definition.
-x86-64 runtime execution remains untested on this arm64 macOS host.
+x86-64 runtime execution is not yet tested.
 
-Independent review fixed acceptance of arrays with incomplete element types,
-leaked tags/enumerators introduced inside declaration-list declarators,
-discarded pointee qualifiers in function parameter compatibility,
-unprototyped call ABI mismatches escaping as verifier errors (including actual
-zero-argument calls), and incomplete address-only aggregate-return imports.
-Nested callback prototype tags/enumerators retain their own scopes. A prototype
+Arrays with incomplete element types, pointee-qualifier mismatches in function
+parameter compatibility and unprototyped call ABI mismatches (including actual
+zero-argument calls) diagnose rather than escaping as verifier errors.
+Tags/enumerators introduced inside declaration-list declarators do not leak, and
+nested callback prototype tags/enumerators retain their own scopes. A prototype
 retained before an old-style definition still enforces call arity; Clang may
 only warn for that ordering, so those cases are separate from strict syntax
 rejection comparisons.
@@ -615,96 +601,38 @@ function-pointer escapes.
 Unimplemented portions of these stages remain requested future work. Dependencies
 constrain implementation order; they do not remove features from the backlog.
 
-## Validation completed for the VM/VLA stage
+## Tests
 
-On native AArch64 macOS:
+Each stage has a focused suite in `crates/keel-c/tests`:
 
-- `cargo test -p keel-c --lib --tests --no-fail-fast`: **167 passed, 0 failed**
-  across 25 test binaries, including both VLA fixtures in the existing
-  Clang/native preprocessing and optimized/unoptimized execution harness.
-- `cargo test -p keel-c --test vla`: **3 passed**. Both fixtures pass all eight
-  target/optimization/debug combinations: IR verification before and after
-  optimization, assembly generation and actual Mach-O/ELF object assembly
-  (**16 objects** across both fixtures). The test now invokes `keel-asm` rather
-  than stopping at structured assembly-program generation.
-- Native differential execution of both fixtures matches Clang `-O0` and `-O2`.
-  Each Keel optimization/debug combination links and runs from both textual
-  assembly and directly assembled objects (**16 native executions** total).
-- Runtime coverage includes 2D/3D mixed dimensions, captured row strides,
-  qualified VM pointers, pointer-to-pointer updates, all pointer arithmetic
-  forms, VM pointer arrays, typedef capture/reuse/shadowing/loop re-entry,
-  abstract cast/type-name bounds, required and omitted sizeof operand effects,
-  optional bound evaluation, nested type names, conditional/short-circuit captures,
-  declarator-before-initializer sequencing and declarator scope/order. GNU vector
-  multidimensional arrays also pass the matrix.
-  Repeated multidimensional allocations with nested continue paths exercise
-  stack restoration. IR assertions ensure typedef/pointer-only declarations
-  capture bounds without dynamic allocation or stack snapshots.
-- Rust formatting of changed Rust files and `git diff --check` passed.
+```sh
+cargo test -p keel-c --test vla                       # stages 1-2
+cargo test -p keel-c --test cleanup                   # stage 3
+cargo test -p keel-c --test weak_symbols --test sections --test lifecycle  # stage 4
+cargo test -p keel-c --test atomic_representations    # stage 5
+cargo test -p keel-c --test complex                   # stage 6
+cargo test -p keel-c --test old_style                 # stage 8
+cargo test -p keel-c --test inline_asm                # stage 9
+```
 
-x86 objects were generated and verified, but x86 native execution was not run on
-this arm64 host. No full-workspace pass or full VLA conformance is claimed.
+The VM/VLA fixtures run the target x optimization x debug matrix: IR
+verification before/after optimization, textual assembly and actual Mach-O and
+ELF object assembly. Native execution from textual assembly and directly
+assembled objects is compared with Clang `-O0`/`-O2`. Coverage includes 2D/3D
+mixed dimensions, captured row strides, qualified VM pointers and pointer
+arithmetic, VM pointer arrays, typedef capture/reuse/shadowing/loop re-entry,
+abstract cast/type-name bounds, required and omitted `sizeof` operand effects,
+conditional/short-circuit captures, declarator sequencing and scope, parameter
+bound effects and capture order, static bounds, nested callback declarations,
+qualifier preservation through array typedefs and decay, and const
+modification diagnostics. IR assertions ensure typedef/pointer-only and
+parameter-only declarations capture bounds without dynamic allocation or stack
+snapshots.
 
-Independent integration review additionally found and fixed lost element
-qualifiers on qualified array typedefs (including VM aliases), and missing
-const modification diagnostics on assignments and pointer updates. Array decay
-now preserves const/volatile even when an unqualified typedef's sugar omits its
-array shape; conditional pointers retain const and member accesses inherit it.
-The review added six const rejection cases, four inherited-VM type boundary
-cases, volatile IR assertions before/after optimization on both targets, and
-native differential cases for nested sizeof/cast bounds, unevaluated and
-short-circuit contexts, and single-evaluation VM pointer array updates.
-`cargo test -p keel-c` passed **173 tests**; the final focused VLA rerun passed
-**4 tests**, including 16 fixture objects, four qualifier-regression objects,
-and the existing 16 native assembly/direct-object differential executions.
-The aggregate statement-expression copy and vector condition rejection
-regressions remain passing. No backend or atomic-specific changes were needed.
+The atomic suite also builds Mach-O/ELF objects with `keel cc --verify-each
+--emit-object`, links arm64 variants and pthread stress objects with Clang, and
+checks with `nm -u` that no atomic helper symbols are referenced.
 
-## Validation completed for the bounded atomic stage
-
-On native AArch64 macOS:
-
-- `cargo test -p keel-c -p keel-frontend --lib --tests --no-fail-fast`:
-  **178 passed, 0 failed across 26 test binaries** (162 C frontend tests and
-  16 shared frontend tests). The five atomic tests include both-target
-  verification/codegen, Clang differential execution, mixed-worker contention,
-  unsupported-case diagnostics and volatile expected-buffer control flow.
-- `cargo build -p keel` passed. Direct `keel cc --verify-each --emit-object`
-  produced eight semantic-test objects across both targets, optimization and
-  debug modes. All four arm64 variants linked and matched Clang. Two additional
-  arm64 stress objects linked with Clang pthread workers and passed. `nm -u`
-  inspection found no unresolved atomic helper symbols in these ten objects.
-- Rust formatting checks on changed Rust files and `git diff --check` passed.
-
-x86 code generation/object validation passed; native x86 execution was not run.
-This is a bounded native implementation, not complete aggregate atomic or
-runtime fallback support.
-
-
-## VM parameter/prototype milestone validation
-
-On native AArch64 macOS, `cargo test -p keel-c --lib --tests --no-fail-fast`
-passed **188 tests across 28 test binaries**. The focused `vla` suite passed
-**5 tests**, including the new `vm_parameters.c` runtime fixture and Clang
-syntax comparisons for eight accepted and sixteen rejected scope/constraint
-examples on both targets.
-
-The three VLA/VM fixtures each pass the target × optimization × debug matrix:
-IR verification before/after optimization, textual assembly, and actual Mach-O
-and ELF object assembly (**24 matrix objects**). The eight accepted scope
-examples also assemble actual objects for both targets (**16 objects**).
-Parameter-only captures assert no dynamic allocation or stack save/restore.
-Native execution from textual assembly and directly assembled objects matches
-Clang `-O0`/`-O2` for all three fixtures (**24 native executions**). New runtime
-coverage includes outer and inner parameter-bound effects, capture order with
-ABI arguments interspersed among hidden locals, 2D/3D captured strides/sizeof,
-static bounds, pointer-object/element qualifiers, typedef-dependent local
-prototypes, nested callback declarations and direct/indirect array calls.
-The existing restrict tests now verify bracket adjustment, definition-only
-contracts and ABI indices after hidden captures. The attribute placement oracle
-now accepts annotated sole-void lists as empty prototypes (58 accepted, 7
-unsupported placements); named-attribute ownership assertions still run.
-
-Changed Rust files pass `rustfmt --check`; `git diff --check` passes. x86-64 IR,
-assembly and actual ELF objects are checked, but native x86-64 execution was not
-run on this ARM64 host. No full-workspace or full VLA conformance claim is made.
+x86-64 objects are generated and verified, but native x86-64 execution is not
+part of these suites. None of this is a claim of full VLA, atomic or C11
+conformance.

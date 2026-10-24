@@ -15,36 +15,32 @@ See [SIMD IR](../../docs/simd-ir.md) and
 sample, not exhaustive ISA, ABI, FP exception, memory-fault or throughput coverage.
 
 ```sh
-# Follow the worktree's Rust build guidance; preserve any project toolchain pin.
-python3 suite/fast_opt_locked.py /tmp/keel-simd-build.jsonl \
-  cargo build --release -p keel --offline --locked -j2
+cargo build --release -p keel
 python3 -B -m unittest discover -s suite/simd-compare -p 'test_*.py'
 
 # New artifact directory; default: all 4 profiles, all cases, None/Fast/Full.
 python3 -B suite/simd-compare/run.py --keel target/release/keel \
-  --output /tmp/keel-simd-check-01
+  --output target/simd-check-01
 
 # Optional allocation/selection comparison on baseline Apple ARM64.
-python3 -B suite/simd-compare/run.py --keel /absolute/path/to/frozen/keel \
-  --output /tmp/keel-simd-arm-timing-01 --profiles apple-arm64 \
+python3 -B suite/simd-compare/run.py --keel /absolute/path/to/keel \
+  --output target/simd-arm-timing-01 --profiles apple-arm64 \
   --variants full full-baseline-select full-fast-alloc \
   --benchmark --rounds 7 --repeats 100000
 
 # On Linux x86: all profiles build, only proven supported profiles execute.
-python3 -B suite/simd-compare/run.py --keel /absolute/path/to/frozen/keel \
-  --clang /usr/bin/clang --output /tmp/keel-simd-x86-01 \
+python3 -B suite/simd-compare/run.py --keel /absolute/path/to/keel \
+  --clang /usr/bin/clang --output target/simd-x86-01 \
   --profiles v1 v2 v3 --benchmark --cpu 2
 ```
 
-The public runner acquires the existing `fast_opt_locked.py` host lock for the
-entire campaign. Invoke it directly; do not nest another lock wrapper. Keep the
-host idle and do not rebuild compilers during a campaign. Supply existing
+The runner holds a host-wide lock for the entire run; invoke it directly rather
+than inside another lock wrapper. Keep the host idle and do not rebuild compilers during a campaign. Supply existing
 compilers; no downloads, remote execution, host configuration changes or automatic
 compiler builds occur. `--clang` selects the reference/compiler/linker;
 `--cases add copy`, `--variants full`, and `--profiles v1` narrow a rerun.
-Use a fresh output directory under `/tmp` (recommended), ignored `target/`,
-or `suite/reports/`.
-For a frozen revision comparison, add `--baseline-keel /absolute/old/keel`
+Use a fresh output directory under ignored `target/` or `suite/reports/`.
+To compare against an older revision, add `--baseline-keel /absolute/old/keel`
 with `--variants full`. Both compilers receive identical Full options and
 share the source, input and driver paths. One discarded warmup and at least
 seven measured rounds shuffle profile/case/route groups and then shuffle the
@@ -54,9 +50,9 @@ samples and runtime samples remain separate. Linux paired timing requires
 1 or more than 10% busy on the selected CPU or its SMT siblings defers timing.
 Partial samples survive with `complete:false` and must not be presented as a
 completed campaign. Apple correctness controls need no timing flag. Archive
-execution records null Git metadata when unavailable; frozen compiler and
-source hashes remain required evidence of identity.
-Resolved cargo-managed target symlinks are supported. Binaries, inputs, assembly,
+execution records null Git metadata when unavailable; compiler and source
+hashes still identify the inputs.
+Symlinked target directories are resolved. Binaries, inputs, assembly,
 objects, disassembly and JSON logs/reports stay there, never in Git.
 
 Profiles are explicit: x86-64 psABI v1/v2/v3 on Linux and ARMv8-A on Apple
@@ -130,7 +126,7 @@ Host/CPU details, detected flags, affinity, load, available Linux governor
 settings, target/flags, Clang version, Git revision/dirty state and SHA-256s of
 compilers, sources, driver and primary artifacts are retained. Binary identity
 checks bracket timing and every round. Keel build features are not introspectable;
-retain the build command/toolchain/features alongside a frozen binary when
+retain the build command/toolchain/features alongside a saved baseline binary when
 comparing revisions. Frequency, thermal state, ASLR and code page placement are
 observed only in part and remain uncontrolled. Missing observations are not
 proof of identical run conditions. `modeled_estimates` is explicitly null:
@@ -159,44 +155,23 @@ and encoding evidence. Inspect native objects for `pshufd`, `shufps` and
 correctness assertions. This sample does not cover arbitrary masks, register
 pressure, exhaustive signedness combinations or whole-application performance.
 
-The prior frozen `74ecf5db` → `3f5130a2` comparison of the original eight cases
-on AMD 9950X3D and Apple M5 Max emitted identical text (old/new runtime ratios
-0.995–1.002x). The maintained longer positive32/adjacent/widen32 loops likewise
-emitted identical Keel code. That null result remains valid: these added cases
-address a coverage gap, not evidence that the earlier workloads became faster.
-For a small follow-up, reuse verified frozen binaries and the identical current
-corpus with `--cases permute-dword shuffle-pairs compare-u8 --variants full
---benchmark --rounds 7 --repeats 1000000`; preserve host, flags and driver path.
-Inspect code alongside samples and report call-overhead sensitivity rather than
-inferring an application speedup from compact kernels.
+### Measured effect of the focused selection cases
 
-A bounded follow-up on 2026-10-23 reused those frozen release/default-feature
-binaries after verifying their recorded SHA-256s. It ran only the three new
-cases, Full selection/allocation, one warmup and seven measured rounds of
-64,000,000 calls, with identical corpus/driver sources and flags within each
-host. LinuxHost used CPU 2. Old and new were separate serial campaigns, so drift
-between revisions remains uncontrolled. Both C and explicit IR passed checks.
+On x86-64 Linux (AMD Ryzen 9 9950X3D), at every v1/v2/v3 level,
+`permute-dword` text shrinks from 84 to 38 bytes and `shuffle-pairs` from 90 to
+54 bytes: stack-based scalar lane movement becomes `pshufd 0x72` and
+`shufps 0xb1`. In this call/checksum driver, old/new median runtime ratios were
+about 4.05-4.2x on v1/v2 and 3.4-3.5x on v3. `compare-u8` shrinks from 90 to 73
+bytes (`pcmpeqd; psllw 7; packsswb` replaces a six-step bias construction), but
+its runtime change was inconclusive. On Apple M5 Max the emitted text is
+unchanged. These are observations of a compact kernel driver, not isolated
+instruction throughput or application speedups; the original eight cases and
+the longer runtime-kernel loops emitted identical code before and after.
 
-On LinuxHost, at every v1/v2/v3 level, `permute-dword` text shrank 84 → 38 bytes
-and `shuffle-pairs` 90 → 54 bytes. Native disassembly replaced stack-based
-scalar lane movement with `pshufd 0x72` and `shufps 0xb1`, respectively.
-Old/new median runtime ratios across C/IR were 4.054–4.065x and 4.194–4.205x
-on v1/v2; v3 measured 3.360x and 3.444–3.463x. These are observations of this
-call/checksum driver on AMD 9950X3D, not isolated instruction throughput or
-application speedups. `compare-u8` text shrank 90 → 73 bytes and its six-step
-bias construction became `pcmpeqd; psllw 7; packsswb`, but runtime ratios
-0.992–1.005x were inconclusive. Unchanged Clang controls ranged 0.995–1.004x.
-CLI-to-object compile ratios for Keel ranged 0.998–1.015x; startup/I/O are
-included and no compile-time improvement is established.
-
-On Apple M5 Max, all old/new text was identical. Keel runtime ratios ranged
-0.972–1.167x while unchanged Clang controls shifted 1.075–1.101x; this run
-supports no ARM runtime improvement. Compile timings also shifted with unchanged
-code and are not attributed to selection. Raw objects, disassembly, all samples,
-commands and hashes for this finite follow-up were retained outside Git under
-`/tmp/keel-corpus-20261023/` on both hosts (the combined comparison is on MacHost).
-No compiler rebuild occurred during measurements and no benchmark threshold
-was added to CI.
+To repeat such a comparison, reuse two saved binaries with
+`--baseline-keel /absolute/old/keel --cases permute-dword shuffle-pairs compare-u8
+--variants full --benchmark --rounds 7 --repeats 1000000`, and inspect the
+disassembly alongside the samples.
 
 Normal unit tests have no timing thresholds or benchmark campaigns. They check
 CPU gating, hand-computed oracle edges, diagnostic contracts, honest spill

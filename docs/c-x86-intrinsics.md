@@ -155,7 +155,7 @@ Immediate controls must be defined integer constant expressions in 0..255.
 Negative controls, 256 and larger controls, runtime controls and unsupported
 constant-expression proofs are diagnosed. This deliberately bounded diagnostic
 contract does not promise vendor acceptance/truncation of other integer controls.
-The implementation reuses the reviewed AES/PCLMUL bounded ICE proof unchanged.
+The implementation reuses the AES/PCLMUL bounded integer-constant-expression proof.
 The data expression is evaluated once. An immediate wrapper does not promise
 an immediate machine encoding: the current architectural IR uses an i64 count.
 
@@ -175,112 +175,30 @@ Strict v1 already includes SSE2; the existing backend preflight and release
 emission guard remain authoritative. ARM inclusion and direct builtin use are
 diagnosed. No backend, optimizer, FP policy or ABI changes accompany this surface.
 
-`keel-c --test x86_shifts` separates frontend/IR/object checks from conditional
-native Linux x86 execution. On LinuxHost, debug and release both passed with GCC
-16.2.0 and Clang 23.1.1 against their vendor headers and an independent unsigned
-lane reference. Runtime counts cover every value 0..255, 256, 65536, 2^32,
-2^63 and UINT64_MAX, with a nonzero ignored upper count half. Lane patterns
-include zero, all ones, signed minimum/maximum, one and mixed bits. Immediate
-forms cover 0, width-1, width, width+1 and 255. Baseline/fast, trees/full and
+### Shift tests
+
+`cargo test -p keel-c --test x86_shifts` separates frontend/IR/object checks
+from native Linux x86-64 execution, which runs only on that host with GCC and
+Clang against their vendor headers and an independent unsigned lane reference.
+Runtime counts cover every value 0..255, 256, 65536, 2^32, 2^63 and
+UINT64_MAX, with a nonzero ignored upper count half. Lane patterns include
+zero, all ones, signed minimum/maximum, one and mixed bits. Immediate forms
+cover 0, width-1, width, width+1 and 255. Baseline/fast, trees/full and
 optimized/full with empty register pools execute values, single evaluation,
 direct/indirect calls and callbacks. Guard pages and sentinels check both page
-edges, unaligned pointers and aliased input/output with exact 16-byte accesses.
+edges, unaligned pointers and aliased input/output (including output aliasing
+the runtime count buffer) with exact 16-byte accesses. The tests also cover
+private-bridge arity/type and name recognition on x86/ARM, defined/undefined
+constant-expression boundaries, and both header inclusion orders with AES and
+PCLMUL.
 
-Independent `llvm-objdump` decoding of the six native debug/release objects
-found all eight legacy SSE2 shift mnemonics. The complete finite mnemonic
-inventories contained only baseline integer/SSE/SSE2 instructions. This decoding
-and native execution supplement the typed feature checks; they do not establish
-execution on a CPUID-masked v1-only host. Existing C headers, AES and PCLMUL
-regressions passed on LinuxHost in both profiles. Local Apple ARM64 frontend/object,
-header/AES/PCLMUL and vector ABI/broadcast regressions also passed; local x86
-object emission alone is not native x86 execution.
-
-Reproduce under the shared build lock (add `--release` for release):
-
-```sh
-python3 suite/fast_opt_locked.py /tmp/keel-c-shifts-unique.jsonl \
-  cargo test --offline --locked -j2 -p keel-c \
-  --test x86_shifts --test x86_intrinsics --test x86_aes --test pclmul
-```
-
-The 2026-10-23 native source snapshot is `/tmp/keel-c-shifts-20261023` on
-LinuxHost. Logs are `/tmp/keel-c-shifts-native-{debug,debug-final,release}.log`;
-final objects and harnesses are `/tmp/keel-c-shifts-{3124846,3125706}`.
-Disassembly and inventories are retained beside those objects and in
-`/tmp/keel-c-shifts-disassembly.json`; the decoder is
-`/tmp/keel-c-shifts-decode.py`. Builds/execution used the shared suite lock and
-cargo default cache with link caching disabled. No timing conclusions were drawn.
-
-An independent review reapplied candidate `9f1fd535` (implementation
-`76a18e1b`) onto main `4611704b` in an isolated worktree. No blocking source
-semantic defect was found. The review added private-bridge arity/type and all-name
-recognition checks on x86/ARM, further defined/undefined ICE boundaries,
-both header inclusion orders with AES/PCLMUL, and effective-feature checks.
-A direct frontend-to-codegen path exercises the existing legality checks without
-an intervening explicit IR verification call. The native harness additionally
-checks output aliasing the runtime count buffer.
-
-Fresh review runs passed `x86_shifts`, `x86_intrinsics`, `x86_aes` and `pclmul`
-in debug and release: 13 tests per profile on Apple ARM64 (frontend, IR and
-object checks plus applicable native controls), and 15 per profile on LinuxHost
-(including GCC 16.2.0/Clang 23.1.1 shift execution). All runs used the shared lock
-and the documented cargo settings. Local logs are
-`/tmp/keel-shifts-review-final-{debug,release}.log`; LinuxHost logs and lock records
-are `/tmp/keel-shifts-independent-final-{debug,release}.{log,jsonl}`. The reviewed
-native snapshot is `/tmp/keel-shifts-independent-review-36692`; debug/release
-objects and harnesses are `/tmp/keel-c-shifts-{3224215,3225064}`. Independent
-`llvm-objdump` decoding found all eight legacy shifts in each of the six objects;
-the full finite mnemonic inventories contain only baseline integer/SSE/SSE2
-instructions. Object hashes, inventories and decoder are retained in
-`/tmp/keel-shifts-independent-disassembly.json` and
-`/tmp/keel-shifts-independent-decode.py` on LinuxHost. These are bounded
-frontend/lowering, encoding and native results; the newer execution host does
-not establish v1-only CPU behavior. No timing or speedup claim is made.
+Decoding the native objects with `llvm-objdump` finds all eight legacy SSE2
+shift mnemonics and only baseline integer/SSE/SSE2 instructions. This
+supplements the typed feature checks; it does not establish execution on a
+CPUID-masked v1-only host.
 
 AVX2 256-bit shifts, per-lane counts, byte shifts, rotates and the remainder of
-the vendor shift families remain queued. Bounded saturation and conversion
-wrappers are documented separately here.
-
-An independent review reapplied implementation `1f41f4eb` and candidate
-`d4fa1b77` onto clean main `0eb22fa9` in its own worktree. No blocking source
-semantic defect was found. Review commit `1f3e6ace` closes verification gaps:
-each wrapper must lower to its specific architectural intrinsic with legacy
-SSE2 tier-0 packed-pair metadata; distinct operand calls must each appear once
-in source order; both header inclusion orders must coexist with shifts,
-AES and PCLMUL while retaining optional-crypto feature diagnostics. Existing
-negative checks cover every private builtin's arity, signedness, nominal lane
-type, shape and target, including explicit ARM diagnostics.
-
-Fresh review runs passed all five suites above in debug and release: 16 tests
-per profile locally on Apple ARM64, and 18 per profile on LinuxHost, including
-GCC 16.2.0 and Clang 23.1.1 native saturation and shift execution. Local x86
-objects establish lowering/encoding, not native execution. The native widened
-scalar oracle uses bounded `int` arithmetic and unsigned byte copies; signed
-lane interpretation is explicit, avoiding narrow signed overflow or
-out-of-range signed conversions. Its exhaustive byte pairs and finite word
-edges/random cases exercise all eight wrappers and both signedness modes.
-The existing emission-guard unit test additionally passed locally in both
-profiles. All runs used the prescribed lock, cargo, offline/locked flags, two
-jobs and disabled link caching; no toolchain or host configuration changed.
-
-The frozen tested source is commit `1f3e6ace` (the final review documentation
-is separate), archived on both hosts as `/tmp/keel-sat-review-source.tar`,
-SHA-256 `5e6b1cfa7b0bec154af5194081bf85d166f403913f026aa1e3cdd3c5fedc1cc8`.
-LinuxHost extracted it at `/tmp/keel-sat-review-79612096`. Fresh logs and lock
-records are `/tmp/keel-sat-review-native-{debug,release}.{log,jsonl}`;
-local logs/records use `/tmp/keel-sat-review-local-{debug,release}.{log,jsonl}`
-and `/tmp/keel-sat-review-guard-{debug,release}.{log,jsonl}`.
-LinuxHost artifacts are `/tmp/keel-sat-review-native-{debug,release}`, including
-copies of the exact test executables embedding the compiler as
-`frozen-test-compiler`. `/tmp/keel-sat-review-provenance.json` records source,
-compiler/test-executable, actual rustc, GCC, Clang, decoder, kernel, harness,
-object and linked-executable SHA-256 identities. The independent decoder is
-`/tmp/keel-sat-review-audit.py`; listings accompany the six objects. It examined
-8,076 instructions, finding all eight saturation mnemonics in each object and
-only the baseline inventory listed above. This is finite encoding evidence,
-not a general independent feature-decoder proof. Native execution used a
-newer CPU, not a v1-only or CPUID-masked host. No timing claim is made. Main,
-the original worktree and the separate numeric-conversion work were untouched.
+the vendor shift families remain unsupported.
 
 ## Bounded SSE2 numeric conversions
 
@@ -318,118 +236,38 @@ promise GNU vendor builtin compatibility. Definitions live in the private
 backend preflight, release legality guard and assembler checks remain in force.
 No backend, optimizer, ABI, feature/default-width or FP-policy change is made.
 
-`keel-c --test x86_conversions` separates frontend/IR and strict-v1 object
-checks from conditional native Linux x86 execution. The native harness compares
-integer-only independent bit/flag oracles with separately compiled GCC/Clang
-vendor-header wrappers. External calls across translation units, no LTO, and
-volatile assembly MXCSR reads/writes ensure the observed conversion executes
-between environment setup and observation. The candidate's unused-result forms
-are checked against the same status oracle. Two identical i32-to-f32 operations
-separated by an external rounding-mode change verify ordering and retention.
+### Conversion tests
+
+`cargo test -p keel-c --test x86_conversions` separates frontend/IR and
+strict-v1 object checks from native Linux x86-64 execution. The native harness
+compares integer-only independent bit/flag oracles with separately compiled
+GCC/Clang vendor-header wrappers. External calls across translation units, no
+LTO, and volatile assembly MXCSR reads/writes ensure the observed conversion
+executes between environment setup and observation. Unused-result forms are
+checked against the same status oracle. All three conversions are repeated
+across an external MXCSR change that clears status, checking ordering and
+retention.
 
 The finite corpus covers signed extrema, exact/inexact integers near and beyond
 2^24, ties, negative zero, positive/negative subnormals, NaNs (quiet/signaling),
-infinities, and signed-i32 boundaries/out-of-range values. Every RC/DAZ/FTZ
-combination runs with clear, invalid-seeded, precision-seeded and all-seeded
-status, plus 256 deterministic random vectors per operation/environment.
-Results and full MXCSR are checked separately, with all exceptions masked and
-entry MXCSR restored. Native tests also cover direct/indirect calls, callbacks,
-live inputs/results, single evaluation, output/input aliases, unaligned pointers,
-byte sentinels and both protected-page edges for exact 16-byte accesses.
-Unmasked exception/trap delivery is **not tested or newly claimed** here.
+infinities, and signed-i32 boundaries/out-of-range values. Each boundary input
+also runs in isolation across all four lanes, so adjacent invalid or inexact
+inputs cannot hide spurious flags. Every RC/DAZ/FTZ combination runs with
+clear, invalid-seeded, precision-seeded and all-seeded status, plus 256
+deterministic random vectors per operation/environment. Results and full MXCSR
+are checked separately, with all exceptions masked and entry MXCSR restored.
+Native tests also cover direct/indirect calls, callbacks that clear all sixteen
+XMM registers, live inputs/results, single evaluation, output/input aliases,
+unaligned pointers, byte sentinels and both protected-page edges for exact
+16-byte accesses. Frontend tests check the exact typed intrinsic signatures and
+opcode metadata, pinned/barrier/trapping classification, and text/typed/chunked
+object byte parity at strict v1 and an effective v3 profile with AVX and
+optional crypto disabled. Unmasked exception/trap delivery is **not tested**.
 
-On 2026-10-23, debug/release gates passed on Apple ARM64 (14 tests/profile,
-frontend/IR/cross-object plus applicable existing native controls) and LinuxHost
-Linux x86-64 (17 tests/profile, including native conversions with GCC 16.2.0
-and Clang 23.1.1). Each conversion harness executed baseline/fast, trees/full,
-and optimized/full with empty register pools. The same runs passed existing
-`x86_intrinsics`, `x86_shifts`, `x86_aes` and `pclmul` regressions.
-
-Independent `llvm-objdump` decoding found legacy `cvtdq2ps`, `cvttps2dq` and
-`cvtps2dq` in all six debug/release candidate objects; full mnemonic inventories
-contain only baseline integer/SSE/SSE2 instructions. Encoding inspection and
-native execution are separate evidence. LinuxHost is a newer CPU, so this does not
-establish execution on a CPUID-masked v1-only machine or exhaustive FP behavior.
-No timing/performance claim is made.
-
-Reproduce under the shared build lock (add `--release` for release):
-
-```sh
-python3 suite/fast_opt_locked.py /tmp/keel-c-conversions-unique.jsonl \
-  cargo test --offline --locked -j2 -p keel-c \
-  --test x86_conversions --test x86_intrinsics --test x86_shifts \
-  --test x86_aes --test pclmul -- --nocapture
-```
-
-LinuxHost source snapshot: `/tmp/keel-c-conversions-20261023`.
-Logs/lock records: `/tmp/keel-conversions-native-debug-final.{log,jsonl}` and
-`/tmp/keel-conversions-native-release.{log,jsonl}`. Candidate objects, vendor
-sources, harnesses and executables: `/tmp/keel-c-conversions-3229213` (debug)
-and `/tmp/keel-c-conversions-3230199` (release). Disassembly is beside each
-object; hashes/inventories and decoder are `/tmp/keel-conversions-disassembly.json`
-and `/tmp/keel-conversions-decode.py`. Local logs/lock records use
-`/tmp/keel-conversions-local-debug-final.{log,jsonl}` and
-`/tmp/keel-conversions-local-release.{log,jsonl}`. Builds/native execution held
-the shared suite lock, used cargo's default cache and kept native-link caching off.
-
-Independent review reapplied candidate `faf36ba0` in its own worktree and
-rebased onto main `3138975a`, preserving all eight saturation and sixteen shift
-wrappers. The frontend dispatch, builtin recognition, shared lowering arm and
-maintained documentation conflicts retain both implementations. No blocking
-production semantic defect was found. Review found that every negative builtin
-case declared an unsupported eight-byte vector, allowing unrelated declaration
-errors to hide bad-call acceptance. The tests now prove the declarations valid
-and require the intended arity/type diagnostic. They also check the exact typed
-intrinsic signatures/opcode metadata, pinned/barrier/trapping classification,
-and text/typed/incremental-chunk object byte parity at strict v1 and an effective
-v3 profile with AVX and optional crypto disabled.
-
-The original live-value callback did not physically clobber SIMD registers.
-Review now places an external call clearing all sixteen XMM registers between
-conversion and capture; direct and indirect callbacks also clobber them before
-returning. All three conversions are repeated across an external MXCSR change
-that clears status, checking retention/order as well as resulting bits/status.
-Each boundary input additionally runs in isolation across all four lanes, so
-adjacent invalid or inexact inputs cannot hide spurious flags on valid INT32_MIN
-or exact conversions. These are focused test corrections; production backend,
-optimizer, ABI, FP policy, widths and target features are unchanged.
-
-Fresh final combined runs passed `x86_conversions`, `x86_saturation`,
-`x86_shifts`, `x86_intrinsics`, `x86_aes` and `pclmul` in debug and release:
-17 tests per profile locally on Apple ARM64 and 20 per profile on LinuxHost. Local
-x86 objects establish frontend/lowering/encoding, not x86 execution. LinuxHost GCC
-16.2.0 and Clang 23.1.1 independently execute the vendor and integer-only
-bit/status oracles in each selection/allocation configuration. The unchanged
-production backend additionally passed `x86_legacy_raw_fp` and
-`x86_raw_fp_conversions` on LinuxHost (six tests per profile), and the existing
-emission-guard unit test passed locally in both profiles. All builds/tests used
-the shared lock, prescribed cargo offline/locked/two-job commands and disabled link
-caching. No timing conclusions were drawn.
-
-The final tested source is `6b3ef4d9908dac1b936cff98910d0c2c9fd346c6`; this
-review evidence documentation is a subsequent commit. Its frozen archive is
-`/tmp/keel-conversion-review-source.tar` on both hosts, SHA-256
-`2bba776ba3a73cf37e436c2e520aaedb63b30c368ef6637ef7944532628d5da8`.
-LinuxHost extracted it at `/tmp/keel-conversion-review-final-97495733`.
-Final logs/lock records are `/tmp/keel-conversion-review-final-{debug,release}.{log,jsonl}`
-on LinuxHost and `/tmp/keel-conversion-review-final-local-{debug,release}.{log,jsonl}`
-locally. Backend FP logs use `/tmp/keel-conversion-review-fp-{debug,release}.{log,jsonl}`
-on LinuxHost; local guard logs use `/tmp/keel-conversion-review-guard-{debug,release}.{log,jsonl}`.
-Native objects, harnesses, linked executables and copies of the exact Rust test
-executables embedding the compiler are below
-`/tmp/keel-conversion-review-final-{debug,release}/keel-c-conversions-*`.
-`/tmp/keel-conversion-review-provenance.json` on LinuxHost records source,
-compiler/test-executable, rustc, GCC, Clang, decoder, kernel, harness, object and
-linked-executable identities. The independent audit is
-`/tmp/keel-conversion-review-audit.py`; disassembly listings sit beside artifacts.
-It decoded 2,206 instructions across six Keel objects, finding each of the three
-legacy conversion mnemonics and checking their mandatory prefixes/opcode bytes.
-The complete finite mnemonic inventories contain only baseline integer/SSE/SSE2
-instructions. Decoding each linked GCC/Clang executable also confirms actual
-vendor conversion instructions and all sixteen physical XMM clears in the
-clobber helper. This is bounded encoding/native evidence, not an exhaustive
-feature-decoder proof, v1-only CPU execution, unmasked-trap validation or a
-performance claim.
+Decoding the native objects finds legacy `cvtdq2ps`, `cvttps2dq` and
+`cvtps2dq` with only baseline integer/SSE/SSE2 instructions otherwise. This
+does not establish execution on a CPUID-masked v1-only machine or exhaustive FP
+behavior.
 
 FP64, scalar-lane, 256-bit/AVX2, unsigned and undefined-upper-lane conversion
 wrappers remain unsupported. There is no general numeric vector-cast extension.
@@ -449,17 +287,19 @@ with available GCC and Clang against their own vendor headers.
 
 The native harness uses protected pages before and after each memory buffer,
 plus byte sentinels, to test both 16- and 32-byte footprints, unaligned pointers,
-and copies at both page boundaries. Export artifacts for an external x86 host
-with `KEEL_C_X86_EXPORT_DIR=/tmp/keel-c-x86-<unique>`; all bulk artifacts stay
-outside Git. A shared suite-lock invocation is:
+and copies at both page boundaries. It also covers all eight supported quiet
+comparison predicates for both floating widths, NaNs and signed zero, wide
+globals/lanes and ten-argument calls.
 
 ```sh
-python3 suite/fast_opt_locked.py /tmp/keel-c-vector-build.jsonl \
-  cargo test --locked -p keel-c --test x86_intrinsics --test gnu_types --test gnu_vector_abi
+cargo test -p keel-c --test x86_intrinsics --test gnu_types --test gnu_vector_abi
+cargo test -p keel-c --test x86_shifts --test x86_conversions \
+  --test x86_saturation --test x86_aes --test pclmul
 ```
 
-For an exported artifact directory on an AVX2-capable Linux x86 host, run under
-that host's shared suite lock, with each available compiler:
+Add `--release` to exercise the release emission feature guards. On a non-x86
+host, export the generated objects with `KEEL_C_X86_EXPORT_DIR=<dir>` and run
+them on an AVX2-capable Linux x86-64 host with each available compiler:
 
 ```sh
 clang -mavx2 -O1 oracle.c harness.c keel-baseline.o -o run-clang-baseline
@@ -468,25 +308,13 @@ gcc -mavx2 -O1 oracle.c harness.c keel-baseline.o -o run-gcc-baseline
 ./run-gcc-baseline
 ```
 
-Repeat for `keel-trees-fast.o` and `keel-optimized.o`. Runtime results and compiler
-versions from the implementation's validation are recorded below.
-
-On 2026-10-23, the ARM64 macOS host passed the existing 16-byte Clang ABI
-harness and emitted the new x86 objects. LinuxHost (native x86-64 Linux) linked and
-executed the exported wide/intrinsic harness successfully with Clang 23.1.1
-and GCC 16.2.0, for all three Keel configurations. This included all eight
-supported quiet predicates for both floating widths, NaNs and signed zero,
-wide globals/lanes, ten-argument calls and protected-page/sentinel memory checks.
-Builds and native execution held `/tmp/keel-perf-20261019.lock`; Rust builds
-used the shared default cargo cache, with native-link caching left disabled.
+Repeat for `keel-trees-fast.o` and `keel-optimized.o`.
 
 The strict-v3 userspace audit also runs this native GCC/Clang harness and checks
 ordinary wide C multiply/add through the public `cc --cpu-level v3` text/object
 paths, including disabled-AVX diagnostics and absence of implicit contraction.
 See [the bounded v3 join](userspace-isa-status.md#strict-v3-userspace-contract-and-audit)
-for exact feature, native and object-decoding evidence and remaining limits.
-This adds validation, not additional header names or FP-environment guarantees.
-
+for feature, native and object-decoding details and remaining limits.
 
 ## Bounded SSE2 saturation
 
@@ -511,56 +339,29 @@ C type. `__has_builtin` reports these names only on x86-64, independently of
 CPU selection; these are Keel bridges, not GNU builtin compatibility promises.
 Header inclusion alone emits no additional functions or enabled features.
 
-`keel-c --test x86_saturation` verifies frontend checks and explicit strict-v1
-text/typed/chunked object parity on every host. Native execution runs only on
-Linux x86-64. Three configurations are baseline/fast, trees/fast and optimized
-full/full with empty allocation pools. GCC and Clang compile independent system
-vendor-header oracles alongside a widened scalar reference with explicit clamps.
-The harness checks all 65,536 ordered byte pairs for every byte operation in
-every lane, word boundary pairs, every word bit pattern paired with selected
-edges, and 4,096 deterministic random vector pairs per operation. Direct and
-indirect calls, inputs live across a callback, same-input and output/input
-aliases, single evaluation, unaligned 16-byte copies, byte canaries and both
-protected-page edges are covered. This is not exhaustive 16-bit pair testing.
-AVX2 widths, narrowing packs and other saturation families remain deferred.
+### Saturation tests
 
-Reproduce with the existing toolchain and shared build lock:
+`cargo test -p keel-c --test x86_saturation` verifies frontend checks and
+explicit strict-v1 text/typed/chunked object parity on every host. Native
+execution runs only on Linux x86-64, under baseline/fast, trees/fast and
+optimized full/full with empty allocation pools. GCC and Clang compile
+independent system vendor-header oracles alongside a widened scalar reference
+with explicit clamps; the reference uses bounded `int` arithmetic and unsigned
+byte copies to avoid narrow signed overflow. The harness checks all 65,536
+ordered byte pairs for every byte operation in every lane, word boundary pairs,
+every word bit pattern paired with selected edges, and 4,096 deterministic
+random vector pairs per operation. Direct and indirect calls, inputs live
+across a callback, same-input and output/input aliases, single evaluation,
+unaligned 16-byte copies, byte canaries and both protected-page edges are
+covered. This is not exhaustive 16-bit pair testing. Each wrapper must lower to
+its specific architectural intrinsic with legacy SSE2 tier-0 packed-pair
+metadata, and distinct operand calls must each appear once in source order.
+Use `KEEL_C_SAT_EXPORT_DIR=<dir>` to export the generated objects.
 
-```sh
-KEEL_C_SAT_EXPORT_DIR=/tmp/keel-c-saturation-unique \
-  python3 suite/fast_opt_locked.py /tmp/keel-c-saturation-unique.jsonl \
-  cargo test --offline --locked -j2 -p keel-c \
-  --test x86_saturation --test x86_shifts --test x86_intrinsics \
-  --test x86_aes --test pclmul
-```
+Decoding the native objects finds all eight legacy saturation opcodes, with
+the remaining mnemonics limited to `push`, `pop`, `mov`, `movups`, `movaps`,
+`sub`, `add`, `lea`, `call`, `ret` and `nop`; no AVX or optional ISA
+instruction appears. Execution on a newer CPU does not establish operation on
+a v1-only or CPUID-masked CPU.
 
-Add `--release` for release preflight and parity. Artifacts and runtime evidence
-remain under `/tmp`; cross-object success alone is not native validation.
-
-On 2026-10-23 the implementation was rebased from clean `0beb8f7d` onto
-`0eb22fa9` after the independently reviewed shift subset landed. All sixteen
-shift wrappers and their private bridge conventions were preserved. The five
-C suites in the command above passed locally on Apple ARM64 (15 tests per
-profile, cross-object checks) and natively on LinuxHost with Clang 23.1.1 and GCC
-16.2.0 (17 tests per profile), in debug and release. Both native compilers ran
-all three saturation configurations in each profile. The existing emission
-feature-guard unit test also passed locally in debug/release, retaining optional
-ISA rejection in both text and structured paths.
-
-LinuxHost source is `/tmp/keel-c-saturation-20261023`; regression logs are
-`/tmp/keel-c-saturation-{debug,release}.log`, with final saturation-only reruns
-at `/tmp/keel-c-saturation-final-{debug,release}.log`. Objects, generated kernels,
-GCC/Clang harnesses and executables are in
-`/tmp/keel-c-saturation-native-{debug,release}`. The independent
-`llvm-objdump` inventory in `/tmp/keel-c-saturation-disassembly.json` and decoder
-`/tmp/keel-c-saturation-decode.py` examined six objects (8,076 instructions),
-finding all eight legacy saturation opcodes in each. The remaining decoded
-mnemonics were `push`, `pop`, `mov`, `movups`, `movaps`, `sub`, `add`, `lea`,
-`call`, `ret` and `nop`; no AVX or optional ISA instruction appeared. This finite
-inventory supplements strict-feature assembly and text/typed/chunked parity;
-it is not an exhaustive independent feature decoder proof. The host supports
-newer ISA levels, so execution does not establish operation on a v1-only or
-CPUID-masked CPU. Independent review and parent integration remain separate.
-No timing claim is made. All builds/native tests used the shared lock,
-`--offline --locked -j2`, existing pins and shared default cargo cache with
-`CARGO_CACHE_LINKS=0`.
+AVX2 widths, narrowing packs and other saturation families remain unsupported.

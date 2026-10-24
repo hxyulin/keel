@@ -252,7 +252,7 @@ def main():
                                    'build_features': 'not introspectable; retain build command with frozen compiler'}
         report['conditions']['frequency_policy'] = {str(path): path.read_text().strip()
             for path in Path('/sys/devices/system/cpu').glob('cpu[0-9]*/cpufreq/scaling_governor')}
-        report['conditions']['environment'] = {k: os.environ.get(k) for k in ('OMP_NUM_THREADS', 'CARGO_CACHE_LINKS')}
+        report['conditions']['environment'] = {k: os.environ.get(k) for k in ('OMP_NUM_THREADS',)}
         jobs = []
         for profile in a.profiles:
             target, march = PROFILES[profile]

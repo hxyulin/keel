@@ -1,39 +1,46 @@
-# Simplify-CFG candidate iteration
+# Simplify-CFG block merging
 
-Source checkpoint: `f614e7b38da7cf14222741ab491f8bbef9e17a9d`, tree
-`d046bdfafcf7052387e72c5badc3d09a564d475c`.
+`simplify-cfg` merges a block into its predecessor when the predecessor ends in
+an unconditional jump and that jump is the block's only incoming edge. This note
+describes how `merge_blocks` (`crates/keel-opt/src/simplify_cfg.rs`) iterates
+candidates without restarting a layout search after every merge.
 
-The current runtime compiler profile and independent data review identify
-`merge_blocks` restarting a layout search after every merge. The existing
-branch-edge census and alias installation already avoid their earlier global
-rescans. The observed first simplify-CFG transform total is 56.697 ms; this
-proposal has no measured benefit yet.
+## Algorithm
 
-Replace repeated searches with a layout snapshot, visiting each predecessor in
-order and retrying it immediately after a merge. A merge removes only the jump
-edge into the removed block. Moving its instructions preserves every outgoing
-edge, including parallel edges and backedges. Incoming counts for surviving
-blocks therefore do not change. Only the absorbing predecessor gets a new
-terminator; previously rejected surviving predecessors remain ineligible.
-Removed snapshot entries have empty instruction lists and must be skipped.
-This preserves the original first-eligible-layout merge sequence, including
-backward layout edges, without a second census or membership searches.
-Candidate checks become bounded by the snapshot length plus successful merges.
-The snapshot adds one allocation proportional to live blocks; instruction
-movement, alias resolution and layout removal retain their existing costs.
-This is not a claim that the entire merge operation becomes linear.
+The pass takes one branch-edge census and one snapshot of the block layout, then
+visits each predecessor in layout order, retrying it immediately after a
+successful merge.
 
-Keep the entry-block exclusion, self-merge exclusion, parameter alias order,
-instruction movement and debug locations unchanged. Refresh the absorbing
-predecessor's terminator and destination after each merge, decrement the removed
-destination's edge count, and retain the outer cleanup rounds. No IR, calling,
-memory, canonicalization, verification or debug contract changes are intended.
+This is sound because a merge removes only the jump edge into the removed block.
+Moving that block's instructions preserves every outgoing edge, including
+parallel edges and backedges, so incoming counts for surviving blocks do not
+change. Only the absorbing predecessor gets a new terminator; previously
+rejected surviving predecessors remain ineligible. Snapshot entries for blocks
+that were already absorbed have empty instruction lists and are skipped.
+Merged blocks leave the layout together at the end.
 
-Source-only checkpoint: no Cargo, build, native execution, remote work or timing
-is authorized here. Add focused regressions for layout order, stale snapshot
-entries, cycles, parallel edges and in-memory aliases. Independent correctness
-review and explicit root build lease are required before validation. Later
-validation must establish retained application-corpus activation, IR/assembly
-byte parity, full correctness and measured compile cost, including small-input
-bookkeeping overhead. Oracle-only fixtures and source reasoning establish no
-performance gain. Root owns integration and host scheduling.
+The result is the same first-eligible-layout merge sequence as a full rescan,
+including backward layout edges, without a second census or membership
+searches. Candidate checks are bounded by the snapshot length plus the number
+of successful merges. The snapshot adds one allocation proportional to live
+blocks; instruction movement and alias resolution keep their existing costs.
+This does not make the whole merge operation linear.
+
+## Invariants
+
+- The entry block is never merged away, and a block never merges into itself.
+- Block-parameter aliases are installed in parameter order before the jump is
+  removed; instruction order and debug locations are unchanged.
+- After each merge the removed destination's edge count is decremented and the
+  absorbing predecessor's new terminator is re-examined.
+- The outer cleanup rounds of `simplify-cfg` are unchanged.
+
+No IR, calling, memory, canonicalization, verification or debug contract
+changes. Unit tests in `simplify_cfg.rs` cover layout order, stale snapshot
+entries, cycles and aliased arguments; `crates/keel-opt/tests/cfg.rs` covers
+duplicate branch edges, switch dispatch, chains and invokes:
+
+```sh
+cargo test -p keel-opt --lib simplify_cfg
+cargo test -p keel-opt --test cfg
+```

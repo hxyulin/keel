@@ -1,5 +1,5 @@
-"""Frozen-revision LinuxHost validation and paired measurement; additive helpers only.
-Run from a private remote root containing baseline/, candidate/ and this script.
+"""Frozen-revision x86-64 Linux validation and paired measurement; additive helpers only.
+Run from a private working directory containing baseline/, candidate/ and this script.
 All subprocess commands, output, failures and negative samples are retained.
 """
 import hashlib,json,os,pathlib,random,shutil,statistics,subprocess,sys,tarfile,time

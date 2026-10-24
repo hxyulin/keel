@@ -1,15 +1,14 @@
 # Executable page backing and runtime measurements
 
-On LinuxHost (Ryzen 9 9950X3D, Linux), byte-identical QuickJS executables showed
+On x86-64 Linux (Ryzen 9 9950X3D), byte-identical QuickJS executables showed
 large, repeatable timing differences associated with their executable backing.
 This is a benchmarking limitation, not a compiler speedup or a diagnosed RAM
 fault. The exact hardware indexing mechanism remains unresolved.
 
 ## Observations
 
-The investigation used the same program, input, output, environment and CPU.
-The executables had SHA-256
-`3afce4db52f51013104d0787c4bbfba12aeb4441b914fb09b8711f9951822fc8`.
+The investigation used the same program, input, output, environment and CPU,
+with byte-identical executables.
 
 * Affinity and scheduling priority did not remove the approximately 28% gap.
   Four fresh tmpfs copies also had substantially different runtimes. Selecting
@@ -66,7 +65,7 @@ investigation does not authorize enabling an optimization by default.
 ## Controlled retest
 
 The fixed-backing harness in `suite/pattern-lab/page-backing/` passed all eight
-workloads' predefined identical-byte control tolerances on LinuxHost. The full run
+workloads' predefined identical-byte control tolerances on x86-64 Linux. The full run
 used eight disjoint retained physical frame sets, both sorted and shuffled
 assignments, and six balanced measured blocks: 3,456 correct launches including
 gates and warmups. Every launch checked its own code bytes, physical frames,
@@ -83,20 +82,9 @@ with intervals conditional on the sampled sets and timing blocks. They exclude
 loader preparation, use a private preload helper, and have no multiple-comparison
 correction. They establish a useful controlled comparison, not ordinary
 deployment performance or a general default-setting win. Compiler defaults remain
-unchanged. Full estimates, raw data and limitations are retained in
-`suite/reports/runtime-next-20261018/fixed-backing-retest-r1/`.
+unchanged.
 
-## Evidence and references
-
-The local, ignored packets under `suite/reports/runtime-next-20261018/` retain
-sources, raw mappings/PFNs, counter groups, artifacts, failures and audit scripts:
-
-* `affinity-priority-tmpfs-r1`: 505 correct launches.
-* `image-placement-observation-r1`: 126 correct launches, including backing swaps.
-* `physical-page-allocation-r1`: 120 correct launches, locked pools and raw PMUs.
-
-They are machine-local evidence, not dependencies needed to read this document.
-Their root receipts and manifest hashes are in `.git/keel-coordination/`.
+## References
 
 * [Kernel pagemap and physical page flags](https://docs.kernel.org/admin-guide/mm/pagemap.html)
 * [Linux Zen 5 instruction-cache event definitions](https://github.com/torvalds/linux/blob/v6.14/tools/perf/pmu-events/arch/x86/amdzen5/inst-cache.json)

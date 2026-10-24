@@ -38,27 +38,24 @@ its children; governors, boost, and system settings are observed, never changed.
 ```sh
 python3 suite/runtime-kernels/run.py \
   --keel /absolute/path/to/keel --clang /absolute/path/to/clang \
-  --label machost-arm64-current \
-  --output target/runtime-kernels-20261021/arm-smoke --smoke
+  --label macos-arm64-current \
+  --output target/runtime-kernels/arm-smoke --smoke
 
 python3 suite/runtime-kernels/run.py \
   --keel /absolute/path/to/keel --clang /absolute/path/to/clang \
   --label linux-x86_64-current --cpu 2 \
-  --output target/runtime-kernels-20261021/x86-full
+  --output target/runtime-kernels/x86-full
 
 python3 -m unittest discover -s suite/runtime-kernels -p 'test_*.py'
 ```
 
-The entry point **automatically** invokes `python3 suite/fast_opt_locked.py
-OUTPUT/lock.jsonl` around its complete worker, holding
-`/tmp/keel-perf-20261019.lock` for every compiler, link, correctness check, and
-native timing. **Do not put the public runner under another lock wrapper**:
-that would recursively deadlock. `--worker` is private and requires the entry
-point's environment marker. Other native validation commands must use the
-shared wrapper directly. Output directories are never reused. No build cache,
-Cargo target, baseline checkout, or remote host is touched.
+The entry point serializes its whole run (every compile, link, correctness
+check and native timing) under a host-wide lock; do not wrap it in another
+lock, which would deadlock. `--worker` is internal. Output
+directories are never reused. No build cache, Cargo target, or baseline
+checkout is touched.
 
-For an optimization experiment, add `--baseline-keel /absolute/path/to/frozen-keel`.
+For an optimization experiment, add `--baseline-keel /absolute/path/to/baseline-keel`.
 This adds `baseline-full` using the same Full flags as the current compiler.
 Both compilers are hashed, freshly build objects, pass all oracle checks, and
 participate in the same randomized compile/runtime rounds. This reduces drift
@@ -66,12 +63,12 @@ between separate campaigns; internal layout and physical code pages remain
 uncontrolled. Inspect unchanged-function controls before attributing small gains.
 
 `--full-passes comma,separated,passes` replaces only the current Full pipeline
-for an opt-in experiment. The frozen baseline retains its default pipeline
+for an opt-in experiment. The baseline compiler retains its default pipeline
 unless `--baseline-passes comma,separated,passes` is supplied alongside
 `--baseline-keel`. Use the same explicit pipeline for both compilers to isolate
 an implementation change in an experimental pass. None/Fast/Clang remain
 unchanged. Exact flags are saved in the results;
-label such runs experimental until correctness, review and timing gates pass.
+label such runs experimental until correctness and timing gates pass.
 
 Configurations are Keel None (`--opt-tier none`, baseline selection), Fast and
 Full (`-O --opt-tier fast|full`, including all selection passes), and Clang `-O2`.

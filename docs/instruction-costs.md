@@ -27,11 +27,9 @@ ordinary ALU costs when the scheduling model lacks their behavior.
 LLVM 23.1.2 recognizes `apple-m5` but selects **CycloneModel** in its
 [processor definitions](https://github.com/llvm/llvm-project/blob/llvmorg-23.1.2/llvm/lib/Target/AArch64/AArch64Processors.td).
 These are provisional scheduling estimates, not measured M5 latencies.
-The checked-in catalog
-has usable model metrics for 358 representative forms and explicit gaps for 176,
-mostly LSE atomics, barriers and call/return behavior. Keep this distinction
-when using it. Hardware
-calibration needs separate dependency-chain and independent-stream experiments,
+The checked-in catalog has usable model metrics for 358 representative forms
+and explicit gaps for 176, mostly LSE atomics, barriers and call/return
+behavior. Hardware calibration needs separate dependency-chain and independent-stream experiments,
 including operand variants, timer overhead, CPU identity and repeated samples.
 Memory measurements need explicit cache, alignment and alias conditions.
 
@@ -42,25 +40,25 @@ optional offline analysis dependencies; code generation and assembly use Keel.
 On a keg-only Homebrew installation, pass their absolute paths:
 
 ```sh
-python3 tools/instruction_metrics.py -o /tmp/encodings.json catalog
-python3 tools/instruction_metrics.py -o /tmp/apple-m5.json catalog \
+python3 tools/instruction_metrics.py -o encodings.json catalog
+python3 tools/instruction_metrics.py -o apple-m5.json catalog \
   --cpu apple-m5 \
   --llvm-mca /opt/homebrew/opt/llvm/bin/llvm-mca \
   --llvm-mc /opt/homebrew/opt/llvm/bin/llvm-mc
 
 # Exact metrics on an assembly file, including final branch/address fixups:
-target/release/keel asm-metrics input.s -o /tmp/exact.json
-python3 tools/instruction_metrics.py -o /tmp/before.json analyze before.s
-python3 tools/instruction_metrics.py -o /tmp/after.json analyze after.s
-python3 tools/instruction_metrics.py compare /tmp/before.json /tmp/after.json \
+target/release/keel asm-metrics input.s -o exact.json
+python3 tools/instruction_metrics.py -o before.json analyze before.s
+python3 tools/instruction_metrics.py -o after.json analyze after.s
+python3 tools/instruction_metrics.py compare before.json after.json \
   --objective size
 
 # For a small straight-line region, add CPU estimates to each report:
-python3 tools/instruction_metrics.py -o /tmp/before.json analyze before.s \
+python3 tools/instruction_metrics.py -o before.json analyze before.s \
   --cpu apple-m5 --llvm-mca /opt/homebrew/opt/llvm/bin/llvm-mca
-python3 tools/instruction_metrics.py -o /tmp/after.json analyze after.s \
+python3 tools/instruction_metrics.py -o after.json analyze after.s \
   --cpu apple-m5 --llvm-mca /opt/homebrew/opt/llvm/bin/llvm-mca
-python3 tools/instruction_metrics.py compare /tmp/before.json /tmp/after.json \
+python3 tools/instruction_metrics.py compare before.json after.json \
   --objective speed
 ```
 
@@ -109,12 +107,12 @@ Instruction selection can fuse operations or encode addresses, and allocation
 can erase apparent savings through spills. A single target-independent cost per
 IR opcode cannot express these cases.
 
-Use the reports first to diagnose measured hot regions and compare actual
-lowerings. Next wire calibrated target estimates into a specific profitability
-decision, such as rematerialization versus retaining a value or a strength
-reduction that changes register pressure. Require correctness tests and paired
-application benchmarks for that change. The provisional LLVM timing tables remain diagnostic. The native M5 tuning
-section below describes the first live decision based on hardware calibration.
+Use the reports to diagnose measured hot regions and compare actual lowerings.
+A profitability decision that uses calibrated estimates (for example,
+rematerialization versus keeping a value live) should come with correctness
+tests and paired application benchmarks. The provisional LLVM timing tables are
+diagnostic only; the Apple M5 tuning below is the one live decision based on
+hardware calibration.
 
 ## Validation
 
@@ -148,16 +146,13 @@ multiply-add covers, shared constants and wrapping integer semantics. Narrow
 integers, i128 and other constants retain their previous lowering. An M5 tuning
 request for the x86 target is rejected by both the driver and backend APIs.
 
-The native calibration
-measures 32- and 64-bit dependency chains and eight independent streams on an
-Apple M5 Max. Keel assembles the generated kernels; a small C timing/checking
-harness uses the system toolchain. Neither LLVM timing data nor llvm-mca is
-needed. Nine randomized pairs after two warmups show about one-third lower
-elapsed time in dependency chains; independent-stream medians are neutral to
-slightly faster. Results are nanoseconds per operation, not inferred cycles.
-QoS is requested but cores and clock frequencies are not pinned. The report
-contains all samples, kernel sources, harness, tool hashes and independent
-correctness checks.
+The calibration measures 32- and 64-bit dependency chains and eight
+independent streams on an Apple M5 Max. Keel assembles the generated kernels and
+a small C harness (built with the system toolchain) times and checks them; no
+LLVM timing data is used. The shift-add form showed about one-third lower
+elapsed time in dependency chains and neutral to slightly faster independent
+streams. Results are nanoseconds per operation, not inferred cycles; cores and
+clock frequencies are not pinned.
 
 `suite/generate_m5_tuning.py` emits the compact Rust cost table from this report.
 The rule requires the chain ratio's upper 95% bootstrap endpoint below 1.0 and
@@ -171,18 +166,15 @@ Reproduce the calibration and check the generated costs:
 
 ```sh
 python3 suite/measure_m5_integer.py --keel target/release/keel \
-  --output /tmp/m5-integer.json
+  --output m5-integer.json
 python3 suite/generate_m5_tuning.py --check
 ```
 
-Compare application behavior using `keel-m5` and `keel-m5-fast` suite presets.
-The application comparison
-uses identical IR passes and full instruction selection on both sides; the
-candidate adds only M5 tuning. Both sides use Keel's assembler, with system
-linking. The final application runtime geometric-mean ratio is 1.0013 (0.13% more
-time), compile-time ratio is 0.9981 (essentially neutral), and combined text
-shrinks by 160 bytes. QuickJS Fibonacci regresses 2.3%; QuickJS string improves
-1.9%, Lua sort/string about 0.9%. These local changes do not establish an
-overall application speedup. The cause of the Fibonacci regression has not
-been profiled. The rule remains experimental and opt-in; generic defaults
-are unchanged.
+Compare application behavior with the `keel-m5` and `keel-m5-fast` suite
+presets, which use identical IR passes and full instruction selection and differ
+only in M5 tuning. In the application comparison, runtime was neutral
+(geometric-mean ratio 1.0013), compile time was neutral (0.9981) and combined
+text shrank by 160 bytes. Individual results ranged from a 2.3% regression
+(QuickJS Fibonacci, not yet profiled) to a 1.9% improvement (QuickJS string).
+There is no overall application speedup, so the rule stays experimental and
+opt-in; generic defaults are unchanged.

@@ -178,7 +178,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--compiler', type=Path, required=True)
     ap.add_argument('--output', type=Path, required=True)
-    ap.add_argument('--baseline-inputs', type=Path, default=ROOT / 'target/fleet-baseline-20261019/machost/measurement')
+    ap.add_argument('--baseline-inputs', type=Path, default=ROOT / 'target/fleet-baseline/macos-arm64/measurement')
     ap.add_argument('--repeats', type=int, default=12)
     ap.add_argument('--warmups', type=int, default=2)
     ap.add_argument('--prepare-only', action='store_true')

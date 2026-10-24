@@ -60,7 +60,7 @@ def main(root):
     assert len(set(trees.values())) == 1
     out['compiler_crates_trees'] = trees
     production = json.loads((root/'production-compiler.json').read_text())
-    prior = json.loads((root.parent/'functionattrs-benchmark-2026-10-16/linuxhost/provenance.json').read_text())
+    prior = json.loads((root.parent/'functionattrs-benchmark-2026-10-16/linux-x86_64/provenance.json').read_text())
     assert production['after']['sha256'] == p['production_binary']['sha256']
     assert production['after']['sha256'] in json.dumps(prior['compilers'])
     out['production_sha256'] = production['after']['sha256']

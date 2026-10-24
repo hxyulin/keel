@@ -30,7 +30,8 @@ encodings. FUCOM-family forms suppress invalid for QNaN but signal it for
 SNaN/unsupported encodings. Masked invalid produces unordered relation.
 
 The raw SW return includes diagnostics that are not promises about undefined
-condition bits. Native acceptance compares defined SW fields separately:
-non-I forms define relation/C1 in addition to exceptions and TOP; I forms
-exclude C0/C2/C3 from acceptance. Full raw words remain diagnostics.
-Integer-memory FICOM/FICOMP recipes and full profile completion remain open.
+condition bits. Only the defined SW fields are part of the contract: non-I
+forms define relation/C1 in addition to exceptions and TOP; for I forms,
+C0/C2/C3 are not defined. The rest of the raw word is diagnostic.
+Integer-memory FICOM/FICOMP is available only through the
+[unmasked region](unmasked-region.md) controls.

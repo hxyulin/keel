@@ -1,4 +1,4 @@
-"""Leased-host, untimed parity/count validation of the committed copied-source probe.
+"""Untimed parity/count validation of the committed copied-source probe.
 
 Builds are explicit separate commands. This runner never times or profiles code.
 Pass the private directory containing fresh base/diagnostic sources and targets.

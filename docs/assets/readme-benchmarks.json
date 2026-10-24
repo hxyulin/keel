@@ -1,0 +1,229 @@
+{
+  "schema": 2,
+  "date": "2026-10-24",
+  "machine": "Apple M5 Max · macOS 27",
+  "source_commit": "2cd5176629ffbae049843e7af5dea2bce671ce3a",
+  "statistic": "median of 7 runs",
+  "sources": {
+    "compiler": {
+      "path": "docs/benchmarks/compiler-20261024.json",
+      "sha256": "192b7857394024e2eb9fae0d47b34bab0b67ffc078f065ce204dce925a7ff720"
+    },
+    "tools": {
+      "path": "docs/benchmarks/assembly-link-20261024.json",
+      "sha256": "50cf737afc6bf39e6c8e075e0ab8cb81e895014e53915c1e42a7a213906a262e"
+    }
+  },
+  "charts": [
+    {
+      "id": "c-object",
+      "title": "C source → object file",
+      "unit": "ms",
+      "headline": {
+        "fast": "Keel -O",
+        "slow": "Clang -O2"
+      },
+      "rows": [
+        {
+          "label": "Keel",
+          "source": "compiler",
+          "pointer": [
+            "c_to_object",
+            "keel-raw",
+            "median_ms"
+          ],
+          "median_ms": 4.31525,
+          "keel": true
+        },
+        {
+          "label": "Keel -O",
+          "source": "compiler",
+          "pointer": [
+            "c_to_object",
+            "keel-O",
+            "median_ms"
+          ],
+          "median_ms": 5.348208,
+          "keel": true
+        },
+        {
+          "label": "Clang -O0",
+          "source": "compiler",
+          "pointer": [
+            "c_to_object",
+            "clang-O0",
+            "median_ms"
+          ],
+          "median_ms": 16.818,
+          "keel": false
+        },
+        {
+          "label": "Clang -O2",
+          "source": "compiler",
+          "pointer": [
+            "c_to_object",
+            "clang-O2",
+            "median_ms"
+          ],
+          "median_ms": 41.77875,
+          "keel": false
+        }
+      ]
+    },
+    {
+      "id": "ir-object",
+      "title": "Keel IR → object file (backend only)",
+      "unit": "us",
+      "headline": {
+        "fast": "Keel full",
+        "slow": "Cranelift speed"
+      },
+      "rows": [
+        {
+          "label": "Keel baseline",
+          "source": "compiler",
+          "pointer": [
+            "ir_to_object",
+            "inputs",
+            0,
+            "configs",
+            "keel-baseline",
+            "median_ms"
+          ],
+          "median_ms": 0.377,
+          "keel": true
+        },
+        {
+          "label": "Keel full",
+          "source": "compiler",
+          "pointer": [
+            "ir_to_object",
+            "inputs",
+            0,
+            "configs",
+            "keel-full",
+            "median_ms"
+          ],
+          "median_ms": 0.413125,
+          "keel": true
+        },
+        {
+          "label": "Cranelift none",
+          "source": "compiler",
+          "pointer": [
+            "ir_to_object",
+            "inputs",
+            0,
+            "configs",
+            "clif-none",
+            "median_ms"
+          ],
+          "median_ms": 0.7745,
+          "keel": false
+        },
+        {
+          "label": "Cranelift speed",
+          "source": "compiler",
+          "pointer": [
+            "ir_to_object",
+            "inputs",
+            0,
+            "configs",
+            "clif-speed",
+            "median_ms"
+          ],
+          "median_ms": 1.01075,
+          "keel": false
+        }
+      ]
+    },
+    {
+      "id": "assembly",
+      "title": "Assembly → object file",
+      "unit": "ms",
+      "headline": {
+        "fast": "keel asm",
+        "slow": "clang -cc1as"
+      },
+      "rows": [
+        {
+          "label": "keel asm",
+          "source": "tools",
+          "pointer": [
+            "assembly",
+            "median_ms",
+            "keel"
+          ],
+          "median_ms": 5.598959,
+          "keel": true
+        },
+        {
+          "label": "clang -cc1as",
+          "source": "tools",
+          "pointer": [
+            "assembly",
+            "median_ms",
+            "clang-cc1as"
+          ],
+          "median_ms": 16.834542,
+          "keel": false
+        },
+        {
+          "label": "clang -c",
+          "source": "tools",
+          "pointer": [
+            "assembly",
+            "median_ms",
+            "clang-driver"
+          ],
+          "median_ms": 23.126834,
+          "keel": false
+        }
+      ]
+    },
+    {
+      "id": "link",
+      "title": "Objects → signed executable",
+      "unit": "ms",
+      "headline": {
+        "fast": "keel link",
+        "slow": "Apple ld"
+      },
+      "rows": [
+        {
+          "label": "keel link",
+          "source": "tools",
+          "pointer": [
+            "link",
+            "median_ms",
+            "keel"
+          ],
+          "median_ms": 8.454292,
+          "keel": true
+        },
+        {
+          "label": "Apple ld",
+          "source": "tools",
+          "pointer": [
+            "link",
+            "median_ms",
+            "apple-ld"
+          ],
+          "median_ms": 14.80275,
+          "keel": false
+        },
+        {
+          "label": "clang",
+          "source": "tools",
+          "pointer": [
+            "link",
+            "median_ms",
+            "clang-driver"
+          ],
+          "median_ms": 21.975958,
+          "keel": false
+        }
+      ]
+    }
+  ]
+}

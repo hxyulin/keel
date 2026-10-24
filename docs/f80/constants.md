@@ -23,5 +23,4 @@ Exact positive one and positive zero already have exact F80 literal recipes:
 Ordinary literals do not promise the raw SW or pinned environment observation
 of a principal FLD1/FLDZ instruction. No new raw intrinsic is added for them.
 
-Native acceptance requires the sealed independent Linux GCC/Clang packet and
-fresh review. Local ARM compilation establishes no native numerical claim.
+Native numerical validation on x86-64 Linux has not been completed.

@@ -1,4 +1,4 @@
-"""One-session result-pool experiment. Run only in the private LinuxHost root.
+"""One-session result-pool experiment. Run only in a private x86-64 Linux working directory.
 Uses the committed initializer harness's strict output gate and corpus options.
 Every child command, failure, and raw sample is retained; no profile collection.
 """

@@ -1,4 +1,4 @@
-# Raw x87 basic unary and status stage
+# Raw x87 basic unary and status operations
 
 `x86_x87_fabs`, `x86_x87_fchs`, `x86_x87_fsqrt`, and
 `x86_x87_frndint`: `(F80) -> (F80, i32)`.
@@ -24,10 +24,11 @@ FTST compares the loaded value with zero: C3/C2/C0 are 000 greater, 001 less,
 FXAM reports the loaded register class in C3/C2/C0: unsupported 000, NaN 001,
 normal 010, infinity 011, zero 100, empty 101, denormal 110; C1 is its sign.
 This value API always loads an operand, so it cannot observe an empty ST(0).
-It does not promise to classify original memory encodings before FLD semantics. FLD m80 does not raise invalid for SNaNs or denormal
-exceptions for subnormals (Intel FLD entry, 3-353). FXAM itself raises no FP exceptions; FLD may do so.
+It does not promise to classify original memory encodings before FLD
+semantics. FLD m80 does not raise invalid for SNaNs or denormal exceptions for subnormals (Intel FLD entry, 3-353). FXAM itself raises no FP exceptions; FLD may do so.
 
 Source: [Intel SDM volume 2A](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-2a-manual.pdf),
 FABS pp.3-311, FCHS 3-319, FRNDINT 3-373, FSQRT 3-385,
-FTST 3-401, FXAM 3-406. Broader raw binary, compare, BCD and stack forms
-remain for later independent stages; this bounded stage does not exclude them.
+FTST 3-401, FXAM 3-406. Binary, compare, BCD and stack forms are specified
+separately ([binary](binary.md), [compare](compare.md), [bcd](bcd.md),
+[owned stack](owned-stack.md)).

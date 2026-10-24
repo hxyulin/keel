@@ -77,15 +77,16 @@ enumerates checks that require source semantic information.
 
 ## Implemented IR transport boundary
 
-`artifact::encode` writes verified textual Keel IR inside a version-3 envelope
+`artifact::encode` writes verified textual Keel IR inside a versioned envelope (currently `KEEL-IR-UNIT 4`)
 with an explicit target triple and exact UTF-8 payload length. `decode` requires
 the expected target, rejects incompatible versions/targets and malformed lengths,
 and parses/verifies the complete payload. Value IDs are canonicalized through
 the existing textual parser. This is an experimental Keel artifact, not LLVM
 bitcode, a native object, a stable distribution format or a cache-key scheme.
 
-Version 2 added ordinary weak symbol syntax. Version 3 adds executable lifecycle
-and compiler-used function flags and rejects versions 1 and 2;
+Version 2 added ordinary weak symbol syntax, version 3 added executable
+lifecycle and compiler-used function flags, and version 4 adds typed custom
+section placement and linker-retention metadata. Older versions are rejected;
 weak declarations and definitions survive encode/decode. Native symbol binding
 is documented in [C weak symbols](c-weak-symbols.md).
 

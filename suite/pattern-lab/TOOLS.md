@@ -35,7 +35,7 @@ Native host OS/release/machine/processor are recorded independently.
 
 MCA requires an explicit CPU name. `--triple` and `--arch` pass through to LLVM;
 when omitted LLVM uses its own defaults, recorded as null in the model fields.
-The adapter never guesses an MacHost/Apple CPU model. All selections are
+The adapter never guesses an Apple CPU model. All selections are
 user-declared and **unverified**, including an accepted `apple-m5` name.
 Acceptance does not establish Apple M5 accuracy, PMU availability, hardware
 performance, or measured profit. There is no calibration or latency summation.
@@ -78,8 +78,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover \
 ```
 
 The default fixture directory is ignored `target/pattern-lab-tools-tests` in
-the checkout. Set `PATTERN_LAB_TEST_ROOT` to another ignored report directory;
-development validation uses the shared root's
-`suite/reports/pattern-lab-development-20261017/adapters`. Fixtures are temporary
+the checkout. Set `PATTERN_LAB_TEST_ROOT` to another ignored report directory,
+for example `suite/reports/pattern-lab-tools/adapters`. Fixtures are temporary
 and removed after each test. Tests establish adapter behavior, not a real LLVM
 analysis or model/hardware accuracy.

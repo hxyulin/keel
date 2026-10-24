@@ -34,15 +34,18 @@ changes to generic F80 arithmetic are made.
 Primary source: [Intel SDM vol.2A](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-2a-manual.pdf),
 FADD (3-312), FMUL (3-361), FSUB (3-395), FSUBR (3-398),
 FDIV (3-334) and FDIVR (3-337) register-form encoding tables.
-The bounded local tests compare an independent native-assembler DC byte fixture
-and compile every liveness/selector/allocator combination. The full sealed DC
-native numerical/status packet is supplied by `tests/x86_x87_dc_packet.rs`;
-native execution and final review remain pending (complete=false).
-The prior D8/DE packet is preserved unchanged.
 
-A later memory-arithmetic stage must separately prove exact F32/F64 memory
-operand widths, principal memory-opcode load/conversion exceptions, source order,
-NaN selection, immediate status and guarded accesses. It must not substitute
-FLD plus register arithmetic or merge those unproved contracts into this stage.
-Arbitrary stack indices, compares, BCD and other stack forms also remain later
-stages. Eighteen fixed-register arithmetic APIs do not constitute full x87 coverage.
+The tests compare against an independent assembler DC byte fixture and compile
+every liveness/selector/allocator combination; native numerical/status
+validation is still outstanding:
+
+```sh
+cargo test -p keel-codegen --test x86_x87_dc
+```
+
+Memory-operand arithmetic is not supported. Supporting it would require exact
+F32/F64 operand widths, principal memory-opcode load/conversion exceptions,
+source order, NaN selection, immediate status and guarded accesses; FLD plus
+register arithmetic is not a substitute. Arbitrary stack indices are also not
+supported; the eighteen fixed-register arithmetic APIs (here and in
+[binary.md](binary.md)) are not full x87 coverage.

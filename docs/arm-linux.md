@@ -1,11 +1,17 @@
 # AArch64 Linux toolchain
 
 Keel supports **64-bit, little-endian AArch64 Linux** as
-`--target aarch64-unknown-linux-gnu` (also `aarch64-linux-gnu`). `cc`, `compile`,
-`opt`, `asm`, `archive` and `link` select it by default on an ARM Linux host.
-C/IR compilation, assembly and object emission run in process. Native ELF
-linking supports freestanding static executables; `link --system` invokes Clang
-for libc/CRT and shared-library linking, matching the existing Linux workflow.
+`--target aarch64-unknown-linux-gnu` (alias `aarch64-linux-gnu`). On an ARM Linux
+host, `cc`, `compile`, `opt`, `asm`, `archive` and `link` select it by default.
+
+| Capability | Status |
+|---|---|
+| C and IR compilation, assembly, object emission | In process, no external tools |
+| Freestanding static executables | Native Keel linker |
+| Hosted executables (libc, CRT, shared libraries) | `link --system` (invokes Clang) |
+| ABI | Base AAPCS64, including variadics and initial-exec TLS |
+| Debug info | CFI and DWARF line/type/variable info in assembly and objects |
+| Exception handling, `long double` arithmetic, SVE operations | Diagnosed as unsupported |
 
 ## ARM development container
 
@@ -21,7 +27,7 @@ binutils, LLD, build tools and stable Rust. `CARGO_TARGET_DIR=/tmp/keel-target`
 separates Linux artifacts from the mounted host's `target/`. Inside:
 
 ```sh
-cargo build --locked -p keel
+cargo build -p keel
 KEEL=/tmp/keel-target/debug/keel
 cat > /tmp/hello.c <<'C'
 #include <stdio.h>
@@ -83,7 +89,7 @@ to execute the resulting static ARM binaries too:
 
 ```sh
 KEEL_AARCH64_RUNNER=/absolute/path/to/qemu-aarch64-static \
-  cargo test --locked -p keel --test aarch64_elf
+  cargo test -p keel --test aarch64_elf
 ```
 
 QEMU is only the execution environment; it does not compile, assemble or link.
@@ -170,26 +176,27 @@ FIXTURE=crates/keel-link/tests/fixtures/aarch64
 Run these inside the container:
 
 ```sh
-cargo test --locked -p keel-c --test environment --test run
-cargo test --locked -p keel-codegen --test run programs -- --exact
-cargo test --locked -p keel --test aarch64_linux_compiler --test aarch64_elf
-cargo test --locked -p keel-asm --lib --test structured --test aarch64_elf
-cargo test --locked -p keel-link --test aarch64_elf
+cargo test -p keel-c --test environment --test run
+cargo test -p keel-codegen --test run programs -- --exact
+cargo test -p keel --test aarch64_linux_compiler --test aarch64_elf
+cargo test -p keel-asm --lib --test structured --test aarch64_elf
+cargo test -p keel-link --test aarch64_elf
 ```
 
-The native execution coverage includes all 24 C fixtures (Clang/native
-preprocessing, ordinary/optimized), the 63 portable IR fixtures in eight
-allocator/optimization/selection configurations, and Clang interoperability in
-both directions. The ABI matrix covers Fast/Full allocators, optimization on/off
-and direct objects/Clang assembly/Keel assembly: structs, HFAs, i128, register
-exhaustion, over-alignment, narrow stack arguments, variadics, `va_copy`, passed
-`va_list`, libc formatting and TLS across pthreads. LLVM verifies each callee's
-DWARF. A separate test forces every value to spill and checks TLS addresses
-through both object routes and allocators. Compiler-produced objects also pass a freestanding native link/execution
-check. Tests validate headers, relocations, archives and diagnostic/atomic-output
-failures. Native execution cases run only on Linux AArch64.
+Native execution cases run only on Linux AArch64. Coverage includes:
 
-The compiler-rt package is needed by the independent Clang overflow reference
-fixture (`__muloti4`); the test selects `--rtlib=compiler-rt` on ARM Linux.
-The full historical linker test suite also includes x86-only execution cases,
-so the focused ARM linker tests above are the native ARM validation command.
+- All C fixtures (ordinary and optimized) and the portable IR fixtures across
+  allocator, optimization and selection configurations.
+- Clang interoperability in both directions.
+- An ABI matrix over both allocators, optimization on/off and three object
+  routes (direct objects, Clang assembly, Keel assembly): structs, HFAs, i128,
+  register exhaustion, over-alignment, narrow stack arguments, variadics,
+  `va_copy`, passed `va_list`, libc formatting and TLS across pthreads. LLVM
+  verifies each callee's DWARF.
+- A forced-spill TLS test, a freestanding link/execute check for
+  compiler-produced objects, and header, relocation, archive and diagnostic
+  checks.
+
+The Clang overflow reference fixture (`__muloti4`) needs the compiler-rt package
+and selects `--rtlib=compiler-rt`. The full linker test suite also contains
+x86-only execution cases, so use the focused ARM commands above.

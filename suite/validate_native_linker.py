@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Native-vs-Apple link validation, gated to avoid the parent's timing session.
 
-Use --cached-root target/suite to reuse prior
+Use --cached-root <repo>/target/suite to reuse prior
 Keel assembly, or --compile to compile cached .i inputs with this Keel first.
 All new artifacts go under --out; the cached build tree is read-only.
 """

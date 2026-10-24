@@ -28,9 +28,8 @@ Like LLVM's `AsmParser::parseDirectiveFile`, `.file 0` upgrades the line table
 to version 5. `clang -gdwarf-5 -S` always emits `.file 0` before any other
 `.file` or `.loc`.
 
-Without `.file 0`, the DWARF 4 output is byte-for-byte unchanged. The
-`dwarf4_tables_are_unchanged_without_file_zero` test pins HEAD a24ae66's
-bytes. In this mode, `md5` and `source` operands are errors rather than
+Without `.file 0`, the DWARF 4 output is byte-for-byte unchanged; the
+`dwarf4_tables_are_unchanged_without_file_zero` test pins those bytes. In this mode, `md5` and `source` operands are errors rather than
 being silently ignored.
 
 There is no `--dwarf-version` flag. Without `.file 0`, LLVM's version 5
@@ -167,25 +166,21 @@ module but needed for unchanged `-O2` output:
 
 ## x86-64 ELF
 
-Not supported.
+The x86-64 ELF assembler builds a version 5 `.debug_line` table, with a
+`.debug_line_str` section, when `.file 0` is present, and keeps its DWARF 4
+table otherwise. Unlike Mach-O, ELF `line_strp` offsets carry `R_X86_64_32`
+relocations against `.debug_line_str`. `md5` and `source` operands require a
+`.file 0` root, and a generated table or string section that conflicts with
+explicit `.debug_line`/`.debug_line_str` contents is an error.
 
-- The x86 assembler rejects `.file 0`, two-string `.file`, and `md5`/`source`
-  operands explicitly. Previously it folded extra operands into a garbled
-  file name.
-- Its DWARF 4 line table is unchanged.
-- It does not accept Clang's x86 output at all: for example the AT&T suffix
-  mnemonic `testl` in `-O1` code.
-- A DWARF 5 ELF table would also need `.debug_line_str` section
-  relocations (`R_X86_64_32`), which the x86 metadata path does not emit.
-
-## Evidence
+## Tests
 
 - `crates/keel-asm/tests/dwarf5.rs` compares Keel against Clang's integrated
   assembler on directory, checksum, embedded-source, header-only, folding
   and pass-through cases. It also covers an unchanged `clang -gdwarf-5 -S`
-  program that is linked, run and `dsymutil`-verified, plus negative cases
-  and x86 rejection.
+  program that is linked, run and `dsymutil`-verified, negative cases, and
+  x86-64 ELF directive handling. Run it with
+  `cargo test -p keel-asm --test dwarf5`.
 - `suite/dwarf5_differential.py` covers Lua (`-O0`/`-O2`), SQLite and
   QuickJS from unchanged Clang `-gdwarf-5` output, with a Lua link and dSYM
   comparison.
-- Results are in `target/dwarf5-support-20261019/REPORT.txt`.

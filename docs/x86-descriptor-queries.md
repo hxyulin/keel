@@ -1,121 +1,124 @@
 # Long-mode descriptor and status observations
 
+Keel exposes fourteen x86-64 intrinsics that observe descriptor-table and
+machine-status registers.
+
+## Memory forms
+
 `x86_sgdt(ptr)` and `x86_sidt(ptr)` write exactly ten bytes, in packed order:
 16-bit limit followed immediately by 64-bit base, little endian. There is no
 padding write. `x86_sldt_mem(ptr)`, `x86_str_mem(ptr)`, and `x86_smsw_mem(ptr)`
 write exactly two bytes. The emitted instruction performs the memory access;
 there is no temporary image or synthesized wider store.
 
+## Register forms
+
 `x86_{sldt,str,smsw}{16,32,64}(i64 old) -> i64` exposes a physical register
-container. r16 replaces bits15:0 and preserves old bits63:16. r32 and r64 use the
-actual corresponding hardware encoding, not a normalized r16 observation.
-For STR, r32/r64 zero-extend the selector. For SLDT in IA-32e, the wide forms
-zero-extend the selector; historic non-IA-32e undefined upper bits do not define
-this long-mode API. For SMSW, Intel093's explicit 64-bit-mode examples define
-r32 as CR0[31:0] (with the architectural upper32 clear) and r64 as CR0[63:0].
-Its opcode table's undefined-high16 wording and non-64-bit description are not
-used to erase these explicit long-mode semantics. No non-64-bit guarantee is
-made. Old is preserved as an independent SSA value even if the allocator reuses
-its physical home for the result. r32/r64 accept old for a uniform physical
-container interface but their hardware overwrites its defined bits.
+container:
+
+- r16 replaces bits 15:0 and preserves `old` bits 63:16.
+- r32 and r64 use the actual corresponding hardware encoding, not a normalized
+  r16 observation.
+- STR: r32/r64 zero-extend the selector.
+- SLDT in IA-32e mode: the wide forms zero-extend the selector. Historic
+  non-IA-32e undefined upper bits do not define this long-mode API.
+- SMSW: following the Intel SDM's explicit 64-bit-mode examples, r32 is
+  CR0[31:0] (with the architectural upper 32 bits clear) and r64 is CR0[63:0].
+  The opcode table's undefined-high-16 wording and non-64-bit description are
+  not used to override these long-mode semantics. No non-64-bit guarantee is
+  made.
+
+`old` is preserved as an independent SSA value even if the allocator reuses its
+physical home for the result. r32/r64 accept `old` for a uniform container
+interface, but the hardware overwrites its defined bits.
+
+## Properties
 
 All fourteen APIs are pinned barriers, observe implicit machine state, may
 fault, and remain when results are unused. They add no frontend syntax or IR
-fields. CPU baseline NONE/V1/V2/V3 needs no invented extension bit. Foreign
-backends explicitly reject them. The instructions preserve flags, though this
-API does not establish an arbitrary ABI-boundary RFLAGS preservation contract.
+fields and need no CPU feature bit beyond the baseline (NONE/V1/V2/V3). Non-x86
+backends reject them. The instructions preserve flags, but this API does not
+establish a general RFLAGS preservation contract across ABI boundaries.
 
-Preconditions: 64-bit execution, CPL0 or CR4.UMIP clear; valid writable memory
-for a successful memory query. SLDT/STR require protected/IA-32e mode. Hardware
-#GP/#SS/#PF and #AC remain hardware operations. Unaligned memory is allowed
-when alignment checking permits it; no universal unaligned/no-fault claim is
-made. No descriptor restoration, table mutation, CR4 read at CPL3, privileged
-setup, software fallback or permission test is inserted.
+## Preconditions
 
-Linux can emulate UMIP #GP queries. CPUID.(7,0):ECX[2] reports UMIP capability,
-not CR4 enablement. Successful user-mode forced-assembly comparisons can
-therefore prove OS-observed behavior without proving this raw permitted-hardware
-contract. A native receipt must collect CS/CPL, CPUID capability and observed
-results and retain raw-mode proof pending unless independently established.
-The bounded emulated CPL0 checkpoint below validates a controlled SGDT/SIDT
-table observation; native bare-metal CPL0 proof remains pending.
-No all-context or full-profile completion follows from this stage.
+- 64-bit execution, and either CPL0 or CR4.UMIP clear.
+- Valid writable memory for the memory forms.
+- SLDT/STR require protected or IA-32e mode.
 
-## Bounded CPL0 table-observation fixture
+Hardware #GP/#SS/#PF and #AC remain hardware behavior. Unaligned memory is
+allowed when alignment checking permits it; no universal unaligned/no-fault
+claim is made. Keel inserts no descriptor restoration, table mutation, CR4 read,
+privileged setup, software fallback, or permission test.
+
+Linux can emulate UMIP #GP queries, and CPUID.(7,0):ECX[2] reports UMIP
+capability rather than CR4 enablement. A successful user-mode run can therefore
+show OS-observed behavior without demonstrating the raw hardware contract.
+Native bare-metal CPL0 validation has not been done; the emulated CPL0 fixture
+below covers SGDT/SIDT only.
+
+## CPL0 table-observation fixture
 
 `suite/x86-cpl0/cases/descriptor.keel` exports one SysV AMD64 function:
-`void descriptor_observe(unsigned char out[32])`. RDI carries a pointer to 32
-writable bytes initially filled with `0xa5`. The caller supplies the normal
-SysV stack alignment (RSP aligned to 16 before CALL). SGDT writes offsets 1–10;
-SIDT writes offsets 17–26. Every other byte must remain `0xa5`, including the
-byte immediately before and after each ten-byte image. Both writes are
-deliberately unaligned. The payload has no external helpers, table setup,
-control-register mutation, or host-execution path.
+`void descriptor_observe(unsigned char out[32])`. RDI points to 32 writable
+bytes initially filled with `0xa5`; the caller provides normal SysV stack
+alignment. SGDT writes offsets 1-10 and SIDT writes offsets 17-26 (both
+deliberately unaligned). Every other byte, including those immediately before
+and after each ten-byte image, must remain `0xa5`. The payload has no external
+helpers, table setup, control-register mutation, or host-execution path.
 
-The maintained disposable-guest harness seeds a known GDT and IDT, enters
-64-bit CPL0, checks CS/CPL and long-mode evidence, initializes the output,
-calls the function, and compares all 32 bytes. It owns boot, BSS initialization,
-stack setup, integer-only bridge assembly, table lifetime and guest termination. It must load a flat Multiboot image if using that boot contract;
-an ELF64 container is not an equivalent QEMU Multiboot input. Accept only the
-expected exit status together with the expected transcript, never a timeout
-containing PASS, a reset or a triple fault. Guest campaigns must be serialized
-under the existing suite lock, bounded by a QEMU timeout, with no network,
-shared mounts or host devices. TCG results must be labeled emulated.
+The guest harness seeds a known GDT and IDT, enters 64-bit CPL0, checks CS/CPL
+and long mode, initializes the output, calls the function, and compares all 32
+bytes. It owns boot, BSS initialization, stack setup, an integer-only bridge,
+table lifetime, and guest termination. It must load a flat Multiboot image when
+using that boot contract; an ELF64 container is not an equivalent QEMU Multiboot
+input. Only the expected exit status together with the expected transcript
+counts as a pass; a timeout containing PASS, a reset, or a triple fault does
+not. Runs are bounded by a QEMU timeout, use no network, shared mounts, or host
+devices, and TCG results are labeled as emulated.
 
-`descriptor_expected.py` independently packs the harness's **seeded** limits
-and linear bases as little-endian u16/u64 images. Feed it linker/setup values,
-never values read by the generated queries. Example addresses below are oracle
-test inputs, not an assumed boot layout:
+`cases/descriptor_bridge.S` loads a static GDT (limit 31) and IDT (limit 511).
+Its code/data descriptors preserve boot selectors 8/16, and it leaves IF=0 and
+the execution mode intact. Both tables live for the whole guest run. It
+provides an opaque call boundary, uses no SIMD or red zone, needs no C compiler
+helpers, and installs no exception resumption.
+
+`descriptor_expected.py` independently packs the harness's seeded limits and
+linear bases as little-endian u16/u64 images. Feed it linker/setup values,
+never values read by the generated queries. The addresses below are example
+inputs, not an assumed boot layout:
 
 ```sh
 python3 suite/x86-cpl0/cases/descriptor_expected.py --self-test
 python3 suite/x86-cpl0/cases/descriptor_expected.py \
   --gdt-base 0x1000 --gdt-limit 0x27 \
-  --idt-base 0x2000 --idt-limit 0xfff > /tmp/descriptor-expected.bin
-env KEEL_DESCRIPTOR_EXPORT_DIR=/tmp/keel-descriptor-cpl0-exports \
-  python3 suite/fast_opt_locked.py /tmp/keel-cpl0-descriptor-unique.jsonl \
+  --idt-base 0x2000 --idt-limit 0xfff > descriptor-expected.bin
+KEEL_DESCRIPTOR_EXPORT_DIR="$PWD/descriptor-exports" \
   cargo test -p keel-codegen --test x86_descriptor_cpl0 \
-  --test x86_descriptor_queries_encoding --offline --locked -j2
+  --test x86_descriptor_queries_encoding
 ```
 
-The export gate creates 12 ELF objects plus assembly, one per selection tier,
-allocator and normal/empty pool combination, under the requested temporary
-directory. `descriptor-Full-Full-false.o` is the optimized normal-pool payload;
-link one variant at a time. Text, typed and chunked objects must match at
-explicit V1; the Full selector also runs IR optimization. A separate compile
-gate confirms all fourteen descriptor/status queries remain when their results
-are unused across those paths. Existing literal complete-body encoding tests
-remain the independent operand-width control. These are compile/encoding and
-export checks, not guest memory-footprint evidence or whole-fourteen-API CPL0
-qualification. SMSW wide-container semantics and old-value liveness are outside
-this two-instruction guest checkpoint.
+The export test writes 12 ELF objects plus assembly, one per selection tier,
+allocator, and normal/empty pool combination. `descriptor-Full-Full-false.o` is
+the optimized normal-pool payload; link one variant at a time. Text, typed, and
+chunked objects must match at explicit V1; the Full selector also runs IR
+optimization. A separate compile check confirms all fourteen queries remain when
+their results are unused. Literal encoding tests cover operand widths. SMSW
+wide-container semantics and `old`-value liveness are not covered by the guest
+fixture.
 
-The maintained `cases/descriptor_bridge.S` loads a static GDT (limit 31) and
-IDT (limit 511). Its code/data descriptors preserve boot selectors 8/16, and
-it leaves IF=0 and execution mode intact. Both tables have guest-long lifetime.
-A separately encoded expected image uses literal limits and linker-known
-seed-table addresses; no expected byte is derived from query output. Assembly
-provides an opaque call boundary, uses no SIMD or red zone, and needs no C
-compiler helpers. No exception resumption is installed.
+Run the guest campaign with `suite/x86-cpl0/descriptor_campaign.py --exports DIR`,
+with optional `--qemu`, `--as`, `--ld`, `--objcopy`, and `--timeout` overrides.
+See `suite/x86-cpl0/README.md` for the complete commands. All twelve explicit V1
+variants, including Full optimization and forced spills, pass the 32-byte
+comparison under QEMU 11.1.1 TCG on x86-64 Linux (READY/PASS, exit 33).
+Negative controls (an observation-free function, or a correct observation
+followed by a canary overwrite) produce READY/FAIL and exit 35. This is
+emulated-guest evidence for SGDT/SIDT only; it is not a native, Linux UMIP, or
+full fourteen-API qualification.
 
-Run `suite/x86-cpl0/descriptor_campaign.py --exports DIR` under the shared lock,
-with optional `--qemu`, `--as`, `--ld`, `--objcopy` and `--timeout` overrides.
-See `suite/x86-cpl0/README.md` for the complete export/campaign commands.
-On 2026-10-23, all twelve freshly exported explicit V1 variants passed the
-complete 32-byte comparison under LinuxHost QEMU 11.1.1 TCG, including Full
-optimization and forced spills. Each produced exactly READY/PASS and exit 33.
-Substituting an observation-free function or a correct observation followed by
-a canary overwrite produced exactly READY/FAIL and exit 35. Captures and exact
-QEMU commands are in `/tmp/keel-descriptor-campaign-q4a10yfm/results.jsonl` on
-LinuxHost; source/export staging and campaign stdout are in
-`/tmp/keel-cpl0-review.5oAfls`. These are finite emulated guest results, separate
-from the three Rust export/encoding tests and the generic smoke/failure checks.
-No native guest claim, Linux UMIP-emulation claim, or broader fourteen-API
-qualification follows. No packages or host privileges were required.
+## References
 
-Primary authority: Intel SDM 325462-093US, September 2026, official combined PDF
+Intel SDM 325462-093US (September 2026), Vol. 2B: SGDT 4-629/630, SIDT
+4-655/656, SLDT 4-657/658, SMSW 4-659/660, STR 4-680/681.
 https://cdrdv2-public.intel.com/929349/325462-093-sdm-vol-1-2abcd-3abcd-4.pdf
-SGDT Vol2B 4-629/630, SIDT 4-655/656, SLDT 4-657/658, SMSW 4-659/660,
-STR 4-680/681; SGDT begins at PDF page1918. Exact extracted pages and their
-hashes are retained in the proof packet. These are observations only, not
-permission to weaken the environment precondition.

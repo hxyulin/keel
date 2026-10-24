@@ -19,7 +19,7 @@ def main():
     ap.add_argument('evidence', type=Path)
     b = ap.parse_args().evidence
     audit = {}; identities = {}; phases = []; ends = []
-    for host in ['machost', 'linuxhost']:
+    for host in ['macos-arm64', 'linux-x86_64']:
         d = b / host
         p = json.loads((d / 'provenance.json').read_text())
         build = json.loads((d / 'build.json').read_text())

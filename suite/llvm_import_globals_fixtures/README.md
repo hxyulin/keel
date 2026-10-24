@@ -1,6 +1,14 @@
 # LLVM global-object milestone
 
-Run `suite/llvm_import_globals_validate.py --libllvm LIBLLVM23 --keel PRIVATE_KEEL --out NEW_ARTIFACT_DIR` through `suite/fast_opt_locked.py LOG ...`. The validator does not acquire a nested lease. The parent aggregate runner can invoke it with the same three arguments inside its lease. Build Keel with a private `CARGO_TARGET_DIR` and `cargo build --offline --locked -j2 -p keel` under the lease.
+Build Keel with `cargo build -p keel`, then run:
+
+```sh
+python3 suite/llvm_import_globals_validate.py \
+  --libllvm /path/to/LLVM23/libLLVM.dylib \
+  --keel target/debug/keel --out NEW_OUTPUT_DIR
+```
+
+`suite/frontend_validate.py` also runs this validator as part of its aggregate run.
 
 The importer helper `suite/llvm_import_globals.py` supports Apple AArch64, little-endian, address-space-zero objects with scalar i1/i8/i16/i32/i64, f32/f64 and pointer fields, arrays, nested nonopaque structs, and packed structs. LLVM TargetData determines allocation sizes, field offsets, array strides, and natural alignment. Explicit padding preserves object layout; padding bytes may be zeroed. Nonempty objects must fit u32; oversized aggregate layouts are rejected before potentially overflowing LLVM size queries. Objects retain constant/writable status and external/internal/private and ODR linkage; declarations emit `decl data`. Unused objects are retained and validated too.
 
@@ -21,8 +29,7 @@ global function pointer also exercises indirect FP calls through both native
 and Keel code. Half/bfloat/x87/FP128 and unsupported FP aggregate forms remain
 rejected. The validator has 45 negative cases and 12 native tier executions.
 
-`suite/frontend_validate.py` invokes this validator under its host lease. The
-old scalar validator now rejects weak global storage rather than ordinary
+The older scalar validator rejects weak global storage rather than ordinary
 globals; its remaining guards stay active.
 
 Hidden class/si ODR RTTI and matched type-name strings have a narrow validated

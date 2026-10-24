@@ -28,9 +28,8 @@ and handle barriers itself. Recompute after function changes. Cloned/inlined
 callee parameters do not acquire entry contracts; the analysis does not
 invent or persist provenance and changes no IR, ABI or calling convention.
 
-The pass remains opt-in. A candidate placement is after inlining, address
-simplification/GVN and stack forwarding, before final simplification and dead
-code cleanup. Root owns evaluation after combined correctness, serial native
-runtime, code-size and compile-cost gates. The audited differential campaign
-shows kernel/route contrasts, not predicted patch speedups or application gains.
-No performance measurements are part of this implementation checkpoint.
+The pass is opt-in; no optimization tier runs it. A suitable placement is
+after inlining, address simplification/GVN and stack forwarding, before final
+simplification and dead code cleanup. No performance claim is made for it.
+
+Tests: `cargo test -p keel-opt --test memory_forward`.

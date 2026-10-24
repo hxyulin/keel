@@ -5,8 +5,7 @@ through `keel opt -p` or an explicit `compile`/`cc` pipeline. They are not in
 Fast or Full defaults. They do not change register allocation or weaken the
 generic vectorizer's restrictions on multiple potentially faulting streams.
 
-Current application validation is recorded in
-[the ARM applicability report](ordered-real-apps-20261021.html). Neither pass
+On ARM, neither pass
 activated on any of the 44 Lua, QuickJS, and SQLite translation units. Both
 activated on their separate kernel controls. Adding the passes produced
 identical application IR, objects, and executables compared with the same
@@ -18,13 +17,12 @@ these three applications. Improvements on other legitimate workloads are still
 useful. Profile inclusion should consider correctness, compilation cost and
 regression checks; lack of a hit in one corpus alone is not a removal criterion.
 
-Recheck applicability with a frozen compiler and prepared application sources:
+Recheck applicability with a built compiler and prepared application sources:
 
 ```sh
-python3 suite/fast_opt_locked.py target/ordered-lock.jsonl \
-  python3 suite/ordered_reductions_validate.py \
-  --keel /absolute/path/to/keel --inputs target/suite \
-  --output target/ordered-activation-new
+python3 suite/ordered_reductions_validate.py \
+  --keel target/release/keel --inputs target/suite \
+  --output target/ordered-activation
 ```
 
 Use a fresh output directory. The validator discovers the compiler's actual
@@ -68,9 +66,9 @@ use a bounded ARM CMP/CSNEG cover for i32/i64. This preserves wrapping MIN,
 custom allocation constraints, source boundaries and live inputs. Functions
 containing inline assembly keep their original NZCV behavior.
 
-To compare an experiment without changing defaults, the standalone runtime
-runner accepts `--baseline-keel` and `--full-passes`. The latter overrides only
-current Full. Frozen Full, None, Fast and Clang keep their original flags;
+To compare an experiment without changing defaults, the runtime kernel runner
+(`suite/runtime-kernels/run.py`) accepts `--baseline-keel` and `--full-passes`. The latter overrides only
+the current Full run. Baseline Full, None, Fast and Clang keep their original flags;
 correctness runs before randomized native measurements. Keep architecture,
 array length, raw variation and unchanged-code controls separate when judging
 whether a pass should enter a default pipeline.

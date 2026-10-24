@@ -356,7 +356,7 @@ lines += ["## Scope and caveats", "",
           "- Lua rows compile only the functions the bridge accepts (unsupported ones become declarations);",
           "  they measure code generation on real code, not a Lua build, and nothing from them is executed.",
           "- Runtime numbers are exploratory: one macOS desktop, no core pinning, no physical page control;",
-          "  publication-quality runtime needs the fixed-page LinuxHost protocol, which was not run.",
+          "  publication-quality runtime needs the fixed-page x86-64 Linux protocol, which was not run.",
           ""]
 (out / "summary.md").write_text("\n".join(lines))
 manifest["completed"] = True

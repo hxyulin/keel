@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="204" viewBox="0 0 720 204" role="img" aria-labelledby="pipeline-t pipeline-d">
+<style>
+svg{--surface:#fcfcfb;--ink:#0b0b0b;--ink-2:#52514e;--grid:#e4e3df;--keel:#2a78d6;--other:#a3a29b}
+@media (prefers-color-scheme:dark){svg{--surface:#1a1a19;--ink:#f0efec;--ink-2:#c3c2b7;--grid:#3a3935;--keel:#3987e5;--other:#6f6e68}}
+text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;fill:var(--ink)}
+.muted{fill:var(--ink-2)}
+rect.stage{fill:none;stroke:var(--ink-2);stroke-width:1.25}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+</style>
+<title id="pipeline-t">Keel toolchain stages</title>
+<desc id="pipeline-d">C source flows through the C frontend, optimizer, backend, assembler and linker to an executable. keel cc runs frontend to assembler; keel compile runs optimizer to assembler from Keel IR; keel opt runs the optimizer; keel asm assembles; keel link links.</desc>
+<rect width="720" height="204" rx="10" fill="var(--surface)"/>
+<defs><marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" fill="var(--ink-2)"/></marker></defs>
+<path d="M24 52.0H56" stroke="var(--ink-2)" stroke-width="1.25" marker-end="url(#arrow)"/>
+<text class="muted mono" x="40.0" y="44.0" font-size="10" text-anchor="middle">.c</text>
+<rect class="stage" x="60" y="30" width="92" height="44" rx="6"/>
+<text x="106.0" y="57.0" font-size="13" font-weight="600" text-anchor="middle">C frontend</text>
+<path d="M154 52.0H186" stroke="var(--ink-2)" stroke-width="1.25" marker-end="url(#arrow)"/>
+<text class="muted mono" x="170.0" y="44.0" font-size="10" text-anchor="middle">IR</text>
+<rect class="stage" x="190" y="30" width="92" height="44" rx="6"/>
+<text x="236.0" y="57.0" font-size="13" font-weight="600" text-anchor="middle">Optimizer</text>
+<path d="M284 52.0H316" stroke="var(--ink-2)" stroke-width="1.25" marker-end="url(#arrow)"/>
+<text class="muted mono" x="300.0" y="44.0" font-size="10" text-anchor="middle">IR</text>
+<rect class="stage" x="320" y="30" width="92" height="44" rx="6"/>
+<text x="366.0" y="57.0" font-size="13" font-weight="600" text-anchor="middle">Backend</text>
+<path d="M414 52.0H446" stroke="var(--ink-2)" stroke-width="1.25" marker-end="url(#arrow)"/>
+<text class="muted mono" x="430.0" y="44.0" font-size="10" text-anchor="middle">asm</text>
+<rect class="stage" x="450" y="30" width="92" height="44" rx="6"/>
+<text x="496.0" y="57.0" font-size="13" font-weight="600" text-anchor="middle">Assembler</text>
+<path d="M544 52.0H576" stroke="var(--ink-2)" stroke-width="1.25" marker-end="url(#arrow)"/>
+<text class="muted mono" x="560.0" y="44.0" font-size="10" text-anchor="middle">.o</text>
+<rect class="stage" x="580" y="30" width="92" height="44" rx="6"/>
+<text x="626.0" y="57.0" font-size="13" font-weight="600" text-anchor="middle">Linker</text>
+<path d="M674 52.0H696" stroke="var(--ink-2)" stroke-width="1.25" marker-end="url(#arrow)"/>
+<text class="muted mono" x="685.0" y="44.0" font-size="10" text-anchor="middle">exe</text>
+<rect x="64" y="100" width="474" height="20" rx="4" fill="var(--keel)"/>
+<text class="mono" x="301.0" y="114" font-size="12" text-anchor="middle" style="fill:#fff">keel cc</text>
+<rect x="194" y="130" width="344" height="20" rx="4" fill="var(--keel)"/>
+<text class="mono" x="366.0" y="144" font-size="12" text-anchor="middle" style="fill:#fff">keel compile</text>
+<rect x="194" y="160" width="84" height="20" rx="4" fill="var(--keel)"/>
+<text class="mono" x="236.0" y="174" font-size="12" text-anchor="middle" style="fill:#fff">keel opt</text>
+<rect x="454" y="160" width="84" height="20" rx="4" fill="var(--keel)"/>
+<text class="mono" x="496.0" y="174" font-size="12" text-anchor="middle" style="fill:#fff">keel asm</text>
+<rect x="584" y="160" width="84" height="20" rx="4" fill="var(--keel)"/>
+<text class="mono" x="626.0" y="174" font-size="12" text-anchor="middle" style="fill:#fff">keel link</text>
+</svg>

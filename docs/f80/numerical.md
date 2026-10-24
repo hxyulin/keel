@@ -76,8 +76,14 @@ principal operation and raw architectural effects.
 This raw instruction contract differs from FILD followed by portable arithmetic:
 operand order, precision-control rounding and exception/status behavior belong
 to the exact FI instruction. Ordinary portable Convert retains its existing
-semantics. The independent assembly packet in
-`crates/keel-codegen/tests/x86_x87_fi_arithmetic` checks same-CPU raw results,
-defined status separately from undefined condition-bit diagnostics, CW and stack
-balance. Native acceptance and fresh review remain pending until root records
-them; the packet does not establish full x87 completion.
+semantics.
+
+## Tests
+
+```sh
+cargo test -p keel-codegen --test x86_x87_numerical
+```
+
+`crates/keel-codegen/tests/x86_x87_numerical/` contains an independent
+assembly probe and runner (see its README) for comparing raw results and status
+on a native x86-64 Linux host. Native validation has not been completed.

@@ -18,16 +18,15 @@ streaming dictionary, high-compression or multithreading suite.
 Run through the standard registry or the platform runner:
 
 ```sh
-python3 suite/fast_opt_locked.py target/lz4-lock.jsonl \
-  python3 suite/benchmark_platforms.py --root . --work target/lz4-run \
+python3 suite/benchmark_platforms.py --root . --work target/lz4-run \
   --keel /absolute/path/to/keel --apps lz4 \
   --configs keel-none keel-fast keel-full clang-O2
 ```
 
-`validate.py` independently checks a pinned existing archive, retains private
-source/object/command evidence, and runs Clang O2 followed by Keel None/Fast/Full
-correctness. It accepts `--archive`, `--keel`, `--output` and at most two jobs.
+`validate.py` independently checks a pinned existing archive, retains
+source/object/command records, and runs Clang O2 followed by Keel None/Fast/Full
+correctness. It accepts `--archive`, `--keel`, `--output` and `-j 1|2`.
 The Clang reference must pass before any candidate is validated. Launch errors
-and timeouts retain structured command records. Use a private output directory;
+and timeouts retain structured command records. Use a dedicated output directory;
 the helper can reuse its own hash-validated compile cache. It performs no
 performance measurements.

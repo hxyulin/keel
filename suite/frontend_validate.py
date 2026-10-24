@@ -80,9 +80,9 @@ def main(argv=None):
     code = 1
     try:
         # No child runner acquires this lock. Builds and all native execution
-        # share the same lease as the existing standalone validation workflows.
+        # share the same lock as the existing standalone validation workflows.
         with open(LOCK, 'a+') as lock:
-            print('frontend checks: waiting for shared native-test lease', flush=True)
+            print('frontend checks: waiting for shared native-test lock', flush=True)
             fcntl.flock(lock, fcntl.LOCK_EX)
             if harness.run('revision', ['git', 'rev-parse', 'HEAD']):
                 report['revision'] = (out / 'revision.stdout').read_text().strip()

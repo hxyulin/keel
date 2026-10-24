@@ -134,43 +134,29 @@ Primary ABI/producer references checked for this implementation:
 
 Remaining work: broader named-section type merging, arbitrary Mach-O zerofill
 and segments, explicit section flags/types, COMDAT placement and retention,
-LLVM/Cranelift export, linker GC, selective native retention, DSO lifecycle,
-startup policy and general lifecycle priorities. Aliases remain unimplemented.
+LLVM/Cranelift export, selective native retention, DSO lifecycle, startup
+policy and general lifecycle priorities. Aliases remain unimplemented.
 
-Validation commands on the macOS arm64 host (GNU cross-binutils installed in
-`/opt/homebrew/bin`):
+### Running the tests
 
 ```sh
-KEEL_GNU_AS=/opt/homebrew/bin/x86_64-elf-as \
-KEEL_TEST_GNU_AS=/opt/homebrew/bin/x86_64-elf-as \
-cargo test --no-fail-fast -p keel-c -p keel-ir -p keel-codegen \
-  -p keel-asm -p keel-asm-ir -p keel-toolchain -p keel-llvm -p keel-opt -p keel-link
-cargo test -p keel-c
 cargo test -p keel-c --test sections
 cargo test -p keel-asm --test retention --test x86_sections --test x86_elf_directives
 cargo test -p keel-ir --test sections -p keel-toolchain --test foundations \
   -p keel-llvm --test export
 cargo test --manifest-path crates/keel-cranelift/Cargo.toml --locked \
   --target-dir target/keel-cranelift
-cargo test --manifest-path crates/keel-cranelift/Cargo.toml --locked \
-  --target-dir target/keel-cranelift --test translate
-cargo check --workspace
 ```
 
-The ELF integration tests use `KEEL_TEST_GNU_LD` and `KEEL_TEST_GNU_AR` overrides
-when supplied; otherwise they use Homebrew cross-tools on macOS and `ld`/`ar`
-on Linux. The assembler oracle accepts `KEEL_TEST_GNU_AS`. Missing required
+On macOS, GNU x86 assembler oracle checks need GNU cross-binutils, selected with
+`KEEL_GNU_AS` / `KEEL_TEST_GNU_AS` (for example
+`/opt/homebrew/bin/x86_64-elf-as`). The ELF integration tests use
+`KEEL_TEST_GNU_LD` and `KEEL_TEST_GNU_AR` overrides when supplied; otherwise
+they use Homebrew cross-tools on macOS and `ld`/`ar` on Linux. Missing required
 system tools fail these integration tests rather than silently skipping them.
+x86-64 ELF objects and images are inspected, not executed, on arm64 hosts.
 
-The broad nine-crate regression run passed 1,883 tests. After the final
-conventional-section hardening, the full frontend run passed 230 tests and the
-focused assembler/section/IR/artifact/LLVM commands above passed. The separate
-Cranelift suite passed 17 tests, with its final translate-only rerun passing 10;
-workspace checking also passed. These runs preserve the existing K&R, complex,
-cleanup, VM/VLA and lifecycle regressions. No x86-64 execution on the arm64 host,
-LLVM/Cranelift retention export, or selective native-linker GC is claimed.
-
-## Independent integration review
+## Registration tables and cross-TU sharing
 
 The combined C registration-table regression in `crates/keel-c/tests/sections.rs`
 compiles three independent translation units and links them in interleaved order.
@@ -196,41 +182,23 @@ Sharing diagnostics for C storage classes apply within a translation unit.
 Native ELF identifier-named registration groups additionally reject mismatched
 input types or flags across translation units, including zero-fill versus
 initialized data, readonly versus writable storage, code versus data, and
-retention mismatches; the review adds C-generated regressions for both object
-routes. Dotted ELF input sections keep separate identities. Mach-O regular
-sections do not encode every original C storage distinction, such as mutable
-versus relocatable-constant data in `__DATA`, or custom zero versus initialized
-data. Object linking cannot reconstruct those distinctions to enforce the
-frontend's complete storage-class policy across translation units.
+retention mismatches, with C-generated regressions for both object routes.
+Dotted ELF input sections keep separate identities. Mach-O regular sections
+do not encode every original C storage distinction, such as mutable versus
+relocatable-constant data in `__DATA`, or custom zero versus initialized data.
+Object linking cannot reconstruct those distinctions to enforce the frontend's
+complete storage-class policy across translation units.
 
-Review of attribute merging, pruning, static locals, weak/asm identities,
-section flags, debug ranges, imports/lifecycle roots, and typed/text/artifact
-transport found one reserved-name validation gap: `.gnu.*` was reserved, but
-`.gnu_debuglink`, `.gnu_debugaltlink` and `.gnu_debugdata` were accepted as
-ordinary custom storage. The shared ELF validator now reserves `.gnu_*` as
-well, with frontend-before-pruning and direct-IR regressions. These names have
-special debug metadata consumers; see the [GDB separate-debug-file format](https://www.sourceware.org/gdb/current/onlinedocs/gdb.html/Separate-Debug-Files.html)
+The ELF validator reserves both `.gnu.*` and `.gnu_*` names, because
+`.gnu_debuglink`, `.gnu_debugaltlink` and `.gnu_debugdata` have special debug
+metadata consumers; see the [GDB separate-debug-file format](https://www.sourceware.org/gdb/current/onlinedocs/gdb.html/Separate-Debug-Files.html)
 and [GNU binutils debug-section handling](https://www.sourceware.org/binutils/docs/binutils.html).
-No further confirmed section/retain semantic defect remained. Another new
-regression checks that validating discarded sectioned pointer/string
-initializers does not emit their otherwise unused referents.
+Validating discarded sectioned pointer/string initializers does not emit their
+otherwise unused referents.
 
-The independent Cranelift check initially failed to compile because its type
-and instruction matches predated the F80 IR additions. Explicit unsupported-F80
-diagnostics restore the diagnostic exporter build without changing F80 native
-semantics or adding Cranelift support. Its full suite then passed 18 tests,
-including section/retention rejection and the new F80 rejection coverage.
-
-Independent validation on macOS arm64 passed the six-crate
-`keel-c/keel-ir/keel-asm/keel-toolchain/keel-llvm/keel-link` batch (894 tests)
-and the `keel-codegen/keel-opt/keel-asm-ir` batch (1,029 tests). After the final
-reserved-name fix, the complete C/IR rerun passed 318 tests (233 C and 85 IR);
-the focused section/IR/artifact/LLVM rerun passed, and the final artifact suite
-passed all nine tests. Workspace checking and `git diff --check` passed.
-`xcrun dwarfdump --verify` reported no errors for the generated ELF registration
-objects and ELF/Mach-O custom-section objects; it still reports empty-child-DIE
-warnings from the existing debug emitter. These general debug warnings were
-not changed by the section/retain review.
+`xcrun dwarfdump --verify` reports no errors for the generated ELF registration
+objects and ELF/Mach-O custom-section objects; it still reports
+empty-child-DIE warnings from the existing debug emitter.
 
 ## TLS custom placement and retention milestone
 
@@ -334,7 +302,7 @@ Primary ABI details checked for TLS:
   instantiation allocates and copies the template. This explains why arbitrary
   regular sections cannot implement named TLS storage.
 
-Focused validation:
+Focused tests:
 
 ```sh
 cargo test -p keel-c --test sections
@@ -344,55 +312,28 @@ cargo test --manifest-path crates/keel-cranelift/Cargo.toml --locked \
   --target-dir target/keel-cranelift
 ```
 
-No native ELF TLS, native dead stripping, TLS weak/COMDAT, over-aligned Darwin
-runtime guarantee, general-dynamic TLS or exporter support is claimed.
+Retained fixture objects and system ELF TLS images are written below
+`target/tmp/tls-arm64` and `target/tmp/tls-elf` by the focused tests.
+`dwarfdump --verify` finds no errors in the TLS Mach-O and ELF debug objects.
 
-Milestone evidence on macOS 27.0.1 (26A434), Apple Clang 21.0.0
-(clang-2100.3.34.2), GNU cross-binutils 2.47.20260726: the final focused
-C section/cleanup, IR section, artifact and LLVM exporter batch passed 52 tests;
-the separate Cranelift suite passed 18 tests; workspace checking passed.
-The broad regression caught a cleanup diagnostic-precedence regression in the
-new automatic-TLS check. Moving that check after the existing TLS/cleanup
-rejection preserves the original diagnostic; the entire cleanup and section
-suites pass after the correction. TLS template pointer initializers also run
-through both linkers, preserving relocations to ordinary static storage.
-The final placement/IR/artifact rerun passed 30 tests after tightening Darwin
-reserved-section diagnostics, and `dwarfdump --verify` found no errors in the
-TLS Mach-O and ELF debug objects. Retained fixture objects and system ELF TLS
-images are written below `target/tmp/tls-arm64` and `target/tmp/tls-elf` by the
-focused tests; the expected incompatible ELF link uses a separate output path.
+### TLS interaction with native COMDAT
 
-The completed nine-crate broad run recorded 1,936 passing tests and two failing
-tests: the cleanup precedence issue above and the old ELF test's expectation
-of the generic `unsupported flags` TLS error. The ELF test now requires the
-precise external-linking / `PT_TLS` boundary. Both initially failing targets
-were rerun in full after correction: all 18 cleanup and ELF-link tests passed.
-The final focused runs cover changes made while the broad run was in progress;
-no full clean rerun of all nine crates is claimed after those corrections.
-
-### Independent TLS review with native COMDAT integrated
-
-Review of the integrated TLS milestone (`8e811314` / `963a2ec1`) on top of
-native COMDAT selection (`33374922`) found and fixed two issues:
-
-- Darwin's generated `<symbol>$tlv$init` template label could collide with a
-  user asm label. Definitions failed with a duplicate label; imports could bind
-  to the private template instead of remaining external. The producer now
-  appends `$` until the template name avoids all declared data and function
-  symbols. The descriptor keeps its public identity, and its template relocation
-  and retention directive use the chosen private label. Regressions occupy two
-  successive candidate names, preserve matching data/function imports, compare
-  both object routes, and execute through Apple dead stripping and native
-  linking with debug and optimization independently on/off.
-- Native ELF rejected `STT_TLS` symbols throughout selected input objects, but
-  checked allocated `SHF_TLS` only after discarding losing COMDAT sections.
-  Symbol-less TLS in a losing group therefore escaped the stated diagnostic
-  boundary. Both checks now apply to the whole selected object. Tests require
-  the external-linking / `PT_TLS` diagnostic for initialized and zero-fill TLS,
-  with and without symbols or retention, in both winning and losing groups.
-  An undefined TLS import referenced only from a discarded group also remains
-  rejected. An unextracted TLS archive member remains outside this contract;
-  archive extraction policy and ordinary COMDAT selection are unchanged.
+- Darwin's generated `<symbol>$tlv$init` template label could otherwise collide
+  with a user asm label. The producer appends `$` until the template name avoids
+  all declared data and function symbols. The descriptor keeps its public
+  identity, and its template relocation and retention directive use the chosen
+  private label. Regressions occupy two successive candidate names, preserve
+  matching data/function imports, compare both object routes, and execute
+  through Apple dead stripping and native linking with debug and optimization
+  independently on/off.
+- Native ELF applies its `STT_TLS` and allocated `SHF_TLS` rejection to the
+  whole selected object, including sections in a losing COMDAT group. Tests
+  require the external-linking / `PT_TLS` diagnostic for initialized and
+  zero-fill TLS, with and without symbols or retention, in both winning and
+  losing groups. An undefined TLS import referenced only from a discarded group
+  also remains rejected. An unextracted TLS archive member remains outside this
+  contract; archive extraction policy and ordinary COMDAT selection are
+  unchanged.
 
 Additional coverage checks const/volatile TLS with late placement, retention
 and alignment declarations. The ARM64 multithread fixture now combines TLS
@@ -401,50 +342,12 @@ checks the main thread's final TLS state. All 20 producer/linker combinations
 execute with four worker threads and the main thread. Clang uses
 `-fno-use-cxa-atexit` for this combined fixture to match Keel's executable
 `atexit` teardown policy. Its default destructor thunk still needs the unsupported
-`___dso_handle`, as documented in [C lifecycle](c-lifecycle.md); this review does
-not extend DSO lifecycle support.
+`___dso_handle`, as documented in [C lifecycle](c-lifecycle.md).
 
-DWARF inspection confirms descriptor-address plus `DW_OP_form_tls_address` on
-Darwin and `R_X86_64_DTPOFF64` plus `DW_OP_GNU_push_tls_address` on ELF. Verification
-of ELF, Darwin TLS and the generated-name collision objects reports no errors;
-the existing empty-child-DIE warnings remain. Review also covered section-class
-sharing, template initialization/alignment, retained descriptor/template pairs,
-late attributes before pruning, typed/text/artifact transport and explicit
-LLVM/Cranelift exporter rejection. No additional confirmed defect in those
-contracts was found.
+DWARF output uses the descriptor address plus `DW_OP_form_tls_address` on
+Darwin and `R_X86_64_DTPOFF64` plus `DW_OP_GNU_push_tls_address` on ELF.
 
-Limits remain native ELF TLS images/relocations, TLS weak/COMDAT/export,
-over-aligned Darwin runtime allocation, general-dynamic TLS, x86 execution on
-this ARM64 host, and native GC/dead stripping. The COMDAT checks here cover TLS
-interaction and preservation of the existing selection/archive/unwind tests;
-they are not a separate full COMDAT audit.
-
-Final review validation on the macOS ARM64 host:
-
-```sh
-KEEL_GNU_AS=/opt/homebrew/bin/x86_64-elf-as \
-KEEL_TEST_GNU_AS=/opt/homebrew/bin/x86_64-elf-as \
-cargo test --no-fail-fast -p keel-c -p keel-ir -p keel-codegen \
-  -p keel-asm -p keel-asm-ir -p keel-toolchain -p keel-llvm -p keel-opt -p keel-link
-cargo test -p keel-c
-cargo test -p keel-link
-cargo test --manifest-path crates/keel-cranelift/Cargo.toml --locked \
-  --target-dir target/keel-cranelift
-cargo check --workspace
-xcrun dwarfdump --verify target/tmp/tls-arm64/input.o \
-  target/tmp/tls-elf/input.o target/tmp/tls-label-collision/input.o
-git diff --check
-```
-
-The complete final nine-crate run passed **1,968 tests**, with zero failures and
-two pre-existing ignored optimizer tests: `native_clang_differential` requires
-a built small-memory binary and exclusive native lease;
-`retained_quickjs_ss493_exact_reload_activation` requires a sealed optimized
-QuickJS profile. Neither is counted as passing. This run includes all 240 C
-tests (19 section tests), all 163 linker tests (21 COMDAT tests), IR placement,
-artifact and LLVM export coverage. The separately completed full C and linker
-runs passed the same 240 and 163 tests. Cranelift passed 18 tests, workspace
-checking passed, and DWARF verification reported no errors in all three objects.
-The complete broad run was performed after the final production fixes and
-regressions, including preservation of the existing malformed-unwind diagnostic
-precedence.
+Remaining TLS limits: native ELF TLS images/relocations, TLS weak/COMDAT/export,
+over-aligned Darwin runtime allocation, general-dynamic TLS, and x86-64
+execution. The COMDAT checks here cover TLS interaction only; they are not a
+full COMDAT audit.

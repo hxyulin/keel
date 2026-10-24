@@ -33,30 +33,30 @@ aggregate copies and zeroing of up to 64 bytes in `copy_bytes_with_flags` and
 fortify calls, volatile operations, ABI, calling conventions and public IR
 contracts are unchanged. No shared alias helper is needed by this pass.
 
+## Tests
+
 `crates/keel-opt/tests/small_memory.rs` checks every length through 32,
 fallbacks, source locations, flags, ordering, determinism and zero-length
-side effects. Its opt-in native differential test generates C wrappers for
-lengths 0 through 33 and a variable length route. It compares complete
+side effects. Its ignored native differential test generates C wrappers for
+lengths 0 through 33 and a variable-length route, and compares complete
 buffers against Clang O0 and O2 with all address residues modulo 8, ten fill
-values and every memmove displacement from -33 through 33, including zero.
-Separate exact-extent source/destination tests abut protected pages at both
-ends. The native test also checks C argument evaluation at zero length,
-smokes ARM and x86 codegen and requires no memcpy call in the native 16-byte
-wrapper. Run serially under the native validation lease:
+values and every memmove displacement from -33 through 33. Exact-extent
+source/destination tests abut protected pages at both ends. It also checks C
+argument evaluation at zero length, smokes ARM and x86 codegen, and requires no
+`memcpy` call in the native 16-byte wrapper. Run it serially:
 
 ```sh
-cargo build --offline -j2 -p keel
-KEEL_SMALL_MEMORY_BIN="$PWD/target/debug/keel" cargo test --offline -j2 \
+cargo build -p keel
+KEEL_SMALL_MEMORY_BIN="$PWD/target/debug/keel" cargo test \
   -p keel-opt --test small_memory native_clang_differential -- --ignored --nocapture
-cargo test --offline -j2 -p keel-opt -p keel-ir
-cargo test --offline -j2 -p keel-c --test memory --test memory_builtins
+cargo test -p keel-opt -p keel-ir
+cargo test -p keel-c --test memory --test memory_builtins
 ```
 
-Native artifacts stay under ignored `target/`; campaign logs stay under
-ignored `suite/reports/`. The default decision accepts the audited short-copy
-kernel benefit and a bounded compile-cost tradeoff. The measured 16-byte copy
-lost its memcpy call; this does not establish an application speedup. The
-SM-only pipeline produced identical assembly for the measured 44 translation
-units and identical code in the three full applications. Wider and dynamic
-copies retain calls. See the validation handoff for exact compiler and input
-identities; no new performance claim follows from default wiring.
+## Results
+
+The measured 16-byte copy no longer calls `memcpy`; this does not by itself
+establish an application speedup. A pipeline adding only `small-memory`
+produced identical assembly for 44 measured translation units and identical
+code in three full applications. Wider and dynamic copies still call the
+library.

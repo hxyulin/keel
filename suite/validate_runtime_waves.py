@@ -138,7 +138,7 @@ def prepare():
          'harness_revision': run(['git', '-C', Path(__file__).parent, 'rev-parse', 'HEAD'], required=False).stdout.decode().strip(),
          'environment': dict(sorted(os.environ.items() & { (k, v) for k, v in os.environ.items() if k in
               ['PATH', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ', 'LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH', 'MACOSX_DEPLOYMENT_TARGET', 'OMP_NUM_THREADS', 'MALLOC_CONF', 'GLIBC_TUNABLES', 'RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS'] })),
-         'method': 'No optional Cargo features/rustflags; report OFF; AVX OFF; cc -O emits assembly; system clang assembles/links only. No LTO/PGO/native CPU/FMA/fastmath changes. CPU2 runtime/compile subprocess affinity on LinuxHost; macOS scheduler, no pin claim. Two warmup and twelve measured complete blocks; rotated and reversed order. Copy/hash canonical binary before timer. No samples discarded. Bootstrap seed42, 10000 paired block resamples.'})
+         'method': 'No optional Cargo features/rustflags; report OFF; AVX OFF; cc -O emits assembly; system clang assembles/links only. No LTO/PGO/native CPU/FMA/fastmath changes. CPU2 runtime/compile subprocess affinity on x86-64 Linux; macOS scheduler, no pin claim. Two warmup and twelve measured complete blocks; rotated and reversed order. Copy/hash canonical binary before timer. No samples discarded. Bootstrap seed42, 10000 paired block resamples.'})
 
 
 def file_identity(p):

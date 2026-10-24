@@ -44,7 +44,9 @@ helper cannot yet represent their unary semantics safely. Suffixed NOP and
 immediate PUSHW remain explicit model gaps. Addresses currently require 64-bit
 base/index registers.
 
-`cargo test --offline --locked -p keel-asm --test x86_att` checks Clang bytes,
+## Testing
+
+`cargo test -p keel-asm --test x86_att` checks Clang bytes,
 nonrelaxable ELF relocations, compiler-generated instruction bodies, syntax
 switches, diagnostics, malformed forms and Intel/typed equivalence. Clang's
 relocation oracle uses `-Wa,-mrelax-relocations=no`, matching the existing encoder's

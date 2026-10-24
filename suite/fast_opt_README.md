@@ -38,39 +38,26 @@ instructions can disappear from debug stepping just as in other optimized tiers.
 
 The goal is useful optimization at low compile cost. Runtime competitive with
 Cranelift speed and compile cost competitive with Cranelift none are measurement
-targets, not guarantees. Results and limitations for the 2026-10-19 experiment
-are in `target/fast-opt-investigation-20261019/REPORT.txt`.
+targets, not guarantees.
 
-The experiment uses a frozen HEAD archive plus only the optimizer/driver
-changes and the diagnostic example. Copy `fast_opt_probe.rs` to that archive's
-`crates/keel/examples/fast_opt_probe.rs`, then build its release CLI and example
-into a private target directory. Run builds and each measurement using
-`python3 suite/fast_opt_locked.py LOG.jsonl COMMAND ...`; it holds an exclusive
-Python `fcntl.flock` on `/tmp/keel-perf-20261019.lock` and records load averages.
-`fast_opt_measure.py ARTIFACT_ROOT stages|checks|extra|bridge|runtime` records exact
-commands and refuses to overwrite measurements. It requires the saved suite
-preprocessed inputs and frozen bridge from the previous investigations.
+## Measuring
 
-`stages` records frontend, verification, optimization, codegen, assembly and
-optimizer-through-object timings separately. Raw-IR parsing and cloning are
-outside tier timings; C frontend timing includes lexing, parsing and IR lowering.
-Tier order rotates in-process, with two warmup rounds. `checks` links saved
-objects and checks kernels, exact native trap signals, Lua checksums, QuickJS
-language tests and SQLite output. `extra` runs Lua's portable upstream suite
-and the remaining QuickJS tests for None and Fast. `bridge` compiles the saved same IR through
-the existing frozen harness. Its native rows are an older backend and must not
-be presented as candidate native measurements. `runtime` randomizes arms and
-checks outputs before accepting each sample. It is a local exploratory run.
+Two diagnostic examples support compile-time measurement. They are not built by
+default; copy them into `crates/keel/examples/` and build in release mode.
 
-The bridge has unwind information disabled while native objects retain it.
-Bridge backend timings exclude C frontend, input verification and Keel IR
-optimization. Account for these different services and stage boundaries when
-interpreting results. The Lua bridge subset is a compile workload; complete
-native Lua and QuickJS are separate application checks.
+- `fast_opt_probe.rs`: `fast_opt_probe REPS OUTDIR INPUT.keel|INPUT.i ...`
+  times frontend, verification, optimization, codegen, assembly and
+  optimizer-through-object separately for each tier, rotating tier order with
+  two warmup rounds. Raw-IR parsing and cloning are outside tier timings; C
+  frontend timing includes lexing, parsing and IR lowering. The backend uses
+  default selection and Full allocation in every arm, with native unwind
+  information retained.
+- `fast_opt_frontend.rs`: `fast_opt_frontend REPS INPUT.i ...`, built with
+  `--features keel-c/profile`, reports lex, parse, IRgen, frontend cleanup and
+  final IR destruction, and checks staged versus public Debug IR equality. Do not
+  mix these instrumented stage numbers into ordinary compiler totals.
 
-For a separate frontend/lowering breakdown, copy `fast_opt_frontend.rs` to a
-frozen checkout's `crates/keel/examples/`, build with `--features keel-c/profile`
-in a separate private target directory, and run it under the same lock. It
-checks staged versus public Debug IR equality and reports lex, parse, IRgen,
-frontend cleanup and final IR destruction. Do not mix these instrumented stage
-numbers into the ordinary compiler totals.
+`fast_opt_measure.py` drove the original Fast tier experiment (stage timings,
+native correctness checks for kernels, Lua, QuickJS and SQLite, and randomized
+runtime samples). It expects investigation artifacts under `target/` that are
+not part of the repository, so it is not a general-purpose harness.

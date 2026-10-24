@@ -50,7 +50,7 @@ def fmt(r):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('--evidence', type=Path, required=True, help='directory with machost/ and linuxhost/ evidence')
+    ap.add_argument('--evidence', type=Path, required=True, help='directory with macos-arm64/ and linux-x86_64/ evidence')
     ap.add_argument('--output', type=Path, required=True)
     args = ap.parse_args()
     summary = {'ratio_direction': 'lower is faster; numerator/denominator recorded in contrasts',
@@ -61,7 +61,7 @@ def main():
              'Intervals are seeded 95% paired bootstrap intervals (10,000 resamples). '
              'Every configuration has two warmup and twelve measured complete blocks, with rotated/reversed order. '
              'No samples are removed. Statistical labels describe this campaign; small effects remain subject to host/background limits.', '']
-    for host in ['machost', 'linuxhost']:
+    for host in ['macos-arm64', 'linux-x86_64']:
         root = args.evidence / host
         data = {n: json.loads((root / (n + '.json')).read_text()) for n in
                 ['provenance', 'build', 'checks', 'runtime', 'compile', 'inspection']}

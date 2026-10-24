@@ -1,9 +1,9 @@
 # Bounded x86 compiler-output instruction support
 
-The intact Clang Lua and SQLite inputs in the 2026-10-20 assembler profile
-motivated these additions. They extend the assembler and shared assembly model;
-they do not change instruction selection or establish full compiler-output
-compatibility.
+These assembler additions let Keel assemble the Clang-generated Lua and SQLite
+assembly used by the application suite. They extend the assembler and shared
+assembly model only; instruction selection is unchanged, and this is not full
+compiler-output compatibility.
 
 `cmpeqsd`, `cmplesd`, `cmpneqsd`, and `cmpordsd` select legacy `cmpsd`
 predicates 0, 2, 4, and 7. They take an XMM destination and an XMM or
@@ -42,11 +42,13 @@ Other x87 instructions and unsupported directives remain errors. Existing
 memory encoding supplies FS/GS, address REX, SIB, displacements and fixups;
 x87 data widths never introduce REX.W or a 16-bit operand-size prefix.
 
-`x86_compiler_output` tests compare `.text` and relocation offsets, ELF types,
+## Testing
+
+`cargo test -p keel-asm --test x86_compiler_output` compares `.text` and relocation offsets, ELF types,
 addends and target names against installed Clang in both dialects. GNU as is
 also checked when an existing x86 assembler is found (`KEEL_GNU_AS` overrides
 discovery). The tests cover every stack index, both register destinations,
 subtraction direction, explicit/default operands, all supported memory widths,
 extended addressing, typed/text equivalence, formatting round trips, malformed
-typed registers, and invalid operands. Optional GNU coverage and native runtime
-coverage must be reported separately from Clang encoding checks.
+typed registers, and invalid operands. These are encoding checks; they do not
+execute the x87 code natively.

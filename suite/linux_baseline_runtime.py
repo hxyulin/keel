@@ -9,7 +9,7 @@ byte-identical, independently linked copies of one reference compiler's build
 
 `launch` is ordinary, unprivileged process timing: wall time from spawn to
 reap, normal ASLR and page backing, one pinned CPU, rotated arm order per
-round, every output checked. On LinuxHost it is known to be confounded by
+round, every output checked. On the x86-64 Linux host it is known to be confounded by
 executable page backing (docs/executable-page-backing.md); keep it separate
 from controlled results.
 """

@@ -1,4 +1,4 @@
-//! Reduced glibc declarations from the LinuxHost application-input failures.
+//! Reduced glibc declarations from the x86-64 Linux application-input failures.
 use keel_c::{Options, PreprocessOptions};
 use keel_ir::Target;
 

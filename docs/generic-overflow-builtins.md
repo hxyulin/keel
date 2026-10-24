@@ -62,84 +62,33 @@ division, wider IR type, backend modification, or runtime helper is involved.
 Synthesis is a fixed sequence per call. The full i128 multiplication path
 uses three i128 low multiplies, two unsigned add-with-carry checks, and limb,
 sign, and range operations. It emits more operations than the existing
-fixed-type hardware-flag path. The dedicated 192-case fixture's AArch64
-assembly was 3,302,109 bytes without IR optimization and 2,530,484 bytes with
-optimization (assembly text, including the whole test program). These are
-artifact sizes, not runtime or compiler-performance measurements; no benchmark
-was run.
+fixed-type hardware-flag path. No runtime benchmark has been run.
 
-## Validation evidence (2026-10-16)
-
-Initial branch `feat/generic-overflow-builtins`, worktree
-`~/.t3/worktrees/keel/t3-56fb70cd`, was clean at
-`fca0aeec316ed2884d828bcee9fcc988bebef975`. No applicable `AGENTS.md` was found
-in this checkout or its ancestor chain. Owned changes are limited to C
-`ast.rs`, `expr.rs`, `features.rs`, `irgen.rs`, the feature-query regression,
-`tests/generic_overflow.rs`, `tests/programs/generic_overflow.c`, and this file.
-
-All commands below used `CARGO_BUILD_JOBS=1` and tests used
-`--test-threads=1`. Native AArch64 ran on MacHost, with rustc
-`1.99.0 (b940084d7 2026-09-28)` and Apple Clang
-`21.0.0 (clang-2100.3.34.2)`, target `arm64-apple-darwin27.0.0`:
+## Testing
 
 ```sh
-cargo check -p keel-c
-cargo test -p keel-c --test generic_overflow --test contracts --test memory --test environment -- --test-threads=1
-cargo test -p keel-c --test run overflow_builtins_compile_on_both_targets -- --test-threads=1
-cargo test -p keel-c --test run rejected -- --test-threads=1
+cargo test -p keel-c --test generic_overflow
+cargo test -p keel-c --test run overflow_builtins_compile_on_both_targets
 ```
 
-All passed: 4 dedicated tests, 3 contracts, 9 memory, 7 environment, and the
-two filtered frontend tests. The environment suite also compiled all fixture
-sources with Keel preprocessing.
-
-LinuxHost was checked for live load and cargo/rustc jobs before use (no build jobs;
-load `0.00, 0.00, 0.02` at the final preflight). A source export was extracted
-only into `/home/hxyulin/.t3/checkouts/generic-overflow-fca0aeec-20261016`.
-Native x86 validation used the same rustc version and Clang `23.1.1`, target
-`x86_64-pc-linux-gnu`:
-
-```sh
-cargo test -p keel-c --test generic_overflow -- --test-threads=1
-```
-
-All 4 passed. Both native hosts tested:
+The suite runs natively on AArch64 macOS and x86-64 Linux and covers:
 
 - Mixed input pairs across 12 integer types, rotated destination types, and
   every destination type for all four signed/unsigned i128 operand pairs.
   Each of 192 cases checks add/sub/mul on a 26-by-26 boundary grid and a
-  deterministic random grid: 778,752 arithmetic calls, plus effect checks.
+  deterministic random grid.
 - Both the overflow flag and all 128 stored bits contribute to output hashes.
   Cases include zero, signed minima/maxima, unsigned maxima, limb boundaries,
   products with nonzero high halves, negative zero, and narrowing/widening.
 - Clang reference executables at `-O0` and `-O2`; Keel with both Clang and
   native preprocessing and with IR optimization disabled/enabled. All outputs
-  agree. Existing fixed-type families run through the same differential helper.
+  must agree. Existing fixed-type families run through the same differential
+  helper.
 - Side-effecting operand/pointer functions, indexed expressions, aliasing,
   ignored return flags, volatile stores, boolean/enum operands, and `_Bool`
   result typing.
 - Source-located diagnostics for noninteger operands, invalid result types
   (including enum/const typedefs and atomic destinations), and wrong arity.
-- A separate 432-function type matrix verifies IR and code generation on
-  AArch64 and x86, before/after optimization, and asserts all volatile stores
-  remain present.
-
-SHA-256 identifiers for the tested code/export (documentation was added after
-validation):
-
-```text
-source export tar.gz  faf21e38f6c2f34adfdb6743093268d442d7d92ba2cc3d33a5ca8e6f8c25c5ee
-irgen.rs             5bb1ece6650c48fa43b9a6de5a26b5e435fd68188a7fba83855f9517dc065589
-generic_overflow.rs  87734d7113d5abea92af1f5f512bd5792d2515d105b1627908906e485524145a
-generic_overflow.c   04cc9c999f997f93798eb72232c47c5d3a15f55d88824e4426aed032a4b0518e
-MacHost keel-c rlib    16183605e48e20554cf8273b74e2c8cff685190ee9bfce6db055d5d2fadf627b
-MacHost test binary    d8e96600091cd6acd84262aa6059b26cbec9ac9a9b6967ec8f43fad1f9273cb8
-LinuxHost keel-c rlib    f44450f3f6032ed42484ba52ff37b9c7bff1f8b1d9761340f2421a8b88e8a1d7
-LinuxHost test binary    b9873e92487691307a06a34a0534dd903b9766ab235d599354b57c4bd52bb58e
-native stdout       57ebad9a5f6e4b61bcc99d3f074dc8b8e4a9b0d5bc6072c715446e39a1ef7b62
-```
-
-The stdout digest agrees across both hosts. No supported integer-width cases
-remain incomplete. Independent review and serialized integration are left to
-the coordinator; no main-branch edits, merge, push, nested worker, persistent
-host configuration change, or rm-nuc-01 use was performed.
+- A 432-function type matrix that verifies IR and code generation on AArch64
+  and x86, before/after optimization, and asserts all volatile stores remain
+  present.

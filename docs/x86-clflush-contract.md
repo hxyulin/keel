@@ -9,7 +9,7 @@ The caller must supply a valid readable address in ordinary live memory. Read-on
 memory is valid. Invalid addresses retain architectural faults; this is not an
 advisory prefetch or a fault-suppression API. No frontend mapping is added.
 
-## Primary-source audit
+## Architectural references
 
 [Intel SDM 253666-093US, September 2026, CLFLUSH, pp. 3-144–145](https://cdrdv2.intel.com/v1/dl/getContent/671199):
 CPUID leaf 1 EDX bit 19 independently indicates CLFSH; SSE2 does not imply it.
@@ -39,7 +39,5 @@ list no CLFSH in baseline, v2 or v3. Unlisted features require detection even if
 current CPUs implement them together. `Features::clflush`, `+clflush` and
 `-clflush` therefore represent an independent capability. NONE, legacy and all
 three levels leave it false; `Features::all()` includes it explicitly. The
-compiler and both assembler paths require that bit. The existing 2004-witness
-core witness inventory is frozen encoding evidence: CLFLUSH probes now receive
-only their necessary optional bit, without relabeling them strict-v1 operations.
-Full v1/v2/v3 compiler support remains false pending the final end-to-end audit.
+compiler and both assembler paths require that bit, so CLFLUSH is never legal
+under a plain `--cpu-level v1`, `v2` or `v3` profile without `+clflush`.

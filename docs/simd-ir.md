@@ -143,38 +143,29 @@ The bounded Fast local pass shares local rules but does not compose shuffle
 producers because it has no single-use information. Loop discovery and loop
 vectorization are unchanged.
 
-### Correctness evidence (2026-10-23)
+### Tests
 
-`cargo test -p keel-opt --offline --locked -j2` passes. The dedicated
-`vector_canonicalize` integration test checks positive and negative rules,
-all 18 shapes, noncanonical nonzero masks, signedness boundaries, effect order,
+```sh
+cargo test -p keel-opt --test vector_canonicalize
+cargo test -p keel-codegen --lib --test vector_ir --test vector_widen_aarch64 \
+  --test vector_widen_x86 --test vector_mask_proofs --test vector_canonicalize \
+  --test vector_shuffle_window --test vector_x86 --test vector_aarch64
+```
+
+The optimizer test checks positive and negative rules, all 18 shapes,
+noncanonical nonzero masks, signedness boundaries, effect order,
 out-of-layout consumers, Fast cleanup and both instruction-combiner and cleanup
 pipeline idempotence. An independent lane oracle checks all 4,096 four-lane
-outer shuffle maps over two inner maps.
+outer shuffle maps over two inner maps. The codegen test checks three selection
+tiers and two allocation tiers, exact text/direct object equality and Clang
+assembly on x86 Linux and Apple AArch64. On native Apple AArch64, original and
+optimized objects pass 256 bit-pattern cases per configuration, including
+infinities, signed zeros, signaling/quiet NaN payloads and all byte values for
+unsigned-then-signed widening. Set `KEEL_VECTOR_CANONICAL_EVIDENCE` to retain
+the generated captures. x86 output is cross-generated, not executed, by this
+test. This is finite evidence, not exhaustive FP or memory validation.
 
-`cargo test -p keel-codegen --lib --test vector_ir --test vector_widen_aarch64
---test vector_widen_x86 --test vector_mask_proofs --test vector_canonicalize
---test vector_shuffle_window --test vector_x86 --test vector_aarch64
---offline --locked -j2` passes. The new codegen test checks three selection tiers and
-two allocation tiers, exact text/direct object equality and independent Clang
-assembly on x86 Linux and Apple AArch64. On the native Apple AArch64 host, both
-original and optimized objects pass 256 bit-pattern cases per configuration,
-including infinities, signed zeros, signaling/quiet NaN payloads and all byte
-values for unsigned-then-signed widening. x86 execution was not performed in
-this track. This is finite evidence, not exhaustive FP or memory validation.
-
-Round 2 on main through `9265dcf9` passes 575 optimizer tests (two opt-in
-tests ignored) and 144 targeted codegen tests. A rebuilt release CLI passes 48
-sample/target/selector/allocator configurations: both samples, x86 v1/v2/v3 and
-baseline Apple ARM, all three selectors and both allocators, with text/direct
-object equality. Twelve ARM configurations execute the native bit-pattern
-oracle; x86 output is cross-generated and is not executed. The maintained
-`suite/simd-compare/run.py` also completes 224 rows across all four profiles,
-with eight passing capability probes and native Apple ARM correctness checks.
-This harness run requests no timing measurements. Earlier general-composition
-measurements do not describe the final supported scope.
-
-### Revised applicability and compilation-cost evidence
+### Applicability and compilation cost
 
 The four-function codegen sample covers lane/bitcast copies, a preserved qword
 shuffle chain, a nonzero splat mask and a widening chain. Its 100-copy synthetic
@@ -186,36 +177,9 @@ counterexample sample stays at 808 bytes on x86 Baseline, 440 on Trees/Full and
 148 on ARM. These are compact synthetic output-size observations, not runtime
 speedup or general application claims.
 
-The retained external release-mode cost driver parses once, then measures
-module cloning, the four-pass cleanup pipeline and destruction. Each process
-collects nine samples of 50 complete corpus cleanups, discards the first sample
-and reports the median. Parsing, backend compilation and Rust builds are
-excluded. Runs are serialized with `suite/fast_opt_locked.py` in
-baseline/revised/revised/baseline order. The comparator is the retained
-pre-feature `9ffab6bcdb610b74f9ac0fd92bfd6b1a4dd848a0` binary, whose SHA-256
-matches the original provenance. This comparison spans other main changes; it
-does not isolate the cost of this round's profitability gate.
-
-Median time per cleanup is 0.02018 versus 0.02104 ms for four scalar fixtures
-(+4.25%), 11.617 versus 11.698 ms for 34 retained Lua IR files (+0.70%), and
-0.3076 versus 0.4095 ms for the synthetic vector corpus (+33.1%). The two
-process medians for the vector corpus span 0.3063–0.3090 ms before and
-0.3970–0.4221 ms revised. Scalar output counts remain 193 of 198 input
-instructions and 51,442 of 81,220 respectively. The Lua captures are diagnostic
-application IR, not a versioned application corpus. Host load and the historical
-comparator limit causal interpretation; the vector-heavy synthetic corpus
-still pays measurable cleanup overhead. No end-to-end compiler-throughput or
-runtime benefit is claimed.
-
-Artifacts remain outside Git: `/tmp/keel-canonical-r2-evidence/` contains IR,
-assembly, objects, oracles and the 48-configuration CLI report;
-`/tmp/keel-canonical-r2-simd/report.json` contains the maintained harness results;
-`/tmp/keel-canonical-r2-cost/` contains the driver, corpus hashes, raw timings
-and binary provenance. Test/build/measurement commands and lock metadata are
-in `/tmp/keel-canonical-r2-unique.jsonl`. Reproduce the retained cleanup cost
-probe with `python3 suite/fast_opt_locked.py /tmp/vector-r2-cost.jsonl python3
-/tmp/keel-canonical-r2-cost/measure.py`. Set `KEEL_VECTOR_CANONICAL_EVIDENCE`
-when rerunning the dedicated codegen test to retain its generated captures.
+Cleanup cost is small on scalar code (under 1% on retained Lua IR) but
+measurable on the vector-heavy synthetic corpus (roughly a third slower
+cleanup). No end-to-end compiler-throughput or runtime benefit is claimed.
 
 ## x86 lowering and calling convention
 
@@ -248,8 +212,7 @@ byval/sret transport and layout-derived stack alignment. GNU empty-member Y
 layouts that Clang and GCC classify differently reject explicitly. Stack-byval
 aggregate tail calls and unnamed compound aggregate varargs retain separate
 planner/IR limitations; vector support does not establish arbitrary aggregate ABI
-coverage. See the exact supported and rejected layouts in
-[x86 coverage](x86-v3-codegen-coverage.html).
+coverage.
 
 Portable FP operations retain their numerical contract, not exact incidental
 MXCSR exception effects. Explicit x86 architectural intrinsics separately expose
@@ -272,8 +235,6 @@ The native evidence includes three selection tiers, two allocation tiers,
 normal/forced spill pools, direct/text object parity, Clang/GCC ABI interop,
 guard pages and numerical/status oracles. Finite corpus results and encoder
 inventories do not establish exhaustive architectural correctness or performance.
-Current commands, source hashes, failures and limits are retained in
-[the stage ledger](isa-stages-20261022.json) and per-family reports.
 
 ## AArch64 NEON lowering and Apple calling convention
 
@@ -300,8 +261,6 @@ and both object routes. The baseline 519-record reconciliation distinguishes
 principal-operation signatures from helper instructions and semantic recipes.
 It does not equate semantic coverage with universal one-instruction lowering.
 Optional FP16 arithmetic, crypto, SVE and SME are separate from baseline NEON.
-See [the reconciliation](neon-519-reconciliation-20261022.html) for per-record
-witnesses and limitations.
 
 ## Automatic loop vectorization
 
@@ -393,21 +352,14 @@ negative bounds, tails, and protected page boundaries. The reproducible
 without the vectorizer, plus Clang, reporting compilation and runtime separately.
 Additional cases cover sequential loops after rejected candidates, overlapping
 byte/short copies, signed 32-bit indices, and bit-preserving floating copies.
-The three-host follow-up results are recorded in
-`suite/reports/loop-vectorize-fleet-20261015.json`.
-The recognition expansion and its on/off and before/after measurements are in
-`suite/reports/loop-vectorize-recognition-20261015.json`. Use
-`--pattern range`, `--pattern inverted`, or `--pattern fixed-start` with
+Use `--pattern range`, `--pattern inverted`, or `--pattern fixed-start` with
 `bench_vectorize.py` to measure the newly supported forms; `--pattern zero`
 retains the zero-based control. `--start` selects the runtime starting index.
 
-Runtime profiles and diagnostic application probes are recorded in
-`suite/reports/app-hot-loops-20261016.json`. They identify helper-call and
+Runtime profiles of the applications identify helper-call and
 aggregate-materialization costs in QuickJS, scalar decimal formatting in SQLite,
 and bounded byte scans/short copies as future vectorization investigations.
-The probes change retained application source or IR copies; they do not add a
-compiler inliner or constant-division pass. See the runtime profiling commands
-in `suite/README.md`.
+See the runtime profiling commands in `suite/README.md`.
 
 ### Bounded ASCII prefix scans
 
@@ -515,11 +467,11 @@ selection retain their original instructions. This is a foundation for mixed-wid
 compound narrowing, packed division and the full `k_narrow` expression remain
 outside this subset.
 
-## Baseline NEON semantic extensions (2026-10-22)
+## Baseline NEON semantic extensions
 
-The implementation and outstanding families are tracked separately from assembler
-encoding coverage in `neon-ir-coverage-20261022.json` and its HTML rendering. A
-519-record assembler inventory does not establish IR or semantic completeness.
+IR implementation coverage is tracked separately from assembler encoding
+coverage: a 519-record assembler inventory does not establish IR or semantic
+completeness.
 
 Portable integer binary operations now include `vsmin/vsmax/vumin/vumax`,
 `vsabd/vuabd`, signed/unsigned halving add/subtract (`vshadd/vuhadd/vshsub/vuhsub`),
@@ -727,114 +679,47 @@ floating, multistream and Fast recipes retain their previous widths. `ALL_128`
 is unchanged. This is not general loop widening, a cost model, ABI widening,
 implicit FMA, or a vendor-header coverage claim.
 
-### Historical wide-pilot validation and measurement (2026-10-23)
+### Wide pilot status and tests
 
-Automatic widening is parked. The measurements below describe the original
-candidate (`0804a50b` recipe, originally default-wide at v3), not the revised
-128-bit defaults. No runtime gain is claimed and these measurements must not be
-reused to describe the new default behavior. There is no new benchmark campaign.
+Automatic widening is parked; every projected target prefers 128 bits by
+default, and the wide recipe only runs when a library caller opts in.
 
-Focused tests are `keel-opt --test vector_context --test loop_vectorize`,
-`keel --test vector_context`, and `keel-codegen --test x86_widen_sum`.
-Context plumbing also has `keel-codegen --test x86_features` and CLI unit tests.
-The native sum gate executes on Linux x86-64 with the required ISA, otherwise
-retaining cross-object validation only. It checks text/typed/chunked byte parity
-and operand-dependent feature legality at v1/v2/v3/v3-minus-AVX2, all three
-selection tiers, both allocators, and normal/empty register pools (48 profiles).
-Native guarded-page cases cover every length 0–81, both accessible-page edges,
-unaligned pointers, starts 0–5, signed extrema and a nonzero wrapping seed.
-Reversed ranges, negative starts/bounds and source-address scaling overflow
-exercise scalar fallback. This is finite correctness evidence, not exhaustive
-fault certification or execution on a strict-v1-only processor.
+```sh
+cargo test -p keel-opt --test vector_context --test loop_vectorize
+cargo test -p keel --test vector_context
+cargo test -p keel-codegen --test x86_widen_sum --test x86_features
+```
 
-Native release validation passed on LinuxHost (Ryzen 9 9950X3D), including the
-integrated PMULLD controls, release emission-legality guard, and independent
-optional AES/PCLMUL gates. Local clippy completed with repository warnings and
-no warning in the new regression files. Measurements used
-frozen current-main `6ff8911b` (including reviewed PMOV and PMULLD improvements) and the
-candidate, CPU 2 affinity, the shared host lock, one warmup and seven shuffled
-paired rounds. The maintained `runtime-kernels` source, driver and independent
-Python oracle were reused; all twelve cases passed at thirteen lengths for each
-compiler/profile. Runtime samples below are median ns/call, including call and
-checksum overhead, for the maintained `widen32` case:
+The signed-sum gate (which requests wide preference explicitly) checks
+text/typed/chunked byte parity and operand-dependent feature legality at
+v1/v2/v3/v3-minus-AVX2, all three selection tiers, both allocators, and
+normal/empty register pools (48 profiles). On Linux x86-64 with the required
+ISA it also executes guarded-page cases covering every length 0-81, both
+accessible-page edges, unaligned pointers, starts 0-5, signed extrema and a
+nonzero wrapping seed; reversed ranges, negative starts/bounds and
+source-address scaling overflow exercise the scalar fallback. Other tests cover
+custom legacy target and canonical overrides, explicit context hooks,
+invocation-scoped deterministic skips, malformed capabilities, schema-2
+preservation, explicit schema-3 metadata and feature fingerprints. This is
+finite correctness evidence, not exhaustive fault certification or execution on
+a strict-v1-only processor.
 
-| Length | Main v3 | Wide pilot v3 | Main / pilot |
-| --- | ---: | ---: | ---: |
-| 8 | 2.06 | 3.07 | 0.670x |
-| 17 | 2.37 | 3.30 | 0.718x |
-| 257 | 14.26 | 51.95 | 0.274x |
-| 4096 | 223.59 | 835.68 | 0.268x |
-| 65536 | 3602.33 | 13228.99 | 0.272x |
-| 1048576 | 56745.42 | 209195.89 | 0.271x |
+Switching to the 128-bit default policy left IR, objects and schema-2 reports
+(timings removed) byte-identical to the pre-context compiler across Fast/Full,
+legacy/v1/v2/v3, v3-minus-AVX2, v1-plus-AVX/AVX2, crypto features, repeated
+modifier replacement and ARM ELF/Mach-O.
 
-**The pilot regresses on this host; wider registers are not evidence of a gain.**
-At length 1048576 the seven paired main/pilot ratios range 0.269–0.278x.
-V1/v2 `widen32` instruction bytes are identical between compilers; their long
-runtime ratios are 1.000x/1.005x, with ordinary sample noise at shorter lengths.
-At v3, function text grows 256→454 bytes. The steady loop grows from 15
-instructions/8 inputs (61 bytes) to 45/16 inputs (184 bytes); the finish grows
-8→18 instructions (31→83 bytes). Neither loop spills vector accumulators. The
-baseline finish uses one vector stack store and two scalar reads; the wide
-finish uses registers. Both functions have a scalar argument spill/reload outside
-the loop. Wide lowering emits numerous scratch-register copies and separate
-legacy SSE loads alongside AVX widening/adds. A subsequent independent
-control/variant/control probe changed only the four
-legacy MOVUPS loads to VMOVUPS: 208.596 → 72.302 → 208.597 microseconds, with
-86 native oracle cases passing. This establishes a large encoding-dependent
-penalty here, not its exact microarchitectural cause. The 72.302 microsecond
-variant remains above the separately measured 56.745 microsecond baseline;
-this was not a fresh matched baseline comparison. XMM/YMM views share physical
-registers, so global mnemonic replacement
-would require an upper-half liveness proof. No backend change or unroll tuning is
-included in this context revision. Probe evidence is at
-`/tmp/keel-wide-vexload-probe-20261023` in the independent investigation.
-
-Compile time was measured separately as fresh process-to-object time for all
-twelve maintained kernels, excluding link/runtime and assembly capture. Median
-main→candidate times were 2.735→2.728 ms (v1), 2.727→2.715 ms (v2), and
-2.728→3.076 ms (v3), a 12.7% v3 increase. No compile-time or runtime improvement
-is claimed. This checkpoint supplies correctness and capability plumbing, but
-automatic widening remains parked pending independent review and fresh matched
-profitability evidence. The retained library experiment is capability-gated.
-Artifacts on LinuxHost are `/tmp/keel-wide-measure-rebased-4188196c/` (compiler hashes, exact
-flags, raw rounds, objects, assembly, disassembly and summary),
-`/tmp/keel-wide-rebased-measure-lock.jsonl`, and
-`/tmp/keel-wide-rebased-native.log`. Supplemental logs are
-`/tmp/keel-wide-rebased-final-guard.log` and
-`/tmp/keel-wide-rebased-final-optionals.log`. The compiler source snapshot is
-`/tmp/keel-wide-candidate-4188196c`. These are historical wide-pilot artifacts;
-they do not measure the revised default policy. All generated artifacts stay
-outside Git.
-
-### Revised 128-bit defaults: compatibility validation (2026-10-23)
-
-The focused suite and CLI units passed 81 tests locally and 80 on LinuxHost in
-release mode (one CLI test is macOS-only). Two benchmark-only PMULLD tests stayed
-ignored. The existing 48-profile signed-sum gate now requests wide preference
-explicitly; LinuxHost executes its guarded native oracle. Custom legacy target and
-canonical overrides, explicit context hooks, invocation-scoped deterministic
-skips, ordinary/observed parity, malformed capabilities, exhaustive public
-struct literals, schema-2 preservation and explicit schema-3 metadata all have
-focused coverage. Normalized feature fingerprints include added AES/PCLMULQDQ
-and removed AVX2 independently of preference. PMULLD remains the integrated
-SSE4.1 binary signature and its selection/encoding controls pass.
-
-Against frozen `6ff8911b` (all 1,943 baseline source blobs verified), 120
-IR/object comparisons and 120 schema-2 report comparisons (timings removed)
-match exactly. The finite matrix uses the signed-sum IR, conditional-reduction
-IR and maintained twelve-kernel C source; Fast/Full; legacy/v1/v2/v3,
-v3-minus-AVX2, v1-plus-AVX/AVX2, independent crypto and repeated modifier
-replacement; and ARM ELF/Mach-O. Main's `opt` predates feature flags, so its IR
-fixture comparisons use the original target-only 128-bit API; `cc` and object
-comparisons use the same effective feature flags on both revisions.
-
-Evidence is `/tmp/keel-wide-followup-parity-20261023/summary.json`, with exact
-comparison commands in `/tmp/keel-wide-followup-parity.py`. Serialized build/test
-commands are recorded in `/tmp/keel-wide-followup-unique.jsonl` on each host.
-LinuxHost logs are `/tmp/keel-wide-followup-native.log`,
-`/tmp/keel-wide-followup-native-context.log` and
-`/tmp/keel-wide-followup-native-cli.log` (also copied locally). These tests are
-finite correctness and compatibility evidence; no new runtime or compile-time
-performance measurement was made. Backend load/encoding changes are separate
-work and are not part of this revision. Independent parent review is required
-before integration.
+**The wide recipe regresses.** On x86-64 Linux at v3, the maintained
+`runtime-kernels` `widen32` case ran roughly 3.7x slower with the wide pilot for
+lengths of 257 elements and above (about 1.4-1.5x slower at 8-17 elements);
+v1/v2 code was unchanged. Function text grows from 256 to 454 bytes, and the
+steady loop from 15 instructions per 8 inputs to 45 per 16. Wide lowering emits
+many scratch-register copies and legacy SSE loads alongside AVX widening/adds.
+Replacing only the four legacy `movups` loads with `vmovups` recovered most of
+the loss (about 2.9x faster than the pilot) but still did not reach the 128-bit
+baseline, which points to a large SSE/AVX encoding-mixing penalty without
+establishing its exact cause. Because XMM/YMM views share physical registers,
+replacing mnemonics globally would require an upper-half liveness proof. v3
+compile time also rose about 13% for the twelve kernels. Wider registers are
+therefore not evidence of a gain, and widening stays parked until backend
+load/encoding work and fresh matched measurements justify it.

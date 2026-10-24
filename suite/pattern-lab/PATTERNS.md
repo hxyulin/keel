@@ -113,9 +113,9 @@ and metadata. These are predictions from fixed-width instruction counts;
 assembler/disassembly evidence must confirm them before measurement. x86
 encodings have variable lengths and no unassembled byte-size claim is made.
 
-This construction follows the masked-byte proof reviewed in the E3 manual ARM
-address experiment (2026-10-17). It is a new isolated fixture, not a replay of
-that application's layout, register pressure, dispatch, or reported timing.
+This construction follows the masked-byte proof from an earlier manual ARM
+address experiment. It is a new isolated fixture, not a replay of that
+application's layout, register pressure, dispatch, or reported timing.
 Null results and regressions are valid outcomes. No always-faster claim follows
 from removing instructions.
 
@@ -145,7 +145,7 @@ actual add-body affine increments, modular checksum identity, exhaustive byte
 index bounds, fold/padding correspondence, source guards/register usage, and
 MCA correspondence. Their restricted source checks do not certify assembled
 opcodes, object format, unwind data, linked ABI behavior, or machine execution.
-Independent review and harness native checks are required before any benchmark.
+Source review and harness native checks are required before any benchmark.
 Native reports must retain source/object/binary identities and unsupported
 architecture/tool statuses; source test success alone is not native correctness.
 

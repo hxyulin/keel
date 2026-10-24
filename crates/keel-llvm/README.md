@@ -5,12 +5,11 @@ an experiment for comparing frontend and optimizer output through LLVM, not a
 production LLVM backend. There is no LLVM library dependency. The API is
 `keel_llvm::export(&keel_ir::Module, TargetProfile::AppleArm64) -> Result<String, String>`.
 
-Build and use (coordinate the build/native lease when working in the parallel
-compiler campaign):
+Build and use:
 
 ```sh
-cargo build -j2 -p keel -p keel-llvm
-cargo test -j2 -p keel-llvm
+cargo build -p keel -p keel-llvm
+cargo test -p keel-llvm
 ./target/debug/keel-llvm --target arm64-apple-macosx11.0.0 input.keel -o output.ll
 clang -Wno-override-module -c output.ll -o output.o
 ```
@@ -137,15 +136,13 @@ actual pass-by-pass trace, for either exported input:
 opt -passes='verify,default<O2>,verify' -print-before-all -print-after-all -S target/llvm-compare/raw.ll -o target/llvm-compare/raw-llvm-opt.ll 2> target/llvm-compare/raw-passes.txt
 ```
 
-Initial local inventory: Apple Clang 21.0.0 (clang-2100.3.34.2), target
-arm64-apple-darwin27.0.0; rustc 1.99.0 (b940084d7 2026-09-28); cargo 1.99.0
-(5f94df478 2026-08-27). No `opt`, `llvm-as` or `llc` was found on PATH;
-`opt` was also absent from `/opt/homebrew/opt/llvm/bin`,
-`/usr/local/opt/llvm/bin`, the Command Line Tools bin and the Xcode default
-toolchain bin. Thus Clang acceptance/native correctness can be checked here,
-but no standalone LLVM pass trace has been obtained. No installation is needed.
+Apple's Command Line Tools and Xcode do not ship `opt`, `llvm-as` or `llc`;
+without a separate LLVM installation, Clang acceptance and native correctness
+can still be checked, but no pass trace is produced.
 
-Run the committed local validation harness after building both executables:
+## Validation
+
+Run the validation harness after building both executables:
 
 ```sh
 python3 crates/keel-llvm/tests/validate.py
@@ -179,10 +176,8 @@ at O0/O2 and must terminate abnormally. Rust tests cover unsupported feature
 families, whole-module buffering, quoted symbols, CLI errors, output preservation
 and temporary-file cleanup on write failure.
 
-Each harness invocation needs a fresh `--out` directory; existing manifests are
-never overwritten. Failed provisional layout/fixture checks are retained under
-`target/keel-llvm-validation-r1-*`, separately from the final committed-source
-run. `target/keel-llvm-validation/manifest.json` records every command/output,
-compiler and exporter binary hashes, source hashes, source revision/tree,
-working-tree status and tool versions, test executables and every produced artifact hash. Binary/report artifacts remain ignored.
+Each harness invocation needs a fresh `--out` directory (default
+`target/keel-llvm-validation`); existing manifests are never overwritten. The
+`manifest.json` records every command and output, compiler and exporter hashes,
+source revision and tool versions, and every produced artifact hash.
 This is a correctness exercise, not a performance campaign or speed claim.

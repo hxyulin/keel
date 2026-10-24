@@ -411,7 +411,7 @@ class Experiment:
             flags = ["--cpu", "apple-m5"] if "clang" in name else []
             self.measure(run_name, [self.a.keel, "asm", "--target", target, *flags, frozen, "-o", obj],
                          [frozen], obj, "cached-workload-asm", source.stat().st_size, repeats=3)
-        cached = Path("target/app-loop-profile/machost/sqlite")
+        cached = Path("target/app-loop-profile/macos-arm64/sqlite")
         if cached.is_dir() and not any(r["name"] == "workload-sqlite-link" for r in self.records):
             objects = []
             for name in ["shell.o", "sqlite3.o"]:

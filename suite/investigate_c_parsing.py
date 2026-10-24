@@ -289,7 +289,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "phases": ["lex", "parse", "irgen", "cleanup"], "labels": labels, "explicit_box_sites": box_sites,
         "changed_files": sorted(n for n in modified if pristine.get(n) != modified[n]),
         "pristine_sha256": pristine, "generated_sha256": modified,
-        "validation": "UNBUILT: requires leased host, independent review, normal/debug IR and diagnostic parity",
+        "validation": "UNBUILT: requires an idle host, normal/debug IR and diagnostic parity",
         "limitations": ["Error-path cleanup remains in the failing phase", "Counts are not time or allocation totals",
             "Explicit AST boxes exclude derived clones; mk excludes direct Expr constructors",
             "Ty derived clone/equality and Rc increments are not counted", "Tag probes count visited scopes, not failed hash comparisons",

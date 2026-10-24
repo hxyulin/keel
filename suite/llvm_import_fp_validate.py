@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Scalar FP importer checks; invoke through suite/fast_opt_locked.py.
+"""Scalar FP importer checks.
 
-No lock is taken here, so an aggregate runner may hold the host lease itself.
+No lock is taken here, so an aggregate runner may hold a host lock itself.
 All compiler output is consumed unchanged. --out must be a new private directory.
 FP->int comparisons use only LLVM-defined inputs (truncated value in range).
 Arithmetic NaNs compare by classification; bitcasts/constants/fneg compare bits.

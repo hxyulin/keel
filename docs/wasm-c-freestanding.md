@@ -1,158 +1,127 @@
-# Bounded public freestanding wasm32 C APIs
+# Freestanding wasm32 C profile
 
-This checkpoint extends the reviewed private [integer lowering](wasm-c-scalar-lowering.md)
-and [pointer/data profile](wasm-c-pointer-data.md), using the recognized
-[target foundation](wasm-target-foundation.md). It enables only the `keel-c`
-library APIs. CLI, optimizer, artifact transport and native output remain guarded.
-Native [ISA](userspace-isa-status.md), [intrinsic](c-x86-intrinsics.md),
-[GNU vector/mode](gnu-vector-mode.md), ABI, FP and memory contracts are unchanged.
-Parent integration and independent review remain separate.
+`keel-c` can compile one freestanding C translation unit for
+`wasm32-unknown-unknown`. The result is unoptimized IR with the WASM32 storage
+layout, intended for the `keel-wasm` runtime emitter. Most users reach this through
+the [CLI](wasm-cli.md); this page is the contract for the C library APIs. It builds
+on the [target foundation](wasm-target-foundation.md) and the earlier
+[integer lowering](wasm-c-scalar-lowering.md) and
+[pointer/data](wasm-c-pointer-data.md) work.
+
+Native ABI, FP, memory, [ISA](userspace-isa-status.md),
+[intrinsic](c-x86-intrinsics.md) and [GNU vector/mode](gnu-vector-mode.md) contracts
+are unaffected.
 
 ## Compile contract
 
-The unchanged public `Options { target, debug_info }` selects this profile only
-with `Target::Wasm32UnknownUnknown`. `compile(preprocessed_c, path, options)`
-constructs its parser with `CDataLayout::WASM32`, independently of the host.
-It checks every retained declaration and every definition before the generator's
-worklist/body pruning, then uses `verify_module_with_layout(DataLayout::WASM32)`
-on the generated module. Empty translation units are supported. Native targets
-continue selecting LP64 and native section validation.
+`Options { target, debug_info }` selects this profile when `target` is
+`Target::Wasm32UnknownUnknown`. `compile(preprocessed_c, path, options)` then:
 
-This profile accepts integer computations through 64 bits, ordinary scalar
-control flow, direct calls with plain i32/i64 arguments/results (or void return),
-bounded integer/pointer/array/record storage and defined static data pointer
-initializers. All function declarations require a prototype and a definition in
-the translation unit; unresolved functions/data are rejected, including unused
-extern declarations. A forward prototype followed by a definition is allowed.
-Pointer arithmetic retains the reviewed i64 IR offsets/conversions with wasm32
-normalization. No host import manifest or C pointer/aggregate call ABI is implied.
-Local initializers remain limited to 64 bytes; local byte-string initializers
-remain rejected. The existing size, alignment, pointer initializer, record and
-array bounds still apply.
+1. Parses with `CDataLayout::WASM32` (ILP32), independent of the host.
+2. Checks every retained declaration and every function definition for unsupported
+   features **before** the generator prunes unused bodies, so unused code cannot
+   hide an unsupported operation.
+3. Verifies the generated module with
+   `verify_module_with_layout(DataLayout::WASM32)`.
 
-Unsupported FP/extended/aggregate values, function pointers, narrow/pointer/
-aggregate call boundaries, variadics, unprototyped calls, atomics, vectors,
-VLAs, inline assembly, computed goto, debug output and native linkage/lifecycle/
-section attributes diagnose before body pruning. Wasm `import_module`,
-`import_name` and `export_name` attributes are also explicitly rejected; runtime
-exports remain caller-selected and no source import contract is implemented. Unused static definitions
-cannot hide these operations. Wasm modules skip the native-only section validator
-only after this full rejection gate. `profile::compile` explicitly rejects Wasm
-before lexing; it cannot bypass the profile through native defaults.
+Empty translation units are supported. Native targets keep LP64 and native section
+validation.
 
-`long double` has declaration-only binary128 storage (size/alignment 16), including
-typedefs, records and unevaluated layout queries. `__builtin_va_list` has opaque
-size/alignment 4 for declaration/layout queries; it deliberately cannot participate
-in value/storage/parameter use. This is no native va_list fallback or variadic ABI.
-`sizeof` and declaration support never authorize FP execution or extended values.
+### Supported
 
-A raw `Module` carries no target. Callers must retain the target/layout pairing,
-use the explicit Wasm runtime emitter and avoid native code generation and
-unaudited target-sensitive optimizer passes. Backend memory placement, exports,
-stack limits and trap lifetime follow [the runtime contract](wasm-memory-backend.md).
+- Integer computation up to 64 bits and ordinary scalar control flow.
+- Direct calls with plain i32/i64 arguments and results, or a void return.
+- Integer, pointer, array and record storage within the existing size, alignment
+  and bounds limits, and defined static data with pointer initializers.
+- Pointer arithmetic using i64 IR offsets with wasm32 normalization (see the
+  [memory backend](wasm-memory-backend.md)).
 
-## Macro and header policy
+Every function needs a prototype and a definition in the translation unit. A
+forward prototype followed by a definition is fine. Unresolved functions and data
+are rejected, including unused `extern` declarations. Local initializers are limited
+to 64 bytes, and local byte-string initializers are rejected.
 
-`predefined_macros(Wasm32UnknownUnknown, None)` supplies freestanding C11,
-ILP32, signed plain char, little endian, four-byte long/pointers/size_t/ptrdiff_t,
-eight-byte long long/intmax_t and binary128 long-double declaration limits.
-The 64-bit integer constant macros use `LL`/`ULL`; pointer integer types and
-limits retain their proper long/unsigned-long identities. GNU `word`/`pointer`
-modes are 32-bit, while `DI` stays 64-bit. No LP64, host OS, x86/ARM, WASI,
-SIMD, atomic lock-free/CAS or optional Wasm feature claims are added. `__has_*`
-capability queries remain conservative (zero); actual `__has_include` queries
-use the same target-aware lookup as `#include`.
+### Rejected
+
+FP, extended and aggregate values; function pointers; narrow, pointer and aggregate
+call boundaries; variadics; unprototyped calls; atomics; vectors; VLAs; inline
+assembly; computed goto; debug output; and native linkage, lifecycle and section
+attributes. The Wasm `import_module`, `import_name` and `export_name` attributes are
+rejected explicitly rather than silently ignored: exports are chosen by the caller
+and there is no source-level import contract. The native-only section validator is
+skipped for Wasm only after this rejection gate. `profile::compile` rejects Wasm
+before lexing.
+
+### Declaration-only types
+
+- `long double` has declaration-only binary128 storage (size and alignment 16), so
+  typedefs, records and `sizeof` work.
+- `__builtin_va_list` has opaque size and alignment 4 for declarations and layout
+  queries, and cannot be used as a value, parameter or storage. There is no native
+  `va_list` fallback and no variadic ABI.
+
+Declaration support never authorizes FP execution or extended values.
+
+### Using the output
+
+A raw `Module` carries no target. Keep the target/layout pairing yourself, use
+`keel_wasm::emit_wasm32_runtime_module` (optionally after the WASM32
+[basic optimization profile](wasm-basic-optimization-audit.md)), and never pass the
+module to native code generation or other optimizer pipelines. Memory placement,
+exports, stack limits and trap behavior follow the
+[runtime contract](../crates/keel-wasm/README.md).
+
+## Macros and headers
+
+`predefined_macros(Wasm32UnknownUnknown, None)` describes a freestanding C11 ILP32
+target: signed plain `char`, little endian, four-byte `long`, pointers, `size_t` and
+`ptrdiff_t`, eight-byte `long long` and `intmax_t`, and binary128 `long double`
+limits. 64-bit constant macros use `LL`/`ULL`, and pointer-sized integer types keep
+their `long`/`unsigned long` identities. GNU `word`/`pointer` modes are 32-bit and
+`DI` is 64-bit. No LP64, host OS, x86/ARM, WASI, SIMD, lock-free atomic or optional
+Wasm feature macros are defined. `__has_*` capability queries conservatively return
+zero, while `__has_include` uses the same lookup as `#include`.
 
 `preprocess(raw_c, path, &PreprocessOptions { target: Wasm32UnknownUnknown, .. })`
-uses the ordinary local directory for quoted includes, explicit `include_dirs`
-and `system_include_dirs` in that order, then only embedded `stddef.h`,
-`stdint.h`, `limits.h`, `stdbool.h`, `float.h`, `stdalign.h`, `stdarg.h` and
-`stdnoreturn.h`. The existing portable headers derive declarations from this
-macro inventory; no host include-next fallback is enabled. Vendor intrinsic
-headers (including private Keel wrappers), `stdatomic.h` and libc are unavailable
-from the embedded inventory. Explicit user directories can supply their own
-headers and take precedence. The caller owns those headers' target compatibility.
-Absolute include names are rejected for Wasm; ordinary relative source/header
-includes remain supported. No implicit `/usr/include`, SDK, framework, CPATH,
-C_INCLUDE_PATH, SDKROOT or compiler resource discovery runs on this path.
-Both an explicit sysroot and any Darwin deployment setting are rejected.
-Native search and embedded-header behavior remain unchanged.
+searches, in order:
 
-Ordered user macro definitions/undefinitions retain their existing semantics;
-they cannot change the parser's explicit target/model or authorize unsupported
-operations. `dump_macros` returns this same inventory after overrides.
-`preprocess_with_stats`, when built with `profile`, uses exactly the same guarded
-preprocessing path. Compile profiling remains unavailable as described above.
+1. the including file's directory (quoted includes),
+2. explicit `include_dirs`, then `system_include_dirs`,
+3. the embedded headers `stddef.h`, `stdint.h`, `limits.h`, `stdbool.h`, `float.h`,
+   `stdalign.h`, `stdarg.h` and `stdnoreturn.h`.
 
-## Validation and scope
+Vendor intrinsic headers (including Keel's private wrappers), `stdatomic.h` and libc
+headers are not available. Your own include directories can supply headers and take
+precedence; you are responsible for their target compatibility. Absolute include
+names are rejected. There is no implicit `/usr/include`, SDK, framework, `CPATH`,
+`C_INCLUDE_PATH`, `SDKROOT` or compiler resource-directory lookup, and an explicit
+sysroot or any Darwin deployment setting is rejected.
 
-`wasm_profile` checks public preprocessed-C layout, empty units, declaration-only
-extended types, native LP64 controls and rejection of unsupported bodies,
-prototypes, externs, debug/profiling and unused section/linkage/lifecycle attrs.
-`wasm_freestanding` preprocesses the maintained raw fixture through embedded
-headers, verifies actual WASM32 IR, emits the bounded runtime module, and uses
-Node's independent validator/runtime for repeated checksum, local array, direct
-helper and static pointer execution with memory sentinels. Existing Clang checks
-the declaration fixture and the shared target macro inventory independently.
-Native macro/header/type/ABI and private Wasm runtime tests remain controls.
-Negative tests cover host/vendor/private headers, include capability queries,
-sysroot/deployment, ordered overrides and ambient host paths in a subprocess.
-Generated evidence remains outside Git; no package/toolchain installation or
-performance campaign is part of this checkpoint.
+User `-D`/`-U` definitions keep their ordered semantics but cannot change the target
+model or enable unsupported operations. `dump_macros` reports the inventory after
+overrides. `preprocess_with_stats` (with the `profile` feature) uses the same path.
 
-Use the shared suite lock and existing pinned toolchain/features, for example:
+## Testing
+
+- `wasm_profile`: preprocessed-C layout, empty units, declaration-only extended
+  types, native LP64 controls, and rejection of unsupported bodies, prototypes,
+  externs, debug/profiling and unused attributes.
+- `wasm_freestanding`: preprocesses a raw fixture through the embedded headers,
+  verifies WASM32 IR, emits a runtime module and runs it under Node (checksum, local
+  array, direct helper, static pointers, memory sentinels). Clang independently
+  checks the declaration fixture and the shared macro inventory.
+- Negative tests cover host, vendor and private headers, include capability
+  queries, sysroot/deployment settings, ordered overrides and ambient host paths.
 
 ```sh
-python3 suite/fast_opt_locked.py /tmp/wasm-c-unique.jsonl \
-  cargo test --offline --locked -j2 -p keel-c --features profile
-python3 suite/fast_opt_locked.py /tmp/wasm-c-release-unique.jsonl \
-  cargo test --release --offline --locked -j2 -p keel-c \
-  --features profile --test wasm_profile --test wasm_freestanding \
-  --test wasm_target_unavailable --test environment --test contracts \
-  --test gnu_types --test x86_intrinsics
+cargo test -p keel-c --features profile \
+  --test wasm_profile --test wasm_freestanding --test wasm_target_unavailable
 ```
 
-This remains a bounded single-translation-unit library profile. No public CLI
-Wasm output, optimizer enablement, native bridge, general C ABI, libc/WASI,
-imports, dynamic linking, FP execution or performance claim is established.
+The full `cargo test -p keel-c --features profile` run includes the native
+macro, header, type and ABI controls. Tests need `node` and `clang` on `PATH`.
 
-## Independent C review (2026-10-24)
+## Limits
 
-The independent review reapplied C candidates `756f1611` and `2331a270` over
-`05fe6c68` plus the separate guarded Target prerequisites. It audited public
-preprocessed compilation, raw preprocessing and profiling, explicit model
-selection and verification, pre-pruning storage/signature/attribute gates,
-builtin capability ownership, macro identities and suffixes, portable headers,
-ambient include isolation, and native controls. Target CLI/link policy remains
-owned by the separate Target review; this C review does not approve that policy.
-
-One correctness finding was fixed: `export_name`, `import_module` and
-`import_name` fell through the generic ignored-attribute parser, silently losing
-Wasm symbol contracts. A public-compile regression reproduced acceptance before
-the fix. These attributes now diagnose explicitly on the Wasm target, including
-unused definitions; native handling is unchanged. Existing Clang independently
-emitted `wasm-export-name` metadata for the renamed-export witness. New negative
-coverage also checks opaque `va_list`/binary128 storage and values after raw
-header preprocessing, native capability macro families, more ambient include
-environment variables, and a fake on-disk `<keel>/include` fallback inventory.
-
-At reviewed C code `38175e39`, the full C debug suite with `profile` passed 321
-tests. Focused release passed 41 tests across `wasm_profile`, `wasm_freestanding`,
-`wasm_target_unavailable`, `environment`, `contracts`, `gnu_types` and
-`x86_intrinsics`. Production `cargo check -p keel-c --features profile` passed.
-Public raw-C execution ran with Node's independent Wasm validator/runtime;
-Clang declaration checks and the inventory oracle comparing over 250 shared
-macros also passed. Private Wasm pointer/data execution and native LP64/ABI/header
-controls passed in the full debug run. This remains finite subset validation,
-with the compile/runtime/ABI limitations above retained.
-
-All Rust validation used `CARGO_CACHE_LINKS=0`, the shared suite lock, existing
-pins/default cargo cache, and `--offline --locked -j2`. Logs and lock metadata are
-`/tmp/wasm-c-review-{final-debug,release,prod}-20261024-a60b.{log,jsonl}`;
-the metadata regression's before/after logs are
-`/tmp/wasm-c-review-metadata{-fixed,}-20261024-a60b.log`.
-Generated LLVM evidence is `/tmp/wasm-c-review-metadata-a60b.ll`.
-Changed tests pass targeted rustfmt checks and the diff passes whitespace checks.
-Workspace-wide `cargo fmt --all -- --check` reports existing unrelated formatting
-differences; this review did not reformat those files. No performance, remote
-host, installation, main integration or cleanup work was performed.
+This is a single-translation-unit freestanding profile. There is no general C ABI,
+libc or WASI, imports, dynamic linking or FP execution.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Correctness-only serial validation, to run after an explicit root lease grant.
+"""Correctness-only serial validation; run manually on an otherwise idle host.
 Uses an already built Keel; does not build Rust or measure performance.
 """
 import argparse
@@ -84,7 +84,7 @@ def main():
                  out / (variant + '.keel'), '-o', stem.with_suffix('.s')])
             run([keel, 'compile', '-O', '--opt-tier', 'none', '--target', target, '--emit-object',
                  out / (variant + '.keel'), '-o', stem.with_suffix('.o')])
-    assert platform.system() == 'Darwin' and platform.machine() == 'arm64', 'native driver requires local MacHost'
+    assert platform.system() == 'Darwin' and platform.machine() == 'arm64', 'native driver requires macOS arm64'
     common = ['clang', '-O2', '-fno-lto', '-fno-strict-aliasing', '-ffp-contract=off']
     run(common + ['-c', fixture / 'driver.c', '-o', out / 'driver.o'])
     run(common + ['-c', fixture / 'hot.c', '-o', out / 'clang.o'])

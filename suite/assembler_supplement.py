@@ -33,7 +33,7 @@ def main():
     save(work / 'supplement-identity.json', {'script_sha256': digest(Path(__file__).read_bytes()),
          'profiler_sha256': digest(profiler.read_bytes()),
          'private_build_command': ['cargo', 'build', '--release', '--offline', '--locked',
-             '--manifest-path', '/tmp/keel-machost-baseline-20261019.O6wiDXVg/src/Cargo.toml',
+             '--manifest-path', str(work / 'src/Cargo.toml'),
              '--target-dir', str(work / 'private-build'), '-p', 'keel-asm', '--example', 'profile'],
          'utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())})
 

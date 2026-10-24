@@ -1,16 +1,17 @@
-# Bounded raw-IR wasm32 memory checkpoint
+# wasm32 memory backend
 
-Based on main `4f9f49c0`, following the reviewed
-[scalar backend](wasm-scalar-backend.md) and
-[explicit IR storage layout](wasm-ir-layout.md). This implements a library-only
-memory milestone from the [layout plan](wasm32-layout-plan.md). It does not enable
-C compilation, a Target/CLI route, optimization passes, static data, a software
-stack or a C/pointer call ABI. The private
-[C layout](wasm-c-layout-foundation.md) and
-[integer evaluation](wasm-c-integer-evaluation.md) work remains separate.
-Native ABI, FP, ISA, memory and intrinsic behavior is unchanged.
+`keel_wasm::emit_wasm32_memory_module` extends the
+[scalar backend](wasm-scalar-backend.md) with one fixed linear memory, loads and
+stores, pointers and narrow-integer conversions. It uses the
+[explicit IR storage layout](wasm-ir-layout.md). The runtime profile
+(`emit_wasm32_runtime_module`, see the [crate README](../crates/keel-wasm/README.md))
+builds on this contract and adds static data and a software stack; the CLI always
+uses the runtime profile.
 
-## Additive API and memory ownership
+This page is the reference for memory, pointer and conversion semantics shared by
+both profiles.
+
+## API and memory ownership
 
 ```rust,ignore
 use keel_wasm::{emit_wasm32_memory_module, Export, Options, Wasm32MemoryOptions};
@@ -23,43 +24,33 @@ let bytes = emit_wasm32_memory_module(&module, &Wasm32MemoryOptions {
 })?;
 ```
 
-The existing `Options { exports }` and `emit_module` API and accepted subset remain
-unchanged. Only the new entrypoint accepts the memory/pointer/conversion subset
-below. Both return complete validated bytes or `Diagnostic`, with no partial
-publication or input mutation. Supply raw, unoptimized IR produced explicitly
-for wasm32; native memory/layout optimizer assumptions have not been audited.
-The caller owns layout provenance. An IR module does not record a target and
-native C IR cannot be relabeled as wasm32.
+`emit_module` and its accepted subset are unchanged; only the memory and runtime
+entry points accept the features below. All return complete validated bytes or a
+`Diagnostic`, without partial output or input mutation. Supply raw, unoptimized IR
+produced for wasm32; the caller owns that layout provenance.
 
-The module defines exactly one owned unshared wasm32 memory, exports it under
-`export_name`, and supplies no imports. Initial and maximum size both equal
-`pages` in 64 KiB units. The inclusive page range is 0..=65536; validation uses
-u64 byte arithmetic, including the valid 4 GiB maximum without host-size overflow.
-Acceptance of a binary does not guarantee the host can allocate its memory.
-Tests validate the 65536-page encoding without instantiating it.
-The memory export name must be nonempty, exact UTF-8 and distinct from every
-function export name. Unicode and embedded NUL are accepted as Wasm strings.
-Function export rules retain the scalar contract (including exact names, unique
-names and required defined functions). Neither function nor memory export names
-are inferred. Invalid names/options return an error.
+The module defines exactly one owned, unshared memory, exports it under
+`export_name`, and has no imports. Initial and maximum size both equal `pages`
+(64 KiB units, 0..=65536). Validation uses u64 arithmetic, so the 4 GiB maximum is
+representable; whether a host can allocate it is a separate matter.
 
-Memory starts zeroed; the host may supply bytes by writing the exported memory
-and observe effects after synchronous calls. There are no data segments,
-allocator, heap, memory-growth instructions, imported memories or extra memories.
-The fixed maximum prevents host growth by positive pages, too. The low/null
-region is **not reserved or protected**: address zero is ordinary accessible
-memory when the configured size and access width permit it.
-Engine bounds checks trap if any byte of an access footprint lies outside
-memory. There is no individual object, lifetime or software-stack bounds claim.
+The memory export name must be nonempty and distinct from every function export
+name. Any valid UTF-8 string is accepted (including non-ASCII and embedded NUL).
+Function exports follow the scalar rules.
 
-## Pointer and scalar contracts
+Memory starts zeroed. The host may write the exported memory and observe effects
+after synchronous calls. There are no data segments in this profile, no allocator,
+no growth instructions and no imported or extra memories. The low/null region is
+**not reserved or protected**: address zero is ordinary memory. The engine traps if
+any byte of an access lies outside memory; there are no per-object, lifetime or
+stack bounds.
 
-Function parameters/results, direct callee tables and declarations keep the
-original i32/i64 normal scalar ABI. Pointer and i8/i16 function signatures are
-rejected even for unexported/internal functions. A host passes an offset as an
-i64 scalar, with `inttoptr.ptr` in the IR. An i32 scalar offset must first use
-`uext.i64`, then `inttoptr.ptr`. These are explicit raw-IR operations, not a C ABI.
-For example:
+## Pointers
+
+Function parameters, results and direct-call signatures keep the plain i32/i64
+scalar contract. Pointer and i8/i16 signatures are rejected even on internal
+functions. A host passes an address as an i64 scalar and the IR converts it with
+`inttoptr.ptr`; an i32 address must first be widened with `uext.i64`:
 
 ```text
 func @read(i64) -> i64 {
@@ -71,159 +62,78 @@ block0(v0: i64):
 }
 ```
 
-Internal pointer values use Wasm i32 locals; pointer storage footprint uses
-`keel_ir::DataLayout::WASM32.pointer_bytes()` (four), never the host model.
-The unchanged IR verifier requires i64 pointer offsets/conversions:
+Pointer values live in Wasm i32 locals and occupy four bytes in memory
+(`DataLayout::WASM32.pointer_bytes()`). The IR verifier keeps i64 pointer offsets
+and conversions, with these wasm32 semantics:
 
 - `inttoptr.ptr(i64)` keeps the low 32 bits.
-- `ptrtoint.i64(ptr)` zero-extends the normalized unsigned address to i64.
-- `ptradd(ptr, i64)` adds the low 32 offset bits with i32 modular wrap.
-  Every memory instruction has memarg offset zero; no folded offset can move
-  this wrap after the engine's nonwrapping effective-address calculation.
+- `ptrtoint.i64(ptr)` zero-extends the unsigned address to i64. Consequently
+  `ptrtoint(inttoptr(x))` is not an identity: high bits are lost.
+- `ptradd(ptr, i64)` adds the low 32 bits of the offset with i32 wrap-around.
+  Every memory instruction uses memarg offset zero, so no folded offset can move
+  this wrap after the engine's non-wrapping effective-address calculation.
 - Pointer `eq`, `ne`, `ult`, `ule`, `ugt`, `uge` compare normalized address bits.
-  Signed pointer comparison predicates are rejected.
-- Pointer select/block parameters/parallel edge copies are supported. A pointer
-  loaded from memory has the same normalized i32 representation. No function
-  addresses, tables, pointer relocations or pointer-call signatures are supported.
+  Signed pointer comparisons are rejected.
+- Pointers may flow through `select`, block parameters and parallel edge copies.
+  There are no function addresses, tables or pointer-call signatures.
 
-`iconst` remains an integer operation: i8/i16/i32/i64 are accepted and constants
-truncate to the IR width; `iconst.ptr` fails the unchanged IR verifier. Form
-constant pointers with `iconst.i64` followed by `inttoptr.ptr`.
+`iconst.ptr` is not valid IR; form a constant pointer with `iconst.i64` followed by
+`inttoptr.ptr`. Integer constants of i8/i16/i32/i64 truncate to their width.
 
-Integer and pointer loads/stores access exactly 1/2/4/8 bytes for i8/i16/i32/i64,
-and exactly four for ptr, in little-endian order. FP, i128 and vectors are rejected
-for both memory and value operations. Unaligned ordinary accesses work with
-alignment one. Alignment flags must be nonzero powers of two; encoded alignment
-hints are capped at natural access width and never widen access or insert an
-alignment trap. `notrap` remains the producer's promise; it does not suppress
-engine checks or cause loads to be removed/hoisted. Volatile and ordinary memory
-operations emit in IR layout execution order, including across direct calls.
-Volatile operations are neither atomic nor fences; shared memory/atomics are
-unsupported. There are no hidden optimizer passes.
+## Loads and stores
 
-Internal i8/i16 values maintain canonical unsigned low-bit representations in
-i32 locals. Loads zero-extend into that representation. Explicit `sext` interprets
-the source sign bit; `uext` preserves unsigned bits. `trunc` discards high bits
-and normalizes the destination. All widening/narrowing pairs among i8/i16/i32/i64
-are supported; i8-to-i16 signed extension also normalizes its 16-bit result.
-MVP shifts implement narrow sign extension, avoiding optional sign-extension
-instructions. Narrow stores write only the low byte/word. Constants, loads,
-select/block transport and integer conditions preserve normalization. Narrow
-arithmetic, comparisons and switch data remain rejected; i8/i16 may be shift
-counts for the existing i32/i64 shifts, with normal modulo-width count semantics.
-No general narrow arithmetic, unary operations, FP/conversions or SIMD support
-follows from the conversion subset.
+- i8/i16/i32/i64 accesses touch exactly 1/2/4/8 bytes, pointers exactly 4, in
+  little-endian order. FP, i128 and vectors are rejected.
+- Unaligned accesses work. Alignment flags must be nonzero powers of two; the
+  encoded hint is capped at the natural width and never widens an access or adds
+  an alignment trap.
+- `notrap` is a producer promise. It does not suppress engine bounds checks and the
+  backend never removes or hoists loads because of it.
+- Volatile and ordinary memory operations are emitted in IR layout order, including
+  across calls. Volatile accesses are neither atomic nor fences; shared memory and
+  atomics are unsupported.
 
-## Preflight and remaining exclusions
+## Narrow integers
 
-Both entrypoints run the IR verifier, then preflight the whole module, including
-unused declarations, direct callee and indirect signature tables, unexported
-functions and unreachable instructions still in layout. Every unsupported
-instruction/contract fails before encoding. The scalar rejection list remains
-in force except for the explicitly listed additions above. In particular:
+i8 and i16 values are kept as canonical zero-extended bit patterns in i32 locals.
+Loads zero-extend; `sext` interprets the source sign bit; `uext` preserves unsigned
+bits; `trunc` discards high bits and renormalizes. All widening and narrowing pairs
+among i8/i16/i32/i64 are supported, implemented with MVP shifts rather than the
+optional sign-extension instructions. Narrow stores write only the low byte or word.
 
-- All `Module.data`, including unused definitions and external declarations,
-  are rejected, as are function data-symbol tables, even unused. No static
-  layout/initializers/relocation/section/RTTI/TLS contract is provided.
-- Stack slots, stack addresses, dynamic stack allocation, save/restore,
-  introspection and all intrinsics remain rejected. There is no linear-memory
-  software stack, frame placement, exhaustion check, restoration or reentrancy
-  contract. Ordinary direct recursion and Wasm locals retain the scalar backend
-  behavior; engine call-stack exhaustion is engine behavior.
-- Imports, indirect/tail calls, variadics, aggregate/extended FP ABI, explicit
-  operand ABI, multiple returns, non-C calling-convention spelling, returns_twice,
-  EH, weak/ODR, lifecycle/retain/section contracts and architectural instructions
-  remain rejected. No native helper or approximate-FP fallback is introduced.
+Narrow arithmetic, comparisons and switches are rejected. i8/i16 values may be
+shift counts for i32/i64 shifts, with the usual modulo-width count semantics.
 
-The encoder and independent `wasmparser::Validator` retain the explicit
-WebAssembly 1.0 feature set. No dependency versions/features or pins changed.
-Node independently validates, compiles, instantiates and executes runtime
-fixtures. No install, remote host, timing or performance campaign is required.
+## Rejected in this profile
 
-## Validation
+Both entry points verify the IR and then check the whole module (unused
+declarations, callee and indirect-signature tables, unexported functions,
+unreachable code) before encoding. Beyond the scalar rejection list:
 
-`crates/keel-wasm/tests/memory.rs` covers fixed maximum encoding, export namespace
-errors, all integer/pointer footprints with byte canaries, unaligned addresses,
-zero/end-of-memory and OOB accesses, no partial OOB writes, host-written bytes,
-four-byte pointer loads/stores/dereferences, high-bit normalization, full-width
-negative offsets and wrap before addressing. BigInt width normalization provides
-an independent arithmetic/conversion oracle. Further fixtures cover all 18
-trunc/sext/uext width combinations, signed/unsigned loads, canonical narrow
-constants/transport, pointer/narrow CFG copies, pointer unsigned predicates,
-volatile order across aliasing direct calls/recursion, alignment/notrap flags,
-unused unsupported contracts and scalar opt-in invariance.
+- All `Module.data` and function data-symbol tables are rejected here; static data
+  is a runtime-profile feature.
+- Stack slots, stack addresses, dynamic stack allocation and all intrinsics are
+  rejected; the software stack is a runtime-profile feature. Ordinary recursion
+  uses Wasm locals, and call-stack exhaustion is engine behavior.
+- Imports, indirect and tail calls, variadics, aggregate or extended-FP ABI,
+  explicit operand ABI, multiple returns, `returns_twice`, exception handling,
+  weak/ODR, lifecycle, retain and section metadata, and architectural
+  instructions are rejected.
 
-Run using existing pins, shared lock and default cargo-managed storage:
+The encoder and the independent `wasmparser::Validator` use the WebAssembly 1.0
+feature set.
+
+## Testing
+
+`crates/keel-wasm/tests/memory.rs` covers the fixed maximum encoding, export name
+errors, every integer and pointer access width with byte canaries, unaligned
+addresses, end-of-memory and OOB accesses (with no partial OOB writes),
+host-written bytes, high-bit pointer normalization, negative and wrapping offsets,
+all 18 conversion width combinations, narrow values through CFG edges, volatile
+ordering across calls and recursion, and unused unsupported contracts. Node checks
+results against independent BigInt and byte oracles. The 65536-page case is
+validated without being instantiated.
 
 ```sh
-python3 suite/fast_opt_locked.py /tmp/keel-wasm-memory-unique.jsonl \
-  cargo test --offline --locked -j2 -p keel-wasm
-# Repeat the same command with --release for the release gate.
+cargo test -p keel-wasm --test memory
 ```
-
-Generated evidence remains outside Git. Parent owns independent review,
-integration and cleanup. These finite raw-IR tests do not establish Wasm C,
-software-stack, native execution or performance support.
-
-On 2026-10-24 implementation `f1eebf33` passed all eight memory tests and all
-15 unchanged scalar regressions in both debug and release on Apple ARM64,
-rustc 1.99.1 and Node v24.22.1, with zero failures/ignored tests. Both profiles
-include independent wasmparser MVP validation and Node execution. The maximum
-65536-page memory was validated/decoded only, without 4 GiB allocation.
-Locked `cargo check` and `cargo build` passed; `cargo fmt -p keel-wasm --check` and
-`git diff --check` passed. Every Rust compilation command used
-`CARGO_CACHE_LINKS=0`, the existing shared `fast_opt_locked.py` lock,
-`--offline --locked -j2` and the default cargo cache/managed target directory.
-
-Exact command records and captured output are respectively
-`/tmp/keel-wasm-memory-229be9fc-{debug,release,check,build}.jsonl` and the same
-paths ending in `.log`. Initial debug fixture parse failures (missing explicit
-`inttoptr.ptr`/`ptrtoint.i64` suffixes) were corrected before the successful
-runs; the append-only command records retain those earlier failed invocations.
-No toolchain, dependency pin/feature, cache setting or native source changed.
-Independent review/integration has not been performed by this implementation task.
-
-## Independent memory review
-
-Candidate `cb55a787` (implementation `f1eebf33`) was reapplied onto `4f9f49c0`
-in the assigned review checkout. No blocking production semantic defect was
-found. The audit checked whole-module preflight, unchanged scalar API/subset,
-i32 pointer locals and unsigned normalization, wrapping pointer addition before
-zero-offset memory accesses, exact access widths and OOB-store atomicity,
-canonical narrow values/conversions, mixed-width shift counts, parallel edge
-copies, ordered volatile accesses/calls, alignment hints and retained engine
-bounds checks. The fixed memory/export contract and explicit MVP validator
-remain bounded as documented above; no production correction was needed.
-
-Review adds two maintained boundary tests and an unaligned high-alignment-hint
-case. Node's independent BigInt/byte oracle checks every i16 bit pattern and
-chained i8-to-i16-to-i32-to-i64 sign extension; all five shifts/rotates at both
-data widths with narrow count types; zero-page instantiation/access traps;
-wrapped multi-byte addresses; every partial eight-byte overlap at the configured
-upper boundary; and no wrapped or partial OOB writes. An ordered trapping direct
-call preserves earlier stores and prevents subsequent stores. The 65536-page
-case remains validation/decoding only, without allocating 4 GiB.
-
-Tested source `ee142b3d52af4aa96f10c55fa44e2e005f29e79a` passed the complete
-`keel-wasm` suite in debug and release: ten memory tests and fifteen unchanged
-scalar regressions per profile, zero failures/ignored tests. Both profiles use
-wasmparser MVP validation and Node v24.22.1 validation/compilation/execution.
-Locked `cargo check` and `cargo build` also passed. All four Rust commands used
-`python3 suite/fast_opt_locked.py`, the existing shared lock,
-`cargo`, `--offline --locked -j2 -p keel-wasm` and existing pins,
-features/default managed storage. Exact command records and output are
-`/tmp/keel-wasm-review-42cb2153-{debug,release,check,build}.{jsonl,log}`.
-`cargo fmt -p keel-wasm --check` and `git diff --check` passed.
-
-The clean review branch was subsequently rebased onto current main
-`40bd8edba76fc44a7d18e329745e813a9b09d633`, producing source `1f773a24`.
-Only disjoint C parser files, its fixture and documentation changed in the base.
-The entire `crates/keel-wasm` tree is identical before/after rebase (Git tree
-`fef6dde42e5fa0987f55f598aefdaec0bbd66540`); `keel-ir`, Cargo manifests/lock,
-toolchain and Cargo configuration are unchanged. No additional Rust run was
-needed for that rebase. This evidence documentation follows the tested source.
-
-These finite tests do not establish a C/pointer call ABI, optimized IR support,
-software-stack behavior, 4 GiB instantiation, native execution or performance.
-No dependency/native source, toolchain/cache configuration, remote host or main
-integration changed during review. Parent owns integration and cleanup.

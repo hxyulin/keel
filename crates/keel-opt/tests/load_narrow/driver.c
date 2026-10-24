@@ -1,4 +1,4 @@
-/* Correctness only. No timers. MacHost arm64 native; both-target objects are
+/* Correctness only. No timers. macOS arm64 native; both-target objects are
  * validated separately. Protected memory tests apply only to generic_load,
  * whose original potentially faulting wide access must remain unchanged. */
 #include <stdint.h>

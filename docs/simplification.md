@@ -98,11 +98,9 @@ restoration after a custom pass exposes a literal through an alias. The native
 fixture covers signed and unsigned comparisons with literals initially on the
 left through both selectors and allocators under restricted registers.
 
-The stage comparison
-measures the previous Full compiler against this contract and initial stage on
-the same 44 preprocessed files with Keel assembly (7 paired runtime samples,
-5 paired compile samples). The candidate release binary after final formatting
-and lint cleanup is byte-identical to the measured binary.
+A stage comparison measured the previous Full compiler against this contract
+and initial stage on the same 44 preprocessed files with Keel assembly (7 paired
+runtime samples, 5 paired compile samples).
 
 | Metric | Before → after / ratio |
 |---|---:|
@@ -178,8 +176,8 @@ ranges. Code motion remains at the end of the experiments here.
 
 ## Sweep
 
-The ordering report
-compares the existing Full pipeline with four alternatives on identical
+An ordering comparison
+measured the existing Full pipeline with four alternatives on identical
 preprocessed Lua, QuickJS and SQLite sources, using Keel's assembler:
 
 - `cleanup`: another instcombine and CFG cleanup after GVN.
@@ -217,8 +215,8 @@ requiring every consumer to handle both `constant + x` and `x + constant`.
 For example, the existing AArch64 emitter folds its right operand into an
 immediate: canonicalizing `37 + x` removes a materialized constant register.
 
-The isolated comparison
-uses saved pre-change and candidate compilers with identical Full pipelines and
+An isolated comparison
+used pre-change and candidate compilers with identical Full pipelines and
 Keel assembly. It reduces literal-left cases from 518 to zero across the corpus,
 with exactly the same static IR instruction and block counts. Generated text
 shrinks by 80 bytes in Lua, 448 in QuickJS and 728 in SQLite (1,256 total).
@@ -331,8 +329,8 @@ The incremental branch-range report holds late combining/CFG cleanup constant on
 
 ## Ordering after the expanded scalar rules
 
-The new ordering comparison
-uses one immutable compiler, seven paired runtime samples, two warmups and five
+A later ordering comparison
+used one compiler, seven paired runtime samples, two warmups and five
 paired compile samples. The baseline is the former default order with all new
 scalar rules. Variants are:
 
@@ -367,7 +365,7 @@ end, so rematerialization does not fight numbering during these rounds.
 
 Across the default scalar-rule changes (Boolean, cast chains and algebra), the
 same application corpus loses 1,043 IR instructions and 3,988 text bytes relative
-to `26d2da0`. The short incremental timing screens do not establish an aggregate
+to the compiler before those changes. The short incremental timing screens do not establish an aggregate
 application runtime gain. Arithmetic and branch-range analyses remain opt-in.
 The remaining work includes select/De Morgan rewrites, richer expression and
 relational reasoning, path facts through block arguments/arithmetic, integration
@@ -375,17 +373,14 @@ of bit and interval domains, and cheaper targeted feedback between passes.
 
 ## Final paired benchmark of the complete change
 
-The before/after report
-compares Full at `26d2da0` with Full at `d6961e6`. The
-comparison against None
-uses the same current compiler for None, default Full, and the opt-in combined
-facts recipe. All use the same 44 preprocessed C files, generic target tuning,
+The before/after comparison measures Full before and after the scalar-rule and
+canonicalization changes. The comparison against None uses the same compiler
+for None, default Full, and the opt-in combined facts recipe. All use the same 44 preprocessed C files, generic target tuning,
 baseline instruction selection, full allocation, and Keel assembly on Apple M5
 Max. There are eight runtime workloads (four Lua, three QuickJS, one SQLite).
 Runtime measurements use 15 alternating paired samples after three warmups;
 compilation uses seven pairs after one warmup, excluding assembly and linking.
-Benchmark stdout matches for every pair. Existing correctness checks cover the
-same candidate binary, whose hash was revalidated against the previous report.
+Benchmark stdout matches for every pair.
 
 | Comparison | Runtime ratio (95% interval) | Compile-time ratio (95% interval) | Text delta |
 |---|---:|---:|---:|
@@ -398,7 +393,7 @@ Runtime weights the eight fixed workloads equally; compile time weights the
 three suite totals equally. `suite/summarize_passes.py` bootstraps paired ratios
 independently within each workload (20,000 samples). Its intervals describe
 measurement uncertainty on this corpus, not generalization to other programs
-or systematic machine-state bias. The report records its seed and script hash.
+or systematic machine-state bias.
 
 The complete default change measures 0.42% less runtime (interval 0.12–0.72%
 less), 3.26% less compile time, and 3,988 fewer text bytes. This supports a small
@@ -415,7 +410,6 @@ text by 10,364 bytes versus Full and raises compiler time to 55.57% above None.
 Those analyses remain opt-in. The QuickJS sort regression is a concrete target
 for subsequent profiling and profitability work.
 
-The runner now supports an empty pipeline via explicit `--opt-tier none` in
-both timing and IR census commands. Previously `-p` with an empty string was
-rejected as an empty pass name; that failed build produced no timing samples.
-The compiler and optimizer code are unchanged by this benchmark task.
+The benchmark runner measures the None tier with an explicit `--opt-tier none`
+in both timing and IR census commands; an empty `-p` string is rejected as an
+empty pass name.

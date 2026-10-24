@@ -232,8 +232,8 @@ fn debugger() {
         for command in commands {
             lldb.arg("-o").arg(command);
         }
-        // LLDB reports physical executable paths. cargo manages targets through
-        // a symlink, so normalize the resolved per-build directory as well.
+        // LLDB reports physical executable paths. The target directory may be a
+        // symlink, so normalize the resolved per-build directory as well.
         let physical_dir = dir.canonicalize().unwrap();
         let out = run_with_timeout(lldb.arg("vars"))
             .replace(physical_dir.to_str().unwrap(), "DIR")

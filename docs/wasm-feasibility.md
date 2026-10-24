@@ -1,10 +1,12 @@
 # WebAssembly output feasibility
 
-Evaluation baseline: `c1a9ef8f95640b5ad428990627ad3b6d0d85f577` (2026-10-24).
-This is a source audit and proposed contract, not implemented support or execution
-evidence. No builds, benchmarks, production changes, or remote-machine access
-were performed. The supplied AGENTS instructions apply; no additional tracked or
-ancestor AGENTS.md was found. Future Rust validation should use cargo as instructed.
+This is the original design evaluation for WebAssembly output, written as a source
+audit of commit `c1a9ef8f95640b5ad428990627ad3b6d0d85f577`. Source links below are
+pinned to that commit. The recommendations were later implemented as the
+[`keel-wasm` backend](../crates/keel-wasm/README.md), the
+[wasm32 layout design](wasm32-layout-plan.md), the
+[freestanding C profile](wasm-c-freestanding.md) and the [CLI route](wasm-cli.md);
+those pages describe current behavior.
 
 ## Recommendation
 
@@ -243,41 +245,39 @@ command would additionally need WASI imports, a compatible sysroot/libc, startup
 and `_start`/exit behavior. Later component APIs require adapters/component and
 canonical ABI work; none is delivered by this core-module checkpoint.
 
-## Small implementation checkpoints and potential owners
+## Proposed checkpoints
 
-These are proposed parallel ownership boundaries, not tasks launched by this audit.
-
-1. **Backend owner:** new crate, explicit supported-operation preflight, pointer-free
+1. **Backend:** new crate, explicit supported-operation preflight, pointer-free
    scalar bytes, typed locals, direct calls, arbitrary ordinary CFG dispatcher,
    atomic output publication. Tests: constant/add exports, diamond, nested loop,
    multiple returns, switch/default, irreducible two-entry loop, self-edge and
    cyclic phi swap, distinct arguments on two edges to the same block. Validate
    every binary independently, then execute finite fixtures in a local engine.
-2. **Layout/frontend owner:** wasm32 target and explicit layout, ILP32 C type
+2. **Layout and frontend:** wasm32 target and explicit layout, ILP32 C type
    selection, macros/header isolation, pointer arithmetic/conversion policy,
-   target-sensitive optimizer audit. Work can proceed alongside checkpoint 1,
-   but must merge before C pointer/memory claims. Tests: sizeof/alignof/offsetof
+   target-sensitive optimizer audit. This can proceed alongside checkpoint 1,
+   but must land before C pointer/memory support. Tests: sizeof/alignof/offsetof
    for pointer-containing nested structs/unions/arrays; long vs long long rank
    and constants; mode(DI)/pointer; size_t/ptrdiff_t; pointer globals/addends,
    null and high-bit addresses; negative tests for native macros/headers. Native
    layouts must remain unchanged. Start C validation without optimization.
-3. **Module/runtime owner:** explicit export/import manifest, aligned data/fixups,
-   static frame software stack, memory operations. Agree with owners 1/2 on
-   layout/options/error API first; avoid concurrent edits to their core files.
+3. **Module and runtime:** explicit export/import manifest, aligned data/fixups,
+   static frame software stack, memory operations. Agree the layout, options and
+   error API with checkpoints 1 and 2 first.
    Tests: data alignment/BSS/string/global-pointer fixups, unaligned exact-width
    accesses with sentinels, recursion and SP restoration on all returns,
    stack overflow/data overlap, OOB traps, wrong/missing import signatures,
    undeclared imports, and memmove overlap. First useful C test: exported buffer
    checksum with local array and a direct helper call, host supplies offset/len.
-4. **Validation/integration owner (parent):** CLI output branch before native
+4. **Validation and integration:** CLI output branch before native
    assembly/object emission, target/feature diagnostics, reproducible local
    validator/engine harness, and cross-checks with a pinned Clang wasm32 toolchain
    only for the claimed C subset. Differential tests cover integer edge values,
    shift counts, zero clz/ctz, signed div/rem traps, NaN/infinity/signed-zero FP,
    saturating conversions and narrow ABI extension; run supported optimized
    cases only after the layout audit. Reject every excluded family even in unused
-   declarations/bodies where its ABI or feature contract matters. No timings yet.
-5. **Separate follow-ups:** table-based indirect calls and null/signature traps;
+   declarations/bodies where its ABI or feature contract matters.
+5. **Later, separately:** table-based indirect calls and null/signature traps;
    aggregate ABI/varargs; generic SIMD; relocatable objects plus wasm-ld tests;
    explicitly versioned WASI. Each adds its own acceptance boundary. Do not
    bundle these into the initial emitter or a general backend refactor.

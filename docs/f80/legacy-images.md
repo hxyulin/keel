@@ -68,38 +68,35 @@ intrinsics, GCM retains every F80-producing/consuming instruction in its origina
 block. Pinning only the image operations would permit pure F80 computations to
 sink/hoist into the full physical stack and corrupt values. Within-block placement
 already remains unchanged in GCM; integer if-conversion excludes floating-point
-speculation by its existing allowlist. The packet tests direct GCM and the full
+speculation by its existing allowlist. Tests exercise direct GCM and the full
 optimized pipeline with pre-region binary/unary values and a post-reset F80 loop;
-its full-tag MMX seeds expose accidental numerical x87 execution in the region. Physical restored x87/MMX payloads are
+full-tag MMX seeds expose accidental numerical x87 execution in the region.
+Physical restored x87/MMX payloads are
 owned state, not SSA results. Source images containing MMX encodings are supported
 as raw legacy images; no numerical MMX conversion API is changed.
 
 Ordinary masked execution and flag-only unmasked CW seeds with no corresponding
 pending exception are supported. For every waiting form, including FLDENV/FRSTOR,
 caller must have **no pending unmasked x87 exception at entry** to the operation.
-For no-WAIT saves, pending-unmasked capture/delivery remains a separate unproved
-stage. In particular a WAIT-first access-fault test must meet that precondition;
-it cannot claim #MF/#PF priority under an unmasked pending exception. Restoring
-unmasked pending state followed by fault delivery/resumption is outside this stage.
+For no-WAIT saves, pending-unmasked capture/delivery is not covered by this
+contract. In particular a WAIT-first access-fault test must meet that
+precondition; it cannot claim #MF/#PF priority under an unmasked pending
+exception. Restoring unmasked pending state followed by fault delivery/resumption
+is outside this contract.
 This is a caller contract, like the existing owned FX image contract; no frontend
 or universal opcode selector mapping is implied.
 
-## Primary definitions and proof status
+## References
 
-Intel SDM Volume 2, document 325383-079US (March 2023), source PDF
-<https://cdrdv2-public.intel.com/774492/325383-sdm-vol-2abcd.pdf>, entries
-FLDENV, FRSTOR, FSAVE/FNSAVE, FSTENV/FNSTENV; AMD APM Volume 5, document 26569,
-revision 3.16 (November 2021),
-<https://docs.amd.com/api/khub/documents/w13cmcpL4f9MCT4WPN6eDg/content>,
-and Volume 2, document 24593 revision3.38 (November2021), section11.4.4,
-figures11-4/11-6, publisher-authored PDF mirrored at
-<https://www.scs.stanford.edu/~zyedidia/docs/x86/amd-manual.pdf> define these formats.
-The AMD primary content endpoints currently return404; this retained manual's
-SHA256 is `faab6c843145a7f45da7e3c14d9c4c3d131f3d4070f2bb2880297d077c3e8e91`.
-Intel PDF SHA256 is
-`bc4348020f5d5a27b0207c61e3c88d4e610eaf428658dc5d08a1cc84f98a719b`.
-Tag classification also follows Intel SDM Volume3B section22.18.4, rather than
-assuming arbitrary nonempty tags override the underlying payload class.
-Assembler support predates these intrinsics; typed and textual routes must agree.
-Native acceptance and full-profile completion remain false until the parent accepts
-the sealed packet on native Linux x86-64. Existing accepted gates remain unchanged.
+- Intel SDM Vol. 2, 325383-079US (March 2023),
+  <https://cdrdv2-public.intel.com/774492/325383-sdm-vol-2abcd.pdf>: FLDENV,
+  FRSTOR, FSAVE/FNSAVE, FSTENV/FNSTENV.
+- AMD APM Vol. 5, 26569 revision 3.16 (November 2021),
+  <https://docs.amd.com/api/khub/documents/w13cmcpL4f9MCT4WPN6eDg/content>.
+- AMD APM Vol. 2, 24593 revision 3.38 (November 2021), section 11.4.4, figures
+  11-4/11-6 (mirror: <https://www.scs.stanford.edu/~zyedidia/docs/x86/amd-manual.pdf>).
+- Tag classification follows Intel SDM Vol. 3B section 22.18.4, rather than
+  assuming arbitrary nonempty tags override the underlying payload class.
+
+Typed and textual assembler routes must agree. Native validation on x86-64 Linux
+has not been completed.

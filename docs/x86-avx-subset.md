@@ -1,9 +1,9 @@
-# Initial x86 AVX subset
+# x86 AVX subset
 
 AVX is opt-in through `x86::Features { avx: true, ..Default::default() }`
 and the feature-aware standalone/typed assembler APIs. The ordinary APIs reject
 these opcodes. Compiler selection uses `FeatureSelector`; the CLI contract is
-`--target-features avx`. This implementation does not implement all AVX or AVX2.
+`--target-features avx`. This is a subset; it does not implement all of AVX or AVX2.
 
 The typed assembler parses and displays these Intel-syntax forms:
 
@@ -84,9 +84,7 @@ Linux x86-64 with AVX available.
 chain in both widths for baseline/AVX output inspection or a caller-driven
 microbenchmark. No speedup claim is made without measurements on the target CPU.
 
-The guarded runtime tests passed on the i7-1360P Linux NUC. See the
-integration report for
-combined AVX/BMI application and baseline compatibility validation.
+The guarded runtime tests have passed on an Intel i7-1360P Linux host.
 
 ## Packed arithmetic extension
 
@@ -109,9 +107,10 @@ The vector runtime tests additionally exercise AVX without requiring BMI,
 including unaligned lane data, NaNs, signed zero, infinity, normal/subnormal
 values, calls, forced spills in both allocator tiers, vector arguments and
 returns. Those runtime tests remain guarded by Rust's AVX CPU/OS support check.
-These descriptions identify coverage; execution evidence for this revision is
-recorded separately and historical reports above do not validate this extension.
 
-Final packed-extension execution evidence and exact commands/hashes are in
-the scoped validation report. Independent review
-and coordinator integration remain separate steps.
+Run the encoding and runtime tests with:
+
+```sh
+cargo test -p keel-asm --test x86_avx
+cargo test -p keel-codegen --test vector_x86
+```

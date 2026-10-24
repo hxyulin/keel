@@ -18,7 +18,7 @@ the manifests, oracles, ASM, harness schema, compiler or optimization pipeline.
 There is no benchmark, native execution, cost simulator, automatic build,
 installation or optimization-success requirement.
 
-Source-only checks (small; still coordinate with active timing workers):
+Source-only checks (small; avoid running them during timing campaigns):
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover \
@@ -31,8 +31,8 @@ all sign bytes and every memory index. They exercise parsing and function
 boundaries with synthetic instruction snippets. They do not certify C parsing,
 machine encodings, ABI execution or compiler correctness.
 
-After an **explicit root build/native lease**, supply an existing executable
-and a JSON identity file with nonempty `sha256`, `revision`, `tree`,
+To capture compiler output, supply an existing executable and a JSON identity
+file with nonempty `sha256`, `revision`, `tree`,
 `build_command` and `toolchain` fields. Use full commit/tree and exact build
 argv, feature/flag/environment/toolchain identities; these are externally
 supplied provenance, not information inferred from an adjacent checkout.
@@ -42,7 +42,7 @@ supply a launcher/wrapper that hides another binary. No tool is auto-selected.
 ```sh
 python3 suite/pattern-lab/compiler-cases/capture.py --execute \
   --compiler /absolute/path/to/keel --identity /absolute/path/identity.json \
-  --output suite/reports/pattern-lab-measured-20261017/bridge/capture-001
+  --output suite/reports/pattern-lab-bridge/capture-001
 ```
 
 The output must be a new directory with an existing parent. Eight sequential
@@ -81,8 +81,8 @@ including prologue/loop/return, not just the measured body. Object code sizes
 are unavailable without assembler evidence and are recorded as null; x86 byte
 sizes must never be inferred from instruction counts.
 
-No measurements are embedded here. Join `measured_id` to the root-owned
-retained campaign records, preserving order strata, intervals, exact compiler
+No measurements are embedded here. Join `measured_id` to the retained
+campaign records, preserving order strata, intervals, exact compiler
 and source identities. Assembly shape observations do not transfer timings
 from a hand-written kernel to generated loops. Register allocation, loop
 control, unrolling and layout can differ. Branch outcome predictability is

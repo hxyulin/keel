@@ -17,15 +17,10 @@ entire access and a device contract for its port, width, and effects. There is
 no permission probing, IOPL enabling, or emulation. Fault handling is terminal
 only; arbitrary resumption is outside this contract.
 
-Primary authority: Intel SDM 093, IN Vol.2A 3-455–456, OUT Vol.2B 4-171–172,
-from `suite/evidence/full-scope-contract-audit-20261023/primary.tar.gz`, member
-`primary/intel-current.pdf`, SHA256
-`a4a62e6a7ba11a76c7753a195b825087306812aac39b930973f9168ee599f321`.
-Official pinned source:
-https://cdrdv2-public.intel.com/929349/325462-093-sdm-vol-1-2abcd-3abcd-4.pdf
-The instruction tables specify E4/E5/EC/ED and E6/E7/EE/EF, operand-size prefix
+Reference: [Intel SDM, order 325462-093](https://cdrdv2-public.intel.com/929349/325462-093-sdm-vol-1-2abcd-3abcd-4.pdf),
+IN (Vol. 2A, 3-455–456) and OUT (Vol. 2B, 4-171–172). The instruction tables specify E4/E5/EC/ED and E6/E7/EE/EF, operand-size prefix
 66 for word accesses, and no FLAGS affected by the principal instruction.
 
-Runtime proof is reserved to the root owner: only a disposable root-permitted
-guest with QEMU pc-testdev at E0..E3 (byte/word/dword latch), and explicit root
-permission. Compile-only tests do not establish device or permission behavior.
+Current tests are compile-only and do not establish device or permission
+behavior. Runtime checks require a disposable privileged guest, for example
+QEMU's `pc-testdev` at ports E0..E3 (byte/word/dword latch).

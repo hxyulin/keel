@@ -98,11 +98,4 @@ x86 ELF objects and native ELF images are generated and inspected on arm64;
 x86 execution is not claimed. Clang and `ar` are test dependencies; arm64 native
 runtime tests additionally require macOS system linking and code signing.
 
-Validation on arm64 macOS (2026-10-22): 477 focused tests passed across the C
-frontend, IR, optimizer linkage paths, weak codegen, assembler metadata/Mach-O,
-native linkers, LLVM/Cranelift rejection paths, artifact transport and CLI
-preprocessing/visibility. The CLI fixture generated 12 objects, ran six native
-executables and checked ten invalid-attribute failures. The weak runtime matrix
-ran 36 executables through Apple/Keel linking. A broader assembler test run
-stopped in the unrelated `x86_baseline_simd` GNU-assembler oracle: macOS's
-assembler invokes Clang, which rejects GNU `--64`. No x86 runtime was available.
+Run the focused suite with `cargo test -p keel-c --test weak_symbols`.

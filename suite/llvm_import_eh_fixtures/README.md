@@ -10,18 +10,14 @@ selection, exception payloads, cleanup counts/arguments and rethrow propagation.
 `edges.ll` separately exercises normal result PHIs and shared unwind PHIs,
 including values live across the throwing call.
 
-Run from the repository root, with a private Keel binary and new output path:
+Run from the repository root with a built Keel and a new output directory:
 
 ```sh
-python3 suite/fast_opt_locked.py /tmp/eh-lock.jsonl \
-  python3 suite/llvm_import_eh_validate.py \
+cargo build -p keel
+python3 suite/llvm_import_eh_validate.py \
   --libllvm "$(rustc --print sysroot)/lib/libLLVM.dylib" \
-  --keel /tmp/eh-target/debug/keel --out /tmp/eh-validation
+  --keel target/debug/keel --out target/llvm-import-eh
 ```
-
-The validator has no internal host lease. Hold `fast_opt_locked.py` around it;
-do not nest it inside `frontend_validate.py`. Builds use `cargo build --offline
---locked -j2 -p keel --target-dir /tmp/eh-target` under the same lease.
 
 The importer accepts direct C invokes with ordinary scalar/call ABI checks,
 unpacked `{ptr, i32}` landingpad results, ordered typed catches and catch-all,

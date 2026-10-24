@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="248" viewBox="0 0 720 248" role="img" aria-labelledby="assembly-t assembly-d">
+<style>
+svg{--surface:#fcfcfb;--ink:#0b0b0b;--ink-2:#52514e;--grid:#e4e3df;--keel:#2a78d6;--other:#a3a29b}
+@media (prefers-color-scheme:dark){svg{--surface:#1a1a19;--ink:#f0efec;--ink-2:#c3c2b7;--grid:#3a3935;--keel:#3987e5;--other:#6f6e68}}
+text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;fill:var(--ink)}
+.muted{fill:var(--ink-2)}
+</style>
+<title id="assembly-t">Assembly → object file (lower is better)</title>
+<desc id="assembly-d">keel asm: 5.60 ms; clang -cc1as: 16.8 ms; clang -c: 23.1 ms. keel asm is 3.0× faster than clang -cc1as. Apple M5 Max · macOS 27, median of 7 runs.</desc>
+<rect width="720" height="248" rx="10" fill="var(--surface)"/>
+<text x="24" y="38" font-size="18" font-weight="650">Assembly → object file</text>
+<text class="muted" x="24" y="60" font-size="12">Apple M5 Max · macOS 27 · median of 7 runs</text>
+<text x="696" y="40" font-size="26" font-weight="700" text-anchor="end">3.0× faster</text>
+<text class="muted" x="696" y="60" font-size="12" text-anchor="end">keel asm vs clang -cc1as</text>
+<path d="M174.0 78V186" stroke="var(--grid)"/>
+<text class="muted" x="174.0" y="202" font-size="11" text-anchor="middle">0</text>
+<path d="M261.6 78V186" stroke="var(--grid)"/>
+<text class="muted" x="261.6" y="202" font-size="11" text-anchor="middle">5</text>
+<path d="M349.2 78V186" stroke="var(--grid)"/>
+<text class="muted" x="349.2" y="202" font-size="11" text-anchor="middle">10</text>
+<path d="M436.8 78V186" stroke="var(--grid)"/>
+<text class="muted" x="436.8" y="202" font-size="11" text-anchor="middle">15</text>
+<path d="M524.4 78V186" stroke="var(--grid)"/>
+<text class="muted" x="524.4" y="202" font-size="11" text-anchor="middle">20</text>
+<path d="M612.0 78V186" stroke="var(--grid)"/>
+<text class="muted" x="612.0" y="202" font-size="11" text-anchor="middle">25</text>
+<text class="muted" x="393.0" y="226" font-size="12" text-anchor="middle">Wall time (ms) · lower is better</text>
+<text x="162" y="101.0" font-size="13" text-anchor="end" font-weight="600">keel asm</text>
+<path d="M174 87.0h94.09a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-94.09z" fill="var(--keel)"/>
+<text x="280.09" y="101.0" font-size="12" font-weight="600">5.60 ms</text>
+<text x="162" y="135.0" font-size="13" text-anchor="end">clang -cc1as</text>
+<path d="M174 121.0h290.94a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-290.94z" fill="var(--other)"/>
+<text x="476.94" y="135.0" font-size="12">16.8 ms</text>
+<text x="162" y="169.0" font-size="13" text-anchor="end">clang -c</text>
+<path d="M174 155.0h401.18a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-401.18z" fill="var(--other)"/>
+<text x="587.18" y="169.0" font-size="12">23.1 ms</text>
+</svg>

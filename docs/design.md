@@ -897,11 +897,9 @@ further folds even when block layout differs from definition order. Integer
 rules follow wrapping arithmetic; division identities require a known nonzero
 divisor, and floating-point identities are excluded. The power-of-two rules
 are exhaustively checked for i8 and at wide integer boundaries, with a
-64-subset pass matrix and native spill/selector checks. The first paired
-application measurement (Apple M5 Max) gives runtime ratio 0.973 and compiler
-ratio 1.011 versus the historical Full pipeline; 38/44 translation units
-change assembly. Raw samples and intervals are in
-`instcombine-aarch64-2026-10-15.json`.
+64-subset pass matrix and native spill/selector checks. On the Lua, QuickJS
+and SQLite application corpus (Apple M5 Max) it gave about 2.7% lower runtime
+at about 1% extra compile time versus the earlier Full pipeline.
 
 Literal extension-mask rules also run in the bounded Fast visit: an AND
 whose literal covers every source bit of a widening zero extension is
@@ -916,15 +914,6 @@ overflow-flag, alias, and native regressions cover these rules. The pipeline
 and tier defaults are unchanged; Full retains three rounds. No performance
 measurement is claimed for these local simplifications.
 
-The final default-pipeline confirmation reproduces the runtime improvement
-(2.7% geometric mean), with 1.5% extra compiler cost and 25,052 bytes less
-aggregate text (0.85%). The `-O` and explicit combining-preset assembly match
-in all 44 application files. Workspace/native tests, six application suite
-configurations, Clippy, and the Tracy feature build pass. Debugger/debug-info
-integration tests were excluded from the workspace run. Raw samples,
-compiler/source hashes and commands are in
-`default-pipeline-aarch64-2026-10-15.json`.
-
 Trivial-phi elimination checks every incoming edge, ignoring a parameter's
 own backedge value only when another incoming value anchors it. Replacement
 requires a value defined in a strictly dominating block, so values defined
@@ -935,7 +924,6 @@ Tests cover distinct edges, loop induction, SCCP aliases, reverse layout,
 128 pass subsets, and native execution with restricted register pools.
 Early placement remains excluded from defaults: placing it before GVN/GCM regressed Lua fib by
 2.21× and QuickJS fib/sort by 1.20×/1.16× in paired application measurements.
-See `phi-simplify-aarch64-2026-10-15.json`.
 
 Forwarding composes the incoming argument tuple with the outgoing jump,
 including permutations and repeated arguments. A forwarding block whose
@@ -967,8 +955,7 @@ overflow flag independently, allowing checked results to drive branches.
 Every i8 operand pair is checked against Rust overflow operations, with
 wide-boundary and native regressions. i128 folds remain conservative because
 the constant immediate cannot represent general i128 results. Application
-assembly was identical in all 44 files and compile timing was neutral; see
-`checked-fold-aarch64-2026-10-15.json`.
+assembly was identical in all 44 files and compile timing was neutral.
 Regression tests
 compare SCCP followed by all 32 subsets of the original five passes against
 an independent execution model, and
@@ -1302,8 +1289,9 @@ Some accepted extensions have deliberately limited behavior:
   [Attribute ownership, merging and emission](function-attributes.md) distinguish
   named declarations from returned-function types and indirect calls.
   GNU function-pointer `noreturn` attributes are not represented.
-  Selected unsupported linkage and lifetime attributes, including `alias` and
-  `constructor`, are diagnosed. Automatic-local `cleanup` has a
+  Selected unsupported linkage attributes, including `alias`, are diagnosed;
+  default-priority `constructor`/`destructor` and `used` have a
+  [bounded lifecycle implementation](c-lifecycle.md). Automatic-local `cleanup` has a
   [bounded scope-exit implementation](c-language-implementation-plan.md#3-reusable-scope-exit-actions-and-cleanup--bounded-milestone-implemented).
   Ordinary external weak definitions
   and references preserve their binding on both native targets; unsupported weak
@@ -1477,8 +1465,8 @@ diagnosed. See [the staged C implementation plan](c-language-implementation-plan
 
 Float/double complex values support a bounded arithmetic and ABI subset; see
 [the complex implementation stage](c-language-implementation-plan.md#6-complex-arithmetic--first-floatdouble-subset-implemented).
-Multiplication/division, extended complex types and complex varargs remain
-diagnosed.
+Multiplication/division call the target's compiler-runtime helpers; extended
+complex types and complex varargs remain diagnosed.
 
 Explicitly typed old-style (K&R) definitions support fixed-size integer,
 float/double and pointer parameters, array/function adjustment and promoted ABI
@@ -1487,7 +1475,8 @@ listed in [the implementation plan](c-language-implementation-plan.md#8-kr-defin
 
 Not supported: full variably modified types, nested functions, `_Atomic` structs, generic atomics outside the
 native size/alignment subset, vector features beyond the
-[bounded GNU subset](gnu-vector-mode.md), and C vector intrinsic headers.
+[bounded GNU subset](gnu-vector-mode.md), and x86 intrinsic headers beyond the
+[bounded subset](c-x86-intrinsics.md).
 C inline assembly has a [bounded AArch64 frontend subset](c-inline-asm.md);
 asm-goto, memory outputs, broader constraints and x86 inline assembly remain
 unsupported and diagnosed.
@@ -1877,10 +1866,10 @@ python3 crates/keel-asm/tools/numeric_cases.py --check
 
 Clang comparisons use the explicit `-mcpu=apple-m5` reference target. Native
 numeric tests query each required `hw.optional.arm.FEAT_*` flag before
-execution. This session's M5 Max advertises all nine. Encoding selection
+execution. An Apple M5 Max advertises all nine. Encoding selection
 never probes the host or silently changes the default target.
 
-**Optional SVE/SME coverage and Apple availability (2026-10-15).** NEON
+**Optional SVE/SME coverage and Apple availability.** NEON
 (Advanced SIMD) uses fixed-width V registers; SVE uses scalable Z/P registers;
 SME adds streaming execution mode and ZA matrix state. They are distinct
 capabilities. LLVM's [Apple processor definitions](https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AArch64/AArch64Processors.td)
@@ -2374,7 +2363,7 @@ the automated assembly checks discover newly added fixtures as the suite grows. 
 does not imply complete A64 ISA or GNU assembler syntax coverage.
 
 
-**M5 compatibility additions (October 2026 audit).** The nine confirmed probes
+**M5 compatibility additions.** The nine confirmed probes
 now assemble, with useful families around each: the classic PAC/AUT/XPAC
 register, SP, zero-modifier, branch and return forms; BTI targets; AES rounds,
 SHA-1/SHA-256, CRC32/CRC32C, 64-bit PMULL; CASP in both widths and all four
@@ -2443,38 +2432,19 @@ DWARF opcode and forces DWARF unwind retention so signed-RA state is preserved.
 
 `suite/audit_clang_assembler.py` compiles sources unchanged with Clang -S -O2,
 assembles with both tools, and compares code/data bytes, normalized relocations,
-section type/size/alignment, build version and linker hints. The checked-in
-October 15 source audit covers all 18 repository C fixtures and 33 Lua translation
-units, with input/assembly/binary hashes. DWARF and compact-unwind bytes are
+section type/size/alignment, build version and linker hints. The source audit
+covers all 18 repository C fixtures and 33 Lua translation units. DWARF and compact-unwind bytes are
 excluded from this raw-byte audit because equivalent representations can differ;
 focused Rust tests exercise the object metadata and call-frame paths. This is
 an inventory of those exact sources/options, not every compiler mode or syntax.
 
 
-The final compatibility evidence is indexed in
-`suite/reports/assembler-m5-compat-summary-20261015.json`. All nine original
-probes match Clang; all 51 unchanged sources pass the byte/relocation/metadata
-audit, and the 33 linked Lua objects pass guarded sorting, arithmetic, string,
-error-handling and coroutine checks on M5 Max. Validation passed 158 assembler
-and 11 CLI tests, one doctest, generator `--check` and `cargo fmt --check`.
-
-Performance remains a tradeoff: nine paired final-build Lua runs observed
-+0.6% serial CLI time and +6.0% aggregate in-process parsing versus 84b5630.
-The final nine-pair comparisons observed +3.6% CLI / +4.8% parsing for 64 MiB
-functions, and +4.7% CLI / +6.2% parsing for dense instructions. The 1 MiB old
-feature workloads observed CLI changes of +4.6% NEON, +4.3% numeric, -1.1% SME
-and -1.0% streaming; corresponding parse changes were -0.2%, -3.5%, -0.7% and
-+3.2%. Small changes, especially CLI startup costs, are sensitive to run noise;
-raw samples are retained, and these are observed medians rather than a claim of
-isolated causality. Coverage was not removed to improve these numbers.
-
-Final command timings were about 10.5x faster than direct Clang -cc1as on old
-Keel-generated Lua input, 5.0x on the new PAC/crypto/system encoding workload,
-and 5.6x on the 51 unchanged Clang-generated C/Lua sources. These are warm-cache
-complete command comparisons, not pure parser comparisons or equivalent-facility
-claims. The seven-pair Clang scale reference report predates only the final
-zero-alignment diagnostic fix; the final-build old/new comparison records exact
-final binary hashes and verifies unchanged text. `generate_m5_compat_inputs.py`
-reconstructs feature inputs from checked-in correctness seeds;
-`compare_assembler_builds.py` provides paired old/new measurements when a Clang
-reference run has already established correctness.
+All nine original M5 probes match Clang; all 51 unchanged sources pass the
+byte/relocation/metadata audit, and the 33 linked Lua objects pass guarded
+sorting, arithmetic, string, error-handling and coroutine checks on an Apple M5
+Max. The added coverage costs a few percent of assembler parse time on large
+inputs; coverage was not removed to improve those numbers.
+`suite/generate_m5_compat_inputs.py` reconstructs feature inputs from
+checked-in correctness seeds, and `suite/compare_assembler_builds.py` provides
+paired old/new assembler measurements once a Clang reference run has
+established correctness.

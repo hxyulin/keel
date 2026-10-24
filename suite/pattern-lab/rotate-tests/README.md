@@ -23,16 +23,15 @@ do not transfer to generated loops.
 Optimizer regressions:
 
 ```sh
-CARGO_TARGET_DIR=/absolute/private/target cargo test -j2 -p keel-opt
+cargo test -p keel-opt
 ```
 
-After the integration owner grants an exclusive correctness lease, run the
-explicit validation script using a separately built compiler and a new output
-directory. It never builds a compiler or runs a benchmark itself:
+Run the explicit validation script on an otherwise idle Apple AArch64 host,
+using a separately built compiler and a new output directory. It never builds a compiler or runs a benchmark itself:
 
 ```sh
 python3 -B suite/pattern-lab/rotate-tests/validate.py \
-  --compiler /absolute/private/target/debug/keel \
+  --compiler /absolute/path/to/target/debug/keel \
   --output /absolute/evidence/new-validation
 ```
 
@@ -53,6 +52,6 @@ checks cover eight edge values, every legal constant count, dynamic counts
 1..63, all edge-value pairs for different-source shifts, and bridge counts
 0/1/2/17/257 with null data. Each mode executes both direct and assembled
 objects against a separate Clang `-O0 -fno-lto` oracle translation unit.
-There is no native x86 validation on MacHost and no cross-target runtime claim.
+There is no native x86 execution and no cross-target runtime claim.
 Failures preserve the partial output directory. Run a new directory after a
 fix; never overwrite prior evidence.

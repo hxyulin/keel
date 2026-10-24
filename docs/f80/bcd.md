@@ -22,7 +22,7 @@ eight; FBSTP snapshot TOP is entry TOP. Cleanup follows the snapshot and restore
 entry TOP with empty tags, even when every result is unused. Exception sticky
 bits include operand preparation and incoming state; undefined condition bits
 are exposed unchanged, not normalized. Unmasked operation and occupied incoming
-tags are outside this bounded contract.
+tags are outside this contract.
 
-Native acceptance requires the independent exported Linux x86_64 packet and
-fresh review; local ARM compilation does not establish numerical acceptance.
+Native numerical validation on x86-64 Linux has not been completed; compile and
+encoding checks alone do not establish it.

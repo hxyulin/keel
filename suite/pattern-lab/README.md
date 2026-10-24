@@ -23,7 +23,7 @@ The data array is generated independently of the input seed: initialize unsigned
 
 Outputs must name a **new** directory. All commands use argument arrays, no shell, with bounded subprocess deadlines (default 20 seconds each and 180 seconds total; configurable maxima 60/600). Inputs, manifests, compiler, driver, objects, binaries and generated artifacts are hashed. Compiler version, host, source commit/tree/dirty state, flags, exact commands, raw stdout/stderr and failures are retained. `otool` on macOS or available `llvm-objdump`/`objdump` on Linux records object and linked disassembly; missing tools or failures remain explicit. `verify` detects subsequent input, manifest, executable or report mutation using `integrity.json`; this is a local integrity record, not a signed attestation. Preserve output directories to keep failures and fixes auditable. Checks invoke optional tool discovery (version/help probes only) through the independent `tools.py` subprocess CLI when present; missing tools do not block native correctness. For explicit model analysis, see `TOOLS.md` (for example `python3 suite/pattern-lab/tools.py discover --output NEW_FILE`).
 
-Benchmarking is opt-in and should follow independent review:
+Benchmarking is opt-in and should follow review of the selected fixtures:
 
 ```sh
 python3 suite/pattern-lab/run.py bench suite/pattern-lab/patterns/SELECTED.json \

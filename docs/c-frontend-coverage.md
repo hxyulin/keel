@@ -1,181 +1,156 @@
-# C frontend compatibility coverage
+# C frontend support summary
 
-This milestone audits GNU attributes in `crates/keel-c/src/parse.rs` against
-Keel's declaration and emission contracts. It adds diagnostics, and hidden
-symbol visibility in the IR and both code generators. Ordinary weak binding is
-now implemented as described in [C weak symbols](c-weak-symbols.md). It
-supersedes the older
-`docs/design.md` statement that all of the attributes below are ignored.
+Keel's C frontend (`crates/keel-c`) compiles C11 with a bounded set of GNU
+extensions for its two native targets, `aarch64-apple-darwin` and
+`x86_64-unknown-linux-gnu`. This page summarizes what is and is not supported
+and links to the detailed contract for each feature. It is not a claim of full
+C11 or GNU C compatibility.
 
-## Linkage and lifetime boundary
+The general rule: a feature whose semantics a program depends on is either
+implemented or diagnosed. Where Keel cannot honor an attribute or construct, it
+reports an error instead of silently changing behavior. The main exception is
+the permissive catch-all for unknown attributes (see below).
 
-The parser rejects `weakref`, `weak_import`, `alias` and `ifunc`, including GNU
-`__name__` spellings. These contracts need additional symbol identity semantics.
-[Custom section placement and `retain`](c-sections-retain.md) now support a bounded
-non-TLS static-storage/function definition subset on both native targets. Diagnostics apply
-also to prototypes, late redeclarations and unused code.
+## Language features
 
-The [bounded lifecycle subset](c-lifecycle.md) now implements default-priority
-`constructor`/`destructor` registration and compiler-only `used` emission.
-Other priorities and malformed lifecycle contracts diagnose. `used` does not
-supply linker retention. Inapplicable placements are rejected even where
-GCC/Clang might warn and ignore them.
+| Feature | Status | Details |
+| --- | --- | --- |
+| Variable-length arrays and VM types | Bounded: multidimensional automatic VLAs, VM typedefs/pointers, runtime type names, dependent parameter bounds, prototype `[*]`. VM declarations combined with goto/switch/`alloca`, VM `typeof`/`_Generic`, VLA initializers and over-aligned VLAs are diagnosed. `__STDC_NO_VLA__` stays defined. | [Plan stages 1-2](c-language-implementation-plan.md) |
+| `cleanup` attribute | Bounded: runs on scope exit, return, break and continue, ordered with VLA restoration. Functions with cleanup locals reject goto/switch and known nonlocal exits. | [Plan stage 3](c-language-implementation-plan.md#3-reusable-scope-exit-actions-and-cleanup--bounded-milestone-implemented) |
+| Atomics | Native 1/2/4/8-byte integer atomics, `_Atomic float`/`double`, GCC generic buffer builtins, no libatomic dependency. `_Atomic` structs/unions and larger sizes are not supported. | [Plan stage 5](c-language-implementation-plan.md#5-atomic-floats-and-generic-atomics--bounded-native-stage-implemented) |
+| Complex numbers | `float _Complex` and `double _Complex` arithmetic and ABI; multiply/divide call the compiler-rt/libgcc helpers. `_Complex long double`, `_Imaginary`, ordered comparisons and complex varargs are diagnosed. `__STDC_NO_COMPLEX__` stays defined. | [Plan stage 6](c-language-implementation-plan.md#6-complex-arithmetic--first-floatdouble-subset-implemented) |
+| x86 `long double` | Opaque storage with the target layout; no x87 arithmetic. Apple arm64 `long double` is `double`. | [Plan stage 7](c-language-implementation-plan.md#7-x86-extended-long-double--not-implemented) |
+| `__float128`, `_FloatN`, `mode(TC)` | Declarations and layout only (TC on x86-64 Linux); any value, call or ABI use is diagnosed. GCC builtin `_Float32` and friends are not supported. | [Unsupported values](c-unsupported-values.md), [system headers](c-system-header-compat.md) |
+| K&R (old-style) definitions | Explicitly typed integer, float/double and pointer parameters with promoted ABI entry conversions. Implicit `int` and aggregate/complex/vector parameters are diagnosed. | [Plan stage 8](c-language-implementation-plan.md#8-kr-definitions--explicit-fixed-size-parameter-milestone-implemented) |
+| Inline assembly | AArch64 GNU subset (`r`, `w`, `m`, `i`/`n`, ties, named operands, clobbers). The x86 frontend rejects asm statements; asm-goto and memory outputs are diagnosed. | [C inline assembly](c-inline-asm.md) |
+| GNU vectors | `vector_size(16)` on all targets, `vector_size(32)` on x86-64 with AVX, plus bounded scalar broadcasts and `__builtin_shufflevector`. | [GNU vectors and modes](gnu-vector-mode.md) |
+| Integer `mode` attribute | `QI`, `HI`, `SI`, `DI`, `TI` (and `byte`, `word`, `pointer`). | [GNU vectors and modes](gnu-vector-mode.md#integer-modes) |
+| x86 intrinsic headers | Embedded `xmmintrin.h`, `emmintrin.h`, `smmintrin.h`, `avxintrin.h`, `avx2intrin.h`, `wmmintrin.h`, `immintrin.h` with a finite name list. | [C x86 intrinsics](c-x86-intrinsics.md) |
+| `restrict` | Top-level restricted pointer parameters of a definition become an optimizer access contract. | [C restrict](c-restrict.md) |
+| Overflow builtins | Fixed-type `__builtin_{s,u}{add,sub,mul}*` and generic `__builtin_{add,sub,mul}_overflow` through 128 bits. `_overflow_p` is not supported. | [Generic overflow builtins](generic-overflow-builtins.md) |
+| Memory builtins | `__builtin_memcpy`/`memmove`/`memset` lower to IR intrinsics; fortified `_chk` variants call the checked runtime. | [Memory builtins](memory-builtins.md) |
+| Nested functions | Not supported. | [Plan stage 10](c-language-implementation-plan.md#10-gnu-nested-functions--not-implemented) |
+| Blocks | Block-pointer declarators (`^`) parse as pointers; block literals and the Blocks runtime are not implemented. | [Design](design.md#c-frontend) |
 
-Ordinary `weak` now works on external function/object definitions and undefined
-references on both native targets, including declarations after definitions.
-Static weak symbols, TLS and hidden undefined combinations diagnose; see the
-[supported scope and validation](c-weak-symbols.md). Weak on a typedef, member,
-parameter, automatic variable, type name or tag remains rejected.
+Driver/preprocessor flag compatibility (`-std`, `-fvisibility`, and similar) is
+deferred; Keel uses a fixed C11 predefined-macro profile.
 
-Automatic-local cleanup has since gained a bounded implementation: see
-[scope-exit actions and cleanup](c-language-implementation-plan.md#3-reusable-scope-exit-actions-and-cleanup--bounded-milestone-implemented).
-It runs on normal scope exits, return, break and continue, with ordered VLA
-restoration; unsupported placements, goto/switch and known nonlocal calls are
-still diagnosed. Its feature query remains zero for general library fallbacks.
+## Attributes
 
+GNU `__name__` spellings are accepted wherever the plain spelling is.
 
-`visibility("hidden")` and `visibility("internal")` are implemented. The
-visibility is recorded on the symbol and merged across declarations, so a
-definition inherits it from an earlier declaration (as with Lua's `LUAI_FUNC`
-and `LUAI_DDEC`) and a later redeclaration may add it. Internal is emitted as
-hidden: the linker treats `STV_INTERNAL` as at least hidden, and dropping the
-extra promise is conservative. Explicit visibilities that differ between
-declarations, or within one, are rejected, like Clang. Static symbols remain
-local and visibility has no effect on them. A nonlocal definition gets the IR
-`hidden` flag (functions and data, including zero-initialized, constant and
-thread-local objects), emitted as `.hidden` (ELF `STV_HIDDEN`) on x86-64 Linux
-and `.private_extern` on AArch64 Mach-O, in both assembly text and objects.
-Undeclared-here references stay default, the weaker assumption. Hidden symbols
-are still `!local` to the optimizer, so no pass treats them less conservatively;
-using hidden visibility as a noninterposability promise is future work.
+### Implemented
 
-`visibility("default")` is accepted as before. `protected`, unknown strings and
-malformed arguments are errors, as are hidden or internal visibility on
-typedefs, members, parameters, automatic variables, type names and tags.
-Adjacent string literals and GNU attribute spellings work.
-`__has_attribute(visibility)` and `__has_attribute(weak)` remain zero, so
-feature-tested sources keep their fallbacks.
+| Attribute | Notes | Details |
+| --- | --- | --- |
+| `visibility("default")`, `visibility("hidden")`, `visibility("internal")` | See [visibility](#visibility). Internal is emitted as hidden. | |
+| `weak` | External function/object definitions and undefined references, on both targets. | [C weak symbols](c-weak-symbols.md) |
+| `section("name")`, `retain` | Static-storage objects (including bounded TLS) and function definitions. | [Sections and retention](c-sections-retain.md) |
+| `constructor`, `destructor`, `used` | Default priority only; `used` is a compiler emission root, not linker retention. | [C lifecycle](c-lifecycle.md) |
+| `cleanup(fn)` | Automatic block objects only. | [Plan stage 3](c-language-implementation-plan.md#3-reusable-scope-exit-actions-and-cleanup--bounded-milestone-implemented) |
+| `always_inline`, `noinline`, `noreturn`, `nothrow`, `returns_twice`, C `_Noreturn` and `inline` | Map to IR function attributes; merged across redeclarations. | [Function attributes](function-attributes.md) |
+| `keel_noninterposable` | Keel extension; advertised by `__has_attribute`. | [Function attributes](function-attributes.md#explicit-non-interposable-binding) |
+| `vector_size`, `mode` | Bounded sizes and modes. | [GNU vectors and modes](gnu-vector-mode.md) |
+| `aligned`, `packed` | Existing alignment and packing handling. | [Design](design.md#c-frontend) |
 
-Diagnostic annotations such as `format`, `nonnull`, `deprecated`,
-`warn_unused_result` and `unused`, and advisory allocation annotations such as
-`malloc` and `alloc_size`, remain accepted. Existing alignment, packing and
-function-contract handling is unchanged. Unknown attributes still follow the
-existing permissive policy; this is a bounded audit, not a complete safety
-classification of all GNU/Clang annotations.
+### Accepted without semantic effect
 
-## Reproducible representative library check
+Diagnostic and advisory annotations are accepted and have no code-generation
+effect: `format`, `nonnull`, `deprecated`, `warn_unused_result`, `unused`,
+`malloc` and `alloc_size`.
 
-`crates/keel-c/tests/fixtures/attribute-library.c` models a small library header
-and implementation: default-visible API declarations/redeclarations, an
-internal-visibility function, an unused weak prototype, format and allocation
-prototypes, unused parameters, a deprecated compatibility wrapper, and
-feature-query checks for unsupported optional hooks. It is synthetic and
-self contained; passing it is not a claim that a complete external project works.
+Unknown attributes are also accepted silently. This permissive catch-all is
+a known gap: the frontend has not classified every GNU/Clang attribute, so an
+unknown attribute whose semantics a program relies on may be ignored.
 
-Run from the repository root, with a fresh private directory:
+### Diagnosed
+
+| Attribute or form | Reason |
+| --- | --- |
+| `alias`, `weakref`, `weak_import`, `ifunc` | Need symbol identity semantics not yet implemented. |
+| `visibility("protected")`, unknown or malformed visibility strings | `STV_PROTECTED` is not supported. |
+| Conflicting explicit visibilities across declarations | Matches Clang. |
+| `weak` on static symbols, TLS, typedefs, members, parameters, locals | Unsupported or meaningless placements. Hidden/internal weak undefined references are also rejected. |
+| `constructor`/`destructor` with a non-default priority | Only priority 65535 is supported. |
+| `ms_abi`, `sysv_abi`, `stdcall`, `fastcall`, `regparm`, `naked`, `interrupt` and other calling-convention attributes | Would otherwise silently use the C calling convention. |
+| `ext_vector_type`, `transparent_union` | Distinct type and ABI semantics are not implemented. |
+| Lifecycle, cleanup, section or visibility attributes in inapplicable positions | Rejected even where GCC/Clang only warn and ignore them. |
+
+Diagnostics apply to prototypes, late redeclarations and unused code as well as
+definitions.
+
+### Feature queries
+
+`__has_attribute` stays conservative: `visibility`, `weak`, `cleanup` and the
+bounded vector/mode attributes report **0**, so feature-tested sources keep
+their fallbacks. Explicit use of the supported subsets still works.
+`keel_noninterposable` reports 1. Clang-preprocessed input reflects Clang's
+answers instead and can enable semantics Keel does not support.
+
+## Visibility
+
+- Visibility is recorded on the symbol and merged across declarations: a
+  definition inherits it from an earlier declaration (as with Lua's
+  `LUAI_FUNC` and `LUAI_DDEC`), and a later redeclaration may add it.
+- Nonlocal definitions with hidden or internal visibility get the IR `hidden`
+  flag (functions and data, including zero-initialized, constant and
+  thread-local objects). This is emitted as `.hidden` (ELF `STV_HIDDEN`) on
+  x86-64 Linux and `.private_extern` on AArch64 Mach-O, in both assembly text
+  and objects.
+- Internal is emitted as hidden: linkers treat `STV_INTERNAL` as at least
+  hidden, and dropping the extra promise is conservative.
+- Static symbols stay local; visibility has no effect on them. References to
+  symbols not declared hidden in the translation unit stay default.
+- Hidden symbols are still treated as interposable by the optimizer. Using
+  hidden visibility as a non-interposability promise is future work.
+- `#pragma GCC visibility` and `-fvisibility` are not supported.
+
+## Real-world code
+
+- Clang-preprocessed Linux Lua 5.4.7, QuickJS and SQLite inputs (44
+  translation units, including `visibility("internal")` and unused `__weak__`
+  prototypes) compile for `x86_64-unknown-linux-gnu` with and without `-O`.
+  Their output equals that of the same inputs with those attributes removed,
+  apart from the added `.hidden` directives / `st_other` bytes.
+- A Lua interpreter built from those objects runs on x86-64 Linux; with
+  `-Wl,-E` it exports the `lua_`/`luaL_` API and none of the internal `luaX_`
+  functions.
+- With the [binary128/TC declaration checkpoint](c-system-header-compat.md#implemented-declarationlayout-checkpoint),
+  complete builds of all three applications from raw sources against glibc 2.44
+  link with GCC and Clang and pass their correctness tests. GCC-preprocessed
+  input still stops at GCC's builtin `_FloatN` types. See
+  [the results](provenance/linux-binary128-tc-layout.md).
+
+Libraries that unconditionally require protected visibility, other startup
+priorities or unsupported section forms stop with a diagnostic. They need
+source/configuration fallbacks or real support; removing those annotations
+mechanically can change behavior.
+
+## Tests
 
 ```sh
-work=$(mktemp -d /tmp/keel-c-coverage.XXXXXX)
-export CARGO_TARGET_DIR="$work/target"
-export TMPDIR="$work/tmp"
-mkdir -p "$TMPDIR"
-python3 suite/ir_lowering_locked_run.py --output "$work/c-tests.log" -- \
-  cargo test --locked -j2 -p keel-c
-python3 suite/ir_lowering_locked_run.py --output "$work/cli-tests.log" -- \
-  cargo test --locked -j2 -p keel --test preprocess
-python3 suite/ir_lowering_locked_run.py --output "$work/build.log" -- \
-  cargo build --locked -j2 -p keel
-python3 suite/ir_lowering_locked_run.py --output "$work/integration.log" -- \
-  python3 crates/keel-c/tests/fixtures/check_attribute_semantics.py \
-  --keel "$CARGO_TARGET_DIR/debug/keel" --out-dir "$work/integration"
+cargo test -p keel-c
+cargo test -p keel --test preprocess --test hidden_visibility
+cargo build -p keel
+python3 crates/keel-c/tests/fixtures/check_attribute_semantics.py \
+  --keel target/debug/keel --out-dir "$(mktemp -d)"
 ```
 
-The integration check builds twelve objects: eight library-macro probes cover
-both targets, native and Clang preprocessing, with and without optimization;
-four additional weak probes cover both targets with and without optimization. On supported native hosts it
-links and executes six binaries, comparing exit status and output with Clang.
-It also requires ten raw-C CLI failures across the two targets for invalid
-weak static declarations, aliases, constructors, cleanup and protected visibility,
-with no output object created. Cross-target objects are compiled but not executed. The focused
-Rust suite additionally checks all rejected names, declaration placement, late
-redeclarations after definitions, block declarations, unused inline functions,
-weak declaration merging and invalid placements, malformed and conflicting
-visibility, hidden flags in IR before and after optimization, and both code
-generators. `crates/keel/tests/hidden_visibility.rs` checks hidden symbols in
-assembly text and objects for both targets, and on a native host links a
-Keel object with a Clang-compiled caller and checks that a shared library does
-not export them. No performance measurements or claims are made.
+`crates/keel-c/tests/attribute_semantics.rs` checks rejected names, declaration
+placement, late redeclarations, block declarations, unused inline functions,
+weak declaration merging, malformed and conflicting visibility, and hidden
+flags in IR and both code generators. `crates/keel/tests/hidden_visibility.rs`
+checks hidden symbols in assembly text and objects for both targets and, on a
+native host, links a Keel object with a Clang-compiled caller and checks that a
+shared library does not export them.
 
-## Remaining workload blockers
-
-Libraries that use protected visibility,
-startup registration, section registries unconditionally, still stop
-with a diagnostic. They need explicit source/configuration fallbacks or actual
-IR/object/runtime support (`STV_PROTECTED`); removing these annotations
-mechanically can change behavior.
-Lua's internal-visibility `LUAI_FUNC` builds now compile, as do glibc headers
-with unused weak prototypes: the Clang-preprocessed Linux Lua 5.4.7, QuickJS
-and SQLite inputs compile at `-S` and `--emit-object`, with and without `-O`.
-That historical result is not a current glibc compatibility claim: the frozen
-LinuxHost glibc 2.44 inputs stop at extended floating declarations on current main;
-see [the unchanged-input evidence and proposed boundary](c-system-header-compat.md#declaration-only-boundary-investigation-at-8bb21e9a).
-Native feature queries can select a fallback; Clang-preprocessed input reflects
-Clang's answers and can still enable unavailable semantics.
-
-Subsequent [GNU type support](gnu-vector-mode.md) implements bounded
-`vector_size(16)` and integer `mode` attributes. Unsupported calling conventions,
-`ext_vector_type` and `transparent_union` now produce diagnostics. Unknown
-attributes still follow the permissive catch-all policy; this remains a bounded
-audit. Visibility pragmas (`#pragma GCC visibility`),
-`-fvisibility` remains outside this change; weak-import annotations now diagnose. The previously documented variable-length-array,
-old-style definition, block-literal/runtime, remaining complex and x86 long-double
-boundaries are tracked in [the implementation plan](c-language-implementation-plan.md).
-Multidimensional automatic VLAs, bounded VM types and a first float/double
-complex subset now work; explicitly typed old-style definitions now have a
-fixed-size parameter milestone with promoted ABI entry conversions. Their
-remaining limits are listed in that plan. This representative check does not establish coverage for
-those features or whole Lua/QuickJS/SQLite builds.
-
-## Validation for this milestone
-
-Validated with private target/artifact directories under
-`/tmp/keel-c-coverage-b9642f7b`, with native commands serialized through
-`suite/ir_lowering_locked_run.py` and Cargo builds limited to `-j2`:
-
-- `cargo test --locked -j2 -p keel-c --test attribute_semantics`: 4 passed
-  (rerun after final fixture/test edits).
-- `cargo test --locked -j2 -p keel --test preprocess`: 7 passed.
-- Representative CLI script: 8 objects, 4 native executions matching Clang,
-  10 expected semantic-attribute failures, passed.
-- `cargo test --locked -j2 -p keel-c`: 148 passed, 2 failed. The failures are
-  `run::aligned_objects_with_debug_info` and `run::programs`, involving the
-  thread-local address-alignment output in `programs/alignment.c`. A separate
-  archive of unchanged parent commit `1ac952c2`, with its own Cargo target,
-  reproduces both failures via `cargo test --locked -j2 -p keel-c --test run`
-  (14 passed, 2 failed). No alignment/backend changes were attempted here.
-- Rust formatting and `git diff --check` passed.
-
-The broad test command stops at the failed integration binary; it does not
-establish a successful full suite or doc-test run. Logs and lock metadata are
-local artifacts, not checked into the repository.
-
-## Validation for hidden visibility and unused weak declarations
-
-- `cargo test --workspace --release --no-fail-fast` on AArch64 macOS: 1709
-  passed, 3 failed, all pre-existing: `keel-asm` `x86_bmi` (2) and
-  `keel-c` `run::aligned_objects_with_debug_info`.
-- The representative CLI script passed on AArch64 macOS and x86-64 Linux.
-  `crates/keel/tests/hidden_visibility.rs` and the focused `keel-c` and
-  `keel-codegen` suites passed natively on both hosts.
-- All 44 Clang-preprocessed Linux Lua 5.4.7, QuickJS and SQLite inputs, with
-  their `visibility("internal")` and unused `__weak__` prototypes, compile for
-  `x86_64-unknown-linux-gnu` at `-S` and `--emit-object`, with and without
-  `-O`. Their output equals that of the same inputs with those attributes
-  removed, except for one added `.hidden` line (186 in all, all Lua) or one
-  `st_other` byte per hidden symbol.
-- On x86-64 Linux, a Lua interpreter built from those Keel objects and linked
-  by Clang runs; with `-Wl,-E` it exports the `lua_`/`luaL_` API and none of
-  the internal `luaX_` functions, which `readelf -s` shows as `HIDDEN` in the
-  objects.
-- Codegen for inputs without these attributes is unchanged: the compile-time
-  corpus produced byte-identical outputs for all eight configurations.
+The script compiles `crates/keel-c/tests/fixtures/attribute-library.c`, a
+small synthetic library (default-visible API declarations, an
+internal-visibility function, an unused weak prototype, format/allocation
+prototypes, a deprecated wrapper and feature-query fallbacks), plus weak
+probes, for both targets with and without optimization, using both native and
+Clang preprocessing. On a supported native host it links and runs the results
+against Clang, and it requires the expected CLI failures (with no output
+object) for a weak static declaration, an alias, a constructor declaration,
+file-scope cleanup and protected visibility. It needs a built `keel` CLI and
+Clang. Passing it is not a claim that any complete external project works.

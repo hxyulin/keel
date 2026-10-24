@@ -93,29 +93,26 @@ pointers, including ordinary weak strong overrides. Artifact tests preserve all
 three function flags. Remaining lifecycle work: general priorities, broader archive policy and
 DSO/static-startup support. Custom section/retention limits are documented separately.
 
-## Lifecycle review validation
+## Running the tests
 
-The review adds regressions for definition order versus forward-declaration
-order in both lifecycle phases, compatible empty K&R definitions with an
-explicit `void(void)` declaration, qualified `void`, unreferenced Darwin runtime
-interface conflicts, pointer-type erasure, asm aliases and generated wrapper
-symbol collisions, including pruned asm-labeled declarations still referenced
-by inline assembly. Native arm64 execution compares the ordering regression with
-Clang through system `-dead_strip` and native links. Mixed weak/strong callback
-overrides run in both object input orders. A separate LLVM/Clang `-O2` object and
-system `-dead_strip` executable check distinguishes compiler emission from linker
-retention. The supported runtime scope and remaining limits above are unchanged.
+```sh
+cargo test -p keel-c --test lifecycle
+```
 
-Review validation on the macOS arm64 host uses the installed GNU cross
-assembler for GNU x86 oracle checks; the system macOS assembler does not accept
-GNU `--64`:
+The tests also cover definition order versus forward-declaration order in both
+lifecycle phases, compatible empty K&R definitions with an explicit
+`void(void)` declaration, unreferenced Darwin runtime interface conflicts, asm
+aliases and generated wrapper symbol collisions, and mixed weak/strong callback
+overrides in both object input orders. A separate LLVM/Clang `-O2` object and
+system `-dead_strip` executable check distinguishes compiler emission from
+linker retention.
+
+On macOS, GNU x86 assembler oracle checks need a GNU cross assembler, because
+the system assembler does not accept GNU `--64`:
 
 ```sh
 KEEL_GNU_AS=/opt/homebrew/bin/x86_64-elf-as \
 KEEL_TEST_GNU_AS=/opt/homebrew/bin/x86_64-elf-as \
-cargo test --no-fail-fast -p keel-c -p keel-ir -p keel-codegen \
-  -p keel-asm -p keel-asm-ir -p keel-toolchain -p keel-llvm -p keel-opt -p keel-link
-cargo test -p keel-c
-cargo test --manifest-path crates/keel-cranelift/Cargo.toml --locked \
-  --target-dir target/keel-cranelift
+cargo test -p keel-c -p keel-ir -p keel-codegen -p keel-asm -p keel-asm-ir \
+  -p keel-toolchain -p keel-llvm -p keel-opt -p keel-link
 ```

@@ -103,7 +103,7 @@ ready in these extracts; entry/setup, loop control, return, cache hierarchy and
 branch prediction are omitted. Multiplication/division instruction costs and
 port pressure are model-specific. No Apple M5 model, hardware cycle estimate,
 additive cost model or performance promise follows. Native correctness and
-independent source review must precede any opt-in benchmark.
+source review must precede any opt-in benchmark.
 
 The source tests interpret the actual small C oracle grammar and compare it
 against independent mathematical definitions, exercise adversarial data, and
@@ -114,4 +114,4 @@ The separate strict runtime manifest parser checks all available manifests;
 the full contract check explicitly reports pending until both committed
 architecture sets are present. Final integrated acceptance requires all 19
 manifests and no pending architecture tests. Native correctness is a separate
-root-leased step; this document records no native or timing result.
+step; this document records no native or timing result.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Separate direct preprocessed C -> object timing on frozen MacHost suite inputs.
+"""Separate direct preprocessed C -> object timing on frozen macOS arm64 suite inputs.
 
 Run only after native_baseline.py completes. Reuses its application correctness
 gates and verifies Keel object text against the previously assembled objects.

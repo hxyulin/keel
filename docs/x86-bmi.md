@@ -92,6 +92,5 @@ selection remains unchanged when features are absent.
   constant rotates, and register pressure/spills across all pipeline tiers.
   Harnesses and assembler runtime objects are checked even on non-x86 hosts.
 
-The guarded assembler and codegen runtime tests passed on the i7-1360P Linux
-NUC. Combined AVX/BMI application and baseline compatibility results are recorded
-in the integration report.
+The guarded assembler and codegen runtime tests have passed natively on an
+Intel Core i7-1360P running Linux.

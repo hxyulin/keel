@@ -1,12 +1,12 @@
 # LLVM integer flag refinement milestone
 
-Run under the shared host lease; this validator takes no lock itself:
+Run from the repository root with a built Keel and a new output directory:
 
 ```sh
-python3 suite/fast_opt_locked.py /private/path/lease.jsonl \
-  python3 suite/llvm_import_flags_validate.py \
+cargo build -p keel
+python3 suite/llvm_import_flags_validate.py \
   --libllvm /path/to/LLVM23/libLLVM.dylib \
-  --keel /private/target/debug/keel --out /private/new-artifacts
+  --keel target/debug/keel --out target/llvm-import-flags
 ```
 
 The existing Apple AArch64, LLVM 23, scalar ABI/type restrictions still apply.
@@ -60,6 +60,4 @@ and zero-divisor checks. All definitions/declarations must survive import.
 Source bytes, replacement on success, existing/absent destination preservation
 on failure, stdin/stdout, late whole-module rejection, parser rejection, failed
 verification, and missing verifier are checked. Commands and completed checks
-are saved in the private artifact directory. Existing validators and aggregate
-harness files are deliberately untouched; their old flag-rejection cases need
-parent integration updates.
+are saved in the output directory.

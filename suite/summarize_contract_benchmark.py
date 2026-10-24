@@ -47,7 +47,7 @@ def main():
     parser.add_argument("report_dir", type=pathlib.Path)
     args = parser.parse_args()
     result = {"method": "All workload rows retained in host apps.json. Application runtime aggregate: geometric mean of workload paired median ratios; 95% bootstrap resamples pairs within each fixed workload, 2000 draws. Conditional on this machine/corpus; no unmeasured-workload inference. Identical code precludes attributing observed runtime differences to code optimization.", "hosts": {}}
-    for host in ["machost", "linuxhost"]:
+    for host in ["macos-arm64", "linux-x86_64"]:
         directory = args.report_dir / host
         def read(name):
             return json.loads((directory / name).read_text())

@@ -1,8 +1,7 @@
 # Bounded terminal x87 execution region
 
-`x86_x87_region(descriptor:ptr, control:i32) -> i32` is a new physical-state
-operation. The existing 678 intrinsic discriminants and signatures are preserved;
-the one additive region ID is 678 (679 catalog entries). Existing masked raw
+`x86_x87_region(descriptor:ptr, control:i32) -> i32` is a physical-state
+operation with intrinsic ID 678. Existing masked raw
 value APIs retain their documented all-masks-set preconditions. The region is
 not a way to call those value recipes outside their preconditions.
 
@@ -78,7 +77,7 @@ Phase values: 1 entry; 10/11 load B/A; 12 load snapshot; 13 load wait;
 52 reset snapshot; 60 completed. Phase describes the last marker before an
 instruction; exact RIP/opcode and saved FIP/FOP determine fault attribution.
 
-The independent Linux terminal-fault packet is export-only on the child. Root
-owns genuine GCC/Clang native execution and fresh review. Local compilation,
-assembly parity and retention checks do not establish native delivery semantics.
-Fullprofile remains false until root proof; SSE/AVX evidence is separate.
+Compilation, assembly parity and retention checks do not establish native fault
+delivery semantics; native validation with GCC and Clang on x86-64 Linux has not
+been completed. See [x86-unmasked-fp.md](../x86-unmasked-fp.md) for the related
+SSE/AVX contract.

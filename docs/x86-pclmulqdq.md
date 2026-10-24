@@ -75,7 +75,7 @@ only `_mm_clmulepi64_si128` as a macro. Each vector argument is evaluated once;
 the control remains an integer constant expression. It calls the checked builtin
 `__builtin_ia32_pclmulqdq128(a,b,imm8)`, accepting matching 64-bit-lane integer
 vectors. All 256 controls are legal. Unsupported/dynamic/out-of-range controls
-and mismatched vector types are diagnosed. The bounded constant proof accepts
+and mismatched vector types are diagnosed. The bounded constant evaluator accepts
 integer expressions through 64-bit integers,
 including enum constants, casts, `sizeof`, conditionals and short-circuit logic.
 A floating literal is accepted only as the immediate operand of a representable
@@ -93,67 +93,45 @@ is available through `wmmintrin.h` and `immintrin.h`. AES has a
 compatibility, other CLMUL widths, automatic polynomial recognition and CRC
 algorithm frameworks remain outside this contract.
 
-## Validation
-
-Focused gates are `keel-asm --test x86_pclmul`, `keel-codegen --test x86_pclmul`,
-`keel-c --test pclmul`, `keel --test x86_cpu_level`, and the codegen library's
-`feature_guard_tests` (also in release). Builds use the shared suite lock:
+## Testing
 
 ```sh
-python3 suite/fast_opt_locked.py /tmp/keel-pclmul-unique.jsonl \
-  cargo test --offline --locked -j2 -p keel-codegen --test x86_pclmul \
-  -p keel-c --test pclmul -p keel-asm --test x86_pclmul \
-  -p keel --test x86_cpu_level
+cargo test -p keel-asm --test x86_pclmul
+cargo test -p keel-codegen --test x86_pclmul
+cargo test -p keel-c --test pclmul
+cargo test -p keel --test x86_cpu_level
+cargo test -p keel-codegen --lib feature_guard_tests
 ```
 
-The assembler matrix compares independent compiler bytes for all 256 immediates,
-register/m128 forms, low/extended XMMs, SIB/displacements, RIP-relative, segment
-and address-size prefixes. It also checks typed formatting, AT&T, malformed
-operands, feature exclusion and explicit disablement. Codegen compares complete
-text/typed/chunked objects across all three selectors, both allocators and
-normal/empty pools. An external call clobbers all XMM registers while the product
-and inputs are live. The C gate covers disabled-header inclusion, builtin support
-queries, diagnostics, single evaluation and three frontend/optimization setups.
+Run the feature guard in `--release` as well.
 
-The native harness uses an independent unsigned XOR/shift reference with no
-shift by 64. It covers zero/one/all-one/top-bit values, every pair of basis bits,
-seeded random values, all four selectors and noncanonical controls 238/239/254/255,
-same-input and output aliases, unaligned/guarded-page buffers, sentinels, and
-unchanged MXCSR. A separate legacy m128 assembly gate checks valid page edges
-and requires SIGSEGV when only eight bytes are accessible, for every selector.
-Native execution checks PCLMUL availability first. Export codegen/C artifacts
-with `KEEL_PCLMUL_EXPORT_DIR` / `KEEL_C_PCLMUL_EXPORT_DIR`; generated files remain
-outside Git.
+- The assembler matrix compares bytes with Clang and GNU `as` for all 256
+  immediates, register/m128 forms, low/extended XMMs, SIB/displacements,
+  RIP-relative relocation addends, and segment and address-size prefixes. It also
+  checks typed formatting, AT&T, malformed operands, feature exclusion and
+  explicit disablement.
+- Codegen compares complete text/typed/chunked objects across all three
+  selectors, both allocators and normal/empty pools. An external call clobbers
+  all XMM registers while the product and inputs are live.
+- The C gate covers disabled-header inclusion, builtin support queries,
+  diagnostics, single evaluation, the ICE rules above (including rejection of
+  invalid shifts, signed overflow, unrepresentable floating casts and i128
+  casts) and three frontend/optimization setups.
 
-The implementation started at `bfa86ed7` and rebased cleanly onto `6d974b4d`
-before final debug/release and native checks. Local validation passed the nine
-focused assembler/codegen/C/CLI tests in both profiles, the debug/release emission
-guard, and ten existing feature/header regression tests. Build records are in
-`/tmp/keel-pclmul-unique.jsonl`; final LinuxHost execution is recorded in
-`/tmp/keel-pclmul-native-final.log`.
+The native harness (x86-64 Linux, after checking PCLMUL availability) uses an
+independent unsigned XOR/shift reference with no shift by 64. It covers
+zero/one/all-one/top-bit values, every pair of basis bits, seeded random values,
+all four selectors and noncanonical controls 238/239/254/255, same-input and
+output aliases, unaligned/guarded-page buffers, sentinels and unchanged MXCSR.
+A separate legacy m128 assembly gate checks valid page edges and requires
+SIGSEGV when only eight bytes are accessible. Clang and GCC vendor headers pass
+the same value harness as secondary oracles. Export codegen/C artifacts with
+`KEEL_PCLMUL_EXPORT_DIR` / `KEEL_C_PCLMUL_EXPORT_DIR`.
 
-On 2026-10-23, native LinuxHost execution verified PCLMULQDQ availability and passed
-the 12 codegen and three C configurations, plus the m128 guarded-page/fault
-gate. The 80,896-byte assembler matrix matched Clang and GNU `as` bytes and
-RIP-relative relocation addends. Clang 23.1.1 and GCC 16.2.0 vendor
-headers passed the same independent value harness as secondary oracles.
 These finite tests do not establish exhaustive ISA/ABI certification or
-performance claims. The host supports newer extensions; strict-feature
-exclusion is established by the compiler/assembler diagnostics and emission
-checks, not execution on a PCLMUL-only machine.
-
-Independent review on 2026-10-23 found and fixed unsafe C control folding:
-invalid shifts, signed overflow and unrepresentable floating casts could previously
-become accepted immediates. The focused ICE regression also covers enum/cast/sizeof
-controls, short-circuit evaluation and rejection of non-ICE floating expressions.
-Explicit i128 casts retain their AST boundary so the bounded proof rejects them.
-The review repeated all ten focused tests in debug/release, feature/header
-regressions and both emission guards. Fresh exports passed the 12+3 LinuxHost native
-configurations, m128 page/fault gate, 80,896-byte Clang/GNU matrix and vendor
-secondary oracles. Exact commands are in `/tmp/keel-pclmul-review-unique.jsonl`;
-native commands, artifact SHA-256 identities and results are in
-`/tmp/keel-pclmul-review-native.log`. Exports use the
-`/tmp/keel-pclmul-review-{codegen,c,asm}` directories outside Git.
+performance claims. Strict-feature exclusion is established by compiler and
+assembler diagnostics and emission checks, not by execution on a machine
+without newer extensions.
 
 Primary semantics references: [Intel SDM, volume 2B](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-2b-manual.pdf),
 [Intel carryless multiplication paper](https://cdrdv2-public.intel.com/836172/clmul-wp-rev-2-02-2014-04-20.pdf),

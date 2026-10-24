@@ -106,15 +106,10 @@ frozen-template/rejection maps and explicit-request skip allocations. Replacing
 boolean eligibility predicates with reason-returning predicates and sharing
 template decisions can affect overhead; no zero-overhead measurement is claimed.
 
-## Integration and investigation
+## Example: QuickJS inlining diagnostic
 
-Base: `21d050463a65fb868321eda5107f941443a2b010`, whose measured compiler baseline
-is documented in `current-app-runtime-2026-10-16.md`. This checkpoint instruments
-existing choices. The validated MacHost QuickJS diagnostic
-records caller instruction growth as the selected blocker for the remaining
-53 duplicate-value, 32 exception-test, and 21 alwaysinline integer-constructor
-calls in JS_CallInternal; reported/unreported/retained baseline IR match exactly.
-A bounded late inlining policy is a separate follow-up, with no gain inferred
-from these decisions.
-Aggregate CFG promotion remains deferred. Coordinator serial integration and
-independent review are required before integration into main.
+A report for QuickJS on macOS arm64 records caller instruction growth as the
+selected blocker for the remaining 53 duplicate-value, 32 exception-test and 21
+alwaysinline integer-constructor calls in `JS_CallInternal`. Optimized IR is
+identical with and without reporting. Reports describe existing decisions; no
+performance gain is inferred from them.

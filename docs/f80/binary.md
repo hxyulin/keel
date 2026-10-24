@@ -35,11 +35,11 @@ All six sticky exception bits and structural state are observable. C0/C2/C3
 are hardware-undefined. C1 reports rounding direction on valid numerical
 outcomes; exceptional/undefined C1 is not canonicalized. Masked invalid results,
 NaN propagation, division by zero, overflow and underflow follow hardware.
-The proof packet states its mandatory domains and diagnostic bits explicitly.
 
 Primary source: [Intel SDM vol.2A](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-2a-manual.pdf),
 FADD/FADDP, FMUL/FMULP, FSUB/FSUBP, FSUBR/FSUBRP,
-FDIV/FDIVP and FDIVR/FDIVRP entries. This stage owns the twelve mappings above;
-DC destination-ST(1) forms are separately specified in [dc.md](dc.md).
-Arbitrary stack-register indices, memory arithmetic,
-compare, BCD and explicit stack forms remain later independently scoped work.
+FDIV/FDIVP and FDIVR/FDIVRP entries. DC destination-ST(1) forms are specified
+in [dc.md](dc.md), comparisons in [compare.md](compare.md), BCD in
+[bcd.md](bcd.md), and explicit stack leaves in [owned-stack.md](owned-stack.md).
+Arbitrary stack-register indices and memory-operand arithmetic are not
+supported.

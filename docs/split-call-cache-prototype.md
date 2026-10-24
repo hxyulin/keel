@@ -50,31 +50,24 @@ The positive token-oracle test removes one home read/transfer while keeping spil
 homes, spill units, saved registers, stack destinations and edge transfers equal.
 This is an allocator assertion, not a frame-layout or runtime measurement.
 
-Fresh qualification on current main (`86c064365b46`) on ARM macOS:
+## Tests
 
-- All 17 R3 tests pass under `regalloc::split::tests`; this filter must execute
-  17 tests, rather than the obsolete zero-match `regalloc::split_tests` filter.
-  Coverage includes whole-block Fixed/Register/Reuse exclusions, different-value
-  displacement, fresh metadata/capacity accounting, inclusive owner/hole return
-  boundaries, occupied/dirty/pinned/unsaved candidates, call barriers, aliases,
-  scalar halves, vectors/returns-twice, source forwarding and CFG edges.
-- The full experimental backend library passes 71 tests.
-- CLI tests pass both with and without the feature (31 each); both independent
-  tier/default compatibility tests pass.
-- All 61 host-applicable native programs pass in four Split configurations
-  (244 executions): real/tiny pools with baseline selection/unoptimized IR or
-  full selection/Full IR optimization. The eight default Full-allocation
-  configurations also pass (488 executions).
-- Assembly is byte-identical to frozen current main in 840 source/target/mode
-  comparisons across both supported targets: default invocation and the
-  None/Fast/Full optimization modes with normal Fast/Full allocation. Both
-  comparison binaries have the experimental feature enabled; Split is opt-in.
+```sh
+cargo test -p keel-codegen --features experimental-regalloc --lib regalloc::split::tests
+cargo test -p keel-codegen --features experimental-regalloc --test run split_allocator_programs -- --exact
+cargo test -p keel-codegen --features experimental-regalloc --test run programs -- --exact
+```
 
-The focused gate is `cargo test --offline --locked -p keel-codegen --features
-experimental-regalloc --lib regalloc::split::tests`. Native gates use `--test run`
-with `split_allocator_programs -- --exact` and `programs -- --exact`. Validation
-used separate Cargo targets for this worktree and the frozen-main snapshot, with
-all Cargo/native commands serialized by `suite/fast_opt_locked.py`.
+The unit tests cover whole-block Fixed/Register/Reuse exclusions,
+different-value displacement, fresh metadata/capacity accounting, inclusive
+owner/hole return boundaries, occupied/dirty/pinned/unsaved candidates, call
+barriers, aliases, scalar halves, vectors/returns-twice, source forwarding and
+CFG edges. The native program tests run every host-applicable program under four
+Split configurations (real and tiny register pools, each with baseline
+selection/unoptimized IR and full selection/Full IR) and under the default
+allocation configurations. With normal Fast/Full allocation, assembly is
+byte-identical to builds without this preference on both targets; Split is
+opt-in.
 
 The token oracle checks values, copies and pool clobbers; it does not model
 concrete ABI staging, pointee memory, instruction encodings or exception runtime.

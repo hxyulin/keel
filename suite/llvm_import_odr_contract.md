@@ -88,50 +88,47 @@ type, address-space and bounds guard. Instruction GEPs retain exact ordinary
 arithmetic without inventing alias/escape facts. LLVM itself controls which
 flag forms are legal on constants versus instructions.
 
-## Evidence and reproduction
-
-Run focused translation tests directly, or the full policy/native checks under
-the host lease with the current verifier:
+## Validation
 
 ```sh
+# Focused translation tests.
 python3 suite/test_llvm_import_odr.py --libllvm /path/to/libLLVM.dylib -v
-python3 suite/fast_opt_locked.py /tmp/odr-policy-lease.jsonl python3 suite/test_llvm_import_odr.py --libllvm /path/to/libLLVM.dylib --keel /path/to/keel --verify-weak-odr -v
+# Policy tests against the real Keel verifier.
+python3 suite/test_llvm_import_odr.py --libllvm /path/to/libLLVM.dylib \
+  --keel target/debug/keel --verify-weak-odr -v
+# Mixed-TU native runs.
+python3 suite/llvm_import_odr_validate.py --libllvm /path/to/libLLVM.dylib \
+  --keel target/debug/keel --out target/odr-native
+# Everything, as part of the frontend checks.
+cargo suite test-frontends --out target/frontend-check --require-llvm
 ```
 
-For historical baseline testing only, without `--verify-weak-odr` the CLI tests require rejection
-of both ordinary and hidden/tagged ODR output. Strong defined RTTI is positively
-verified, and real CLI file/stdin input preservation and destination/stdout
-atomicity are checked. No mock verifier is used. After integrating core syntax:
+Output directories must be fresh. Without `--verify-weak-odr`, the CLI tests
+expect rejection of both ordinary and hidden/tagged ODR output (a historical
+baseline mode). Strong defined RTTI is positively verified, and CLI file/stdin
+input preservation and destination/stdout atomicity are checked. No mock
+verifier is used.
 
-```sh
-python3 suite/fast_opt_locked.py /tmp/keel-odr-integrated-lease.jsonl env CARGO_TARGET_DIR=/tmp/keel-odr-integrated-target cargo build --offline --locked -j2 -p keel
-python3 suite/fast_opt_locked.py /tmp/keel-odr-integrated-lease.jsonl python3 suite/test_llvm_import_odr.py --libllvm ~/.rustup/toolchains/stable-aarch64-apple-darwin/lib/libLLVM.dylib --keel /tmp/keel-odr-integrated-target/debug/keel --verify-weak-odr -v
-python3 suite/fast_opt_locked.py /tmp/keel-odr-integrated-lease.jsonl python3 suite/llvm_import_odr_validate.py --libllvm ~/.rustup/toolchains/stable-aarch64-apple-darwin/lib/libLLVM.dylib --keel /tmp/keel-odr-integrated-target/debug/keel --out /tmp/keel-odr-integrated-native
-python3 suite/frontend_validate.py --out /tmp/keel-odr-integrated-frontend --jobs 2 --require-llvm
-```
+The combined harness runs the core tests, 15 policy tests and 32 native mixed-TU
+runs covering identity, shared storage, virtual dispatch, cleanup and
+cross-module user-defined catches. Policy tests also cover lifetime restarts,
+initialized memory, and select-masked dead loads flowing through signed division
+at all three tiers.
 
-The mixed-TU validator is `suite/llvm_import_odr_validate.py`.
-`frontend_validate.py` owns its lease: do not wrap it in fast_opt_locked.py.
-Output directories must be fresh. Parent integration must reconcile these
-existing expectations without dropping retained rejection coverage:
+Related validators reflect this contract:
 
-- `llvm_import_linkage_validate.py`: default-strict left/right/constexpr now
-  accept true ODR definitions; weak-odr is no longer a negative even with the
-  legacy flag. Legacy local-copy address/storage/closure rejections remain.
-- `llvm_import_eh_validate.py`: defined-rtti becomes positive; weak-any RTTI
-  stays negative. Its deliberately synthetic null typeinfo is transportable
-  data, not evidence of a functioning C++ runtime typeinfo record.
-- `llvm_import_globals_validate.py`: `rejections.json` cases `linkonce` (actually
-  linkonce_odr) and `inrange` now accept; all other existing global negatives
-  still reject in a real-LLVM translation sweep. External zero-sized
-  declarations accept; zero-sized definitions still reject.
-- `cpp_coverage.py` and shared docs/harness: virtual/eh/constexpr-runtime probes
-  can become positive subject to actual native checks; ordinary hidden symbols
-  remain negative. The shared README's blanket inrange rejection is obsolete.
+- `llvm_import_linkage_validate.py`: default-strict left/right/constexpr cases
+  accept true ODR definitions; weak-odr is accepted even with the legacy flag.
+  Legacy local-copy address/storage/closure rejections remain.
+- `llvm_import_eh_validate.py`: defined RTTI is accepted; weak-any RTTI is
+  rejected. Its deliberately synthetic null typeinfo is transportable data, not
+  evidence of a functioning C++ runtime typeinfo record.
+- `llvm_import_globals_validate.py`: the `linkonce` (linkonce_odr) and `inrange`
+  cases are accepted; all other global negatives still reject. External
+  zero-sized declarations are accepted; zero-sized definitions are rejected.
+- `cpp_coverage.py`: virtual/EH/constexpr-runtime profiles are positive subject
+  to native checks; ordinary hidden symbols remain rejected.
 
-The combined harness now runs the core tests, 15 policy tests and 32 native
-mixed-TU runs. Policy tests also cover lifetime restarts, initialized memory,
-and select-masked dead loads flowing through signed division at all three tiers.
 LLVM 23 canonical lifetime markers are accepted only on direct fixed slots;
 the importer keeps those slots alive for the entire function and omits the
 markers without importing lifetime facts. LLVM's legacy upgrader may remove
