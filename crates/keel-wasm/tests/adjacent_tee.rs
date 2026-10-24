@@ -1,5 +1,7 @@
 #[path = "support/adjacent_tee.rs"]
 mod oracle;
+#[path = "support/combined_corpus.rs"]
+mod combined_corpus;
 
 use keel_ir::{Module, parse};
 use keel_wasm::{
@@ -176,7 +178,7 @@ for(let n=0;n<20;n++) assert.equal(e.cycle(n,17,5),n%2?-12:12);
 }
 
 #[test]
-fn static_frozen_corpus_exact_body_operator_and_local_delta() {
+fn static_frozen_corpus_combined_exact_body_operator_and_local_delta() {
     // Optional external evidence input; normal tests do not depend on /tmp.
     let Ok(root) = std::env::var("KEEL_TEE_FROZEN_CORPUS") else {
         return;
@@ -198,32 +200,33 @@ fn static_frozen_corpus_exact_body_operator_and_local_delta() {
         assert_eq!(before.len(), after.len());
         let mut pairs = 0;
         let mut bytes_saved = 0;
-        for (old, new) in before.iter().zip(&after) {
-            let (expected, count) = oracle::fold_body(old.as_bytes());
+        let mut operators_saved = 0;
+        let mut locals_removed = 0;
+        for (index, (old, new)) in before.iter().zip(&after).enumerate() {
+            let sibling = combined_corpus::pre_tee_body(profile, index);
+            let pre_tee = sibling.as_deref().unwrap_or(old.as_bytes());
+            let (expected, count) = oracle::fold_body(pre_tee);
             assert_eq!(new.as_bytes(), expected);
             pairs += count;
             bytes_saved += old.as_bytes().len() - new.as_bytes().len();
-            assert_eq!(
-                old.get_locals_reader()
-                    .unwrap()
-                    .into_iter()
-                    .collect::<Result<Vec<_>, _>>()
-                    .unwrap(),
-                new.get_locals_reader()
-                    .unwrap()
-                    .into_iter()
-                    .collect::<Result<Vec<_>, _>>()
-                    .unwrap()
-            );
-            assert_eq!(
-                old.get_operators_reader().unwrap().into_iter().count() - count,
-                new.get_operators_reader().unwrap().into_iter().count()
-            );
+            let declaration_count = |body: &wasmparser::FunctionBody<'_>| -> u32 {
+                body.get_locals_reader().unwrap().into_iter().map(|l| l.unwrap().0).sum()
+            };
+            let removed = u32::from(profile == "basic" && index == 10);
+            assert_eq!(declaration_count(old) - declaration_count(new), removed);
+            locals_removed += removed;
+            operators_saved += old.get_operators_reader().unwrap().into_iter().count()
+                - new.get_operators_reader().unwrap().into_iter().count();
         }
-        assert_eq!(pairs, 73);
-        assert_eq!(bytes_saved, 146);
+        // Low-bit casts remove 28 bytes/18 operators before tee folding;
+        // terminal-if removes another 42 bytes/24 operators and one PC local.
+        let terminal = usize::from(profile == "basic");
+        assert_eq!(pairs, 68);
+        assert_eq!(bytes_saved, 28 + 42 * terminal + 2 * pairs);
+        assert_eq!(operators_saved, 18 + 24 * terminal + pairs);
+        assert_eq!(locals_removed, terminal as u32);
         eprintln!(
-            "corpus {profile}: pairs={pairs} body_bytes_saved={bytes_saved} operators_saved={pairs} locals_unchanged=true"
+            "corpus {profile}: pairs={pairs} body_bytes_saved={bytes_saved} operators_saved={operators_saved} locals_removed={locals_removed}"
         );
     }
 }

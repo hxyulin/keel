@@ -518,3 +518,91 @@ for(const args of {faults}) {{
         }
     }
 }
+
+// All three emitters interact here: exact casts in both terminal arms, a
+// retained aliased trap producer, and tees around shifted runtime frame locals.
+#[test]
+fn combined_terminal_cast_tees_preserve_mutation_traps_and_stack() {
+    let mut module = parse(r#"
+func @choose(i32,i32,i32)->i32 {
+ ss0=stack_slot 16, align 16
+block0(v0:i32,v1:i32,v2:i32):
+ v3=stack_addr ss0
+ v4=iconst.i32 7
+ store volatile v4,v3
+ brif v0,block2,block1
+block1:
+ v5=iconst.i32 -2147483648
+ v6=sdiv v5,v2
+ v7=uext.i64 v6
+ v8=trunc.i32 v7
+ v9=uext.i64 v8
+ v10=inttoptr.ptr v9
+ v11=iconst.i32 23
+ store align 1 volatile v11,v10
+ v12=load.i32 align 1 volatile v10
+ v13=load.i32 volatile v3
+ v14=iadd v12,v13
+ return v14
+block2:
+ v15=uext.i64 v1
+ v16=trunc.i32 v15
+ v17=uext.i64 v16
+ v18=inttoptr.ptr v17
+ v19=iconst.i32 41
+ store align 1 volatile v19,v18
+ v20=load.i32 align 1 volatile v18
+ v21=load.i32 volatile v3
+ v22=iadd v20,v21
+ return v22
+}
+func @address()->i32 {
+ ss0=stack_slot 16, align 16
+block0:
+ v0=stack_addr ss0
+ v1=ptrtoint.i64 v0
+ v2=trunc.i32 v1
+ return v2
+}
+"#).unwrap();
+    let f = &mut module.functions[0];
+    let arm = f.blocks().nth(1).unwrap();
+    let div = f.block_insts(arm)[1];
+    f.replace_all_uses(f.first_result(div), f.block_params(f.entry_block().unwrap())[1]);
+    let bytes = emit(&module, &["choose", "address"], 2).unwrap();
+    assert_eq!(conversions(&bytes), [(0,0), (0,0)]);
+    let body = wasmparser::Parser::new(0).parse_all(&bytes).find_map(|p| {
+        if let wasmparser::Payload::CodeSectionEntry(b) = p.unwrap() { Some(b) } else { None }
+    }).unwrap();
+    let ops = body.get_operators_reader().unwrap().into_iter()
+        .collect::<Result<Vec<_>, _>>().unwrap();
+    assert!(!ops.iter().any(|o| matches!(o, wasmparser::Operator::Loop { .. })));
+    assert_eq!(ops.iter().filter(|o| matches!(o, wasmparser::Operator::Else)).count(), 1);
+    assert_eq!(ops.iter().filter(|o| matches!(o, wasmparser::Operator::I32DivS)).count(), 1);
+    assert!(ops.iter().any(|o| matches!(o, wasmparser::Operator::LocalTee { .. })));
+    execute(&module, &["choose", "address"], 2, r#"
+function expected(m,addr,value) {
+ const want=m.slice(), dv=new DataView(want.buffer);
+ dv.setUint32(65520,7,true);
+ if(value!==null)dv.setUint32(addr,value,true);
+ return want;
+}
+const m=new Uint8Array(e.memory.buffer);
+for(let n=0;n<40;n++)for(const [flag,denom,value] of [[1,0,41],[1,-1,41],[0,1,23]]) {
+ m.fill(0xa7); const addr=n%2?65517:129, want=expected(m,addr,value);
+ // The high address deliberately overlaps the frame's first byte.
+ const dv=new DataView(want.buffer), result=(dv.getInt32(addr,true)+dv.getInt32(65520,true))|0;
+ assert.equal(e.choose(flag,addr,denom),result);
+ assert.deepEqual(m,want,'exact memory including unaligned stores and frame canaries');
+ assert.equal(e.address(),65520,'both terminal returns restore incoming SP');
+}
+// Aliased division must still trap before the final store. Each trap gets a
+// fresh instance; no recovery after a software-stack trap is assumed.
+for(const [flag,addr,denom] of [[0,129,0],[0,129,-1],[0,65534,1],[1,65534,0]]) {
+ const t=new WebAssembly.Instance(mod).exports, u=new Uint8Array(t.memory.buffer);
+ u.fill(0xa7); const want=expected(u,addr,null);
+ assert.throws(()=>t.choose(flag,addr,denom),WebAssembly.RuntimeError);
+ assert.deepEqual(u,want,'frame store precedes fault; OOB store writes no prefix');
+}
+"#);
+}
