@@ -467,3 +467,135 @@ assert.equal(u[16],0); assert.equal(u[39],0);
 "#,
     );
 }
+
+#[test]
+fn review_stack_pointer_aliases_parallel_phi_cycles_and_callee_frames() {
+    let mut m = checked(
+        r#"
+func @cycle(i32) -> i64 {
+ ss0 = stack_slot 8, align 8
+ ss1 = stack_slot 8, align 8
+block0(v0:i32):
+ v1 = stack_addr ss0
+ v2 = stack_addr ss1
+ v3 = stack_addr ss0
+ v4 = iconst.i64 11
+ v5 = iconst.i64 22
+ store v4,v1
+ store v5,v3
+ jump block2(v1,v2,v0)
+block1:
+ return v4
+block2(v6:ptr,v7:ptr,v8:i32):
+ brif v8, block3, block4(v6,v7)
+block3:
+ v9 = iconst.i32 1
+ v10 = isub v8,v9
+ jump block2(v7,v6,v10)
+block4(v11:ptr,v12:ptr):
+ call @leaf()
+ v13 = load.i64 v11
+ v14 = load.i64 v12
+ v15 = iconst.i64 100
+ v16 = imul v13,v15
+ v17 = iadd v16,v14
+ return v17
+}
+func @leaf() {
+ ss0 = stack_slot 16, align 16
+block0:
+ v0 = stack_addr ss0
+ v1 = iconst.i64 -1
+ store v1,v0
+ return
+}
+"#,
+    );
+    let f = &mut m.functions[0];
+    let insts = f.block_insts(f.entry_block().unwrap()).to_vec();
+    // Keep the aliased StackAddr producer in layout: its raw destination must
+    // not overwrite the replacement's local with the other slot's address.
+    f.replace_all_uses(f.first_result(insts[2]), f.first_result(insts[1]));
+    let gap = f.blocks().nth(1).unwrap();
+    f.remove_block(gap);
+    execute(
+        &m,
+        &options(&["cycle"]),
+        r#"
+for(let n=0;n<40;n++) {
+ assert.equal(e.cycle(n), n%2 ? 2211n : 1122n);
+ assert.equal(dv.getBigInt64(65520,true),11n);
+ assert.equal(dv.getBigInt64(65528,true),22n);
+ assert.equal(dv.getBigInt64(65504,true),-1n);
+ assert.equal(u[65503],0);
+}
+"#,
+    );
+}
+
+#[test]
+fn review_zero_frames_restore_sp_and_allow_an_empty_stack_region() {
+    let m = checked(
+        r#"
+func @empty(i32) -> i64 {
+block0(v0:i32):
+ brif v0, block1, block2
+block1:
+ v1 = iconst.i64 123
+ return v1
+block2:
+ v2 = call @framed()
+ return v2
+}
+func @framed() -> i64 {
+ ss0 = stack_slot 1, align 1
+block0:
+ v0 = stack_addr ss0
+ v1 = ptrtoint.i64 v0
+ return v1
+}
+"#,
+    );
+    let mut opts = options(&["empty"]);
+    opts.stack_bottom = 65520;
+    execute(
+        &m,
+        &opts,
+        "for(let i=0;i<100;i++) { assert.equal(e.empty(0),65520n); assert.equal(e.empty(1),123n); }",
+    );
+    // An unused framed definition does not reserve space until called.
+    opts.stack_bottom = opts.stack_top;
+    execute(
+        &m,
+        &opts,
+        "assert.equal(e.empty(1),123n); assert.throws(()=>e.empty(0),WebAssembly.RuntimeError);",
+    );
+}
+
+#[test]
+fn review_malformed_runtime_references_return_diagnostics() {
+    use keel_ir::{DataRef, EntityRef, InstData, StackSlot, Symbol};
+    let original = checked(
+        "data @x = align 4 { i32 7 }\nfunc @f() {\n ss0=stack_slot 4, align 4\nblock0:\n v0=stack_addr ss0\n v1=symbol_addr @x\n return\n}",
+    );
+    for invalid in [
+        InstData::StackAddr {
+            slot: StackSlot::new(u32::MAX as usize),
+        },
+        InstData::SymbolAddr {
+            symbol: Symbol::Data(DataRef::new(u32::MAX as usize)),
+        },
+    ] {
+        let mut m = original.clone();
+        let f = &mut m.functions[0];
+        let inst = f.block_insts(f.entry_block().unwrap())[0];
+        *f.inst_data_mut(inst) = invalid;
+        assert!(emit_wasm32_runtime_module(&m, &options(&[])).is_err());
+    }
+    let mut m = original.clone();
+    m.functions[0].import_data("undeclared");
+    assert!(emit_wasm32_runtime_module(&m, &options(&[])).is_err());
+    let mut m = original;
+    m.data[0].init.as_mut().unwrap().align = 0;
+    assert!(emit_wasm32_runtime_module(&m, &options(&[])).is_err());
+}
