@@ -141,3 +141,76 @@ its exact invocation and output use
 `/tmp/keel-c-scalar-check-20261024.{jsonl,log}`. Focused rustfmt checks on all
 five changed Rust files and `git diff --check` passed. The checkout is left for
 parent review/integration without rebasing or cleanup.
+
+## Independent review
+
+Candidate `06afc15c` (source `e751973f`/`7ccedc94`) was reapplied onto clean
+`aa326b52` in the assigned review checkout as `7ed191f1`/`ebfc3db1`/`8e445694`.
+The audit found one parser robustness defect reachable through the new seam:
+the GNU case-range bound check subtracted i64 endpoints without checking
+overflow. A range from LLONG_MIN to LLONG_MAX panicked in debug and could
+bypass the size limit in release. Fix `98ceb4ea` uses checked subtraction and
+returns the existing oversized-range diagnostic. Its regression covers both
+the private seam and public native compilation. Ordinary accepted ranges and
+native lowering semantics are unchanged.
+
+Review test commit `da07029d` extends the maintained fixture with nine constant
+functions and compares each actual returned IR i64 constant against Clang's
+independently optimized LLVM return, in wasm32 and native LP64 profiles. Cases
+cover unsigned-long division/remainder/right shift, mixed signedness comparison,
+long/long-long rank, truncation through unsigned long, negative signed division,
+_Bool after long truncation and narrow integer promotion. Unsigned arithmetic
+and conversions use defined C rules; these are compile-time oracle checks,
+not executable Wasm C evidence. Clang is invoked with `-O1 -S -emit-llvm -o -`
+and the existing header-free flags, with generated output held outside Git.
+
+Additional checks cover 1/2/4/8-byte volatile slots, signed widening and signed
+versus unsigned runtime shifts, truncation beneath logical-not and logical-and,
+i32 SSA merge parameters, default long returns, direct external prototypes and
+plain ABI metadata. Rejection regressions require boundary diagnostics for
+unknown calls, unprototyped/narrow signatures, unsupported expressions beneath
+false branches/short-circuit/conditional expressions, statement/compound
+literals, pointer locals, static data, weak/visibility/noreturn metadata.
+Public `Options { target, debug_info }` literal construction is exercised for
+every existing Target, with and without debug output; native long stays i64,
+volatile long storage stays 8/8 and narrow signed ABI extensions remain intact.
+
+No unresolved defect was found in the accepted integer-only lowering paths.
+Parser, generator scalar queries, fold recursion and truth/identity proofs use
+the same model. Remaining native evaluator/width calls are behind the excluded
+data, computed-goto and builtin paths, apart from the width-invariant i128
+conversion guard. Every global/function body is validated before the generator
+worklist, including unused bodies. Production `compile` still constructs only
+LP64 parsers; the alternate parser constructor, WASM32 constant and scalar seam
+remain test-only in private modules. Public Options/Target/API are unchanged.
+
+The earlier blockers remain: C pointers/data/aggregate serialization, narrow
+call ABI, headers/macros, production target routing, debug support and optimizer
+migration are deferred. Known undefined prototypes describe IR signatures only,
+without authorizing imports. No backend join or C-to-Wasm execution is claimed.
+The AST/model pairing remains a trusted private precondition, and the gate
+validates the typed AST after parser constant/type-query erasure rather than
+all tokens in the original source. Parent owns integration and cleanup.
+
+Fresh independent validation of `da07029d` on 2026-10-24, Apple ARM64 with
+Apple Clang 21.0.0 (`clang-2100.3.34.2`), passed 305 full C debug tests and
+121 tests in the focused release command above, zero failures/ignored and no
+compiler warnings. Both configurations include all seven scalar lowering tests,
+the expanded Clang wasm32/native syntax fixture and the optimized constant
+oracles. Applicable native runtime/ABI controls executed; local Linux/x86
+frontend/object results remain cross-compilation evidence. Locked production
+`cargo check --offline --locked -j2 -p keel-c` also passed. Focused rustfmt checks
+on all changed Rust files and `git diff --check` passed.
+
+Every Rust invocation used `CARGO_CACHE_LINKS=0`, the existing shared
+`fast_opt_locked.py` lock, pinned toolchain/features, `--offline --locked -j2`
+and default cargo cache/managed targets. Logs and exact serialized invocations
+remain outside Git at `/tmp/keel-scalar-review-b58c-{debug,release,check}.{log,jsonl}`.
+The initial oversized-range panic is recorded in
+`/tmp/keel-scalar-review-b58c-witness.{log,jsonl}`. Focused unit runs use
+`/tmp/keel-scalar-review-b58c-unit.jsonl` and `-unit{,-final}.log`; the first
+expanded rejection run expected the later profile diagnostic for an unknown
+callee, while the parser correctly rejected it earlier as undeclared. The final
+full suites include that corrected assertion. No remote hosts, subagents,
+toolchain/cache changes, manual output deletion, performance campaign, backend
+or IR/API expansion, main integration or worktree cleanup were performed.
