@@ -5,6 +5,11 @@
 `keel link --system ...` explicitly selects the Clang driver fallback. Native
 errors never silently switch linkers.
 
+Place `--system` before Clang-only options for opaque driver forwarding, including
+Clang's own target/response/config/environment handling. See the precise
+[system-link compatibility boundary](wasm-target-foundation.md#system-link-compatibility-boundary-revised-contract).
+External Clang Wasm selection is not Keel Wasm support.
+
 The reusable `keel-link` crate takes named object/archive bytes and explicit
 `Dylib` interfaces. `link` returns a **not yet signed** Mach-O image and warnings;
 `write_signed` and the streaming `link_signed` write a sibling temporary file,
