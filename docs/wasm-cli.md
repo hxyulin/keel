@@ -141,3 +141,44 @@ error. The final helper uses shell redirection and passes. No production semanti
 correction was needed during these runs. Changed Rust files pass rustfmt checks
 and the diff passes whitespace checks. These are finite correctness checks, with
 no performance or cross-host native-execution claim.
+
+## Independent CLI review (2026-10-24)
+
+Candidate `3dd569dc` (`ea4680ee`, `788cd8be`, `3dd569dc`) was reapplied onto
+`e24cba6d` as `2a138c59`, `9f68b6e0`, `b4ddcb8c`. No blocking production defect
+was found. The audit checked flag presence rather than final default values,
+dedicated routing before native input/optimization/output handling, raw C versus
+preprocessed `.i` versus raw IR, target-tagged artifact rejection, actual WASM32
+runtime verification, exact backend export options, u32 memory bounds, and
+exclusive same-directory publication with failure cleanup. The existing backend
+gates and native/Portable CLI behavior remain intact; no production change was
+needed.
+
+Review commit `16a0395b` adds three maintained integration tests. They check that
+overriding forbidden options cannot hide their presence, extra inputs reject,
+and unimplemented joined/equals spellings and `--` reject before input loading.
+This driver requires separate `-o path`, `--export name`, and Wasm numeric flag
+arguments; `-opath` and `--flag=value` are not added by this checkpoint. Duplicate
+output and memory options retain last-value semantics. All four numeric flags
+reject signs, whitespace, hexadecimal, fractional and overflowing values.
+Node validates and compiles maximum 65536-page memory with high unsigned stack
+bounds without instantiating it. Symlink and hard-link output aliases preserve
+their targets on both failed compilation and successful atomic replacement.
+
+Reviewed source `16a0395b` passed 62 tests in each of debug and release: 38 binary,
+12 `wasm_output`, 2 `wasm_target_unavailable`, 7 `system_link_args` and 3 existing
+`x86_cpu_level` controls. Both profiles execute the Node witnesses. Locked cargo
+check with `--all-targets` and build passed without compiler warnings. Every Rust
+compilation used `python3 suite/fast_opt_locked.py`, the existing
+shared lock, `cargo`, `--offline --locked -j2`, existing pins/features
+and default managed cache/storage. Evidence stays outside Git:
+`/tmp/wasm-cli-review-{final-debug,release,check,build}-dcabf804.{jsonl,log}`.
+
+Targeted rustfmt checks of all changed Rust files and `git diff --check` pass.
+`cargo fmt -p keel -- --check` reports an existing unrelated formatting difference
+in `crates/keel/tests/hidden_visibility.rs`; that file is unchanged. Publication
+create/rename failure paths are exercised; write/sync/close failures and process
+termination are not fault-injected. Maximum-memory validation is not a 4 GiB
+allocation/execution claim. This finite review adds no imports, FP, SIMD,
+optimizer, native ABI or memory semantics, performance claim, remote access or
+main integration. Parent owns integration and cleanup.
