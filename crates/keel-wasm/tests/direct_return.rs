@@ -534,3 +534,67 @@ fn minimal_return_shapes_and_code_size_evidence_all_profiles() {
         }
     }
 }
+
+#[test]
+fn unused_loads_and_aliased_division_producers_keep_their_traps() {
+    let mut scalar = parse(
+        r#"
+func @divide(i64,i64)->i64 {
+block0(v0:i64,v1:i64):
+ v2=sdiv v0,v1
+ return v2
+}
+"#,
+    )
+    .unwrap();
+    let f = &mut scalar.functions[0];
+    let b = f.entry_block().unwrap();
+    let div = f.block_insts(b)[0];
+    // The raw producer stays in layout although its result resolves to v0.
+    f.replace_all_uses(f.first_result(div), f.block_params(b)[0]);
+    for profile in 0..3 {
+        let bytes = emit(&scalar, &["divide"], profile).unwrap();
+        direct_shape(&bodies(&bytes)[0], profile);
+        execute(
+            &bytes,
+            "assert.equal(e.divide(17n,3n),17n); assert.throws(()=>e.divide(17n,0n),WebAssembly.RuntimeError);",
+        );
+        execute(
+            &bytes,
+            "assert.throws(()=>e.divide(-(1n<<63n),-1n),WebAssembly.RuntimeError);",
+        );
+    }
+
+    let memory = parse(
+        r#"
+func @read(i64) {
+block0(v0:i64):
+ v1=iconst.i64 7
+ v2=inttoptr.ptr v1
+ v3=iconst.i8 85
+ store volatile v3,v2
+ v4=inttoptr.ptr v0
+ v5=load.i64 volatile v4
+ v6=load.i16 v4
+ v7=iconst.i8 102
+ store volatile v7,v2
+ return
+}
+"#,
+    )
+    .unwrap();
+    for profile in 1..3 {
+        let bytes = emit(&memory, &["read"], profile).unwrap();
+        direct_shape(&bodies(&bytes)[0], profile);
+        execute(
+            &bytes,
+            r#"
+const u=new Uint8Array(e.memory.buffer);u.fill(0xab);
+e.read(65528n);
+assert(u.every((x,i)=>x===(i===7?102:0xab)));
+assert.throws(()=>e.read(65529n),WebAssembly.RuntimeError);
+assert(u.every((x,i)=>x===(i===7?85:0xab)));
+"#,
+        );
+    }
+}
