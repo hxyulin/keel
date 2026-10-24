@@ -1,3 +1,6 @@
+#[path = "support/adjacent_tee.rs"]
+mod adjacent_tee;
+
 use keel_ir::{Module, parse};
 use keel_wasm::{
     Diagnostic, Export, Options, Wasm32MemoryOptions, Wasm32RuntimeOptions, emit_module,
@@ -423,7 +426,12 @@ fn unmatched_cfg_snapshots_and_phi_cycles() {
             let ops=b.get_operators_reader().unwrap().into_iter().collect::<Result<Vec<_>,_>>().unwrap();
             assert!(ops.iter().any(|o|matches!(o,Operator::Loop{..})));
             let hex=b.as_bytes().iter().map(|b|format!("{b:02x}")).collect::<String>();
-            assert_eq!(hex,UNMATCHED_BASE[profile as usize][i],"profile={profile} body={i}");
+            let frozen = UNMATCHED_BASE[profile as usize][i];
+            let original: Vec<u8> = (0..frozen.len()).step_by(2)
+                .map(|n| u8::from_str_radix(&frozen[n..n + 2], 16).unwrap()).collect();
+            let (expected, _) = adjacent_tee::fold_body(&original);
+            let expected_hex = expected.iter().map(|b| format!("{b:02x}")).collect::<String>();
+            assert_eq!(hex,expected_hex,"profile={profile} body={i}");
         }
         execute(&bytes,r#"
 for(let n=0;n<12;n++) {
