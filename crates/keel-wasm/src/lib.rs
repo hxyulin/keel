@@ -3,7 +3,7 @@
 mod runtime;
 use keel_ir::{
     ArgExt, BinaryOp, Block, BlockCall, CallConv, ConvertOp, DataLayout, EntityRef, Function,
-    FunctionAttrs, InstData, IntCC, Module, Purpose, Signature, Symbol, Type, Value,
+    FunctionAttrs, InstData, IntCC, Module, Purpose, Signature, Symbol, Type, UnaryOp, Value,
 };
 pub use runtime::Wasm32RuntimeOptions;
 use std::collections::{HashMap, HashSet};
@@ -329,6 +329,7 @@ fn emit(
                             matches!(ty, Type::I8 | Type::I32 | Type::I64)
                                 || (has_memory && *ty == Type::I16)
                         }
+                        InstData::Unary { op, arg } => *op == UnaryOp::Ineg && wide(ty(*arg)),
                         InstData::Binary { op, args } => {
                             binary(*op, ty(args[0])).is_some()
                                 || (has_memory && *op == BinaryOp::Ptradd)
@@ -636,6 +637,17 @@ impl<'a> Body<'a> {
                         ));
                     }
                     InstData::Iconst { ty, imm } => self.constant(*ty, *imm),
+                    InstData::Unary {
+                        op: UnaryOp::Ineg,
+                        arg,
+                    } => {
+                        let ty = self.ir.value_type(self.ir.resolve(*arg));
+                        // MVP subtraction wraps at the operand width, including
+                        // INT_MIN; keep the input local live and resolve aliases.
+                        self.constant(ty, 0);
+                        self.get(*arg);
+                        self.op(binary(BinaryOp::Isub, ty).unwrap());
+                    }
                     InstData::Binary {
                         op: BinaryOp::Ptradd,
                         args,

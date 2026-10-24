@@ -2,8 +2,9 @@
 
 This library-only checkpoint adds static data and static software-stack frames
 to the reviewed [fixed-memory backend](../../docs/wasm-memory-backend.md).
-The original scalar and fixed-memory APIs, options and accepted subsets retain
-their contracts. No C frontend, Target, CLI, native backend, dependency or
+The original scalar and fixed-memory APIs and options retain their contracts;
+the additive integer-negation subset is documented below.
+No C frontend, Target, CLI, native backend, dependency or
 optimizer integration is provided. Supply raw, unoptimized IR whose storage was
 explicitly produced for wasm32; the caller owns that provenance.
 
@@ -116,6 +117,31 @@ growth, imported memory/functions, function tables, indirect/tail calls,
 C/pointer/narrow call ABI, aggregate/variadic boundaries, FP, SIMD, atomics, EH,
 TLS and native integration remain unsupported. Native ABI/FP/memory and
 architectural contracts remain unchanged.
+
+## Wrapping integer negation
+
+All three existing entrypoints (`emit_module`, `emit_wasm32_memory_module`,
+`emit_wasm32_runtime_module`) additionally accept raw-IR `UnaryOp::Ineg` on
+I32 and I64. The result keeps its input width. Emission uses MVP typed `0 - x`,
+wrapping modulo 2^32 or 2^64; negating INT_MIN returns INT_MIN without trapping.
+There is no API/options change or runtime helper. Alias reads, destination locals,
+normal scalar calls and CFG edge transport retain their existing contracts.
+
+Other unary operations, I8/I16/I128 negation, floating-point and vector operations
+remain rejected, including in unexported functions. This raw-IR addition does not
+establish C lowering, a C ABI or new native semantics. Pointer offsets remain i64;
+the memory profiles normalize the resulting offset through the existing wasm32
+`ptradd` contract.
+
+`tests/negation.rs` independently validates MVP bytes and executes Node against
+BigInt width-normalized oracles in all three profiles. It covers zero, one,
+minus one, signed extrema and deterministic full-width inputs, retained/removed
+aliases, live inputs/results across calls, loop phi transport and negated counts
+used by mixed-width shifts. A raw-IR pointer-decrement equivalent composes i64
+negation with `ptradd` and exact four-byte stores, checking every memory byte,
+negative/high-bit offsets, INT_MIN and an OOB store that writes no prefix.
+The runtime instance is discarded after the final trapping operation.
+Explicit negative tests retain unsupported unary/width/FP family coverage.
 
 ## Validation
 
