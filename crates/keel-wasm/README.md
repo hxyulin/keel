@@ -173,4 +173,40 @@ Validation temporarily uses prerequisite `8f3eab3e`, the unmodified cherry-pick
 of the separately owned IR implementation `4d974a65`, on base `aa326b52`.
 That prerequisite is separate from the two runtime-owned commits and is subject
 to the parent's IR review/integration. The runtime-owned patch changes only
-this crate. Independent runtime review and integration remain outstanding.
+this crate. The independent runtime review is recorded below; parent integration remains separate.
+
+## Independent runtime review
+
+The independent review reapplied runtime commits `c4388780`, `4fa9d0d8` and
+`d44fa09e`, then dropped the temporary IR prerequisite and rebased onto reviewed
+main `6a1e148712617ab38a62df7d227a3614c9b2b059`. The IR production source has no
+diff from `4d974a65`; `verifier.rs` has Git blob identity
+`66da48503cadc0d107bfdc6788f3d2b6faeedc6f` in both. The separate IR review was
+not repeated. Runtime production source has no diff from candidate `d44fa09e`.
+No blocking runtime semantic defect was found in this bounded review.
+
+Three focused regressions close coverage gaps: retained aliased StackAddr
+producers must not overwrite replacement locals; pointer phi cycles with a
+removed layout block must preserve distinct slots across a callee frame;
+zero-frame callers must restore SP across repeated calls and permit an empty
+stack region until a framed callee is actually invoked. Runtime entrypoint
+negative cases additionally require diagnostics for out-of-range slot/data
+handles, an unused undeclared data reference and zero initializer alignment.
+These check the backend verification boundary, rather than repeat the IR suite.
+
+Final reviewed source `c994e3eb` passed all 38 backend integration tests in
+both debug and release (13 runtime, 10 memory, 15 scalar), with no failures or
+ignored tests. Both profiles independently validate MVP bytes and run the Node
+fixtures. Locked cargo check and build passed without compiler warnings;
+`cargo fmt -p keel-wasm --check` and `git diff --check` also passed. Every Rust
+gate used the prescribed shared suite lock, `CARGO_CACHE_LINKS=0`, default cargo
+storage and `--offline --locked -j2 -p keel-wasm`. Command records are
+`/tmp/keel-wasm-runtime-review-5172ebf9-{debug,release,check,build}.jsonl`;
+release/check/build output is beside those records as `.log` files. The debug
+output is retained in the review thread.
+
+This is finite raw-IR runtime evidence. Near-4-GiB BSS/high-bit fixtures only
+encode, validate and inspect small binaries; no large memory is instantiated.
+Trap instances are discarded. No C ABI, FP, native regression execution,
+performance result or general malformed-IR resource limit is established.
+Main integration and worktree cleanup remain the parent's responsibility.
