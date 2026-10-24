@@ -17,6 +17,7 @@ profiling.workspace = true
 tracy-client = { version = "0.18", optional = true }
 
 keel-ir = { path = "../keel-ir" }
+keel-wasm = { path = "../keel-wasm" }
 keel-c = { path = "../keel-c" }
 keel-codegen = { path = "../keel-codegen" }
 keel-opt = { path = "../keel-opt" }

@@ -355,6 +355,7 @@ dependencies = [
  "keel-ir",
  "keel-link",
  "keel-opt",
+ "keel-wasm",
  "memmap2",
  "object",
  "profiling",

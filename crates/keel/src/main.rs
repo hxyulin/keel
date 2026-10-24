@@ -34,6 +34,7 @@ mod archive;
 mod asm;
 mod input;
 mod link;
+mod wasm;
 
 const USAGE: &str = "usage:
   keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <legacy|v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
@@ -46,6 +47,9 @@ const USAGE: &str = "usage:
   keel asm-metrics <input.s> [-o <metrics.json>]
   keel link [--system] [--target <triple>] [-e entry] [-L DIR] [--rpath PATH] [--sysroot SDK] [-l NAME] [--dead-strip] [--require-export SYMBOL] [--debug-map DIR] [--dsym PATH] <input.o|input.a|input.so>... -o executable
   keel archive [--target <triple>] -o <output.a> <member.o>...
+  keel cc|compile --target wasm32-unknown-unknown --emit-wasm [--export name]... <input> -o <output.wasm>
+  Wasm memory: --wasm-memory-pages 1 --wasm-data-floor 1024 --wasm-stack-bottom 32768 --wasm-stack-top 65536
+  Wasm emits unoptimized freestanding integer code; no native/optimization/debug flags.
   keel passes
 
   --target also accepts aarch64-unknown-linux-gnu (Linux AAPCS64/ELF).
@@ -89,6 +93,8 @@ struct Options {
     ir_lines: bool,
     emit_ir: bool,
     emit_object: bool,
+    emit_wasm: bool,
+    wasm: wasm::Options,
     preprocess_only: bool,
     dump_macros: bool,
     sysroot: Option<std::path::PathBuf>,
@@ -267,6 +273,7 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
     let mut opts = Options::default();
     let mut optimize_preset = false;
     let mut explicit_selection = false;
+    let mut supplied = Vec::new();
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         let raw = arg.as_str();
@@ -286,7 +293,25 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
         if flag.starts_with('-') && !allowed.contains(&flag) {
             return Err(format!("unknown flag `{flag}`\n{USAGE}"));
         }
+        if flag.starts_with('-') {
+            supplied.push(flag);
+        }
         match flag {
+            "--emit-wasm" => opts.emit_wasm = true,
+            "--export" => opts.wasm.exports.push(
+                args.next()
+                    .ok_or("`--export` needs a function name")?
+                    .clone(),
+            ),
+            "--wasm-memory-pages"
+            | "--wasm-data-floor"
+            | "--wasm-stack-bottom"
+            | "--wasm-stack-top" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| format!("`{flag}` needs a decimal u32"))?;
+                opts.wasm.set_number(flag, value)?;
+            }
             "-I" | "-D" | "-U" => {
                 let value = if raw.len() > 2 {
                     raw[2..].to_string()
@@ -484,7 +509,10 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             _ => return Err(format!("unexpected argument `{arg}`\n{USAGE}")),
         }
     }
-    opts.reject_unavailable_target()?;
+    wasm::validate_options(&opts, &supplied)?;
+    if !opts.emit_wasm {
+        opts.reject_unavailable_target()?;
+    }
     // Explicit selectors override the convenience preset regardless of order.
     // IR tier changes and explicit pipelines do not reset selection.
     if optimize_preset && !explicit_selection {
@@ -613,6 +641,12 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "-g",
                     "--target",
                     "--emit-object",
+                    "--emit-wasm",
+                    "--export",
+                    "--wasm-memory-pages",
+                    "--wasm-data-floor",
+                    "--wasm-stack-bottom",
+                    "--wasm-stack-top",
                     "--isel",
                     "--opt-report",
                     "--verify-each",
@@ -626,6 +660,9 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--cpu-level",
                 ],
             )?;
+            if opts.emit_wasm {
+                return wasm::compile_ir(&opts);
+            }
             let (input, mut module) = load(&opts)?;
             opts.optimize_with_output(&mut module)
                 .map_err(|e| format!("{input}: {e}"))?;
@@ -651,6 +688,12 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "-mmacosx-version-min",
                     "--target",
                     "--emit-object",
+                    "--emit-wasm",
+                    "--export",
+                    "--wasm-memory-pages",
+                    "--wasm-data-floor",
+                    "--wasm-stack-bottom",
+                    "--wasm-stack-top",
                     "--isel",
                     "--opt-report",
                     "--verify-each",
@@ -664,6 +707,9 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--cpu-level",
                 ],
             )?;
+            if opts.emit_wasm {
+                return wasm::compile_c(&opts);
+            }
             let input = opts.input.clone().ok_or(USAGE)?;
             let src = input::Source::open(&input).map_err(|e| format!("{input}: {e}"))?;
             let text = src.text().map_err(|e| format!("{input}: {e}"))?;
