@@ -80,7 +80,7 @@ pub(super) fn validate_options(opts: &DriverOptions, supplied: &[&str]) -> Resul
         return Err("Wasm flags require `--emit-wasm --target wasm32-unknown-unknown`".into());
     }
     // Presence, rather than final values, matters: even explicit native defaults
-    // and overridden optimization requests have no reviewed Wasm contract.
+    // and overridden native optimization requests have no Wasm contract.
     for flag in supplied {
         if !matches!(
             *flag,
@@ -99,7 +99,7 @@ pub(super) fn validate_options(opts: &DriverOptions, supplied: &[&str]) -> Resul
                 | "--wasm-stack-top"
         ) {
             return Err(format!(
-                "`{flag}` is unsupported with --emit-wasm: optimization, native output, debug and hosted configuration are unavailable"
+                "`{flag}` is unsupported with --emit-wasm: native optimization/output, debug and hosted configuration are unavailable"
             ));
         }
     }
