@@ -1409,7 +1409,15 @@ impl<'a> FunctionCompiler<'a> {
         for slot in f80_homes {
             vector_spills.insert(slot, 128);
         }
-        let copy_temp = has_vectors.then_some(alloc.spill_slots + staging as u32);
+        // Some instruction recipes also use this slot for staging. Keep their
+        // storage conservatively; ordinary SIMD copies use reserved registers.
+        let needs_copy_temp = has_vectors
+            && (wide_vectors
+                || (0..func.num_values()).any(|i| func.value_type(Value::new(i)) == Type::F80)
+                || func
+                    .layout_insts()
+                    .any(|(_, i)| matches!(func.inst_data(i), InstData::Intrinsic { .. })));
+        let copy_temp = needs_copy_temp.then_some(alloc.spill_slots + staging as u32);
         if let Some(slot) = copy_temp {
             vector_spills.insert(slot, if wide_vectors { 256 } else { 128 });
         }
@@ -1417,7 +1425,7 @@ impl<'a> FunctionCompiler<'a> {
         let offset = spill_base
             + 8 * (alloc.spill_slots as usize
                 + staging
-                + if has_vectors {
+                + if needs_copy_temp {
                     if wide_vectors { 4 } else { 2 }
                 } else {
                     0
@@ -1518,7 +1526,9 @@ impl<'a> FunctionCompiler<'a> {
                     .is_some_and(|data| data.thread_local),
                 _ => false,
             });
-        let frameless = func.sig.cc == CallConv::Fast
+        // Both conventions use the same SysV leaf protocol. Keep frames for
+        // anything that observes or changes the stack, or needs frame storage.
+        let frameless = matches!(func.sig.cc, CallConv::Fast | CallConv::C)
             && !has_tls_address
             && module.files.is_empty()
             && func.personality.is_none()
@@ -6042,10 +6052,19 @@ impl<'a> FunctionCompiler<'a> {
     }
 
     /// Emits `moves`, each `(dst, src)`, as if they all happened at once.
-    /// Scalar functions break cycles through r11. With live vectors, a
-    /// 16-byte stack temporary preserves complete XMM values instead.
+    /// Integer copies break cycles through r11. SIMD copies use reserved
+    /// xmm14/ymm14, preserving every lane without reserving frame storage.
+    /// emit_move uses only rax and xmm15/ymm15 for memory transfers, so it
+    /// cannot clobber either cycle temporary while draining a chain.
     fn parallel_copy(&mut self, moves: &[(Loc, Loc)]) {
-        let temp = self.copy_temp.map_or(Loc::Reg(S3), Loc::Stack);
+        let simd = moves.iter().any(|&(dst, src)| {
+            [dst, src].iter().any(|loc| match loc {
+                Loc::FReg(_) => true,
+                Loc::Stack(slot) => self.vector_spills.contains_key(slot),
+                _ => false,
+            })
+        });
+        let temp = if simd { Loc::FReg(FS1) } else { Loc::Reg(S3) };
         for_each_move(moves, temp, |dst, src| self.emit_move(dst, src));
     }
 
