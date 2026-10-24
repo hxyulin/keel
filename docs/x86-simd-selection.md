@@ -13,6 +13,8 @@ The generic 128-bit shuffle selector uses existing SSE2 encodings for:
 - Every one-source dword permutation, including resolved `[x,x]` inputs.
 - Two-source dword shuffles with two low lanes from one source and two high
   lanes from the other, in either source order.
+- Alternating-source dword shuffles, in either source order, using two
+  `pshufd` operations followed by `punpckldq`.
 - All qword permutations; the existing two-source `shufpd` window is retained.
 - Byte/word permutations that preserve aligned groups of four bytes.
 
@@ -51,11 +53,12 @@ equivalence.
 ### Static measurements
 
 Run `measure_generic_shuffle_codegen` with `-- --ignored --nocapture`. The
-128-function corpus in `x86_generic_shuffle::fixture` includes all qword index
+current 144-function corpus in `x86_generic_shuffle::fixture` includes all qword index
 pairs, representative dword/byte-group/word-group masks, repeated and reversed
 lanes, same inputs, and both inputs remaining live. Counts use Full selection
-without an IR optimization pass, include all function overhead, and are the
-same at v1, v2 and v3:
+without an IR optimization pass. The recorded counts below predate the
+alternating-source extension and use the earlier 128-function corpus. They
+include all function overhead and were the same at v1, v2 and v3:
 
 | Configuration | Instructions | `.text` bytes | Frame-memory (vector) |
 | --- | ---: | ---: | ---: |
@@ -222,12 +225,12 @@ boost and load are uncontrolled. It is not an application-wide speedup claim.
 
 The target-private `packed(op, shape, features)` helper recognizes generic
 `vimul` on `i32x4` when `features.sse41` is enabled and returns the legacy
-`PMULLD` encoding. Legalization retention and emission call the same helper
-with the effective feature set:
+`PMULLD` encoding. Legalization retains the SSE2 recipe independently of the single-opcode
+helper. Emission uses the effective feature set:
 
 - Explicit v2/v3 and v1+sse41 select `PMULLD`.
-- v1 and v2/v3 with `-sse41` keep lane legalization (identical assembly to
-  before).
+- v1 and v2/v3 with `-sse41` use two SSE2 `PMULUDQ` operations. Dword
+  shuffles select the even and odd low products; `PUNPCKLDQ` combines them.
 
 The low 32 bits of each product implement the IR's modular integer semantics
 for both signed and unsigned interpretation. Existing two-address source
@@ -282,8 +285,23 @@ The ignored `measure_multiply_backend_time` gate times typed-program backend
 compilation of the pre-parsed corpus (excluding parsing and assembly). Median
 time per corpus was v1 29.2 -> 29.1 us, v2 29.4 -> 10.2 us and v3 28.8 ->
 10.1 us. These are backend micro-measurements, not whole-compiler throughput.
-The maintained runtime-kernel suite has no multiply kernel, so no runtime
-speedup is claimed.
+The native SIMD comparison suite includes a wrapping dword multiply case.
+Measurements of that case remain separate from the twelve integer runtime kernels.
+
+## Private C vector constructors
+
+Full optimization recovers complete `i32x4` constructors from the existing
+same-block byte facts in `stack-forward`. Four copies of one `i32` value become
+`vsplat`; four extracts from at most two `i32x4` snapshots become `vshuffle`.
+The sources must remain defined in the same block, including block parameters.
+Partial or torn lanes, other scalar expressions, and mixed-width constructors
+keep their memory representation. The existing escape, volatile, atomic,
+stack-lifetime and debugger-home exclusions apply.
+
+This recovers ordinary C literals such as `(U){s,s,s,s}` and
+`(U){a[3],b[0],a[1],b[2]}` before target lane legalization. No producer is moved
+or cloned. Private stores disappear only when all reads of the slot disappear.
+The separate target selector then chooses the packed shuffle recipe.
 
 ## Related
 

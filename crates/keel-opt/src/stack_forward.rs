@@ -350,6 +350,19 @@ pub fn run(func: &mut Function) -> bool {
                             if local_only
                                 || offset != 0
                                 || sizes[&slot] != 16
+                                || ty != Type::Vector(VectorType::I32x4)
+                            {
+                                return None;
+                            }
+                            let data = dword_constructor(func, inst, slot, &bytes)?;
+                            let recovered = func.insert_inst(InsertPoint::Before(inst), data);
+                            func.set_inst_loc(recovered, func.inst_loc(inst));
+                            Some(func.first_result(recovered))
+                        })
+                        .or_else(|| {
+                            if local_only
+                                || offset != 0
+                                || sizes[&slot] != 16
                                 || ty != Type::Vector(VectorType::I64x2)
                             {
                                 return None;
@@ -425,6 +438,75 @@ pub fn run(func: &mut Function) -> bool {
         }
     }
     changed
+}
+
+// Recover only complete i32 lanes from the final same-block byte image. Do
+// not rebuild arbitrary vectors: repeated scalars and extracts from at most
+// two immutable vector snapshots have direct splat/shuffle representations.
+fn dword_constructor(
+    f: &Function,
+    at: Inst,
+    slot: StackSlot,
+    bytes: &FxHashMap<(StackSlot, usize), (Value, usize)>,
+) -> Option<InstData> {
+    let block = f.inst_block(at);
+    let available = |value: Value| {
+        f.is_value_defined(value)
+            && match f.value_def(value) {
+                ValueDef::Result(inst, n) => {
+                    f.inst_results(inst).get(n as usize) == Some(&value)
+                        && f.inst_block(inst) == block
+                }
+                ValueDef::Param(b, _) => b == block,
+                ValueDef::Alias(_) => unreachable!("resolved"),
+            }
+    };
+    let mut values = [Value::new(0); 4];
+    for (lane, value) in values.iter_mut().enumerate() {
+        *value = f.resolve(bytes.get(&(slot, lane * 4))?.0);
+        if f.value_type(*value) != Type::I32 || !available(*value) {
+            return None;
+        }
+        for byte in 0..4 {
+            let &(stored, source_byte) = bytes.get(&(slot, lane * 4 + byte))?;
+            if f.resolve(stored) != *value || source_byte != byte {
+                return None;
+            }
+        }
+    }
+    if values.iter().all(|&value| value == values[0]) {
+        return Some(InstData::VectorSplat {
+            ty: Type::Vector(VectorType::I32x4),
+            arg: values[0],
+        });
+    }
+    let mut sources = Vec::with_capacity(2);
+    let mut lanes = Vec::with_capacity(4);
+    for value in values {
+        let ValueDef::Result(inst, 0) = f.value_def(value) else {
+            return None;
+        };
+        let InstData::VectorExtract { arg, lane } = *f.inst_data(inst) else {
+            return None;
+        };
+        let arg = f.resolve(arg);
+        if f.value_type(arg) != Type::Vector(VectorType::I32x4) || !available(arg) || lane >= 4 {
+            return None;
+        }
+        let source = match sources.iter().position(|&source| source == arg) {
+            Some(index) => index,
+            None if sources.len() < 2 => {
+                sources.push(arg);
+                sources.len() - 1
+            }
+            None => return None,
+        };
+        lanes.push(source as u8 * 4 + lane);
+    }
+    Some(InstData::VectorShuffle {
+        args: [sources[0], *sources.get(1).unwrap_or(&sources[0])],
+        lanes,
+    })
 }
 // Recognize only the final byte image of two signed low lanes. Availability
 // within this block follows from verified SSA; no producer is moved or cloned.

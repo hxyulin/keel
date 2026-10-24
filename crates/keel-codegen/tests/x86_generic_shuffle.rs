@@ -64,6 +64,8 @@ fn patterns(width: usize) -> Vec<Vec<usize>> {
         [7, 4, 2, 1],
         [2, 2, 7, 7],
         [5, 6, 1, 0],
+        [3, 4, 1, 6],
+        [6, 1, 7, 0],
     ]
     .into_iter()
     .map(|dwords| {

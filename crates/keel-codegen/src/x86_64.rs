@@ -2043,6 +2043,13 @@ impl<'a> FunctionCompiler<'a> {
             InstData::VectorIcmp { cond, args } => self.vector_compare(cond, args, result),
             InstData::VectorSelect { args } => self.vector_select(args, result),
             InstData::VectorBinary { op, args } => {
+                if op == keel_ir::VectorBinaryOp::Imul
+                    && self.ty(args[0]) == Type::Vector(keel_ir::VectorType::I32x4)
+                    && !self.features.sse41
+                {
+                    self.vector_multiply_dwords_sse2(args, result);
+                    return;
+                }
                 let d = self.def_freg(result);
                 let a = self.use_freg(args[0], FS0);
                 let b = self.use_freg(args[1], FS1);

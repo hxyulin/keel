@@ -151,6 +151,7 @@ pub(super) fn packed(
 enum ShuffleRecipe {
     Dwords { source: usize, imm: u8 },
     Halves { first: usize, imm: u8 },
+    Interleave { first: usize, imm: [u8; 2] },
 }
 
 fn shuffle_recipe(shape: VectorType, lanes: &[u8], same: bool) -> Option<ShuffleRecipe> {
@@ -183,6 +184,18 @@ fn shuffle_recipe(shape: VectorType, lanes: &[u8], same: bool) -> Option<Shuffle
         && dwords[0] / 4 != dwords[2] / 4
     {
         return Some(ShuffleRecipe::Halves { first: source, imm });
+    }
+    if dwords[0] / 4 == dwords[2] / 4
+        && dwords[1] / 4 == dwords[3] / 4
+        && dwords[0] / 4 != dwords[1] / 4
+    {
+        return Some(ShuffleRecipe::Interleave {
+            first: source,
+            imm: [
+                (dwords[0] % 4) | ((dwords[2] % 4) << 2),
+                (dwords[1] % 4) | ((dwords[3] % 4) << 2),
+            ],
+        });
     }
     None
 }
@@ -243,7 +256,9 @@ pub(super) fn lower(func: &Function, features: keel_asm_ir::x86::Features) -> Co
                 func.value_type(*arg) == Type::Vector(VectorType::I64x2)
             }
             InstData::VectorBinary { op, args } => {
-                packed(*op, func.value_type(args[0]).vector().unwrap(), features).is_some()
+                let shape = func.value_type(args[0]).vector().unwrap();
+                (*op == V::Imul && shape == VectorType::I32x4)
+                    || packed(*op, shape, features).is_some()
             }
             InstData::Convert {
                 op: ConvertOp::SwidenLow | ConvertOp::UwidenLow,
@@ -309,6 +324,34 @@ fn canonical_mask(func: &Function, mut value: Value) -> bool {
 }
 
 impl FunctionCompiler<'_> {
+    pub(super) fn vector_multiply_dwords_sse2(&mut self, args: [Value; 2], result: Option<Value>) {
+        // PMULUDQ multiplies the even dwords into qwords. A second product
+        // covers odd lanes; only the low dword of each product is retained.
+        // Modulo 2^32, the result is independent of operand signedness.
+        self.vector_stage(args[0], FS1);
+        self.vector_stage(args[1], FS2);
+        self.emit(
+            Opcode::Pshufd,
+            [asm_arg(xmm(FS0)), asm_arg(xmm(FS1)), asm_arg(0xf5i64)],
+        );
+        self.emit(Opcode::Pmuludq, [asm_arg(xmm(FS1)), asm_arg(xmm(FS2))]);
+        self.emit(
+            Opcode::Pshufd,
+            [asm_arg(xmm(FS2)), asm_arg(xmm(FS2)), asm_arg(0xf5i64)],
+        );
+        self.emit(Opcode::Pmuludq, [asm_arg(xmm(FS0)), asm_arg(xmm(FS2))]);
+        self.emit(
+            Opcode::Pshufd,
+            [asm_arg(xmm(FS2)), asm_arg(xmm(FS0)), asm_arg(0xe8i64)],
+        );
+        self.emit(
+            Opcode::Pshufd,
+            [asm_arg(xmm(FS0)), asm_arg(xmm(FS1)), asm_arg(0xe8i64)],
+        );
+        self.emit(Opcode::Punpckldq, [asm_arg(xmm(FS0)), asm_arg(xmm(FS2))]);
+        self.vector_publish(result);
+    }
+
     pub(super) fn vector_reduce_add(&mut self, arg: Value, result: Option<Value>) {
         let shape = self.ty(arg).vector().unwrap();
         // Capture the entire input before defining a scalar destination. Only
@@ -355,6 +398,30 @@ impl FunctionCompiler<'_> {
         )
         .expect("native shuffle retained by vector legalization");
         match recipe {
+            ShuffleRecipe::Interleave { first, imm } => {
+                // Read both inputs before defining a result that may alias
+                // either one. Reserved scratch also covers all-spilled cases.
+                let a = self.use_freg(args[first], FS1);
+                let b = self.use_freg(args[1 - first], FS2);
+                self.emit(
+                    Opcode::Pshufd,
+                    [
+                        asm_arg(xmm(FS0)),
+                        asm_arg(xmm(a)),
+                        asm_arg(i64::from(imm[0])),
+                    ],
+                );
+                self.emit(
+                    Opcode::Pshufd,
+                    [
+                        asm_arg(xmm(FS1)),
+                        asm_arg(xmm(b)),
+                        asm_arg(i64::from(imm[1])),
+                    ],
+                );
+                self.emit(Opcode::Punpckldq, [asm_arg(xmm(FS0)), asm_arg(xmm(FS1))]);
+                self.vector_publish(result);
+            }
             ShuffleRecipe::Dwords { source, imm } => {
                 // PSHUFD has a separate source and can safely overwrite either
                 // allocated input. Read a spilled source before defining FS0.
@@ -741,6 +808,17 @@ mod d_tests {
                         ShuffleRecipe::Halves { first, imm } => {
                             (imm, [first, first, 1 - first, 1 - first])
                         }
+                        ShuffleRecipe::Interleave { first, imm } => {
+                            let indices =
+                                [imm[0] & 3, imm[1] & 3, (imm[0] >> 2) & 3, (imm[1] >> 2) & 3];
+                            (
+                                indices
+                                    .iter()
+                                    .enumerate()
+                                    .fold(0, |v, (i, d)| v | (d << (2 * i))),
+                                [first, 1 - first, first, 1 - first],
+                            )
+                        }
                     };
                     for (i, byte) in actual.iter_mut().enumerate() {
                         let source = if same { 0 } else { sources[i / 4] };
@@ -771,7 +849,8 @@ mod d_tests {
             .is_none()
         );
         assert!(shuffle_recipe(VectorType::I16x8, &[1, 0, 2, 3, 4, 5, 6, 7], false).is_none());
-        assert!(shuffle_recipe(VectorType::I32x4, &[0, 4, 1, 5], false).is_none());
+        assert!(shuffle_recipe(VectorType::I32x4, &[0, 4, 1, 5], false).is_some());
+        assert!(shuffle_recipe(VectorType::I32x4, &[0, 4, 1, 2], false).is_none());
     }
 
     #[test]
@@ -855,14 +934,14 @@ mod d_tests {
                 assert!(matches!(lowered, Cow::Owned(_))); // vpadd forces shared rounds.
                 keel_ir::verify(&lowered).unwrap();
                 let retained = lowered.layout_insts().any(|(_, i)| i == mul);
-                assert_eq!(retained, sse41);
+                assert!(retained);
                 if retained {
                     assert_eq!(lowered.inst_data(mul), &data);
                     assert_eq!(lowered.first_result(mul), result);
                     assert_eq!(lowered.inst_loc(mul), Some(loc));
                     assert_eq!(
                         packed(V::Imul, VectorType::I32x4, features),
-                        Some(Opcode::V2(keel_asm_ir::x86::V2Opcode::Pmulld))
+                        sse41.then_some(Opcode::V2(keel_asm_ir::x86::V2Opcode::Pmulld))
                     );
                 }
             }
