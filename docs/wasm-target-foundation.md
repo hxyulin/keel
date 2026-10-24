@@ -60,8 +60,10 @@ including optional profiling entry points and paths with empty modules:
   its Portable context without resolving a host target; no optimizer pass or
   canonical/custom context dispatch is changed.
 - CLI `asm`, `link` and `archive` reject Wasm before input/output processing.
-  `link --system` is guarded before launching Clang, including Clang's `-target`
-  and target-equals spellings. Assembler APIs themselves are architecture-specific
+  Direct `link --system` target arguments are guarded before launching Clang,
+  including Clang's `-target` and target-equals spellings. The independent review
+  below records unresolved response-file and option-operand gaps in this guard.
+  Assembler APIs themselves are architecture-specific
   (AArch64 or x86), with no `keel_ir::Target` argument. Link/archive APIs use
   separate closed native machine/format enums; no Wasm-to-native conversion is
   added. LLVM and the excluded experimental Cranelift workspace likewise retain
@@ -130,3 +132,50 @@ final changed-codegen/CLI runs, native `contracts`/`environment` controls and
 workspace check use `/tmp/keel-wasm-target-final-*-20261024.log`.
 The workspace check reports existing dead-code warnings in other test helpers;
 there are no new warnings in the target foundation/rejection tests.
+
+## Independent review: system-link guard needs revision
+
+Review baseline is candidate `acddcff5`, reapplied on `05fe6c68` as `e7bc6a1c`.
+The public C rejection checkpoint remains unchanged. The exhaustive and
+nonexhaustive target audit found two unresolved issues in
+`crates/keel/src/link.rs::run`; this review does not approve integration:
+
+- **P1: response files bypass the pre-spawn rejection.** With a response file
+  containing `--target=wasm32-unknown-unknown`, `keel link --system @file` forwards
+  the file to Clang without examining its arguments. A marker executable named
+  `clang` confirms that a child is spawned; real Apple Clang 21's `-###` dry run
+  confirms that this response file selects `wasm32-unknown-unknown`. The external
+  driver can therefore enter a Wasm pipeline despite this checkpoint's gate.
+  Nested response files and other driver argument indirection need consideration
+  when fixing the boundary. No Wasm object or executable was generated for review.
+- **P2: option operands are mistaken for target options.**
+  `keel link --system -o --target=wasm32-unknown-unknown missing.o` is rejected
+  as a Wasm target although the target-looking token is an output filename.
+  Clang accepts it as the operand of `-o`; this is a native argument-surface
+  regression. The gate must distinguish target options from other option values.
+
+Simply banning response files would remove part of the existing system driver's
+native argument surface. A repair must reconcile that compatibility requirement
+with rejection before spawning Clang; it must not enable public Wasm output.
+The parent owns that resolution and integration. The separate frontend worker
+must preserve the CLI and native backend gates when rebasing.
+
+An additional Unix CLI regression uses an isolated marker executable to verify
+zero Clang spawns for all four direct target spellings, with a native target
+positive control proving the marker detects actual invocation. It does not cover
+or claim to fix the response-file bypass. Probe evidence is
+`/tmp/keel-wasm-review-9e78570c-probes/{probes.json,clang-response.txt}`.
+
+Independent validation passed 105 tests in each of debug and release: the five
+focused groups above, adding the complete C `environment` integration test and
+the Clang spawn regression. The host-independent Portable-context unit control,
+predefined-macro rejection, and preprocessing rejection with nonexistent include
+paths passed. Workspace `check --workspace --all-targets --features keel-c/profile`
+also passed, with existing dead-code warnings in unrelated codegen test helpers.
+Every compilation used the prescribed suite lock, offline/locked dependencies,
+two jobs, existing toolchain and shared cargo cache with `CARGO_CACHE_LINKS=0`.
+Logs and lock records use `/tmp/keel-wasm-review-9e78570c-*`.
+The changed Rust test passes focused rustfmt checking and `git diff --check`.
+Workspace-wide `cargo fmt --all -- --check` reports pre-existing formatting
+differences in other files; those files were left unchanged. These checks do not
+supersede the unresolved system-link findings or establish Wasm execution support.

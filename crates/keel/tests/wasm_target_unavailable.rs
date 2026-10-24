@@ -204,3 +204,51 @@ fn target_free_opt_and_native_cli_controls_remain_available() {
         assert!(!std::fs::read(&output).unwrap().is_empty());
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn explicit_wasm_system_link_targets_reject_before_spawning_clang() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = Temp::new();
+    let clang = temp.0.join("clang");
+    let marker = temp.0.join("clang-spawned");
+    std::fs::write(
+        &clang,
+        "#!/bin/sh\nprintf spawned > \"$KEEL_TEST_CLANG_MARKER\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&clang, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let invoke = |flags: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_keel"))
+            .args(["link", "--system"])
+            .args(flags)
+            .env("PATH", &temp.0)
+            .env("KEEL_TEST_CLANG_MARKER", &marker)
+            .output()
+            .unwrap()
+    };
+    for flags in [
+        &["--target", "wasm32-unknown-unknown"][..],
+        &["-target", "wasm32-unknown-unknown"],
+        &["--target=wasm32-unknown-unknown"],
+        &["-target=wasm32-unknown-unknown"],
+    ] {
+        let result = invoke(flags);
+        assert!(!result.status.success());
+        assert!(
+            String::from_utf8_lossy(&result.stderr).contains(
+                "unsupported target wasm32-unknown-unknown: native linking is unavailable"
+            )
+        );
+        assert!(!marker.exists(), "Clang was spawned for {flags:?}");
+    }
+    // Prove the marker detects an actual child process, and native target
+    // forwarding still reaches the explicitly selected system driver.
+    assert!(
+        invoke(&["--target=x86_64-unknown-linux-gnu"])
+            .status
+            .success()
+    );
+    assert_eq!(std::fs::read(marker).unwrap(), b"spawned");
+}
