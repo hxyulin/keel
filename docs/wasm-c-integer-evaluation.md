@@ -124,3 +124,66 @@ debug compilation began). Logs and serialized command records are
 run and compile check use `/tmp/keel-c-eval-20261024-{unit,check}.{log,jsonl}`.
 Generated logs and artifacts remain outside Git. No performance or Wasm C
 execution claim is made. Parent owns independent review and integration.
+
+## Independent review
+
+Candidate `2dfd2df1` (implementation `fbc9017c`) was reapplied onto clean
+`bc76d65c` in the assigned review checkout as `e1a6004d`/`ffb4a789`.
+The independent source audit found no blocking defect in this private checkpoint.
+All evaluator recursion, including complex casts, address/member/dereference
+recursion, hint arguments, conditional/logical/comma selection and arithmetic,
+uses the supplied model. Literal candidate additions cannot alter the first
+fitting LP64 candidate: native long/long long have equal widths and signedness.
+Production construction still selects LP64, and WASM32 remains `cfg(test)`.
+No public Target/Options/CLI/backend/IR interface changed.
+
+Review test commit `cfc37108` adds member address recursion across pointer wrap,
+model-specific record offsets and pointer element scales, division before
+ptrdiff truncation, hints, choose-expression constant queries, comma/comparison
+and short-circuit paths. PCLMUL and AES caller tests additionally reject LP64
+long overflow, MIN/-1, shift-by-64 and an out-of-range FP-to-long cast even under
+a final unsigned-char cast. These exercise the native proof boundary through
+actual intrinsic callers, rather than assuming the general evaluator rejects
+undefined ICEs. No production source fix was needed.
+
+The maintained independent declaration oracle is
+[`wasm-integer-constants.c`](../crates/keel-c/tests/fixtures/wasm-integer-constants.c).
+Apple Clang 21.0.0 (`clang-2100.3.34.2`) passed its six nominal type assertions
+and nine constant-value assertions using:
+
+```sh
+/usr/bin/clang --target=wasm32-unknown-unknown -std=gnu11 -ffreestanding \
+  -nostdinc -Werror -fsyntax-only \
+  crates/keel-c/tests/fixtures/wasm-integer-constants.c
+```
+
+The oracle excludes invented-address pointer arithmetic, out-of-range literal
+fallback and wrapping/saturating evaluator extensions: those are not portable
+C ICE proofs. Pointer tests establish only the private evaluator normalization
+contract, not object validity or executable Wasm C.
+
+The remaining migration limits above still apply. In particular, the native
+`parse/asm.rs` constant evaluator also remains behind the inline-assembly
+boundary; a future non-native parser must reject assembly before reaching it.
+The dual private APIs trust callers to pair AST/type/record provenance with the
+same model. No production entry point can currently select a non-native model,
+and this review does not authorize passing the expression-only test AST to IR
+generation. Symbolic base/addend representation, final weak-binding checks and
+the native generator's u32 addend/narrow-storage/unaligned relocation rejection
+policy are unchanged. Extreme symbolic addend/layout arithmetic retains its
+existing unchecked behavior; it is not a new large-object guarantee.
+
+Fresh review validation of `cfc37108` on Apple ARM64 passed the full C debug
+suite (292 tests) and the same focused release command listed above (81 tests),
+zero failures/ignored. Both include all five integer-layout tests. The locked
+`cargo check --offline --locked -j2 -p keel-c` also passed. Every Rust command
+used `CARGO_CACHE_LINKS=0`, the existing shared `fast_opt_locked.py` lock and
+cargo default cache/managed targets, preserving pins and features. Logs and exact
+serialized invocations are `/tmp/keel-integer-review-7db4-{debug,release,check}.{log,jsonl}`.
+Focused rustfmt checks on the three candidate source files and two changed
+intrinsic tests, plus `git diff --check`, passed. The standalone Clang oracle
+passed separately. Local x86 frontend/object checks do not establish x86 native
+execution; applicable native ARM64 controls did execute. No remote host,
+performance campaign, toolchain/cache changes, output deletion or main
+integration/cleanup was performed. Parent owns integration and any subsequent
+production migration.
