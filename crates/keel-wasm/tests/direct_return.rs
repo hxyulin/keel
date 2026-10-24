@@ -1,3 +1,6 @@
+#[path = "support/adjacent_tee.rs"]
+mod adjacent_tee;
+
 use keel_ir::{Function, Module, Signature, parse};
 use keel_wasm::{
     Diagnostic, Export, Options, Wasm32MemoryOptions, Wasm32RuntimeOptions, emit_module,
@@ -182,20 +185,20 @@ fn fallback_bodies_remain_byte_identical_including_one_block_selfedge() {
                 .collect::<Result<Vec<_>, _>>()
                 .unwrap();
             assert!(ops.iter().any(|o| matches!(o, Operator::Loop { .. })));
-            let hex = body
-                .as_bytes()
-                .iter()
-                .map(|b| format!("{b:02x}"))
-                .collect::<String>();
-            assert_eq!(
-                hex,
-                if profile == 2 {
-                    FALLBACK_RUNTIME[i]
-                } else {
-                    FALLBACK_BASE[i]
-                },
-                "profile {profile} function {i}"
-            );
+            // Keep the original frozen dispatcher bodies as the baseline.
+            // Apply only the independently decoded adjacent set/get peephole;
+            // nonmatching snapshots still compare byte-for-byte unchanged.
+            let frozen = if profile == 2 {
+                FALLBACK_RUNTIME[i]
+            } else {
+                FALLBACK_BASE[i]
+            };
+            let original: Vec<u8> = (0..frozen.len())
+                .step_by(2)
+                .map(|n| u8::from_str_radix(&frozen[n..n + 2], 16).unwrap())
+                .collect();
+            let (expected, _) = adjacent_tee::fold_body(&original);
+            assert_eq!(body.as_bytes(), expected, "profile {profile} function {i}");
         }
         execute(
             &bytes,

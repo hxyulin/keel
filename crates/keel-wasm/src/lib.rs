@@ -489,6 +489,45 @@ fn encode(
     Ok(bytes)
 }
 
+// Buffer only a raw local.set. Every other operator is an adjacency barrier.
+// No instructions move across a barrier, including structured control or traps.
+struct InstructionOutput {
+    function: wasm_encoder::Function,
+    pending_set: Option<u32>,
+}
+impl InstructionOutput {
+    fn new(declarations: Vec<(u32, ValType)>) -> Self {
+        Self {
+            function: wasm_encoder::Function::new(declarations),
+            pending_set: None,
+        }
+    }
+    fn op(&mut self, op: W<'_>) {
+        if let Some(local) = self.pending_set.take() {
+            if matches!(op, W::LocalGet(index) if index == local) {
+                self.function.instruction(&W::LocalTee(local));
+                return;
+            }
+            self.function.instruction(&W::LocalSet(local));
+        }
+        if let W::LocalSet(local) = op {
+            self.pending_set = Some(local);
+        } else {
+            self.function.instruction(&op);
+        }
+    }
+    fn finish(mut self) -> wasm_encoder::Function {
+        if let Some(local) = self.pending_set.take() {
+            self.function.instruction(&W::LocalSet(local));
+        }
+        self.function
+    }
+}
+
+#[cfg(test)]
+#[path = "../tests/support/adjacent_tee_output.rs"]
+mod adjacent_tee_output_tests;
+
 struct Body<'a> {
     ir: &'a Function,
     indices: &'a HashMap<&'a str, u32>,
@@ -501,7 +540,7 @@ struct Body<'a> {
     direct_return: bool,
     pc: u32,
     blocks: HashMap<Block, i32>,
-    out: wasm_encoder::Function,
+    out: InstructionOutput,
 }
 impl<'a> Body<'a> {
     fn new(
@@ -566,11 +605,11 @@ impl<'a> Body<'a> {
                 .enumerate()
                 .map(|(i, b)| (b, i as i32))
                 .collect(),
-            out: wasm_encoder::Function::new(declarations),
+            out: InstructionOutput::new(declarations),
         }
     }
     fn op(&mut self, op: W<'_>) {
-        self.out.instruction(&op);
+        self.out.op(op);
     }
     fn get(&mut self, v: Value) {
         self.op(W::LocalGet(
@@ -835,6 +874,6 @@ impl<'a> Body<'a> {
             self.op(W::Unreachable); // A loop has no normal function exit.
         }
         self.op(W::End);
-        self.out
+        self.out.finish()
     }
 }
