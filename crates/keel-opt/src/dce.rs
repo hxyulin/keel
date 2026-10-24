@@ -15,6 +15,16 @@ use crate::scratch::Scratch;
 use keel_ir::{Block, EntityRef, Function, Inst, InstData, Value, ValueDef};
 
 pub fn run(func: &mut Function) -> bool {
+    run_with_read_policy(func, false)
+}
+
+/// Wasm's bounded profile preserves even dead notrap reads: the emitter treats
+/// that flag as a hint, and the profile promises unchanged memory footprints.
+pub(crate) fn run_preserving_reads(func: &mut Function) -> bool {
+    run_with_read_policy(func, true)
+}
+
+fn run_with_read_policy(func: &mut Function, preserve_reads: bool) -> bool {
     // Every branch into each block: (branch instruction, destination index),
     // packed by destination block. Only terminators branch.
     let mut incoming_start = Scratch::filled(func.num_blocks() + 1, 0u32);
@@ -58,7 +68,7 @@ pub fn run(func: &mut Function) -> bool {
         for &inst in func.block_insts(block) {
             let data = func.inst_data(inst);
             let dead_read_eligible = matches!(data, InstData::Load { flags, .. }
-                if flags.notrap && !flags.volatile);
+                if flags.notrap && !flags.volatile && !preserve_reads);
             if data.is_pinned() && !dead_read_eligible {
                 live_inst[inst.index()] = true;
                 uses_except_branch_args(func, inst, |value| {

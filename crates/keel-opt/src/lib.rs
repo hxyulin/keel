@@ -22,6 +22,8 @@ mod call_contracts;
 mod call_load_reuse;
 mod canonicalize;
 mod const_fold;
+mod wasm32;
+pub use wasm32::optimize_wasm32_basic;
 mod dce;
 mod fast;
 mod gcm;
