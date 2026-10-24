@@ -1,4 +1,4 @@
-//! Private integer-only lowering checkpoint, not a C ABI or production target.
+//! Private integer/pointer storage lowering checkpoint, not a C ABI or production target.
 use super::*;
 
 fn reject(loc: Loc, family: &str) -> Error {
@@ -29,11 +29,38 @@ fn signature(fty: &FuncTy, loc: Loc) -> R<()> {
 }
 
 fn expression(e: &Expr<'_>) -> R<()> {
-    if e.ty != Ty::Void && !integer(&e.ty) {
-        return Err(reject(e.loc, "non-integer values (including pointers)"));
+    expression_use(e, false)
+}
+
+fn expression_use(e: &Expr<'_>, storage: bool) -> R<()> {
+    let mut pointer = e.ty;
+    while let Ty::Ptr(inner) = pointer {
+        if matches!(inner, Ty::Func(_)) {
+            return Err(reject(e.loc, "function pointers"));
+        }
+        pointer = *inner;
+    }
+    if e.ty != Ty::Void && !integer(&e.ty) && !matches!(e.ty, Ty::Ptr(_)) && !storage {
+        return Err(reject(e.loc, "aggregate/unsupported values"));
     }
     match e.kind {
-        ExprKind::Int(_) | ExprKind::Local(_) => Ok(()),
+        ExprKind::Int(_) | ExprKind::Local(_) | ExprKind::Global(_) | ExprKind::Str(_) => Ok(()),
+        ExprKind::Addr(a) => {
+            if matches!(a.ty, Ty::Func(_)) {
+                return Err(reject(e.loc, "function pointers"));
+            }
+            expression_use(a, true)
+        }
+        ExprKind::Deref(a) => expression(a),
+        ExprKind::Member {
+            base, bits: None, ..
+        } => expression_use(base, true),
+        ExprKind::PtrAdd(a, b, _)
+        | ExprKind::PtrDiff(a, b, _)
+        | ExprKind::PtrOpAssign { lhs: a, rhs: b, .. } => {
+            expression(a)?;
+            expression(b)
+        }
         ExprKind::Unary(_, a) | ExprKind::Cast(a) | ExprKind::IncDec { lhs: a, .. } => {
             expression(a)
         }
@@ -69,34 +96,39 @@ fn expression(e: &Expr<'_>) -> R<()> {
     }
 }
 
-fn statement(s: &Stmt<'_>) -> R<()> {
+fn statement(s: &Stmt<'_>, sizes: &[u64]) -> R<()> {
     match s {
         Stmt::Expr(e) | Stmt::Return(Some(e), _) => expression(e),
-        Stmt::Init(_, init, loc) => {
+        Stmt::Init(id, init, loc) => {
+            if sizes[*id] > 64 {
+                return Err(reject(
+                    *loc,
+                    "local initializers above 64 bytes (memory intrinsic path)",
+                ));
+            }
             for item in init.items {
                 match item {
                     InitItem::Expr {
-                        offset: 0,
-                        expr,
-                        bits: None,
+                        expr, bits: None, ..
                     } => expression(expr)?,
-                    _ => return Err(reject(*loc, "aggregate/byte/bit-field initializers")),
+                    InitItem::Bytes { .. } => return Err(reject(*loc, "local byte initializers")),
+                    _ => return Err(reject(*loc, "bit-field initializers")),
                 }
             }
             Ok(())
         }
-        Stmt::Block(ss) | Stmt::Scoped(_, ss) => statements(ss),
+        Stmt::Block(ss) | Stmt::Scoped(_, ss) => statements(ss, sizes),
         Stmt::If(e, yes, no) => {
             expression(e)?;
-            statement(yes)?;
+            statement(yes, sizes)?;
             if let Some(no) = no {
-                statement(no)?;
+                statement(no, sizes)?;
             }
             Ok(())
         }
         Stmt::While(e, body) | Stmt::DoWhile(body, e) => {
             expression(e)?;
-            statement(body)
+            statement(body, sizes)
         }
         Stmt::For {
             init,
@@ -105,7 +137,7 @@ fn statement(s: &Stmt<'_>) -> R<()> {
             body,
         } => {
             if let Some(init) = init {
-                statement(init)?;
+                statement(init, sizes)?;
             }
             if let Some(cond) = cond {
                 expression(cond)?;
@@ -113,11 +145,11 @@ fn statement(s: &Stmt<'_>) -> R<()> {
             if let Some(step) = step {
                 expression(step)?;
             }
-            statement(body)
+            statement(body, sizes)
         }
         Stmt::Switch { cond, body, .. } => {
             expression(cond)?;
-            statement(body)
+            statement(body, sizes)
         }
         Stmt::Declare(_)
         | Stmt::Case(_)
@@ -130,26 +162,132 @@ fn statement(s: &Stmt<'_>) -> R<()> {
     }
 }
 
-fn statements(ss: &[Stmt<'_>]) -> R<()> {
+fn statements(ss: &[Stmt<'_>], sizes: &[u64]) -> R<()> {
     for s in ss {
-        statement(s)?;
+        statement(s, sizes)?;
     }
     Ok(())
 }
 
 impl Gen<'_> {
+    fn private_storage(&self, ty: &Ty<'_>, seen: &mut Vec<usize>) -> R<()> {
+        match ty {
+            ty if integer(ty) => Ok(()),
+            Ty::Ptr(inner) if matches!(inner, Ty::Void) => Ok(()),
+            Ty::Ptr(inner) => self.private_storage(inner, seen),
+            Ty::Array(a) if a.vla.is_none() && a.len.is_some() => {
+                self.private_storage(&a.elem, seen)
+            }
+            Ty::Struct(id) if seen.contains(id) => Ok(()),
+            Ty::Struct(id) => {
+                seen.push(*id);
+                let record = &self.p.structs[*id];
+                if !record.complete || record.members.iter().any(|m| m.bits.is_some()) {
+                    return Err(reject(Loc::default(), "incomplete/bit-field storage"));
+                }
+                for m in &record.members {
+                    self.private_storage(&m.ty, seen)?;
+                }
+                Ok(())
+            }
+            _ => Err(reject(
+                Loc::default(),
+                "unsupported storage (function pointers/FP/atomic/vector/VLA)",
+            )),
+        }
+    }
+
+    fn private_data(&self, g: &Global<'_>) -> R<()> {
+        let size = self.types().size(&g.ty);
+        if size == 0 || size > u32::MAX as u64 || g.align > 4096 {
+            return Err(reject(Loc::default(), "data size/alignment"));
+        }
+        let mut spans = Vec::new();
+        for item in g.init.as_ref().map_or(&[][..], |i| i.items) {
+            let (offset, width) = match item {
+                InitItem::Bytes { offset, bytes } => (*offset, bytes.len() as u64),
+                InitItem::Expr {
+                    offset,
+                    expr,
+                    bits: None,
+                } => {
+                    expression(expr)?;
+                    let width = self.types().size(&expr.ty);
+                    match crate::eval::eval_with_binding_and_layout(
+                        expr,
+                        &|id| self.p.globals[id].weak.is_none(),
+                        self.p.c_layout,
+                    ) {
+                        Some(Const::Int(_))
+                            if integer(&expr.ty) || matches!(expr.ty, Ty::Ptr(_)) => {}
+                        Some(Const::Addr(base, addend)) if matches!(expr.ty, Ty::Ptr(_)) => {
+                            let target_size = match base {
+                                Base::Global(id)
+                                    if self.p.globals[id].defined
+                                        && !matches!(self.p.globals[id].ty, Ty::Func(_)) =>
+                                {
+                                    self.types().size(&self.p.globals[id].ty)
+                                }
+                                // String relocations need a separately checked string placement contract.
+                                _ => {
+                                    return Err(reject(
+                                        expr.loc,
+                                        "symbolic target other than defined data",
+                                    ));
+                                }
+                            };
+                            if width != 4
+                                || g.align < 4
+                                || offset % 4 != 0
+                                || addend < 0
+                                || addend as u64 > target_size
+                            {
+                                return Err(reject(
+                                    expr.loc,
+                                    "pointer initializer alignment/bounds",
+                                ));
+                            }
+                        }
+                        _ => {
+                            return Err(reject(
+                                expr.loc,
+                                "nonconstant/nonpointer symbolic initializer",
+                            ));
+                        }
+                    }
+                    (*offset, width)
+                }
+                _ => return Err(reject(Loc::default(), "bit-field initializer")),
+            };
+            let end = offset
+                .checked_add(width)
+                .filter(|end| *end <= size)
+                .ok_or_else(|| reject(Loc::default(), "initializer bounds"))?;
+            if spans.iter().any(|&(a, b)| offset < b && a < end) {
+                return Err(reject(Loc::default(), "overlapping initializers"));
+            }
+            spans.push((offset, end));
+        }
+        Ok(())
+    }
+
     pub(super) fn check_private_scalar_profile(&self) -> R<()> {
         if self.debug {
             return Err(reject(Loc::default(), "debug output"));
         }
         for g in &self.p.globals {
-            let Ty::Func(fty) = g.ty else {
-                return Err(reject(
-                    Loc::default(),
-                    "static/external data and symbolic initializers",
-                ));
-            };
-            signature(fty, Loc::default())?;
+            if g.compound_literal {
+                return Err(reject(Loc::default(), "file-scope compound literals"));
+            }
+            if let Ty::Func(fty) = g.ty {
+                signature(fty, Loc::default())?;
+            } else {
+                if !g.defined {
+                    return Err(reject(Loc::default(), "external data"));
+                }
+                self.private_storage(&g.ty, &mut Vec::new())?;
+                self.private_data(g)?;
+            }
             if g.thread_local
                 || g.returns_twice
                 || g.weak.is_some()
@@ -170,7 +308,8 @@ impl Gen<'_> {
                 return Err(reject(def.loc, "VLA/label addresses"));
             }
             for local in &def.locals {
-                if !integer(&local.ty) || local.cleanup.is_some() {
+                self.private_storage(&local.ty, &mut Vec::new())?;
+                if local.cleanup.is_some() {
                     return Err(reject(
                         def.loc,
                         "non-integer/atomic/aggregate locals or cleanup",
@@ -180,7 +319,30 @@ impl Gen<'_> {
                     return Err(reject(def.loc, "local alignment above 16"));
                 }
             }
-            statements(def.body)?;
+            let sizes: Vec<_> = def
+                .locals
+                .iter()
+                .map(|l| self.types().size(&l.ty))
+                .collect();
+            statements(def.body, &sizes)?;
+            // Inspect pointer pointee storage as well, including casts hidden in
+            // unused expressions. Direct function decay is checked by Call.
+            let mut error = None;
+            for stmt in def.body {
+                visit_stmt_exprs(stmt, &mut |e, _| {
+                    if matches!(e.ty, Ty::Ptr(_))
+                        && !matches!(e.kind, ExprKind::Addr(a) if matches!(a.ty, Ty::Func(_)))
+                    {
+                        if let Err(err) = self.private_storage(&e.ty, &mut Vec::new()) {
+                            error = Some(err);
+                        }
+                    }
+                    Some(())
+                });
+            }
+            if let Some(err) = error {
+                return Err(err);
+            }
         }
         Ok(())
     }
@@ -198,7 +360,14 @@ pub(crate) fn lower(src: &str, debug: bool) -> R<Module> {
     )?;
     let files = p.take_files();
     let funcs = std::mem::take(&mut p.funcs);
-    Gen::new(&p, funcs, &files, debug).run()
+    let module = Gen::new(&p, funcs, &files, debug).run()?;
+    keel_ir::verify_module_with_layout(&module, keel_ir::DataLayout::WASM32).map_err(|e| {
+        Error::new(
+            Loc::default(),
+            format!("private wasm32 IR verification: {e:?}"),
+        )
+    })?;
+    Ok(module)
 }
 
 #[test]
@@ -230,7 +399,6 @@ fn widths_calls_and_storage() {
 fn reject_before_pruning() {
     for src in [
         "static int unused(void) { float x = 1; return (int)x; } int f(void) { return 0; }",
-        "static int unused(void) { int *p = 0; return 0; }",
         "static int unused(void) { _Atomic int x; return 0; }",
         "static int unused(int n) { int a[n]; return 0; }",
         "static int unused(void) { int x __attribute__((aligned(32))); return 0; }",
@@ -238,14 +406,10 @@ fn reject_before_pruning() {
         "static int unused(void) { __asm__(\"\"); return 0; }",
         "int f(double x);",
         "int f(__int128 x);",
-        "static int unused(void) { int a[4]; return 0; }",
-        "static int unused(void) { struct S { int x; } s; return 0; }",
         "static int unused(void) { return __builtin_frame_address(0) != 0; }",
         "static int unused(void) { if (0) return __builtin_popcount(1); return 0; }",
         "int f(char x);",
         "int f(int x, ...);",
-        "int x;",
-        "int f(void) { return (int)(long *)1; }",
         "int f(void) { return (int)(double)1; }",
     ] {
         assert!(lower(src, false).is_err(), "accepted {src}");
@@ -450,7 +614,7 @@ fn rejection_families_and_prototype_policy() {
     for (src, diagnostic) in [
         (
             "int f(void) { if (0) { (void)&f; } return 0; }",
-            "non-integer values",
+            "function pointers",
         ),
         (
             "int f(void) { return 0 ? __builtin_popcount(1) : 0; }",
@@ -479,10 +643,6 @@ fn rejection_families_and_prototype_policy() {
             "native linkage/function attributes",
         ),
         (
-            "int f(void) { static long x = 1; return 0; }",
-            "static/external data",
-        ),
-        (
             "int f(void) { return ({ 1; }); }",
             "unmigrated expressions/builtins",
         ),
@@ -492,7 +652,7 @@ fn rejection_families_and_prototype_policy() {
         ),
         (
             "int f(void) { int (*p)(void) = f; return p(); }",
-            "non-integer/atomic/aggregate locals",
+            "unsupported storage",
         ),
     ] {
         let err = lower(src, false).unwrap_err();
@@ -546,4 +706,248 @@ fn public_native_options_keep_lp64_and_arg_extensions() {
             );
         }
     }
+}
+
+#[test]
+fn pointer_data_runtime() {
+    use keel_wasm::{
+        Export, Options, Wasm32MemoryOptions, Wasm32RuntimeOptions, emit_wasm32_runtime_module,
+    };
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let source = include_str!("../../tests/fixtures/wasm-pointer-data.c");
+    // The private seam accepts preprocessed C; these are only model assertions.
+    let body = source.split_once("struct Storage").unwrap().1;
+    let source = format!("struct Storage{body}");
+    let module = lower(&source, false).unwrap();
+    let names = [
+        "checksum",
+        "recurse",
+        "distance",
+        "pointer_bits",
+        "numeric_bits",
+        "big_difference",
+        "pointer_slot",
+        "constant_pointer",
+        "walk",
+        "ordered",
+        "stride",
+        "local_init",
+    ];
+    let bytes = emit_wasm32_runtime_module(
+        &module,
+        &Wasm32RuntimeOptions {
+            memory: Wasm32MemoryOptions {
+                scalar: Options {
+                    exports: names
+                        .iter()
+                        .map(|name| Export {
+                            name: (*name).into(),
+                            function: (*name).into(),
+                        })
+                        .collect(),
+                },
+                pages: 1,
+                export_name: "memory".into(),
+            },
+            data_floor: 1024,
+            stack_bottom: 32768,
+            stack_top: 65536,
+        },
+    )
+    .unwrap_or_else(|e| panic!("{e:?}\n{module}"));
+    let script = r#"
+const assert = require('assert/strict');
+const b = require('fs').readFileSync(0);
+assert(WebAssembly.validate(b));
+const e = new WebAssembly.Instance(new WebAssembly.Module(b)).exports;
+const memory = new Uint8Array(e.memory.buffer);
+memory.fill(0xcc, 8191, 8225);
+for (let i=0; i<32; i++) memory[8192+i]=(i*17+129)&255;
+let want=7;
+for (let i=0; i<32; i++) want=(Math.imul(want,33)^memory[8192+i])>>>0;
+for (let i=0; i<16; i++) want=(want^((i^0x5a)<<(i&7)))>>>0;
+want=(want+97+22+165+90+165+90)>>>0;
+for (let i=0; i<100; i++) {
+ assert.equal(e.checksum(8192,32)>>>0,want);
+ assert.equal(e.recurse(10),55);
+ assert.equal(e.pointer_slot(),22);
+}
+assert.equal(memory[8191],0xcc); assert.equal(memory[8224],0xcc);
+assert.equal(e.distance(),3);
+assert.equal(e.stride(),2);
+assert.equal(e.local_init(),14);
+assert.equal(e.walk(8193,-1),129);
+assert.equal(e.ordered(0x80000000,0x7fffffff),1);
+assert.equal(e.constant_pointer(),0x80000001n);
+assert.equal(e.numeric_bits(),0x80000001n);
+assert.equal(e.pointer_bits(0x1234567880000001n),0x80000001n);
+assert.equal(e.pointer_bits(-1n),0xffffffffn);
+// Arithmetic inspection fixture: offsets are not dereferenced. Divide before truncating.
+assert.equal(e.big_difference(0xfffffff0,0),1073741820);
+assert.equal(e.big_difference(0,0xfffffff0),-1073741820);
+"#;
+    let mut child = Command::new("node")
+        .args(["-e", script])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("existing Node required");
+    child.stdin.take().unwrap().write_all(&bytes).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let pointer_slot = module
+        .functions
+        .iter()
+        .find(|f| f.name == "pointer_slot")
+        .unwrap();
+    assert!(
+        pointer_slot
+            .stack_slots()
+            .any(|(_, s)| s.size == 4 && s.align == 4)
+    );
+    let checksum = module
+        .functions
+        .iter()
+        .find(|f| f.name == "checksum")
+        .unwrap();
+    assert!(
+        checksum
+            .stack_slots()
+            .any(|(_, s)| s.size == 16 && s.align == 16)
+    );
+    for target in [Some("wasm32-unknown-unknown"), None] {
+        let mut cmd = Command::new("clang");
+        if let Some(target) = target {
+            cmd.arg(format!("--target={target}"));
+        }
+        let out = cmd
+            .args([
+                "-std=gnu11",
+                "-ffreestanding",
+                "-nostdinc",
+                "-Werror",
+                "-fsyntax-only",
+            ])
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/wasm-pointer-data.c"
+            ))
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let native = crate::compile(&source, "pointer.c", crate::Options::default()).unwrap();
+    keel_ir::verify_module(&native).unwrap();
+}
+
+#[test]
+fn storage_data_boundaries_before_pruning() {
+    for src in [
+        "extern int missing; int f(void) { return 0; }",
+        "typedef char Row[1073741824]; static Row data[1]; static Row *bad = data + 1073741824L + 1073741824L + 1073741824L + 1073741824L + 1073741824L + 1073741824L + 1073741824L + 1073741824L; int f(void) { return 0; }",
+        "static int data; static int *bad = &data - 1; int f(void) { return 0; }",
+        "static int data; static int *bad = &data + 2; int f(void) { return 0; }",
+        "static unsigned long bad = (unsigned long)&bad; int f(void) { return 0; }",
+        "static char *bad = \"text\"; int f(void) { return 0; }",
+        "static _Thread_local int bad; int f(void) { return 0; }",
+        "static int bad __attribute__((weak)); int f(void) { return 0; }",
+        "static float bad; int f(void) { return 0; }",
+        "static int (*bad)(void); int f(void) { return 0; }",
+        "static int unused(void) { struct S { int x; } a, b; a = b; return 0; }",
+        "static int unused(void) { struct S { float x; } a; return 0; }",
+        "static int unused(void) { (void)(float *)0; return 0; }",
+        "static int unused(void) { int a[17] = {1}; return 0; }",
+        "static int unused(void) { char a[8] = \"test\"; return 0; }",
+        "static int *p = (int[]){1}; int f(void) { return 0; }",
+        "int *f(void);",
+        "int f(int *p);",
+    ] {
+        assert!(lower(src, false).is_err(), "accepted {src}");
+    }
+    let module = lower("int target[2]; struct R { int a; int *p; int b; int *q; }; struct R r = {0x11223344, target + 1, 0x55667788, target + 2}; unsigned long g = (unsigned long)0x100000007ULL; void *n = (void *)0x1234567880000001ULL; char text[4] = \"ab\";", false).unwrap();
+    keel_ir::verify_module_with_layout(&module, keel_ir::DataLayout::WASM32).unwrap();
+    let record = module.data_object("r").unwrap().init.as_ref().unwrap();
+    assert_eq!(record.align, 4);
+    assert_eq!(
+        record.checked_size_with_layout(keel_ir::DataLayout::WASM32),
+        Some(16)
+    );
+    let mut cursor = 0;
+    let mut pointers = Vec::new();
+    for item in &record.items {
+        if let DataItem::Ptr { symbol, addend } = item {
+            pointers.push((cursor, symbol.as_str(), *addend));
+        }
+        cursor += item.size_with_layout(keel_ir::DataLayout::WASM32);
+    }
+    assert_eq!(pointers, [(4, "target", 4), (12, "target", 8)]);
+    let bytes = |name: &str| {
+        let init = module.data_object(name).unwrap().init.as_ref().unwrap();
+        let mut out = Vec::new();
+        for item in &init.items {
+            match item {
+                DataItem::Bytes(b) => out.extend_from_slice(b),
+                DataItem::Zero(n) => out.resize(out.len() + *n as usize, 0),
+                _ => panic!("expected serialized bytes"),
+            }
+        }
+        out
+    };
+    assert_eq!(bytes("g"), 7u32.to_le_bytes());
+    assert_eq!(bytes("n"), 0x80000001u32.to_le_bytes());
+    assert_eq!(bytes("text"), b"ab\0\0");
+    let native = crate::compile("int target[2]; struct R { int a; int *p; int b; int *q; }; struct R r = {1, target + 1, 2, target + 2};", "data.c", crate::Options::default()).unwrap();
+    keel_ir::verify_module(&native).unwrap();
+    assert_eq!(
+        native
+            .data_object("r")
+            .unwrap()
+            .init
+            .as_ref()
+            .unwrap()
+            .size(),
+        32
+    );
+}
+
+#[test]
+fn pointer_decrement_reports_backend_gap() {
+    let module = lower(
+        "int f(unsigned int address) { int *p = (int *)(unsigned long)address; p--; return *p; }",
+        false,
+    )
+    .unwrap();
+    let err = keel_wasm::emit_wasm32_runtime_module(
+        &module,
+        &keel_wasm::Wasm32RuntimeOptions {
+            memory: keel_wasm::Wasm32MemoryOptions {
+                scalar: keel_wasm::Options {
+                    exports: vec![keel_wasm::Export {
+                        name: "f".into(),
+                        function: "f".into(),
+                    }],
+                },
+                pages: 1,
+                export_name: "memory".into(),
+            },
+            data_floor: 1024,
+            stack_bottom: 32768,
+            stack_top: 65536,
+        },
+    )
+    .unwrap_err();
+    assert!(
+        err.0.contains("unsupported instruction Unary") && err.0.contains("Ineg"),
+        "{err}"
+    );
 }

@@ -288,7 +288,14 @@ pub fn eval_with_binding_and_layout(
             };
             let delta = n.wrapping_mul(*size as i64);
             match eval_with_binding_and_layout(p, nonnull, layout)? {
-                Const::Addr(base, off) => Const::Addr(base, off + delta),
+                Const::Addr(base, off) => Const::Addr(
+                    base,
+                    if layout.pointer_bytes() == 4 {
+                        off.checked_add(n.checked_mul(i64::try_from(*size).ok()?)?)?
+                    } else {
+                        off + delta
+                    },
+                ),
                 Const::Int(v) => Const::Int(v.wrapping_add(delta)),
                 Const::Float(_) | Const::Complex(..) => return None,
             }
@@ -297,8 +304,18 @@ pub fn eval_with_binding_and_layout(
             eval_with_binding_and_layout(a, nonnull, layout)?,
             eval_with_binding_and_layout(b, nonnull, layout)?,
         ) {
-            (Const::Addr(x, i), Const::Addr(y, j)) if x == y => Const::Int((i - j) / *size as i64),
-            (Const::Int(i), Const::Int(j)) => Const::Int(i.wrapping_sub(j) / *size as i64),
+            (Const::Addr(x, i), Const::Addr(y, j)) if x == y => {
+                Const::Int(if layout.pointer_bytes() == 4 {
+                    i.checked_sub(j)?.checked_div(i64::try_from(*size).ok()?)?
+                } else {
+                    (i - j) / *size as i64
+                })
+            }
+            (Const::Int(i), Const::Int(j)) => Const::Int(if layout.pointer_bytes() == 4 {
+                i.wrapping_sub(j).checked_div(i64::try_from(*size).ok()?)?
+            } else {
+                i.wrapping_sub(j) / *size as i64
+            }),
             _ => return None,
         },
         ExprKind::LogAnd(a, b) => Const::Int(i64::from(
@@ -331,8 +348,19 @@ fn eval_addr(e: &Expr<'_>, nonnull: &dyn Fn(usize) -> bool, layout: CDataLayout)
         ExprKind::Global(g) => Some(Const::Addr(Base::Global(*g), 0)),
         ExprKind::Str(s) => Some(Const::Addr(Base::Str(*s), 0)),
         ExprKind::Member { base, offset, .. } => match eval_addr(base, nonnull, layout)? {
-            Const::Addr(b, off) => Some(Const::Addr(b, off + *offset as i64)),
-            Const::Int(v) => Some(Const::Int(v + *offset as i64)),
+            Const::Addr(b, off) => Some(Const::Addr(
+                b,
+                if layout.pointer_bytes() == 4 {
+                    off.checked_add(i64::try_from(*offset).ok()?)?
+                } else {
+                    off + *offset as i64
+                },
+            )),
+            Const::Int(v) => Some(Const::Int(if layout.pointer_bytes() == 4 {
+                v.wrapping_add(*offset as i64)
+            } else {
+                v + *offset as i64
+            })),
             Const::Float(_) | Const::Complex(..) => None,
         },
         ExprKind::Deref(p) => match eval_with_binding_and_layout(p, nonnull, layout)? {

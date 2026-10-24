@@ -24,6 +24,7 @@ keel-ir = { path = "../keel-ir" }
 keel-frontend = { path = "../keel-frontend" }
 
 [dev-dependencies]
+keel-wasm = { path = "../keel-wasm" }
 keel-codegen = { path = "../keel-codegen" }
 keel-opt = { path = "../keel-opt" }
 keel-asm = { path = "../keel-asm" }

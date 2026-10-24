@@ -396,6 +396,7 @@ dependencies = [
  "keel-ir",
  "keel-link",
  "keel-opt",
+ "keel-wasm",
  "memchr",
  "memmap2",
  "object",

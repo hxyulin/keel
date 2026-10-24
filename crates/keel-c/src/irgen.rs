@@ -879,7 +879,14 @@ impl<'p> Gen<'p> {
             } else {
                 let types = fg.g.types();
                 let size = types.size(&local.ty).max(1);
-                let align = local.align;
+                let align = if fg.g.p.c_layout.pointer_bytes() == 4
+                    && matches!(local.ty, Ty::Array(_))
+                    && size >= 16
+                {
+                    local.align.max(16)
+                } else {
+                    local.align
+                };
                 let reserve = size
                     .checked_add(if align > 16 { align - 1 } else { 0 })
                     .and_then(|n| u32::try_from(n).ok())
@@ -1015,7 +1022,15 @@ impl<'p> Gen<'p> {
         let global = &self.p.globals[g];
         let types = self.types();
         let size = types.size(&global.ty) as usize;
-        let align = global.align.max(1) as u32;
+        let align = if self.p.c_layout.pointer_bytes() == 4
+            && matches!(global.ty, Ty::Array(_))
+            && size >= 16
+        {
+            global.align.max(16)
+        } else {
+            global.align.max(1)
+        } as u32;
+        let pointer_bytes = self.p.c_layout.pointer_bytes() as usize;
         let mut bytes = vec![0u8; size];
         let mut relocs: Vec<(usize, String, i64)> = Vec::new();
         let items = global.init.as_ref().map_or(&[][..], |i| &i.items[..]);
@@ -1030,9 +1045,16 @@ impl<'p> Gen<'p> {
                     let offset = *offset as usize;
                     // All declarations have merged: only final strong binding
                     // proves a global address nonnull in a static initializer.
-                    let Some(value) =
+                    let value = if self.p.c_layout == CDataLayout::NATIVE_LP64 {
                         crate::eval::eval_with(expr, &|g| self.p.globals[g].weak.is_none())
-                    else {
+                    } else {
+                        crate::eval::eval_with_binding_and_layout(
+                            expr,
+                            &|g| self.p.globals[g].weak.is_none(),
+                            self.p.c_layout,
+                        )
+                    };
+                    let Some(value) = value else {
                         return Err(Error::new(expr.loc, "initializer is not a constant"));
                     };
                     let width = self.types().size(&expr.ty) as usize;
@@ -1078,7 +1100,9 @@ impl<'p> Gen<'p> {
                             write_le(&mut bytes[offset..offset + width], v);
                         }
                         Const::Addr(base, addend) => {
-                            if width != 8 {
+                            if width != pointer_bytes
+                                || (pointer_bytes == 4 && !matches!(expr.ty, Ty::Ptr(_)))
+                            {
                                 return Err(Error::new(expr.loc, "address in a narrow integer"));
                             }
                             let symbol = match base {
@@ -1106,7 +1130,12 @@ impl<'p> Gen<'p> {
         let mut items = Vec::new();
         let mut pos = 0;
         for (offset, symbol, addend) in relocs {
-            if !offset.is_multiple_of(8) {
+            if !offset.is_multiple_of(pointer_bytes)
+                || offset < pos
+                || offset
+                    .checked_add(pointer_bytes)
+                    .is_none_or(|end| end > size)
+            {
                 return Err(Error::new(
                     Loc::default(),
                     "unaligned pointer relocations are not supported",
@@ -1120,7 +1149,7 @@ impl<'p> Gen<'p> {
                 ));
             };
             items.push(DataItem::Ptr { symbol, addend });
-            pos = offset + 8;
+            pos = offset + pointer_bytes;
         }
         push_bytes(&mut items, &bytes[pos..]);
         if items.is_empty() {
@@ -2500,7 +2529,8 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             }
             ExprKind::Int(v) => match &e.ty {
                 Ty::Ptr(_) => {
-                    let n = self.b.ins().iconst(Type::I64, *v);
+                    let bits = crate::eval::normalize_with_layout(*v, &e.ty, self.g.p.c_layout);
+                    let n = self.b.ins().iconst(Type::I64, bits);
                     self.b.ins().convert(ConvertOp::IntToPtr, Type::Ptr, n)
                 }
                 ty => self
@@ -2648,7 +2678,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 let y = self.b.ins().convert(ConvertOp::PtrToInt, Type::I64, y);
                 let d = self.b.ins().isub(x, y);
                 // The difference is an exact multiple of the size.
-                if *size <= 1 {
+                let difference = if *size <= 1 {
                     d
                 } else if size.is_power_of_two() {
                     let s = self.b.ins().iconst(Type::I64, size.trailing_zeros() as i64);
@@ -2656,6 +2686,11 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 } else {
                     let s = self.b.ins().iconst(Type::I64, *size as i64);
                     self.b.ins().sdiv(d, s)
+                };
+                if self.g.p.c_layout.pointer_bytes() == 4 {
+                    self.b.ins().trunc(Type::I32, difference)
+                } else {
+                    difference
                 }
             }
             ExprKind::LogAnd(..) | ExprKind::LogOr(..) => {
@@ -2868,11 +2903,12 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     return Ok(None);
                 }
                 // Null pointers and other integer constants made pointers:
-                // the constant already has the 64 bits the conversion gives.
+                // normalize to the compilation model before the i64 IR conversion.
                 if e.ty.is_ptr()
                     && let Some(n) = fold_int(inner, FOLD_DEPTH, self.g.p.c_layout)
                 {
-                    let n = self.b.ins().iconst(Type::I64, n);
+                    let bits = crate::eval::normalize_with_layout(n, &e.ty, self.g.p.c_layout);
+                    let n = self.b.ins().iconst(Type::I64, bits);
                     let p = self.b.ins().convert(ConvertOp::IntToPtr, Type::Ptr, n);
                     return Ok(Some(p));
                 }
@@ -2938,6 +2974,15 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             return Ok(self.b.ins().iconst(Type::I64, k.wrapping_mul(size as i64)));
         }
         let v = self.val(n)?;
+        let v = if self.b.function().value_type(v) != Type::I64 {
+            if n.ty.is_signed() {
+                self.b.ins().sext(Type::I64, v)
+            } else {
+                self.b.ins().uext(Type::I64, v)
+            }
+        } else {
+            v
+        };
         if size == 1 {
             return Ok(v);
         }
@@ -3303,6 +3348,12 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     16 => ins.trunc(Type::I64, v),
                     _ if k.signed() => ins.sext(Type::I64, v),
                     _ => ins.uext(Type::I64, v),
+                };
+                let n = if self.g.p.c_layout.pointer_bytes() == 4 {
+                    let low = self.b.ins().trunc(Type::I32, n);
+                    self.b.ins().uext(Type::I64, low)
+                } else {
+                    n
                 };
                 self.b.ins().convert(ConvertOp::IntToPtr, Type::Ptr, n)
             }
