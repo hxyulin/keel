@@ -3,7 +3,7 @@
 mod runtime;
 use keel_ir::{
     ArgExt, BinaryOp, Block, BlockCall, CallConv, ConvertOp, DataLayout, EntityRef, Function,
-    FunctionAttrs, InstData, IntCC, Module, Purpose, Signature, Symbol, Type, UnaryOp, Value,
+    FunctionAttrs, Inst, InstData, IntCC, Module, Purpose, Signature, Symbol, Type, UnaryOp, Value,
 };
 pub use runtime::Wasm32RuntimeOptions;
 use std::collections::{HashMap, HashSet};
@@ -578,6 +578,92 @@ fn terminal_if(ir: &Function) -> Option<[Block; 3]> {
     Some([entry, arms[0], arms[1]])
 }
 
+// Only adjacent, exact low-bit cast chains are represented by their i32 source.
+// This is emission bookkeeping, not an IR rewrite or a native pointer identity.
+#[derive(Default)]
+struct LowBitCasts {
+    skipped: HashSet<Inst>,
+    sources: HashMap<Inst, Value>,
+}
+impl LowBitCasts {
+    fn new(ir: &Function) -> Self {
+        let mut uses = vec![0u8; ir.num_values()];
+        let mut aliased = vec![false; ir.num_values()];
+        for n in 0..ir.num_values() {
+            let raw = Value::new(n);
+            let resolved = ir.resolve(raw);
+            if raw != resolved {
+                aliased[n] = true;
+                aliased[resolved.index()] = true;
+            }
+        }
+        for b in ir.blocks() {
+            for &i in ir.block_insts(b) {
+                ir.inst_data(i).for_each_operand(|v| {
+                    let count = &mut uses[ir.resolve(v).index()];
+                    *count = count.saturating_add(1);
+                });
+            }
+        }
+        let mut result = Self::default();
+        // Fixed patterns bound each candidate to four instructions. Adjacency
+        // also prevents moving reads across calls, effects, or block edges.
+        for b in ir.blocks() {
+            let insts = ir.block_insts(b);
+            for (start, &first) in insts.iter().enumerate() {
+                let pattern: &[(ConvertOp, Type)] = match ir.inst_data(first) {
+                    InstData::Convert {
+                        op: ConvertOp::Uext,
+                        ty: Type::I64,
+                        arg,
+                    } if ir.value_type(*arg) == Type::I32 => &[
+                        (ConvertOp::Uext, Type::I64),
+                        (ConvertOp::Trunc, Type::I32),
+                        (ConvertOp::Uext, Type::I64),
+                        (ConvertOp::IntToPtr, Type::Ptr),
+                    ],
+                    InstData::Convert {
+                        op: ConvertOp::PtrToInt,
+                        ty: Type::I64,
+                        ..
+                    } => &[
+                        (ConvertOp::PtrToInt, Type::I64),
+                        (ConvertOp::Trunc, Type::I32),
+                    ],
+                    _ => continue,
+                };
+                let Some(chain) = insts.get(start..start + pattern.len()) else {
+                    continue;
+                };
+                let InstData::Convert { arg: source, .. } = ir.inst_data(first) else {
+                    unreachable!()
+                };
+                let mut previous = *source;
+                let matches = chain.iter().zip(pattern).enumerate().all(
+                    |(n, (&i, &(want_op, want_ty)))| {
+                        let InstData::Convert { op, ty, arg } = ir.inst_data(i) else {
+                            return false;
+                        };
+                        let values = ir.inst_results(i);
+                        if *op != want_op || *ty != want_ty || *arg != previous || values.len() != 1 {
+                            return false;
+                        }
+                        let value = values[0];
+                        previous = value;
+                        n + 1 == pattern.len()
+                            || (!aliased[value.index()] && uses[value.index()] == 1)
+                    },
+                );
+                if matches {
+                    result.skipped.extend(chain[..chain.len() - 1].iter().copied());
+                    result.sources.insert(*chain.last().unwrap(), *source);
+                }
+            }
+        }
+        result
+    }
+}
+
 struct Body<'a> {
     ir: &'a Function,
     indices: &'a HashMap<&'a str, u32>,
@@ -589,6 +675,7 @@ struct Body<'a> {
     locals: Vec<Option<u32>>,
     direct_return: bool,
     terminal_if: Option<[Block; 3]>,
+    low_bit_casts: LowBitCasts,
     pc: u32,
     blocks: HashMap<Block, i32>,
     out: InstructionOutput,
@@ -653,6 +740,7 @@ impl<'a> Body<'a> {
             locals,
             direct_return,
             terminal_if,
+            low_bit_casts: LowBitCasts::new(ir),
             pc: next,
             blocks: ir
                 .blocks()
@@ -796,6 +884,9 @@ impl<'a> Body<'a> {
                 self.op(W::If(BlockType::Empty));
             }
             for &i in self.ir.block_insts(b) {
+                if self.low_bit_casts.skipped.contains(&i) {
+                    continue;
+                }
                 match self.ir.inst_data(i) {
                     InstData::StackAddr { slot } => {
                         self.op(W::LocalGet(self.frame_base));
@@ -830,7 +921,13 @@ impl<'a> Body<'a> {
                         self.op(W::I32WrapI64);
                         self.op(W::I32Add);
                     }
-                    InstData::Convert { op, ty, arg } => self.convert(*op, *ty, *arg),
+                    InstData::Convert { op, ty, arg } => {
+                        if let Some(&source) = self.low_bit_casts.sources.get(&i) {
+                            self.get(source);
+                        } else {
+                            self.convert(*op, *ty, *arg);
+                        }
+                    }
                     InstData::Load { ty, addr, flags } => {
                         self.get(*addr);
                         let m = Self::memarg(*ty, flags.align);
