@@ -2224,6 +2224,14 @@ impl<'a> Parser<'a> {
                 };
                 let name = name.trim_matches('_');
                 match name {
+                    // Symbol metadata needs an explicit runtime import/export
+                    // contract. Never discard it through the generic ignored
+                    // attribute path, including on unused Wasm definitions.
+                    "import_module" | "import_name" | "export_name"
+                        if self.target == Target::Wasm32UnknownUnknown =>
+                    {
+                        return Err(unsupported_attribute(loc, name));
+                    }
                     // These change types, linkage, retention, placement or execution.
                     // Accepting their syntax without implementing the contract
                     // would silently change the program, even on a prototype

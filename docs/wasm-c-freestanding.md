@@ -33,7 +33,9 @@ array bounds still apply.
 Unsupported FP/extended/aggregate values, function pointers, narrow/pointer/
 aggregate call boundaries, variadics, unprototyped calls, atomics, vectors,
 VLAs, inline assembly, computed goto, debug output and native linkage/lifecycle/
-section attributes diagnose before body pruning. Unused static definitions
+section attributes diagnose before body pruning. Wasm `import_module`,
+`import_name` and `export_name` attributes are also explicitly rejected; runtime
+exports remain caller-selected and no source import contract is implemented. Unused static definitions
 cannot hide these operations. Wasm modules skip the native-only section validator
 only after this full rejection gate. `profile::compile` explicitly rejects Wasm
 before lexing; it cannot bypass the profile through native defaults.

@@ -102,3 +102,22 @@ fn compile_profiling_cannot_bypass_wasm_gate() {
         );
     }
 }
+
+#[test]
+fn wasm_symbol_metadata_is_rejected_even_on_unused_definitions() {
+    for attribute in [
+        "export_name(\"renamed\")",
+        "import_module(\"env\")",
+        "import_name(\"host_function\")",
+    ] {
+        for declaration in [
+            format!("int f(void) __attribute__(({attribute})); int f(void) {{ return 1; }}"),
+            format!(
+                "static int unused(void) __attribute__(({attribute})); static int unused(void) {{ return 1; }}"
+            ),
+        ] {
+            let error = compile(&declaration, "metadata.i", options()).unwrap_err();
+            assert!(error.message.contains("attribute"), "{error:?}");
+        }
+    }
+}
