@@ -862,6 +862,29 @@ assert.equal(e.big_difference(0,0xfffffff0),-1073741820);
 
 #[test]
 fn storage_data_boundaries_before_pruning() {
+    for source in [
+        "struct Big { long long big[9223372036854775807LL]; }; int f(void) { return 0; }",
+        "union Big { long long big[9223372036854775807LL]; }; int f(void) { return 0; }",
+        "struct Big { char big[2147483648ULL][8589934592ULL]; }; int f(void) { return 0; }",
+        "struct Big { char a[2147483648ULL], b[2147483648ULL]; }; int f(void) { return 0; }",
+        "struct Big { _Alignas(16) char a[4294967295ULL]; }; int f(void) { return 0; }",
+    ] {
+        let error = lower(source, false).unwrap_err();
+        assert!(error.message.contains("exceeds wasm32 bounds"), "{error:?}");
+    }
+    // A layout query at the valid boundary emits no allocation or data object.
+    let boundary = lower("struct Big { char a[4294967295ULL]; }; unsigned long f(void) { return sizeof(struct Big); }", false).unwrap();
+    assert!(boundary.data.is_empty());
+    // Sixteen scaled steps would wrap an unchecked i64 addend back to zero,
+    // passing a final-only bounds test. The actual target is one byte, so this
+    // witness never needs a large data allocation, even if the gate regresses.
+    for step in [" + 1073741824L", " - 1073741824L"] {
+        let source = format!(
+            "typedef char Row[1073741824]; static char data; static Row *bad = (Row *)&data{}; int f(void) {{ return 0; }}",
+            step.repeat(16)
+        );
+        assert!(lower(&source, false).is_err(), "accepted {source}");
+    }
     for src in [
         "extern int missing; int f(void) { return 0; }",
         "static long long big[9223372036854775807LL]; int f(void) { return 0; }",

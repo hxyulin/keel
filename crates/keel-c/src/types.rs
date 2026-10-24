@@ -981,6 +981,16 @@ pub fn layout_struct<'a>(
     {
         return Err("non-native packed records and bit-fields are not supported");
     }
+    // Record layout precedes the private lowering gate, including for unused
+    // definitions. Bound array multiplication here before Types::size can wrap
+    // or panic. Pointer pointees do not contribute to a member's storage size.
+    fn bounded_field_size(types: &Types, ty: &Ty) -> Option<u64> {
+        let size = match ty {
+            Ty::Array(a) => bounded_field_size(types, &a.elem)?.checked_mul(a.len.unwrap_or(0))?,
+            _ => types.size(ty),
+        };
+        (size <= u32::MAX as u64).then_some(size)
+    }
     let mut members = Vec::new();
     let mut bit: u64 = 0;
     let mut size: u64 = 0;
@@ -995,7 +1005,15 @@ pub fn layout_struct<'a>(
         let falign = if packed { 1 } else { natural }
             .max(requested_align.unwrap_or(1))
             .min(max_align.unwrap_or(u64::MAX));
-        let fsize = types.size(&ty);
+        let fsize = if types.layout != CDataLayout::NATIVE_LP64 {
+            if falign > u32::MAX as u64 {
+                return Err("non-native record alignment exceeds wasm32 bounds");
+            }
+            bounded_field_size(types, &ty)
+                .ok_or("non-native record member storage exceeds wasm32 bounds")?
+        } else {
+            types.size(&ty)
+        };
         if is_union {
             bit = 0;
         }
@@ -1049,8 +1067,14 @@ pub fn layout_struct<'a>(
             }
         }
         size = size.max(bit.div_ceil(8));
+        if types.layout != CDataLayout::NATIVE_LP64 && size > u32::MAX as u64 {
+            return Err("non-native record storage exceeds wasm32 bounds");
+        }
     }
     let size = size.next_multiple_of(align);
+    if types.layout != CDataLayout::NATIVE_LP64 && size > u32::MAX as u64 {
+        return Err("non-native record storage exceeds wasm32 bounds");
+    }
     if packed_accesses
         .iter()
         .any(|(offset, width)| offset + width > size)
