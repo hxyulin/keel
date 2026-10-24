@@ -49,7 +49,7 @@ allocator, heap, memory-growth instructions, imported memories or extra memories
 The fixed maximum prevents host growth by positive pages, too. The low/null
 region is **not reserved or protected**: address zero is ordinary accessible
 memory when the configured size and access width permit it.
-Engine bounds checks trap on an access whose complete footprint lies outside
+Engine bounds checks trap if any byte of an access footprint lies outside
 memory. There is no individual object, lifetime or software-stack bounds claim.
 
 ## Pointer and scalar contracts
@@ -164,3 +164,21 @@ python3 suite/fast_opt_locked.py /tmp/keel-wasm-memory-unique.jsonl \
 Generated evidence remains outside Git. Parent owns independent review,
 integration and cleanup. These finite raw-IR tests do not establish Wasm C,
 software-stack, native execution or performance support.
+
+On 2026-10-24 implementation `f1eebf33` passed all eight memory tests and all
+15 unchanged scalar regressions in both debug and release on Apple ARM64,
+rustc 1.99.1 and Node v24.22.1, with zero failures/ignored tests. Both profiles
+include independent wasmparser MVP validation and Node execution. The maximum
+65536-page memory was validated/decoded only, without 4 GiB allocation.
+Locked `cargo check` and `cargo build` passed; `cargo fmt -p keel-wasm --check` and
+`git diff --check` passed. Every Rust compilation command used
+`CARGO_CACHE_LINKS=0`, the existing shared `fast_opt_locked.py` lock,
+`--offline --locked -j2` and the default cargo cache/managed target directory.
+
+Exact command records and captured output are respectively
+`/tmp/keel-wasm-memory-229be9fc-{debug,release,check,build}.jsonl` and the same
+paths ending in `.log`. Initial debug fixture parse failures (missing explicit
+`inttoptr.ptr`/`ptrtoint.i64` suffixes) were corrected before the successful
+runs; the append-only command records retain those earlier failed invocations.
+No toolchain, dependency pin/feature, cache setting or native source changed.
+Independent review/integration has not been performed by this implementation task.

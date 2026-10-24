@@ -1,6 +1,6 @@
 [package]
 name = "keel-wasm"
-description = "Bounded pointer-free scalar Keel IR to core WebAssembly backend"
+description = "Bounded scalar Keel IR to core WebAssembly backend with opt-in wasm32 memory"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
