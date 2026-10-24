@@ -1,8 +1,36 @@
-//! C types, with the sizes and alignments of Apple arm64 (LP64, signed
-//! `char`, `long double` the same as `double`).
+//! C type identities and explicit compilation-local storage queries.
+//! Production compilations use LP64; the private wasm32 model is test-only.
 
 use bumpalo::Bump;
 use keel_ir::{Layout, Type, VectorType};
+
+/// Validated C storage models, independent of host and IR/backend selection.
+/// This controls long/pointer storage only, not char, extended FP or call ABI.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub(crate) struct CDataLayout {
+    long_bytes: u64,
+    pointer_bytes: u64,
+}
+
+impl CDataLayout {
+    pub(crate) const NATIVE_LP64: Self = Self {
+        long_bytes: 8,
+        pointer_bytes: 8,
+    };
+    // No production route may select this until evaluator/lowering migration.
+    #[cfg(test)]
+    pub(crate) const WASM32: Self = Self {
+        long_bytes: 4,
+        pointer_bytes: 4,
+    };
+
+    pub(crate) const fn pointer_bytes(self) -> u64 {
+        self.pointer_bytes
+    }
+    pub(crate) const fn pointer_align(self) -> u64 {
+        self.pointer_bytes
+    }
+}
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum IntKind {
@@ -26,6 +54,10 @@ pub enum IntKind {
 
 impl IntKind {
     pub fn size(self) -> u64 {
+        self.size_with_layout(CDataLayout::NATIVE_LP64)
+    }
+
+    pub fn size_with_layout(self, layout: CDataLayout) -> u64 {
         match self {
             IntKind::Bool
             | IntKind::Char
@@ -34,7 +66,8 @@ impl IntKind {
             | IntKind::UPlainChar => 1,
             IntKind::Short | IntKind::UShort => 2,
             IntKind::Int | IntKind::UInt => 4,
-            IntKind::Long | IntKind::ULong | IntKind::LLong | IntKind::ULLong => 8,
+            IntKind::Long | IntKind::ULong => layout.long_bytes,
+            IntKind::LLong | IntKind::ULLong => 8,
             IntKind::Int128 | IntKind::UInt128 => 16,
         }
     }
@@ -587,8 +620,12 @@ impl<'a> Ty<'a> {
     }
 
     pub fn ir(&self) -> Type {
+        self.ir_with_layout(CDataLayout::NATIVE_LP64)
+    }
+
+    pub fn ir_with_layout(&self, layout: CDataLayout) -> Type {
         match self {
-            Ty::Int(k) => match k.size() {
+            Ty::Int(k) => match k.size_with_layout(layout) {
                 1 => Type::I8,
                 2 => Type::I16,
                 4 => Type::I32,
@@ -635,22 +672,29 @@ impl<'a> StructDef<'a> {
 }
 
 /// Sizes, alignments and ABI layouts need the struct table.
-pub struct Types<'a>(pub &'a [StructDef<'a>]);
+pub struct Types<'a> {
+    structs: &'a [StructDef<'a>],
+    layout: CDataLayout,
+}
 
-impl Types<'_> {
+impl<'a> Types<'a> {
+    pub fn new(structs: &'a [StructDef<'a>], layout: CDataLayout) -> Self {
+        Self { structs, layout }
+    }
     pub fn size(&self, ty: &Ty) -> u64 {
         match ty {
             Ty::Void => 1,
-            Ty::Int(k) => k.size(),
+            Ty::Int(k) => k.size_with_layout(self.layout),
             Ty::Vector(_, shape) => u64::from(shape.bytes()),
             Ty::Complex(t) => 2 * self.size(t),
             Ty::Float => 4,
-            Ty::Double | Ty::Ptr(_) => 8,
+            Ty::Double => 8,
+            Ty::Ptr(_) => self.layout.pointer_bytes(),
             Ty::Half => 2,
             Ty::Opaque(o) => o.size,
             Ty::Array(a) => self.size(&a.elem) * a.len.unwrap_or(0),
             Ty::Func(_) => 1,
-            Ty::Struct(id) => self.0[*id].size,
+            Ty::Struct(id) => self.structs[*id].size,
             Ty::Atomic(t) => self.size(t),
         }
     }
@@ -658,6 +702,9 @@ impl Types<'_> {
     /// Native atomic representations shared by the two supported targets.
     /// The pointer's declared/proven alignment must cover the whole object.
     pub fn atomic_size(&self, ty: &Ty, align: u64) -> Option<u8> {
+        if self.layout != CDataLayout::NATIVE_LP64 {
+            return None;
+        }
         let size = self.size(ty);
         if matches!(ty, Ty::Void | Ty::Func(_) | Ty::Array(_))
             || !matches!(size, 1 | 2 | 4 | 8)
@@ -671,10 +718,11 @@ impl Types<'_> {
 
     pub fn align(&self, ty: &Ty) -> u64 {
         match ty {
+            Ty::Ptr(_) => self.layout.pointer_align(),
             Ty::Complex(t) => self.align(t),
             Ty::Opaque(o) => o.align,
             Ty::Array(a) => self.align(&a.elem),
-            Ty::Struct(id) => self.0[*id].align,
+            Ty::Struct(id) => self.structs[*id].align,
             Ty::Atomic(t) => self.align(t),
             Ty::Void | Ty::Func(_) => 1,
             _ => self.size(ty),
@@ -687,14 +735,24 @@ impl Types<'_> {
     /// of its float, and anything else an array of integers as wide as
     /// its alignment, which has the same size and alignment.
     pub fn abi_layout(&self, ty: &Ty) -> Layout {
+        assert_eq!(
+            self.layout,
+            CDataLayout::NATIVE_LP64,
+            "native ABI layout only"
+        );
         self.abi_layout_with_alignment(ty, self.align(ty))
     }
 
     /// AAPCS64 ignores an aggregate's top-level over-alignment when
     /// allocating argument registers, while retaining member alignment.
     pub fn aapcs_layout(&self, ty: &Ty) -> Layout {
+        assert_eq!(
+            self.layout,
+            CDataLayout::NATIVE_LP64,
+            "native ABI layout only"
+        );
         let alignment = match ty {
-            Ty::Struct(id) => self.0[*id]
+            Ty::Struct(id) => self.structs[*id]
                 .members
                 .iter()
                 .map(|m| m.align)
@@ -726,7 +784,7 @@ impl Types<'_> {
     /// The current IR layouts cannot express those explicit field offsets.
     pub fn has_unaligned_fields(&self, ty: &Ty, base: u64) -> bool {
         match ty {
-            Ty::Struct(id) => self.0[*id]
+            Ty::Struct(id) => self.structs[*id]
                 .members
                 .iter()
                 .any(|m| m.bits.is_none() && self.has_unaligned_fields(&m.ty, base + m.offset)),
@@ -745,7 +803,7 @@ impl Types<'_> {
             match ty {
                 Ty::Struct(id) if !seen.contains(id) => {
                     seen.push(*id);
-                    types.0[*id]
+                    types.structs[*id]
                         .members
                         .iter()
                         .find_map(|m| find(types, &m.ty, seen))
@@ -761,7 +819,7 @@ impl Types<'_> {
     pub fn contains_vector_union(&self, ty: &Ty) -> bool {
         match ty {
             Ty::Struct(id) => {
-                let def = &self.0[*id];
+                let def = &self.structs[*id];
                 (def.is_union && self.contains_vector(ty))
                     || def
                         .members
@@ -776,7 +834,7 @@ impl Types<'_> {
     pub fn contains_vector(&self, ty: &Ty) -> bool {
         match ty {
             Ty::Vector(..) => true,
-            Ty::Struct(id) => self.0[*id]
+            Ty::Struct(id) => self.structs[*id]
                 .members
                 .iter()
                 .any(|m| self.contains_vector(&m.ty)),
@@ -789,7 +847,7 @@ impl Types<'_> {
         match ty {
             Ty::Complex(_) => true,
             Ty::Opaque(o) => o.name == "_Complex long double",
-            Ty::Struct(id) => self.0[*id]
+            Ty::Struct(id) => self.structs[*id]
                 .members
                 .iter()
                 .any(|m| self.contains_complex(&m.ty)),
@@ -802,11 +860,14 @@ impl Types<'_> {
     /// SysV merges SSE/INTEGER classes per eightbyte, not per entire struct.
     /// Fail closed for unions, bit-fields and explicit/packed layout changes.
     pub fn complex_abi_layout(&self, ty: &Ty) -> Option<Layout> {
+        if self.layout != CDataLayout::NATIVE_LP64 {
+            return None;
+        }
         let layout = match ty {
             Ty::Atomic(elem) => self.complex_abi_layout(elem)?,
             Ty::Complex(elem) => Layout::Array(Box::new(Layout::Scalar(elem.ir())), 2),
             Ty::Struct(id) => {
-                let def = &self.0[*id];
+                let def = &self.structs[*id];
                 if def.is_union {
                     return None;
                 }
@@ -841,7 +902,7 @@ impl Types<'_> {
     pub fn contains_atomic(&self, ty: &Ty) -> bool {
         match ty {
             Ty::Atomic(_) => true,
-            Ty::Struct(id) => self.0[*id]
+            Ty::Struct(id) => self.structs[*id]
                 .members
                 .iter()
                 .any(|m| self.contains_atomic(&m.ty)),
@@ -861,7 +922,7 @@ impl Types<'_> {
                 elem, len: Some(n), ..
             }) => self.hfa(elem).map(|(t, k)| (t, k * n)),
             Ty::Struct(id) => {
-                let def = &self.0[*id];
+                let def = &self.structs[*id];
                 if def.is_union {
                     return None;
                 }
@@ -911,6 +972,11 @@ pub fn layout_struct<'a>(
     fields: Vec<StructField<'a>>,
     max_align: Option<u64>,
 ) -> Result<(Vec<Member<'a>>, u64, u64), &'static str> {
+    if types.layout != CDataLayout::NATIVE_LP64
+        && (max_align.is_some() || fields.iter().any(|f| f.3.is_some() || f.5))
+    {
+        return Err("non-native packed records and bit-fields are not supported");
+    }
     let mut members = Vec::new();
     let mut bit: u64 = 0;
     let mut size: u64 = 0;
@@ -1043,5 +1109,147 @@ mod node_tests {
             vla: None,
         }));
         assert_eq!(*nodes.node(composite), composite);
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    const MODELS: [CDataLayout; 2] = [CDataLayout::NATIVE_LP64, CDataLayout::WASM32];
+
+    #[test]
+    fn integer_storage_preserves_nominal_identity_and_rank() {
+        use IntKind::*;
+        let kinds = [
+            Bool, Char, SChar, UChar, UPlainChar, Short, UShort, Int, UInt, Long, ULong, LLong,
+            ULLong, Int128, UInt128,
+        ];
+        for layout in MODELS {
+            let types = Types::new(&[], layout);
+            for k in kinds {
+                let ty = Ty::Int(k);
+                let expected = match k {
+                    Bool | Char | SChar | UChar | UPlainChar => 1,
+                    Short | UShort => 2,
+                    Int | UInt => 4,
+                    Long | ULong => layout.long_bytes,
+                    LLong | ULLong => 8,
+                    Int128 | UInt128 => 16,
+                };
+                assert_eq!(k.size_with_layout(layout), expected);
+                assert_eq!(types.size(&ty), expected);
+                assert_eq!(types.align(&ty), expected);
+                assert_eq!(
+                    u64::from(ty.ir_with_layout(layout).bytes().unwrap()),
+                    expected
+                );
+                assert_eq!(k.size(), k.size_with_layout(CDataLayout::NATIVE_LP64));
+                assert_eq!(ty.ir(), ty.ir_with_layout(CDataLayout::NATIVE_LP64));
+                assert_eq!(k.to_unsigned().size_with_layout(layout), expected);
+            }
+            assert!(Int.rank() < Long.rank() && Long.rank() < LLong.rank());
+            assert!(!LONG.compatible(&Ty::Int(LLong)));
+            assert!(!INT.compatible(&LONG));
+        }
+        assert_eq!(LONG.ir_with_layout(CDataLayout::WASM32), Type::I32);
+        assert_eq!(
+            Ty::Int(LLong).ir_with_layout(CDataLayout::WASM32),
+            Type::I64
+        );
+    }
+
+    fn field<'a>(ty: Ty<'a>) -> StructField<'a> {
+        (None, ty, Sugar::Plain, None, None, false)
+    }
+
+    #[test]
+    fn pointer_record_union_and_nested_array_storage() {
+        let ptr = Ty::Ptr(&CHAR);
+        for layout in MODELS {
+            let types = Types::new(&[], layout);
+            let p = layout.pointer_bytes();
+            assert_eq!(types.size(&ptr), p);
+            assert_eq!(types.align(&ptr), layout.pointer_align());
+            // IR pointer identity is independent of its storage representation.
+            assert_eq!(ptr.ir_with_layout(layout), Type::Ptr);
+            let (members, size, align) = layout_struct(
+                &types,
+                &[],
+                false,
+                vec![field(CHAR), field(ptr), field(LONG)],
+                None,
+            )
+            .unwrap();
+            assert_eq!(
+                members.iter().map(|m| m.offset).collect::<Vec<_>>(),
+                vec![0, p, 2 * p]
+            );
+            assert_eq!((size, align), (3 * p, p));
+            let record = StructDef {
+                tag: None,
+                is_union: false,
+                members,
+                size,
+                align,
+                complete: true,
+            };
+            let defs = [record];
+            let types = Types::new(&defs, layout);
+            let array = Ty::Array(&ArrayTy {
+                elem: Ty::Struct(0),
+                len: Some(3),
+                vla: None,
+            });
+            let nested = Ty::Array(&ArrayTy {
+                elem: array,
+                len: Some(2),
+                vla: None,
+            });
+            assert_eq!((types.size(&nested), types.align(&nested)), (18 * p, p));
+            let (_, union_size, union_align) = layout_struct(
+                &types,
+                &[],
+                true,
+                vec![field(ptr), field(Ty::Int(IntKind::LLong))],
+                None,
+            )
+            .unwrap();
+            assert_eq!((union_size, union_align), (8, 8));
+            let (_, outer_size, outer_align) =
+                layout_struct(&types, &[], false, vec![field(CHAR), field(nested)], None).unwrap();
+            assert_eq!((outer_size, outer_align), (19 * p, p));
+            assert_eq!(types.size(&Ty::Atomic(&LONG)), layout.long_bytes);
+        }
+    }
+
+    #[test]
+    fn wasm_storage_does_not_authorize_native_abi_or_bitfields() {
+        let types = Types::new(&[], CDataLayout::WASM32);
+        assert_eq!(types.atomic_size(&INT, 4), None);
+        assert_eq!(types.complex_abi_layout(&Ty::Complex(&Ty::Double)), None);
+        let mut bitfield = field(INT);
+        bitfield.3 = Some(3);
+        assert!(layout_struct(&types, &[], false, vec![bitfield], None).is_err());
+        let mut packed = field(INT);
+        packed.5 = true;
+        assert!(layout_struct(&types, &[], false, vec![packed], None).is_err());
+        assert!(layout_struct(&types, &[], false, vec![field(INT)], Some(1)).is_err());
+        // Native support remains available.
+        let native = Types::new(&[], CDataLayout::NATIVE_LP64);
+        assert!(layout_struct(&native, &[], false, vec![bitfield], None).is_ok());
+        assert_eq!(native.atomic_size(&INT, 4), Some(4));
+    }
+
+    #[test]
+    #[should_panic(expected = "native ABI layout only")]
+    fn wasm_cannot_use_native_abi_classifier() {
+        Types::new(&[], CDataLayout::WASM32).abi_layout(&LONG);
+    }
+
+    #[test]
+    #[should_panic(expected = "native ABI layout only")]
+    fn wasm_cannot_use_aapcs_classifier() {
+        Types::new(&[], CDataLayout::WASM32).aapcs_layout(&LONG);
     }
 }

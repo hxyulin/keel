@@ -339,6 +339,7 @@ pub struct Parser<'a> {
     /// Counts names made up for static locals and compound literals.
     unique: usize,
     pub(crate) target: Target,
+    pub(crate) c_layout: CDataLayout,
     /// SysV's `struct __va_list_tag`, once a `va_list` needs it.
     va_list_tag: Option<usize>,
 }
@@ -586,6 +587,7 @@ impl<'a> Parser<'a> {
             last_params: Vec::new(),
             unique: 0,
             target,
+            c_layout: CDataLayout::NATIVE_LP64,
             va_list_tag: None,
         };
         p.fill();
@@ -608,7 +610,7 @@ impl<'a> Parser<'a> {
         }
         let id = *self.va_list_tag.get_or_insert_with(|| {
             let member = |name: &'static str, ty: Ty<'a>, offset| Member {
-                align: Types(&self.structs).align(&ty),
+                align: Types::new(&self.structs, self.c_layout).align(&ty),
                 name: Some(name.into()),
                 ty,
                 sugar: Sugar::Plain,
@@ -923,7 +925,7 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn types(&self) -> Types<'_> {
-        Types(&self.structs)
+        Types::new(&self.structs, self.c_layout)
     }
 
     pub(crate) fn size_of(&self, ty: &Ty<'a>) -> u64 {
@@ -2698,8 +2700,8 @@ impl<'a> Parser<'a> {
             if matches!(spec.ty, Ty::Float | Ty::Double) && counter != LONG + DOUBLE {
                 spec.ty = Ty::Complex(self.type_ref(spec.ty));
             } else if counter == LONG + DOUBLE {
-                let size = 2 * Types(&self.structs).size(&spec.ty);
-                let align = Types(&self.structs).align(&spec.ty);
+                let size = 2 * Types::new(&self.structs, self.c_layout).size(&spec.ty);
+                let align = Types::new(&self.structs, self.c_layout).align(&spec.ty);
                 spec.ty = Ty::Opaque(self.arena.alloc(OpaqueTy {
                     name: "_Complex long double",
                     size,
