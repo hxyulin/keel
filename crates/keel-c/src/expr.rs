@@ -27,7 +27,10 @@ pub(crate) fn mk<'a>(kind: ExprKind<'a>, ty: Ty<'a>, loc: Loc) -> Expr<'a> {
 /// intermediates, even when the final scalar type is narrower.
 // Native-only proof boundary; migrating the scalar evaluator does not migrate
 // the vector range/shape checks that consume this proof.
-fn broadcast_constant(e: &Expr<'_>) -> Option<Const> {
+fn broadcast_constant(e: &Expr<'_>, layout: CDataLayout) -> Option<Const> {
+    if layout != CDataLayout::NATIVE_LP64 {
+        return None;
+    }
     fn supported(e: &Expr<'_>) -> bool {
         if !(e.ty.int_kind().is_some_and(|k| k.size() <= 8)
             || matches!(e.ty, Ty::Float | Ty::Double))
@@ -49,7 +52,10 @@ fn broadcast_constant(e: &Expr<'_>) -> Option<Const> {
 
 /// x86 immediate controls are bounded C ICEs, not arbitrary folds by the general
 /// evaluator (which deliberately wraps shifts/overflow and saturates FP casts).
-fn x86_immediate_control(e: &Expr<'_>) -> Option<i64> {
+fn x86_immediate_control(e: &Expr<'_>, layout: CDataLayout) -> Option<i64> {
+    if layout != CDataLayout::NATIVE_LP64 {
+        return None;
+    }
     fn integer(e: &Expr<'_>) -> bool {
         e.ty.int_kind().is_some_and(|k| k.size() <= 8)
     }
@@ -693,6 +699,7 @@ impl<'a> Parser<'a> {
     /// A bounded, lossless GNU scalar conversion before splatting. In particular,
     /// never use assignment conversion to silently truncate a wide scalar.
     fn vector_broadcast(&mut self, scalar: Expr<'a>, ty: Ty<'a>, loc: Loc) -> R<Expr<'a>> {
+        self.require_native_layout(loc, "C vector broadcasts")?;
         let Ty::Vector(elem, _) = ty else {
             unreachable!()
         };
@@ -706,7 +713,7 @@ impl<'a> Parser<'a> {
                     !from.signed() && from.size() < to.size()
                 };
                 range_fits
-                    || broadcast_constant(&scalar).is_some_and(|c| {
+                    || broadcast_constant(&scalar, self.c_layout).is_some_and(|c| {
                         let Const::Int(bits) = c else { return false };
                         let value = if from.signed() {
                             bits as i128
@@ -724,7 +731,7 @@ impl<'a> Parser<'a> {
             }
             _ => match (scalar.ty, *elem) {
                 (Ty::Float, Ty::Float | Ty::Double) | (Ty::Double, Ty::Double) => true,
-                (Ty::Double, Ty::Float) => broadcast_constant(&scalar).is_some_and(
+                (Ty::Double, Ty::Float) => broadcast_constant(&scalar, self.c_layout).is_some_and(
                     |c| matches!(c, Const::Float(f) if f.is_finite() && (f as f32) as f64 == f),
                 ),
                 _ => false,
@@ -1501,7 +1508,7 @@ impl<'a> Parser<'a> {
         let len = (bytes.len() / unit) as u64;
         let i = self.add_string(bytes, wide);
         let elem = if wide {
-            if self.target == Target::Aarch64LinuxGnu {
+            if self.c_layout == CDataLayout::NATIVE_LP64 && self.target == Target::Aarch64LinuxGnu {
                 UINT
             } else {
                 INT
@@ -1516,6 +1523,9 @@ impl<'a> Parser<'a> {
 
     fn builtin(&mut self, name: &str, loc: Loc) -> R<Expr<'a>> {
         let base = &name["__builtin_".len()..];
+        if base.starts_with("ia32_") || base.starts_with("keel_sse2_") {
+            self.require_native_layout(loc, "x86 builtins")?;
+        }
         if let Some(id) = packed_conversion_builtin(base) {
             let args = self.builtin_args(1, loc)?;
             let to_float = id == Intrinsic::X86Ssecvtdq2ps128;
@@ -1553,7 +1563,8 @@ impl<'a> Parser<'a> {
             }
             if immediate {
                 // Reuse the reviewed bounded ICE proof, including undefined-expression checks.
-                let Some(n) = x86_immediate_control(&args[1]).filter(|n| (0..=255).contains(n))
+                let Some(n) = x86_immediate_control(&args[1], self.c_layout)
+                    .filter(|n| (0..=255).contains(n))
                 else {
                     return Err(Error::new(
                         loc,
@@ -1613,7 +1624,7 @@ impl<'a> Parser<'a> {
                     "PCLMULQDQ requires matching i64x2 integer vectors on x86-64",
                 ));
             }
-            let Some(n) = x86_immediate_control(&args[2]) else {
+            let Some(n) = x86_immediate_control(&args[2], self.c_layout) else {
                 return Err(Error::new(
                     loc,
                     "PCLMULQDQ control must be an integer constant expression in0..=255",
@@ -1646,7 +1657,7 @@ impl<'a> Parser<'a> {
             }
             if keygen {
                 // Reuse the reviewed PCLMUL bounded ICE proof unchanged.
-                let Some(n) = x86_immediate_control(&args[1]) else {
+                let Some(n) = x86_immediate_control(&args[1], self.c_layout) else {
                     return Err(Error::new(
                         loc,
                         "AESKEYGENASSIST requires an integer constant expression in 0..255",
@@ -3231,8 +3242,8 @@ mod integer_layout_tests {
     use crate::strings::Strings;
     use bumpalo::Bump;
 
-    // Expression-only seam: never invoke translation-unit parsing or IR generation
-    // with the test model. No production constructor selects WASM32.
+    // Expression-only seam: never invoke IR generation with the test model.
+    // No production constructor selects WASM32.
     fn expression<'a>(src: &'a str, arena: &'a Bump, layout: CDataLayout) -> Expr<'a> {
         let mut p = Parser::new(
             src,
@@ -3442,6 +3453,26 @@ mod integer_layout_tests {
     }
 
     #[test]
+    fn native_proofs_explicitly_reject_the_private_model() {
+        let arena = Bump::new();
+        let e = expression("1L + 2L", &arena, CDataLayout::WASM32);
+        assert_eq!(x86_immediate_control(&e, CDataLayout::WASM32), None);
+        assert_eq!(broadcast_constant(&e, CDataLayout::WASM32), None);
+        let e = expression("1L + 2L", &arena, CDataLayout::NATIVE_LP64);
+        assert_eq!(x86_immediate_control(&e, CDataLayout::NATIVE_LP64), Some(3));
+        assert_eq!(
+            broadcast_constant(&e, CDataLayout::NATIVE_LP64),
+            Some(Const::Int(3))
+        );
+
+        // Exercise the broadcast entry even without a declaration-created vector.
+        let mut p = Parser::new("", "proof.c", Target::default(), Strings::new(&arena));
+        p.c_layout = CDataLayout::WASM32;
+        let ty = Ty::Vector(&INT, keel_ir::VectorType::I32x4);
+        assert!(p.vector_broadcast(e, ty, Loc::default()).is_err());
+    }
+
+    #[test]
     fn wide_casts_and_constant_proof_safeguards_stay_bounded() {
         let arena = Bump::new();
         for layout in [CDataLayout::NATIVE_LP64, CDataLayout::WASM32] {
@@ -3483,11 +3514,19 @@ mod integer_layout_tests {
             "(1, 2)",
         ] {
             let e = expression(src, &arena, CDataLayout::NATIVE_LP64);
-            assert_eq!(x86_immediate_control(&e), None, "{src}");
+            assert_eq!(
+                x86_immediate_control(&e, CDataLayout::NATIVE_LP64),
+                None,
+                "{src}"
+            );
         }
         for src in ["(int)(__int128)1", "(int)(void*)1", "(1, 2)"] {
             let e = expression(src, &arena, CDataLayout::NATIVE_LP64);
-            assert_eq!(broadcast_constant(&e), None, "{src}");
+            assert_eq!(
+                broadcast_constant(&e, CDataLayout::NATIVE_LP64),
+                None,
+                "{src}"
+            );
         }
     }
 }

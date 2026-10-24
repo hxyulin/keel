@@ -81,8 +81,8 @@ impl<'a> Parser<'a> {
             return Ok(None);
         };
         let elem_size = match elem {
-            Ty::Int(k) if k.size() == 1 => 1,
-            Ty::Int(k) if k.size() == 4 => 4,
+            Ty::Int(k) if k.size_with_layout(self.c_layout) == 1 => 1,
+            Ty::Int(k) if k.size_with_layout(self.c_layout) == 4 => 4,
             _ => return Ok(None),
         };
         if !matches!(self.peek(), Tok::Str { .. }) {
@@ -96,6 +96,22 @@ impl<'a> Parser<'a> {
         let unit = if self.strings[i].wide { 4 } else { 1 };
         if unit != elem_size {
             return Err(Error::new(e.loc, "string literal of the wrong width"));
+        }
+        // Equal storage width does not make long32 a wchar_t alias. Preserve
+        // native acceptance, but keep the private wasm32 string path nominal;
+        // in particular _Bool is not a character type either.
+        if self.c_layout != CDataLayout::NATIVE_LP64 {
+            let compatible = if unit == 4 {
+                elem == INT
+            } else {
+                matches!(
+                    elem,
+                    Ty::Int(IntKind::Char | IntKind::SChar | IntKind::UChar | IntKind::UPlainChar)
+                )
+            };
+            if !compatible {
+                return Err(Error::new(e.loc, "incompatible string element type"));
+            }
         }
         let count = (bytes.len() / unit) as u64;
         if let Some(n) = len {

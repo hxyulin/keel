@@ -594,9 +594,34 @@ impl<'a> Parser<'a> {
         p
     }
 
+    /// Private declaration-only model seam. The returned AST must never enter
+    /// native IR generation; production construction continues to select LP64.
+    #[cfg(test)]
+    pub(crate) fn declarations_with_layout(
+        src: &'a str,
+        target: Target,
+        text: Strings<'a>,
+        layout: CDataLayout,
+    ) -> R<Self> {
+        let mut p = Self::new(src, "layout-declarations.c", target, text);
+        p.c_layout = layout;
+        p.translation_unit()?;
+        Ok(p)
+    }
+
     /// The file names line markers mentioned; a `Loc::file` indexes them.
     pub fn take_files(&mut self) -> Vec<&'a str> {
         std::mem::take(&mut self.lexer.files)
+    }
+
+    pub(crate) fn require_native_layout(&self, loc: Loc, subject: &str) -> R<()> {
+        if self.c_layout != CDataLayout::NATIVE_LP64 {
+            return Err(Error::new(
+                loc,
+                format!("{subject} requires the native C layout"),
+            ));
+        }
+        Ok(())
     }
 
     /// `__builtin_va_list`. Apple's is a pointer to the next argument.
@@ -2133,6 +2158,7 @@ impl<'a> Parser<'a> {
         let mut label = None;
         loop {
             if self.is("__asm") || self.is("__asm__") || self.is("asm") {
+                self.require_native_layout(self.loc(), "asm labels")?;
                 self.advance();
                 self.expect("(")?;
                 let mut text = Vec::new();
@@ -2328,7 +2354,8 @@ impl<'a> Parser<'a> {
                             "QI" | "byte" => TypeMode::Integer(1),
                             "HI" => TypeMode::Integer(2),
                             "SI" => TypeMode::Integer(4),
-                            "DI" | "word" | "pointer" => TypeMode::Integer(8),
+                            "DI" => TypeMode::Integer(8),
+                            "word" | "pointer" => TypeMode::Integer(self.c_layout.pointer_bytes()),
                             "TI" => TypeMode::Integer(16),
                             "TC" => TypeMode::ComplexBinary128,
                             _ => {
@@ -2552,6 +2579,7 @@ impl<'a> Parser<'a> {
                             Some(ty)
                         }
                         "__builtin_va_list" => {
+                            self.require_native_layout(loc, "va_list")?;
                             self.advance();
                             Some(self.va_list())
                         }
@@ -2685,14 +2713,17 @@ impl<'a> Parser<'a> {
             DOUBLE => Ty::Double,
             // On x86-64 Linux it is the x87 80-bit format, which keel does
             // not have: its values are refused rather than miscompiled.
-            c if c == LONG + DOUBLE => match self.target {
-                Target::Aarch64AppleDarwin => Ty::Double,
-                Target::X86_64LinuxGnu | Target::Aarch64LinuxGnu => Ty::Opaque(&OpaqueTy {
-                    name: "long double",
-                    size: 16,
-                    align: 16,
-                }),
-            },
+            c if c == LONG + DOUBLE => {
+                self.require_native_layout(loc, "long double declarations")?;
+                match self.target {
+                    Target::Aarch64AppleDarwin => Ty::Double,
+                    Target::X86_64LinuxGnu | Target::Aarch64LinuxGnu => Ty::Opaque(&OpaqueTy {
+                        name: "long double",
+                        size: 16,
+                        align: 16,
+                    }),
+                }
+            }
             HALF => Ty::Half,
             _ => return Err(Error::new(loc, "invalid combination of type specifiers")),
         };
@@ -2742,6 +2773,7 @@ impl<'a> Parser<'a> {
         if let Some((mode, loc)) = attrs.mode.take() {
             match mode {
                 TypeMode::ComplexBinary128 => {
+                    self.require_native_layout(loc, "TC mode")?;
                     if self.target != Target::X86_64LinuxGnu {
                         return Err(Error::new(
                             loc,
@@ -2773,7 +2805,8 @@ impl<'a> Parser<'a> {
                         1 => IntKind::SChar,
                         2 => IntKind::Short,
                         4 => IntKind::Int,
-                        8 => IntKind::Long,
+                        8 if IntKind::Long.size_with_layout(self.c_layout) == 8 => IntKind::Long,
+                        8 => IntKind::LLong,
                         _ => IntKind::Int128,
                     };
                     ty = Ty::Int(if kind.signed() {
@@ -2791,6 +2824,7 @@ impl<'a> Parser<'a> {
     }
 
     fn vector_type(&mut self, ty: Ty<'a>, bytes: u64, loc: Loc) -> R<Ty<'a>> {
+        self.require_native_layout(loc, "C vector types")?;
         // Declaration-specifier attributes have already changed the base type.
         // A final declarator attribute requires a scalar subject, like Clang.
         if bytes == 32 && self.target != keel_ir::Target::X86_64LinuxGnu {
@@ -3973,6 +4007,7 @@ impl<'a> Parser<'a> {
                     return Ok(Stmt::Goto(label));
                 }
                 "asm" | "__asm" | "__asm__" => {
+                    self.require_native_layout(loc, "inline assembly")?;
                     return self.asm_statement();
                 }
                 _ if matches!(self.peek_at(1), Tok::Punct(":")) && !is_keyword(&word) => {
@@ -4197,5 +4232,204 @@ mod tests {
             p.sugar_ref(Sugar::Plain),
             p.sugar_ref(Sugar::Plain)
         ));
+    }
+}
+
+#[cfg(test)]
+mod declaration_layout_tests {
+    use super::*;
+    use crate::eval::{Const, eval_with_layout};
+    use bumpalo::Bump;
+
+    const FIXTURE: &str = include_str!("../tests/fixtures/wasm-scalar-declarations.c");
+
+    fn declarations<'a>(src: &'a str, arena: &'a Bump, layout: CDataLayout) -> R<Parser<'a>> {
+        Parser::declarations_with_layout(src, Target::default(), Strings::new(arena), layout)
+    }
+
+    #[test]
+    fn maintained_declarations_build_records_under_each_model() {
+        let arena = Bump::new();
+        for (layout, sizes, offsets, bound, value) in [
+            (
+                CDataLayout::NATIVE_LP64,
+                [24, 24, 80],
+                [48, 64],
+                2,
+                4294967297,
+            ),
+            (CDataLayout::WASM32, [12, 16, 56], [32, 44], 3, 1),
+            (
+                CDataLayout::NATIVE_LP64,
+                [24, 24, 80],
+                [48, 64],
+                2,
+                4294967297,
+            ),
+        ] {
+            let p = declarations(FIXTURE, &arena, layout).unwrap();
+            for (record, size) in p.structs.iter().zip(sizes) {
+                assert_eq!(record.size, size, "{:?}", record.tag);
+            }
+            let global = |name| p.globals.iter().find(|g| g.name == name).unwrap();
+            assert_eq!(p.size_of(&global("grid").ty), 18 * layout.pointer_bytes());
+            assert!(matches!(global("bounds").ty, Ty::Array(a) if a.len == Some(bound)));
+            let items = global("initialized").init.unwrap().items;
+            assert_eq!(items.len(), 2);
+            for (item, offset) in items.iter().zip(offsets) {
+                assert!(matches!(item, InitItem::Expr { offset: o, .. } if *o == offset));
+            }
+            let InitItem::Expr { expr, .. } = items[1] else {
+                panic!("scalar item")
+            };
+            assert_eq!(expr.ty, LONG);
+            assert_eq!(eval_with_layout(expr, layout), Some(Const::Int(value)));
+            let scalar = global("scalar_values").init.unwrap().items;
+            assert!(matches!(scalar, [InitItem::Expr { offset, expr, .. }]
+                if *offset == 2 * IntKind::Long.size_with_layout(layout)
+                && eval_with_layout(expr, layout) == Some(Const::Int(value))));
+            for (name, size, bytes) in [("narrow", 4, 4), ("wide", 12, 12), ("clipped", 8, 8)] {
+                let g = global(name);
+                assert_eq!(p.size_of(&g.ty), size);
+                assert!(
+                    matches!(g.init.unwrap().items, [InitItem::Bytes { offset: 0, bytes: b }] if b.len() == bytes)
+                );
+            }
+            assert!(matches!(global("wide").ty, Ty::Array(a) if a.elem == INT));
+        }
+    }
+
+    #[test]
+    fn modes_preserve_nominal_identity_signedness_and_attribute_positions() {
+        use IntKind::*;
+        let arena = Bump::new();
+        for layout in [CDataLayout::WASM32, CDataLayout::NATIVE_LP64] {
+            let p = declarations(
+                "typedef unsigned int U __attribute__((mode(__DI__)));\n\
+                 typedef signed char __attribute__((__mode__(word))) W;\n\
+                 typedef unsigned short P __attribute__((mode(__pointer__)));\n\
+                 typedef signed int H __attribute__((mode(__HI__)));\n\
+                 typedef unsigned long Q __attribute__((mode(QI)));\n\
+                 typedef unsigned int T __attribute__((mode(TI)));\n\
+                 U object; U function(U parameter);\n\
+                 _Static_assert(__builtin_types_compatible_p(U, __typeof__(object)), \"object identity\");",
+                &arena, layout,
+            ).unwrap();
+            let wasm = layout == CDataLayout::WASM32;
+            for (name, kind) in [
+                ("U", if wasm { ULLong } else { ULong }),
+                ("W", if wasm { Int } else { Long }),
+                ("P", if wasm { UInt } else { ULong }),
+                ("H", Short),
+                ("Q", UChar),
+                ("T", UInt128),
+            ] {
+                assert_eq!(
+                    p.typedefs.iter().find(|t| t.name == name).unwrap().ty,
+                    Ty::Int(kind)
+                );
+            }
+            let Ty::Func(f) = p.globals.iter().find(|g| g.name == "function").unwrap().ty else {
+                panic!("function type")
+            };
+            assert_eq!(f.ret, Ty::Int(if wasm { ULLong } else { ULong }));
+            assert_eq!(f.params, &[f.ret]);
+        }
+        let aliases = "typedef int X __attribute__((mode(DI), mode(word)));";
+        assert!(declarations(aliases, &arena, CDataLayout::NATIVE_LP64).is_ok());
+        assert!(declarations(aliases, &arena, CDataLayout::WASM32).is_err());
+        for src in [
+            "typedef int X __attribute__((mode(DI))); typedef long X;",
+            "typedef unsigned int X __attribute__((mode(pointer))); typedef int X;",
+            "_Bool x __attribute__((mode(DI)));",
+            "int *x __attribute__((mode(DI)));",
+        ] {
+            assert!(
+                declarations(src, &arena, CDataLayout::WASM32).is_err(),
+                "{src}"
+            );
+        }
+    }
+
+    #[test]
+    fn nonnative_declarations_fence_native_contracts_and_string_identity() {
+        let arena = Bump::new();
+        for (src, message) in [
+            (
+                "typedef long V __attribute__((vector_size(16)));",
+                "C vector types",
+            ),
+            ("__builtin_va_list ap;", "va_list"),
+            (
+                "int f(void) { return __builtin_ia32_aesimc128(0); }",
+                "x86 builtins",
+            ),
+            ("long double x;", "long double"),
+            ("_Complex double x __attribute__((mode(TC)));", "TC mode"),
+            ("int f(void) { asm(\"\"); return 0; }", "inline assembly"),
+            ("int x asm(\"x\");", "asm labels"),
+            ("long text[] = L\"ab\";", "incompatible string"),
+            ("unsigned int text[] = L\"ab\";", "incompatible string"),
+            ("int text[] = \"ab\";", "wrong width"),
+            ("char text[] = L\"ab\";", "wrong width"),
+            ("_Bool text[] = \"ab\";", "incompatible string"),
+            ("struct B { long bits:3; };", "non-native packed records"),
+            (
+                "struct B { long x; } __attribute__((packed));",
+                "non-native packed records",
+            ),
+        ] {
+            let err = declarations(src, &arena, CDataLayout::WASM32)
+                .err()
+                .unwrap();
+            assert!(err.message.contains(message), "{src}: {err:?}");
+        }
+        // Retain the existing permissive LP64 unsigned-wide initializer path.
+        assert!(
+            declarations(
+                "unsigned int text[] = L\"ab\";",
+                &arena,
+                CDataLayout::NATIVE_LP64
+            )
+            .is_ok()
+        );
+        // A borrowed native target must not select its unsigned wchar_t in ILP32.
+        let p = Parser::declarations_with_layout(
+            "int text[] = L\"ab\";",
+            Target::Aarch64LinuxGnu,
+            Strings::new(&arena),
+            CDataLayout::WASM32,
+        )
+        .unwrap();
+        assert!(matches!(p.globals[0].ty, Ty::Array(a) if a.elem == INT));
+    }
+
+    #[test]
+    fn clang_checks_maintained_wasm_and_native_declaration_oracle() {
+        for target in [Some("wasm32-unknown-unknown"), None] {
+            let mut cmd = std::process::Command::new("clang");
+            if let Some(target) = target {
+                cmd.arg(format!("--target={target}"));
+            }
+            let output = cmd
+                .args([
+                    "-std=gnu11",
+                    "-ffreestanding",
+                    "-nostdinc",
+                    "-Werror",
+                    "-fsyntax-only",
+                ])
+                .arg(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/tests/fixtures/wasm-scalar-declarations.c"
+                ))
+                .output()
+                .expect("existing Clang is required for declaration oracle");
+            assert!(
+                output.status.success(),
+                "{target:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
     }
 }
