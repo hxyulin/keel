@@ -115,3 +115,44 @@ python3 suite/fast_opt_locked.py /tmp/wasm-c-release-unique.jsonl \
 This remains a bounded single-translation-unit library profile. No public CLI
 Wasm output, optimizer enablement, native bridge, general C ABI, libc/WASI,
 imports, dynamic linking, FP execution or performance claim is established.
+
+## Independent C review (2026-10-24)
+
+The independent review reapplied C candidates `756f1611` and `2331a270` over
+`05fe6c68` plus the separate guarded Target prerequisites. It audited public
+preprocessed compilation, raw preprocessing and profiling, explicit model
+selection and verification, pre-pruning storage/signature/attribute gates,
+builtin capability ownership, macro identities and suffixes, portable headers,
+ambient include isolation, and native controls. Target CLI/link policy remains
+owned by the separate Target review; this C review does not approve that policy.
+
+One correctness finding was fixed: `export_name`, `import_module` and
+`import_name` fell through the generic ignored-attribute parser, silently losing
+Wasm symbol contracts. A public-compile regression reproduced acceptance before
+the fix. These attributes now diagnose explicitly on the Wasm target, including
+unused definitions; native handling is unchanged. Existing Clang independently
+emitted `wasm-export-name` metadata for the renamed-export witness. New negative
+coverage also checks opaque `va_list`/binary128 storage and values after raw
+header preprocessing, native capability macro families, more ambient include
+environment variables, and a fake on-disk `<keel>/include` fallback inventory.
+
+At reviewed C code `38175e39`, the full C debug suite with `profile` passed 321
+tests. Focused release passed 41 tests across `wasm_profile`, `wasm_freestanding`,
+`wasm_target_unavailable`, `environment`, `contracts`, `gnu_types` and
+`x86_intrinsics`. Production `cargo check -p keel-c --features profile` passed.
+Public raw-C execution ran with Node's independent Wasm validator/runtime;
+Clang declaration checks and the inventory oracle comparing over 250 shared
+macros also passed. Private Wasm pointer/data execution and native LP64/ABI/header
+controls passed in the full debug run. This remains finite subset validation,
+with the compile/runtime/ABI limitations above retained.
+
+All Rust validation used `CARGO_CACHE_LINKS=0`, the shared suite lock, existing
+pins/default cargo cache, and `--offline --locked -j2`. Logs and lock metadata are
+`/tmp/wasm-c-review-{final-debug,release,prod}-20261024-a60b.{log,jsonl}`;
+the metadata regression's before/after logs are
+`/tmp/wasm-c-review-metadata{-fixed,}-20261024-a60b.log`.
+Generated LLVM evidence is `/tmp/wasm-c-review-metadata-a60b.ll`.
+Changed tests pass targeted rustfmt checks and the diff passes whitespace checks.
+Workspace-wide `cargo fmt --all -- --check` reports existing unrelated formatting
+differences; this review did not reformat those files. No performance, remote
+host, installation, main integration or cleanup work was performed.
