@@ -29,8 +29,13 @@ fn validate(bytes: &[u8]) {
         .unwrap();
 }
 fn execute(source: &str, names: &[&str], assertions: &str) {
+    execute_pages(source, names, 1, assertions);
+}
+fn execute_pages(source: &str, names: &[&str], pages: u32, assertions: &str) {
     let m = checked(source);
-    let bytes = emit_wasm32_memory_module(&m, &options(names)).unwrap();
+    let mut opts = options(names);
+    opts.pages = pages;
+    let bytes = emit_wasm32_memory_module(&m, &opts).unwrap();
     validate(&bytes);
     let js = format!(
         r#"
@@ -41,7 +46,7 @@ const mod=new WebAssembly.Module(bytes);
 assert.deepEqual(WebAssembly.Module.imports(mod),[]);
 const e=new WebAssembly.Instance(mod).exports;
 const u=new Uint8Array(e.memory.buffer), dv=new DataView(e.memory.buffer);
-assert.equal(u.length,65536);
+assert.equal(u.length,{pages}*65536);
 assert.throws(()=>e.memory.grow(1),RangeError);
 {assertions}
 "#
@@ -382,6 +387,8 @@ block0(v0:i64,v1:i64):
 u.fill(0xab); assert.equal(e.ordered(3n),17n*256n+34n);
 assert(u.every((x,i)=>x===(i===3?34:0xab)));
 assert.equal(e.aligned(64n,-1n),-1n);
+// Wasm alignment immediates remain hints even when they exceed natural width.
+assert.equal(e.aligned(3n,0x123456789abcdefn),0x123456789abcdefn);
 // notrap is a producer guarantee, never an unchecked Wasm memory access.
 assert.throws(()=>e.aligned(65536n,5n),WebAssembly.RuntimeError);
 "#,
@@ -533,6 +540,137 @@ assert.throws(()=>e.indirection(65532n),WebAssembly.RuntimeError);
 assert.throws(()=>e.indirection(65533n),WebAssembly.RuntimeError);
 u.fill(0x93); assert.equal(e.recurse(12,7n),0n);
 assert(u.every((x,i)=>x===(i===7?0:0x93)));
+"#,
+    );
+}
+
+#[test]
+fn review_zero_pages_and_nonwrapping_access_footprints() {
+    let source = r#"
+func @read(i64,i64)->i64 {
+block0(v0:i64,v1:i64):
+ v2 = inttoptr.ptr v0
+ v3 = ptradd v2,v1
+ v4 = load.i64 v3
+ return v4
+}
+func @write(i64,i64,i64) {
+block0(v0:i64,v1:i64,v2:i64):
+ v3 = inttoptr.ptr v0
+ v4 = ptradd v3,v1
+ store v2,v4
+ return
+}
+func @ordered_trap(i64) {
+block0(v0:i64):
+ v1 = iconst.i64 0
+ v2 = inttoptr.ptr v1
+ v3 = iconst.i8 90
+ store volatile v3,v2
+ call @write(v0,v1,v0)
+ v4 = iconst.i8 123
+ store volatile v4,v2
+ return
+}
+"#;
+    execute_pages(
+        source,
+        &["read", "write", "ordered_trap"],
+        0,
+        r#"
+for(const addr of [0n,1n,-1n,0x100000000n]) {
+ assert.throws(()=>e.read(addr,0n),WebAssembly.RuntimeError);
+ assert.throws(()=>e.write(addr,0n,-1n),WebAssembly.RuntimeError);
+}
+assert.equal(e.memory.grow(0),0);
+"#,
+    );
+    execute(
+        source,
+        &["read", "write", "ordered_trap"],
+        r#"
+const value=-0x123456789abcdefn;
+// The address wraps, but the eight-byte footprint never wraps.
+for(const [base,offset] of [[-1n,1n],[0n,-4294967296n],
+ [0x80000000n,-2147483648n],[0x100000000n,65528n]]) {
+ const addr=Number(BigInt.asUintN(32,base+offset));
+ u.fill(0xa6); e.write(base,offset,value);
+ let bits=BigInt.asUintN(64,value);
+ for(let i=0;i<u.length;i++) assert.equal(u[i],i>=addr && i<addr+8
+  ? Number((bits>>BigInt(8*(i-addr)))&255n):0xa6);
+ assert.equal(e.read(base,offset),value);
+}
+// Every partial overlap at the upper boundary, plus a would-be 32-bit wrap.
+for(const addr of [65529n,65530n,65531n,65532n,65533n,65534n,65535n,
+ 0xfffffff9n,0xfffffffan,0xfffffffbn,0xfffffffcn,0xfffffffdn,0xfffffffen,0xffffffffn]) {
+ u.fill(0xa6);
+ assert.throws(()=>e.read(addr,0n),WebAssembly.RuntimeError);
+ assert.throws(()=>e.write(addr,0n,value),WebAssembly.RuntimeError);
+ assert(u.every(x=>x===0xa6));
+}
+u.fill(0xa6);
+assert.throws(()=>e.ordered_trap(65535n),WebAssembly.RuntimeError);
+assert(u.every((x,i)=>x===(i===0?90:0xa6)),
+ 'effects before a trapping direct call survive; later effects do not execute');
+"#,
+    );
+}
+
+#[test]
+fn review_exhaustive_narrow_sign_chains_and_mixed_width_counts() {
+    let mut source = String::from(
+        r#"
+func @chain(i64)->i64 {
+block0(v0:i64):
+ v1 = trunc.i8 v0
+ v2 = sext.i16 v1
+ v3 = sext.i32 v2
+ v4 = sext.i64 v3
+ return v4
+}
+func @signed16(i64)->i64 {
+block0(v0:i64):
+ v1 = trunc.i16 v0
+ v2 = sext.i64 v1
+ return v2
+}
+"#,
+    );
+    let mut names = vec!["chain".to_owned(), "signed16".to_owned()];
+    for width in [32, 64] {
+        for count_width in [8, 16] {
+            for op in ["shl", "ushr", "sshr", "rotl", "rotr"] {
+                let name = format!("{op}_{width}_{count_width}");
+                source += &format!(
+                    "func @{name}(i{width},i64)->i{width} {{\nblock0(v0:i{width},v1:i64):\n v2 = trunc.i{count_width} v1\n v3 = {op} v0,v2\n return v3\n}}\n"
+                );
+                names.push(name);
+            }
+        }
+    }
+    execute(
+        &source,
+        &names.iter().map(String::as_str).collect::<Vec<_>>(),
+        r#"
+for(let x=0n;x<65536n;x++) {
+ assert.equal(e.signed16(x),BigInt.asIntN(16,x));
+ assert.equal(e.chain(x),BigInt.asIntN(8,x));
+}
+for(const width of [32,64]) for(const cw of [8,16]) {
+ const w=BigInt(width), mask=(1n<<w)-1n;
+ for(const x of [0n,1n,-1n,1n<<(w-1n),0x123456789abcdefn])
+ for(const count of [0n,1n,31n,32n,63n,64n,127n,128n,255n,256n,
+ 32768n,65535n,65536n,-1n,-9223372036854775808n]) {
+  const c=BigInt.asUintN(cw,count)%w, u=BigInt.asUintN(width,x), s=BigInt.asIntN(width,x);
+  const wants={shl:u<<c,ushr:u>>c,sshr:s>>c,
+   rotl:(u<<c)|(u>>(w-c)),rotr:(u>>c)|(u<<(w-c))};
+  for(const [op,v] of Object.entries(wants)) {
+   const got=e[`${op}_${width}_${cw}`](width===32?Number(s):s,count);
+   const want=BigInt.asIntN(width,v&mask);
+   assert.equal(BigInt(got),want,`${op} i${width} i${cw} x=${x} count=${count}`);
+  }
+ }
+}
 "#,
     );
 }
