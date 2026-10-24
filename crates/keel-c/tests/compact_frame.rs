@@ -4,7 +4,7 @@ use keel_ir::InstData;
 
 #[test]
 fn optimized_c_dead_declarations_do_not_change_generated_code() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let compile_c = |count| {
             let source =
                 format!("int f(int x) {{ int dead[{count}]; dead[0] = x; return x + 1; }}");

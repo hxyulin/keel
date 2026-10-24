@@ -255,7 +255,7 @@ fn clang_behavior_and_bidirectional_vector_abi() {
     let (source, harness) = sources();
     fs::write(dir.join("oracle.c"), source.replace(" k_", " c_")).unwrap();
     fs::write(dir.join("harness.c"), harness).unwrap();
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let triple = match target {
             Target::Aarch64AppleDarwin => "arm64-apple-macos11",
             Target::X86_64LinuxGnu => "x86_64-unknown-linux-gnu",

@@ -43,7 +43,7 @@ fn explicit_forwarding_offsets_matches_clang_and_both_targets() {
         assert_eq!(loads(&m, name), after, "after {name}\n{m}");
     }
     std::fs::write(dir.join("after.keel"), m.to_string()).unwrap();
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         std::fs::write(
             dir.join(format!("smoke-{}.s", target.triple())),
             keel_codegen::compile(&m, target).unwrap(),
@@ -106,7 +106,7 @@ block0(v0: ptr, v1: i64):
     assert_eq!(loads(&m, "wrapped"), 2);
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("memory-forward-wrap");
     std::fs::create_dir_all(&dir).unwrap();
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         std::fs::write(
             dir.join(format!("smoke-{}.s", target.triple())),
             keel_codegen::compile(&m, target).unwrap(),

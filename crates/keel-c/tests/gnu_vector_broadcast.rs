@@ -71,7 +71,7 @@ fn lossless_broadcast_conversion_boundaries() {
     ] {
         let text = source(base, scalar, expression, 16);
         clang_accepts(&text);
-        for target in Target::ALL {
+        for target in Target::NATIVE {
             keel_ir::verify_module(&compile(&text, target).unwrap()).unwrap();
         }
     }
@@ -106,7 +106,7 @@ fn lossless_broadcast_conversion_boundaries() {
         ("int", "int", "v/s"),
     ] {
         let text = source(base, scalar, expression, 16);
-        for target in Target::ALL {
+        for target in Target::NATIVE {
             assert!(compile(&text, target).is_err(), "accepted {text}");
         }
     }
@@ -114,7 +114,7 @@ fn lossless_broadcast_conversion_boundaries() {
 
 #[test]
 fn compounds_and_distinct_vectors_stay_checked() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for expr in ["v+=s", "v-=s", "v*=s", "v&=s", "v|=s", "v^=s"] {
             let text = source("int", "int", expr, 16);
             clang_accepts(&text);

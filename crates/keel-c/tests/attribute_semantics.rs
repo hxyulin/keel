@@ -17,7 +17,7 @@ fn compile(source: &str, target: Target) -> Result<keel_ir::Module, keel_c::Diag
 
 #[test]
 fn linkage_and_lifetime_attributes_are_diagnosed_on_declarations_and_redeclarations() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for (attribute, args) in [
             ("weakref", "(\"implementation\")"),
             ("weak_import", ""),
@@ -53,7 +53,7 @@ fn linkage_and_lifetime_attributes_are_diagnosed_on_declarations_and_redeclarati
 
 #[test]
 fn cleanup_is_accepted_but_undefined_retention_stays_diagnosed() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for attr in ["cleanup(release)", "__cleanup__(release)"] {
             for source in [
                 format!(
@@ -77,7 +77,7 @@ fn cleanup_is_accepted_but_undefined_retention_stays_diagnosed() {
 
 #[test]
 fn weak_declarations_merge_and_invalid_placements_are_rejected() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for name in ["weak", "__weak__"] {
             let attr = format!("__attribute__(({name}))");
             // Nothing is emitted for these, so weak binding is unobservable.
@@ -160,7 +160,7 @@ fn weak_declarations_merge_and_invalid_placements_are_rejected() {
 
 #[test]
 fn visibility_rejects_protected_and_unknown_values_and_preserves_error_location() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for visibility in ["protected", "unknown", ""] {
             for declaration in ["int f(void);", "int f(void) { return 1; }"] {
                 let source = format!(
@@ -251,7 +251,7 @@ fn hidden_and_internal_visibility_mark_external_symbols_hidden() {
         "constant",
         "tls",
     ];
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let mut module = compile(source, target).unwrap();
         for optimized in [false, true] {
             if optimized {
@@ -295,7 +295,7 @@ fn hidden_and_internal_visibility_mark_external_symbols_hidden() {
 
 #[test]
 fn visibility_conflicts_and_symbolless_placements_are_rejected() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for source in [
             r#"int f(void) __attribute__((visibility("hidden"))); int f(void) __attribute__((visibility("internal")));"#,
             r#"int f(void) __attribute__((visibility("default"))); int f(void) __attribute__((visibility("hidden"))) { return 1; }"#,
@@ -335,7 +335,7 @@ fn visibility_conflicts_and_symbolless_placements_are_rejected() {
 #[test]
 fn representative_library_macros_keep_harmless_annotations_and_capability_fallbacks() {
     let source = include_str!("fixtures/attribute-library.c");
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let preprocessed = keel_c::preprocess(
             source,
             "attribute-library.c",

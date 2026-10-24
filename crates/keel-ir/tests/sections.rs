@@ -1,7 +1,7 @@
 use keel_ir::{Target, parse, section::validate_module, verify_module};
 #[test]
 fn placement_metadata_roundtrips_and_invalid_storage_diagnoses() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let section = match target {
             Target::X86_64LinuxGnu | Target::Aarch64LinuxGnu => ".custom",
             Target::Aarch64AppleDarwin => "__DATA,__custom",
@@ -48,7 +48,7 @@ fn placement_metadata_roundtrips_and_invalid_storage_diagnoses() {
         let text = format!("data @x = section \"{name}\" align 4 {{ i32 1 }}\n");
         if let Ok(m) = parse(&text) {
             assert!(
-                Target::ALL
+                Target::NATIVE
                     .into_iter()
                     .all(|t| validate_module(&m, t).is_err())
             );

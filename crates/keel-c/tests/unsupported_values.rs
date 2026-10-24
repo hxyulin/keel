@@ -25,7 +25,7 @@ const TYPES: &str = r#"
 
 #[test]
 fn containing_objects_and_abis_are_rejected() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for source in [
             "Box pick(Box a, Box b) { return b; }",
             "Box pick(void) { return a; }",
@@ -99,7 +99,7 @@ fn declarations_layout_and_pointer_transport_remain_usable() {
         static inline int unused(Box *p) {{ return sizeof(*p) + sizeof(get(*p)); }}
     "#
     );
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for debug in [false, true] {
             let module = compile(&source, target, debug).unwrap();
             keel_ir::verify_module(&module).unwrap();
@@ -124,7 +124,7 @@ fn declarations_layout_and_pointer_transport_remain_usable() {
 
 #[test]
 fn opaque_numeric_identity_survives_redeclarations() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for source in [
             "extern __float128 x; extern double x;",
             "extern double x; extern __float128 x;",
@@ -147,7 +147,7 @@ fn opaque_numeric_identity_survives_redeclarations() {
 
 #[test]
 fn immediate_unsupported_types_are_also_contained() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for ty in ["_Float16", "_Complex long double"] {
             let source =
                 format!("struct S {{ {ty} x[2]; }}; struct S f(struct S x) {{ return x; }}");
@@ -162,7 +162,7 @@ fn immediate_unsupported_types_are_also_contained() {
 
 #[test]
 fn aggregate_va_arg_stays_rejected() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for ty in ["Box", "union U", "Q"] {
             let source = format!(
                 "{TYPES} static void f(__builtin_va_list ap) {{ __builtin_va_arg(ap,{ty}); }}"
@@ -179,7 +179,7 @@ fn aggregate_va_arg_stays_rejected() {
 #[test]
 fn native_aggregate_abi_reproducer_diagnoses() {
     let source = include_str!("fixtures/extended-float-aggregate-abi.c");
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for debug in [false, true] {
             let error = compile(source, target, debug).unwrap_err().to_string();
             assert!(
@@ -192,7 +192,7 @@ fn native_aggregate_abi_reproducer_diagnoses() {
 
 #[test]
 fn unevaluated_compound_literals_preserve_layout_queries() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for query in [
             "sizeof((Box){})",
             "sizeof((Q){})",
@@ -234,7 +234,7 @@ fn unevaluated_compound_literals_preserve_layout_queries() {
 
 #[test]
 fn late_completion_cycles_atomics_and_shadowing() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for source in [
             "struct S; struct S object; struct S { struct S *next; __float128 q; };",
             "struct S; static void f(void) { struct S object; } struct S { __float128 q; };",

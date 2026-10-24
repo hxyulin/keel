@@ -204,7 +204,7 @@ fn comparison_controls_and_wide_casts_fail_closed() {
 #[test]
 fn shuffle_builtin_uses_the_existing_128_bit_path_on_all_targets() {
     let source = "typedef int V __attribute__((vector_size(16))); V f(V a,V b){return __builtin_shufflevector(a,b,7,0,5,2);}";
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let queried = format!(
             "_Static_assert(__has_builtin(__builtin_shufflevector),\"shuffle feature\"); _Static_assert(__has_builtin(__builtin_ia32_cmpps256)=={},\"x86 feature\"); {source}",
             u8::from(target == Target::X86_64LinuxGnu)

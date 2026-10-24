@@ -23,7 +23,7 @@ fn affinity_objects_match_text_on_both_targets() {
     ] {
         let module = keel_ir::parse(src).unwrap();
         keel_ir::verify_module(&module).unwrap();
-        for target in Target::ALL {
+        for target in Target::NATIVE {
             for selector in [SelectionTier::Baseline, SelectionTier::Full] {
                 let pipeline = CodegenPipeline {
                     selector: &selector,

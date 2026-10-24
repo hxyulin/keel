@@ -105,14 +105,14 @@ fn local_or_undefined_hidden_symbols_are_rejected() {
         "func @f() local hidden {\nblock0:\n return\n}\n",
     ] {
         let m = keel_ir::parse(src).unwrap();
-        for target in Target::ALL {
+        for target in Target::NATIVE {
             assert!(compile(&m, target).is_err(), "{src}");
             assert!(compile_program(&m, target).is_err(), "{src}");
         }
     }
     let mut m = keel_ir::parse("decl data @d\n").unwrap();
     m.data[0].hidden = true;
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         assert!(compile(&m, target).is_err());
     }
 }

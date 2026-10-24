@@ -2,7 +2,7 @@ use keel_ir::{InstData, Target};
 
 #[test]
 fn wide_expression_trees_cannot_prove_away_required_checks() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for op in ["memcpy", "memmove", "memset"] {
             for (length, bound) in [
                 ("(unsigned long)(((__int128)1 << 64) > 8)", "0"),
@@ -41,7 +41,7 @@ fn wide_expression_trees_cannot_prove_away_required_checks() {
 
 #[test]
 fn unsigned_checked_proofs_and_fallbacks() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for op in ["memcpy", "memmove", "memset"] {
             for (length, bound, safe) in [
                 ("8", "8", true),
@@ -88,7 +88,7 @@ fn unsigned_checked_proofs_and_fallbacks() {
 
 #[test]
 fn zero_checked_keeps_argument_effects_and_volatile_reads() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let source = "void *d(void); const void *s(void); unsigned long effect(void); void *f(volatile unsigned long *p) { return __builtin___memmove_chk(d(),s(),(effect(),0),(*p,8)); }";
         let mut m = keel_c::compile(
             source,
@@ -150,7 +150,7 @@ fn native_checked_exact_footprints_and_both_target_objects() {
         }
     }
     source.push_str("void vf(volatile double *p,double x) { *p=x; }\n");
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let mut m = keel_c::compile(
             &source,
             "checked-native.c",

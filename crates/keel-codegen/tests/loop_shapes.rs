@@ -30,7 +30,7 @@ fn loop_shape_objects_match_text_on_both_targets() {
         ],
     )
     .unwrap();
-    for target in keel_codegen::Target::ALL {
+    for target in keel_codegen::Target::NATIVE {
         for selector in [SelectionTier::Baseline, SelectionTier::Full] {
             for allocator in [AllocationTier::Fast, AllocationTier::Full] {
                 let pipeline = CodegenPipeline {

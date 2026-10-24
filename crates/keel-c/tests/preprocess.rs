@@ -270,7 +270,7 @@ fn rejects_invalid_input_with_source_location() {
 
 #[test]
 fn target_environment_matches_abi_and_queries() {
-    for target in keel_ir::Target::ALL {
+    for target in keel_ir::Target::NATIVE {
         let opts = PreprocessOptions {
             target,
             ..Default::default()

@@ -41,7 +41,7 @@ impl RegisterAllocator for Allocator {
 #[test]
 fn backends_use_supplied_stages() {
     let module = keel_ir::parse(SOURCE).unwrap();
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let selector = Selector(Cell::new(0));
         let allocator = Allocator(Cell::new(0));
         let output = keel_codegen::compile_with_pipeline(
@@ -64,7 +64,7 @@ fn backends_use_supplied_stages() {
 #[test]
 fn independent_tiers_preserve_legacy_defaults_and_tree_selection() {
     let module = keel_ir::parse(SOURCE).unwrap();
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for allocator in [AllocationTier::Fast, AllocationTier::Full] {
             for selector in [
                 SelectionTier::Baseline,

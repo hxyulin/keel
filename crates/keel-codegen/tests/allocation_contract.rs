@@ -84,7 +84,7 @@ impl RegisterAllocator for Allocator {
 #[test]
 fn fixed_and_reused_operand_locations_reach_both_emitters() {
     let module = keel_ir::parse(SOURCE).unwrap();
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let assembly = keel_codegen::compile_with_pipeline(
             &module,
             target,

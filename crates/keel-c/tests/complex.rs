@@ -349,7 +349,7 @@ fn clang_differential_and_bidirectional_abi() {
     let (source, harness) = sources();
     fs::write(dir.join("oracle.c"), source.replace(" k_", " c_")).unwrap();
     fs::write(dir.join("harness.c"), harness).unwrap();
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let triple = match target {
             Target::Aarch64AppleDarwin => "arm64-apple-macos11",
             Target::Aarch64LinuxGnu => "aarch64-unknown-linux-gnu",
@@ -497,7 +497,7 @@ fn imaginary_literal_lexical_diagnostics_match_clang() {
                 .success(),
             "Clang accepted {literal}"
         );
-        for target in Target::ALL {
+        for target in Target::NATIVE {
             assert!(
                 keel_c::compile(
                     &source,
@@ -516,7 +516,7 @@ fn imaginary_literal_lexical_diagnostics_match_clang() {
 
 #[test]
 fn unsupported_complex_operations_diagnose() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for source in [
             "int f(double _Complex a){return a<2;}",
             "int f(double _Complex a){return a%2;}",
@@ -569,7 +569,7 @@ fn unsupported_complex_operations_diagnose() {
 fn complex_abi_register_probes_match_clang() {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("complex-registers");
     fs::create_dir_all(&dir).unwrap();
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let triple = match target {
             Target::Aarch64AppleDarwin => "arm64-apple-macos11",
             Target::Aarch64LinuxGnu => "aarch64-unknown-linux-gnu",
@@ -686,7 +686,7 @@ fn component_lvalue_alignment_matches_clang() {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("complex-alignment");
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("alignment.c"), source).unwrap();
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let triple = match target {
             Target::Aarch64AppleDarwin => "arm64-apple-macos11",
             Target::Aarch64LinuxGnu => "aarch64-unknown-linux-gnu",
@@ -732,7 +732,7 @@ fn component_rvalues_and_const_objects_are_not_modifiable() {
                 "Clang accepted {source}"
             );
         }
-        for target in Target::ALL {
+        for target in Target::NATIVE {
             assert!(
                 keel_c::compile(
                     source,
@@ -751,7 +751,7 @@ fn component_rvalues_and_const_objects_are_not_modifiable() {
 
 #[test]
 fn static_arithmetic_range_and_final_binding_policy() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         // Range-sensitive and exceptional runtime operations are intentionally
         // not folded using host arithmetic. In static storage they diagnose.
         for expression in [

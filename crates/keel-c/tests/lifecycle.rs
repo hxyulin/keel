@@ -49,7 +49,7 @@ int main(void) { puts("main"); return 0; }
 "#;
 #[test]
 fn lifecycle_roundtrip_emission_and_section_types() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for debug in [false, true] {
             for optimize in [false, true] {
                 let m = module(SRC, target, debug, optimize);
@@ -100,7 +100,7 @@ fn lifecycle_roundtrip_emission_and_section_types() {
 }
 #[test]
 fn invalid_lifecycle_and_retention_contracts() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for src in [
             "int f(void) __attribute__((constructor)); int f(void){return 0;}",
             "void f(int x) __attribute__((destructor)); void f(int x){}",
@@ -483,7 +483,7 @@ fn darwin_registration_allows_ordinary_atexit_and_rejects_conflicting_interface(
 
 #[test]
 fn default_priority_expressions_inline_definitions_and_gnu_spellings() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let m = module(
             "static inline void f(void) __attribute__((__constructor__(65535+0), __destructor__, __used__)); static inline void f(void){}",
             target,
@@ -516,7 +516,7 @@ fn default_priority_expressions_inline_definitions_and_gnu_spellings() {
 #[test]
 fn registrations_follow_definitions_not_forward_declarations() {
     let source = "static void second(void); static void first(void) __attribute__((constructor,destructor)); static void first(void) {} static void second(void) __attribute__((constructor,destructor)); static void second(void) {}";
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for optimize in [false, true] {
             let m = module(source, target, false, optimize);
             let constructors: Vec<_> = m
@@ -626,7 +626,7 @@ fn darwin_registration_validates_unreferenced_atexit_contracts() {
 
 #[test]
 fn lifecycle_accepts_compatible_old_style_definitions_and_qualified_void() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for source in [
             "void f(void) __attribute__((constructor,destructor)); void f() {}",
             "void f() {} void f(void) __attribute__((constructor,destructor));",

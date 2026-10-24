@@ -9,7 +9,7 @@ fn malformed_ordinary_weak_linkage_never_reaches_object_emission() {
         "data @d = weak thread_local align 4 { i32 0 }\n",
     ] {
         let m = keel_ir::parse(src).unwrap();
-        for target in keel_ir::Target::ALL {
+        for target in keel_ir::Target::NATIVE {
             assert!(keel_codegen::compile(&m, target).is_err(), "{src}");
             assert!(keel_codegen::compile_program(&m, target).is_err(), "{src}");
         }

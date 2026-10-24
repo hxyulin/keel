@@ -95,7 +95,7 @@ const STRONG: &str = "int f(void) { return 17; } int d=19,z=23; const int c=29; 
 
 #[test]
 fn weak_symbols_and_symbol_relocations_survive_all_emission_routes() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for src in [definitions("a"), MISSING.into()] {
             let typed = object(&src, target, false);
             assert_eq!(typed, object(&src, target, true));
@@ -140,7 +140,7 @@ fn weak_symbols_and_symbol_relocations_survive_all_emission_routes() {
 
 #[test]
 fn unsupported_weak_storage_visibility_and_constant_forms_diagnose() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let retained = module(
             "__attribute__((weak)) int unused_function(void) { return 1; } __attribute__((weak)) const int unused_constant=3; __attribute__((weak)) int unused_zero;",
             target,
@@ -566,7 +566,7 @@ int function(void) { return 1; }
     let dir = std::env::temp_dir().join(format!("keel-strong-truth-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("truth.c"), src).unwrap();
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let triple = match target {
             Target::Aarch64AppleDarwin => "arm64-apple-macos11",
             Target::Aarch64LinuxGnu => "aarch64-unknown-linux-gnu",

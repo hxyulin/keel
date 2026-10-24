@@ -17,7 +17,7 @@ fn object(m: &keel_ir::Module, target: Target) -> Vec<u8> {
 
 #[test]
 fn cleanup_ir_and_both_targets() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for debug_info in [false, true] {
             for optimize in [false, true] {
                 let mut m =
@@ -322,7 +322,7 @@ fn invalid_cleanup_declarations_and_unmodeled_exits_are_diagnosed() {
             "returns-twice",
         ),
     ];
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for (source, expected) in cases {
             let error = keel_c::compile(
                 source,
@@ -345,7 +345,7 @@ fn invalid_cleanup_declarations_and_unmodeled_exits_are_diagnosed() {
 fn unused_locals_keep_hidden_address_and_callback_reference() {
     let source =
         "static void c(int *p){*p=9;} int f(void){int x __attribute__((cleanup(c)))=1;return 0;}";
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let mut m = keel_c::compile(
             source,
             "hidden-address.c",
@@ -378,7 +378,7 @@ fn raw_attribute_macros_work_but_general_capability_query_keeps_fallback() {
         static void done(int *p) { *p=7; }
         int run(void) { int value CLEANUP(done)=3; return value; }
     "#;
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let text = keel_c::preprocess(
             source,
             "cleanup-macro.c",
@@ -405,7 +405,7 @@ fn raw_attribute_macros_work_but_general_capability_query_keeps_fallback() {
 
 #[test]
 fn callbacks_keep_ordinary_weak_and_visibility_semantics() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for late in [false, true] {
             let attrs = "void c(int*) __attribute__((weak, visibility(\"default\")));";
             let body =

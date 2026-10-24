@@ -82,7 +82,7 @@ fn retained_actual_bridge_ir_selects_only_in_tree_modes_and_both_targets_assembl
     // Fresh C->IR activation is a separate mandatory leased acceptance check.
     let module = keel_ir::parse(include_str!("fixtures/bridge_madd.ir")).unwrap();
     keel_ir::verify_module(&module).unwrap();
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for trees in [false, true] {
             for folded_operands in [false, true] {
                 for register_hints in [false, true] {

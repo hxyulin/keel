@@ -21,7 +21,7 @@ fn conditional_reload_removed_for_both_targets_and_tiers() {
         keel_opt::OptimizationTier::Fast,
         keel_opt::OptimizationTier::Full,
     ] {
-        for target in Target::ALL {
+        for target in Target::NATIVE {
             let mut m = keel_ir::parse(SOURCE).unwrap();
             keel_ir::verify_module(&m).unwrap();
             keel_opt::run_passes(&mut m, tier.pipeline()).unwrap();
@@ -119,7 +119,7 @@ fn branch_and_merge_facts_emit_on_both_targets() {
             .count(),
         1
     );
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for selector in [SelectionTier::Baseline, SelectionTier::Full] {
             for allocator in [AllocationTier::Fast, AllocationTier::Full] {
                 let pipeline = CodegenPipeline {

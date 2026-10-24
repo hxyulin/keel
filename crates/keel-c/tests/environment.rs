@@ -17,7 +17,7 @@ fn macros(src: &str) -> BTreeMap<String, String> {
 
 #[test]
 fn derived_abi_macros_match_clang_for_each_target() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let mut cmd = Command::new("clang");
         cmd.args([
             "-E",
@@ -128,7 +128,7 @@ int f(int n, ...) {
     return atomic_load(&value) + result;
 }
 "#;
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         // An empty root prevents Linux host libc from contributing anything.
         let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join("empty-sdk");
         std::fs::create_dir_all(&root).unwrap();
@@ -212,7 +212,7 @@ fn sysroot_system_paths_frameworks_and_user_override_order() {
         "#define ARCH_VALUE 64\n",
     )
     .unwrap();
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let opts = PreprocessOptions {
             target,
             sysroot: Some(dir.clone()),

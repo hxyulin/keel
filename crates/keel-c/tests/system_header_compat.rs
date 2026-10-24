@@ -15,7 +15,7 @@ fn compile(source: &str, target: Target) -> Result<keel_ir::Module, keel_c::Diag
 
 #[test]
 fn gcc_float32_builtin_is_diagnosed_in_declarations() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for source in [
             "extern _Float32 strtof32(const char *restrict, char **restrict);",
             "_Float32 object;",
@@ -47,7 +47,7 @@ fn header_supplied_float32_typedef_keeps_its_declared_identity() {
         float scoped(void) { typedef double _Float32; _Float32 x = 2.0; return (float)x; }
         int shadowed(void) { int _Float32 = 7; _Float32 += 1; return _Float32; }
     "#;
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let module = compile(source, target).unwrap();
         keel_ir::verify_module(&module).unwrap();
     }
@@ -56,7 +56,7 @@ fn header_supplied_float32_typedef_keeps_its_declared_identity() {
 #[test]
 fn complex_binary128_mode_preserves_target_boundary() {
     let source = "typedef _Complex float C __attribute__((__mode__(__TC__)));";
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let pp = keel_c::preprocess(
             source,
             "system-header.c",
@@ -82,7 +82,7 @@ fn complex_binary128_mode_preserves_target_boundary() {
 #[test]
 fn float32_header_typedef_still_checks_redeclarations() {
     let source = "typedef float _Float32; extern _Float32 object; extern double object;";
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         assert!(compile(source, target).is_err());
     }
 }

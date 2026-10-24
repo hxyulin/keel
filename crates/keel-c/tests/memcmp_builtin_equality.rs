@@ -45,7 +45,7 @@ fn builtin_equality_native_guard_pages_and_both_target_objects() {
     source.push_str("struct Value { double number; long tag; }; struct Entry { struct Value val; }; int comparator16(struct Entry *ap, struct Entry *bp) { return !__builtin_memcmp(&ap->val,&bp->val,sizeof(ap->val)); }\n");
     source.push_str("int effects; unsigned char z[1]; void *a(void){effects=effects*10+1;return z;} void *b(void){effects=effects*10+2;return z;} unsigned long zero(void){effects=effects*10+3;return 0;} int side(void){effects=0;int r=__builtin_memcmp(a(),b(),(zero(),0))==0;return r&&effects==123;}\n");
     fs::write(dir.join("impl.c"), &source).unwrap();
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let m = compile(&source, target);
         for n in 0..=33 {
             for name in ["eq", "ne"] {

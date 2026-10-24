@@ -131,7 +131,7 @@ fn hidden_sret_is_never_a_restrict_parameter() {
         let source = format!(
             "struct S {{ int x; }}; struct S f(int *{qualifier} p, int *{qualifier} q) {{ struct S s={{*p}}; *q=9; s.x+=*p; return s; }}"
         );
-        for target in Target::ALL {
+        for target in Target::NATIVE {
             let mut m = keel_c::compile(
                 &source,
                 "restrict-sret.c",

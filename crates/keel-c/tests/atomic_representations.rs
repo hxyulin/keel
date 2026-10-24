@@ -158,7 +158,7 @@ fn volatile_expected_is_written_only_on_failure() {
     use keel_ir::InstData;
     let source = "int scalar(_Atomic float *p, volatile float *e) { return __c11_atomic_compare_exchange_strong(p,e,1.0f,4,2); }\n\
                   int generic(int *p, volatile int *e, int *d) { return __atomic_compare_exchange(p,e,d,0,4,2); }";
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let mut m = keel_c::compile(
             source,
             "volatile-cas.c",
@@ -253,7 +253,7 @@ fn scalar_builtin_families_and_writable_buffers_match_clang() {
         "void f(int *p){__atomic_clear(p,4);}",
         "void f(int *p){__atomic_test_and_set(p,9);}",
     ] {
-        for target in Target::ALL {
+        for target in Target::NATIVE {
             clang_syntax(source, target, false);
             assert!(
                 keel_c::compile(
@@ -279,7 +279,7 @@ fn scalar_builtin_families_and_writable_buffers_match_clang() {
         "typedef unsigned int I __attribute__((mode(HI))); I f(I *p){return __atomic_exchange_n(p,1,4);}",
         "void f(int *p){__atomic_clear(p,3); __atomic_test_and_set(p,2);}",
     ] {
-        for target in Target::ALL {
+        for target in Target::NATIVE {
             clang_syntax(source, target, true);
             let m = keel_c::compile(
                 source,
@@ -307,7 +307,7 @@ fn under_aligned_pointer_aliases_fail_closed() {
         "typedef _Atomic float F __attribute__((aligned(1))); void f(F *p){*p+=1.0f;}",
         "typedef _Atomic float F __attribute__((aligned(1))); void f(F *p){(*p)++;}",
     ] {
-        for target in Target::ALL {
+        for target in Target::NATIVE {
             let error = keel_c::compile(
                 source,
                 "atomic-review.c",
@@ -330,7 +330,7 @@ fn generic_buffers_preserve_volatile_members() {
         void store(struct S *p, struct S *in){__atomic_store(p,in,5);}\n\
         void exchange(struct S *p, struct S *in, struct S *out){__atomic_exchange(p,in,out,5);}\n\
         int cas(struct S *p, struct S *e, struct S *d){return __atomic_compare_exchange(p,e,d,0,5,2);}";
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         clang_syntax(source, target, true);
         let mut m = keel_c::compile(
             source,

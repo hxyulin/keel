@@ -75,7 +75,7 @@ fn extensions(output: &str, target: Target) -> usize {
 
 #[test]
 fn materialized_loads_need_no_second_extension() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for allocator in allocators() {
             for selector in [SelectionTier::Baseline, SelectionTier::Full] {
                 for ty in ["i8", "i16"] {
@@ -116,7 +116,7 @@ fn unknown_upper_bits_and_truncations_still_extend() {
         "func @f(ptr) -> i64 {\nblock0(v0: ptr):\n v1 = load.i16 v0\n v2 = trunc.i8 v1\n v3 = uext.i64 v2\n return v3\n}",
         "func @f(ptr) -> i64 {\nblock0(v0: ptr):\n v1 = atomic_load.i8 seq_cst v0\n v2 = uext.i64 v1\n return v2\n}",
     ];
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for allocator in allocators() {
             for selector in [SelectionTier::Baseline, SelectionTier::Full] {
                 for (i, source) in sources.iter().enumerate() {
@@ -136,7 +136,7 @@ fn unknown_upper_bits_and_truncations_still_extend() {
 #[test]
 fn cset_is_clean_but_setcc_is_not() {
     let source = "func @f(i64, i64) -> i64 {\nblock0(v0: i64, v1: i64):\n v2 = icmp.ult v0, v1\n v3 = uext.i64 v2\n return v3\n}";
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for allocator in allocators() {
             for selector in [SelectionTier::Baseline, SelectionTier::Full] {
                 let output = assembly(source, target, selector, allocator, false);
@@ -207,7 +207,7 @@ fn aliases_follow_the_resolved_definition_including_block_arguments() {
             func.replace_all_uses(Value::new(2), Value::new(1));
         }
         keel_ir::verify_module(&module).unwrap();
-        for target in Target::ALL {
+        for target in Target::NATIVE {
             for allocator in allocators() {
                 let output = keel_codegen::compile_with_pipeline(
                     &module,
@@ -247,7 +247,7 @@ fn distinct_conversion_destination_still_copies_the_value() {
     }
     let module = keel_ir::parse("func @f(ptr) -> i64 {\nblock0(v0: ptr):\n v1 = load.i8 v0\n v2 = uext.i64 v1\n return v2\n}").unwrap();
     keel_ir::verify_module(&module).unwrap();
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let output = keel_codegen::compile_with_pipeline(
             &module,
             target,
@@ -305,7 +305,7 @@ fn pressure_source() -> String {
 
 #[test]
 fn pressure_loads_remain_clean_on_both_targets() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for allocator in allocators() {
             for selector in [SelectionTier::Baseline, SelectionTier::Full] {
                 for tiny in [false, true] {

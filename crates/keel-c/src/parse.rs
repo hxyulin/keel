@@ -4491,7 +4491,7 @@ mod declaration_layout_tests {
         }
         // Native constructor provenance must remain independent of test parses
         // and of which native profile the private seam borrowed.
-        for target in Target::ALL {
+        for target in Target::NATIVE {
             let p = Parser::new("", "native.c", target, Strings::new(&arena));
             assert_eq!(p.c_layout, CDataLayout::NATIVE_LP64);
             assert!(p.structs.is_empty());

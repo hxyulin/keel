@@ -32,7 +32,7 @@ fn generic_overflow_types_codegen_and_volatile_store() {
             }
         }
     }
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let mut module = keel_c::compile(
             &source,
             "generic.c",

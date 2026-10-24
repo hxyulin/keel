@@ -492,7 +492,7 @@ fn parameter_scope_and_constraint_differential_clang() {
     ];
     for (sources, success) in [(&accepted[..], true), (&rejected[..], false)] {
         for &source in sources {
-            for target in Target::ALL {
+            for target in Target::NATIVE {
                 let triple = match target {
                     Target::Aarch64AppleDarwin => "arm64-apple-macos11",
                     Target::Aarch64LinuxGnu => "aarch64-unknown-linux-gnu",

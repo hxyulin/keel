@@ -355,7 +355,7 @@ fn atomic_pointer_updates_are_seq_cst_rmw() {
                int *pre_inc(_Atomic(int *) *p) { return ++*p; }\n\
                int *post_dec(_Atomic(int *) *p) { return (*p)--; }\n\
                int *pre_dec(_Atomic(int *) *p) { return --*p; }\n";
-    for target in keel_ir::Target::ALL {
+    for target in keel_ir::Target::NATIVE {
         let mut module = keel_c::compile(
             src,
             "test.c",
@@ -467,7 +467,7 @@ fn auto_type_initializer_uses_outer_scope() {
 fn auto_type_atomic_qualifier_applies_to_inferred_type() {
     let src = "int *f(int *a) { _Atomic __auto_type p = a; return p++; }\n\
                int g(_Atomic(int) *a) { __auto_type x = *a; return x + 1; }";
-    for target in keel_ir::Target::ALL {
+    for target in keel_ir::Target::NATIVE {
         let mut module = keel_c::compile(
             src,
             "test.c",
@@ -524,7 +524,7 @@ fn overflow_builtins_compile_on_both_targets() {
             }
         }
     }
-    for target in keel_ir::Target::ALL {
+    for target in keel_ir::Target::NATIVE {
         let mut module = keel_c::compile(
             &src,
             "test.c",
@@ -560,7 +560,7 @@ fn hint_argument_calls_survive_optimization() {
                long plain(void) { return __builtin_expect(value(), expected()); }\n\
                long probability(void) { return __builtin_expect_with_probability(value(), expected(), 0.75); }\n\
                void *aligned(void) { return __builtin_assume_aligned(pointer(), 8, offset()); }";
-    for target in keel_ir::Target::ALL {
+    for target in keel_ir::Target::NATIVE {
         let mut module = keel_c::compile(
             src,
             "test.c",
@@ -592,7 +592,7 @@ fn hint_argument_calls_survive_optimization() {
 #[test]
 fn debugtrap_preserves_continuation_on_both_targets() {
     let src = "int f(void) { __builtin_debugtrap(); return 42; }";
-    for target in keel_ir::Target::ALL {
+    for target in keel_ir::Target::NATIVE {
         let mut module = keel_c::compile(
             src,
             "test.c",
@@ -629,7 +629,7 @@ fn alignment_and_indirect_debug_locations_round_trip() {
                struct S { char c; int x __attribute__((aligned(16))); };\n\
                int f(int value) { _Alignas(32) int x = value; struct S s = { 0 };\n\
                s.x = x; return ((unsigned long)&x & 31) + __alignof__(x) + s.x; }";
-    for target in keel_ir::Target::ALL {
+    for target in keel_ir::Target::NATIVE {
         let mut module = keel_c::compile(
             src,
             "alignment.c",
@@ -716,7 +716,7 @@ fn aligned_objects_with_debug_info() {
 /// SysV MEMORY classification when translated into the IR layout.
 #[test]
 fn alignment_abi_limits_are_diagnosed() {
-    for target in keel_ir::Target::ALL {
+    for target in keel_ir::Target::NATIVE {
         for src in [
             "struct __attribute__((aligned(32))) S { int x; }; int f(struct S s) { return s.x; }",
             "struct __attribute__((aligned(32))) S { int x; }; struct S f(void) { return (struct S){ 1 }; }",

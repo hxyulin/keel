@@ -5,7 +5,7 @@ use keel_codegen::{CodegenPipeline, SelectionTier, Target, regalloc::AllocationT
 fn sparse_escaping_slots_assemble_on_both_targets() {
     let module = keel_ir::parse(include_str!("programs/compact_frame.keel")).unwrap();
     keel_ir::verify_module(&module).unwrap();
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for allocator in [
             AllocationTier::Fast,
             AllocationTier::Full,
@@ -76,7 +76,7 @@ fn unused_slots_do_not_consume_frames_or_frame_limits() {
         #[cfg(feature = "experimental-regalloc")]
         AllocationTier::Weighted,
     ];
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for allocator in tiers {
             for selector in [SelectionTier::Baseline, SelectionTier::Full] {
                 let pipeline = CodegenPipeline {

@@ -18,7 +18,7 @@ fn compile(source: &str, target: Target) -> keel_ir::Module {
 
 #[test]
 fn explicit_memory_builtins_use_existing_intrinsics_and_return_destination() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for (name, id) in [
             ("memcpy", Intrinsic::Memcpy),
             ("memmove", Intrinsic::Memmove),
@@ -65,7 +65,7 @@ fn explicit_memory_builtins_use_existing_intrinsics_and_return_destination() {
 
 #[test]
 fn library_builtin_designators_keep_addresses_and_parenthesized_calls() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for name in ["memcpy", "memmove", "memset"] {
             let second = if name == "memset" {
                 "int"
@@ -100,7 +100,7 @@ fn library_builtin_designators_keep_addresses_and_parenthesized_calls() {
 
 #[test]
 fn memory_null_pointers_accept_zero_integer_constant_expressions_only() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for zero in [
             "1-1",
             "ZERO",
@@ -155,7 +155,7 @@ fn memory_null_pointers_accept_zero_integer_constant_expressions_only() {
 
 #[test]
 fn checked_memory_returns_twice_never_creates_mismatched_signatures() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for source in [
             "void *__memcpy_chk(void *, const void *, unsigned long, unsigned long) __attribute__((returns_twice)); void *f(void *d, const void *s) { return __builtin___memcpy_chk(d,s,1,1); }",
             "void *f(void *d, const void *s) { return __builtin___memcpy_chk(d,s,1,1); } void *__memcpy_chk(void *, const void *, unsigned long, unsigned long) __attribute__((returns_twice));",
@@ -229,7 +229,7 @@ fn checked_memory_returns_twice_never_creates_mismatched_signatures() {
 
 #[test]
 fn every_checked_memory_redeclaration_is_validated_before_merging() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for name in ["memcpy", "memmove", "memset"] {
             let second_ty = if name == "memset" {
                 "int"
@@ -293,7 +293,7 @@ fn every_checked_memory_redeclaration_is_validated_before_merging() {
 
 #[test]
 fn explicit_pointer_casts_set_memory_builtin_qualifiers() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for source in [
             "void *f(volatile int *p) { return __builtin_memset((void *)p,0,1); }",
             "void *f(void *d, const volatile int *p) { return __builtin_memcpy(d,(const void *)p,1); }",
@@ -310,7 +310,7 @@ fn explicit_pointer_casts_set_memory_builtin_qualifiers() {
 #[test]
 fn ordinary_memory_symbols_keep_calls_and_volatile_arguments_keep_accesses() {
     let source = "void *memcpy(void *, const void *, unsigned long); void *f(void *d, const void *s) { return memcpy(d,s,7); }";
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let module = compile(source, target);
         let f = module.functions.iter().find(|f| f.name == "f").unwrap();
         assert!(f.layout_insts().any(|(_, i)| matches!(f.inst_data(i), InstData::Call { func, .. } if f.callee(*func).name == "memcpy")));
@@ -326,7 +326,7 @@ fn ordinary_memory_symbols_keep_calls_and_volatile_arguments_keep_accesses() {
 
 #[test]
 fn zero_length_still_evaluates_each_argument_once() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for (name, second) in [("memcpy", "s()"), ("memmove", "s()"), ("memset", "fill()")] {
             let source = format!(
                 "void *d(void); const void *s(void); int fill(void); int zero(void); void *f(void) {{ return __builtin_{name}(d(),{second},(zero(),0)); }}"
@@ -388,7 +388,7 @@ fn memory_builtin_argument_diagnostics() {
 
 #[test]
 fn checked_memory_calls_preserve_bound_and_prototype_checks() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for name in ["memcpy", "memmove", "memset"] {
             let second = if name == "memset" { "257" } else { "s" };
             for bound in ["3", "bound()"] {
@@ -436,7 +436,7 @@ fn checked_memory_calls_preserve_bound_and_prototype_checks() {
 
 #[test]
 fn checked_memory_runtime_declarations_are_canonical_and_reusable() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for name in ["memcpy", "memmove", "memset"] {
             for declared in [false, true] {
                 let second = if name == "memset" {
@@ -493,7 +493,7 @@ fn checked_memory_runtime_declarations_are_canonical_and_reusable() {
 #[test]
 fn memory_builtin_feature_queries_match_support() {
     let source = "#if !__has_builtin(__builtin_memcpy) || !__has_builtin(__builtin_memmove) || !__has_builtin(__builtin_memset)\n#error missing memory builtin\n#endif\n#if __has_builtin(__builtin___memcpy_chk) || __has_builtin(__builtin___memmove_chk) || __has_builtin(__builtin___memset_chk)\n#error conditional checked calls must not be advertised\n#endif\nint f(void) { return 0; }\n";
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let text = keel_c::preprocess(
             source,
             "features.c",

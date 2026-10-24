@@ -52,7 +52,7 @@ fn clang_checks(source: &str, target: Target, accepted: bool) {
 }
 #[test]
 fn integer_modes_layout_identity_and_placements() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for (mode, base, bytes) in [
             ("QI", "signed char", 1),
             ("HI", "short", 2),
@@ -89,7 +89,7 @@ fn integer_modes_layout_identity_and_placements() {
 }
 #[test]
 fn modes_and_calling_conventions_fail_closed() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for source in [
             "float x __attribute__((mode(DI)));",
             "int x __attribute__((mode(SF)));",
@@ -143,7 +143,7 @@ fn modes_and_calling_conventions_fail_closed() {
 
 #[test]
 fn vector_layout_identity_and_initializers() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for (base, ir) in [
             ("signed char", "i8x16"),
             ("unsigned char", "i8x16"),
@@ -180,7 +180,7 @@ fn vector_layout_identity_and_initializers() {
 }
 #[test]
 fn vector_arithmetic_comparison_and_bitcasts() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let source = r#"
             typedef int V __attribute__((vector_size(16)));
             typedef unsigned int U __attribute__((vector_size(16)));
@@ -214,7 +214,7 @@ fn vector_arithmetic_comparison_and_bitcasts() {
 }
 #[test]
 fn unsupported_vectors_are_diagnosed() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for source in [
             "typedef int V __attribute__((ext_vector_type(4)));",
             "typedef int V __attribute__((__ext_vector_type__(4)));",
@@ -248,7 +248,7 @@ fn unsupported_vectors_are_diagnosed() {
 
 #[test]
 fn vector_attributes_keep_declarator_ownership() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let source = r#"
             typedef int V __attribute__((vector_size(16)));
             typedef int __attribute__((vector_size(16))) *P;
@@ -292,7 +292,7 @@ fn vector_attributes_keep_declarator_ownership() {
 
 #[test]
 fn unsupported_vector_aggregate_abis_are_diagnosed() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let source = "typedef int V __attribute__((vector_size(16))); union U { V v; }; union U f(union U x){return x;}";
         assert!(
             compile(source, target)
@@ -312,7 +312,7 @@ fn unsupported_vector_aggregate_abis_are_diagnosed() {
 
 #[test]
 fn vector_conditions_require_scalars() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for source in [
             "typedef int V __attribute__((vector_size(16))); V f(V x,V a,V b){return x?a:b;}",
             "typedef int V __attribute__((vector_size(16))); V f(V x,V a){return x?:a;}",

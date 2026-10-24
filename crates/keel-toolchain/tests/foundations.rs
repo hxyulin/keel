@@ -6,13 +6,13 @@ const ACCESS: &str = "func @access(ptr) -> i32 cc(c) {\nblock0(v0: ptr):\n v1 = 
 #[test]
 fn artifact_rejects_incompatible_or_damaged_inputs() {
     let module = keel_ir::parse(ACCESS).unwrap();
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let bytes = artifact::encode(&module, target).unwrap();
         assert_eq!(
             artifact::decode(&bytes, target).unwrap().to_string(),
             module.to_string()
         );
-        let other = Target::ALL.into_iter().find(|t| *t != target).unwrap();
+        let other = Target::NATIVE.into_iter().find(|t| *t != target).unwrap();
         assert!(artifact::decode(&bytes, other).is_err());
         assert!(artifact::decode(&bytes[..bytes.len() - 1], target).is_err());
         let mut trailing = bytes.clone();
@@ -59,7 +59,7 @@ fn instrumentation_preserves_accesses_and_refuses_second_pass() {
         ));
     }
     // Instrumented units can travel to the eventual LTO consumer intact.
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let encoded = artifact::encode(&module, target).unwrap();
         artifact::decode(&encoded, target).unwrap();
     }
@@ -195,7 +195,7 @@ int main(void) {
 fn artifact_v4_preserves_ordinary_weak_binding_and_rejects_v1() {
     let source = "decl @optional() weak\ndecl data weak @missing\ndata @d = weak align 4 { i32 0 }\nfunc @f() weak {\nblock0:\n return\n}\n";
     let m = keel_ir::parse(source).unwrap();
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let bytes = artifact::encode(&m, target).unwrap();
         assert!(bytes.starts_with(b"KEEL-IR-UNIT 4\n"));
         let decoded = artifact::decode(&bytes, target).unwrap();
@@ -212,7 +212,7 @@ fn artifact_v4_preserves_lifecycle_and_compiler_used_roots() {
         "func @callback() cc(c) constructor destructor used {\nblock0:\n return\n}\n",
     )
     .unwrap();
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let bytes = artifact::encode(&m, target).unwrap();
         let recovered = artifact::decode(&bytes, target).unwrap();
         assert_eq!(recovered.to_string(), m.to_string());
@@ -227,7 +227,7 @@ fn artifact_v4_preserves_lifecycle_and_compiler_used_roots() {
 
 #[test]
 fn artifact_v4_preserves_sections_and_retain_and_rejects_all_older_versions() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let (data, code) = if target == Target::Aarch64AppleDarwin {
             ("__DATA,__custom", "__TEXT,__custom")
         } else {
@@ -285,7 +285,7 @@ fn reserved_gnu_metadata_cannot_enter_artifacts_or_native_codegen() {
 
 #[test]
 fn tls_sections_retain_artifact_roundtrip_and_target_validation() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let section = if target != Target::Aarch64AppleDarwin {
             ".tls_custom"
         } else {

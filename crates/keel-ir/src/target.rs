@@ -20,6 +20,9 @@ impl Target {
         Target::Aarch64LinuxGnu,
     ];
 
+    /// Targets supported by the native code generators and native C frontend.
+    pub const NATIVE: [Target; 3] = Self::ALL;
+
     /// The machine this program runs on, if keel supports it.
     pub fn host() -> Option<Target> {
         if cfg!(all(target_arch = "aarch64", target_os = "macos")) {

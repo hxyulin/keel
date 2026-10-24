@@ -70,7 +70,7 @@ int main(void) {{ return placed() != 45; }}
 }
 #[test]
 fn section_roundtrip_optimized_direct_and_text_objects() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for debug in [false, true] {
             for optimize in [false, true] {
                 let m = module(&source(target), target, debug, optimize);
@@ -127,7 +127,7 @@ fn section_roundtrip_optimized_direct_and_text_objects() {
 }
 #[test]
 fn placement_and_retention_diagnose_before_pruning() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let [code, data, _, _] = names(target);
         let cases = [
             "int x __attribute__((retain(1)));".into(),
@@ -621,7 +621,7 @@ fn elf_weak_identity_and_archive_extraction_with_gc() {
 
 #[test]
 fn placement_alone_is_not_an_emission_root_and_static_locals_retain() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let [code, data, _, _] = names(target);
         let src = format!(
             r#"
@@ -662,7 +662,7 @@ int main(void) {{ return 0; }}
 
 #[test]
 fn retained_relocations_keep_bound_weak_symbol_identity() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let section = if target != Target::Aarch64AppleDarwin {
             ".data.rel.ro.custom"
         } else {
@@ -992,7 +992,7 @@ fn c_registration_tables_with_native_bounds_and_system_gc() {
 
 #[test]
 fn validating_discarded_section_pointers_does_not_root_their_referents() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let section = names(target)[1];
         let src = format!(
             r#"
@@ -1084,7 +1084,7 @@ int *address(void) {{ return &value; }}
 
 #[test]
 fn tls_template_sections_identity_alignment_retention_and_roundtrip() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         for debug in [false, true] {
             for optimize in [false, true] {
                 let m = module(&tls_source(target), target, debug, optimize);
@@ -1149,7 +1149,7 @@ fn tls_template_sections_identity_alignment_retention_and_roundtrip() {
 
 #[test]
 fn tls_placement_and_redeclarations_diagnose_before_pruning() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let invalid = match target {
             Target::X86_64LinuxGnu | Target::Aarch64LinuxGnu => vec![
                 ".text",
@@ -1245,7 +1245,7 @@ fn tls_placement_and_redeclarations_diagnose_before_pruning() {
 
 #[test]
 fn qualified_tls_keeps_template_storage_with_late_attributes() {
-    for target in Target::ALL {
+    for target in Target::NATIVE {
         let (data, zero) = match target {
             Target::X86_64LinuxGnu | Target::Aarch64LinuxGnu => {
                 (".tdata.qualified", ".tbss.qualified")

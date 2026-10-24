@@ -107,7 +107,7 @@ mod tests {
         assert_eq!(slots.0, [None, Some(0)]);
         assert_eq!(end, 8);
         // Each emitter resolves aliases, including when folding an address.
-        for target in crate::Target::ALL {
+        for target in crate::Target::NATIVE {
             crate::compile_with_options(&module, target, crate::SelectionOptions::ALL).unwrap();
         }
     }

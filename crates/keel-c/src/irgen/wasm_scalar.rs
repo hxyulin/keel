@@ -689,7 +689,7 @@ fn rejection_families_and_prototype_policy() {
 #[test]
 fn public_native_options_keep_lp64_and_arg_extensions() {
     // Literal construction also protects the existing public Options shape.
-    for target in keel_ir::Target::ALL {
+    for target in keel_ir::Target::NATIVE {
         for debug_info in [false, true] {
             let module = crate::compile(
                 "long width(long x) { volatile long y = x; return y; } signed char narrow(signed char x) { return x; }",
