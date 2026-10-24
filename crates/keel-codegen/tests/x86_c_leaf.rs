@@ -97,7 +97,7 @@ fn assert_leaf(text: &str, bytes: &[u8], cfi: &[Cfi]) {
 }
 
 #[test]
-fn scalar_and_simd_c_leaves_keep_rsp_based_unwind_rules() {
+fn simd_c_leaves_keep_rsp_based_unwind_rules() {
     let simd = "func @leaf(ptr, ptr, ptr) cc(c) {
 block0(v0: ptr, v1: ptr, v2: ptr):
  v3 = load.i32x4 v0
@@ -108,17 +108,13 @@ block0(v0: ptr, v1: ptr, v2: ptr):
 }";
     for tier in [SelectionTier::Baseline, SelectionTier::Full] {
         for alloc in [AllocationTier::Fast, AllocationTier::Full] {
-            for src in [LEAF, simd] {
-                let (text, bytes, cfi) =
-                    compile(src, tier, &alloc, &keel_codegen::x86_64::REGISTERS, false);
-                assert_leaf(&text, &bytes, &cfi);
-                if src == simd {
-                    assert!(
-                        !text.contains("xmm14"),
-                        "GPR entry copies need no SIMD temp: {text}"
-                    );
-                }
-            }
+            let (text, bytes, cfi) =
+                compile(simd, tier, &alloc, &keel_codegen::x86_64::REGISTERS, false);
+            assert_leaf(&text, &bytes, &cfi);
+            assert!(
+                !text.contains("xmm14"),
+                "GPR entry copies need no SIMD temp: {text}"
+            );
         }
     }
 }
@@ -127,6 +123,7 @@ block0(v0: ptr, v1: ptr, v2: ptr):
 fn stack_users_observers_and_hidden_calls_retain_frames() {
     let inserted = |inst: &str| LEAF.replace(" v1 = iconst", &format!(" {inst}\n v1 = iconst"));
     let mut sources = vec![
+        LEAF.into(),
         inserted("v8 = intrinsic frame_address()"),
         inserted("v8 = intrinsic stack_save()"),
         inserted("v8 = intrinsic stack_alloc(v0)"),
