@@ -133,3 +133,11 @@ not local x86 execution. Logs and serialized invocations are
 unit run exposed a text-assertion spelling error (binary operations print
 without type suffixes); the final suites include the corrected assertions.
 No C-to-Wasm execution or performance claim follows from these checks.
+
+Tested implementation is `7ccedc94` (the compiled Rust/fixture contents were
+unchanged while the two focused commits were recorded). Locked production
+`cargo check --offline --locked -j2 -p keel-c` also passed with no warnings;
+its exact invocation and output use
+`/tmp/keel-c-scalar-check-20261024.{jsonl,log}`. Focused rustfmt checks on all
+five changed Rust files and `git diff --check` passed. The checkout is left for
+parent review/integration without rebasing or cleanup.
