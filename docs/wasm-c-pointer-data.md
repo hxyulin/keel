@@ -1,6 +1,7 @@
 # Private wasm32 C pointer/data checkpoint
 
-Based on reviewed main `0115a0f7`, this extends the private
+Rebased onto reviewed main `c8bfba1e` (including the reviewed i32/i64 `Ineg`
+extension), this extends the private
 [integer lowering seam](wasm-c-scalar-lowering.md), using the existing
 [bounded runtime API](../crates/keel-wasm/README.md). The private test API remains
 `irgen::wasm_scalar::lower(src, debug) -> Result<Module, Error>`. It selects
@@ -78,13 +79,17 @@ subtracting pointers to unrelated objects. Ordinary same-array differences,
 including a non-power-of-two stride, are also executed. High-bit addresses are
 round-tripped/compared, never dereferenced. No large memory is instantiated.
 
-The backend remains independently bounded. A separate regression retains the
-current diagnostic for `p--`: the frontend emits valid i64 `Ineg`, which the
-runtime rejects as `unsupported instruction Unary { op: Ineg, ... }`. The
-executable fixture uses `p -= 1`. Parent is arranging a separate backend change
-and independent review; when that lands, this witness must become acceptance.
-Other unsupported instructions still diagnose at the backend boundary. No
-backend source is modified here. Earlier integer-only narrow arithmetic
+The backend remains independently bounded. Initially, `p--` emitted valid i64
+`Ineg` that the old runtime rejected. Parent separately integrated and reviewed
+the i32/i64 wrapping-negation extension in main `c8bfba1e`; that historical
+blocker is now resolved. The maintained fixture uses actual `p--`, and the
+former negative witness is now a positive C-to-Wasm-to-Node test. It checks
+postfix value/address behavior, stores between local-array canaries, and guarded
+INT_MIN/INT_MAX offsets. Extreme offsets return before pointer formation; every
+accepted decrement and dereference remains within one actual C array. Repeated
+calls also exceed the finite software stack budget if frames leak. Unsupported
+unary operations retain the backend's existing negative controls. No backend
+source is modified by this candidate. Earlier integer-only narrow arithmetic
 limitations, public preprocessing/target routing, narrow/pointer ABI, optimizer
 audit, FP/SIMD/atomics/debug and general application/WASI support remain blocked.
 
@@ -93,7 +98,7 @@ default shared cargo cache/managed targets, and `--offline --locked -j2`. Genera
 logs/artifacts stay outside Git. No remote hosts, subagents, toolchain/cache
 changes, output deletion, main integration/cleanup or performance campaign.
 
-## Validation record
+## Validation before negation integration
 
 Implementation commits are `ab44053f` and the private array-sizing guard
 `efb262a0`. On 2026-10-24, Apple ARM64, rustc 1.99.1, Apple Clang 21.0.0
@@ -127,6 +132,38 @@ guard. Focused development metadata is
 `/tmp/keel-c-pointer-unit-8e8a.jsonl`, with the final passing output beside it
 as `.log`; initial entries include a missing dev-dependency, fixture extraction
 and qualifier corrections, and the discovered `Ineg` backend diagnostic.
-The explicit negative witness remains in the final suites for the parent's
-separate backend follow-up. Parent owns independent review, integration and
-any resulting witness update; this checkout is left intact for that work.
+The initial negative witness was subsequently replaced after the separately
+reviewed backend integration, as recorded below. Parent owns independent review
+and integration; this checkout is left intact for that work.
+
+## Reviewed negation integration
+
+Parent integrated reviewed negation support as main `c8bfba1e`. This candidate
+was rebased onto that commit without conflicts: implementation `ab44053f` became
+`39aa0ad4`, the array bound guard `efb262a0` became `321a5f11`, and the initial
+checkpoint documentation became `ab94e5a1`. Test commit `9e8ba2be` replaces the
+historical negative `p--` witness with positive C-to-Wasm-to-Node execution and
+changes the maintained checksum/walk fixture to use actual pointer decrement.
+There are no backend edits relative to this reviewed main.
+
+Fresh combined debug validation passed 350 tests (308 C and 42 Wasm), and the
+same focused C release selection passed 124 tests. All ten private lowering
+tests pass in both C profiles, including the decrement/canary/extreme-offset
+fixture and independent Clang wasm32/native checks. There were no failures,
+ignored tests or compiler warnings. Focused rustfmt and `git diff --check`
+passed. The unchanged production C check/build and the parent's independently
+reviewed backend check/build are retained; production checks were not repeated
+after this rebase. The separately reviewed backend's 42 release controls are
+recorded in its README, rather than duplicated here.
+
+Final rebased-source commands, all using the same prescribed cargo wrapper,
+shared lock, pins and `--offline --locked -j2`, are recorded outside Git:
+
+- `/tmp/keel-c-pointer-ineg-unit-8e8a.{jsonl,log}` — affected private C tests.
+- `/tmp/keel-c-pointer-ineg-debug-8e8a.{jsonl,log}` — combined full C/Wasm debug.
+- `/tmp/keel-c-pointer-ineg-release-8e8a.{jsonl,log}` — focused C release.
+
+The local-byte and above-64-byte local initializer fences remain unchanged.
+No public API, optimizer, native ABI/FP/memory or backend source change is
+introduced by this integration follow-up. Independent review remains the next
+parent-owned gate.
