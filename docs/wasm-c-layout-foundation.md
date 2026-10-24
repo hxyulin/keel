@@ -40,6 +40,11 @@ from natural type/member alignment and remains unfinished.
 
 ## Unfinished width migration
 
+This is the original checkpoint inventory. The later
+[integer expression/evaluator checkpoint](wasm-c-integer-evaluation.md) migrates
+the scalar helper path and parser constant queries; it records the remaining
+native proof, initializer and generator boundaries in detail.
+
 All unchanged no-argument IntKind size and Ty IR queries still mean LP64.
 The following is the migration inventory, not a claim those uses are portable:
 

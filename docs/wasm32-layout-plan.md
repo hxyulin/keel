@@ -10,6 +10,10 @@ The backend worker owns the new crate; the parent owns interface agreement,
 foundation delegation, integration, and independent review. No production code,
 lockfile, feasibility document, native contract, or target default changes here.
 
+The private [C integer expression/evaluator checkpoint](wasm-c-integer-evaluation.md)
+records the later bounded helper migration; the production target and lowering
+stages below remain a plan.
+
 ## Recommendation and handoff contract
 
 Land additive IR memory-layout queries first, without adding a `Target` variant.
