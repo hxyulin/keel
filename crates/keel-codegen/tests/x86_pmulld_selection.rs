@@ -231,6 +231,11 @@ fn effective_feature_selection_and_oracles() {
                         if f.sse41 { 3 } else { 0 },
                         "{name} {s:?} {a:?} {pool}"
                     );
+                    assert_eq!(
+                        text.matches("\tpmuludq\t").count(),
+                        if f.sse41 { 0 } else { 6 }
+                    );
+                    assert!(!text.contains(" = stack_addr"), "{text}");
                     export(
                         &dir,
                         &format!("{name}-{s:?}-{a:?}-{pool}"),
@@ -311,22 +316,34 @@ fn controlled_aliases_and_independent_spills() {
         SelectionTier::Full,
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
-            for layout in 0..6 {
-                let (text, _, object) = compile(
-                    &ir,
-                    s,
-                    &Controlled(a, layout),
-                    &keel_codegen::x86_64::REGISTERS,
-                    Features::for_level(CpuLevel::V2),
-                );
-                assert_eq!(text.matches("\tpmulld\t").count(), 3);
-                export(
-                    &dir,
-                    &format!("controlled-{s:?}-{a:?}-{layout}"),
-                    &text,
-                    &object,
-                    &c,
-                );
+            for (profile, features) in [
+                ("v1", Features::for_level(CpuLevel::V1)),
+                ("v2", Features::for_level(CpuLevel::V2)),
+            ] {
+                for layout in 0..6 {
+                    let (text, _, object) = compile(
+                        &ir,
+                        s,
+                        &Controlled(a, layout),
+                        &keel_codegen::x86_64::REGISTERS,
+                        features,
+                    );
+                    assert_eq!(
+                        text.matches("\tpmulld\t").count(),
+                        if features.sse41 { 3 } else { 0 }
+                    );
+                    assert_eq!(
+                        text.matches("\tpmuludq\t").count(),
+                        if features.sse41 { 0 } else { 6 }
+                    );
+                    export(
+                        &dir,
+                        &format!("controlled-{profile}-{s:?}-{a:?}-{layout}"),
+                        &text,
+                        &object,
+                        &c,
+                    );
+                }
             }
         }
     }

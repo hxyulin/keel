@@ -750,3 +750,51 @@ fn packed_splats_use_sse2_without_stack_staging() {
         }
     }
 }
+
+#[test]
+fn interleaved_dwords_and_v1_multiply_use_packed_recipes_with_live_inputs() {
+    let source = "func @shuffle(ptr,ptr,ptr) {
+block0(v0:ptr,v1:ptr,v2:ptr):
+ v3 = load.i32x4 align 1 v0
+ v4 = load.i32x4 align 1 v1
+ v5 = vshuffle v3,v4,[3,4,1,6]
+ store align 1 v5,v2
+ v6 = iconst.i64 16
+ v7 = ptradd v2,v6
+ store align 1 v3,v7
+ v8 = iconst.i64 32
+ v9 = ptradd v2,v8
+ store align 1 v4,v9
+ return
+}
+func @multiply(ptr,ptr,ptr) {
+block0(v0:ptr,v1:ptr,v2:ptr):
+ v3 = load.i32x4 align 1 v0
+ v4 = load.i32x4 align 1 v1
+ v5 = vimul v3,v4
+ store align 1 v5,v2
+ v6 = iconst.i64 16
+ v7 = ptradd v2,v6
+ store align 1 v3,v7
+ v8 = iconst.i64 32
+ v9 = ptradd v2,v8
+ store align 1 v4,v9
+ return
+}";
+    for pools in [&keel_codegen::x86_64::REGISTERS, &SPILLED] {
+        for allocation in [AllocationTier::Fast, AllocationTier::Full] {
+            let (text, _) = compile_with_pools(
+                source,
+                SelectionTier::Baseline,
+                allocation,
+                pools,
+                Features::for_level(CpuLevel::V1),
+            );
+            assert_eq!(text.matches("pmuludq\t").count(), 2, "{text}");
+            assert_eq!(text.matches("punpckldq\t").count(), 2, "{text}");
+            assert!(!text.contains("imul\t"), "{text}");
+            assert!(!text.contains("pmulld\t"), "{text}");
+            assert!(!text.contains("stack_addr"), "lane legalization: {text}");
+        }
+    }
+}
