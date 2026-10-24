@@ -8,6 +8,10 @@ Production remains LP64; `CDataLayout::WASM32` remains `cfg(test)`. No public
 Target, Options, macro, header, CLI, IR, backend or lockfile changes are included.
 Native ABI, FP, memory, vector and architectural intrinsic contracts are unchanged.
 
+The later [private scalar lowering checkpoint](wasm-c-scalar-lowering.md) admits
+a separately validated integer-function subset to model-aware IR generation.
+Its strict gates do not authorize the deferred pointer/data/ABI families here.
+
 ## Implemented boundary
 
 GNU integer mode parsing now resolves `word` and `pointer` to the stored model's

@@ -32,6 +32,9 @@ use keel_ir::{
 
 type R<T> = Result<T, Error>;
 
+#[cfg(test)]
+pub(crate) mod wasm_scalar;
+
 pub struct Gen<'p> {
     p: &'p Parser<'p>,
     /// The parser's function definitions, each dropped once emitted.
@@ -112,6 +115,15 @@ impl<'p> Gen<'p> {
     }
 
     pub fn run(mut self) -> R<Module> {
+        if self.p.c_layout != CDataLayout::NATIVE_LP64 {
+            #[cfg(test)]
+            self.check_private_scalar_profile()?;
+            #[cfg(not(test))]
+            return Err(Error::new(
+                Loc::default(),
+                "non-native C lowering is private to tests",
+            ));
+        }
         // Validate even discarded static/inline bodies against callback and
         // direct-call contracts added by later declarations in the unit.
         for def in self.funcs.iter().flatten() {

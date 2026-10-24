@@ -12,7 +12,9 @@ lockfile, feasibility document, native contract, or target default changes here.
 
 The private [C integer expression/evaluator checkpoint](wasm-c-integer-evaluation.md)
 records the later bounded helper migration; the production target and lowering
-stages below remain a plan.
+stages below remain a plan. The later [private scalar lowering checkpoint](wasm-c-scalar-lowering.md)
+implements only a test-only integer-function subset; pointer/data lowering and
+production target selection remain gated.
 
 ## Recommendation and handoff contract
 

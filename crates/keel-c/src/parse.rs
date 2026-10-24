@@ -594,8 +594,9 @@ impl<'a> Parser<'a> {
         p
     }
 
-    /// Private declaration-only model seam. The returned AST must never enter
-    /// native IR generation; production construction continues to select LP64.
+    /// Private model seam for declaration tests and the separately validated
+    /// integer-only lowering checkpoint. Never pass its AST to a native backend;
+    /// production construction continues to select LP64.
     #[cfg(test)]
     pub(crate) fn declarations_with_layout(
         src: &'a str,
