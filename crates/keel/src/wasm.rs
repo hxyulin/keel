@@ -1,4 +1,4 @@
-//! Bounded, unoptimized Wasm output. Never enters native codegen or linking.
+//! Bounded Wasm output. Never enters native codegen or linking.
 use super::{Options as DriverOptions, input};
 use keel_ir::{Module, Target};
 use keel_wasm::{Export, Wasm32MemoryOptions, Wasm32RuntimeOptions};
@@ -11,6 +11,7 @@ use std::{
 
 pub(super) struct Options {
     pub exports: Vec<String>,
+    pub basic: bool,
     pages: u32,
     data_floor: u32,
     stack_bottom: u32,
@@ -20,6 +21,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             exports: Vec::new(),
+            basic: false,
             pages: 1,
             data_floor: 1024,
             stack_bottom: 32768,
@@ -83,6 +85,7 @@ pub(super) fn validate_options(opts: &DriverOptions, supplied: &[&str]) -> Resul
         if !matches!(
             *flag,
             "--emit-wasm"
+                | "--wasm-opt"
                 | "--target"
                 | "--export"
                 | "-o"
@@ -162,8 +165,23 @@ pub(super) fn compile_c(opts: &DriverOptions) -> Result<(), String> {
 fn emit(opts: &DriverOptions, module: &Module) -> Result<(), String> {
     // This API verifies with WASM32, preflights the complete module, and validates
     // the complete bytes as MVP before any output file is opened.
-    let bytes = keel_wasm::emit_wasm32_runtime_module(module, &opts.wasm.runtime())
-        .map_err(|e| e.to_string())?;
+    let runtime = opts.wasm.runtime();
+    let optimized;
+    let module = if opts.wasm.basic {
+        // Preserve the complete ORIGINAL unsupported-input contract before any
+        // constant branch pruning or DCE can hide instructions or definitions.
+        keel_wasm::validate_wasm32_runtime_module(module, &runtime).map_err(|e| e.to_string())?;
+        optimized = {
+            let mut module = module.clone();
+            keel_opt::optimize_wasm32_basic(&mut module).map_err(|e| e.to_string())?;
+            module
+        };
+        &optimized
+    } else {
+        module
+    };
+    let bytes =
+        keel_wasm::emit_wasm32_runtime_module(module, &runtime).map_err(|e| e.to_string())?;
     publish(
         Path::new(opts.output.as_deref().expect("validated output")),
         &bytes,

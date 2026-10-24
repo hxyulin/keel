@@ -49,7 +49,7 @@ const USAGE: &str = "usage:
   keel archive [--target <triple>] -o <output.a> <member.o>...
   keel cc|compile --target wasm32-unknown-unknown --emit-wasm [--export name]... <input> -o <output.wasm>
   Wasm memory: --wasm-memory-pages 1 --wasm-data-floor 1024 --wasm-stack-bottom 32768 --wasm-stack-top 65536
-  Wasm emits unoptimized freestanding integer code; no native/optimization/debug flags.
+  Wasm: --wasm-opt basic opts into the bounded profile; no native optimization/debug flags.
   keel passes
 
   --target also accepts aarch64-unknown-linux-gnu (Linux AAPCS64/ELF).
@@ -298,6 +298,12 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
         }
         match flag {
             "--emit-wasm" => opts.emit_wasm = true,
+            "--wasm-opt" => {
+                if args.next().map(String::as_str) != Some("basic") {
+                    return Err("`--wasm-opt` needs basic".into());
+                }
+                opts.wasm.basic = true;
+            }
             "--export" => opts.wasm.exports.push(
                 args.next()
                     .ok_or("`--export` needs a function name")?
@@ -642,6 +648,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--target",
                     "--emit-object",
                     "--emit-wasm",
+                    "--wasm-opt",
                     "--export",
                     "--wasm-memory-pages",
                     "--wasm-data-floor",
@@ -689,6 +696,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--target",
                     "--emit-object",
                     "--emit-wasm",
+                    "--wasm-opt",
                     "--export",
                     "--wasm-memory-pages",
                     "--wasm-data-floor",

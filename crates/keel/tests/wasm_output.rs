@@ -620,3 +620,170 @@ fn atomic_publication_replaces_aliases_without_truncating_their_targets() {
         t.no_temporary();
     }
 }
+
+#[test]
+fn basic_profile_preserves_c_layout_calls_recursion_and_memory() {
+    let t = Temp::new();
+    let c = t.write(
+        "basic.c",
+        include_str!("../../../suite/wasm-basic/corpus.c"),
+    );
+    for basic in [false, true] {
+        let out = t.0.join(if basic { "basic.wasm" } else { "plain.wasm" });
+        let mut flags = EXPORTS.to_vec();
+        if basic {
+            flags.extend(["--wasm-opt", "basic"]);
+        }
+        success(compile("cc", &c, &out, &flags));
+        node(&out, RUNTIME);
+    }
+    t.no_temporary();
+}
+
+const BASIC_IR: &str = include_str!("../../../suite/wasm-basic/corpus.keel");
+#[test]
+fn basic_and_plain_ir_preserve_bigint_wrapping_traps_and_volatile_order() {
+    let t = Temp::new();
+    let input = t.write("basic.keel", BASIC_IR);
+    for basic in [false, true] {
+        let output = t.0.join(if basic { "basic.wasm" } else { "plain.wasm" });
+        let mut flags = vec![];
+        for name in [
+            "roundtrip",
+            "wrap",
+            "fold",
+            "divide",
+            "fault",
+            "hint",
+            "ordered",
+            "dead_div",
+            "dead_overflow",
+            "wrapread",
+            "frame",
+        ] {
+            flags.extend(["--export", name]);
+        }
+        if basic {
+            flags.extend(["--wasm-opt", "basic"]);
+        }
+        success(compile("compile", &input, &output, &flags));
+        let script = r#"
+const a=require('assert/strict'),fs=require('fs'),b=fs.readFileSync(process.argv[1]);
+a(WebAssembly.validate(b));const m=new WebAssembly.Module(b);a.deepEqual(WebAssembly.Module.imports(m),[]);
+function fresh(){return new WebAssembly.Instance(m).exports;}
+let e=fresh();
+for(const x of [0n,1n,0x80000000n,0xffffffffn,0x100000001n,-1n])a.equal(e.roundtrip(x),BigInt.asUintN(32,x));
+for(const [p,d] of [[0xffffffffn,1n],[0n,-1n],[0x80000000n,0x100000001n]])a.equal(e.wrap(p,d),BigInt.asUintN(32,p+d));
+for(const x of [0n,1n,-1n,0x7fffffffffffffffn])a.equal(e.fold(x),BigInt.asIntN(64,x+42n));
+a.equal(e.divide(81n,9n),9n);
+for(const [x,y] of [[1n,0n],[-0x8000000000000000n,-1n]]){e=fresh();a.throws(()=>e.divide(x,y),WebAssembly.RuntimeError);}
+e=fresh();e.fault(65528n);a.throws(()=>e.fault(65529n),WebAssembly.RuntimeError);
+// The OOB notrap call deliberately violates the producer promise: only this hint may disappear.
+e=fresh();e.hint(65528n);if(BASIC)e.hint(65529n);else a.throws(()=>e.hint(65529n),WebAssembly.RuntimeError);
+e=fresh();new Uint8Array(e.memory.buffer)[0]=211;a.equal(e.wrapread(0xffffffffn,1n),211);
+e=fresh();a.throws(()=>e.dead_overflow(),WebAssembly.RuntimeError);
+e=fresh();let bytes=new Uint8Array(e.memory.buffer);a.throws(()=>e.dead_div(8192n),WebAssembly.RuntimeError);a.equal(bytes[8192],53);
+e=fresh();bytes=new Uint8Array(e.memory.buffer);bytes.fill(0xcc,8191,8194);
+e.ordered(8192n,0n);a.deepEqual([...bytes.slice(8191,8194)],[0xcc,91,0xcc]);
+e=fresh();bytes=new Uint8Array(e.memory.buffer);bytes.fill(0xcc,8191,8194);
+a.throws(()=>e.ordered(8192n,65529n),WebAssembly.RuntimeError);a.deepEqual([...bytes.slice(8191,8194)],[0xcc,37,0xcc]);
+"#;
+        node(
+            &output,
+            &script.replace("BASIC", if basic { "true" } else { "false" }),
+        );
+    }
+    t.no_temporary();
+}
+
+#[test]
+fn basic_rejects_original_unsupported_input_before_pruning_and_preserves_output() {
+    let t = Temp::new();
+    let out = t.write("keep.wasm", "sentinel");
+    let entry = "func @entry() {\nblock0:\n return\n}\n";
+    for extra in [
+        "func @unused() {\nblock0:\n v0 = fconst.f32 0.0\n return\n}\n",
+        "func @unused(f32) {\nblock0(v0:f32):\n return\n}\n",
+        "decl @unused(i32) -> i32\n",
+        "func @unused() {\nblock0:\n v0 = iconst.i8 1\n brif v0, block1, block2\nblock1:\n return\nblock2:\n v1 = fconst.f32 0.0\n return\n}\n",
+    ] {
+        let input = t.write("unsupported.keel", &(entry.to_string() + extra));
+        let plain = failure(compile("compile", &input, &out, &["--export", "entry"]));
+        let basic = failure(compile(
+            "compile",
+            &input,
+            &out,
+            &["--export", "entry", "--wasm-opt", "basic"],
+        ));
+        assert_eq!(plain, basic);
+        assert!(!basic.contains("parse error"), "{basic}");
+        assert_eq!(std::fs::read(&out).unwrap(), b"sentinel");
+    }
+    let c = t.write(
+        "unsupported.c",
+        "int entry(void){return 42;} static float unused(void){return 1.0f;}",
+    );
+    failure(compile(
+        "cc",
+        &c,
+        &out,
+        &["--wasm-opt", "basic", "--export", "entry"],
+    ));
+    assert_eq!(std::fs::read(&out).unwrap(), b"sentinel");
+    t.no_temporary();
+}
+
+#[test]
+fn wasm_basic_selector_is_explicit_and_cannot_hide_native_options() {
+    let t = Temp::new();
+    let missing = t.0.join("missing");
+    let out = t.write("keep", "sentinel");
+    for flags in [
+        vec!["--wasm-opt", "full"],
+        vec!["--wasm-opt", "none"],
+        vec!["--wasm-opt", "basic", "-O"],
+        vec!["-O", "--wasm-opt", "basic"],
+        vec!["--wasm-opt", "basic", "--opt-tier", "basic"],
+        vec!["--wasm-opt", "basic", "-p", "dce"],
+        vec!["--wasm-opt", "basic", "--no-verify-each"],
+    ] {
+        let error = failure(compile("compile", &missing, &out, &flags));
+        assert!(!error.contains("No such file"), "{flags:?}: {error}");
+        assert_eq!(std::fs::read(&out).unwrap(), b"sentinel");
+    }
+    for kind in ["compile", "cc"] {
+        let error = failure(
+            Command::new(env!("CARGO_BIN_EXE_keel"))
+                .args([kind, "--wasm-opt", "basic"])
+                .arg(&missing)
+                .arg("-o")
+                .arg(&out)
+                .output()
+                .unwrap(),
+        );
+        assert!(error.contains("Wasm flags require"), "{error}");
+    }
+}
+
+#[test]
+fn basic_keeps_dead_stack_slots_and_restores_normal_recursive_returns() {
+    let t = Temp::new();
+    let input = t.write("frames.keel", BASIC_IR);
+    for basic in [false, true] {
+        let output = t.0.join(if basic { "basic.wasm" } else { "plain.wasm" });
+        let mut flags = vec!["--export", "frame", "--wasm-stack-bottom", "65520"];
+        if basic {
+            flags.extend(["--wasm-opt", "basic"]);
+        }
+        success(compile("compile", &input, &output, &flags));
+        node(
+            &output,
+            r#"
+const a=require('assert/strict'),b=require('fs').readFileSync(process.argv[1]);
+const m=new WebAssembly.Module(b),e=new WebAssembly.Instance(m).exports;
+for(let i=0;i<100;i++)a.equal(e.frame(0),0);
+a.throws(()=>e.frame(1),WebAssembly.RuntimeError);
+"#,
+        );
+    }
+}
