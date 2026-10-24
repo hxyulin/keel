@@ -625,14 +625,18 @@ impl<'p> Gen<'p> {
         if let Some(name) = self.types().unsupported_value(ty) {
             return Err(name);
         }
+        if self.p.c_layout != CDataLayout::NATIVE_LP64 {
+            // Private preflight admits only plain i32/i64 signatures.
+            return Ok(AbiParam::new(ty.ir_with_layout(self.p.c_layout)));
+        }
         Ok(match ty {
             Ty::Struct(_) | Ty::Complex(_) => AbiParam {
                 ty: Type::Ptr,
                 ext: ArgExt::None,
                 purpose: Purpose::ByVal(self.aggregate_layout(ty)?),
             },
-            Ty::Int(k) if k.size() < 4 => AbiParam {
-                ty: ty.ir(),
+            Ty::Int(k) if k.size_with_layout(self.p.c_layout) < 4 => AbiParam {
+                ty: ty.ir_with_layout(self.p.c_layout),
                 ext: if k.signed() {
                     ArgExt::Sext
                 } else {
@@ -640,7 +644,7 @@ impl<'p> Gen<'p> {
                 },
                 purpose: Purpose::Normal,
             },
-            _ => AbiParam::new(ty.ir()),
+            _ => AbiParam::new(ty.ir_with_layout(self.p.c_layout)),
         })
     }
 
@@ -859,7 +863,7 @@ impl<'p> Gen<'p> {
                 && local.ty.is_scalar()
                 && !local.ty.is_complex()
             {
-                Storage::Var(fg.b.declare_var(local.ty.ir()))
+                Storage::Var(fg.b.declare_var(local.ty.ir_with_layout(fg.g.p.c_layout)))
             } else {
                 let types = fg.g.types();
                 let size = types.size(&local.ty).max(1);
@@ -1210,33 +1214,34 @@ enum Place {
 const FOLD_DEPTH: u32 = 32;
 
 /// An integer of at most 64 bits: the type whose values `fold_int` gives.
-fn small_int(ty: &Ty) -> bool {
-    ty.int_kind().is_some_and(|k| k.size() <= 8)
+fn small_int(ty: &Ty, layout: CDataLayout) -> bool {
+    ty.int_kind()
+        .is_some_and(|k| k.size_with_layout(layout) <= 8)
 }
 
 /// The value of integer expression `e` if it is made of literals alone,
 /// normalized to its type as the parser normalizes literals.
-fn fold_int(e: &Expr<'_>, depth: u32) -> Option<i64> {
-    if !small_int(&e.ty) {
+fn fold_int(e: &Expr<'_>, depth: u32, layout: CDataLayout) -> Option<i64> {
+    if !small_int(&e.ty, layout) {
         return None;
     }
     let depth = depth.checked_sub(1)?;
     let v = match &e.kind {
         ExprKind::Int(v) => *v,
-        ExprKind::Cast(a) if small_int(&a.ty) => fold_int(a, depth)?,
-        ExprKind::Unary(op, a) if small_int(&a.ty) => {
-            let x = fold_int(a, depth)?;
+        ExprKind::Cast(a) if small_int(&a.ty, layout) => fold_int(a, depth, layout)?,
+        ExprKind::Unary(op, a) if small_int(&a.ty, layout) => {
+            let x = fold_int(a, depth, layout)?;
             match op {
                 UnOp::Neg => x.wrapping_neg(),
                 UnOp::BitNot => !x,
                 UnOp::Not => i64::from(x == 0),
             }
         }
-        ExprKind::Binary(op, a, b) if small_int(&a.ty) && small_int(&b.ty) => {
-            let x = fold_int(a, depth)?;
-            let y = fold_int(b, depth)?;
+        ExprKind::Binary(op, a, b) if small_int(&a.ty, layout) && small_int(&b.ty, layout) => {
+            let x = fold_int(a, depth, layout)?;
+            let y = fold_int(b, depth, layout)?;
             let signed = a.ty.is_signed();
-            let bits = a.ty.int_kind()?.size() as i64 * 8;
+            let bits = a.ty.int_kind()?.size_with_layout(layout) as i64 * 8;
             let (ux, uy) = (x as u64, y as u64);
             let min = i64::MIN >> (64 - bits);
             match op {
@@ -1273,45 +1278,49 @@ fn fold_int(e: &Expr<'_>, depth: u32) -> Option<i64> {
         }
         // `sizeof(size_t) < sizeof(long) ? A : B`: the other arm is not
         // evaluated, whatever it is.
-        ExprKind::Cond(c, a, b) if small_int(&c.ty) => {
-            let arm = if fold_int(c, depth)? != 0 { a } else { b };
+        ExprKind::Cond(c, a, b) if small_int(&c.ty, layout) => {
+            let arm = if fold_int(c, depth, layout)? != 0 {
+                a
+            } else {
+                b
+            };
             if arm.ty != e.ty {
                 return None;
             }
-            fold_int(arm, depth)?
+            fold_int(arm, depth, layout)?
         }
         _ => return None,
     };
-    Some(crate::eval::normalize(v, &e.ty))
+    Some(crate::eval::normalize_with_layout(v, &e.ty, layout))
 }
 
 /// Whether `x op k` is `x` for integer `x` of type `ty`.
-fn right_identity(op: BinOp, k: i64, ty: &Ty) -> bool {
+fn right_identity(op: BinOp, k: i64, ty: &Ty, layout: CDataLayout) -> bool {
     match op {
         BinOp::Add | BinOp::Sub | BinOp::Or | BinOp::Xor | BinOp::Shl | BinOp::Shr => k == 0,
         BinOp::Mul | BinOp::Div => k == 1,
-        BinOp::And => k == crate::eval::normalize(-1, ty),
+        BinOp::And => k == crate::eval::normalize_with_layout(-1, ty, layout),
         _ => false,
     }
 }
 
 /// Whether `k op x` is `x`.
-fn left_identity(op: BinOp, k: i64, ty: &Ty) -> bool {
+fn left_identity(op: BinOp, k: i64, ty: &Ty, layout: CDataLayout) -> bool {
     match op {
         BinOp::Add | BinOp::Or | BinOp::Xor => k == 0,
         BinOp::Mul => k == 1,
-        BinOp::And => k == crate::eval::normalize(-1, ty),
+        BinOp::And => k == crate::eval::normalize_with_layout(-1, ty, layout),
         _ => false,
     }
 }
 
 /// A literal, or an operation on literals, whose evaluation does nothing
 /// and cannot fail.
-fn inert(e: &Expr<'_>) -> bool {
+fn inert(e: &Expr<'_>, layout: CDataLayout) -> bool {
     match &e.kind {
         ExprKind::Int(_) | ExprKind::Float(_) => true,
-        ExprKind::Cast(a) => convertible(&a.ty, &e.ty) && inert(a),
-        _ => fold_int(e, FOLD_DEPTH).is_some(),
+        ExprKind::Cast(a) => convertible(&a.ty, &e.ty) && inert(a, layout),
+        _ => fold_int(e, FOLD_DEPTH, layout).is_some(),
     }
 }
 
@@ -1330,7 +1339,7 @@ fn convertible(from: &Ty, to: &Ty) -> bool {
 /// An expression that is non-zero exactly when `e` is, and evaluates the
 /// same way: conversions to `_Bool`, between pointers and to an integer at
 /// least as wide, and `__builtin_expect` with inert expectations.
-fn same_truth<'e, 'a>(e: &'e Expr<'a>) -> Option<&'e Expr<'a>> {
+fn same_truth<'e, 'a>(e: &'e Expr<'a>, layout: CDataLayout) -> Option<&'e Expr<'a>> {
     match &e.kind {
         ExprKind::Cast(a) => {
             let to_bool = e.ty == Ty::Int(IntKind::Bool)
@@ -1338,17 +1347,19 @@ fn same_truth<'e, 'a>(e: &'e Expr<'a>) -> Option<&'e Expr<'a>> {
             let keeps = to_bool
                 || e.ty.is_ptr() && a.ty.is_ptr()
                 || matches!((e.ty.int_kind(), a.ty.int_kind()),
-                    (Some(to), Some(from)) if to.size() >= from.size());
+                    (Some(to), Some(from)) if to.size_with_layout(layout) >= from.size_with_layout(layout));
             keeps.then_some(&**a)
         }
-        ExprKind::Builtin(Builtin::Hint, args) if args[1..].iter().all(inert) => Some(&args[0]),
+        ExprKind::Builtin(Builtin::Hint, args) if args[1..].iter().all(|e| inert(e, layout)) => {
+            Some(&args[0])
+        }
         _ => None,
     }
 }
 
 /// `e` with `same_truth` applied as far as it goes.
-fn strip_truth<'e, 'a>(mut e: &'e Expr<'a>) -> &'e Expr<'a> {
-    while let Some(inner) = same_truth(e) {
+fn strip_truth<'e, 'a>(mut e: &'e Expr<'a>, layout: CDataLayout) -> &'e Expr<'a> {
+    while let Some(inner) = same_truth(e, layout) {
         e = inner;
     }
     e
@@ -1357,8 +1368,11 @@ fn strip_truth<'e, 'a>(mut e: &'e Expr<'a>) -> &'e Expr<'a> {
 /// An integer comparison `a op b` under truth-preserving wrappers, so that
 /// `(a op b) != 0` is `a op b`. Float comparisons are excluded: with NaN,
 /// negating one is not the opposite comparison.
-fn int_comparison<'e, 'a>(e: &'e Expr<'a>) -> Option<(BinOp, &'e Expr<'a>, &'e Expr<'a>)> {
-    match &strip_truth(e).kind {
+fn int_comparison<'e, 'a>(
+    e: &'e Expr<'a>,
+    layout: CDataLayout,
+) -> Option<(BinOp, &'e Expr<'a>, &'e Expr<'a>)> {
+    match &strip_truth(e, layout).kind {
         ExprKind::Binary(op, a, b) if op.is_comparison() && !a.ty.is_float() => Some((*op, a, b)),
         _ => None,
     }
@@ -1831,7 +1845,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         if *ret == Ty::Void || ret.is_pair_or_struct() {
             self.b.ins().return_(&[]);
         } else {
-            let z = self.zero(ret.ir());
+            let z = self.zero(ret.ir_with_layout(self.g.p.c_layout));
             self.b.ins().return_(&[z]);
         }
         self.terminated = true;
@@ -1954,7 +1968,11 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     args.push(self.val(e)?);
                 }
                 args.extend(readwrite);
-                let types: Vec<_> = asm.outputs.iter().map(|(e, _)| e.ty.ir()).collect();
+                let types: Vec<_> = asm
+                    .outputs
+                    .iter()
+                    .map(|(e, _)| e.ty.ir_with_layout(self.g.p.c_layout))
+                    .collect();
                 let contract = keel_ir::InlineAsm::new(asm.template, asm.constraints, &types)
                     .map_err(|e| Error::new(asm.loc, e))?;
                 let inst = self.b.ins().inline_asm(contract, &args);
@@ -2003,7 +2021,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     && (self.loop_depth > 0 || self.labels_placed)
                 {
                     self.ensure_block();
-                    let zero = self.zero(self.def.locals[*id].ty.ir());
+                    let zero = self.zero(self.def.locals[*id].ty.ir_with_layout(self.g.p.c_layout));
                     self.b.def_var(var, zero);
                 }
                 self.register_cleanup(*id);
@@ -2343,7 +2361,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.branch(b, t, f)
             }
             ExprKind::Unary(UnOp::Not, a) => self.branch(a, f, t),
-            _ if let Some(inner) = same_truth(cond) => self.branch(inner, t, f),
+            _ if let Some(inner) = same_truth(cond, self.g.p.c_layout) => self.branch(inner, t, f),
             _ if let Some((ne, x)) = zero_test(cond) => {
                 if ne {
                     self.branch(x, t, f)
@@ -2355,7 +2373,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             // Both edges stay: code built into the other block would
             // otherwise be an unreached predecessor of the join, passing
             // it values of its own.
-            _ if let Some(v) = fold_int(cond, FOLD_DEPTH) => {
+            _ if let Some(v) = fold_int(cond, FOLD_DEPTH, self.g.p.c_layout) => {
                 let c = self.b.ins().iconst(Type::I8, i64::from(v != 0));
                 self.b.ins().brif(c, t, &[], f, &[]);
                 self.terminated = true;
@@ -2380,7 +2398,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         }
         let v = self.val(e)?;
         Ok(match &e.ty {
-            Ty::Int(k) if k.size() <= 8 => v,
+            Ty::Int(k) if k.size_with_layout(self.g.p.c_layout) <= 8 => v,
             ty => self.nonzero(v, ty),
         })
     }
@@ -2393,7 +2411,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             let i = self.nonzero(i, elem);
             return self.b.ins().or(r, i);
         }
-        let z = self.zero(ty.ir());
+        let z = self.zero(ty.ir_with_layout(self.g.p.c_layout));
         if ty.is_float() {
             self.b.ins().fcmp(FloatCC::Ne, v, z)
         } else {
@@ -2443,7 +2461,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.discard(b)
             }
             ExprKind::Local(_) if !self.object_flags(&inner.ty, &inner.sugar).volatile => Ok(()),
-            _ if inert(inner) => Ok(()),
+            _ if inert(inner, self.g.p.c_layout) => Ok(()),
             _ => self.emit(e).map(drop),
         }
     }
@@ -2455,9 +2473,13 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         if matches!(
             e.kind,
             ExprKind::Unary(..) | ExprKind::Binary(..) | ExprKind::Cast(_)
-        ) && let Some(v) = fold_int(e, FOLD_DEPTH)
+        ) && let Some(v) = fold_int(e, FOLD_DEPTH, self.g.p.c_layout)
         {
-            return Ok(Some(self.b.ins().iconst(e.ty.ir(), v)));
+            return Ok(Some(
+                self.b
+                    .ins()
+                    .iconst(e.ty.ir_with_layout(self.g.p.c_layout), v),
+            ));
         }
         let v = match &e.kind {
             ExprKind::LabelAddr(n) => {
@@ -2469,7 +2491,10 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     let n = self.b.ins().iconst(Type::I64, *v);
                     self.b.ins().convert(ConvertOp::IntToPtr, Type::Ptr, n)
                 }
-                ty => self.b.ins().iconst(ty.ir(), *v),
+                ty => self
+                    .b
+                    .ins()
+                    .iconst(ty.ir_with_layout(self.g.p.c_layout), *v),
             },
             ExprKind::Float(f) => match e.ty {
                 Ty::Float => self.b.ins().f32const(*f as f32),
@@ -2485,7 +2510,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             },
             ExprKind::VectorIndex(base, index) => {
                 let vector = self.val(base)?;
-                if let Some(lane) = fold_int(index, FOLD_DEPTH) {
+                if let Some(lane) = fold_int(index, FOLD_DEPTH, self.g.p.c_layout) {
                     self.b.ins().vextract(vector, lane as u8)
                 } else {
                     let slot = self.b.create_stack_slot(16, 16);
@@ -2493,7 +2518,9 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     self.b.ins().store(vector, address);
                     let offset = self.scaled(index, self.size(&e.ty))?;
                     let address = self.b.ins().ptradd(address, offset);
-                    self.b.ins().load(e.ty.ir(), address)
+                    self.b
+                        .ins()
+                        .load(e.ty.ir_with_layout(self.g.p.c_layout), address)
                 }
             }
             ExprKind::Local(id) => match self.locals[*id] {
@@ -2504,7 +2531,9 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 }
             },
             // `!(a < b)` is `a >= b` for integers and pointers.
-            ExprKind::Unary(UnOp::Not, a) if let Some((op, x, y)) = int_comparison(a) => {
+            ExprKind::Unary(UnOp::Not, a)
+                if let Some((op, x, y)) = int_comparison(a, self.g.p.c_layout) =>
+            {
                 let c = self.compare(negated(op), x, y)?;
                 self.b.ins().uext(Type::I32, c)
             }
@@ -2549,7 +2578,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     UnOp::Neg => self.b.ins().ineg(v),
                     UnOp::BitNot => self.b.ins().bnot(v),
                     UnOp::Not => {
-                        let z = self.zero(a.ty.ir());
+                        let z = self.zero(a.ty.ir_with_layout(self.g.p.c_layout));
                         let c = if a.ty.is_float() {
                             self.b.ins().fcmp(FloatCC::Eq, v, z)
                         } else {
@@ -2569,14 +2598,16 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             // `n * sizeof(char)`, `x << 0`, `0 | x` from macros: no
             // operation, and no evaluation skipped but the literal's.
             ExprKind::Binary(op, a, b)
-                if small_int(&e.ty)
-                    && fold_int(b, FOLD_DEPTH).is_some_and(|k| right_identity(*op, k, &e.ty)) =>
+                if small_int(&e.ty, self.g.p.c_layout)
+                    && fold_int(b, FOLD_DEPTH, self.g.p.c_layout)
+                        .is_some_and(|k| right_identity(*op, k, &e.ty, self.g.p.c_layout)) =>
             {
                 self.val(a)?
             }
             ExprKind::Binary(op, a, b)
-                if small_int(&e.ty)
-                    && fold_int(a, FOLD_DEPTH).is_some_and(|k| left_identity(*op, k, &e.ty)) =>
+                if small_int(&e.ty, self.g.p.c_layout)
+                    && fold_int(a, FOLD_DEPTH, self.g.p.c_layout)
+                        .is_some_and(|k| left_identity(*op, k, &e.ty, self.g.p.c_layout)) =>
             {
                 self.val(b)?
             }
@@ -2589,7 +2620,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.arith(*op, &e.ty, x, y, e.loc)?
             }
             ExprKind::PtrAdd(p, n, size) => {
-                if fold_int(n, FOLD_DEPTH).is_some() {
+                if fold_int(n, FOLD_DEPTH, self.g.p.c_layout).is_some() {
                     let (base, off) = self.ptr_parts(e)?;
                     self.offset_by(base, off)
                 } else {
@@ -2643,7 +2674,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             ExprKind::OpAssign { op, lhs, rhs } if lhs.ty.is_complex() || rhs.ty.is_complex() => {
                 let place = self.place(lhs)?.unwrap();
                 let old = self.load_place(&place);
-                let calc = crate::expr::usual(&lhs.ty, &rhs.ty);
+                let calc = crate::expr::usual_with_layout(&lhs.ty, &rhs.ty, self.g.p.c_layout);
                 let lt = match calc {
                     Ty::Complex(elem) if !lhs.ty.is_complex() => *elem,
                     _ => calc,
@@ -2717,7 +2748,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                         }
                     }
                     ty => {
-                        let one = self.b.ins().iconst(ty.ir(), 1);
+                        let one = self.b.ins().iconst(ty.ir_with_layout(self.g.p.c_layout), 1);
                         if *inc {
                             self.b.ins().iadd(old, one)
                         } else {
@@ -2732,7 +2763,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             // macros dispatch on the type: only the selected arm. The other
             // is never evaluated, and has no statement a jump could reach.
             ExprKind::Cond(c, a, b)
-                if let Some(v) = fold_int(c, FOLD_DEPTH)
+                if let Some(v) = fold_int(c, FOLD_DEPTH, self.g.p.c_layout)
                     && no_statements(if v != 0 { b } else { a }, 64) =>
             {
                 let arm = if v != 0 { a } else { b };
@@ -2760,7 +2791,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 let ir = if Self::is_aggregate(&e.ty) {
                     Type::Ptr
                 } else {
-                    e.ty.ir()
+                    e.ty.ir_with_layout(self.g.p.c_layout)
                 };
                 let var = self.b.declare_var(ir);
                 for (block, arm) in [(t, a), (f, b)] {
@@ -2827,7 +2858,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 // Null pointers and other integer constants made pointers:
                 // the constant already has the 64 bits the conversion gives.
                 if e.ty.is_ptr()
-                    && let Some(n) = fold_int(inner, FOLD_DEPTH)
+                    && let Some(n) = fold_int(inner, FOLD_DEPTH, self.g.p.c_layout)
                 {
                     let n = self.b.ins().iconst(Type::I64, n);
                     let p = self.b.ins().convert(ConvertOp::IntToPtr, Type::Ptr, n);
@@ -2836,7 +2867,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 // `x > 0` with a floating `x`: the converted constant,
                 // rounded once to nearest as the conversion rounds.
                 if matches!(e.ty, Ty::Float | Ty::Double)
-                    && let Some(n) = fold_int(inner, FOLD_DEPTH)
+                    && let Some(n) = fold_int(inner, FOLD_DEPTH, self.g.p.c_layout)
                 {
                     let signed = inner.ty.is_signed();
                     return Ok(Some(match (&e.ty, signed) {
@@ -2862,12 +2893,14 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     Ty::Vector(..) => {
                         return Err(Error::new(e.loc, "va_arg of a vector is not supported"));
                     }
-                    Ty::Int(k) if k.size() < 4 => {
+                    Ty::Int(k) if k.size_with_layout(self.g.p.c_layout) < 4 => {
                         let v = self.b.ins().va_arg(Type::I32, addr);
-                        self.b.ins().trunc(e.ty.ir(), v)
+                        self.b
+                            .ins()
+                            .trunc(e.ty.ir_with_layout(self.g.p.c_layout), v)
                     }
                     Ty::Int(k)
-                        if k.size() == 16
+                        if k.size_with_layout(self.g.p.c_layout) == 16
                             && self.g.p.target != keel_ir::Target::Aarch64LinuxGnu =>
                     {
                         return Err(Error::new(e.loc, "`va_arg` of `__int128`"));
@@ -2876,7 +2909,10 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                         let v = self.b.ins().va_arg(Type::F64, addr);
                         self.b.ins().convert(ConvertOp::Fptrunc, Type::F32, v)
                     }
-                    ty => self.b.ins().va_arg(ty.ir(), addr),
+                    ty => self
+                        .b
+                        .ins()
+                        .va_arg(ty.ir_with_layout(self.g.p.c_layout), addr),
                 }
             }
             ExprKind::Builtin(op, args) => return self.builtin(*op, args, e),
@@ -2886,7 +2922,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
 
     /// `n * size` as an `i64`, for pointer arithmetic.
     fn scaled(&mut self, n: &Expr<'p>, size: u64) -> R<Value> {
-        if let Some(k) = fold_int(n, FOLD_DEPTH) {
+        if let Some(k) = fold_int(n, FOLD_DEPTH, self.g.p.c_layout) {
             return Ok(self.b.ins().iconst(Type::I64, k.wrapping_mul(size as i64)));
         }
         let v = self.val(n)?;
@@ -2901,7 +2937,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         // `(x < y) != 0` (as `__builtin_expect` and `!!` spell it) is
         // `x < y`, and `(x < y) == 0` is `x >= y`.
         if let Some(ne) = zero_test_op(op, a, b)
-            && let Some((inner, x, y)) = int_comparison(a)
+            && let Some((inner, x, y)) = int_comparison(a, self.g.p.c_layout)
         {
             return self.compare(if ne { inner } else { negated(inner) }, x, y);
         }
@@ -3025,9 +3061,15 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
     }
 
     fn complex_parts(&mut self, addr: Value, elem: &Ty) -> (Value, Value) {
-        let r = self.b.ins().load(elem.ir(), addr);
+        let r = self
+            .b
+            .ins()
+            .load(elem.ir_with_layout(self.g.p.c_layout), addr);
         let imag = self.offset(addr, self.size(elem));
-        let i = self.b.ins().load(elem.ir(), imag);
+        let i = self
+            .b
+            .ins()
+            .load(elem.ir_with_layout(self.g.p.c_layout), imag);
         (r, i)
     }
 
@@ -3040,7 +3082,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         y: Value,
         loc: Loc,
     ) -> R<Value> {
-        let ty = crate::expr::usual(lt, rt);
+        let ty = crate::expr::usual_with_layout(lt, rt, self.g.p.c_layout);
         let Ty::Complex(elem) = ty else {
             unreachable!()
         };
@@ -3071,7 +3113,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 let i = self.arith(op, elem, xr, i, loc)?;
                 return Ok(self.complex_pair(r, i, elem));
             }
-            let zero = self.zero(elem.ir());
+            let zero = self.zero(elem.ir_with_layout(self.g.p.c_layout));
             return self.complex_runtime(
                 op,
                 elem,
@@ -3123,7 +3165,8 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     .map_err(|m| Error::new(loc, m))?,
             ),
         });
-        sig.params.extend((0..4).map(|_| AbiParam::new(elem.ir())));
+        sig.params
+            .extend((0..4).map(|_| AbiParam::new(elem.ir_with_layout(self.g.p.c_layout))));
         if !self.g.module.decls.iter().any(|d| d.name == name) {
             self.g.module.decls.push(FuncDecl {
                 name: name.to_owned(),
@@ -3163,7 +3206,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 )
             } else {
                 let r = self.convert(v, from, elem, loc)?;
-                (r, self.zero(elem.ir()))
+                (r, self.zero(elem.ir_with_layout(self.g.p.c_layout)))
             };
             return Ok(self.complex_pair(r, i, elem));
         }
@@ -3172,7 +3215,10 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             return self.convert(r, elem, to, loc);
         }
         let ins = self.b.ins();
-        let (fi, ti) = (from.ir(), to.ir());
+        let (fi, ti) = (
+            from.ir_with_layout(self.g.p.c_layout),
+            to.ir_with_layout(self.g.p.c_layout),
+        );
         if from.is_vector() || to.is_vector() {
             return Ok(if fi == ti {
                 v
@@ -3196,7 +3242,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 }
             }
             (Ty::Int(k), _) if to.is_float() => {
-                if k.size() == 16 {
+                if k.size_with_layout(self.g.p.c_layout) == 16 {
                     return Err(Error::new(loc, "`__int128` to float is not supported"));
                 }
                 let op = if k.signed() {
@@ -3207,7 +3253,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 ins.convert(op, ti, v)
             }
             (_, Ty::Int(k)) if from.is_float() => {
-                if k.size() == 16 {
+                if k.size_with_layout(self.g.p.c_layout) == 16 {
                     return Err(Error::new(loc, "float to `__int128` is not supported"));
                 }
                 let op = if k.signed() {
@@ -3215,7 +3261,11 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 } else {
                     ConvertOp::Fptoui
                 };
-                let wide = if k.size() == 8 { Type::I64 } else { Type::I32 };
+                let wide = if k.size_with_layout(self.g.p.c_layout) == 8 {
+                    Type::I64
+                } else {
+                    Type::I32
+                };
                 let r = ins.convert(op, wide, v);
                 if wide != ti {
                     self.b.ins().trunc(ti, r)
@@ -3236,7 +3286,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 }
             }
             (Ty::Int(k), Ty::Ptr(_)) => {
-                let n = match k.size() {
+                let n = match k.size_with_layout(self.g.p.c_layout) {
                     8 => v,
                     16 => ins.trunc(Type::I64, v),
                     _ if k.signed() => ins.sext(Type::I64, v),
@@ -3281,7 +3331,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             let address = self.b.ins().ptradd(address, offset);
             return Ok(Some(Place::Mem(
                 address,
-                e.ty.ir(),
+                e.ty.ir_with_layout(self.g.p.c_layout),
                 self.object_flags(&e.ty, &e.sugar),
             )));
         }
@@ -3302,7 +3352,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             return Ok(Some(Place::Bits {
                 flags: self.object_flags(&e.ty, &e.sugar),
                 addr,
-                unit: e.ty.ir(),
+                unit: e.ty.ir_with_layout(self.g.p.c_layout),
                 field: *field,
                 signed: e.ty.is_signed(),
             }));
@@ -3315,7 +3365,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             if let Some(name) = e.ty.unusable() {
                 return Err(Error::new(e.loc, format!("`{name}` is not supported")));
             }
-            Place::Mem(addr, e.ty.ir(), flags)
+            Place::Mem(addr, e.ty.ir_with_layout(self.g.p.c_layout), flags)
         }))
     }
 
@@ -3428,7 +3478,9 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
     /// that is not a literal is still evaluated, once and in order.
     fn ptr_parts(&mut self, e: &Expr<'p>) -> R<(Value, i64)> {
         match &e.kind {
-            ExprKind::PtrAdd(p, n, size) if let Some(k) = fold_int(n, FOLD_DEPTH) => {
+            ExprKind::PtrAdd(p, n, size)
+                if let Some(k) = fold_int(n, FOLD_DEPTH, self.g.p.c_layout) =>
+            {
                 let (base, off) = self.ptr_parts(p)?;
                 Ok((base, off.wrapping_add(k.wrapping_mul(*size as i64))))
             }
@@ -3606,7 +3658,10 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             }
             if vals.len() >= fty.params.len() + usize::from(ret_slot.is_some())
                 && (arg.ty.is_pair_or_struct()
-                    || arg.ty.int_kind().is_some_and(|k| k.size() == 16)
+                    || arg
+                        .ty
+                        .int_kind()
+                        .is_some_and(|k| k.size_with_layout(self.g.p.c_layout) == 16)
                         && self.g.p.target != keel_ir::Target::Aarch64LinuxGnu)
             {
                 return Err(Error::new(
@@ -3697,7 +3752,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 Some(self.zero(if ret_slot.is_some() {
                     Type::Ptr
                 } else {
-                    fty.ret.ir()
+                    fty.ret.ir_with_layout(self.g.p.c_layout)
                 }))
             });
         }
@@ -3728,7 +3783,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         } else {
             IntKind::UInt128
         });
-        let wide = wide_ty.ir();
+        let wide = wide_ty.ir_with_layout(self.g.p.c_layout);
         let a = self.convert(vals[0], &args[0].ty, &wide_ty, loc)?;
         let b = self.convert(vals[1], &args[1].ty, &wide_ty, loc)?;
         let zero = self.b.ins().iconst(wide, 0);
@@ -3808,7 +3863,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         let nonzero = self.b.ins().or(nonzero, carry);
         let negative = self.b.ins().and(negative, nonzero);
         let kind = result_ty.int_kind().unwrap();
-        let bits = kind.size() * 8;
+        let bits = kind.size_with_layout(self.g.p.c_layout) * 8;
         let all = self.b.ins().iconst(wide, -1);
         let wide_bits = wide.bytes().unwrap() * 8;
         let limit = if kind.signed() {
@@ -4087,7 +4142,11 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             let expected = self.b.append_block_param(retry, bits);
             self.b.ins().jump(retry, &[first]);
             self.switch_to(retry);
-            let old = self.b.ins().convert(ConvertOp::Bitcast, ty.ir(), expected);
+            let old = self.b.ins().convert(
+                ConvertOp::Bitcast,
+                ty.ir_with_layout(self.g.p.c_layout),
+                expected,
+            );
             let x = self.convert(old, &ty, &args[1].ty, e.loc)?;
             let value = self.arith(op, &args[1].ty, x, vals[1], e.loc)?;
             let value = self.convert(value, &args[1].ty, &ty, e.loc)?;
@@ -4137,9 +4196,13 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             }
             Builtin::VectorFloatCompare(cc) => {
                 let mask = ins.vfcmp(cc, vals[0], vals[1]);
-                self.b.ins().convert(ConvertOp::Bitcast, e.ty.ir(), mask)
+                self.b.ins().convert(
+                    ConvertOp::Bitcast,
+                    e.ty.ir_with_layout(self.g.p.c_layout),
+                    mask,
+                )
             }
-            Builtin::VectorSplat => ins.vsplat(e.ty.ir(), vals[0]),
+            Builtin::VectorSplat => ins.vsplat(e.ty.ir_with_layout(self.g.p.c_layout), vals[0]),
             Builtin::VectorShuffle => ins.vshuffle(
                 vals[0],
                 vals[1],
@@ -4276,12 +4339,20 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 match op {
                     Builtin::AtomicLoad => {
                         let v = ins.atomic_load(
-                            if float { repr } else { e.ty.ir() },
+                            if float {
+                                repr
+                            } else {
+                                e.ty.ir_with_layout(self.g.p.c_layout)
+                            },
                             ordering,
                             vals[0],
                         );
                         if float {
-                            self.b.ins().convert(ConvertOp::Bitcast, e.ty.ir(), v)
+                            self.b.ins().convert(
+                                ConvertOp::Bitcast,
+                                e.ty.ir_with_layout(self.g.p.c_layout),
+                                v,
+                            )
                         } else {
                             v
                         }
@@ -4292,9 +4363,11 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                             return Ok(None);
                         }
                         if float {
-                            self.b
-                                .ins()
-                                .convert(ConvertOp::Bitcast, value_ty.ir(), vals[1])
+                            self.b.ins().convert(
+                                ConvertOp::Bitcast,
+                                value_ty.ir_with_layout(self.g.p.c_layout),
+                                vals[1],
+                            )
                         } else {
                             vals[1]
                         }
@@ -4303,7 +4376,11 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                         let old = ins.atomic_rmw(op, ordering, vals[0], vals[1]);
                         if !new {
                             return Ok(Some(if float {
-                                self.b.ins().convert(ConvertOp::Bitcast, value_ty.ir(), old)
+                                self.b.ins().convert(
+                                    ConvertOp::Bitcast,
+                                    value_ty.ir_with_layout(self.g.p.c_layout),
+                                    old,
+                                )
                             } else {
                                 old
                             }));
@@ -4321,7 +4398,11 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     Builtin::AtomicCas => {
                         let v = ins.atomic_cas(ordering, vals[0], vals[1], vals[2]);
                         if float {
-                            self.b.ins().convert(ConvertOp::Bitcast, value_ty.ir(), v)
+                            self.b.ins().convert(
+                                ConvertOp::Bitcast,
+                                value_ty.ir_with_layout(self.g.p.c_layout),
+                                v,
+                            )
                         } else {
                             v
                         }
@@ -4331,7 +4412,11 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                         self.b.ins().icmp(IntCC::Eq, old, vals[1])
                     }
                     Builtin::AtomicCompareExchange => {
-                        let ty = if float { repr } else { args[2].ty.ir() };
+                        let ty = if float {
+                            repr
+                        } else {
+                            args[2].ty.ir_with_layout(self.g.p.c_layout)
+                        };
                         let flags = MemoryFlags {
                             volatile: args[1]
                                 .sugar
@@ -4464,7 +4549,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         if let Storage::Var(var) = self.locals[id] {
             let v = match init.items.first() {
                 Some(InitItem::Expr { expr, .. }) => self.val(expr)?,
-                _ => self.zero(ty.ir()),
+                _ => self.zero(ty.ir_with_layout(self.g.p.c_layout)),
             };
             self.b.def_var(var, v);
             return Ok(());
@@ -4489,14 +4574,14 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                         Some(field) => Place::Bits {
                             flags,
                             addr,
-                            unit: expr.ty.ir(),
+                            unit: expr.ty.ir_with_layout(self.g.p.c_layout),
                             field: *field,
                             signed: false,
                         },
                         None if Self::is_aggregate(&expr.ty) => {
                             self.aggregate_place(addr, &expr.ty, flags, expr.loc)?
                         }
-                        None => Place::Mem(addr, expr.ty.ir(), flags),
+                        None => Place::Mem(addr, expr.ty.ir_with_layout(self.g.p.c_layout), flags),
                     };
                     self.store_place(&place, v);
                 }

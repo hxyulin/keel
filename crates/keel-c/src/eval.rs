@@ -27,9 +27,6 @@ pub enum Const {
 pub fn eval_int(e: &Expr<'_>) -> Option<i64> {
     eval_int_with_layout(e, CDataLayout::NATIVE_LP64)
 }
-pub fn normalize(v: i64, ty: &Ty) -> i64 {
-    normalize_with_layout(v, ty, CDataLayout::NATIVE_LP64)
-}
 pub fn eval_constant(e: &Expr<'_>, allow_comma: bool) -> Option<Const> {
     eval_constant_with_layout(e, allow_comma, CDataLayout::NATIVE_LP64)
 }

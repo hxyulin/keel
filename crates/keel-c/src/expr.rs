@@ -3079,13 +3079,7 @@ pub(crate) fn promoted<'a>(ty: &Ty<'a>) -> Ty<'a> {
     }
 }
 
-/// The type the usual arithmetic conversions give two arithmetic types.
-// Compatibility boundary for native IR generation. Parser calls use the
-// explicit model below, including when a private expression test selects ILP32.
-pub(crate) fn usual<'a>(a: &Ty<'a>, b: &Ty<'a>) -> Ty<'a> {
-    usual_with_layout(a, b, CDataLayout::NATIVE_LP64)
-}
-
+/// The type the usual arithmetic conversions give under the supplied model.
 pub(crate) fn usual_with_layout<'a>(a: &Ty<'a>, b: &Ty<'a>, layout: CDataLayout) -> Ty<'a> {
     if a.is_complex() || b.is_complex() {
         let component = |t: &Ty<'a>| match t {
