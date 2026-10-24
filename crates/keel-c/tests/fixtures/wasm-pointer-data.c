@@ -42,9 +42,19 @@ int walk(unsigned int address, long offset) {
     unsigned char *p = (unsigned char *)(unsigned long)address;
     p += offset;
     p++;
-    p -= 1;
+    p--;
     return *p;
 }
 int ordered(unsigned int a, unsigned int b) { return (void *)(unsigned long)a > (void *)(unsigned long)b; }
 long stride(void) { struct T { int a, b, c; } x[3]; return &x[2] - &x[0]; }
 int local_init(void) { int a[4] = {7, 0, 3, 4}; return a[0] + a[1] + a[2] + a[3]; }
+/* Reject extreme offsets before forming a pointer; every accepted decrement
+   and store stays within this one local array, preserving both canaries. */
+int decrement(long offset) {
+    unsigned char a[6] = {0xa5, 11, 22, 33, 44, 0x5a};
+    if (offset < 1 || offset > 4) return -1;
+    unsigned char *p = a + 1 + offset;
+    int old = *p--;
+    *p = (unsigned char)(*p + 1);
+    return old * 65536 + a[offset] * 256 + (a[0] == 0xa5 && a[5] == 0x5a);
+}

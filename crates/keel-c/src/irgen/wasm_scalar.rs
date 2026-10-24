@@ -933,20 +933,21 @@ fn storage_data_boundaries_before_pruning() {
 }
 
 #[test]
-fn pointer_decrement_reports_backend_gap() {
-    let module = lower(
-        "int f(unsigned int address) { int *p = (int *)(unsigned long)address; p--; return *p; }",
-        false,
-    )
-    .unwrap();
-    let err = keel_wasm::emit_wasm32_runtime_module(
+fn pointer_decrement_executes_with_canaries_and_extreme_offsets() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    // This last maintained fixture function is self-contained/header-free.
+    let source = include_str!("../../tests/fixtures/wasm-pointer-data.c");
+    let source = &source[source.find("int decrement(long offset)").unwrap()..];
+    let module = lower(source, false).unwrap();
+    let bytes = keel_wasm::emit_wasm32_runtime_module(
         &module,
         &keel_wasm::Wasm32RuntimeOptions {
             memory: keel_wasm::Wasm32MemoryOptions {
                 scalar: keel_wasm::Options {
                     exports: vec![keel_wasm::Export {
-                        name: "f".into(),
-                        function: "f".into(),
+                        name: "decrement".into(),
+                        function: "decrement".into(),
                     }],
                 },
                 pages: 1,
@@ -957,9 +958,31 @@ fn pointer_decrement_reports_backend_gap() {
             stack_top: 65536,
         },
     )
-    .unwrap_err();
+    .unwrap();
+    let script = r#"
+const assert = require('assert/strict'), bytes = require('fs').readFileSync(0);
+assert(WebAssembly.validate(bytes));
+const e = new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports;
+for (let i=0; i<1000; i++) {
+ for (const offset of [-2147483648,-1,0,5,2147483647]) assert.equal(e.decrement(offset),-1);
+ for (let offset=1; offset<=4; offset++) {
+   const old=[0,22,33,44,90][offset], next=[0,12,23,34,45][offset];
+   assert.equal(e.decrement(offset),old*65536+next*256+1);
+ }
+}
+"#;
+    let mut child = Command::new("node")
+        .args(["-e", script])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("existing Node required");
+    child.stdin.take().unwrap().write_all(&bytes).unwrap();
+    let out = child.wait_with_output().unwrap();
     assert!(
-        err.0.contains("unsupported instruction Unary") && err.0.contains("Ineg"),
-        "{err}"
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
     );
 }
