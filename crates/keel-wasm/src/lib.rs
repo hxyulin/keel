@@ -261,7 +261,8 @@ pub fn emit_module(module: &Module, options: &Options) -> Result<Vec<u8>, Diagno
         .section(&exports)
         .section(&code);
     let bytes = output.finish();
-    wasmparser::Validator::new()
+    // Keep the output contract independent of the validator's evolving defaults.
+    wasmparser::Validator::new_with_features(wasmparser::WasmFeatures::WASM1)
         .validate_all(&bytes)
         .map_err(|e| reject(format!("generated binary failed validation: {e}")))?;
     Ok(bytes)

@@ -21,7 +21,9 @@ fn execute_options(module: &Module, opts: &Options, assertions: &str) {
     let bytes = emit_module(module, opts).unwrap();
     // An independent parser/validator checks the binary in addition to the
     // emitter's validation; V8 independently validates, compiles and executes.
-    wasmparser::Validator::new().validate_all(&bytes).unwrap();
+    wasmparser::Validator::new_with_features(wasmparser::WasmFeatures::WASM1)
+        .validate_all(&bytes)
+        .unwrap();
     let js = format!(
         r#"
 const fs = require('fs');
@@ -268,6 +270,12 @@ fn arithmetic_extrema_and_comparisons() {
 const w={width}, W=BigInt(w), mask=(1n<<W)-1n;
 const s=x=>BigInt.asIntN(w,x), u=x=>x&mask;
 const values=[0n,1n,-1n,1n<<(W-1n),(1n<<(W-1n))-1n,0x12345678n,-7n,W,W+1n];
+// Deterministic full-width patterns supplement the semantic boundary pairs.
+let seed=0xd1b54a32d192ed03n;
+for(let i=0;i<24;i++) {{
+ seed=BigInt.asUintN(64,seed*6364136223846793005n+1442695040888963407n);
+ values.push(s(seed));
+}}
 const call=(op,a,b)=>BigInt(e[op+w](...(w===64?[s(a),s(b)]:[Number(s(a)),Number(s(b))])));
 for(const a of values) for(const b of values) {{
  const A=s(a),B=s(b),U=u(a),V=u(b),k=V%W;
@@ -320,9 +328,12 @@ fn rejects_invalid_exports_and_unsupported_contracts() {
         "func @f() {\nblock0:\n v0 = iconst.i8 1\n v1 = iadd v0, v0\n return\n}",
         "func @f() {\nblock0:\n v0 = iconst.i32 1\n v1 = umulhi v0, v0\n return\n}",
         "func @f() {\nblock0:\n v0 = iconst.i32 1\n v1, v2 = uadd_overflow v0, v0\n return\n}",
+        "func @f(i32) {\nblock0(v0: i32):\n v1 = clz v0\n return\n}",
+        "func @f(i32) {\nblock0(v0: i32):\n v1 = sext.i64 v0\n return\n}",
     ] {
         let m =
             parse(source).unwrap_or_else(|e| panic!("test fixture parse failed: {e}\n{source}"));
+        keel_ir::verify_module(&m).unwrap_or_else(|e| panic!("invalid fixture: {e:?}\n{source}"));
         assert!(
             emit_module(&m, &Options::default()).is_err(),
             "accepted {source}"
@@ -508,5 +519,93 @@ assert.equal(e.constant64(),-9223372036854775808n); assert.equal(e.constant32(),
 assert.equal(e.switch32(-1),8); assert.equal(e.switch32(-2147483648),9);
 assert.equal(e.switch32(0),7); assert.equal(e.switch32(2147483647),7);
 "#,
+    );
+}
+
+#[test]
+fn switch_parallel_cycles_with_removed_layout_gap() {
+    let mut m = parse(
+        r#"
+func @cycle(i32, i64, i64, i64) -> i64 {
+block0(v0: i32, v1: i64, v2: i64, v3: i64):
+    v4 = iconst.i32 1
+    jump block2(v0, v1, v2, v3)
+block1:
+    v5 = fconst.f64 1.0
+    return v1
+block2(v6: i32, v7: i64, v8: i64, v9: i64):
+    v10 = isub v6, v4
+    switch v6, block2(v10, v8, v9, v7), [0: block3(v7), 1: block2(v10, v9, v8, v7)]
+block3(v11: i64):
+    return v11
+}
+"#,
+    )
+    .unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    // Unsupported instructions in unreachable but laid-out blocks are rejected.
+    assert!(emit_module(&m, &options(&["cycle"])).is_err());
+    let removed = m.functions[0].blocks().nth(1).unwrap();
+    m.functions[0].remove_block(removed);
+    // Arena block IDs now differ from dispatcher PC indices. Only live layout
+    // is emitted, including the mixed i32/i64 copies on the switch self-edge.
+    execute(
+        &m,
+        &["cycle"],
+        r#"
+const seeds=[[11n,22n,33n],[-1n,-9223372036854775808n,0x123456789abcdefn]];
+for(const initial of seeds) for(let n=0;n<30;n++) {
+ let [a,b,c]=initial;
+ for(let remaining=n;remaining>0;remaining--) {
+  [a,b,c]=remaining===1?[c,b,a]:[b,c,a];
+ }
+ assert.equal(e.cycle(n,...initial),a);
+}
+"#,
+    );
+}
+
+#[test]
+fn rejects_explicit_scalar_call_abi_and_unused_indirect_table() {
+    let mut m = parse(
+        r#"
+func @caller(i32) -> i32 {
+block0(v0: i32):
+    v1 = call @callee(v0)
+    return v1
+}
+func @callee(i32) -> i32 {
+block0(v0: i32):
+    return v0
+}
+"#,
+    )
+    .unwrap();
+    let f = &mut m.functions[0];
+    let call = f.block_insts(f.entry_block().unwrap())[0];
+    let mut data = f.inst_data(call).clone();
+    if let keel_ir::InstData::Call { args, .. } = &mut data {
+        *args = keel_ir::CallArgs::with_abi(
+            args.iter()
+                .map(|&v| (v, keel_ir::AbiParam::new(keel_ir::Type::I32))),
+        );
+    }
+    *f.inst_data_mut(call) = data;
+    keel_ir::verify_module(&m).unwrap();
+    assert!(
+        emit_module(&m, &Options::default())
+            .unwrap_err()
+            .0
+            .contains("unsupported instruction")
+    );
+
+    let mut m = parse("func @f() {\nblock0:\n return\n}").unwrap();
+    m.functions[0].import_signature(keel_ir::Signature::new(&[], &[]));
+    keel_ir::verify_module(&m).unwrap();
+    assert!(
+        emit_module(&m, &Options::default())
+            .unwrap_err()
+            .0
+            .contains("indirect-call contract")
     );
 }
