@@ -290,3 +290,110 @@ fn wasm_initializers_do_not_hide_function_debug_reference_or_metadata_errors() {
         ["@layout_records: thread-local data cannot be const"]
     );
 }
+
+#[test]
+fn empty_definitions_are_not_external_declarations() {
+    for items in ["", "zero 0", "b\"\", zero 0"] {
+        let module = parse(&format!(
+            "decl data @external\ndata @empty = align 1 {{ {items} }}\n\
+             data @refs = const align 8 {{ ptr @empty, ptr @empty + 1, ptr @external + 4294967295 }}"
+        ))
+        .unwrap();
+        for layout in [DataLayout::WASM32, DataLayout::NATIVE64] {
+            assert_eq!(
+                errors(&module, layout),
+                [
+                    "@empty: data object is empty",
+                    "@refs: @empty + 1 is past the end of @empty (0 bytes)",
+                ],
+                "{items}"
+            );
+        }
+    }
+}
+
+#[test]
+fn large_zero_storage_does_not_narrow_target_sizes_or_cursors() {
+    // Zero runs need no huge allocation. General IR verification checks storage
+    // sizes in u64, independently of a backend's wasm32 address-space limits.
+    let module = parse(
+        "data @short = align 1 { zero 4294967294 }\n\
+         data @exact = align 1 { zero 4294967295 }\n\
+         data @large = align 8 { zero 4294967295, zero 1, ptr @exact }\n\
+         data @refs = align 8 { ptr @short + 4294967295, ptr @exact + 4294967295, ptr @large + 4294967295 }",
+    )
+    .unwrap();
+    for layout in [DataLayout::WASM32, DataLayout::NATIVE64] {
+        assert_eq!(
+            errors(&module, layout),
+            ["@refs: @short + 4294967295 is past the end of @short (4294967294 bytes)"]
+        );
+    }
+}
+
+#[test]
+fn mixed_pointer_rtti_alignment_reports_each_requirement_once() {
+    for (items, wasm_requirements) in [
+        (
+            "ptr @name, zero 4, rtti_name @name, ptr @name, zero 4, rtti_name @name",
+            vec![
+                "@mixed: holds pointers, so it needs align 4 or more, got 1",
+                "@mixed: holds pointers, so it needs align 8 or more, got 1",
+            ],
+        ),
+        (
+            "rtti_name @name, ptr @name, zero 4, rtti_name @name, ptr @name",
+            vec!["@mixed: holds pointers, so it needs align 8 or more, got 1"],
+        ),
+    ] {
+        let module = parse(&format!(
+            "decl data @name\ndata @mixed = align 1 {{ {items} }}"
+        ))
+        .unwrap();
+        assert_eq!(errors(&module, DataLayout::WASM32), wasm_requirements);
+        let native = errors(&module, DataLayout::NATIVE64);
+        assert_eq!(
+            native
+                .iter()
+                .filter(|e| e.contains("holds pointers"))
+                .collect::<Vec<_>>(),
+            ["@mixed: holds pointers, so it needs align 8 or more, got 1"]
+        );
+        assert!(native.iter().any(|e| e.contains("not a multiple of 8")));
+    }
+}
+
+#[test]
+fn const_pointer_initializers_keep_storage_metadata_validation() {
+    let module = parse(
+        "decl data @external\n\
+         data @table = hidden const align 4 { ptr @external, ptr @external }",
+    )
+    .unwrap();
+    let before = module.clone();
+    assert_eq!(
+        verify_module_with_layout(&module, DataLayout::WASM32),
+        Ok(())
+    );
+    assert_eq!(module.data, before.data);
+    // Const pointer storage is legal; incompatible linkage/placement metadata
+    // must still diagnose on the actual object carrying wasm32 initializers.
+    for (field, expected) in [
+        (0, "@table: thread-local data cannot be const"),
+        (1, "@table: hidden requires a nonlocal definition"),
+        (2, "@table: section/retain requires a non-COMDAT definition"),
+    ] {
+        let mut invalid = module.clone();
+        let table = &mut invalid.data[1];
+        match field {
+            0 => table.thread_local = true,
+            1 => table.local = true,
+            2 => {
+                table.weak_odr = true;
+                table.retain = true;
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(errors(&invalid, DataLayout::WASM32), [expected]);
+    }
+}
