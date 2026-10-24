@@ -1,0 +1,508 @@
+{
+  "schema": 1,
+  "date": "2026-10-24",
+  "source_commit": "2cd5176629ffbae049843e7af5dea2bce671ce3a",
+  "host": "apple-m5-max",
+  "platform": "macOS-27.0.1-arm64-arm-64bit",
+  "cpu": "Apple M5 Max",
+  "clang_version": "Apple clang version 21.0.0 (clang-2100.3.34.2)\nTarget: arm64-apple-darwin27.0.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin\n",
+  "apple_ld_version": "@(#)PROGRAM:ld PROJECT:ld-27037.1\nBUILD 21:17:51 Aug 25 2026\nconfigured to support archs: armv6 armv7 armv7s arm64 arm64e arm64_32 i386 x86_64 x86_64h armv6m armv7k armv7m armv7em armv8m.main armv8.1m.main\nLTO support using: LLVM version 21.0.0 (static support for 30, runtime is 30)\nTAPI support using: Apple TAPI version 21.0.0 (tapi-2100.3.8.1)\n",
+  "sdk": "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+  "sdk_version": "27.0",
+  "tools": {
+    "keel": {
+      "path": "target/release/keel",
+      "sha256": "648e2e5d82faa2e4d7a6081c833574bd3eeeedd1fcf26f2c34655d7b737dd488"
+    },
+    "clang": {
+      "path": "/usr/bin/clang",
+      "sha256": "34129c71a01a74f7f3b2443521519b2e5447553fa187f5fcafaaf8c42cc192e2"
+    },
+    "ld": {
+      "path": "/Library/Developer/CommandLineTools/usr/bin/ld",
+      "sha256": "374d9f0713bce2c8a9e1e82bde51615d5433516a10d99b63107eb6ee70542e4c"
+    },
+    "selected_clang": {
+      "path": "/Library/Developer/CommandLineTools/usr/bin/clang",
+      "sha256": "1590ac950a3d627817d09ade5cb60b2115f17a72182a3141e010b4bcc482a0c9",
+      "identity_observed": "post-measurement independent review; original raw report hashes only the launcher"
+    }
+  },
+  "harness_sha256": "7dc91027007c69ac8cda17b3fb28aff730d4051644f2e406f37236cff8a5b35e",
+  "warmups": 2,
+  "rounds": 7,
+  "seed": 20261024,
+  "sources": [
+    {
+      "path": "suite/runtime-kernels/kernels.c",
+      "sha256": "0b83ca8710b02722147af56a5d4dab616a7593941cec800b4e8ebe653340a0a5",
+      "assembly_path": "kernels.s",
+      "assembly_sha256": "243936742b3f2dd11b57d4654d46f7818b4e7f0f5840e6873e4150cd495217a2",
+      "assembly_bytes": 19415
+    },
+    {
+      "path": "suite/runtime-kernels/driver.c",
+      "sha256": "1d173ffd27270c4f1da349b50ef41fc1154b31d8588abd82a37430664940095f",
+      "assembly_path": "driver.s",
+      "assembly_sha256": "b780c3c9f89af0c24872068594adc774ddcf4540ffbe9071e6b4e73c6b77acae",
+      "assembly_bytes": 16333
+    }
+  ],
+  "assembly": {
+    "commands": {
+      "keel": [
+        [
+          "target/release/keel",
+          "asm",
+          "--cpu",
+          "baseline",
+          "kernels.s",
+          "-o",
+          "kernels-keel.o"
+        ],
+        [
+          "target/release/keel",
+          "asm",
+          "--cpu",
+          "baseline",
+          "driver.s",
+          "-o",
+          "driver-keel.o"
+        ]
+      ],
+      "clang-cc1as": [
+        [
+          "/usr/bin/clang",
+          "-cc1as",
+          "-triple",
+          "arm64-apple-macosx11.0.0",
+          "-target-cpu",
+          "apple-m1",
+          "-filetype",
+          "obj",
+          "kernels.s",
+          "-o",
+          "kernels-clang-cc1as.o"
+        ],
+        [
+          "/usr/bin/clang",
+          "-cc1as",
+          "-triple",
+          "arm64-apple-macosx11.0.0",
+          "-target-cpu",
+          "apple-m1",
+          "-filetype",
+          "obj",
+          "driver.s",
+          "-o",
+          "driver-clang-cc1as.o"
+        ]
+      ],
+      "clang-driver": [
+        [
+          "/usr/bin/clang",
+          "-target",
+          "arm64-apple-macosx11.0.0",
+          "-mcpu=apple-m1",
+          "-x",
+          "assembler",
+          "-c",
+          "kernels.s",
+          "-o",
+          "kernels-clang-driver.o"
+        ],
+        [
+          "/usr/bin/clang",
+          "-target",
+          "arm64-apple-macosx11.0.0",
+          "-mcpu=apple-m1",
+          "-x",
+          "assembler",
+          "-c",
+          "driver.s",
+          "-o",
+          "driver-clang-driver.o"
+        ]
+      ]
+    },
+    "orders_including_warmups": [
+      [
+        "clang-cc1as",
+        "keel",
+        "clang-driver"
+      ],
+      [
+        "clang-cc1as",
+        "keel",
+        "clang-driver"
+      ],
+      [
+        "clang-driver",
+        "keel",
+        "clang-cc1as"
+      ],
+      [
+        "clang-cc1as",
+        "clang-driver",
+        "keel"
+      ],
+      [
+        "clang-cc1as",
+        "keel",
+        "clang-driver"
+      ],
+      [
+        "keel",
+        "clang-driver",
+        "clang-cc1as"
+      ],
+      [
+        "clang-driver",
+        "keel",
+        "clang-cc1as"
+      ],
+      [
+        "clang-driver",
+        "clang-cc1as",
+        "keel"
+      ],
+      [
+        "keel",
+        "clang-driver",
+        "clang-cc1as"
+      ]
+    ],
+    "samples_ms": {
+      "keel": [
+        5.596,
+        5.598959,
+        6.788042,
+        5.740292,
+        5.394542,
+        5.850958,
+        5.040708
+      ],
+      "clang-cc1as": [
+        16.834542,
+        16.653209,
+        16.721333,
+        17.346541,
+        17.255166,
+        16.934666,
+        16.523917
+      ],
+      "clang-driver": [
+        23.126834,
+        22.570875,
+        23.974167,
+        23.502542,
+        23.3935,
+        23.044792,
+        22.979166
+      ]
+    },
+    "median_ms": {
+      "keel": 5.598959,
+      "clang-cc1as": 16.834542,
+      "clang-driver": 23.126834
+    }
+  },
+  "link": {
+    "commands": {
+      "keel": [
+        [
+          "target/release/keel",
+          "link",
+          "--sysroot",
+          "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+          "-mmacosx-version-min=11.0",
+          "kernels-clang-cc1as.o",
+          "driver-clang-cc1as.o",
+          "-o",
+          "program"
+        ]
+      ],
+      "apple-ld": [
+        [
+          "/Library/Developer/CommandLineTools/usr/bin/ld",
+          "-arch",
+          "arm64",
+          "-platform_version",
+          "macos",
+          "11.0",
+          "27.0",
+          "-syslibroot",
+          "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+          "-e",
+          "_main",
+          "kernels-clang-cc1as.o",
+          "driver-clang-cc1as.o",
+          "-lSystem",
+          "-o",
+          "program"
+        ]
+      ],
+      "clang-driver": [
+        [
+          "/usr/bin/clang",
+          "-target",
+          "arm64-apple-macosx11.0.0",
+          "-isysroot",
+          "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+          "kernels-clang-cc1as.o",
+          "driver-clang-cc1as.o",
+          "-o",
+          "program"
+        ]
+      ]
+    },
+    "orders_including_warmups": [
+      [
+        "keel",
+        "apple-ld",
+        "clang-driver"
+      ],
+      [
+        "keel",
+        "clang-driver",
+        "apple-ld"
+      ],
+      [
+        "keel",
+        "clang-driver",
+        "apple-ld"
+      ],
+      [
+        "apple-ld",
+        "clang-driver",
+        "keel"
+      ],
+      [
+        "clang-driver",
+        "keel",
+        "apple-ld"
+      ],
+      [
+        "clang-driver",
+        "apple-ld",
+        "keel"
+      ],
+      [
+        "apple-ld",
+        "keel",
+        "clang-driver"
+      ],
+      [
+        "clang-driver",
+        "apple-ld",
+        "keel"
+      ],
+      [
+        "clang-driver",
+        "apple-ld",
+        "keel"
+      ]
+    ],
+    "samples_ms": {
+      "keel": [
+        8.334875,
+        8.609334,
+        8.352291,
+        8.454292,
+        8.301417,
+        8.557083,
+        8.638375
+      ],
+      "apple-ld": [
+        15.119209,
+        15.389459,
+        14.80275,
+        14.590625,
+        14.612542,
+        14.40175,
+        15.061333
+      ],
+      "clang-driver": [
+        22.074375,
+        22.602834,
+        21.896792,
+        21.975958,
+        21.920042,
+        21.5735,
+        22.919041
+      ]
+    },
+    "median_ms": {
+      "keel": 8.454292,
+      "apple-ld": 14.80275,
+      "clang-driver": 21.975958
+    },
+    "verified_output": {
+      "keel": {
+        "bytes": 51728,
+        "sha256": "6a44cc4ce7cf81f475355020b82fbcbf446ece352daf6b1acdbb4263da3a67f7"
+      },
+      "apple-ld": {
+        "bytes": 51432,
+        "sha256": "3dce96720860295bad265bd1d29aec6988e8b3526fe71434df6043029ab0078c"
+      },
+      "clang-driver": {
+        "bytes": 51432,
+        "sha256": "3dce96720860295bad265bd1d29aec6988e8b3526fe71434df6043029ab0078c"
+      }
+    }
+  },
+  "correctness": {
+    "instructions": [
+      {
+        "input": "kernels",
+        "mode": "keel",
+        "text_bytes": 2080,
+        "text_sha256": "f372b4ca57dfa2a8b121c94ff480c5d350b43e10460897ff36899eae29622b46",
+        "normalized_text_relocations_equal": true
+      },
+      {
+        "input": "kernels",
+        "mode": "clang-cc1as",
+        "text_bytes": 2080,
+        "text_sha256": "f372b4ca57dfa2a8b121c94ff480c5d350b43e10460897ff36899eae29622b46",
+        "normalized_text_relocations_equal": true
+      },
+      {
+        "input": "kernels",
+        "mode": "clang-driver",
+        "text_bytes": 2080,
+        "text_sha256": "f372b4ca57dfa2a8b121c94ff480c5d350b43e10460897ff36899eae29622b46",
+        "normalized_text_relocations_equal": true
+      },
+      {
+        "input": "driver",
+        "mode": "keel",
+        "text_bytes": 1796,
+        "text_sha256": "13ee45c41cc521bca30aad4f2a19fc18b63356528cf3d148f96c93c3b6359682",
+        "normalized_text_relocations_equal": true
+      },
+      {
+        "input": "driver",
+        "mode": "clang-cc1as",
+        "text_bytes": 1796,
+        "text_sha256": "13ee45c41cc521bca30aad4f2a19fc18b63356528cf3d148f96c93c3b6359682",
+        "normalized_text_relocations_equal": true
+      },
+      {
+        "input": "driver",
+        "mode": "clang-driver",
+        "text_bytes": 1796,
+        "text_sha256": "13ee45c41cc521bca30aad4f2a19fc18b63356528cf3d148f96c93c3b6359682",
+        "normalized_text_relocations_equal": true
+      }
+    ],
+    "oracle": {
+      "cases": [
+        "positive32",
+        "balance32",
+        "positive64",
+        "balance64",
+        "sensor_mix",
+        "clamped",
+        "unsigned_high",
+        "adjacent",
+        "buckets",
+        "run_balance",
+        "widen32",
+        "widen_u32"
+      ],
+      "lengths": [
+        0,
+        1,
+        33,
+        257
+      ],
+      "seed": 20261024,
+      "checks_per_executable": 48,
+      "assembly_executables": 3,
+      "link_executables": 3,
+      "all_passed": true,
+      "strict_signatures_passed": true,
+      "oracle_sha256": "8f513b04fd1d2016e64d06b3d1a103bf5ee88c075007b33617cdb86ee83a0071"
+    }
+  },
+  "objects": [
+    {
+      "path": "kernels-clang-cc1as.o",
+      "sha256": "721346bfc9624da9010af77f167266ee29751f27a82ca00a0a5351aefc5c11e9",
+      "bytes": 3504
+    },
+    {
+      "path": "driver-clang-cc1as.o",
+      "sha256": "2b43f1e8ad853c6c20fcdc58e5b08ea7b4d5108cc2fc5f5d4343085c98998555",
+      "bytes": 5592
+    }
+  ],
+  "generation_commands": [
+    [
+      "/usr/bin/clang",
+      "-S",
+      "-O0",
+      "-target",
+      "arm64-apple-macosx11.0.0",
+      "-mcpu=apple-m1",
+      "-isysroot",
+      "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+      "suite/runtime-kernels/kernels.c",
+      "-o",
+      "kernels.s"
+    ],
+    [
+      "/usr/bin/clang",
+      "-S",
+      "-O0",
+      "-target",
+      "arm64-apple-macosx11.0.0",
+      "-mcpu=apple-m1",
+      "-isysroot",
+      "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+      "suite/runtime-kernels/driver.c",
+      "-o",
+      "driver.s"
+    ]
+  ],
+  "raw_report": {
+    "path": "raw.json",
+    "sha256": "bfc0ebd6aab2fd9445812efdaadeb51c64f3fa7c079dd668f22690d6dfd7585d"
+  },
+  "build": {
+    "source_clean": true,
+    "profile": "release",
+    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "rust_host": "aarch64-apple-darwin",
+    "llvm": "23.1.1",
+    "command": [
+      "cargo",
+      "build",
+      "--release",
+      "-p",
+      "keel",
+      "--locked"
+    ]
+  },
+  "support_gate_rejection": {
+    "generation_optimization": "-O2",
+    "input": "suite/runtime-kernels/kernels.c",
+    "assembly_sha256": "a3c4d30c45c18dcee9582354c958575735d5807af653c642d0d14618f19e4d9e",
+    "line": 713,
+    "instruction": "sabd.4s v16, v16, v20",
+    "diagnostic": "unsupported Apple SIMD mnemonic suffix",
+    "timed": false
+  },
+  "dependencies": {
+    "suite/audit_clang_assembler.py": "cd5e6f21e87dd987b183cdb74fea932e451e9f06bce0942e3290dbfc7e77e173",
+    "suite/runtime-kernels/oracle.py": "8f513b04fd1d2016e64d06b3d1a103bf5ee88c075007b33617cdb86ee83a0071"
+  },
+  "scope": {
+    "assembly": "Serial two-file CLI text-to-Mach-O object batch; startup/read/parse/encode/write included. Both Clang modes invoke the /usr/bin/clang tool-selection launcher; -cc1as skips normal driver processing but is not bare installed compiler/service timing. C generation/preprocessing and linking excluded. No compiler structured-encoding or API timing.",
+    "link": "Identical two objects to signed executable CLI; startup/read/SDK interfaces/native signing/write included. Apple direct ld separate from Clang driver inclusive. SDK discovery, compilation/assembly, codesign verification, execution and debug tools excluded. Clang includes the /usr/bin/clang tool-selection launcher, default flags and libclang_rt.osx.a search; internal linker services/layouts need not match.",
+    "runtime": "Correctness only; no runtime speed measurement.",
+    "coverage": "Only two Clang -O0 generated assembly inputs; initial Clang -O2 assembly rejected before timing. No Cranelift assembler/linker comparison."
+  }
+}

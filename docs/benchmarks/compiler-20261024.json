@@ -1,0 +1,1823 @@
+{
+  "schema": 1,
+  "environment": {
+    "head": "2cd5176629ffbae049843e7af5dea2bce671ce3a",
+    "tree": "09fcabce3558c89db16c8c3fa4ca0c9872ff0f48",
+    "compiler_source_status": "",
+    "host": {
+      "system": "Darwin",
+      "node": "apple-m5-max",
+      "release": "27.0.0",
+      "version": "Darwin Kernel Version 27.0.0: Tue Aug 11 21:06:40 PDT 2026; root:xnu-13432.1.9~1/RELEASE_ARM64_T6050",
+      "machine": "arm64"
+    },
+    "cpu": "Apple M5 Max",
+    "hardware": "hw.model: Mac17,7\nhw.memsize: 137438953472\nhw.ncpu: 18\n",
+    "os": "ProductName:\t\tmacOS\nProductVersion:\t\t27.0.1\nBuildVersion:\t\t26A434\n",
+    "clang": "Apple clang version 21.0.0 (clang-2100.3.34.2)\nTarget: arm64-apple-darwin27.0.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin\n",
+    "clang_path": "/usr/bin/clang",
+    "load_start": [
+      2.1669921875,
+      2.169921875,
+      2.84521484375
+    ],
+    "binaries_sha256": {
+      "target/release/keel": "648e2e5d82faa2e4d7a6081c833574bd3eeeedd1fcf26f2c34655d7b737dd488",
+      "target/release/keel-cranelift-bench": "98c2a66bd32df3274c829d270fb2da45472642512cf8019b79e034c97c6cc6d7",
+      "/usr/bin/clang": "34129c71a01a74f7f3b2443521519b2e5447553fa187f5fcafaaf8c42cc192e2"
+    },
+    "inputs_sha256": {
+      "crates/keel-cranelift/kernels/kernels.c": "e8a461693804bc86c0879fb08a20893e16fafcdddf22ad5ac12b211b81e24a64",
+      "crates/keel-cranelift/kernels/driver.c": "7c144fa20d82dd280f419a3fc1582d3582a129b6f411c6536b5870434ed6fe55"
+    },
+    "locks_sha256": {
+      "Cargo.lock": "2c34ac25d21295781a387161dcacca0d0103246da0e30af29abb5a4ad8cddf48",
+      "crates/keel-cranelift/Cargo.lock": "e6ac2876fe7bf7821c8a0b82cb25da587885666e274fd96e8549e45698789feb"
+    }
+  },
+  "protocol": {
+    "warmups": 2,
+    "rounds": 7,
+    "seed": 20261024,
+    "c_order": "seeded shuffled configurations per round",
+    "ir_order": "existing in-process harness rotates configurations each round; not randomized",
+    "c_boundary": "subprocess wall time: raw C read, preprocessing, frontend (including Keel frontend-IR verification), configured optimization, native code generation, integrated assembly, object write; no linking",
+    "ir_boundary": "sum of backend stage timers on identical parsed verified Keel IR; excludes parse/verify, IR optimization, process startup, filesystem writes, linking; CLIF verifier off during timing, on for gated objects; FNV64 verifier-on/off fingerprints checked per sample by existing harness",
+    "features": "native objects include unwind services; Cranelift unwind_info=false; unequal services",
+    "target_keel": "aarch64-apple-darwin",
+    "target_clang": "arm64-apple-macosx11.0.0",
+    "scope": "one maintained kernels translation unit; 21 named kernel checks plus helpers; no application or runtime performance claim",
+    "host_control": "no enforced quiet-host gate, core pinning, frequency control or scheduling isolation; load snapshots only"
+  },
+  "correctness_passed": true,
+  "correctness": {
+    "keel-raw": {
+      "agrees_with_clang_O0": true,
+      "lines": 795,
+      "sha256": "8c96f7f4eb623e7d2ad3b9f5e9b73727e8f32fb3cc0843f3a7ad2f3e067a3b56"
+    },
+    "keel-O": {
+      "agrees_with_clang_O0": true,
+      "lines": 795,
+      "sha256": "8c96f7f4eb623e7d2ad3b9f5e9b73727e8f32fb3cc0843f3a7ad2f3e067a3b56"
+    },
+    "clang-O0": {
+      "agrees_with_clang_O0": true,
+      "lines": 795,
+      "sha256": "8c96f7f4eb623e7d2ad3b9f5e9b73727e8f32fb3cc0843f3a7ad2f3e067a3b56"
+    },
+    "clang-O2": {
+      "agrees_with_clang_O0": true,
+      "lines": 795,
+      "sha256": "8c96f7f4eb623e7d2ad3b9f5e9b73727e8f32fb3cc0843f3a7ad2f3e067a3b56"
+    },
+    "raw-keel-baseline": {
+      "agrees_with_clang_O0": true,
+      "lines": 795,
+      "sha256": "8c96f7f4eb623e7d2ad3b9f5e9b73727e8f32fb3cc0843f3a7ad2f3e067a3b56"
+    },
+    "raw-keel-full": {
+      "agrees_with_clang_O0": true,
+      "lines": 795,
+      "sha256": "8c96f7f4eb623e7d2ad3b9f5e9b73727e8f32fb3cc0843f3a7ad2f3e067a3b56"
+    },
+    "raw-clif-none": {
+      "agrees_with_clang_O0": true,
+      "lines": 795,
+      "sha256": "8c96f7f4eb623e7d2ad3b9f5e9b73727e8f32fb3cc0843f3a7ad2f3e067a3b56"
+    },
+    "raw-clif-speed": {
+      "agrees_with_clang_O0": true,
+      "lines": 795,
+      "sha256": "8c96f7f4eb623e7d2ad3b9f5e9b73727e8f32fb3cc0843f3a7ad2f3e067a3b56"
+    },
+    "O-keel-baseline": {
+      "agrees_with_clang_O0": true,
+      "lines": 795,
+      "sha256": "8c96f7f4eb623e7d2ad3b9f5e9b73727e8f32fb3cc0843f3a7ad2f3e067a3b56"
+    },
+    "O-keel-full": {
+      "agrees_with_clang_O0": true,
+      "lines": 795,
+      "sha256": "8c96f7f4eb623e7d2ad3b9f5e9b73727e8f32fb3cc0843f3a7ad2f3e067a3b56"
+    },
+    "O-clif-none": {
+      "agrees_with_clang_O0": true,
+      "lines": 795,
+      "sha256": "8c96f7f4eb623e7d2ad3b9f5e9b73727e8f32fb3cc0843f3a7ad2f3e067a3b56"
+    },
+    "O-clif-speed": {
+      "agrees_with_clang_O0": true,
+      "lines": 795,
+      "sha256": "8c96f7f4eb623e7d2ad3b9f5e9b73727e8f32fb3cc0843f3a7ad2f3e067a3b56"
+    }
+  },
+  "ir_sha256": {
+    "raw": "3d40ff7bb80c8255f5f533a04a95426a7cf73ab2a51d8dc2cd4ca95d14b979c8",
+    "O": "fac3a0223bbc6c19f591ed0e98c98e5314d4edb168584da14c68ba5931bfe742"
+  },
+  "objects_sha256": {
+    "keel-raw": "481ef7b13f2b5486cfef4809eeab97a6e561326e2161cf718c74663a017e4231",
+    "keel-O": "5b4d6b8838e7552932bca2e33b13b4a740059ba8839ba74201ff4c6e3a09cca6",
+    "clang-O0": "18985e9b3633691d94d0375bbd57af7ea7e391c5dfdfe448e199a531dace7ec7",
+    "clang-O2": "23807732e3db129899baf33338b785f5734123825ae09b73bf43a394c2d9f2a8",
+    "raw-keel-baseline": "481ef7b13f2b5486cfef4809eeab97a6e561326e2161cf718c74663a017e4231",
+    "raw-keel-full": "d73dc940d108afef7d8aceeb8350911b28788302a3dd356c7611992adc16b5d5",
+    "raw-clif-none": "3b280057785ac630774f6542f31614f61bf271d98044d9b63a1ec3e9417cb49d",
+    "raw-clif-speed": "a185fbf432333995ce20e48ad75fc92c5a0634d5d0e72114a1b84da68905635a",
+    "O-keel-baseline": "f4511f6ab13e9b8ed49f6e4b6d1bad3adc74d09968b7f6761b450c6332a6adbc",
+    "O-keel-full": "5b4d6b8838e7552932bca2e33b13b4a740059ba8839ba74201ff4c6e3a09cca6",
+    "O-clif-none": "d4b50b648d60c314127ce15272cc4223960ac610d2fe4459f4e5fbff6e2bdcce",
+    "O-clif-speed": "ea5338b8e466130c41fd72055f5f297e1b39d0c9914fbf88aaa0d0c6e16d149e"
+  },
+  "c_to_object": {
+    "keel-raw": {
+      "samples_ns": [
+        4403916,
+        3991917,
+        4334917,
+        4315250,
+        4003292,
+        4508084,
+        4204625
+      ],
+      "median_ms": 4.31525,
+      "object_bytes": 9166,
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "keel-raw.o"
+      ]
+    },
+    "keel-O": {
+      "samples_ns": [
+        5198542,
+        5348208,
+        5009417,
+        5497916,
+        4737834,
+        5548458,
+        5491708
+      ],
+      "median_ms": 5.348208,
+      "object_bytes": 8862,
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "-O",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "keel-O.o"
+      ]
+    },
+    "clang-O0": {
+      "samples_ns": [
+        16211041,
+        15995125,
+        17942000,
+        16621333,
+        16818000,
+        17164625,
+        16852250
+      ],
+      "median_ms": 16.818,
+      "object_bytes": 8872,
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O0",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "clang-O0.o"
+      ]
+    },
+    "clang-O2": {
+      "samples_ns": [
+        41456834,
+        41201166,
+        41936292,
+        41778750,
+        42726583,
+        41727500,
+        42628875
+      ],
+      "median_ms": 41.77875,
+      "object_bytes": 7304,
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O2",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "clang-O2.o"
+      ]
+    }
+  },
+  "c_orders_including_warmups": [
+    [
+      "clang-O2",
+      "keel-raw",
+      "clang-O0",
+      "keel-O"
+    ],
+    [
+      "keel-O",
+      "keel-raw",
+      "clang-O2",
+      "clang-O0"
+    ],
+    [
+      "clang-O2",
+      "keel-raw",
+      "clang-O0",
+      "keel-O"
+    ],
+    [
+      "clang-O2",
+      "clang-O0",
+      "keel-O",
+      "keel-raw"
+    ],
+    [
+      "keel-O",
+      "keel-raw",
+      "clang-O0",
+      "clang-O2"
+    ],
+    [
+      "keel-raw",
+      "clang-O0",
+      "clang-O2",
+      "keel-O"
+    ],
+    [
+      "keel-raw",
+      "keel-O",
+      "clang-O0",
+      "clang-O2"
+    ],
+    [
+      "keel-raw",
+      "clang-O2",
+      "keel-O",
+      "clang-O0"
+    ],
+    [
+      "keel-O",
+      "clang-O2",
+      "keel-raw",
+      "clang-O0"
+    ]
+  ],
+  "commands": [
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "HEAD"
+      ],
+      "returncode": 0,
+      "wall_ns": 5597042
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "HEAD^{tree}"
+      ],
+      "returncode": 0,
+      "wall_ns": 6361125
+    },
+    {
+      "argv": [
+        "git",
+        "status",
+        "--porcelain",
+        "--",
+        "crates",
+        "Cargo.toml",
+        "Cargo.lock"
+      ],
+      "returncode": 0,
+      "wall_ns": 11058167
+    },
+    {
+      "argv": [
+        "sysctl",
+        "-n",
+        "machdep.cpu.brand_string"
+      ],
+      "returncode": 0,
+      "wall_ns": 2354708
+    },
+    {
+      "argv": [
+        "sysctl",
+        "hw.model",
+        "hw.memsize",
+        "hw.ncpu"
+      ],
+      "returncode": 0,
+      "wall_ns": 2119167
+    },
+    {
+      "argv": [
+        "sw_vers"
+      ],
+      "returncode": 0,
+      "wall_ns": 6981292
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "--version"
+      ],
+      "returncode": 0,
+      "wall_ns": 7803000
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O2",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/driver.c",
+        "-o",
+        "driver.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 147933625
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "keel-raw.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 7002750
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "-O",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "keel-O.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 5652792
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O0",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "clang-O0.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 21772667
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O2",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "clang-O2.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 46488625
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-ir",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "kernels.raw.keel"
+      ],
+      "returncode": 0,
+      "wall_ns": 4259000
+    },
+    {
+      "argv": [
+        "target/release/keel-cranelift-bench",
+        "support",
+        "kernels.raw.keel"
+      ],
+      "returncode": 0,
+      "wall_ns": 6612000
+    },
+    {
+      "argv": [
+        "target/release/keel-cranelift-bench",
+        "objects",
+        "--out-dir",
+        "keel-readme-compiler-20261024-r1",
+        "--label",
+        "raw",
+        "kernels.raw.keel"
+      ],
+      "returncode": 0,
+      "wall_ns": 8447666
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "-O",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-ir",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "kernels.O.keel"
+      ],
+      "returncode": 0,
+      "wall_ns": 4777459
+    },
+    {
+      "argv": [
+        "target/release/keel-cranelift-bench",
+        "support",
+        "kernels.O.keel"
+      ],
+      "returncode": 0,
+      "wall_ns": 5558292
+    },
+    {
+      "argv": [
+        "target/release/keel-cranelift-bench",
+        "objects",
+        "--out-dir",
+        "keel-readme-compiler-20261024-r1",
+        "--label",
+        "O",
+        "kernels.O.keel"
+      ],
+      "returncode": 0,
+      "wall_ns": 7833500
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "driver.o",
+        "keel-raw.o",
+        "-o",
+        "check-keel-raw"
+      ],
+      "returncode": 0,
+      "wall_ns": 23753500
+    },
+    {
+      "argv": [
+        "check-keel-raw",
+        "check"
+      ],
+      "returncode": 0,
+      "wall_ns": 5002166
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "driver.o",
+        "keel-O.o",
+        "-o",
+        "check-keel-O"
+      ],
+      "returncode": 0,
+      "wall_ns": 22191000
+    },
+    {
+      "argv": [
+        "check-keel-O",
+        "check"
+      ],
+      "returncode": 0,
+      "wall_ns": 4847208
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "driver.o",
+        "clang-O0.o",
+        "-o",
+        "check-clang-O0"
+      ],
+      "returncode": 0,
+      "wall_ns": 21924125
+    },
+    {
+      "argv": [
+        "check-clang-O0",
+        "check"
+      ],
+      "returncode": 0,
+      "wall_ns": 6766334
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "driver.o",
+        "clang-O2.o",
+        "-o",
+        "check-clang-O2"
+      ],
+      "returncode": 0,
+      "wall_ns": 22859125
+    },
+    {
+      "argv": [
+        "check-clang-O2",
+        "check"
+      ],
+      "returncode": 0,
+      "wall_ns": 4502417
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "driver.o",
+        "raw.keel-baseline.o",
+        "-o",
+        "check-raw-keel-baseline"
+      ],
+      "returncode": 0,
+      "wall_ns": 21570375
+    },
+    {
+      "argv": [
+        "check-raw-keel-baseline",
+        "check"
+      ],
+      "returncode": 0,
+      "wall_ns": 5162625
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "driver.o",
+        "raw.keel-full.o",
+        "-o",
+        "check-raw-keel-full"
+      ],
+      "returncode": 0,
+      "wall_ns": 21719708
+    },
+    {
+      "argv": [
+        "check-raw-keel-full",
+        "check"
+      ],
+      "returncode": 0,
+      "wall_ns": 5055292
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "driver.o",
+        "raw.clif-none.o",
+        "-o",
+        "check-raw-clif-none"
+      ],
+      "returncode": 0,
+      "wall_ns": 21964500
+    },
+    {
+      "argv": [
+        "check-raw-clif-none",
+        "check"
+      ],
+      "returncode": 0,
+      "wall_ns": 5057667
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "driver.o",
+        "raw.clif-speed.o",
+        "-o",
+        "check-raw-clif-speed"
+      ],
+      "returncode": 0,
+      "wall_ns": 22044042
+    },
+    {
+      "argv": [
+        "check-raw-clif-speed",
+        "check"
+      ],
+      "returncode": 0,
+      "wall_ns": 4890625
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "driver.o",
+        "O.keel-baseline.o",
+        "-o",
+        "check-O-keel-baseline"
+      ],
+      "returncode": 0,
+      "wall_ns": 21957500
+    },
+    {
+      "argv": [
+        "check-O-keel-baseline",
+        "check"
+      ],
+      "returncode": 0,
+      "wall_ns": 4664667
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "driver.o",
+        "O.keel-full.o",
+        "-o",
+        "check-O-keel-full"
+      ],
+      "returncode": 0,
+      "wall_ns": 22061250
+    },
+    {
+      "argv": [
+        "check-O-keel-full",
+        "check"
+      ],
+      "returncode": 0,
+      "wall_ns": 4758833
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "driver.o",
+        "O.clif-none.o",
+        "-o",
+        "check-O-clif-none"
+      ],
+      "returncode": 0,
+      "wall_ns": 22240208
+    },
+    {
+      "argv": [
+        "check-O-clif-none",
+        "check"
+      ],
+      "returncode": 0,
+      "wall_ns": 4812916
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "driver.o",
+        "O.clif-speed.o",
+        "-o",
+        "check-O-clif-speed"
+      ],
+      "returncode": 0,
+      "wall_ns": 22282250
+    },
+    {
+      "argv": [
+        "check-O-clif-speed",
+        "check"
+      ],
+      "returncode": 0,
+      "wall_ns": 4700458
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O2",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "clang-O2.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 43086125
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "keel-raw.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 4710708
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O0",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "clang-O0.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 17727334
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "-O",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "keel-O.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 5434209
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "-O",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "keel-O.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 4879333
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "keel-raw.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 4282000
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O2",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "clang-O2.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 42011708
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O0",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "clang-O0.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 16761583
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O2",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "clang-O2.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 41456834
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "keel-raw.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 4403916
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O0",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "clang-O0.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 16211041
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "-O",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "keel-O.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 5198542
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O2",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "clang-O2.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 41201166
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O0",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "clang-O0.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 15995125
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "-O",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "keel-O.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 5348208
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "keel-raw.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 3991917
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "-O",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "keel-O.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 5009417
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "keel-raw.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 4334917
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O0",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "clang-O0.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 17942000
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O2",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "clang-O2.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 41936292
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "keel-raw.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 4315250
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O0",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "clang-O0.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 16621333
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O2",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "clang-O2.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 41778750
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "-O",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "keel-O.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 5497916
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "keel-raw.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 4003292
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "-O",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "keel-O.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 4737834
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O0",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "clang-O0.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 16818000
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O2",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "clang-O2.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 42726583
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "keel-raw.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 4508084
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O2",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "clang-O2.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 41727500
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "-O",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "keel-O.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 5548458
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O0",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "clang-O0.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 17164625
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "-O",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "keel-O.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 5491708
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O2",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "clang-O2.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 42628875
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "keel-raw.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 4204625
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O0",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "clang-O0.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 16852250
+    },
+    {
+      "argv": [
+        "target/release/keel-cranelift-bench",
+        "time",
+        "--warmup",
+        "2",
+        "--reps",
+        "7",
+        "--out",
+        "ir-time.json",
+        "--emit-dir",
+        "keel-readme-compiler-20261024-r1",
+        "raw=kernels.raw.keel",
+        "O=kernels.O.keel"
+      ],
+      "returncode": 0,
+      "wall_ns": 71274750
+    }
+  ],
+  "load_end": [
+    2.1669921875,
+    2.169921875,
+    2.84521484375
+  ],
+  "raw_report_path": "report.json",
+  "raw_report_sha256": "d6b14d8970490aecc226dd70546dcc555971a173c410e47e1b61a9c8e749ed6d",
+  "support": {
+    "raw": {
+      "total_functions": 31,
+      "supported_functions": [
+        "k_logic",
+        "k_fnv1a",
+        "k_crc32",
+        "k_sieve",
+        "k_matmul",
+        "k_dot",
+        "k_saxpy",
+        "k_divmix",
+        "gcd64",
+        "k_gcd",
+        "k_isort",
+        "k_qsort",
+        "qsort_rec",
+        "k_interp",
+        "k_classify",
+        "k_classify_sum",
+        "k_bits",
+        "clamp_i8",
+        "mix_u16",
+        "k_narrow",
+        "k_fconv",
+        "k_collatz",
+        "k_copy",
+        "k_dispatch",
+        "op_rot",
+        "op_mul",
+        "op_xor",
+        "op_add",
+        "k_names",
+        "k_stackobj",
+        "acc_add"
+      ],
+      "rejections": []
+    },
+    "O": {
+      "total_functions": 31,
+      "supported_functions": [
+        "k_logic",
+        "k_fnv1a",
+        "k_crc32",
+        "k_sieve",
+        "k_matmul",
+        "k_dot",
+        "k_saxpy",
+        "k_divmix",
+        "gcd64",
+        "k_gcd",
+        "k_isort",
+        "k_qsort",
+        "qsort_rec",
+        "k_interp",
+        "k_classify",
+        "k_classify_sum",
+        "k_bits",
+        "clamp_i8",
+        "mix_u16",
+        "k_narrow",
+        "k_fconv",
+        "k_collatz",
+        "k_copy",
+        "k_dispatch",
+        "op_rot",
+        "op_mul",
+        "op_xor",
+        "op_add",
+        "k_names",
+        "k_stackobj",
+        "acc_add"
+      ],
+      "rejections": []
+    }
+  },
+  "ir_to_object": {
+    "schema": 1,
+    "warmup": 2,
+    "reps": 7,
+    "timed_cranelift_settings": [
+      {
+        "opt_level": "none",
+        "is_pic": "true",
+        "unwind_info": "false",
+        "enable_verifier": "false"
+      },
+      {
+        "opt_level": "speed",
+        "is_pic": "true",
+        "unwind_info": "false",
+        "enable_verifier": "false"
+      }
+    ],
+    "inputs": [
+      {
+        "label": "raw",
+        "path": "kernels.raw.keel",
+        "functions": 31,
+        "keel_instructions": 862,
+        "parse_verify_ns": [
+          505708,
+          512334,
+          519625,
+          529917,
+          505417,
+          503916,
+          533042
+        ],
+        "configs": {
+          "keel-baseline": {
+            "stages_ns": {
+              "codegen": [
+                257542,
+                246292,
+                225291,
+                244083,
+                260541,
+                280791,
+                226000
+              ],
+              "object": [
+                134208,
+                130708,
+                118792,
+                123333,
+                134875,
+                140750,
+                116542
+              ]
+            },
+            "total_ns": [
+              391750,
+              377000,
+              344083,
+              367416,
+              395416,
+              421541,
+              342542
+            ],
+            "object_bytes": 9166,
+            "fnv64": "673f6b84e90fbc36",
+            "median_ms": 0.377
+          },
+          "keel-full": {
+            "stages_ns": {
+              "codegen": [
+                282791,
+                279542,
+                365792,
+                306125,
+                297791,
+                300000,
+                260250
+              ],
+              "object": [
+                121167,
+                118833,
+                137834,
+                127209,
+                115334,
+                133083,
+                110125
+              ]
+            },
+            "total_ns": [
+              403958,
+              398375,
+              503626,
+              433334,
+              413125,
+              433083,
+              370375
+            ],
+            "object_bytes": 8878,
+            "fnv64": "9ad2627d61c91ace",
+            "median_ms": 0.413125
+          },
+          "clif-none": {
+            "stages_ns": {
+              "setup": [
+                917,
+                708,
+                1208,
+                833,
+                791,
+                1125,
+                834
+              ],
+              "translate": [
+                96583,
+                94209,
+                109708,
+                99417,
+                109917,
+                113709,
+                104084
+              ],
+              "codegen": [
+                616000,
+                612792,
+                712500,
+                660417,
+                629125,
+                700542,
+                657666
+              ],
+              "object": [
+                13625,
+                12500,
+                15792,
+                13833,
+                12417,
+                15125,
+                14125
+              ]
+            },
+            "total_ns": [
+              727125,
+              720209,
+              839208,
+              774500,
+              752250,
+              830501,
+              776709
+            ],
+            "object_bytes": 5352,
+            "fnv64": "74f8d8612640cb33",
+            "median_ms": 0.7745
+          },
+          "clif-speed": {
+            "stages_ns": {
+              "setup": [
+                709,
+                792,
+                791,
+                625,
+                583,
+                667,
+                750
+              ],
+              "translate": [
+                95834,
+                95958,
+                98625,
+                92250,
+                92125,
+                95208,
+                96542
+              ],
+              "codegen": [
+                873334,
+                885500,
+                922709,
+                905541,
+                894625,
+                989375,
+                918000
+              ],
+              "object": [
+                12792,
+                13959,
+                13542,
+                12334,
+                12333,
+                17833,
+                13459
+              ]
+            },
+            "total_ns": [
+              982669,
+              996209,
+              1035667,
+              1010750,
+              999666,
+              1103083,
+              1028751
+            ],
+            "object_bytes": 5120,
+            "fnv64": "082280016cafada8",
+            "median_ms": 1.01075
+          }
+        }
+      },
+      {
+        "label": "O",
+        "path": "kernels.O.keel",
+        "functions": 31,
+        "keel_instructions": 909,
+        "parse_verify_ns": [
+          565625,
+          538958,
+          550583,
+          533250,
+          543667,
+          504875,
+          516500
+        ],
+        "configs": {
+          "keel-baseline": {
+            "stages_ns": {
+              "codegen": [
+                266167,
+                279125,
+                243875,
+                269375,
+                262334,
+                241708,
+                254209
+              ],
+              "object": [
+                116959,
+                123042,
+                107625,
+                125333,
+                119416,
+                107334,
+                118125
+              ]
+            },
+            "total_ns": [
+              383126,
+              402167,
+              351500,
+              394708,
+              381750,
+              349042,
+              372334
+            ],
+            "object_bytes": 9278,
+            "fnv64": "1bd51f6a707a4f93",
+            "median_ms": 0.38175
+          },
+          "keel-full": {
+            "stages_ns": {
+              "codegen": [
+                314875,
+                309875,
+                286041,
+                331292,
+                301625,
+                287167,
+                296708
+              ],
+              "object": [
+                116000,
+                109583,
+                100834,
+                130083,
+                110500,
+                112875,
+                103708
+              ]
+            },
+            "total_ns": [
+              430875,
+              419458,
+              386875,
+              461375,
+              412125,
+              400042,
+              400416
+            ],
+            "object_bytes": 8862,
+            "fnv64": "885c9ccf7687627f",
+            "median_ms": 0.412125
+          },
+          "clif-none": {
+            "stages_ns": {
+              "setup": [
+                792,
+                666,
+                625,
+                750,
+                750,
+                667,
+                625
+              ],
+              "translate": [
+                110083,
+                102667,
+                98292,
+                110417,
+                101125,
+                95958,
+                113584
+              ],
+              "codegen": [
+                687834,
+                689916,
+                645791,
+                643042,
+                677083,
+                666125,
+                655917
+              ],
+              "object": [
+                13875,
+                13292,
+                12875,
+                12458,
+                13000,
+                13458,
+                12750
+              ]
+            },
+            "total_ns": [
+              812584,
+              806541,
+              757583,
+              766667,
+              791958,
+              776208,
+              782876
+            ],
+            "object_bytes": 5400,
+            "fnv64": "138ba3dc924d0fea",
+            "median_ms": 0.782876
+          },
+          "clif-speed": {
+            "stages_ns": {
+              "setup": [
+                709,
+                750,
+                666,
+                666,
+                666,
+                709,
+                667
+              ],
+              "translate": [
+                103292,
+                99000,
+                105958,
+                101208,
+                94208,
+                104584,
+                99708
+              ],
+              "codegen": [
+                1010250,
+                955917,
+                998542,
+                960042,
+                947792,
+                1024209,
+                992542
+              ],
+              "object": [
+                12917,
+                11750,
+                12667,
+                12125,
+                12292,
+                14042,
+                12958
+              ]
+            },
+            "total_ns": [
+              1127168,
+              1067417,
+              1117833,
+              1074041,
+              1054958,
+              1143544,
+              1105875
+            ],
+            "object_bytes": 5480,
+            "fnv64": "075168fc34e93f54",
+            "median_ms": 1.105875
+          }
+        }
+      }
+    ]
+  },
+  "builds": [
+    {
+      "command": [
+        "cargo",
+        "build",
+        "--release",
+        "-p",
+        "keel",
+        "--locked"
+      ],
+      "started_unix": 1792847561.311121,
+      "wait_s": 4.887580871582031e-05,
+      "wall_s": 2.4285709857940674,
+      "returncode": 0
+    },
+    {
+      "command": [
+        "cargo",
+        "build",
+        "--release",
+        "--manifest-path",
+        "crates/keel-cranelift/Cargo.toml",
+        "--locked",
+        "--bin",
+        "keel-cranelift",
+        "--bin",
+        "keel-cranelift-bench"
+      ],
+      "started_unix": 1792847592.887425,
+      "wait_s": 4.982948303222656e-05,
+      "wall_s": 41.985483169555664,
+      "returncode": 0
+    }
+  ],
+  "build_environment": {
+    "rustc": "1.99.1 (58cf8f9c3 2026-10-13)",
+    "rustc_host": "aarch64-apple-darwin",
+    "rustc_llvm": "23.1.1",
+    "profile": "release"
+  }
+}
