@@ -502,3 +502,121 @@ fn explicit_headers_macros_and_ambient_host_isolation() {
     }
     t.no_temporary();
 }
+
+#[test]
+fn option_spelling_and_overrides_cannot_hide_forbidden_requests() {
+    let t = Temp::new();
+    let missing = t.0.join("missing");
+    let out = t.write("keep", "sentinel");
+    for kind in ["cc", "compile"] {
+        for flags in [
+            vec!["-O", "--opt-tier", "none"],
+            vec!["--isel-tier", "full", "--isel-tier", "baseline"],
+            vec!["--target-features", "+avx", "--target-features", "none"],
+            vec!["--emit-wasm=true"],
+            vec!["--export=answer"],
+            vec!["--wasm-memory-pages=1"],
+            vec!["-okeep"],
+            vec!["--", "-O"],
+        ] {
+            let error = failure(compile(kind, &missing, &out, &flags));
+            assert!(
+                error.contains("unsupported") || error.contains("unknown flag"),
+                "{kind} {flags:?}: {error}"
+            );
+            assert_eq!(std::fs::read(&out).unwrap(), b"sentinel");
+        }
+        // A second positional input must not be silently ignored.
+        assert!(failure(compile(kind, &missing, &out, &["extra"])).contains("unexpected argument"));
+    }
+    t.no_temporary();
+}
+
+#[test]
+fn decimal_boundaries_and_last_values_reach_the_runtime_unchanged() {
+    let t = Temp::new();
+    let c = t.write("a.c", "int answer(void){return 42;}");
+    let out = t.write("keep", "sentinel");
+    // Validate/compile a maximum-size memory without instantiating 4 GiB.
+    success(compile(
+        "cc",
+        &c,
+        &out,
+        &[
+            "--wasm-memory-pages",
+            "0",
+            "--wasm-memory-pages",
+            "00065536",
+            "--wasm-data-floor",
+            "4294967264",
+            "--wasm-stack-bottom",
+            "4294967280",
+            "--wasm-stack-top",
+            "4294967280",
+        ],
+    ));
+    node(
+        &out,
+        "const a=require('assert/strict'),b=require('fs').readFileSync(process.argv[1]);a(WebAssembly.validate(b));new WebAssembly.Module(b);",
+    );
+    for flag in [
+        "--wasm-memory-pages",
+        "--wasm-data-floor",
+        "--wasm-stack-bottom",
+        "--wasm-stack-top",
+    ] {
+        for value in ["4294967296", "-1", "+1", "0x10", " 16", "16 ", "1.0", ""] {
+            std::fs::write(&out, b"sentinel").unwrap();
+            assert!(failure(compile("cc", &c, &out, &[flag, value])).contains("decimal u32"));
+            assert_eq!(std::fs::read(&out).unwrap(), b"sentinel");
+        }
+    }
+    // Duplicate destinations select the last path, without touching earlier ones.
+    let first = t.write("first", "untouched");
+    success(
+        command("cc")
+            .arg(&c)
+            .arg("-o")
+            .arg(&first)
+            .arg("-o")
+            .arg(&out)
+            .args(["--wasm-memory-pages", "2", "--wasm-memory-pages", "1"])
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(std::fs::read(first).unwrap(), b"untouched");
+    node(
+        &out,
+        "const a=require('assert/strict'),e=new WebAssembly.Instance(new WebAssembly.Module(require('fs').readFileSync(process.argv[1]))).exports;a.equal(e.memory.buffer.byteLength,65536);",
+    );
+    t.no_temporary();
+}
+
+#[cfg(unix)]
+#[test]
+fn atomic_publication_replaces_aliases_without_truncating_their_targets() {
+    use std::os::unix::fs::symlink;
+    let t = Temp::new();
+    let text = "int answer(void){return 42;}";
+    let c = t.write("a.c", text);
+    let out = t.0.join("out.wasm");
+    for hard_link in [false, true] {
+        if hard_link {
+            std::fs::hard_link(&c, &out).unwrap();
+        } else {
+            symlink(&c, &out).unwrap();
+        }
+        // A failed compile preserves both the alias and its target.
+        failure(compile("cc", &c, &out, &["--export", "missing"]));
+        assert_eq!(std::fs::read(&out).unwrap(), text.as_bytes());
+        success(compile("cc", &c, &out, &["--export", "answer"]));
+        assert!(!out.symlink_metadata().unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read(&c).unwrap(), text.as_bytes());
+        node(
+            &out,
+            "require('assert/strict').equal(new WebAssembly.Instance(new WebAssembly.Module(require('fs').readFileSync(process.argv[1]))).exports.answer(),42);",
+        );
+        std::fs::remove_file(&out).unwrap();
+        t.no_temporary();
+    }
+}
