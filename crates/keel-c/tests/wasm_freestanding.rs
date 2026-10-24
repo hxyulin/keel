@@ -190,6 +190,22 @@ fn macros_and_capabilities_do_not_claim_native_or_unimplemented_features() {
             .any(|s| s.contains("_ATOMIC_") && !s.contains("SIG_ATOMIC")
                 || s.contains("COMPARE_AND_SWAP"))
     );
+    for name in m.keys() {
+        assert!(
+            ![
+                "__ARM",
+                "__AARCH64",
+                "__SSE",
+                "__AVX",
+                "__MMX",
+                "__WASM_ATOMIC",
+                "__GCC_HAVE_SYNC"
+            ]
+            .iter()
+            .any(|prefix| name.starts_with(prefix)),
+            "unexpected target capability {name}"
+        );
+    }
     assert_eq!(m["__STDC_NO_ATOMICS__"], "1");
     let text=preprocess("#if __has_builtin(__builtin_ia32_pause) || __has_feature(c_atomic) || __has_attribute(vector_size)\n#error false capability\n#endif\n#if __has_include(<immintrin.h>) || __has_include(<__keel_aes.h>) || __has_include(<stdatomic.h>) || __has_include(<stdio.h>)\n#error false header\n#endif\n#if !__has_include(<stdint.h>)\n#error missing portable header\n#endif\n", "cap.c",&pp()).unwrap();
     assert!(!text.contains("#error"));
@@ -282,7 +298,12 @@ fn explicit_freestanding_search_and_override_policy() {
 fn ambient_host_paths_cannot_restore_headers() {
     const MARKER: &str = "KEEL_WASM_INCLUDE_CHILD";
     if std::env::var_os(MARKER).is_some() {
-        for name in ["ambient-only.h", "stdio.h", "Foundation/Foundation.h"] {
+        for name in [
+            "ambient-only.h",
+            "stdio.h",
+            "Foundation/Foundation.h",
+            "__keel_aes.h",
+        ] {
             assert!(
                 preprocess(&format!("#include <{name}>"), "ambient.c", &pp()).is_err(),
                 "ambient {name}"
@@ -294,6 +315,14 @@ fn ambient_host_paths_cannot_restore_headers() {
     }
     let dir = std::env::temp_dir().join(format!("keel-wasm-ambient-{}", std::process::id()));
     std::fs::create_dir_all(dir.join("usr/include")).unwrap();
+    std::fs::create_dir_all(dir.join("<keel>/include")).unwrap();
+    for name in ["stdio.h", "ambient-only.h", "__keel_aes.h"] {
+        std::fs::write(
+            dir.join("<keel>/include").join(name),
+            "#error disk fallback leaked\n",
+        )
+        .unwrap();
+    }
     std::fs::write(dir.join("ambient-only.h"), "#error leaked\n").unwrap();
     std::fs::write(dir.join("usr/include/stdio.h"), "#error leaked\n").unwrap();
     let output = Command::new(std::env::current_exe().unwrap())
@@ -303,7 +332,11 @@ fn ambient_host_paths_cannot_restore_headers() {
             "--nocapture",
         ])
         .env(MARKER, "1")
+        .current_dir(&dir)
         .env("CPATH", &dir)
+        .env("CPLUS_INCLUDE_PATH", &dir)
+        .env("OBJC_INCLUDE_PATH", &dir)
+        .env("INCLUDE", &dir)
         .env("C_INCLUDE_PATH", &dir)
         .env("SDKROOT", &dir)
         .env("MACOSX_DEPLOYMENT_TARGET", "13.0")
@@ -316,4 +349,34 @@ fn ambient_host_paths_cannot_restore_headers() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[test]
+fn raw_headers_do_not_authorize_extended_storage_or_values() {
+    for body in [
+        "static long double unused;",
+        "static va_list unused;",
+        "static int unused(void) { long double *p = 0; return 0; }",
+        "static int unused(void) { va_list *p = 0; return 0; }",
+        "static int unused(void) { struct S { va_list ap; } s; return 0; }",
+        "static int unused(void) { return (int)LDBL_EPSILON; }",
+        "static int unused(void) { va_list ap; va_end(ap); return 0; }",
+        "static int unused(void) { return __builtin_popcount(7); }",
+        "static int unused(void) { return __builtin_bswap32(7); }",
+    ] {
+        let source = format!("#include <stdarg.h>\n#include <float.h>\n{body}");
+        let text = preprocess(&source, "raw-reject.c", &pp()).unwrap();
+        assert!(
+            compile(
+                &text,
+                "raw-reject.c",
+                Options {
+                    target: WASM,
+                    debug_info: false
+                }
+            )
+            .is_err(),
+            "accepted {body}"
+        );
+    }
 }
