@@ -209,6 +209,51 @@ Add `--release` for release. Final lock records are
 `git diff --check` pass. These checks validate the revised compatibility
 boundary; the parent owns new independent review and integration.
 
+## Independent review round 2: revised system-link boundary
+
+Candidate `a72024dff849d38091ed0fdc0261130bb6fc6cb7` was reapplied onto
+`05fe6c68` in the assigned review checkout. No unresolved blocking finding was
+found under the parent's revised opaque-system contract. The earlier P1 is
+resolved by that contract revision; this review does not restore a promise of
+zero Clang spawns for explicit system links. The earlier P2 is covered by both
+opaque forwarding checks and real native ELF links with target-looking outputs.
+
+The compatibility change is intentional and bounded: put `--system` before
+Clang-only options. A standalone `--` or an unknown option in the prefix stops
+selector discovery; operands of known Keel native options do not. After selection,
+only the selected token is removed, and the legacy literal sysroot translation
+still applies everywhere in direct argv, including operands and tokens after
+`--`. Clang owns response/config/environment interpretation and may select Wasm.
+Keel-owned native Wasm requests still reject before external discovery or output.
+No broader Clang option parser or C frontend enablement is introduced.
+
+The review adds a fake-driver regression covering each native value-taking
+prefix option with selector-looking, target-looking and `--` operands, supported
+native flags/joined options, and diagnostics for Clang-only prefixes. Real ELF
+controls now also link outputs and `--`-protected inputs named `--target`,
+`-target` and both joined target spellings. Public C/profile/preprocessing/macros,
+all native codegen output APIs, artifact transport, sections, CLI routes, exact
+target identity/layout, native inventories and the host-independent Portable
+optimization control were audited and exercised by the focused suites.
+
+Fresh local Apple ARM64 validation passed **128 tests in each of debug and
+release**: IR targets/layout/sections (15), codegen rejection/selection/tuning/
+features (18), C rejection/types/broadcast/environment/contracts with `profile`
+(28), toolchain foundations (11), and CLI unit/routing/system/ELF/Mach-O controls
+(56). `check --workspace --all-targets --features keel-c/profile` passed with
+existing unrelated test-helper dead-code warnings. All compilation used
+`python3 suite/fast_opt_locked.py /tmp/<record>.jsonl
+cargo ... --offline --locked -j2`, the existing shared lock and pins,
+and default cargo cache/managed targets. Focused rustfmt and `git diff --check`
+passed. No remote execution, performance campaign or Wasm/C acceptance is claimed.
+
+Logs use `/tmp/keel-target-review2-{debug,release}-{ir,codegen,c,toolchain,cli}-20261024.log`;
+the final debug CLI log is
+`/tmp/keel-target-review2-debug-cli-final-20261024.log`. Workspace evidence is
+`/tmp/keel-target-review2-workspace-20261024.log`; lock records are
+`/tmp/keel-target-review2-{debug,validation}-20261024.jsonl`.
+Parent integration and cleanup remain separate.
+
 ## Historical independent review: original system-link guard
 
 The findings below describe the original, now superseded pre-spawn rule. P1 is

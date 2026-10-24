@@ -147,6 +147,70 @@ fn system_keeps_operands_end_of_options_and_only_removes_selector() {
 }
 
 #[test]
+fn native_prefix_consumes_operands_before_selecting_system() {
+    let driver = Driver::new();
+    // Both selector-looking and target-looking operands remain data. An
+    // operand spelled `--` must not terminate selector discovery either.
+    for option in [
+        "-o",
+        "-e",
+        "--entry",
+        "--dynamic-linker",
+        "--rpath",
+        "-rpath",
+        "--sysroot",
+        "-syslibroot",
+        "-L",
+        "-l",
+        "--require-export",
+        "--debug-map",
+        "--dsym",
+        "-mmacosx-version-min",
+        "--target",
+        "-target",
+    ] {
+        let forwarded_option = if matches!(option, "--sysroot" | "-syslibroot") {
+            "-isysroot"
+        } else {
+            option
+        };
+        for operand in ["--system", "--target=wasm32-unknown-unknown", "--"] {
+            driver.forwarded(
+                &[option, operand, "--system", "input.o"],
+                &[forwarded_option, operand, "input.o"],
+            );
+        }
+    }
+    for prefix in [
+        "--dead-strip",
+        "-dead_strip",
+        "--gc-sections",
+        "--no-gc-sections",
+        "--static",
+        "-static",
+        "-Bstatic",
+        "-Bdynamic",
+        "--sysroot=sdk",
+        "-mmacosx-version-min=11.0",
+        "-lSystem",
+        "-Llib",
+        "input.o",
+        "--target=x86_64-unknown-linux-gnu",
+        "-target=x86_64-unknown-linux-gnu",
+    ] {
+        driver.forwarded(&[prefix, "--system", "input.o"], &[prefix, "input.o"]);
+    }
+    // Unknown option arity is deliberately not guessed. Place --system first
+    // for the Clang surface, even when a later token could select it.
+    for prefix in ["-Xclang", "--config=custom.cfg", "-isysroot"] {
+        let result = driver.invoke(&[prefix, "--system", "input.o"]);
+        assert!(!result.status.success());
+        assert!(!driver.0.join("args").exists(), "{prefix}");
+        assert!(String::from_utf8_lossy(&result.stderr).contains("unsupported native"));
+    }
+}
+
+#[test]
 fn response_files_are_opaque_even_when_nested_missing_malformed_or_cyclic() {
     let driver = Driver::new();
     for (name, contents) in [
@@ -259,7 +323,13 @@ fn native_option_operands_and_double_dash_do_not_select_system_driver() {
     // pre-scan mistook for a target/selector. No external tools are available.
     let object = keel_asm::x86::assemble_object(".text\n.globl _start\n_start:\nret\n").unwrap();
     std::fs::write(driver.0.join("input.o"), &object).unwrap();
-    for output in ["--system", "--target=wasm32-unknown-unknown"] {
+    for output in [
+        "--system",
+        "--target",
+        "-target",
+        "--target=wasm32-unknown-unknown",
+        "-target=wasm32-unknown-unknown",
+    ] {
         let result = driver.invoke(&[
             "--target",
             "x86_64-unknown-linux-gnu",
