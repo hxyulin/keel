@@ -231,6 +231,7 @@ return 0; }
 
 fn native(target: Target) -> bool {
     match target {
+        keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
         Target::Aarch64AppleDarwin => cfg!(all(target_arch = "aarch64", target_os = "macos")),
         Target::Aarch64LinuxGnu => cfg!(all(target_arch = "aarch64", target_os = "linux")),
         Target::X86_64LinuxGnu => cfg!(all(target_arch = "x86_64", target_os = "linux")),
@@ -257,6 +258,7 @@ fn clang_behavior_and_bidirectional_vector_abi() {
     fs::write(dir.join("harness.c"), harness).unwrap();
     for target in Target::NATIVE {
         let triple = match target {
+            keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
             Target::Aarch64AppleDarwin => "arm64-apple-macos11",
             Target::X86_64LinuxGnu => "x86_64-unknown-linux-gnu",
             Target::Aarch64LinuxGnu => "aarch64-unknown-linux-gnu",
@@ -289,6 +291,7 @@ fn clang_behavior_and_bidirectional_vector_abi() {
                 keel_codegen::compile_program_with_pipeline(&module, target, &pipeline).unwrap();
             assert_eq!(program.stats().text_bytes, 0);
             let object = match target {
+                keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
                 Target::Aarch64AppleDarwin => {
                     keel_asm::assemble_program_object(&program, Default::default())
                 }

@@ -27,6 +27,7 @@ fn assembly(
         allocator: &allocator,
     };
     match target {
+        keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
         Target::X86_64LinuxGnu => {
             let pools = if tiny {
                 Pools {
@@ -65,6 +66,7 @@ fn extensions(output: &str, target: Target) -> usize {
     output
         .lines()
         .filter(|line| match target {
+            keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
             Target::X86_64LinuxGnu => line.trim_start().starts_with("movzx\t"),
             Target::Aarch64AppleDarwin | Target::Aarch64LinuxGnu => ["uxtb\t", "uxth\t"]
                 .iter()
@@ -259,6 +261,7 @@ fn distinct_conversion_destination_still_copies_the_value() {
         .unwrap();
         // The forced source/destination are rdi/r8 on x86 and w10/w11 on ARM.
         let copy = match target {
+            keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
             Target::X86_64LinuxGnu => "mov\tr8d, edi",
             Target::Aarch64AppleDarwin | Target::Aarch64LinuxGnu => "mov\tw11, w10",
         };

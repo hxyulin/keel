@@ -277,6 +277,7 @@ fn target_environment_matches_abi_and_queries() {
         };
         let got = preprocess("#ifndef __clang__\n#error not clang\n#endif\n__SIZEOF_POINTER__ __SIZEOF_LONG__ __has_builtin(__builtin_expect) __has_feature(c_atomic) __SIZEOF_LONG_DOUBLE__\n#if defined(__aarch64__)\narm\n#elif defined(__x86_64__)\nx86\n#else\n#error missing target architecture\n#endif\n", "test.c", &opts).unwrap();
         let expected = match target {
+            keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
             keel_ir::Target::Aarch64AppleDarwin => "8 8 1 1 8 arm",
             keel_ir::Target::X86_64LinuxGnu => "8 8 1 1 16 x86",
             keel_ir::Target::Aarch64LinuxGnu => "8 8 1 1 16 arm",

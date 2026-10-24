@@ -114,6 +114,7 @@ fn retained_actual_bridge_ir_selects_only_in_tree_modes_and_both_targets_assembl
                     )
                     .unwrap();
                     let (object, parsed) = match target {
+                        keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
                         Target::Aarch64LinuxGnu => (
                             keel_asm::assemble_elf_program_object(&program, Default::default())
                                 .unwrap(),

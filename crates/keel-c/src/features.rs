@@ -3,6 +3,10 @@
 use keel_ir::Target;
 
 pub fn query(name: &str, argument: &str, target: Target) -> u64 {
+    // No public Wasm frontend or capability profile exists at this checkpoint.
+    if target == Target::Wasm32UnknownUnknown {
+        return 0;
+    }
     let arg = argument
         .strip_prefix("__")
         .and_then(|s| s.strip_suffix("__"))

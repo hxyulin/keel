@@ -13,6 +13,11 @@ const MAGIC: &str = "KEEL-IR-UNIT 4";
 /// The version covers the envelope and IR dialect; bump it on incompatible
 /// changes. No host target is inferred when reading an artifact.
 pub fn encode(module: &Module, target: Target) -> Result<Vec<u8>, Error> {
+    if target == Target::Wasm32UnknownUnknown {
+        return Err(Error(
+            "unsupported target wasm32-unknown-unknown: IR unit transport is unavailable".into(),
+        ));
+    }
     validate(module)?;
     keel_ir::section::validate_module(module, target).map_err(Error)?;
     let ir = module.to_string();
@@ -33,6 +38,11 @@ pub fn encode(module: &Module, target: Target) -> Result<Vec<u8>, Error> {
 /// Read one complete artifact, rejecting other versions, targets, truncated
 /// payloads, trailing bytes, malformed UTF-8 and invalid modules.
 pub fn decode(bytes: &[u8], expected_target: Target) -> Result<Module, Error> {
+    if expected_target == Target::Wasm32UnknownUnknown {
+        return Err(Error(
+            "unsupported target wasm32-unknown-unknown: IR unit transport is unavailable".into(),
+        ));
+    }
     let text = std::str::from_utf8(bytes).map_err(|e| Error(e.to_string()))?;
     let (header, ir) = text
         .split_once("\n\n")

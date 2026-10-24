@@ -52,6 +52,7 @@ impl Options {
                         Some("x86_64-unknown-linux-gnu" | "x86_64-linux-gnu") => (true, false),
                         Some("aarch64-unknown-linux-gnu" | "aarch64-linux-gnu") => (false, true),
                         Some("aarch64-apple-darwin") => (false, false),
+                        Some("wasm32-unknown-unknown") => return Err("unsupported target wasm32-unknown-unknown: native assembly is unavailable".into()),
                         _ => return Err("assembler --target expects x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu or aarch64-apple-darwin".into()),
                     };
                     opts.x86 = x86;

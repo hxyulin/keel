@@ -7,6 +7,7 @@ const VM_SOURCE: &str = include_str!("programs/vm_arrays.c");
 fn object(m: &keel_ir::Module, target: Target) -> Vec<u8> {
     let program = keel_codegen::compile_program(m, target).unwrap();
     match target {
+        keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
         Target::Aarch64AppleDarwin => {
             keel_asm::assemble_program_object(&program, Default::default()).unwrap()
         }
@@ -494,6 +495,7 @@ fn parameter_scope_and_constraint_differential_clang() {
         for &source in sources {
             for target in Target::NATIVE {
                 let triple = match target {
+                    keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
                     Target::Aarch64AppleDarwin => "arm64-apple-macos11",
                     Target::Aarch64LinuxGnu => "aarch64-unknown-linux-gnu",
                     Target::X86_64LinuxGnu => "x86_64-unknown-linux-gnu",

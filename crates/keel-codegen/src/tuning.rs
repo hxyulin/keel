@@ -21,6 +21,7 @@ impl TuningCpu {
     }
 
     pub fn validate_target(self, target: Target) -> Result<(), &'static str> {
+        crate::require_native_target(target)?;
         if self == Self::AppleM5 && target != Target::Aarch64AppleDarwin {
             return Err("apple-m5 tuning requires aarch64-apple-darwin");
         }

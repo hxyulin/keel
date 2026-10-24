@@ -127,6 +127,7 @@ impl Options {
         &self,
         target: keel_opt::VectorTarget,
     ) -> Result<keel_opt::OptimizationContext, String> {
+        self.reject_unavailable_target()?;
         // Target-free `opt` also works on hosts with no code generation target.
         // Its legacy Portable policy needs neither host resolution nor features.
         if target == keel_opt::VectorTarget::Portable
@@ -207,11 +208,19 @@ impl Options {
                 keel_opt::VectorTarget::Aarch64Neon
             }
             Some(Target::X86_64LinuxGnu) => keel_opt::VectorTarget::X86Sse2,
-            None => keel_opt::VectorTarget::Portable,
+            Some(Target::Wasm32UnknownUnknown) | None => keel_opt::VectorTarget::Portable,
         }
     }
 
+    fn reject_unavailable_target(&self) -> Result<(), String> {
+        if self.target == Some(Target::Wasm32UnknownUnknown) {
+            return Err("unsupported target wasm32-unknown-unknown: public C, optimization and native output pipelines are unavailable".into());
+        }
+        Ok(())
+    }
+
     fn target(&self) -> Result<Target, String> {
+        self.reject_unavailable_target()?;
         let target = self.target.or_else(Target::host).ok_or_else(|| {
             "keel does not run on this machine's target; pass `--target`".to_string()
         })?;
@@ -475,6 +484,7 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             _ => return Err(format!("unexpected argument `{arg}`\n{USAGE}")),
         }
     }
+    opts.reject_unavailable_target()?;
     // Explicit selectors override the convenience preset regardless of order.
     // IR tier changes and explicit pipelines do not reset selection.
     if optimize_preset && !explicit_selection {
@@ -803,15 +813,26 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
         let mut aarch64 = keel_asm::ProgramAssembler::new(keel_asm::TargetFeatures::default());
         let mut x86 = keel_asm::x86::ProgramAssembler::new(opts.x86_features);
         let mut arm_elf = keel_asm::ElfProgramAssembler::new(keel_asm::TargetFeatures::default());
-        let mut sink = |program| match target {
-            Target::Aarch64LinuxGnu => arm_elf.push(program),
-            Target::Aarch64AppleDarwin => aarch64.push(program),
-            Target::X86_64LinuxGnu => x86.push(program),
+        let mut arm_elf_sink = |program| arm_elf.push(program);
+        let mut aarch64_sink = |program| aarch64.push(program);
+        let mut x86_sink = |program| x86.push(program);
+        let sink: &mut dyn FnMut(_) = match target {
+            Target::Wasm32UnknownUnknown => return Err(
+                "unsupported target wasm32-unknown-unknown: native object emission is unavailable"
+                    .into(),
+            ),
+            Target::Aarch64LinuxGnu => &mut arm_elf_sink,
+            Target::Aarch64AppleDarwin => &mut aarch64_sink,
+            Target::X86_64LinuxGnu => &mut x86_sink,
         };
-        keel_codegen::compile_program_chunks_with_pipeline(&module, target, &pipeline, &mut sink)
+        keel_codegen::compile_program_chunks_with_pipeline(&module, target, &pipeline, sink)
             .map_err(|e| e.to_string())?;
         drop(module);
         let object = match target {
+            Target::Wasm32UnknownUnknown => return Err(
+                "unsupported target wasm32-unknown-unknown: native object emission is unavailable"
+                    .into(),
+            ),
             Target::Aarch64LinuxGnu => arm_elf.finish(),
             Target::Aarch64AppleDarwin => aarch64.finish(),
             Target::X86_64LinuxGnu => x86.finish(),

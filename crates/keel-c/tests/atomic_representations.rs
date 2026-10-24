@@ -197,6 +197,7 @@ fn clang_syntax(source: &str, target: Target, accepted: bool) {
         process::{Command, Stdio},
     };
     let triple = match target {
+        keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
         Target::Aarch64AppleDarwin => "arm64-apple-macos11",
         Target::Aarch64LinuxGnu => "aarch64-unknown-linux-gnu",
         Target::X86_64LinuxGnu => "x86_64-unknown-linux-gnu",

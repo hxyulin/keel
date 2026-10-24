@@ -3,10 +3,12 @@ use keel_ir::{Target, parse, section::validate_module, verify_module};
 fn placement_metadata_roundtrips_and_invalid_storage_diagnoses() {
     for target in Target::NATIVE {
         let section = match target {
+            keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
             Target::X86_64LinuxGnu | Target::Aarch64LinuxGnu => ".custom",
             Target::Aarch64AppleDarwin => "__DATA,__custom",
         };
         let code = match target {
+            keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
             Target::X86_64LinuxGnu | Target::Aarch64LinuxGnu => ".custom_code",
             Target::Aarch64AppleDarwin => "__TEXT,__custom",
         };

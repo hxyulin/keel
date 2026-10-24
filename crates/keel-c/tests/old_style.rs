@@ -32,6 +32,7 @@ const INTEROP_CASES: [(&str, &str); 6] = [
 fn object(m: &keel_ir::Module, target: Target) -> Vec<u8> {
     let p = keel_codegen::compile_program(m, target).unwrap();
     match target {
+        keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
         Target::Aarch64AppleDarwin => {
             keel_asm::assemble_program_object(&p, Default::default()).unwrap()
         }
@@ -43,6 +44,7 @@ fn object(m: &keel_ir::Module, target: Target) -> Vec<u8> {
 }
 fn clang_syntax(source: &str, target: Target) -> std::process::Output {
     let triple = match target {
+        keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
         Target::Aarch64AppleDarwin => "arm64-apple-macos11",
         Target::Aarch64LinuxGnu => "aarch64-unknown-linux-gnu",
         Target::X86_64LinuxGnu => "x86_64-unknown-linux-gnu",

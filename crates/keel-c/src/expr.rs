@@ -1861,7 +1861,7 @@ impl<'a> Parser<'a> {
                     "va_start" => {
                         self.expect(",")?;
                         self.assign()?;
-                        let ap = self.va_list_addr(ap);
+                        let ap = self.va_list_addr(ap)?;
                         mk(ExprKind::VaStart(self.node(ap)), Ty::Void, loc)
                     }
                     "va_arg" => {
@@ -1873,7 +1873,7 @@ impl<'a> Parser<'a> {
                         if !ty.is_scalar() {
                             return Err(Error::new(loc, "`va_arg` of a non-scalar"));
                         }
-                        let ap = self.va_list_addr(ap);
+                        let ap = self.va_list_addr(ap)?;
                         mk(ExprKind::VaArg(self.node(ap)), ty, loc)
                     }
                     // SysV's va_list is an array, so copying is copying the
@@ -1881,12 +1881,12 @@ impl<'a> Parser<'a> {
                     "va_copy" if self.target == Target::X86_64LinuxGnu => {
                         self.expect(",")?;
                         let src = self.assign()?;
-                        let [dst, src] = [ap, src].map(|e| {
-                            let p = self.va_list_addr(e);
+                        let [dst, src] = [ap, src].map(|e| -> R<_> {
+                            let p = self.va_list_addr(e)?;
                             let ty = p.ty.pointee().cloned().expect("a pointer");
-                            mk(ExprKind::Deref(self.node(p)), ty, loc)
+                            Ok(mk(ExprKind::Deref(self.node(p)), ty, loc))
                         });
-                        self.assignment("=", dst, src, loc)?
+                        self.assignment("=", dst?, src?, loc)?
                     }
                     "va_copy" => {
                         self.expect(",")?;
@@ -2830,8 +2830,14 @@ impl<'a> Parser<'a> {
     /// and `va_arg` work on. Apple's `va_list` is a pointer variable, whose
     /// address it is; SysV's is an array, which decays to its own address,
     /// and a `va_list` parameter already holds that.
-    fn va_list_addr(&mut self, ap: Expr<'a>) -> Expr<'a> {
-        match self.target {
+    fn va_list_addr(&mut self, ap: Expr<'a>) -> R<Expr<'a>> {
+        Ok(match self.target {
+            Target::Wasm32UnknownUnknown => {
+                return Err(Error::new(
+                    ap.loc,
+                    "unsupported target wasm32-unknown-unknown: va_list is unavailable",
+                ));
+            }
             Target::Aarch64AppleDarwin | Target::Aarch64LinuxGnu => {
                 self.mark_address_taken(&ap);
                 let ty = self.ptr_type(ap.ty);
@@ -2839,7 +2845,7 @@ impl<'a> Parser<'a> {
                 mk(ExprKind::Addr(self.node(ap)), ty, loc)
             }
             Target::X86_64LinuxGnu => self.rvalue(ap),
-        }
+        })
     }
 
     /// An integer constant that is a whole initializer for an object of

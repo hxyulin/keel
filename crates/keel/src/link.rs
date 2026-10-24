@@ -2,6 +2,20 @@ use crate::input::Source;
 use std::path::{Path, PathBuf};
 
 pub fn run(args: &[String]) -> Result<(), String> {
+    let mut target_args = args.iter().take_while(|a| *a != "--");
+    while let Some(arg) = target_args.next() {
+        let target = if arg == "--target" || arg == "-target" {
+            target_args.next().map(String::as_str)
+        } else {
+            arg.strip_prefix("--target=")
+                .or_else(|| arg.strip_prefix("-target="))
+        };
+        if target == Some("wasm32-unknown-unknown") {
+            return Err(
+                "unsupported target wasm32-unknown-unknown: native linking is unavailable".into(),
+            );
+        }
+    }
     // An explicit fallback preserves the system driver's full argument surface.
     // It is selected before native parsing; native failures never trigger it.
     if args

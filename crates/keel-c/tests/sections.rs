@@ -20,6 +20,7 @@ fn object(m: &Module, target: Target, text: bool) -> Vec<u8> {
     if text {
         let asm = keel_codegen::compile(m, target).unwrap();
         match target {
+            keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
             Target::Aarch64AppleDarwin => keel_asm::assemble_object(&asm).unwrap(),
             Target::Aarch64LinuxGnu => keel_asm::assemble_elf_object(&asm).unwrap(),
             Target::X86_64LinuxGnu => keel_asm::x86::assemble_object(&asm).unwrap(),
@@ -27,6 +28,7 @@ fn object(m: &Module, target: Target, text: bool) -> Vec<u8> {
     } else {
         let p = keel_codegen::compile_program(m, target).unwrap();
         match target {
+            keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
             Target::Aarch64AppleDarwin => {
                 keel_asm::assemble_program_object(&p, Default::default()).unwrap()
             }
@@ -39,6 +41,7 @@ fn object(m: &Module, target: Target, text: bool) -> Vec<u8> {
 }
 fn names(target: Target) -> [&'static str; 4] {
     match target {
+        keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
         Target::Aarch64AppleDarwin => [
             "__TEXT,__custom_code",
             "__DATA,__custom_data",
@@ -164,6 +167,7 @@ fn placement_and_retention_diagnose_before_pruning() {
             );
         }
         let bad_names: &[&str] = match target {
+            keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
             Target::X86_64LinuxGnu | Target::Aarch64LinuxGnu => &[
                 ".init_array",
                 ".hash",
@@ -757,6 +761,7 @@ int main(void) {return kept();}
 // does not insert a hole that a C array iterator could mistake for a record.
 fn registration_sources(target: Target) -> [String; 3] {
     let (section, code, alias) = match target {
+        keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
         Target::X86_64LinuxGnu | Target::Aarch64LinuxGnu => {
             ("registry", "plugin_code", "plugin_one")
         }
@@ -787,6 +792,7 @@ static void uncalled(void) {{
 "#
     );
     let bounds = match target {
+        keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
         Target::X86_64LinuxGnu | Target::Aarch64LinuxGnu => {
             r#"
 extern struct Entry __start_registry[], __stop_registry[];
@@ -1057,6 +1063,7 @@ fn elf_c_registration_contributions_reject_incompatible_cross_tu_storage() {
 
 fn tls_source(target: Target) -> String {
     let (data, zero) = match target {
+        keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
         Target::X86_64LinuxGnu | Target::Aarch64LinuxGnu => (".custom_tls", ".custom_tls_zero"),
         Target::Aarch64AppleDarwin => ("__DATA,__custom_tls", "__DATA,__custom_tzero"),
     };
@@ -1151,6 +1158,7 @@ fn tls_template_sections_identity_alignment_retention_and_roundtrip() {
 fn tls_placement_and_redeclarations_diagnose_before_pruning() {
     for target in Target::NATIVE {
         let invalid = match target {
+            keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
             Target::X86_64LinuxGnu | Target::Aarch64LinuxGnu => vec![
                 ".text",
                 ".data",
@@ -1247,6 +1255,7 @@ fn tls_placement_and_redeclarations_diagnose_before_pruning() {
 fn qualified_tls_keeps_template_storage_with_late_attributes() {
     for target in Target::NATIVE {
         let (data, zero) = match target {
+            keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
             Target::X86_64LinuxGnu | Target::Aarch64LinuxGnu => {
                 (".tdata.qualified", ".tbss.qualified")
             }

@@ -34,6 +34,7 @@ fn affinity_objects_match_text_on_both_targets() {
                     keel_codegen::compile_program_with_pipeline(&module, target, &pipeline)
                         .unwrap();
                 let (typed, parsed) = match target {
+                    keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
                     Target::Aarch64AppleDarwin => (
                         keel_asm::assemble_program_object(&program, Default::default()).unwrap(),
                         keel_asm::assemble_object(&text).unwrap(),

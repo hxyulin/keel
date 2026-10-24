@@ -612,6 +612,7 @@ fn debugtrap_preserves_continuation_on_both_targets() {
             assert!(text.contains("return "), "{text}");
             let asm = keel_codegen::compile(&module, target).unwrap();
             let breakpoint = match target {
+                keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
                 keel_ir::Target::Aarch64AppleDarwin | keel_ir::Target::Aarch64LinuxGnu => {
                     "brk\t#61440"
                 }

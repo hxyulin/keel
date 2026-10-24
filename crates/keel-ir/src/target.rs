@@ -1,8 +1,8 @@
-//! The machines keel generates code for. The IR itself is the same for
-//! every target; frontends need the target for the C types the ABI fixes
-//! (`va_list`, symbol names), and code generation picks a backend by it.
+//! Recognized compilation targets. Recognition and storage layout do not imply
+//! an available frontend or backend. Native frontends use the target for ABI
+//! types and names; code generation explicitly rejects unavailable targets.
 
-/// A machine and operating system to generate code for.
+/// A recognized machine/environment, including gated compilation targets.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Target {
     /// arm64 macOS: Apple's variant of AAPCS64, Mach-O.
@@ -11,17 +11,25 @@ pub enum Target {
     X86_64LinuxGnu,
     /// AArch64 Linux: base AAPCS64, ELF.
     Aarch64LinuxGnu,
+    /// Recognized freestanding wasm32 target; public compilation is not enabled.
+    Wasm32UnknownUnknown,
 }
 
 impl Target {
-    pub const ALL: [Target; 3] = [
+    /// All recognized targets, including targets with unavailable public pipelines.
+    pub const ALL: [Target; 4] = [
+        Target::Aarch64AppleDarwin,
+        Target::X86_64LinuxGnu,
+        Target::Aarch64LinuxGnu,
+        Target::Wasm32UnknownUnknown,
+    ];
+
+    /// Targets supported by the native code generators and native C frontend.
+    pub const NATIVE: [Target; 3] = [
         Target::Aarch64AppleDarwin,
         Target::X86_64LinuxGnu,
         Target::Aarch64LinuxGnu,
     ];
-
-    /// Targets supported by the native code generators and native C frontend.
-    pub const NATIVE: [Target; 3] = Self::ALL;
 
     /// The machine this program runs on, if keel supports it.
     pub fn host() -> Option<Target> {
@@ -42,6 +50,17 @@ impl Target {
             Target::Aarch64AppleDarwin => "aarch64-apple-darwin",
             Target::X86_64LinuxGnu => "x86_64-unknown-linux-gnu",
             Target::Aarch64LinuxGnu => "aarch64-unknown-linux-gnu",
+            Target::Wasm32UnknownUnknown => "wasm32-unknown-unknown",
+        }
+    }
+
+    /// Memory storage layout only; this does not select a frontend or call ABI.
+    pub const fn data_layout(self) -> crate::DataLayout {
+        match self {
+            Self::Wasm32UnknownUnknown => crate::DataLayout::WASM32,
+            Self::Aarch64AppleDarwin | Self::X86_64LinuxGnu | Self::Aarch64LinuxGnu => {
+                crate::DataLayout::NATIVE64
+            }
         }
     }
 

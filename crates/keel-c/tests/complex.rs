@@ -324,6 +324,7 @@ fn sources() -> (String, String) {
 }
 fn native(target: Target) -> bool {
     match target {
+        keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
         Target::Aarch64AppleDarwin => cfg!(all(target_arch = "aarch64", target_os = "macos")),
         Target::Aarch64LinuxGnu => cfg!(all(target_arch = "aarch64", target_os = "linux")),
         Target::X86_64LinuxGnu => cfg!(all(target_arch = "x86_64", target_os = "linux")),
@@ -351,6 +352,7 @@ fn clang_differential_and_bidirectional_abi() {
     fs::write(dir.join("harness.c"), harness).unwrap();
     for target in Target::NATIVE {
         let triple = match target {
+            keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
             Target::Aarch64AppleDarwin => "arm64-apple-macos11",
             Target::Aarch64LinuxGnu => "aarch64-unknown-linux-gnu",
             Target::X86_64LinuxGnu => "x86_64-unknown-linux-gnu",
@@ -383,6 +385,7 @@ fn clang_differential_and_bidirectional_abi() {
             let program =
                 keel_codegen::compile_program_with_pipeline(&module, target, &pipeline).unwrap();
             let object = match target {
+                keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
                 Target::Aarch64AppleDarwin => {
                     keel_asm::assemble_program_object(&program, Default::default())
                 }
@@ -571,6 +574,7 @@ fn complex_abi_register_probes_match_clang() {
     fs::create_dir_all(&dir).unwrap();
     for target in Target::NATIVE {
         let triple = match target {
+            keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
             Target::Aarch64AppleDarwin => "arm64-apple-macos11",
             Target::Aarch64LinuxGnu => "aarch64-unknown-linux-gnu",
             Target::X86_64LinuxGnu => "x86_64-unknown-linux-gnu",
@@ -688,6 +692,7 @@ fn component_lvalue_alignment_matches_clang() {
     fs::write(dir.join("alignment.c"), source).unwrap();
     for target in Target::NATIVE {
         let triple = match target {
+            keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
             Target::Aarch64AppleDarwin => "arm64-apple-macos11",
             Target::Aarch64LinuxGnu => "aarch64-unknown-linux-gnu",
             Target::X86_64LinuxGnu => "x86_64-unknown-linux-gnu",
@@ -922,6 +927,7 @@ fn raw_platform_complex_header() {
             )
             .unwrap();
             let object = match target {
+                keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
                 Target::Aarch64AppleDarwin => {
                     keel_asm::assemble_program_object(&program, Default::default())
                 }

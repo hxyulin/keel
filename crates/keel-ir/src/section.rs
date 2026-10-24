@@ -76,6 +76,11 @@ impl SectionName {
         use Placement::*;
         let name = self.as_str();
         match target {
+            crate::Target::Wasm32UnknownUnknown => {
+                return Err(
+                    "unsupported target wasm32-unknown-unknown: native sections are unavailable",
+                );
+            }
             crate::Target::X86_64LinuxGnu | crate::Target::Aarch64LinuxGnu => {
                 if name.contains(".keel.retain.") {
                     return Err("compiler retain section namespace is reserved");
@@ -234,6 +239,12 @@ impl SectionName {
 
 /// Validates the full emitted module, shared by both native backend paths.
 pub fn validate_module(module: &crate::Module, target: crate::Target) -> Result<(), String> {
+    if target == crate::Target::Wasm32UnknownUnknown {
+        return Err(
+            "unsupported target wasm32-unknown-unknown: native module sections are unavailable"
+                .into(),
+        );
+    }
     let mut seen = std::collections::BTreeMap::new();
     let mut check =
         |name: &str, section: Option<SectionName>, placement: Placement, retain: bool| {

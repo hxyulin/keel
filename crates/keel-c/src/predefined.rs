@@ -9,6 +9,11 @@ pub fn predefined_macros(
     target: Target,
     darwin_deployment: Option<&str>,
 ) -> Result<String, String> {
+    if target == Target::Wasm32UnknownUnknown {
+        return Err(
+            "unsupported target wasm32-unknown-unknown: predefined C macros are unavailable".into(),
+        );
+    }
     let apple = target == Target::Aarch64AppleDarwin;
     let arm_linux = target == Target::Aarch64LinuxGnu;
     if !apple && darwin_deployment.is_some() {

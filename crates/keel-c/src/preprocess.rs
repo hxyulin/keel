@@ -105,6 +105,15 @@ fn preprocess_inner<const TRACK: bool>(
     path: &str,
     options: &PreprocessOptions,
 ) -> Result<(String, PreprocessStats), Diagnostic> {
+    if options.target == keel_ir::Target::Wasm32UnknownUnknown {
+        return Err(Diagnostic {
+            file: path.into(),
+            line: 1,
+            col: 1,
+            message: "unsupported target wasm32-unknown-unknown: C preprocessing is unavailable"
+                .into(),
+        });
+    }
     let arena = Bump::new();
     let sources = typed_arena::Arena::new();
     let token_buffers = typed_arena::Arena::new();

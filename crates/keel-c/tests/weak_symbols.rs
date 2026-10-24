@@ -30,6 +30,7 @@ fn object(src: &str, target: Target, text: bool) -> Vec<u8> {
     if text {
         let asm = keel_codegen::compile(&m, target).unwrap();
         match target {
+            keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
             Target::Aarch64AppleDarwin => keel_asm::assemble_object(&asm).unwrap(),
             Target::Aarch64LinuxGnu => keel_asm::assemble_elf_object(&asm).unwrap(),
             Target::X86_64LinuxGnu => keel_asm::x86::assemble_object(&asm).unwrap(),
@@ -37,6 +38,7 @@ fn object(src: &str, target: Target, text: bool) -> Vec<u8> {
     } else {
         let p = keel_codegen::compile_program(&m, target).unwrap();
         match target {
+            keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
             Target::Aarch64AppleDarwin => {
                 keel_asm::assemble_program_object(&p, Default::default()).unwrap()
             }
@@ -568,6 +570,7 @@ int function(void) { return 1; }
     fs::write(dir.join("truth.c"), src).unwrap();
     for target in Target::NATIVE {
         let triple = match target {
+            keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
             Target::Aarch64AppleDarwin => "arm64-apple-macos11",
             Target::Aarch64LinuxGnu => "aarch64-unknown-linux-gnu",
             Target::X86_64LinuxGnu => "x86_64-unknown-linux-gnu",

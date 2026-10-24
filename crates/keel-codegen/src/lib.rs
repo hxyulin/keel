@@ -38,6 +38,15 @@ use regalloc::Loc;
 use keel_ir::Module;
 pub use keel_ir::Target;
 
+pub(crate) fn require_native_target(target: Target) -> Result<(), &'static str> {
+    if target == Target::Wasm32UnknownUnknown {
+        return Err(
+            "unsupported target wasm32-unknown-unknown: native code generation is unavailable",
+        );
+    }
+    Ok(())
+}
+
 /// Optional target instruction-selection passes. They preserve IR semantics,
 /// but may trade instruction count against register pressure and scheduling.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -87,6 +96,10 @@ pub struct CodegenPipeline<'a> {
 
 impl CodegenPipeline<'_> {
     pub(crate) fn validate_target(&self, target: Target) -> Result<(), CodegenError> {
+        require_native_target(target).map_err(|message| CodegenError {
+            func: "<target>".into(),
+            message: message.into(),
+        })?;
         self.selector
             .validate_target(target)
             .map_err(|message| CodegenError {
@@ -111,8 +124,8 @@ pub trait InstructionSelector {
     fn x86_features(&self) -> keel_asm_ir::x86::Features {
         keel_asm_ir::x86::Features::default()
     }
-    fn validate_target(&self, _target: Target) -> Result<(), &'static str> {
-        Ok(())
+    fn validate_target(&self, target: Target) -> Result<(), &'static str> {
+        require_native_target(target)
     }
     fn name(&self) -> &'static str;
     fn select(
@@ -149,6 +162,7 @@ impl InstructionSelector for ExperimentalDispatchTails<'_> {
         self.0.x86_features()
     }
     fn validate_target(&self, target: Target) -> Result<(), &'static str> {
+        require_native_target(target)?;
         self.0.validate_target(target)
     }
     fn name(&self) -> &'static str {
@@ -324,6 +338,12 @@ pub fn compile_with_pipeline(
 ) -> Result<String, CodegenError> {
     profiling::scope!("codegen", target.triple());
     match target {
+        Target::Wasm32UnknownUnknown => Err(CodegenError {
+            func: "<target>".into(),
+            message:
+                "unsupported target wasm32-unknown-unknown: native code generation is unavailable"
+                    .into(),
+        }),
         Target::Aarch64LinuxGnu => aarch64::compile_linux(module, pipeline),
         Target::Aarch64AppleDarwin => {
             aarch64::compile_with_pipeline(module, &aarch64::REGISTERS, pipeline)
@@ -357,6 +377,12 @@ pub fn compile_program_with_pipeline(
     pipeline: &CodegenPipeline<'_>,
 ) -> Result<keel_asm_ir::Program, CodegenError> {
     match target {
+        Target::Wasm32UnknownUnknown => Err(CodegenError {
+            func: "<target>".into(),
+            message:
+                "unsupported target wasm32-unknown-unknown: native code generation is unavailable"
+                    .into(),
+        }),
         Target::Aarch64LinuxGnu => aarch64::compile_linux_program(module, pipeline, None),
         Target::Aarch64AppleDarwin => {
             aarch64::compile_program_with_pipeline(module, &aarch64::REGISTERS, pipeline)
@@ -377,6 +403,12 @@ pub fn compile_program_chunks_with_pipeline(
     sink: &mut dyn FnMut(keel_asm_ir::Program),
 ) -> Result<(), CodegenError> {
     match target {
+        Target::Wasm32UnknownUnknown => Err(CodegenError {
+            func: "<target>".into(),
+            message:
+                "unsupported target wasm32-unknown-unknown: native code generation is unavailable"
+                    .into(),
+        }),
         Target::Aarch64LinuxGnu => {
             let p = aarch64::compile_linux_program(module, pipeline, Some(&mut *sink))?;
             sink(p);

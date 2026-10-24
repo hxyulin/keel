@@ -27,6 +27,7 @@ fn sparse_escaping_slots_assemble_on_both_targets() {
                 )
                 .unwrap();
                 let object = match target {
+                    keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
                     Target::Aarch64AppleDarwin => keel_asm::assemble_object(&asm).unwrap(),
                     Target::Aarch64LinuxGnu => keel_asm::assemble_elf_object(&asm).unwrap(),
                     Target::X86_64LinuxGnu => keel_asm::x86::assemble_object(&asm).unwrap(),

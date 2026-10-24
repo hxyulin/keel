@@ -18,6 +18,7 @@ pub fn compile(
     path: &str,
     opts: Options,
 ) -> Result<(keel_ir::Module, Timings), Diagnostic> {
+    crate::require_public_target(opts.target, path)?;
     let arena = bumpalo::Bump::new();
     let text = crate::strings::Strings::new(&arena);
     let diagnostic = |files: &[&str], e: crate::Error| Diagnostic {

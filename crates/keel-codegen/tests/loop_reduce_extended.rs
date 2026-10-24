@@ -58,6 +58,7 @@ fn extended_reductions_compile_to_both_target_objects() {
                     std::fs::write(evidence.join(format!("{name}.s")), &text).unwrap();
                     std::fs::write(evidence.join(format!("{name}.keel")), m.to_string()).unwrap();
                     match target {
+                        keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
                         Target::Aarch64AppleDarwin | Target::Aarch64LinuxGnu => {
                             assert!(text.contains(".2d"), "{text}");
                             assert_eq!(

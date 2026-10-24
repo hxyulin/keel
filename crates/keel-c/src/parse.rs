@@ -2182,6 +2182,12 @@ impl<'a> Parser<'a> {
                         }
                     },
                     Target::X86_64LinuxGnu | Target::Aarch64LinuxGnu => &text,
+                    Target::Wasm32UnknownUnknown => {
+                        return Err(Error::new(
+                            self.loc(),
+                            "unsupported target wasm32-unknown-unknown: asm labels are unavailable",
+                        ));
+                    }
                 };
                 label = Some(self.text.intern(name));
             } else if !self.attributes(attrs)? {
@@ -2717,6 +2723,12 @@ impl<'a> Parser<'a> {
             c if c == LONG + DOUBLE => {
                 self.require_native_layout(loc, "long double declarations")?;
                 match self.target {
+                    Target::Wasm32UnknownUnknown => {
+                        return Err(Error::new(
+                            loc,
+                            "unsupported target wasm32-unknown-unknown: long double declarations are unavailable",
+                        ));
+                    }
                     Target::Aarch64AppleDarwin => Ty::Double,
                     Target::X86_64LinuxGnu | Target::Aarch64LinuxGnu => Ty::Opaque(&OpaqueTy {
                         name: "long double",

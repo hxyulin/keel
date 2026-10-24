@@ -112,6 +112,7 @@ pub struct Options {
 
 /// Compiles preprocessed C source, read from `path`, to a keel module.
 pub fn compile(src: &str, path: &str, opts: Options) -> Result<keel_ir::Module, Diagnostic> {
+    require_public_target(opts.target, path)?;
     let arena = bumpalo::Bump::new();
     let text = crate::strings::Strings::new(&arena);
     let diagnostic = |files: &[&str], e: Error| Diagnostic {
@@ -131,4 +132,18 @@ pub fn compile(src: &str, path: &str, opts: Options) -> Result<keel_ir::Module, 
     irgen::Gen::new(&parser, funcs, &files, opts.debug_info)
         .run()
         .map_err(|e| diagnostic(&files, e))
+}
+
+/// Reject before parsing/lexing: no public Wasm C profile exists yet.
+fn require_public_target(target: keel_ir::Target, path: &str) -> Result<(), Diagnostic> {
+    if target == keel_ir::Target::Wasm32UnknownUnknown {
+        return Err(Diagnostic {
+            file: path.into(),
+            line: 1,
+            col: 1,
+            message: "unsupported target wasm32-unknown-unknown: public C frontend is unavailable"
+                .into(),
+        });
+    }
+    Ok(())
 }

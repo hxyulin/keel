@@ -19,6 +19,7 @@ fn object(m: &Module, target: Target, assembly: bool) -> Vec<u8> {
     if assembly {
         let asm = keel_codegen::compile(m, target).unwrap();
         match target {
+            keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
             Target::Aarch64AppleDarwin => keel_asm::assemble_object(&asm).unwrap(),
             Target::Aarch64LinuxGnu => keel_asm::assemble_elf_object(&asm).unwrap(),
             Target::X86_64LinuxGnu => keel_asm::x86::assemble_object(&asm).unwrap(),
@@ -26,6 +27,7 @@ fn object(m: &Module, target: Target, assembly: bool) -> Vec<u8> {
     } else {
         let p = keel_codegen::compile_program(m, target).unwrap();
         match target {
+            keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
             Target::Aarch64AppleDarwin => {
                 keel_asm::assemble_program_object(&p, Default::default()).unwrap()
             }

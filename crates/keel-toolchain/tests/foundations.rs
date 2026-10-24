@@ -140,6 +140,7 @@ fn native_callback_runtime_stops_before_invalid_access() {
     let arm = keel_codegen::aarch64::compile(&module).unwrap();
     let x86 = keel_codegen::x86_64::compile(&module).unwrap();
     let asm = match target {
+        keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
         Target::Aarch64AppleDarwin | Target::Aarch64LinuxGnu => arm,
         Target::X86_64LinuxGnu => x86,
     };
@@ -312,5 +313,28 @@ fn tls_sections_retain_artifact_roundtrip_and_target_validation() {
             ir.len()
         );
         assert!(artifact::decode(envelope.as_bytes(), target).is_err());
+    }
+}
+
+#[test]
+fn wasm_ir_unit_transport_is_unavailable_even_for_empty_modules() {
+    let target = Target::Wasm32UnknownUnknown;
+    let module = keel_ir::parse("").unwrap();
+    let error = artifact::encode(&module, target).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("unsupported target wasm32-unknown-unknown")
+    );
+    for bytes in [
+        &[][..],
+        &b"KEEL-IR-UNIT 4\ntarget wasm32-unknown-unknown\nbytes 0\n\n"[..],
+    ] {
+        let error = artifact::decode(bytes, target).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported target wasm32-unknown-unknown")
+        );
     }
 }

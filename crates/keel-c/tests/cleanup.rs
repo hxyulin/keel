@@ -5,6 +5,7 @@ const SOURCE: &str = include_str!("fixtures/cleanup.c");
 fn object(m: &keel_ir::Module, target: Target) -> Vec<u8> {
     let program = keel_codegen::compile_program(m, target).unwrap();
     match target {
+        keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
         Target::Aarch64AppleDarwin => {
             keel_asm::assemble_program_object(&program, Default::default()).unwrap()
         }

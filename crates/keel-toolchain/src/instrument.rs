@@ -52,7 +52,7 @@ fn accesses(function: &Function) -> Result<Vec<Access>, Error> {
     for block in function.blocks() {
         for &at in function.block_insts(block) {
             let mut fixed = |address, ty: Type, flags| -> Result<(), Error> {
-                // All current Keel targets use eight-byte pointers. Target
+                // The native targets use eight-byte pointers. Target
                 // expansion must revisit this together with data::PTR_BYTES.
                 let bytes = ty.bytes().unwrap_or(keel_ir::data::PTR_BYTES as u32);
                 result.push(Access {

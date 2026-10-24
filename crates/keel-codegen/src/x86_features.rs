@@ -14,6 +14,7 @@ impl InstructionSelector for FeatureSelector<'_> {
         self.features
     }
     fn validate_target(&self, target: Target) -> Result<(), &'static str> {
+        crate::require_native_target(target)?;
         self.inner.validate_target(target)?;
         self.features.validate()?;
         if !self.features.is_empty() && target != Target::X86_64LinuxGnu {
@@ -49,6 +50,7 @@ pub fn vector_capabilities(
     target: Target,
     selector: &dyn InstructionSelector,
 ) -> Result<keel_ir::VectorCapabilities, &'static str> {
+    crate::require_native_target(target)?;
     selector.validate_target(target)?;
     if target != Target::X86_64LinuxGnu {
         return Ok(keel_ir::VectorCapabilities::BASELINE);

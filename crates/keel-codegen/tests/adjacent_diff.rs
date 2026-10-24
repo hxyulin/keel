@@ -26,6 +26,7 @@ fn compile(
         float_callee_saved: &[],
     };
     let (text, program) = match target {
+        keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
         Target::Aarch64AppleDarwin | Target::Aarch64LinuxGnu => {
             let pools = if spills {
                 &arm
@@ -61,6 +62,7 @@ fn compile(
     };
     if spills {
         match target {
+            keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
             Target::Aarch64AppleDarwin | Target::Aarch64LinuxGnu => assert!(
                 text.lines()
                     .any(|l| l.contains("str\tq") && (l.contains("[sp") || l.contains("[x29"))),
@@ -179,6 +181,9 @@ fn simd_objects_on_both_targets_with_both_allocators_and_selectors() {
                         };
                         let (text, program) = compile(&m, target, &pipeline, spills);
                         let obj = match target {
+                            keel_ir::Target::Wasm32UnknownUnknown => {
+                                panic!("native-only test target")
+                            }
                             Target::Aarch64AppleDarwin | Target::Aarch64LinuxGnu => {
                                 assert!(text.contains(".2d"), "{text}");
                                 if !spills {

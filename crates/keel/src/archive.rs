@@ -28,6 +28,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
                             Target::Aarch64LinuxGnu
                         }
                         "aarch64-apple-darwin" => Target::Aarch64AppleDarwin,
+                        "wasm32-unknown-unknown" => return Err("unsupported target wasm32-unknown-unknown: native archives are unavailable".into()),
                         other => return Err(format!("unsupported archive target `{other}`")),
                     },
                 )
