@@ -33,7 +33,8 @@ Emission first calls `keel_ir::verify_module`, then preflights the entire module
 including unexported functions, unused callee-table entries, declarations and
 indirect signature tables. Encoding starts only after preflight succeeds.
 `wasmparser::Validator` independently validates the finished bytes before return;
-errors return no partial binary. The caller owns any eventual file publication.
+validation explicitly selects WebAssembly 1.0 rather than evolving proposal
+defaults. Errors return no partial binary. The caller owns any eventual file publication.
 A declaration without a definition is rejected even when unused; the existing IR
 verifier rejects duplicate declaration/definition names. Direct callee-table
 entries must name a definition with an exactly matching supported signature.
@@ -108,10 +109,17 @@ component, SIMD, serde and hash-table features. The only new registry packages
 are these two crates, `leb128fmt` and `bitflags`; existing package versions remain
 unchanged. The encoder produces core instructions only. Binary validation is a
 separate parser/validator, not byte snapshot comparison.
+Both pinned Wasm crates declare Rust 1.82 as their minimum; this is below the
+workspace's edition-2024 minimum of Rust 1.85. Existing locked `indexmap` also
+requires 1.85. No workspace Rust pin or dependency version was changed.
 
 `crates/keel-wasm/tests/scalar.rs` requires an existing `node` on PATH and fails
 if it is unavailable. Accepted fixtures pass wasmparser validation and Node's
 independent `WebAssembly.validate`, V8 compilation, instantiation and execution.
+This explicit external-tool requirement follows the existing C ABI tests that
+require Clang; it adds Node to environments running the full workspace tests.
+Only Node v24.22.1 has been validated here; no Node installation or version pin
+is supplied by this crate.
 BigInt arithmetic provides independent wrapping/signed/unsigned integer oracles.
 Tests cover diamonds, nested loops, multiple returns, switch/default at both
 widths, irreducible two-entry loops, self-edge phi swaps, distinct arguments to
@@ -144,3 +152,33 @@ fixture. `cargo check`, `cargo build`, `cargo fmt -p keel-wasm --check` and
 `/tmp/keel-wasm-impl-20261024-build.jsonl` (check metadata uses suffix `a`).
 These are finite integer/CFG checks, with no FP, C ABI, memory, native runtime
 or performance evidence implied.
+
+## Independent candidate review
+
+Candidate `a786ee5a798e3ad3eccbdf47dc9f93b4b5274508` was reapplied onto
+`666093b8` in a separate review worktree. The audit checked dispatcher branch
+depths (jump/default 1, conditional/case 2), full-width i64 conditions/switches,
+raw destination versus resolved source locals, layout-only emission, selected
+edge parallel copies, defined-call indices/signatures, explicit exports, and
+whole-module unsupported-contract preflight. No runtime miscompile was found.
+The validator's permissive default proposal set was replaced by an explicit
+WebAssembly 1.0 feature set in production and execution fixtures.
+
+Review regressions add mixed i32/i64 switch self-edges with three-value cycles,
+different copies on default/case edges, removed-block arena/layout gaps, and
+unreachable laid-out unsupported code. A separate JavaScript state-update loop
+checks the cycle results across 60 inputs; it does not inspect encoder output.
+The integer oracle now includes 24 deterministic full-width patterns in addition
+to nine boundary patterns at each width (1,089 ordered pairs per width).
+BigInt mathematical operations and explicit width normalization remain independent
+of the emitter's opcode mapping. Added verifier-valid negative gates cover unary
+counts, conversions, explicit scalar call ABI descriptors and unused indirect
+signature tables. These tests retain the bounded subset rather than extending it.
+
+All 15 tests passed in debug and release on rustc 1.99.1 / Node v24.22.1, using
+the command above (plus `--release`) with shared locking, `--offline --locked
+-j2`, cargo and `CARGO_CACHE_LINKS=0`. Metadata is outside Git at
+`/tmp/keel-wasm-review-d9a054c9-debug.jsonl` and
+`/tmp/keel-wasm-review-d9a054c9-release.jsonl`. Formatting and diff whitespace
+checks passed. No native source or existing dependency version changed; no
+native runtime, memory, FP, C ABI or performance validation is claimed.
