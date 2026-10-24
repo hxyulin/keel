@@ -15,7 +15,10 @@ records the later bounded helper migration; the production target and lowering
 stages below remain a plan. The later [private scalar lowering checkpoint](wasm-c-scalar-lowering.md)
 implements a test-only integer-function subset. The subsequent
 [private pointer/data checkpoint](wasm-c-pointer-data.md) adds bounded storage
-and runtime tests; production target selection remains gated.
+and runtime tests; production target selection remains gated. The later
+[public target foundation](wasm-target-foundation.md) exposes the exact target
+identity and storage query while explicitly rejecting public C, preprocessing,
+optimization and native output routes. It does not enable the guarded C profile.
 
 ## Recommendation and handoff contract
 
