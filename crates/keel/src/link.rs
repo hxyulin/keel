@@ -1,30 +1,75 @@
 use crate::input::Source;
 use std::path::{Path, PathBuf};
 
-pub fn run(args: &[String]) -> Result<(), String> {
-    let mut target_args = args.iter().take_while(|a| *a != "--");
-    while let Some(arg) = target_args.next() {
-        let target = if arg == "--target" || arg == "-target" {
-            target_args.next().map(String::as_str)
-        } else {
-            arg.strip_prefix("--target=")
-                .or_else(|| arg.strip_prefix("-target="))
-        };
-        if target == Some("wasm32-unknown-unknown") {
-            return Err(
-                "unsupported target wasm32-unknown-unknown: native linking is unavailable".into(),
-            );
+// This is Keel's native syntax, not a partial Clang option table. Put --system
+// before any Clang-only option: its entire remaining argument surface is opaque.
+fn native_value_option(arg: &str) -> bool {
+    matches!(
+        arg,
+        "-o" | "-e"
+            | "--entry"
+            | "--dynamic-linker"
+            | "--rpath"
+            | "-rpath"
+            | "--sysroot"
+            | "-syslibroot"
+            | "-L"
+            | "-l"
+            | "--require-export"
+            | "--debug-map"
+            | "--dsym"
+            | "-mmacosx-version-min"
+    )
+}
+
+fn system_selector(args: &[String]) -> Option<usize> {
+    let mut i = 0;
+    while let Some(arg) = args.get(i) {
+        match arg.as_str() {
+            "--system" => return Some(i),
+            "--" => return None,
+            "--target" | "-target" => i += 2,
+            a if native_value_option(a) => i += 2,
+            a if !a.starts_with('-')
+                || matches!(
+                    a,
+                    "--dead-strip"
+                        | "-dead_strip"
+                        | "--gc-sections"
+                        | "--no-gc-sections"
+                        | "--static"
+                        | "-static"
+                        | "-Bstatic"
+                        | "-Bdynamic"
+                )
+                || [
+                    "--target=",
+                    "-target=",
+                    "--sysroot=",
+                    "-mmacosx-version-min=",
+                    "-l",
+                    "-L",
+                ]
+                .iter()
+                .any(|prefix| a.starts_with(prefix)) =>
+            {
+                i += 1
+            }
+            _ => return None,
         }
     }
-    // An explicit fallback preserves the system driver's full argument surface.
-    // It is selected before native parsing; native failures never trigger it.
-    if args
-        .iter()
-        .take_while(|a| *a != "--")
-        .any(|a| a == "--system")
-    {
+    None
+}
+
+pub fn run(args: &[String]) -> Result<(), String> {
+    // Only the Keel prefix selects the route. Once selected, Clang owns the
+    // opaque argument surface (including response/config files and environment).
+    if let Some(system) = system_selector(args) {
         let mut command = std::process::Command::new("clang");
-        for arg in args.iter().filter(|a| *a != "--system") {
+        for (i, arg) in args.iter().enumerate() {
+            if i == system {
+                continue;
+            }
             command.arg(if matches!(arg.as_str(), "--sysroot" | "-syslibroot") {
                 "-isysroot"
             } else {
@@ -39,6 +84,28 @@ pub fn run(args: &[String]) -> Result<(), String> {
         } else {
             Err(format!("system linker exited with {status}"))
         };
+    }
+
+    let mut target_args = args.iter();
+    while let Some(arg) = target_args.next() {
+        if arg == "--" {
+            break;
+        }
+        let target = if arg == "--target" || arg == "-target" {
+            target_args.next().map(String::as_str)
+        } else {
+            if native_value_option(arg) {
+                target_args.next();
+                continue;
+            }
+            arg.strip_prefix("--target=")
+                .or_else(|| arg.strip_prefix("-target="))
+        };
+        if target == Some("wasm32-unknown-unknown") {
+            return Err(
+                "unsupported target wasm32-unknown-unknown: native linking is unavailable".into(),
+            );
+        }
     }
 
     let mut native_args = Vec::new();
@@ -61,6 +128,11 @@ pub fn run(args: &[String]) -> Result<(), String> {
             target = iter.next().ok_or("--target requires a target triple")?;
         } else {
             native_args.push(arg.clone());
+            if native_value_option(arg) {
+                if let Some(value) = iter.next() {
+                    native_args.push(value.clone());
+                }
+            }
         }
     }
     match target {
