@@ -201,3 +201,43 @@ IR dump record: `/tmp/wasm-comparison-ir-dump-e3391b54-20261024.jsonl`.
 All compilation/execution gates used the existing shared suite lock. No build
 outputs were deleted, independent checkouts shared no `CARGO_TARGET_DIR`, and
 no main integration was performed.
+
+## Independent comparison review (2026-10-24)
+
+Candidate `d7a20f17` was reapplied as `2a70a50a` onto `3c6d09ae`, the
+integration base containing the independently owned gap audit. No production
+compiler changes were made. The bounded review found evidence-tool issues,
+with no reproduced compiler correctness defect:
+
+- Decoder LEB reads could cross function-body boundaries, and over-width
+  constants were truncated rather than rejected. Reads now stay within their
+  body, enforce signed/unsigned widths, and reject truncated local groups,
+  section payloads, duplicate/unordered sections and mismatched function counts.
+  Block types, globals and result arity now enforce the stated integer MVP
+  policy. Node remains responsible for independent full semantic validation.
+- The harness silently filtered failed profiles, permitting a partial comparison
+  to return success. All four named profiles must now have emitted successfully.
+  Diagnostic-emission, static-policy, correctness and runtime failures retain
+  stage information in the manifest and return failure. Static-only runs record
+  that timing was not requested. Failed `ps` probes defer timing, and a mid-run
+  quiet-gate failure retains partial compile samples without completed summaries.
+
+The frozen r3 manifest remains unchanged at SHA-256
+`a43403a5ad24b52ea120c11706def605500efda98923166d2a6953463559e01d`.
+The review independently checked all 33 artifact-index hashes, tool hashes,
+candidate/frozen runner identities, and all 44 decoded bodies and metadata.
+The final stricter decoder produces identical results on these binaries. Exact
+commands, source revision, deferred timing and absent timing samples agree with
+the report and gap audit. The existing 23-test release result was inspected,
+not rerun; no new Rust compilation or real compile/runtime timing occurred.
+
+Nineteen deterministic decoder/runner tests pass, including simulated quiet-gate
+and emission failures, retained partial samples, and real Node rejection of
+incomplete profile sets. A fresh serialized correctness-only Node run against
+the frozen binaries passes all 640 independent result and exact-arena checks.
+Node syntax and whitespace checks pass. Review identity and serialized command
+records are `/tmp/keel-wasm-comparison-review-976bc563/identity.json`,
+`tests-final.jsonl` and `correctness.jsonl` in that directory; test/runtime output
+is retained in the review thread. Frozen evidence was not regenerated or edited.
+The full timing path remains unmeasured; deterministic tool stubs exercise gate
+behavior without supporting speed claims. Parent owns integration and cleanup.

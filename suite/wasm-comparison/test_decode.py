@@ -29,4 +29,25 @@ class DecoderTests(unittest.TestCase):
     def test_fixed_memory_and_integer_only_signatures(self):
         self.assertEqual(decode(HEAD+section(5,b'\x01\x01\x01\x01'))['memory_pages'],[1,1])
         with self.assertRaises(AssertionError):decode(HEAD+section(1,b'\x01\x60\x01\x7d\x00'))
+    def test_reject_cross_body_immediates_and_local_groups(self):
+        # A malformed first body must not consume the next body's size byte.
+        for first in [bytes([0,0x41,0x80]),bytes([1,1])]:
+            payload=bytes([2,len(first)])+first+bytes([2,0,0x0b])
+            b=HEAD+section(1,b'\x01\x60\x00\x00')+section(3,b'\x02\x00\x00')+section(10,payload)
+            with self.assertRaises(ValueError):decode(b)
+    def test_reject_oversized_or_out_of_range_constants(self):
+        for encoded in ['418080808010','41808080808000','4280808080808080808001']:
+            with self.assertRaises(ValueError):decode(module(b'\x00'+bytes.fromhex(encoded)+b'\x0b'))
+    def test_reject_noninteger_or_nonmvp_block_types(self):
+        for blocktype in [0x7d,0x7c,0x00]:
+            with self.assertRaises(ValueError):decode(module(bytes([0,2,blocktype,11,11,65,0,11])))
+    def test_reject_truncated_duplicate_and_trailing_sections(self):
+        for b in [HEAD+b'\x00\x02x',HEAD+section(1,b'\x00')*2,HEAD+section(1,b'\x00x'),HEAD+section(3,b'\x01\x00')]:
+            with self.assertRaises((ValueError,AssertionError)):decode(b)
+    def test_integer_global_policy(self):
+        decode(HEAD+section(6,bytes.fromhex('017f01417f0b')))
+        for payload in ['017d0043000000000b','017e0041000b']:
+            with self.assertRaises(AssertionError):decode(HEAD+section(6,bytes.fromhex(payload)))
+    def test_reject_multivalue_signature(self):
+        with self.assertRaises(AssertionError):decode(HEAD+section(1,bytes.fromhex('016000027f7f')))
 if __name__=='__main__':unittest.main()

@@ -59,3 +59,14 @@ The common stack budget and normalized object checks do not make their ABIs or
 trap policies identical. The source stays within the supported plain i32/i64
 call boundary, uses no FP/SIMD/imports/libc/LTO/fast math, and Clang explicitly
 selects `-mcpu=mvp`. Optimization levels intentionally differ.
+
+Independent review hardened the decoder's section/body boundaries, LEB widths,
+integer block/global types and single-result MVP signatures. It remains a
+bounded statistics/policy decoder; Node supplies full semantic validation.
+All four profiles are required for successful correctness; failed profiles are
+never silently filtered. Failed diagnostic emission, static policy, correctness
+and runtime stages are retained in the manifest with a nonzero exit. Failed
+`ps` probes defer timing. Partial compile samples survive a later gate failure,
+without completed statistics; missing samples are not represented as zero.
+`--static-only` explicitly records that timing was not requested. Deterministic
+runner tests use fake tools and gates, with no compiler invocation or real timing.

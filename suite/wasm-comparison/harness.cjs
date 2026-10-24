@@ -31,7 +31,9 @@ function load(mode){
  const base=e.object_offset()>>>0,buffer=e.buffer_offset()>>>0;assert.equal(buffer,base+8);assert(base+1040<=65536);
  return {e,base,view:new Uint8Array(e.memory.buffer,base,1040)};
 }
-const modes=Object.keys(report.profiles).filter(m=>report.profiles[m].emission==='passed');
+const modes=['plain','basic','clang-O0','clang-O2'];
+assert.deepEqual(Object.keys(report.profiles).sort(),modes.slice().sort(),'all four profiles required');
+for(const mode of modes)assert.equal(report.profiles[mode].emission,'passed',`${mode} emission failed`);
 const instances=Object.fromEntries(modes.map(m=>[m,load(m)]));let checks=0;
 for(const mode of modes)for(const name of names)for(const seed of [0,1,0x80000000,0xffffffff])for(const n of [0,1,31,1024,16384]){
  // Bounded recursion long input still has depth eight, not input-sized recursion.
