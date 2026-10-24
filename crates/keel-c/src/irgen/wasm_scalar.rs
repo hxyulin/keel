@@ -956,6 +956,97 @@ fn storage_data_boundaries_before_pruning() {
 }
 
 #[test]
+fn pointer_widths_wrap_and_exact_host_footprint() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let module = lower(
+        r#"
+struct R { unsigned int before; void *volatile pointer; volatile long value; unsigned int after; };
+static long long helper(long long x) { volatile long long saved = x; return saved; }
+unsigned long long store(unsigned int base, unsigned long long bits) {
+    struct R *r = (struct R *)(unsigned long)base;
+    r->pointer = (void *)bits;
+    r->value = (long)r->pointer;
+    unsigned long long live = (unsigned long long)r->pointer;
+    return live ^ (unsigned long long)helper((long long)r->value);
+}
+unsigned long long wrap(unsigned int address, long delta) {
+    unsigned char *p = (unsigned char *)(unsigned long)address;
+    p += delta;
+    return (unsigned long long)p;
+}
+long long signed_bits(unsigned long long bits) { return (long long)(long)(void *)bits; }
+unsigned long long unsigned_bits(unsigned long long bits) { return (unsigned long long)(unsigned long)(void *)bits; }
+"#,
+        false,
+    )
+    .unwrap();
+    let bytes = keel_wasm::emit_wasm32_runtime_module(
+        &module,
+        &keel_wasm::Wasm32RuntimeOptions {
+            memory: keel_wasm::Wasm32MemoryOptions {
+                scalar: keel_wasm::Options {
+                    exports: ["store", "wrap", "signed_bits", "unsigned_bits"]
+                        .into_iter()
+                        .map(|name| keel_wasm::Export {
+                            name: name.into(),
+                            function: name.into(),
+                        })
+                        .collect(),
+                },
+                pages: 1,
+                export_name: "memory".into(),
+            },
+            data_floor: 1024,
+            stack_bottom: 32768,
+            stack_top: 65536,
+        },
+    )
+    .unwrap();
+    // Numeric-address arithmetic checks the private IR normalization contract;
+    // it does not assert C object provenance for wrapping addresses. Only the
+    // small, aligned host record is dereferenced. BigInt supplies the oracle.
+    let script = r#"
+const assert = require('assert/strict'), bytes = require('fs').readFileSync(0);
+assert(WebAssembly.validate(bytes));
+const e = new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports;
+const memory = new Uint8Array(e.memory.buffer), view = new DataView(e.memory.buffer);
+const inputs = [0n, 1n, 0x7fffffffn, 0x80000000n, 0xffffffffn, -1n,
+                0x1234567880000001n, -0x1234567880000001n];
+for (const bits of inputs) {
+ const low = BigInt.asUintN(32,bits), signed = BigInt.asIntN(32,bits);
+ assert.equal(e.signed_bits(bits),signed);
+ assert.equal(e.unsigned_bits(bits),low);
+ memory.fill(0xa7,8192,8224);
+ const expected = memory.slice(8192,8224);
+ for (let i=0;i<4;i++) expected[8+i]=expected[12+i]=Number((low>>BigInt(8*i))&255n);
+ assert.equal(BigInt.asUintN(64,e.store(8196,bits)),BigInt.asUintN(64,low^signed));
+ assert.deepEqual(memory.slice(8192,8224),expected);
+ assert.equal(view.getUint32(8200,true),Number(low));
+}
+for (const address of [0,1,0x7fffffff,0x80000000,0xffffffff]) {
+ for (const delta of [-2147483648,-257,-1,0,1,257,2147483647]) {
+   assert.equal(e.wrap(address,delta),BigInt.asUintN(32,BigInt(address)+BigInt(delta)));
+ }
+}
+"#;
+    let mut child = Command::new("node")
+        .args(["-e", script])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("existing Node required");
+    child.stdin.take().unwrap().write_all(&bytes).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
 fn pointer_decrement_executes_with_canaries_and_extreme_offsets() {
     use std::io::Write;
     use std::process::{Command, Stdio};
