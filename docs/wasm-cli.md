@@ -52,8 +52,33 @@ FP, SIMD, atomics, function pointers, imports, unresolved externs, WASI/libc,
 native objects/assembly, relocatable Wasm objects and object linking remain
 unsupported. There is no start function or implicit call to C `main`.
 
-No optimizer runs, including a nominal level-zero pipeline or native canonical
-restoration. All explicit optimization/pass/verification/report flags reject:
+Without `--wasm-opt basic`, no optimizer runs, including a nominal level-zero
+pipeline or native canonical restoration. The opt-in basic profile runs exactly
+one fixed sequence: `const-fold`, `simplify-cfg`, `phi-simplify`, `dce`. It calls
+the builtins directly, with no native tiers, canonical restoration, host tuning,
+vectorization, module passes, custom pass selection or pipeline convergence
+loop. Every pass is followed by whole-module `DataLayout::WASM32` verification in both debug
+and release. Pointer conversions, normalization and storage layout remain owned
+by the Wasm frontend/backend. Ordinary potentially faulting loads, volatile loads
+(even `volatile notrap`),
+divisions and other pinned effects remain in order with exact access widths.
+DCE may remove an unused nonvolatile `notrap` load under the existing producer
+promise that it cannot trap and its read has no observable effect. This explicit
+exception does not authorize marking any new load `notrap`; raw IR producers
+remain responsible for that promise. Native DCE is unchanged.
+
+The CLI non-emitting runtime preflight checks the complete ORIGINAL module
+before any optimizer runs, including unexported functions, signatures and dead
+instructions. Unsupported input therefore cannot become accepted after constant
+branch pruning or DCE. The final ordinary emitter independently repeats runtime
+legality checks and validates complete MVP bytes before publication. This adds a
+preflight and a module clone to the opt-in route; no compile-time or runtime gain
+is claimed. The no-option route still calls the emitter directly.
+
+`--wasm-opt` accepts only the separate argument `basic`; repeated valid requests
+are idempotent. Native `-O` still means native Full plus instruction-selection
+presets, so it is deliberately not reinterpreted for Wasm. All native
+optimization/pass/verification/report flags continue to reject:
 `-O`, `-p`, `--opt-tier` (even `none`), `--verify-each`, `--no-verify-each` and
 `--opt-report`. `-O0` is unsupported syntax and also rejects. Native CPU tuning,
 features, register allocation, instruction selection, rematerialization, debug
@@ -123,7 +148,7 @@ python3 suite/fast_opt_locked.py /tmp/wasm-cli-unique.jsonl \
 Use `--release` for release validation. No toolchain/dependency installation,
 cache policy change, remote host or performance campaign is needed. Only a
 path dependency on the existing `keel-wasm` crate and its lockfile edge are added.
-CLI output ownership does not change any frontend, IR, optimizer, backend, native
+The original CLI checkpoint did not change any frontend, IR, optimizer, backend, native
 ABI, FP or memory implementation. Parent integration and new independent CLI
 review remain separate.
 
@@ -182,3 +207,69 @@ termination are not fault-injected. Maximum-memory validation is not a 4 GiB
 allocation/execution claim. This finite review adds no imports, FP, SIMD,
 optimizer, native ABI or memory semantics, performance claim, remote access or
 main integration. Parent owns integration and cleanup.
+
+## Opt-in basic profile validation (2026-10-24)
+
+Candidate CLI `9bccf212` uses `optimize_wasm32_basic` from `b9059e44` plus
+`546c0dab`, with the separate runtime admission prerequisite `82d3244e`
+(locally cherry-picked as `e2989057`). The completed safety audit is
+`49cd1747`, [audit contract](wasm-basic-optimization-audit.md). Parent owns
+independent implementation review and integration; these tests do not replace it.
+The optimizer crate does not depend on the backend: its entry point documents
+that backend admission of the complete original input is the caller's obligation.
+
+On Apple ARM64 with Node v24.22.1, 89 focused tests passed in each of debug and
+release: 38 CLI binary, 17 `wasm_output`, 2 `wasm_target_unavailable`, 7
+`system_link_args`, 3 `x86_cpu_level`, and 22 optimizer profile/DCE/CFG/phi/golden
+tests. The maintained C and raw-IR corpus in `suite/wasm-basic` exercises C ILP32
+static pointers, checksum/local arrays/direct calls/recursive normal returns,
+i64 BigInt, dynamic and constant division traps, unused faulting loads,
+volatile-plus-notrap loads and store ordering, one-byte canaries, high-bit pointer
+round trips, wrapping pointer addition followed by an actual load, dead stack
+addresses with retained frame allocation, and recursive stack exhaustion.
+A deliberately false raw-IR `notrap` promise demonstrates the documented DCE
+exception; it is not a defined-program equivalence claim. Unexported unsupported
+FP instructions/signatures, constant-dead FP blocks and unused external function
+declarations reject identically before and after requesting the profile. A
+malformed global initializer test establishes verification before transformation,
+and align-4 pointer data is accepted only with the explicit WASM32 verifier.
+Native CLI and Portable optimizer controls pass unchanged.
+
+All Rust compilation used `python3 suite/fast_opt_locked.py`,
+existing pins/shared cache, `cargo`, `--offline --locked -j2`, and no
+feature changes. Evidence is `/tmp/wasm-basic-final-{debug,release,check,build}-20261024.jsonl`;
+debug output is `/tmp/wasm-basic-final-debug-20261024.log`. The all-target check
+for `keel` and `keel-opt`, release CLI build, targeted rustfmt checks and
+`git diff --check` pass without warnings. No dependencies, toolchains, cache
+policies, native behavior or backend emission changes belong to this candidate.
+
+The finite size/count pilot uses the existing dispatcher emitter, holding backend
+emission constant between unoptimized and basic requests. C module bytes are
+1546/1490, summed function-body bytes 1406/1350, declared locals 117/117, and
+encoded instruction counts 652/620 (plain/basic). Raw-IR values are 1292/1198,
+1058/965, 74/67 and 536/492 respectively. Body bytes include local declarations
+and exclude the enclosing body-length LEB; instruction counts include structural
+operators and local accesses. `measure.py` fails on unknown opcodes, validates
+modules in Node, and checks equal result sinks. These counts describe this corpus
+only; they are not results for the separate straight-line emitter candidate.
+
+Five alternating serialized CLI compile samples and five warmed Node batches per
+profile were captured with the shared suite lock. Node batches include JavaScript
+and BigInt overhead; CLI times include process startup, preprocessing where
+applicable, both legality gates, and the optimizer's module clone. The host had
+one-minute load 2.12 on 18 logical CPUs. Full raw samples, binary/corpus hashes,
+bytes and counts are in `/tmp/wasm-basic-evidence-20261024-r2/report.json`;
+the lock record is `/tmp/wasm-basic-measure-final-20261024.jsonl`. This small
+pilot does not isolate the cost of original admission or establish application,
+compile-time, runtime or cross-host gains. To reproduce with a built release CLI:
+
+```sh
+python3 suite/fast_opt_locked.py /tmp/wasm-basic-build-unique.jsonl \
+  cargo build --release --offline --locked -j2 -p keel
+python3 suite/fast_opt_locked.py /tmp/wasm-basic-measure-unique.jsonl \
+  python3 suite/wasm-basic/measure.py target/release/keel /tmp/wasm-basic-unique
+```
+
+The destination directory must be new. The script declines sampling when the
+one-minute host load exceeds half the logical CPU count; all generated modules
+and reports stay under the supplied temporary directory.
