@@ -324,3 +324,226 @@ fn oversized_switch_range_is_diagnostic() {
     );
 }
 
+#[test]
+fn clang_constant_oracle_and_runtime_shapes() {
+    let src = include_str!("../../tests/fixtures/wasm-scalar-lowering.c");
+    let wasm = lower(src, false).unwrap();
+    let native = crate::compile(src, "scalar.c", crate::Options::default()).unwrap();
+    for (module, target) in [(&wasm, Some("wasm32-unknown-unknown")), (&native, None)] {
+        keel_ir::verify_module(module).unwrap();
+        let mut cmd = std::process::Command::new("clang");
+        if let Some(target) = target {
+            cmd.arg(format!("--target={target}"));
+        }
+        let output = cmd
+            .args([
+                "-std=gnu11",
+                "-ffreestanding",
+                "-nostdinc",
+                "-Werror",
+                "-O1",
+                "-S",
+                "-emit-llvm",
+                "-o",
+                "-",
+            ])
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/wasm-scalar-lowering.c"
+            ))
+            .output()
+            .expect("existing Clang required for integer oracle");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let llvm = String::from_utf8(output.stdout).unwrap();
+        for name in [
+            "oracle_div",
+            "oracle_rem",
+            "oracle_shift",
+            "oracle_compare",
+            "oracle_rank",
+            "oracle_cast",
+            "oracle_signed",
+            "oracle_bool",
+            "oracle_promote",
+        ] {
+            // Read Clang's independently optimized return, then inspect the
+            // actual value returned by Keel (not any incidental constant).
+            let body = llvm
+                .split(&format!("@{name}("))
+                .nth(1)
+                .unwrap()
+                .split('}')
+                .next()
+                .unwrap();
+            let want: i64 = body
+                .lines()
+                .find_map(|line| line.trim().strip_prefix("ret i64 "))
+                .unwrap()
+                .parse()
+                .unwrap();
+            let f = module.functions.iter().find(|f| f.name == name).unwrap();
+            let returns: Vec<_> = f
+                .blocks()
+                .flat_map(|b| f.block_insts(b))
+                .filter_map(|&inst| {
+                    if let InstData::Return { args: values } = f.inst_data(inst) {
+                        assert_eq!(values.len(), 1);
+                        let ValueDef::Result(constant, _) = f.value_def(f.resolve(values[0]))
+                        else {
+                            panic!("{name} did not return a constant: {f}");
+                        };
+                        let InstData::Iconst { ty: Type::I64, imm } = f.inst_data(constant) else {
+                            panic!("{name} did not return i64 constant: {f}");
+                        };
+                        Some(*imm)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            assert_eq!(returns, [want], "{name}, target {target:?}: {f}");
+        }
+        // All declaration, definition and direct-call ABI entries stay plain.
+        for name in ["helper", "widths", "slots", "signed_widen", "phi"] {
+            let sig = module.signature(name).unwrap();
+            assert!(!sig.variadic && !sig.returns_twice);
+            assert!(
+                sig.params
+                    .iter()
+                    .chain(&sig.returns)
+                    .all(|p| p.purpose == Purpose::Normal && p.ext == ArgExt::None)
+            );
+        }
+    }
+    let function = |name: &str| wasm.functions.iter().find(|f| f.name == name).unwrap();
+    let slots: Vec<_> = function("slots")
+        .stack_slots()
+        .map(|(_, s)| (s.size, s.align))
+        .collect();
+    assert_eq!(slots, [(1, 1), (2, 2), (4, 4), (8, 8)]);
+    for (name, operation) in [
+        ("signed_widen", "sext.i64"),
+        ("signed_shift", "sshr "),
+        ("unsigned_shift", "ushr "),
+        ("truth_not", "trunc.i32"),
+        ("truth_and", "trunc.i32"),
+    ] {
+        let text = function(name).to_string();
+        assert!(text.contains(operation), "{name}: {text}");
+    }
+    let defaults = lower("long default_return(void) { }", false).unwrap();
+    keel_ir::verify_module(&defaults).unwrap();
+    assert!(defaults.functions[0].to_string().contains("iconst.i32 0"));
+    assert!(
+        function("phi")
+            .blocks()
+            .any(|b| !function("phi").block_params(b).is_empty())
+    );
+}
+
+#[test]
+fn rejection_families_and_prototype_policy() {
+    for (src, diagnostic) in [
+        (
+            "int f(void) { if (0) { (void)&f; } return 0; }",
+            "non-integer values",
+        ),
+        (
+            "int f(void) { return 0 ? __builtin_popcount(1) : 0; }",
+            "unmigrated expressions/builtins",
+        ),
+        (
+            "int f(void) { return 0 && __builtin_popcount(1); }",
+            "unmigrated expressions/builtins",
+        ),
+        ("int f(void) { return unknown(1); }", "is not declared"),
+        (
+            "int f(); int g(void) { return 0; }",
+            "unprototyped/variadic",
+        ),
+        ("short f(void);", "plain i32/i64"),
+        (
+            "int f(void) __attribute__((noreturn));",
+            "native linkage/function attributes",
+        ),
+        (
+            "int f(void) __attribute__((weak));",
+            "native linkage/function attributes",
+        ),
+        (
+            "int f(void) __attribute__((visibility(\"hidden\")));",
+            "native linkage/function attributes",
+        ),
+        (
+            "int f(void) { static long x = 1; return 0; }",
+            "static/external data",
+        ),
+        (
+            "int f(void) { return ({ 1; }); }",
+            "unmigrated expressions/builtins",
+        ),
+        (
+            "int f(void) { return (int){1}; }",
+            "unmigrated expressions/builtins",
+        ),
+        (
+            "int f(void) { int (*p)(void) = f; return p(); }",
+            "non-integer/atomic/aggregate locals",
+        ),
+    ] {
+        let err = lower(src, false).unwrap_err();
+        assert!(err.message.contains(diagnostic), "{src}: {err:?}");
+    }
+    // A known plain prototype is IR declaration knowledge, never an import grant.
+    let module = lower("unsigned long ext(unsigned long, long long); unsigned long f(unsigned long x) { return ext(x, 7LL); }", false).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let sig = module.signature("ext").unwrap();
+    assert_eq!(
+        sig.params.iter().map(|p| p.ty).collect::<Vec<_>>(),
+        [Type::I32, Type::I64]
+    );
+    assert_eq!(sig.returns[0].ty, Type::I32);
+    assert!(
+        sig.params
+            .iter()
+            .chain(&sig.returns)
+            .all(|p| p.ext == ArgExt::None && p.purpose == Purpose::Normal)
+    );
+    assert!(module.data.is_empty());
+}
+
+#[test]
+fn public_native_options_keep_lp64_and_arg_extensions() {
+    // Literal construction also protects the existing public Options shape.
+    for target in keel_ir::Target::ALL {
+        for debug_info in [false, true] {
+            let module = crate::compile(
+                "long width(long x) { volatile long y = x; return y; } signed char narrow(signed char x) { return x; }",
+                "native.c", crate::Options { target, debug_info },
+            ).unwrap();
+            keel_ir::verify_module(&module).unwrap();
+            let sig = module.signature("width").unwrap();
+            assert_eq!(sig.params[0].ty, Type::I64);
+            assert_eq!(sig.returns[0].ty, Type::I64);
+            let width = module.functions.iter().find(|f| f.name == "width").unwrap();
+            assert!(
+                width
+                    .stack_slots()
+                    .any(|(_, s)| s.size == 8 && s.align == 8)
+            );
+            let sig = module.signature("narrow").unwrap();
+            assert!(
+                sig.params
+                    .iter()
+                    .chain(&sig.returns)
+                    .all(|p| p.ty == Type::I8
+                        && p.ext == ArgExt::Sext
+                        && p.purpose == Purpose::Normal)
+            );
+        }
+    }
+}
