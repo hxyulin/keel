@@ -176,13 +176,23 @@ impl Gen<'_> {
             Ty::Ptr(inner) if matches!(inner, Ty::Void) => Ok(()),
             Ty::Ptr(inner) => self.private_storage(inner, seen),
             Ty::Array(a) if a.vla.is_none() && a.len.is_some() => {
-                self.private_storage(&a.elem, seen)
+                self.private_storage(&a.elem, seen)?;
+                // Check each dimension before Types::size's multiplication.
+                self.types()
+                    .size(&a.elem)
+                    .checked_mul(a.len.unwrap())
+                    .filter(|size| *size <= u32::MAX as u64)
+                    .ok_or_else(|| reject(Loc::default(), "array storage exceeds wasm32 bounds"))?;
+                Ok(())
             }
             Ty::Struct(id) if seen.contains(id) => Ok(()),
             Ty::Struct(id) => {
                 seen.push(*id);
                 let record = &self.p.structs[*id];
-                if !record.complete || record.members.iter().any(|m| m.bits.is_some()) {
+                if !record.complete
+                    || record.size > u32::MAX as u64
+                    || record.members.iter().any(|m| m.bits.is_some())
+                {
                     return Err(reject(Loc::default(), "incomplete/bit-field storage"));
                 }
                 for m in &record.members {
@@ -854,6 +864,8 @@ assert.equal(e.big_difference(0,0xfffffff0),-1073741820);
 fn storage_data_boundaries_before_pruning() {
     for src in [
         "extern int missing; int f(void) { return 0; }",
+        "static long long big[9223372036854775807LL]; int f(void) { return 0; }",
+        "static int unused(void) { long long big[9223372036854775807LL]; return 0; }",
         "typedef char Row[1073741824]; static Row data[1]; static Row *bad = data + 1073741824L + 1073741824L + 1073741824L + 1073741824L + 1073741824L + 1073741824L + 1073741824L + 1073741824L; int f(void) { return 0; }",
         "static int data; static int *bad = &data - 1; int f(void) { return 0; }",
         "static int data; static int *bad = &data + 2; int f(void) { return 0; }",
