@@ -184,6 +184,11 @@ fn fallback_bodies_remain_byte_identical_including_one_block_selfedge() {
                 .into_iter()
                 .collect::<Result<Vec<_>, _>>()
                 .unwrap();
+            // The exact terminal branch now has its own structured path.
+            if i == 2 {
+                assert!(!ops.iter().any(|o| matches!(o, Operator::Loop { .. })));
+                continue;
+            }
             assert!(ops.iter().any(|o| matches!(o, Operator::Loop { .. })));
             // Keep the original frozen dispatcher bodies as the baseline.
             // Apply only the independently decoded adjacent set/get peephole;

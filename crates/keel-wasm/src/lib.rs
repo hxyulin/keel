@@ -528,6 +528,56 @@ impl InstructionOutput {
 #[path = "../tests/support/adjacent_tee_output.rs"]
 mod adjacent_tee_output_tests;
 
+// Selected only after whole-module verification and unsupported/frame preflight.
+// This is an exact terminal diamond, not a general CFG structurizer.
+fn terminal_if(ir: &Function) -> Option<[Block; 3]> {
+    let layout: Vec<_> = ir.blocks().collect();
+    if layout.len() != 3 || layout[0] != ir.entry_block()? {
+        return None;
+    }
+    let entry = layout[0];
+    let last = *ir.block_insts(entry).last()?;
+    let InstData::Brif { dests, .. } = ir.inst_data(last) else {
+        return None;
+    };
+    let arms = [dests[0].block, dests[1].block];
+    if arms[0] == arms[1]
+        || !arms.iter().all(|b| layout[1..].contains(b))
+        || dests.iter().any(|d| !d.args.is_empty())
+        || arms.iter().any(|&b| !ir.block_params(b).is_empty())
+    {
+        return None;
+    }
+    let mut entry_values: HashSet<_> = ir.block_params(entry).iter().copied().collect();
+    for b in [entry, arms[0], arms[1]] {
+        let insts = ir.block_insts(b);
+        let (&last, prefix) = insts.split_last()?;
+        if prefix.iter().any(|&i| ir.inst_data(i).is_terminator())
+            || (b != entry && !matches!(ir.inst_data(last), InstData::Return { .. }))
+        {
+            return None;
+        }
+        // Resolved reads must come from entry or an earlier definition in this
+        // arm. Raw result destinations remain distinct even for aliased,
+        // retained faulting producers. No cross-arm transport is supported.
+        let mut available = entry_values.clone();
+        for &i in insts {
+            let mut dominated = true;
+            ir.inst_data(i).for_each_operand(|v| {
+                dominated &= available.contains(&ir.resolve(v));
+            });
+            if !dominated {
+                return None;
+            }
+            available.extend(ir.inst_results(i).iter().copied());
+        }
+        if b == entry {
+            entry_values = available;
+        }
+    }
+    Some([entry, arms[0], arms[1]])
+}
+
 struct Body<'a> {
     ir: &'a Function,
     indices: &'a HashMap<&'a str, u32>,
@@ -538,6 +588,7 @@ struct Body<'a> {
     frame_base: u32,
     locals: Vec<Option<u32>>,
     direct_return: bool,
+    terminal_if: Option<[Block; 3]>,
     pc: u32,
     blocks: HashMap<Block, i32>,
     out: InstructionOutput,
@@ -567,6 +618,8 @@ impl<'a> Body<'a> {
                 ir.block_insts(only).last().map(|&i| ir.inst_data(i)),
                 Some(InstData::Return { .. })
             );
+        let terminal_if = terminal_if(ir);
+        let dispatch = !direct_return && terminal_if.is_none();
         // Definition destinations use raw values; only reads resolve aliases.
         // An aliased producer must never overwrite its replacement's local.
         for b in ir.blocks() {
@@ -582,8 +635,8 @@ impl<'a> Body<'a> {
                 }
             }
         }
-        let dispatch_locals = u32::from(!direct_return);
-        if !direct_return {
+        let dispatch_locals = u32::from(dispatch);
+        if dispatch {
             declarations.push((1, ValType::I32));
         }
         if runtime.is_some() {
@@ -599,6 +652,7 @@ impl<'a> Body<'a> {
             frame_base: next + dispatch_locals + 1,
             locals,
             direct_return,
+            terminal_if,
             pc: next,
             blocks: ir
                 .blocks()
@@ -723,11 +777,19 @@ impl<'a> Body<'a> {
             self.op(W::LocalGet(self.frame_base));
             self.op(W::GlobalSet(0));
         }
-        if !self.direct_return {
+        let dispatch = !self.direct_return && self.terminal_if.is_none();
+        if dispatch {
             self.op(W::Loop(BlockType::Empty));
         }
-        for b in self.ir.blocks() {
-            if !self.direct_return {
+        let order = self.terminal_if.map_or_else(
+            || self.ir.blocks().collect::<Vec<_>>(),
+            |blocks| blocks.to_vec(),
+        );
+        for (position, b) in order.into_iter().enumerate() {
+            if self.terminal_if.is_some() && position == 2 {
+                self.op(W::Else);
+            }
+            if dispatch {
                 self.op(W::LocalGet(self.pc));
                 self.op(W::I32Const(self.blocks[&b]));
                 self.op(W::I32Eq);
@@ -828,10 +890,12 @@ impl<'a> Body<'a> {
                     InstData::Brif { cond, dests } => {
                         self.condition(*cond);
                         self.op(W::If(BlockType::Empty));
-                        self.edge(&dests[0], 2);
-                        self.op(W::Else);
-                        self.edge(&dests[1], 2);
-                        self.op(W::End);
+                        if self.terminal_if.is_none() {
+                            self.edge(&dests[0], 2);
+                            self.op(W::Else);
+                            self.edge(&dests[1], 2);
+                            self.op(W::End);
+                        }
                     }
                     InstData::Switch { arg, dests, cases } => {
                         for (case, dest) in cases.iter().zip(&dests[1..]) {
@@ -864,11 +928,16 @@ impl<'a> Body<'a> {
                     self.op(W::LocalSet(self.locals[v.index()].unwrap()));
                 }
             }
-            if !self.direct_return {
+            if dispatch {
                 self.op(W::End);
             }
         }
-        if !self.direct_return {
+        if self.terminal_if.is_some() {
+            self.op(W::End);
+            // Empty-typed MVP if does not propagate its arms' return typing.
+            self.op(W::Unreachable);
+        }
+        if dispatch {
             self.op(W::Unreachable); // No valid PC may fall through the dispatch.
             self.op(W::End);
             self.op(W::Unreachable); // A loop has no normal function exit.
