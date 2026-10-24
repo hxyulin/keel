@@ -273,3 +273,16 @@ encode, validate and inspect small binaries; no large memory is instantiated.
 Trap instances are discarded. No C ABI, FP, native regression execution,
 performance result or general malformed-IR resource limit is established.
 Main integration and worktree cleanup remain the parent's responsibility.
+
+## Runtime admission without encoding
+
+`validate_wasm32_runtime_module(&Module, &Wasm32RuntimeOptions)` returns
+`Result<(), Diagnostic>` after the same memory-option, static placement,
+WASM32 module verification, all-function unsupported/signature/call/export and
+static-frame checks used by runtime emission. It checks unexported functions
+and unused declarations/data/slots. It borrows the real input without mutation,
+cloning or synthetic modules, and does not encode code/data sections or expand
+sparse BSS. This is an admission check; only the emitting API independently
+validates generated MVP bytes. The older scalar and fixed-memory entrypoints
+retain their existing contracts. `tests/preflight.rs` checks diagnostic parity,
+nonmutation and near-4-GiB sparse BSS admission without instantiation.

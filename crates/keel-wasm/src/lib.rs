@@ -217,15 +217,40 @@ pub fn emit_wasm32_runtime_module(
     module: &Module,
     options: &Wasm32RuntimeOptions,
 ) -> Result<Vec<u8>, Diagnostic> {
-    validate_memory_options(&options.memory)?;
-    let placement = runtime::Placement::new(module, options)?;
-    emit(
+    let (placement, prepared) = prepare_runtime(module, options)?;
+    encode(
         module,
         &options.memory.scalar,
         Some(&options.memory),
         Some(&placement),
         Some(options),
+        prepared,
     )
+}
+
+/// Check admission to the bounded wasm32 runtime profile without encoding.
+/// This checks the real module, placement, exports, calls and static frames;
+/// it neither mutates the input nor validates a generated Wasm binary.
+pub fn validate_wasm32_runtime_module(
+    module: &Module,
+    options: &Wasm32RuntimeOptions,
+) -> Result<(), Diagnostic> {
+    prepare_runtime(module, options).map(|_| ())
+}
+
+struct Prepared<'a> {
+    indices: HashMap<&'a str, u32>,
+    frames: Option<Vec<runtime::Frame>>,
+}
+
+fn prepare_runtime<'a>(
+    module: &'a Module,
+    options: &Wasm32RuntimeOptions,
+) -> Result<(runtime::Placement<'a>, Prepared<'a>), Diagnostic> {
+    validate_memory_options(&options.memory)?;
+    let placement = runtime::Placement::new(module, options)?;
+    let prepared = prepare(module, &options.memory.scalar, true, true, true)?;
+    Ok((placement, prepared))
 }
 
 fn emit(
@@ -235,8 +260,24 @@ fn emit(
     placement: Option<&runtime::Placement<'_>>,
     runtime: Option<&Wasm32RuntimeOptions>,
 ) -> Result<Vec<u8>, Diagnostic> {
-    let has_memory = memory.is_some();
-    let verified = if placement.is_some() {
+    let prepared = prepare(
+        module,
+        options,
+        memory.is_some(),
+        placement.is_some(),
+        runtime.is_some(),
+    )?;
+    encode(module, options, memory, placement, runtime, prepared)
+}
+
+fn prepare<'a>(
+    module: &'a Module,
+    options: &Options,
+    has_memory: bool,
+    has_placement: bool,
+    has_runtime: bool,
+) -> Result<Prepared<'a>, Diagnostic> {
+    let verified = if has_placement {
         keel_ir::verify_module_with_layout(module, DataLayout::WASM32)
     } else {
         keel_ir::verify_module(module)
@@ -250,7 +291,7 @@ fn emit(
                 .join("\n"),
         )
     })?;
-    if placement.is_none() && !module.data.is_empty() {
+    if !has_placement && !module.data.is_empty() {
         return Err(reject("module data is unsupported"));
     }
     let indices: HashMap<_, _> = module
@@ -294,8 +335,8 @@ fn emit(
             attrs(f.attrs)?;
             if f.weak_odr
                 || f.personality.is_some()
-                || (runtime.is_none() && f.num_stack_slots() != 0)
-                || (placement.is_none() && f.data_symbols().next().is_some())
+                || (!has_runtime && f.num_stack_slots() != 0)
+                || (!has_placement && f.data_symbols().next().is_some())
                 || f.signatures().next().is_some()
             {
                 return Err(reject(
@@ -351,10 +392,10 @@ fn emit(
                                 && memory_bytes(ty(*value)).is_some()
                                 && flags.align.is_power_of_two()
                         }
-                        InstData::StackAddr { .. } => runtime.is_some(),
+                        InstData::StackAddr { .. } => has_runtime,
                         InstData::SymbolAddr {
                             symbol: Symbol::Data(_),
-                        } => placement.is_some(),
+                        } => has_placement,
                         InstData::Select { .. }
                         | InstData::Jump { .. }
                         | InstData::Brif { .. }
@@ -373,8 +414,8 @@ fn emit(
         check().map_err(|e| reject(format!("@{}: {e}", f.name)))?;
     }
     // Complete frame preflight for every function before encoding any body.
-    let frames = runtime
-        .map(|_| {
+    let frames = has_runtime
+        .then(|| {
             module
                 .functions
                 .iter()
@@ -382,6 +423,18 @@ fn emit(
                 .collect::<Result<Vec<_>, _>>()
         })
         .transpose()?;
+    Ok(Prepared { indices, frames })
+}
+
+fn encode(
+    module: &Module,
+    options: &Options,
+    memory: Option<&Wasm32MemoryOptions>,
+    placement: Option<&runtime::Placement<'_>>,
+    runtime: Option<&Wasm32RuntimeOptions>,
+    prepared: Prepared<'_>,
+) -> Result<Vec<u8>, Diagnostic> {
+    let Prepared { indices, frames } = prepared;
     let mut types = TypeSection::new();
     let mut functions = FunctionSection::new();
     let mut exports = ExportSection::new();
