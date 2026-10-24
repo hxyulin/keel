@@ -4,6 +4,7 @@
 pub mod asm;
 pub mod builder;
 pub mod data;
+pub mod data_layout;
 pub mod debug;
 pub mod dominators;
 pub mod entity;
@@ -30,6 +31,7 @@ pub mod x87_owned_stack;
 pub use asm::{AsmClobber, AsmOperand, InlineAsm, PhysReg};
 pub use builder::InstBuilder;
 pub use data::{DataInit, DataItem, DataObject};
+pub use data_layout::DataLayout;
 pub use debug::{
     DebugGlobal, DebugMember, DebugScope, DebugType, DebugTypeData, DebugVar, Encoding, Language,
     MemberLocation,

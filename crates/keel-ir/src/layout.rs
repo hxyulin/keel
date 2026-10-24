@@ -5,8 +5,7 @@
 //! handled through a `ptr`. Signatures, explicit call operand contracts, and
 //! aggregate va_arg carry layouts so the ABI can classify and copy the object.
 
-use crate::Type;
-use crate::data::PTR_BYTES;
+use crate::{DataLayout, Type};
 use std::fmt;
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -28,68 +27,116 @@ impl Layout {
 
     /// Natural size without overflowing, including nested arrays and padding.
     pub fn checked_size(&self) -> Option<u64> {
-        fn align_up(size: u64, align: u64) -> Option<u64> {
-            size.checked_add(align - 1).map(|n| n / align * align)
-        }
+        self.checked_size_with_layout(DataLayout::NATIVE64)
+    }
+
+    /// Natural size under an explicit storage model, including nested arrays
+    /// and padding. Returns `None` on addition, rounding, or product overflow.
+    pub fn checked_size_with_layout(&self, layout: DataLayout) -> Option<u64> {
         match self {
-            Layout::Scalar(ty) => Some(scalar_bytes(*ty)),
+            Layout::Scalar(ty) => Some(scalar_bytes(*ty, layout)),
             Layout::Struct(fields) => {
                 let mut offset = 0;
                 for field in fields {
-                    offset = align_up(offset, field.align())?.checked_add(field.checked_size()?)?;
+                    offset = align_up(offset, field.align_with_layout(layout))?
+                        .checked_add(field.checked_size_with_layout(layout)?)?;
                 }
-                align_up(offset, self.align())
+                align_up(offset, self.align_with_layout(layout))
             }
-            Layout::Array(elem, n) => elem.checked_size()?.checked_mul(u64::from(*n)),
+            Layout::Array(elem, n) => elem
+                .checked_size_with_layout(layout)?
+                .checked_mul(u64::from(*n)),
         }
     }
 
     pub fn align(&self) -> u64 {
+        self.align_with_layout(DataLayout::NATIVE64)
+    }
+
+    /// Natural alignment under an explicit storage model, even for empty arrays.
+    pub fn align_with_layout(&self, layout: DataLayout) -> u64 {
         match self {
-            Layout::Scalar(ty) => scalar_bytes(*ty),
-            Layout::Struct(fields) => fields.iter().map(Layout::align).max().unwrap_or(1),
-            Layout::Array(elem, _) => elem.align(),
+            Layout::Scalar(Type::Ptr) => layout.pointer_align(),
+            Layout::Scalar(ty) => scalar_bytes(*ty, layout),
+            Layout::Struct(fields) => fields
+                .iter()
+                .map(|field| field.align_with_layout(layout))
+                .max()
+                .unwrap_or(1),
+            Layout::Array(elem, _) => elem.align_with_layout(layout),
         }
     }
 
     /// Every scalar inside, with its byte offset, in memory order.
+    /// Requires a validated native size and a practical leaf count, as with
+    /// `leaves_with_layout`.
     pub fn leaves(&self) -> Vec<(u64, Type)> {
+        self.leaves_with_layout(DataLayout::NATIVE64)
+    }
+
+    /// Every scalar and its byte offset under an explicit storage model.
+    /// Callers must first validate `checked_size_with_layout` with the same
+    /// model and ensure the leaf count is practical to materialize in a Vec.
+    pub fn leaves_with_layout(&self, layout: DataLayout) -> Vec<(u64, Type)> {
         let mut out = Vec::new();
-        self.collect_leaves(0, &mut out);
+        self.collect_leaves(0, layout, &mut out);
         out
     }
 
-    fn collect_leaves(&self, base: u64, out: &mut Vec<(u64, Type)>) {
+    fn collect_leaves(&self, base: u64, layout: DataLayout, out: &mut Vec<(u64, Type)>) {
         match self {
             Layout::Scalar(ty) => out.push((base, *ty)),
             Layout::Struct(fields) => {
                 let mut offset: u64 = 0;
                 for field in fields {
-                    offset = offset.next_multiple_of(field.align());
-                    field.collect_leaves(base + offset, out);
-                    offset += field.size();
+                    offset = align_up(offset, field.align_with_layout(layout))
+                        .expect("aggregate layout offset overflows u64");
+                    field.collect_leaves(
+                        base.checked_add(offset)
+                            .expect("aggregate layout offset overflows u64"),
+                        layout,
+                        out,
+                    );
+                    offset = offset
+                        .checked_add(
+                            field
+                                .checked_size_with_layout(layout)
+                                .expect("aggregate layout size overflows u64"),
+                        )
+                        .expect("aggregate layout offset overflows u64");
                 }
             }
             Layout::Array(elem, n) => {
                 // Empty elements have no leaves regardless of their count.
                 // Keep the AST intact: alignment and member presence still
                 // participate in structural producer classification.
-                if elem.size() == 0 {
+                let stride = elem
+                    .checked_size_with_layout(layout)
+                    .expect("aggregate layout size overflows u64");
+                if stride == 0 {
                     return;
                 }
                 for i in 0..u64::from(*n) {
-                    elem.collect_leaves(base + i * elem.size(), out);
+                    let offset = i
+                        .checked_mul(stride)
+                        .and_then(|offset| base.checked_add(offset))
+                        .expect("aggregate layout offset overflows u64");
+                    elem.collect_leaves(offset, layout, out);
                 }
             }
         }
     }
 }
 
-fn scalar_bytes(ty: Type) -> u64 {
+fn align_up(size: u64, align: u64) -> Option<u64> {
+    size.checked_add(align - 1).map(|n| n / align * align)
+}
+
+fn scalar_bytes(ty: Type, layout: DataLayout) -> u64 {
     if ty == Type::F80 {
         16
     } else {
-        ty.bytes().map_or(PTR_BYTES, u64::from)
+        ty.bytes().map_or(layout.pointer_bytes(), u64::from)
     }
 }
 

@@ -16,7 +16,7 @@
 //! A `ptr @sym` item is a relocation: its value is an address only the
 //! linker (or the loader) knows, so it is kept as a symbol name, not bytes.
 
-use crate::Type;
+use crate::{DataLayout, Type};
 use std::fmt;
 
 /// A named data object: defined here (`init` is `Some`) or elsewhere.
@@ -64,28 +64,35 @@ pub enum DataItem {
     /// `n` zero bytes.
     Zero(u32),
     /// Apple RTTI type-name pointer: symbol address plus 2^63, modulo 2^64.
-    /// This is a tagged address, not an in-bounds pointer offset.
+    /// Always eight bytes: a native tagged address, not a portable pointer.
     RttiName {
         symbol: String,
     },
-    /// The address of `symbol` plus `addend` bytes: 8 bytes, filled in by
-    /// the linker.
+    /// The address of `symbol` plus `addend` bytes, filled in by the linker.
+    /// Eight bytes by default; explicit layout queries use its pointer width.
     Ptr {
         symbol: String,
         addend: u32,
     },
 }
 
-/// Pointer size on every target keel supports.
+/// Native pointer size; explicit layout queries may use a different width.
 pub const PTR_BYTES: u64 = 8;
 
 impl DataItem {
     pub fn size(&self) -> u64 {
+        self.size_with_layout(DataLayout::NATIVE64)
+    }
+
+    /// Storage size, without implicit padding or validation of the item type.
+    /// RTTI names retain their native eight-byte tagged representation.
+    pub fn size_with_layout(&self, layout: DataLayout) -> u64 {
         match self {
             DataItem::Bytes(bytes) => bytes.len() as u64,
             DataItem::Int { ty, .. } => ty.bytes().map_or(PTR_BYTES, u64::from),
             DataItem::Zero(n) => u64::from(*n),
-            DataItem::Ptr { .. } | DataItem::RttiName { .. } => PTR_BYTES,
+            DataItem::Ptr { .. } => layout.pointer_bytes(),
+            DataItem::RttiName { .. } => PTR_BYTES,
         }
     }
 }
@@ -93,6 +100,14 @@ impl DataItem {
 impl DataInit {
     pub fn size(&self) -> u64 {
         self.items.iter().map(DataItem::size).sum()
+    }
+
+    /// Total item storage, with checked addition and no implicit padding.
+    /// This does not validate target support, relocations, or object alignment.
+    pub fn checked_size_with_layout(&self, layout: DataLayout) -> Option<u64> {
+        self.items.iter().try_fold(0u64, |size, item| {
+            size.checked_add(item.size_with_layout(layout))
+        })
     }
 
     /// Whether any item needs the linker to fill in an address.
