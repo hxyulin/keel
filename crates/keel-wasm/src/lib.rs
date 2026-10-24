@@ -498,6 +498,7 @@ struct Body<'a> {
     saved_sp: u32,
     frame_base: u32,
     locals: Vec<Option<u32>>,
+    direct_return: bool,
     pc: u32,
     blocks: HashMap<Block, i32>,
     out: wasm_encoder::Function,
@@ -517,6 +518,16 @@ impl<'a> Body<'a> {
         }
         let mut declarations = Vec::new();
         let mut next = ir.sig.params.len() as u32;
+        // This choice is made only after complete module and frame preflight.
+        // Count layout blocks, not allocated block handles: removed blocks do
+        // not participate. A one-block jump/self-loop still needs dispatch.
+        let mut blocks = ir.blocks();
+        let only = blocks.next().unwrap();
+        let direct_return = blocks.next().is_none()
+            && matches!(
+                ir.block_insts(only).last().map(|&i| ir.inst_data(i)),
+                Some(InstData::Return { .. })
+            );
         // Definition destinations use raw values; only reads resolve aliases.
         // An aliased producer must never overwrite its replacement's local.
         for b in ir.blocks() {
@@ -532,7 +543,10 @@ impl<'a> Body<'a> {
                 }
             }
         }
-        declarations.push((1, ValType::I32));
+        let dispatch_locals = u32::from(!direct_return);
+        if !direct_return {
+            declarations.push((1, ValType::I32));
+        }
         if runtime.is_some() {
             declarations.push((2, ValType::I32));
         }
@@ -542,9 +556,10 @@ impl<'a> Body<'a> {
             placement,
             frame,
             runtime,
-            saved_sp: next + 1,
-            frame_base: next + 2,
+            saved_sp: next + dispatch_locals,
+            frame_base: next + dispatch_locals + 1,
             locals,
+            direct_return,
             pc: next,
             blocks: ir
                 .blocks()
@@ -669,12 +684,16 @@ impl<'a> Body<'a> {
             self.op(W::LocalGet(self.frame_base));
             self.op(W::GlobalSet(0));
         }
-        self.op(W::Loop(BlockType::Empty));
+        if !self.direct_return {
+            self.op(W::Loop(BlockType::Empty));
+        }
         for b in self.ir.blocks() {
-            self.op(W::LocalGet(self.pc));
-            self.op(W::I32Const(self.blocks[&b]));
-            self.op(W::I32Eq);
-            self.op(W::If(BlockType::Empty));
+            if !self.direct_return {
+                self.op(W::LocalGet(self.pc));
+                self.op(W::I32Const(self.blocks[&b]));
+                self.op(W::I32Eq);
+                self.op(W::If(BlockType::Empty));
+            }
             for &i in self.ir.block_insts(b) {
                 match self.ir.inst_data(i) {
                     InstData::StackAddr { slot } => {
@@ -806,11 +825,15 @@ impl<'a> Body<'a> {
                     self.op(W::LocalSet(self.locals[v.index()].unwrap()));
                 }
             }
-            self.op(W::End);
+            if !self.direct_return {
+                self.op(W::End);
+            }
         }
-        self.op(W::Unreachable); // No valid PC may fall through the dispatch.
-        self.op(W::End);
-        self.op(W::Unreachable); // A loop has no normal function exit.
+        if !self.direct_return {
+            self.op(W::Unreachable); // No valid PC may fall through the dispatch.
+            self.op(W::End);
+            self.op(W::Unreachable); // A loop has no normal function exit.
+        }
         self.op(W::End);
         self.out
     }
