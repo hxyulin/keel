@@ -143,3 +143,34 @@ python3 suite/fast_opt_locked.py /tmp/<unique>-build.jsonl \
 Generated binaries travel in memory to Node; logs/artifacts remain outside Git.
 Finite raw-IR tests do not establish executable Wasm C, 4-GiB instantiation,
 native execution or performance. Parent owns independent review and integration.
+
+On 2026-10-24 source `4fa9d0d8` (production `c4388780`) passed locally on
+Apple ARM64, rustc 1.99.1 and Node v24.22.1: all 35 backend integration tests
+in both debug and release (10 runtime, 10 fixed-memory, 15 scalar), zero
+failures/ignored. Both profiles independently validate MVP binaries and execute
+Node fixtures. Locked cargo check and build also passed with no compiler warnings.
+`cargo fmt -p keel-wasm --check` and `git diff --check` passed.
+
+Every Rust invocation used the shared `suite/fast_opt_locked.py` lock,
+`CARGO_CACHE_LINKS=0`, `cargo`, `--offline --locked -j2 -p keel-wasm`,
+existing toolchain/features, and default shared cache/managed target storage.
+The release gate adds `--release` to test. Exact serialized command records and
+captured output are outside Git:
+
+- `/tmp/keel-wasm-runtime-ecd33817-debug-final.{jsonl,log}`
+- `/tmp/keel-wasm-runtime-ecd33817-release.{jsonl,log}`
+- `/tmp/keel-wasm-runtime-ecd33817-check.{jsonl,log}`
+- `/tmp/keel-wasm-runtime-ecd33817-build.{jsonl,log}`
+
+The append-only debug command records retain initial test-fixture corrections
+(an `icmp.eq` spelling and an explicit u32 literal type); the final invocations
+above passed after those corrections. No production semantic correction was
+needed during these runs. No 4-GiB instantiation, remote host, installation,
+cache/toolchain change, output deletion, performance campaign or main
+integration/cleanup was performed.
+
+Validation temporarily uses prerequisite `8f3eab3e`, the unmodified cherry-pick
+of the separately owned IR implementation `4d974a65`, on base `aa326b52`.
+That prerequisite is separate from the two runtime-owned commits and is subject
+to the parent's IR review/integration. The runtime-owned patch changes only
+this crate. Independent runtime review and integration remain outstanding.
