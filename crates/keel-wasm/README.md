@@ -143,6 +143,23 @@ negative/high-bit offsets, INT_MIN and an OOB store that writes no prefix.
 The runtime instance is discarded after the final trapping operation.
 Explicit negative tests retain unsupported unary/width/FP family coverage.
 
+On 2026-10-24, implementation `ba0ca420` on reviewed main `0115a0f7`
+passed the full keel-wasm debug and release suites: 42 integration tests per
+profile (15 scalar, 10 fixed-memory, 13 runtime, 4 negation), with no failures
+or ignored tests. Locked cargo check/build passed without compiler warnings;
+`cargo fmt -p keel-wasm --check` and `git diff --check` also passed.
+Node v24.22.1 executed the independent BigInt oracles locally.
+
+Every compilation used the existing shared `suite/fast_opt_locked.py` lock,
+`CARGO_CACHE_LINKS=0`, `cargo`, `--offline --locked -j2 -p keel-wasm`,
+existing toolchain/features and default managed cargo storage; release test adds
+`--release`. Exact command records and output remain outside Git at
+`/tmp/keel-wasm-ineg-50d50f78-{debug,release,check,build}.{jsonl,log}`.
+No existing negative test in this base used `ineg`; the new tests explicitly
+reject the other unary operations without removing existing family controls.
+This is finite raw-IR evidence. Parent owns C coordination, independent review,
+integration and cleanup; no native execution or performance result is claimed.
+
 ## Validation
 
 The dedicated tests/runtime.rs uses independent wasmparser MVP validation and
