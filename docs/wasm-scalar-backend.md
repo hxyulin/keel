@@ -9,6 +9,10 @@ Native instruction selection, register allocation and code generation are unchan
 The native [ISA](userspace-isa-status.md), [intrinsic](c-x86-intrinsics.md) and
 [vector](gnu-vector-mode.md) contracts remain native contracts.
 
+The later [raw-IR memory checkpoint](wasm-memory-backend.md) adds a separate
+explicitly selected memory API; the original scalar API/subset documented here
+remains unchanged.
+
 ## API and publication
 
 ```rust,ignore

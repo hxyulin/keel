@@ -1,12 +1,13 @@
-//! Experimental pointer-free scalar core WebAssembly output. No native or C ABI.
+//! Experimental scalar core WebAssembly output with opt-in fixed wasm32 memory.
+//! No native or C ABI, software stack, static data, or host imports.
 use keel_ir::{
-    ArgExt, BinaryOp, Block, BlockCall, CallConv, EntityRef, Function, FunctionAttrs, InstData,
-    IntCC, Module, Purpose, Signature, Type, Value,
+    ArgExt, BinaryOp, Block, BlockCall, CallConv, ConvertOp, DataLayout, EntityRef, Function,
+    FunctionAttrs, InstData, IntCC, Module, Purpose, Signature, Type, Value,
 };
 use std::collections::{HashMap, HashSet};
 use wasm_encoder::{
-    BlockType, CodeSection, ExportKind, ExportSection, FunctionSection, Instruction as W,
-    TypeSection, ValType,
+    BlockType, CodeSection, ExportKind, ExportSection, FunctionSection, Instruction as W, MemArg,
+    MemorySection, MemoryType, TypeSection, ValType,
 };
 
 /// One explicitly requested function export; names are exact UTF-8 strings.
@@ -20,6 +21,17 @@ pub struct Export {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Options {
     pub exports: Vec<Export>,
+}
+
+/// Explicit opt-in to one owned, unshared, exported wasm32 memory.
+/// Initial and maximum size are both `pages` (64 KiB each, 0..=65536).
+/// `export_name` must be nonempty and distinct from all function export names.
+/// Function signatures retain the scalar i32/i64 contract of `Options`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Wasm32MemoryOptions {
+    pub scalar: Options,
+    pub pages: u32,
+    pub export_name: String,
 }
 
 /// A verifier, unsupported-contract, or binary-validation failure.
@@ -39,9 +51,33 @@ fn wide(t: Type) -> bool {
 }
 fn local_type(t: Type) -> Result<ValType, Diagnostic> {
     match t {
-        Type::I8 | Type::I32 => Ok(ValType::I32),
+        Type::I8 | Type::I16 | Type::I32 | Type::Ptr => Ok(ValType::I32),
         Type::I64 => Ok(ValType::I64),
         _ => Err(reject(format!("unsupported value type {t}"))),
+    }
+}
+fn check_value_type(t: Type, memory: bool) -> Result<(), Diagnostic> {
+    if !memory && matches!(t, Type::I16 | Type::Ptr) {
+        return Err(reject(format!("unsupported value type {t}")));
+    }
+    local_type(t).map(|_| ())
+}
+fn memory_bytes(t: Type) -> Option<u64> {
+    match t {
+        Type::Ptr => Some(DataLayout::WASM32.pointer_bytes()),
+        Type::I8 | Type::I16 | Type::I32 | Type::I64 => t.bytes().map(u64::from),
+        _ => None,
+    }
+}
+fn conversion(op: ConvertOp, from: Type, to: Type) -> bool {
+    match op {
+        ConvertOp::IntToPtr => (from, to) == (Type::I64, Type::Ptr),
+        ConvertOp::PtrToInt => (from, to) == (Type::Ptr, Type::I64),
+        ConvertOp::Sext | ConvertOp::Uext | ConvertOp::Trunc => {
+            matches!(from, Type::I8 | Type::I16 | Type::I32 | Type::I64)
+                && matches!(to, Type::I8 | Type::I16 | Type::I32 | Type::I64)
+        }
+        _ => false,
     }
 }
 fn signature(sig: &Signature) -> Result<(), Diagnostic> {
@@ -104,6 +140,12 @@ fn binary(op: BinaryOp, t: Type) -> Option<W<'static>> {
 }
 fn comparison(cc: IntCC, t: Type) -> Option<W<'static>> {
     use IntCC::*;
+    // Pointer relations use normalized unsigned wasm32 address bits. Signed
+    // pointer predicates have no accepted contract in this profile.
+    if t == Type::Ptr {
+        return matches!(cc, Eq | Ne | Ult | Ule | Ugt | Uge)
+            .then(|| comparison(cc, Type::I32).unwrap());
+    }
     Some(match (cc, t) {
         (Eq, Type::I32) => W::I32Eq,
         (Eq, Type::I64) => W::I64Eq,
@@ -133,6 +175,41 @@ fn comparison(cc: IntCC, t: Type) -> Option<W<'static>> {
 /// contracts (including unused declarations), then encode and independently
 /// validate a complete core module. Errors never publish partial bytes.
 pub fn emit_module(module: &Module, options: &Options) -> Result<Vec<u8>, Diagnostic> {
+    emit(module, options, None)
+}
+
+/// Emit raw, unoptimized IR with fixed wasm32 memory. Offsets cross the scalar
+/// export boundary as i64 followed by `inttoptr`, or i32 followed by `uext.i64`
+/// and `inttoptr`. Pointer function signatures, including internal, are rejected.
+pub fn emit_wasm32_memory_module(
+    module: &Module,
+    options: &Wasm32MemoryOptions,
+) -> Result<Vec<u8>, Diagnostic> {
+    // Wide arithmetic also handles the valid 4 GiB maximum on 32-bit hosts.
+    let bytes = u64::from(options.pages) * 65536;
+    if bytes > (1u64 << 32) {
+        return Err(reject("wasm32 memory pages must be in 0..=65536"));
+    }
+    if options.export_name.is_empty() {
+        return Err(reject("memory export name must be nonempty"));
+    }
+    if options
+        .scalar
+        .exports
+        .iter()
+        .any(|e| e.name == options.export_name)
+    {
+        return Err(reject("memory export name collides with a function export"));
+    }
+    emit(module, &options.scalar, Some(options))
+}
+
+fn emit(
+    module: &Module,
+    options: &Options,
+    memory: Option<&Wasm32MemoryOptions>,
+) -> Result<Vec<u8>, Diagnostic> {
+    let has_memory = memory.is_some();
     keel_ir::verify_module(module).map_err(|errors| {
         reject(
             errors
@@ -143,7 +220,7 @@ pub fn emit_module(module: &Module, options: &Options) -> Result<Vec<u8>, Diagno
         )
     })?;
     if !module.data.is_empty() {
-        return Err(reject("data/memory is unsupported"));
+        return Err(reject("module data is unsupported"));
     }
     let indices: HashMap<_, _> = module
         .functions
@@ -199,17 +276,17 @@ pub fn emit_module(module: &Module, options: &Options) -> Result<Vec<u8>, Diagno
             }
             for b in f.blocks() {
                 for &v in f.block_params(b) {
-                    local_type(f.value_type(v))?;
+                    check_value_type(f.value_type(v), has_memory)?;
                 }
                 for &i in f.block_insts(b) {
                     let d = f.inst_data(i);
                     let ty = |v| f.value_type(f.resolve(v));
                     for &v in f.inst_results(i) {
-                        local_type(f.value_type(v))?;
+                        check_value_type(f.value_type(v), has_memory)?;
                     }
                     let mut bad = None;
                     d.for_each_operand(|v| {
-                        if let Err(e) = local_type(ty(v)) {
+                        if let Err(e) = check_value_type(ty(v), has_memory) {
                             bad = Some(e);
                         }
                     });
@@ -219,9 +296,29 @@ pub fn emit_module(module: &Module, options: &Options) -> Result<Vec<u8>, Diagno
                     let supported = match d {
                         InstData::Iconst { ty, .. } => {
                             matches!(ty, Type::I8 | Type::I32 | Type::I64)
+                                || (has_memory && *ty == Type::I16)
                         }
-                        InstData::Binary { op, args } => binary(*op, ty(args[0])).is_some(),
-                        InstData::Icmp { cond, args } => comparison(*cond, ty(args[0])).is_some(),
+                        InstData::Binary { op, args } => {
+                            binary(*op, ty(args[0])).is_some()
+                                || (has_memory && *op == BinaryOp::Ptradd)
+                        }
+                        InstData::Icmp { cond, args } => {
+                            comparison(*cond, ty(args[0])).is_some()
+                                && (has_memory || ty(args[0]) != Type::Ptr)
+                        }
+                        InstData::Convert { op, ty: to, arg } => {
+                            has_memory && conversion(*op, ty(*arg), *to)
+                        }
+                        InstData::Load { ty, flags, .. } => {
+                            has_memory
+                                && memory_bytes(*ty).is_some()
+                                && flags.align.is_power_of_two()
+                        }
+                        InstData::Store { value, flags, .. } => {
+                            has_memory
+                                && memory_bytes(ty(*value)).is_some()
+                                && flags.align.is_power_of_two()
+                        }
                         InstData::Select { .. }
                         | InstData::Jump { .. }
                         | InstData::Brif { .. }
@@ -255,11 +352,20 @@ pub fn emit_module(module: &Module, options: &Options) -> Result<Vec<u8>, Diagno
         exports.export(&e.name, ExportKind::Func, indices[e.function.as_str()]);
     }
     let mut output = wasm_encoder::Module::new();
-    output
-        .section(&types)
-        .section(&functions)
-        .section(&exports)
-        .section(&code);
+    output.section(&types).section(&functions);
+    if let Some(memory) = memory {
+        let mut memories = MemorySection::new();
+        memories.memory(MemoryType {
+            minimum: u64::from(memory.pages),
+            maximum: Some(u64::from(memory.pages)),
+            memory64: false,
+            shared: false,
+            page_size_log2: None,
+        });
+        output.section(&memories);
+        exports.export(&memory.export_name, ExportKind::Memory, 0);
+    }
+    output.section(&exports).section(&code);
     let bytes = output.finish();
     // Keep the output contract independent of the validator's evolving defaults.
     wasmparser::Validator::new_with_features(wasmparser::WasmFeatures::WASM1)
@@ -335,10 +441,60 @@ impl<'a> Body<'a> {
         } else {
             W::I32Const(if t == Type::I8 {
                 imm as u8 as i32
+            } else if t == Type::I16 {
+                imm as u16 as i32
             } else {
                 imm as i32
             })
         });
+    }
+    fn memarg(ty: Type, align: u32) -> MemArg {
+        // Alignment is a hint, never a requirement or a widened footprint.
+        // Offset zero preserves ptradd's wrap before the bounds-checked access.
+        MemArg {
+            offset: 0,
+            align: align.ilog2().min(memory_bytes(ty).unwrap().ilog2()),
+            memory_index: 0,
+        }
+    }
+    fn convert(&mut self, op: ConvertOp, to: Type, arg: Value) {
+        let from = self.ir.value_type(arg);
+        self.get(arg);
+        match op {
+            ConvertOp::IntToPtr => self.op(W::I32WrapI64),
+            ConvertOp::PtrToInt => self.op(W::I64ExtendI32U),
+            ConvertOp::Trunc => {
+                if from == Type::I64 {
+                    self.op(W::I32WrapI64);
+                }
+                if matches!(to, Type::I8 | Type::I16) {
+                    self.op(W::I32Const(if to == Type::I8 { 255 } else { 65535 }));
+                    self.op(W::I32And);
+                }
+            }
+            ConvertOp::Sext | ConvertOp::Uext => {
+                if op == ConvertOp::Sext && matches!(from, Type::I8 | Type::I16) {
+                    // MVP shifts, rather than proposal-only extend8/extend16.
+                    let shift = if from == Type::I8 { 24 } else { 16 };
+                    self.op(W::I32Const(shift));
+                    self.op(W::I32Shl);
+                    self.op(W::I32Const(shift));
+                    self.op(W::I32ShrS);
+                    if to == Type::I16 {
+                        self.op(W::I32Const(65535));
+                        self.op(W::I32And);
+                    }
+                }
+                if to == Type::I64 {
+                    self.op(if op == ConvertOp::Sext {
+                        W::I64ExtendI32S
+                    } else {
+                        W::I64ExtendI32U
+                    });
+                }
+            }
+            _ => unreachable!("preflight"),
+        }
     }
     fn edge(&mut self, edge: &BlockCall, depth: u32) {
         // Snapshot every source on the operand stack, then pop in reverse.
@@ -364,6 +520,40 @@ impl<'a> Body<'a> {
             for &i in self.ir.block_insts(b) {
                 match self.ir.inst_data(i) {
                     InstData::Iconst { ty, imm } => self.constant(*ty, *imm),
+                    InstData::Binary {
+                        op: BinaryOp::Ptradd,
+                        args,
+                    } => {
+                        self.get(args[0]);
+                        self.get(args[1]);
+                        self.op(W::I32WrapI64);
+                        self.op(W::I32Add);
+                    }
+                    InstData::Convert { op, ty, arg } => self.convert(*op, *ty, *arg),
+                    InstData::Load { ty, addr, flags } => {
+                        self.get(*addr);
+                        let m = Self::memarg(*ty, flags.align);
+                        self.op(match ty {
+                            Type::I8 => W::I32Load8U(m),
+                            Type::I16 => W::I32Load16U(m),
+                            Type::I32 | Type::Ptr => W::I32Load(m),
+                            Type::I64 => W::I64Load(m),
+                            _ => unreachable!("preflight"),
+                        });
+                    }
+                    InstData::Store { value, addr, flags } => {
+                        self.get(*addr);
+                        self.get(*value);
+                        let ty = self.ir.value_type(*value);
+                        let m = Self::memarg(ty, flags.align);
+                        self.op(match ty {
+                            Type::I8 => W::I32Store8(m),
+                            Type::I16 => W::I32Store16(m),
+                            Type::I32 | Type::Ptr => W::I32Store(m),
+                            Type::I64 => W::I64Store(m),
+                            _ => unreachable!("preflight"),
+                        });
+                    }
                     InstData::Binary { op, args } => {
                         self.get(args[0]);
                         self.get(args[1]);
