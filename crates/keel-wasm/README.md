@@ -160,6 +160,26 @@ reject the other unary operations without removing existing family controls.
 This is finite raw-IR evidence. Parent owns C coordination, independent review,
 integration and cleanup; no native execution or performance result is claimed.
 
+Independent review reapplied candidate `4b5b61d5` (implementation `ba0ca420`)
+onto `0115a0f7` as `4bc7a603` and `ed86b60f`. No blocking defect was found
+in width preflight, resolved operand reads, raw destination locals, typed MVP
+subtraction, or composition with existing select, calls and CFG transport.
+The BigInt oracle computes width-normalized mathematical negation independently
+of the emitter; its mixed-width count expectations preserve the required low
+count bits. Valid negative fixtures retain the other unary and narrow/FP
+rejection boundaries. Unsupported value types can be rejected before their
+operation, so those cases establish rejection rather than a specific opcode
+diagnostic. No production or regression-test correction was warranted.
+
+Fresh review debug/release runs passed all 42 integration tests per profile
+with Node v24.22.1; locked cargo check/build also passed without compiler warnings.
+Formatting and whitespace checks passed. Commands used the same shared lock,
+offline/locked/two-job settings and disabled link caching documented above.
+Review logs and command records are outside Git at
+`/tmp/keel-wasm-review-dd8bc459-{debug,release,check,build}.{log,jsonl}`.
+This remains finite raw-IR evidence; C integration and its expected-diagnostic
+update belong to the parent and were not performed in this review checkout.
+
 ## Validation
 
 The dedicated tests/runtime.rs uses independent wasmparser MVP validation and
