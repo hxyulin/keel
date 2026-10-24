@@ -3922,7 +3922,7 @@ impl<'a> Parser<'a> {
                         } else {
                             v
                         };
-                        if last < v || last - v >= 1 << 16 {
+                        if last < v || last.checked_sub(v).is_none_or(|span| span >= 1 << 16) {
                             return Err(Error::new(loc, "case range is empty or too big"));
                         }
                         Some(v..=last)
