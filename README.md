@@ -65,11 +65,14 @@ and [ISA status](docs/userspace-isa-status.md) for the details and limits.
 
 ## Performance
 
-Compile times on an Apple M5 Max, median of 7 runs. Small inputs, so treat these
-as indicative. [Compiler methodology](docs/benchmarks/compiler-20261024.md) ·
-[assembler/linker methodology](docs/benchmarks/assembly-link-20261024.md)
+Keel compiles quickly; the code it generates is not yet as fast as Clang's.
+Measured on an Apple M5 Max. [Compiler](docs/benchmarks/compiler-20261024.md) ·
+[assembler/linker](docs/benchmarks/assembly-link-20261024.md) ·
+[runtime](docs/benchmarks/runtime-20261022.md) methodology
 
 <p align="center"><img src="docs/assets/readme-c-object.svg" alt="C source to object file: Keel 4.32 ms, Keel -O 5.35 ms, Clang -O0 16.8 ms, Clang -O2 41.8 ms" width="720"></p>
+
+<p align="center"><img src="docs/assets/readme-runtime.svg" alt="Run time of Keel -O programs relative to Clang -O2: Lua 1.34x, SQLite 1.48x, LZ4 1.49x, yyjson 1.66x, QuickJS 1.89x; 1.6x slower overall" width="720"></p>
 
 <p align="center"><img src="docs/assets/readme-ir-object.svg" alt="Keel IR to object file, backend only: Keel baseline 377 µs, Keel full 413 µs, Cranelift none 775 µs, Cranelift speed 1011 µs" width="720"></p>
 

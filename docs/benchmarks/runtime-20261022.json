@@ -1,0 +1,191 @@
+{
+  "schema": 1,
+  "date": "2026-10-22",
+  "machine": "Apple M5 Max \u00b7 macOS 27",
+  "keel_commit": "7b72d98b",
+  "keel_configuration": "keel cc -O (full IR optimization and instruction selection)",
+  "reference": "Apple Clang 21.0.0 -O2",
+  "method": "Whole-process wall time of each benchmark executable, including startup. Keel and Clang builds alternate in 7 paired rounds; ratio = median of paired Keel/Clang time ratios, with a 5000-resample percentile 95% interval (seed 19). Both compilers consume the same Clang-preprocessed sources. Outputs are checked before timing.",
+  "ratio_direction": "Keel time / Clang time; above 1 means Keel-compiled code is slower",
+  "overall_geomean_ratio": 1.5600860911781043,
+  "apps": {
+    "yyjson": {
+      "workloads": 3,
+      "geomean_ratio": 1.6643286146522094
+    },
+    "lz4": {
+      "workloads": 2,
+      "geomean_ratio": 1.490059808686479
+    },
+    "lua": {
+      "workloads": 4,
+      "geomean_ratio": 1.3372582107496485
+    },
+    "quickjs": {
+      "workloads": 3,
+      "geomean_ratio": 1.8852487155516908
+    },
+    "sqlite": {
+      "workloads": 1,
+      "geomean_ratio": 1.4781418642582533
+    }
+  },
+  "workloads": [
+    {
+      "app": "yyjson",
+      "workload": "api",
+      "rounds": 7,
+      "keel_O_ms": 82.55037499999999,
+      "clang_O2_ms": 46.261209,
+      "ratio": 1.7880171052165974,
+      "ratio_ci95": [
+        1.7566252175314296,
+        1.7954733504556626
+      ]
+    },
+    {
+      "app": "yyjson",
+      "workload": "config",
+      "rounds": 7,
+      "keel_O_ms": 30.350749999999998,
+      "clang_O2_ms": 17.612,
+      "ratio": 1.723299454917102,
+      "ratio_ci95": [
+        1.6930637946721399,
+        1.7486167041508434
+      ]
+    },
+    {
+      "app": "yyjson",
+      "workload": "telemetry",
+      "rounds": 7,
+      "keel_O_ms": 47.331708,
+      "clang_O2_ms": 31.746249999999996,
+      "ratio": 1.496183359601573,
+      "ratio_ci95": [
+        1.487281342457028,
+        1.5056279403079105
+      ]
+    },
+    {
+      "app": "lz4",
+      "workload": "compress",
+      "rounds": 7,
+      "keel_O_ms": 47.478417,
+      "clang_O2_ms": 30.046833,
+      "ratio": 1.576240979521075,
+      "ratio_ci95": [
+        1.5607760440137037,
+        1.5870927798255918
+      ]
+    },
+    {
+      "app": "lz4",
+      "workload": "decompress",
+      "rounds": 7,
+      "keel_O_ms": 21.8105,
+      "clang_O2_ms": 15.649625,
+      "ratio": 1.4085906040441833,
+      "ratio_ci95": [
+        1.3624881514357856,
+        1.412510380385372
+      ]
+    },
+    {
+      "app": "lua",
+      "workload": "fib",
+      "rounds": 7,
+      "keel_O_ms": 79.33925,
+      "clang_O2_ms": 54.155083,
+      "ratio": 1.4621034538957522,
+      "ratio_ci95": [
+        1.4393207748943209,
+        1.534543544139707
+      ]
+    },
+    {
+      "app": "lua",
+      "workload": "sort",
+      "rounds": 7,
+      "keel_O_ms": 66.499583,
+      "clang_O2_ms": 54.978084,
+      "ratio": 1.2108160931613934,
+      "ratio_ci95": [
+        1.168648562847789,
+        1.2267721625220698
+      ]
+    },
+    {
+      "app": "lua",
+      "workload": "string",
+      "rounds": 7,
+      "keel_O_ms": 96.609875,
+      "clang_O2_ms": 75.355458,
+      "ratio": 1.2778320134869614,
+      "ratio_ci95": [
+        1.2629768602406561,
+        1.2932247323080432
+      ]
+    },
+    {
+      "app": "lua",
+      "workload": "float",
+      "rounds": 7,
+      "keel_O_ms": 220.688792,
+      "clang_O2_ms": 157.05587500000001,
+      "ratio": 1.4136146606721123,
+      "ratio_ci95": [
+        1.394344796079739,
+        1.4390211761981697
+      ]
+    },
+    {
+      "app": "quickjs",
+      "workload": "fib",
+      "rounds": 7,
+      "keel_O_ms": 71.680042,
+      "clang_O2_ms": 39.143,
+      "ratio": 1.8312352655647244,
+      "ratio_ci95": [
+        1.7714784125599647,
+        1.8546867814336114
+      ]
+    },
+    {
+      "app": "quickjs",
+      "workload": "sort",
+      "rounds": 7,
+      "keel_O_ms": 223.813334,
+      "clang_O2_ms": 112.338375,
+      "ratio": 1.9929728732501246,
+      "ratio_ci95": [
+        1.920173816697045,
+        2.040953967572218
+      ]
+    },
+    {
+      "app": "quickjs",
+      "workload": "string",
+      "rounds": 7,
+      "keel_O_ms": 498.962958,
+      "clang_O2_ms": 277.561958,
+      "ratio": 1.8359482262491926,
+      "ratio_ci95": [
+        1.7456970813436414,
+        1.870907137843076
+      ]
+    },
+    {
+      "app": "sqlite",
+      "workload": "queries",
+      "rounds": 7,
+      "keel_O_ms": 367.032292,
+      "clang_O2_ms": 243.39783300000002,
+      "ratio": 1.4781418642582533,
+      "ratio_ci95": [
+        1.469417894816426,
+        1.5079521763860566
+      ]
+    }
+  ]
+}

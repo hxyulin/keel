@@ -12,6 +12,10 @@
     "tools": {
       "path": "docs/benchmarks/assembly-link-20261024.json",
       "sha256": "50cf737afc6bf39e6c8e075e0ab8cb81e895014e53915c1e42a7a213906a262e"
+    },
+    "runtime": {
+      "path": "docs/benchmarks/runtime-20261022.json",
+      "sha256": "567c46ad0c3ca66d424154427e0ba2749690b3ce25bf92e5395d7fc0a4705ac3"
     }
   },
   "charts": [
@@ -222,6 +226,65 @@
           ],
           "median_ms": 21.975958,
           "keel": false
+        }
+      ]
+    },
+    {
+      "id": "runtime",
+      "kind": "ratio",
+      "title": "Run time of Keel -O programs",
+      "reference": "Clang -O2",
+      "statistic": "median of 7 paired runs",
+      "rows": [
+        {
+          "label": "Lua",
+          "source": "runtime",
+          "pointer": [
+            "apps",
+            "lua",
+            "geomean_ratio"
+          ],
+          "value": 1.3372582107496485
+        },
+        {
+          "label": "SQLite",
+          "source": "runtime",
+          "pointer": [
+            "apps",
+            "sqlite",
+            "geomean_ratio"
+          ],
+          "value": 1.4781418642582533
+        },
+        {
+          "label": "LZ4",
+          "source": "runtime",
+          "pointer": [
+            "apps",
+            "lz4",
+            "geomean_ratio"
+          ],
+          "value": 1.490059808686479
+        },
+        {
+          "label": "yyjson",
+          "source": "runtime",
+          "pointer": [
+            "apps",
+            "yyjson",
+            "geomean_ratio"
+          ],
+          "value": 1.6643286146522094
+        },
+        {
+          "label": "QuickJS",
+          "source": "runtime",
+          "pointer": [
+            "apps",
+            "quickjs",
+            "geomean_ratio"
+          ],
+          "value": 1.8852487155516908
         }
       ]
     }

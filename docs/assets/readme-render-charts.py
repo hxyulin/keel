@@ -54,13 +54,32 @@ def bar(x, y, w, h, r=4):
 
 def render(data, chart):
     esc = html.escape
-    scale, unit = UNITS[chart['unit']]
-    rows = [(r['label'], r['median_ms'] * scale, r['keel']) for r in chart['rows']]
-    by_label = {label: value for label, value, _ in rows}
-    headline = chart['headline']
-    speedup = by_label[headline['slow']] / by_label[headline['fast']]
+    ratio = chart.get('kind') == 'ratio'
+    if ratio:
+        rows = [(r['label'], r['value'], True) for r in chart['rows']]
+        overall = math.exp(sum(math.log(v) for _, v, _ in rows) / len(rows))
+        unit, headline_text = '×', f'{overall:.1f}× slower'
+        caption = f'geometric mean vs {chart["reference"]}'
+        axis = f'Run time relative to {chart["reference"]} · lower is better'
+        label_value = lambda v: f'{v:.2f}×'
+        desc = '; '.join(f'{label}: {v:.2f}×' for label, v, _ in rows)
+        desc += f'. Overall {overall:.2f}× the run time of {chart["reference"]}.'
+    else:
+        scale, unit = UNITS[chart['unit']]
+        rows = [(r['label'], r['median_ms'] * scale, r['keel']) for r in chart['rows']]
+        by_label = {label: value for label, value, _ in rows}
+        headline = chart['headline']
+        speedup = by_label[headline['slow']] / by_label[headline['fast']]
+        headline_text = f'{speedup:.1f}× faster'
+        caption = f'{headline["fast"]} vs {headline["slow"]}'
+        axis = f'Wall time ({unit}) · lower is better'
+        label_value = lambda v: f'{fmt(v)} {unit}'
+        desc = '; '.join(f'{label}: {fmt(v)} {unit}' for label, v, _ in rows)
+        desc += f'. {headline["fast"]} is {speedup:.1f}× faster than {headline["slow"]}.'
+    statistic = chart.get('statistic', data['statistic'])
+    desc += f' {data["machine"]}, {statistic}.'
 
-    step = nice_step(max(v for _, v, _ in rows))
+    step = 0.5 if ratio else nice_step(max(v for _, v, _ in rows))
     limit = step * math.ceil(max(v for _, v, _ in rows) / step)
     x0 = PAD + LABEL_W
     plot_w = WIDTH - x0 - PAD - VALUE_W
@@ -68,9 +87,6 @@ def render(data, chart):
     base = top + ROW * len(rows)
     height = base + 62
 
-    desc = '; '.join(f'{label}: {fmt(v)} {unit}' for label, v, _ in rows)
-    desc += (f'. {headline["fast"]} is {speedup:.1f}× faster than {headline["slow"]}. '
-             f'{data["machine"]}, {data["statistic"]}.')
     cid = chart['id']
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{WIDTH}" height="{height}" '
            f'viewBox="0 0 {WIDTH} {height}" role="img" aria-labelledby="{cid}-t {cid}-d">',
@@ -80,11 +96,11 @@ def render(data, chart):
            f'<rect width="{WIDTH}" height="{height}" rx="10" fill="var(--surface)"/>',
            f'<text x="{PAD}" y="38" font-size="18" font-weight="650">{esc(chart["title"])}</text>',
            f'<text class="muted" x="{PAD}" y="60" font-size="12">'
-           f'{esc(data["machine"])} · {esc(data["statistic"])}</text>',
+           f'{esc(data["machine"])} · {esc(statistic)}</text>',
            f'<text x="{WIDTH - PAD}" y="40" font-size="26" font-weight="700" text-anchor="end">'
-           f'{speedup:.1f}× faster</text>',
+           f'{headline_text}</text>',
            f'<text class="muted" x="{WIDTH - PAD}" y="60" font-size="12" text-anchor="end">'
-           f'{esc(headline["fast"])} vs {esc(headline["slow"])}</text>']
+           f'{esc(caption)}</text>']
 
     value = 0.0
     while value <= limit + 1e-9:
@@ -94,18 +110,23 @@ def render(data, chart):
                    f'text-anchor="middle">{tick(value)}</text>')
         value += step
     out.append(f'<text class="muted" x="{x0 + plot_w / 2:.1f}" y="{base + 40}" font-size="12" '
-               f'text-anchor="middle">Wall time ({unit}) · lower is better</text>')
+               f'text-anchor="middle">{esc(axis)}</text>')
 
     for i, (label, v, keel) in enumerate(rows):
         y = top + i * ROW + (ROW - BAR) / 2 - 4
         w = max(plot_w * v / limit, 1)
-        weight = ' font-weight="600"' if keel else ''
+        weight = ' font-weight="600"' if keel and not ratio else ''
         fill = 'var(--keel)' if keel else 'var(--other)'
         out.append(f'<text x="{x0 - 12}" y="{y + 14}" font-size="13" text-anchor="end"{weight}>'
                    f'{esc(label)}</text>')
         out.append(bar(x0, y, round(w, 2), BAR) + f' fill="{fill}"/>')
         out.append(f'<text x="{x0 + w + 8:.2f}" y="{y + 14}" font-size="12"{weight}>'
-                   f'{fmt(v)} {unit}</text>')
+                   f'{label_value(v)}</text>')
+    if ratio:
+        x = x0 + plot_w / limit
+        out.append(f'<path d="M{x:.1f} {top - 10}V{base}" stroke="var(--ink)" stroke-width="1.5"/>')
+        out.append(f'<text x="{x:.1f}" y="{top - 14}" font-size="11" text-anchor="middle">'
+                   f'{esc(chart["reference"])}</text>')
     out.append('</svg>\n')
     return '\n'.join(out)
 
@@ -175,7 +196,7 @@ def main():
                 value = evidence[row['source']]
                 for part in row['pointer']:
                     value = value[part]
-                assert value == row['median_ms'], row['label']
+                assert value == row.get('median_ms', row.get('value')), row['label']
     outputs = {f'readme-{chart["id"]}.svg': render(data, chart) for chart in data['charts']}
     outputs['readme-pipeline.svg'] = render_pipeline()
     for name, output in outputs.items():

@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="316" viewBox="0 0 720 316" role="img" aria-labelledby="runtime-t runtime-d">
+<style>
+svg{--surface:#fcfcfb;--ink:#0b0b0b;--ink-2:#52514e;--grid:#e4e3df;--keel:#2a78d6;--other:#a3a29b}
+@media (prefers-color-scheme:dark){svg{--surface:#1a1a19;--ink:#f0efec;--ink-2:#c3c2b7;--grid:#3a3935;--keel:#3987e5;--other:#6f6e68}}
+text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;fill:var(--ink)}
+.muted{fill:var(--ink-2)}
+</style>
+<title id="runtime-t">Run time of Keel -O programs (lower is better)</title>
+<desc id="runtime-d">Lua: 1.34×; SQLite: 1.48×; LZ4: 1.49×; yyjson: 1.66×; QuickJS: 1.89×. Overall 1.56× the run time of Clang -O2. Apple M5 Max · macOS 27, median of 7 paired runs.</desc>
+<rect width="720" height="316" rx="10" fill="var(--surface)"/>
+<text x="24" y="38" font-size="18" font-weight="650">Run time of Keel -O programs</text>
+<text class="muted" x="24" y="60" font-size="12">Apple M5 Max · macOS 27 · median of 7 paired runs</text>
+<text x="696" y="40" font-size="26" font-weight="700" text-anchor="end">1.6× slower</text>
+<text class="muted" x="696" y="60" font-size="12" text-anchor="end">geometric mean vs Clang -O2</text>
+<path d="M174.0 78V254" stroke="var(--grid)"/>
+<text class="muted" x="174.0" y="270" font-size="11" text-anchor="middle">0</text>
+<path d="M283.5 78V254" stroke="var(--grid)"/>
+<text class="muted" x="283.5" y="270" font-size="11" text-anchor="middle">0.5</text>
+<path d="M393.0 78V254" stroke="var(--grid)"/>
+<text class="muted" x="393.0" y="270" font-size="11" text-anchor="middle">1</text>
+<path d="M502.5 78V254" stroke="var(--grid)"/>
+<text class="muted" x="502.5" y="270" font-size="11" text-anchor="middle">1.5</text>
+<path d="M612.0 78V254" stroke="var(--grid)"/>
+<text class="muted" x="612.0" y="270" font-size="11" text-anchor="middle">2</text>
+<text class="muted" x="393.0" y="294" font-size="12" text-anchor="middle">Run time relative to Clang -O2 · lower is better</text>
+<text x="162" y="101.0" font-size="13" text-anchor="end">Lua</text>
+<path d="M174 87.0h288.86a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-288.86z" fill="var(--keel)"/>
+<text x="474.86" y="101.0" font-size="12">1.34×</text>
+<text x="162" y="135.0" font-size="13" text-anchor="end">SQLite</text>
+<path d="M174 121.0h319.71a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-319.71z" fill="var(--keel)"/>
+<text x="505.71" y="135.0" font-size="12">1.48×</text>
+<text x="162" y="169.0" font-size="13" text-anchor="end">LZ4</text>
+<path d="M174 155.0h322.32a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-322.32z" fill="var(--keel)"/>
+<text x="508.32" y="169.0" font-size="12">1.49×</text>
+<text x="162" y="203.0" font-size="13" text-anchor="end">yyjson</text>
+<path d="M174 189.0h360.49a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-360.49z" fill="var(--keel)"/>
+<text x="546.49" y="203.0" font-size="12">1.66×</text>
+<text x="162" y="237.0" font-size="13" text-anchor="end">QuickJS</text>
+<path d="M174 223.0h408.87a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-408.87z" fill="var(--keel)"/>
+<text x="594.87" y="237.0" font-size="12">1.89×</text>
+<path d="M393.0 74V254" stroke="var(--ink)" stroke-width="1.5"/>
+<text x="393.0" y="70" font-size="11" text-anchor="middle">Clang -O2</text>
+</svg>
