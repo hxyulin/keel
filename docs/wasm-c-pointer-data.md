@@ -33,8 +33,12 @@ normalization. Symbolic offsets must be nonnegative and at most target object
 size (one-past allowed). Pointer relocations require four-byte object/cursor
 alignment and advance the cursor by exactly four. Initializer extents and
 nonoverlap are checked before serialization. After parsing, the private gate
-checks each array dimension against u32 bounds before storage multiplication; symbolic evaluation checks i64
-multiplication/addition/subtraction overflow in the private model. Native
+checks each array dimension against u32 bounds before storage multiplication.
+Array parsing checks extents before enclosing dimensions and type queries can
+request a size. Record parsing additionally bounds member-array multiplication,
+alignment, accumulated size and trailing padding before the lowering gate (including unused
+definitions). Symbolic evaluation checks i64 multiplication/addition/subtraction
+overflow in the private model. Native
 evaluator compatibility paths retain their existing behavior. Backend placement
 still checks memory bounds and static-data/stack overlap.
 
@@ -167,3 +171,61 @@ The local-byte and above-64-byte local initializer fences remain unchanged.
 No public API, optimizer, native ABI/FP/memory or backend source change is
 introduced by this integration follow-up. Independent review remains the next
 parent-owned gate.
+
+## Independent pointer/data review
+
+Candidate `eabe9602` was reapplied onto `c8bfba1e` in the assigned review
+checkout. Review found one blocking bounds family: record layout occurs before
+the private lowering gate. An unused `struct Big { long long
+big[9223372036854775807LL]; };` panicked in debug at `Types::size` and was accepted
+after wrapping in release. Fix `c40a72dc` bounds private non-native member-array
+multiplication, alignment, accumulated record size and trailing padding before
+those operations. Fix `37f7b69b` additionally checks completed array dimensions
+during parsing, covering nested declarators and erased `sizeof` type names
+before they can request unchecked sizes. Native LP64 branches retain their
+existing calculations. No backend or IR source change is needed.
+
+Regressions cover unused structs/unions, nested dimensions and pointer-to-array
+declarations, oversized aggregate sums/padding, and a valid u32-boundary layout
+query that creates no data object. Additional symbolic-addend witnesses use a
+one-byte target and sixteen positive/negative scaled steps: unchecked wrapping
+would return to zero and evade a final-only bounds check. They allocate no large
+object. Test commit `885f21ae` independently checks dynamic pointer wrapping,
+signed/unsigned pointer-to-long widening, a live result across an i64 helper
+call, and every byte surrounding adjacent four-byte volatile pointer/long stores
+in host memory. Node expectations use BigInt width normalization; high-bit and
+wrapping addresses are never dereferenced. These cases exercise the private
+normalization policy, rather than assert general C provenance for numeric
+addresses.
+
+No further blocking defect was found in this bounded audit. The test seam still
+selects the model before parsing, bypasses native ABI classification, validates
+the actual WASM32 module, and runs no optimizer. Its module has no target tag;
+callers remain responsible for pairing its provenance with the runtime API.
+Public target/preprocessing/header/CLI routing, pointer/narrow/aggregate ABI,
+unsupported narrow arithmetic, optimizer audit, larger/byte local initializer
+paths, FP/SIMD/atomics and application/WASI support remain blocked. The existing
+local initializer fences remain intact. Parent owns integration and cleanup.
+
+Final reviewed Rust source `37f7b69b` passed 351 combined debug tests (309 C,
+42 Wasm) and 125 focused C release tests, including all eleven private lowering
+tests in both profiles. There were no failures, ignored tests or compiler
+warnings. Production check/build for both crates passed. The existing Clang
+wasm32/native declaration and integer-constant oracles ran within those suites;
+separate Clang checks also confirmed the footprint test record's offsets and
+size (16 bytes on wasm32, 32 on native LP64), and the maintained wasm32 layout
+declaration oracle passed. Node v24.22.1 executed the byte-footprint and BigInt
+oracles locally on Apple ARM64 with Apple Clang 21. These are finite checks;
+Linux/x86 runtime branches remain cross-object evidence on this host.
+
+Every Rust invocation used the prescribed `CARGO_CACHE_LINKS=0`, shared
+`suite/fast_opt_locked.py` lock, `cargo`, `--offline --locked -j2`,
+existing toolchain/features and default managed storage. Final command records
+and captured output are `/tmp/keel-pointer-review-dd2a-final-{debug,release,check,build}.{jsonl,log}`.
+The release selection is the focused C command documented in the scalar
+checkpoint. The original failing bounds witness is retained in
+`/tmp/keel-pointer-review-dd2a-record-red.{jsonl,log}`; earlier development logs
+with this prefix precede the final fixes. Independent Clang inputs/output are
+`/tmp/keel-pointer-review-dd2a-{wasm,native}-oracle.{c,log}` and
+`/tmp/keel-pointer-review-dd2a-layout-oracle.log`. Focused rustfmt on all changed
+Rust files and `git diff --check` passed. No generated artifact is tracked.
