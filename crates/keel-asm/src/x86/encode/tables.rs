@@ -277,6 +277,8 @@ fn register_matches(spec: IsaOperand, r: Register, size: u16, address: u16) -> b
         "mmx" => r.class == RegisterClass::Mmx,
         "fpr" => r.class == RegisterClass::X87,
         "sreg" => r.class == RegisterClass::Segment,
+        "cr" => r.class == RegisterClass::Control,
+        "dr" => r.class == RegisterClass::Debug,
         "implicit_reg" => {
             if spec.register == "st0" {
                 return r.class == RegisterClass::X87 && r.number == 0;

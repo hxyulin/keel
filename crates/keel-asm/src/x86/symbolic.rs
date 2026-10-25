@@ -267,6 +267,8 @@ fn register(out: &mut Vec<u8>, r: &Register) {
         RegisterClass::Rip => 3,
         RegisterClass::Ymm => 5,
         RegisterClass::Segment => 6,
+        RegisterClass::Control => 7,
+        RegisterClass::Debug => 8,
     });
     out.push(r.number);
     out.extend_from_slice(&r.width.to_le_bytes());

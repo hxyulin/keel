@@ -55,6 +55,22 @@ impl Register {
                 5 => w.write_str("gs"),
                 _ => Err(fmt::Error),
             },
+            RegisterClass::Control | RegisterClass::Debug => {
+                let valid = if self.class == RegisterClass::Control {
+                    matches!(self.number, 0 | 2 | 3 | 4 | 8)
+                } else {
+                    self.number < 8
+                };
+                if !valid || self.width != 64 || self.high_byte {
+                    return Err(fmt::Error);
+                }
+                w.write_str(if self.class == RegisterClass::Control {
+                    "cr"
+                } else {
+                    "dr"
+                })?;
+                write_int(w, self.number.into(), false)
+            }
             RegisterClass::Rip => w.write_str(if self.width == 32 { "eip" } else { "rip" }),
             RegisterClass::Ymm => {
                 w.write_str("ymm")?;

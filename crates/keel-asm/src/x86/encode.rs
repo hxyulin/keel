@@ -284,6 +284,10 @@ fn validate(i: &Instruction) -> Result<(), String> {
                 RegisterClass::Ymm => r.width == 256 && !r.high_byte,
                 RegisterClass::X87 => r.number < 8 && r.width == 80 && !r.high_byte,
                 RegisterClass::Segment => r.number < 6 && r.width == 16 && !r.high_byte,
+                RegisterClass::Control => {
+                    matches!(r.number, 0 | 2 | 3 | 4 | 8) && r.width == 64 && !r.high_byte
+                }
+                RegisterClass::Debug => r.number < 8 && r.width == 64 && !r.high_byte,
                 RegisterClass::Rip => r.number == 0 && matches!(r.width, 32 | 64) && !r.high_byte,
             }
     }
