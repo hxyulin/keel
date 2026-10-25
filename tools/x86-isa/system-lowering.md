@@ -89,6 +89,12 @@ remain handwritten in `cpu_control.rs`. A later fixed-register recipe needs
 reviewed ordering, clobber and result-packing rules; register names alone are
 insufficient.
 
+The older descriptor/status, selector and scalar port-I/O families now have
+[generated metadata and public helper tables](../../docs/x86-query-bindings.md)
+for 42 existing prefix IDs. Their shared emission code has not migrated into
+this recipe engine. Four wide LAR/LSL register paths have existing assembler
+operand gaps documented there.
+
 CPUID is outside this schema and needs an RBX save slot and prologue save/CFI
 planning. Its instruction emission cannot be migrated independently of those
 frame requirements. Existing RDTSC/RDPMC/XGETBV sequences may later share a

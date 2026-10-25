@@ -51,6 +51,10 @@ SLDT/STR/SMSW forms with known selectors, two CR0 values and two old register
 containers. See [descriptor/status observations](x86-descriptor-queries.md).
 LAR, LSL, VERR and VERW have typed descriptor-query APIs. Scalar and string
 port I/O have typed APIs, with their own permission and FLAGS contracts.
+The [query/I/O binding migration](x86-query-bindings.md) generates metadata for
+42 existing APIs. It also records four pre-existing assembly gaps in the
+32/64-bit register LAR/LSL APIs; those paths need an operand spelling/matcher
+fix before CPL0 qualification.
 
 LGDT and LIDT now have assembler encodings and pinned typed APIs:
 `x86_lgdt(ptr)` and `x86_lidt(ptr)`. Each reads one packed ten-byte image:

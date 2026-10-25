@@ -1,0 +1,43 @@
+# Frozen from 50b85e31 before query/I/O generation. No instruction execution.
+687|X86Sgdt|x86_sgdt|[Ptr]|[]|false|Barrier|true|Some(("sgdt", 80, 10))|None|None
+688|X86Sidt|x86_sidt|[Ptr]|[]|false|Barrier|true|Some(("sidt", 80, 10))|None|None
+689|X86SldtMem|x86_sldt_mem|[Ptr]|[]|false|Barrier|true|Some(("sldt", 16, 2))|None|None
+690|X86Sldt16|x86_sldt16|[I64]|[I64]|false|Barrier|true|Some(("sldt", 16, 0))|None|None
+691|X86Sldt32|x86_sldt32|[I64]|[I64]|false|Barrier|true|Some(("sldt", 32, 0))|None|None
+692|X86Sldt64|x86_sldt64|[I64]|[I64]|false|Barrier|true|Some(("sldt", 64, 0))|None|None
+693|X86StrMem|x86_str_mem|[Ptr]|[]|false|Barrier|true|Some(("str", 16, 2))|None|None
+694|X86Str16|x86_str16|[I64]|[I64]|false|Barrier|true|Some(("str", 16, 0))|None|None
+695|X86Str32|x86_str32|[I64]|[I64]|false|Barrier|true|Some(("str", 32, 0))|None|None
+696|X86Str64|x86_str64|[I64]|[I64]|false|Barrier|true|Some(("str", 64, 0))|None|None
+697|X86SmswMem|x86_smsw_mem|[Ptr]|[]|false|Barrier|true|Some(("smsw", 16, 2))|None|None
+698|X86Smsw16|x86_smsw16|[I64]|[I64]|false|Barrier|true|Some(("smsw", 16, 0))|None|None
+699|X86Smsw32|x86_smsw32|[I64]|[I64]|false|Barrier|true|Some(("smsw", 32, 0))|None|None
+700|X86Smsw64|x86_smsw64|[I64]|[I64]|false|Barrier|true|Some(("smsw", 64, 0))|None|None
+701|X86Lar16|x86_lar16|[I16, I16]|[I16, I32]|false|Barrier|true|None|Some(("lar", 16, false))|None
+702|X86Lar16Mem|x86_lar16_mem|[I16, Ptr]|[I16, I32]|false|Barrier|true|None|Some(("lar", 16, true))|None
+703|X86Lar32|x86_lar32|[I32, I16]|[I32, I32]|false|Barrier|true|None|Some(("lar", 32, false))|None
+704|X86Lar32Mem|x86_lar32_mem|[I32, Ptr]|[I32, I32]|false|Barrier|true|None|Some(("lar", 32, true))|None
+705|X86Lar64|x86_lar64|[I64, I16]|[I64, I32]|false|Barrier|true|None|Some(("lar", 64, false))|None
+706|X86Lar64Mem|x86_lar64_mem|[I64, Ptr]|[I64, I32]|false|Barrier|true|None|Some(("lar", 64, true))|None
+707|X86Lsl16|x86_lsl16|[I16, I16]|[I16, I32]|false|Barrier|true|None|Some(("lsl", 16, false))|None
+708|X86Lsl16Mem|x86_lsl16_mem|[I16, Ptr]|[I16, I32]|false|Barrier|true|None|Some(("lsl", 16, true))|None
+709|X86Lsl32|x86_lsl32|[I32, I16]|[I32, I32]|false|Barrier|true|None|Some(("lsl", 32, false))|None
+710|X86Lsl32Mem|x86_lsl32_mem|[I32, Ptr]|[I32, I32]|false|Barrier|true|None|Some(("lsl", 32, true))|None
+711|X86Lsl64|x86_lsl64|[I64, I16]|[I64, I32]|false|Barrier|true|None|Some(("lsl", 64, false))|None
+712|X86Lsl64Mem|x86_lsl64_mem|[I64, Ptr]|[I64, I32]|false|Barrier|true|None|Some(("lsl", 64, true))|None
+713|X86Verr|x86_verr|[I16]|[I32]|false|Barrier|true|None|Some(("verr", 0, false))|None
+714|X86VerrMem|x86_verr_mem|[Ptr]|[I32]|false|Barrier|true|None|Some(("verr", 0, true))|None
+715|X86Verw|x86_verw|[I16]|[I32]|false|Barrier|true|None|Some(("verw", 0, false))|None
+716|X86VerwMem|x86_verw_mem|[Ptr]|[I32]|false|Barrier|true|None|Some(("verw", 0, true))|None
+717|X86In8|x86_in8|[I16]|[I8]|false|Barrier|true|None|None|Some((false, 8, false))
+718|X86In16|x86_in16|[I16]|[I16]|false|Barrier|true|None|None|Some((false, 16, false))
+719|X86In32|x86_in32|[I16]|[I32]|false|Barrier|true|None|None|Some((false, 32, false))
+720|X86Out8|x86_out8|[I16, I8]|[]|false|Barrier|true|None|None|Some((true, 8, false))
+721|X86Out16|x86_out16|[I16, I16]|[]|false|Barrier|true|None|None|Some((true, 16, false))
+722|X86Out32|x86_out32|[I16, I32]|[]|false|Barrier|true|None|None|Some((true, 32, false))
+723|X86In8Imm|x86_in8_imm|[I16]|[I8]|false|Barrier|true|None|None|Some((false, 8, true))
+724|X86In16Imm|x86_in16_imm|[I16]|[I16]|false|Barrier|true|None|None|Some((false, 16, true))
+725|X86In32Imm|x86_in32_imm|[I16]|[I32]|false|Barrier|true|None|None|Some((false, 32, true))
+726|X86Out8Imm|x86_out8_imm|[I16, I8]|[]|false|Barrier|true|None|None|Some((true, 8, true))
+727|X86Out16Imm|x86_out16_imm|[I16, I16]|[]|false|Barrier|true|None|None|Some((true, 16, true))
+728|X86Out32Imm|x86_out32_imm|[I16, I32]|[]|false|Barrier|true|None|None|Some((true, 32, true))

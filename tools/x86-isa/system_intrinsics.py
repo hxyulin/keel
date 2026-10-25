@@ -61,9 +61,16 @@ def generate(schema):
               f'        pub const ALL: [Intrinsic; {schema["first_id"] + len(rows)}] = [',
               '            $($prefix,)*']
     lines += [f'            Intrinsic::{row["variant"]},' for row in rows]
-    lines += ['        ];', '    };', '}', '',
-              '/// Generated patterns for exhaustive target and effect classifications.',
-              '#[doc(hidden)]', '#[macro_export]', 'macro_rules! x86_system_intrinsics {']
+    lines += ['        ];', '    };', '}', '']
+    lines += metadata(rows, 'system')
+    lines += system_lowering.ir_helpers(rows)
+    lines += ['}', '']
+    return '\n'.join(lines)
+
+
+def metadata(rows, family):
+    lines = ['/// Generated patterns for exhaustive target and effect classifications.',
+              '#[doc(hidden)]', '#[macro_export]', f'macro_rules! x86_{family}_intrinsics {{']
     groups = {'all': rows, 'x86_64': rows}
     groups.update({effect: [r for r in rows if r['memory'] == effect] for effect in sorted(MEMORY)})
     for group, members in groups.items():
@@ -73,7 +80,7 @@ def generate(schema):
                       for i, r in enumerate(members)]
             lines += ['    };']
     lines += ['}', '', 'impl Intrinsic {',
-              '    pub(super) fn generated_system_info(self) -> Option<IntrinsicInfo> {',
+              f'    pub(super) fn generated_{family}_info(self) -> Option<IntrinsicInfo> {{',
               '        Some(match self {']
     for row in rows:
         ty = lambda values: '&[' + ', '.join(f'Type::{v}' for v in values) + ']'
@@ -83,16 +90,14 @@ def generate(schema):
                   f'                returns: {ty(row["returns"])},',
                   f'                pure: {str(row["pure"]).lower()},', '            },']
     lines += ['            _ => return None,', '        })', '    }', '',
-              '    pub(crate) fn generated_system_memory_effects(self) -> crate::MemoryEffects {',
+              f'    pub(crate) fn generated_{family}_memory_effects(self) -> crate::MemoryEffects {{',
               '        match self {']
     for effect in sorted(MEMORY):
         if groups[effect]:
-            lines += [f'            x86_system_intrinsics!({effect}) => crate::MemoryEffects::{effect},']
-    lines += ['            _ => unreachable!("not a declared x86 system intrinsic"),',
+            lines += [f'            x86_{family}_intrinsics!({effect}) => crate::MemoryEffects::{effect},']
+    lines += [f'            _ => unreachable!("not a declared x86 {family} intrinsic"),',
               '        }', '    }', '']
-    lines += system_lowering.ir_helpers(rows)
-    lines += ['}', '']
-    return '\n'.join(lines)
+    return lines
 
 
 def outputs(root, output):

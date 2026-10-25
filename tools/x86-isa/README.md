@@ -237,6 +237,12 @@ also requires a validated regular lowering recipe or an explicit MSR hook. Name 
 continues to use `ALL` and `info()`, so it consumes the same generated names.
 The earlier intrinsic declarations remain handwritten.
 
+`query-bindings.json` separately owns metadata and helper mappings for 42
+existing descriptor/status, selector and scalar port-I/O APIs in that prefix.
+`query_bindings.py` emits their signatures, effects, target patterns and helper
+tables while const-checking IDs against the existing declarations. Shared
+emitters remain handwritten. See [the migration and known operand gaps](../../docs/x86-query-bindings.md).
+
 The generated enum and inventory macros retain the handwritten prefix. Numeric
 IDs and `ALL` iteration order are separate contracts: the earlier prefix does
 not iterate in numeric order. Frozen fixtures captured from `a80be8ca` check

@@ -1,0 +1,894 @@
+{
+  "intrinsics": [
+    {
+      "id": 687,
+      "variant": "X86Sgdt",
+      "name": "x86_sgdt",
+      "params": [
+        "Ptr"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "binding": {
+        "kind": "descriptor_query",
+        "mnemonic": "sgdt",
+        "bits": 80,
+        "write_bytes": 10
+      }
+    },
+    {
+      "id": 688,
+      "variant": "X86Sidt",
+      "name": "x86_sidt",
+      "params": [
+        "Ptr"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "binding": {
+        "kind": "descriptor_query",
+        "mnemonic": "sidt",
+        "bits": 80,
+        "write_bytes": 10
+      }
+    },
+    {
+      "id": 689,
+      "variant": "X86SldtMem",
+      "name": "x86_sldt_mem",
+      "params": [
+        "Ptr"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "binding": {
+        "kind": "descriptor_query",
+        "mnemonic": "sldt",
+        "bits": 16,
+        "write_bytes": 2
+      }
+    },
+    {
+      "id": 690,
+      "variant": "X86Sldt16",
+      "name": "x86_sldt16",
+      "params": [
+        "I64"
+      ],
+      "returns": [
+        "I64"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "binding": {
+        "kind": "descriptor_query",
+        "mnemonic": "sldt",
+        "bits": 16,
+        "write_bytes": 0
+      }
+    },
+    {
+      "id": 691,
+      "variant": "X86Sldt32",
+      "name": "x86_sldt32",
+      "params": [
+        "I64"
+      ],
+      "returns": [
+        "I64"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "binding": {
+        "kind": "descriptor_query",
+        "mnemonic": "sldt",
+        "bits": 32,
+        "write_bytes": 0
+      }
+    },
+    {
+      "id": 692,
+      "variant": "X86Sldt64",
+      "name": "x86_sldt64",
+      "params": [
+        "I64"
+      ],
+      "returns": [
+        "I64"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "binding": {
+        "kind": "descriptor_query",
+        "mnemonic": "sldt",
+        "bits": 64,
+        "write_bytes": 0
+      }
+    },
+    {
+      "id": 693,
+      "variant": "X86StrMem",
+      "name": "x86_str_mem",
+      "params": [
+        "Ptr"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "binding": {
+        "kind": "descriptor_query",
+        "mnemonic": "str",
+        "bits": 16,
+        "write_bytes": 2
+      }
+    },
+    {
+      "id": 694,
+      "variant": "X86Str16",
+      "name": "x86_str16",
+      "params": [
+        "I64"
+      ],
+      "returns": [
+        "I64"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "binding": {
+        "kind": "descriptor_query",
+        "mnemonic": "str",
+        "bits": 16,
+        "write_bytes": 0
+      }
+    },
+    {
+      "id": 695,
+      "variant": "X86Str32",
+      "name": "x86_str32",
+      "params": [
+        "I64"
+      ],
+      "returns": [
+        "I64"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "binding": {
+        "kind": "descriptor_query",
+        "mnemonic": "str",
+        "bits": 32,
+        "write_bytes": 0
+      }
+    },
+    {
+      "id": 696,
+      "variant": "X86Str64",
+      "name": "x86_str64",
+      "params": [
+        "I64"
+      ],
+      "returns": [
+        "I64"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "binding": {
+        "kind": "descriptor_query",
+        "mnemonic": "str",
+        "bits": 64,
+        "write_bytes": 0
+      }
+    },
+    {
+      "id": 697,
+      "variant": "X86SmswMem",
+      "name": "x86_smsw_mem",
+      "params": [
+        "Ptr"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "binding": {
+        "kind": "descriptor_query",
+        "mnemonic": "smsw",
+        "bits": 16,
+        "write_bytes": 2
+      }
+    },
+    {
+      "id": 698,
+      "variant": "X86Smsw16",
+      "name": "x86_smsw16",
+      "params": [
+        "I64"
+      ],
+      "returns": [
+        "I64"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "binding": {
+        "kind": "descriptor_query",
+        "mnemonic": "smsw",
+        "bits": 16,
+        "write_bytes": 0
+      }
+    },
+    {
+      "id": 699,
+      "variant": "X86Smsw32",
+      "name": "x86_smsw32",
+      "params": [
+        "I64"
+      ],
+      "returns": [
+        "I64"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "binding": {
+        "kind": "descriptor_query",
+        "mnemonic": "smsw",
+        "bits": 32,
+        "write_bytes": 0
+      }
+    },
+    {
+      "id": 700,
+      "variant": "X86Smsw64",
+      "name": "x86_smsw64",
+      "params": [
+        "I64"
+      ],
+      "returns": [
+        "I64"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "binding": {
+        "kind": "descriptor_query",
+        "mnemonic": "smsw",
+        "bits": 64,
+        "write_bytes": 0
+      }
+    },
+    {
+      "id": 701,
+      "variant": "X86Lar16",
+      "name": "x86_lar16",
+      "params": [
+        "I16",
+        "I16"
+      ],
+      "returns": [
+        "I16",
+        "I32"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned descriptor-state query with old-destination and captured ZF results. Exact m16 or register selector input; caller owns privilege/state/fault handling. Successful wide LAR has undefined bits 19:16. No general FLAGS preservation.",
+      "binding": {
+        "kind": "selector_query",
+        "mnemonic": "lar",
+        "bits": 16,
+        "memory": false
+      }
+    },
+    {
+      "id": 702,
+      "variant": "X86Lar16Mem",
+      "name": "x86_lar16_mem",
+      "params": [
+        "I16",
+        "Ptr"
+      ],
+      "returns": [
+        "I16",
+        "I32"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned descriptor-state query with old-destination and captured ZF results. Exact m16 or register selector input; caller owns privilege/state/fault handling. Successful wide LAR has undefined bits 19:16. No general FLAGS preservation.",
+      "binding": {
+        "kind": "selector_query",
+        "mnemonic": "lar",
+        "bits": 16,
+        "memory": true
+      }
+    },
+    {
+      "id": 703,
+      "variant": "X86Lar32",
+      "name": "x86_lar32",
+      "params": [
+        "I32",
+        "I16"
+      ],
+      "returns": [
+        "I32",
+        "I32"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned descriptor-state query with old-destination and captured ZF results. Exact m16 or register selector input; caller owns privilege/state/fault handling. Successful wide LAR has undefined bits 19:16. No general FLAGS preservation.",
+      "binding": {
+        "kind": "selector_query",
+        "mnemonic": "lar",
+        "bits": 32,
+        "memory": false
+      }
+    },
+    {
+      "id": 704,
+      "variant": "X86Lar32Mem",
+      "name": "x86_lar32_mem",
+      "params": [
+        "I32",
+        "Ptr"
+      ],
+      "returns": [
+        "I32",
+        "I32"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned descriptor-state query with old-destination and captured ZF results. Exact m16 or register selector input; caller owns privilege/state/fault handling. Successful wide LAR has undefined bits 19:16. No general FLAGS preservation.",
+      "binding": {
+        "kind": "selector_query",
+        "mnemonic": "lar",
+        "bits": 32,
+        "memory": true
+      }
+    },
+    {
+      "id": 705,
+      "variant": "X86Lar64",
+      "name": "x86_lar64",
+      "params": [
+        "I64",
+        "I16"
+      ],
+      "returns": [
+        "I64",
+        "I32"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned descriptor-state query with old-destination and captured ZF results. Exact m16 or register selector input; caller owns privilege/state/fault handling. Successful wide LAR has undefined bits 19:16. No general FLAGS preservation.",
+      "binding": {
+        "kind": "selector_query",
+        "mnemonic": "lar",
+        "bits": 64,
+        "memory": false
+      }
+    },
+    {
+      "id": 706,
+      "variant": "X86Lar64Mem",
+      "name": "x86_lar64_mem",
+      "params": [
+        "I64",
+        "Ptr"
+      ],
+      "returns": [
+        "I64",
+        "I32"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned descriptor-state query with old-destination and captured ZF results. Exact m16 or register selector input; caller owns privilege/state/fault handling. Successful wide LAR has undefined bits 19:16. No general FLAGS preservation.",
+      "binding": {
+        "kind": "selector_query",
+        "mnemonic": "lar",
+        "bits": 64,
+        "memory": true
+      }
+    },
+    {
+      "id": 707,
+      "variant": "X86Lsl16",
+      "name": "x86_lsl16",
+      "params": [
+        "I16",
+        "I16"
+      ],
+      "returns": [
+        "I16",
+        "I32"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned descriptor-state query with old-destination and captured ZF results. Exact m16 or register selector input; caller owns privilege/state/fault handling. Successful wide LAR has undefined bits 19:16. No general FLAGS preservation.",
+      "binding": {
+        "kind": "selector_query",
+        "mnemonic": "lsl",
+        "bits": 16,
+        "memory": false
+      }
+    },
+    {
+      "id": 708,
+      "variant": "X86Lsl16Mem",
+      "name": "x86_lsl16_mem",
+      "params": [
+        "I16",
+        "Ptr"
+      ],
+      "returns": [
+        "I16",
+        "I32"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned descriptor-state query with old-destination and captured ZF results. Exact m16 or register selector input; caller owns privilege/state/fault handling. Successful wide LAR has undefined bits 19:16. No general FLAGS preservation.",
+      "binding": {
+        "kind": "selector_query",
+        "mnemonic": "lsl",
+        "bits": 16,
+        "memory": true
+      }
+    },
+    {
+      "id": 709,
+      "variant": "X86Lsl32",
+      "name": "x86_lsl32",
+      "params": [
+        "I32",
+        "I16"
+      ],
+      "returns": [
+        "I32",
+        "I32"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned descriptor-state query with old-destination and captured ZF results. Exact m16 or register selector input; caller owns privilege/state/fault handling. Successful wide LAR has undefined bits 19:16. No general FLAGS preservation.",
+      "binding": {
+        "kind": "selector_query",
+        "mnemonic": "lsl",
+        "bits": 32,
+        "memory": false
+      }
+    },
+    {
+      "id": 710,
+      "variant": "X86Lsl32Mem",
+      "name": "x86_lsl32_mem",
+      "params": [
+        "I32",
+        "Ptr"
+      ],
+      "returns": [
+        "I32",
+        "I32"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned descriptor-state query with old-destination and captured ZF results. Exact m16 or register selector input; caller owns privilege/state/fault handling. Successful wide LAR has undefined bits 19:16. No general FLAGS preservation.",
+      "binding": {
+        "kind": "selector_query",
+        "mnemonic": "lsl",
+        "bits": 32,
+        "memory": true
+      }
+    },
+    {
+      "id": 711,
+      "variant": "X86Lsl64",
+      "name": "x86_lsl64",
+      "params": [
+        "I64",
+        "I16"
+      ],
+      "returns": [
+        "I64",
+        "I32"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned descriptor-state query with old-destination and captured ZF results. Exact m16 or register selector input; caller owns privilege/state/fault handling. Successful wide LAR has undefined bits 19:16. No general FLAGS preservation.",
+      "binding": {
+        "kind": "selector_query",
+        "mnemonic": "lsl",
+        "bits": 64,
+        "memory": false
+      }
+    },
+    {
+      "id": 712,
+      "variant": "X86Lsl64Mem",
+      "name": "x86_lsl64_mem",
+      "params": [
+        "I64",
+        "Ptr"
+      ],
+      "returns": [
+        "I64",
+        "I32"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned descriptor-state query with old-destination and captured ZF results. Exact m16 or register selector input; caller owns privilege/state/fault handling. Successful wide LAR has undefined bits 19:16. No general FLAGS preservation.",
+      "binding": {
+        "kind": "selector_query",
+        "mnemonic": "lsl",
+        "bits": 64,
+        "memory": true
+      }
+    },
+    {
+      "id": 713,
+      "variant": "X86Verr",
+      "name": "x86_verr",
+      "params": [
+        "I16"
+      ],
+      "returns": [
+        "I32"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned descriptor-state query with old-destination and captured ZF results. Exact m16 or register selector input; caller owns privilege/state/fault handling. Successful wide LAR has undefined bits 19:16. No general FLAGS preservation.",
+      "binding": {
+        "kind": "selector_query",
+        "mnemonic": "verr",
+        "bits": 0,
+        "memory": false
+      }
+    },
+    {
+      "id": 714,
+      "variant": "X86VerrMem",
+      "name": "x86_verr_mem",
+      "params": [
+        "Ptr"
+      ],
+      "returns": [
+        "I32"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned descriptor-state query with old-destination and captured ZF results. Exact m16 or register selector input; caller owns privilege/state/fault handling. Successful wide LAR has undefined bits 19:16. No general FLAGS preservation.",
+      "binding": {
+        "kind": "selector_query",
+        "mnemonic": "verr",
+        "bits": 0,
+        "memory": true
+      }
+    },
+    {
+      "id": 715,
+      "variant": "X86Verw",
+      "name": "x86_verw",
+      "params": [
+        "I16"
+      ],
+      "returns": [
+        "I32"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned descriptor-state query with old-destination and captured ZF results. Exact m16 or register selector input; caller owns privilege/state/fault handling. Successful wide LAR has undefined bits 19:16. No general FLAGS preservation.",
+      "binding": {
+        "kind": "selector_query",
+        "mnemonic": "verw",
+        "bits": 0,
+        "memory": false
+      }
+    },
+    {
+      "id": 716,
+      "variant": "X86VerwMem",
+      "name": "x86_verw_mem",
+      "params": [
+        "Ptr"
+      ],
+      "returns": [
+        "I32"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned descriptor-state query with old-destination and captured ZF results. Exact m16 or register selector input; caller owns privilege/state/fault handling. Successful wide LAR has undefined bits 19:16. No general FLAGS preservation.",
+      "binding": {
+        "kind": "selector_query",
+        "mnemonic": "verw",
+        "bits": 0,
+        "memory": true
+      }
+    },
+    {
+      "id": 717,
+      "variant": "X86In8",
+      "name": "x86_in8",
+      "params": [
+        "I16"
+      ],
+      "returns": [
+        "I8"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/x86-port-io.md.",
+      "binding": {
+        "kind": "port_io",
+        "output": false,
+        "bits": 8,
+        "immediate": false
+      }
+    },
+    {
+      "id": 718,
+      "variant": "X86In16",
+      "name": "x86_in16",
+      "params": [
+        "I16"
+      ],
+      "returns": [
+        "I16"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/x86-port-io.md.",
+      "binding": {
+        "kind": "port_io",
+        "output": false,
+        "bits": 16,
+        "immediate": false
+      }
+    },
+    {
+      "id": 719,
+      "variant": "X86In32",
+      "name": "x86_in32",
+      "params": [
+        "I16"
+      ],
+      "returns": [
+        "I32"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/x86-port-io.md.",
+      "binding": {
+        "kind": "port_io",
+        "output": false,
+        "bits": 32,
+        "immediate": false
+      }
+    },
+    {
+      "id": 720,
+      "variant": "X86Out8",
+      "name": "x86_out8",
+      "params": [
+        "I16",
+        "I8"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/x86-port-io.md.",
+      "binding": {
+        "kind": "port_io",
+        "output": true,
+        "bits": 8,
+        "immediate": false
+      }
+    },
+    {
+      "id": 721,
+      "variant": "X86Out16",
+      "name": "x86_out16",
+      "params": [
+        "I16",
+        "I16"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/x86-port-io.md.",
+      "binding": {
+        "kind": "port_io",
+        "output": true,
+        "bits": 16,
+        "immediate": false
+      }
+    },
+    {
+      "id": 722,
+      "variant": "X86Out32",
+      "name": "x86_out32",
+      "params": [
+        "I16",
+        "I32"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/x86-port-io.md.",
+      "binding": {
+        "kind": "port_io",
+        "output": true,
+        "bits": 32,
+        "immediate": false
+      }
+    },
+    {
+      "id": 723,
+      "variant": "X86In8Imm",
+      "name": "x86_in8_imm",
+      "params": [
+        "I16"
+      ],
+      "returns": [
+        "I8"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/x86-port-io.md.",
+      "binding": {
+        "kind": "port_io",
+        "output": false,
+        "bits": 8,
+        "immediate": true
+      }
+    },
+    {
+      "id": 724,
+      "variant": "X86In16Imm",
+      "name": "x86_in16_imm",
+      "params": [
+        "I16"
+      ],
+      "returns": [
+        "I16"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/x86-port-io.md.",
+      "binding": {
+        "kind": "port_io",
+        "output": false,
+        "bits": 16,
+        "immediate": true
+      }
+    },
+    {
+      "id": 725,
+      "variant": "X86In32Imm",
+      "name": "x86_in32_imm",
+      "params": [
+        "I16"
+      ],
+      "returns": [
+        "I32"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/x86-port-io.md.",
+      "binding": {
+        "kind": "port_io",
+        "output": false,
+        "bits": 32,
+        "immediate": true
+      }
+    },
+    {
+      "id": 726,
+      "variant": "X86Out8Imm",
+      "name": "x86_out8_imm",
+      "params": [
+        "I16",
+        "I8"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/x86-port-io.md.",
+      "binding": {
+        "kind": "port_io",
+        "output": true,
+        "bits": 8,
+        "immediate": true
+      }
+    },
+    {
+      "id": 727,
+      "variant": "X86Out16Imm",
+      "name": "x86_out16_imm",
+      "params": [
+        "I16",
+        "I16"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/x86-port-io.md.",
+      "binding": {
+        "kind": "port_io",
+        "output": true,
+        "bits": 16,
+        "immediate": true
+      }
+    },
+    {
+      "id": 728,
+      "variant": "X86Out32Imm",
+      "name": "x86_out32_imm",
+      "params": [
+        "I16",
+        "I32"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/x86-port-io.md.",
+      "binding": {
+        "kind": "port_io",
+        "output": true,
+        "bits": 32,
+        "immediate": true
+      }
+    }
+  ]
+}

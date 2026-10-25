@@ -761,20 +761,7 @@ impl InstData {
             Self::VaArg { .. } | Self::AggregateVaArg { .. } => ReadWrite,
             Self::Intrinsic { id, .. } => match id {
                 crate::x86_system_intrinsics!(all) => id.generated_system_memory_effects(),
-                Intrinsic::X86Sgdt
-                | Intrinsic::X86Sidt
-                | Intrinsic::X86SldtMem
-                | Intrinsic::X86Sldt16
-                | Intrinsic::X86Sldt32
-                | Intrinsic::X86Sldt64
-                | Intrinsic::X86StrMem
-                | Intrinsic::X86Str16
-                | Intrinsic::X86Str32
-                | Intrinsic::X86Str64
-                | Intrinsic::X86SmswMem
-                | Intrinsic::X86Smsw16
-                | Intrinsic::X86Smsw32
-                | Intrinsic::X86Smsw64 => Barrier,
+                crate::x86_query_intrinsics!(all) => id.generated_query_memory_effects(),
                 Intrinsic::X86FmaVfmadd132pd128
                 | Intrinsic::X86FmaVfmadd132pd256
                 | Intrinsic::X86FmaVfmadd132ps128
@@ -1147,23 +1134,6 @@ impl InstData {
                 | Intrinsic::X86Pause
                 | Intrinsic::X86AvxVzeroall
                 | Intrinsic::X86AvxVmaskmovdqu
-                | Intrinsic::X86Lar16
-                | Intrinsic::X86Lar16Mem
-                | Intrinsic::X86Lar32
-                | Intrinsic::X86Lar32Mem
-                | Intrinsic::X86Lar64
-                | Intrinsic::X86Lar64Mem
-                | Intrinsic::X86Lsl16
-                | Intrinsic::X86Lsl16Mem
-                | Intrinsic::X86Lsl32
-                | Intrinsic::X86Lsl32Mem
-                | Intrinsic::X86Lsl64
-                | Intrinsic::X86Lsl64Mem
-                | Intrinsic::X86Verr
-                | Intrinsic::X86VerrMem
-                | Intrinsic::X86Verw
-                | Intrinsic::X86VerwMem
-                | Intrinsic::X86In8
                 | Intrinsic::X86Ins8
                 | Intrinsic::X86Ins16
                 | Intrinsic::X86Ins32
@@ -1188,17 +1158,6 @@ impl InstData {
                 | Intrinsic::X86RepOuts8OwnedTerminal
                 | Intrinsic::X86RepOuts16OwnedTerminal
                 | Intrinsic::X86RepOuts32OwnedTerminal
-                | Intrinsic::X86In16
-                | Intrinsic::X86In32
-                | Intrinsic::X86Out8
-                | Intrinsic::X86Out16
-                | Intrinsic::X86Out32
-                | Intrinsic::X86In8Imm
-                | Intrinsic::X86In16Imm
-                | Intrinsic::X86In32Imm
-                | Intrinsic::X86Out8Imm
-                | Intrinsic::X86Out16Imm
-                | Intrinsic::X86Out32Imm
                 | Intrinsic::X86DivU8
                 | Intrinsic::X86DivU16
                 | Intrinsic::X86DivU32

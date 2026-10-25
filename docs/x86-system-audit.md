@@ -8,6 +8,11 @@ RSM policy also resolves the I486 classification gap. Terminal compiler
 contracts and execution qualification remain open. The findings and ledger
 digest below record the original audit checkpoint.
 
+The later [query/I/O binding migration](x86-query-bindings.md) generates 42
+existing binding tables. Its baseline probe found assembly failures in the
+32/64-bit register LAR/LSL paths. Those four APIs need a spelling/matcher fix
+before the descriptor-query qualification recommended below.
+
 Most remaining baseline work concerns compiler contracts and qualification,
 rather than missing instruction bytes. Two public assembler gaps are confirmed:
 **SYSEXIT and RSM**. Their forms already exist in the shared catalogue. Optional

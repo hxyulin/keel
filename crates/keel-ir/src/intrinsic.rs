@@ -14,6 +14,10 @@ use std::fmt;
 #[path = "generated/x86_system_intrinsics.rs"]
 mod generated_system;
 
+#[macro_use]
+#[path = "generated/x86_query_intrinsics.rs"]
+mod generated_query;
+
 define_intrinsics! {
     X86Sse41Blendvps128,
     X86Sse41Blendvpd128,
@@ -1696,6 +1700,7 @@ impl Intrinsic {
         const MEM: &[Type] = &[Type::Ptr, Type::Ptr, Type::I64];
         let (name, params, returns, pure): (_, &'static [Type], &'static [Type], _) = match self {
             x86_system_intrinsics!(all) => return self.generated_system_info().unwrap(),
+            x86_query_intrinsics!(all) => return self.generated_query_info().unwrap(),
             Intrinsic::X86Pclmulqdq128 => (
                 "x86_pclmulqdq128",
                 &[
@@ -1795,108 +1800,6 @@ impl Intrinsic {
 
             Intrinsic::X86RflagsRead => ("x86_rflags_read", &[], &[Type::I64], false),
             Intrinsic::X86RflagsSwap => ("x86_rflags_swap", &[Type::I64], &[Type::I64], false),
-            Intrinsic::X86In8 => ("x86_in8", &[Type::I16], &[Type::I8], false),
-            Intrinsic::X86In16 => ("x86_in16", &[Type::I16], &[Type::I16], false),
-            Intrinsic::X86In32 => ("x86_in32", &[Type::I16], &[Type::I32], false),
-            Intrinsic::X86Out8 => ("x86_out8", &[Type::I16, Type::I8], &[], false),
-            Intrinsic::X86Out16 => ("x86_out16", &[Type::I16, Type::I16], &[], false),
-            Intrinsic::X86Out32 => ("x86_out32", &[Type::I16, Type::I32], &[], false),
-            Intrinsic::X86In8Imm => ("x86_in8_imm", &[Type::I16], &[Type::I8], false),
-            Intrinsic::X86In16Imm => ("x86_in16_imm", &[Type::I16], &[Type::I16], false),
-            Intrinsic::X86In32Imm => ("x86_in32_imm", &[Type::I16], &[Type::I32], false),
-            Intrinsic::X86Out8Imm => ("x86_out8_imm", &[Type::I16, Type::I8], &[], false),
-            Intrinsic::X86Out16Imm => ("x86_out16_imm", &[Type::I16, Type::I16], &[], false),
-            Intrinsic::X86Out32Imm => ("x86_out32_imm", &[Type::I16, Type::I32], &[], false),
-            Intrinsic::X86Sgdt => ("x86_sgdt", &[Type::Ptr], &[], false),
-            Intrinsic::X86Sidt => ("x86_sidt", &[Type::Ptr], &[], false),
-            Intrinsic::X86SldtMem => ("x86_sldt_mem", &[Type::Ptr], &[], false),
-            Intrinsic::X86Sldt16 => ("x86_sldt16", &[Type::I64], &[Type::I64], false),
-            Intrinsic::X86Sldt32 => ("x86_sldt32", &[Type::I64], &[Type::I64], false),
-            Intrinsic::X86Sldt64 => ("x86_sldt64", &[Type::I64], &[Type::I64], false),
-            Intrinsic::X86StrMem => ("x86_str_mem", &[Type::Ptr], &[], false),
-            Intrinsic::X86Str16 => ("x86_str16", &[Type::I64], &[Type::I64], false),
-            Intrinsic::X86Str32 => ("x86_str32", &[Type::I64], &[Type::I64], false),
-            Intrinsic::X86Str64 => ("x86_str64", &[Type::I64], &[Type::I64], false),
-            Intrinsic::X86SmswMem => ("x86_smsw_mem", &[Type::Ptr], &[], false),
-            Intrinsic::X86Smsw16 => ("x86_smsw16", &[Type::I64], &[Type::I64], false),
-            Intrinsic::X86Smsw32 => ("x86_smsw32", &[Type::I64], &[Type::I64], false),
-            Intrinsic::X86Smsw64 => ("x86_smsw64", &[Type::I64], &[Type::I64], false),
-            Intrinsic::X86Lar16 => (
-                "x86_lar16",
-                &[Type::I16, Type::I16],
-                &[Type::I16, Type::I32],
-                false,
-            ),
-            Intrinsic::X86Lar16Mem => (
-                "x86_lar16_mem",
-                &[Type::I16, Type::Ptr],
-                &[Type::I16, Type::I32],
-                false,
-            ),
-            Intrinsic::X86Lar32 => (
-                "x86_lar32",
-                &[Type::I32, Type::I16],
-                &[Type::I32, Type::I32],
-                false,
-            ),
-            Intrinsic::X86Lar32Mem => (
-                "x86_lar32_mem",
-                &[Type::I32, Type::Ptr],
-                &[Type::I32, Type::I32],
-                false,
-            ),
-            Intrinsic::X86Lar64 => (
-                "x86_lar64",
-                &[Type::I64, Type::I16],
-                &[Type::I64, Type::I32],
-                false,
-            ),
-            Intrinsic::X86Lar64Mem => (
-                "x86_lar64_mem",
-                &[Type::I64, Type::Ptr],
-                &[Type::I64, Type::I32],
-                false,
-            ),
-            Intrinsic::X86Lsl16 => (
-                "x86_lsl16",
-                &[Type::I16, Type::I16],
-                &[Type::I16, Type::I32],
-                false,
-            ),
-            Intrinsic::X86Lsl16Mem => (
-                "x86_lsl16_mem",
-                &[Type::I16, Type::Ptr],
-                &[Type::I16, Type::I32],
-                false,
-            ),
-            Intrinsic::X86Lsl32 => (
-                "x86_lsl32",
-                &[Type::I32, Type::I16],
-                &[Type::I32, Type::I32],
-                false,
-            ),
-            Intrinsic::X86Lsl32Mem => (
-                "x86_lsl32_mem",
-                &[Type::I32, Type::Ptr],
-                &[Type::I32, Type::I32],
-                false,
-            ),
-            Intrinsic::X86Lsl64 => (
-                "x86_lsl64",
-                &[Type::I64, Type::I16],
-                &[Type::I64, Type::I32],
-                false,
-            ),
-            Intrinsic::X86Lsl64Mem => (
-                "x86_lsl64_mem",
-                &[Type::I64, Type::Ptr],
-                &[Type::I64, Type::I32],
-                false,
-            ),
-            Intrinsic::X86Verr => ("x86_verr", &[Type::I16], &[Type::I32], false),
-            Intrinsic::X86VerrMem => ("x86_verr_mem", &[Type::Ptr], &[Type::I32], false),
-            Intrinsic::X86Verw => ("x86_verw", &[Type::I16], &[Type::I32], false),
-            Intrinsic::X86VerwMem => ("x86_verw_mem", &[Type::Ptr], &[Type::I32], false),
             Intrinsic::X86DivU8 => ("x86_div_u8", &[Type::I8; 3], &[Type::I8; 2], false),
             Intrinsic::X86DivU16 => ("x86_div_u16", &[Type::I16; 3], &[Type::I16; 2], false),
             Intrinsic::X86DivU32 => ("x86_div_u32", &[Type::I32; 3], &[Type::I32; 2], false),
@@ -6974,28 +6877,6 @@ impl Intrinsic {
         })
     }
 
-    /// (opcode, operand bits, exact write bytes; zero means register).
-    /// Long mode only, CPL0 or CR4.UMIP clear; no feature-bit implication.
-    pub fn x86_descriptor_query(self) -> Option<(&'static str, u16, usize)> {
-        Some(match self {
-            Self::X86Sgdt => ("sgdt", 80, 10),
-            Self::X86Sidt => ("sidt", 80, 10),
-            Self::X86SldtMem => ("sldt", 16, 2),
-            Self::X86Sldt16 => ("sldt", 16, 0),
-            Self::X86Sldt32 => ("sldt", 32, 0),
-            Self::X86Sldt64 => ("sldt", 64, 0),
-            Self::X86StrMem => ("str", 16, 2),
-            Self::X86Str16 => ("str", 16, 0),
-            Self::X86Str32 => ("str", 32, 0),
-            Self::X86Str64 => ("str", 64, 0),
-            Self::X86SmswMem => ("smsw", 16, 2),
-            Self::X86Smsw16 => ("smsw", 16, 0),
-            Self::X86Smsw32 => ("smsw", 32, 0),
-            Self::X86Smsw64 => ("smsw", 64, 0),
-            _ => return None,
-        })
-    }
-
     /// Raw 2w/w architectural division, quotient then remainder. See docs/x86-raw-div.md.
     pub fn x86_raw_div(self) -> Option<(u16, bool)> {
         match self {
@@ -7009,52 +6890,6 @@ impl Intrinsic {
             Self::X86DivS64 => Some((64, true)),
             _ => None,
         }
-    }
-
-    /// (opcode, destination width or zero for verify, exact m16 pointer form).
-    /// Query implicit descriptor state; pinned even with unused results. LAR
-    /// successful wide results have undefined bits 19:16. Failed LAR/LSL
-    /// preserve the entire old destination at the declared result width.
-    /// No implicit FLAGS boundary contract; only the captured ZF is returned.
-    pub fn x86_selector_query(self) -> Option<(&'static str, u16, bool)> {
-        Some(match self {
-            Self::X86Lar16 => ("lar", 16, false),
-            Self::X86Lar16Mem => ("lar", 16, true),
-            Self::X86Lar32 => ("lar", 32, false),
-            Self::X86Lar32Mem => ("lar", 32, true),
-            Self::X86Lar64 => ("lar", 64, false),
-            Self::X86Lar64Mem => ("lar", 64, true),
-            Self::X86Lsl16 => ("lsl", 16, false),
-            Self::X86Lsl16Mem => ("lsl", 16, true),
-            Self::X86Lsl32 => ("lsl", 32, false),
-            Self::X86Lsl32Mem => ("lsl", 32, true),
-            Self::X86Lsl64 => ("lsl", 64, false),
-            Self::X86Lsl64Mem => ("lsl", 64, true),
-            Self::X86Verr => ("verr", 0, false),
-            Self::X86VerrMem => ("verr", 0, true),
-            Self::X86Verw => ("verw", 0, false),
-            Self::X86VerwMem => ("verw", 0, true),
-            _ => return None,
-        })
-    }
-
-    /// Exact scalar port I/O: (output, data width, encoded immediate port).
-    pub fn x86_port_io(self) -> Option<(bool, u16, bool)> {
-        Some(match self {
-            Self::X86In8 => (false, 8, false),
-            Self::X86In16 => (false, 16, false),
-            Self::X86In32 => (false, 32, false),
-            Self::X86Out8 => (true, 8, false),
-            Self::X86Out16 => (true, 16, false),
-            Self::X86Out32 => (true, 32, false),
-            Self::X86In8Imm => (false, 8, true),
-            Self::X86In16Imm => (false, 16, true),
-            Self::X86In32Imm => (false, 32, true),
-            Self::X86Out8Imm => (true, 8, true),
-            Self::X86Out16Imm => (true, 16, true),
-            Self::X86Out32Imm => (true, 32, true),
-            _ => return None,
-        })
     }
 
     /// (output, element bits, REP, explicit owned terminal FLAGS context).

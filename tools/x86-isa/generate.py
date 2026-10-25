@@ -13,6 +13,7 @@ import registers
 import core_mappings
 import att_rules
 import system_intrinsics
+import query_bindings
 import coverage_ledger
 
 ROOT = Path(__file__).resolve().parent
@@ -417,6 +418,7 @@ def main():
     outputs.update(core_mappings.outputs(ROOT, OUTPUT))
     outputs.update(att_rules.outputs(ROOT, OUTPUT))
     outputs.update(system_intrinsics.outputs(ROOT, OUTPUT))
+    outputs.update(query_bindings.outputs(ROOT))
     outputs.update(coverage_ledger.outputs(ROOT, data, adapters, exclusion_reasons, form_isa))
     target, output = documentation_inventory(outputs[OUTPUT.with_name('v2.rs')], adapters['v2'])
     outputs[target] = output
