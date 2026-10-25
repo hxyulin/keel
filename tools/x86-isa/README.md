@@ -259,3 +259,8 @@ To add another system intrinsic in this append-only range:
 This migration introduces no instruction, intrinsic ID, runtime permission,
 feature requirement or kernel entry/return contract. Existing lowering and
 privileged qualification fixtures remain separate.
+
+The [regular system-lowering investigation](system-lowering.md) proposes the
+next step: generate bindings for 43 existing intrinsics through four shared
+recipe families, while retaining two explicit MSR hooks. It records the
+allocation, adjacency and terminal-transfer boundaries and validation plan.
