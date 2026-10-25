@@ -4,14 +4,17 @@
 //! Pure arithmetic belongs in the instruction set, where the optimizer sees
 //! it directly. Intrinsics are for call-like operations (memory functions)
 //! and target-specific ones. Everything a pass needs to know about one lives
-//! in its [`IntrinsicInfo`], so adding an intrinsic touches only this file
-//! and the backends.
+//! in its [`IntrinsicInfo`]. Reviewed x86 system declarations come from
+//! `tools/x86-isa/system-intrinsics.json`; their lowering stays in the backends.
 
 use crate::{Type, VectorType};
 use std::fmt;
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
-pub enum Intrinsic {
+#[macro_use]
+#[path = "generated/x86_system_intrinsics.rs"]
+mod generated_system;
+
+define_intrinsics! {
     X86Sse41Blendvps128,
     X86Sse41Blendvpd128,
     X86Sse41Pblendvb128,
@@ -901,58 +904,6 @@ pub enum Intrinsic {
     X86Aesdeclast128,
     X86Aesimc128,
     X86Aeskeygenassist128,
-    // Privileged long-mode descriptor-table loads, append-only IDs 774..775.
-    X86Lgdt,
-    X86Lidt,
-    // Raw privileged MSR access, append-only IDs 776..777.
-    X86Rdmsr,
-    X86Wrmsr,
-    // Baseline privileged CPU/cache control, append-only IDs 778..780.
-    X86Clts,
-    X86Invd,
-    X86Wbinvd,
-    // Descriptor/status mutation and address invalidation, IDs 781..787.
-    X86Lldt,
-    X86LldtMem,
-    X86Ltr,
-    X86LtrMem,
-    X86Lmsw,
-    X86LmswMem,
-    X86Invlpg,
-    // Privileged system register access, append-only IDs 788..813.
-    X86ReadCr0,
-    X86WriteCr0,
-    X86ReadCr2,
-    X86WriteCr2,
-    X86ReadCr3,
-    X86WriteCr3,
-    X86ReadCr4,
-    X86WriteCr4,
-    X86ReadCr8,
-    X86WriteCr8,
-    X86ReadDr0,
-    X86WriteDr0,
-    X86ReadDr1,
-    X86WriteDr1,
-    X86ReadDr2,
-    X86WriteDr2,
-    X86ReadDr3,
-    X86WriteDr3,
-    X86ReadDr4,
-    X86WriteDr4,
-    X86ReadDr5,
-    X86WriteDr5,
-    X86ReadDr6,
-    X86WriteDr6,
-    X86ReadDr7,
-    X86WriteDr7,
-    // Interrupt control and adjacent enable/halt, append-only IDs 814..817.
-    X86Cli,
-    X86Sti,
-    X86Hlt,
-    X86StiHlt,
-    // Raw long-mode GS-base exchange, append-only ID 818.
-    X86Swapgs,
 }
 
 pub struct IntrinsicInfo {
@@ -964,7 +915,7 @@ pub struct IntrinsicInfo {
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 819] = [
+    define_intrinsic_inventory! {
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -1739,56 +1690,12 @@ impl Intrinsic {
         Intrinsic::X86Aesdeclast128,
         Intrinsic::X86Aesimc128,
         Intrinsic::X86Aeskeygenassist128,
-        Intrinsic::X86Lgdt,
-        Intrinsic::X86Lidt,
-        Intrinsic::X86Rdmsr,
-        Intrinsic::X86Wrmsr,
-        Intrinsic::X86Clts,
-        Intrinsic::X86Invd,
-        Intrinsic::X86Wbinvd,
-        Intrinsic::X86Lldt,
-        Intrinsic::X86LldtMem,
-        Intrinsic::X86Ltr,
-        Intrinsic::X86LtrMem,
-        Intrinsic::X86Lmsw,
-        Intrinsic::X86LmswMem,
-        Intrinsic::X86Invlpg,
-        Intrinsic::X86ReadCr0,
-        Intrinsic::X86WriteCr0,
-        Intrinsic::X86ReadCr2,
-        Intrinsic::X86WriteCr2,
-        Intrinsic::X86ReadCr3,
-        Intrinsic::X86WriteCr3,
-        Intrinsic::X86ReadCr4,
-        Intrinsic::X86WriteCr4,
-        Intrinsic::X86ReadCr8,
-        Intrinsic::X86WriteCr8,
-        Intrinsic::X86ReadDr0,
-        Intrinsic::X86WriteDr0,
-        Intrinsic::X86ReadDr1,
-        Intrinsic::X86WriteDr1,
-        Intrinsic::X86ReadDr2,
-        Intrinsic::X86WriteDr2,
-        Intrinsic::X86ReadDr3,
-        Intrinsic::X86WriteDr3,
-        Intrinsic::X86ReadDr4,
-        Intrinsic::X86WriteDr4,
-        Intrinsic::X86ReadDr5,
-        Intrinsic::X86WriteDr5,
-        Intrinsic::X86ReadDr6,
-        Intrinsic::X86WriteDr6,
-        Intrinsic::X86ReadDr7,
-        Intrinsic::X86WriteDr7,
-        Intrinsic::X86Cli,
-        Intrinsic::X86Sti,
-        Intrinsic::X86Hlt,
-        Intrinsic::X86StiHlt,
-        Intrinsic::X86Swapgs,
-    ];
+    }
 
     pub fn info(self) -> IntrinsicInfo {
         const MEM: &[Type] = &[Type::Ptr, Type::Ptr, Type::I64];
         let (name, params, returns, pure): (_, &'static [Type], &'static [Type], _) = match self {
+            x86_system_intrinsics!(all) => return self.generated_system_info().unwrap(),
             Intrinsic::X86Pclmulqdq128 => (
                 "x86_pclmulqdq128",
                 &[
@@ -1871,51 +1778,8 @@ impl Intrinsic {
             Intrinsic::X86RepOuts8OwnedTerminal => ("x86_rep_outs8_owned_terminal", &[Type::I64, Type::I16, Type::Ptr, Type::I64], &[Type::Ptr, Type::I64, Type::I64, Type::I64], false),
             Intrinsic::X86RepOuts16OwnedTerminal => ("x86_rep_outs16_owned_terminal", &[Type::I64, Type::I16, Type::Ptr, Type::I64], &[Type::Ptr, Type::I64, Type::I64, Type::I64], false),
             Intrinsic::X86RepOuts32OwnedTerminal => ("x86_rep_outs32_owned_terminal", &[Type::I64, Type::I16, Type::Ptr, Type::I64], &[Type::Ptr, Type::I64, Type::I64, Type::I64], false),
-            Intrinsic::X86Lldt => ("x86_lldt", &[Type::I16], &[], false),
-            Intrinsic::X86LldtMem => ("x86_lldt_mem", &[Type::Ptr], &[], false),
-            Intrinsic::X86Ltr => ("x86_ltr", &[Type::I16], &[], false),
-            Intrinsic::X86LtrMem => ("x86_ltr_mem", &[Type::Ptr], &[], false),
-            Intrinsic::X86Lmsw => ("x86_lmsw", &[Type::I16], &[], false),
-            Intrinsic::X86LmswMem => ("x86_lmsw_mem", &[Type::Ptr], &[], false),
-            Intrinsic::X86Invlpg => ("x86_invlpg", &[Type::Ptr], &[], false),
-            Intrinsic::X86Cli => ("x86_cli", &[], &[], false),
-            Intrinsic::X86Sti => ("x86_sti", &[], &[], false),
-            Intrinsic::X86Hlt => ("x86_hlt", &[], &[], false),
-            Intrinsic::X86StiHlt => ("x86_sti_hlt", &[], &[], false),
-            Intrinsic::X86Swapgs => ("x86_swapgs", &[], &[], false),
 
-            Intrinsic::X86ReadCr0 => ("x86_read_cr0", &[], &[Type::I64], false),
-            Intrinsic::X86WriteCr0 => ("x86_write_cr0", &[Type::I64], &[], false),
-            Intrinsic::X86ReadCr2 => ("x86_read_cr2", &[], &[Type::I64], false),
-            Intrinsic::X86WriteCr2 => ("x86_write_cr2", &[Type::I64], &[], false),
-            Intrinsic::X86ReadCr3 => ("x86_read_cr3", &[], &[Type::I64], false),
-            Intrinsic::X86WriteCr3 => ("x86_write_cr3", &[Type::I64], &[], false),
-            Intrinsic::X86ReadCr4 => ("x86_read_cr4", &[], &[Type::I64], false),
-            Intrinsic::X86WriteCr4 => ("x86_write_cr4", &[Type::I64], &[], false),
-            Intrinsic::X86ReadCr8 => ("x86_read_cr8", &[], &[Type::I64], false),
-            Intrinsic::X86WriteCr8 => ("x86_write_cr8", &[Type::I64], &[], false),
-            Intrinsic::X86ReadDr0 => ("x86_read_dr0", &[], &[Type::I64], false),
-            Intrinsic::X86WriteDr0 => ("x86_write_dr0", &[Type::I64], &[], false),
-            Intrinsic::X86ReadDr1 => ("x86_read_dr1", &[], &[Type::I64], false),
-            Intrinsic::X86WriteDr1 => ("x86_write_dr1", &[Type::I64], &[], false),
-            Intrinsic::X86ReadDr2 => ("x86_read_dr2", &[], &[Type::I64], false),
-            Intrinsic::X86WriteDr2 => ("x86_write_dr2", &[Type::I64], &[], false),
-            Intrinsic::X86ReadDr3 => ("x86_read_dr3", &[], &[Type::I64], false),
-            Intrinsic::X86WriteDr3 => ("x86_write_dr3", &[Type::I64], &[], false),
-            Intrinsic::X86ReadDr4 => ("x86_read_dr4", &[], &[Type::I64], false),
-            Intrinsic::X86WriteDr4 => ("x86_write_dr4", &[Type::I64], &[], false),
-            Intrinsic::X86ReadDr5 => ("x86_read_dr5", &[], &[Type::I64], false),
-            Intrinsic::X86WriteDr5 => ("x86_write_dr5", &[Type::I64], &[], false),
-            Intrinsic::X86ReadDr6 => ("x86_read_dr6", &[], &[Type::I64], false),
-            Intrinsic::X86WriteDr6 => ("x86_write_dr6", &[Type::I64], &[], false),
-            Intrinsic::X86ReadDr7 => ("x86_read_dr7", &[], &[Type::I64], false),
-            Intrinsic::X86WriteDr7 => ("x86_write_dr7", &[Type::I64], &[], false),
 
-            Intrinsic::X86Clts => ("x86_clts", &[], &[], false),
-            Intrinsic::X86Invd => ("x86_invd", &[], &[], false),
-            Intrinsic::X86Wbinvd => ("x86_wbinvd", &[], &[], false),
-            Intrinsic::X86Rdmsr => ("x86_rdmsr", &[Type::I32], &[Type::I64], false),
-            Intrinsic::X86Wrmsr => ("x86_wrmsr", &[Type::I32, Type::I64], &[], false),
             Intrinsic::X86Rdpmc => ("x86_rdpmc", &[Type::I32], &[Type::I64], false),
             Intrinsic::X86X87Ffree0 => ("x86_x87_ffree0", &[], &[], false),
             Intrinsic::X86X87Ffree1 => ("x86_x87_ffree1", &[], &[], false),
@@ -1943,8 +1807,6 @@ impl Intrinsic {
             Intrinsic::X86Out8Imm => ("x86_out8_imm", &[Type::I16, Type::I8], &[], false),
             Intrinsic::X86Out16Imm => ("x86_out16_imm", &[Type::I16, Type::I16], &[], false),
             Intrinsic::X86Out32Imm => ("x86_out32_imm", &[Type::I16, Type::I32], &[], false),
-            Intrinsic::X86Lgdt => ("x86_lgdt", &[Type::Ptr], &[], false),
-            Intrinsic::X86Lidt => ("x86_lidt", &[Type::Ptr], &[], false),
             Intrinsic::X86Sgdt => ("x86_sgdt", &[Type::Ptr], &[], false),
             Intrinsic::X86Sidt => ("x86_sidt", &[Type::Ptr], &[], false),
             Intrinsic::X86SldtMem => ("x86_sldt_mem", &[Type::Ptr], &[], false),
@@ -7278,6 +7140,9 @@ impl Intrinsic {
     }
 
     pub fn is_x86_target(self) -> bool {
+        if matches!(self, x86_system_intrinsics!(x86_64)) {
+            return true;
+        }
         matches!(
             self,
             Self::X86RflagsRead
@@ -7304,16 +7169,6 @@ impl Intrinsic {
                 | Self::X86Cpuid
                 | Self::X86Rdtsc
                 | Self::X86Rdpmc
-                | Self::X86Rdmsr
-                | Self::X86Wrmsr
-                | Self::X86Clts
-                | Self::X86Invd
-                | Self::X86Wbinvd
-                | Self::X86Cli
-                | Self::X86Sti
-                | Self::X86Hlt
-                | Self::X86StiHlt
-                | Self::X86Swapgs
                 | Self::X86Lfence
                 | Self::X86Sfence
                 | Self::X86Mfence

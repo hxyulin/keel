@@ -220,3 +220,42 @@ truncation, invalid prefixes, the 15-byte limit and every one/two-byte start.
 Neither table generation nor an encoding comparison proves execution semantics.
 
 See `LICENSE-ZYDIS` for production ISA data and `LICENSE-XED` for the pilot.
+
+## System intrinsic declarations
+
+`system-intrinsics.json` owns the 45 existing x86 system intrinsic declarations
+at IDs 774 through 818. `system_intrinsics.py` generates their enum variants,
+`ALL` inventory entries and length, names, parameter/result types, Rust docs,
+purity, compiler memory effects and x86-only classification patterns. Name lookup
+continues to use `ALL` and `info()`, so it consumes the same generated names.
+The earlier intrinsic declarations remain handwritten.
+
+The generated enum and inventory macros retain the handwritten prefix. Numeric
+IDs and `ALL` iteration order are separate contracts: the earlier prefix does
+not iterate in numeric order. Frozen fixtures captured from `a80be8ca` check
+all 819 numeric IDs and inventory entries independently, plus every migrated
+signature, name, purity, memory effect and target classification.
+
+Effects and target availability are explicit reviewed policy. They are not
+inferred from the encoding catalogue or mnemonic. All current rows are pinned
+compiler memory barriers and x86-64-only; a compiler barrier does not promise
+hardware fencing. The schema validates contiguous explicit IDs, unique names
+and variants, supported scalar types, effects and target domains. Pure entries
+cannot claim memory effects. Generic instruction-memory classification and
+AArch64 rejection/exhaustive classification consume the generated policy.
+
+To add another system intrinsic in this append-only range:
+
+1. Append its declaration with the next stable ID, signature, effects, target
+   and contract documentation to `system-intrinsics.json`.
+2. Run `python3 tools/x86-isa/generate.py`. Declarations, lookup inputs, effects
+   and target classifications follow the new row.
+3. Implement its lowering and review privilege, state and continuation contracts.
+   Lowering dispatch, physical-register constraints and terminal transfers are
+   still handwritten. Add independent encoding/runtime witnesses as needed.
+4. Extend the compatibility fixtures for the intentional new ID and signature,
+   then run the generator tests, freshness checks and affected Rust suites.
+
+This migration introduces no instruction, intrinsic ID, runtime permission,
+feature requirement or kernel entry/return contract. Existing lowering and
+privileged qualification fixtures remain separate.

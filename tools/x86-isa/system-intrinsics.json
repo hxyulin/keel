@@ -1,0 +1,577 @@
+{
+  "first_id": 774,
+  "intrinsics": [
+    {
+      "id": 774,
+      "variant": "X86Lgdt",
+      "name": "x86_lgdt",
+      "params": [
+        "Ptr"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/x86-system-write.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 775,
+      "variant": "X86Lidt",
+      "name": "x86_lidt",
+      "params": [
+        "Ptr"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/x86-system-write.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 776,
+      "variant": "X86Rdmsr",
+      "name": "x86_rdmsr",
+      "params": [
+        "I32"
+      ],
+      "returns": [
+        "I64"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw MSR access with caller-owned CPL0, MSR index and model/state preconditions. See docs/x86-msr.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 777,
+      "variant": "X86Wrmsr",
+      "name": "x86_wrmsr",
+      "params": [
+        "I32",
+        "I64"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw MSR access with caller-owned CPL0, MSR index and model/state preconditions. See docs/x86-msr.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 778,
+      "variant": "X86Clts",
+      "name": "x86_clts",
+      "params": [],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw CPU/cache control with caller-owned CPL0 and architectural state. See docs/x86-privileged-control.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 779,
+      "variant": "X86Invd",
+      "name": "x86_invd",
+      "params": [],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw CPU/cache control with caller-owned CPL0 and architectural state. See docs/x86-privileged-control.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 780,
+      "variant": "X86Wbinvd",
+      "name": "x86_wbinvd",
+      "params": [],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw CPU/cache control with caller-owned CPL0 and architectural state. See docs/x86-privileged-control.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 781,
+      "variant": "X86Lldt",
+      "name": "x86_lldt",
+      "params": [
+        "I16"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/x86-system-write.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 782,
+      "variant": "X86LldtMem",
+      "name": "x86_lldt_mem",
+      "params": [
+        "Ptr"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/x86-system-write.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 783,
+      "variant": "X86Ltr",
+      "name": "x86_ltr",
+      "params": [
+        "I16"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/x86-system-write.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 784,
+      "variant": "X86LtrMem",
+      "name": "x86_ltr_mem",
+      "params": [
+        "Ptr"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/x86-system-write.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 785,
+      "variant": "X86Lmsw",
+      "name": "x86_lmsw",
+      "params": [
+        "I16"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/x86-system-write.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 786,
+      "variant": "X86LmswMem",
+      "name": "x86_lmsw_mem",
+      "params": [
+        "Ptr"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/x86-system-write.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 787,
+      "variant": "X86Invlpg",
+      "name": "x86_invlpg",
+      "params": [
+        "Ptr"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/x86-system-write.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 788,
+      "variant": "X86ReadCr0",
+      "name": "x86_read_cr0",
+      "params": [],
+      "returns": [
+        "I64"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/x86-system-registers.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 789,
+      "variant": "X86WriteCr0",
+      "name": "x86_write_cr0",
+      "params": [
+        "I64"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/x86-system-registers.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 790,
+      "variant": "X86ReadCr2",
+      "name": "x86_read_cr2",
+      "params": [],
+      "returns": [
+        "I64"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/x86-system-registers.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 791,
+      "variant": "X86WriteCr2",
+      "name": "x86_write_cr2",
+      "params": [
+        "I64"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/x86-system-registers.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 792,
+      "variant": "X86ReadCr3",
+      "name": "x86_read_cr3",
+      "params": [],
+      "returns": [
+        "I64"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/x86-system-registers.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 793,
+      "variant": "X86WriteCr3",
+      "name": "x86_write_cr3",
+      "params": [
+        "I64"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/x86-system-registers.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 794,
+      "variant": "X86ReadCr4",
+      "name": "x86_read_cr4",
+      "params": [],
+      "returns": [
+        "I64"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/x86-system-registers.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 795,
+      "variant": "X86WriteCr4",
+      "name": "x86_write_cr4",
+      "params": [
+        "I64"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/x86-system-registers.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 796,
+      "variant": "X86ReadCr8",
+      "name": "x86_read_cr8",
+      "params": [],
+      "returns": [
+        "I64"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/x86-system-registers.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 797,
+      "variant": "X86WriteCr8",
+      "name": "x86_write_cr8",
+      "params": [
+        "I64"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/x86-system-registers.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 798,
+      "variant": "X86ReadDr0",
+      "name": "x86_read_dr0",
+      "params": [],
+      "returns": [
+        "I64"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/x86-system-registers.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 799,
+      "variant": "X86WriteDr0",
+      "name": "x86_write_dr0",
+      "params": [
+        "I64"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/x86-system-registers.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 800,
+      "variant": "X86ReadDr1",
+      "name": "x86_read_dr1",
+      "params": [],
+      "returns": [
+        "I64"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/x86-system-registers.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 801,
+      "variant": "X86WriteDr1",
+      "name": "x86_write_dr1",
+      "params": [
+        "I64"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/x86-system-registers.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 802,
+      "variant": "X86ReadDr2",
+      "name": "x86_read_dr2",
+      "params": [],
+      "returns": [
+        "I64"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/x86-system-registers.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 803,
+      "variant": "X86WriteDr2",
+      "name": "x86_write_dr2",
+      "params": [
+        "I64"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/x86-system-registers.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 804,
+      "variant": "X86ReadDr3",
+      "name": "x86_read_dr3",
+      "params": [],
+      "returns": [
+        "I64"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/x86-system-registers.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 805,
+      "variant": "X86WriteDr3",
+      "name": "x86_write_dr3",
+      "params": [
+        "I64"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/x86-system-registers.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 806,
+      "variant": "X86ReadDr4",
+      "name": "x86_read_dr4",
+      "params": [],
+      "returns": [
+        "I64"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/x86-system-registers.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 807,
+      "variant": "X86WriteDr4",
+      "name": "x86_write_dr4",
+      "params": [
+        "I64"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/x86-system-registers.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 808,
+      "variant": "X86ReadDr5",
+      "name": "x86_read_dr5",
+      "params": [],
+      "returns": [
+        "I64"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/x86-system-registers.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 809,
+      "variant": "X86WriteDr5",
+      "name": "x86_write_dr5",
+      "params": [
+        "I64"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/x86-system-registers.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 810,
+      "variant": "X86ReadDr6",
+      "name": "x86_read_dr6",
+      "params": [],
+      "returns": [
+        "I64"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/x86-system-registers.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 811,
+      "variant": "X86WriteDr6",
+      "name": "x86_write_dr6",
+      "params": [
+        "I64"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/x86-system-registers.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 812,
+      "variant": "X86ReadDr7",
+      "name": "x86_read_dr7",
+      "params": [],
+      "returns": [
+        "I64"
+      ],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/x86-system-registers.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 813,
+      "variant": "X86WriteDr7",
+      "name": "x86_write_dr7",
+      "params": [
+        "I64"
+      ],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/x86-system-registers.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 814,
+      "variant": "X86Cli",
+      "name": "x86_cli",
+      "params": [],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw interrupt control with caller-owned privilege, interrupt delivery and continuation; STI;HLT remains adjacent. See docs/x86-interrupt-control.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 815,
+      "variant": "X86Sti",
+      "name": "x86_sti",
+      "params": [],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw interrupt control with caller-owned privilege, interrupt delivery and continuation; STI;HLT remains adjacent. See docs/x86-interrupt-control.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 816,
+      "variant": "X86Hlt",
+      "name": "x86_hlt",
+      "params": [],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw interrupt control with caller-owned privilege, interrupt delivery and continuation; STI;HLT remains adjacent. See docs/x86-interrupt-control.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 817,
+      "variant": "X86StiHlt",
+      "name": "x86_sti_hlt",
+      "params": [],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw interrupt control with caller-owned privilege, interrupt delivery and continuation; STI;HLT remains adjacent. See docs/x86-interrupt-control.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    },
+    {
+      "id": 818,
+      "variant": "X86Swapgs",
+      "name": "x86_swapgs",
+      "params": [],
+      "returns": [],
+      "pure": false,
+      "memory": "Barrier",
+      "target": "x86_64",
+      "doc": "Raw GS-base exchange with caller-owned long-mode CPL0 state and asynchronous entry policy. See docs/x86-swapgs.md. Pinned compiler memory barrier; not a claim of hardware fencing."
+    }
+  ]
+}

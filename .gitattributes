@@ -15,3 +15,6 @@
 
 # Generated CPU-profile membership documentation.
 /tools/x86-isa/cpu-profile-table.md linguist-generated=true
+
+# Generated compiler-facing system-intrinsic declarations.
+/crates/keel-ir/src/generated/*.rs linguist-generated=true
