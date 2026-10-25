@@ -16,6 +16,7 @@ fn text(bytes: &[u8]) -> Vec<u8> {
 fn baseline_fixed_forms_match_clang_gnu_and_typed_transport() {
     let mut source = String::from(".intel_syntax noprefix\n.text\n");
     let mut program = keel_asm_ir::Program::new();
+    let mut chunks = keel_asm::x86::ProgramAssembler::new(Default::default());
     let mut expected = Vec::new();
     for &op in FixedOpcode::ALL {
         source.push_str(op.mnemonic());
@@ -26,7 +27,10 @@ fn baseline_fixed_forms_match_clang_gnu_and_typed_transport() {
         assert_eq!(parsed.to_string(), op.mnemonic());
         let att = Instruction::parse_att(op.mnemonic()).unwrap();
         assert_eq!(parsed, att);
-        program.x86_instruction(parsed);
+        program.x86_instruction(parsed.clone());
+        let mut chunk = keel_asm_ir::Program::new();
+        chunk.x86_instruction(parsed);
+        chunks.push(chunk);
         for bad in [
             format!("{} rax", op.mnemonic()),
             format!("lock {}", op.mnemonic()),
@@ -42,6 +46,7 @@ fn baseline_fixed_forms_match_clang_gnu_and_typed_transport() {
     let typed = keel_asm::x86::assemble_program_object(&program).unwrap();
     assert_eq!(text(&own), expected);
     assert_eq!(own, typed);
+    assert_eq!(own, chunks.finish().unwrap());
     let dir = std::env::temp_dir().join(format!("keel-fixed-baseline-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let input = dir.join("forms.s");
@@ -86,7 +91,8 @@ fn baseline_fixed_forms_match_clang_gnu_and_typed_transport() {
         &gnu_input,
         std::fs::read_to_string(&input)
             .unwrap()
-            .replace("\nsysret\n", "\nsysretd\n"),
+            .replace("\nsysret\n", "\nsysretd\n")
+            .replace("\nsysexit\n", "\nsysexitd\n"),
     )
     .unwrap();
     let gnu = dir.join("gnu.o");
@@ -99,5 +105,76 @@ fn baseline_fixed_forms_match_clang_gnu_and_typed_transport() {
         .expect("GNU assembler is required");
     assert!(p.status.success(), "{}", String::from_utf8_lossy(&p.stderr));
     assert_eq!(text(&std::fs::read(gnu).unwrap()), expected);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn system_exit_widths_aliases_and_att_oracles() {
+    for (spellings, expected) in [
+        (&["sysexit", "sysexitd", "sysexitl"][..], &[0x0f, 0x35][..]),
+        (&["sysexitq"][..], &[0x48, 0x0f, 0x35][..]),
+        (&["rsm"][..], &[0x0f, 0xaa][..]),
+    ] {
+        for name in spellings {
+            for source in [name.to_string(), format!(".att_syntax prefix\n{name}")] {
+                assert_eq!(
+                    text(&keel_asm::x86::assemble_object(&source).unwrap()),
+                    expected
+                );
+            }
+            for bad in [
+                format!("{name} rax"),
+                format!("{name} [rax]"),
+                format!("lock {name}"),
+            ] {
+                assert!(keel_asm::x86::assemble_object(&bad).is_err(), "{bad}");
+            }
+        }
+    }
+    // Explicit AT&T sizes work in both external assemblers. Intel GNU's
+    // 32-bit spelling differs from LLVM's, as covered by the full matrix.
+    let dir = std::env::temp_dir().join(format!("keel-system-exits-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("forms.s");
+    std::fs::write(
+        &input,
+        ".att_syntax prefix\n.text\nsysexitl\nsysexitq\nrsm\n",
+    )
+    .unwrap();
+    let expected = [0x0f, 0x35, 0x48, 0x0f, 0x35, 0x0f, 0xaa];
+    let assembler = std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| {
+        if cfg!(target_os = "linux") {
+            "as".into()
+        } else {
+            "x86_64-elf-as".into()
+        }
+    });
+    for (name, mut command) in [
+        ("clang", {
+            let mut c = Command::new("clang");
+            c.args([
+                "-target",
+                "x86_64-unknown-linux-gnu",
+                "-c",
+                "-x",
+                "assembler",
+            ]);
+            c
+        }),
+        ("gnu", {
+            let mut c = Command::new(assembler);
+            c.arg("--64");
+            c
+        }),
+    ] {
+        let output = dir.join(format!("{name}.o"));
+        let result = command.arg(&input).arg("-o").arg(&output).output().unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(text(&std::fs::read(output).unwrap()), expected, "{name}");
+    }
     std::fs::remove_dir_all(dir).unwrap();
 }

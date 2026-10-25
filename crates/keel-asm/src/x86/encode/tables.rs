@@ -1,7 +1,7 @@
 //! Operand matching and emission driven by the shared generated ISA forms.
 use super::*;
 use keel_asm_ir::x86::{
-    CoreOpcode, FixedOpcode, Repeat,
+    CoreOpcode, Repeat,
     isa::{self, IsaForm, IsaOperand},
 };
 use smallvec::SmallVec;
@@ -89,38 +89,10 @@ fn dialect(i: &Instruction) -> Dialect {
         }
     }
     if let Fixed(op) = i.opcode {
-        match op {
-            FixedOpcode::Fclex => {
-                d.name = "fnclex".into();
-                d.wait = true;
-            }
-            FixedOpcode::Finit => {
-                d.name = "fninit".into();
-                d.wait = true;
-            }
-            FixedOpcode::Leavew => {
-                d.name = "leave".into();
-                d.size = Some(16);
-            }
-            FixedOpcode::Pushfw => {
-                d.name = "pushf".into();
-                d.size = Some(16);
-            }
-            FixedOpcode::Popfw => {
-                d.name = "popf".into();
-                d.size = Some(16);
-            }
-            FixedOpcode::Sysretq => {
-                d.name = "sysret".into();
-                d.size = Some(64);
-            }
-            FixedOpcode::Sysret => d.size = Some(32),
-            FixedOpcode::Iretw => {
-                d.name = "iret".into();
-                d.size = Some(16);
-            }
-            _ => {}
-        }
+        let (name, size, wait) = op.source();
+        d.name = name.into();
+        d.size = size;
+        d.wait = wait;
     }
     if let Some((base, suffix)) = raw.split_once('.') {
         d.name = base.into();

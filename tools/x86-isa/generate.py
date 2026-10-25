@@ -307,7 +307,23 @@ def fixed_adapters(data, adapters):
             raise ValueError(f'no fixed encoding for {adapter}')
         result = min(candidates, key=len)
         lines.append(f'FixedOpcode::{adapter["variant"]} => &{result},')
-    return '\n'.join(lines + ['} }', ''])
+    lines += ['} }', '#[rustfmt::skip]',
+              "pub const fn source(op: FixedOpcode) -> (&'static str, Option<u16>, bool) { match op {"]
+    for adapter in adapters:
+        size = 'None' if adapter['size'] is None else f'Some({adapter["size"]})'
+        lines.append(f'FixedOpcode::{adapter["variant"]} => ({json.dumps(adapter["source_mnemonic"])}, {size}, {str(adapter["wait"]).lower()}),')
+    lines += ['} }', '#[rustfmt::skip]',
+              "pub fn fixed_width_mnemonic(source: &str, size: u16) -> Option<&'static str> { match (source, size) {"]
+    seen = set()
+    for adapter in adapters:
+        if adapter['size'] is None or adapter['wait']:
+            continue
+        key = (adapter['source_mnemonic'], adapter['size'])
+        if key in seen:
+            raise ValueError(f'ambiguous fixed width mnemonic: {key}')
+        seen.add(key)
+        lines.append(f'({json.dumps(key[0])}, {key[1]}) => Some({json.dumps(adapter["mnemonic"])}),')
+    return '\n'.join(lines + ['_ => None,', '} }', ''])
 
 
 def feature_adapters(data, adapters, policy):

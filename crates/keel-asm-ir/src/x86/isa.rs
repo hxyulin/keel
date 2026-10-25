@@ -7,6 +7,8 @@ mod register_names;
 pub(super) use features::{feature_policy, opcode_features};
 pub use register_names::register_name;
 pub(super) mod fixed;
+/// Public width-specific spellings derived from the fixed adapter schema.
+pub use fixed::fixed_width_mnemonic;
 pub(super) mod v2;
 mod v3;
 pub use generated::FORMS;

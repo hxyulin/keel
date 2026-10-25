@@ -68,9 +68,15 @@ EVEX, MVEX, XOP and 3DNow records are outside this import.
 
 Generated files under `crates/keel-asm-ir/src/x86/isa/` provide the shared
 catalogue, decoding index, 93 v2 metadata entries, 1,226 VEX form adapters,
-64 fixed encodings and opcode feature queries. Public fixed/v2/v3 enums, their
+67 fixed encodings and opcode feature queries. Public fixed/v2/v3 enums, their
 `ALL` lists, parse aliases and mnemonic mappings are also generated from the
 explicit identity policy. Existing enum order and spellings are preserved.
+
+Fixed adapters also generate their source mnemonic, operand-size selection and
+leading-FWAIT normalization. The decoder uses generated width-specific names
+for canonical formatting. [SYSEXIT/RSM support](../../docs/x86-system-exits.md)
+adds public adapters without another instruction-specific encoder or compiler
+terminal API.
 The baseline formatting macro expands into an exhaustive match with handwritten
 dynamic arms. Compatibility tests pin the original API schema and exercise an
 independent spelling/format fixture captured from `db6129d3`.

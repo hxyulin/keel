@@ -3292,6 +3292,27 @@
       "source_mnemonic": "sysret",
       "size": 64,
       "wait": false
+    },
+    {
+      "variant": "Sysexit",
+      "mnemonic": "sysexit",
+      "source_mnemonic": "sysexit",
+      "size": 32,
+      "wait": false
+    },
+    {
+      "variant": "Sysexitq",
+      "mnemonic": "sysexitq",
+      "source_mnemonic": "sysexit",
+      "size": 64,
+      "wait": false
+    },
+    {
+      "variant": "Rsm",
+      "mnemonic": "rsm",
+      "source_mnemonic": "rsm",
+      "size": null,
+      "wait": false
     }
   ],
   "feature_opcodes": [
@@ -9091,6 +9112,24 @@
       {
         "variant": "Sysretq",
         "mnemonic": "sysretq",
+        "aliases": []
+      },
+      {
+        "variant": "Sysexit",
+        "mnemonic": "sysexit",
+        "aliases": [
+          "sysexitd",
+          "sysexitl"
+        ]
+      },
+      {
+        "variant": "Sysexitq",
+        "mnemonic": "sysexitq",
+        "aliases": []
+      },
+      {
+        "variant": "Rsm",
+        "mnemonic": "rsm",
         "aliases": []
       }
     ]

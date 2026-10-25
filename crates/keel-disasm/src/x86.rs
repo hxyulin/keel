@@ -50,7 +50,8 @@ impl Instruction {
                 name => name,
             }
         } else {
-            self.form.mnemonic
+            isa::fixed_width_mnemonic(self.form.mnemonic, self.operand_size)
+                .unwrap_or(self.form.mnemonic)
         });
         let operands: Vec<_> = self
             .operands

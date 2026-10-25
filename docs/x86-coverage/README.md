@@ -7,10 +7,10 @@ Machine-readable form records are in [coverage.json](coverage.json).
 Imported source forms: **3603**, plus **1** local extension.
 Production catalogue: **3495** forms; **109** imported forms excluded.
 Decoder registration enabled: **3494**; disabled by policy: **1**.
-Forms with declarative assembler candidates: **2853**.
-Public binding records: **998**; without a direct source join: **86** (not an unsupported count).
+Forms with declarative assembler candidates: **2855**.
+Public binding records: **1001**; without a direct source join: **86** (not an unsupported count).
 Tracked compiler declarations: **45**, with **43** regular recipes and **2** hooks.
-ISA policy keys without an explicit feature classification: **85**.
+ISA policy keys without an explicit feature classification: **84**.
 
 **Registration is not successful decoding. Candidate links are not complete operand support.**
 Compiler coverage outside the tracked system declarations is unknown here.
@@ -83,7 +83,7 @@ An unclassified key is not automatically baseline; the runtime feature lookup cu
 | `I286PROTECTED` | 16 | 16 | 16 | 16 | 4 | unclassified |  |
 | `I286REAL` | 9 | 9 | 9 | 9 | 5 | unclassified |  |
 | `I386` | 106 | 106 | 106 | 84 | 0 | baseline | v1, v2, v3 |
-| `I486` | 1 | 1 | 1 | 0 | 0 | unclassified |  |
+| `I486` | 1 | 1 | 1 | 1 | 0 | baseline | v1, v2, v3 |
 | `I486REAL` | 20 | 20 | 20 | 20 | 3 | baseline | v1, v2, v3 |
 | `I86` | 463 | 429 | 429 | 395 | 7 | baseline | v1, v2, v3 |
 | `ICACHE_PREFETCH` | 2 | 2 | 2 | 0 | 0 | unclassified |  |
@@ -118,7 +118,7 @@ An unclassified key is not automatically baseline; the runtime feature lookup cu
 | `PENTIUMREAL` | 5 | 4 | 4 | 4 | 2 | unclassified |  |
 | `PKU` | 2 | 2 | 2 | 0 | 0 | unclassified |  |
 | `POPCNT` | 2 | 2 | 2 | 2 | 0 | popcnt | v2, v3 |
-| `PPRO` | 35 | 32 | 31 | 31 | 0 | baseline | v1, v2, v3 |
+| `PPRO` | 35 | 32 | 31 | 32 | 0 | baseline | v1, v2, v3 |
 | `PREFETCHWT1` | 1 | 1 | 1 | 0 | 0 | unclassified |  |
 | `PREFETCH_NOP` | 8 | 8 | 8 | 1 | 0 | baseline | v1, v2, v3 |
 | `PT` | 4 | 2 | 2 | 0 | 0 | unclassified |  |

@@ -6,6 +6,14 @@ import generate
 
 
 class GeneratorTests(unittest.TestCase):
+    def test_fixed_width_names_reject_ambiguous_source_size(self):
+        rows = [copy.deepcopy(next(r for r in self.adapters['fixed']
+                                   if r['variant'] == 'Sysexitq'))]
+        rows.append(dict(variant='ConflictingSysexit', mnemonic='other',
+                         source_mnemonic='sysexit', size=64, wait=False))
+        with self.assertRaisesRegex(ValueError, 'ambiguous fixed width'):
+            generate.fixed_adapters(self.data, rows)
+
     @classmethod
     def setUpClass(cls):
         cls.data = json.loads((generate.ROOT / 'zydis.json').read_text())

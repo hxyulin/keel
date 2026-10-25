@@ -2,6 +2,12 @@
 
 Audit date: 2026-10-25. Source checkpoint: `151e7ac7`.
 
+Follow-up: [SYSEXIT/RSM assembler support](x86-system-exits.md) closes the two
+assembler exposure gaps below and adds width-specific formatting. Its explicit
+RSM policy also resolves the I486 classification gap. Terminal compiler
+contracts and execution qualification remain open. The findings and ledger
+digest below record the original audit checkpoint.
+
 Most remaining baseline work concerns compiler contracts and qualification,
 rather than missing instruction bytes. Two public assembler gaps are confirmed:
 **SYSEXIT and RSM**. Their forms already exist in the shared catalogue. Optional

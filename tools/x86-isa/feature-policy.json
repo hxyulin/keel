@@ -112,5 +112,6 @@
   "AVX_PCLMULQDQ": [
     "avx",
     "pclmulqdq"
-  ]
+  ],
+  "I486": []
 }

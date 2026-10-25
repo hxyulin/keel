@@ -104,7 +104,7 @@ across 19 expected guest verdicts. See [raw system registers](x86-system-registe
 - Extend address-translation/cache qualification beyond the bounded emulated
   INVLPG remap and CPU/cache-control fixtures. Keep native hardware, multicore
   scope and additional address-space contexts explicit.
-- Expose RSM through a public adapter with its SMM saved-state contract.
+- Define RSM's SMM saved-state contract over its generated public assembler adapter.
   The remaining fixed control transfers need the terminal contracts below;
   the existing typed MSR operations retain model/permission preconditions.
 - Define arbitrary-vector software-interrupt transport and handler
@@ -117,7 +117,7 @@ across 19 expected guest verdicts. See [raw system registers](x86-system-registe
   permission or transition ABI. RSM also needs its SMM saved-state contract;
   an ordinary function return does not implement these transitions. The
   [transition audit](x86-system-transitions.md) records current interfaces,
-  the missing RSM adapter and requirements for owned terminal paths.
+  the RSM execution gap and requirements for owned terminal paths.
 - Extend guest validation to LAR/LSL/VERR/VERW and scalar/string port I/O.
   Keep known raw FLAGS/x87 and saved-context limits visible. SLDT/STR/SMSW
   now have bounded

@@ -163,3 +163,26 @@ fn privileged_fixed_adapters_and_decoder_share_generated_forms() {
         );
     }
 }
+
+#[test]
+fn system_exit_widths_format_and_reassemble_literal_bytes() {
+    use object::{Object, ObjectSection};
+    for (bytes, name) in [
+        (&[0x0f, 0x35][..], "sysexit"),
+        (&[0x48, 0x0f, 0x35][..], "sysexitq"),
+        (&[0x0f, 0xaa][..], "rsm"),
+        (&[0x0f, 0x07][..], "sysret"),
+        (&[0x48, 0x0f, 0x07][..], "sysretq"),
+        (&[0x66, 0xcf][..], "iretw"),
+    ] {
+        let instruction = decode(bytes, 0x1000).unwrap();
+        assert_eq!(instruction.bytes, bytes);
+        assert_eq!(instruction.assembly(), name);
+        let encoded = keel_asm::x86::assemble_object(&instruction.assembly()).unwrap();
+        let object = object::File::parse(encoded.as_slice()).unwrap();
+        assert_eq!(
+            object.section_by_name(".text").unwrap().data().unwrap(),
+            bytes
+        );
+    }
+}

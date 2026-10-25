@@ -10,3 +10,4 @@ keel-asm-ir = { path = "../keel-asm-ir" }
 
 [dev-dependencies]
 keel-asm = { path = "../keel-asm" }
+object = { version = "0.36", default-features = false, features = ["read", "std"] }

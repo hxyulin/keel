@@ -65,6 +65,9 @@ pub enum FixedOpcode {
     Iretq,
     Sysret,
     Sysretq,
+    Sysexit,
+    Sysexitq,
+    Rsm,
 }
 impl FixedOpcode {
     pub const ALL: &'static [Self] = &[
@@ -132,6 +135,9 @@ impl FixedOpcode {
         Self::Iretq,
         Self::Sysret,
         Self::Sysretq,
+        Self::Sysexit,
+        Self::Sysexitq,
+        Self::Rsm,
     ];
     pub fn parse(name: &str) -> Option<Self> {
         Some(match name {
@@ -199,6 +205,11 @@ impl FixedOpcode {
             "iretq" => Self::Iretq,
             "sysret" => Self::Sysret,
             "sysretq" => Self::Sysretq,
+            "sysexit" => Self::Sysexit,
+            "sysexitd" => Self::Sysexit,
+            "sysexitl" => Self::Sysexit,
+            "sysexitq" => Self::Sysexitq,
+            "rsm" => Self::Rsm,
             _ => return None,
         })
     }
@@ -268,6 +279,9 @@ impl FixedOpcode {
             Self::Iretq => "iretq",
             Self::Sysret => "sysret",
             Self::Sysretq => "sysretq",
+            Self::Sysexit => "sysexit",
+            Self::Sysexitq => "sysexitq",
+            Self::Rsm => "rsm",
         }
     }
 }

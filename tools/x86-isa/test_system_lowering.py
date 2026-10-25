@@ -69,7 +69,8 @@ class SystemLoweringTests(unittest.TestCase):
         self.assertIn('operand: SystemOperand::AddressOnly', system_lowering.generate(self.rows))
 
     def test_fixed_rejects_operands_register_clobbers_and_terminal_transfers(self):
-        for mnemonic in ['lgdt', 'cpuid', 'rdmsr', 'iretq', 'sysret', 'not_an_opcode', None]:
+        for mnemonic in ['lgdt', 'cpuid', 'rdmsr', 'iretq', 'sysret',
+                         'sysexit', 'sysexitq', 'rsm', 'not_an_opcode', None]:
             self.recipe_change('X86Clts', 'mnemonic', mnemonic, 'zero-operand')
 
     def test_adjacent_pair_is_not_a_general_sequence_language(self):

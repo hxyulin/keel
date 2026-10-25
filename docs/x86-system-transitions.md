@@ -13,11 +13,11 @@ missing interfaces from existing APIs that still need execution qualification.
 | Returning Linux SYSCALL | `x86_64::linux_syscall::{signature, program, assembly}` transports syscall number, six arguments and raw RAX through an ordinary imported C function. | Arbitrary OS entry, stack replacement and non-returning syscalls need a separate protocol. |
 | IRETQ | [Owned terminal GPR/frame adapter](x86-iretq.md), with CPL0 and CPL3 landing witnesses. | Broader descriptor/flag combinations, malformed-frame recovery, asynchronous entry and other context components remain caller-owned and unqualified. |
 | SYSRET | Fixed assembler identities `sysret` and `sysretq`. | Target registers and stack, configured selector/MSR policy, CPU/mode preconditions and fault delivery after stack replacement. |
-| SYSEXIT | Imported encoding/decoder form; no public assembler identity. | Public identity and width policy, then a vendor-qualified terminal stack/register and selector/MSR contract. |
+| SYSEXIT | [Generated fixed adapters](x86-system-exits.md), with explicit 32/64-bit names. | Vendor-qualified terminal stack/register and selector/MSR contract. |
 | SYSENTER/general SYSCALL entry | Assembler identities. | First-instruction entry shim, physical stack acquisition and register capture before ordinary compiled code. CPU/vendor availability remains explicit. |
 | Software interrupts | `debugtrap` lowers to INT3; assembler Core grammar exposes INT imm8. | Arbitrary-vector native IR transport still needs an immediate-vector contract, handler register preservation and a valid continuation or terminal policy. |
 | Far transfers and segment loads | Core assembler grammar includes far calls/jumps/returns and LFS/LGS/LSS; MOV/POP segment forms also exist. | Descriptor/privilege rules, segment cache effects, interrupt shadows and a valid continuation or terminal transfer. |
-| RSM | Imported catalogue form is present, with absent CPL metadata. No public RSM mnemonic adapter is currently exposed. | Adapter identity plus a real SMM saved-state and terminal execution contract. |
+| RSM | [Generated fixed adapter](x86-system-exits.md); upstream CPL metadata remains absent. | A real SMM saved-state and terminal execution contract. |
 
 ## Constraints found in current code
 
