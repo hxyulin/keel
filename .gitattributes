@@ -1,6 +1,12 @@
 # Imported architectural instruction tables retain their upstream licence.
 /crates/keel-asm/isa/** linguist-vendored=true
 
+# Generated instruction metadata, encoders, and decoders.
+/crates/keel-asm/src/generated.rs linguist-generated=true
+/crates/keel-asm-ir/src/generated.rs linguist-generated=true
+/crates/keel-asm-ir/src/x86/isa/*.rs linguist-generated=true
+/crates/keel-disasm/src/generated.rs linguist-generated=true
+
 # Small generated fixtures still required by focused regression tests.
 /crates/keel-codegen/tests/**/corpus.ir linguist-generated=true
 /crates/keel-codegen/tests/**/cases.json linguist-generated=true
