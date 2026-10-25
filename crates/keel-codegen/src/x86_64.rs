@@ -2640,6 +2640,10 @@ impl<'a> FunctionCompiler<'a> {
                     | Intrinsic::X86Clts
                     | Intrinsic::X86Invd
                     | Intrinsic::X86Wbinvd
+                    | Intrinsic::X86Cli
+                    | Intrinsic::X86Sti
+                    | Intrinsic::X86Hlt
+                    | Intrinsic::X86StiHlt
                     | Intrinsic::X86Lfence
                     | Intrinsic::X86Sfence
                     | Intrinsic::X86Mfence
@@ -3604,6 +3608,10 @@ impl<'a> FunctionCompiler<'a> {
                 | Intrinsic::X86Clts
                 | Intrinsic::X86Invd
                 | Intrinsic::X86Wbinvd
+                | Intrinsic::X86Cli
+                | Intrinsic::X86Sti
+                | Intrinsic::X86Hlt
+                | Intrinsic::X86StiHlt
                 | Intrinsic::X86X87Ffree0
                 | Intrinsic::X86X87Ffree1
                 | Intrinsic::X86X87Ffree2

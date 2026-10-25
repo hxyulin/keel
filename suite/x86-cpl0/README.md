@@ -266,3 +266,21 @@ covers CR0/2/3/4/8 and DR0–7, including DR4/5 aliases with DE clear. It checks
 actual hardware state and output values separately, switches CR3 between two
 copies of the same page map, and restores the original state. No breakpoint
 is enabled. See [contracts and finite evidence](../../docs/x86-system-registers.md).
+
+## Interrupt control and HLT resumption
+
+`--interrupt-control` requires GNU objdump (`--objdump`) in addition to the
+usual tools. The guest owns a private GDT/TSS/IDT with an IRQ0 gate on an IST
+stack and a one-shot PIT timer. It checks CLI/STI state, raw HLT resumption and
+an adjacent STI;HLT pair entered with IF clear and an IRQ already pending.
+Eight wide values and canaries check the compiled continuation.
+
+Positive transcripts include two fixed-format RIP records between READY and
+PASS. The host binds them to independently decoded HLT fall-through addresses;
+the pair also requires adjacent STI. This mode rejects a skipped halt even if
+it races the timer and returns a complete report. A negative control must
+return normally with exact READY/FAIL and exit 35, or with a well-formed
+success report whose HLT evidence is rejected. Faults, malformed transcripts,
+tool errors and timeouts never satisfy a negative. Existing modes keep their
+previous exact transcript and exit checks. See
+[contracts, observation rules and limits](../../docs/x86-interrupt-control.md).

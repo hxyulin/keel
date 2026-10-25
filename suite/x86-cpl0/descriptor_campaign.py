@@ -9,6 +9,7 @@ from pathlib import Path
 import tempfile
 
 import run
+import interrupt_evidence
 
 # One configuration owns each mode's object roster, bridge, entry symbols and
 # controls. This keeps those selections together as new system families arrive.
@@ -49,6 +50,15 @@ CAMPAIGNS = {
                              ('omitted-ltr', 'KEEL_OMIT_LTR', True),
                              ('omitted-lmsw', 'KEEL_OMIT_LMSW', True),
                              ('clobbered-live', 'KEEL_CLOBBER_LIVE', True)]),
+    'interrupt-control': dict(prefix='interrupt', bridge='interrupt_control_bridge.S',
+                              symbols=['interrupt_disable', 'interrupt_enable',
+                                       'interrupt_halt', 'interrupt_enable_halt'],
+                              reference='interrupt_control_reference.S', controls=[
+                                  ('reference', None, False),
+                                  ('omitted-cli', 'KEEL_OMIT_CLI', True),
+                                  ('omitted-sti', 'KEEL_OMIT_STI', True),
+                                  ('omitted-hlt', 'KEEL_OMIT_HLT', True),
+                                  ('clobbered-live', 'KEEL_CLOBBER_LIVE', True)]),
     'system-registers': dict(prefix='system-register', bridge='system_registers_bridge.S',
                               symbols=['system_' + r for r in
                                        ('cr0', 'cr2', 'cr3', 'cr4', 'cr8',
@@ -91,6 +101,7 @@ def main():
     parser.add_argument('--as', dest='assembler', default='as')
     parser.add_argument('--ld', dest='linker', default='ld')
     parser.add_argument('--objcopy', default='objcopy')
+    parser.add_argument('--objdump', default='objdump', help='GNU objdump, used by interrupt-control evidence')
     parser.add_argument('--timeout', type=float, default=5)
     args = parser.parse_args()
     if not 0 < args.timeout <= 30:
@@ -104,6 +115,7 @@ def main():
         parser.error(f'exports must contain exactly the {len(names)} expected payload objects')
     assembler, linker, objcopy, qemu = map(
         run.tool, (args.assembler, args.linker, args.objcopy, args.qemu))
+    objdump = run.tool(args.objdump) if args.mode == 'interrupt-control' else None
     work = Path(tempfile.mkdtemp(prefix='keel-descriptor-campaign-', dir='/tmp'))
     print(json.dumps(dict(artifacts=str(work))), flush=True)
     bridge = work / 'bridge.o'
@@ -137,6 +149,10 @@ def main():
                         and result['transcript'] == (run.READY + run.FAIL).decode()
                         if negative else result['status'] == 'pass'
                         and result['transcript'] == (run.READY + run.PASS).decode())
+            if objdump is not None:
+                evidence = interrupt_evidence.observe(result, case / 'guest.elf', objdump)
+                expected = interrupt_evidence.expected_verdict(result, evidence, negative)
+                result['interrupt_evidence'] = evidence
             result.update(case=name, artifacts=str(case), negative=negative,
                           expected_verdict=expected)
             line = json.dumps(result, sort_keys=True)

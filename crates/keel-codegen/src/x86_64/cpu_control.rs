@@ -95,6 +95,15 @@ impl FunctionCompiler<'_> {
             Intrinsic::X86Clts => self.emit(Opcode::parse("clts").unwrap(), []),
             Intrinsic::X86Invd => self.emit(Opcode::parse("invd").unwrap(), []),
             Intrinsic::X86Wbinvd => self.emit(Opcode::parse("wbinvd").unwrap(), []),
+            Intrinsic::X86Cli => self.emit(Opcode::parse("cli").unwrap(), []),
+            Intrinsic::X86Sti => self.emit(Opcode::parse("sti").unwrap(), []),
+            Intrinsic::X86Hlt => self.emit(Opcode::parse("hlt").unwrap(), []),
+            Intrinsic::X86StiHlt => {
+                // One IR operation: no allocation, spills or labels may appear
+                // between STI and HLT. The caller supplies the interrupt context.
+                self.emit(Opcode::parse("sti").unwrap(), []);
+                self.emit(Opcode::parse("hlt").unwrap(), []);
+            }
             Intrinsic::X86Lfence => self.emit(Opcode::Lfence, []),
             Intrinsic::X86Sfence => self.emit(Opcode::Sfence, []),
             Intrinsic::X86Mfence => self.emit(Opcode::Mfence, []),

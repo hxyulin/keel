@@ -946,6 +946,11 @@ pub enum Intrinsic {
     X86WriteDr6,
     X86ReadDr7,
     X86WriteDr7,
+    // Interrupt control and adjacent enable/halt, append-only IDs 814..817.
+    X86Cli,
+    X86Sti,
+    X86Hlt,
+    X86StiHlt,
 }
 
 pub struct IntrinsicInfo {
@@ -957,7 +962,7 @@ pub struct IntrinsicInfo {
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 814] = [
+    pub const ALL: [Intrinsic; 818] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -1772,6 +1777,10 @@ impl Intrinsic {
         Intrinsic::X86WriteDr6,
         Intrinsic::X86ReadDr7,
         Intrinsic::X86WriteDr7,
+        Intrinsic::X86Cli,
+        Intrinsic::X86Sti,
+        Intrinsic::X86Hlt,
+        Intrinsic::X86StiHlt,
     ];
 
     pub fn info(self) -> IntrinsicInfo {
@@ -1866,6 +1875,11 @@ impl Intrinsic {
             Intrinsic::X86Lmsw => ("x86_lmsw", &[Type::I16], &[], false),
             Intrinsic::X86LmswMem => ("x86_lmsw_mem", &[Type::Ptr], &[], false),
             Intrinsic::X86Invlpg => ("x86_invlpg", &[Type::Ptr], &[], false),
+            Intrinsic::X86Cli => ("x86_cli", &[], &[], false),
+            Intrinsic::X86Sti => ("x86_sti", &[], &[], false),
+            Intrinsic::X86Hlt => ("x86_hlt", &[], &[], false),
+            Intrinsic::X86StiHlt => ("x86_sti_hlt", &[], &[], false),
+
             Intrinsic::X86ReadCr0 => ("x86_read_cr0", &[], &[Type::I64], false),
             Intrinsic::X86WriteCr0 => ("x86_write_cr0", &[Type::I64], &[], false),
             Intrinsic::X86ReadCr2 => ("x86_read_cr2", &[], &[Type::I64], false),
@@ -7291,6 +7305,10 @@ impl Intrinsic {
                 | Self::X86Clts
                 | Self::X86Invd
                 | Self::X86Wbinvd
+                | Self::X86Cli
+                | Self::X86Sti
+                | Self::X86Hlt
+                | Self::X86StiHlt
                 | Self::X86Lfence
                 | Self::X86Sfence
                 | Self::X86Mfence

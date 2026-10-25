@@ -42,9 +42,12 @@ CLTS, INVD and WBINVD have pinned typed APIs and bounded CPL0 execution
 checks. CLTS has direct CR0-state checks; physical cache writeback and
 invalidation remain unqualified. See [privileged CPU/cache control](x86-privileged-control.md).
 
-CLI, STI, HLT, SWAPGS, IRET and SYSRET have assembler encodings, but no typed
-system-state/transition contract. An
-assembler encoding alone is not evidence of working kernel code generation.
+CLI, STI and HLT have pinned typed APIs, including adjacent STI;HLT as a
+single IR operation. An owned CPL0 IRQ fixture checks IF, wide-value liveness,
+interrupt-frame RIP and actual HLT fall-through boundaries. See
+[interrupt control and halt](x86-interrupt-control.md).
+SWAPGS, IRET and SYSRET still need typed state/transition contracts; assembler
+encodings alone do not establish working kernel code generation.
 
 LLDT, LTR and LMSW have register/memory APIs, and INVLPG has an address-only
 API over generated forms. CPL0 fixtures check selector changes, TSS busy bits,
@@ -195,3 +198,15 @@ assembler-IR/assembler/disassembler tests, 26 focused codegen tests, 25 Python
 generator tests and both freshness checks. All 98 freshly regenerated guest
 objects retain the exact bytes qualified by the 137-verdict campaign run.
 The full workspace count above precedes these two refactors.
+
+## Interrupt control integration
+
+IDs 814 through 817 add CLI, STI, HLT and adjacent STI;HLT as pinned raw
+operations. The new owned IRQ fixture checks IF, active/distinct IST stacks,
+wide-value liveness, canaries and unmodified hardware-frame RIPs. GNU objdump
+binds those RIPs to HLT fall-through addresses and checks pair adjacency.
+All 18 new expected verdicts pass, and all nine CPL0 campaigns pass 155
+expected verdicts using fresh exports. The full workspace run passes with
+2,666 tests, zero failures and 13 ignored across 485 groups. This run precedes
+the later register-schema import; it does not complete the remaining entry,
+return, segment and system-state contracts.
