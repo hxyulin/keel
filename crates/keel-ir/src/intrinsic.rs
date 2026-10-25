@@ -6974,57 +6974,6 @@ impl Intrinsic {
         })
     }
 
-    /// Raw long-mode system register access: (register, write). Callers own
-    /// privilege, valid bit patterns and continued compiled-code execution.
-    pub fn x86_system_register(self) -> Option<(&'static str, bool)> {
-        Some(match self {
-            Self::X86ReadCr0 => ("cr0", false),
-            Self::X86WriteCr0 => ("cr0", true),
-            Self::X86ReadCr2 => ("cr2", false),
-            Self::X86WriteCr2 => ("cr2", true),
-            Self::X86ReadCr3 => ("cr3", false),
-            Self::X86WriteCr3 => ("cr3", true),
-            Self::X86ReadCr4 => ("cr4", false),
-            Self::X86WriteCr4 => ("cr4", true),
-            Self::X86ReadCr8 => ("cr8", false),
-            Self::X86WriteCr8 => ("cr8", true),
-            Self::X86ReadDr0 => ("dr0", false),
-            Self::X86WriteDr0 => ("dr0", true),
-            Self::X86ReadDr1 => ("dr1", false),
-            Self::X86WriteDr1 => ("dr1", true),
-            Self::X86ReadDr2 => ("dr2", false),
-            Self::X86WriteDr2 => ("dr2", true),
-            Self::X86ReadDr3 => ("dr3", false),
-            Self::X86WriteDr3 => ("dr3", true),
-            Self::X86ReadDr4 => ("dr4", false),
-            Self::X86WriteDr4 => ("dr4", true),
-            Self::X86ReadDr5 => ("dr5", false),
-            Self::X86WriteDr5 => ("dr5", true),
-            Self::X86ReadDr6 => ("dr6", false),
-            Self::X86WriteDr6 => ("dr6", true),
-            Self::X86ReadDr7 => ("dr7", false),
-            Self::X86WriteDr7 => ("dr7", true),
-            _ => return None,
-        })
-    }
-
-    /// Single-operand privileged operations: (opcode, encoded operand width,
-    /// pointer form). INVLPG's m8 is an address-only operand, not a byte read.
-    pub fn x86_system_write(self) -> Option<(&'static str, u16, bool)> {
-        Some(match self {
-            Self::X86Lgdt => ("lgdt", 80, true),
-            Self::X86Lidt => ("lidt", 80, true),
-            Self::X86Lldt => ("lldt", 16, false),
-            Self::X86LldtMem => ("lldt", 16, true),
-            Self::X86Ltr => ("ltr", 16, false),
-            Self::X86LtrMem => ("ltr", 16, true),
-            Self::X86Lmsw => ("lmsw", 16, false),
-            Self::X86LmswMem => ("lmsw", 16, true),
-            Self::X86Invlpg => ("invlpg", 8, true),
-            _ => return None,
-        })
-    }
-
     /// (opcode, operand bits, exact write bytes; zero means register).
     /// Long mode only, CPL0 or CR4.UMIP clear; no feature-bit implication.
     pub fn x86_descriptor_query(self) -> Option<(&'static str, u16, usize)> {

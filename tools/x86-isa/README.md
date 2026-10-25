@@ -226,7 +226,8 @@ See `LICENSE-ZYDIS` for production ISA data and `LICENSE-XED` for the pilot.
 `system-intrinsics.json` owns the 45 existing x86 system intrinsic declarations
 at IDs 774 through 818. `system_intrinsics.py` generates their enum variants,
 `ALL` inventory entries and length, names, parameter/result types, Rust docs,
-purity, compiler memory effects and x86-only classification patterns. Name lookup
+purity, compiler memory effects and x86-only classification patterns. Each row
+also requires a validated regular lowering recipe or an explicit MSR hook. Name lookup
 continues to use `ALL` and `info()`, so it consumes the same generated names.
 The earlier intrinsic declarations remain handwritten.
 
@@ -250,9 +251,10 @@ To add another system intrinsic in this append-only range:
    and contract documentation to `system-intrinsics.json`.
 2. Run `python3 tools/x86-isa/generate.py`. Declarations, lookup inputs, effects
    and target classifications follow the new row.
-3. Implement its lowering and review privilege, state and continuation contracts.
-   Lowering dispatch, physical-register constraints and terminal transfers are
-   still handwritten. Add independent encoding/runtime witnesses as needed.
+3. Select a supported lowering recipe and review privilege, state and continuation
+   contracts. Existing recipe bindings and dispatch are generated; shared emitters,
+   new recipe semantics, MSR sequences and terminal transfers remain handwritten.
+   Add independent encoding/runtime witnesses as needed.
 4. Extend the compatibility fixtures for the intentional new ID and signature,
    then run the generator tests, freshness checks and affected Rust suites.
 
@@ -260,7 +262,7 @@ This migration introduces no instruction, intrinsic ID, runtime permission,
 feature requirement or kernel entry/return contract. Existing lowering and
 privileged qualification fixtures remain separate.
 
-The [regular system-lowering investigation](system-lowering.md) proposes the
-next step: generate bindings for 43 existing intrinsics through four shared
-recipe families, while retaining two explicit MSR hooks. It records the
-allocation, adjacency and terminal-transfer boundaries and validation plan.
+The [regular system-lowering contract](system-lowering.md) describes generated
+bindings for 43 existing intrinsics through four shared recipe families and two
+explicit MSR hooks. It records validation, allocation, adjacency and terminal
+transfer boundaries.

@@ -79,3 +79,42 @@ fn system_signatures_effects_names_and_target_classification_stay_stable() {
         );
     }
 }
+
+#[test]
+fn generated_helper_mappings_match_the_frozen_public_api() {
+    let expected: HashMap<_, _> = fixture(include_str!("fixtures/x86-system-helper-mappings.txt"))
+        .map(|row| {
+            let fields: Vec<_> = row.split('|').collect();
+            (fields[0], fields)
+        })
+        .collect();
+    assert_eq!(expected.len(), 35);
+    for id in Intrinsic::ALL {
+        let name = format!("{id:?}");
+        match expected.get(name.as_str()) {
+            Some(fields) if fields[1] == "register" => {
+                assert_eq!(
+                    id.x86_system_register(),
+                    Some((fields[2], fields[3].parse().unwrap()))
+                );
+                assert_eq!(id.x86_system_write(), None);
+            }
+            Some(fields) => {
+                assert_eq!(fields[1], "unary");
+                assert_eq!(
+                    id.x86_system_write(),
+                    Some((
+                        fields[2],
+                        fields[3].parse().unwrap(),
+                        fields[4].parse().unwrap()
+                    ))
+                );
+                assert_eq!(id.x86_system_register(), None);
+            }
+            None => {
+                assert_eq!(id.x86_system_register(), None, "{name}");
+                assert_eq!(id.x86_system_write(), None, "{name}");
+            }
+        }
+    }
+}

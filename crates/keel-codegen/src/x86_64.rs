@@ -94,6 +94,7 @@ mod raw_rflags;
 mod rflags_region;
 mod port_io;
 mod string_port_io;
+mod system_lowering;
 mod selector_queries;
 mod descriptor_queries;
 mod sign_blend;
@@ -2580,9 +2581,10 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Intrinsic { id, ref args } if id.x86_port_io().is_some() => {
                 self.native_port_io(id, args, result)
             }
-            InstData::Intrinsic { id, ref args } if id.x86_system_write().is_some() => {
-                self.native_system_write(id, args)
-            }
+            InstData::Intrinsic {
+                id: id @ (keel_ir::x86_system_intrinsics!(all)),
+                ref args,
+            } => self.native_generated_system(id, args, result),
             InstData::Intrinsic { id, ref args } if id.x86_descriptor_query().is_some() => {
                 self.native_descriptor_query(id, args, result)
             }
@@ -2633,25 +2635,12 @@ impl<'a> FunctionCompiler<'a> {
                 id: id @ (Intrinsic::X86AvxVmaskmovdqu | Intrinsic::X86SseMaskmovdqu),
                 ref args,
             } => self.native_byte_mask_store(id, args),
-            InstData::Intrinsic { id, ref args } if id.x86_system_register().is_some() => {
-                self.native_system_register(id, args, result)
-            }
             InstData::Intrinsic {
                 id:
                     id @ (Intrinsic::X86Xgetbv0
                     | Intrinsic::X86Cpuid
                     | Intrinsic::X86Rdtsc
                     | Intrinsic::X86Rdpmc
-                    | Intrinsic::X86Rdmsr
-                    | Intrinsic::X86Wrmsr
-                    | Intrinsic::X86Clts
-                    | Intrinsic::X86Invd
-                    | Intrinsic::X86Wbinvd
-                    | Intrinsic::X86Cli
-                    | Intrinsic::X86Sti
-                    | Intrinsic::X86Hlt
-                    | Intrinsic::X86StiHlt
-                    | Intrinsic::X86Swapgs
                     | Intrinsic::X86Lfence
                     | Intrinsic::X86Sfence
                     | Intrinsic::X86Mfence

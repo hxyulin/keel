@@ -3,22 +3,6 @@
 use super::*;
 
 impl FunctionCompiler<'_> {
-    pub(super) fn native_system_write(&mut self, id: Intrinsic, args: &[Value]) {
-        let (op, width, pointer) = id.x86_system_write().expect("system write dispatch");
-        let input = self.use_reg(args[0], S0);
-        let operand = if pointer {
-            // The INVLPG operand computes an address; the hardware performs
-            // no data read. The descriptor/status memory forms read directly.
-            asm_arg(sized(memory(r64(input), 0), width))
-        } else {
-            asm_arg(Register {
-                width,
-                ..r64(input)
-            })
-        };
-        self.emit(Opcode::parse(op).unwrap(), [operand]);
-    }
-
     pub(super) fn native_descriptor_query(
         &mut self,
         id: Intrinsic,

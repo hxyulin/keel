@@ -18,3 +18,6 @@
 
 # Generated compiler-facing system-intrinsic declarations.
 /crates/keel-ir/src/generated/*.rs linguist-generated=true
+
+# Generated typed system-lowering bindings.
+/crates/keel-codegen/src/x86_64/generated/*.rs linguist-generated=true
