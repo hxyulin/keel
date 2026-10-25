@@ -48,7 +48,9 @@ interrupt-frame RIP and actual HLT fall-through boundaries. See
 [interrupt control and halt](x86-interrupt-control.md).
 SWAPGS has a pinned raw API with independent base, effective-address,
 selector and liveness checks. See [raw GS-base exchange](x86-swapgs.md).
-IRET and SYSRET still need owned terminal transition contracts.
+IRETQ now has an [owned terminal GPR/frame transport](x86-iretq.md), with
+CPL0 and CPL3 landing checks. SYSRET and other terminal families still need
+distinct contracts.
 
 LLDT, LTR and LMSW have register/memory APIs, and INVLPG has an address-only
 API over generated forms. CPL0 fixtures check selector changes, TSS busy bits,
@@ -69,11 +71,15 @@ across 19 expected guest verdicts. See [raw system registers](x86-system-registe
 - Extend address-translation/cache qualification beyond the bounded emulated
   INVLPG remap and CPU/cache-control fixtures. Keep native hardware, multicore
   scope and additional address-space contexts explicit.
-- Add typed CPU-control operations for the remaining baseline fixed opcodes,
-  with state and control-flow contracts. The existing typed MSR operations
-  retain explicit model/permission preconditions.
+- Expose RSM through a public adapter with its SMM saved-state contract.
+  The remaining fixed control transfers need the terminal contracts below;
+  the existing typed MSR operations retain model/permission preconditions.
+- Define arbitrary-vector software-interrupt transport and handler
+  preservation requirements. `debugtrap` already emits INT3, while INT imm8
+  currently has assembler support without a native IR interface.
 - Define entry/return, segment state and physical stack/frame ownership for
-  IRET, SYSCALL/SYSRET, SYSENTER/SYSEXIT, far transfers and segment loads.
+  remaining IRET variants, SYSCALL/SYSRET, SYSENTER/SYSEXIT, far transfers
+  and segment loads.
   Preserve CPU/mode preconditions rather than treating v1 as a generic
   permission or transition ABI. RSM also needs its SMM saved-state contract;
   an ordinary function return does not implement these transitions. The
@@ -240,3 +246,26 @@ The full workspace `cargo test --workspace --no-fail-fast` run after the
 register-schema import and SWAPGS addition passes: 2672 passed, zero
 failed and 13 ignored across 487 reported groups. This result does
 not complete the remaining terminal, segment and SMM contracts.
+
+## Owned IRETQ integration
+
+The public terminal adapter defines a 160-byte GPR/frame image and a SysV
+AMD64 `noreturn` import. Its final stack installation, R10 restoration and
+IRETQ have no intervening helper, spill or ordinary epilogue. This adapter
+and its two-privilege fixture replace the earlier experimental reference.
+
+All twelve explicit-V1 caller variants and an independent assembly reference
+restore fifteen GPRs onto distinct CPL0/CPL3 stacks. The CPL3 landing uses high
+canonical RIP and RSP, with a separate kernel TSS stack for the trusted return
+gate. Different flag patterns, image preservation, live inputs and canaries
+are checked. Seven broken controls fail normally, for twenty expected verdicts.
+All eleven guest campaigns pass 194 expected verdicts in this round. The ten
+existing campaigns reuse their 122 previously qualified payload objects;
+existing instruction lowering and generated metadata are unchanged.
+
+The full workspace `cargo test --workspace --no-fail-fast` passes: 2674
+passed, zero failed and 13 ignored across 488 reported groups.
+The workspace compile check, both generator freshness checks, 33 generator
+and 15 runner tests pass. The adapter's 68 instruction bytes independently
+match GNU as and Clang. See [the image and return contract](x86-iretq.md).
+Remaining terminal, software-interrupt, segment and SMM work is still open.

@@ -14,6 +14,15 @@ import interrupt_evidence
 # One configuration owns each mode's object roster, bridge, entry symbols and
 # controls. This keeps those selections together as new system families arrive.
 CAMPAIGNS = {
+    'iretq': dict(prefix='iretq', bridge='iretq_bridge.S', symbols=['resume_owned'],
+                  common_exports=['iretq-adapter.o'], reference='iretq_reference.S', controls=[
+                      ('reference', None, False),
+                      ('omitted-r10', 'KEEL_OMIT_R10', True),
+                      ('ordinary-ret', 'KEEL_USE_RET', True),
+                      ('wrong-flags', 'KEEL_WRONG_FLAGS', True),
+                      ('image-overrun', 'KEEL_CLOBBER_IMAGE', True),
+                      ('clobbered-live', 'KEEL_CLOBBER_LIVE', True),
+                      ('skipped-privilege', 'KEEL_SKIP_PRIVILEGE', True)]),
     'observe': dict(prefix='descriptor', bridge='descriptor_bridge.S',
                     symbols=['descriptor_observe'], inline=[
                         ('no-observation', 'ret'),
@@ -120,8 +129,10 @@ def main():
              for s in ('Baseline', 'Trees', 'Full')
              for a in ('Fast', 'Full') for spill in ('false', 'true')]
     names += config.get('extra_exports', [])
-    if sorted(p.name for p in args.exports.glob('*.o')) != sorted(names):
-        parser.error(f'exports must contain exactly the {len(names)} expected payload objects')
+    common = [args.exports / name for name in config.get('common_exports', [])]
+    roster = names + [p.name for p in common]
+    if sorted(p.name for p in args.exports.glob('*.o')) != sorted(roster):
+        parser.error(f'exports must contain exactly the {len(roster)} expected payload objects')
     assembler, linker, objcopy, qemu = map(
         run.tool, (args.assembler, args.linker, args.objcopy, args.qemu))
     objdump = run.tool(args.objdump) if args.mode == 'interrupt-control' else None
@@ -151,7 +162,7 @@ def main():
         for name, obj, negative in cases:
             case = work / name
             case.mkdir()
-            image = run.build(case, [bridge, obj], assembler, linker, objcopy)
+            image = run.build(case, [bridge, obj, *common], assembler, linker, objcopy)
             result = run.execute(qemu, image, case, args.timeout)
             expected = (result['status'] == 'guest-error'
                         and result['returncode'] == 35

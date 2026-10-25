@@ -7,9 +7,10 @@ compiler entry or return ABI.
 | Area | Current interface | Remaining contract |
 |---|---|---|
 | Returning Linux SYSCALL | `x86_64::linux_syscall::{signature, program, assembly}` transports syscall number, six arguments and raw RAX through an ordinary imported C function. | Arbitrary OS entry, stack replacement and non-returning syscalls need a separate protocol. |
-| IRETQ | Fixed assembler/decoder identity; the IRQ fixture uses a trusted assembly handler. | Owned architectural frame, target GPR state, stack installation and terminal control flow. |
+| IRETQ | [Owned terminal GPR/frame adapter](x86-iretq.md), with CPL0 and CPL3 landing witnesses. | Broader descriptor/flag combinations, malformed-frame recovery, asynchronous entry and other context components remain caller-owned and unqualified. |
 | SYSRET/SYSEXIT | Fixed assembler identities. | Target registers and stack, configured selector/MSR policy, CPU/mode preconditions and fault delivery after stack replacement. |
 | SYSENTER/general SYSCALL entry | Assembler identities. | First-instruction entry shim, physical stack acquisition and register capture before ordinary compiled code. CPU/vendor availability remains explicit. |
+| Software interrupts | `debugtrap` lowers to INT3; assembler Core grammar exposes INT imm8. | Arbitrary-vector native IR transport still needs an immediate-vector contract, handler register preservation and a valid continuation or terminal policy. |
 | Far transfers and segment loads | Core assembler grammar includes far calls/jumps/returns and LFS/LGS/LSS; MOV/POP segment forms also exist. | Descriptor/privilege rules, segment cache effects, interrupt shadows and a valid continuation or terminal transfer. |
 | RSM | Imported catalogue form is present, with absent CPL metadata. No public RSM mnemonic adapter is currently exposed. | Adapter identity plus a real SMM saved-state and terminal execution contract. |
 
@@ -46,7 +47,12 @@ The existing linkable typed-assembly adapter pattern offers one implementation
 route: a `noreturn` declaration and transport that owns the final restoration
 sequence. Another route is explicit terminal IR. Either must prove the same
 stack and control-flow properties; an ordinary void intrinsic alone does not.
-No target-state layout or terminal API is declared stable by this audit.
+The [IRETQ adapter](x86-iretq.md) now defines its own GPR/frame layout and terminal call contract. Other terminal families still need distinct APIs.
+
+SYSENTER/SYSEXIT availability in long mode needs vendor/model qualification.
+Intel documents 64-bit entry/return forms; AMD's [application programming manual](https://docs.amd.com/api/khub/documents/sfvvekC9mDflu6vd3R0NXA/content)
+marks both instructions invalid in 64-bit mode. A v1 label alone must not
+select one vendor's entry protocol for every processor.
 
 IRET and SYSRET need distinct frame contracts. SYSRET consumes RCX/R11, derives
 selectors from STAR and does not load the target stack pointer. Canonicality
@@ -55,35 +61,11 @@ privilege variants must retain their architectural differences. RSM needs
 an SMM test environment and saved-state ownership; an ordinary CPL0 return
 fixture cannot qualify it.
 
-Future fixtures must observe the actual target privilege, RIP, RSP, flags and
+Additional fixtures must observe the actual target privilege, RIP, RSP, flags and
 promised registers from an independent landing shim, with invalid controls
 that cannot pass by faulting or timing out. Existing IRQ-frame observations
 and GS exchange witnesses provide components for that validation, not a
-completed entry/return implementation.
+complete entry/return coverage.
 
 Architectural distinctions follow Intel's [instruction reference A-L](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-2a-manual.pdf)
 and [instruction reference M-U](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-2b-manual.pdf).
-
-## Experimental IRETQ witness
-
-[`iret_context_reference.S`](../suite/x86-cpl0/cases/iret_context_reference.S)
-restores all fifteen non-RSP GPRs from an owned image, installs its five-word
-IRETQ frame, and lands on a distinct stack at CPL0. The landing shim captures
-registers, RSP and flags before comparison. It then restores the guest harness
-stack. This fixture defines no public context-image layout or compiler API.
-
-Assemble the fixture with the same GNU toolchain used by the runner, then run:
-
-```sh
-x86_64-unknown-linux-gnu-as --64 \
-  -o /tmp/iret-reference.o suite/x86-cpl0/cases/iret_context_reference.S
-python3 suite/x86-cpl0/run.py --payload /tmp/iret-reference.o --timeout 5
-```
-
-The reference passes under QEMU 11.1.2 TCG. Reassembling separately with
-`--defsym KEEL_OMIT_R10=1`, `--defsym KEEL_USE_RET=1` or
-`--defsym KEEL_WRONG_FLAGS=1` produces three normally returning failures with
-exact READY/FAIL and exit 35. These controls check missing register restoration,
-ordinary RET in place of IRETQ, and an incorrect restored carry flag. No
-privilege transition, CPL3 landing, fault recovery or compiler-generated
-terminal transport is qualified by this experiment.

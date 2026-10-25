@@ -293,3 +293,14 @@ and 16, independent GS-relative reads, round trips, wide canonical bases,
 eight live SSA values and canaries. The bridge restores the original selector
 and both base MSRs. IF stays clear. See
 [contracts and finite evidence](../../docs/x86-swapgs.md).
+
+## Owned IRETQ return
+
+`--iretq` consumes twelve compiled caller objects plus `iretq-adapter.o`. Each
+positive runs two terminal returns, restoring all fifteen GPRs onto separate
+CPL0 and CPL3 stacks, with high canonical RIP/RSP at CPL3. An independent reference and seven normally failing
+controls check registers, selectors, flags, stack installation, image guards
+and caller liveness. A private DPL3 gate/TSS returns to the trusted verifier.
+The fixture temporarily grants user access to its shared low/high mappings;
+it observes privilege changes without claiming isolation. See the
+[public image and terminal call contract](../../docs/x86-iretq.md).

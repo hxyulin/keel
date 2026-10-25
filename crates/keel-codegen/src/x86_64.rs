@@ -83,6 +83,7 @@ mod flags_state;
 mod legacy_x87_images;
 mod owned_x87_stack;
 pub mod linux_syscall;
+pub mod iretq;
 mod packed_pair;
 mod pclmul;
 mod packed_search;
