@@ -51,11 +51,17 @@ API over generated forms. CPL0 fixtures check selector changes, TSS busy bits,
 LMSW low-bit/PE behavior and a TLB remap with a stale-mapping control. See
 [system mutation/invalidation](x86-system-write.md) for contracts and limits.
 
+Control/debug MOV operands and 26 typed read/write operations cover
+CR0/2/3/4/8 and DR0 through DR7, including conditional DR4/5 aliases.
+The caller must preserve continued compiled-code execution. The disposable
+fixture checks independent state, full-width values, liveness and canaries
+across 19 expected guest verdicts. See [raw system registers](x86-system-registers.md).
+
 ## Remaining baseline work
 
-- Expose control/debug register operands and generated MOV forms. Design
-  typed access around the registers whose mutation permits ordinary compiled code to
-  continue; mode-changing operations need an explicit transition contract.
+- Extend control/debug state qualification beyond the finite guest fixture.
+  Arbitrary mode, address-space, breakpoint and exception transitions still
+  need their own execution and entry/return contracts.
 - Extend address-translation/cache qualification beyond the bounded emulated
   INVLPG remap and CPU/cache-control fixtures. Keep native hardware, multicore
   scope and additional address-space contexts explicit.
@@ -171,3 +177,14 @@ all 118 expected CPL0 verdicts across seven campaigns. Fresh tail objects pass
 The guest evidence retains its emulated, single-CPU and fixture-specific limits.
 The full workspace test run reported above predates this adapter import; the
 post-import checks listed here are targeted integration evidence.
+
+## Control/debug register integration
+
+The control/debug assembler adapters preserve existing RegisterClass IDs and
+symbolic tags. The 26 pinned typed operations extend the registry through ID
+813. The 416-combination Clang/GNU matrix, compiler tier/allocator parity and
+independent guest state/liveness fixture pass. All eight CPL0 campaigns pass
+137 expected verdicts using fresh exports, including 19 register-access cases.
+The full workspace run passes with 2,658 tests, zero failures and 13 ignored
+across 483 reported groups. This run includes optional-extension adapters and
+precedes the later feature-field and baseline/x87 identity refactors.

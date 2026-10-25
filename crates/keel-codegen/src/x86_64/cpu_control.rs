@@ -1,6 +1,24 @@
 //! Explicit CPU query results and hardware ordering operations.
 use super::*;
 impl FunctionCompiler<'_> {
+    pub(super) fn native_system_register(
+        &mut self,
+        id: Intrinsic,
+        args: &[Value],
+        result: Option<Value>,
+    ) {
+        let (name, write) = id.x86_system_register().expect("system register dispatch");
+        let register = Register::parse(name).expect("known system register");
+        if write {
+            let input = self.use_reg(args[0], S0);
+            self.emit(Opcode::Mov, [asm_arg(register), asm_arg(r64(input))]);
+        } else {
+            let output = self.def_reg(result);
+            self.emit(Opcode::Mov, [asm_arg(r64(output)), asm_arg(register)]);
+            self.def_done(result, output);
+        }
+    }
+
     pub(super) fn native_cpu_control(
         &mut self,
         id: Intrinsic,

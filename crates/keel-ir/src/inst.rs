@@ -769,6 +769,32 @@ impl InstData {
                 | Intrinsic::X86Lmsw
                 | Intrinsic::X86LmswMem
                 | Intrinsic::X86Invlpg
+                | Intrinsic::X86ReadCr0
+                | Intrinsic::X86WriteCr0
+                | Intrinsic::X86ReadCr2
+                | Intrinsic::X86WriteCr2
+                | Intrinsic::X86ReadCr3
+                | Intrinsic::X86WriteCr3
+                | Intrinsic::X86ReadCr4
+                | Intrinsic::X86WriteCr4
+                | Intrinsic::X86ReadCr8
+                | Intrinsic::X86WriteCr8
+                | Intrinsic::X86ReadDr0
+                | Intrinsic::X86WriteDr0
+                | Intrinsic::X86ReadDr1
+                | Intrinsic::X86WriteDr1
+                | Intrinsic::X86ReadDr2
+                | Intrinsic::X86WriteDr2
+                | Intrinsic::X86ReadDr3
+                | Intrinsic::X86WriteDr3
+                | Intrinsic::X86ReadDr4
+                | Intrinsic::X86WriteDr4
+                | Intrinsic::X86ReadDr5
+                | Intrinsic::X86WriteDr5
+                | Intrinsic::X86ReadDr6
+                | Intrinsic::X86WriteDr6
+                | Intrinsic::X86ReadDr7
+                | Intrinsic::X86WriteDr7
                 | Intrinsic::X86Sgdt
                 | Intrinsic::X86Sidt
                 | Intrinsic::X86SldtMem

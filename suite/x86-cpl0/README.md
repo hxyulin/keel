@@ -257,3 +257,12 @@ emulated evidence, with no native hardware, multicore or exception-resumption
 claim. The modes are mutually exclusive with all other campaign modes. See
 [system mutation/invalidation](../../docs/x86-system-write.md) for seeds,
 contracts and limits.
+
+## Control and debug registers
+
+`--system-registers` runs the 13 exported payload variants, an independent
+assembly reference and five normally returning broken controls. The fixture
+covers CR0/2/3/4/8 and DR0–7, including DR4/5 aliases with DE clear. It checks
+actual hardware state and output values separately, switches CR3 between two
+copies of the same page map, and restores the original state. No breakpoint
+is enabled. See [contracts and finite evidence](../../docs/x86-system-registers.md).

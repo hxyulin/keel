@@ -49,6 +49,18 @@ CAMPAIGNS = {
                              ('omitted-ltr', 'KEEL_OMIT_LTR', True),
                              ('omitted-lmsw', 'KEEL_OMIT_LMSW', True),
                              ('clobbered-live', 'KEEL_CLOBBER_LIVE', True)]),
+    'system-registers': dict(prefix='system-register', bridge='system_registers_bridge.S',
+                              symbols=['system_' + r for r in
+                                       ('cr0', 'cr2', 'cr3', 'cr4', 'cr8',
+                                        'dr0', 'dr1', 'dr2', 'dr3', 'dr4', 'dr5', 'dr6', 'dr7')]
+                                      + ['system_constant'],
+                              extra_exports=['system-register-remat.o'],
+                              reference='system_registers_reference.S', controls=[
+                                  ('reference', None, False),
+                                  ('omitted-write', 'KEEL_OMIT_WRITE', True),
+                                  ('narrow-read', 'KEEL_NARROW_READ', True),
+                                  ('wrong-register', 'KEEL_WRONG_REGISTER', True),
+                                  ('clobbered-live', 'KEEL_CLOBBER_LIVE', True)]),
     'invlpg': dict(prefix='invlpg', bridge='invlpg_bridge.S', symbols=['invalidate'],
                    reference='invlpg_reference.S', controls=[
                        ('reference', None, False),
