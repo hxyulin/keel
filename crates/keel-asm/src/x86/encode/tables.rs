@@ -737,6 +737,7 @@ fn emit<'a>(
                 rm,
                 f.vector == 256,
                 choice.w,
+                false,
             )?;
         } else {
             e.bytes.extend([
@@ -826,12 +827,7 @@ fn emit<'a>(
             .count();
         e.bytes[..end].rotate_left(1);
     }
-    let len = e.bytes.len();
-    for fix in &mut e.fixups {
-        if matches!(fix.kind, 2 | 4 | 9 | 15 | 22) {
-            fix.adjust -= (len - fix.offset) as i128;
-        }
-    }
+    e.finish()?;
     Ok(e)
 }
 

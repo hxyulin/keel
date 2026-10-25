@@ -31,7 +31,9 @@ The generator rejects unknown filter names, unsupported filter values and
 unclassified feature sets used by Keel adapters. It excludes REX2 and the
 alternate AMD, KNC and MPX interpretations. The default decoder uses the
 ModRM-bearing UD0 form; Keel's explicit `ud0.short` encoding remains available.
-EVEX, MVEX, XOP and 3DNow records are outside this import.
+The legacy/VEX selection remains unchanged. A separate `evex.json` selection
+adds AVX-512F/VL and its VEX mask operations, from the same upstream pin. Other
+EVEX families, MVEX, XOP and 3DNow remain outside these imports.
 
 ## Inputs and outputs
 
@@ -186,8 +188,8 @@ The XMM requirement is documented in Intel's
 New extension identities, scalar AT&T suffix eligibility, operand-specific
 VEX form adapters and feature queries are generated from that exposure list
 and the source records. Adding a feature field requires a schema entry; deciding
-the CPU profile policy remains an explicit profile-schema change. EVEX/AVX-512 vector forms remain outside
-this increment.
+the CPU profile policy remains an explicit profile-schema change. Other
+EVEX/AVX-512 families remain outside this increment.
 
 ## Decoding limits
 
@@ -303,3 +305,87 @@ It joins import/exclusion facts, decoder registration, declarative assembler
 candidates, the 45 tracked compiler recipes and feature/profile policy.
 [Definitions and limits](coverage-ledger.md) explain why candidates, unknown
 policy, unknown privilege and untracked validation are separate states.
+
+## AVX-512F/VL and EVEX
+
+`evex.json` adds 1,884 EVEX AVX-512F records and 15 VEX-encoded foundation mask
+records. The latter are also present in the original legacy/VEX snapshot.
+`evex-source.json` pins the upstream commit, source hash and selection hash.
+`generate.py --check-upstream <instructions.json>` checks both selections.
+The imported data retains the Zydis MIT licence in `LICENSE-ZYDIS`.
+
+`evex.py` generates a separate form/decode table and 351 `EvexMnemonic` bindings.
+It preserves mask policy, encoded length constraints, rounding/SAE, broadcast,
+element sizes and displacement tuples. Unknown encoding conditions fail
+validation. Feature requirements come from the existing policy and prerequisite
+graph. A shared encoder/decoder handles these forms without per-instruction
+encoding functions. Registers and both symbolic tag directions are generated
+from `registers.json`; existing IDs/tags are unchanged, with ZMM and mask classes
+appended. XMM/YMM names now extend through register 31 for EVEX.
+
+Enable `avx512f` explicitly, or `avx512vl` for 128/256-bit VL forms. Positive
+feature edits include prerequisite closure. The v1/v2/v3 profiles remain
+unchanged; no v4 profile is added. Runtime execution still requires OS-enabled
+opmask and ZMM state in XCR0. Target flags do not inspect the host or enable
+that state. Existing compiler xstate APIs do not acquire a wider state contract.
+
+Intel and AT&T input accept merge/zero masks, embedded broadcast, rounding and
+SAE. For example:
+
+```asm
+vaddps zmm31{k7}{z}, zmm20, dword ptr [r13+508]{1to16}
+{evex} vaddps xmm0, xmm1, xmm2
+```
+
+The first line needs `avx512f`; the second also needs `avx512vl`. Ordinary low
+XMM/YMM operations retain their VEX spelling/encoding. `{evex}` explicitly
+selects the EVEX adapter, while ZMM, high vector registers, mask destinations
+and 512-bit memory select it automatically. The assembler applies the same
+promotion to typed programs. Typed callers can also use
+`Opcode::Evex(EvexOpcode { kind, options })` directly. Decorators stay in this
+copyable opcode payload, so the public `Instruction`/`Register` fields and the
+symbolic cache's operand format do not need a second representation.
+
+AT&T memory-width aliases are generated from ambiguous operand shapes. This
+covers x/y conversion suffixes and l/q integer-input widths, while preserving
+existing VEX parsing. Ambiguous unsized memory is rejected; Intel input needs
+an explicit width and AT&T input needs its width suffix. Broadcast counts
+disambiguate their own vector length.
+`addr32` supports base-free VSIB as well as ordinary 32-bit address registers.
+Symbolic displacements retain full relocation fields; only divisible numeric
+displacements in range use disp8*N. RIP-relative fixups include any trailing
+immediate when computing the relocation addend.
+
+This increment does not add AVX-512 compiler intrinsics, selection, allocation
+or runtime qualification. It does not cover BW/DQ/CD, FP16, APX, additional
+EVEX opcode maps or a complete v4 profile. Those need their own import/feature
+review and witnesses; new operand or tuple kinds require shared-engine work.
+
+## Generated assembly smoke tests
+
+`assembly_smoke.py` generates source witnesses, not expected bytes:
+
+- 2,423 AVX-512F operand shapes, including broadcast alternatives, in both
+  dialects. They exercise all imported records through their public bindings.
+  Several source records can share a canonical assembly spelling; these are
+  representative binding checks, not exhaustive architectural input coverage.
+- One compiler IR function for each of the 87 reviewed system/query bindings.
+  Original inputs stay live after each operation, results are stored, and
+  immediate ports use an explicit constant. The test checks all 36 CPU-level,
+  selector, allocator and pool configurations with text/typed/chunked parity.
+
+The AVX-512 test compares both dialects with Clang/GNU and checks decode and
+canonical reassembly. VMOVQ's equivalent memory encodings are compared through
+complete decoded operand descriptions. Separate literal bytes remain independent
+of generation. Further tests cover invalid decorators/reserved prefix bits,
+feature gates, width/disp8 boundaries, relocations, address32 and symbolic folding.
+No generated privileged or AVX-512 payload executes on the host. The coverage
+ledger keeps structural registration separate from test qualification.
+
+Validation at this increment: the full workspace passed 2,727 tests with zero
+failures and 13 ignored across 502 groups. Workspace compilation, all 98 ISA
+generator tests, both generator freshness checks and comparison with the pinned
+full upstream source passed. Logs are `/tmp/keel-evex-workspace.log`,
+`/tmp/keel-evex-check.log`, `/tmp/keel-evex-python.log` and
+`/tmp/keel-evex-upstream.log`. This is encoding/transport evidence for EVEX;
+no native AVX-512 execution qualification is claimed.

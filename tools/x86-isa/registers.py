@@ -140,7 +140,11 @@ def definitions(schema):
               '    /// Stable Keel symbolic tag; separate from the enum discriminant.',
               '    pub const fn symbolic_tag(self) -> u8 {', '        match self {']
     lines += [f'            Self::{r["variant"]} => {r["symbolic_tag"]},' for r in rows]
-    lines += ['        }', '    }', '    /// Register class for a shared ISA operand kind.',
+    lines += ['        }', '    }',
+              '    pub const fn from_symbolic_tag(tag: u8) -> Option<Self> {', '        Some(match tag {']
+    lines += [f'            {r["symbolic_tag"]} => Self::{r["variant"]},' for r in rows]
+    lines += ['            _ => return None,', '        })', '    }',
+              '    /// Register class for a shared ISA operand kind.',
               '    pub fn from_isa_kind(kind: &str) -> Option<Self> {', '        Some(match kind {']
     for row in rows:
         if row.get('isa_kinds'):

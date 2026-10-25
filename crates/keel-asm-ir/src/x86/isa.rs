@@ -2,7 +2,9 @@
 mod condition_codes;
 mod features;
 pub use condition_codes::{condition_code_name, isa_condition_code_name, parse_condition_code};
+mod evex_forms;
 mod generated;
+pub use evex_forms::EVEX_FORMS;
 mod register_names;
 pub(super) use features::{feature_policy, opcode_features};
 pub use register_names::register_name;
@@ -131,4 +133,17 @@ pub fn decode_forms(vex: bool, map: u8, byte: u8) -> impl Iterator<Item = &'stat
         &[]
     };
     indices.iter().map(|index| &FORMS[usize::from(*index)])
+}
+
+pub fn evex_decode_forms(
+    map: u8,
+    byte: u8,
+) -> impl Iterator<Item = &'static super::evex::EvexForm> {
+    let indices = if map < 4 {
+        let (start, end) = evex_forms::DECODE_RANGES[usize::from(map) * 256 + usize::from(byte)];
+        &evex_forms::DECODE_ORDER[usize::from(start)..usize::from(end)]
+    } else {
+        &[]
+    };
+    indices.iter().map(|n| &EVEX_FORMS[usize::from(*n)])
 }

@@ -2,7 +2,7 @@
 use keel_asm_ir::x86::{Register, RegisterClass, isa};
 use std::{collections::BTreeSet, fmt::Write};
 
-const CLASSES: [(RegisterClass, u8, u8); 9] = [
+const CLASSES: [(RegisterClass, u8, u8); 11] = [
     (RegisterClass::Gpr, 0, 0),
     (RegisterClass::Xmm, 1, 1),
     (RegisterClass::Mmx, 2, 4),
@@ -12,6 +12,8 @@ const CLASSES: [(RegisterClass, u8, u8); 9] = [
     (RegisterClass::Rip, 6, 3),
     (RegisterClass::Control, 7, 7),
     (RegisterClass::Debug, 8, 8),
+    (RegisterClass::Zmm, 9, 9),
+    (RegisterClass::Mask, 10, 10),
 ];
 fn canonical() -> Vec<(Register, &'static str)> {
     include_str!("fixtures/x86-registers.txt")
@@ -42,6 +44,7 @@ fn public_ids_tags_names_and_parse_roundtrips_are_stable() {
     for (class, id, tag) in CLASSES {
         assert_eq!(class as u8, id, "{class:?}");
         assert_eq!(class.symbolic_tag(), tag, "{class:?}");
+        assert_eq!(RegisterClass::from_symbolic_tag(tag), Some(class));
     }
     for (register, name) in canonical() {
         assert_eq!(register.to_string(), name);
@@ -70,7 +73,20 @@ fn structural_validation_matches_the_original_canonical_domain() {
                     };
                     assert_eq!(
                         r.is_valid(),
-                        valid.contains(&(class as u8, number, width, high_byte)),
+                        valid.contains(&(class as u8, number, width, high_byte))
+                            || (16..32).contains(&number)
+                                && !high_byte
+                                && match class {
+                                    RegisterClass::Xmm => width == 128,
+                                    RegisterClass::Ymm => width == 256,
+                                    _ => false,
+                                }
+                            || !high_byte
+                                && match class {
+                                    RegisterClass::Zmm => number < 32 && width == 512,
+                                    RegisterClass::Mask => number < 8 && width == 64,
+                                    _ => false,
+                                },
                         "{r:?}"
                     );
                 }
@@ -99,8 +115,8 @@ fn numeric_spelling_and_formatter_compatibility_remain_separate_from_validity() 
         assert!(Register::parse(source).is_some());
     }
     for source in [
-        "cr00", "cr+0", "CR08", "dr04", "dr+4", "mm00", "st(00)", "st(+0)", "r7", "r16", "xmm16",
-        "ymm16", "xmm-0", " rax", "rax ", "cr1", "dr8",
+        "cr00", "cr+0", "CR08", "dr04", "dr+4", "mm00", "st(00)", "st(+0)", "r7", "r16", "xmm32",
+        "ymm32", "xmm-0", " rax", "rax ", "cr1", "dr8",
     ] {
         assert_eq!(Register::parse(source), None, "{source}");
     }
@@ -145,7 +161,10 @@ fn decoded_register_fields_keep_their_existing_recognition_limits() {
         RegisterClass::from_isa_kind("cr"),
         Some(RegisterClass::Control)
     );
-    assert_eq!(RegisterClass::from_isa_kind("mask"), None);
+    assert_eq!(
+        RegisterClass::from_isa_kind("mask"),
+        Some(RegisterClass::Mask)
+    );
     // Decoded fields can describe reserved encodings that the typed assembler rejects.
     assert_eq!(isa::register_name("cr", 1).as_deref(), Some("cr1"));
     assert_eq!(Register::parse("cr1"), None);

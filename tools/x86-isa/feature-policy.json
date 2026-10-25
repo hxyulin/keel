@@ -113,5 +113,25 @@
     "avx",
     "pclmulqdq"
   ],
-  "I486": []
+  "I486": [],
+  "AVX512F_512": [
+    "avx512f"
+  ],
+  "AVX512F_SCALAR": [
+    "avx512f"
+  ],
+  "AVX512F_128N": [
+    "avx512f"
+  ],
+  "AVX512F_KOP": [
+    "avx512f"
+  ],
+  "AVX512F_128": [
+    "avx512f",
+    "avx512vl"
+  ],
+  "AVX512F_256": [
+    "avx512f",
+    "avx512vl"
+  ]
 }

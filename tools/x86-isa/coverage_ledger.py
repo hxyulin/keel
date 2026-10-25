@@ -1,6 +1,8 @@
 """Generate bounded coverage facts, not architectural or test-pass claims."""
 import hashlib
 import json
+
+import evex
 from collections import Counter
 
 import cpu_profiles
@@ -10,7 +12,7 @@ import system_intrinsics
 INPUTS = ['zydis.json', 'zydis-source.json', 'keel-extensions.json', 'keel-adapters.json',
           'api-identities.json', 'core-identities.json', 'condition-codes.json',
           'system-intrinsics.json', 'registers.json', 'feature-fields.json',
-          'feature-policy.json', 'cpu-profiles.json']
+          'feature-policy.json', 'cpu-profiles.json', 'evex.json', 'evex-source.json', 'query-bindings.json']
 
 
 def digest(value):
@@ -165,14 +167,30 @@ def build(root, data, adapters, exclusion_reasons, form_isa):
                    regular_recipes=sum(b['lowering']['kind'] != 'handwritten' for b in compiler),
                    handwritten_hooks=sum(b['lowering']['kind'] == 'handwritten' for b in compiler),
                    unclassified_policy_keys=sum(s['status'] == 'unclassified' for s in sets))
-    return dict(schema_version=1,
-                scope='Pinned legacy/VEX import plus Keel extensions; structural facts and candidate relations only.',
+    avx512 = []
+    vector_rows = evex.load(root)
+    indices = sorted(range(len(vector_rows)), key=lambda n: vector_rows[n]['mnemonic'])
+    for index, source_index in enumerate(indices):
+        row = vector_rows[source_index]
+        avx512.append(dict(id='zydis:' + digest(row), source_index=source_index, table_index=index,
+                          mnemonic=row['mnemonic'], encoding=row['encoding'], isa_set=row['meta_info']['isa_set'],
+                          binding='EvexMnemonic::' + row['mnemonic'][0].upper() + row['mnemonic'][1:],
+                          requires=policy[row['meta_info']['isa_set']],
+                          decoder='registered_evex' if row['encoding'] == 'evex' else 'registered_shared_vex',
+                          evex=row.get('evex', {}), validation='untracked'))
+    summary.update(avx512_table_records=len(avx512),
+                   evex_encoded_records=sum(r['encoding'] == 'evex' for r in vector_rows),
+                   avx512_reused_vex_records=sum(r['encoding'] == 'vex' for r in vector_rows),
+                   avx512_mnemonic_bindings=len({r['mnemonic'] for r in vector_rows}))
+    return dict(schema_version=2,
+                scope='Pinned legacy/VEX import plus Keel extensions, with a separate AVX-512F/VL form table; structural facts and candidate relations only.',
                 provenance=inputs['zydis-source.json'],
                 input_sha256={name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in INPUTS},
-                not_enumerated=['EVEX', 'MVEX', 'XOP encoding', '3DNow encoding', 'explicit non-64-bit source forms'],
+                avx512_provenance=inputs['evex-source.json'],
+                not_enumerated=['Other EVEX families including APX', 'MVEX', 'XOP encoding', '3DNow encoding', 'explicit non-64-bit source forms'],
                 validation_scope='No test results or runtime campaign verdicts are ingested. Untracked does not mean untested or unsupported.',
                 summary=summary, isa_sets=sets, dynamic_identity_families=dynamic,
-                assembler_bindings=public, compiler_bindings=compiler, forms=forms)
+                assembler_bindings=public, compiler_bindings=compiler, forms=forms, avx512_forms=avx512)
 
 
 def markdown(ledger):
@@ -181,13 +199,16 @@ def markdown(ledger):
              '# x86 structural coverage ledger', '',
              'See [ledger definitions](../../tools/x86-isa/coverage-ledger.md) before interpreting these counts.',
              'Machine-readable form records are in [coverage.json](coverage.json).', '',
-             f'Imported source forms: **{s["imported_zydis"]}**, plus **{s["local_extensions"]}** local extension.',
-             f'Production catalogue: **{s["catalogue"]}** forms; **{s["excluded"]}** imported forms excluded.',
+             f'Legacy/VEX imported source forms: **{s["imported_zydis"]}**, plus **{s["local_extensions"]}** local extension.',
+             f'Legacy/VEX catalogue: **{s["catalogue"]}** forms; **{s["excluded"]}** imported forms excluded.',
              f'Decoder registration enabled: **{s["decoder_registered"]}**; disabled by policy: **{s["decoder_disabled"]}**.',
              f'Forms with declarative assembler candidates: **{s["forms_with_assembler_candidates"]}**.',
              f'Public binding records: **{s["public_bindings"]}**; without a direct source join: **{s["bindings_without_candidates"]}** (not an unsupported count).',
              f'Tracked compiler declarations: **{s["tracked_compiler_bindings"]}**, with **{s["regular_recipes"]}** regular recipes and **{s["handwritten_hooks"]}** hooks.',
              f'ISA policy keys without an explicit feature classification: **{s["unclassified_policy_keys"]}**.', '',
+             f'Separate AVX-512F/VL table: **{s["avx512_table_records"]}** records and **{s["avx512_mnemonic_bindings"]}** mnemonic bindings.',
+             f'It contains **{s["evex_encoded_records"]}** EVEX records plus **{s["avx512_reused_vex_records"]}** VEX mask records already present in the legacy/VEX import.',
+             'Do not add those reused VEX records to the unique-import total. These records are listed under `avx512_forms`.', '',
              '**Registration is not successful decoding. Candidate links are not complete operand support.**',
              'Compiler coverage outside the tracked system declarations is unknown here.',
              'Per-form validation is untracked; existing tests and campaign records are not inferred from file names.', '',
@@ -213,7 +234,7 @@ def json_report(ledger):
     # One object per record keeps changes to this generated inventory reviewable.
     lines = ['{']
     for index, (key, value) in enumerate(ledger.items()):
-        if key in ('forms', 'assembler_bindings', 'compiler_bindings', 'isa_sets'):
+        if key in ('forms', 'assembler_bindings', 'compiler_bindings', 'isa_sets', 'avx512_forms'):
             lines.append('  ' + json.dumps(key) + ': [')
             lines += ['    ' + json.dumps(row) + (',' if i + 1 < len(value) else '')
                       for i, row in enumerate(value)]

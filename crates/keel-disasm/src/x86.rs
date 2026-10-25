@@ -1,5 +1,9 @@
 //! Long-mode byte decoding from the same generated forms as the assembler.
-use keel_asm_ir::x86::isa::{self, IsaForm, IsaOperand};
+use keel_asm_ir::x86::{
+    EvexOptions, Rounding,
+    evex::EvexForm,
+    isa::{self, IsaForm, IsaOperand},
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operand {
@@ -25,10 +29,17 @@ pub struct Instruction {
     pub operands: Vec<Operand>,
     pub lock: bool,
     pub repeat: u8,
+    pub evex: Option<EvexOptions>,
 }
 impl Instruction {
     pub fn assembly(&self) -> String {
         let mut text = String::new();
+        if let Some(options) = self.evex {
+            if options.address32 {
+                text.push_str("addr32 ");
+            }
+            text.push_str("{evex} ");
+        }
         if self.lock {
             text.push_str("lock ");
         }
@@ -53,7 +64,7 @@ impl Instruction {
             isa::fixed_width_mnemonic(self.form.mnemonic, self.operand_size)
                 .unwrap_or(self.form.mnemonic)
         });
-        let operands: Vec<_> = self
+        let mut operands: Vec<_> = self
             .operands
             .iter()
             .map(|o| match o {
@@ -78,6 +89,7 @@ impl Instruction {
                         80 => "tbyte",
                         128 => "xmmword",
                         256 => "ymmword",
+                        512 => "zmmword",
                         _ => "",
                     };
                     let mut address = base.clone().unwrap_or_default();
@@ -107,6 +119,35 @@ impl Instruction {
                 }
             })
             .collect();
+        if let Some(options) = self.evex {
+            if let Some(first) = operands.first_mut() {
+                if let Some(mask) = options.mask {
+                    first.push_str(&format!("{{k{mask}}}"));
+                }
+                if options.zero {
+                    first.push_str("{z}");
+                }
+            }
+            if options.broadcast != 0 {
+                if let Some(n) = self
+                    .operands
+                    .iter()
+                    .position(|o| matches!(o, Operand::Memory { .. }))
+                {
+                    operands[n].push_str(&format!("{{1to{}}}", options.broadcast));
+                }
+            }
+            if let Some(round) = options.rounding {
+                let before_last = matches!(self.operands.last(), Some(Operand::Immediate(_)))
+                    || matches!(self.operands.last(), Some(Operand::Register(r)) if keel_asm_ir::x86::Register::parse(r).is_some_and(|r| r.class == keel_asm_ir::x86::RegisterClass::Gpr));
+                let at = if before_last {
+                    operands.len().saturating_sub(1)
+                } else {
+                    operands.len()
+                };
+                operands.insert(at, format!("{{{}}}", round.name()));
+            }
+        }
         if !operands.is_empty() {
             text.push(' ');
             text.push_str(&operands.join(", "));
@@ -144,6 +185,14 @@ impl Reader<'_> {
         })
     }
 }
+#[derive(Clone, Copy)]
+struct EvexPrefix {
+    ll: u8,
+    r_high: u8,
+    b: bool,
+    zero: bool,
+    mask: u8,
+}
 #[derive(Clone, Copy, Default)]
 struct Prefix {
     p66: bool,
@@ -153,6 +202,7 @@ struct Prefix {
     lock: bool,
     segment: Option<&'static str>,
     vex: bool,
+    evex: Option<EvexPrefix>,
     map: u8,
     l: bool,
     source: u8,
@@ -212,7 +262,34 @@ fn prefixes(r: &mut Reader<'_>) -> Option<Prefix> {
         r.byte()?;
     }
     let first = *r.bytes.get(r.pos)?;
-    if first == 0xc4 || first == 0xc5 {
+    if first == 0x62 {
+        if p.rex != 0 || p.p66 || p.rep != 0 || p.lock {
+            return None;
+        }
+        r.byte()?;
+        let a = r.byte()?;
+        let b = r.byte()?;
+        let c = r.byte()?;
+        if a & 0x0c != 0 || a & 3 == 0 || b & 4 == 0 {
+            return None;
+        }
+        p.map = a & 3;
+        p.rex = ((!a >> 5) & 7) | ((b >> 4) & 8);
+        p.source = ((!b >> 3) & 15) | ((!c & 8) << 1);
+        p.evex = Some(EvexPrefix {
+            ll: (c >> 5) & 3,
+            r_high: (!a >> 4) & 1,
+            b: c & 16 != 0,
+            zero: c & 128 != 0,
+            mask: c & 7,
+        });
+        match b & 3 {
+            1 => p.p66 = true,
+            2 => p.rep = 0xf3,
+            3 => p.rep = 0xf2,
+            _ => {}
+        }
+    } else if first == 0xc4 || first == 0xc5 {
         if p.rex != 0 || p.p66 || p.rep != 0 || p.lock {
             return None;
         }
@@ -228,7 +305,9 @@ fn prefixes(r: &mut Reader<'_>) -> Option<Prefix> {
             p.rex = (!a >> 5) & 7;
             r.byte()?
         };
-        p.rex |= (b >> 4) & 8;
+        if first == 0xc4 {
+            p.rex |= (b >> 4) & 8;
+        }
         p.source = (!b >> 3) & 15;
         p.l = b & 4 != 0;
         match b & 3 {
@@ -320,6 +399,7 @@ fn decode_form(
     p: Prefix,
     byte: u8,
     f: &'static IsaForm,
+    ef: Option<&'static EvexForm>,
     address: u64,
 ) -> Option<Instruction> {
     if f.vex != p.vex || f.map != p.map || f.byte != byte {
@@ -328,7 +408,50 @@ fn decode_form(
     if (f.w >= 0 && (f.w == 1) != p.w()) || (f.b >= 0 && f.b as u8 != p.b()) {
         return None;
     }
-    if f.vector != 0 && (f.vector == 256) != p.l {
+    let mut evex_options = None;
+    if let Some(e) = p.evex {
+        let ef = ef?;
+        if ef.evex_b >= 0 && (ef.evex_b == 1) != e.b {
+            return None;
+        }
+        let mut options = EvexOptions {
+            address32: p.address32,
+            mask: (e.mask != 0).then_some(e.mask),
+            zero: e.zero,
+            ..EvexOptions::default()
+        };
+        if ef.mask == "forbidden" && e.mask != 0
+            || ef.mask == "required" && e.mask == 0
+            || e.zero && (!ef.zero || e.mask == 0)
+        {
+            return None;
+        }
+        if e.b && ef.functionality == "rc" {
+            options.rounding = Some(match e.ll {
+                0 => Rounding::Nearest,
+                1 => Rounding::Down,
+                2 => Rounding::Up,
+                _ => Rounding::Zero,
+            });
+        } else {
+            if ef.ll_mask & (1 << e.ll) == 0 {
+                return None;
+            }
+            if e.b {
+                match ef.functionality {
+                    "sae" => options.rounding = Some(Rounding::Sae),
+                    "bc" => {
+                        let spec = *f.operands.iter().find(|o| o.kind == "mem")?;
+                        options.broadcast =
+                            u8::try_from(ef.memory_bytes(spec, false) * 8 / ef.element).ok()?;
+                    }
+                    "" => {}
+                    _ => return None,
+                }
+            }
+        }
+        evex_options = Some(options);
+    } else if f.vector != 0 && (f.vector == 256) != p.l {
         return None;
     }
     if f.prefix == 0 && (p.rep != 0 || p.p66) {
@@ -364,7 +487,7 @@ fn decode_form(
             return None;
         }
     }
-    let mem = if let Some(m) = m {
+    let mut mem = if let Some(m) = m {
         if m >> 6 != 3 && !f.ignore_mod {
             Some(memory(&mut r, m, p)?)
         } else {
@@ -373,29 +496,50 @@ fn decode_form(
     } else {
         None
     };
+    if m.is_some_and(|m| m >> 6 == 1)
+        && let (Some(ef), Some(mem)) = (ef, mem.as_mut())
+    {
+        mem.disp *=
+            i64::from(ef.displacement_scale(evex_options.is_some_and(|o| o.broadcast != 0)));
+    }
     let mut operands = Vec::new();
     let mut targets = Vec::new();
     for spec in f.operands {
         let n = match spec.encoding {
-            "modrm_reg" => ((m? >> 3) & 7) + p.r() * 8,
-            "modrm_rm" => (m? & 7) + p.b() * 8,
+            "modrm_reg" => ((m? >> 3) & 7) + p.r() * 8 + p.evex.map_or(0, |e| e.r_high * 16),
+            "modrm_rm" => {
+                (m? & 7)
+                    + p.b() * 8
+                    + if p.evex.is_some() && m? >> 6 == 3 {
+                        p.x() * 16
+                    } else {
+                        0
+                    }
+            }
             "opcode" => (byte & 7) + p.b() * 8,
             "ndsndd" => p.source,
             "is4" => r.byte()? >> 4,
             _ => 0,
         };
         let operand = match spec.kind {
-            "mem" | "mem_vsibx" | "mem_vsiby" | "agen" | "agen_norel" => {
+            "mem" | "mem_vsibx" | "mem_vsiby" | "mem_vsibz" | "agen" | "agen_norel" => {
                 let mem = mem?;
                 let vsib = spec.kind.starts_with("mem_vsib");
                 let index = mem.index.filter(|n| vsib || *n != 4).map(|n| {
+                    let n = if vsib && p.evex.is_some() {
+                        n + (p.source >> 4) * 16
+                    } else {
+                        n
+                    };
                     if vsib {
                         format!(
                             "{}{n}",
                             if spec.kind == "mem_vsibx" {
                                 "xmm"
-                            } else {
+                            } else if spec.kind == "mem_vsiby" {
                                 "ymm"
+                            } else {
+                                "zmm"
                             }
                         )
                     } else {
@@ -403,7 +547,9 @@ fn decode_form(
                     }
                 });
                 Operand::Memory {
-                    bits: spec.bytes(size) * 8,
+                    bits: ef.map_or(spec.bytes(size), |ef| {
+                        ef.memory_bytes(*spec, evex_options.is_some_and(|o| o.broadcast != 0))
+                    }) * 8,
                     address_bits: p.address(),
                     base: if mem.ip {
                         Some(if p.address32 { "eip" } else { "rip" }.into())
@@ -433,12 +579,44 @@ fn decode_form(
                 targets.push(operands.len());
                 Operand::Immediate(r.number(spec.bytes(size) as usize, true)?)
             }
-            _ => Operand::Register(register(*spec, n, size, p)?),
+            _ => {
+                if ef.is_some() && n >= 16 && spec.kind.starts_with("gpr") {
+                    return None;
+                }
+                Operand::Register(register(*spec, n, size, p)?)
+            }
         };
         operands.push(operand);
     }
-    if !f.operands.iter().any(|o| o.encoding == "ndsndd") && p.vex && p.source != 0 {
+    let vsib = f.operands.iter().any(|o| o.kind.starts_with("mem_vsib"));
+    if !f.operands.iter().any(|o| o.encoding == "ndsndd")
+        && (p.vex || p.evex.is_some())
+        && (if vsib && p.evex.is_some() {
+            p.source & 15
+        } else {
+            p.source
+        }) != 0
+    {
         return None;
+    }
+    if let Some(e) = p.evex {
+        if !f.operands.iter().any(|o| o.encoding == "modrm_reg") && (p.r() != 0 || e.r_high != 0) {
+            return None;
+        }
+        if f.gather {
+            let number = |name: &str| keel_asm_ir::x86::Register::parse(name).map(|r| r.number);
+            let dest = operands.iter().find_map(|o| match o {
+                Operand::Register(r) => number(r),
+                _ => None,
+            });
+            let index = operands.iter().find_map(|o| match o {
+                Operand::Memory { index: Some(r), .. } => number(r),
+                _ => None,
+            });
+            if dest.is_some() && dest == index {
+                return None;
+            }
+        }
     }
     for index in targets {
         let Operand::Immediate(delta) = operands[index] else {
@@ -457,6 +635,7 @@ fn decode_form(
         operand_size: size,
         operands,
         lock: p.lock,
+        evex: evex_options,
         repeat: if (p.rep == 0xf3 && f.rep) || (p.rep == 0xf2 && f.repne) {
             p.rep
         } else {
@@ -471,7 +650,7 @@ pub fn decode(bytes: &[u8], address: u64) -> Option<Instruction> {
     let mut r = Reader { bytes, pos: 0 };
     let mut p = prefixes(&mut r)?;
     let mut byte = r.byte()?;
-    if !p.vex && byte == 0x0f {
+    if !p.vex && p.evex.is_none() && byte == 0x0f {
         p.map = 1;
         byte = r.byte()?;
         if byte == 0x38 || byte == 0x3a {
@@ -479,12 +658,20 @@ pub fn decode(bytes: &[u8], address: u64) -> Option<Instruction> {
             byte = r.byte()?;
         }
     }
+    if p.evex.is_some() {
+        for ef in isa::evex_decode_forms(p.map, byte) {
+            if let Some(instruction) = decode_form(r, p, byte, &ef.form, Some(ef), address) {
+                return Some(instruction);
+            }
+        }
+        return None;
+    }
     let mut best: Option<(u8, Instruction)> = None;
     for f in isa::decode_forms(p.vex, p.map, byte) {
         if !f.decode || f.vex != p.vex || f.map != p.map || f.byte != byte {
             continue;
         }
-        if let Some(instruction) = decode_form(r, p, byte, f, address) {
+        if let Some(instruction) = decode_form(r, p, byte, f, None, address) {
             let score = u8::from(f.prefix > 0) * 2 + u8::from(f.prefix == 0);
             if best.as_ref().is_none_or(|(old, _)| score > *old) {
                 best = Some((score, instruction));

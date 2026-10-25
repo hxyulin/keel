@@ -16,6 +16,8 @@ pub enum RegisterClass {
     Control = 7,
     /// DR0..DR7; DR4/DR5 require CR4.DE clear and alias DR6/DR7.
     Debug = 8,
+    Zmm = 9,
+    Mask = 10,
 }
 impl RegisterClass {
     /// Stable Keel symbolic tag; separate from the enum discriminant.
@@ -30,7 +32,25 @@ impl RegisterClass {
             Self::Rip => 3,
             Self::Control => 7,
             Self::Debug => 8,
+            Self::Zmm => 9,
+            Self::Mask => 10,
         }
+    }
+    pub const fn from_symbolic_tag(tag: u8) -> Option<Self> {
+        Some(match tag {
+            0 => Self::Gpr,
+            1 => Self::Xmm,
+            4 => Self::Mmx,
+            5 => Self::Ymm,
+            2 => Self::X87,
+            6 => Self::Segment,
+            3 => Self::Rip,
+            7 => Self::Control,
+            8 => Self::Debug,
+            9 => Self::Zmm,
+            10 => Self::Mask,
+            _ => return None,
+        })
     }
     /// Register class for a shared ISA operand kind.
     pub fn from_isa_kind(kind: &str) -> Option<Self> {
@@ -43,6 +63,8 @@ impl RegisterClass {
             "sreg" => Self::Segment,
             "cr" => Self::Control,
             "dr" => Self::Debug,
+            "zmm" => Self::Zmm,
+            "mask" => Self::Mask,
             _ => return None,
         })
     }
@@ -148,7 +170,7 @@ impl Register {
         if let Some(rest) = s.strip_prefix("xmm") {
             if let Some(number) = rest.strip_suffix("") {
                 if let Ok(number) = number.parse::<u8>() {
-                    if number < 16 {
+                    if number < 32 {
                         return Some(Self { class: RegisterClass::Xmm, number, width: 128, high_byte: false });
                     }
                 }
@@ -169,7 +191,7 @@ impl Register {
         if let Some(rest) = s.strip_prefix("ymm") {
             if let Some(number) = rest.strip_suffix("") {
                 if let Ok(number) = number.parse::<u8>() {
-                    if number < 16 {
+                    if number < 32 {
                         return Some(Self { class: RegisterClass::Ymm, number, width: 256, high_byte: false });
                     }
                 }
@@ -211,20 +233,43 @@ impl Register {
                 }
             }
         }
+        if let Some(rest) = s.strip_prefix("zmm") {
+            if let Some(number) = rest.strip_suffix("") {
+                if let Ok(number) = number.parse::<u8>() {
+                    if number < 32 {
+                        return Some(Self { class: RegisterClass::Zmm, number, width: 512, high_byte: false });
+                    }
+                }
+            }
+        }
+        if let Some(rest) = s.strip_prefix("k") {
+            if let Some(number) = rest.strip_suffix("") {
+                if number.len() != 1 {
+                    return None;
+                }
+                if let Ok(number) = number.parse::<u8>() {
+                    if number < 8 {
+                        return Some(Self { class: RegisterClass::Mask, number, width: 64, high_byte: false });
+                    }
+                }
+            }
+        }
         None
     }
     /// Structural validity, independent of instruction/address restrictions.
     pub fn is_valid(self) -> bool {
         match self.class {
             RegisterClass::Gpr => (self.number < 16) && (matches!(self.width, 8 | 16 | 32 | 64)) && ((!self.high_byte || (matches!(self.number, 4 | 5 | 6 | 7) && self.width == 8))),
-            RegisterClass::Xmm => (self.number < 16) && (self.width == 128) && (!self.high_byte),
+            RegisterClass::Xmm => (self.number < 32) && (self.width == 128) && (!self.high_byte),
             RegisterClass::Mmx => (self.number < 8) && (self.width == 64) && (!self.high_byte),
-            RegisterClass::Ymm => (self.number < 16) && (self.width == 256) && (!self.high_byte),
+            RegisterClass::Ymm => (self.number < 32) && (self.width == 256) && (!self.high_byte),
             RegisterClass::X87 => (self.number < 8) && (self.width == 80) && (!self.high_byte),
             RegisterClass::Segment => (self.number < 6) && (self.width == 16) && (!self.high_byte),
             RegisterClass::Rip => (self.number == 0) && (matches!(self.width, 32 | 64)) && (!self.high_byte),
             RegisterClass::Control => (matches!(self.number, 0 | 2 | 3 | 4 | 8)) && (self.width == 64) && (!self.high_byte),
             RegisterClass::Debug => (self.number < 8) && (self.width == 64) && (!self.high_byte),
+            RegisterClass::Zmm => (self.number < 32) && (self.width == 512) && (!self.high_byte),
+            RegisterClass::Mask => (self.number < 8) && (self.width == 64) && (!self.high_byte),
         }
     }
 }

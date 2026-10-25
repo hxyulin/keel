@@ -210,6 +210,10 @@ impl Opcode {
 impl Instruction {
     pub(super) fn core_prefix(mut self, prefix: &str) -> Result<Self, String> {
         self.opcode = match (prefix, self.opcode) {
+            ("addr32", Opcode::Evex(mut op)) if !op.options.address32 => {
+                op.options.address32 = true;
+                Opcode::Evex(op)
+            }
             (
                 "addr32",
                 Opcode::Core(CoreOpcode::String {

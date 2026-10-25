@@ -371,6 +371,7 @@ pub enum Opcode {
     Cvtdq2pd,
     Cvtpd2dq,
     Cvttpd2dq,
+    Evex(EvexOpcode),
 }
 impl Opcode {
     fn parse_baseline(name: &str) -> Option<Self> {

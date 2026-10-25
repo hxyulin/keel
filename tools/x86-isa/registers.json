@@ -171,7 +171,23 @@
               12,
               13,
               14,
-              15
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31
             ],
             "parse_digits": null
           }
@@ -248,7 +264,23 @@
               12,
               13,
               14,
-              15
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31
             ],
             "parse_digits": null
           }
@@ -426,13 +458,111 @@
         "width": 64,
         "check_number": false
       }
+    },
+    {
+      "variant": "Zmm",
+      "id": 9,
+      "symbolic_tag": 9,
+      "views": [
+        {
+          "width": 512,
+          "numbered": {
+            "prefix": "zmm",
+            "suffix": "",
+            "numbers": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31
+            ],
+            "parse_digits": null
+          }
+        }
+      ],
+      "format": {
+        "check": [
+          "number",
+          "width",
+          "high_byte"
+        ]
+      },
+      "isa_kinds": [
+        "zmm"
+      ],
+      "decode": {
+        "width": 512,
+        "check_number": true
+      }
+    },
+    {
+      "variant": "Mask",
+      "id": 10,
+      "symbolic_tag": 10,
+      "views": [
+        {
+          "width": 64,
+          "numbered": {
+            "prefix": "k",
+            "suffix": "",
+            "numbers": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7
+            ],
+            "parse_digits": 1
+          }
+        }
+      ],
+      "format": {
+        "check": [
+          "number",
+          "width",
+          "high_byte"
+        ]
+      },
+      "isa_kinds": [
+        "mask"
+      ],
+      "decode": {
+        "width": 64,
+        "check_number": true
+      }
     }
   ],
   "decoder_only": [
-    {
-      "isa_kind": "mask",
-      "prefix": "k"
-    },
     {
       "isa_kind": "bnd",
       "prefix": "bnd"

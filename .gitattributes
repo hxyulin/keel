@@ -25,3 +25,8 @@
 # Generated structural x86 coverage reports.
 /docs/x86-coverage/coverage.json linguist-generated=true
 /docs/x86-coverage/README.md linguist-generated=true
+
+# AVX-512 source data and generated assembly smoke fixtures.
+/tools/x86-isa/evex.json linguist-vendored=true
+/crates/keel-disasm/tests/generated/* linguist-generated=true
+/crates/keel-codegen/tests/generated/* linguist-generated=true

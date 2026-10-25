@@ -120,5 +120,21 @@
     "field": "osxsave",
     "doc": "OS-enabled XSAVE state management (CPUID.OSXSAVE); AVX also needs XCR0 state at runtime.",
     "bit": 23
+  },
+  {
+    "field": "avx512f",
+    "bit": 24,
+    "requires": [
+      "avx"
+    ],
+    "doc": "AVX-512 foundation; execution also requires OS-enabled opmask and ZMM XCR0 state."
+  },
+  {
+    "field": "avx512vl",
+    "bit": 25,
+    "requires": [
+      "avx512f"
+    ],
+    "doc": "AVX-512 128/256-bit vector-length forms."
   }
 ]

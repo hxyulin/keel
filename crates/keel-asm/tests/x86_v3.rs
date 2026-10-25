@@ -2,7 +2,7 @@ use keel_asm_ir::x86::{Instruction, Register, RegisterClass};
 
 #[test]
 fn ymm_transport_identity_and_format() {
-    for n in 0..16 {
+    for n in 0..32 {
         let ymm = Register::parse(&format!("ymm{n}")).unwrap();
         let xmm = Register::parse(&format!("xmm{n}")).unwrap();
         assert_eq!(ymm.class, RegisterClass::Ymm);
@@ -13,7 +13,7 @@ fn ymm_transport_identity_and_format() {
         let i = Instruction::parse_intel(&source).unwrap();
         assert_eq!(Instruction::parse_intel(&i.to_string()).unwrap(), i);
     }
-    assert!(Register::parse("ymm16").is_none());
+    assert!(Register::parse("ymm32").is_none());
 }
 
 use keel_asm::x86::{
@@ -519,7 +519,7 @@ fn malformed_typed_and_parsed_operands_are_rejected() {
                             unreachable!()
                         };
                         match field {
-                            0 => r.number = 16,
+                            0 => r.number = 32,
                             1 => r.high_byte = true,
                             _ => {
                                 r.class = RegisterClass::Rip;
@@ -584,7 +584,7 @@ fn malformed_typed_and_parsed_operands_are_rejected() {
         "xsave qword ptr [rax]",
         "xgetbv eax",
         "vpsrld ymm15,ymmword ptr [rip+external+7],255",
-        "vaddps ymm16,ymm0,ymm1",
+        "vaddps ymm32,ymm0,ymm1",
         "vaddps ymm0,ymm1,[rax+ymm16*4]",
     ] {
         assert!(

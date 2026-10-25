@@ -48,7 +48,7 @@ No timestamps, local build paths or current Git HEAD enter generated output.
 The catalogue generator and ledger share `exclusion_reasons()`. The current
 filters exclude requested alternate AMD/KNC/MPX interpretations and REX2.
 All applicable reasons are retained, so per-reason totals may overlap. Forms
-outside the pinned selection, including EVEX/MVEX/XOP/3DNow encodings and explicit
+outside the pinned selections, including other EVEX families, MVEX/XOP/3DNow encodings and explicit
 non-64-bit source records, are named as out of scope rather than assigned
 invented missing-form counts. ISA labels and encoding-family tags are separate.
 
@@ -125,3 +125,15 @@ compilation and diff checks passed. Existing generated Rust outputs remain
 unchanged. Logs are `/tmp/keel-coverage-ledger-workspace.log`,
 `/tmp/keel-coverage-ledger-python.log` and `/tmp/keel-coverage-ledger-check.log`.
 These global checks do not populate individual form execution verdicts.
+
+## Separate AVX-512F/VL table
+
+Schema version 2 adds `avx512_forms`, with locators into `evex.json` and indices
+into `isa::EVEX_FORMS`. The original `forms` array and its summary counters
+continue to describe the legacy/VEX table. The new section contains 1,884 EVEX
+records and 15 VEX-encoded mask records also present in the original import.
+Those 15 records retain identical content IDs; they are reused, not additional
+unique imported instructions. Requirements and the public `EvexMnemonic`
+binding are recorded per entry. Decoder registration names the EVEX index or
+the shared VEX index. Validation remains `untracked`; generated source witnesses
+are not ingested as per-form qualification verdicts.

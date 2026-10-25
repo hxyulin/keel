@@ -226,8 +226,10 @@ fn memory(s: &str, prefix: bool) -> Result<Operand, String> {
         }
     }
     if m.index.is_some_and(|r| {
-        !matches!(r.class, RegisterClass::Xmm | RegisterClass::Ymm)
-            && (r.class != RegisterClass::Gpr || !matches!(r.width, 32 | 64) || r.number == 4)
+        !matches!(
+            r.class,
+            RegisterClass::Xmm | RegisterClass::Ymm | RegisterClass::Zmm
+        ) && (r.class != RegisterClass::Gpr || !matches!(r.width, 32 | 64) || r.number == 4)
     }) || (m.base.is_some_and(|r| r.class == RegisterClass::Rip) && m.index.is_some())
     {
         return Err("invalid address index".into());
@@ -254,7 +256,10 @@ fn width(o: &mut Operand, bits: u16) -> Result<(), String> {
     }
     Ok(())
 }
-fn parse(s: &str, prefix: bool) -> Result<Instruction, String> {
+pub(super) fn parse(s: &str, prefix: bool) -> Result<Instruction, String> {
+    if let Some(i) = evex::decorated(s, true, prefix)? {
+        return Ok(i);
+    }
     use Opcode::*;
     let s = s.trim();
     if let Some(i) = super::core::parse_string(s, true, prefix) {
@@ -361,11 +366,25 @@ fn parse(s: &str, prefix: bool) -> Result<Instruction, String> {
                 .filter(|op| packed_conversion(*op))
                 .map(|op| (op, w))
         });
-    let opcode = if let Some((op, w)) = packed_conversion {
+    let evex_suffix = evex::att_alias(name).filter(|(base, _, _)| {
+        Opcode::parse(base).is_some_and(|op| matches!(evex::promote(op, &ops), Opcode::Evex(_)))
+    });
+    let opcode = if let Some((base, width, index)) = evex_suffix {
+        match ops.get_mut(index) {
+            Some(Operand::Memory(m)) => m.width = width,
+            Some(Operand::Register(r)) if r.width == width => {}
+            _ => return Err("EVEX suffix disagrees with source width".into()),
+        }
+        Opcode::Evex(EvexOpcode::parse(base).unwrap())
+    } else if let Some((op, w)) = packed_conversion {
         match ops.get_mut(1) {
             Some(Operand::Memory(m)) => m.width = w,
             Some(Operand::Register(r))
-                if r.width == w && matches!(r.class, RegisterClass::Xmm | RegisterClass::Ymm) => {}
+                if r.width == w
+                    && matches!(
+                        r.class,
+                        RegisterClass::Xmm | RegisterClass::Ymm | RegisterClass::Zmm
+                    ) => {}
             _ => return Err("packed conversion suffix disagrees with source".into()),
         }
         op

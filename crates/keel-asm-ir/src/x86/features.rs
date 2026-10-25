@@ -46,6 +46,9 @@ impl Features {
 }
 impl super::Opcode {
     pub fn required_features(self) -> Features {
+        if let super::Opcode::Evex(op) = self {
+            return op.kind.required_features();
+        }
         super::isa::opcode_features(self)
     }
 }
@@ -75,7 +78,7 @@ mod tests {
         );
         assert_eq!(v3.names().count(), 17);
         assert!(v3.validate().is_ok());
-        assert_eq!(Features::all_known().names().count(), 24);
+        assert_eq!(Features::all_known().names().count(), 26);
         assert!(Features::all_known().validate().is_ok());
         for invalid in ["legacy", "v4", "V1", ""] {
             assert!(CpuLevel::parse(invalid).is_err());
@@ -166,7 +169,7 @@ mod tests {
             "osxsave",
         ];
         let all = Features::all_known();
-        assert_eq!(all.fingerprint(), (1 << 24) - 1);
+        assert_eq!(all.fingerprint(), (1 << 26) - 1);
         for (bit, name) in names.iter().enumerate() {
             let mut missing = all;
             assert!(missing.set_feature(name, false));

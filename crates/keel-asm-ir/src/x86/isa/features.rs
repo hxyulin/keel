@@ -515,5 +515,11 @@ pub fn feature_policy(isa: &str) -> Features { match isa {
 "VAES" => Features { vaes: true, avx: true, xsave: true, osxsave: true, ..Features::NONE },
 "VPCLMULQDQ" => Features { vpclmulqdq: true, avx: true, xsave: true, osxsave: true, ..Features::NONE },
 "AVX_PCLMULQDQ" => Features { avx: true, pclmulqdq: true, xsave: true, osxsave: true, ..Features::NONE },
+"AVX512F_512" => Features { avx: true, xsave: true, osxsave: true, avx512f: true, ..Features::NONE },
+"AVX512F_SCALAR" => Features { avx: true, xsave: true, osxsave: true, avx512f: true, ..Features::NONE },
+"AVX512F_128N" => Features { avx: true, xsave: true, osxsave: true, avx512f: true, ..Features::NONE },
+"AVX512F_KOP" => Features { avx: true, xsave: true, osxsave: true, avx512f: true, ..Features::NONE },
+"AVX512F_128" => Features { avx: true, xsave: true, osxsave: true, avx512f: true, avx512vl: true, ..Features::NONE },
+"AVX512F_256" => Features { avx: true, xsave: true, osxsave: true, avx512f: true, avx512vl: true, ..Features::NONE },
 _ => Features::NONE,
 } }

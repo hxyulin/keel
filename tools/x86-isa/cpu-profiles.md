@@ -35,8 +35,9 @@ The [x86-64 psABI source](https://gitlab.com/x86-psABIs/x86-64-ABI/-/raw/master/
 was checked on 2026-10-25. Its tracked v2/v3 additions agree with the profile
 memberships above. Keel also tracks XSAVE as an AVX state prerequisite. The
 standard requires cumulative levels and enabled vector state, including XCR0
-checks for v3/v4. Keel currently exposes no v4 profile: EVEX/AVX-512 forms and
-the corresponding compiler/register support remain outside this implementation.
+checks for v3/v4. Keel exposes AVX-512F/VL assembler and decoder support, but
+no v4 profile. Other required v4 families and compiler support remain outside
+this implementation.
 Compile-time validation does not perform CPUID/XGETBV or establish a CPL0 ABI.
 
 ## Modifier rules

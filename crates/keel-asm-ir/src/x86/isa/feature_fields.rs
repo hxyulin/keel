@@ -29,6 +29,10 @@ pub struct Features {
     pub xsave: bool,
     /// OS-enabled XSAVE state management (CPUID.OSXSAVE); AVX also needs XCR0 state at runtime.
     pub osxsave: bool,
+    /// AVX-512 foundation; execution also requires OS-enabled opmask and ZMM XCR0 state.
+    pub avx512f: bool,
+    /// AVX-512 128/256-bit vector-length forms.
+    pub avx512vl: bool,
 }
 impl Features {
     pub const NONE: Self = Self {
@@ -56,6 +60,8 @@ impl Features {
         movbe: false,
         xsave: false,
         osxsave: false,
+        avx512f: false,
+        avx512vl: false,
     };
     /// Every declared capability, for tests and tooling; not host detection.
     pub const fn all_known() -> Self { Self {
@@ -83,6 +89,8 @@ impl Features {
         movbe: true,
         xsave: true,
         osxsave: true,
+        avx512f: true,
+        avx512vl: true,
     } }
     /// Stable schema bit IDs, covering every capability.
     pub const fn fingerprint(self) -> u64 {
@@ -110,6 +118,8 @@ impl Features {
             | ((self.movbe as u64) << 21)
             | ((self.xsave as u64) << 22)
             | ((self.osxsave as u64) << 23)
+            | ((self.avx512f as u64) << 24)
+            | ((self.avx512vl as u64) << 25)
     }
     pub const fn is_empty(self) -> bool { self.fingerprint() == 0 }
     pub const fn contains(self, required: Self) -> bool {
@@ -218,6 +228,23 @@ impl Features {
             "osxsave" => {
                 self.osxsave = enabled;
             }
+            "avx512f" => {
+                self.avx512f = enabled;
+                if enabled {
+                    self.avx = true;
+                    self.xsave = true;
+                    self.osxsave = true;
+                }
+            }
+            "avx512vl" => {
+                self.avx512vl = enabled;
+                if enabled {
+                    self.avx = true;
+                    self.xsave = true;
+                    self.osxsave = true;
+                    self.avx512f = true;
+                }
+            }
             _ => return false,
         }
         true
@@ -243,6 +270,12 @@ impl Features {
         }
         if self.fma && !self.avx {
             return Err("fma requires avx");
+        }
+        if self.avx512f && !self.avx {
+            return Err("avx512f requires avx");
+        }
+        if self.avx512vl && !self.avx512f {
+            return Err("avx512vl requires avx512f");
         }
         Ok(())
     }
@@ -272,6 +305,8 @@ impl Features {
             (self.movbe, "movbe"),
             (self.xsave, "xsave"),
             (self.osxsave, "osxsave"),
+            (self.avx512f, "avx512f"),
+            (self.avx512vl, "avx512vl"),
         ]
         .into_iter()
         .filter_map(|(on, name)| on.then_some(name))

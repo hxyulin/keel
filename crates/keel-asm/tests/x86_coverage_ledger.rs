@@ -96,3 +96,39 @@ fn recorded_static_spellings_and_tracked_compiler_names_exist() {
         assert_eq!(binding["validation"], "untracked");
     }
 }
+
+#[test]
+fn avx512_table_and_public_bindings_match_the_separate_ledger() {
+    use keel_asm_ir::x86::EvexOpcode;
+    let ledger = ledger();
+    let rows = ledger["avx512_forms"].as_array().unwrap();
+    let source: Value =
+        serde_json::from_str(include_str!("../../../tools/x86-isa/evex.json")).unwrap();
+    assert_eq!(rows.len(), isa::EVEX_FORMS.len());
+    for row in rows {
+        let f = &isa::EVEX_FORMS[row["table_index"].as_u64().unwrap() as usize];
+        let raw = &source[row["source_index"].as_u64().unwrap() as usize];
+        assert_eq!(raw["mnemonic"], f.form.mnemonic);
+        assert_eq!(row["mnemonic"], f.form.mnemonic);
+        assert_eq!(row["isa_set"], f.form.isa);
+        assert_eq!(f.form.vex, row["encoding"] == "vex");
+        let required: Vec<_> = f.requirements().names().collect();
+        let expected: Vec<_> = row["requires"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s.as_str().unwrap())
+            .collect();
+        assert_eq!(required, expected);
+        let op = EvexOpcode::parse(f.form.mnemonic).unwrap();
+        assert_eq!(row["binding"], format!("EvexMnemonic::{:?}", op.kind));
+        if !f.form.vex {
+            assert!(
+                isa::evex_decode_forms(f.form.map, f.form.byte)
+                    .any(|candidate| std::ptr::eq(candidate, f))
+            );
+        }
+        assert_eq!(f.tuple, raw["evex"]["tuple_type"].as_str().unwrap_or(""));
+        assert_eq!(row["validation"], "untracked");
+    }
+}

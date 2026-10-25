@@ -167,6 +167,20 @@ impl Register {
                 w.write_str("dr")?;
                 write_int(w, self.number.into(), false)
             }
+            RegisterClass::Zmm => {
+                if !((self.number < 32) && (self.width == 512) && (!self.high_byte)) {
+                    return Err(fmt::Error);
+                }
+                w.write_str("zmm")?;
+                write_int(w, self.number.into(), false)
+            }
+            RegisterClass::Mask => {
+                if !((self.number < 8) && (self.width == 64) && (!self.high_byte)) {
+                    return Err(fmt::Error);
+                }
+                w.write_str("k")?;
+                write_int(w, self.number.into(), false)
+            }
         }
     }
 }

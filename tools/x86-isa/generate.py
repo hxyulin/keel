@@ -16,6 +16,8 @@ import intrinsic_registry
 import system_intrinsics
 import query_bindings
 import coverage_ledger
+import evex
+import assembly_smoke
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT.parents[1] / 'crates/keel-asm-ir/src/x86/isa/generated.rs'
@@ -399,6 +401,12 @@ def main():
                 expected.append(row)
         if expected != data:
             raise ValueError('Zydis subset differs from upstream selection')
+        selected = [{k: v for k, v in row.items() if k != 'comment'} for row in json.loads(upstream)
+                    if (row.get('encoding') == 'evex' and row['meta_info']['isa_set'].startswith('AVX512F_')
+                        or row.get('encoding') == 'vex' and row['meta_info']['isa_set'] == 'AVX512F_KOP')
+                    and row.get('filters', {}).get('mode') != '!64']
+        if selected != evex.load(ROOT):
+            raise ValueError('EVEX subset differs from upstream selection')
     data += json.loads((ROOT / 'keel-extensions.json').read_text())
     adapters = json.loads((ROOT / 'keel-adapters.json').read_text())
     policy = json.loads((ROOT / 'feature-policy.json').read_text())
@@ -416,6 +424,8 @@ def main():
     outputs[OUTPUT.with_name('extension_opcodes.rs')] = opcode_identities('ExtensionOpcode', identities)
     outputs.update(api_identities.outputs(ROOT, OUTPUT, opcode_identities))
     outputs.update(registers.outputs(ROOT, OUTPUT))
+    outputs.update(evex.outputs(ROOT, OUTPUT, opcode_identities))
+    outputs.update(assembly_smoke.outputs(ROOT))
     outputs.update(core_mappings.outputs(ROOT, OUTPUT))
     outputs.update(att_rules.outputs(ROOT, OUTPUT))
     outputs.update(intrinsic_registry.outputs(ROOT))

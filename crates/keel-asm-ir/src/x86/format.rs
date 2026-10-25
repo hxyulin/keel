@@ -17,6 +17,7 @@ impl Opcode {
             Opcode::Extension(op) => op.mnemonic(),
             Opcode::V2(op) => op.spec().mnemonic,
             Opcode::V3(op) => op.mnemonic(),
+            Opcode::Evex(op) => op.mnemonic(),
             Opcode::Jcc(c) => return ("j", Some(c)),
             Opcode::Setcc(c) => return ("set", Some(c)),
             Opcode::Cmovcc(c) => return ("cmov", Some(c)),
@@ -137,6 +138,7 @@ impl Operand {
                         80 => "tbyte ptr ",
                         128 => "xmmword ptr ",
                         256 => "ymmword ptr ",
+                        512 => "zmmword ptr ",
                         _ => return Err(fmt::Error),
                     })?;
                 }
@@ -190,6 +192,9 @@ pub fn write_instruction<W: Write + ?Sized>(
     operands: &[Operand],
     lock: bool,
 ) -> fmt::Result {
+    if let Opcode::Evex(op) = opcode {
+        return evex::write(w, op, operands, lock);
+    }
     if lock {
         w.write_str("lock ")?;
     }

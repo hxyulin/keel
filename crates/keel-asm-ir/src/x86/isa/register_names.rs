@@ -35,7 +35,14 @@ pub fn register_name(kind: &str, number: u8) -> Option<String> {
         "dr" => {
             format!("dr{number}")
         }
-        "mask" => format!("k{number}"),
+        "zmm" => {
+            if !(number < 32) { return None; }
+            format!("zmm{number}")
+        }
+        "mask" => {
+            if !(number < 8) { return None; }
+            format!("k{number}")
+        }
         "bnd" => format!("bnd{number}"),
         "tmm" => format!("tmm{number}"),
         _ => return None,

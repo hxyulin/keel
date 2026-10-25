@@ -302,15 +302,8 @@ impl Reader<'_> {
         self.take::<1>()[0]
     }
     fn register(&mut self) -> Register {
-        let class = match self.u8() {
-            0 => RegisterClass::Gpr,
-            1 => RegisterClass::Xmm,
-            2 => RegisterClass::X87,
-            4 => RegisterClass::Mmx,
-            5 => RegisterClass::Ymm,
-            6 => RegisterClass::Segment,
-            _ => RegisterClass::Rip,
-        };
+        let class =
+            RegisterClass::from_symbolic_tag(self.u8()).expect("valid cached register class");
         let number = self.u8();
         let width = u16::from_le_bytes(self.take());
         Register {

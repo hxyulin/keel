@@ -1,3 +1,4 @@
+mod evex;
 mod tables;
 
 use Operand::{Immediate as I, Memory as M, Register as R};
@@ -45,6 +46,17 @@ fn constant(a: &Address) -> Option<i128> {
     }
 }
 impl<'a> Encoding<'a> {
+    fn finish(&mut self) -> Result<(), String> {
+        if self.bytes.len() > 15 {
+            return Err("instruction exceeds 15 bytes".into());
+        }
+        for fix in &mut self.fixups {
+            if matches!(fix.kind, 2 | 4 | 9 | 15 | 22) {
+                fix.adjust -= (self.bytes.len() - fix.offset) as i128;
+            }
+        }
+        Ok(())
+    }
     fn number(&mut self, n: i128, bytes: u8) {
         self.bytes
             .extend_from_slice(&n.to_le_bytes()[..usize::from(bytes)]);
@@ -155,7 +167,19 @@ impl<'a> Encoding<'a> {
         Ok(())
     }
     fn memory(&mut self, field: u8, m: &'a Memory) -> Result<(), String> {
-        let address32 = m.base.into_iter().chain(m.index).any(|r| r.width == 32);
+        self.memory_scaled(field, m, 1)
+    }
+    fn memory_scaled(&mut self, field: u8, m: &'a Memory, scale: u16) -> Result<(), String> {
+        self.memory_scaled_address(field, m, scale, false)
+    }
+    fn memory_scaled_address(
+        &mut self,
+        field: u8,
+        m: &'a Memory,
+        scale: u16,
+        address32: bool,
+    ) -> Result<(), String> {
+        let address32 = address32 || m.base.into_iter().chain(m.index).any(|r| r.width == 32);
         let a = &m.displacement;
         let symbolic = a.expression.add.is_some()
             || a.expression.subtract.is_some()
@@ -197,7 +221,10 @@ impl<'a> Encoding<'a> {
         let base = m.base.map(|r| r.number & 7);
         let mode = if base.is_none() || (!symbolic && d == 0 && base != Some(5)) {
             0
-        } else if !symbolic && (-128..128).contains(&d) {
+        } else if !symbolic
+            && d % i128::from(scale) == 0
+            && (-128..128).contains(&(d / i128::from(scale)))
+        {
             1
         } else {
             2
@@ -213,7 +240,7 @@ impl<'a> Encoding<'a> {
             );
         }
         if mode == 1 {
-            self.number(d, 1)
+            self.number(d / i128::from(scale), 1)
         } else if mode == 2 || base.is_none() {
             self.imm(a, 4, !address32)?
         }
@@ -232,6 +259,7 @@ impl<'a> Encoding<'a> {
         rm: &'a Operand,
         l: bool,
         w: bool,
+        address32: bool,
     ) -> Result<(), String> {
         let (b, x) = match rm {
             R(r) => (r.number >> 3, 0),
@@ -248,6 +276,9 @@ impl<'a> Encoding<'a> {
         {
             self.bytes.push(segment);
         }
+        if address32 {
+            self.bytes.push(0x67);
+        }
         // None means reserved encoded vvvv=1111, not register 15.
         let v = source.map_or(0x78, |r| ((!r) & 15) << 3) | (u8::from(l) << 2) | (u8::from(w) << 7);
         let r = ((!field >> 3) & 1) << 7;
@@ -260,7 +291,7 @@ impl<'a> Encoding<'a> {
         self.bytes.push(byte);
         match rm {
             R(r) => self.bytes.push(0xc0 | ((field & 7) << 3) | (r.number & 7)),
-            M(m) => self.memory(field, m)?,
+            M(m) => self.memory_scaled_address(field, m, 1, address32)?,
             _ => unreachable!(),
         }
         Ok(())
@@ -268,6 +299,9 @@ impl<'a> Encoding<'a> {
 }
 
 pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding<'_>, String> {
+    if matches!(i.opcode, Evex(_)) {
+        return evex::encode(i);
+    }
     validate(i)?;
     tables::encode(i, short)
 }

@@ -363,7 +363,8 @@
     {"variant": "Cvtpd2ps", "mnemonic": "cvtpd2ps", "spellings": ["cvtpd2ps"]},
     {"variant": "Cvtdq2pd", "mnemonic": "cvtdq2pd", "spellings": ["cvtdq2pd"]},
     {"variant": "Cvtpd2dq", "mnemonic": "cvtpd2dq", "spellings": ["cvtpd2dq"]},
-    {"variant": "Cvttpd2dq", "mnemonic": "cvttpd2dq", "spellings": ["cvttpd2dq"]}
+    {"variant": "Cvttpd2dq", "mnemonic": "cvttpd2dq", "spellings": ["cvttpd2dq"]},
+    {"variant": "Evex", "payload": "EvexOpcode"}
   ],
   "x87": [
     {"variant": "Fst", "mnemonic": "fst"},

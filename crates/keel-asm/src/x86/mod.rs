@@ -608,6 +608,17 @@ impl Items {
         self.push(entry);
     }
     fn x86_instruction(&mut self, i: &x86::Instruction, line: usize) {
+        let opcode = x86::evex::promote(i.opcode, &i.operands);
+        let promoted;
+        let i = if opcode != i.opcode {
+            promoted = x86::Instruction {
+                opcode,
+                ..i.clone()
+            };
+            &promoted
+        } else {
+            i
+        };
         if !self.encode(i, line) {
             let index = self.symbolic.push(i, &mut self.symbols);
             self.push(Entry::Symbolic {

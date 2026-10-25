@@ -2,7 +2,9 @@
 use crate::Expression;
 use smallvec::SmallVec;
 use std::borrow::Cow;
+pub mod evex;
 pub mod isa;
+pub use evex::{EvexMnemonic, EvexOpcode, EvexOptions, Rounding};
 
 fn lowercase(s: &str) -> Cow<'_, str> {
     if s.bytes().any(|b| b.is_ascii_uppercase()) {
@@ -18,6 +20,13 @@ impl Opcode {
     /// Select the SSE4 memory-destination form without promoting the v1
     /// register-destination PEXTRW encoding. Explicit `pextrw.s` stays SSE4.
     fn with_operand_form(self, operands: &[Operand]) -> Self {
+        if matches!(self, Self::Evex(_)) {
+            return self;
+        }
+        let promoted = evex::promote(self, operands);
+        if promoted != self {
+            return promoted;
+        }
         if self == Self::Pextrw && matches!(operands.first(), Some(Operand::Memory(_))) {
             Self::V2(V2Opcode::PextrwSse4)
         } else {
@@ -43,6 +52,9 @@ impl Opcode {
         }
         if let Some(op) = V3Opcode::parse(s) {
             return Some(V3(op));
+        }
+        if let Some(op) = EvexOpcode::parse(s) {
+            return Some(Evex(op));
         }
         if s == "pclmulqdq" {
             return Some(Pclmulqdq);
@@ -323,6 +335,7 @@ fn operand(s: &str, prefix: bool) -> Result<Operand, String> {
         ("tbyte ptr ", 80),
         ("xmmword ptr ", 128),
         ("ymmword ptr ", 256),
+        ("zmmword ptr ", 512),
     ] {
         if let Some(rest) = s.strip_prefix(prefix) {
             width = bits;
@@ -409,7 +422,10 @@ fn operand(s: &str, prefix: bool) -> Result<Operand, String> {
                 if sign < 0 {
                     return Err("cannot subtract an address register".into());
                 }
-                if matches!(r.class, RegisterClass::Xmm | RegisterClass::Ymm) && mem.index.is_none()
+                if matches!(
+                    r.class,
+                    RegisterClass::Xmm | RegisterClass::Ymm | RegisterClass::Zmm
+                ) && mem.index.is_none()
                 {
                     mem.index = Some(r)
                 } else if mem.base.is_none() {
@@ -443,8 +459,10 @@ fn operand(s: &str, prefix: bool) -> Result<Operand, String> {
             }
         }
         if mem.index.is_some_and(|r| {
-            !matches!(r.class, RegisterClass::Xmm | RegisterClass::Ymm)
-                && (r.class != RegisterClass::Gpr || !matches!(r.width, 32 | 64) || r.number == 4)
+            !matches!(
+                r.class,
+                RegisterClass::Xmm | RegisterClass::Ymm | RegisterClass::Zmm
+            ) && (r.class != RegisterClass::Gpr || !matches!(r.width, 32 | 64) || r.number == 4)
         }) || (mem.base.is_some_and(|r| r.class == RegisterClass::Rip) && mem.index.is_some())
         {
             return Err("invalid address index".into());
@@ -461,6 +479,9 @@ impl Instruction {
     }
     fn parse_intel_prefix(s: &str, prefix: bool) -> Result<Self, String> {
         let s = s.trim();
+        if let Some(i) = evex::decorated(s, false, prefix)? {
+            return Ok(i);
+        }
         if let Some(i) = core::parse_string(s, false, prefix) {
             return i;
         }
@@ -681,6 +702,15 @@ pub use v3::{V3_FORMS, V3Form, V3Opcode, V3Operand};
 /// validation: unmatched forms retain the opcode's requirements. Lock and
 /// segment overrides do not participate in feature selection.
 pub fn required_features(opcode: Opcode, operands: &[Operand]) -> Features {
+    let opcode = evex::promote(opcode, operands);
+    if let Opcode::Evex(op) = opcode {
+        return evex::form(&Instruction {
+            opcode,
+            operands: operands.to_vec(),
+            lock: false,
+        })
+        .map_or(op.kind.required_features(), |f| f.requirements());
+    }
     let base = opcode.required_features();
     if base.avx {
         v3::form(opcode, operands).map_or(base, |f| v3::requirement(f.isa))
@@ -692,6 +722,9 @@ pub fn required_features(opcode: Opcode, operands: &[Operand]) -> Features {
 impl Instruction {
     /// Includes operand-specific requirements (e.g. AVX2 register broadcasts).
     pub fn required_features(&self) -> Features {
+        if let Opcode::Evex(op) = self.opcode {
+            return evex::form(self).map_or(op.kind.required_features(), |f| f.requirements());
+        }
         required_features(self.opcode, &self.operands)
     }
 }
