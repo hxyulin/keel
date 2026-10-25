@@ -1,0 +1,9 @@
+{
+  "project": "Zydis instruction database",
+  "commit": "eaf92a02dca616b90c12b2ebc338d87ed943c84f",
+  "path": "datafiles/instructions.json",
+  "url": "https://raw.githubusercontent.com/zyantific/zydis-db/eaf92a02dca616b90c12b2ebc338d87ed943c84f/datafiles/instructions.json",
+  "upstream_sha256": "43a234ab7e3559b992c0ebad606279b750f2eb7c322c15e96bdfb6c3fd3f73c6",
+  "subset_sha256": "8688b976e33eac5e5ed28da2a445792b97d210d01030eb031cfbddc8fdd4f81e",
+  "selection": "Legacy and VEX forms except explicit !64 mode; upstream comment removed; all other keys preserved"
+}

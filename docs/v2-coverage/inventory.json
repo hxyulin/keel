@@ -1,8 +1,104 @@
 {
   "schema": 1,
   "authority": "Intel SDM volumes 1 section 12 and 2 instruction reference; https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html",
-  "scope": "legacy x86-64 user-space XMM/GPR and SSSE3 MMX forms; no VEX/YMM",
+  "scope": "legacy x86-64 XMM/GPR and SSSE3 MMX forms, plus optional AES; no VEX/YMM",
   "instructions": [
+    {
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": [],
+      "mnemonic": "aesenc",
+      "family": "aes",
+      "prefix": 102,
+      "map": 56,
+      "byte": 220,
+      "memory_bits": 128,
+      "form": "Binary",
+      "optional": true,
+      "psabi_level": null
+    },
+    {
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": [],
+      "mnemonic": "aesenclast",
+      "family": "aes",
+      "prefix": 102,
+      "map": 56,
+      "byte": 221,
+      "memory_bits": 128,
+      "form": "Binary",
+      "optional": true,
+      "psabi_level": null
+    },
+    {
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": [],
+      "mnemonic": "aesdec",
+      "family": "aes",
+      "prefix": 102,
+      "map": 56,
+      "byte": 222,
+      "memory_bits": 128,
+      "form": "Binary",
+      "optional": true,
+      "psabi_level": null
+    },
+    {
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": [],
+      "mnemonic": "aesdeclast",
+      "family": "aes",
+      "prefix": 102,
+      "map": 56,
+      "byte": 223,
+      "memory_bits": 128,
+      "form": "Binary",
+      "optional": true,
+      "psabi_level": null
+    },
+    {
+      "operand_forms": [
+        "xmm,xmm",
+        "xmm,m128"
+      ],
+      "implicit_operands": [],
+      "mnemonic": "aesimc",
+      "family": "aes",
+      "prefix": 102,
+      "map": 56,
+      "byte": 219,
+      "memory_bits": 128,
+      "form": "Binary",
+      "optional": true,
+      "psabi_level": null
+    },
+    {
+      "operand_forms": [
+        "xmm,xmm,imm8",
+        "xmm,m128,imm8"
+      ],
+      "implicit_operands": [],
+      "mnemonic": "aeskeygenassist",
+      "family": "aes",
+      "prefix": 102,
+      "map": 58,
+      "byte": 223,
+      "memory_bits": 128,
+      "form": "Control",
+      "optional": true,
+      "psabi_level": null
+    },
     {
       "mnemonic": "pextrw.s",
       "family": "sse41",
@@ -1439,10 +1535,6 @@
     {
       "mnemonic": "mwait",
       "reason": "privileged wait, outside ordinary user-space v2 target"
-    },
-    {
-      "mnemonic": "SSSE3 MMX forms",
-      "reason": "MMX register class is absent from existing assembler; XMM equivalents are in scope"
     }
   ],
   "gates": {
@@ -1451,6 +1543,13 @@
     "semantic_oracle": "pending_parent_linux"
   },
   "primary_inventory": {
+    "project": "Zydis instruction database",
+    "commit": "eaf92a02dca616b90c12b2ebc338d87ed943c84f",
+    "file": "datafiles/instructions.json",
+    "provenance": "tools/x86-isa/zydis-source.json"
+  },
+  "generated_encoding_fields": "tools/x86-isa/generate.py; pinned Zydis source in tools/x86-isa/zydis-source.json; operand descriptions and validation notes are retained",
+  "independent_inventory": {
     "project": "Intel XED",
     "commit": "0bcb6237345c5066726dcc08b3d87928df3b5b26",
     "file": "datafiles/xed-isa.txt",

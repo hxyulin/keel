@@ -46,7 +46,7 @@ const USAGE: &str = "usage:
   keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <legacy|v1|v2|v3>] [--target-features <features>] <input.s> -o <output.o>
   keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <legacy|v1|v2|v3>] [--target-features <features>] <input.s>... --out-dir <directory>
   keel asm-metrics <input.s> [-o <metrics.json>]
-  keel disasm <input.o> [-o <output.txt>]  (AArch64 Mach-O or ELF)
+  keel disasm <input.o> [-o <output.txt>]  (AArch64 or x86-64 Mach-O/ELF)
   keel link [--system] [--target <triple>] [-e entry] [-L DIR] [--rpath PATH] [--sysroot SDK] [-l NAME] [--dead-strip] [--require-export SYMBOL] [--debug-map DIR] [--dsym PATH] <input.o|input.a|input.so>... -o executable
   keel archive [--target <triple>] -o <output.a> <member.o>...
   keel cc|compile --target wasm32-unknown-unknown --emit-wasm [--export name]... <input> -o <output.wasm>

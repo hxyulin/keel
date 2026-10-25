@@ -64,7 +64,11 @@ fn disassembles_aarch64_macho_and_elf_without_external_tools() {
     let result = invoke(&["disasm", bad.to_str().unwrap()]);
     assert!(!result.status.success());
     let x86 = dir.join("x86.o");
-    std::fs::write(&source, ".text\nret\n").unwrap();
+    std::fs::write(
+        &source,
+        ".text\n.globl xentry\nxentry:\nmov rax,rbx\nlgdt [rax]\nret\n.byte 0x62,0xff,0xc3\n",
+    )
+    .unwrap();
     let result = invoke(&[
         "asm",
         "--target",
@@ -75,7 +79,12 @@ fn disassembles_aarch64_macho_and_elf_without_external_tools() {
     ]);
     assert!(result.status.success());
     let result = invoke(&["disasm", x86.to_str().unwrap()]);
-    assert!(!result.status.success());
-    assert!(String::from_utf8_lossy(&result.stderr).contains("little-endian AArch64"));
+    assert!(result.status.success());
+    let text = String::from_utf8_lossy(&result.stdout);
+    assert!(text.contains("<xentry>:"), "{text}");
+    assert!(text.contains("mov rax, rbx"), "{text}");
+    assert!(text.contains("lgdt tbyte ptr [rax]"), "{text}");
+    assert!(text.contains("ret"), "{text}");
+    assert!(text.contains(".byte 0x62, 0xff, 0xc3"), "{text}");
     std::fs::remove_dir_all(dir).unwrap();
 }

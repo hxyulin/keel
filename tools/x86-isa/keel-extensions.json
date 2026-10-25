@@ -1,0 +1,9 @@
+[
+  {
+    "mnemonic": "udb",
+    "opcode": "D6",
+    "filters": {"mode": "64"},
+    "meta_info": {"category": "INTERRUPT", "extension": "KEEL", "isa_set": "KEEL"},
+    "comment": "Existing Keel spelling for the intentionally undefined long-mode D6 trap byte. No execution semantics are inferred."
+  }
+]

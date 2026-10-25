@@ -5,6 +5,7 @@
 //! operand combinations not expressed by inventory conditions may still match.
 mod format;
 mod generated;
+pub mod x86;
 
 struct Field {
     name: &'static str,
