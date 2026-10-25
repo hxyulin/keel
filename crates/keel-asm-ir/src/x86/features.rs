@@ -18,72 +18,13 @@ impl CpuLevel {
         }
     }
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Features {
-    /// CPUID.01H:ECX.AES[25], independent of psABI levels.
-    pub aes: bool,
-    pub adx: bool,
-    pub sha: bool,
-    pub vaes: bool,
-    pub vpclmulqdq: bool,
-    pub avx: bool,
-    pub bmi1: bool,
-    pub bmi2: bool,
-    /// CPUID.01H:EDX.CLFSH[19]; independent of SSE2 and all psABI levels.
-    pub clflush: bool,
-    /// Independent CPUID.01H:ECX.PCLMULQDQ[1]; absent from psABI v3.
-    pub pclmulqdq: bool,
-    pub cx16: bool,
-    pub lahf_sahf: bool,
-    pub popcnt: bool,
-    pub sse3: bool,
-    pub ssse3: bool,
-    pub sse41: bool,
-    pub sse42: bool,
-    pub avx2: bool,
-    pub f16c: bool,
-    pub fma: bool,
-    pub lzcnt: bool,
-    pub movbe: bool,
-    pub xsave: bool,
-    /// OS-enabled XSAVE state management (CPUID.OSXSAVE); AVX also needs XCR0 state at runtime.
-    pub osxsave: bool,
-    /// Tracks an explicit target even when its extension set is empty.
-    pub explicit: bool,
-}
+include!("isa/feature_fields.rs");
 impl Default for Features {
     fn default() -> Self {
         Self::legacy()
     }
 }
 impl Features {
-    pub const NONE: Self = Self {
-        aes: false,
-        adx: false,
-        sha: false,
-        vaes: false,
-        vpclmulqdq: false,
-        avx: false,
-        bmi1: false,
-        bmi2: false,
-        clflush: false,
-        pclmulqdq: false,
-        cx16: false,
-        lahf_sahf: false,
-        popcnt: false,
-        sse3: false,
-        ssse3: false,
-        sse41: false,
-        sse42: false,
-        avx2: false,
-        f16c: false,
-        fma: false,
-        lzcnt: false,
-        movbe: false,
-        xsave: false,
-        osxsave: false,
-        explicit: false,
-    };
     pub const fn none() -> Self {
         Self::NONE
     }
@@ -150,32 +91,6 @@ impl Features {
     pub fn is_empty(self) -> bool {
         self == Self::legacy()
     }
-    pub fn contains(self, required: Self) -> bool {
-        (!required.adx || self.adx)
-            && (!required.sha || self.sha)
-            && (!required.vaes || self.vaes)
-            && (!required.vpclmulqdq || self.vpclmulqdq)
-            && (!required.aes || self.aes)
-            && (!required.avx || self.avx)
-            && (!required.bmi1 || self.bmi1)
-            && (!required.bmi2 || self.bmi2)
-            && (!required.clflush || self.clflush)
-            && (!required.pclmulqdq || self.pclmulqdq)
-            && (!required.cx16 || self.cx16)
-            && (!required.lahf_sahf || self.lahf_sahf)
-            && (!required.popcnt || self.popcnt)
-            && (!required.sse3 || self.sse3)
-            && (!required.ssse3 || self.ssse3)
-            && (!required.sse41 || self.sse41)
-            && (!required.sse42 || self.sse42)
-            && (!required.avx2 || self.avx2)
-            && (!required.f16c || self.f16c)
-            && (!required.fma || self.fma)
-            && (!required.lzcnt || self.lzcnt)
-            && (!required.movbe || self.movbe)
-            && (!required.xsave || self.xsave)
-            && (!required.osxsave || self.osxsave)
-    }
     /// Parse modifiers on the historical compatibility baseline.
     pub fn parse(source: &str) -> Result<Self, String> {
         Self::legacy().with_features(source)
@@ -193,33 +108,9 @@ impl Features {
             } else {
                 (true, token.strip_prefix('+').unwrap_or(token))
             };
-            let flag = match name {
-                "aes" => &mut self.aes,
-                "adx" => &mut self.adx,
-                "sha" => &mut self.sha,
-                "vaes" => &mut self.vaes,
-                "vpclmulqdq" => &mut self.vpclmulqdq,
-                "avx" => &mut self.avx,
-                "bmi1" => &mut self.bmi1,
-                "bmi2" => &mut self.bmi2,
-                "pclmulqdq" | "pclmul" => &mut self.pclmulqdq,
-                "clflush" => &mut self.clflush,
-                "cx16" => &mut self.cx16,
-                "lahf_sahf" => &mut self.lahf_sahf,
-                "popcnt" => &mut self.popcnt,
-                "sse3" => &mut self.sse3,
-                "ssse3" => &mut self.ssse3,
-                "sse41" => &mut self.sse41,
-                "sse42" => &mut self.sse42,
-                "avx2" => &mut self.avx2,
-                "f16c" => &mut self.f16c,
-                "fma" => &mut self.fma,
-                "lzcnt" => &mut self.lzcnt,
-                "movbe" => &mut self.movbe,
-                "xsave" => &mut self.xsave,
-                "osxsave" => &mut self.osxsave,
-                _ => return Err(format!("unknown x86 target feature `{token}`")),
-            };
+            let flag = self
+                .feature_mut(name)
+                .ok_or_else(|| format!("unknown x86 target feature `{token}`"))?;
             *flag = enabled;
             if enabled && name == "avx" {
                 self.xsave = true;
@@ -248,36 +139,6 @@ impl Features {
         }
         Ok(())
     }
-    pub fn names(self) -> impl Iterator<Item = &'static str> {
-        [
-            (self.aes, "aes"),
-            (self.adx, "adx"),
-            (self.sha, "sha"),
-            (self.vaes, "vaes"),
-            (self.vpclmulqdq, "vpclmulqdq"),
-            (self.avx, "avx"),
-            (self.bmi1, "bmi1"),
-            (self.bmi2, "bmi2"),
-            (self.clflush, "clflush"),
-            (self.pclmulqdq, "pclmulqdq"),
-            (self.cx16, "cx16"),
-            (self.lahf_sahf, "lahf_sahf"),
-            (self.popcnt, "popcnt"),
-            (self.sse3, "sse3"),
-            (self.ssse3, "ssse3"),
-            (self.sse41, "sse41"),
-            (self.sse42, "sse42"),
-            (self.avx2, "avx2"),
-            (self.f16c, "f16c"),
-            (self.fma, "fma"),
-            (self.lzcnt, "lzcnt"),
-            (self.movbe, "movbe"),
-            (self.xsave, "xsave"),
-            (self.osxsave, "osxsave"),
-        ]
-        .into_iter()
-        .filter_map(|(on, name)| on.then_some(name))
-    }
 }
 impl super::Opcode {
     pub fn required_features(self) -> Features {
@@ -288,6 +149,124 @@ impl super::Opcode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn names_and_empty_configurations_retain_the_public_contract() {
+        assert_eq!(Features::NONE, Features::none());
+        assert_eq!(Features::default(), Features::legacy());
+        assert_ne!(Features::NONE, Features::default());
+        assert!(!Features::NONE.is_empty());
+        assert_eq!(
+            Features::legacy().names().collect::<Vec<_>>(),
+            ["popcnt", "sse41"]
+        );
+        assert_eq!(
+            Features::all().names().collect::<Vec<_>>(),
+            [
+                "aes",
+                "adx",
+                "sha",
+                "vaes",
+                "vpclmulqdq",
+                "avx",
+                "bmi1",
+                "bmi2",
+                "clflush",
+                "pclmulqdq",
+                "cx16",
+                "lahf_sahf",
+                "popcnt",
+                "sse3",
+                "ssse3",
+                "sse41",
+                "sse42",
+                "avx2",
+                "f16c",
+                "fma",
+                "lzcnt",
+                "movbe",
+                "xsave",
+                "osxsave",
+            ]
+        );
+        let explicit = Features::for_level(CpuLevel::V1);
+        assert_ne!(explicit, Features::NONE);
+        assert_eq!(explicit.names().count(), 0);
+        assert!(explicit.contains(Features::NONE));
+        assert!(Features::NONE.contains(explicit));
+    }
+
+    #[test]
+    fn capability_queries_and_cli_names_cover_every_public_bit() {
+        let avx = Features {
+            avx: true,
+            xsave: true,
+            osxsave: true,
+            ..Features::NONE
+        };
+        macro_rules! check {
+            ($($field:ident),* $(,)?) => {$(
+                let bit = Features { $field: true, ..Features::NONE };
+                assert!(Features::all().contains(bit), stringify!($field));
+                assert!(!Features::NONE.contains(bit), stringify!($field));
+                let mut missing = Features::all();
+                missing.$field = false;
+                assert!(!missing.contains(bit), stringify!($field));
+                assert!(!missing.contains(Features::all()), stringify!($field));
+                let mut expected = avx;
+                expected.$field = true;
+                assert_eq!(Features::NONE.with_features(concat!("avx,", stringify!($field))).unwrap(), expected);
+                expected.$field = false;
+                if expected.validate().is_ok() {
+                    assert_eq!(avx.with_features(concat!("-", stringify!($field))).unwrap(), expected);
+                }
+            )*};
+        }
+        check!(
+            aes, adx, sha, vaes, vpclmulqdq, avx, bmi1, bmi2, clflush, pclmulqdq, cx16, lahf_sahf,
+            popcnt, sse3, ssse3, sse41, sse42, avx2, f16c, fma, lzcnt, movbe, xsave, osxsave
+        );
+        assert_eq!(
+            Features::parse("pclmul").unwrap(),
+            Features::parse("pclmulqdq").unwrap()
+        );
+        assert_eq!(
+            Features::parse("+pclmul,-pclmulqdq").unwrap(),
+            Features::legacy()
+        );
+    }
+
+    #[test]
+    fn modifiers_keep_token_order_side_effects_and_exact_errors() {
+        let v1 = Features::for_level(CpuLevel::V1);
+        assert!(v1.with_features("avx2,avx").is_ok());
+        assert!(v1.with_features("-xsave,avx").unwrap().xsave);
+        assert_eq!(
+            v1.with_features("avx,-xsave").unwrap_err(),
+            "AVX requires XSAVE and OSXSAVE"
+        );
+        assert_eq!(
+            v1.with_features("avx2,-avx").unwrap_err(),
+            "AVX2/F16C/FMA/VAES/VPCLMULQDQ require AVX"
+        );
+        let disabled = v1.with_features("avx,-avx").unwrap();
+        assert!(!disabled.avx && disabled.xsave && disabled.osxsave && disabled.explicit);
+        assert!(Features::NONE.with_features("avx,-xsave,-osxsave").is_ok());
+        // The whole-source `none` shortcut also bypasses validation.
+        let invalid = Features { avx2: true, ..v1 };
+        assert_eq!(invalid.with_features("none").unwrap(), invalid);
+        for token in ["", "+", "-", "explicit", "AES", " aes", "-unknown", "none"] {
+            let source = format!("aes,{token}");
+            assert_eq!(
+                v1.with_features(&source).unwrap_err(),
+                format!("unknown x86 target feature `{token}`")
+            );
+        }
+        assert_eq!(
+            v1.with_features("avx2,+unknown").unwrap_err(),
+            "unknown x86 target feature `+unknown`"
+        );
+    }
+
     #[test]
     fn cumulative_levels_and_legacy_contract() {
         let v1 = Features::for_level(CpuLevel::V1);

@@ -1,0 +1,81 @@
+[
+  {
+    "field": "aes",
+    "doc": "CPUID.01H:ECX.AES[25], independent of psABI levels."
+  },
+  {
+    "field": "adx"
+  },
+  {
+    "field": "sha"
+  },
+  {
+    "field": "vaes"
+  },
+  {
+    "field": "vpclmulqdq"
+  },
+  {
+    "field": "avx"
+  },
+  {
+    "field": "bmi1"
+  },
+  {
+    "field": "bmi2"
+  },
+  {
+    "field": "clflush",
+    "doc": "CPUID.01H:EDX.CLFSH[19]; independent of SSE2 and all psABI levels."
+  },
+  {
+    "field": "pclmulqdq",
+    "doc": "Independent CPUID.01H:ECX.PCLMULQDQ[1]; absent from psABI v3.",
+    "aliases": [
+      "pclmul"
+    ]
+  },
+  {
+    "field": "cx16"
+  },
+  {
+    "field": "lahf_sahf"
+  },
+  {
+    "field": "popcnt"
+  },
+  {
+    "field": "sse3"
+  },
+  {
+    "field": "ssse3"
+  },
+  {
+    "field": "sse41"
+  },
+  {
+    "field": "sse42"
+  },
+  {
+    "field": "avx2"
+  },
+  {
+    "field": "f16c"
+  },
+  {
+    "field": "fma"
+  },
+  {
+    "field": "lzcnt"
+  },
+  {
+    "field": "movbe"
+  },
+  {
+    "field": "xsave"
+  },
+  {
+    "field": "osxsave",
+    "doc": "OS-enabled XSAVE state management (CPUID.OSXSAVE); AVX also needs XCR0 state at runtime."
+  }
+]

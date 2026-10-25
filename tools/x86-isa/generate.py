@@ -6,6 +6,8 @@ import json
 import re
 from pathlib import Path
 
+import feature_fields
+
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT.parents[1] / 'crates/keel-asm-ir/src/x86/isa/generated.rs'
 FILTERS = {'address_size', 'feature_amd', 'feature_cet', 'feature_cldemote',
@@ -370,11 +372,14 @@ def main():
     data += json.loads((ROOT / 'keel-extensions.json').read_text())
     adapters = json.loads((ROOT / 'keel-adapters.json').read_text())
     policy = json.loads((ROOT / 'feature-policy.json').read_text())
+    fields = json.loads((ROOT / 'feature-fields.json').read_text())
+    feature_source = feature_fields.generate(fields, policy)
     identities, features, vex = extension_adapters(data, adapters['extensions'])
     outputs = {OUTPUT: generate(data), OUTPUT.with_name('v2.rs'): v2_adapters(data, adapters['v2']),
                OUTPUT.with_name('v3.rs'): v3_adapters(data, adapters['v3'] + vex),
                OUTPUT.with_name('fixed.rs'): fixed_adapters(data, adapters['fixed']),
                OUTPUT.with_name('features.rs'): feature_adapters(data, adapters['feature_opcodes'] + features, policy)}
+    outputs[OUTPUT.with_name('feature_fields.rs')] = feature_source
     for group, name in [('v2', 'V2Opcode'), ('v3', 'V3Opcode'), ('fixed', 'FixedOpcode')]:
         outputs[OUTPUT.with_name(f'{group}_opcodes.rs')] = opcode_identities(name, adapters['identities'][group])
     outputs[OUTPUT.with_name('extension_opcodes.rs')] = opcode_identities('ExtensionOpcode', identities)
