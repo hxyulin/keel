@@ -95,3 +95,22 @@ bare-metal execution, exception resumption or every input.
 Instruction semantics and privilege requirements follow Intel's
 [instruction reference](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-2a-manual.pdf)
 and [system programming guide](https://cdrdv2-public.intel.com/874249/253668-090-sdm-vol-3a.pdf).
+
+## ABI validation backlog
+
+The stale D8 aggregate rejection check now exercises a defined byval/sret tail
+boundary. Natural integer and f32 D8 aggregates compile with text/typed object
+parity; untagged f64x1 still rejects. The obsolete tagged-f64x1 tail rejection
+was removed, retaining the existing positive recursive producer-ABI tests.
+
+The restored [SysV tail oracle](../crates/keel-codegen/tests/sysv_tail/README.md)
+passes all 36 exported selector, allocator, register-pool and CPU-level
+configurations with GCC 16.2.0 and Clang 23.1.3 on x86-64 Linux. These are 72
+native executions. Both compilers reject a deliberately broken constant-return
+tail through normal value-check failures. The evidence covers this finite
+fixture roster and does not complete the remaining privileged APIs.
+
+The repaired privileged-instruction checkout passes `cargo test --workspace
+--no-fail-fast`: 2,649 tests pass, none fail and 13 are ignored across 480
+reported test groups. This run precedes the optional-extension adapter import;
+it establishes the ABI repair against the original generated-table migration.

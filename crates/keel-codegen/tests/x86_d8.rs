@@ -372,19 +372,35 @@ fn d_external_memory_is_exactly_eight_bytes() {
 }
 
 #[test]
-fn mixed_small_d_aggregates_stay_an_explicit_separate_limit() {
+fn natural_small_d_aggregate_boundaries_accept_except_untagged_f64x1() {
     for t in VectorType::ALL_64 {
         for layout in [format!("{{{t},i64}}"), format!("{{{t},{t}}}")] {
-            let source = format!("decl @mixed(ptr byval {layout})\n");
+            // Exercise a defined boundary and its call, rather than an unused declaration.
+            let source = format!(
+                "decl @mixed(ptr sret {layout},ptr byval {layout})\n\
+                 func @forward(ptr sret {layout},ptr byval {layout}) {{\n\
+                 entry(v0:ptr,v1:ptr):\n return_call @mixed(v0,v1)\n}}\n"
+            );
             let m = keel_ir::parse(&source).unwrap();
             keel_ir::verify_module(&m).unwrap();
-            let error = keel_codegen::x86_64::compile(&m).unwrap_err();
-            let expected = if t == VectorType::F64x1 {
-                "f64x1 SysV C ABI is unsupported:"
+            let text = keel_codegen::x86_64::compile(&m);
+            let typed = keel_codegen::compile_program(&m, keel_codegen::Target::X86_64LinuxGnu);
+            if t == VectorType::F64x1 {
+                for error in [text.unwrap_err(), typed.unwrap_err()] {
+                    assert!(
+                        error.message.contains("f64x1 SysV C ABI is unsupported:"),
+                        "{error:?}"
+                    );
+                }
             } else {
-                "SSEUP ABI classification"
-            };
-            assert!(error.message.contains(expected), "{error:?}");
+                let text = text.unwrap();
+                let typed = typed.unwrap();
+                assert!(text.contains("jmp\t"), "{text}");
+                assert_eq!(
+                    keel_asm::x86::assemble_object(&text).unwrap(),
+                    keel_asm::x86::assemble_program_object(&typed).unwrap()
+                );
+            }
         }
     }
 }
