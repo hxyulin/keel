@@ -273,23 +273,8 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding<'_>, Strin
 }
 fn validate(i: &Instruction) -> Result<(), String> {
     fn register(r: Register) -> bool {
-        r.number < 16
-            && match r.class {
-                RegisterClass::Gpr => {
-                    matches!(r.width, 8 | 16 | 32 | 64)
-                        && (!r.high_byte || r.width == 8 && (4..8).contains(&r.number))
-                }
-                RegisterClass::Xmm => r.width == 128 && !r.high_byte,
-                RegisterClass::Mmx => r.number < 8 && r.width == 64 && !r.high_byte,
-                RegisterClass::Ymm => r.width == 256 && !r.high_byte,
-                RegisterClass::X87 => r.number < 8 && r.width == 80 && !r.high_byte,
-                RegisterClass::Segment => r.number < 6 && r.width == 16 && !r.high_byte,
-                RegisterClass::Control => {
-                    matches!(r.number, 0 | 2 | 3 | 4 | 8) && r.width == 64 && !r.high_byte
-                }
-                RegisterClass::Debug => r.number < 8 && r.width == 64 && !r.high_byte,
-                RegisterClass::Rip => r.number == 0 && matches!(r.width, 32 | 64) && !r.high_byte,
-            }
+        // The current legacy/VEX emitters carry four register-number bits.
+        r.number < 16 && r.is_valid()
     }
     let vsib = if i.opcode.required_features().avx {
         keel_asm_ir::x86::V3_FORMS

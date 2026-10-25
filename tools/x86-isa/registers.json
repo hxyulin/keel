@@ -1,0 +1,445 @@
+{
+  "classes": [
+    {
+      "variant": "Gpr",
+      "id": 0,
+      "symbolic_tag": 0,
+      "views": [
+        {
+          "width": 8,
+          "numbered": {
+            "prefix": "r",
+            "suffix": "b",
+            "numbers": [
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15
+            ],
+            "parse_digits": null
+          },
+          "names": [
+            "al",
+            "cl",
+            "dl",
+            "bl",
+            "spl",
+            "bpl",
+            "sil",
+            "dil"
+          ]
+        },
+        {
+          "width": 16,
+          "numbered": {
+            "prefix": "r",
+            "suffix": "w",
+            "numbers": [
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15
+            ],
+            "parse_digits": null
+          },
+          "names": [
+            "ax",
+            "cx",
+            "dx",
+            "bx",
+            "sp",
+            "bp",
+            "si",
+            "di"
+          ]
+        },
+        {
+          "width": 32,
+          "numbered": {
+            "prefix": "r",
+            "suffix": "d",
+            "numbers": [
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15
+            ],
+            "parse_digits": null
+          },
+          "names": [
+            "eax",
+            "ecx",
+            "edx",
+            "ebx",
+            "esp",
+            "ebp",
+            "esi",
+            "edi"
+          ]
+        },
+        {
+          "width": 64,
+          "numbered": {
+            "prefix": "r",
+            "suffix": "",
+            "numbers": [
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15
+            ],
+            "parse_digits": null
+          },
+          "names": [
+            "rax",
+            "rcx",
+            "rdx",
+            "rbx",
+            "rsp",
+            "rbp",
+            "rsi",
+            "rdi"
+          ]
+        }
+      ],
+      "high_byte": {
+        "width": 8,
+        "first": 4,
+        "names": [
+          "ah",
+          "ch",
+          "dh",
+          "bh"
+        ]
+      },
+      "format": {
+        "check": [
+          "number",
+          "width"
+        ]
+      },
+      "isa_kinds": [
+        "gpr8",
+        "gpr16",
+        "gpr32",
+        "gpr64",
+        "gpr16_32_64",
+        "gpr32_32_64",
+        "gpr16_32_32",
+        "gpr_asz"
+      ]
+    },
+    {
+      "variant": "Xmm",
+      "id": 1,
+      "symbolic_tag": 1,
+      "views": [
+        {
+          "width": 128,
+          "numbered": {
+            "prefix": "xmm",
+            "suffix": "",
+            "numbers": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15
+            ],
+            "parse_digits": null
+          }
+        }
+      ],
+      "format": {
+        "check": [],
+        "fixed_width": 128
+      },
+      "isa_kinds": [
+        "xmm"
+      ],
+      "decode": {
+        "width": 128,
+        "check_number": false
+      }
+    },
+    {
+      "variant": "Mmx",
+      "id": 2,
+      "symbolic_tag": 4,
+      "views": [
+        {
+          "width": 64,
+          "numbered": {
+            "prefix": "mm",
+            "suffix": "",
+            "numbers": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7
+            ],
+            "parse_digits": 1
+          }
+        }
+      ],
+      "doc": "MM0..MM7, the 64-bit MMX register file.",
+      "isa_kinds": [
+        "mmx"
+      ],
+      "decode": {
+        "width": 64,
+        "check_number": true
+      }
+    },
+    {
+      "variant": "Ymm",
+      "id": 3,
+      "symbolic_tag": 5,
+      "views": [
+        {
+          "width": 256,
+          "numbered": {
+            "prefix": "ymm",
+            "suffix": "",
+            "numbers": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15
+            ],
+            "parse_digits": null
+          }
+        }
+      ],
+      "doc": "256-bit SIMD view; aliases the same physical indices as XMM.",
+      "format": {
+        "check": [],
+        "fixed_width": 256
+      },
+      "isa_kinds": [
+        "ymm"
+      ],
+      "decode": {
+        "width": 256,
+        "check_number": false
+      }
+    },
+    {
+      "variant": "X87",
+      "id": 4,
+      "symbolic_tag": 2,
+      "views": [
+        {
+          "width": 80,
+          "numbered": {
+            "prefix": "st(",
+            "suffix": ")",
+            "numbers": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7
+            ],
+            "parse_digits": 1
+          }
+        }
+      ],
+      "doc": "x87 floating-point stack register ST(0)..ST(7), always 80 bits.",
+      "aliases": [
+        {
+          "name": "st",
+          "width": 80,
+          "number": 0
+        }
+      ],
+      "isa_kinds": [
+        "fpr"
+      ],
+      "decode": {
+        "width": 80,
+        "check_number": true
+      }
+    },
+    {
+      "variant": "Segment",
+      "id": 5,
+      "symbolic_tag": 6,
+      "views": [
+        {
+          "width": 16,
+          "names": [
+            "es",
+            "cs",
+            "ss",
+            "ds",
+            "fs",
+            "gs"
+          ]
+        }
+      ],
+      "doc": "ES, CS, SS, DS, FS and GS selector registers.",
+      "format": {
+        "check": [
+          "number"
+        ],
+        "fixed_width": 16
+      },
+      "isa_kinds": [
+        "sreg"
+      ],
+      "decode": {
+        "width": 16,
+        "check_number": true
+      }
+    },
+    {
+      "variant": "Rip",
+      "id": 6,
+      "symbolic_tag": 3,
+      "views": [
+        {
+          "width": 32,
+          "names": [
+            "eip"
+          ]
+        },
+        {
+          "width": 64,
+          "names": [
+            "rip"
+          ]
+        }
+      ],
+      "format": {
+        "check": [],
+        "fixed_number": 0,
+        "fallback_width": 64
+      },
+      "isa_kinds": []
+    },
+    {
+      "variant": "Control",
+      "id": 7,
+      "symbolic_tag": 7,
+      "views": [
+        {
+          "width": 64,
+          "numbered": {
+            "prefix": "cr",
+            "suffix": "",
+            "numbers": [
+              0,
+              2,
+              3,
+              4,
+              8
+            ],
+            "parse_digits": 1
+          }
+        }
+      ],
+      "doc": "Long-mode control registers CR0, CR2, CR3, CR4 and CR8.",
+      "isa_kinds": [
+        "cr"
+      ],
+      "decode": {
+        "width": 64,
+        "check_number": false
+      }
+    },
+    {
+      "variant": "Debug",
+      "id": 8,
+      "symbolic_tag": 8,
+      "views": [
+        {
+          "width": 64,
+          "numbered": {
+            "prefix": "dr",
+            "suffix": "",
+            "numbers": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7
+            ],
+            "parse_digits": 1
+          }
+        }
+      ],
+      "doc": "DR0..DR7; DR4/DR5 require CR4.DE clear and alias DR6/DR7.",
+      "isa_kinds": [
+        "dr"
+      ],
+      "decode": {
+        "width": 64,
+        "check_number": false
+      }
+    }
+  ],
+  "decoder_only": [
+    {
+      "isa_kind": "mask",
+      "prefix": "k"
+    },
+    {
+      "isa_kind": "bnd",
+      "prefix": "bnd"
+    },
+    {
+      "isa_kind": "tmm",
+      "prefix": "tmm"
+    }
+  ]
+}

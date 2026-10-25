@@ -43,6 +43,11 @@ EVEX, MVEX, XOP and 3DNow records are outside this import.
 - `feature-fields.json` lists capability fields in public struct and `names()`
   order, with field docs and CLI aliases. `feature_fields.py` generates the
   struct, `NONE`, containment, CLI lookup and names iteration.
+- `registers.json` defines register class IDs, symbolic tags, names, number/width
+  domains, parser spelling rules and formatter compatibility. `registers.py`
+  generates the public register types, parsing, structural validation, formatting,
+  ISA-kind mappings and decoder register names. Class IDs and symbolic tags are
+  independent fields; changing either requires a compatibility review.
 - `api-identities.json` preserves baseline enum order, payload types, static
   spellings and x87 identities. `api_identities.py` emits their Rust definitions
   and mappings without consulting instruction encodings. Wrapper dispatch,
@@ -74,6 +79,34 @@ canonical choices, addressing and object relocations. It contains no fallback
 to the removed instruction-specific encoders. Adding a public instruction
 still requires its syntax/API identity and any compiler semantics; importing
 an ISA form does not add an intrinsic or make it available for selection.
+
+## Register mappings
+
+The register schema preserves the existing GPR, XMM, MMX, YMM, x87, segment,
+instruction-pointer, control and debug register APIs. `Register` keeps its public
+`class`, `number`, `width` and `high_byte` fields. Parser case folding, aliases
+and numeric spelling rules stay unchanged. CR/DR names accept exactly one
+numeric digit; CR indices are 0/2/3/4/8 and DR indices are 0..7. DR4/5 retain
+their documented conditional alias preconditions.
+
+`Register::is_valid()` checks the structural register domain. Instruction
+operands, addressing, high-byte/REX compatibility and the current four-bit
+legacy/VEX register-number limit remain encoder rules. The assembler uses the
+generated class validation and ISA-kind mapping; symbolic serialization uses
+the generated tag mapping. The decoder uses the same canonical GPR names and
+generated names for its other register fields.
+
+Formatting compatibility is separate from structural validity. Existing
+permissive formatting of malformed XMM/YMM, segment, instruction-pointer and
+high-byte GPR values is preserved; control/debug formatting remains strict.
+Decoded fields also retain their existing recognition limits, including raw
+reserved CR/DR numbers. `decoder_only` name rules for mask, bounds and tile
+register fields do not add assembler register classes or instruction support.
+
+Schema generation rejects duplicate IDs/tags/spellings, inconsistent number
+domains, ambiguous duplicate patterns and unknown schema constraints. A frozen
+canonical register fixture captured from `5b04a1aa` protects existing public
+names and field values independently of the generator.
 
 ## Optional legacy/VEX extensions
 

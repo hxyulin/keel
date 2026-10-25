@@ -8,6 +8,7 @@ from pathlib import Path
 
 import feature_fields
 import api_identities
+import registers
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT.parents[1] / 'crates/keel-asm-ir/src/x86/isa/generated.rs'
@@ -385,6 +386,7 @@ def main():
         outputs[OUTPUT.with_name(f'{group}_opcodes.rs')] = opcode_identities(name, adapters['identities'][group])
     outputs[OUTPUT.with_name('extension_opcodes.rs')] = opcode_identities('ExtensionOpcode', identities)
     outputs.update(api_identities.outputs(ROOT, OUTPUT, opcode_identities))
+    outputs.update(registers.outputs(ROOT, OUTPUT))
     target, output = documentation_inventory(outputs[OUTPUT.with_name('v2.rs')], adapters['v2'])
     outputs[target] = output
     for target, output in outputs.items():

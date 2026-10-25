@@ -1,7 +1,9 @@
 //! Shared generated x86 instruction forms. Compiler semantics are separate.
 mod features;
 mod generated;
+mod register_names;
 pub(super) use features::{feature_policy, opcode_features};
+pub use register_names::register_name;
 pub(super) mod fixed;
 pub(super) mod v2;
 mod v3;
