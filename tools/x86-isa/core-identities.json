@@ -1,0 +1,551 @@
+[
+  {
+    "variant": "String",
+    "fields": [
+      [
+        "kind",
+        "StringKind"
+      ],
+      [
+        "width",
+        "u16"
+      ],
+      [
+        "repeat",
+        "Repeat"
+      ],
+      [
+        "address32",
+        "bool"
+      ],
+      [
+        "segment",
+        "Option<u8>"
+      ]
+    ]
+  },
+  {
+    "variant": "Xlat",
+    "fields": [
+      [
+        "address32",
+        "bool"
+      ],
+      [
+        "segment",
+        "Option<u8>"
+      ]
+    ]
+  },
+  {
+    "variant": "Nop18_0",
+    "mnemonic": "nop.18.0",
+    "spellings": [
+      "nop.18.0"
+    ]
+  },
+  {
+    "variant": "Nop18_1",
+    "mnemonic": "nop.18.1",
+    "spellings": [
+      "nop.18.1"
+    ]
+  },
+  {
+    "variant": "Nop18_2",
+    "mnemonic": "nop.18.2",
+    "spellings": [
+      "nop.18.2"
+    ]
+  },
+  {
+    "variant": "Nop18_3",
+    "mnemonic": "nop.18.3",
+    "spellings": [
+      "nop.18.3"
+    ]
+  },
+  {
+    "variant": "Nop18_4",
+    "mnemonic": "nop.18.4",
+    "spellings": [
+      "nop.18.4"
+    ]
+  },
+  {
+    "variant": "Nop18_5",
+    "mnemonic": "nop.18.5",
+    "spellings": [
+      "nop.18.5"
+    ]
+  },
+  {
+    "variant": "Nop18_6",
+    "mnemonic": "nop.18.6",
+    "spellings": [
+      "nop.18.6"
+    ]
+  },
+  {
+    "variant": "Nop18_7",
+    "mnemonic": "nop.18.7",
+    "spellings": [
+      "nop.18.7"
+    ]
+  },
+  {
+    "variant": "Nop19",
+    "mnemonic": "nop.19",
+    "spellings": [
+      "nop.19"
+    ]
+  },
+  {
+    "variant": "Nop1a",
+    "mnemonic": "nop.1a",
+    "spellings": [
+      "nop.1a"
+    ]
+  },
+  {
+    "variant": "Nop1b",
+    "mnemonic": "nop.1b",
+    "spellings": [
+      "nop.1b"
+    ]
+  },
+  {
+    "variant": "Nop1c",
+    "mnemonic": "nop.1c",
+    "spellings": [
+      "nop.1c"
+    ]
+  },
+  {
+    "variant": "Nop1d",
+    "mnemonic": "nop.1d",
+    "spellings": [
+      "nop.1d"
+    ]
+  },
+  {
+    "variant": "Nop1e",
+    "mnemonic": "nop.1e",
+    "spellings": [
+      "nop.1e"
+    ]
+  },
+  {
+    "variant": "MovMoffs32",
+    "mnemonic": "movabs32",
+    "spellings": [
+      "movabs32"
+    ]
+  },
+  {
+    "variant": "MovLoad",
+    "mnemonic": "mov.load",
+    "spellings": [
+      "mov.load"
+    ]
+  },
+  {
+    "variant": "MovImm",
+    "mnemonic": "mov.imm",
+    "spellings": [
+      "mov.imm"
+    ]
+  },
+  {
+    "variant": "PushRm",
+    "mnemonic": "push.rm",
+    "spellings": [
+      "push.rm"
+    ]
+  },
+  {
+    "variant": "PopRm",
+    "mnemonic": "pop.rm",
+    "spellings": [
+      "pop.rm"
+    ]
+  },
+  {
+    "variant": "Pushw",
+    "mnemonic": "pushw",
+    "spellings": [
+      "pushw"
+    ]
+  },
+  {
+    "variant": "Popw",
+    "mnemonic": "popw",
+    "spellings": [
+      "popw"
+    ]
+  },
+  {
+    "variant": "XchgAcc",
+    "mnemonic": "xchg.acc",
+    "spellings": [
+      "xchg.acc"
+    ]
+  },
+  {
+    "variant": "AddLoad",
+    "mnemonic": "add.load",
+    "spellings": [
+      "add.load"
+    ]
+  },
+  {
+    "variant": "OrLoad",
+    "mnemonic": "or.load",
+    "spellings": [
+      "or.load"
+    ]
+  },
+  {
+    "variant": "AdcLoad",
+    "mnemonic": "adc.load",
+    "spellings": [
+      "adc.load"
+    ]
+  },
+  {
+    "variant": "SbbLoad",
+    "mnemonic": "sbb.load",
+    "spellings": [
+      "sbb.load"
+    ]
+  },
+  {
+    "variant": "AndLoad",
+    "mnemonic": "and.load",
+    "spellings": [
+      "and.load"
+    ]
+  },
+  {
+    "variant": "SubLoad",
+    "mnemonic": "sub.load",
+    "spellings": [
+      "sub.load"
+    ]
+  },
+  {
+    "variant": "XorLoad",
+    "mnemonic": "xor.load",
+    "spellings": [
+      "xor.load"
+    ]
+  },
+  {
+    "variant": "CmpLoad",
+    "mnemonic": "cmp.load",
+    "spellings": [
+      "cmp.load"
+    ]
+  },
+  {
+    "variant": "Rcl",
+    "mnemonic": "rcl",
+    "spellings": [
+      "rcl"
+    ]
+  },
+  {
+    "variant": "Rcr",
+    "mnemonic": "rcr",
+    "spellings": [
+      "rcr"
+    ]
+  },
+  {
+    "variant": "RclImm",
+    "mnemonic": "rcl.imm",
+    "spellings": [
+      "rcl.imm"
+    ]
+  },
+  {
+    "variant": "RcrImm",
+    "mnemonic": "rcr.imm",
+    "spellings": [
+      "rcr.imm"
+    ]
+  },
+  {
+    "variant": "Cwd",
+    "mnemonic": "cwd",
+    "spellings": [
+      "cwd",
+      "cwtd"
+    ]
+  },
+  {
+    "variant": "Cmpxchg8b",
+    "mnemonic": "cmpxchg8b",
+    "spellings": [
+      "cmpxchg8b"
+    ]
+  },
+  {
+    "variant": "Clflush",
+    "mnemonic": "clflush",
+    "spellings": [
+      "clflush"
+    ]
+  },
+  {
+    "variant": "Loop",
+    "fields": [
+      [
+        "kind",
+        "LoopKind"
+      ],
+      [
+        "address32",
+        "bool"
+      ]
+    ]
+  },
+  {
+    "variant": "Enter",
+    "fields": [
+      [
+        "operand16",
+        "bool"
+      ]
+    ]
+  },
+  {
+    "variant": "Int",
+    "mnemonic": "int",
+    "spellings": [
+      "int"
+    ]
+  },
+  {
+    "variant": "IntImm",
+    "mnemonic": "int.imm",
+    "spellings": [
+      "int.imm"
+    ]
+  },
+  {
+    "variant": "Int1",
+    "mnemonic": "int1",
+    "spellings": [
+      "int1",
+      "icebp"
+    ]
+  },
+  {
+    "variant": "In",
+    "mnemonic": "in",
+    "spellings": [
+      "in",
+      "inb",
+      "inw",
+      "inl"
+    ]
+  },
+  {
+    "variant": "Out",
+    "mnemonic": "out",
+    "spellings": [
+      "out",
+      "outb",
+      "outw",
+      "outl"
+    ]
+  },
+  {
+    "variant": "Lfs",
+    "mnemonic": "lfs",
+    "spellings": [
+      "lfs",
+      "lfsw",
+      "lfsl",
+      "lfsq"
+    ]
+  },
+  {
+    "variant": "Lgs",
+    "mnemonic": "lgs",
+    "spellings": [
+      "lgs",
+      "lgsw",
+      "lgsl",
+      "lgsq"
+    ]
+  },
+  {
+    "variant": "Lss",
+    "mnemonic": "lss",
+    "spellings": [
+      "lss",
+      "lssw",
+      "lssl",
+      "lssq"
+    ]
+  },
+  {
+    "variant": "Lar",
+    "mnemonic": "lar",
+    "spellings": [
+      "lar"
+    ]
+  },
+  {
+    "variant": "Lsl",
+    "mnemonic": "lsl",
+    "spellings": [
+      "lsl"
+    ]
+  },
+  {
+    "variant": "Verr",
+    "mnemonic": "verr",
+    "spellings": [
+      "verr"
+    ]
+  },
+  {
+    "variant": "Verw",
+    "mnemonic": "verw",
+    "spellings": [
+      "verw"
+    ]
+  },
+  {
+    "variant": "Lldt",
+    "mnemonic": "lldt",
+    "spellings": [
+      "lldt"
+    ]
+  },
+  {
+    "variant": "Ltr",
+    "mnemonic": "ltr",
+    "spellings": [
+      "ltr"
+    ]
+  },
+  {
+    "variant": "Lmsw",
+    "mnemonic": "lmsw",
+    "spellings": [
+      "lmsw"
+    ]
+  },
+  {
+    "variant": "Invlpg",
+    "mnemonic": "invlpg",
+    "spellings": [
+      "invlpg"
+    ]
+  },
+  {
+    "variant": "Lgdt",
+    "mnemonic": "lgdt",
+    "spellings": [
+      "lgdt"
+    ]
+  },
+  {
+    "variant": "Lidt",
+    "mnemonic": "lidt",
+    "spellings": [
+      "lidt"
+    ]
+  },
+  {
+    "variant": "Sgdt",
+    "mnemonic": "sgdt",
+    "spellings": [
+      "sgdt"
+    ]
+  },
+  {
+    "variant": "Sidt",
+    "mnemonic": "sidt",
+    "spellings": [
+      "sidt"
+    ]
+  },
+  {
+    "variant": "Sldt",
+    "mnemonic": "sldt",
+    "spellings": [
+      "sldt"
+    ]
+  },
+  {
+    "variant": "Str",
+    "mnemonic": "str",
+    "spellings": [
+      "str"
+    ]
+  },
+  {
+    "variant": "Smsw",
+    "mnemonic": "smsw",
+    "spellings": [
+      "smsw"
+    ]
+  },
+  {
+    "variant": "CallFar",
+    "mnemonic": "callf",
+    "spellings": [
+      "callf",
+      "lcall",
+      "lcallw",
+      "lcalll",
+      "lcallq"
+    ]
+  },
+  {
+    "variant": "JmpFar",
+    "mnemonic": "jmpf",
+    "spellings": [
+      "jmpf",
+      "ljmp",
+      "ljmpw",
+      "ljmpl",
+      "ljmpq"
+    ]
+  },
+  {
+    "variant": "RetFar",
+    "fields": [
+      [
+        "width",
+        "u16"
+      ]
+    ]
+  },
+  {
+    "variant": "Ud0",
+    "mnemonic": "ud0",
+    "spellings": [
+      "ud0"
+    ]
+  },
+  {
+    "variant": "Ud1",
+    "mnemonic": "ud1",
+    "spellings": [
+      "ud1"
+    ]
+  },
+  {
+    "variant": "Ud0Short",
+    "mnemonic": "ud0.short",
+    "spellings": [
+      "ud0.short"
+    ]
+  }
+]

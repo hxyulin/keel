@@ -5,9 +5,6 @@
 use super::*;
 use crate::directive::write_int;
 use std::fmt::{self, Write};
-const CC: [&str; 16] = [
-    "o", "no", "b", "ae", "e", "ne", "be", "a", "s", "ns", "p", "np", "l", "ge", "le", "g",
-];
 include!("isa/baseline_mnemonics.rs");
 
 impl Opcode {
@@ -33,7 +30,7 @@ impl Opcode {
         let (name, cc) = self.mnemonic();
         w.write_str(name)?;
         match cc {
-            Some(c) => w.write_str(CC.get(usize::from(c)).ok_or(fmt::Error)?),
+            Some(c) => w.write_str(isa::condition_code_name(c).ok_or(fmt::Error)?),
             None => Ok(()),
         }
     }

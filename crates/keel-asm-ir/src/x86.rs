@@ -57,25 +57,7 @@ impl Opcode {
         } else {
             (0, s.strip_prefix('j')?)
         };
-        let cc = match cc {
-            "o" => 0,
-            "no" => 1,
-            "b" | "c" | "nae" => 2,
-            "ae" | "nb" | "nc" => 3,
-            "e" | "z" => 4,
-            "ne" | "nz" => 5,
-            "be" | "na" => 6,
-            "a" | "nbe" => 7,
-            "s" => 8,
-            "ns" => 9,
-            "p" | "pe" => 10,
-            "np" | "po" => 11,
-            "l" | "nge" => 12,
-            "ge" | "nl" => 13,
-            "le" | "ng" => 14,
-            "g" | "nle" => 15,
-            _ => return None,
-        };
+        let cc = isa::parse_condition_code(cc)?;
         Some(match kind {
             0 => Jcc(cc),
             1 => Setcc(cc),

@@ -1,5 +1,7 @@
 //! Shared generated x86 instruction forms. Compiler semantics are separate.
+mod condition_codes;
 mod features;
+pub use condition_codes::{condition_code_name, isa_condition_code_name, parse_condition_code};
 mod generated;
 mod register_names;
 pub(super) use features::{feature_policy, opcode_features};

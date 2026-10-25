@@ -1,0 +1,144 @@
+[
+  {
+    "code": 0,
+    "name": "o",
+    "aliases": [
+      "o"
+    ],
+    "isa_name": "o"
+  },
+  {
+    "code": 1,
+    "name": "no",
+    "aliases": [
+      "no"
+    ],
+    "isa_name": "no"
+  },
+  {
+    "code": 2,
+    "name": "b",
+    "aliases": [
+      "b",
+      "c",
+      "nae"
+    ],
+    "isa_name": "b"
+  },
+  {
+    "code": 3,
+    "name": "ae",
+    "aliases": [
+      "ae",
+      "nb",
+      "nc"
+    ],
+    "isa_name": "nb"
+  },
+  {
+    "code": 4,
+    "name": "e",
+    "aliases": [
+      "e",
+      "z"
+    ],
+    "isa_name": "z"
+  },
+  {
+    "code": 5,
+    "name": "ne",
+    "aliases": [
+      "ne",
+      "nz"
+    ],
+    "isa_name": "nz"
+  },
+  {
+    "code": 6,
+    "name": "be",
+    "aliases": [
+      "be",
+      "na"
+    ],
+    "isa_name": "be"
+  },
+  {
+    "code": 7,
+    "name": "a",
+    "aliases": [
+      "a",
+      "nbe"
+    ],
+    "isa_name": "nbe"
+  },
+  {
+    "code": 8,
+    "name": "s",
+    "aliases": [
+      "s"
+    ],
+    "isa_name": "s"
+  },
+  {
+    "code": 9,
+    "name": "ns",
+    "aliases": [
+      "ns"
+    ],
+    "isa_name": "ns"
+  },
+  {
+    "code": 10,
+    "name": "p",
+    "aliases": [
+      "p",
+      "pe"
+    ],
+    "isa_name": "p"
+  },
+  {
+    "code": 11,
+    "name": "np",
+    "aliases": [
+      "np",
+      "po"
+    ],
+    "isa_name": "np"
+  },
+  {
+    "code": 12,
+    "name": "l",
+    "aliases": [
+      "l",
+      "nge"
+    ],
+    "isa_name": "l"
+  },
+  {
+    "code": 13,
+    "name": "ge",
+    "aliases": [
+      "ge",
+      "nl"
+    ],
+    "isa_name": "nl"
+  },
+  {
+    "code": 14,
+    "name": "le",
+    "aliases": [
+      "le",
+      "ng"
+    ],
+    "isa_name": "le"
+  },
+  {
+    "code": 15,
+    "name": "g",
+    "aliases": [
+      "g",
+      "nle"
+    ],
+    "isa_name": "nle"
+  }
+]

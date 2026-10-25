@@ -108,6 +108,28 @@ domains, ambiguous duplicate patterns and unknown schema constraints. A frozen
 canonical register fixture captured from `5b04a1aa` protects existing public
 names and field values independently of the generator.
 
+## Core identities and condition codes
+
+`core-identities.json` owns the ordered 70-variant `CoreOpcode` API, including
+its five payload shapes, static parse aliases and static mnemonic names.
+`core_mappings.py` emits `core_opcodes.rs` and `core_mnemonics.rs`. The latter
+is an exhaustive match macro whose caller supplies the five dynamic cases.
+String/loop/far-return parsing, prefix handling, width checks and instruction
+semantics remain in `core.rs`. Wrapper dispatch precedence stays unchanged.
+
+`condition-codes.json` owns the sixteen numeric condition codes, their accepted
+aliases, public formatting names and imported ISA names. For example, public
+`ae` maps to ISA `nb`, and public `e` maps to ISA `z`. The generated
+`condition_codes.rs` serves parsing, formatting and encoder canonicalization.
+Public `Jcc(u8)`, `Setcc(u8)` and `Cmovcc(u8)` payloads stay unchanged; invalid
+condition numbers have no generated name. The decoder retains the mnemonic
+recorded in the shared ISA catalogue.
+
+Compatibility fixtures and generator pins come from `3109c651`, before this
+move. Literal opcode-family tests cover every accepted condition alias through
+the generic encoder. These schemas describe names and API shape, not compiler
+effects, architectural permission or runtime behavior.
+
 ## Optional legacy/VEX extensions
 
 The `extensions` list in `keel-adapters.json` exposes 16 additional mnemonics

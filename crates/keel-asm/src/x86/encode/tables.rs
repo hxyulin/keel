@@ -242,17 +242,9 @@ fn dialect(i: &Instruction) -> Dialect {
     .into();
     for stem in ["cmov", "set", "j"] {
         if let Some(cc) = d.name.strip_prefix(stem) {
-            let canonical = match cc {
-                "e" => "z",
-                "ne" => "nz",
-                "ae" => "nb",
-                "a" => "nbe",
-                "ge" => "nl",
-                "g" => "nle",
-                "p" => "p",
-                "np" => "np",
-                other => other,
-            };
+            let canonical = keel_asm_ir::x86::isa::parse_condition_code(cc)
+                .and_then(keel_asm_ir::x86::isa::isa_condition_code_name)
+                .unwrap_or(cc);
             d.name = format!("{stem}{canonical}");
             break;
         }
