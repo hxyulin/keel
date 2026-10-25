@@ -9,8 +9,10 @@ full baseline system support remains unfinished.
 ## Current coverage
 
 SGDT, SIDT, SLDT, STR and SMSW have typed observation APIs and assembler
-encodings. The disposable CPL0 campaign covers SGDT/SIDT. LAR, LSL, VERR and
-VERW have typed descriptor-query APIs. Scalar and string port I/O have typed
+encodings. Disposable CPL0 campaigns cover SGDT/SIDT and the twelve
+SLDT/STR/SMSW forms with known selectors, two CR0 values and two old register
+containers. See [descriptor/status observations](x86-descriptor-queries.md).
+LAR, LSL, VERR and VERW have typed descriptor-query APIs. Scalar and string port I/O have typed
 APIs, with their own permission and FLAGS contracts.
 
 LGDT and LIDT now have assembler encodings and pinned typed APIs:
@@ -47,8 +49,10 @@ assembler encoding alone is not evidence of working kernel code generation.
 - Define entry/return, segment state and physical stack/frame ownership for
   SWAPGS, IRET, SYSRET and related transitions. Ordinary function returns do
   not establish these contracts.
-- Extend guest validation to the existing status/selector APIs and string I/O.
-  Keep known raw FLAGS/x87 and saved-context limits visible.
+- Extend guest validation to LAR/LSL/VERR/VERW and string I/O. Keep known raw
+  FLAGS/x87 and saved-context limits visible. SLDT/STR/SMSW now have bounded
+  CPL0 checks, including all operand sizes, memory canaries and old-value
+  liveness; other machine states and fault paths remain unqualified.
 
 Optional extensions such as VMX/SVM, SMX, XSAVE and INVPCID are separate from
 this baseline goal. Instructions invalid in 64-bit mode do not become
