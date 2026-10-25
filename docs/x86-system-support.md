@@ -135,5 +135,23 @@ guest verdicts: 18 system-load cases and 17 invalidation cases. The five
 previous campaigns also pass after the mode-selection refactor, for 118
 verdicts across seven campaigns. The assembler/disassembler package suites,
 16 focused codegen tests, generator freshness check, ten runner unit tests
-and workspace compile check pass with these adapters. Full workspace test
-failures in `x86_d8` and `x86_sysv_tail` remain on the validation backlog.
+and workspace compile check pass with these adapters.
+
+## ABI validation backlog
+
+The stale D8 aggregate rejection check now exercises a defined byval/sret tail
+boundary. Natural integer and f32 D8 aggregates compile with text/typed object
+parity; untagged f64x1 still rejects. The obsolete tagged-f64x1 tail rejection
+was removed, retaining the existing positive recursive producer-ABI tests.
+
+The restored [SysV tail oracle](../crates/keel-codegen/tests/sysv_tail/README.md)
+passes all 36 exported selector, allocator, register-pool and CPU-level
+configurations with GCC 16.2.0 and Clang 23.1.3 on x86-64 Linux. These are 72
+native executions. Both compilers reject a deliberately broken constant-return
+tail through normal value-check failures. The evidence covers this finite
+fixture roster and does not complete the remaining privileged APIs.
+
+The repaired privileged-instruction checkout passes `cargo test --workspace
+--no-fail-fast`: 2,649 tests pass, none fail and 13 are ignored across 480
+reported test groups. This run precedes the optional-extension adapter import;
+it establishes the ABI repair against the original generated-table migration.

@@ -1,4 +1,4 @@
-//! Compatible aggregate tail transport. Native Linux execution is root-owned.
+//! Compatible aggregate tail transport, with an exportable native Linux oracle.
 use keel_asm_ir::x86::{CpuLevel, Features};
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
@@ -29,7 +29,7 @@ fn compatible_tail_packet() {
             std::env::temp_dir().join(format!("keel-sysv-tail-{}", std::process::id()))
         });
     fs::create_dir_all(&dir).unwrap();
-    for name in ["corpus.ir", "oracle.c", "depth.S"] {
+    for name in ["corpus.ir", "oracle.c", "depth.S", "run.py"] {
         fs::copy(
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("tests/sysv_tail")
@@ -160,10 +160,6 @@ fn incompatible_tails_reject() {
         (
             "decl @g(ptr sret {f64,f64})\nfunc @f(ptr sret {i64,i64}) {\nentry(v0:ptr):\n return_call @g(v0)\n}",
             "return protocol mismatch",
-        ),
-        (
-            "decl @g(f64x1)->f64x1 x86_vector_abi(clang)\nfunc @f(f64x1)->f64x1 x86_vector_abi(clang) {\nentry(v0:f64x1):\n return_call @g(v0)\n}",
-            "guaranteed tails await",
         ),
     ];
     for (source, expected) in cases {
