@@ -259,17 +259,7 @@ fn intern<'i>(
     id
 }
 fn register(out: &mut Vec<u8>, r: &Register) {
-    out.push(match r.class {
-        RegisterClass::Gpr => 0,
-        RegisterClass::Xmm => 1,
-        RegisterClass::X87 => 2,
-        RegisterClass::Mmx => 4,
-        RegisterClass::Rip => 3,
-        RegisterClass::Ymm => 5,
-        RegisterClass::Segment => 6,
-        RegisterClass::Control => 7,
-        RegisterClass::Debug => 8,
-    });
+    out.push(r.class.symbolic_tag());
     out.push(r.number);
     out.extend_from_slice(&r.width.to_le_bytes());
     out.push(u8::from(r.high_byte));

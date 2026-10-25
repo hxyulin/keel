@@ -272,13 +272,6 @@ fn register_matches(spec: IsaOperand, r: Register, size: u16, address: u16) -> b
         "gpr32_32_64" => gpr(if size == 64 { 64 } else { 32 }),
         "gpr16_32_32" => gpr(if size == 16 { 16 } else { 32 }),
         "gpr_asz" => gpr(address),
-        "xmm" => r.class == RegisterClass::Xmm,
-        "ymm" => r.class == RegisterClass::Ymm,
-        "mmx" => r.class == RegisterClass::Mmx,
-        "fpr" => r.class == RegisterClass::X87,
-        "sreg" => r.class == RegisterClass::Segment,
-        "cr" => r.class == RegisterClass::Control,
-        "dr" => r.class == RegisterClass::Debug,
         "implicit_reg" => {
             if spec.register == "st0" {
                 return r.class == RegisterClass::X87 && r.number == 0;
@@ -290,7 +283,7 @@ fn register_matches(spec: IsaOperand, r: Register, size: u16, address: u16) -> b
             };
             r.to_string() == expected
         }
-        _ => false,
+        kind => RegisterClass::from_isa_kind(kind).is_some_and(|class| r.class == class),
     }
 }
 fn reg_name(n: u8, bits: u16) -> String {

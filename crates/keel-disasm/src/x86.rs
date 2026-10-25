@@ -240,31 +240,18 @@ fn prefixes(r: &mut Reader<'_>) -> Option<Prefix> {
     Some(p)
 }
 fn gpr(n: u8, bits: u16, rex: bool) -> String {
-    const R8: [&str; 8] = ["al", "cl", "dl", "bl", "spl", "bpl", "sil", "dil"];
-    const R16: [&str; 8] = ["ax", "cx", "dx", "bx", "sp", "bp", "si", "di"];
-    const R32: [&str; 8] = ["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"];
-    const R64: [&str; 8] = ["rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi"];
-    if n >= 8 {
-        return format!(
-            "r{n}{}",
-            match bits {
-                8 => "b",
-                16 => "w",
-                32 => "d",
-                _ => "",
-            }
-        );
+    // Encoded GPR fields have at most four bits in the current legacy/VEX import.
+    keel_asm_ir::x86::Register {
+        class: keel_asm_ir::x86::RegisterClass::Gpr,
+        number: n,
+        width: if matches!(bits, 8 | 16 | 32) {
+            bits
+        } else {
+            64
+        },
+        high_byte: bits == 8 && !rex && (4..8).contains(&n),
     }
-    if bits == 8 && !rex && n >= 4 {
-        return ["ah", "ch", "dh", "bh"][(n - 4) as usize].into();
-    }
-    match bits {
-        8 => R8[n as usize],
-        16 => R16[n as usize],
-        32 => R32[n as usize],
-        _ => R64[n as usize],
-    }
-    .into()
+    .to_string()
 }
 fn register(spec: IsaOperand, n: u8, size: u16, p: Prefix) -> Option<String> {
     Some(match spec.kind {
@@ -276,22 +263,12 @@ fn register(spec: IsaOperand, n: u8, size: u16, p: Prefix) -> Option<String> {
         "gpr32_32_64" => gpr(n, if size == 64 { 64 } else { 32 }, true),
         "gpr16_32_32" => gpr(n, if size == 16 { 16 } else { 32 }, true),
         "gpr_asz" => gpr(n, p.address(), true),
-        "xmm" => format!("xmm{n}"),
-        "ymm" => format!("ymm{n}"),
-        "mmx" if n < 8 => format!("mm{n}"),
-        "fpr" if n < 8 => format!("st({n})"),
-        "sreg" if n < 6 => ["es", "cs", "ss", "ds", "fs", "gs"][n as usize].into(),
-        "cr" => format!("cr{n}"),
-        "dr" => format!("dr{n}"),
-        "mask" => format!("k{n}"),
-        "bnd" => format!("bnd{n}"),
-        "tmm" => format!("tmm{n}"),
         "implicit_reg" => match spec.register {
             "osz_ax" => gpr(0, size, true),
             "asz_ax" => gpr(0, p.address(), true),
             other => other.into(),
         },
-        _ => return None,
+        kind => keel_asm_ir::x86::isa::register_name(kind, n)?,
     })
 }
 #[derive(Clone, Copy)]
