@@ -2,7 +2,8 @@
 //! are frozen at
 //! pass entry: newly cloned calls are not reconsidered, so growth and recursion
 //! cannot recursively reconsider cloned sites. Full schedules bounded tiny
-//! alwaysinline leaves first; each phase otherwise retains layout order. Other
+//! alwaysinline and guarded, writing hinted leaves first. Each phase otherwise
+//! retains layout order. Other
 //! policies consume budgets in layout order. ABI by-value arguments get a fresh snapshot.
 //! Instruction growth bounds the increase in layout instructions before cleanup;
 //! the removed call pays for the jump entering the cloned body.
@@ -406,8 +407,10 @@ fn byval_copy_cost(size: u64) -> usize {
         .sum::<usize>()
 }
 
-// Include ABI snapshots in scheduling as well as admission. This is a small
-// structural priority class, not an alwaysinline budget exemption. Calls and
+// Include ABI snapshots in scheduling as well as admission. Full also gives
+// guarded, writing hinted leaves this priority, so wrappers cannot crowd out
+// cheap value helpers. This is a small structural priority class, not an
+// alwaysinline budget exemption. Calls and
 // cycles are excluded so a tiny wrapper cannot compete as a constructor leaf.
 fn tiny_priority_leaf(f: &Function) -> bool {
     let (cost, stack) = inline_cost(f);
@@ -789,7 +792,14 @@ fn run_observed_policy(
                     admit_noninterposable
                         && templates.get(&decl.name).is_some_and(|&index| {
                             let f = &module.functions[index];
-                            (decl.attrs.alwaysinline || f.attrs.alwaysinline)
+                            (decl.attrs.alwaysinline
+                                || f.attrs.alwaysinline
+                                || (cheap_reserve
+                                    && (decl.attrs.inlinehint || f.attrs.inlinehint)
+                                    && f.blocks().count() > 1
+                                    && f.layout_insts().any(|(_, i)| {
+                                        matches!(f.inst_data(i), InstData::Store { .. })
+                                    })))
                                 && tiny_templates.contains(f.name.as_str())
                         })
                 })
