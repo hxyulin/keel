@@ -263,6 +263,9 @@ fn width(o: &mut Operand, bits: u16) -> Result<(), String> {
     Ok(())
 }
 fn scalar(op: Opcode) -> bool {
+    if let Opcode::Extension(op) = op {
+        return op.scalar_suffix();
+    }
     if matches!(op, V3(V3Opcode::Lzcnt | V3Opcode::Movbe)) {
         return true;
     }

@@ -15,6 +15,7 @@ impl Opcode {
             Opcode::Core(op) => op.mnemonic(),
             Opcode::X87(op) => op.mnemonic(),
             Opcode::Fixed(op) => op.mnemonic(),
+            Opcode::Extension(op) => op.mnemonic(),
             Opcode::Pclmulqdq => "pclmulqdq",
             Opcode::V2(op) => op.spec().mnemonic,
             Opcode::Movq6e => "movq.6e",

@@ -47,17 +47,44 @@ EVEX, MVEX, XOP and 3DNow records are outside this import.
   spelling, `udb`, which is absent from this upstream snapshot.
 
 Generated files under `crates/keel-asm-ir/src/x86/isa/` provide the shared
-catalogue, decoding index, 93 v2 metadata entries, 1,202 VEX form adapters,
-64 fixed encodings and opcode feature queries. The generator also reconciles
+catalogue, decoding index, 93 v2 metadata entries, 1,226 VEX form adapters,
+64 fixed encodings and opcode feature queries. Public fixed/v2/v3 enums, their
+`ALL` lists, parse aliases and mnemonic mappings are also generated from the
+explicit identity policy. Existing enum order and spellings are preserved.
+The generator also reconciles
 encoding fields in `docs/v2-coverage/inventory.json`, retaining its operand and
 validation prose. AES entries are optional and are not implied by psABI v2.
 
-The assembler keeps public opcode identities and syntax adapters. Handwritten
+The assembler keeps stable public opcode identities and syntax adapters. Handwritten
 code handles branch relaxation, exact alias selection, operand conventions,
 canonical choices, addressing and object relocations. It contains no fallback
 to the removed instruction-specific encoders. Adding a public instruction
 still requires its syntax/API identity and any compiler semantics; importing
 an ISA form does not add an intrinsic or make it available for selection.
+
+## Optional legacy/VEX extensions
+
+The `extensions` list in `keel-adapters.json` exposes 16 additional mnemonics
+through generated `ExtensionOpcode` identities (46 imported forms): ADCX/ADOX, the seven SHA
+instructions, VAESENC/VAESENCLAST/VAESDEC/VAESDECLAST, VAESIMC,
+VAESKEYGENASSIST and VPCLMULQDQ. These use the existing shared matcher and
+encoder. No compiler intrinsics or selection rules are added.
+
+Enable `adx` or `sha` independently. XMM VAES forms require `avx,aes`;
+YMM VAES forms require `avx,vaes`. VAESIMC and VAESKEYGENASSIST have XMM forms
+only. XMM VPCLMULQDQ requires `avx,pclmulqdq`; YMM requires
+`avx,vpclmulqdq`. None of the four new feature bits is implied by psABI v3.
+The source labels XMM VPCLMULQDQ simply `AVX`; the generated adapter uses an
+explicit `AVX_PCLMULQDQ` policy label to retain its independent PCLMULQDQ
+requirement. The shared source catalogue retains the upstream ISA label.
+The XMM requirement is documented in Intel's
+[instruction reference, volume 2B](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-2b-manual.pdf).
+
+New extension identities, scalar AT&T suffix eligibility, operand-specific
+VEX form adapters and feature queries are generated from that exposure list
+and the source records. Adding a feature field and deciding the CPU profile
+policy remain explicit Rust changes. EVEX/AVX-512 vector forms remain outside
+this increment.
 
 ## Decoding limits
 

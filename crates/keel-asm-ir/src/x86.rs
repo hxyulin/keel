@@ -19,6 +19,8 @@ pub enum Opcode {
     Fixed(FixedOpcode),
     /// Legacy post-SSE2 forms, carrying explicit feature metadata.
     V2(V2Opcode),
+    /// Optional extensions exposed through generated assembler adapters.
+    Extension(ExtensionOpcode),
     Pclmulqdq,
     // Explicit alternate legacy encodings for otherwise identical operand forms.
     Movq6e,
@@ -769,6 +771,9 @@ impl Opcode {
                 }
                 if let Some(op) = FixedOpcode::parse(if s == "wait" { "fwait" } else { s }) {
                     return Some(Fixed(op));
+                }
+                if let Some(op) = ExtensionOpcode::parse(s) {
+                    return Some(Extension(op));
                 }
                 if let Some(op) = V3Opcode::parse(s) {
                     return Some(V3(op));
@@ -1569,7 +1574,9 @@ pub use att::{SourceParser, Syntax};
 mod format;
 pub use format::{write_expression, write_instruction};
 
+mod extensions;
 mod features;
+pub use extensions::ExtensionOpcode;
 mod fixed;
 pub use fixed::FixedOpcode;
 mod x87_extra;

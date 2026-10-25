@@ -26,6 +26,12 @@ selector in `keel_codegen::x86_features::FeatureSelector`. BMI gates are indepen
 of AVX even where their instructions use VEX prefixes. See the [AVX subset](x86-avx-subset.md)
 and [BMI coverage](x86-bmi.md) for instruction forms, lowering choices and limits.
 
+The assembler also accepts ADX (`adx`), SHA (`sha`), XMM VAES
+(`avx,aes`), YMM VAES (`avx,vaes`), XMM VPCLMULQDQ (`avx,pclmulqdq`)
+and YMM VPCLMULQDQ (`avx,vpclmulqdq`). These optional forms have generated
+public `ExtensionOpcode` adapters. They do not add compiler intrinsics or
+instruction-selection rules. See the [extension coverage and feature rules](../tools/x86-isa/README.md#optional-legacyvex-extensions).
+
 ## Design
 
 The existing `keel-asm-ir::Instruction`, generated `Opcode`/`FieldId`, symbolic
