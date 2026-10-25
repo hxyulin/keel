@@ -152,7 +152,8 @@ independent Clang/GNU encoding and relocation witnesses.
 
 CPU-profile constructors are a separate candidate. See the
 [CPU-profile investigation](cpu-profiles.md) for current memberships, legacy
-compatibility behavior and a proposed constructor-only generation increment.
+behavior and a proposed generated profile/dependency model without legacy
+compatibility constraints.
 
 ## Optional legacy/VEX extensions
 
