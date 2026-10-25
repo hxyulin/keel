@@ -1,8 +1,24 @@
-//! Exact long-mode observations, subject to CPL0 or CR4.UMIP=0.
-//! These queries neither configure descriptor state nor imply OS permission.
+//! Long-mode descriptor/status observations and privileged single-operand writes.
+//! Permission, state ownership and fault handling remain caller preconditions.
 use super::*;
 
 impl FunctionCompiler<'_> {
+    pub(super) fn native_system_write(&mut self, id: Intrinsic, args: &[Value]) {
+        let (op, width, pointer) = id.x86_system_write().expect("system write dispatch");
+        let input = self.use_reg(args[0], S0);
+        let operand = if pointer {
+            // The INVLPG operand computes an address; the hardware performs
+            // no data read. The descriptor/status memory forms read directly.
+            asm_arg(sized(memory(r64(input), 0), width))
+        } else {
+            asm_arg(Register {
+                width,
+                ..r64(input)
+            })
+        };
+        self.emit(Opcode::parse(op).unwrap(), [operand]);
+    }
+
     pub(super) fn native_descriptor_query(
         &mut self,
         id: Intrinsic,

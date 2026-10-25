@@ -5,7 +5,9 @@ IDs 717–728 append `x86_in8/16/32`, `x86_out8/16/32`, then the corresponding
 I8/I16/I32; OUT takes an I16 port followed by same-width data and returns void.
 Dynamic forms always use DX. `_imm` requires a literal I16 constant 0..255;
 invalid values are rejected without masking. Each operation transfers exactly
-1, 2, or 4 bytes. No 64-bit or string I/O form is provided.
+1, 2, or 4 bytes; there is no 64-bit scalar form.
+[String port I/O](x86-string-port-io.md) has a separate typed API and state
+contract.
 
 All forms are pinned barriers, including dead IN results: permission faults and
 device effects remain observable. They are baseline x86 (NONE/V1/V2/V3), with

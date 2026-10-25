@@ -84,6 +84,7 @@ mod legacy_x87_images;
 mod loop_align;
 mod owned_x87_stack;
 pub mod linux_syscall;
+pub mod iretq;
 mod packed_pair;
 mod pclmul;
 mod packed_search;
@@ -2579,20 +2580,8 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Intrinsic { id, ref args } if id.x86_port_io().is_some() => {
                 self.native_port_io(id, args, result)
             }
-            InstData::Intrinsic {
-                id: id @ (Intrinsic::X86Lgdt | Intrinsic::X86Lidt),
-                ref args,
-            } => {
-                let input = self.use_reg(args[0], S0);
-                self.emit(
-                    Opcode::parse(if id == Intrinsic::X86Lgdt {
-                        "lgdt"
-                    } else {
-                        "lidt"
-                    })
-                    .unwrap(),
-                    [asm_arg(sized(memory(r64(input), 0), 80))],
-                );
+            InstData::Intrinsic { id, ref args } if id.x86_system_write().is_some() => {
+                self.native_system_write(id, args)
             }
             InstData::Intrinsic { id, ref args } if id.x86_descriptor_query().is_some() => {
                 self.native_descriptor_query(id, args, result)
@@ -2644,12 +2633,25 @@ impl<'a> FunctionCompiler<'a> {
                 id: id @ (Intrinsic::X86AvxVmaskmovdqu | Intrinsic::X86SseMaskmovdqu),
                 ref args,
             } => self.native_byte_mask_store(id, args),
+            InstData::Intrinsic { id, ref args } if id.x86_system_register().is_some() => {
+                self.native_system_register(id, args, result)
+            }
             InstData::Intrinsic {
                 id:
                     id @ (Intrinsic::X86Xgetbv0
                     | Intrinsic::X86Cpuid
                     | Intrinsic::X86Rdtsc
                     | Intrinsic::X86Rdpmc
+                    | Intrinsic::X86Rdmsr
+                    | Intrinsic::X86Wrmsr
+                    | Intrinsic::X86Clts
+                    | Intrinsic::X86Invd
+                    | Intrinsic::X86Wbinvd
+                    | Intrinsic::X86Cli
+                    | Intrinsic::X86Sti
+                    | Intrinsic::X86Hlt
+                    | Intrinsic::X86StiHlt
+                    | Intrinsic::X86Swapgs
                     | Intrinsic::X86Lfence
                     | Intrinsic::X86Sfence
                     | Intrinsic::X86Mfence
@@ -3440,6 +3442,39 @@ impl<'a> FunctionCompiler<'a> {
                 | Intrinsic::X86DivS64
                 | Intrinsic::X86Lgdt
                 | Intrinsic::X86Lidt
+                | Intrinsic::X86Lldt
+                | Intrinsic::X86LldtMem
+                | Intrinsic::X86Ltr
+                | Intrinsic::X86LtrMem
+                | Intrinsic::X86Lmsw
+                | Intrinsic::X86LmswMem
+                | Intrinsic::X86Invlpg
+                | Intrinsic::X86ReadCr0
+                | Intrinsic::X86WriteCr0
+                | Intrinsic::X86ReadCr2
+                | Intrinsic::X86WriteCr2
+                | Intrinsic::X86ReadCr3
+                | Intrinsic::X86WriteCr3
+                | Intrinsic::X86ReadCr4
+                | Intrinsic::X86WriteCr4
+                | Intrinsic::X86ReadCr8
+                | Intrinsic::X86WriteCr8
+                | Intrinsic::X86ReadDr0
+                | Intrinsic::X86WriteDr0
+                | Intrinsic::X86ReadDr1
+                | Intrinsic::X86WriteDr1
+                | Intrinsic::X86ReadDr2
+                | Intrinsic::X86WriteDr2
+                | Intrinsic::X86ReadDr3
+                | Intrinsic::X86WriteDr3
+                | Intrinsic::X86ReadDr4
+                | Intrinsic::X86WriteDr4
+                | Intrinsic::X86ReadDr5
+                | Intrinsic::X86WriteDr5
+                | Intrinsic::X86ReadDr6
+                | Intrinsic::X86WriteDr6
+                | Intrinsic::X86ReadDr7
+                | Intrinsic::X86WriteDr7
                 | Intrinsic::X86Sgdt
                 | Intrinsic::X86Sidt
                 | Intrinsic::X86SldtMem
@@ -3576,6 +3611,16 @@ impl<'a> FunctionCompiler<'a> {
                 | Intrinsic::X86Cpuid
                 | Intrinsic::X86Rdtsc
                 | Intrinsic::X86Rdpmc
+                | Intrinsic::X86Rdmsr
+                | Intrinsic::X86Wrmsr
+                | Intrinsic::X86Clts
+                | Intrinsic::X86Invd
+                | Intrinsic::X86Wbinvd
+                | Intrinsic::X86Cli
+                | Intrinsic::X86Sti
+                | Intrinsic::X86Hlt
+                | Intrinsic::X86StiHlt
+                | Intrinsic::X86Swapgs
                 | Intrinsic::X86X87Ffree0
                 | Intrinsic::X86X87Ffree1
                 | Intrinsic::X86X87Ffree2

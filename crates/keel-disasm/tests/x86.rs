@@ -43,8 +43,20 @@ fn literal_legacy_vex_and_system_witnesses() {
             "lidt tbyte ptr [r12 + r9*4 + 16]",
         ),
         (&[0x0f, 0x01, 0xf8][..], "swapgs"),
+        (&[0x0f, 0x00, 0xd0][..], "lldt ax"),
+        (&[0x41, 0x0f, 0x00, 0xd1][..], "lldt r9w"),
+        (&[0x0f, 0x00, 0xd8][..], "ltr ax"),
+        (&[0x0f, 0x01, 0xf0][..], "lmsw ax"),
+        (&[0x41, 0x0f, 0x01, 0x75, 8][..], "lmsw word ptr [r13 + 8]"),
+        (
+            &[0x43, 0x0f, 0x01, 0x7c, 0x8c, 16][..],
+            "invlpg byte ptr [r12 + r9*4 + 16]",
+        ),
         (&[0x0f, 0x32][..], "rdmsr"),
         (&[0x0f, 0x30][..], "wrmsr"),
+        (&[0xfa][..], "cli"),
+        (&[0xfb][..], "sti"),
+        (&[0xf4][..], "hlt"),
         (&[0x0f, 0x20, 0xc0][..], "mov rax, cr0"),
         (&[0x0f, 0x21, 0xc0][..], "mov rax, dr0"),
         (&[0x45, 0x0f, 0x20, 0xc0][..], "mov r8, cr8"),
@@ -120,5 +132,34 @@ fn arbitrary_short_inputs_are_bounded() {
                 assert!(!instruction.bytes.is_empty() && instruction.bytes.len() <= bytes.len());
             }
         }
+    }
+}
+
+#[test]
+fn privileged_fixed_adapters_and_decoder_share_generated_forms() {
+    use keel_asm_ir::x86::{FixedOpcode, isa};
+
+    // Literal architectural bytes pin the generated fixed adapter and the
+    // form selected by decoding. This checks encoding identity, not execution.
+    for (name, bytes) in [
+        ("rdmsr", &[0x0f, 0x32][..]),
+        ("wrmsr", &[0x0f, 0x30][..]),
+        ("clts", &[0x0f, 0x06][..]),
+        ("invd", &[0x0f, 0x08][..]),
+        ("wbinvd", &[0x0f, 0x09][..]),
+        ("cli", &[0xfa][..]),
+        ("sti", &[0xfb][..]),
+        ("hlt", &[0xf4][..]),
+        ("swapgs", &[0x0f, 0x01, 0xf8][..]),
+        ("iretq", &[0x48, 0xcf][..]),
+    ] {
+        assert_eq!(FixedOpcode::parse(name).unwrap().bytes(), bytes, "{name}");
+        let decoded = decode(bytes, 0).unwrap();
+        assert_eq!(decoded.assembly(), name);
+        assert!(
+            isa::forms(name)
+                .iter()
+                .any(|f| std::ptr::eq(f, decoded.form))
+        );
     }
 }

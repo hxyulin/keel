@@ -45,15 +45,21 @@ register values are promised. RSP is 16-byte aligned immediately before CALL
 page-table setup and the first call. Payload text, rodata, data and BSS are linked
 into the same low-memory image; all unresolved helpers must be supplied. The
 linker and flat-image validator reject an image/BSS beyond the 32 MiB guest
-RAM limit. Payload accesses must also stay within RAM and the identity map.
+RAM limit. Accessed physical memory must stay within guest RAM. The initial
+mapping is an identity map; a payload that installs aliases owns their
+validity and the mappings needed for the harness continuation.
 No ELF executable loader, dynamic linking, TLS, libc or operating system exists.
 
 C bridges should use an existing x86-64 ELF compiler with `-ffreestanding
 -mno-red-zone -mgeneral-regs-only -fno-stack-protector -fno-pic -fno-pie`.
-The generic harness does not initialize FP/SIMD state. Interrupts stay disabled;
-no exception handlers are installed. Payloads must not change execution mode,
-interrupt state or mappings needed by the harness. A fault/reset/triple fault
-fails through the exit/transcript check or timeout; it is not recovered.
+The generic harness does not initialize FP/SIMD state. It enters the payload
+with maskable interrupts disabled and no exception handlers installed. A
+payload that changes event delivery, descriptor tables or mappings must own
+the handlers, stacks and state needed for its entire execution and the harness
+continuation. Return in 64-bit mode with IF and DF clear and the harness's
+code, data and stack still usable. Dedicated IRQ and IRETQ fixtures establish
+their own contexts as described below. A fault/reset/triple fault fails through
+the exit/transcript check or timeout; the generic harness does not recover it.
 
 The multiboot flat image begins at physical/linear `0x100000`; its 32-byte
 address-bearing header and entry/load/BSS bounds are checked after GNU objcopy.
@@ -178,3 +184,129 @@ campaign. `--status` and `--table-loads` are mutually exclusive.
 All eighteen verdicts match under QEMU 11.1.2 TCG on macOS ARM64. See
 [descriptor/status observations](../../docs/x86-descriptor-queries.md#cpl0-selectorstatus-fixture)
 for constants, memory layout and the limits of this emulated evidence.
+
+## MSR campaign
+
+```sh
+KEEL_MSR_EXPORT_DIR="$PWD/target/msr-exports" \
+  cargo test -p keel-codegen --test x86_msr
+python3 suite/x86-cpl0/descriptor_campaign.py --msr \
+  --exports target/msr-exports --timeout 5
+```
+
+This mode requires twelve standard explicit-v1 MSR exports and one forced
+rematerialization export. The bridge checks
+reads and writes of two canonical GS-base MSRs, original input liveness,
+eight additional live values, incoming stack arguments and output canaries.
+A separate constant-index/value function checks constant operands and its
+returned result. The bridge independently checks post-write MSR state and restores both original MSRs
+on normal success or mismatch. The fixture uses no GS-relative accesses or
+SWAPGS. It does not recover from faults.
+
+All thirteen generated variants and an independent assembly reference pass
+under QEMU 11.1.2 TCG on macOS ARM64. Five broken controls must return the
+exact READY/FAIL transcript and exit 35: omitted write, narrow read, wrong
+index, clobbered live value and no observations. All five fail as expected.
+The other campaign modes are mutually exclusive with `--msr`. See
+[raw MSR access](../../docs/x86-msr.md) for the API contract and evidence limits.
+
+## CLTS and cache-control campaign
+
+```sh
+KEEL_CPU_CONTROL_EXPORT_DIR="$PWD/target/cpu-control-exports" \
+  cargo test -p keel-codegen --test x86_privileged_control
+python3 suite/x86-cpl0/descriptor_campaign.py --cpu-control \
+  --exports target/cpu-control-exports --timeout 5
+```
+
+This mode requires exactly twelve v1 exports. It checks CLTS against three
+CR0 states, original integer inputs, incoming stack arguments and a 128-byte
+output with canaries. The generated WBINVD/INVD instructions are adjacent.
+The bridge restores its original CR0 on normal success or mismatch.
+
+All twelve variants and an independent reference pass under QEMU 11.1.2 TCG
+on macOS ARM64. Four controls fail normally with exit 35: omitted CLTS,
+altered CR0.WP, a clobbered live value and no operations. A scope control that
+omits both cache instructions also passes, demonstrating that these state
+checks do not prove physical cache writeback or invalidation. All eighteen
+verdicts match. Faults and timeouts fail the campaign.
+
+`--cpu-control` is mutually exclusive with the other campaign modes. See
+[privileged CPU/cache control](../../docs/x86-privileged-control.md) for the
+contracts and remaining evidence limits.
+
+## LLDT/LTR/LMSW and INVLPG campaigns
+
+```sh
+KEEL_SYSTEM_LOAD_EXPORT_DIR="$PWD/target/system-load-exports" \
+KEEL_INVLPG_EXPORT_DIR="$PWD/target/invlpg-exports" \
+  cargo test -p keel-codegen --test x86_system_write
+python3 suite/x86-cpl0/descriptor_campaign.py --system-loads \
+  --exports target/system-load-exports --timeout 5
+python3 suite/x86-cpl0/descriptor_campaign.py --invlpg \
+  --exports target/invlpg-exports --timeout 5
+```
+
+Each mode accepts exactly twelve v1 exports. The system-load bridge checks
+register and memory mutations against trusted selector/CR0 observations,
+TSS busy bits, original input values and canaries. Its reference passes and
+five controls fail normally, for eighteen expected verdicts.
+
+The INVLPG bridge replaces a 4 KiB mapping after reading its old value. The
+generated invalidation must expose the new value, while the omission control
+must fail. Unmapped and noncanonical address-only calls also return normally.
+An independent reference passes and four controls fail normally, for seventeen
+expected verdicts. Mapping changes are restored on normal success or mismatch.
+
+Both campaigns pass under QEMU 11.1.2 TCG on macOS ARM64. They provide bounded
+emulated evidence, with no native hardware, multicore or exception-resumption
+claim. The modes are mutually exclusive with all other campaign modes. See
+[system mutation/invalidation](../../docs/x86-system-write.md) for seeds,
+contracts and limits.
+
+## Control and debug registers
+
+`--system-registers` runs the 13 exported payload variants, an independent
+assembly reference and five normally returning broken controls. The fixture
+covers CR0/2/3/4/8 and DR0–7, including DR4/5 aliases with DE clear. It checks
+actual hardware state and output values separately, switches CR3 between two
+copies of the same page map, and restores the original state. No breakpoint
+is enabled. See [contracts and finite evidence](../../docs/x86-system-registers.md).
+
+## Interrupt control and HLT resumption
+
+`--interrupt-control` requires GNU objdump (`--objdump`) in addition to the
+usual tools. The guest owns a private GDT/TSS/IDT with an IRQ0 gate on an IST
+stack and a one-shot PIT timer. It checks CLI/STI state, raw HLT resumption and
+an adjacent STI;HLT pair entered with IF clear and an IRQ already pending.
+Eight wide values and canaries check the compiled continuation.
+
+Positive transcripts include two fixed-format RIP records between READY and
+PASS. The host binds them to independently decoded HLT fall-through addresses;
+the pair also requires adjacent STI. This mode rejects a skipped halt even if
+it races the timer and returns a complete report. A negative control must
+return normally with exact READY/FAIL and exit 35, or with a well-formed
+success report whose HLT evidence is rejected. Faults, malformed transcripts,
+tool errors and timeouts never satisfy a negative. Existing modes keep their
+previous exact transcript and exit checks. See
+[contracts, observation rules and limits](../../docs/x86-interrupt-control.md).
+
+## GS exchange
+
+`--swapgs` runs twelve generated payloads, an independent reference and six
+normally returning broken controls. It checks both base MSRs, selector zero
+and 16, independent GS-relative reads, round trips, wide canonical bases,
+eight live SSA values and canaries. The bridge restores the original selector
+and both base MSRs. IF stays clear. See
+[contracts and finite evidence](../../docs/x86-swapgs.md).
+
+## Owned IRETQ return
+
+`--iretq` consumes twelve compiled caller objects plus `iretq-adapter.o`. Each
+positive runs two terminal returns, restoring all fifteen GPRs onto separate
+CPL0 and CPL3 stacks, with high canonical RIP/RSP at CPL3. An independent reference and seven normally failing
+controls check registers, selectors, flags, stack installation, image guards
+and caller liveness. A private DPL3 gate/TSS returns to the trusted verifier.
+The fixture temporarily grants user access to its shared low/high mappings;
+it observes privilege changes without claiming isolation. See the
+[public image and terminal call contract](../../docs/x86-iretq.md).

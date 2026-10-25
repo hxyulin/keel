@@ -1,0 +1,54 @@
+func @msr_observe(ptr,i32,i64,i64,i64,i64,i64,i64,i64,i64,i64) {
+entry(v0:ptr,v1:i32,v2:i64,v3:i64,v4:i64,v5:i64,v6:i64,v7:i64,v8:i64,v9:i64,v10:i64):
+ v11 = intrinsic x86_rdmsr(v1)
+ intrinsic x86_wrmsr(v1,v2)
+ v12 = intrinsic x86_rdmsr(v1)
+ v13 = intrinsic x86_rdmsr(v1)
+ v14 = uext.i64 v1
+ v15 = iconst.i64 8
+ v16 = ptradd v0,v15
+ store align 1 v11,v16
+ v17 = iconst.i64 16
+ v18 = ptradd v0,v17
+ store align 1 v12,v18
+ v19 = iconst.i64 24
+ v20 = ptradd v0,v19
+ store align 1 v2,v20
+ v21 = iconst.i64 32
+ v22 = ptradd v0,v21
+ store align 1 v14,v22
+ v23 = iconst.i64 40
+ v24 = ptradd v0,v23
+ store align 1 v3,v24
+ v25 = iconst.i64 48
+ v26 = ptradd v0,v25
+ store align 1 v4,v26
+ v27 = iconst.i64 56
+ v28 = ptradd v0,v27
+ store align 1 v5,v28
+ v29 = iconst.i64 64
+ v30 = ptradd v0,v29
+ store align 1 v6,v30
+ v31 = iconst.i64 72
+ v32 = ptradd v0,v31
+ store align 1 v7,v32
+ v33 = iconst.i64 80
+ v34 = ptradd v0,v33
+ store align 1 v8,v34
+ v35 = iconst.i64 88
+ v36 = ptradd v0,v35
+ store align 1 v9,v36
+ v37 = iconst.i64 96
+ v38 = ptradd v0,v37
+ store align 1 v10,v38
+ return
+}
+
+func @msr_constant()->i64 {
+entry:
+ v0 = iconst.i32 3221225730
+ v1 = iconst.i64 95075992133360
+ intrinsic x86_wrmsr(v0,v1)
+ v2 = intrinsic x86_rdmsr(v0)
+ return v2
+}

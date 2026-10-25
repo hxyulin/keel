@@ -1230,6 +1230,39 @@ fn is_call(func: &Function, data: &InstData) -> bool {
             | Intrinsic::X86DivS64
             | Intrinsic::X86Lgdt
             | Intrinsic::X86Lidt
+            | Intrinsic::X86Lldt
+            | Intrinsic::X86LldtMem
+            | Intrinsic::X86Ltr
+            | Intrinsic::X86LtrMem
+            | Intrinsic::X86Lmsw
+            | Intrinsic::X86LmswMem
+            | Intrinsic::X86Invlpg
+            | Intrinsic::X86ReadCr0
+            | Intrinsic::X86WriteCr0
+            | Intrinsic::X86ReadCr2
+            | Intrinsic::X86WriteCr2
+            | Intrinsic::X86ReadCr3
+            | Intrinsic::X86WriteCr3
+            | Intrinsic::X86ReadCr4
+            | Intrinsic::X86WriteCr4
+            | Intrinsic::X86ReadCr8
+            | Intrinsic::X86WriteCr8
+            | Intrinsic::X86ReadDr0
+            | Intrinsic::X86WriteDr0
+            | Intrinsic::X86ReadDr1
+            | Intrinsic::X86WriteDr1
+            | Intrinsic::X86ReadDr2
+            | Intrinsic::X86WriteDr2
+            | Intrinsic::X86ReadDr3
+            | Intrinsic::X86WriteDr3
+            | Intrinsic::X86ReadDr4
+            | Intrinsic::X86WriteDr4
+            | Intrinsic::X86ReadDr5
+            | Intrinsic::X86WriteDr5
+            | Intrinsic::X86ReadDr6
+            | Intrinsic::X86WriteDr6
+            | Intrinsic::X86ReadDr7
+            | Intrinsic::X86WriteDr7
             | Intrinsic::X86Sgdt
             | Intrinsic::X86Sidt
             | Intrinsic::X86SldtMem
@@ -1367,6 +1400,16 @@ fn is_call(func: &Function, data: &InstData) -> bool {
             | Intrinsic::X86Cpuid
             | Intrinsic::X86Rdtsc
             | Intrinsic::X86Rdpmc
+            | Intrinsic::X86Rdmsr
+            | Intrinsic::X86Wrmsr
+            | Intrinsic::X86Clts
+            | Intrinsic::X86Invd
+            | Intrinsic::X86Wbinvd
+            | Intrinsic::X86Cli
+            | Intrinsic::X86Sti
+            | Intrinsic::X86Hlt
+            | Intrinsic::X86StiHlt
+            | Intrinsic::X86Swapgs
             | Intrinsic::X86X87Ffree0
             | Intrinsic::X86X87Ffree1
             | Intrinsic::X86X87Ffree2
@@ -4039,6 +4082,39 @@ impl<'a> FunctionCompiler<'a> {
                 | Intrinsic::X86DivS64
                 | Intrinsic::X86Lgdt
                 | Intrinsic::X86Lidt
+                | Intrinsic::X86Lldt
+                | Intrinsic::X86LldtMem
+                | Intrinsic::X86Ltr
+                | Intrinsic::X86LtrMem
+                | Intrinsic::X86Lmsw
+                | Intrinsic::X86LmswMem
+                | Intrinsic::X86Invlpg
+                | Intrinsic::X86ReadCr0
+                | Intrinsic::X86WriteCr0
+                | Intrinsic::X86ReadCr2
+                | Intrinsic::X86WriteCr2
+                | Intrinsic::X86ReadCr3
+                | Intrinsic::X86WriteCr3
+                | Intrinsic::X86ReadCr4
+                | Intrinsic::X86WriteCr4
+                | Intrinsic::X86ReadCr8
+                | Intrinsic::X86WriteCr8
+                | Intrinsic::X86ReadDr0
+                | Intrinsic::X86WriteDr0
+                | Intrinsic::X86ReadDr1
+                | Intrinsic::X86WriteDr1
+                | Intrinsic::X86ReadDr2
+                | Intrinsic::X86WriteDr2
+                | Intrinsic::X86ReadDr3
+                | Intrinsic::X86WriteDr3
+                | Intrinsic::X86ReadDr4
+                | Intrinsic::X86WriteDr4
+                | Intrinsic::X86ReadDr5
+                | Intrinsic::X86WriteDr5
+                | Intrinsic::X86ReadDr6
+                | Intrinsic::X86WriteDr6
+                | Intrinsic::X86ReadDr7
+                | Intrinsic::X86WriteDr7
                 | Intrinsic::X86Sgdt
                 | Intrinsic::X86Sidt
                 | Intrinsic::X86SldtMem
@@ -4175,6 +4251,16 @@ impl<'a> FunctionCompiler<'a> {
                 | Intrinsic::X86Cpuid
                 | Intrinsic::X86Rdtsc
                 | Intrinsic::X86Rdpmc
+                | Intrinsic::X86Rdmsr
+                | Intrinsic::X86Wrmsr
+                | Intrinsic::X86Clts
+                | Intrinsic::X86Invd
+                | Intrinsic::X86Wbinvd
+                | Intrinsic::X86Cli
+                | Intrinsic::X86Sti
+                | Intrinsic::X86Hlt
+                | Intrinsic::X86StiHlt
+                | Intrinsic::X86Swapgs
                 | Intrinsic::X86X87Ffree0
                 | Intrinsic::X86X87Ffree1
                 | Intrinsic::X86X87Ffree2

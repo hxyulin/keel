@@ -904,6 +904,55 @@ pub enum Intrinsic {
     // Privileged long-mode descriptor-table loads, append-only IDs 774..775.
     X86Lgdt,
     X86Lidt,
+    // Raw privileged MSR access, append-only IDs 776..777.
+    X86Rdmsr,
+    X86Wrmsr,
+    // Baseline privileged CPU/cache control, append-only IDs 778..780.
+    X86Clts,
+    X86Invd,
+    X86Wbinvd,
+    // Descriptor/status mutation and address invalidation, IDs 781..787.
+    X86Lldt,
+    X86LldtMem,
+    X86Ltr,
+    X86LtrMem,
+    X86Lmsw,
+    X86LmswMem,
+    X86Invlpg,
+    // Privileged system register access, append-only IDs 788..813.
+    X86ReadCr0,
+    X86WriteCr0,
+    X86ReadCr2,
+    X86WriteCr2,
+    X86ReadCr3,
+    X86WriteCr3,
+    X86ReadCr4,
+    X86WriteCr4,
+    X86ReadCr8,
+    X86WriteCr8,
+    X86ReadDr0,
+    X86WriteDr0,
+    X86ReadDr1,
+    X86WriteDr1,
+    X86ReadDr2,
+    X86WriteDr2,
+    X86ReadDr3,
+    X86WriteDr3,
+    X86ReadDr4,
+    X86WriteDr4,
+    X86ReadDr5,
+    X86WriteDr5,
+    X86ReadDr6,
+    X86WriteDr6,
+    X86ReadDr7,
+    X86WriteDr7,
+    // Interrupt control and adjacent enable/halt, append-only IDs 814..817.
+    X86Cli,
+    X86Sti,
+    X86Hlt,
+    X86StiHlt,
+    // Raw long-mode GS-base exchange, append-only ID 818.
+    X86Swapgs,
 }
 
 pub struct IntrinsicInfo {
@@ -915,7 +964,7 @@ pub struct IntrinsicInfo {
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 776] = [
+    pub const ALL: [Intrinsic; 819] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -1692,6 +1741,49 @@ impl Intrinsic {
         Intrinsic::X86Aeskeygenassist128,
         Intrinsic::X86Lgdt,
         Intrinsic::X86Lidt,
+        Intrinsic::X86Rdmsr,
+        Intrinsic::X86Wrmsr,
+        Intrinsic::X86Clts,
+        Intrinsic::X86Invd,
+        Intrinsic::X86Wbinvd,
+        Intrinsic::X86Lldt,
+        Intrinsic::X86LldtMem,
+        Intrinsic::X86Ltr,
+        Intrinsic::X86LtrMem,
+        Intrinsic::X86Lmsw,
+        Intrinsic::X86LmswMem,
+        Intrinsic::X86Invlpg,
+        Intrinsic::X86ReadCr0,
+        Intrinsic::X86WriteCr0,
+        Intrinsic::X86ReadCr2,
+        Intrinsic::X86WriteCr2,
+        Intrinsic::X86ReadCr3,
+        Intrinsic::X86WriteCr3,
+        Intrinsic::X86ReadCr4,
+        Intrinsic::X86WriteCr4,
+        Intrinsic::X86ReadCr8,
+        Intrinsic::X86WriteCr8,
+        Intrinsic::X86ReadDr0,
+        Intrinsic::X86WriteDr0,
+        Intrinsic::X86ReadDr1,
+        Intrinsic::X86WriteDr1,
+        Intrinsic::X86ReadDr2,
+        Intrinsic::X86WriteDr2,
+        Intrinsic::X86ReadDr3,
+        Intrinsic::X86WriteDr3,
+        Intrinsic::X86ReadDr4,
+        Intrinsic::X86WriteDr4,
+        Intrinsic::X86ReadDr5,
+        Intrinsic::X86WriteDr5,
+        Intrinsic::X86ReadDr6,
+        Intrinsic::X86WriteDr6,
+        Intrinsic::X86ReadDr7,
+        Intrinsic::X86WriteDr7,
+        Intrinsic::X86Cli,
+        Intrinsic::X86Sti,
+        Intrinsic::X86Hlt,
+        Intrinsic::X86StiHlt,
+        Intrinsic::X86Swapgs,
     ];
 
     pub fn info(self) -> IntrinsicInfo {
@@ -1779,6 +1871,51 @@ impl Intrinsic {
             Intrinsic::X86RepOuts8OwnedTerminal => ("x86_rep_outs8_owned_terminal", &[Type::I64, Type::I16, Type::Ptr, Type::I64], &[Type::Ptr, Type::I64, Type::I64, Type::I64], false),
             Intrinsic::X86RepOuts16OwnedTerminal => ("x86_rep_outs16_owned_terminal", &[Type::I64, Type::I16, Type::Ptr, Type::I64], &[Type::Ptr, Type::I64, Type::I64, Type::I64], false),
             Intrinsic::X86RepOuts32OwnedTerminal => ("x86_rep_outs32_owned_terminal", &[Type::I64, Type::I16, Type::Ptr, Type::I64], &[Type::Ptr, Type::I64, Type::I64, Type::I64], false),
+            Intrinsic::X86Lldt => ("x86_lldt", &[Type::I16], &[], false),
+            Intrinsic::X86LldtMem => ("x86_lldt_mem", &[Type::Ptr], &[], false),
+            Intrinsic::X86Ltr => ("x86_ltr", &[Type::I16], &[], false),
+            Intrinsic::X86LtrMem => ("x86_ltr_mem", &[Type::Ptr], &[], false),
+            Intrinsic::X86Lmsw => ("x86_lmsw", &[Type::I16], &[], false),
+            Intrinsic::X86LmswMem => ("x86_lmsw_mem", &[Type::Ptr], &[], false),
+            Intrinsic::X86Invlpg => ("x86_invlpg", &[Type::Ptr], &[], false),
+            Intrinsic::X86Cli => ("x86_cli", &[], &[], false),
+            Intrinsic::X86Sti => ("x86_sti", &[], &[], false),
+            Intrinsic::X86Hlt => ("x86_hlt", &[], &[], false),
+            Intrinsic::X86StiHlt => ("x86_sti_hlt", &[], &[], false),
+            Intrinsic::X86Swapgs => ("x86_swapgs", &[], &[], false),
+
+            Intrinsic::X86ReadCr0 => ("x86_read_cr0", &[], &[Type::I64], false),
+            Intrinsic::X86WriteCr0 => ("x86_write_cr0", &[Type::I64], &[], false),
+            Intrinsic::X86ReadCr2 => ("x86_read_cr2", &[], &[Type::I64], false),
+            Intrinsic::X86WriteCr2 => ("x86_write_cr2", &[Type::I64], &[], false),
+            Intrinsic::X86ReadCr3 => ("x86_read_cr3", &[], &[Type::I64], false),
+            Intrinsic::X86WriteCr3 => ("x86_write_cr3", &[Type::I64], &[], false),
+            Intrinsic::X86ReadCr4 => ("x86_read_cr4", &[], &[Type::I64], false),
+            Intrinsic::X86WriteCr4 => ("x86_write_cr4", &[Type::I64], &[], false),
+            Intrinsic::X86ReadCr8 => ("x86_read_cr8", &[], &[Type::I64], false),
+            Intrinsic::X86WriteCr8 => ("x86_write_cr8", &[Type::I64], &[], false),
+            Intrinsic::X86ReadDr0 => ("x86_read_dr0", &[], &[Type::I64], false),
+            Intrinsic::X86WriteDr0 => ("x86_write_dr0", &[Type::I64], &[], false),
+            Intrinsic::X86ReadDr1 => ("x86_read_dr1", &[], &[Type::I64], false),
+            Intrinsic::X86WriteDr1 => ("x86_write_dr1", &[Type::I64], &[], false),
+            Intrinsic::X86ReadDr2 => ("x86_read_dr2", &[], &[Type::I64], false),
+            Intrinsic::X86WriteDr2 => ("x86_write_dr2", &[Type::I64], &[], false),
+            Intrinsic::X86ReadDr3 => ("x86_read_dr3", &[], &[Type::I64], false),
+            Intrinsic::X86WriteDr3 => ("x86_write_dr3", &[Type::I64], &[], false),
+            Intrinsic::X86ReadDr4 => ("x86_read_dr4", &[], &[Type::I64], false),
+            Intrinsic::X86WriteDr4 => ("x86_write_dr4", &[Type::I64], &[], false),
+            Intrinsic::X86ReadDr5 => ("x86_read_dr5", &[], &[Type::I64], false),
+            Intrinsic::X86WriteDr5 => ("x86_write_dr5", &[Type::I64], &[], false),
+            Intrinsic::X86ReadDr6 => ("x86_read_dr6", &[], &[Type::I64], false),
+            Intrinsic::X86WriteDr6 => ("x86_write_dr6", &[Type::I64], &[], false),
+            Intrinsic::X86ReadDr7 => ("x86_read_dr7", &[], &[Type::I64], false),
+            Intrinsic::X86WriteDr7 => ("x86_write_dr7", &[Type::I64], &[], false),
+
+            Intrinsic::X86Clts => ("x86_clts", &[], &[], false),
+            Intrinsic::X86Invd => ("x86_invd", &[], &[], false),
+            Intrinsic::X86Wbinvd => ("x86_wbinvd", &[], &[], false),
+            Intrinsic::X86Rdmsr => ("x86_rdmsr", &[Type::I32], &[Type::I64], false),
+            Intrinsic::X86Wrmsr => ("x86_wrmsr", &[Type::I32, Type::I64], &[], false),
             Intrinsic::X86Rdpmc => ("x86_rdpmc", &[Type::I32], &[Type::I64], false),
             Intrinsic::X86X87Ffree0 => ("x86_x87_ffree0", &[], &[], false),
             Intrinsic::X86X87Ffree1 => ("x86_x87_ffree1", &[], &[], false),
@@ -6975,6 +7112,57 @@ impl Intrinsic {
         })
     }
 
+    /// Raw long-mode system register access: (register, write). Callers own
+    /// privilege, valid bit patterns and continued compiled-code execution.
+    pub fn x86_system_register(self) -> Option<(&'static str, bool)> {
+        Some(match self {
+            Self::X86ReadCr0 => ("cr0", false),
+            Self::X86WriteCr0 => ("cr0", true),
+            Self::X86ReadCr2 => ("cr2", false),
+            Self::X86WriteCr2 => ("cr2", true),
+            Self::X86ReadCr3 => ("cr3", false),
+            Self::X86WriteCr3 => ("cr3", true),
+            Self::X86ReadCr4 => ("cr4", false),
+            Self::X86WriteCr4 => ("cr4", true),
+            Self::X86ReadCr8 => ("cr8", false),
+            Self::X86WriteCr8 => ("cr8", true),
+            Self::X86ReadDr0 => ("dr0", false),
+            Self::X86WriteDr0 => ("dr0", true),
+            Self::X86ReadDr1 => ("dr1", false),
+            Self::X86WriteDr1 => ("dr1", true),
+            Self::X86ReadDr2 => ("dr2", false),
+            Self::X86WriteDr2 => ("dr2", true),
+            Self::X86ReadDr3 => ("dr3", false),
+            Self::X86WriteDr3 => ("dr3", true),
+            Self::X86ReadDr4 => ("dr4", false),
+            Self::X86WriteDr4 => ("dr4", true),
+            Self::X86ReadDr5 => ("dr5", false),
+            Self::X86WriteDr5 => ("dr5", true),
+            Self::X86ReadDr6 => ("dr6", false),
+            Self::X86WriteDr6 => ("dr6", true),
+            Self::X86ReadDr7 => ("dr7", false),
+            Self::X86WriteDr7 => ("dr7", true),
+            _ => return None,
+        })
+    }
+
+    /// Single-operand privileged operations: (opcode, encoded operand width,
+    /// pointer form). INVLPG's m8 is an address-only operand, not a byte read.
+    pub fn x86_system_write(self) -> Option<(&'static str, u16, bool)> {
+        Some(match self {
+            Self::X86Lgdt => ("lgdt", 80, true),
+            Self::X86Lidt => ("lidt", 80, true),
+            Self::X86Lldt => ("lldt", 16, false),
+            Self::X86LldtMem => ("lldt", 16, true),
+            Self::X86Ltr => ("ltr", 16, false),
+            Self::X86LtrMem => ("ltr", 16, true),
+            Self::X86Lmsw => ("lmsw", 16, false),
+            Self::X86LmswMem => ("lmsw", 16, true),
+            Self::X86Invlpg => ("invlpg", 8, true),
+            _ => return None,
+        })
+    }
+
     /// (opcode, operand bits, exact write bytes; zero means register).
     /// Long mode only, CPL0 or CR4.UMIP clear; no feature-bit implication.
     pub fn x86_descriptor_query(self) -> Option<(&'static str, u16, usize)> {
@@ -7116,11 +7304,22 @@ impl Intrinsic {
                 | Self::X86Cpuid
                 | Self::X86Rdtsc
                 | Self::X86Rdpmc
+                | Self::X86Rdmsr
+                | Self::X86Wrmsr
+                | Self::X86Clts
+                | Self::X86Invd
+                | Self::X86Wbinvd
+                | Self::X86Cli
+                | Self::X86Sti
+                | Self::X86Hlt
+                | Self::X86StiHlt
+                | Self::X86Swapgs
                 | Self::X86Lfence
                 | Self::X86Sfence
                 | Self::X86Mfence
                 | Self::X86Pause
-        ) || matches!(self, Self::X86Lgdt | Self::X86Lidt)
+        ) || self.x86_system_register().is_some()
+            || self.x86_system_write().is_some()
             || self.x86_descriptor_query().is_some()
             || self.x86_selector_query().is_some()
             || self.x86_port_io().is_some()

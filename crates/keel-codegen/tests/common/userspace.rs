@@ -2,7 +2,7 @@
 use keel_asm_ir::x86::{CpuLevel, Features};
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
-    regalloc::{AllocationTier, Pools},
+    regalloc::{AllocationTier, Pools, RegisterAllocator},
     x86_features::FeatureSelector,
 };
 const EMPTY: Pools = Pools {
@@ -19,6 +19,16 @@ pub fn compile(
     a: AllocationTier,
     spilled: bool,
 ) -> (Vec<u8>, String) {
+    compile_with_allocator(source, level, s, &a, spilled)
+}
+
+pub fn compile_with_allocator(
+    source: &str,
+    level: CpuLevel,
+    s: SelectionTier,
+    allocator: &dyn RegisterAllocator,
+    spilled: bool,
+) -> (Vec<u8>, String) {
     let mut module = keel_ir::parse(source).unwrap();
     keel_ir::verify_module(&module).unwrap();
     if s == SelectionTier::Full {
@@ -31,7 +41,7 @@ pub fn compile(
     };
     let pipeline = CodegenPipeline {
         selector: &selector,
-        allocator: &a,
+        allocator,
     };
     let pools = if spilled {
         &EMPTY
