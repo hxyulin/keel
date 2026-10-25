@@ -65,6 +65,13 @@ the preprocessed file; `keel`: `keel cc`, then Clang assembles), and its
 `flags`. The top-level `baseline` is what benchmark ratios are computed against
 (`clang-O0`), and `test` is what `cargo suite test` builds unless given `-c`.
 
+All registered Keel configurations declare `--link-intent executable`, because
+these workloads link executable programs. This enables strong-definition body
+inlining in Full without source annotations. The platform benchmark runner uses
+the same intent for its built-in Keel configurations; custom candidate flags
+remain explicit. Results from before this policy change used different binding
+assumptions, so retain the configuration flags when comparing runs.
+
 Commonly used configurations:
 
 | Configuration | Meaning |

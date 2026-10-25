@@ -282,3 +282,18 @@ remains private-only. Weak and weak-ODR bodies remain ineligible even if IR carr
 the attribute. The attribute round-trips through IR and synchronizes with named
 callee declarations. It does not enable exact-binding call summaries, ABI
 privatization or inference of alias, capture or memory contracts.
+
+### Intended final link output
+
+`keel cc --link-intent executable` declares that the compiled code will go into
+an executable. It selects `-fno-semantic-interposition` behavior by default.
+`--link-intent shared` retains semantic interposition for public definitions.
+Without either intent, reusable C outputs retain the conservative default.
+An explicit `-fsemantic-interposition` or `-fno-semantic-interposition` overrides
+the intent's default regardless of argument order. Repeated intent flags use
+the last value. Weak definitions and imported functions retain their guards.
+
+Intent describes the eventual link destination, not the immediate output format.
+The command still emits assembly, IR or an object as requested; it does not link
+an executable or implement PIC/PIE relocation modes. These intent flags are native
+C compilation options and are rejected for Wasm and other subcommands.

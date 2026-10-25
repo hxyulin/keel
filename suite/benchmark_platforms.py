@@ -258,9 +258,9 @@ def main():
         assert args.keel
         report['apps'] = {a: report['apps'][a] for a in chosen_apps}
         keel = str(args.keel.resolve())
-        configs = {'keel-none': ('keel', keel, []),
-                   'keel-fast': ('keel', keel, ['--opt-tier', 'fast', '--isel-tier', 'full', '--regalloc', 'full']),
-                   'keel-full': ('keel', keel, ['-O']),
+        configs = {'keel-none': ('keel', keel, ['--link-intent', 'executable']),
+                   'keel-fast': ('keel', keel, ['--link-intent', 'executable', '--opt-tier', 'fast', '--isel-tier', 'full', '--regalloc', 'full']),
+                   'keel-full': ('keel', keel, ['--link-intent', 'executable', '-O']),
                    'clang-O0': ('cc', clang, ['-O0']), 'clang-O2': ('cc', clang, ['-O2'])}
         if gcc:
             configs.update({'gcc-O0': ('cc', gcc, ['-O0']), 'gcc-O2': ('cc', gcc, ['-O2'])})

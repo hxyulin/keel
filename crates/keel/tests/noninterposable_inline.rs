@@ -341,16 +341,20 @@ fn c_binding_mode_preserves_native_abi_effects_and_faults() {
     )
     .unwrap();
     fs::write(dir.join("oracle.c"), ORACLE).unwrap();
-    for (index, flag) in ["-fsemantic-interposition", "-fno-semantic-interposition"]
-        .into_iter()
-        .enumerate()
+    for (index, flags) in [
+        vec!["-fsemantic-interposition"],
+        vec!["-fno-semantic-interposition"],
+        vec!["--link-intent", "executable"],
+        vec!["--link-intent", "shared"],
+    ]
+    .into_iter()
+    .enumerate()
     {
         let obj = format!("source-{index}.o");
         let exe = format!("oracle-{index}");
-        keel(
-            &dir,
-            &["cc", "-O", flag, "--emit-object", "source.c", "-o", &obj],
-        );
+        let mut args = vec!["cc", "-O", "--emit-object", "source.c", "-o", &obj];
+        args.extend(flags);
+        keel(&dir, &args);
         command(Command::new("clang").current_dir(&dir).args([
             "-O2",
             "-fno-strict-aliasing",
@@ -453,4 +457,93 @@ fn semantic_mode_keeps_interposed_function_addresses() {
             .current_dir(&dir)
             .env("LD_PRELOAD", dir.join("override.so")),
     );
+}
+
+#[test]
+fn executable_link_intent_selects_binding_without_changing_output_kind() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("c-link-intent");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("source.i"), "int helper(int x) { return x+1; } __attribute__((weak)) int weak_helper(int x) { return x+2; } int caller(int x) { return helper(x)+weak_helper(x); }").unwrap();
+    for target in [
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+    ] {
+        for (flags, inlined) in [
+            (vec!["--link-intent", "executable"], true),
+            (vec!["--link-intent", "shared"], false),
+            (
+                vec!["--link-intent", "executable", "-fsemantic-interposition"],
+                false,
+            ),
+            (
+                vec!["-fsemantic-interposition", "--link-intent", "executable"],
+                false,
+            ),
+            (
+                vec!["--link-intent", "shared", "-fno-semantic-interposition"],
+                true,
+            ),
+            (
+                vec!["--link-intent", "executable", "--link-intent", "shared"],
+                false,
+            ),
+            (
+                vec!["--link-intent", "shared", "--link-intent", "executable"],
+                true,
+            ),
+        ] {
+            let mut args = vec!["cc", "--target", target, "-O", "--emit-ir", "source.i"];
+            args.extend(flags.clone());
+            let ir = keel(&dir, &args);
+            assert_eq!(function(&ir, "caller").contains("call @helper("), !inlined);
+            assert!(function(&ir, "caller").contains("call @weak_helper("));
+            let mut args = vec![
+                "cc",
+                "--target",
+                target,
+                "-O",
+                "--emit-object",
+                "source.i",
+                "-o",
+                "source.o",
+            ];
+            args.extend(flags);
+            keel(&dir, &args);
+            let symbols = global_functions(&dir.join("source.o"));
+            assert!(symbols.iter().any(|s| s.ends_with("helper")));
+            assert!(symbols.iter().any(|s| s.ends_with("caller")));
+        }
+    }
+    for flags in [
+        vec!["cc", "--link-intent"],
+        vec!["cc", "--link-intent", "invalid", "source.i"],
+        vec!["compile", "--link-intent", "executable", "source.i"],
+        vec![
+            "cc",
+            "--target",
+            "wasm32-unknown-unknown",
+            "--link-intent",
+            "executable",
+            "source.i",
+        ],
+        vec![
+            "cc",
+            "--target",
+            "wasm32-unknown-unknown",
+            "--link-intent",
+            "shared",
+            "source.i",
+        ],
+    ] {
+        assert!(
+            !Command::new(env!("CARGO_BIN_EXE_keel"))
+                .current_dir(&dir)
+                .args(flags)
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+    }
 }
