@@ -8,6 +8,8 @@ use std::process::Command;
 
 fn avx() -> Features {
     Features {
+        xsave: true,
+        osxsave: true,
         avx: true,
         ..Features::default()
     }
@@ -94,6 +96,8 @@ fn avx_feature_gating_roundtrips_and_invalid_forms() {
         assert_eq!(
             i.opcode.required_features(),
             Features {
+                xsave: true,
+                osxsave: true,
                 avx: true,
                 ..Features::NONE
             }
@@ -328,6 +332,8 @@ fn avx_matrix_matches_clang_and_gnu() {
         assert_eq!(
             instruction.opcode.required_features(),
             Features {
+                xsave: true,
+                osxsave: true,
                 avx: true,
                 ..Features::NONE
             }

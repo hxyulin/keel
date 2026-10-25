@@ -341,17 +341,19 @@ fn encoding_matches_clang_and_optional_gnu() {
         "aeskeygenassist xmm0,xmm1,-1",
     ] {
         assert!(
-            keel_asm::x86::assemble_object_with_features(line, Features::all()).is_err(),
+            keel_asm::x86::assemble_object_with_features(line, Features::all_known()).is_err(),
             "{line}"
         );
     }
     assert!(
-        keel_asm::x86::assemble_object_with_features("vaesenc xmm0,xmm1,xmm2", Features::all())
-            .is_ok()
+        keel_asm::x86::assemble_object_with_features(
+            "vaesenc xmm0,xmm1,xmm2",
+            Features::all_known()
+        )
+        .is_ok()
     );
     assert!(
-        keel_asm::x86::assemble_object_with_features("vaesenc xmm0,xmm1,xmm2", features())
-            .is_err()
+        keel_asm::x86::assemble_object_with_features("vaesenc xmm0,xmm1,xmm2", features()).is_err()
     );
     for level in [CpuLevel::V1, CpuLevel::V2, CpuLevel::V3] {
         assert!(

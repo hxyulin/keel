@@ -13,7 +13,11 @@ const BMI: Features = Features {
     avx: false,
     bmi1: true,
     bmi2: true,
-    ..Features::legacy()
+    ..Features {
+        popcnt: true,
+        sse41: true,
+        ..Features::NONE
+    }
 };
 fn text(object: &[u8]) -> Vec<u8> {
     object::File::parse(object)
@@ -157,7 +161,13 @@ fn bmi_gating_and_invalid_operands() {
             bmi1: !required.bmi1,
             bmi2: !required.bmi2,
             avx: true,
-            ..Features::legacy()
+            xsave: true,
+            osxsave: true,
+            ..Features {
+                popcnt: true,
+                sse41: true,
+                ..Features::NONE
+            }
         };
         assert!(
             assemble_object_with_features(&source, opposite).is_err(),

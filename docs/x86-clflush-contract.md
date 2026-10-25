@@ -37,7 +37,7 @@ CLFLUSHOPT is mentioned only to state AMD's ordering distinction, not exposed.
 [The psABI Processor Architecture table and runtime-detection rule](https://gitlab.com/x86-psABIs/x86-64-ABI/-/raw/master/x86-64-ABI/low-level-sys-info.tex)
 list no CLFSH in baseline, v2 or v3. Unlisted features require detection even if
 current CPUs implement them together. `Features::clflush`, `+clflush` and
-`-clflush` therefore represent an independent capability. NONE, legacy and all
-three levels leave it false; `Features::all()` includes it explicitly. The
+`-clflush` therefore represent an independent capability. NONE, the default and all
+three levels leave it false; `Features::all_known()` includes it explicitly. The
 compiler and both assembler paths require that bit, so CLFLUSH is never legal
 under a plain `--cpu-level v1`, `v2` or `v3` profile without `+clflush`.

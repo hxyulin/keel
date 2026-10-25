@@ -161,11 +161,13 @@ fn vector_operations_execute_unaligned_edges_masks_and_spills() {
                 }
                 if std::is_x86_feature_detected!("avx") {
                     features.push(Features {
+                        xsave: true,
+                        osxsave: true,
                         avx: true,
                         ..Features::default()
                     });
                     if host_supports_level(CpuLevel::V3) {
-                        features.push(Features::all());
+                        features.push(Features::all_known());
                     }
                 }
                 for features in features {
@@ -238,6 +240,8 @@ fn vector_sysv_arguments_results_calls_tail_calls_varargs_cycles_and_pressure_ex
                 vec![
                     Features::default(),
                     Features {
+                        xsave: true,
+                        osxsave: true,
                         avx: true,
                         ..Features::default()
                     },
@@ -281,6 +285,8 @@ fn packed_avx_selection_preserves_sources_and_removes_two_address_copies() {
         x86::{Opcode, Operand},
     };
     let features = Features {
+        xsave: true,
+        osxsave: true,
         avx: true,
         ..Features::default()
     };
@@ -436,6 +442,8 @@ fn packed_pressure_fixture_emits_with_both_allocators() {
                 true,
                 Features {
                     avx,
+                    xsave: avx,
+                    osxsave: avx,
                     ..Features::default()
                 },
             );
@@ -469,6 +477,8 @@ fn packed_arithmetic_edges_execute_across_calls_and_forced_spills() {
                 println!("packed pressure: allocation={allocation:?} tiny={tiny} avx={avx}");
                 let features = Features {
                     avx,
+                    xsave: avx,
+                    osxsave: avx,
                     ..Features::default()
                 };
                 let (_, program) =

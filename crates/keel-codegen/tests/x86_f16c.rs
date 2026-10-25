@@ -159,7 +159,7 @@ fn f16c_typed_storage_rounding_and_exports() {
 fn f16c_requires_features_and_well_typed_constant_rounding() {
     let s = source();
     let mut minimal = Features::NONE;
-    minimal.avx = true;
+    minimal = minimal.with_features("avx").unwrap();
     minimal.f16c = true;
     object(&s, SelectionTier::Full, AllocationTier::Full, true, minimal).unwrap();
     for missing in [0, 1] {

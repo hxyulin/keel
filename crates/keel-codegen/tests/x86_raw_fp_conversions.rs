@@ -247,7 +247,7 @@ fn raw_fp_conversion_control_and_exports() {
         }
     }
     let mut minimal = Features::NONE;
-    minimal.avx = true;
+    minimal = minimal.with_features("avx").unwrap();
     object(SelectionTier::Full, AllocationTier::Full, true, minimal).unwrap();
     assert!(
         object(

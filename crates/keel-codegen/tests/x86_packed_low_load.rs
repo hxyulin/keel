@@ -1,5 +1,7 @@
 //! Exact low-half vector loads retain the original access and selection contracts.
-use keel_asm::x86::{assemble_object, assemble_program_object};
+use keel_asm::x86::{assemble_object_with_features, assemble_program_object_with_features};
+use keel_asm_ir::x86::Features;
+use keel_codegen::x86_features::FeatureSelector;
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools},
@@ -38,8 +40,14 @@ block0(v0: ptr,v1: ptr):
 fn compile(src: &str, sel: SelectionTier, alloc: AllocationTier, spill: bool) -> (String, Vec<u8>) {
     let m = keel_ir::parse(src).unwrap();
     keel_ir::verify_module(&m).unwrap();
+    // This oracle specifically exercises the SSE4.1 PMOVSXDQ load cover.
+    let features = Features::parse("sse41").unwrap();
+    let selector = FeatureSelector {
+        inner: &sel,
+        features,
+    };
     let p = CodegenPipeline {
-        selector: &sel,
+        selector: &selector,
         allocator: &alloc,
     };
     let pools = if spill {
@@ -49,8 +57,8 @@ fn compile(src: &str, sel: SelectionTier, alloc: AllocationTier, spill: bool) ->
     };
     let text = keel_codegen::x86_64::compile_with_pipeline(&m, pools, &p).unwrap();
     let program = keel_codegen::x86_64::compile_program_with_pipeline(&m, pools, &p).unwrap();
-    let obj = assemble_program_object(&program).unwrap();
-    assert_eq!(assemble_object(&text).unwrap(), obj);
+    let obj = assemble_program_object_with_features(&program, features).unwrap();
+    assert_eq!(assemble_object_with_features(&text, features).unwrap(), obj);
     (text, obj)
 }
 fn direct_loads(text: &str) -> usize {

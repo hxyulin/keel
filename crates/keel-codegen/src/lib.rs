@@ -100,6 +100,11 @@ impl CodegenPipeline<'_> {
             func: "<target>".into(),
             message: message.into(),
         })?;
+        crate::x86_features::validate_target_features(target, self.selector.x86_features())
+            .map_err(|message| CodegenError {
+                func: "<target>".into(),
+                message: message.into(),
+            })?;
         self.selector
             .validate_target(target)
             .map_err(|message| CodegenError {
@@ -514,7 +519,7 @@ pub(crate) fn validate_vector_width_with_memory_policy(
     maximum: u32,
     byte_copy: impl Fn(Option<keel_ir::X86VectorAbi>, &keel_ir::Layout, bool) -> bool,
 ) -> Result<(), CodegenError> {
-    use keel_ir::{EntityRef, Value, InstData};
+    use keel_ir::{EntityRef, InstData, Value};
     let unsupported = |ty: keel_ir::Type| {
         ty.vector()
             .is_some_and(|v| v.bytes() < minimum || v.bytes() > maximum)
@@ -555,18 +560,42 @@ pub(crate) fn validate_vector_width_with_memory_policy(
         }
         for (_, i) in f.layout_insts() {
             let mut bad = None;
-            let data=f.inst_data(i);
-            let sig=match data {
-                InstData::Call {func,..}|InstData::ReturnCall {func,..}|InstData::Invoke {func,..} => Some(&f.callee(*func).sig),
-                InstData::CallIndirect {sig,..}|InstData::ReturnCallIndirect {sig,..} => Some(f.signature(*sig)),
+            let data = f.inst_data(i);
+            let sig = match data {
+                InstData::Call { func, .. }
+                | InstData::ReturnCall { func, .. }
+                | InstData::Invoke { func, .. } => Some(&f.callee(*func).sig),
+                InstData::CallIndirect { sig, .. } | InstData::ReturnCallIndirect { sig, .. } => {
+                    Some(f.signature(*sig))
+                }
                 _ => None,
             };
-            let producer=match data { InstData::AggregateVaArg {x86_vector_abi,..} => *x86_vector_abi, _ => sig.and_then(|s| s.x86_vector_abi) };
-            data.for_each_abi_type_filtered(|ty| { if unsupported(ty) { bad=Some(ty); } }, |layout,index| {
-                !byte_copy(producer,layout,index.is_none_or(|n| sig.is_some_and(|s| n>=s.params.len())))
-            });
+            let producer = match data {
+                InstData::AggregateVaArg { x86_vector_abi, .. } => *x86_vector_abi,
+                _ => sig.and_then(|s| s.x86_vector_abi),
+            };
+            data.for_each_abi_type_filtered(
+                |ty| {
+                    if unsupported(ty) {
+                        bad = Some(ty);
+                    }
+                },
+                |layout, index| {
+                    !byte_copy(
+                        producer,
+                        layout,
+                        index.is_none_or(|n| sig.is_some_and(|s| n >= s.params.len())),
+                    )
+                },
+            );
             if let Some(ty) = bad {
-                return Err(CodegenError { func: f.name.clone(), message: format!("{ty} in aggregate ABI requires a backend with {}-bit SIMD support", ty.bytes().unwrap() * 8) });
+                return Err(CodegenError {
+                    func: f.name.clone(),
+                    message: format!(
+                        "{ty} in aggregate ABI requires a backend with {}-bit SIMD support",
+                        ty.bytes().unwrap() * 8
+                    ),
+                });
             }
         }
         for n in 0..f.num_values() {
@@ -588,23 +617,44 @@ pub(crate) fn validate_vector_width_with_memory_policy(
 /// Until the matching target transport is implemented, never silently discard
 /// an explicit producer ABI, including declarations and indirect signatures.
 pub(crate) fn reject_x86_vector_abi(module: &Module, target: &str) -> Result<(), CodegenError> {
-    for (name, sig) in module.decls.iter().map(|d| (d.name.as_str(), &d.sig)).chain(
-        module.functions.iter().flat_map(|f| {
+    for (name, sig) in module
+        .decls
+        .iter()
+        .map(|d| (d.name.as_str(), &d.sig))
+        .chain(module.functions.iter().flat_map(|f| {
             std::iter::once((f.name.as_str(), &f.sig))
                 .chain(f.callees().map(move |(_, d)| (f.name.as_str(), &d.sig)))
                 .chain(f.signatures().map(move |(_, s)| (f.name.as_str(), s)))
-        }),
-    ) {
+        }))
+    {
         if sig.x86_vector_abi.is_some() {
             return Err(CodegenError {
                 func: name.into(),
-                message: format!("explicit x86 vector ABI transport is not implemented on {target}"),
+                message: format!(
+                    "explicit x86 vector ABI transport is not implemented on {target}"
+                ),
             });
         }
     }
     for f in &module.functions {
-        if f.layout_insts().any(|(_,i)| matches!(f.inst_data(i), keel_ir::InstData::VaArg { x86_vector_abi: Some(_), .. } | keel_ir::InstData::AggregateVaArg { x86_vector_abi: Some(_), .. })) {
-            return Err(CodegenError { func: f.name.clone(), message: format!("explicit x86 vector ABI transport is not implemented on {target}") });
+        if f.layout_insts().any(|(_, i)| {
+            matches!(
+                f.inst_data(i),
+                keel_ir::InstData::VaArg {
+                    x86_vector_abi: Some(_),
+                    ..
+                } | keel_ir::InstData::AggregateVaArg {
+                    x86_vector_abi: Some(_),
+                    ..
+                }
+            )
+        }) {
+            return Err(CodegenError {
+                func: f.name.clone(),
+                message: format!(
+                    "explicit x86 vector ABI transport is not implemented on {target}"
+                ),
+            });
         }
     }
     Ok(())
@@ -612,19 +662,37 @@ pub(crate) fn reject_x86_vector_abi(module: &Module, target: &str) -> Result<(),
 
 /// Reject extended values before reaching scalar SIMD lowering on unsupported targets.
 pub(crate) fn reject_f80(module: &Module, target: &str) -> Result<(), CodegenError> {
-    use keel_ir::{Type, Value, EntityRef};
-    let signature_has_f80 = |sig: &keel_ir::Signature| sig.params.iter().chain(&sig.returns).any(|p| {
-        p.ty == Type::F80 || p.layout().is_some_and(|l| l.leaves().iter().any(|(_, t)| *t == Type::F80))
-    });
-    let error = |name: &str| CodegenError { func: name.into(), message: format!("f80 values and foreign ABI are unsupported on {target}") };
-    for d in &module.decls { if signature_has_f80(&d.sig) { return Err(error(&d.name)); } }
+    use keel_ir::{EntityRef, Type, Value};
+    let signature_has_f80 = |sig: &keel_ir::Signature| {
+        sig.params.iter().chain(&sig.returns).any(|p| {
+            p.ty == Type::F80
+                || p.layout()
+                    .is_some_and(|l| l.leaves().iter().any(|(_, t)| *t == Type::F80))
+        })
+    };
+    let error = |name: &str| CodegenError {
+        func: name.into(),
+        message: format!("f80 values and foreign ABI are unsupported on {target}"),
+    };
+    for d in &module.decls {
+        if signature_has_f80(&d.sig) {
+            return Err(error(&d.name));
+        }
+    }
     for f in &module.functions {
         if signature_has_f80(&f.sig)
             || f.callees().any(|(_, d)| signature_has_f80(&d.sig))
             || f.signatures().any(|(_, s)| signature_has_f80(s))
             || (0..f.num_values()).any(|n| f.value_type(Value::new(n)) == Type::F80)
-            || f.layout_insts().any(|(_, i)| { let mut found = false; f.inst_data(i).for_each_abi_type(|t| found |= t == Type::F80); found })
-        { return Err(error(&f.name)); }
+            || f.layout_insts().any(|(_, i)| {
+                let mut found = false;
+                f.inst_data(i)
+                    .for_each_abi_type(|t| found |= t == Type::F80);
+                found
+            })
+        {
+            return Err(error(&f.name));
+        }
     }
     Ok(())
 }

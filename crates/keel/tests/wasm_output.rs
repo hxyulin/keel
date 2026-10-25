@@ -214,7 +214,7 @@ fn rejected_options_never_load_inputs_or_create_reports() {
         &["--isel-tier", "baseline"],
         &["--isel", "none"],
         &["--tune", "generic"],
-        &["--cpu-level", "legacy"],
+        &["--cpu-level", "v1"],
         &["--target-features", "none"],
         &["--emit-object"],
         &["-g"],

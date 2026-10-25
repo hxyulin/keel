@@ -419,7 +419,11 @@ fn explicit_levels_and_independent_popcount_rounding_gates() {
         v1,
         Features::for_level(CpuLevel::V2),
         Features::for_level(CpuLevel::V3),
-        Features::legacy(),
+        Features {
+            popcnt: true,
+            sse41: true,
+            ..Features::NONE
+        },
         v1.with_features("popcnt").unwrap(),
         v1.with_features("sse41").unwrap(),
     ] {
@@ -436,7 +440,7 @@ fn explicit_levels_and_independent_popcount_rounding_gates() {
         assert_eq!(has("popcnt"), features.popcnt);
         assert_eq!(has("roundss"), features.sse41);
         assert_eq!(has("roundsd"), features.sse41);
-        if features == Features::legacy() {
+        if features.is_empty() {
             let module = keel_ir::parse(&fixture()).unwrap();
             let pipeline = CodegenPipeline {
                 selector: &SelectionTier::Full,

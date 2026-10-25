@@ -5,7 +5,11 @@ fn assemble_object(source: &str) -> Result<Vec<u8>, keel_asm::Error> {
         source,
         Features {
             clflush: true,
-            ..Features::legacy()
+            ..Features {
+                popcnt: true,
+                sse41: true,
+                ..Features::NONE
+            }
         },
     )
 }

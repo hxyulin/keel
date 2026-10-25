@@ -385,3 +385,18 @@ fn invalid_lock_vector_widths_and_controls_stay_explicit() {
         );
     }
 }
+
+#[test]
+fn invalid_manual_feature_sets_are_rejected_on_both_entry_points() {
+    let invalid = Features {
+        avx: true,
+        ..Features::NONE
+    };
+    let mut program = Program::new();
+    program.x86_instruction(Instruction::parse_intel("ret").unwrap());
+    assert!(keel_asm::x86::assemble_object_with_features("ret", invalid).is_err());
+    assert!(keel_asm::x86::assemble_program_object_with_features(&program, invalid).is_err());
+    for source in ["popcnt rax, rcx", "roundsd xmm0, xmm1, 0"] {
+        assert!(assemble_object(source).is_err(), "{source}");
+    }
+}

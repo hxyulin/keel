@@ -3,7 +3,11 @@ use keel_asm_ir::{Item, Program, x86::Instruction};
 use object::{Object, ObjectSection, ObjectSymbol};
 
 fn text(source: &str) -> Vec<u8> {
-    let bytes = assemble_object(source).unwrap();
+    let bytes = keel_asm::x86::assemble_object_with_features(
+        source,
+        keel_asm_ir::x86::Features::parse("popcnt,sse41").unwrap(),
+    )
+    .unwrap();
     let file = object::File::parse(&*bytes).unwrap();
     file.section_by_name(".text")
         .unwrap()
@@ -468,7 +472,9 @@ fn executable_alignment_uses_nops_and_explicit_zero_fill_is_preserved() {
     let code = file.section_by_name(".text").unwrap().data().unwrap();
     assert_eq!(
         &code[..16],
-        &[0x90, 0x66, 0x2e, 0x0f, 0x1f, 0x84, 0, 0, 0, 0, 0, 0x0f, 0x1f, 0x44, 0, 0],
+        &[
+            0x90, 0x66, 0x2e, 0x0f, 0x1f, 0x84, 0, 0, 0, 0, 0, 0x0f, 0x1f, 0x44, 0, 0
+        ],
         "fall-through padding must be executable NOPs"
     );
     assert_eq!(code[16], 0xc3);

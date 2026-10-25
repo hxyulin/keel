@@ -72,7 +72,7 @@ fn effective_features_preserve_128_bit_default_and_schema2_reports() {
             "--cpu-level",
             "v1",
             "--target-features",
-            "+avx2",
+            "+avx2,-avx",
             "-O",
         ])
         .arg(&input)

@@ -199,7 +199,7 @@ fn masked_memory_typed_alias_spill_exports() {
 #[test]
 fn masked_memory_feature_and_operand_validation() {
     let mut f = Features::NONE;
-    f.avx = true;
+    f = f.with_features("avx").unwrap();
     assert!(object(SelectionTier::Baseline, AllocationTier::Full, false, f).is_err());
     let mut m = keel_ir::parse(&source()).unwrap();
     m.functions

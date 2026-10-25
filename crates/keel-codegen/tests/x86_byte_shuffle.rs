@@ -110,7 +110,7 @@ fn byte_shuffle_features_purity_and_encodings() {
     )
     .unwrap();
     f = Features::NONE;
-    f.avx = true;
+    f = f.with_features("avx").unwrap();
     f.xsave = true;
     f.osxsave = true;
     compile(

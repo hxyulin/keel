@@ -1003,7 +1003,7 @@ mod d_tests {
         keel_ir::verify_module(&m).unwrap();
         for features in [
             keel_asm_ir::x86::Features::NONE,
-            keel_asm_ir::x86::Features::all(),
+            keel_asm_ir::x86::Features::all_known(),
         ] {
             for f in &m.functions {
                 let lowered = lower(f, features);

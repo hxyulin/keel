@@ -1,6 +1,6 @@
 //! Immutable optimizer capabilities, independent of a backend or CPU level name.
 /// Accepted value width, complete recipe width, and preferred width are separate.
-/// The feature fingerprint records the effective explicit x86 contract, not the host.
+/// The feature fingerprint records the effective x86 capability set, not the host.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct VectorCapabilities {
     value_bits: u16,

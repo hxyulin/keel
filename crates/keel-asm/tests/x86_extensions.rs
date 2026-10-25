@@ -33,15 +33,20 @@ fn literal_extension_encodings_and_att_scalar_suffixes() {
             &[0xc4, 0xe3, 0x71, 0x44, 0xc2, 17],
         ),
     ] {
-        assert_eq!(assemble(source, Features::all()), expected, "{source}");
+        assert_eq!(
+            assemble(source, Features::all_known()),
+            expected,
+            "{source}"
+        );
     }
     for (att, intel) in [
         ("adcxq %rcx,%rax", "adcx rax,rcx"),
         ("adoxl 8(%r12),%r9d", "adox r9d,dword ptr [r12+8]"),
     ] {
         let bytes =
-            assemble_object_with_syntax_and_features(att, Syntax::Att, Features::all()).unwrap();
-        assert_eq!(text(&bytes), assemble(intel, Features::all()));
+            assemble_object_with_syntax_and_features(att, Syntax::Att, Features::all_known())
+                .unwrap();
+        assert_eq!(text(&bytes), assemble(intel, Features::all_known()));
     }
 }
 
@@ -98,8 +103,8 @@ fn extensions_require_independent_features_and_operand_specific_vector_bits() {
             "{source}"
         );
     }
-    assert!(v1.with_features("vaes").is_err());
-    assert!(v1.with_features("vpclmulqdq").is_err());
+    assert!(v1.with_features("vaes").unwrap().avx);
+    assert!(v1.with_features("vpclmulqdq").unwrap().avx);
 }
 
 #[test]
@@ -119,7 +124,7 @@ fn malformed_extension_operands_are_rejected() {
         "vpclmulqdq xmm0,xmm1,xmm2,256",
     ] {
         assert!(
-            assemble_object_with_features(source, Features::all()).is_err(),
+            assemble_object_with_features(source, Features::all_known()).is_err(),
             "{source}"
         );
     }
@@ -190,13 +195,13 @@ fn exposed_forms_match_clang_and_gnu_and_format_roundtrip() {
         }
     }
     let source = cases.join("\n");
-    let expected = assemble(&source, Features::all());
+    let expected = assemble(&source, Features::all_known());
     let formatted = cases
         .iter()
         .map(|s| Instruction::parse_intel(s).unwrap().to_string())
         .collect::<Vec<_>>()
         .join("\n");
-    assert_eq!(assemble(&formatted, Features::all()), expected);
+    assert_eq!(assemble(&formatted, Features::all_known()), expected);
     let dir = std::env::temp_dir().join(format!("keel-extension-oracles-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     let input = dir.join("input.s");

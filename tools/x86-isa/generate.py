@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 import feature_fields
+import cpu_profiles
 import api_identities
 import registers
 import core_mappings
@@ -382,8 +383,9 @@ def main():
     outputs = {OUTPUT: generate(data), OUTPUT.with_name('v2.rs'): v2_adapters(data, adapters['v2']),
                OUTPUT.with_name('v3.rs'): v3_adapters(data, adapters['v3'] + vex),
                OUTPUT.with_name('fixed.rs'): fixed_adapters(data, adapters['fixed']),
-               OUTPUT.with_name('features.rs'): feature_adapters(data, adapters['feature_opcodes'] + features, policy)}
+               OUTPUT.with_name('features.rs'): feature_adapters(data, adapters['feature_opcodes'] + features, feature_fields.closed_policy(fields, policy))}
     outputs[OUTPUT.with_name('feature_fields.rs')] = feature_source
+    outputs.update(cpu_profiles.outputs(ROOT, OUTPUT, fields))
     for group, name in [('v2', 'V2Opcode'), ('v3', 'V3Opcode'), ('fixed', 'FixedOpcode')]:
         outputs[OUTPUT.with_name(f'{group}_opcodes.rs')] = opcode_identities(name, adapters['identities'][group])
     outputs[OUTPUT.with_name('extension_opcodes.rs')] = opcode_identities('ExtensionOpcode', identities)

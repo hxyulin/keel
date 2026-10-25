@@ -71,7 +71,7 @@ fn source(indices: &[usize]) -> String {
 }
 fn feature_sets() -> Vec<(&'static str, Features, Vec<usize>)> {
     let mut avx = Features::NONE;
-    avx.avx = true;
+    avx = avx.with_features("avx").unwrap();
     let mut avx2 = avx;
     avx2.avx2 = true;
     vec![

@@ -14,7 +14,7 @@ struct Options {
     out_dir: Option<PathBuf>,
     features: TargetFeatures,
     x86_features: keel_asm::x86::Features,
-    x86_level: Option<keel_asm::x86::CpuLevel>,
+    x86_options: crate::x86_options::X86Options,
     x86: bool,
     arm_elf: bool,
     x86_syntax: Option<keel_asm::x86::Syntax>,
@@ -66,28 +66,14 @@ impl Options {
                     });
                 }
                 "--cpu-level" => {
-                    let name = args
-                        .next()
-                        .ok_or("--cpu-level needs v1, v2, v3 or legacy")?;
-                    opts.x86_level = if name == "legacy" {
-                        None
-                    } else {
-                        Some(keel_asm::x86::CpuLevel::parse(name)?)
-                    };
-                    opts.x86_features = opts
-                        .x86_level
-                        .map(keel_asm::x86::Features::for_level)
-                        .unwrap_or_default();
+                    opts.x86_options
+                        .set_level(args.next().ok_or("--cpu-level needs v1, v2 or v3")?)?;
                 }
                 "--target-features" => {
-                    opts.x86_features = opts
-                        .x86_level
-                        .map(keel_asm::x86::Features::for_level)
-                        .unwrap_or_default()
-                        .with_features(
-                            args.next()
-                                .ok_or("--target-features needs avx,bmi1,bmi2 or none")?,
-                        )?;
+                    opts.x86_options.push_features(
+                        args.next()
+                            .ok_or("--target-features needs a feature list or none")?,
+                    );
                 }
                 "--cpu" => {
                     opts.features = match args.next().map(String::as_str) {
@@ -107,13 +93,14 @@ impl Options {
                 _ => opts.inputs.push(arg.into()),
             }
         }
+        opts.x86_features = opts.x86_options.resolve()?;
         if opts.x86 && opts.features != TargetFeatures::default() {
             return Err("--cpu apple-m5 requires the AArch64 assembler target".into());
         }
         if !opts.x86 && opts.x86_syntax.is_some() {
             return Err("--x86-syntax requires the x86 assembler target".into());
         }
-        if !opts.x86 && !opts.x86_features.is_empty() {
+        if !opts.x86 && opts.x86_options.supplied() {
             return Err("x86 target features require the x86 assembler target".into());
         }
         if opts.inputs.is_empty() {
@@ -505,6 +492,26 @@ mod tests {
 #[cfg(test)]
 mod feature_option_tests {
     use super::*;
+    #[test]
+    fn empty_x86_requests_still_reject_foreign_targets() {
+        for flags in [
+            ["--cpu-level", "v1"],
+            ["--target-features", "none"],
+            ["--target-features", ""],
+        ] {
+            let args = [
+                "--target",
+                "aarch64-apple-darwin",
+                flags[0],
+                flags[1],
+                "input.s",
+                "-o",
+                "out.o",
+            ]
+            .map(str::to_owned);
+            assert!(Options::parse(&args).is_err());
+        }
+    }
     #[test]
     fn feature_flags_are_x86_only_and_order_independent() {
         let parse = |target: &str| {

@@ -38,8 +38,11 @@ keel cc --target x86_64-unknown-linux-gnu --cpu-level v1 ...   # or v2, v3
 The library equivalent is `Features::for_level(CpuLevel::V1)` (or `V2`, `V3`)
 through `FeatureSelector`.
 
-- The historical `legacy` default permits POPCNT and SSE4.1, so it is **not** a
-  strict-v1 target.
+- The default is strict v1. POPCNT and SSE4.1 require explicit features or a
+  suitable named profile. No legacy profile remains.
+- Positive modifiers enable prerequisites; repeated feature lists accumulate.
+  `none` clears optional features. See the
+  [generated profile contract](../tools/x86-isa/cpu-profiles.md).
 - `--target-features` modifiers change the contract on purpose. Tuning and
   optimization/allocation tiers do not.
 - CLFSH is optional at every level and never implied.

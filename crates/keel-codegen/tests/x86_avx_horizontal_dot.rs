@@ -250,7 +250,7 @@ fn avx_horizontal_dot_features_controls_and_unused_effects() {
         .is_err()
     );
     let mut f = Features::NONE;
-    f.avx = true;
+    f = f.with_features("avx").unwrap();
     object(SelectionTier::Full, AllocationTier::Full, true, f).unwrap();
     for to in ["iconst.i32 256", "load.i32 align 1 v0"] {
         let bad = source().replace("iconst.i32 255", to);

@@ -82,7 +82,7 @@ fn pclmul_controls_feature_preflight_and_foreign_target() {
             assert!(keel_ir::verify_module(&m).is_err());
             let sel = FeatureSelector {
                 inner: &SelectionTier::Full,
-                features: Features::all(),
+                features: Features::all_known(),
             };
             let p = CodegenPipeline {
                 selector: &sel,
@@ -187,7 +187,7 @@ fn pclmul_assembler_memory_is_m128_for_every_selector() {
             ".globl memory_{c}\nmemory_{c}:\n movdqu xmm0,[rdi]\n pclmulqdq xmm0,xmmword ptr [rsi],{c}\n movdqu [rdx],xmm0\n ret\n"
         );
     }
-    let object = keel_asm::x86::assemble_object_with_features(&asm, Features::all()).unwrap();
+    let object = keel_asm::x86::assemble_object_with_features(&asm, Features::all_known()).unwrap();
     let harness = r#"
 #include <stdint.h>
 #include <sys/mman.h>
@@ -235,6 +235,12 @@ int main(void){
                 .unwrap()
                 .success()
         );
-        assert!(Command::new(exe).current_dir(&d).status().unwrap().success());
+        assert!(
+            Command::new(exe)
+                .current_dir(&d)
+                .status()
+                .unwrap()
+                .success()
+        );
     }
 }

@@ -29,8 +29,6 @@ pub struct Features {
     pub xsave: bool,
     /// OS-enabled XSAVE state management (CPUID.OSXSAVE); AVX also needs XCR0 state at runtime.
     pub osxsave: bool,
-    /// Tracks an explicit target even when its extension set is empty.
-    pub explicit: bool,
 }
 impl Features {
     pub const NONE: Self = Self {
@@ -58,62 +56,195 @@ impl Features {
         movbe: false,
         xsave: false,
         osxsave: false,
-        explicit: false,
     };
-    pub fn contains(self, required: Self) -> bool {
-        (!required.aes || self.aes)
-            && (!required.adx || self.adx)
-            && (!required.sha || self.sha)
-            && (!required.vaes || self.vaes)
-            && (!required.vpclmulqdq || self.vpclmulqdq)
-            && (!required.avx || self.avx)
-            && (!required.bmi1 || self.bmi1)
-            && (!required.bmi2 || self.bmi2)
-            && (!required.clflush || self.clflush)
-            && (!required.pclmulqdq || self.pclmulqdq)
-            && (!required.cx16 || self.cx16)
-            && (!required.lahf_sahf || self.lahf_sahf)
-            && (!required.popcnt || self.popcnt)
-            && (!required.sse3 || self.sse3)
-            && (!required.ssse3 || self.ssse3)
-            && (!required.sse41 || self.sse41)
-            && (!required.sse42 || self.sse42)
-            && (!required.avx2 || self.avx2)
-            && (!required.f16c || self.f16c)
-            && (!required.fma || self.fma)
-            && (!required.lzcnt || self.lzcnt)
-            && (!required.movbe || self.movbe)
-            && (!required.xsave || self.xsave)
-            && (!required.osxsave || self.osxsave)
+    /// Every declared capability, for tests and tooling; not host detection.
+    pub const fn all_known() -> Self { Self {
+        aes: true,
+        adx: true,
+        sha: true,
+        vaes: true,
+        vpclmulqdq: true,
+        avx: true,
+        bmi1: true,
+        bmi2: true,
+        clflush: true,
+        pclmulqdq: true,
+        cx16: true,
+        lahf_sahf: true,
+        popcnt: true,
+        sse3: true,
+        ssse3: true,
+        sse41: true,
+        sse42: true,
+        avx2: true,
+        f16c: true,
+        fma: true,
+        lzcnt: true,
+        movbe: true,
+        xsave: true,
+        osxsave: true,
+    } }
+    /// Stable schema bit IDs, covering every capability.
+    pub const fn fingerprint(self) -> u64 {
+        ((self.aes as u64) << 0)
+            | ((self.adx as u64) << 1)
+            | ((self.sha as u64) << 2)
+            | ((self.vaes as u64) << 3)
+            | ((self.vpclmulqdq as u64) << 4)
+            | ((self.avx as u64) << 5)
+            | ((self.bmi1 as u64) << 6)
+            | ((self.bmi2 as u64) << 7)
+            | ((self.clflush as u64) << 8)
+            | ((self.pclmulqdq as u64) << 9)
+            | ((self.cx16 as u64) << 10)
+            | ((self.lahf_sahf as u64) << 11)
+            | ((self.popcnt as u64) << 12)
+            | ((self.sse3 as u64) << 13)
+            | ((self.ssse3 as u64) << 14)
+            | ((self.sse41 as u64) << 15)
+            | ((self.sse42 as u64) << 16)
+            | ((self.avx2 as u64) << 17)
+            | ((self.f16c as u64) << 18)
+            | ((self.fma as u64) << 19)
+            | ((self.lzcnt as u64) << 20)
+            | ((self.movbe as u64) << 21)
+            | ((self.xsave as u64) << 22)
+            | ((self.osxsave as u64) << 23)
     }
-    fn feature_mut(&mut self, name: &str) -> Option<&mut bool> {
-        Some(match name {
-            "aes" => &mut self.aes,
-            "adx" => &mut self.adx,
-            "sha" => &mut self.sha,
-            "vaes" => &mut self.vaes,
-            "vpclmulqdq" => &mut self.vpclmulqdq,
-            "avx" => &mut self.avx,
-            "bmi1" => &mut self.bmi1,
-            "bmi2" => &mut self.bmi2,
-            "clflush" => &mut self.clflush,
-            "pclmulqdq" | "pclmul" => &mut self.pclmulqdq,
-            "cx16" => &mut self.cx16,
-            "lahf_sahf" => &mut self.lahf_sahf,
-            "popcnt" => &mut self.popcnt,
-            "sse3" => &mut self.sse3,
-            "ssse3" => &mut self.ssse3,
-            "sse41" => &mut self.sse41,
-            "sse42" => &mut self.sse42,
-            "avx2" => &mut self.avx2,
-            "f16c" => &mut self.f16c,
-            "fma" => &mut self.fma,
-            "lzcnt" => &mut self.lzcnt,
-            "movbe" => &mut self.movbe,
-            "xsave" => &mut self.xsave,
-            "osxsave" => &mut self.osxsave,
-            _ => return None,
-        })
+    pub const fn is_empty(self) -> bool { self.fingerprint() == 0 }
+    pub const fn contains(self, required: Self) -> bool {
+        self.fingerprint() & required.fingerprint() == required.fingerprint()
+    }
+    fn set_feature(&mut self, name: &str, enabled: bool) -> bool {
+        match name {
+            "aes" => {
+                self.aes = enabled;
+            }
+            "adx" => {
+                self.adx = enabled;
+            }
+            "sha" => {
+                self.sha = enabled;
+            }
+            "vaes" => {
+                self.vaes = enabled;
+                if enabled {
+                    self.avx = true;
+                    self.xsave = true;
+                    self.osxsave = true;
+                }
+            }
+            "vpclmulqdq" => {
+                self.vpclmulqdq = enabled;
+                if enabled {
+                    self.avx = true;
+                    self.xsave = true;
+                    self.osxsave = true;
+                }
+            }
+            "avx" => {
+                self.avx = enabled;
+                if enabled {
+                    self.xsave = true;
+                    self.osxsave = true;
+                }
+            }
+            "bmi1" => {
+                self.bmi1 = enabled;
+            }
+            "bmi2" => {
+                self.bmi2 = enabled;
+            }
+            "clflush" => {
+                self.clflush = enabled;
+            }
+            "pclmulqdq" | "pclmul" => {
+                self.pclmulqdq = enabled;
+            }
+            "cx16" => {
+                self.cx16 = enabled;
+            }
+            "lahf_sahf" => {
+                self.lahf_sahf = enabled;
+            }
+            "popcnt" => {
+                self.popcnt = enabled;
+            }
+            "sse3" => {
+                self.sse3 = enabled;
+            }
+            "ssse3" => {
+                self.ssse3 = enabled;
+            }
+            "sse41" => {
+                self.sse41 = enabled;
+            }
+            "sse42" => {
+                self.sse42 = enabled;
+            }
+            "avx2" => {
+                self.avx2 = enabled;
+                if enabled {
+                    self.avx = true;
+                    self.xsave = true;
+                    self.osxsave = true;
+                }
+            }
+            "f16c" => {
+                self.f16c = enabled;
+                if enabled {
+                    self.avx = true;
+                    self.xsave = true;
+                    self.osxsave = true;
+                }
+            }
+            "fma" => {
+                self.fma = enabled;
+                if enabled {
+                    self.avx = true;
+                    self.xsave = true;
+                    self.osxsave = true;
+                }
+            }
+            "lzcnt" => {
+                self.lzcnt = enabled;
+            }
+            "movbe" => {
+                self.movbe = enabled;
+            }
+            "xsave" => {
+                self.xsave = enabled;
+            }
+            "osxsave" => {
+                self.osxsave = enabled;
+            }
+            _ => return false,
+        }
+        true
+    }
+    pub fn validate(self) -> Result<(), &'static str> {
+        if self.vaes && !self.avx {
+            return Err("vaes requires avx");
+        }
+        if self.vpclmulqdq && !self.avx {
+            return Err("vpclmulqdq requires avx");
+        }
+        if self.avx && !self.xsave {
+            return Err("avx requires xsave");
+        }
+        if self.avx && !self.osxsave {
+            return Err("avx requires osxsave");
+        }
+        if self.avx2 && !self.avx {
+            return Err("avx2 requires avx");
+        }
+        if self.f16c && !self.avx {
+            return Err("f16c requires avx");
+        }
+        if self.fma && !self.avx {
+            return Err("fma requires avx");
+        }
+        Ok(())
     }
     pub fn names(self) -> impl Iterator<Item = &'static str> {
         [

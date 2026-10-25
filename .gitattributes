@@ -12,3 +12,6 @@
 /crates/keel-codegen/tests/**/cases.json linguist-generated=true
 /crates/keel-codegen/tests/f64x1_recursive/layouts.txt linguist-generated=true
 /docs/v2-coverage/inventory.json linguist-generated=true
+
+# Generated CPU-profile membership documentation.
+/tools/x86-isa/cpu-profile-table.md linguist-generated=true

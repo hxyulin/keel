@@ -100,7 +100,7 @@ fn feature_sets() -> Vec<(&'static str, Features, Vec<usize>)> {
     let mut sse41 = Features::NONE;
     sse41.sse41 = true;
     let mut avx = Features::NONE;
-    avx.avx = true;
+    avx = avx.with_features("avx").unwrap();
     let mut avx2 = avx;
     avx2.avx2 = true;
     [

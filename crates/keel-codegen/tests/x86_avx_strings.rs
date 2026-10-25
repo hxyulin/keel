@@ -447,7 +447,7 @@ fn string_features_controls_lengths_purity_and_foreign_target() {
             .contains("x86 architectural")
     );
     let mut f = Features::NONE;
-    f.avx = true;
+    f = f.with_features("avx").unwrap();
     let selector = FeatureSelector {
         inner: &SelectionTier::Full,
         features: f,

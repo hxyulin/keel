@@ -41,8 +41,11 @@ EVEX, MVEX, XOP and 3DNow records are outside this import.
   forms. Encoding selectors identify exact alternatives. Memory-width and
   family expectations guard compatibility; they do not supply emitted bytes.
 - `feature-fields.json` lists capability fields in public struct and `names()`
-  order, with field docs and CLI aliases. `feature_fields.py` generates the
-  struct, `NONE`, containment, CLI lookup and names iteration.
+  order, with field docs, CLI aliases, stable bit IDs and prerequisites.
+  `feature_fields.py` generates the struct, `NONE`, all-known set, containment,
+  names, fingerprint, enabling closure and strict validation.
+- `cpu-profiles.json` defines cumulative level membership and the v1 default.
+  `cpu_profiles.py` emits constructors, level lookup and the membership table.
 - `registers.json` defines register class IDs, symbolic tags, names, number/width
   domains, parser spelling rules and formatter compatibility. `registers.py`
   generates the public register types, parsing, structural validation, formatting,
@@ -50,14 +53,16 @@ EVEX, MVEX, XOP and 3DNow records are outside this import.
   independent fields; changing either requires a compatibility review.
 - `api-identities.json` preserves baseline enum order, payload types, static
   spellings and x87 identities. `api_identities.py` emits their Rust definitions
-  and mappings without consulting instruction encodings. Wrapper dispatch,
-  condition codes and Core syntax remain handwritten. `Pclmulqdq` retains its
+  and mappings without consulting instruction encodings. Condition codes and
+  Core identities have separate schemas; wrapper dispatch and parameterized
+  Core grammar remain handwritten. `Pclmulqdq` retains its
   position in the handwritten parse fallback.
 - `feature-policy.json` maps upstream ISA sets onto Keel feature fields.
   Empty lists mean baseline capabilities; null entries exclude unsupported
   interpretation families. The generator rejects undeclared feature fields.
-  Profile membership, dependency validation, AVX state side effects and explicit
-  target state semantics remain handwritten in `x86/features.rs`.
+  Profile membership is generated from `cpu-profiles.json`; dependency closure
+  and strict validation come from prerequisites in `feature-fields.json`.
+  Target-option provenance stays in the CLI rather than the capability set.
 - `keel-extensions.json` preserves the existing intentional long-mode D6 trap
   spelling, `udb`, which is absent from this upstream snapshot.
 
@@ -150,10 +155,9 @@ The frozen AT&T fixture comes from `14bed00d`, before this move, and contains
 448 accepted or rejected source cases. The existing assembler suites retain
 independent Clang/GNU encoding and relocation witnesses.
 
-CPU-profile constructors are a separate candidate. See the
-[CPU-profile investigation](cpu-profiles.md) for current memberships, legacy
-behavior and a proposed generated profile/dependency model without legacy
-compatibility constraints.
+CPU profiles use the same generation pipeline. See the
+[generated CPU-profile contract](cpu-profiles.md) for current memberships,
+dependency closure, v1 defaults and ordered CLI modifier resolution.
 
 ## Optional legacy/VEX extensions
 
@@ -176,7 +180,7 @@ The XMM requirement is documented in Intel's
 New extension identities, scalar AT&T suffix eligibility, operand-specific
 VEX form adapters and feature queries are generated from that exposure list
 and the source records. Adding a feature field requires a schema entry; deciding
-the CPU profile policy remains an explicit Rust change. EVEX/AVX-512 vector forms remain outside
+the CPU profile policy remains an explicit profile-schema change. EVEX/AVX-512 vector forms remain outside
 this increment.
 
 ## Decoding limits

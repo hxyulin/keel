@@ -213,7 +213,7 @@ fn compare_control_validation_and_unused_exception_effects() {
         assert!(keel_ir::verify_module(&keel_ir::parse(&bad).unwrap()).is_err());
     }
     let mut minimal = Features::NONE;
-    minimal.avx = true;
+    minimal = minimal.with_features("avx").unwrap();
     object(SelectionTier::Full, AllocationTier::Full, true, minimal).unwrap();
     assert!(
         object(

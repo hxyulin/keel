@@ -7,7 +7,11 @@ const BMI: Features = Features {
     avx: false,
     bmi1: true,
     bmi2: true,
-    ..Features::legacy()
+    ..Features {
+        popcnt: true,
+        sse41: true,
+        ..Features::NONE
+    }
 };
 
 fn fixtures(bmi2: bool) -> (String, String) {
@@ -205,7 +209,11 @@ fn bmi_assembler_executes_zero_boundaries_memory_high_registers_and_aliases() {
             bmi1: !bmi2,
             bmi2,
             avx: false,
-            ..Features::legacy()
+            ..Features {
+                popcnt: true,
+                sse41: true,
+                ..Features::NONE
+            }
         };
         let input = temp.join("test.c");
         let object = temp.join("test.o");

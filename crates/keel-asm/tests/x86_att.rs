@@ -15,10 +15,16 @@ use std::{
 };
 
 const FEATURES: Features = Features {
+    xsave: true,
+    osxsave: true,
     avx: true,
     bmi1: true,
     bmi2: true,
-    ..Features::legacy()
+    ..Features {
+        popcnt: true,
+        sse41: true,
+        ..Features::NONE
+    }
 };
 fn assemble(source: &str) -> Vec<u8> {
     assemble_object_with_syntax_and_features(source, Syntax::Att, FEATURES)

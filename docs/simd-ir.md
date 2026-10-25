@@ -185,8 +185,7 @@ cleanup). No end-to-end compiler-throughput or runtime benefit is claimed.
 
 Q values use packed SSE/SSE2 operations or exact scalar lane expansion. Explicit
 `--cpu-level v1` selects baseline fallbacks without requiring POPCNT/SSE4.1; v2 and v3
-are cumulative profiles. The historical default remains the legacy feature
-configuration. CPU features, instruction-selection tiers, allocation tiers and
+are cumulative profiles. The default is v1. CPU features, instruction-selection tiers, allocation tiers and
 optimization profiles are independent controls.
 
 AVX-enabled 256-bit values use packed primitives, conversions, integer reductions

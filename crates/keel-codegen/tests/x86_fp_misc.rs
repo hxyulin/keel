@@ -244,7 +244,7 @@ fn fp_misc_types_features_and_controls() {
         .is_err()
     );
     let mut f = Features::NONE;
-    f.avx = true;
+    f = f.with_features("avx").unwrap();
     object(SelectionTier::Full, AllocationTier::Full, true, f).unwrap();
     let bad = source().replace("iconst.i32 15", "iconst.i32 16");
     assert!(keel_ir::verify_module(&keel_ir::parse(&bad).unwrap()).is_err());

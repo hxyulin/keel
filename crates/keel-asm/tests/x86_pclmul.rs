@@ -146,6 +146,8 @@ fn pclmul_legacy_encoding_oracles_and_feature_contract() {
         );
     }
     assert!(assemble_object_with_features("lock pclmulqdq xmm0,xmm1,0", f).is_err());
-    assert!(assemble_object_with_features("vpclmulqdq xmm0,xmm1,xmm2,0", Features::all()).is_ok());
+    assert!(
+        assemble_object_with_features("vpclmulqdq xmm0,xmm1,xmm2,0", Features::all_known()).is_ok()
+    );
     assert!(assemble_object_with_features("vpclmulqdq xmm0,xmm1,xmm2,0", f).is_err());
 }

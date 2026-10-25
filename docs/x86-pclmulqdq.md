@@ -13,7 +13,7 @@ keel cc --target x86_64-unknown-linux-gnu --cpu-level v1 \
 `compile`, `cc` and `asm` share this modifier. `-pclmulqdq` explicitly disables
 it again. Library callers use `Features::for_level(level).with_features("+pclmulqdq")`
 with `FeatureSelector`, and the same features when assembling objects.
-`Features::all()` includes this optional capability; level presets do not.
+`Features::all_known()` includes this optional capability; level presets do not.
 The deployment CPU must support CPUID.01H:ECX.PCLMULQDQ[1]. No runtime dispatch
 or per-function target attributes are added. ARM targets reject the intrinsic,
 feature selection and owned x86 header.

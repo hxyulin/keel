@@ -139,11 +139,11 @@ fn every_xed_vector_form_typed_text_roundtrip() {
         );
         let mut p = Program::new();
         p.x86_instruction(i);
-        let a = assemble_object_with_features(&source, Features::all())
+        let a = assemble_object_with_features(&source, Features::all_known())
             .unwrap_or_else(|e| panic!("{source}: {e}"));
         assert_eq!(
             a,
-            assemble_program_object_with_features(&p, Features::all()).unwrap(),
+            assemble_program_object_with_features(&p, Features::all_known()).unwrap(),
             "{source}"
         );
         assert!(
@@ -261,7 +261,7 @@ fn differential_syntax(cases: Vec<String>, label: &str, att_syntax: bool) {
                 continue;
             }
             let expected = sections[format!(".case{n}").as_str()];
-            let own_object = assemble_object_with_features(s, Features::all()).unwrap();
+            let own_object = assemble_object_with_features(s, Features::all_known()).unwrap();
             let ours = text(&own_object);
             if label == "relocations" {
                 assert_eq!(
@@ -337,8 +337,8 @@ fn scalar_v3_families_match_both_assemblers_and_typed_transport() {
         let mut p = Program::new();
         p.x86_instruction(i.clone());
         assert_eq!(
-            assemble_object_with_features(s, Features::all()).unwrap(),
-            assemble_program_object_with_features(&p, Features::all()).unwrap(),
+            assemble_object_with_features(s, Features::all_known()).unwrap(),
+            assemble_program_object_with_features(&p, Features::all_known()).unwrap(),
             "{s}"
         );
         assert!(
@@ -487,8 +487,8 @@ fn all_forms_att_and_intel_encode_identically() {
     for source in sources {
         let i = Instruction::parse_intel(&source).unwrap();
         let att = att(&i);
-        let a = assemble_object_with_features(&source, Features::all()).unwrap();
-        let b = assemble_object_with_syntax_and_features(&att, Syntax::Att, Features::all())
+        let a = assemble_object_with_features(&source, Features::all_known()).unwrap();
+        let b = assemble_object_with_syntax_and_features(&att, Syntax::Att, Features::all_known())
             .unwrap_or_else(|e| panic!("{source} -> {att}: {e}"));
         assert_eq!(text(&a), text(&b), "{source} -> {att}");
     }
@@ -501,7 +501,7 @@ fn malformed_typed_and_parsed_operands_are_rejected() {
         let mut p = Program::new();
         p.x86_instruction(i.clone());
         assert!(
-            assemble_program_object_with_features(&p, Features::all()).is_err(),
+            assemble_program_object_with_features(&p, Features::all_known()).is_err(),
             "accepted {i:?}"
         );
     };
@@ -588,7 +588,7 @@ fn malformed_typed_and_parsed_operands_are_rejected() {
         "vaddps ymm0,ymm1,[rax+ymm16*4]",
     ] {
         assert!(
-            assemble_object_with_features(source, Features::all()).is_err(),
+            assemble_object_with_features(source, Features::all_known()).is_err(),
             "{source}"
         );
     }
@@ -604,7 +604,7 @@ fn form_specific_features_never_inherit_legacy_bits() {
             assemble_object_with_features(&source, required).is_ok(),
             "{source}"
         );
-        let mut disabled = Features::all();
+        let mut disabled = Features::all_known();
         if required.fma {
             disabled.fma = false;
         } else if required.f16c {
@@ -623,6 +623,8 @@ fn form_specific_features_never_inherit_legacy_bits() {
         );
     }
     let avx = Features {
+        xsave: true,
+        osxsave: true,
         avx: true,
         ..Features::NONE
     };
@@ -707,13 +709,14 @@ fn symbolic_ymm_vsib_and_trailing_immediates_match_external_relocations() {
         let i = Instruction::parse_intel(&source).unwrap();
         let mut p = Program::new();
         p.x86_instruction(i.clone());
-        let a = assemble_object_with_features(&source, Features::all()).unwrap();
+        let a = assemble_object_with_features(&source, Features::all_known()).unwrap();
         assert_eq!(
             a,
-            assemble_program_object_with_features(&p, Features::all()).unwrap()
+            assemble_program_object_with_features(&p, Features::all_known()).unwrap()
         );
-        let b = assemble_object_with_syntax_and_features(&att(&i), Syntax::Att, Features::all())
-            .unwrap();
+        let b =
+            assemble_object_with_syntax_and_features(&att(&i), Syntax::Att, Features::all_known())
+                .unwrap();
         assert_eq!(text(&a), text(&b));
         assert_eq!(relocations(&a, ".text"), relocations(&b, ".text"));
     }
@@ -747,7 +750,7 @@ fn exact_reserved_bits_and_xed_w1_string_aliases() {
         ),
     ] {
         assert_eq!(
-            text(&assemble_object_with_features(source, Features::all()).unwrap()),
+            text(&assemble_object_with_features(source, Features::all_known()).unwrap()),
             expected,
             "{source}"
         );
@@ -785,16 +788,16 @@ fn tls_relaxation_is_not_a_generic_v3_memory_relocation() {
         let mut program = Program::new();
         program.x86_instruction(i);
         assert!(
-            assemble_object_with_features(source, Features::all()).is_err(),
+            assemble_object_with_features(source, Features::all_known()).is_err(),
             "{source}"
         );
         assert!(
-            assemble_program_object_with_features(&program, Features::all()).is_err(),
+            assemble_program_object_with_features(&program, Features::all_known()).is_err(),
             "{source}"
         );
         // Ordinary PC-relative address relocations remain valid.
         assert!(
-            assemble_object_with_features(&source.replace("@GOTTPOFF", ""), Features::all())
+            assemble_object_with_features(&source.replace("@GOTTPOFF", ""), Features::all_known())
                 .is_ok(),
             "{source}"
         );

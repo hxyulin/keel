@@ -220,7 +220,7 @@ fn gather_rejects_disabled_features_bad_operands_and_nonconstant_scales() {
             .contains("x86 architectural")
     );
     let mut minimal = Features::NONE;
-    minimal.avx = true;
+    minimal = minimal.with_features("avx").unwrap();
     minimal.avx2 = true;
     object(SelectionTier::Full, AllocationTier::Full, true, minimal).unwrap();
 }

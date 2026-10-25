@@ -116,7 +116,7 @@ fn zeroall_features_barrier_and_allocation() {
         .is_err()
     );
     let mut f = Features::NONE;
-    f.avx = true;
+    f = f.with_features("avx").unwrap();
     compile(SelectionTier::Full, AllocationTier::Full, &EMPTY, f).unwrap();
     assert!(
         keel_codegen::aarch64::compile(
