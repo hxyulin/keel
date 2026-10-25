@@ -1,8 +1,8 @@
 # Userspace ISA support
 
 Keel targets userspace x86-64 at psABI levels v1, v2 and v3, plus baseline
-NEON on AArch64. Kernel and privileged-instruction support is a separate,
-optional track and does not block userspace work.
+NEON on AArch64. Baseline privileged-instruction support is an active
+[separate goal](x86-system-support.md) and does not block userspace work.
 
 The [x86-64 psABI feature levels](https://gitlab.com/x86-psABIs/x86-64-ABI/-/raw/master/x86-64-ABI/low-level-sys-info.tex)
 are cumulative CPU/OS capability groups. Userspace code relies on the OS to

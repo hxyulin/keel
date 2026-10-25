@@ -2,9 +2,9 @@ mod baseline;
 #[path = "bmi.rs"]
 mod bmi;
 mod core;
+mod pclmul;
 mod sse2;
 mod v2;
-mod pclmul;
 mod v3;
 mod vex;
 mod x87;
@@ -1114,7 +1114,10 @@ fn validate(i: &Instruction) -> Result<(), String> {
                     || matches!(
                         i.opcode,
                         Core(
-                            keel_asm_ir::x86::CoreOpcode::Sgdt | keel_asm_ir::x86::CoreOpcode::Sidt
+                            keel_asm_ir::x86::CoreOpcode::Sgdt
+                                | keel_asm_ir::x86::CoreOpcode::Sidt
+                                | keel_asm_ir::x86::CoreOpcode::Lgdt
+                                | keel_asm_ir::x86::CoreOpcode::Lidt
                         )
                     ) && m.width == 80
                     || matches!(

@@ -760,7 +760,9 @@ impl InstData {
             | Self::Neon { .. } => Barrier,
             Self::VaArg { .. } | Self::AggregateVaArg { .. } => ReadWrite,
             Self::Intrinsic { id, .. } => match id {
-                Intrinsic::X86Sgdt
+                Intrinsic::X86Lgdt
+                | Intrinsic::X86Lidt
+                | Intrinsic::X86Sgdt
                 | Intrinsic::X86Sidt
                 | Intrinsic::X86SldtMem
                 | Intrinsic::X86Sldt16
