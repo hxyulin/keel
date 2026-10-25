@@ -639,7 +639,8 @@ fn parse(s: &str, prefix: bool) -> Result<Instruction, String> {
                         continue;
                     }
                     if op == Mov
-                        && matches!(o, Operand::Register(r) if r.class==RegisterClass::Segment)
+                        && matches!(o, Operand::Register(r) if r.class==RegisterClass::Segment
+                            || w==64 && matches!(r.class, RegisterClass::Control | RegisterClass::Debug))
                     {
                         continue;
                     }

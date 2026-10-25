@@ -833,6 +833,10 @@ pub enum RegisterClass {
     /// ES, CS, SS, DS, FS and GS selector registers.
     Segment,
     Rip,
+    /// Long-mode control registers CR0, CR2, CR3, CR4 and CR8.
+    Control,
+    /// DR0..DR7; DR4/DR5 require CR4.DE clear and alias DR6/DR7.
+    Debug,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Register {
@@ -885,6 +889,24 @@ impl Register {
                 width: 16,
                 high_byte: false,
             });
+        }
+        for (prefix, class) in [("cr", RegisterClass::Control), ("dr", RegisterClass::Debug)] {
+            if let Some(n) = s
+                .strip_prefix(prefix)
+                .filter(|n| n.len() == 1)
+                .and_then(|n| n.parse::<u8>().ok())
+                .filter(|n| match class {
+                    RegisterClass::Control => matches!(n, 0 | 2 | 3 | 4 | 8),
+                    _ => *n < 8,
+                })
+            {
+                return Some(Self {
+                    class,
+                    number: n,
+                    width: 64,
+                    high_byte: false,
+                });
+            }
         }
         if matches!(s, "rip" | "eip") {
             return Some(Self {
