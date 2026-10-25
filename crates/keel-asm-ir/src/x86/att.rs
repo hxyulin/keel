@@ -1,6 +1,7 @@
 //! AT&T source grammar. Operands are constructed directly in the shared model;
 //! no source rewriting or assembler subprocess is involved.
 use super::*;
+include!("isa/att_rules.rs");
 
 /// Initial source dialect. Syntax directives can change it within a fragment.
 /// Intel remains the default for compatibility with existing callers.
@@ -243,15 +244,6 @@ fn operand(s: &str, prefix: bool) -> Result<Operand, String> {
     }
     memory(s, prefix)
 }
-fn bits(s: u8) -> Option<u16> {
-    Some(match s {
-        b'b' => 8,
-        b'w' => 16,
-        b'l' => 32,
-        b'q' => 64,
-        _ => return None,
-    })
-}
 fn width(o: &mut Operand, bits: u16) -> Result<(), String> {
     match o {
         Operand::Memory(m) => m.width = bits,
@@ -261,79 +253,6 @@ fn width(o: &mut Operand, bits: u16) -> Result<(), String> {
         _ => {}
     }
     Ok(())
-}
-fn scalar(op: Opcode) -> bool {
-    if let Opcode::Extension(op) = op {
-        return op.scalar_suffix();
-    }
-    if matches!(op, V3(V3Opcode::Lzcnt | V3Opcode::Movbe)) {
-        return true;
-    }
-    use Opcode::*;
-    matches!(op, Core(CoreOpcode::Rcl | CoreOpcode::Rcr))
-        || matches!(
-            op,
-            Mov | Movabs
-                | Lea
-                | Push
-                | Pop
-                | Ret
-                | Leave
-                | Nop
-                | Add
-                | Or
-                | Adc
-                | Sbb
-                | And
-                | Sub
-                | Xor
-                | Cmp
-                | Test
-                | Neg
-                | Not
-                | Inc
-                | Dec
-                | Mul
-                | Imul
-                | Div
-                | Idiv
-                | Shl
-                | Shr
-                | Sar
-                | Rol
-                | Ror
-                | Shld
-                | Shrd
-                | Bsf
-                | Bsr
-                | Bswap
-                | Popcnt
-                | Andn
-                | Bextr
-                | Blsi
-                | Blsmsk
-                | Blsr
-                | Tzcnt
-                | Shlx
-                | Shrx
-                | Sarx
-                | Rorx
-                | Bzhi
-                | Pext
-                | Pdep
-                | Mulx
-                | Bt
-                | Bts
-                | Btr
-                | Btc
-                | Xchg
-                | Xadd
-                | Cmpxchg
-                | Call
-                | Jmp
-                | Cmovcc(_)
-                | Setcc(_)
-        )
 }
 fn parse(s: &str, prefix: bool) -> Result<Instruction, String> {
     use Opcode::*;
@@ -425,44 +344,21 @@ fn parse(s: &str, prefix: bool) -> Result<Instruction, String> {
     if !matches!(Opcode::parse(name), Some(Core(CoreOpcode::Enter { .. }))) {
         ops.reverse();
     }
-    if let Some(w) = match name {
-        "lcallw" | "ljmpw" => Some(32),
-        "lcall" | "ljmp" | "callf" | "jmpf" | "lcalll" | "ljmpl" => Some(48),
-        "lcallq" | "ljmpq" => Some(80),
-        _ => None,
-    } {
+    if let Some(w) = far_width(name) {
         let [Operand::Memory(m)] = ops.as_mut_slice() else {
             return Err("far control transfer requires memory".into());
         };
         m.width = w;
     }
     let invalid = || format!("unsupported AT&T instruction `{mnemonic}`");
-    let extension = match name {
-        "movsbw" => Some((Movsx, 8, 16)),
-        "movsbl" => Some((Movsx, 8, 32)),
-        "movsbq" => Some((Movsx, 8, 64)),
-        "movswl" => Some((Movsx, 16, 32)),
-        "movswq" => Some((Movsx, 16, 64)),
-        "movslq" => Some((Movsxd, 32, 64)),
-        "movzbw" => Some((Movzx, 8, 16)),
-        "movzbl" => Some((Movzx, 8, 32)),
-        "movzbq" => Some((Movzx, 8, 64)),
-        "movzwl" => Some((Movzx, 16, 32)),
-        "movzwq" => Some((Movzx, 16, 64)),
-        _ => None,
-    };
+    let extension = extension(name);
     let packed_conversion = name
-        .strip_suffix('x')
-        .map(|s| (s, 128))
-        .or_else(|| name.strip_suffix('y').map(|s| (s, 256)))
-        .and_then(|(base, w)| {
-            Opcode::parse(base)
-                .filter(|op| {
-                    matches!(
-                        op,
-                        V3(V3Opcode::Vcvtpd2dq | V3Opcode::Vcvttpd2dq | V3Opcode::Vcvtpd2ps)
-                    )
-                })
+        .as_bytes()
+        .last()
+        .and_then(|&suffix| packed_bits(suffix))
+        .and_then(|w| {
+            Opcode::parse(&name[..name.len() - 1])
+                .filter(|op| packed_conversion(*op))
                 .map(|op| (op, w))
         });
     let opcode = if let Some((op, w)) = packed_conversion {
@@ -496,36 +392,13 @@ fn parse(s: &str, prefix: bool) -> Result<Instruction, String> {
         width(a, dst)?;
         width(b, src)?;
         op
-    } else if let Some((op, w)) = X87Opcode::att_memory(name) {
+    } else if let Some((op, w)) = x87_memory(name) {
         let [Operand::Memory(m)] = ops.as_mut_slice() else {
             return Err("x87 memory suffix requires one memory operand".into());
         };
         m.width = w;
         Opcode::X87(op)
-    } else if let Some((op, w)) = match name {
-        "flds" => Some((Fld, 32)),
-        "fldl" => Some((Fld, 64)),
-        "fldt" => Some((Fld, 80)),
-        "fstps" => Some((Fstp, 32)),
-        "fstpl" => Some((Fstp, 64)),
-        "fstpt" => Some((Fstp, 80)),
-        "fadds" => Some((Fadd, 32)),
-        "faddl" => Some((Fadd, 64)),
-        "fmuls" => Some((Fmul, 32)),
-        "fmull" => Some((Fmul, 64)),
-        "filds" => Some((Fild, 16)),
-        "fildl" => Some((Fild, 32)),
-        "fildll" => Some((Fild, 64)),
-        "fisttps" => Some((V2(V2Opcode::Fisttp), 16)),
-        "fisttpl" => Some((V2(V2Opcode::Fisttp), 32)),
-        "fisttpll" => Some((V2(V2Opcode::Fisttp), 64)),
-        "fistps" => Some((Fistp, 16)),
-        "fistpl" => Some((Fistp, 32)),
-        "fistpll" => Some((Fistp, 64)),
-        "fldcw" => Some((Fldcw, 16)),
-        "fnstcw" => Some((Fnstcw, 16)),
-        _ => None,
-    } {
+    } else if let Some((op, w)) = legacy_x87_memory(name) {
         let [Operand::Memory(m)] = ops.as_mut_slice() else {
             return Err(if op == Fld {
                 "x87 load requires one memory operand"
@@ -542,14 +415,7 @@ fn parse(s: &str, prefix: bool) -> Result<Instruction, String> {
         Fsubrp
     } else if name == "fsubrp" {
         Fsubp
-    } else if let Some(op) = match name {
-        "cbtw" => Some(Cbw),
-        "cwtl" => Some(Cwde),
-        "cltq" => Some(Cdqe),
-        "cltd" => Some(Cdq),
-        "cqto" => Some(Cqo),
-        _ => None,
-    } {
+    } else if let Some(op) = alias(name) {
         op
     } else {
         // Conversion suffixes describe the integer operand, not the XMM value.
@@ -559,34 +425,10 @@ fn parse(s: &str, prefix: bool) -> Result<Instruction, String> {
             .and_then(|&b| bits(b))
             .filter(|w| matches!(w, 32 | 64))
             .and_then(|w| {
-                Opcode::parse(&name[..name.len() - 1])
-                    .filter(|op| {
-                        matches!(
-                            op,
-                            Cvtsi2ss
-                                | Cvtsi2sd
-                                | Cvttss2si
-                                | Cvttsd2si
-                                | Cvtss2si
-                                | Cvtsd2si
-                                | V3(V3Opcode::Vcvtsi2ss
-                                    | V3Opcode::Vcvtsi2sd
-                                    | V3Opcode::Vcvtss2si
-                                    | V3Opcode::Vcvtsd2si
-                                    | V3Opcode::Vcvttss2si
-                                    | V3Opcode::Vcvttsd2si)
-                        )
-                    })
-                    .map(|op| (op, w))
+                let op = Opcode::parse(&name[..name.len() - 1])?;
+                Some((op, w, conversion_operand(op)?))
             });
-        if let Some((op, w)) = conversion {
-            let index = if matches!(op, Cvtsi2ss | Cvtsi2sd) {
-                1
-            } else if matches!(op, V3(V3Opcode::Vcvtsi2ss | V3Opcode::Vcvtsi2sd)) {
-                2
-            } else {
-                0
-            };
+        if let Some((op, w, index)) = conversion {
             width(
                 ops.get_mut(index)
                     .ok_or("conversion expects two operands")?,

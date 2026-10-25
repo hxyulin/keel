@@ -1,0 +1,537 @@
+{
+  "scalar_suffixes": {
+    "b": 8,
+    "w": 16,
+    "l": 32,
+    "q": 64
+  },
+  "scalar": {
+    "baseline": [
+      "Mov",
+      "Movabs",
+      "Lea",
+      "Push",
+      "Pop",
+      "Ret",
+      "Leave",
+      "Nop",
+      "Add",
+      "Or",
+      "Adc",
+      "Sbb",
+      "And",
+      "Sub",
+      "Xor",
+      "Cmp",
+      "Test",
+      "Neg",
+      "Not",
+      "Inc",
+      "Dec",
+      "Mul",
+      "Imul",
+      "Div",
+      "Idiv",
+      "Shl",
+      "Shr",
+      "Sar",
+      "Rol",
+      "Ror",
+      "Shld",
+      "Shrd",
+      "Bsf",
+      "Bsr",
+      "Bswap",
+      "Popcnt",
+      "Andn",
+      "Bextr",
+      "Blsi",
+      "Blsmsk",
+      "Blsr",
+      "Tzcnt",
+      "Shlx",
+      "Shrx",
+      "Sarx",
+      "Rorx",
+      "Bzhi",
+      "Pext",
+      "Pdep",
+      "Mulx",
+      "Bt",
+      "Bts",
+      "Btr",
+      "Btc",
+      "Xchg",
+      "Xadd",
+      "Cmpxchg",
+      "Call",
+      "Jmp"
+    ],
+    "core": [
+      "Rcl",
+      "Rcr"
+    ],
+    "v3": [
+      "Lzcnt",
+      "Movbe"
+    ],
+    "conditions": [
+      "Cmovcc",
+      "Setcc"
+    ]
+  },
+  "far_widths": [
+    {
+      "names": [
+        "lcallw",
+        "ljmpw"
+      ],
+      "width": 32
+    },
+    {
+      "names": [
+        "lcall",
+        "ljmp",
+        "callf",
+        "jmpf",
+        "lcalll",
+        "ljmpl"
+      ],
+      "width": 48
+    },
+    {
+      "names": [
+        "lcallq",
+        "ljmpq"
+      ],
+      "width": 80
+    }
+  ],
+  "extensions": [
+    {
+      "name": "movsbw",
+      "opcode": "Movsx",
+      "source": 8,
+      "destination": 16
+    },
+    {
+      "name": "movsbl",
+      "opcode": "Movsx",
+      "source": 8,
+      "destination": 32
+    },
+    {
+      "name": "movsbq",
+      "opcode": "Movsx",
+      "source": 8,
+      "destination": 64
+    },
+    {
+      "name": "movswl",
+      "opcode": "Movsx",
+      "source": 16,
+      "destination": 32
+    },
+    {
+      "name": "movswq",
+      "opcode": "Movsx",
+      "source": 16,
+      "destination": 64
+    },
+    {
+      "name": "movslq",
+      "opcode": "Movsxd",
+      "source": 32,
+      "destination": 64
+    },
+    {
+      "name": "movzbw",
+      "opcode": "Movzx",
+      "source": 8,
+      "destination": 16
+    },
+    {
+      "name": "movzbl",
+      "opcode": "Movzx",
+      "source": 8,
+      "destination": 32
+    },
+    {
+      "name": "movzbq",
+      "opcode": "Movzx",
+      "source": 8,
+      "destination": 64
+    },
+    {
+      "name": "movzwl",
+      "opcode": "Movzx",
+      "source": 16,
+      "destination": 32
+    },
+    {
+      "name": "movzwq",
+      "opcode": "Movzx",
+      "source": 16,
+      "destination": 64
+    }
+  ],
+  "legacy_x87_memory": [
+    {
+      "name": "flds",
+      "opcode": "Fld",
+      "width": 32
+    },
+    {
+      "name": "fldl",
+      "opcode": "Fld",
+      "width": 64
+    },
+    {
+      "name": "fldt",
+      "opcode": "Fld",
+      "width": 80
+    },
+    {
+      "name": "fstps",
+      "opcode": "Fstp",
+      "width": 32
+    },
+    {
+      "name": "fstpl",
+      "opcode": "Fstp",
+      "width": 64
+    },
+    {
+      "name": "fstpt",
+      "opcode": "Fstp",
+      "width": 80
+    },
+    {
+      "name": "fadds",
+      "opcode": "Fadd",
+      "width": 32
+    },
+    {
+      "name": "faddl",
+      "opcode": "Fadd",
+      "width": 64
+    },
+    {
+      "name": "fmuls",
+      "opcode": "Fmul",
+      "width": 32
+    },
+    {
+      "name": "fmull",
+      "opcode": "Fmul",
+      "width": 64
+    },
+    {
+      "name": "filds",
+      "opcode": "Fild",
+      "width": 16
+    },
+    {
+      "name": "fildl",
+      "opcode": "Fild",
+      "width": 32
+    },
+    {
+      "name": "fildll",
+      "opcode": "Fild",
+      "width": 64
+    },
+    {
+      "name": "fisttps",
+      "opcode": "Fisttp",
+      "width": 16,
+      "group": "v2"
+    },
+    {
+      "name": "fisttpl",
+      "opcode": "Fisttp",
+      "width": 32,
+      "group": "v2"
+    },
+    {
+      "name": "fisttpll",
+      "opcode": "Fisttp",
+      "width": 64,
+      "group": "v2"
+    },
+    {
+      "name": "fistps",
+      "opcode": "Fistp",
+      "width": 16
+    },
+    {
+      "name": "fistpl",
+      "opcode": "Fistp",
+      "width": 32
+    },
+    {
+      "name": "fistpll",
+      "opcode": "Fistp",
+      "width": 64
+    },
+    {
+      "name": "fldcw",
+      "opcode": "Fldcw",
+      "width": 16
+    },
+    {
+      "name": "fnstcw",
+      "opcode": "Fnstcw",
+      "width": 16
+    }
+  ],
+  "aliases": [
+    {
+      "name": "cbtw",
+      "opcode": "Cbw"
+    },
+    {
+      "name": "cwtl",
+      "opcode": "Cwde"
+    },
+    {
+      "name": "cltq",
+      "opcode": "Cdqe"
+    },
+    {
+      "name": "cltd",
+      "opcode": "Cdq"
+    },
+    {
+      "name": "cqto",
+      "opcode": "Cqo"
+    }
+  ],
+  "integer_conversions": [
+    {
+      "opcode": "Cvtsi2ss",
+      "group": "baseline",
+      "operand": 1
+    },
+    {
+      "opcode": "Cvtsi2sd",
+      "group": "baseline",
+      "operand": 1
+    },
+    {
+      "opcode": "Cvttss2si",
+      "group": "baseline",
+      "operand": 0
+    },
+    {
+      "opcode": "Cvttsd2si",
+      "group": "baseline",
+      "operand": 0
+    },
+    {
+      "opcode": "Cvtss2si",
+      "group": "baseline",
+      "operand": 0
+    },
+    {
+      "opcode": "Cvtsd2si",
+      "group": "baseline",
+      "operand": 0
+    },
+    {
+      "opcode": "Vcvtsi2ss",
+      "group": "v3",
+      "operand": 2
+    },
+    {
+      "opcode": "Vcvtsi2sd",
+      "group": "v3",
+      "operand": 2
+    },
+    {
+      "opcode": "Vcvtss2si",
+      "group": "v3",
+      "operand": 0
+    },
+    {
+      "opcode": "Vcvtsd2si",
+      "group": "v3",
+      "operand": 0
+    },
+    {
+      "opcode": "Vcvttss2si",
+      "group": "v3",
+      "operand": 0
+    },
+    {
+      "opcode": "Vcvttsd2si",
+      "group": "v3",
+      "operand": 0
+    }
+  ],
+  "packed_conversions": [
+    "Vcvtpd2dq",
+    "Vcvttpd2dq",
+    "Vcvtpd2ps"
+  ],
+  "packed_suffixes": {
+    "x": 128,
+    "y": 256
+  },
+  "x87_memory": [
+    {
+      "opcode": "Fst",
+      "suffixes": {
+        "s": 32,
+        "l": 64
+      }
+    },
+    {
+      "opcode": "Fsub",
+      "suffixes": {
+        "s": 32,
+        "l": 64
+      }
+    },
+    {
+      "opcode": "Fsubr",
+      "suffixes": {
+        "s": 32,
+        "l": 64
+      }
+    },
+    {
+      "opcode": "Fdiv",
+      "suffixes": {
+        "s": 32,
+        "l": 64
+      }
+    },
+    {
+      "opcode": "Fdivr",
+      "suffixes": {
+        "s": 32,
+        "l": 64
+      }
+    },
+    {
+      "opcode": "Fcom",
+      "suffixes": {
+        "s": 32,
+        "l": 64
+      }
+    },
+    {
+      "opcode": "Fcomp",
+      "suffixes": {
+        "s": 32,
+        "l": 64
+      }
+    },
+    {
+      "opcode": "Fiadd",
+      "suffixes": {
+        "s": 16,
+        "l": 32
+      }
+    },
+    {
+      "opcode": "Fimul",
+      "suffixes": {
+        "s": 16,
+        "l": 32
+      }
+    },
+    {
+      "opcode": "Ficom",
+      "suffixes": {
+        "s": 16,
+        "l": 32
+      }
+    },
+    {
+      "opcode": "Ficomp",
+      "suffixes": {
+        "s": 16,
+        "l": 32
+      }
+    },
+    {
+      "opcode": "Fisub",
+      "suffixes": {
+        "s": 16,
+        "l": 32
+      }
+    },
+    {
+      "opcode": "Fisubr",
+      "suffixes": {
+        "s": 16,
+        "l": 32
+      }
+    },
+    {
+      "opcode": "Fidiv",
+      "suffixes": {
+        "s": 16,
+        "l": 32
+      }
+    },
+    {
+      "opcode": "Fidivr",
+      "suffixes": {
+        "s": 16,
+        "l": 32
+      }
+    },
+    {
+      "opcode": "Fist",
+      "suffixes": {
+        "s": 16,
+        "l": 32
+      }
+    },
+    {
+      "opcode": "Fldenv",
+      "suffixes": {
+        "s": 16,
+        "l": 32
+      }
+    },
+    {
+      "opcode": "Fstenv",
+      "suffixes": {
+        "s": 16,
+        "l": 32
+      }
+    },
+    {
+      "opcode": "Fnstenv",
+      "suffixes": {
+        "s": 16,
+        "l": 32
+      }
+    },
+    {
+      "opcode": "Fsave",
+      "suffixes": {
+        "s": 16,
+        "l": 32
+      }
+    },
+    {
+      "opcode": "Fnsave",
+      "suffixes": {
+        "s": 16,
+        "l": 32
+      }
+    },
+    {
+      "opcode": "Frstor",
+      "suffixes": {
+        "s": 16,
+        "l": 32
+      }
+    }
+  ]
+}

@@ -130,6 +130,30 @@ move. Literal opcode-family tests cover every accepted condition alias through
 the generic encoder. These schemas describe names and API shape, not compiler
 effects, architectural permission or runtime behavior.
 
+## AT&T dialect mappings
+
+`att-rules.json` owns regular suffix widths, scalar suffix eligibility,
+far-memory widths, sign/zero-extension spellings, baseline and additional x87
+memory spellings, simple aliases, and the integer/packed conversion mappings.
+`att_rules.py` checks opcode references against the existing identity schemas
+and generates `att_rules.rs`. Optional extension suffix eligibility continues
+to come from the extension adapters rather than a second list.
+
+The parser consumes these lookups in its original precedence order. Address
+and branch grammar, operand reversal, suffix/register checks, implicit shift
+counts, x87 subtraction/division operand semantics, prefix rules and relocation
+restrictions remain handwritten. CR/DR and segment MOV exceptions remain
+explicit. This move preserves accepted source, structured operands and errors;
+it does not add AT&T instruction forms.
+
+The frozen AT&T fixture comes from `14bed00d`, before this move, and contains
+448 accepted or rejected source cases. The existing assembler suites retain
+independent Clang/GNU encoding and relocation witnesses.
+
+CPU-profile constructors are a separate candidate. See the
+[CPU-profile investigation](cpu-profiles.md) for current memberships, legacy
+compatibility behavior and a proposed constructor-only generation increment.
+
 ## Optional legacy/VEX extensions
 
 The `extensions` list in `keel-adapters.json` exposes 16 additional mnemonics

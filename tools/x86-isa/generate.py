@@ -10,6 +10,7 @@ import feature_fields
 import api_identities
 import registers
 import core_mappings
+import att_rules
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT.parents[1] / 'crates/keel-asm-ir/src/x86/isa/generated.rs'
@@ -389,6 +390,7 @@ def main():
     outputs.update(api_identities.outputs(ROOT, OUTPUT, opcode_identities))
     outputs.update(registers.outputs(ROOT, OUTPUT))
     outputs.update(core_mappings.outputs(ROOT, OUTPUT))
+    outputs.update(att_rules.outputs(ROOT, OUTPUT))
     target, output = documentation_inventory(outputs[OUTPUT.with_name('v2.rs')], adapters['v2'])
     outputs[target] = output
     for target, output in outputs.items():

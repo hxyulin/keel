@@ -8,49 +8,6 @@ impl X87Opcode {
             Self::Fldenv | Self::Fstenv | Self::Fnstenv | Self::Fsave | Self::Fnsave | Self::Frstor
         )
     }
-    pub(super) fn att_memory(name: &str) -> Option<(Self, u16)> {
-        let (base, bits) = if let Some(base) = name.strip_suffix('s') {
-            (base, 16)
-        } else if let Some(base) = name.strip_suffix('l') {
-            (base, 32)
-        } else {
-            return None;
-        };
-        let op = Self::parse(base)?;
-        let width = match op {
-            Self::Fst
-            | Self::Fsub
-            | Self::Fsubr
-            | Self::Fdiv
-            | Self::Fdivr
-            | Self::Fcom
-            | Self::Fcomp => {
-                if bits == 16 {
-                    32
-                } else {
-                    64
-                }
-            }
-            Self::Fiadd
-            | Self::Fimul
-            | Self::Ficom
-            | Self::Ficomp
-            | Self::Fisub
-            | Self::Fisubr
-            | Self::Fidiv
-            | Self::Fidivr
-            | Self::Fist
-            | Self::Fldenv
-            | Self::Fstenv
-            | Self::Fnstenv
-            | Self::Fsave
-            | Self::Fnsave
-            | Self::Frstor => bits,
-            _ => return None,
-        };
-        Some((op, width))
-    }
-
     pub(super) fn from_att(self, args: &[super::Operand]) -> Self {
         use super::{Operand, RegisterClass};
         // GAS/LLVM retain the historical reversed subtraction/division spelling
