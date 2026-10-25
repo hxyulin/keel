@@ -284,3 +284,12 @@ success report whose HLT evidence is rejected. Faults, malformed transcripts,
 tool errors and timeouts never satisfy a negative. Existing modes keep their
 previous exact transcript and exit checks. See
 [contracts, observation rules and limits](../../docs/x86-interrupt-control.md).
+
+## GS exchange
+
+`--swapgs` runs twelve generated payloads, an independent reference and six
+normally returning broken controls. It checks both base MSRs, selector zero
+and 16, independent GS-relative reads, round trips, wide canonical bases,
+eight live SSA values and canaries. The bridge restores the original selector
+and both base MSRs. IF stays clear. See
+[contracts and finite evidence](../../docs/x86-swapgs.md).

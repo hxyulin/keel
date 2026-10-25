@@ -46,8 +46,9 @@ CLI, STI and HLT have pinned typed APIs, including adjacent STI;HLT as a
 single IR operation. An owned CPL0 IRQ fixture checks IF, wide-value liveness,
 interrupt-frame RIP and actual HLT fall-through boundaries. See
 [interrupt control and halt](x86-interrupt-control.md).
-SWAPGS, IRET and SYSRET still need typed state/transition contracts; assembler
-encodings alone do not establish working kernel code generation.
+SWAPGS has a pinned raw API with independent base, effective-address,
+selector and liveness checks. See [raw GS-base exchange](x86-swapgs.md).
+IRET and SYSRET still need owned terminal transition contracts.
 
 LLDT, LTR and LMSW have register/memory APIs, and INVLPG has an address-only
 API over generated forms. CPL0 fixtures check selector changes, TSS busy bits,
@@ -72,10 +73,12 @@ across 19 expected guest verdicts. See [raw system registers](x86-system-registe
   with state and control-flow contracts. The existing typed MSR operations
   retain explicit model/permission preconditions.
 - Define entry/return, segment state and physical stack/frame ownership for
-  SWAPGS, IRET, SYSCALL/SYSRET, SYSENTER/SYSEXIT, far transfers and segment
-  loads. Preserve CPU/mode preconditions rather than treating v1 as a generic
+  IRET, SYSCALL/SYSRET, SYSENTER/SYSEXIT, far transfers and segment loads.
+  Preserve CPU/mode preconditions rather than treating v1 as a generic
   permission or transition ABI. RSM also needs its SMM saved-state contract;
-  an ordinary function return does not implement these transitions.
+  an ordinary function return does not implement these transitions. The
+  [transition audit](x86-system-transitions.md) records current interfaces,
+  the missing RSM adapter and requirements for owned terminal paths.
 - Extend guest validation to LAR/LSL/VERR/VERW and string I/O. Keep known raw
   FLAGS/x87 and saved-context limits visible. SLDT/STR/SMSW now have bounded
   CPL0 checks, including all operand sizes, memory canaries and old-value
@@ -217,3 +220,23 @@ workspace compile check, 444 assembler-IR/assembler/disassembler tests,
 and 15 runner/evidence tests. All 110 fresh guest objects are byte-for-byte
 identical to those qualified by the 155 expected verdicts. The full workspace
 result above remains scoped to the source before this import.
+
+## GS exchange integration
+
+ID 818 adds raw SWAPGS as a pinned memory barrier. The owned guest checks both
+base MSRs, selector preservation, independent GS-relative observations,
+round trips, wide canonical bases and eight live SSA inputs. All 19 expected
+verdicts pass. All ten CPL0 campaigns pass 174 expected verdicts using 122
+fresh generated objects. The 110 existing objects remain byte-for-byte
+identical to those qualified before this addition.
+
+Both generator freshness checks, all 33 generator/pilot tests and all 15
+runner/evidence tests pass. A separate experimental IRETQ assembly reference
+restores fifteen GPRs onto a distinct stack at CPL0, and three broken controls
+fail normally. This experiment establishes no public return API or privilege
+transition; see the [transition audit](x86-system-transitions.md).
+
+The full workspace `cargo test --workspace --no-fail-fast` run after the
+register-schema import and SWAPGS addition passes: 2672 passed, zero
+failed and 13 ignored across 487 reported groups. This result does
+not complete the remaining terminal, segment and SMM contracts.

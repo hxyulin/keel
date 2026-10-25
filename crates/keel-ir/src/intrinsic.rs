@@ -951,6 +951,8 @@ pub enum Intrinsic {
     X86Sti,
     X86Hlt,
     X86StiHlt,
+    // Raw long-mode GS-base exchange, append-only ID 818.
+    X86Swapgs,
 }
 
 pub struct IntrinsicInfo {
@@ -962,7 +964,7 @@ pub struct IntrinsicInfo {
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 818] = [
+    pub const ALL: [Intrinsic; 819] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -1781,6 +1783,7 @@ impl Intrinsic {
         Intrinsic::X86Sti,
         Intrinsic::X86Hlt,
         Intrinsic::X86StiHlt,
+        Intrinsic::X86Swapgs,
     ];
 
     pub fn info(self) -> IntrinsicInfo {
@@ -1879,6 +1882,7 @@ impl Intrinsic {
             Intrinsic::X86Sti => ("x86_sti", &[], &[], false),
             Intrinsic::X86Hlt => ("x86_hlt", &[], &[], false),
             Intrinsic::X86StiHlt => ("x86_sti_hlt", &[], &[], false),
+            Intrinsic::X86Swapgs => ("x86_swapgs", &[], &[], false),
 
             Intrinsic::X86ReadCr0 => ("x86_read_cr0", &[], &[Type::I64], false),
             Intrinsic::X86WriteCr0 => ("x86_write_cr0", &[Type::I64], &[], false),
@@ -7309,6 +7313,7 @@ impl Intrinsic {
                 | Self::X86Sti
                 | Self::X86Hlt
                 | Self::X86StiHlt
+                | Self::X86Swapgs
                 | Self::X86Lfence
                 | Self::X86Sfence
                 | Self::X86Mfence

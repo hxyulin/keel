@@ -1173,6 +1173,7 @@ impl InstData {
                 | Intrinsic::X86Sti
                 | Intrinsic::X86Hlt
                 | Intrinsic::X86StiHlt
+                | Intrinsic::X86Swapgs
                 | Intrinsic::X86X87Ffree0
                 | Intrinsic::X86X87Ffree1
                 | Intrinsic::X86X87Ffree2

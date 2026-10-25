@@ -98,6 +98,7 @@ impl FunctionCompiler<'_> {
             Intrinsic::X86Cli => self.emit(Opcode::parse("cli").unwrap(), []),
             Intrinsic::X86Sti => self.emit(Opcode::parse("sti").unwrap(), []),
             Intrinsic::X86Hlt => self.emit(Opcode::parse("hlt").unwrap(), []),
+            Intrinsic::X86Swapgs => self.emit(Opcode::parse("swapgs").unwrap(), []),
             Intrinsic::X86StiHlt => {
                 // One IR operation: no allocation, spills or labels may appear
                 // between STI and HLT. The caller supplies the interrupt context.

@@ -1,0 +1,104 @@
+decl @gs_observe()->i64
+
+func @gs_exchange(ptr,i64,i64,i64,i64,i64,i64,i64,i64) {
+entry(v0:ptr,v1:i64,v2:i64,v3:i64,v4:i64,v5:i64,v6:i64,v7:i64,v8:i64):
+ intrinsic x86_swapgs()
+ v9 = call @gs_observe()
+ v10 = iconst.i64 8
+ v11 = ptradd v0,v10
+ store align 1 v9,v11
+ v12 = iconst.i64 16
+ v13 = ptradd v0,v12
+ store align 1 v1,v13
+ v14 = iconst.i64 24
+ v15 = ptradd v0,v14
+ store align 1 v2,v15
+ v16 = iconst.i64 32
+ v17 = ptradd v0,v16
+ store align 1 v3,v17
+ v18 = iconst.i64 40
+ v19 = ptradd v0,v18
+ store align 1 v4,v19
+ v20 = iconst.i64 48
+ v21 = ptradd v0,v20
+ store align 1 v5,v21
+ v22 = iconst.i64 56
+ v23 = ptradd v0,v22
+ store align 1 v6,v23
+ v24 = iconst.i64 64
+ v25 = ptradd v0,v24
+ store align 1 v7,v25
+ v26 = iconst.i64 72
+ v27 = ptradd v0,v26
+ store align 1 v8,v27
+ return
+}
+
+func @gs_roundtrip(ptr,i64,i64,i64,i64,i64,i64,i64,i64) {
+entry(v0:ptr,v1:i64,v2:i64,v3:i64,v4:i64,v5:i64,v6:i64,v7:i64,v8:i64):
+ intrinsic x86_swapgs()
+ v9 = call @gs_observe()
+ intrinsic x86_swapgs()
+ v10 = call @gs_observe()
+ v11 = iconst.i64 8
+ v12 = ptradd v0,v11
+ store align 1 v9,v12
+ v13 = iconst.i64 16
+ v14 = ptradd v0,v13
+ store align 1 v10,v14
+ v15 = iconst.i64 24
+ v16 = ptradd v0,v15
+ store align 1 v1,v16
+ v17 = iconst.i64 32
+ v18 = ptradd v0,v17
+ store align 1 v2,v18
+ v19 = iconst.i64 40
+ v20 = ptradd v0,v19
+ store align 1 v3,v20
+ v21 = iconst.i64 48
+ v22 = ptradd v0,v21
+ store align 1 v4,v22
+ v23 = iconst.i64 56
+ v24 = ptradd v0,v23
+ store align 1 v5,v24
+ v25 = iconst.i64 64
+ v26 = ptradd v0,v25
+ store align 1 v6,v26
+ v27 = iconst.i64 72
+ v28 = ptradd v0,v27
+ store align 1 v7,v28
+ v29 = iconst.i64 80
+ v30 = ptradd v0,v29
+ store align 1 v8,v30
+ return
+}
+
+func @gs_exchange_raw(ptr,i64,i64,i64,i64,i64,i64,i64,i64) {
+entry(v0:ptr,v1:i64,v2:i64,v3:i64,v4:i64,v5:i64,v6:i64,v7:i64,v8:i64):
+ intrinsic x86_swapgs()
+ v9 = iconst.i64 8
+ v10 = ptradd v0,v9
+ store align 1 v1,v10
+ v11 = iconst.i64 16
+ v12 = ptradd v0,v11
+ store align 1 v2,v12
+ v13 = iconst.i64 24
+ v14 = ptradd v0,v13
+ store align 1 v3,v14
+ v15 = iconst.i64 32
+ v16 = ptradd v0,v15
+ store align 1 v4,v16
+ v17 = iconst.i64 40
+ v18 = ptradd v0,v17
+ store align 1 v5,v18
+ v19 = iconst.i64 48
+ v20 = ptradd v0,v19
+ store align 1 v6,v20
+ v21 = iconst.i64 56
+ v22 = ptradd v0,v21
+ store align 1 v7,v22
+ v23 = iconst.i64 64
+ v24 = ptradd v0,v23
+ store align 1 v8,v24
+ return
+}
