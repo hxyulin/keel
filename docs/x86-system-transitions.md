@@ -47,7 +47,8 @@ The existing linkable typed-assembly adapter pattern offers one implementation
 route: a `noreturn` declaration and transport that owns the final restoration
 sequence. Another route is explicit terminal IR. Either must prove the same
 stack and control-flow properties; an ordinary void intrinsic alone does not.
-The [IRETQ adapter](x86-iretq.md) now defines its own GPR/frame layout and terminal call contract. Other terminal families still need distinct APIs.
+The [IRETQ adapter](x86-iretq.md) now defines its own GPR/frame layout and
+terminal call contract. Other terminal families still need distinct APIs.
 
 SYSENTER/SYSEXIT availability in long mode needs vendor/model qualification.
 Intel documents 64-bit entry/return forms; AMD's [application programming manual](https://docs.amd.com/api/khub/documents/sfvvekC9mDflu6vd3R0NXA/content)
@@ -64,7 +65,7 @@ fixture cannot qualify it.
 Additional fixtures must observe the actual target privilege, RIP, RSP, flags and
 promised registers from an independent landing shim, with invalid controls
 that cannot pass by faulting or timing out. Existing IRQ-frame observations
-and GS exchange witnesses provide components for that validation, not a
+and GS exchange witnesses provide components for that validation, not
 complete entry/return coverage.
 
 Architectural distinctions follow Intel's [instruction reference A-L](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-2a-manual.pdf)

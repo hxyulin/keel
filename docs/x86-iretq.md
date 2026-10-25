@@ -58,7 +58,8 @@ level. The caller supplies valid selectors and descriptor tables, canonical
 RIP/RSP, mappings and legal flags. Selector words are zero-extended.
 Target code must accept the restored registers and stack, including its ABI
 alignment and return-address policy. The adapter does not validate addresses,
-reload unrelated machine state, sanitize flags, create a usable exception stack or install an interrupt-entry protocol.
+reload unrelated machine state, sanitize flags, create a usable exception
+stack or install an interrupt-entry protocol.
 It leaves IRETQ's architectural effects on segment selectors and flags intact.
 
 The image is a GPR and return-frame contract. SIMD/x87 state, FS/GS bases,
@@ -80,16 +81,14 @@ independent GNU-assembled reference. Each first restores all fifteen GPRs
 onto a distinct CPL0 stack with RFLAGS 2, then restores them onto another stack
 at CPL3 with RFLAGS 0x43. That second RIP and RSP use a high canonical alias,
 which distinguishes full-width addresses from truncation. The landing shim
-captures registers, RSP, flags and
-selectors before using them. A private DPL3 interrupt gate and TSS return
+captures registers, RSP, flags and selectors before using them. A private DPL3 interrupt gate and TSS return
 control to the trusted CPL0 verifier. That verifier separately checks the
 processor's saved CS, SS, RSP and continuation RIP, the caller's eight wide
 values, output canaries and image preservation.
 
 The fixture owns a private GDT/TSS/IDT. It temporarily grants user access to
 the first 2 MiB identity mapping and a high canonical alias. It restores the
-original page entries/CR3
-before exit. This observes privilege transitions; it does not test memory
+original page entries/CR3 before exit. This observes privilege transitions; it does not test memory
 isolation. Private descriptor tables remain installed until disposable guest
 exit. Both landings keep IF clear, and no asynchronous event is injected.
 

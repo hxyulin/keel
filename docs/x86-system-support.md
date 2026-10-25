@@ -1,6 +1,6 @@
-# Baseline x86-64 system instruction work
+# Baseline x86-64 system instruction checkpoint
 
-The active goal is to complete baseline long-mode instruction support,
+The goal is to complete baseline long-mode instruction support,
 including privileged instructions. The psABI v1 profile describes userspace
 CPU capabilities, not a kernel execution environment. The existing
 [userspace contract](userspace-isa-status.md) still has its documented limits;
@@ -9,6 +9,32 @@ full baseline system support remains unfinished.
 The assembler and decoder share generated ISA forms. Public mnemonic/operand
 adapters and typed lowering determine which compiler paths are exposed. The
 remaining work below tracks those layers and their validation.
+
+## Checkpoint boundary
+
+The implementation checkpoint is `583297c7`. Its recorded validation is
+2,674 workspace tests passed, zero failed and 13 ignored, plus 194 expected
+guest verdicts across eleven campaigns. The guest evidence uses QEMU TCG;
+it does not establish native hardware, multicore or arbitrary fault recovery.
+The detailed validation ledger below records which exports were reused.
+
+| Family | Exposed compiler interface | Execution evidence |
+|---|---|---|
+| SGDT/SIDT/LGDT/LIDT | Typed observation/load APIs | Owned CPL0 table fixtures |
+| SLDT/STR/SMSW | Memory and register-width APIs | CPL0 state, width, old-value and canary checks |
+| LAR/LSL/VERR/VERW | Typed query APIs | CPL0 execution qualification remains open |
+| RDMSR/WRMSR, CLTS/INVD/WBINVD | Typed raw operations | Bounded CPL0 state checks; physical cache effects unqualified |
+| CR/DR access, LLDT/LTR/LMSW/INVLPG | Typed register, memory and address operations | CPL0 state, liveness and remap checks |
+| CLI/STI/HLT, adjacent STI;HLT | Typed raw operations | Owned IRQ/IST fixture with independently checked HLT resumption |
+| SWAPGS | Typed raw operation | Both GS bases, effective reads, selector preservation and liveness |
+| IRETQ | Owned terminal GPR/frame adapter | CPL0 and CPL3 landings, high canonical RIP/RSP and negative controls |
+| Scalar and string port I/O | Typed operations with permission/state contracts | Compile/encoding checks; privileged device execution remains open |
+| Other entry/return, arbitrary INT, far/segment transfers, RSM | Incomplete native interfaces/contracts | Follow-up implementation; see [transition audit](x86-system-transitions.md) |
+
+This is a checkpoint of the interfaces and finite evidence above. Imported ISA
+forms, public assembler identities and callable compiler interfaces are
+separate layers. Neither imported forms nor the v1 CPU profile imply complete
+system support or an operating-system entry ABI.
 
 ## Current coverage
 
@@ -85,8 +111,9 @@ across 19 expected guest verdicts. See [raw system registers](x86-system-registe
   an ordinary function return does not implement these transitions. The
   [transition audit](x86-system-transitions.md) records current interfaces,
   the missing RSM adapter and requirements for owned terminal paths.
-- Extend guest validation to LAR/LSL/VERR/VERW and string I/O. Keep known raw
-  FLAGS/x87 and saved-context limits visible. SLDT/STR/SMSW now have bounded
+- Extend guest validation to LAR/LSL/VERR/VERW and scalar/string port I/O.
+  Keep known raw FLAGS/x87 and saved-context limits visible. SLDT/STR/SMSW
+  now have bounded
   CPL0 checks, including all operand sizes, memory canaries and old-value
   liveness; other machine states and fault paths remain unqualified.
 

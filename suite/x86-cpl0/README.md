@@ -45,15 +45,21 @@ register values are promised. RSP is 16-byte aligned immediately before CALL
 page-table setup and the first call. Payload text, rodata, data and BSS are linked
 into the same low-memory image; all unresolved helpers must be supplied. The
 linker and flat-image validator reject an image/BSS beyond the 32 MiB guest
-RAM limit. Payload accesses must also stay within RAM and the identity map.
+RAM limit. Accessed physical memory must stay within guest RAM. The initial
+mapping is an identity map; a payload that installs aliases owns their
+validity and the mappings needed for the harness continuation.
 No ELF executable loader, dynamic linking, TLS, libc or operating system exists.
 
 C bridges should use an existing x86-64 ELF compiler with `-ffreestanding
 -mno-red-zone -mgeneral-regs-only -fno-stack-protector -fno-pic -fno-pie`.
-The generic harness does not initialize FP/SIMD state. Interrupts stay disabled;
-no exception handlers are installed. Payloads must not change execution mode,
-interrupt state or mappings needed by the harness. A fault/reset/triple fault
-fails through the exit/transcript check or timeout; it is not recovered.
+The generic harness does not initialize FP/SIMD state. It enters the payload
+with maskable interrupts disabled and no exception handlers installed. A
+payload that changes event delivery, descriptor tables or mappings must own
+the handlers, stacks and state needed for its entire execution and the harness
+continuation. Return in 64-bit mode with IF and DF clear and the harness's
+code, data and stack still usable. Dedicated IRQ and IRETQ fixtures establish
+their own contexts as described below. A fault/reset/triple fault fails through
+the exit/transcript check or timeout; the generic harness does not recover it.
 
 The multiboot flat image begins at physical/linear `0x100000`; its 32-byte
 address-bearing header and entry/load/BSS bounds are checked after GNU objcopy.
