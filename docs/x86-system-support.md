@@ -46,17 +46,19 @@ CLI, STI, HLT, SWAPGS, IRET and SYSRET have assembler encodings, but no typed
 system-state/transition contract. An
 assembler encoding alone is not evidence of working kernel code generation.
 
+LLDT, LTR and LMSW have register/memory APIs, and INVLPG has an address-only
+API over generated forms. CPL0 fixtures check selector changes, TSS busy bits,
+LMSW low-bit/PE behavior and a TLB remap with a stale-mapping control. See
+[system mutation/invalidation](x86-system-write.md) for contracts and limits.
+
 ## Remaining baseline work
 
-- Expose LLDT, LTR and LMSW assembler identities and typed operations over
-  the generated forms, including descriptor side effects and permitted state
-  changes.
-- Expose control/debug register operands and generated MOV forms. Design typed access
-  around the registers whose mutation permits ordinary compiled code to
+- Expose control/debug register operands and generated MOV forms. Design
+  typed access around the registers whose mutation permits ordinary compiled code to
   continue; mode-changing operations need an explicit transition contract.
-- Expose INVLPG's address-only operand and typed operation, then qualify
-  address translation/cache operations in disposable guests. Define the distinction between compiler barriers and hardware
-  invalidation, including local-CPU scope.
+- Extend address-translation/cache qualification beyond the bounded emulated
+  INVLPG remap and CPU/cache-control fixtures. Keep native hardware, multicore
+  scope and additional address-space contexts explicit.
 - Add typed CPU-control operations for the remaining baseline fixed opcodes,
   with state and control-flow contracts. The existing typed MSR operations
   retain explicit model/permission preconditions.
@@ -126,3 +128,12 @@ CPU/cache-control cases. These are 83 expected guest verdicts. The individual
 campaigns retain their documented limits. This integration check does not
 establish that all workspace tests pass or complete the remaining system
 instruction APIs.
+
+
+The descriptor/status mutation and INVLPG adapters add 35 further expected
+guest verdicts: 18 system-load cases and 17 invalidation cases. The five
+previous campaigns also pass after the mode-selection refactor, for 118
+verdicts across seven campaigns. The assembler/disassembler package suites,
+16 focused codegen tests, generator freshness check, ten runner unit tests
+and workspace compile check pass with these adapters. Full workspace test
+failures in `x86_d8` and `x86_sysv_tail` remain on the validation backlog.

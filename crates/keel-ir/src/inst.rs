@@ -762,6 +762,13 @@ impl InstData {
             Self::Intrinsic { id, .. } => match id {
                 Intrinsic::X86Lgdt
                 | Intrinsic::X86Lidt
+                | Intrinsic::X86Lldt
+                | Intrinsic::X86LldtMem
+                | Intrinsic::X86Ltr
+                | Intrinsic::X86LtrMem
+                | Intrinsic::X86Lmsw
+                | Intrinsic::X86LmswMem
+                | Intrinsic::X86Invlpg
                 | Intrinsic::X86Sgdt
                 | Intrinsic::X86Sidt
                 | Intrinsic::X86SldtMem

@@ -2573,20 +2573,8 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Intrinsic { id, ref args } if id.x86_port_io().is_some() => {
                 self.native_port_io(id, args, result)
             }
-            InstData::Intrinsic {
-                id: id @ (Intrinsic::X86Lgdt | Intrinsic::X86Lidt),
-                ref args,
-            } => {
-                let input = self.use_reg(args[0], S0);
-                self.emit(
-                    Opcode::parse(if id == Intrinsic::X86Lgdt {
-                        "lgdt"
-                    } else {
-                        "lidt"
-                    })
-                    .unwrap(),
-                    [asm_arg(sized(memory(r64(input), 0), 80))],
-                );
+            InstData::Intrinsic { id, ref args } if id.x86_system_write().is_some() => {
+                self.native_system_write(id, args)
             }
             InstData::Intrinsic { id, ref args } if id.x86_descriptor_query().is_some() => {
                 self.native_descriptor_query(id, args, result)
@@ -3439,6 +3427,13 @@ impl<'a> FunctionCompiler<'a> {
                 | Intrinsic::X86DivS64
                 | Intrinsic::X86Lgdt
                 | Intrinsic::X86Lidt
+                | Intrinsic::X86Lldt
+                | Intrinsic::X86LldtMem
+                | Intrinsic::X86Ltr
+                | Intrinsic::X86LtrMem
+                | Intrinsic::X86Lmsw
+                | Intrinsic::X86LmswMem
+                | Intrinsic::X86Invlpg
                 | Intrinsic::X86Sgdt
                 | Intrinsic::X86Sidt
                 | Intrinsic::X86SldtMem

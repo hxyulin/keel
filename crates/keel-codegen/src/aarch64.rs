@@ -1230,6 +1230,13 @@ fn is_call(func: &Function, data: &InstData) -> bool {
             | Intrinsic::X86DivS64
             | Intrinsic::X86Lgdt
             | Intrinsic::X86Lidt
+            | Intrinsic::X86Lldt
+            | Intrinsic::X86LldtMem
+            | Intrinsic::X86Ltr
+            | Intrinsic::X86LtrMem
+            | Intrinsic::X86Lmsw
+            | Intrinsic::X86LmswMem
+            | Intrinsic::X86Invlpg
             | Intrinsic::X86Sgdt
             | Intrinsic::X86Sidt
             | Intrinsic::X86SldtMem
@@ -4044,6 +4051,13 @@ impl<'a> FunctionCompiler<'a> {
                 | Intrinsic::X86DivS64
                 | Intrinsic::X86Lgdt
                 | Intrinsic::X86Lidt
+                | Intrinsic::X86Lldt
+                | Intrinsic::X86LldtMem
+                | Intrinsic::X86Ltr
+                | Intrinsic::X86LtrMem
+                | Intrinsic::X86Lmsw
+                | Intrinsic::X86LmswMem
+                | Intrinsic::X86Invlpg
                 | Intrinsic::X86Sgdt
                 | Intrinsic::X86Sidt
                 | Intrinsic::X86SldtMem

@@ -228,3 +228,32 @@ verdicts match. Faults and timeouts fail the campaign.
 `--cpu-control` is mutually exclusive with the other campaign modes. See
 [privileged CPU/cache control](../../docs/x86-privileged-control.md) for the
 contracts and remaining evidence limits.
+
+## LLDT/LTR/LMSW and INVLPG campaigns
+
+```sh
+KEEL_SYSTEM_LOAD_EXPORT_DIR="$PWD/target/system-load-exports" \
+KEEL_INVLPG_EXPORT_DIR="$PWD/target/invlpg-exports" \
+  cargo test -p keel-codegen --test x86_system_write
+python3 suite/x86-cpl0/descriptor_campaign.py --system-loads \
+  --exports target/system-load-exports --timeout 5
+python3 suite/x86-cpl0/descriptor_campaign.py --invlpg \
+  --exports target/invlpg-exports --timeout 5
+```
+
+Each mode accepts exactly twelve v1 exports. The system-load bridge checks
+register and memory mutations against trusted selector/CR0 observations,
+TSS busy bits, original input values and canaries. Its reference passes and
+five controls fail normally, for eighteen expected verdicts.
+
+The INVLPG bridge replaces a 4 KiB mapping after reading its old value. The
+generated invalidation must expose the new value, while the omission control
+must fail. Unmapped and noncanonical address-only calls also return normally.
+An independent reference passes and four controls fail normally, for seventeen
+expected verdicts. Mapping changes are restored on normal success or mismatch.
+
+Both campaigns pass under QEMU 11.1.2 TCG on macOS ARM64. They provide bounded
+emulated evidence, with no native hardware, multicore or exception-resumption
+claim. The modes are mutually exclusive with all other campaign modes. See
+[system mutation/invalidation](../../docs/x86-system-write.md) for seeds,
+contracts and limits.

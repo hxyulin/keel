@@ -10,19 +10,71 @@ import tempfile
 
 import run
 
+# One configuration owns each mode's object roster, bridge, entry symbols and
+# controls. This keeps those selections together as new system families arrive.
+CAMPAIGNS = {
+    'observe': dict(prefix='descriptor', bridge='descriptor_bridge.S',
+                    symbols=['descriptor_observe'], inline=[
+                        ('no-observation', 'ret'),
+                        ('corrupt-canary', 'sgdt 1(%rdi)\nsidt 17(%rdi)\nmovb $0, (%rdi)\nret')]),
+    'table-loads': dict(prefix='descriptor-load', bridge='descriptor_bridge.S',
+                        symbols=['descriptor_load'], defines=['KEEL_TABLE_LOADS'], inline=[
+                            ('no-load', 'ret'),
+                            ('swapped-tables', 'lgdt (%rsi)\nlidt (%rdi)\nret')]),
+    'status': dict(prefix='descriptor-status', bridge='descriptor_status_bridge.S',
+                   symbols=['descriptor_status'], reference='descriptor_status_reference.S', controls=[
+                       ('reference', None, False),
+                       ('normalized-r16', 'KEEL_NORMALIZE_R16', True),
+                       ('wide-memory', 'KEEL_WIDE_MEMORY', True),
+                       ('narrow-smsw', 'KEEL_NARROW_SMSW', True),
+                       ('clobbered-old', 'KEEL_CLOBBER_OLD', True)]),
+    'msr': dict(prefix='msr', bridge='msr_bridge.S', symbols=['msr_observe', 'msr_constant'],
+                extra_exports=['msr-remat.o'], reference='msr_reference.S', controls=[
+                    ('reference', None, False),
+                    ('omitted-write', 'KEEL_OMIT_WRITE', True),
+                    ('narrow-read', 'KEEL_NARROW_READ', True),
+                    ('wrong-index', 'KEEL_WRONG_INDEX', True),
+                    ('clobbered-live', 'KEEL_CLOBBER_LIVE', True)]),
+    'cpu-control': dict(prefix='cpu-control', bridge='cpu_control_bridge.S',
+                        symbols=['cpu_control'], reference='cpu_control_reference.S', controls=[
+                            ('reference', None, False),
+                            ('cache-omitted', 'KEEL_OMIT_CACHE', False),
+                            ('omitted-clts', 'KEEL_OMIT_CLTS', True),
+                            ('altered-cr0', 'KEEL_ALTER_CR0', True),
+                            ('clobbered-live', 'KEEL_CLOBBER_LIVE', True)]),
+    'system-loads': dict(prefix='system-load', bridge='system_load_bridge.S',
+                         symbols=['system_reg', 'system_mem'], reference='system_load_reference.S', controls=[
+                             ('reference', None, False),
+                             ('omitted-lldt', 'KEEL_OMIT_LLDT', True),
+                             ('omitted-ltr', 'KEEL_OMIT_LTR', True),
+                             ('omitted-lmsw', 'KEEL_OMIT_LMSW', True),
+                             ('clobbered-live', 'KEEL_CLOBBER_LIVE', True)]),
+    'invlpg': dict(prefix='invlpg', bridge='invlpg_bridge.S', symbols=['invalidate'],
+                   reference='invlpg_reference.S', controls=[
+                       ('reference', None, False),
+                       ('omitted-invalidation', 'KEEL_OMIT_INVALIDATE', True),
+                       ('bad-marker', 'KEEL_BAD_MARKER', True),
+                       ('bad-address-result', 'KEEL_BAD_ADDRESS', True)]),
+}
+
+
+def definitions(names):
+    return [arg for name in names for arg in ('--defsym', f'{name}=1')]
+
+
+def stub(symbols, body='ret'):
+    return ('.text\n.code64\n' + ''.join(f'.global {s}\n{s}:\n{body}\n' for s in symbols)
+            + '.section .note.GNU-stack,"",@progbits\n')
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--exports', type=Path, required=True)
     modes = parser.add_mutually_exclusive_group()
-    modes.add_argument('--table-loads', action='store_true',
-                       help='validate LGDT/LIDT exports using a trusted observer')
-    modes.add_argument('--status', action='store_true',
-                       help='validate all twelve SLDT/STR/SMSW forms')
-    modes.add_argument('--msr', action='store_true',
-                       help='validate typed RDMSR/WRMSR and live inputs')
-    modes.add_argument('--cpu-control', action='store_true',
-                       help='validate CLTS state and emulated cache-control execution')
+    for mode in CAMPAIGNS:
+        if mode != 'observe':
+            modes.add_argument(f'--{mode}', dest='mode', action='store_const', const=mode)
+    parser.set_defaults(mode='observe')
     parser.add_argument('--qemu', default='qemu-system-x86_64')
     parser.add_argument('--as', dest='assembler', default='as')
     parser.add_argument('--ld', dest='linker', default='ld')
@@ -31,13 +83,11 @@ def main():
     args = parser.parse_args()
     if not 0 < args.timeout <= 30:
         parser.error('timeout must be positive and at most 30 seconds')
-    prefix = ('cpu-control' if args.cpu_control else 'msr' if args.msr else 'descriptor-status' if args.status else
-              'descriptor-load' if args.table_loads else 'descriptor')
-    names = [f'{prefix}-{s}-{a}-{spill}.o'
+    config = CAMPAIGNS[args.mode]
+    names = [f'{config["prefix"]}-{s}-{a}-{spill}.o'
              for s in ('Baseline', 'Trees', 'Full')
              for a in ('Fast', 'Full') for spill in ('false', 'true')]
-    if args.msr:
-        names.append('msr-remat.o')
+    names += config.get('extra_exports', [])
     if sorted(p.name for p in args.exports.glob('*.o')) != sorted(names):
         parser.error(f'exports must contain exactly the {len(names)} expected payload objects')
     assembler, linker, objcopy, qemu = map(
@@ -45,70 +95,24 @@ def main():
     work = Path(tempfile.mkdtemp(prefix='keel-descriptor-campaign-', dir='/tmp'))
     print(json.dumps(dict(artifacts=str(work))), flush=True)
     bridge = work / 'bridge.o'
-    defines = ['--defsym', 'KEEL_TABLE_LOADS=1'] if args.table_loads else []
-    bridge_source = ('cpu_control_bridge.S' if args.cpu_control else 'msr_bridge.S' if args.msr else
-                     'descriptor_status_bridge.S' if args.status else 'descriptor_bridge.S')
-    run.checked([assembler, '--64', *defines, '-o', str(bridge),
-                 str(run.HERE / 'cases' / bridge_source)])
+    run.checked([assembler, '--64', *definitions(config.get('defines', [])), '-o', str(bridge),
+                 str(run.HERE / 'cases' / config['bridge'])])
     cases = [(name, args.exports / name, False) for name in names]
-    # Controls must return normally with incorrect state or output. A fault
-    # or timeout cannot satisfy the expected FAIL transcript and exit status.
-    if args.status or args.msr or args.cpu_control:
-        controls = (
-            ('reference', None),
-            ('omitted-write', 'KEEL_OMIT_WRITE'),
-            ('narrow-read', 'KEEL_NARROW_READ'),
-            ('wrong-index', 'KEEL_WRONG_INDEX'),
-            ('clobbered-live', 'KEEL_CLOBBER_LIVE'),
-        ) if args.msr else (
-                ('reference', None),
-                ('normalized-r16', 'KEEL_NORMALIZE_R16'),
-                ('wide-memory', 'KEEL_WIDE_MEMORY'),
-                ('narrow-smsw', 'KEEL_NARROW_SMSW'),
-                ('clobbered-old', 'KEEL_CLOBBER_OLD'))
-        controls = [(name, define, define is not None) for name, define in controls]
-        if args.cpu_control:
-            controls = [
-                ('reference', None, False),
-                ('cache-omitted', 'KEEL_OMIT_CACHE', False),
-                ('omitted-clts', 'KEEL_OMIT_CLTS', True),
-                ('altered-cr0', 'KEEL_ALTER_CR0', True),
-                ('clobbered-live', 'KEEL_CLOBBER_LIVE', True),
-            ]
-        reference = ('cpu_control_reference.S' if args.cpu_control else
-                     'msr_reference.S' if args.msr else 'descriptor_status_reference.S')
-        for name, define, negative in controls:
+    if 'reference' in config:
+        for name, define, negative in config['controls']:
             obj = work / f'{name}.o'
-            defines = ['--defsym', f'{define}=1'] if define else []
-            run.checked([assembler, '--64', *defines, '-o', str(obj),
-                         str(run.HERE / 'cases' / reference)])
+            run.checked([assembler, '--64', *definitions([define] if define else []),
+                         '-o', str(obj), str(run.HERE / 'cases' / config['reference'])])
             cases.append((name, obj, negative))
-        source, obj = work / 'no-observation.S', work / 'no-observation.o'
-        symbol = ('cpu_control' if args.cpu_control else
-                  'msr_observe' if args.msr else 'descriptor_status')
-        source.write_text(f'.text\n.code64\n.global {symbol}\n'
-                          f'{symbol}:\nret\n'
-                          '.section .note.GNU-stack,"",@progbits\n')
-        if args.msr:
-            with source.open('a') as out:
-                out.write('.text\n.global msr_constant\nmsr_constant:\nret\n')
-        run.checked([assembler, '--64', '-o', str(obj), str(source)])
-        cases.append(('no-observation', obj, True))
+        controls = [('no-observation', 'ret')]
     else:
-        controls = (
-            ('no-load', 'ret'),
-            ('swapped-tables', 'lgdt (%rsi)\nlidt (%rdi)\nret'),
-        ) if args.table_loads else (
-            ('no-observation', 'ret'),
-            ('corrupt-canary', 'sgdt 1(%rdi)\nsidt 17(%rdi)\nmovb $0, (%rdi)\nret'))
-        symbol = 'descriptor_load' if args.table_loads else 'descriptor_observe'
-        for name, body in controls:
-            source, obj = work / f'{name}.S', work / f'{name}.o'
-            source.write_text(f'.text\n.code64\n.global {symbol}\n'
-                              f'{symbol}:\n' + body +
-                              '\n.section .note.GNU-stack,"",@progbits\n')
-            run.checked([assembler, '--64', '-o', str(obj), str(source)])
-            cases.append((name, obj, True))
+        controls = config['inline']
+    # A fault or timeout cannot satisfy the expected FAIL transcript/exit pair.
+    for name, body in controls:
+        source, obj = work / f'{name}.S', work / f'{name}.o'
+        source.write_text(stub(config['symbols'], body))
+        run.checked([assembler, '--64', '-o', str(obj), str(source)])
+        cases.append((name, obj, True))
     passed = True
     with (work / 'results.jsonl').open('w') as log:
         for name, obj, negative in cases:

@@ -911,6 +911,14 @@ pub enum Intrinsic {
     X86Clts,
     X86Invd,
     X86Wbinvd,
+    // Descriptor/status mutation and address invalidation, IDs 781..787.
+    X86Lldt,
+    X86LldtMem,
+    X86Ltr,
+    X86LtrMem,
+    X86Lmsw,
+    X86LmswMem,
+    X86Invlpg,
 }
 
 pub struct IntrinsicInfo {
@@ -922,7 +930,7 @@ pub struct IntrinsicInfo {
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 781] = [
+    pub const ALL: [Intrinsic; 788] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -1704,6 +1712,13 @@ impl Intrinsic {
         Intrinsic::X86Clts,
         Intrinsic::X86Invd,
         Intrinsic::X86Wbinvd,
+        Intrinsic::X86Lldt,
+        Intrinsic::X86LldtMem,
+        Intrinsic::X86Ltr,
+        Intrinsic::X86LtrMem,
+        Intrinsic::X86Lmsw,
+        Intrinsic::X86LmswMem,
+        Intrinsic::X86Invlpg,
     ];
 
     pub fn info(self) -> IntrinsicInfo {
@@ -1791,6 +1806,13 @@ impl Intrinsic {
             Intrinsic::X86RepOuts8OwnedTerminal => ("x86_rep_outs8_owned_terminal", &[Type::I64, Type::I16, Type::Ptr, Type::I64], &[Type::Ptr, Type::I64, Type::I64, Type::I64], false),
             Intrinsic::X86RepOuts16OwnedTerminal => ("x86_rep_outs16_owned_terminal", &[Type::I64, Type::I16, Type::Ptr, Type::I64], &[Type::Ptr, Type::I64, Type::I64, Type::I64], false),
             Intrinsic::X86RepOuts32OwnedTerminal => ("x86_rep_outs32_owned_terminal", &[Type::I64, Type::I16, Type::Ptr, Type::I64], &[Type::Ptr, Type::I64, Type::I64, Type::I64], false),
+            Intrinsic::X86Lldt => ("x86_lldt", &[Type::I16], &[], false),
+            Intrinsic::X86LldtMem => ("x86_lldt_mem", &[Type::Ptr], &[], false),
+            Intrinsic::X86Ltr => ("x86_ltr", &[Type::I16], &[], false),
+            Intrinsic::X86LtrMem => ("x86_ltr_mem", &[Type::Ptr], &[], false),
+            Intrinsic::X86Lmsw => ("x86_lmsw", &[Type::I16], &[], false),
+            Intrinsic::X86LmswMem => ("x86_lmsw_mem", &[Type::Ptr], &[], false),
+            Intrinsic::X86Invlpg => ("x86_invlpg", &[Type::Ptr], &[], false),
             Intrinsic::X86Clts => ("x86_clts", &[], &[], false),
             Intrinsic::X86Invd => ("x86_invd", &[], &[], false),
             Intrinsic::X86Wbinvd => ("x86_wbinvd", &[], &[], false),
@@ -6992,6 +7014,23 @@ impl Intrinsic {
         })
     }
 
+    /// Single-operand privileged operations: (opcode, encoded operand width,
+    /// pointer form). INVLPG's m8 is an address-only operand, not a byte read.
+    pub fn x86_system_write(self) -> Option<(&'static str, u16, bool)> {
+        Some(match self {
+            Self::X86Lgdt => ("lgdt", 80, true),
+            Self::X86Lidt => ("lidt", 80, true),
+            Self::X86Lldt => ("lldt", 16, false),
+            Self::X86LldtMem => ("lldt", 16, true),
+            Self::X86Ltr => ("ltr", 16, false),
+            Self::X86LtrMem => ("ltr", 16, true),
+            Self::X86Lmsw => ("lmsw", 16, false),
+            Self::X86LmswMem => ("lmsw", 16, true),
+            Self::X86Invlpg => ("invlpg", 8, true),
+            _ => return None,
+        })
+    }
+
     /// (opcode, operand bits, exact write bytes; zero means register).
     /// Long mode only, CPL0 or CR4.UMIP clear; no feature-bit implication.
     pub fn x86_descriptor_query(self) -> Option<(&'static str, u16, usize)> {
@@ -7142,7 +7181,7 @@ impl Intrinsic {
                 | Self::X86Sfence
                 | Self::X86Mfence
                 | Self::X86Pause
-        ) || matches!(self, Self::X86Lgdt | Self::X86Lidt)
+        ) || self.x86_system_write().is_some()
             || self.x86_descriptor_query().is_some()
             || self.x86_selector_query().is_some()
             || self.x86_port_io().is_some()

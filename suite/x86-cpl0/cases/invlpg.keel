@@ -1,0 +1,10 @@
+func @invalidate(ptr,ptr,i64) {
+entry(v0:ptr,v1:ptr,v2:i64):
+ intrinsic x86_invlpg(v0)
+ store align 1 v2,v1
+ v3 = iconst.i64 8
+ v4 = ptradd v1,v3
+ v5 = ptrtoint.i64 v0
+ store align 1 v5,v4
+ return
+}
