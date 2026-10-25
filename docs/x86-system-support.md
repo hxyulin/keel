@@ -155,3 +155,19 @@ The repaired privileged-instruction checkout passes `cargo test --workspace
 --no-fail-fast`: 2,649 tests pass, none fail and 13 are ignored across 480
 reported test groups. This run precedes the optional-extension adapter import;
 it establishes the ABI repair against the original generated-table migration.
+
+## Generated identity and extension integration
+
+The privileged branch also includes the generated fixed/v2/v3 identity and
+optional-extension adapter checkpoint, imported locally as `f52a0791` after
+the generated-file attributes commit `cf30013a`. The import leaves privileged
+intrinsic IDs, CoreOpcode identities and compiler lowering unchanged.
+
+The integrated checkout passes the workspace compile check, 16 generator/pilot
+tests and generator freshness check, all 432 assembler-IR/assembler/disassembler
+tests, and 23 focused privileged/AES/PCLMUL codegen tests. Fresh payloads pass
+all 118 expected CPL0 verdicts across seven campaigns. Fresh tail objects pass
+72 native GCC/Clang executions and reject both broken-tail controls.
+The guest evidence retains its emulated, single-CPU and fixture-specific limits.
+The full workspace test run reported above predates this adapter import; the
+post-import checks listed here are targeted integration evidence.
