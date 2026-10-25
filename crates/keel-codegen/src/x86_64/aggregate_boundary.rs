@@ -169,7 +169,7 @@ impl Builder {
 }
 
 pub(super) fn lower(old: &Function) -> Option<Function> {
-    if old.blocks().count() != 1
+    if old.blocks().count() > 4
         || old.layout_insts().count() > 256
         || old.num_values() > 1024
         || old.num_stack_slots() > 32
@@ -197,6 +197,9 @@ pub(super) fn lower(old: &Function) -> Option<Function> {
         return None;
     }
     let sig = signature(&old.sig)?;
+    if old.blocks().count() != 1 {
+        return lower_branches(old, sig);
+    }
     let mut f = Function::new(&old.name, sig);
     f.attrs = old.attrs.clone();
     f.local = old.local;
@@ -396,6 +399,241 @@ pub(super) fn lower(old: &Function) -> Option<Function> {
     Some(b.f)
 }
 
+// Scalarize only acyclic leaves. Virtual homes must agree at joins; differing
+// contents fall back to the ordinary ABI rather than synthesizing memory phis.
+// External loads/stores stay at the same instruction on the same CFG path.
+fn lower_branches(old: &Function, sig: Signature) -> Option<Function> {
+    use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
+    if old.blocks().count() > 4 || old.layout_insts().count() > 64 {
+        return None;
+    }
+    let cfg = ControlFlowGraph::compute(old);
+    let dom = DominatorTree::compute(old, &cfg);
+    let order = dom.rpo();
+    if order.len() != old.blocks().count() {
+        return None;
+    }
+    let positions: FxHashMap<_, _> = order.iter().enumerate().map(|(i, &b)| (b, i)).collect();
+    for &block in order {
+        if cfg
+            .succs(block)
+            .iter()
+            .any(|next| positions[next] <= positions[&block])
+        {
+            return None;
+        }
+    }
+    let mut f = Function::new(&old.name, sig);
+    f.attrs = old.attrs.clone();
+    f.local = old.local;
+    f.hidden = old.hidden;
+    f.weak_odr = old.weak_odr;
+    let blocks: FxHashMap<_, _> = order.iter().map(|&old| (old, f.create_block())).collect();
+    let entry = old.entry_block()?;
+    let mut b = Builder {
+        block: blocks[&entry],
+        f,
+        values: FxHashMap::default(),
+        addresses: FxHashMap::default(),
+        objects: Vec::new(),
+        pairs: FxHashMap::default(),
+        constants: FxHashMap::default(),
+    };
+    let params = old.block_params(entry);
+    let result_home = b.object(2);
+    b.addresses.insert(params[0], (result_home, 0));
+    for (&v, p) in params[1..].iter().zip(&old.sig.params[1..]) {
+        let ty = if matches!(p.purpose, Purpose::ByVal(_)) {
+            Type::I128
+        } else {
+            p.ty
+        };
+        let new = b.f.append_block_param(b.block, ty);
+        if matches!(p.purpose, Purpose::ByVal(_)) {
+            let words = b.split(new);
+            let id = b.object(2);
+            b.objects[id] = words.map(Some).to_vec();
+            b.addresses.insert(v, (id, 0));
+        } else {
+            b.values.insert(v, new);
+        }
+    }
+    let entry_pairs = b.pairs.clone();
+    let mut slots = FxHashMap::default();
+    for (slot, data) in old.stack_slots() {
+        let size = data.size as usize;
+        if size == 0 || size > 64 || size % 8 != 0 {
+            return None;
+        }
+        slots.insert(slot, b.object(size / 8));
+    }
+    for &block in &order[1..] {
+        for &v in old.block_params(block) {
+            let new = b.f.append_block_param(blocks[&block], old.value_type(v));
+            b.values.insert(v, new);
+        }
+    }
+    let mut exits: FxHashMap<_, Vec<Vec<Option<Value>>>> = FxHashMap::default();
+    for &block in order {
+        b.block = blocks[&block];
+        // Only entry-dominating pair facts may be reused across blocks.
+        b.pairs = entry_pairs.clone();
+        if block != entry {
+            let first = *cfg.preds(block).first()?;
+            let state = exits.get(&first)?.clone();
+            if cfg
+                .preds(block)
+                .iter()
+                .any(|p| exits.get(p) != Some(&state))
+            {
+                return None;
+            }
+            b.objects = state;
+        }
+        for &i in old.block_insts(block) {
+            let data = old.inst_data(i);
+            let scalar = |v: Value, b: &Builder| b.values.get(&old.resolve(v)).copied();
+            let address = |v: Value, b: &Builder| b.addresses.get(&old.resolve(v)).copied();
+            let mut produced = None;
+            match data {
+                InstData::StackAddr { slot } => {
+                    b.addresses
+                        .insert(old.first_result(i), (*slots.get(slot)?, 0));
+                }
+                InstData::Iconst { ty, imm } => {
+                    let v = b.emit(InstData::Iconst { ty: *ty, imm: *imm });
+                    b.constants.insert(v, *imm);
+                    produced = Some(v);
+                }
+                InstData::Binary {
+                    op: BinaryOp::Ptradd,
+                    args,
+                } if address(args[0], &b).is_some() => {
+                    let (id, offset) = address(args[0], &b)?;
+                    let n = usize::try_from(*b.constants.get(&scalar(args[1], &b)?)?).ok()?;
+                    let offset = offset.checked_add(n)?;
+                    if offset > b.objects[id].len() * 8 {
+                        return None;
+                    }
+                    b.addresses.insert(old.first_result(i), (id, offset));
+                }
+                InstData::Load { ty, addr, flags } if address(*addr, &b).is_some() => {
+                    if !matches!(ty, Type::I64 | Type::Ptr) || flags.volatile || flags.align > 8 {
+                        return None;
+                    }
+                    let (id, offset) = address(*addr, &b)?;
+                    if offset % 8 != 0 {
+                        return None;
+                    }
+                    let word = (*b.objects[id].get(offset / 8)?)?;
+                    produced = Some(if *ty == Type::Ptr {
+                        b.emit(InstData::Convert {
+                            op: ConvertOp::IntToPtr,
+                            ty: Type::Ptr,
+                            arg: word,
+                        })
+                    } else {
+                        word
+                    });
+                }
+                InstData::Store { addr, value, flags } if address(*addr, &b).is_some() => {
+                    if flags.volatile || flags.align > 8 {
+                        return None;
+                    }
+                    let (id, offset) = address(*addr, &b)?;
+                    let value = scalar(*value, &b)?;
+                    if offset % 8 != 0 || b.f.value_type(value) != Type::I64 {
+                        return None;
+                    }
+                    *b.objects[id].get_mut(offset / 8)? = Some(value);
+                }
+                InstData::Return { args } if args.is_empty() => {
+                    let result = b.packed(result_home, 0)?;
+                    b.f.append_inst(
+                        b.block,
+                        InstData::Return {
+                            args: vec![result].into(),
+                        },
+                    );
+                }
+                InstData::Load {
+                    ty: Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Ptr,
+                    flags,
+                    ..
+                }
+                | InstData::Store { flags, .. }
+                    if !flags.volatile && flags.align <= 8 =>
+                {
+                    let mut new = data.clone();
+                    let mut valid = true;
+                    new.for_each_operand_mut(|v| {
+                        if let Some(n) = scalar(*v, &b) {
+                            *v = n;
+                        } else {
+                            valid = false;
+                        }
+                    });
+                    if !valid {
+                        return None;
+                    }
+                    let inst = b.f.append_inst(b.block, new);
+                    if !old.inst_results(i).is_empty() {
+                        produced = Some(b.f.first_result(inst));
+                    }
+                }
+                InstData::Convert {
+                    op:
+                        ConvertOp::Trunc
+                        | ConvertOp::Uext
+                        | ConvertOp::Sext
+                        | ConvertOp::IntToPtr
+                        | ConvertOp::PtrToInt,
+                    ..
+                }
+                | InstData::Binary {
+                    op:
+                        BinaryOp::Iadd
+                        | BinaryOp::Isub
+                        | BinaryOp::And
+                        | BinaryOp::Or
+                        | BinaryOp::Xor
+                        | BinaryOp::Ptradd,
+                    ..
+                }
+                | InstData::Icmp { .. }
+                | InstData::Jump { .. }
+                | InstData::Brif { .. } => {
+                    let mut new = data.clone();
+                    let mut valid = true;
+                    new.for_each_operand_mut(|v| {
+                        if let Some(n) = scalar(*v, &b) {
+                            *v = n;
+                        } else {
+                            valid = false;
+                        }
+                    });
+                    if !valid {
+                        return None;
+                    }
+                    for dest in new.branch_dests_mut() {
+                        dest.block = blocks[&dest.block];
+                    }
+                    let inst = b.f.append_inst(b.block, new);
+                    if !old.inst_results(i).is_empty() {
+                        produced = Some(b.f.first_result(inst));
+                    }
+                }
+                _ => return None,
+            }
+            if let Some(new) = produced {
+                b.values.insert(old.first_result(i), new);
+            }
+        }
+        exits.insert(block, b.objects.clone());
+    }
+    Some(b.f)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -404,6 +642,42 @@ mod tests {
         let m = keel_ir::parse(s).unwrap();
         keel_ir::verify_module(&m).unwrap();
         m.functions[0].clone()
+    }
+    const BRANCH: &str = include_str!("../../tests/fixtures/aggregate-branch.keel");
+    #[test]
+    fn branching_leaf_eliminates_only_private_homes() {
+        let original = source(BRANCH);
+        let f = lower(&original).unwrap();
+        keel_ir::verify(&f).unwrap();
+        assert_eq!(f.sig.returns[0].ty, Type::I128);
+        assert_eq!(f.num_stack_slots(), 0);
+        assert_eq!(f.blocks().count(), 3);
+        assert_eq!(
+            f.layout_insts()
+                .filter(|(_, i)| matches!(f.inst_data(*i), InstData::Load { .. }))
+                .count(),
+            1
+        );
+        assert_eq!(
+            f.layout_insts()
+                .filter(|(_, i)| matches!(f.inst_data(*i), InstData::Store { .. }))
+                .count(),
+            1
+        );
+        assert_eq!(original.to_string(), source(BRANCH).to_string());
+    }
+    #[test]
+    fn branching_leaf_keeps_fault_paths_and_rejects_ambiguous_homes() {
+        for s in [
+            BRANCH.replace("load.i64 v2", "load.i64 volatile v2"),
+            BRANCH.replace("load.i32 v10", "load.i32 volatile v10"),
+            BRANCH.replace(" store v6, v14\n", ""),
+            BRANCH.replace(" store v13, v10", " store v13, v10\n store v6, v2"),
+            BRANCH.replace(" v9 = icmp.uge v7, v8", " v9 = icmp.eq v0, v2"),
+            BRANCH.replace(" jump block2", " jump block1"),
+        ] {
+            assert!(lower(&source(&s)).is_none(), "{s}");
+        }
     }
     #[test]
     fn wrapper_removes_transport_without_changing_the_symbol_or_binding() {
