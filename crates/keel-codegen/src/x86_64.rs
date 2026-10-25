@@ -71,6 +71,7 @@
 //! linkage table (`call puts@PLT`).
 
 mod aes;
+mod aggregate_boundary;
 mod aggregate_va_arg;
 mod byte_shuffle;
 mod cache_stream;
@@ -282,7 +283,13 @@ fn compile_output(
     let mut frames = Vec::new();
     let symbols = crate::symbols::Symbols::new(module);
     for original in &module.functions {
-        let func = vector::lower(original, pipeline.selector.x86_features());
+        let boundary = (!debug)
+            .then(|| aggregate_boundary::lower(original))
+            .flatten();
+        let func = vector::lower(
+            boundary.as_ref().unwrap_or(original),
+            pipeline.selector.x86_features(),
+        );
         let mut compiler = FunctionCompiler::new(&func, &symbols, pools, pipeline, structured)?;
         compiler.debug = debug;
         let slots = if debug {
@@ -4087,6 +4094,26 @@ impl<'a> FunctionCompiler<'a> {
     /// narrower; only its low bits count.
     fn binary_i128(&mut self, inst: Inst, op: BinaryOp, args: [Value; 2]) {
         let [a0, a1] = self.halves(args[0]);
+        // Aggregate word packing/unpacking shifts by exactly one eightbyte.
+        // Read the needed half before overwriting either result register.
+        if matches!(op, BinaryOp::Shl | BinaryOp::Ushr | BinaryOp::Sshr)
+            && matches!(self.func.value_def(self.func.resolve(args[1])), ValueDef::Result(i, _)
+                if matches!(self.func.inst_data(i), InstData::Iconst { imm: 64, .. }))
+        {
+            if op == BinaryOp::Shl {
+                self.emit(Opcode::Mov, [asm_arg(r64(2)), asm_arg(a0)]);
+                self.emit(Opcode::Xor, [asm_arg(r32(0)), asm_arg(r32(0))]);
+            } else {
+                self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(a1)]);
+                if op == BinaryOp::Sshr {
+                    self.emit(Opcode::Mov, [asm_arg(r64(2)), asm_arg(r64(0))]);
+                    self.emit(Opcode::Sar, [asm_arg(r64(2)), asm_arg(63i128)]);
+                } else {
+                    self.emit(Opcode::Xor, [asm_arg(r32(2)), asm_arg(r32(2))]);
+                }
+            }
+            return;
+        }
         let [b0, b1] = if self.ty(args[1]) == Type::I128 {
             self.halves(args[1])
         } else {

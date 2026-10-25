@@ -25,7 +25,7 @@ fn passes(bounded: bool) -> String {
         .pipeline()
         .iter()
         .map(|p| {
-            if !bounded && *p == "inline-noninterposable" {
+            if !bounded && matches!(*p, "inline-noninterposable" | "inline-cheap-reserve") {
                 "inline"
             } else {
                 *p

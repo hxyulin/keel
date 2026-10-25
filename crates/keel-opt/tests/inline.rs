@@ -176,7 +176,7 @@ fn full_only_and_explicit_ablation() {
     let off: Vec<_> = keel_opt::DEFAULT_PIPELINE
         .iter()
         .copied()
-        .filter(|p| *p != "inline-noninterposable")
+        .filter(|p| !matches!(*p, "inline-noninterposable" | "inline-cheap-reserve"))
         .collect();
     assert_eq!(calls(&run(source, &off), "f"), 1);
 }

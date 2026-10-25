@@ -454,7 +454,7 @@ pub fn optimize_with_tier(module: &mut Module, tier: OptimizationTier) -> Result
 }
 
 const FULL_ROUND: [&str; 16] = [
-    "inline-noninterposable",
+    "inline-cheap-reserve",
     "simplify-cfg",
     "canonicalize",
     "instcombine",

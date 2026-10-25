@@ -115,15 +115,15 @@ impl Pass for InlineNoninterposable {
     }
 }
 
-/// Opt-in research policy: keep Full's scheduling and ordinary budgets, then
-/// fairly retry cheap helper sites denied only by module growth. Never a tier.
+/// Full policy: keep ordinary scheduling and budgets, then
+/// fairly retry cheap helper sites denied only by module growth.
 pub struct InlineCheapReserve;
 impl Pass for InlineCheapReserve {
     fn name(&self) -> &'static str {
         "inline-cheap-reserve"
     }
     fn description(&self) -> &'static str {
-        "experimental fair bounded cheap-helper reserve"
+        "fair bounded cheap-helper reserve"
     }
     fn run(&self, _: &mut Function) -> bool {
         false
@@ -150,8 +150,8 @@ impl Pass for InlineCheapReserve {
 }
 
 const CHEAP_SITE_GROWTH: usize = 48;
-const CHEAP_MODULE_GROWTH: usize = 2048;
-const CHEAP_MODULE_SITES: usize = 128;
+const CHEAP_MODULE_GROWTH: usize = 4096;
+const CHEAP_MODULE_SITES: usize = 256;
 
 // A cheap predicate or guarded single slow-call wrapper, independent of names
 // and inline attributes. Charge all layout instructions and ABI snapshots;
@@ -999,7 +999,7 @@ fn run_observed_policy(
                 call,
                 requested,
                 if use_cheap {
-                    "experimental_cheap_reserve_inlined"
+                    "cheap_reserve_inlined"
                 } else if use_reserve {
                     "experimental_reserve_inlined"
                 } else {
@@ -1184,7 +1184,9 @@ fn inline_call(caller: &mut Function, call: Inst, callee: &Function) {
                 edge.block = blocks[&edge.block];
             }
             match &mut inst {
-                InstData::StackAddr { slot } | InstData::AggregateVaArg { home: slot, .. } => *slot = slots[slot],
+                InstData::StackAddr { slot } | InstData::AggregateVaArg { home: slot, .. } => {
+                    *slot = slots[slot]
+                }
                 InstData::SymbolAddr { symbol } => {
                     *symbol = match *symbol {
                         Symbol::Func(r) => Symbol::Func(refs[&r]),
@@ -1396,7 +1398,10 @@ mod report_tests {
                 }
             } else {
                 let func = f.import_function("external", sig);
-                InstData::Call { func, args: vec![].into() }
+                InstData::Call {
+                    func,
+                    args: vec![].into(),
+                }
             };
             let inst = f.layout_insts().next().unwrap().1;
             *f.inst_data_mut(inst) = call;

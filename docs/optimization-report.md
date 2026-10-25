@@ -74,14 +74,14 @@ bytes include unreferenced declarations and exclude alignment, saved registers,
 spills, and backend frame decisions: **they are not frame bytes**.
 
 `inline_sites` contains the original direct Call/Invoke/ReturnCall input sites
-considered by each inline invocation, in caller/site layout order. Each has
+considered by each inline invocation, in its deterministic scheduling order. Each has
 caller/callee names, original instruction `site` index, `category` (ordinary or
 alwaysinline), and `outcome`. Newly cloned calls are not reconsidered or
 reported as input sites in the same invocation. Indirect calls are outside the
 existing direct-site loop. An alwaysinline definition remains categorized as
 such even when rejected before becoming a template.
 
-Outcomes are `inlined`, or the selected failed check in existing diagnostic and
+Outcomes are `inlined`, `cheap_reserve_inlined`, or the selected failed check in existing diagnostic and
 site decision order; a site may have additional blockers. Template rejection
 precedence remains noinline, recursion, legality, profitability. Detailed
 legality outcomes cover public definitions, missing definitions, variadic and
@@ -105,6 +105,25 @@ explicit-definition category set are opt-in. The inliner still has its existing
 frozen-template/rejection maps and explicit-request skip allocations. Replacing
 boolean eligibility predicates with reason-returning predicates and sharing
 template decisions can affect overhead; no zero-overhead measurement is claimed.
+
+## Full cheap-helper reserve
+
+Full uses `inline-cheap-reserve` in its three bounded rounds. Ordinary
+inlining still has its 16,384-instruction module growth limit. A separate
+4,096-instruction, 256-site reserve retries cheap helpers denied only by that
+module limit, one site per caller per sweep. Each helper costs at most 48
+instructions including ABI snapshots, has at most eight acyclic blocks and
+64 declared stack bytes, contains a predicate and at most one direct slow
+call, and has no indirect calls or intrinsics.
+
+The reserve does not bypass binding, recursion, legality, profitability,
+caller growth, caller call-count or caller stack limits. It preserves frozen
+templates and never revisits newly cloned calls within the same invocation.
+Fast and Basic retain their previous pipelines. Explicit
+`inline-noninterposable` retains ordinary admission without the reserve.
+Successful retries report `cheap_reserve_inlined`; their measured pre-cleanup
+layout growth uses the existing `experimental_net_growth` JSON field for
+schema compatibility.
 
 ## Example: QuickJS inlining diagnostic
 

@@ -40,14 +40,18 @@ fn pipeline(tier: keel_opt::OptimizationTier, binding: bool) -> String {
         .iter()
         .copied()
         .map(|name| {
-            if !binding && name == "inline-noninterposable" {
+            if !binding && matches!(name, "inline-noninterposable" | "inline-cheap-reserve") {
                 "inline"
             } else {
                 name
             }
         })
         .collect();
-    if binding && !names.contains(&"inline-noninterposable") {
+    if binding
+        && !names
+            .iter()
+            .any(|n| matches!(*n, "inline-noninterposable" | "inline-cheap-reserve"))
+    {
         names.insert(0, "inline-noninterposable");
     }
     names.join(",")

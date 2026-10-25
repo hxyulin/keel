@@ -1,4 +1,4 @@
-//! Opt-in reserve bounds and fairness, without relying on cleanup or names.
+//! Full reserve bounds and fairness, without relying on cleanup or names.
 use keel_ir::Module;
 use keel_opt::{InlineSite, OptimizationReport};
 
@@ -46,7 +46,7 @@ fn count(m: &Module) -> usize {
 fn admitted(sites: &[InlineSite]) -> Vec<&InlineSite> {
     sites
         .iter()
-        .filter(|s| s.outcome == "experimental_cheap_reserve_inlined")
+        .filter(|s| s.outcome == "cheap_reserve_inlined")
         .collect()
 }
 
@@ -55,12 +55,13 @@ fn module_growth_is_exactly_bounded_and_late_callers_get_a_turn() {
     let source = saturated()
         + &leaf("predicate", 32, "local", true)
         + &caller("early", "predicate", 100)
-        + &caller("late", "predicate", 1);
+        + &caller("late", "predicate", 1)
+        + &caller("middle", "predicate", 100);
     let before = keel_ir::parse(&source).unwrap();
     let (baseline, _) = run(&source, "inline-noninterposable");
     let (m, sites) = run(&source, PASS);
     let reserve = admitted(&sites);
-    assert_eq!(reserve.len(), 64);
+    assert_eq!(reserve.len(), 128);
     assert_eq!(reserve[0].caller, "early");
     assert_eq!(reserve[1].caller, "late");
     assert!(
@@ -69,7 +70,7 @@ fn module_growth_is_exactly_bounded_and_late_callers_get_a_turn() {
             .all(|s| s.experimental_net_growth == Some(32))
     );
     assert_eq!(count(&baseline) - count(&before), 16_384);
-    assert_eq!(count(&m) - count(&baseline), 2048);
+    assert_eq!(count(&m) - count(&baseline), 4096);
     assert_eq!(
         sites
             .iter()
@@ -82,15 +83,15 @@ fn module_growth_is_exactly_bounded_and_late_callers_get_a_turn() {
 #[test]
 fn module_site_count_is_a_separate_exact_bound() {
     let mut source = saturated() + &leaf("predicate", 3, "local", true);
-    for i in 0..129 {
+    for i in 0..257 {
         source += &caller(&format!("late{i}"), "predicate", 1);
     }
     let (_, sites) = run(&source, PASS);
-    assert_eq!(admitted(&sites).len(), 128);
+    assert_eq!(admitted(&sites).len(), 256);
     assert_eq!(
         sites
             .iter()
-            .find(|s| s.caller == "late128")
+            .find(|s| s.caller == "late256")
             .unwrap()
             .outcome,
         "module_instruction_growth_budget"
@@ -151,14 +152,14 @@ fn structural_boundary_and_definition_binding_are_required() {
 }
 
 #[test]
-fn candidate_is_opt_in_and_existing_tiers_stay_unchanged() {
+fn full_uses_the_reserve_and_smaller_tiers_keep_their_pipelines() {
     for tier in [
         keel_opt::OptimizationTier::Fast,
         keel_opt::OptimizationTier::Basic,
-        keel_opt::OptimizationTier::Full,
     ] {
         assert!(!tier.pipeline().contains(&PASS));
     }
+    assert!(keel_opt::OptimizationTier::Full.pipeline().contains(&PASS));
     let source = saturated() + &leaf("helper", 16, "local", true) + &caller("late", "helper", 1);
     assert!(admitted(&run(&source, "inline-noninterposable").1).is_empty());
     assert!(admitted(&run(&source, "inline-aggregate-reserve").1).is_empty());

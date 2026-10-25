@@ -91,7 +91,7 @@ fn admission_requires_both_explicit_pass_and_definition_contract() {
         keel_opt::OptimizationTier::Full,
     ] {
         assert_eq!(
-            tier.pipeline().contains(&"inline-noninterposable"),
+            tier.pipeline().contains(&"inline-cheap-reserve"),
             tier == keel_opt::OptimizationTier::Full
         );
     }
