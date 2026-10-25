@@ -155,3 +155,26 @@ Both must return FAIL with exit 35. Normal exports must return PASS with exit
 All twelve load variants pass under QEMU 11.1.2 TCG on macOS ARM64. Both
 negative controls return the exact READY/FAIL transcript and exit 35. This is
 bounded emulated evidence, not native bare-metal qualification.
+
+## SLDT/STR/SMSW campaign
+
+```sh
+KEEL_DESCRIPTOR_STATUS_EXPORT_DIR="$PWD/target/descriptor-status-exports" \
+  cargo test -p keel-codegen --test x86_descriptor_cpl0 \
+  --test x86_descriptor_queries_encoding
+python3 suite/x86-cpl0/descriptor_campaign.py --status \
+  --exports target/descriptor-status-exports --timeout 5
+```
+
+This mode runs exactly twelve generated objects, one independent assembly
+reference and five negative controls. Each positive payload must pass two
+seeded LDTR/TR/CR0/container cases with an exact 128-byte comparison. The bridge
+owns GDT/LDT/TSS lifetime and privileged setup; the generated payload only
+observes state. The reference must pass. Negative controls for omitted
+observations, normalized r16, widened m16, narrowed SMSW and a clobbered old
+value must return FAIL and exit 35 normally. Faults and timeouts fail the
+campaign. `--status` and `--table-loads` are mutually exclusive.
+
+All eighteen verdicts match under QEMU 11.1.2 TCG on macOS ARM64. See
+[descriptor/status observations](../../docs/x86-descriptor-queries.md#cpl0-selectorstatus-fixture)
+for constants, memory layout and the limits of this emulated evidence.

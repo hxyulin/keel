@@ -17,7 +17,7 @@ fn descriptor_observation_payload_export_and_parity() {
         "KEEL_DESCRIPTOR_EXPORT_DIR",
         "descriptor",
         "descriptor_observe",
-        ["sgdt", "sidt"],
+        &[("sgdt", 1), ("sidt", 1)],
     );
 }
 
@@ -28,7 +28,7 @@ fn descriptor_load_payload_export_and_parity() {
         "KEEL_DESCRIPTOR_LOAD_EXPORT_DIR",
         "descriptor-load",
         "descriptor_load",
-        ["lgdt", "lidt"],
+        &[("lgdt", 1), ("lidt", 1)],
     );
     let m = keel_ir::parse(LOAD_SOURCE).unwrap();
     assert!(keel_codegen::aarch64::compile(&m).is_err());
@@ -54,7 +54,21 @@ fn descriptor_load_payload_export_and_parity() {
     assert_eq!(keel_ir::Intrinsic::X86Lidt as usize, 775);
 }
 
-fn export_payload(source: &str, variable: &str, prefix: &str, symbol: &str, ops: [&str; 2]) {
+#[test]
+fn descriptor_status_payload_export_and_parity() {
+    let source = include_str!("../../../suite/x86-cpl0/cases/descriptor_status.keel");
+    export_payload(
+        source,
+        "KEEL_DESCRIPTOR_STATUS_EXPORT_DIR",
+        "descriptor-status",
+        "descriptor_status",
+        &[("sldt", 4), ("str", 4), ("smsw", 4)],
+    );
+    let m = keel_ir::parse(source).unwrap();
+    assert!(keel_codegen::aarch64::compile(&m).is_err());
+}
+
+fn export_payload(source: &str, variable: &str, prefix: &str, symbol: &str, ops: &[(&str, usize)]) {
     let export = std::env::var_os(variable).map(std::path::PathBuf::from);
     if let Some(dir) = &export {
         std::fs::create_dir_all(dir).unwrap();
@@ -67,12 +81,12 @@ fn export_payload(source: &str, variable: &str, prefix: &str, symbol: &str, ops:
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for spilled in [false, true] {
                 let (object, text) = userspace::compile(source, CpuLevel::V1, s, a, spilled);
-                for query in ops {
+                for &(query, count) in ops {
                     assert_eq!(
                         text.lines()
                             .filter(|line| line.split_whitespace().next() == Some(query))
                             .count(),
-                        1,
+                        count,
                         "{text}"
                     );
                 }

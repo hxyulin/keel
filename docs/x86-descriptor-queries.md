@@ -54,8 +54,9 @@ privileged setup, software fallback, or permission test.
 Linux can emulate UMIP #GP queries, and CPUID.(7,0):ECX[2] reports UMIP
 capability rather than CR4 enablement. A successful user-mode run can therefore
 show OS-observed behavior without demonstrating the raw hardware contract.
-Native bare-metal CPL0 validation has not been done; the emulated CPL0 fixture
-below covers SGDT/SIDT only.
+Native bare-metal CPL0 validation has not been done. The emulated CPL0
+fixtures below cover SGDT/SIDT and, separately, all twelve SLDT/STR/SMSW forms
+with bounded seed values.
 
 ## CPL0 table-observation fixture
 
@@ -116,6 +117,51 @@ Negative controls (an observation-free function, or a correct observation
 followed by a canary overwrite) produce READY/FAIL and exit 35. This is
 emulated-guest evidence for SGDT/SIDT only; it is not a native, Linux UMIP, or
 full fourteen-API qualification.
+
+## CPL0 selector/status fixture
+
+`cases/descriptor_status.keel` exports
+`void descriptor_status(unsigned char out[128], uint64_t old)`. It exercises
+the memory, r16, r32 and r64 forms of each of SLDT, STR and SMSW. The original
+`old` SSA value remains live past every query and is stored separately.
+The output starts filled with `0xa5`:
+
+- SLDT, STR and SMSW memory outputs occupy offsets 1–2, 5–6 and 9–10.
+- Nine full register containers occupy offsets 16–87, grouped by mnemonic and
+  then increasing operand width.
+- The original `old` occupies offsets 96–103. Every other byte is a canary.
+
+The assembly bridge installs a GDT preserving boot selectors 8 and 16, plus
+16-byte LDT and TSS descriptors. GNU assembly loads LDTR=0x18 and TR=0x28.
+These are fixture setup, not compiler APIs for LLDT or LTR. The TSS and LDT
+live for the whole disposable guest, and LTR may set the TSS descriptor busy.
+No stack switch, task switch or exception recovery occurs.
+
+The bridge compares the entire output against two literal expected images:
+first LDTR=0x18, CR0=0x80010033 and `old=0xdeadbeefcafe7654`; then a null LDTR,
+CR0=0x8005003b and `old=0x0123456789abfedc`. TR remains 0x28. CR0 keeps PE,
+PG and the existing page tables active. The second case adds AM and TS; the
+fixture uses no FP/SIMD and keeps AC and IF clear. Expectations derive from
+the setup constants rather than queries of the observed state. Nonzero bits
+above CR0 bit 15 distinguish wide SMSW from a zero-extended memory result.
+
+```sh
+KEEL_DESCRIPTOR_STATUS_EXPORT_DIR="$PWD/target/descriptor-status-exports" \
+  cargo test -p keel-codegen --test x86_descriptor_cpl0 \
+  --test x86_descriptor_queries_encoding
+python3 suite/x86-cpl0/descriptor_campaign.py --status \
+  --exports target/descriptor-status-exports --timeout 5
+```
+
+All twelve explicit-V1 selection/allocator/pool variants pass both cases under
+QEMU 11.1.2 TCG on macOS ARM64, with matching text, typed and chunked objects.
+An independently assembled reference also passes. Five deliberately broken
+payloads must return the exact READY/FAIL transcript and exit 35: no
+observations, normalized r16, a canary overwrite simulating widened m16,
+narrowed SMSW wide results, and a clobbered original value. All five fail as
+expected without faults or timeouts. This covers these finite value and
+memory checks; it does not establish fault resumption, every possible CR0
+state or native bare-metal behavior.
 
 ## References
 

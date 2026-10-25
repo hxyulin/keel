@@ -1,0 +1,52 @@
+func @descriptor_status(ptr,i64) {
+entry(v0:ptr,v1:i64):
+ v2 = iconst.i64 1
+ v3 = ptradd v0,v2
+ intrinsic x86_sldt_mem(v3)
+ v4 = iconst.i64 5
+ v5 = ptradd v0,v4
+ intrinsic x86_str_mem(v5)
+ v6 = iconst.i64 9
+ v7 = ptradd v0,v6
+ intrinsic x86_smsw_mem(v7)
+ v8 = intrinsic x86_sldt16(v1)
+ v9 = iconst.i64 16
+ v10 = ptradd v0,v9
+ store align 1 v8,v10
+ v11 = intrinsic x86_sldt32(v1)
+ v12 = iconst.i64 24
+ v13 = ptradd v0,v12
+ store align 1 v11,v13
+ v14 = intrinsic x86_sldt64(v1)
+ v15 = iconst.i64 32
+ v16 = ptradd v0,v15
+ store align 1 v14,v16
+ v17 = intrinsic x86_str16(v1)
+ v18 = iconst.i64 40
+ v19 = ptradd v0,v18
+ store align 1 v17,v19
+ v20 = intrinsic x86_str32(v1)
+ v21 = iconst.i64 48
+ v22 = ptradd v0,v21
+ store align 1 v20,v22
+ v23 = intrinsic x86_str64(v1)
+ v24 = iconst.i64 56
+ v25 = ptradd v0,v24
+ store align 1 v23,v25
+ v26 = intrinsic x86_smsw16(v1)
+ v27 = iconst.i64 64
+ v28 = ptradd v0,v27
+ store align 1 v26,v28
+ v29 = intrinsic x86_smsw32(v1)
+ v30 = iconst.i64 72
+ v31 = ptradd v0,v30
+ store align 1 v29,v31
+ v32 = intrinsic x86_smsw64(v1)
+ v33 = iconst.i64 80
+ v34 = ptradd v0,v33
+ store align 1 v32,v34
+ v35 = iconst.i64 96
+ v36 = ptradd v0,v35
+ store align 1 v1,v36
+ return
+}
