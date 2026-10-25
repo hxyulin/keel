@@ -81,6 +81,7 @@ mod cx16;
 mod f80;
 mod flags_state;
 mod legacy_x87_images;
+mod loop_align;
 mod owned_x87_stack;
 pub mod linux_syscall;
 mod packed_pair;
@@ -1722,8 +1723,13 @@ impl<'a> FunctionCompiler<'a> {
 
         // Only reachable blocks, in the order the allocator numbered them.
         let order = self.alloc.order.clone();
+        let aligned = loop_align::headers(func);
         for (i, &block) in order.iter().enumerate() {
             self.next_block = order.get(i + 1).copied();
+            if aligned.contains(&block) {
+                // A 32-byte fetch boundary costs at most 31 bytes per header.
+                self.out.align(5);
+            }
             self.out.block_label(&func.name, self.bare_name, block);
             for &inst in func.block_insts(block) {
                 self.out.inst_comment(func, inst);

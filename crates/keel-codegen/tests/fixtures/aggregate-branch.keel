@@ -1,0 +1,23 @@
+func @aggregate_dup(ptr sret [2 x i64], ptr, ptr byval [2 x i64]) cc(c) {
+block0(v0: ptr, v1: ptr, v2: ptr):
+ v3 = load.i64 v2
+ v4 = iconst.i64 8
+ v5 = ptradd v2, v4
+ v6 = load.i64 v5
+ v7 = trunc.i32 v6
+ v8 = iconst.i32 -11
+ v9 = icmp.uge v7, v8
+ brif v9, block1, block2
+block1:
+ v10 = load.ptr v2
+ v11 = load.i32 v10
+ v12 = iconst.i32 1
+ v13 = iadd v11, v12
+ store v13, v10
+ jump block2
+block2:
+ store v3, v0
+ v14 = ptradd v0, v4
+ store v6, v14
+ return
+}

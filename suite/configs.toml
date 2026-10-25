@@ -33,171 +33,172 @@ flags = ["-O3"]
 [[config]]
 name = "keel"
 compiler = "keel"
+flags = ["--link-intent", "executable"]
 
 [[config]]
 name = "keel-g"
 compiler = "keel"
-flags = ["-g"]
+flags = ["--link-intent", "executable", "-g"]
 
 [[config]]
 name = "keel-O"
 compiler = "keel"
-flags = ["-O"]
+flags = ["--link-intent", "executable", "-O"]
 
 # Optional target selection; individual passes support ablation measurements.
 [[config]]
 name = "keel-select"
 compiler = "keel"
-flags = ["--isel", "all"]
+flags = ["--link-intent", "executable", "--isel", "all"]
 
 [[config]]
 name = "keel-O-select"
 compiler = "keel"
-flags = ["-O", "--isel", "all"]
+flags = ["--link-intent", "executable", "-O", "--isel", "all"]
 
 [[config]]
 name = "keel-O-trees"
 compiler = "keel"
-flags = ["-O", "--isel", "trees"]
+flags = ["--link-intent", "executable", "-O", "--isel", "trees"]
 
 [[config]]
 name = "keel-O-folds"
 compiler = "keel"
-flags = ["-O", "--isel", "folds"]
+flags = ["--link-intent", "executable", "-O", "--isel", "folds"]
 
 [[config]]
 name = "keel-O-hints"
 compiler = "keel"
-flags = ["-O", "--isel", "hints"]
+flags = ["--link-intent", "executable", "-O", "--isel", "hints"]
 
 # Independently selectable effort presets; opt-in for benchmark comparisons.
 [[config]]
 name = "keel-basic"
 compiler = "keel"
-flags = ["--opt-tier", "basic", "--isel-tier", "baseline", "--regalloc", "full"]
+flags = ["--link-intent", "executable", "--opt-tier", "basic", "--isel-tier", "baseline", "--regalloc", "full"]
 
 [[config]]
 name = "keel-fast"
 compiler = "keel"
-flags = ["--opt-tier", "fast", "--isel-tier", "full", "--regalloc", "full"]
+flags = ["--link-intent", "executable", "--opt-tier", "fast", "--isel-tier", "full", "--regalloc", "full"]
 
 # Historical allocation-effort experiment, distinct from the Fast IR profile.
 [[config]]
 name = "keel-basic-fast-alloc"
 compiler = "keel"
-flags = ["--opt-tier", "basic", "--isel-tier", "baseline", "--regalloc", "fast"]
+flags = ["--link-intent", "executable", "--opt-tier", "basic", "--isel-tier", "baseline", "--regalloc", "fast"]
 
 [[config]]
 name = "keel-full"
 compiler = "keel"
-flags = ["--opt-tier", "full", "--isel-tier", "full", "--regalloc", "full"]
+flags = ["--link-intent", "executable", "--opt-tier", "full", "--isel-tier", "full", "--regalloc", "full"]
 
 # SCCP adds propagation before instruction combining.
 # Opt-in until measurements justify changing the default pipelines.
 [[config]]
 name = "keel-basic-sccp"
 compiler = "keel"
-flags = ["-p", "simplify-cfg,sccp,instcombine,simplify-cfg,dce"]
+flags = ["--link-intent", "executable", "-p", "simplify-cfg,sccp,instcombine,simplify-cfg,dce"]
 
 [[config]]
 name = "keel-O-sccp"
 compiler = "keel"
-flags = ["-p", "simplify-cfg,sccp,instcombine,simplify-cfg,gvn,dce,gcm"]
+flags = ["--link-intent", "executable", "-p", "simplify-cfg,sccp,instcombine,simplify-cfg,gvn,dce,gcm"]
 
 [[config]]
 name = "keel-O-combine"
 compiler = "keel"
-flags = ["-p", "simplify-cfg,instcombine,simplify-cfg,gvn,dce,gcm"]
+flags = ["--link-intent", "executable", "-p", "simplify-cfg,instcombine,simplify-cfg,gvn,dce,gcm"]
 
 [[config]]
 name = "keel-O-phi"
 compiler = "keel"
-flags = ["-p", "simplify-cfg,instcombine,phi-simplify,simplify-cfg,gvn,phi-simplify,dce,gcm"]
+flags = ["--link-intent", "executable", "-p", "simplify-cfg,instcombine,phi-simplify,simplify-cfg,gvn,phi-simplify,dce,gcm"]
 
 # Historical numeric-fold-only Full pipeline, retained for comparisons.
 [[config]]
 name = "keel-O-legacy"
 compiler = "keel"
-flags = ["-p", "simplify-cfg,const-fold,simplify-cfg,gvn,dce,gcm"]
+flags = ["--link-intent", "executable", "-p", "simplify-cfg,const-fold,simplify-cfg,gvn,dce,gcm"]
 
 # Cleanup after code motion avoids the early phi/GVN/GCM runtime regression.
 [[config]]
 name = "keel-O-phi-late"
 compiler = "keel"
-flags = ["-p", "simplify-cfg,instcombine,simplify-cfg,gvn,dce,gcm,phi-simplify"]
+flags = ["--link-intent", "executable", "-p", "simplify-cfg,instcombine,simplify-cfg,gvn,dce,gcm,phi-simplify"]
 
 # Conservative block-local memory optimization, measured independently.
 [[config]]
 name = "keel-O-memory"
 compiler = "keel"
-flags = ["-p", "simplify-cfg,instcombine,simplify-cfg,gvn,memory-forward,dce,gcm"]
+flags = ["--link-intent", "executable", "-p", "simplify-cfg,instcombine,simplify-cfg,gvn,memory-forward,dce,gcm"]
 
 [[config]]
 name = "keel-O-memory-select"
 compiler = "keel"
-flags = ["-p", "simplify-cfg,instcombine,simplify-cfg,gvn,memory-forward,dce,gcm", "--isel", "all"]
+flags = ["--link-intent", "executable", "-p", "simplify-cfg,instcombine,simplify-cfg,gvn,memory-forward,dce,gcm", "--isel", "all"]
 
 # Explicit M5 tuning: selection effort and ISA target remain independent.
 [[config]]
 name = "keel-m5"
 compiler = "keel"
-flags = ["-O", "--isel-tier", "full", "--tune", "apple-m5"]
+flags = ["--link-intent", "executable", "-O", "--isel-tier", "full", "--tune", "apple-m5"]
 
 [[config]]
 name = "keel-m5-fast"
 compiler = "keel"
-flags = ["-O", "--isel-tier", "full", "--tune", "apple-m5", "--regalloc", "fast"]
+flags = ["--link-intent", "executable", "-O", "--isel-tier", "full", "--tune", "apple-m5", "--regalloc", "fast"]
 
 # Simplification breadth and phase-order experiments.
 [[config]]
 name = "keel-O-cleanup"
 compiler = "keel"
-flags = ["-p", "simplify-cfg,instcombine,simplify-cfg,gvn,instcombine,simplify-cfg,dce,gcm"]
+flags = ["--link-intent", "executable", "-p", "simplify-cfg,instcombine,simplify-cfg,gvn,instcombine,simplify-cfg,dce,gcm"]
 
 [[config]]
 name = "keel-O-bits-early"
 compiler = "keel"
-flags = ["-p", "simplify-cfg,known-bits,instcombine,simplify-cfg,gvn,dce,gcm"]
+flags = ["--link-intent", "executable", "-p", "simplify-cfg,known-bits,instcombine,simplify-cfg,gvn,dce,gcm"]
 
 [[config]]
 name = "keel-O-bits-late"
 compiler = "keel"
-flags = ["-p", "simplify-cfg,instcombine,simplify-cfg,gvn,known-bits,instcombine,simplify-cfg,dce,gcm"]
+flags = ["--link-intent", "executable", "-p", "simplify-cfg,instcombine,simplify-cfg,gvn,known-bits,instcombine,simplify-cfg,dce,gcm"]
 
 [[config]]
 name = "keel-O-bits-repeat"
 compiler = "keel"
-flags = ["-p", "simplify-cfg,instcombine,simplify-cfg,gvn,known-bits,instcombine,simplify-cfg,dce,gvn,known-bits,instcombine,simplify-cfg,dce,gcm"]
+flags = ["--link-intent", "executable", "-p", "simplify-cfg,instcombine,simplify-cfg,gvn,known-bits,instcombine,simplify-cfg,dce,gvn,known-bits,instcombine,simplify-cfg,dce,gcm"]
 
 # Conditional-edge integer facts; opt-in while measured against Full.
 [[config]]
 name = "keel-O-ranges"
 compiler = "keel"
-flags = ["-p", "canonicalize,simplify-cfg,instcombine,simplify-cfg,gvn,branch-ranges,instcombine,simplify-cfg,dce,gcm"]
+flags = ["--link-intent", "executable", "-p", "canonicalize,simplify-cfg,instcombine,simplify-cfg,gvn,branch-ranges,instcombine,simplify-cfg,dce,gcm"]
 
 # Combined scalar analyses after value numbering, with CFG canonicalization first.
 [[config]]
 name = "keel-O-facts"
 compiler = "keel"
-flags = ["-p", "simplify-cfg,canonicalize,instcombine,simplify-cfg,gvn,known-bits,branch-ranges,instcombine,simplify-cfg,dce,gcm"]
+flags = ["--link-intent", "executable", "-p", "simplify-cfg,canonicalize,instcombine,simplify-cfg,gvn,known-bits,branch-ranges,instcombine,simplify-cfg,dce,gcm"]
 
 # In-process object emission; opt in to preserve existing benchmark baselines.
 [[config]]
 name = "keel-native"
 compiler = "keel"
-flags = ["--emit-object"]
+flags = ["--link-intent", "executable", "--emit-object"]
 
 [[config]]
 name = "keel-O-native"
 compiler = "keel"
-flags = ["-O", "--emit-object"]
+flags = ["--link-intent", "executable", "-O", "--emit-object"]
 
 [[config]]
 name = "keel-g-native"
 compiler = "keel"
-flags = ["-g", "--emit-object"]
+flags = ["--link-intent", "executable", "-g", "--emit-object"]
 
 [[config]]
 name = "keel-O-select-native"
 compiler = "keel"
-flags = ["-O", "--isel", "all", "--emit-object"]
+flags = ["--link-intent", "executable", "-O", "--isel", "all", "--emit-object"]

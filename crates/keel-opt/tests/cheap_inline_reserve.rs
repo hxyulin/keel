@@ -256,3 +256,28 @@ fn snapshot_cost_stack_and_scc_caller_guard_remain_bounded() {
         );
     }
 }
+
+#[test]
+fn guarded_hinted_leaves_precede_ordinary_growth_without_expanding_budgets() {
+    let helper = "func @value_helper(ptr) inlinehint local {\nblock0(v0: ptr):\n v1 = load.i32 v0\n v2 = iconst.i32 1\n v3 = icmp.ne v1, v2\n brif v3, block1, block2\nblock1:\n v4 = iadd v1, v2\n store v4, v0\n jump block2\nblock2:\n return\n}\n";
+    let late = "func @late(ptr) {\nblock0(v0: ptr):\n call @value_helper(v0)\n return\n}\n";
+    let source = saturated().replace("alwaysinline local", "local") + helper + late;
+    let before = keel_ir::parse(&source).unwrap();
+    let (_, baseline_sites) = run(&source, "inline-noninterposable");
+    assert_eq!(
+        baseline_sites.last().unwrap().outcome,
+        "module_instruction_growth_budget"
+    );
+    let (m, sites) = run(&source, PASS);
+    assert_eq!(sites.first().unwrap().caller, "late");
+    assert_eq!(sites.first().unwrap().outcome, "inlined");
+    assert!(count(&m) - count(&before) <= 16_384);
+    assert!(admitted(&sites).is_empty());
+    let source = helper.to_owned()
+        + &late.replace(
+            " call @value_helper(v0)\n",
+            &" call @value_helper(v0)\n".repeat(129),
+        );
+    let (_, sites) = run(&source, PASS);
+    assert_eq!(sites.last().unwrap().outcome, "caller_call_count_budget");
+}

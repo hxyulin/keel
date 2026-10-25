@@ -233,3 +233,317 @@ fn native_independent_abi_alias_wrapping_volatile_atomic_capture_and_fault_oracl
         }
     }
 }
+
+#[test]
+fn c_binding_flags_preserve_defaults_order_exports_and_noinline() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("c-function-binding-flags");
+    fs::create_dir_all(&dir).unwrap();
+    let source = "int helper(int x) { return x+1; } int caller(int x) { return helper(x); } __attribute__((noinline)) int stay(int x) { return x+2; } int stay_call(int x) { return stay(x); }";
+    fs::write(dir.join("source.c"), source).unwrap();
+    fs::write(dir.join("source.i"), source).unwrap();
+    for target in [
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+    ] {
+        for (index, flags, admitted) in [
+            (0, vec![], false),
+            (1, vec!["-fno-semantic-interposition"], true),
+            (2, vec!["-fsemantic-interposition"], false),
+            (
+                3,
+                vec!["-fno-semantic-interposition", "-fsemantic-interposition"],
+                false,
+            ),
+            (
+                4,
+                vec!["-fsemantic-interposition", "-fno-semantic-interposition"],
+                true,
+            ),
+        ] {
+            let mut args = vec!["cc", "--target", target, "-O", "--emit-ir", "source.c"];
+            args.extend(&flags);
+            let ir = keel(&dir, &args);
+            assert_eq!(function(&ir, "caller").contains("call @helper("), !admitted);
+            assert!(function(&ir, "stay_call").contains("call @stay("));
+            let m = keel_ir::parse(&ir).unwrap();
+            keel_ir::verify_module(&m).unwrap();
+            let helper = m.functions.iter().find(|f| f.name == "helper").unwrap();
+            assert_eq!(helper.attrs.no_semantic_interposition, admitted);
+            assert!(!helper.attrs.noninterposable);
+            assert!(!helper.local);
+            assert!(!helper.hidden);
+            // Print/parse must preserve the promise for separate IR compilation.
+            fs::write(dir.join("source.keel"), ir).unwrap();
+            let obj = format!("{target}-{index}.o");
+            keel(
+                &dir,
+                &[
+                    "compile",
+                    "--target",
+                    target,
+                    "--emit-object",
+                    "source.keel",
+                    "-o",
+                    &obj,
+                ],
+            );
+            let symbols = global_functions(&dir.join(&obj));
+            assert!(symbols.iter().any(|s| s.ends_with("helper")));
+            assert!(symbols.iter().any(|s| s.ends_with("caller")));
+        }
+    }
+    for args in [
+        vec!["opt", "-fno-semantic-interposition", "missing.keel"],
+        vec!["compile", "-fsemantic-interposition", "missing.keel"],
+        vec![
+            "cc",
+            "--target",
+            "wasm32-unknown-unknown",
+            "-fno-semantic-interposition",
+            "source.c",
+        ],
+        vec![
+            "cc",
+            "--target",
+            "wasm32-unknown-unknown",
+            "-fsemantic-interposition",
+            "source.c",
+        ],
+    ] {
+        assert!(
+            !Command::new(env!("CARGO_BIN_EXE_keel"))
+                .current_dir(&dir)
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+    }
+}
+
+#[cfg(any(
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "linux", target_arch = "x86_64")
+))]
+#[test]
+fn c_binding_mode_preserves_native_abi_effects_and_faults() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("c-function-binding-native");
+    fs::create_dir_all(&dir).unwrap();
+    // Exercise the new mode rather than the stronger source-level promise.
+    fs::write(
+        dir.join("source.c"),
+        SOURCE.replace(
+            "#define BIND __attribute__((keel_noninterposable))",
+            "#define BIND",
+        ),
+    )
+    .unwrap();
+    fs::write(dir.join("oracle.c"), ORACLE).unwrap();
+    for (index, flags) in [
+        vec!["-fsemantic-interposition"],
+        vec!["-fno-semantic-interposition"],
+        vec!["--link-intent", "executable"],
+        vec!["--link-intent", "shared"],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let obj = format!("source-{index}.o");
+        let exe = format!("oracle-{index}");
+        let mut args = vec!["cc", "-O", "--emit-object", "source.c", "-o", &obj];
+        args.extend(flags);
+        keel(&dir, &args);
+        command(Command::new("clang").current_dir(&dir).args([
+            "-O2",
+            "-fno-strict-aliasing",
+            "oracle.c",
+            &obj,
+            "-o",
+            &exe,
+        ]));
+        command(&mut Command::new(dir.join(&exe)));
+        command(Command::new(dir.join(&exe)).arg("faults"));
+    }
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[test]
+fn elf_hidden_inlining_preserves_public_interposition() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("c-function-binding-preload");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("source.c"), "int public_helper(int x) { return x+1; } __attribute__((visibility(\"hidden\"))) int hidden_helper(int x) { return x+2; } int public_call(int x) { return public_helper(x); } int hidden_call(int x) { return hidden_helper(x); }").unwrap();
+    fs::write(
+        dir.join("override.c"),
+        "int public_helper(int x) { return x+100; } int hidden_helper(int x) { return x+200; }",
+    )
+    .unwrap();
+    fs::write(dir.join("main.c"), "int public_call(int); int hidden_call(int); int main(void) { return public_call(10)==110 && hidden_call(10)==12 ? 0 : 1; }").unwrap();
+    keel(
+        &dir,
+        &["cc", "-O", "--emit-object", "source.c", "-o", "source.o"],
+    );
+    command(Command::new("clang").current_dir(&dir).args([
+        "-shared",
+        "source.o",
+        "-o",
+        "library.so",
+    ]));
+    command(Command::new("clang").current_dir(&dir).args([
+        "-shared",
+        "-fPIC",
+        "override.c",
+        "-o",
+        "override.so",
+    ]));
+    command(Command::new("clang").current_dir(&dir).args([
+        "main.c",
+        "./library.so",
+        "-Wl,-rpath,$ORIGIN",
+        "-o",
+        "oracle",
+    ]));
+    command(
+        Command::new(dir.join("oracle"))
+            .current_dir(&dir)
+            .env("LD_PRELOAD", dir.join("override.so")),
+    );
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[test]
+fn semantic_mode_keeps_interposed_function_addresses() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("c-function-binding-addresses");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("source.c"), "int helper(int x) { return x+1; } int caller(int x) { return helper(x); } int (*address)(int)=helper;").unwrap();
+    // Equivalent replacement is allowed by this mode. Its address must still win.
+    fs::write(dir.join("override.c"), "int helper(int x) { return 1+x; }").unwrap();
+    fs::write(dir.join("main.c"), "int helper(int); int caller(int); extern int (*address)(int); int main(void) { return address==helper && caller(10)==11 && address(10)==11 ? 0 : 1; }").unwrap();
+    keel(
+        &dir,
+        &[
+            "cc",
+            "-O",
+            "-fno-semantic-interposition",
+            "--emit-object",
+            "source.c",
+            "-o",
+            "source.o",
+        ],
+    );
+    command(Command::new("clang").current_dir(&dir).args([
+        "-shared",
+        "source.o",
+        "-o",
+        "library.so",
+    ]));
+    command(Command::new("clang").current_dir(&dir).args([
+        "-shared",
+        "-fPIC",
+        "override.c",
+        "-o",
+        "override.so",
+    ]));
+    command(Command::new("clang").current_dir(&dir).args([
+        "main.c",
+        "./library.so",
+        "-Wl,-rpath,$ORIGIN",
+        "-o",
+        "oracle",
+    ]));
+    command(
+        Command::new(dir.join("oracle"))
+            .current_dir(&dir)
+            .env("LD_PRELOAD", dir.join("override.so")),
+    );
+}
+
+#[test]
+fn executable_link_intent_selects_binding_without_changing_output_kind() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("c-link-intent");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("source.i"), "int helper(int x) { return x+1; } __attribute__((weak)) int weak_helper(int x) { return x+2; } int caller(int x) { return helper(x)+weak_helper(x); }").unwrap();
+    for target in [
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+    ] {
+        for (flags, inlined) in [
+            (vec!["--link-intent", "executable"], true),
+            (vec!["--link-intent", "shared"], false),
+            (
+                vec!["--link-intent", "executable", "-fsemantic-interposition"],
+                false,
+            ),
+            (
+                vec!["-fsemantic-interposition", "--link-intent", "executable"],
+                false,
+            ),
+            (
+                vec!["--link-intent", "shared", "-fno-semantic-interposition"],
+                true,
+            ),
+            (
+                vec!["--link-intent", "executable", "--link-intent", "shared"],
+                false,
+            ),
+            (
+                vec!["--link-intent", "shared", "--link-intent", "executable"],
+                true,
+            ),
+        ] {
+            let mut args = vec!["cc", "--target", target, "-O", "--emit-ir", "source.i"];
+            args.extend(flags.clone());
+            let ir = keel(&dir, &args);
+            assert_eq!(function(&ir, "caller").contains("call @helper("), !inlined);
+            assert!(function(&ir, "caller").contains("call @weak_helper("));
+            let mut args = vec![
+                "cc",
+                "--target",
+                target,
+                "-O",
+                "--emit-object",
+                "source.i",
+                "-o",
+                "source.o",
+            ];
+            args.extend(flags);
+            keel(&dir, &args);
+            let symbols = global_functions(&dir.join("source.o"));
+            assert!(symbols.iter().any(|s| s.ends_with("helper")));
+            assert!(symbols.iter().any(|s| s.ends_with("caller")));
+        }
+    }
+    for flags in [
+        vec!["cc", "--link-intent"],
+        vec!["cc", "--link-intent", "invalid", "source.i"],
+        vec!["compile", "--link-intent", "executable", "source.i"],
+        vec![
+            "cc",
+            "--target",
+            "wasm32-unknown-unknown",
+            "--link-intent",
+            "executable",
+            "source.i",
+        ],
+        vec![
+            "cc",
+            "--target",
+            "wasm32-unknown-unknown",
+            "--link-intent",
+            "shared",
+            "source.i",
+        ],
+    ] {
+        assert!(
+            !Command::new(env!("CARGO_BIN_EXE_keel"))
+                .current_dir(&dir)
+                .args(flags)
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+    }
+}

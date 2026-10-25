@@ -99,3 +99,32 @@ fn noninterposable_is_independent_of_linkage_abi_and_inline_policy() {
     attrs.merge(FunctionAttrs::default());
     assert!(attrs.noninterposable);
 }
+
+#[test]
+fn semantic_interposition_contract_roundtrips_without_exact_binding() {
+    let text = "decl @external(i32) -> i32 no_semantic_interposition\nfunc @helper(i32) -> i32 no_semantic_interposition {\nblock0(v0: i32):\n return v0\n}\nfunc @caller(i32) -> i32 {\nblock0(v0: i32):\n v1 = call @helper(v0)\n return v1\n}\n";
+    let m = parse(text).unwrap();
+    verify_module(&m).unwrap();
+    let printed = m.to_string();
+    let again = parse(&printed).unwrap();
+    verify_module(&again).unwrap();
+    assert_eq!(printed, again.to_string());
+    assert!(again.decls[0].attrs.no_semantic_interposition);
+    assert!(again.functions[0].attrs.no_semantic_interposition);
+    assert!(!again.functions[0].attrs.noninterposable);
+    assert!(!again.functions[0].local);
+    assert!(!again.functions[0].hidden);
+    assert!(
+        again.functions[1]
+            .callees()
+            .next()
+            .unwrap()
+            .1
+            .attrs
+            .no_semantic_interposition
+    );
+    let mut attrs = FunctionAttrs::default();
+    attrs.merge(again.functions[0].attrs);
+    assert_eq!(attrs, again.functions[0].attrs);
+    assert!(parse("decl @f() no_semantic_interposition no_semantic_interposition\n").is_err());
+}
