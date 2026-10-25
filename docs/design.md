@@ -791,7 +791,9 @@ The default pipeline (`-O`) runs three bounded rounds of `inline-noninterposable
 call-contracts, simplify-cfg, gvn, small-memory, stack-forward, canonicalize, instcombine, dce, gcm,
 adjacent-abs, loop-vectorize, loop-reduce`. Cleanup between inliner invocations exposes smaller
 helpers for the next round. The inliner keeps its existing growth budgets;
-public definitions require an explicit `noninterposable` producer promise.
+public definitions require a `noninterposable` or `no_semantic_interposition`
+producer promise. The C frontend derives the latter for strong hidden ELF
+definitions or the explicit `-fno-semantic-interposition` mode.
 The 48 round entries retain code motion and loop optimization between rounds,
 followed by this 14-entry epilogue:
 `load-reuse, stack-promote, phi-simplify, dce, simplify-cfg,
@@ -1346,9 +1348,9 @@ mapping source annotations onto unrelated flags:
   hint builtins. Preserving these on CFG edges and using them in block layout
   is a concrete next step for Lua and QuickJS. Probabilities are advisory;
   probability zero or one must not make an edge unreachable.
-- `hot`/`cold` remain unrepresented. Hidden visibility is emitted but does
-  not yet make definitions noninterposable for optimization. Inline policies now
-  reach the private-only inliner under the
+- `hot`/`cold` remain unrepresented. Strong hidden ELF definitions permit direct-call body substitution;
+  Darwin hidden visibility alone does not. Inline policies now
+  reach the binding-aware inliner under the
   [function attribute contract](function-attributes.md); public/interposable
   definitions retain calls.
 - `restrict` and C effective-type alias information are discarded. Scoped

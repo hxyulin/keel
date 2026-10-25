@@ -101,8 +101,9 @@ answers instead and can enable semantics Keel does not support.
   hidden, and dropping the extra promise is conservative.
 - Static symbols stay local; visibility has no effect on them. References to
   symbols not declared hidden in the translation unit stay default.
-- Hidden symbols are still treated as interposable by the optimizer. Using
-  hidden visibility as a non-interposability promise is future work.
+- Strong hidden/internal function definitions on ELF permit direct-call body
+  substitution. Darwin visibility alone supplies no optimization promise. See
+  [C semantic interposition mode](function-attributes.md#c-semantic-interposition-mode).
 - `#pragma GCC visibility` and `-fvisibility` are not supported.
 
 ## Real-world code

@@ -267,6 +267,10 @@ pub struct FunctionAttrs {
     /// definition, even though the symbol may remain externally visible.
     /// This does not change linkage, visibility, ABI, or linker options.
     pub noninterposable: bool,
+    /// A replacement of this definition must preserve its semantics and effects.
+    /// Allows body substitution at direct calls, without promising symbol identity,
+    /// local relocations, or binding for function addresses and unexpanded calls.
+    pub no_semantic_interposition: bool,
     pub inlinehint: bool,
     pub alwaysinline: bool,
     pub noinline: bool,
@@ -283,6 +287,7 @@ impl FunctionAttrs {
         self.section = self.section.or(other.section);
         self.destructor |= other.destructor;
         self.noninterposable |= other.noninterposable;
+        self.no_semantic_interposition |= other.no_semantic_interposition;
         self.inlinehint |= other.inlinehint;
         self.alwaysinline |= other.alwaysinline;
         self.noinline |= other.noinline;
@@ -310,6 +315,7 @@ impl fmt::Display for FunctionAttrs {
             (self.retain, "retain"),
             (self.destructor, "destructor"),
             (self.noninterposable, "noninterposable"),
+            (self.no_semantic_interposition, "no_semantic_interposition"),
             (self.inlinehint, "inlinehint"),
             (self.alwaysinline, "alwaysinline"),
             (self.noinline, "noinline"),

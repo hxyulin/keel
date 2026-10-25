@@ -54,9 +54,10 @@ pub fn compile(
     let funcs = std::mem::take(&mut parser.funcs);
     let parse_ms = start.elapsed().as_secs_f64() * 1000.;
     let start = Instant::now();
-    let module = irgen::Gen::new(&parser, funcs, &files, opts.debug_info)
+    let mut module = irgen::Gen::new(&parser, funcs, &files, opts.debug_info)
         .run()
         .map_err(|e| diagnostic(&files, e))?;
+    crate::apply_function_binding(&mut module, opts.target, crate::FunctionBinding::default());
     let irgen_ms = start.elapsed().as_secs_f64() * 1000.;
     let start = Instant::now();
     drop(parser);

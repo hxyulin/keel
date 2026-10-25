@@ -1,7 +1,8 @@
 # Function attributes
 
-`FunctionAttrs` carries `noninterposable`, `inlinehint`, `alwaysinline`,
-`noinline`, `noreturn`, and `nounwind` on IR definitions, external declarations, and each direct
+`FunctionAttrs` carries `noninterposable`, `no_semantic_interposition`,
+`inlinehint`, `alwaysinline`, `noinline`, `noreturn`, and `nounwind` on IR
+definitions, external declarations, and each direct
 callee record. These are separate from `Signature`: they do not participate
 in ABI or C function type compatibility. `returns_twice` retains its existing
 signature representation and behavior.
@@ -19,7 +20,8 @@ block0(v0: i32):
 }
 ```
 
-The printer uses the order `noninterposable inlinehint alwaysinline noinline noreturn nounwind`.
+The binding attributes print as `noninterposable no_semantic_interposition`,
+followed by `inlinehint alwaysinline noinline noreturn nounwind`.
 The parser rejects duplicate and malformed tokens. The verifier rejects
 `alwaysinline` with `noinline`, and `noreturn` with `returns_twice`, on declarations,
 definitions and callee records. It requires direct callee attributes to agree
@@ -226,7 +228,9 @@ no new target configuration or CLI/library option is necessary.
 
 Full uses `inline-noninterposable` in its three bounded inlining rounds.
 `inline-noninterposable` admits private definitions and explicitly
-`noninterposable` public definitions. It uses the same cloning implementation,
+`noninterposable` public definitions, as well as definitions carrying the
+`no_semantic_interposition` equivalent-body promise described below. It uses
+the same cloning implementation,
 recursion rejection, ABI signature equality, `noinline` precedence, supported
 operations, byval snapshots, debug subtree handling, soft limits and hard budgets
 as `inline`. `alwaysinline` never supplies a binding proof or bypasses legality.
@@ -249,3 +253,32 @@ This removes the two per-element helper calls in `k_narrow` when its two exporte
 helpers are explicitly marked. It does not provide mixed-width SIMD conversion
 support and does not establish any runtime speedup. Ordinary unmarked kernel
 sources retain their prior semantics and calls.
+
+## C semantic interposition mode
+
+`keel cc -fno-semantic-interposition` permits substituting a strong definition's
+body at direct calls. Any replacement must preserve that definition's semantics
+and side effects. The frontend emits the IR attribute
+`no_semantic_interposition` on strong public definitions in that translation unit.
+It does not annotate undefined declarations, weak definitions or indirect function
+types. `-fsemantic-interposition` is the default for ordinary public definitions;
+when both flags appear, the last wins. These flags belong to native C compilation,
+including preprocessed `.i` inputs, rather than IR compilation or Wasm output.
+The library API is `compile_with_binding(..., FunctionBinding::NoSemanticInterposition)`;
+`compile` retains its existing defaults.
+
+Strong hidden/internal C definitions on ELF also receive this attribute, even
+with `-fsemantic-interposition`: ELF visibility prevents runtime preemption of
+those definitions. Darwin hidden definitions remain conservative unless the
+explicit mode is selected. Target-free IR `hidden` alone supplies no binding proof.
+
+This promise is weaker than `noninterposable`. It does not promise which address
+or definition a symbol reference resolves to. Exported entry points, symbol
+visibility, function addresses, unexpanded direct calls and indirect calls retain
+normal emission and binding. No local aliases or relocation changes are requested.
+Full's binding-aware inliner consumes either promise, preserving the existing ABI,
+legality, recursion, `noinline` and growth checks. The private-only `inline` pass
+remains private-only. Weak and weak-ODR bodies remain ineligible even if IR carries
+the attribute. The attribute round-trips through IR and synchronizes with named
+callee declarations. It does not enable exact-binding call summaries, ABI
+privatization or inference of alias, capture or memory contracts.

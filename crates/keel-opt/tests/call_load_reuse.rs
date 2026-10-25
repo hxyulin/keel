@@ -485,3 +485,12 @@ fn transitive_candidate_body_work_is_bounded() {
     let src = chain(2).replace("v3 = iadd v2, v1", "v3 = call @chain1(v0, v2)");
     assert_eq!(loads(&optimize(&src)), 2);
 }
+
+#[test]
+fn semantic_inlining_permission_is_not_an_exact_binding_summary() {
+    let helper = LEAF.replace("local", "no_semantic_interposition");
+    assert_eq!(
+        loads(&optimize(&source(&helper, "v4 = call @leaf(v0, v1)"))),
+        2
+    );
+}

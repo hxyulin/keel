@@ -39,13 +39,17 @@ fn admission_requires_both_explicit_pass_and_definition_contract() {
             "noninterposable",
             "noninterposable alwaysinline",
             "noninterposable noinline",
+            "no_semantic_interposition",
+            "no_semantic_interposition alwaysinline",
+            "no_semantic_interposition noinline",
             "local",
         ] {
             let source = scalar(attrs, "(i8 uext) -> i8 sext", "return v0");
             let (m, report) = optimize(&source, pass);
             let admitted = attrs == "local"
                 || (pass == "inline-noninterposable"
-                    && attrs.contains("noninterposable")
+                    && (attrs.contains("noninterposable")
+                        || attrs.contains("no_semantic_interposition"))
                     && !attrs.contains("noinline"));
             assert_eq!(
                 calls(&m, "caller"),
@@ -236,4 +240,17 @@ fn exported_binding_keeps_soft_limits_hard_stack_and_exact_abi_checks() {
     let pass = keel_opt::find_pass("inline-noninterposable").unwrap();
     assert_eq!(pass.run_module(&mut m), Some(false));
     assert_eq!(calls(&m, "caller"), 1);
+}
+
+#[test]
+fn semantic_body_contract_cannot_override_weak_binding() {
+    for binding in ["weak", "weak_odr"] {
+        let source = scalar(
+            &format!("no_semantic_interposition alwaysinline {binding}"),
+            "(i8 uext) -> i8 sext",
+            "return v0",
+        );
+        let (m, _) = optimize(&source, "inline-noninterposable");
+        assert_eq!(calls(&m, "caller"), 1);
+    }
 }

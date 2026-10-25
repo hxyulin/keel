@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <legacy|v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
-//! keel cc [-O] [-g] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <legacy|v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]  C to assembly
+//! keel cc [-O] [-g] [-fsemantic-interposition|-fno-semantic-interposition] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <legacy|v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]  C to assembly
 //! keel opt [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
 //! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <legacy|v1|v2|v3>] [--target-features <features>] <input.s> -o <output.o>                 assembly to native object
 //! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <legacy|v1|v2|v3>] [--target-features <features>] <input.s>... --out-dir <directory>      batch assembly
@@ -39,7 +39,7 @@ mod wasm;
 
 const USAGE: &str = "usage:
   keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <legacy|v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
-  keel cc [-O] [-g] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <legacy|v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]
+  keel cc [-O] [-g] [-fsemantic-interposition|-fno-semantic-interposition] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <legacy|v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]
   keel opt [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
   keel compile|cc|opt [--verify-each | --no-verify-each] [--opt-report <new-report.json>] <input> [-o <output>]
   keel compile|cc [--emit-object] <input> -o <output.o>  (AArch64 Mach-O or AArch64/x86-64 ELF)
@@ -94,6 +94,7 @@ struct Options {
     x86_level: Option<keel_asm::x86::CpuLevel>,
     ir_lines: bool,
     emit_ir: bool,
+    function_binding: Option<keel_c::FunctionBinding>,
     emit_object: bool,
     emit_wasm: bool,
     wasm: wasm::Options,
@@ -448,6 +449,12 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             }
             "-g" => opts.ir_lines = true,
             "--emit-ir" => opts.emit_ir = true,
+            "-fsemantic-interposition" => {
+                opts.function_binding = Some(keel_c::FunctionBinding::SemanticInterposition)
+            }
+            "-fno-semantic-interposition" => {
+                opts.function_binding = Some(keel_c::FunctionBinding::NoSemanticInterposition)
+            }
             "--emit-object" => opts.emit_object = true,
             "--isel" => {
                 explicit_selection = true;
@@ -687,6 +694,8 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "-p",
                     "-g",
                     "--emit-ir",
+                    "-fsemantic-interposition",
+                    "-fno-semantic-interposition",
                     "-E",
                     "-dM",
                     "-I",
@@ -718,6 +727,11 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--cpu-level",
                 ],
             )?;
+            if opts.function_binding.is_some()
+                && (opts.emit_wasm || opts.target == Some(Target::Wasm32UnknownUnknown))
+            {
+                return Err("C function binding modes require a native target".into());
+            }
             if opts.emit_wasm {
                 return wasm::compile_c(&opts);
             }
@@ -762,8 +776,13 @@ fn run(args: Vec<String>) -> Result<(), String> {
             };
             let mut module = {
                 profiling::scope!("c-frontend");
-                keel_c::compile(preprocessed.as_deref().unwrap_or(text), &input, c_opts)
-                    .map_err(|e| e.to_string())?
+                keel_c::compile_with_binding(
+                    preprocessed.as_deref().unwrap_or(text),
+                    &input,
+                    c_opts,
+                    opts.function_binding.unwrap_or_default(),
+                )
+                .map_err(|e| e.to_string())?
             };
             drop(src);
             if let Err(errors) = keel_ir::verify_module(&module) {

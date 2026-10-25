@@ -82,14 +82,14 @@ impl Pass for InlineAggregateReserve {
 
 /// Binding-aware Full integration. Shares ordinary legality, growth budgets
 /// and cloning, with bounded read-only leaves and one-level SCC wrappers.
-/// Exported definitions still require an explicit producer binding promise.
+/// Exported definitions require an exact-binding or equivalent-body promise.
 pub struct InlineNoninterposable;
 impl Pass for InlineNoninterposable {
     fn name(&self) -> &'static str {
         "inline-noninterposable"
     }
     fn description(&self) -> &'static str {
-        "inline bounded private or explicitly noninterposable direct-call functions"
+        "inline bounded direct-call functions with exact binding or equivalent bodies"
     }
     fn run(&self, _: &mut Function) -> bool {
         false
@@ -488,7 +488,9 @@ fn profitability_reason(f: &Function, full: bool) -> Option<&'static str> {
 fn eligibility_reason(f: &Function, admit_noninterposable: bool) -> Option<&'static str> {
     if f.attrs.weak
         || f.weak_odr
-        || (!f.local && !(admit_noninterposable && f.attrs.noninterposable))
+        || (!f.local
+            && !(admit_noninterposable
+                && (f.attrs.noninterposable || f.attrs.no_semantic_interposition)))
     {
         return Some("public_definition");
     }
