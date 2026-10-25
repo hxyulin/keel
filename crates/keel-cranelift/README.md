@@ -229,3 +229,8 @@ comparable:
 - Clang `-O2` runtimes are a C→object reference, not a same-IR result.
 - Publication-quality runtime claims need the fixed-page protocol on x86-64
   Linux (see `docs/executable-page-backing.md`), which was not run.
+
+`k_stackobj` accumulates and returns unsigned 64-bit values. Its arithmetic wraps
+modulo 2^64 for the driver's full-range signed inputs; the input sign still chooses
+the accumulator. Earlier signed accumulators overflowed on those inputs. Rebuild
+both compilers' objects when comparing results across this source change.

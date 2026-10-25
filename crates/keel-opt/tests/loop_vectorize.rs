@@ -710,3 +710,43 @@ fn widening_never_commutes_across_narrow_wrapping_arithmetic_or_hidden_reads() {
         assert_eq!(packed(&reduce_sum(&source, VectorTarget::Aarch64Neon)), 0);
     }
 }
+
+#[test]
+fn conditional_multi_sums_fold_only_proved_full_loop_unit_counts() {
+    let source = include_str!("conditional_reduce/multi.keel");
+    for target in [
+        VectorTarget::Portable,
+        VectorTarget::Aarch64Neon,
+        VectorTarget::X86Sse2,
+    ] {
+        let mut m = keel_ir::parse(source).unwrap();
+        keel_opt::run_passes_for_target(&mut m, &["loop-reduce-multi"], target).unwrap();
+        keel_ir::verify_module(&m).unwrap();
+        assert_eq!(
+            m.functions[0]
+                .layout_insts()
+                .any(|(_, i)| matches!(m.functions[0].inst_data(i), InstData::VectorIcmp { .. })),
+            target != VectorTarget::Portable,
+            "{m}"
+        );
+        for rejected in [
+            source.replace("iconst.i32 1", "iconst.i32 2"),
+            source.replace("iconst.i64 1", "iconst.i64 2"),
+            source.replace("icmp.ult v6,v1", "icmp.slt v6,v1"),
+            source.replace("brif v10,block2,block3", "brif v10,block3,block2"),
+            source.replace("load.i64 v13", "load.i64 volatile v13"),
+            source.replace("v18 = iadd v8,v14", "v18 = iadd v8,v7"),
+            source.replace("v18 = iadd v8,v14", "v30 = uext.i64 v9\n v18 = iadd v8,v30"),
+            source.replace(
+                "v15 = iconst.i64 0",
+                "v30 = load.i64 v0\n v15 = iconst.i64 0",
+            ),
+        ] {
+            let mut m = keel_ir::parse(&rejected).unwrap();
+            keel_ir::verify_module(&m).unwrap();
+            let before = m.to_string();
+            keel_opt::run_passes_for_target(&mut m, &["loop-reduce-multi"], target).unwrap();
+            assert_eq!(before, m.to_string(), "{rejected}");
+        }
+    }
+}

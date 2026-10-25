@@ -294,13 +294,14 @@ u64 k_names(u64 n) {
 }
 
 /* Small struct on the stack via address (no by-value aggregates). */
-struct acc { i64 lo, hi; u32 count; };
+/* Accumulators and the result wrap modulo 2^64, including extreme inputs. */
+struct acc { u64 lo, hi; u32 count; };
 static void acc_add(struct acc *a, i64 v) {
     if (v < 0) a->lo += v; else a->hi += v;
     a->count++;
 }
 
-i64 k_stackobj(const i64 *v, u64 n) {
+u64 k_stackobj(const i64 *v, u64 n) {
     struct acc a;
     memset(&a, 0, sizeof a);
     for (u64 i = 0; i < n; ++i) acc_add(&a, v[i]);

@@ -45,7 +45,7 @@ u64 k_collatz(u64, u64);
 u64 k_copy(u8 *, const u8 *, u64);
 u64 k_dispatch(const u64 *, u64);
 u64 k_names(u64);
-i64 k_stackobj(const i64 *, u64);
+u64 k_stackobj(const i64 *, u64);
 
 static u64 state = 0x9E3779B97F4A7C15ULL;
 static u64 rnd(void) {

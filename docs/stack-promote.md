@@ -42,24 +42,25 @@ with i32 counter updates, promoting the counter recurrence alongside two i64
 accumulators. Dynamic or nonuniform wider initializers remain outside this
 subset.
 
-## Limitation: slots passed to `memset`
+## Post-capture promotion
 
-A slot whose address is passed to an ordinary declared `memset` call escapes,
-so the pass leaves its field loads and stores intact. `call-contracts` has no
-capture/alias contract that proves such a use safe. For example, the
-`k_stackobj` corpus kernel keeps its six field loads and three stores (plus the
-input load).
+Full also admits a bounded suffix after the entry block's final memory barrier.
+A previously captured slot is eligible when subsequent accesses use exact,
+disjoint fields and every other load derives from an incoming pointer parameter
+through pointer addition. Incoming objects predate this activation's fixed slots.
+Loaded pointers, initializer-returned pointers, globals, pointer casts and phi
+pointers do not establish that disjointness. Calls, unknown writes, volatile and
+atomic accesses, address observations, debug homes and frame/nonlocal observers
+exclude the suffix. No edge can return to entry.
 
-LLVM, given the same IR with the callee declared `nobuiltin` and without
-`nocapture`/`noalias`, keeps `bl _memset` and the initial field reads, then
-promotes and vectorizes the recurrence. That reflects LLVM's stronger
-allocation-identity/alias analysis and loop memory promotion; it does not prove
-Keel may assume the ordinary call never captures the address. Region promotion
-past such a call would need proof that later input accesses cannot alias the
-escaped field, that no intervening observer can inspect captured memory, and
-correct entry reads, exit writes and first-fault behavior on every region exit.
-This pass assumes none of those. See `stack-cache` below for the opt-in
-alternative.
+The initializer remains an ordinary call. Fresh, nontrapping field reads after
+it seed the SSA values, including nonzero values and stable uninitialized bytes.
+There is no assumption that `memset` writes zero or does not capture. All suffix
+reads of a selected field use its current SSA value. Its stores can disappear
+because no admitted observer can see them before this activation ends. The
+additional seed reads stay inside their fixed slots and do not change the first
+fault among external input reads. Unsupported aliases retain their stores.
+The bounded implementation shares `stack-cache`'s SSA construction and limits.
 
 ## Tests
 

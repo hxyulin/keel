@@ -77,12 +77,12 @@ impl crate::Pass for LoopReduce {
     }
     fn run_for_target(&self, f: &mut Function, target: VectorTarget) -> bool {
         let changed = run_candidates(f, target, true);
-        normalize_conditional_loop(f, target) || changed
+        normalize_conditional_loop(f, target, false) || changed
     }
     fn run_with_context(&self, f: &mut Function, context: crate::OptimizationContext) -> bool {
         let changed = run_candidates_with_context(f, context, true, false);
         // Conditional normalization and every other recipe retain 128-bit policy.
-        normalize_conditional_loop(f, context.target) || changed
+        normalize_conditional_loop(f, context.target, false) || changed
     }
     fn deterministic(&self) -> bool {
         true
@@ -136,7 +136,8 @@ impl crate::Pass for MultiLoopReduce {
         self.run_for_target(f, VectorTarget::Portable)
     }
     fn run_for_target(&self, f: &mut Function, target: VectorTarget) -> bool {
-        run_extended(f, target, true, true)
+        let changed = run_extended(f, target, true, true);
+        normalize_conditional_loop(f, target, true) || changed
     }
     fn deterministic(&self) -> bool {
         true
@@ -1773,7 +1774,7 @@ fn reachable_cycle(f: &Function) -> bool {
 /// C conditional expressions initially have diamond CFGs. Normalize only a
 /// bounded private trial and publish it only after a reduction vectorizes.
 /// Rejected candidates do not leave extra selects or change unrelated layouts.
-fn normalize_conditional_loop(f: &mut Function, target: VectorTarget) -> bool {
+fn normalize_conditional_loop(f: &mut Function, target: VectorTarget, multi: bool) -> bool {
     if f.layout_insts().take(257).count() > 256 || f.blocks().take(17).count() > 16 {
         return false;
     }
@@ -1825,13 +1826,282 @@ fn normalize_conditional_loop(f: &mut Function, target: VectorTarget) -> bool {
             break;
         }
     }
-    if !crate::if_convert::run(&mut trial) {
+    let converted = crate::if_convert::run(&mut trial);
+    crate::simplify_cfg::run(&mut trial);
+    crate::phi_simplify::run(&mut trial);
+    crate::dce::run(&mut trial);
+    let normalized = multi && normalize_multi_recurrences(&mut trial);
+    if !converted && !normalized {
         return false;
     }
-    crate::simplify_cfg::run(&mut trial);
-    if !run_candidates(&mut trial, target, true) {
+    crate::phi_simplify::run(&mut trial);
+    crate::dce::run(&mut trial);
+    if !(if multi {
+        run_extended(&mut trial, target, true, true)
+    } else {
+        run_candidates(&mut trial, target, true)
+    }) {
         return false;
     }
     *f = trial;
     true
+}
+
+/// Canonicalize wrapping conditional sums and remove a unit counter whose only
+/// observations are after the loop. This runs only inside a private trial.
+fn normalize_multi_recurrences(f: &mut Function) -> bool {
+    let mut changed = false;
+    for header in f.blocks().collect::<Vec<_>>() {
+        let params = f.block_params(header).to_vec();
+        if !(3..=6).contains(&params.len()) {
+            continue;
+        }
+        let [cmp, branch] = *f.block_insts(header) else {
+            continue;
+        };
+        let iv = params[0];
+        if !matches!(f.value_type(iv), Type::I32 | Type::I64) {
+            continue;
+        }
+        let D::Icmp { cond, args } = *f.inst_data(cmp) else {
+            continue;
+        };
+        if !matches!(
+            (cond, f.resolve(args[0]) == iv, f.resolve(args[1]) == iv),
+            (IntCC::Ult, true, false) | (IntCC::Ugt, false, true)
+        ) {
+            continue;
+        }
+        let D::Brif {
+            cond: test,
+            ref dests,
+        } = *f.inst_data(branch)
+        else {
+            continue;
+        };
+        if f.resolve(test) != f.first_result(cmp) || dests.iter().any(|d| !d.args.is_empty()) {
+            continue;
+        }
+        let body = dests[0].block;
+        let bound = args[if f.resolve(args[0]) == iv { 1 } else { 0 }];
+        let analysis = crate::analysis::get(f);
+        if analysis.cfg.preds(body) != [header] || !f.block_params(body).is_empty() {
+            continue;
+        }
+        let Some(&back) = f.block_insts(body).last() else {
+            continue;
+        };
+        let D::Jump { dest: back_dest } = f.inst_data(back).clone() else {
+            continue;
+        };
+        if back_dest.block != header || back_dest.args.len() != params.len() {
+            continue;
+        }
+        let predecessors = analysis.cfg.preds(header);
+        if predecessors.len() != 2 {
+            continue;
+        }
+        let Some(&pre) = predecessors.iter().find(|&&b| b != body) else {
+            continue;
+        };
+        if !analysis.dom.dominates(header, body) {
+            continue;
+        }
+        let Some(&entry) = f.block_insts(pre).last() else {
+            continue;
+        };
+        let D::Jump { dest: entry_dest } = f.inst_data(entry).clone() else {
+            continue;
+        };
+        if entry_dest.block != header || entry_dest.args.len() != params.len() {
+            continue;
+        }
+        let unit = |f: &Function, value, accumulator| {
+            def(f, value).is_some_and(|i| {
+                matches!(*f.inst_data(i),
+                D::Binary { op: B::Iadd, args } if
+                (f.resolve(args[0]) == accumulator && constant(f, args[1]) == Some(1)) ||
+                (f.resolve(args[1]) == accumulator && constant(f, args[0]) == Some(1)))
+            })
+        };
+        if !unit(f, back_dest.args[0], iv) {
+            continue;
+        }
+        for index in (1..params.len()).rev() {
+            let accumulator = params[index];
+            let ty = f.value_type(accumulator);
+            if !matches!(ty, Type::I32 | Type::I64) {
+                continue;
+            }
+            let update = f.resolve(back_dest.args[index]);
+            let Some(root) = def(f, update) else {
+                continue;
+            };
+            if f.inst_block(root) != body {
+                continue;
+            }
+            // select(p, a+x, a) -> a + select(p, x, 0), in the same ring.
+            if let D::Select {
+                args: [cond, yes, no],
+            } = *f.inst_data(root)
+            {
+                let args = [yes, no];
+                for chosen in 0..2 {
+                    if f.resolve(args[1 - chosen]) != accumulator {
+                        continue;
+                    }
+                    let Some(add) = def(f, args[chosen]) else {
+                        continue;
+                    };
+                    let D::Binary {
+                        op: B::Iadd,
+                        args: operands,
+                    } = *f.inst_data(add)
+                    else {
+                        continue;
+                    };
+                    let value = if f.resolve(operands[0]) == accumulator {
+                        operands[1]
+                    } else if f.resolve(operands[1]) == accumulator {
+                        operands[0]
+                    } else {
+                        continue;
+                    };
+                    let zero =
+                        f.insert_inst(keel_ir::InsertPoint::Before(root), D::Iconst { ty, imm: 0 });
+                    let mut arms = [f.first_result(zero); 2];
+                    arms[chosen] = value;
+                    let masked = f.insert_inst(
+                        keel_ir::InsertPoint::Before(root),
+                        D::Select {
+                            args: [cond, arms[0], arms[1]],
+                        },
+                    );
+                    *f.inst_data_mut(root) = D::Binary {
+                        op: B::Iadd,
+                        args: [accumulator, f.first_result(masked)],
+                    };
+                    changed = true;
+                    break;
+                }
+            }
+            if !unit(f, update, accumulator) || ty.bytes() > f.value_type(iv).bytes() {
+                continue;
+            }
+            if back_dest
+                .args
+                .iter()
+                .filter(|&&v| f.resolve(v) == update)
+                .count()
+                != 1
+            {
+                continue;
+            }
+            if f.layout_insts().any(|(_, i)| {
+                i != back && {
+                    let mut used = false;
+                    f.inst_data(i)
+                        .for_each_operand(|v| used |= f.resolve(v) == update);
+                    used
+                }
+            }) {
+                continue;
+            }
+            let initial = f.resolve(entry_dest.args[index]);
+            let start = f.resolve(entry_dest.args[0]);
+            if !invariant(f, &analysis.dom, pre, initial)
+                || !invariant(f, &analysis.dom, pre, start)
+                || !invariant(f, &analysis.dom, pre, bound)
+            {
+                continue;
+            }
+            let users: Vec<_> = f
+                .layout_insts()
+                .filter(|&(_, i)| {
+                    let mut uses = false;
+                    f.inst_data(i)
+                        .for_each_operand(|v| uses |= f.resolve(v) == accumulator);
+                    uses
+                })
+                .collect();
+            if users.iter().any(|&(b, i)| {
+                i != root && (b == body || b == header || !analysis.dom.dominates(header, b))
+            }) {
+                continue;
+            }
+            // Full-loop observations use max(bound-start, 0), not the live
+            // induction variable, which vectorization replaces with a countdown.
+            let anchor = entry;
+            let difference = f.insert_inst(
+                keel_ir::InsertPoint::Before(anchor),
+                D::Binary {
+                    op: B::Isub,
+                    args: [bound, start],
+                },
+            );
+            let mut delta = f.first_result(difference);
+            if constant(f, start) != Some(0) {
+                let zero = f.insert_inst(
+                    keel_ir::InsertPoint::Before(anchor),
+                    D::Iconst {
+                        ty: f.value_type(iv),
+                        imm: 0,
+                    },
+                );
+                let nonempty = f.insert_inst(
+                    keel_ir::InsertPoint::Before(anchor),
+                    D::Icmp {
+                        cond: IntCC::Ugt,
+                        args: [bound, start],
+                    },
+                );
+                let trips = f.insert_inst(
+                    keel_ir::InsertPoint::Before(anchor),
+                    D::Select {
+                        args: [f.first_result(nonempty), delta, f.first_result(zero)],
+                    },
+                );
+                delta = f.first_result(trips);
+            }
+            if f.value_type(delta) != ty {
+                let narrow = f.insert_inst(
+                    keel_ir::InsertPoint::Before(anchor),
+                    D::Convert {
+                        op: ConvertOp::Trunc,
+                        ty,
+                        arg: delta,
+                    },
+                );
+                delta = f.first_result(narrow);
+            }
+            let sum = f.insert_inst(
+                keel_ir::InsertPoint::Before(anchor),
+                D::Binary {
+                    op: B::Iadd,
+                    args: [initial, delta],
+                },
+            );
+            let replacement = f.first_result(sum);
+            for (_, i) in users {
+                if i == root {
+                    continue;
+                }
+                let mut data = f.inst_data(i).clone();
+                data.for_each_operand_mut(|v| {
+                    if f.resolve(*v) == accumulator {
+                        *v = replacement;
+                    }
+                });
+                *f.inst_data_mut(i) = data;
+            }
+            // The counter update is now dead; remove the phi and both edge args.
+            f.remove_inst(root);
+            f.remove_block_param(header, index);
+            for i in [entry, back] {
+                f.inst_data_mut(i).branch_dests_mut()[0].args.remove(index);
+            }
+            changed = true;
+        }
+    }
+    changed
 }

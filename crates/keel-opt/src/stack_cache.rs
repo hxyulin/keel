@@ -29,6 +29,15 @@ impl crate::Pass for StackCache {
 type Field = (StackSlot, usize, Type);
 
 pub fn run(f: &mut Function) -> bool {
+    run_impl(f, false)
+}
+
+/// Remove suffix stores only when all possible observers are excluded.
+pub fn promote(f: &mut Function) -> bool {
+    run_impl(f, true)
+}
+
+fn run_impl(f: &mut Function, promote: bool) -> bool {
     if f.stack_slots().next().is_none() {
         return false;
     }
@@ -123,6 +132,76 @@ pub fn run(f: &mut Function) -> bool {
         .map(|i| (entry, i))
         .chain(instructions.iter().copied().filter(|&(b, _)| b != entry))
         .collect();
+    if promote {
+        // Entry parameters predate this activation's fixed slots. Only ptradd
+        // preserves that disjoint provenance; a loaded, returned, cast or phi
+        // pointer may instead point at an object captured by the initializer.
+        let mut external = keel_ir::fxhash::FxHashSet::default();
+        external.extend(
+            f.block_params(entry)
+                .iter()
+                .copied()
+                .filter(|&v| f.value_type(v) == Type::Ptr),
+        );
+        for _ in 0..8 {
+            let before = external.len();
+            for &(_, i) in &instructions {
+                if let D::Binary {
+                    op: BinaryOp::Ptradd,
+                    args,
+                } = *f.inst_data(i)
+                    && external.contains(&f.resolve(args[0]))
+                {
+                    external.insert(f.resolve(f.first_result(i)));
+                }
+            }
+            if before == external.len() {
+                break;
+            }
+        }
+        for &(_, i) in &suffix {
+            let d = f.inst_data(i);
+            match *d {
+                D::Load { addr, ty, flags } if !flags.volatile => {
+                    if field(addr, ty).is_none() && !external.contains(&f.resolve(addr)) {
+                        return false;
+                    }
+                }
+                D::Store { addr, value, flags } if !flags.volatile => {
+                    if field(addr, f.value_type(f.resolve(value))).is_none() {
+                        return false;
+                    }
+                }
+                _ if d.memory_effects() != keel_ir::MemoryEffects::None => return false,
+                _ => {}
+            }
+            // No address observations after the boundary, even in a pure
+            // comparison, return, pointer store, or unsupported derivation.
+            let mut observer = false;
+            d.for_each_operand(|v| {
+                let v = f.resolve(v);
+                if !addresses.contains_key(&v) {
+                    return;
+                }
+                let allowed = match d {
+                    D::Load { addr, .. } => f.resolve(*addr) == v,
+                    D::Store { addr, value, .. } => f.resolve(*addr) == v && f.resolve(*value) != v,
+                    D::Binary {
+                        op: BinaryOp::Ptradd,
+                        args,
+                    } => {
+                        f.resolve(args[0]) == v
+                            && addresses.contains_key(&f.resolve(f.first_result(i)))
+                    }
+                    _ => false,
+                };
+                observer |= !allowed;
+            });
+            if observer {
+                return false;
+            }
+        }
+    }
     let mut accesses = FxHashMap::default();
     let mut fields = Vec::new();
     for &(_, i) in &suffix {
@@ -145,24 +224,39 @@ pub fn run(f: &mut Function) -> bool {
     }
     let dom = DominatorTree::compute(f, &cfg);
     let loops = LoopDepth::compute(f, &cfg, &dom);
+    let mut captured = keel_ir::fxhash::FxHashSet::default();
+    if promote {
+        for &i in &entry_insts[..cut] {
+            if matches!(f.inst_data(i), D::Call { .. } | D::CallIndirect { .. }) {
+                f.inst_data(i).for_each_operand(|v| {
+                    if let Some(&(slot, _)) = addresses.get(&f.resolve(v)) {
+                        captured.insert(slot);
+                    }
+                });
+            }
+        }
+    }
     let selected: Vec<_> = fields
         .iter()
         .copied()
         .filter(|&(s, o, t)| {
-            !fields.iter().any(|&(other, offset, ty)| {
-                other == s
-                    && (offset, ty) != (o, t)
-                    && o < offset + width(ty)
-                    && offset < o + width(t)
-            }) && !suffix.iter().any(|&(_, i)| {
-                accesses.get(&i) == Some(&(s, o, t))
-                    && matches!(f.inst_data(i), D::Load { .. })
-                    && f.resolve(f.first_result(i)) != f.first_result(i)
-            }) && suffix.iter().any(|&(b, i)| {
-                loops.depth(b) > 0
-                    && accesses.get(&i) == Some(&(s, o, t))
-                    && matches!(f.inst_data(i), D::Load { .. })
-            })
+            (!promote || captured.contains(&s))
+                && !fields.iter().any(|&(other, offset, ty)| {
+                    other == s
+                        && (offset, ty) != (o, t)
+                        && o < offset + width(ty)
+                        && offset < o + width(t)
+                })
+                && !suffix.iter().any(|&(_, i)| {
+                    accesses.get(&i) == Some(&(s, o, t))
+                        && matches!(f.inst_data(i), D::Load { .. })
+                        && f.resolve(f.first_result(i)) != f.first_result(i)
+                })
+                && suffix.iter().any(|&(b, i)| {
+                    loops.depth(b) > 0
+                        && accesses.get(&i) == Some(&(s, o, t))
+                        && matches!(f.inst_data(i), D::Load { .. })
+                })
         })
         .take(8)
         .collect();
@@ -221,7 +315,12 @@ pub fn run(f: &mut Function) -> bool {
                         f.replace_all_uses(f.first_result(i), f.resolve(value));
                         f.remove_inst(i);
                     }
-                    D::Store { value: v, .. } => value = f.resolve(v),
+                    D::Store { value: v, .. } => {
+                        value = f.resolve(v);
+                        if promote {
+                            f.remove_inst(i);
+                        }
+                    }
                     _ => unreachable!(),
                 }
             }
@@ -238,7 +337,7 @@ pub fn run(f: &mut Function) -> bool {
 }
 
 fn width(ty: Type) -> usize {
-    ty.bytes().unwrap() as usize
+    ty.bytes().unwrap_or(8) as usize
 }
 fn constant(f: &Function, v: Value) -> Option<i64> {
     if let ValueDef::Result(i, _) = f.value_def(f.resolve(v))

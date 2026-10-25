@@ -323,6 +323,29 @@ fn canonical_mask(func: &Function, mut value: Value) -> bool {
     false
 }
 
+// Exact all-zero bits, not numerical FP equality (negative zero is distinct).
+fn zero_splat(func: &Function, value: Value) -> bool {
+    let value = func.resolve(value);
+    let ValueDef::Result(i, _) = func.value_def(value) else {
+        return false;
+    };
+    if func.first_result(i) != value {
+        return false;
+    }
+    let InstData::VectorSplat { arg, .. } = *func.inst_data(i) else {
+        return false;
+    };
+    let arg = func.resolve(arg);
+    let ValueDef::Result(i, _) = func.value_def(arg) else {
+        return false;
+    };
+    func.first_result(i) == arg
+        && matches!(
+            *func.inst_data(i),
+            InstData::Iconst { imm: 0, .. } | InstData::Fconst { bits: 0, .. }
+        )
+}
+
 impl FunctionCompiler<'_> {
     pub(super) fn vector_multiply_dwords_sse2(&mut self, args: [Value; 2], result: Option<Value>) {
         // PMULUDQ multiplies the even dwords into qwords. A second product
@@ -742,6 +765,31 @@ impl FunctionCompiler<'_> {
     pub(super) fn vector_select(&mut self, args: [Value; 3], result: Option<Value>) {
         let shape = self.ty(args[0]).vector().unwrap();
         let canonical = canonical_mask(self.func, args[0]);
+        if canonical && (zero_splat(self.func, args[1]) || zero_splat(self.func, args[2])) {
+            let zero_true = zero_splat(self.func, args[1]);
+            // Read both leaves before defining a possibly coalesced or spilled
+            // destination. Shared comparisons retain their original mask value.
+            let mask = self.use_freg(args[0], FS0);
+            let value = self.use_freg(args[if zero_true { 2 } else { 1 }], FS1);
+            let d = self.def_freg(result);
+            let dst = if d == value && mask != d { FS2 } else { d };
+            if dst != mask {
+                self.emit(Opcode::Movaps, [asm_arg(xmm(dst)), asm_arg(xmm(mask))]);
+            }
+            self.emit(
+                if zero_true {
+                    Opcode::Andnps
+                } else {
+                    Opcode::Andps
+                },
+                [asm_arg(xmm(dst)), asm_arg(xmm(value))],
+            );
+            if dst != d {
+                self.emit(Opcode::Movaps, [asm_arg(xmm(d)), asm_arg(xmm(dst))]);
+            }
+            self.def_done(result, d);
+            return;
+        }
         self.vector_stage(args[0], FS0);
         if !canonical {
             self.emit(Opcode::Xorps, [asm_arg(xmm(FS1)), asm_arg(xmm(FS1))]);

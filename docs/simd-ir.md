@@ -723,3 +723,25 @@ replacing mnemonics globally would require an upper-half liveness proof. v3
 compile time also rose about 13% for the twelve kernels. Wider registers are
 therefore not evidence of a gain, and widening stays parked until backend
 load/encoding work and fresh matched measurements justify it.
+
+## Conditional multi-reduction normalization
+
+Full's `loop-reduce-multi` tries conditional integer recurrences in a private
+copy, limited to 256 instructions and 16 blocks. The existing guarded diamond
+converter speculates only its nontrapping scalar allowlist. A wrapping update
+`select(p, a+x, a)` becomes `a + select(p, x, 0)` in the same integer width.
+Independent sums retain the existing vector expression, stream and fault-order
+proofs. Coupled sums, writes, volatile accesses and unsupported expressions fail.
+
+An unsigned, strict-less-than loop with a unit induction step can fold an i32 or
+i64 unit counter observed only after the loop. Its final value is the original
+counter plus `max(bound-start, 0)`, reduced to the counter's width. Nonzero seeds,
+zero trips, nonzero starts and narrow wrapping counts retain their semantics.
+The trial is published only after vectorization succeeds. This does not enable
+general if-conversion in the default pipeline.
+
+The x86 SSE2 selector recognizes a canonical mask with an exact all-zero splat
+on either arm. It emits AND or ANDNOT, supports shared masks, and reads operands
+before defining an aliased or spilled result. Loaded arbitrary masks retain lane
+truth normalization. Floating negative zero keeps the general bit-preserving
+select; numerical equality to zero is insufficient for this recipe.

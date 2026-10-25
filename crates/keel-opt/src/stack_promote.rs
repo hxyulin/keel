@@ -11,7 +11,8 @@ use keel_ir::{
 type Field = (StackSlot, usize, Type);
 
 pub fn run(f: &mut Function) -> bool {
-    run_impl(f, false)
+    let changed = run_impl(f, false);
+    crate::stack_cache::promote(f) || changed
 }
 
 /// Explicit opt-in for bounded promotion in large functions. The default pass
@@ -116,7 +117,8 @@ fn run_impl(f: &mut Function, large: bool) -> bool {
     let mut escaped: FxHashSet<_> = f.debug_vars.iter().map(|v| v.slot).collect();
     // The ABI instruction writes this home without a StackAddr SSA operand.
     escaped.extend(f.layout_insts().filter_map(|(_, i)| match f.inst_data(i) {
-        InstData::AggregateVaArg { home, .. } => Some(*home), _ => None,
+        InstData::AggregateVaArg { home, .. } => Some(*home),
+        _ => None,
     }));
     let mut accesses: FxHashMap<_, Field> = FxHashMap::default();
     let mut fields = Vec::new();

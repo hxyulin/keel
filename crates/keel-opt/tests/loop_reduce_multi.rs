@@ -66,7 +66,7 @@ fn coupled_recurrences_extra_traps_and_observable_stores_remain_scalar() {
 }
 
 #[test]
-fn mixed_width_count_recurrence_is_rejected() {
+fn mixed_width_unit_count_folds_but_nonunit_count_remains_scalar() {
     let source = fixtures::source();
     let source = source[source.find("func @multi_64").unwrap()..]
         .to_owned()
@@ -74,18 +74,31 @@ fn mixed_width_count_recurrence_is_rejected() {
         .replace("v5: i64", "v5: i32")
         .replace("v10: i64", "v10: i32")
         .replace("v20 = iconst.i64", "v20 = iconst.i32");
-    let m = vectorized(&source);
-    assert!(
-        !m.functions[0]
-            .layout_insts()
-            .any(|(_, i)| m.functions[0].inst_data(i).is_vector_instruction())
-    );
+    for unit in [true, false] {
+        let source = if unit {
+            source.clone()
+        } else {
+            source.replace("v20 = iconst.i32 1", "v20 = iconst.i32 2")
+        };
+        let m = vectorized(&source);
+        assert_eq!(
+            m.functions[0]
+                .layout_insts()
+                .any(|(_, i)| m.functions[0].inst_data(i).is_vector_instruction()),
+            unit,
+            "{m}"
+        );
+    }
 }
 
 #[test]
 fn recurrence_budget_accepts_four_and_rejects_five() {
     for count in [4, 5] {
-        let mut source = fixtures::source();
+        // Keep the counter nonunit and every added sum observable, so trial
+        // cleanup cannot fold the count or delete an unused recurrence.
+        let mut source = fixtures::source()
+            .replace("v20 = iconst.i32 1", "v20 = iconst.i32 2")
+            .replace("v20 = iconst.i64 1", "v20 = iconst.i64 2");
         let mut entry = String::new();
         let mut back = String::new();
         let mut updates = String::new();
@@ -94,6 +107,7 @@ fn recurrence_budget_accepts_four_and_rejects_five() {
             entry.push_str(",v3");
             back.push_str(&format!(",v{}", id + 1));
             updates.push_str(&format!(" v{} = iadd v{id},v15\n", id + 1));
+            source = source.replace(" return", &format!(" store v{id},v6\n return"));
             for width in [32, 64] {
                 source = source.replace(
                     &format!("v10: i{width}"),

@@ -118,13 +118,6 @@ fn rejects_partial_initialization_overlap_escape_volatile_atomic_and_nonlocal_ca
         original.replace("store v1, v2", "store volatile v1, v2"),
         original.replace("load.i64 v2", "load.i64 volatile v2"),
         format!(
-            "decl @memset(ptr, i32, i64) -> ptr\n{}",
-            original.replace(
-                "store v1, v2",
-                "v11 = iconst.i32 0\n v12 = iconst.i64 8\n v13 = call @memset(v2, v11, v12)"
-            )
-        ),
-        format!(
             "decl @save() returns_twice\n{}",
             original.replace("store v1, v2", "store v1, v2\n call @save()")
         ),
@@ -395,15 +388,13 @@ fn mixed_width_fields_keep_escape_observer_and_exception_barriers() {
     let exact = fixture(Type::I32);
     let covered = covered_fixture(Type::I64, Type::I32, 0, 0);
     // Reuse every existing barrier regression with the wider initializer.
-    // Calls named memset remain ordinary calls, even after initialization.
+    // Memory and nonlocal observers still exclude the function.
     for effect in [
-        "call @observe(v20)",
         "v23 = load.i8 volatile v20",
         "v23 = atomic_load.i8 relaxed v20",
         "v23 = intrinsic frame_address()",
         "v23 = intrinsic stack_save()",
         "call @twice()",
-        "v23 = iconst.i64 8\n v24 = iconst.i32 0\n v25 = call @memset(v20, v24, v23)",
     ] {
         let candidate = format!(
             "decl @observe(ptr)\ndecl @twice() returns_twice\ndecl @memset(ptr, i32, i64) -> ptr\n{}",

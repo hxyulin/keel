@@ -23,9 +23,9 @@ Loads, stores, atomics, calls (including returns-twice and indirect calls), divi
 and remainder, floating operations, frame operations, inline assembly, exception
 operations and traps are excluded. New IR opcodes do not enter implicitly.
 
-## Suggested schedule
+## Explicit schedule
 
-For Full, the intended segment is:
+For experiments with the explicit pass:
 
 ```text
 inline,small-memory,simplify-cfg,stack-promote,phi-simplify,dce,
@@ -37,11 +37,16 @@ cleanup exposes small scalar diamonds; cleanup after conversion removes
 redundant parameters and jumps. Keep the pass out of Fast until compile cost and
 register pressure have been evaluated.
 
-Select formation is sufficient for branchless scalar backend code, but general
-multiple-accumulator vector reduction and select/mask vectorization are further
-work. The real `k_stackobj` corpus kernel additionally needs the escaped-field
-region/alias proof described in [stack-promote.md](stack-promote.md); it still
-has seven loads, three stores and two conditional branches.
+Full does not schedule general `if-convert`. Its reduction passes use bounded
+private trials and publish normalization only after vectorization succeeds.
+`loop-reduce-multi` can normalize independent conditional wrapping sums and fold
+an unsigned unit counter observed only after the loop. See
+[simd-ir.md](simd-ir.md#conditional-multi-reduction-normalization).
+
+The real `k_stackobj` now uses [post-capture promotion](stack-promote.md#post-capture-promotion)
+and conditional multi-reduction normalization. It keeps the ordinary initializer
+and three entry field reads, then vectorizes the two sums. Its accumulators and
+result use defined unsigned wrapping arithmetic in the C benchmark source.
 
 ## Effect on the reduced fixture
 

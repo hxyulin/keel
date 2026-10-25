@@ -1,0 +1,30 @@
+func @partition(ptr, i64, i64, i64, i64, i32) -> i64 {
+block0(v0: ptr, v1: i64, v2: i64, v3: i64, v4: i64, v5: i32):
+ jump block1(v2,v3,v4,v5)
+block1(v6: i64,v7: i64,v8: i64,v9: i32):
+ v10 = icmp.ult v6,v1
+ brif v10,block2,block3
+block2:
+ v11 = iconst.i64 3
+ v12 = shl v6,v11
+ v13 = ptradd v0,v12
+ v14 = load.i64 v13
+ v15 = iconst.i64 0
+ v16 = icmp.slt v14,v15
+ v17 = iadd v7,v14
+ v18 = iadd v8,v14
+ v19 = select v16,v17,v7
+ v20 = select v16,v8,v18
+ v21 = iconst.i32 1
+ v22 = iadd v9,v21
+ v23 = iconst.i64 1
+ v24 = iadd v6,v23
+ jump block1(v24,v19,v20,v22)
+block3:
+ v25 = iconst.i64 3
+ v26 = imul v7,v25
+ v27 = iadd v26,v8
+ v28 = uext.i64 v9
+ v29 = iadd v27,v28
+ return v29
+}
