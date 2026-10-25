@@ -506,22 +506,28 @@ const FULL_EPILOGUE: [&str; 16] = [
 // summaries are built by codegen from the final selected/allocated leaf bodies.
 // Scalarize bounded private pairs before finalizing calling conventions, and
 // run the associated cleanup only if transport actually changed the module.
-const fn full_pipeline() -> [&'static str; FULL_ROUND.len() * FULL_ROUNDS + FULL_EPILOGUE.len()] {
-    let mut passes = [""; FULL_ROUND.len() * FULL_ROUNDS + FULL_EPILOGUE.len()];
+// Also do this before freezing the first inliner templates: scalar cleanup
+// removes aggregate homes and avoids charging byval snapshots at every site.
+// Retain the late invocation for signatures exposed by intervening rewrites.
+const fn full_pipeline() -> [&'static str; 1 + FULL_ROUND.len() * FULL_ROUNDS + FULL_EPILOGUE.len()]
+{
+    let mut passes = [""; 1 + FULL_ROUND.len() * FULL_ROUNDS + FULL_EPILOGUE.len()];
+    passes[0] = "private-aggregate-cleanup";
     let mut i = 0;
     while i < FULL_ROUND.len() * FULL_ROUNDS {
-        passes[i] = FULL_ROUND[i % FULL_ROUND.len()];
+        passes[1 + i] = FULL_ROUND[i % FULL_ROUND.len()];
         i += 1;
     }
     let mut j = 0;
     while j < FULL_EPILOGUE.len() {
-        passes[i + j] = FULL_EPILOGUE[j];
+        passes[1 + i + j] = FULL_EPILOGUE[j];
         j += 1;
     }
     passes
 }
 
-/// The passes `keel compile -O` runs: three bounded rounds, then memory/loop cleanup.
+/// The passes `keel compile -O` runs: private aggregate cleanup, three bounded
+/// rounds, then memory/loop cleanup.
 pub const DEFAULT_PIPELINE: &[&str] = &full_pipeline();
 
 pub fn find_pass(name: &str) -> Option<&'static dyn Pass> {

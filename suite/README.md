@@ -87,8 +87,9 @@ override the preset, and the last explicit selector wins. `--opt-tier` and
 `-p` control IR independently and do not reset selection.
 
 Full IR runs three bounded rounds of inlining, scalar/memory cleanup, code
-motion and loop optimization. This is a fixed schedule, not an unbounded
-fixed-point loop. Fast retains its own bounded pipeline.
+motion and loop optimization. Private aggregate transport and its conditional
+cleanup run before the first round and again near the end. This is a fixed
+schedule, not an unbounded fixed-point loop. Fast retains its own bounded pipeline.
 
 ## Adding a workload
 

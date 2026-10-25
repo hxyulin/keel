@@ -145,6 +145,17 @@ fn named_registration_is_appended_and_cleanup_is_full_only() {
             tier == keel_opt::OptimizationTier::Full
         );
     }
+    let full = keel_opt::OptimizationTier::Full.pipeline();
+    assert_eq!(
+        &full[..2],
+        ["private-aggregate-cleanup", "inline-cheap-reserve"]
+    );
+    assert_eq!(
+        full.iter()
+            .filter(|&&p| p == "private-aggregate-cleanup")
+            .count(),
+        2
+    );
     assert_eq!(
         keel_opt::OptimizationTier::Full
             .pipeline()

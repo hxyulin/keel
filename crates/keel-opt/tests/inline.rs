@@ -195,9 +195,15 @@ fn full_revisits_calls_exposed_by_earlier_inline_rounds() {
     }
     source.push_str("func @chain7() -> i64 local {\nblock0:\n v0 = iconst.i64 42\n return v0\n}\n");
     let pipeline = keel_opt::DEFAULT_PIPELINE;
-    let round = pipeline.iter().position(|p| *p == "loop-reduce").unwrap() + 1;
-    assert_eq!(calls(&run(&source, &pipeline[..round]), "chain0"), 1);
-    assert_eq!(calls(&run(&source, &pipeline[..round * 2]), "chain0"), 1);
+    // Find actual round ends so a one-time prefix is not counted twice.
+    let round_ends = pipeline
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| **p == "loop-reduce")
+        .map(|(i, _)| i + 1);
+    for end in round_ends.take(2) {
+        assert_eq!(calls(&run(&source, &pipeline[..end]), "chain0"), 1);
+    }
     let optimized = run(&source, pipeline);
     assert_eq!(calls(&optimized, "chain0"), 0);
     let entry = &optimized.functions[0];

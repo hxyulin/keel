@@ -175,12 +175,17 @@ block0(v0: i64, v1: i64):
         keel_opt::OptimizationTier::Basic.pipeline()[1],
         "canonicalize"
     );
-    assert_eq!(keel_opt::DEFAULT_PIPELINE[2], "canonicalize");
+    let full = keel_opt::DEFAULT_PIPELINE;
+    let inline = full
+        .iter()
+        .position(|p| *p == "inline-cheap-reserve")
+        .unwrap();
+    assert_eq!(full[inline + 2], "canonicalize");
     assert_eq!(
         keel_opt::OptimizationTier::Basic.pipeline()[0],
         "simplify-cfg"
     );
-    assert_eq!(keel_opt::DEFAULT_PIPELINE[0], "inline-cheap-reserve");
+    assert_eq!(full[inline + 1], "simplify-cfg");
     assert!(keel_opt::OptimizationTier::None.pipeline().is_empty());
 }
 

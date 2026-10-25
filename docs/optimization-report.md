@@ -108,6 +108,13 @@ template decisions can affect overhead; no zero-overhead measurement is claimed.
 
 ## Full cheap-helper reserve
 
+Full runs `private-aggregate-cleanup` before its first inlining round. Eligible
+private two-word arguments become scalar transport, and conditional scalar
+cleanup removes redundant aggregate homes before templates are frozen. This
+reduces helper costs and byval snapshot charges without increasing inlining
+budgets. The existing late invocation remains for signatures exposed by later
+rewrites. Modules without a transport rewrite skip the associated cleanup.
+
 Full uses `inline-cheap-reserve` in its three bounded rounds. Ordinary
 inlining still has its 16,384-instruction module growth limit. A separate
 4,096-instruction, 256-site reserve retries cheap helpers denied only by that
