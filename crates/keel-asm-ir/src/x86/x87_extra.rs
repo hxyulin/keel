@@ -1,33 +1,5 @@
 //! Additional architectural x87 stack, integer-memory, and state operations.
-macro_rules! operations {
-    ($($variant:ident => $name:literal),* $(,)?) => {
-        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-        pub enum X87Opcode { $($variant),* }
-        impl X87Opcode {
-            pub const ALL: &'static [Self] = &[$(Self::$variant),*];
-            pub fn parse(name: &str) -> Option<Self> {
-                Some(match name { $($name => Self::$variant,)* _ => return None })
-            }
-            pub const fn mnemonic(self) -> &'static str {
-                match self { $(Self::$variant => $name),* }
-            }
-        }
-    }
-}
-operations! {
-    Fst => "fst", Fsub => "fsub", Fsubr => "fsubr", Fdiv => "fdiv", Fdivr => "fdivr",
-    Faddp => "faddp", Fdivp => "fdivp", Fdivrp => "fdivrp",
-    Fcom => "fcom", Fcomp => "fcomp", Fucom => "fucom", Fucomp => "fucomp",
-    Fcomi => "fcomi", Fcomip => "fcomip", Ffree => "ffree", Ffreep => "ffreep",
-    Fcmovb => "fcmovb", Fcmove => "fcmove", Fcmovbe => "fcmovbe", Fcmovu => "fcmovu",
-    Fcmovne => "fcmovne", Fcmovnbe => "fcmovnbe", Fcmovnu => "fcmovnu",
-    Fiadd => "fiadd", Fimul => "fimul", Ficom => "ficom", Ficomp => "ficomp",
-    Fisub => "fisub", Fisubr => "fisubr", Fidiv => "fidiv", Fidivr => "fidivr",
-    Fist => "fist", Fbld => "fbld", Fbstp => "fbstp",
-    Fsave => "fsave", Fnsave => "fnsave", Frstor => "frstor",
-    Fldenv => "fldenv", Fstenv => "fstenv", Fnstenv => "fnstenv",
-    Fstcw => "fstcw", Fstsw => "fstsw", Fnstsw => "fnstsw",
-}
+include!("isa/x87_opcodes.rs");
 
 impl X87Opcode {
     pub(super) fn environment(self) -> bool {

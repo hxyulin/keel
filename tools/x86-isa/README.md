@@ -43,6 +43,11 @@ EVEX, MVEX, XOP and 3DNow records are outside this import.
 - `feature-fields.json` lists capability fields in public struct and `names()`
   order, with field docs and CLI aliases. `feature_fields.py` generates the
   struct, `NONE`, containment, CLI lookup and names iteration.
+- `api-identities.json` preserves baseline enum order, payload types, static
+  spellings and x87 identities. `api_identities.py` emits their Rust definitions
+  and mappings without consulting instruction encodings. Wrapper dispatch,
+  condition codes and Core syntax remain handwritten. `Pclmulqdq` retains its
+  position in the handwritten parse fallback.
 - `feature-policy.json` maps upstream ISA sets onto Keel feature fields.
   Empty lists mean baseline capabilities; null entries exclude unsupported
   interpretation families. The generator rejects undeclared feature fields.
@@ -56,6 +61,9 @@ catalogue, decoding index, 93 v2 metadata entries, 1,226 VEX form adapters,
 64 fixed encodings and opcode feature queries. Public fixed/v2/v3 enums, their
 `ALL` lists, parse aliases and mnemonic mappings are also generated from the
 explicit identity policy. Existing enum order and spellings are preserved.
+The baseline formatting macro expands into an exhaustive match with handwritten
+dynamic arms. Compatibility tests pin the original API schema and exercise an
+independent spelling/format fixture captured from `db6129d3`.
 The generator also reconciles
 encoding fields in `docs/v2-coverage/inventory.json`, retaining its operand and
 validation prose. AES entries are optional and are not implied by psABI v2.
