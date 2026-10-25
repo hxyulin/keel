@@ -13,6 +13,7 @@ import registers
 import core_mappings
 import att_rules
 import system_intrinsics
+import coverage_ledger
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT.parents[1] / 'crates/keel-asm-ir/src/x86/isa/generated.rs'
@@ -53,9 +54,7 @@ def generate(data):
                 raise ValueError(f'unsupported {key} value: {f[key]}')
         # Keep the full input snapshot, but explicitly exclude unsupported CPU
         # interpretation switches and REX2. They are not baseline long mode.
-        if any(f.get(k) == '1' for k in ('feature_amd', 'feature_knc', 'feature_mpx')):
-            continue
-        if f.get('rex_2') not in (None, 'no_rex2'):
+        if exclusion_reasons(row):
             continue
         operands = []
         for operand in row.get('operands', []):
@@ -116,9 +115,16 @@ def generate(data):
     return '\n'.join(lines)
 
 
-def enabled(row):
+def exclusion_reasons(row):
     f = row.get('filters', {})
-    return not any(f.get(k) == '1' for k in ('feature_amd', 'feature_knc', 'feature_mpx')) and f.get('rex_2') in (None, 'no_rex2')
+    reasons = [key for key in ('feature_amd', 'feature_knc', 'feature_mpx') if f.get(key) == '1']
+    if f.get('rex_2') not in (None, 'no_rex2'):
+        reasons.append('rex_2')
+    return reasons
+
+
+def enabled(row):
+    return not exclusion_reasons(row)
 
 
 def opcode_identities(name, rows):
@@ -395,6 +401,7 @@ def main():
     outputs.update(core_mappings.outputs(ROOT, OUTPUT))
     outputs.update(att_rules.outputs(ROOT, OUTPUT))
     outputs.update(system_intrinsics.outputs(ROOT, OUTPUT))
+    outputs.update(coverage_ledger.outputs(ROOT, data, adapters, exclusion_reasons, form_isa))
     target, output = documentation_inventory(outputs[OUTPUT.with_name('v2.rs')], adapters['v2'])
     outputs[target] = output
     for target, output in outputs.items():

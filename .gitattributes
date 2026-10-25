@@ -21,3 +21,7 @@
 
 # Generated typed system-lowering bindings.
 /crates/keel-codegen/src/x86_64/generated/*.rs linguist-generated=true
+
+# Generated structural x86 coverage reports.
+/docs/x86-coverage/coverage.json linguist-generated=true
+/docs/x86-coverage/README.md linguist-generated=true

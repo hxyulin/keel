@@ -8,7 +8,10 @@ full baseline system support remains unfinished.
 
 The assembler and decoder share generated ISA forms. Public mnemonic/operand
 adapters and typed lowering determine which compiler paths are exposed. The
-remaining work below tracks those layers and their validation.
+remaining work below tracks those layers and their validation. The
+[generated structural ledger](x86-coverage/README.md) accounts for imported
+forms and declarative candidates; it does not infer execution qualification
+from these historical records.
 
 ## Checkpoint boundary
 

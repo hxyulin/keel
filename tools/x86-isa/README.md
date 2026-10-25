@@ -266,3 +266,12 @@ The [regular system-lowering contract](system-lowering.md) describes generated
 bindings for 43 existing intrinsics through four shared recipe families and two
 explicit MSR hooks. It records validation, allocation, adjacency and terminal
 transfer boundaries.
+
+## Generated structural coverage ledger
+
+`coverage_ledger.py` emits [the x86 coverage ledger](../../docs/x86-coverage/README.md)
+and its per-source-form JSON through the same generator and freshness check.
+It joins import/exclusion facts, decoder registration, declarative assembler
+candidates, the 45 tracked compiler recipes and feature/profile policy.
+[Definitions and limits](coverage-ledger.md) explain why candidates, unknown
+policy, unknown privilege and untracked validation are separate states.
