@@ -1,87 +1,98 @@
-# x86 ISA generation pilot
+# Shared x86 instruction tables
 
-This pilot imports a pinned subset of Intel XED into opcode dispatch tables.
-It proves that Keel can generate native Rust tables from ISA data without
-linking a C decoder. It does not decode instruction streams or add x86 support
-to `keel disasm`.
+Keel's x86 assembler and disassembler use one generated form catalogue.
+The instruction-specific encoders have been replaced by operand matching and
+common prefix, ModRM/SIB, immediate and relocation emission. Compiler lowering,
+intrinsic semantics and the CPU profiles remain separate.
 
-Run the offline import report and tests:
+## Regeneration
+
+```sh
+python3 tools/x86-isa/generate.py
+python3 tools/x86-isa/generate.py --check
+python3 -m unittest discover -s tools/x86-isa -p 'test_*.py'
+```
+
+Ordinary Cargo builds use checked-in Rust. They need no network access,
+Python, C decoder, or upstream generator.
+
+The input is a subset of the MIT-licensed
+[Zydis instruction database](https://github.com/zyantific/zydis-db/tree/eaf92a02dca616b90c12b2ebc338d87ed943c84f),
+pinned to `eaf92a02dca616b90c12b2ebc338d87ed943c84f`. The snapshot retains
+legacy and VEX records except explicit non-long-mode records, removing only
+the upstream comment field. `zydis-source.json` records full-file and subset
+SHA-256 values. Audit a separately downloaded upstream file with:
+
+```sh
+python3 tools/x86-isa/generate.py --check-upstream /path/to/instructions.json
+```
+
+The generator rejects unknown filter names, unsupported filter values and
+unclassified feature sets used by Keel adapters. It excludes REX2 and the
+alternate AMD, KNC and MPX interpretations. The default decoder uses the
+ModRM-bearing UD0 form; Keel's explicit `ud0.short` encoding remains available.
+EVEX, MVEX, XOP and 3DNow records are outside this import.
+
+## Inputs and outputs
+
+- `zydis.json` supplies opcodes, prefixes, operand roles, size rules, ModRM
+  domains, VEX fields, ISA sets and explicit privilege metadata.
+- `keel-adapters.json` binds stable public enums and dialect aliases to source
+  forms. Encoding selectors identify exact alternatives. Memory-width and
+  family expectations guard compatibility; they do not supply emitted bytes.
+- `feature-policy.json` maps upstream ISA sets onto Keel feature fields.
+  Empty lists mean baseline capabilities; null entries exclude unsupported
+  interpretation families. The profile definitions remain handwritten.
+- `keel-extensions.json` preserves the existing intentional long-mode D6 trap
+  spelling, `udb`, which is absent from this upstream snapshot.
+
+Generated files under `crates/keel-asm-ir/src/x86/isa/` provide the shared
+catalogue, decoding index, 93 v2 metadata entries, 1,202 VEX form adapters,
+64 fixed encodings and opcode feature queries. The generator also reconciles
+encoding fields in `docs/v2-coverage/inventory.json`, retaining its operand and
+validation prose. AES entries are optional and are not implied by psABI v2.
+
+The assembler keeps public opcode identities and syntax adapters. Handwritten
+code handles branch relaxation, exact alias selection, operand conventions,
+canonical choices, addressing and object relocations. It contains no fallback
+to the removed instruction-specific encoders. Adding a public instruction
+still requires its syntax/API identity and any compiler semantics; importing
+an ISA form does not add an intrinsic or make it available for selection.
+
+## Decoding limits
+
+`keel-disasm::x86::decode(bytes, address)` returns original bytes, the matching
+form and structured operands. Decoding uses an opcode index, reads at most
+15 bytes and returns no length for unsupported, invalid or truncated input.
+The CLI prints the rest of that section as data after an unknown instruction.
+It does not guess subsequent boundaries.
+
+The catalogue is an encoding description, not exhaustive architectural decode
+pseudocode. Recognition does not certify CPU support, register restrictions or
+runtime privilege. Upstream privilege metadata is optional; absent CPL is
+unknown. The sampled LGDT record lacks the CPL0 metadata present in XED.
+Compiler APIs retain their explicit preconditions and separate CPL0 tests.
+Aliases, ignored prefixes and alternative encodings can produce assembly text
+that reassembles differently. Original bytes remain authoritative.
+
+## Independent witnesses
+
+The original XED pilot remains in `probe.py`, `system-xed.txt` and `source.json`.
+It preserves repeated PATTERN/OPERANDS pairs and imports 22 system forms,
+excludes eight non-long-mode forms and reports four control/debug register
+forms as unsupported by that pilot's grammar. Those pilot gaps are unchanged;
+the production catalogue separately describes control/debug register forms.
+No compiler access APIs are inferred from them.
 
 ```sh
 python3 tools/x86-isa/probe.py
-python3 -m unittest discover -s tools/x86-isa -p 'test_*.py'
 python3 tools/x86-isa/probe.py --emit-rust > /tmp/keel-x86-forms.rs
 rustc --crate-type lib /tmp/keel-x86-forms.rs -o /tmp/libkeel_x86_forms.rlib
 ```
 
-`system-xed.txt` contains 24 unmodified records selected from Intel XED commit
-[`0bcb6237345c5066726dcc08b3d87928df3b5b26`](https://github.com/intelxed/xed/tree/0bcb6237345c5066726dcc08b3d87928df3b5b26).
-This is also the pin cited by Keel's existing x86 v3 encoding inventory.
-The records retain all 34 `PATTERN`/`OPERANDS` pairs. The pilot imports 22 forms,
-excludes eight forms explicitly marked `not64`, and reports four unsupported
-`MOV_CR`/`MOV_DR` forms. Unknown predicates remain visible in the report;
-they never become unconditional matches. The selected forms are a system
-instruction sample, not the whole x86-64 baseline or psABI v1 profile.
+Existing Clang/GNU assembler comparisons remain independent byte and relocation
+oracles. Decoder tests include literal legacy, VEX and privileged encodings,
+truncation, invalid prefixes, the 15-byte limit and every one/two-byte start.
+Neither table generation nor an encoding comparison proves execution semantics.
 
-`source.json` records the selection, pinned URL, full-file SHA-256 and subset
-SHA-256. Ordinary runs require no network access. To audit the subset against
-an independently downloaded copy of that exact upstream file:
-
-```sh
-python3 tools/x86-isa/probe.py --check-upstream /path/to/xed-isa.txt
-```
-
-The importer preserves repeated `PATTERN`/`OPERANDS` pairs within a record.
-It generates opcode bytes, ModRM domains, group selectors, fixed RM values,
-`FORCE64` and the no-REX2 constraint. Original operand expressions and metadata
-remain in the report. The generated Rust carries the operand expressions as
-strings; typed operand extraction is still future work. `candidates()` only
-tests opcode/group selection, including memory-only forms and SWAPGS's fixed
-ModRM. It returns all candidates and does not consume bytes.
-
-## Source choice
-
-[Intel XED](https://intelxed.github.io/) provides instruction patterns,
-operand expressions, mode conditions and ISA feature layers. Its Apache-2.0
-data is already cited in this repository. The grammar includes nonterminals,
-state, register-class rules and overrides across files. A complete importer
-must resolve those rules; parsing only `xed-isa.txt` does not cover the ISA.
-The pilot deliberately rejects the control/debug register predicates instead
-of treating them as ordinary memory-addressing forms.
-
-[Zydis's database](https://github.com/zyantific/zydis-db/tree/eaf92a02dca616b90c12b2ebc338d87ed943c84f)
-offers explicit JSON filters and operands under MIT. It is another viable
-input, but does not remove the need to implement prefix interpretation,
-register classes and operand/address-size rules. Its sampled LGDT entry lacks
-the CPL0 metadata present in XED. Imported metadata needs a separate semantics
-audit whichever source is used.
-
-[iced's definitions](https://github.com/icedland/iced/blob/8cfc5f57c08fd2e80a4cec9d3d9d36f642b2de31/src/csharp/Intel/Generator/Tables/InstructionDefs.txt)
-provide MIT instruction descriptions and formatter information. Reusing those
-definitions would also require interpreting their generator conventions and
-decoder handlers. They remain useful as an independent decoding oracle.
-
-## Next implementation boundary
-
-Keep the byte decoder independent of assembler opcode enums. Add a handwritten,
-bounded prefix/REX and ModRM/SIB reader, with generated dispatch and operand
-recipes. Enforce the 15-byte instruction limit. Handle operand/address-size
-selection, signed displacements and immediates, RIP-relative targets, invalid
-prefix combinations and truncation explicitly. VEX/EVEX require their own
-dispatch and validation rules; this pilot does not cover them.
-
-Before expanding imports, classify every pattern as supported, excluded by
-scope, or unsupported, and audit overlapping candidates. Preserve original
-bytes even when formatting chooses an alias. An unsupported x86 instruction
-does not have a known length: use an explicit stop or byte-fallback policy,
-without claiming the following bytes are synchronized instructions.
-
-The parallel privileged-instruction session owns assembler enums, encoders,
-typed IR/codegen and disposable CPL0 tests. This work owns source import,
-generation and decoding. No shared enum migration is required for this pilot.
-LGDT/LIDT witnesses are `0F 01 /2` and `/3`, memory-only in long mode, with
-`FORCE64()` and a ten-byte memory operand. Data generation proves neither
-privilege behavior nor compiler semantics. Four control/debug register forms
-remain explicit gaps until their grammar and register restrictions are handled.
-
-Intel-derived records and generated tables use Apache-2.0; see `LICENSE-XED`.
+See `LICENSE-ZYDIS` for production ISA data and `LICENSE-XED` for the pilot.

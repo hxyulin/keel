@@ -1,0 +1,6719 @@
+{
+  "v2": [
+    {
+      "variant": "Aesenc",
+      "mnemonic": "aesenc",
+      "source_mnemonic": "aesenc",
+      "family": "aes",
+      "form": "Binary",
+      "selector": {
+        "opcode": "DC",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Aesenclast",
+      "mnemonic": "aesenclast",
+      "source_mnemonic": "aesenclast",
+      "family": "aes",
+      "form": "Binary",
+      "selector": {
+        "opcode": "DD",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Aesdec",
+      "mnemonic": "aesdec",
+      "source_mnemonic": "aesdec",
+      "family": "aes",
+      "form": "Binary",
+      "selector": {
+        "opcode": "DE",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Aesdeclast",
+      "mnemonic": "aesdeclast",
+      "source_mnemonic": "aesdeclast",
+      "family": "aes",
+      "form": "Binary",
+      "selector": {
+        "opcode": "DF",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Aesimc",
+      "mnemonic": "aesimc",
+      "source_mnemonic": "aesimc",
+      "family": "aes",
+      "form": "Binary",
+      "selector": {
+        "opcode": "DB",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Aeskeygenassist",
+      "mnemonic": "aeskeygenassist",
+      "source_mnemonic": "aeskeygenassist",
+      "family": "aes",
+      "form": "Control",
+      "selector": {
+        "opcode": "DF",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "PextrwSse4",
+      "mnemonic": "pextrw.s",
+      "source_mnemonic": "pextrw",
+      "family": "sse41",
+      "form": "Extract",
+      "selector": {
+        "opcode": "15",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 16
+    },
+    {
+      "variant": "Pcmpestri64",
+      "mnemonic": "pcmpestri64",
+      "source_mnemonic": "pcmpestri",
+      "family": "sse42",
+      "form": "Control64",
+      "selector": {
+        "opcode": "61",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pcmpestrm64",
+      "mnemonic": "pcmpestrm64",
+      "source_mnemonic": "pcmpestrm",
+      "family": "sse42",
+      "form": "Control64",
+      "selector": {
+        "opcode": "60",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pcmpistri64",
+      "mnemonic": "pcmpistri64",
+      "source_mnemonic": "pcmpistri",
+      "family": "sse42",
+      "form": "Control64",
+      "selector": {
+        "opcode": "63",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pcmpistrm64",
+      "mnemonic": "pcmpistrm64",
+      "source_mnemonic": "pcmpistrm",
+      "family": "sse42",
+      "form": "Control64",
+      "selector": {
+        "opcode": "62",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Addsubpd",
+      "mnemonic": "addsubpd",
+      "source_mnemonic": "addsubpd",
+      "family": "sse3",
+      "form": "Binary",
+      "selector": {
+        "opcode": "D0",
+        "opcode_map": "0f"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Addsubps",
+      "mnemonic": "addsubps",
+      "source_mnemonic": "addsubps",
+      "family": "sse3",
+      "form": "Binary",
+      "selector": {
+        "opcode": "D0",
+        "opcode_map": "0f"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Haddpd",
+      "mnemonic": "haddpd",
+      "source_mnemonic": "haddpd",
+      "family": "sse3",
+      "form": "Binary",
+      "selector": {
+        "opcode": "7C",
+        "opcode_map": "0f"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Haddps",
+      "mnemonic": "haddps",
+      "source_mnemonic": "haddps",
+      "family": "sse3",
+      "form": "Binary",
+      "selector": {
+        "opcode": "7C",
+        "opcode_map": "0f"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Hsubpd",
+      "mnemonic": "hsubpd",
+      "source_mnemonic": "hsubpd",
+      "family": "sse3",
+      "form": "Binary",
+      "selector": {
+        "opcode": "7D",
+        "opcode_map": "0f"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Hsubps",
+      "mnemonic": "hsubps",
+      "source_mnemonic": "hsubps",
+      "family": "sse3",
+      "form": "Binary",
+      "selector": {
+        "opcode": "7D",
+        "opcode_map": "0f"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Movddup",
+      "mnemonic": "movddup",
+      "source_mnemonic": "movddup",
+      "family": "sse3",
+      "form": "Binary",
+      "selector": {
+        "opcode": "12",
+        "opcode_map": "0f"
+      },
+      "memory_bits": 64
+    },
+    {
+      "variant": "Movsldup",
+      "mnemonic": "movsldup",
+      "source_mnemonic": "movsldup",
+      "family": "sse3",
+      "form": "Binary",
+      "selector": {
+        "opcode": "12",
+        "opcode_map": "0f"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Movshdup",
+      "mnemonic": "movshdup",
+      "source_mnemonic": "movshdup",
+      "family": "sse3",
+      "form": "Binary",
+      "selector": {
+        "opcode": "16",
+        "opcode_map": "0f"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Lddqu",
+      "mnemonic": "lddqu",
+      "source_mnemonic": "lddqu",
+      "family": "sse3",
+      "form": "Memory",
+      "selector": {
+        "opcode": "F0",
+        "opcode_map": "0f"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Fisttp",
+      "mnemonic": "fisttp",
+      "source_mnemonic": "fisttp",
+      "family": "sse3",
+      "form": "Fisttp",
+      "selector": {
+        "opcode": "00",
+        "opcode_map": null
+      },
+      "memory_bits": 0
+    },
+    {
+      "variant": "Pshufb",
+      "mnemonic": "pshufb",
+      "source_mnemonic": "pshufb",
+      "family": "ssse3",
+      "form": "Binary",
+      "selector": {
+        "opcode": "00",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Phaddw",
+      "mnemonic": "phaddw",
+      "source_mnemonic": "phaddw",
+      "family": "ssse3",
+      "form": "Binary",
+      "selector": {
+        "opcode": "01",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Phaddd",
+      "mnemonic": "phaddd",
+      "source_mnemonic": "phaddd",
+      "family": "ssse3",
+      "form": "Binary",
+      "selector": {
+        "opcode": "02",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Phaddsw",
+      "mnemonic": "phaddsw",
+      "source_mnemonic": "phaddsw",
+      "family": "ssse3",
+      "form": "Binary",
+      "selector": {
+        "opcode": "03",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pmaddubsw",
+      "mnemonic": "pmaddubsw",
+      "source_mnemonic": "pmaddubsw",
+      "family": "ssse3",
+      "form": "Binary",
+      "selector": {
+        "opcode": "04",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Phsubw",
+      "mnemonic": "phsubw",
+      "source_mnemonic": "phsubw",
+      "family": "ssse3",
+      "form": "Binary",
+      "selector": {
+        "opcode": "05",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Phsubd",
+      "mnemonic": "phsubd",
+      "source_mnemonic": "phsubd",
+      "family": "ssse3",
+      "form": "Binary",
+      "selector": {
+        "opcode": "06",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Phsubsw",
+      "mnemonic": "phsubsw",
+      "source_mnemonic": "phsubsw",
+      "family": "ssse3",
+      "form": "Binary",
+      "selector": {
+        "opcode": "07",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Psignb",
+      "mnemonic": "psignb",
+      "source_mnemonic": "psignb",
+      "family": "ssse3",
+      "form": "Binary",
+      "selector": {
+        "opcode": "08",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Psignw",
+      "mnemonic": "psignw",
+      "source_mnemonic": "psignw",
+      "family": "ssse3",
+      "form": "Binary",
+      "selector": {
+        "opcode": "09",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Psignd",
+      "mnemonic": "psignd",
+      "source_mnemonic": "psignd",
+      "family": "ssse3",
+      "form": "Binary",
+      "selector": {
+        "opcode": "0A",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pmulhrsw",
+      "mnemonic": "pmulhrsw",
+      "source_mnemonic": "pmulhrsw",
+      "family": "ssse3",
+      "form": "Binary",
+      "selector": {
+        "opcode": "0B",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pabsb",
+      "mnemonic": "pabsb",
+      "source_mnemonic": "pabsb",
+      "family": "ssse3",
+      "form": "Binary",
+      "selector": {
+        "opcode": "1C",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pabsw",
+      "mnemonic": "pabsw",
+      "source_mnemonic": "pabsw",
+      "family": "ssse3",
+      "form": "Binary",
+      "selector": {
+        "opcode": "1D",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pabsd",
+      "mnemonic": "pabsd",
+      "source_mnemonic": "pabsd",
+      "family": "ssse3",
+      "form": "Binary",
+      "selector": {
+        "opcode": "1E",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Palignr",
+      "mnemonic": "palignr",
+      "source_mnemonic": "palignr",
+      "family": "ssse3",
+      "form": "Control",
+      "selector": {
+        "opcode": "0F",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pminsb",
+      "mnemonic": "pminsb",
+      "source_mnemonic": "pminsb",
+      "family": "sse41",
+      "form": "Binary",
+      "selector": {
+        "opcode": "38",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pminsd",
+      "mnemonic": "pminsd",
+      "source_mnemonic": "pminsd",
+      "family": "sse41",
+      "form": "Binary",
+      "selector": {
+        "opcode": "39",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pminuw",
+      "mnemonic": "pminuw",
+      "source_mnemonic": "pminuw",
+      "family": "sse41",
+      "form": "Binary",
+      "selector": {
+        "opcode": "3A",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pminud",
+      "mnemonic": "pminud",
+      "source_mnemonic": "pminud",
+      "family": "sse41",
+      "form": "Binary",
+      "selector": {
+        "opcode": "3B",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pmaxsb",
+      "mnemonic": "pmaxsb",
+      "source_mnemonic": "pmaxsb",
+      "family": "sse41",
+      "form": "Binary",
+      "selector": {
+        "opcode": "3C",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pmaxsd",
+      "mnemonic": "pmaxsd",
+      "source_mnemonic": "pmaxsd",
+      "family": "sse41",
+      "form": "Binary",
+      "selector": {
+        "opcode": "3D",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pmaxuw",
+      "mnemonic": "pmaxuw",
+      "source_mnemonic": "pmaxuw",
+      "family": "sse41",
+      "form": "Binary",
+      "selector": {
+        "opcode": "3E",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pmaxud",
+      "mnemonic": "pmaxud",
+      "source_mnemonic": "pmaxud",
+      "family": "sse41",
+      "form": "Binary",
+      "selector": {
+        "opcode": "3F",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pmuldq",
+      "mnemonic": "pmuldq",
+      "source_mnemonic": "pmuldq",
+      "family": "sse41",
+      "form": "Binary",
+      "selector": {
+        "opcode": "28",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pcmpeqq",
+      "mnemonic": "pcmpeqq",
+      "source_mnemonic": "pcmpeqq",
+      "family": "sse41",
+      "form": "Binary",
+      "selector": {
+        "opcode": "29",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Packusdw",
+      "mnemonic": "packusdw",
+      "source_mnemonic": "packusdw",
+      "family": "sse41",
+      "form": "Binary",
+      "selector": {
+        "opcode": "2B",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pmulld",
+      "mnemonic": "pmulld",
+      "source_mnemonic": "pmulld",
+      "family": "sse41",
+      "form": "Binary",
+      "selector": {
+        "opcode": "40",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Ptest",
+      "mnemonic": "ptest",
+      "source_mnemonic": "ptest",
+      "family": "sse41",
+      "form": "Binary",
+      "selector": {
+        "opcode": "17",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Phminposuw",
+      "mnemonic": "phminposuw",
+      "source_mnemonic": "phminposuw",
+      "family": "sse41",
+      "form": "Binary",
+      "selector": {
+        "opcode": "41",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pmovsxbw",
+      "mnemonic": "pmovsxbw",
+      "source_mnemonic": "pmovsxbw",
+      "family": "sse41",
+      "form": "Binary",
+      "selector": {
+        "opcode": "20",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 64
+    },
+    {
+      "variant": "Pmovsxbd",
+      "mnemonic": "pmovsxbd",
+      "source_mnemonic": "pmovsxbd",
+      "family": "sse41",
+      "form": "Binary",
+      "selector": {
+        "opcode": "21",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 32
+    },
+    {
+      "variant": "Pmovsxbq",
+      "mnemonic": "pmovsxbq",
+      "source_mnemonic": "pmovsxbq",
+      "family": "sse41",
+      "form": "Binary",
+      "selector": {
+        "opcode": "22",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 16
+    },
+    {
+      "variant": "Pmovsxwd",
+      "mnemonic": "pmovsxwd",
+      "source_mnemonic": "pmovsxwd",
+      "family": "sse41",
+      "form": "Binary",
+      "selector": {
+        "opcode": "23",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 64
+    },
+    {
+      "variant": "Pmovsxwq",
+      "mnemonic": "pmovsxwq",
+      "source_mnemonic": "pmovsxwq",
+      "family": "sse41",
+      "form": "Binary",
+      "selector": {
+        "opcode": "24",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 32
+    },
+    {
+      "variant": "Pmovsxdq",
+      "mnemonic": "pmovsxdq",
+      "source_mnemonic": "pmovsxdq",
+      "family": "sse41",
+      "form": "Binary",
+      "selector": {
+        "opcode": "25",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 64
+    },
+    {
+      "variant": "Pmovzxbw",
+      "mnemonic": "pmovzxbw",
+      "source_mnemonic": "pmovzxbw",
+      "family": "sse41",
+      "form": "Binary",
+      "selector": {
+        "opcode": "30",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 64
+    },
+    {
+      "variant": "Pmovzxbd",
+      "mnemonic": "pmovzxbd",
+      "source_mnemonic": "pmovzxbd",
+      "family": "sse41",
+      "form": "Binary",
+      "selector": {
+        "opcode": "31",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 32
+    },
+    {
+      "variant": "Pmovzxbq",
+      "mnemonic": "pmovzxbq",
+      "source_mnemonic": "pmovzxbq",
+      "family": "sse41",
+      "form": "Binary",
+      "selector": {
+        "opcode": "32",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 16
+    },
+    {
+      "variant": "Pmovzxwd",
+      "mnemonic": "pmovzxwd",
+      "source_mnemonic": "pmovzxwd",
+      "family": "sse41",
+      "form": "Binary",
+      "selector": {
+        "opcode": "33",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 64
+    },
+    {
+      "variant": "Pmovzxwq",
+      "mnemonic": "pmovzxwq",
+      "source_mnemonic": "pmovzxwq",
+      "family": "sse41",
+      "form": "Binary",
+      "selector": {
+        "opcode": "34",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 32
+    },
+    {
+      "variant": "Pmovzxdq",
+      "mnemonic": "pmovzxdq",
+      "source_mnemonic": "pmovzxdq",
+      "family": "sse41",
+      "form": "Binary",
+      "selector": {
+        "opcode": "35",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 64
+    },
+    {
+      "variant": "Roundps",
+      "mnemonic": "roundps",
+      "source_mnemonic": "roundps",
+      "family": "sse41",
+      "form": "Control",
+      "selector": {
+        "opcode": "08",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Roundpd",
+      "mnemonic": "roundpd",
+      "source_mnemonic": "roundpd",
+      "family": "sse41",
+      "form": "Control",
+      "selector": {
+        "opcode": "09",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Blendps",
+      "mnemonic": "blendps",
+      "source_mnemonic": "blendps",
+      "family": "sse41",
+      "form": "Control",
+      "selector": {
+        "opcode": "0C",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Blendpd",
+      "mnemonic": "blendpd",
+      "source_mnemonic": "blendpd",
+      "family": "sse41",
+      "form": "Control",
+      "selector": {
+        "opcode": "0D",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pblendw",
+      "mnemonic": "pblendw",
+      "source_mnemonic": "pblendw",
+      "family": "sse41",
+      "form": "Control",
+      "selector": {
+        "opcode": "0E",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Dpps",
+      "mnemonic": "dpps",
+      "source_mnemonic": "dpps",
+      "family": "sse41",
+      "form": "Control",
+      "selector": {
+        "opcode": "40",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Dppd",
+      "mnemonic": "dppd",
+      "source_mnemonic": "dppd",
+      "family": "sse41",
+      "form": "Control",
+      "selector": {
+        "opcode": "41",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Mpsadbw",
+      "mnemonic": "mpsadbw",
+      "source_mnemonic": "mpsadbw",
+      "family": "sse41",
+      "form": "Control",
+      "selector": {
+        "opcode": "42",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Blendvps",
+      "mnemonic": "blendvps",
+      "source_mnemonic": "blendvps",
+      "family": "sse41",
+      "form": "Blend",
+      "selector": {
+        "opcode": "14",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Blendvpd",
+      "mnemonic": "blendvpd",
+      "source_mnemonic": "blendvpd",
+      "family": "sse41",
+      "form": "Blend",
+      "selector": {
+        "opcode": "15",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pblendvb",
+      "mnemonic": "pblendvb",
+      "source_mnemonic": "pblendvb",
+      "family": "sse41",
+      "form": "Blend",
+      "selector": {
+        "opcode": "10",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Movntdqa",
+      "mnemonic": "movntdqa",
+      "source_mnemonic": "movntdqa",
+      "family": "sse41",
+      "form": "Memory",
+      "selector": {
+        "opcode": "2A",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pextrb",
+      "mnemonic": "pextrb",
+      "source_mnemonic": "pextrb",
+      "family": "sse41",
+      "form": "Extract",
+      "selector": {
+        "opcode": "14",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 8
+    },
+    {
+      "variant": "Pextrd",
+      "mnemonic": "pextrd",
+      "source_mnemonic": "pextrd",
+      "family": "sse41",
+      "form": "Extract",
+      "selector": {
+        "opcode": "16",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 32
+    },
+    {
+      "variant": "Pextrq",
+      "mnemonic": "pextrq",
+      "source_mnemonic": "pextrq",
+      "family": "sse41",
+      "form": "Extract",
+      "selector": {
+        "opcode": "16",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 64
+    },
+    {
+      "variant": "Extractps",
+      "mnemonic": "extractps",
+      "source_mnemonic": "extractps",
+      "family": "sse41",
+      "form": "Extract",
+      "selector": {
+        "opcode": "17",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 32
+    },
+    {
+      "variant": "Pinsrb",
+      "mnemonic": "pinsrb",
+      "source_mnemonic": "pinsrb",
+      "family": "sse41",
+      "form": "Insert",
+      "selector": {
+        "opcode": "20",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 8
+    },
+    {
+      "variant": "Pinsrd",
+      "mnemonic": "pinsrd",
+      "source_mnemonic": "pinsrd",
+      "family": "sse41",
+      "form": "Insert",
+      "selector": {
+        "opcode": "22",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 32
+    },
+    {
+      "variant": "Pinsrq",
+      "mnemonic": "pinsrq",
+      "source_mnemonic": "pinsrq",
+      "family": "sse41",
+      "form": "Insert",
+      "selector": {
+        "opcode": "22",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 64
+    },
+    {
+      "variant": "Insertps",
+      "mnemonic": "insertps",
+      "source_mnemonic": "insertps",
+      "family": "sse41",
+      "form": "Control",
+      "selector": {
+        "opcode": "21",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 32
+    },
+    {
+      "variant": "Pcmpgtq",
+      "mnemonic": "pcmpgtq",
+      "source_mnemonic": "pcmpgtq",
+      "family": "sse42",
+      "form": "Binary",
+      "selector": {
+        "opcode": "37",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pcmpestrm",
+      "mnemonic": "pcmpestrm",
+      "source_mnemonic": "pcmpestrm",
+      "family": "sse42",
+      "form": "Control",
+      "selector": {
+        "opcode": "60",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pcmpestri",
+      "mnemonic": "pcmpestri",
+      "source_mnemonic": "pcmpestri",
+      "family": "sse42",
+      "form": "Control",
+      "selector": {
+        "opcode": "61",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pcmpistrm",
+      "mnemonic": "pcmpistrm",
+      "source_mnemonic": "pcmpistrm",
+      "family": "sse42",
+      "form": "Control",
+      "selector": {
+        "opcode": "62",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Pcmpistri",
+      "mnemonic": "pcmpistri",
+      "source_mnemonic": "pcmpistri",
+      "family": "sse42",
+      "form": "Control",
+      "selector": {
+        "opcode": "63",
+        "opcode_map": "0f3a"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Crc32",
+      "mnemonic": "crc32",
+      "source_mnemonic": "crc32",
+      "family": "sse42",
+      "form": "Crc32",
+      "selector": {
+        "opcode": "F0",
+        "opcode_map": "0f38"
+      },
+      "memory_bits": 0
+    },
+    {
+      "variant": "Cmpxchg16b",
+      "mnemonic": "cmpxchg16b",
+      "source_mnemonic": "cmpxchg16b",
+      "family": "cx16",
+      "form": "Cx16",
+      "selector": {
+        "opcode": "C7",
+        "opcode_map": "0f"
+      },
+      "memory_bits": 128
+    },
+    {
+      "variant": "Lahf",
+      "mnemonic": "lahf",
+      "source_mnemonic": "lahf",
+      "family": "lahf_sahf",
+      "form": "Nullary",
+      "selector": {
+        "opcode": "9F",
+        "opcode_map": null
+      },
+      "memory_bits": 0
+    },
+    {
+      "variant": "Sahf",
+      "mnemonic": "sahf",
+      "source_mnemonic": "sahf",
+      "family": "lahf_sahf",
+      "form": "Nullary",
+      "selector": {
+        "opcode": "9E",
+        "opcode_map": null
+      },
+      "memory_bits": 0
+    }
+  ],
+  "v3": [
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vaddsubpd)",
+      "source_mnemonic": "vaddsubpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vaddsubps)",
+      "source_mnemonic": "vaddsubps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vandnpd)",
+      "source_mnemonic": "vandnpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vandnps)",
+      "source_mnemonic": "vandnps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vblendpd)",
+      "source_mnemonic": "vblendpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vblendps)",
+      "source_mnemonic": "vblendps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vblendvpd)",
+      "source_mnemonic": "vblendvpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vblendvps)",
+      "source_mnemonic": "vblendvps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vbroadcastf128)",
+      "source_mnemonic": "vbroadcastf128",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vbroadcasti128)",
+      "source_mnemonic": "vbroadcasti128",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vbroadcastsd)",
+      "source_mnemonic": "vbroadcastsd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vbroadcastss)",
+      "source_mnemonic": "vbroadcastss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcmppd)",
+      "source_mnemonic": "vcmppd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcmpps)",
+      "source_mnemonic": "vcmpps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcmpsd)",
+      "source_mnemonic": "vcmpsd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcmpss)",
+      "source_mnemonic": "vcmpss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcomisd)",
+      "source_mnemonic": "vcomisd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcomiss)",
+      "source_mnemonic": "vcomiss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtdq2pd)",
+      "source_mnemonic": "vcvtdq2pd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtdq2ps)",
+      "source_mnemonic": "vcvtdq2ps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtpd2dq)",
+      "source_mnemonic": "vcvtpd2dq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtpd2ps)",
+      "source_mnemonic": "vcvtpd2ps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtph2ps)",
+      "source_mnemonic": "vcvtph2ps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtps2dq)",
+      "source_mnemonic": "vcvtps2dq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtps2pd)",
+      "source_mnemonic": "vcvtps2pd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtps2ph)",
+      "source_mnemonic": "vcvtps2ph",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtsd2si)",
+      "source_mnemonic": "vcvtsd2si",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtsd2ss)",
+      "source_mnemonic": "vcvtsd2ss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtsi2sd)",
+      "source_mnemonic": "vcvtsi2sd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtsi2ss)",
+      "source_mnemonic": "vcvtsi2ss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtss2sd)",
+      "source_mnemonic": "vcvtss2sd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtss2si)",
+      "source_mnemonic": "vcvtss2si",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvttpd2dq)",
+      "source_mnemonic": "vcvttpd2dq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvttps2dq)",
+      "source_mnemonic": "vcvttps2dq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvttsd2si)",
+      "source_mnemonic": "vcvttsd2si",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvttss2si)",
+      "source_mnemonic": "vcvttss2si",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vdppd)",
+      "source_mnemonic": "vdppd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vdpps)",
+      "source_mnemonic": "vdpps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vextractf128)",
+      "source_mnemonic": "vextractf128",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vextracti128)",
+      "source_mnemonic": "vextracti128",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vextractps)",
+      "source_mnemonic": "vextractps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmadd132pd)",
+      "source_mnemonic": "vfmadd132pd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmadd132ps)",
+      "source_mnemonic": "vfmadd132ps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmadd132sd)",
+      "source_mnemonic": "vfmadd132sd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmadd132ss)",
+      "source_mnemonic": "vfmadd132ss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmadd213pd)",
+      "source_mnemonic": "vfmadd213pd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmadd213ps)",
+      "source_mnemonic": "vfmadd213ps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmadd213sd)",
+      "source_mnemonic": "vfmadd213sd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmadd213ss)",
+      "source_mnemonic": "vfmadd213ss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmadd231pd)",
+      "source_mnemonic": "vfmadd231pd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmadd231ps)",
+      "source_mnemonic": "vfmadd231ps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmadd231sd)",
+      "source_mnemonic": "vfmadd231sd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmadd231ss)",
+      "source_mnemonic": "vfmadd231ss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmaddsub132pd)",
+      "source_mnemonic": "vfmaddsub132pd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmaddsub132ps)",
+      "source_mnemonic": "vfmaddsub132ps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmaddsub213pd)",
+      "source_mnemonic": "vfmaddsub213pd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmaddsub213ps)",
+      "source_mnemonic": "vfmaddsub213ps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmaddsub231pd)",
+      "source_mnemonic": "vfmaddsub231pd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmaddsub231ps)",
+      "source_mnemonic": "vfmaddsub231ps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsub132pd)",
+      "source_mnemonic": "vfmsub132pd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsub132ps)",
+      "source_mnemonic": "vfmsub132ps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsub132sd)",
+      "source_mnemonic": "vfmsub132sd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsub132ss)",
+      "source_mnemonic": "vfmsub132ss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsub213pd)",
+      "source_mnemonic": "vfmsub213pd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsub213ps)",
+      "source_mnemonic": "vfmsub213ps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsub213sd)",
+      "source_mnemonic": "vfmsub213sd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsub213ss)",
+      "source_mnemonic": "vfmsub213ss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsub231pd)",
+      "source_mnemonic": "vfmsub231pd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsub231ps)",
+      "source_mnemonic": "vfmsub231ps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsub231sd)",
+      "source_mnemonic": "vfmsub231sd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsub231ss)",
+      "source_mnemonic": "vfmsub231ss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsubadd132pd)",
+      "source_mnemonic": "vfmsubadd132pd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsubadd132ps)",
+      "source_mnemonic": "vfmsubadd132ps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsubadd213pd)",
+      "source_mnemonic": "vfmsubadd213pd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsubadd213ps)",
+      "source_mnemonic": "vfmsubadd213ps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsubadd231pd)",
+      "source_mnemonic": "vfmsubadd231pd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsubadd231ps)",
+      "source_mnemonic": "vfmsubadd231ps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmadd132pd)",
+      "source_mnemonic": "vfnmadd132pd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmadd132ps)",
+      "source_mnemonic": "vfnmadd132ps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmadd132sd)",
+      "source_mnemonic": "vfnmadd132sd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmadd132ss)",
+      "source_mnemonic": "vfnmadd132ss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmadd213pd)",
+      "source_mnemonic": "vfnmadd213pd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmadd213ps)",
+      "source_mnemonic": "vfnmadd213ps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmadd213sd)",
+      "source_mnemonic": "vfnmadd213sd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmadd213ss)",
+      "source_mnemonic": "vfnmadd213ss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmadd231pd)",
+      "source_mnemonic": "vfnmadd231pd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmadd231ps)",
+      "source_mnemonic": "vfnmadd231ps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmadd231sd)",
+      "source_mnemonic": "vfnmadd231sd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmadd231ss)",
+      "source_mnemonic": "vfnmadd231ss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmsub132pd)",
+      "source_mnemonic": "vfnmsub132pd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmsub132ps)",
+      "source_mnemonic": "vfnmsub132ps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmsub132sd)",
+      "source_mnemonic": "vfnmsub132sd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmsub132ss)",
+      "source_mnemonic": "vfnmsub132ss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmsub213pd)",
+      "source_mnemonic": "vfnmsub213pd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmsub213ps)",
+      "source_mnemonic": "vfnmsub213ps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmsub213sd)",
+      "source_mnemonic": "vfnmsub213sd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmsub213ss)",
+      "source_mnemonic": "vfnmsub213ss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmsub231pd)",
+      "source_mnemonic": "vfnmsub231pd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmsub231ps)",
+      "source_mnemonic": "vfnmsub231ps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmsub231sd)",
+      "source_mnemonic": "vfnmsub231sd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmsub231ss)",
+      "source_mnemonic": "vfnmsub231ss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vgatherdpd)",
+      "source_mnemonic": "vgatherdpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vgatherdps)",
+      "source_mnemonic": "vgatherdps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vgatherqpd)",
+      "source_mnemonic": "vgatherqpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vgatherqps)",
+      "source_mnemonic": "vgatherqps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vhaddpd)",
+      "source_mnemonic": "vhaddpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vhaddps)",
+      "source_mnemonic": "vhaddps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vhsubpd)",
+      "source_mnemonic": "vhsubpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vhsubps)",
+      "source_mnemonic": "vhsubps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vinsertf128)",
+      "source_mnemonic": "vinsertf128",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vinserti128)",
+      "source_mnemonic": "vinserti128",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vinsertps)",
+      "source_mnemonic": "vinsertps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vlddqu)",
+      "source_mnemonic": "vlddqu",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vldmxcsr)",
+      "source_mnemonic": "vldmxcsr",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmaskmovdqu)",
+      "source_mnemonic": "vmaskmovdqu",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmaskmovpd)",
+      "source_mnemonic": "vmaskmovpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmaskmovps)",
+      "source_mnemonic": "vmaskmovps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmaxpd)",
+      "source_mnemonic": "vmaxpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmaxps)",
+      "source_mnemonic": "vmaxps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vminpd)",
+      "source_mnemonic": "vminpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vminps)",
+      "source_mnemonic": "vminps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovd)",
+      "source_mnemonic": "vmovd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovddup)",
+      "source_mnemonic": "vmovddup",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovdqa)",
+      "source_mnemonic": "vmovdqa",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovdqu)",
+      "source_mnemonic": "vmovdqu",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovhlps)",
+      "source_mnemonic": "vmovhlps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovhpd)",
+      "source_mnemonic": "vmovhpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovhps)",
+      "source_mnemonic": "vmovhps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovlhps)",
+      "source_mnemonic": "vmovlhps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovlpd)",
+      "source_mnemonic": "vmovlpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovlps)",
+      "source_mnemonic": "vmovlps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovmskpd)",
+      "source_mnemonic": "vmovmskpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovmskps)",
+      "source_mnemonic": "vmovmskps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovntdq)",
+      "source_mnemonic": "vmovntdq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovntdqa)",
+      "source_mnemonic": "vmovntdqa",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovntpd)",
+      "source_mnemonic": "vmovntpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovntps)",
+      "source_mnemonic": "vmovntps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovq)",
+      "source_mnemonic": "vmovq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovshdup)",
+      "source_mnemonic": "vmovshdup",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovsldup)",
+      "source_mnemonic": "vmovsldup",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmpsadbw)",
+      "source_mnemonic": "vmpsadbw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpabsb)",
+      "source_mnemonic": "vpabsb",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpabsd)",
+      "source_mnemonic": "vpabsd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpabsw)",
+      "source_mnemonic": "vpabsw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpackssdw)",
+      "source_mnemonic": "vpackssdw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpacksswb)",
+      "source_mnemonic": "vpacksswb",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpackusdw)",
+      "source_mnemonic": "vpackusdw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpackuswb)",
+      "source_mnemonic": "vpackuswb",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpaddb)",
+      "source_mnemonic": "vpaddb",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpaddd)",
+      "source_mnemonic": "vpaddd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpaddq)",
+      "source_mnemonic": "vpaddq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpaddsb)",
+      "source_mnemonic": "vpaddsb",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpaddsw)",
+      "source_mnemonic": "vpaddsw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpaddusb)",
+      "source_mnemonic": "vpaddusb",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpaddusw)",
+      "source_mnemonic": "vpaddusw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpaddw)",
+      "source_mnemonic": "vpaddw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpalignr)",
+      "source_mnemonic": "vpalignr",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpand)",
+      "source_mnemonic": "vpand",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpandn)",
+      "source_mnemonic": "vpandn",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpavgb)",
+      "source_mnemonic": "vpavgb",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpavgw)",
+      "source_mnemonic": "vpavgw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpblendd)",
+      "source_mnemonic": "vpblendd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpblendvb)",
+      "source_mnemonic": "vpblendvb",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpblendw)",
+      "source_mnemonic": "vpblendw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpbroadcastb)",
+      "source_mnemonic": "vpbroadcastb",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpbroadcastd)",
+      "source_mnemonic": "vpbroadcastd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpbroadcastq)",
+      "source_mnemonic": "vpbroadcastq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpbroadcastw)",
+      "source_mnemonic": "vpbroadcastw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpeqb)",
+      "source_mnemonic": "vpcmpeqb",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpeqd)",
+      "source_mnemonic": "vpcmpeqd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpeqq)",
+      "source_mnemonic": "vpcmpeqq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpeqw)",
+      "source_mnemonic": "vpcmpeqw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpestri)",
+      "source_mnemonic": "vpcmpestri",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpestri64)",
+      "source_mnemonic": "vpcmpestri",
+      "force_w": true
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpestrm)",
+      "source_mnemonic": "vpcmpestrm",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpestrm64)",
+      "source_mnemonic": "vpcmpestrm",
+      "force_w": true
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpgtb)",
+      "source_mnemonic": "vpcmpgtb",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpgtd)",
+      "source_mnemonic": "vpcmpgtd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpgtq)",
+      "source_mnemonic": "vpcmpgtq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpgtw)",
+      "source_mnemonic": "vpcmpgtw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpistri)",
+      "source_mnemonic": "vpcmpistri",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpistri64)",
+      "source_mnemonic": "vpcmpistri",
+      "force_w": true
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpistrm)",
+      "source_mnemonic": "vpcmpistrm",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vperm2f128)",
+      "source_mnemonic": "vperm2f128",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vperm2i128)",
+      "source_mnemonic": "vperm2i128",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpermd)",
+      "source_mnemonic": "vpermd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpermilpd)",
+      "source_mnemonic": "vpermilpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpermilps)",
+      "source_mnemonic": "vpermilps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpermpd)",
+      "source_mnemonic": "vpermpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpermps)",
+      "source_mnemonic": "vpermps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpermq)",
+      "source_mnemonic": "vpermq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpextrb)",
+      "source_mnemonic": "vpextrb",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpextrd)",
+      "source_mnemonic": "vpextrd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpextrq)",
+      "source_mnemonic": "vpextrq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpextrw)",
+      "source_mnemonic": "vpextrw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpgatherdd)",
+      "source_mnemonic": "vpgatherdd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpgatherdq)",
+      "source_mnemonic": "vpgatherdq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpgatherqd)",
+      "source_mnemonic": "vpgatherqd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpgatherqq)",
+      "source_mnemonic": "vpgatherqq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vphaddd)",
+      "source_mnemonic": "vphaddd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vphaddsw)",
+      "source_mnemonic": "vphaddsw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vphaddw)",
+      "source_mnemonic": "vphaddw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vphminposuw)",
+      "source_mnemonic": "vphminposuw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vphsubd)",
+      "source_mnemonic": "vphsubd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vphsubsw)",
+      "source_mnemonic": "vphsubsw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vphsubw)",
+      "source_mnemonic": "vphsubw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpinsrb)",
+      "source_mnemonic": "vpinsrb",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpinsrd)",
+      "source_mnemonic": "vpinsrd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpinsrq)",
+      "source_mnemonic": "vpinsrq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpinsrw)",
+      "source_mnemonic": "vpinsrw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmaddubsw)",
+      "source_mnemonic": "vpmaddubsw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmaddwd)",
+      "source_mnemonic": "vpmaddwd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmaskmovd)",
+      "source_mnemonic": "vpmaskmovd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmaskmovq)",
+      "source_mnemonic": "vpmaskmovq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmaxsb)",
+      "source_mnemonic": "vpmaxsb",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmaxsd)",
+      "source_mnemonic": "vpmaxsd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmaxsw)",
+      "source_mnemonic": "vpmaxsw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmaxub)",
+      "source_mnemonic": "vpmaxub",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmaxud)",
+      "source_mnemonic": "vpmaxud",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmaxuw)",
+      "source_mnemonic": "vpmaxuw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpminsb)",
+      "source_mnemonic": "vpminsb",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpminsd)",
+      "source_mnemonic": "vpminsd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpminsw)",
+      "source_mnemonic": "vpminsw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpminub)",
+      "source_mnemonic": "vpminub",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpminud)",
+      "source_mnemonic": "vpminud",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpminuw)",
+      "source_mnemonic": "vpminuw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmovmskb)",
+      "source_mnemonic": "vpmovmskb",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmovsxbd)",
+      "source_mnemonic": "vpmovsxbd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmovsxbq)",
+      "source_mnemonic": "vpmovsxbq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmovsxbw)",
+      "source_mnemonic": "vpmovsxbw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmovsxdq)",
+      "source_mnemonic": "vpmovsxdq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmovsxwd)",
+      "source_mnemonic": "vpmovsxwd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmovsxwq)",
+      "source_mnemonic": "vpmovsxwq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmovzxbd)",
+      "source_mnemonic": "vpmovzxbd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmovzxbq)",
+      "source_mnemonic": "vpmovzxbq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmovzxbw)",
+      "source_mnemonic": "vpmovzxbw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmovzxdq)",
+      "source_mnemonic": "vpmovzxdq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmovzxwd)",
+      "source_mnemonic": "vpmovzxwd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmovzxwq)",
+      "source_mnemonic": "vpmovzxwq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmuldq)",
+      "source_mnemonic": "vpmuldq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmulhrsw)",
+      "source_mnemonic": "vpmulhrsw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmulhuw)",
+      "source_mnemonic": "vpmulhuw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmulhw)",
+      "source_mnemonic": "vpmulhw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmulld)",
+      "source_mnemonic": "vpmulld",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmullw)",
+      "source_mnemonic": "vpmullw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmuludq)",
+      "source_mnemonic": "vpmuludq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpor)",
+      "source_mnemonic": "vpor",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsadbw)",
+      "source_mnemonic": "vpsadbw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpshufb)",
+      "source_mnemonic": "vpshufb",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpshufd)",
+      "source_mnemonic": "vpshufd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpshufhw)",
+      "source_mnemonic": "vpshufhw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpshuflw)",
+      "source_mnemonic": "vpshuflw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsignb)",
+      "source_mnemonic": "vpsignb",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsignd)",
+      "source_mnemonic": "vpsignd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsignw)",
+      "source_mnemonic": "vpsignw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpslld)",
+      "source_mnemonic": "vpslld",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpslldq)",
+      "source_mnemonic": "vpslldq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsllq)",
+      "source_mnemonic": "vpsllq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsllvd)",
+      "source_mnemonic": "vpsllvd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsllvq)",
+      "source_mnemonic": "vpsllvq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsllw)",
+      "source_mnemonic": "vpsllw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsrad)",
+      "source_mnemonic": "vpsrad",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsravd)",
+      "source_mnemonic": "vpsravd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsraw)",
+      "source_mnemonic": "vpsraw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsrld)",
+      "source_mnemonic": "vpsrld",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsrldq)",
+      "source_mnemonic": "vpsrldq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsrlq)",
+      "source_mnemonic": "vpsrlq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsrlvd)",
+      "source_mnemonic": "vpsrlvd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsrlvq)",
+      "source_mnemonic": "vpsrlvq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsrlw)",
+      "source_mnemonic": "vpsrlw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsubb)",
+      "source_mnemonic": "vpsubb",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsubd)",
+      "source_mnemonic": "vpsubd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsubq)",
+      "source_mnemonic": "vpsubq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsubsb)",
+      "source_mnemonic": "vpsubsb",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsubsw)",
+      "source_mnemonic": "vpsubsw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsubusb)",
+      "source_mnemonic": "vpsubusb",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsubusw)",
+      "source_mnemonic": "vpsubusw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsubw)",
+      "source_mnemonic": "vpsubw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vptest)",
+      "source_mnemonic": "vptest",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpunpckhbw)",
+      "source_mnemonic": "vpunpckhbw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpunpckhdq)",
+      "source_mnemonic": "vpunpckhdq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpunpckhqdq)",
+      "source_mnemonic": "vpunpckhqdq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpunpckhwd)",
+      "source_mnemonic": "vpunpckhwd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpunpcklbw)",
+      "source_mnemonic": "vpunpcklbw",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpunpckldq)",
+      "source_mnemonic": "vpunpckldq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpunpcklqdq)",
+      "source_mnemonic": "vpunpcklqdq",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpunpcklwd)",
+      "source_mnemonic": "vpunpcklwd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpxor)",
+      "source_mnemonic": "vpxor",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vrcpps)",
+      "source_mnemonic": "vrcpps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vrcpss)",
+      "source_mnemonic": "vrcpss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vroundpd)",
+      "source_mnemonic": "vroundpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vroundps)",
+      "source_mnemonic": "vroundps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vrsqrtps)",
+      "source_mnemonic": "vrsqrtps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vrsqrtss)",
+      "source_mnemonic": "vrsqrtss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vshufpd)",
+      "source_mnemonic": "vshufpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vshufps)",
+      "source_mnemonic": "vshufps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vsqrtpd)",
+      "source_mnemonic": "vsqrtpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vsqrtps)",
+      "source_mnemonic": "vsqrtps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vstmxcsr)",
+      "source_mnemonic": "vstmxcsr",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vtestpd)",
+      "source_mnemonic": "vtestpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vtestps)",
+      "source_mnemonic": "vtestps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vunpckhpd)",
+      "source_mnemonic": "vunpckhpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vunpckhps)",
+      "source_mnemonic": "vunpckhps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vunpcklpd)",
+      "source_mnemonic": "vunpcklpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vunpcklps)",
+      "source_mnemonic": "vunpcklps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vzeroall)",
+      "source_mnemonic": "vzeroall",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vaddpd",
+      "source_mnemonic": "vaddpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vaddps",
+      "source_mnemonic": "vaddps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vaddsd",
+      "source_mnemonic": "vaddsd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vaddss",
+      "source_mnemonic": "vaddss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vandpd",
+      "source_mnemonic": "vandpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vandps",
+      "source_mnemonic": "vandps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vdivpd",
+      "source_mnemonic": "vdivpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vdivps",
+      "source_mnemonic": "vdivps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vdivsd",
+      "source_mnemonic": "vdivsd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vdivss",
+      "source_mnemonic": "vdivss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vmaxsd",
+      "source_mnemonic": "vmaxsd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vmaxss",
+      "source_mnemonic": "vmaxss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vminsd",
+      "source_mnemonic": "vminsd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vminss",
+      "source_mnemonic": "vminss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vmovapd",
+      "source_mnemonic": "vmovapd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vmovaps",
+      "source_mnemonic": "vmovaps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vmovsd",
+      "source_mnemonic": "vmovsd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vmovss",
+      "source_mnemonic": "vmovss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vmovupd",
+      "source_mnemonic": "vmovupd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vmovups",
+      "source_mnemonic": "vmovups",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vmulpd",
+      "source_mnemonic": "vmulpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vmulps",
+      "source_mnemonic": "vmulps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vmulsd",
+      "source_mnemonic": "vmulsd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vmulss",
+      "source_mnemonic": "vmulss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vorpd",
+      "source_mnemonic": "vorpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vorps",
+      "source_mnemonic": "vorps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vroundsd",
+      "source_mnemonic": "vroundsd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vroundss",
+      "source_mnemonic": "vroundss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vsqrtsd",
+      "source_mnemonic": "vsqrtsd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vsqrtss",
+      "source_mnemonic": "vsqrtss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vsubpd",
+      "source_mnemonic": "vsubpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vsubps",
+      "source_mnemonic": "vsubps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vsubsd",
+      "source_mnemonic": "vsubsd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vsubss",
+      "source_mnemonic": "vsubss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vucomisd",
+      "source_mnemonic": "vucomisd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vucomiss",
+      "source_mnemonic": "vucomiss",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vxorpd",
+      "source_mnemonic": "vxorpd",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vxorps",
+      "source_mnemonic": "vxorps",
+      "force_w": false
+    },
+    {
+      "opcode": "Opcode::Vzeroupper",
+      "source_mnemonic": "vzeroupper",
+      "force_w": false
+    }
+  ],
+  "fixed": [
+    {
+      "variant": "Fabs",
+      "mnemonic": "fabs",
+      "source_mnemonic": "fabs",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fchs",
+      "mnemonic": "fchs",
+      "source_mnemonic": "fchs",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Ftst",
+      "mnemonic": "ftst",
+      "source_mnemonic": "ftst",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fxam",
+      "mnemonic": "fxam",
+      "source_mnemonic": "fxam",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fld1",
+      "mnemonic": "fld1",
+      "source_mnemonic": "fld1",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fldl2t",
+      "mnemonic": "fldl2t",
+      "source_mnemonic": "fldl2t",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fldl2e",
+      "mnemonic": "fldl2e",
+      "source_mnemonic": "fldl2e",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fldpi",
+      "mnemonic": "fldpi",
+      "source_mnemonic": "fldpi",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fldlg2",
+      "mnemonic": "fldlg2",
+      "source_mnemonic": "fldlg2",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fldln2",
+      "mnemonic": "fldln2",
+      "source_mnemonic": "fldln2",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "F2xm1",
+      "mnemonic": "f2xm1",
+      "source_mnemonic": "f2xm1",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fyl2x",
+      "mnemonic": "fyl2x",
+      "source_mnemonic": "fyl2x",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fptan",
+      "mnemonic": "fptan",
+      "source_mnemonic": "fptan",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fpatan",
+      "mnemonic": "fpatan",
+      "source_mnemonic": "fpatan",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fxtract",
+      "mnemonic": "fxtract",
+      "source_mnemonic": "fxtract",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fprem1",
+      "mnemonic": "fprem1",
+      "source_mnemonic": "fprem1",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fdecstp",
+      "mnemonic": "fdecstp",
+      "source_mnemonic": "fdecstp",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fincstp",
+      "mnemonic": "fincstp",
+      "source_mnemonic": "fincstp",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fprem",
+      "mnemonic": "fprem",
+      "source_mnemonic": "fprem",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fyl2xp1",
+      "mnemonic": "fyl2xp1",
+      "source_mnemonic": "fyl2xp1",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fsqrt",
+      "mnemonic": "fsqrt",
+      "source_mnemonic": "fsqrt",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fsincos",
+      "mnemonic": "fsincos",
+      "source_mnemonic": "fsincos",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Frndint",
+      "mnemonic": "frndint",
+      "source_mnemonic": "frndint",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fscale",
+      "mnemonic": "fscale",
+      "source_mnemonic": "fscale",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fsin",
+      "mnemonic": "fsin",
+      "source_mnemonic": "fsin",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fcos",
+      "mnemonic": "fcos",
+      "source_mnemonic": "fcos",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fcompp",
+      "mnemonic": "fcompp",
+      "source_mnemonic": "fcompp",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fucompp",
+      "mnemonic": "fucompp",
+      "source_mnemonic": "fucompp",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fnop",
+      "mnemonic": "fnop",
+      "source_mnemonic": "fnop",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fnclex",
+      "mnemonic": "fnclex",
+      "source_mnemonic": "fnclex",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fninit",
+      "mnemonic": "fninit",
+      "source_mnemonic": "fninit",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Fclex",
+      "mnemonic": "fclex",
+      "source_mnemonic": "fnclex",
+      "size": null,
+      "wait": true
+    },
+    {
+      "variant": "Finit",
+      "mnemonic": "finit",
+      "source_mnemonic": "fninit",
+      "size": null,
+      "wait": true
+    },
+    {
+      "variant": "Fwait",
+      "mnemonic": "fwait",
+      "source_mnemonic": "fwait",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Emms",
+      "mnemonic": "emms",
+      "source_mnemonic": "emms",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Cpuid",
+      "mnemonic": "cpuid",
+      "source_mnemonic": "cpuid",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Rdtsc",
+      "mnemonic": "rdtsc",
+      "source_mnemonic": "rdtsc",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Clc",
+      "mnemonic": "clc",
+      "source_mnemonic": "clc",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Stc",
+      "mnemonic": "stc",
+      "source_mnemonic": "stc",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Cmc",
+      "mnemonic": "cmc",
+      "source_mnemonic": "cmc",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Cld",
+      "mnemonic": "cld",
+      "source_mnemonic": "cld",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Std",
+      "mnemonic": "std",
+      "source_mnemonic": "std",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Pushfq",
+      "mnemonic": "pushfq",
+      "source_mnemonic": "pushfq",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Popfq",
+      "mnemonic": "popfq",
+      "source_mnemonic": "popfq",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Leavew",
+      "mnemonic": "leavew",
+      "source_mnemonic": "leave",
+      "size": 16,
+      "wait": false
+    },
+    {
+      "variant": "Pushfw",
+      "mnemonic": "pushfw",
+      "source_mnemonic": "pushf",
+      "size": 16,
+      "wait": false
+    },
+    {
+      "variant": "Popfw",
+      "mnemonic": "popfw",
+      "source_mnemonic": "popf",
+      "size": 16,
+      "wait": false
+    },
+    {
+      "variant": "Iretw",
+      "mnemonic": "iretw",
+      "source_mnemonic": "iret",
+      "size": 16,
+      "wait": false
+    },
+    {
+      "variant": "Iretd",
+      "mnemonic": "iretd",
+      "source_mnemonic": "iretd",
+      "size": 32,
+      "wait": false
+    },
+    {
+      "variant": "Rdpmc",
+      "mnemonic": "rdpmc",
+      "source_mnemonic": "rdpmc",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Sysenter",
+      "mnemonic": "sysenter",
+      "source_mnemonic": "sysenter",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Udb",
+      "mnemonic": "udb",
+      "source_mnemonic": "udb",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Cli",
+      "mnemonic": "cli",
+      "source_mnemonic": "cli",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Sti",
+      "mnemonic": "sti",
+      "source_mnemonic": "sti",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Hlt",
+      "mnemonic": "hlt",
+      "source_mnemonic": "hlt",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Clts",
+      "mnemonic": "clts",
+      "source_mnemonic": "clts",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Invd",
+      "mnemonic": "invd",
+      "source_mnemonic": "invd",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Wbinvd",
+      "mnemonic": "wbinvd",
+      "source_mnemonic": "wbinvd",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Rdmsr",
+      "mnemonic": "rdmsr",
+      "source_mnemonic": "rdmsr",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Wrmsr",
+      "mnemonic": "wrmsr",
+      "source_mnemonic": "wrmsr",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Swapgs",
+      "mnemonic": "swapgs",
+      "source_mnemonic": "swapgs",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Iretq",
+      "mnemonic": "iretq",
+      "source_mnemonic": "iretq",
+      "size": 64,
+      "wait": false
+    },
+    {
+      "variant": "Sysret",
+      "mnemonic": "sysret",
+      "source_mnemonic": "sysret",
+      "size": 32,
+      "wait": false
+    },
+    {
+      "variant": "Sysretq",
+      "mnemonic": "sysretq",
+      "source_mnemonic": "sysret",
+      "size": 64,
+      "wait": false
+    }
+  ],
+  "feature_opcodes": [
+    {
+      "opcode": "Opcode::Pclmulqdq",
+      "source_mnemonic": "pclmulqdq"
+    },
+    {
+      "opcode": "Opcode::Movq6e",
+      "source_mnemonic": "movq6e"
+    },
+    {
+      "opcode": "Opcode::Movq7e",
+      "source_mnemonic": "movq7e"
+    },
+    {
+      "opcode": "Opcode::MovqD6",
+      "source_mnemonic": "movqd6"
+    },
+    {
+      "opcode": "Opcode::Movq7f",
+      "source_mnemonic": "movq7f"
+    },
+    {
+      "opcode": "Opcode::MovssStore",
+      "source_mnemonic": "movssstore"
+    },
+    {
+      "opcode": "Opcode::MovsdStore",
+      "source_mnemonic": "movsdstore"
+    },
+    {
+      "opcode": "Opcode::MovapsStore",
+      "source_mnemonic": "movapsstore"
+    },
+    {
+      "opcode": "Opcode::MovupsStore",
+      "source_mnemonic": "movupsstore"
+    },
+    {
+      "opcode": "Opcode::MovapdStore",
+      "source_mnemonic": "movapdstore"
+    },
+    {
+      "opcode": "Opcode::MovupdStore",
+      "source_mnemonic": "movupdstore"
+    },
+    {
+      "opcode": "Opcode::MovdqaStore",
+      "source_mnemonic": "movdqastore"
+    },
+    {
+      "opcode": "Opcode::MovdquStore",
+      "source_mnemonic": "movdqustore"
+    },
+    {
+      "opcode": "Opcode::Comiss",
+      "source_mnemonic": "comiss"
+    },
+    {
+      "opcode": "Opcode::Comisd",
+      "source_mnemonic": "comisd"
+    },
+    {
+      "opcode": "Opcode::Cvtss2si",
+      "source_mnemonic": "cvtss2si"
+    },
+    {
+      "opcode": "Opcode::Cvtsd2si",
+      "source_mnemonic": "cvtsd2si"
+    },
+    {
+      "opcode": "Opcode::Cvtpi2ps",
+      "source_mnemonic": "cvtpi2ps"
+    },
+    {
+      "opcode": "Opcode::Cvtpi2pd",
+      "source_mnemonic": "cvtpi2pd"
+    },
+    {
+      "opcode": "Opcode::Cvtps2pi",
+      "source_mnemonic": "cvtps2pi"
+    },
+    {
+      "opcode": "Opcode::Cvtpd2pi",
+      "source_mnemonic": "cvtpd2pi"
+    },
+    {
+      "opcode": "Opcode::Cvttps2pi",
+      "source_mnemonic": "cvttps2pi"
+    },
+    {
+      "opcode": "Opcode::Cvttpd2pi",
+      "source_mnemonic": "cvttpd2pi"
+    },
+    {
+      "opcode": "Opcode::Rcpps",
+      "source_mnemonic": "rcpps"
+    },
+    {
+      "opcode": "Opcode::Rcpss",
+      "source_mnemonic": "rcpss"
+    },
+    {
+      "opcode": "Opcode::Rsqrtps",
+      "source_mnemonic": "rsqrtps"
+    },
+    {
+      "opcode": "Opcode::Rsqrtss",
+      "source_mnemonic": "rsqrtss"
+    },
+    {
+      "opcode": "Opcode::Movhps",
+      "source_mnemonic": "movhps"
+    },
+    {
+      "opcode": "Opcode::Movlps",
+      "source_mnemonic": "movlps"
+    },
+    {
+      "opcode": "Opcode::Movhpd",
+      "source_mnemonic": "movhpd"
+    },
+    {
+      "opcode": "Opcode::Movlpd",
+      "source_mnemonic": "movlpd"
+    },
+    {
+      "opcode": "Opcode::Movlhps",
+      "source_mnemonic": "movlhps"
+    },
+    {
+      "opcode": "Opcode::Movdq2q",
+      "source_mnemonic": "movdq2q"
+    },
+    {
+      "opcode": "Opcode::Movq2dq",
+      "source_mnemonic": "movq2dq"
+    },
+    {
+      "opcode": "Opcode::Movntq",
+      "source_mnemonic": "movntq"
+    },
+    {
+      "opcode": "Opcode::Movntdq",
+      "source_mnemonic": "movntdq"
+    },
+    {
+      "opcode": "Opcode::Movntps",
+      "source_mnemonic": "movntps"
+    },
+    {
+      "opcode": "Opcode::Movntpd",
+      "source_mnemonic": "movntpd"
+    },
+    {
+      "opcode": "Opcode::Movnti",
+      "source_mnemonic": "movnti"
+    },
+    {
+      "opcode": "Opcode::Maskmovq",
+      "source_mnemonic": "maskmovq"
+    },
+    {
+      "opcode": "Opcode::Maskmovdqu",
+      "source_mnemonic": "maskmovdqu"
+    },
+    {
+      "opcode": "Opcode::Prefetchnta",
+      "source_mnemonic": "prefetchnta"
+    },
+    {
+      "opcode": "Opcode::Prefetcht0",
+      "source_mnemonic": "prefetcht0"
+    },
+    {
+      "opcode": "Opcode::Prefetcht1",
+      "source_mnemonic": "prefetcht1"
+    },
+    {
+      "opcode": "Opcode::Prefetcht2",
+      "source_mnemonic": "prefetcht2"
+    },
+    {
+      "opcode": "Opcode::Fxsave",
+      "source_mnemonic": "fxsave"
+    },
+    {
+      "opcode": "Opcode::Fxsave64",
+      "source_mnemonic": "fxsave64"
+    },
+    {
+      "opcode": "Opcode::Fxrstor",
+      "source_mnemonic": "fxrstor"
+    },
+    {
+      "opcode": "Opcode::Fxrstor64",
+      "source_mnemonic": "fxrstor64"
+    },
+    {
+      "opcode": "Opcode::Cmpeqps",
+      "source_mnemonic": "cmpeqps"
+    },
+    {
+      "opcode": "Opcode::Cmpltps",
+      "source_mnemonic": "cmpltps"
+    },
+    {
+      "opcode": "Opcode::Cmpleps",
+      "source_mnemonic": "cmpleps"
+    },
+    {
+      "opcode": "Opcode::Cmpunordps",
+      "source_mnemonic": "cmpunordps"
+    },
+    {
+      "opcode": "Opcode::Cmpneqps",
+      "source_mnemonic": "cmpneqps"
+    },
+    {
+      "opcode": "Opcode::Cmpnleps",
+      "source_mnemonic": "cmpnleps"
+    },
+    {
+      "opcode": "Opcode::Cmpordps",
+      "source_mnemonic": "cmpordps"
+    },
+    {
+      "opcode": "Opcode::Cmpeqpd",
+      "source_mnemonic": "cmpeqpd"
+    },
+    {
+      "opcode": "Opcode::Cmpltpd",
+      "source_mnemonic": "cmpltpd"
+    },
+    {
+      "opcode": "Opcode::Cmplepd",
+      "source_mnemonic": "cmplepd"
+    },
+    {
+      "opcode": "Opcode::Cmpunordpd",
+      "source_mnemonic": "cmpunordpd"
+    },
+    {
+      "opcode": "Opcode::Cmpneqpd",
+      "source_mnemonic": "cmpneqpd"
+    },
+    {
+      "opcode": "Opcode::Cmpnltpd",
+      "source_mnemonic": "cmpnltpd"
+    },
+    {
+      "opcode": "Opcode::Cmpnlepd",
+      "source_mnemonic": "cmpnlepd"
+    },
+    {
+      "opcode": "Opcode::Cmpordpd",
+      "source_mnemonic": "cmpordpd"
+    },
+    {
+      "opcode": "Opcode::Cmpeqss",
+      "source_mnemonic": "cmpeqss"
+    },
+    {
+      "opcode": "Opcode::Cmpless",
+      "source_mnemonic": "cmpless"
+    },
+    {
+      "opcode": "Opcode::Cmpunordss",
+      "source_mnemonic": "cmpunordss"
+    },
+    {
+      "opcode": "Opcode::Cmpneqss",
+      "source_mnemonic": "cmpneqss"
+    },
+    {
+      "opcode": "Opcode::Cmpnltss",
+      "source_mnemonic": "cmpnltss"
+    },
+    {
+      "opcode": "Opcode::Cmpnless",
+      "source_mnemonic": "cmpnless"
+    },
+    {
+      "opcode": "Opcode::Cmpordss",
+      "source_mnemonic": "cmpordss"
+    },
+    {
+      "opcode": "Opcode::Cmpunordsd",
+      "source_mnemonic": "cmpunordsd"
+    },
+    {
+      "opcode": "Opcode::Cmpnltsd",
+      "source_mnemonic": "cmpnltsd"
+    },
+    {
+      "opcode": "Opcode::Cmpnlesd",
+      "source_mnemonic": "cmpnlesd"
+    },
+    {
+      "opcode": "Opcode::Packssdw",
+      "source_mnemonic": "packssdw"
+    },
+    {
+      "opcode": "Opcode::Packsswb",
+      "source_mnemonic": "packsswb"
+    },
+    {
+      "opcode": "Opcode::Packuswb",
+      "source_mnemonic": "packuswb"
+    },
+    {
+      "opcode": "Opcode::Paddsb",
+      "source_mnemonic": "paddsb"
+    },
+    {
+      "opcode": "Opcode::Paddsw",
+      "source_mnemonic": "paddsw"
+    },
+    {
+      "opcode": "Opcode::Paddusb",
+      "source_mnemonic": "paddusb"
+    },
+    {
+      "opcode": "Opcode::Paddusw",
+      "source_mnemonic": "paddusw"
+    },
+    {
+      "opcode": "Opcode::Psubsb",
+      "source_mnemonic": "psubsb"
+    },
+    {
+      "opcode": "Opcode::Psubsw",
+      "source_mnemonic": "psubsw"
+    },
+    {
+      "opcode": "Opcode::Psubusb",
+      "source_mnemonic": "psubusb"
+    },
+    {
+      "opcode": "Opcode::Psubusw",
+      "source_mnemonic": "psubusw"
+    },
+    {
+      "opcode": "Opcode::Pavgb",
+      "source_mnemonic": "pavgb"
+    },
+    {
+      "opcode": "Opcode::Pavgw",
+      "source_mnemonic": "pavgw"
+    },
+    {
+      "opcode": "Opcode::Pmaxsw",
+      "source_mnemonic": "pmaxsw"
+    },
+    {
+      "opcode": "Opcode::Pmaxub",
+      "source_mnemonic": "pmaxub"
+    },
+    {
+      "opcode": "Opcode::Pminsw",
+      "source_mnemonic": "pminsw"
+    },
+    {
+      "opcode": "Opcode::Pminub",
+      "source_mnemonic": "pminub"
+    },
+    {
+      "opcode": "Opcode::Psadbw",
+      "source_mnemonic": "psadbw"
+    },
+    {
+      "opcode": "Opcode::Pshufw",
+      "source_mnemonic": "pshufw"
+    },
+    {
+      "opcode": "Opcode::Pinsrw",
+      "source_mnemonic": "pinsrw"
+    },
+    {
+      "opcode": "Opcode::Pextrw",
+      "source_mnemonic": "pextrw"
+    },
+    {
+      "opcode": "Opcode::Mov",
+      "source_mnemonic": "mov"
+    },
+    {
+      "opcode": "Opcode::Movabs",
+      "source_mnemonic": "movabs"
+    },
+    {
+      "opcode": "Opcode::Lea",
+      "source_mnemonic": "lea"
+    },
+    {
+      "opcode": "Opcode::Movsx",
+      "source_mnemonic": "movsx"
+    },
+    {
+      "opcode": "Opcode::Movzx",
+      "source_mnemonic": "movzx"
+    },
+    {
+      "opcode": "Opcode::Movsxd",
+      "source_mnemonic": "movsxd"
+    },
+    {
+      "opcode": "Opcode::Push",
+      "source_mnemonic": "push"
+    },
+    {
+      "opcode": "Opcode::Pop",
+      "source_mnemonic": "pop"
+    },
+    {
+      "opcode": "Opcode::Ret",
+      "source_mnemonic": "ret"
+    },
+    {
+      "opcode": "Opcode::Leave",
+      "source_mnemonic": "leave"
+    },
+    {
+      "opcode": "Opcode::Nop",
+      "source_mnemonic": "nop"
+    },
+    {
+      "opcode": "Opcode::Ud2",
+      "source_mnemonic": "ud2"
+    },
+    {
+      "opcode": "Opcode::Add",
+      "source_mnemonic": "add"
+    },
+    {
+      "opcode": "Opcode::Or",
+      "source_mnemonic": "or"
+    },
+    {
+      "opcode": "Opcode::Adc",
+      "source_mnemonic": "adc"
+    },
+    {
+      "opcode": "Opcode::Sbb",
+      "source_mnemonic": "sbb"
+    },
+    {
+      "opcode": "Opcode::And",
+      "source_mnemonic": "and"
+    },
+    {
+      "opcode": "Opcode::Sub",
+      "source_mnemonic": "sub"
+    },
+    {
+      "opcode": "Opcode::Xor",
+      "source_mnemonic": "xor"
+    },
+    {
+      "opcode": "Opcode::Cmp",
+      "source_mnemonic": "cmp"
+    },
+    {
+      "opcode": "Opcode::Test",
+      "source_mnemonic": "test"
+    },
+    {
+      "opcode": "Opcode::Neg",
+      "source_mnemonic": "neg"
+    },
+    {
+      "opcode": "Opcode::Not",
+      "source_mnemonic": "not"
+    },
+    {
+      "opcode": "Opcode::Inc",
+      "source_mnemonic": "inc"
+    },
+    {
+      "opcode": "Opcode::Dec",
+      "source_mnemonic": "dec"
+    },
+    {
+      "opcode": "Opcode::Mul",
+      "source_mnemonic": "mul"
+    },
+    {
+      "opcode": "Opcode::Imul",
+      "source_mnemonic": "imul"
+    },
+    {
+      "opcode": "Opcode::Div",
+      "source_mnemonic": "div"
+    },
+    {
+      "opcode": "Opcode::Idiv",
+      "source_mnemonic": "idiv"
+    },
+    {
+      "opcode": "Opcode::Cqo",
+      "source_mnemonic": "cqo"
+    },
+    {
+      "opcode": "Opcode::Cdq",
+      "source_mnemonic": "cdq"
+    },
+    {
+      "opcode": "Opcode::Cbw",
+      "source_mnemonic": "cbw"
+    },
+    {
+      "opcode": "Opcode::Cwde",
+      "source_mnemonic": "cwde"
+    },
+    {
+      "opcode": "Opcode::Cdqe",
+      "source_mnemonic": "cdqe"
+    },
+    {
+      "opcode": "Opcode::Shl",
+      "source_mnemonic": "shl"
+    },
+    {
+      "opcode": "Opcode::Shr",
+      "source_mnemonic": "shr"
+    },
+    {
+      "opcode": "Opcode::Sar",
+      "source_mnemonic": "sar"
+    },
+    {
+      "opcode": "Opcode::Rol",
+      "source_mnemonic": "rol"
+    },
+    {
+      "opcode": "Opcode::Ror",
+      "source_mnemonic": "ror"
+    },
+    {
+      "opcode": "Opcode::Shld",
+      "source_mnemonic": "shld"
+    },
+    {
+      "opcode": "Opcode::Shrd",
+      "source_mnemonic": "shrd"
+    },
+    {
+      "opcode": "Opcode::Bsf",
+      "source_mnemonic": "bsf"
+    },
+    {
+      "opcode": "Opcode::Bsr",
+      "source_mnemonic": "bsr"
+    },
+    {
+      "opcode": "Opcode::Bswap",
+      "source_mnemonic": "bswap"
+    },
+    {
+      "opcode": "Opcode::Popcnt",
+      "source_mnemonic": "popcnt"
+    },
+    {
+      "opcode": "Opcode::Andn",
+      "source_mnemonic": "andn"
+    },
+    {
+      "opcode": "Opcode::Bextr",
+      "source_mnemonic": "bextr"
+    },
+    {
+      "opcode": "Opcode::Blsi",
+      "source_mnemonic": "blsi"
+    },
+    {
+      "opcode": "Opcode::Blsmsk",
+      "source_mnemonic": "blsmsk"
+    },
+    {
+      "opcode": "Opcode::Blsr",
+      "source_mnemonic": "blsr"
+    },
+    {
+      "opcode": "Opcode::Tzcnt",
+      "source_mnemonic": "tzcnt"
+    },
+    {
+      "opcode": "Opcode::Shlx",
+      "source_mnemonic": "shlx"
+    },
+    {
+      "opcode": "Opcode::Shrx",
+      "source_mnemonic": "shrx"
+    },
+    {
+      "opcode": "Opcode::Sarx",
+      "source_mnemonic": "sarx"
+    },
+    {
+      "opcode": "Opcode::Rorx",
+      "source_mnemonic": "rorx"
+    },
+    {
+      "opcode": "Opcode::Bzhi",
+      "source_mnemonic": "bzhi"
+    },
+    {
+      "opcode": "Opcode::Pext",
+      "source_mnemonic": "pext"
+    },
+    {
+      "opcode": "Opcode::Pdep",
+      "source_mnemonic": "pdep"
+    },
+    {
+      "opcode": "Opcode::Mulx",
+      "source_mnemonic": "mulx"
+    },
+    {
+      "opcode": "Opcode::Bt",
+      "source_mnemonic": "bt"
+    },
+    {
+      "opcode": "Opcode::Bts",
+      "source_mnemonic": "bts"
+    },
+    {
+      "opcode": "Opcode::Btr",
+      "source_mnemonic": "btr"
+    },
+    {
+      "opcode": "Opcode::Btc",
+      "source_mnemonic": "btc"
+    },
+    {
+      "opcode": "Opcode::Xchg",
+      "source_mnemonic": "xchg"
+    },
+    {
+      "opcode": "Opcode::Xadd",
+      "source_mnemonic": "xadd"
+    },
+    {
+      "opcode": "Opcode::Cmpxchg",
+      "source_mnemonic": "cmpxchg"
+    },
+    {
+      "opcode": "Opcode::Mfence",
+      "source_mnemonic": "mfence"
+    },
+    {
+      "opcode": "Opcode::Lfence",
+      "source_mnemonic": "lfence"
+    },
+    {
+      "opcode": "Opcode::Sfence",
+      "source_mnemonic": "sfence"
+    },
+    {
+      "opcode": "Opcode::Pause",
+      "source_mnemonic": "pause"
+    },
+    {
+      "opcode": "Opcode::Syscall",
+      "source_mnemonic": "syscall"
+    },
+    {
+      "opcode": "Opcode::Int3",
+      "source_mnemonic": "int3"
+    },
+    {
+      "opcode": "Opcode::Call",
+      "source_mnemonic": "call"
+    },
+    {
+      "opcode": "Opcode::Jmp",
+      "source_mnemonic": "jmp"
+    },
+    {
+      "opcode": "Opcode::Vaddps",
+      "source_mnemonic": "vaddps"
+    },
+    {
+      "opcode": "Opcode::Vaddpd",
+      "source_mnemonic": "vaddpd"
+    },
+    {
+      "opcode": "Opcode::Vsubps",
+      "source_mnemonic": "vsubps"
+    },
+    {
+      "opcode": "Opcode::Vsubpd",
+      "source_mnemonic": "vsubpd"
+    },
+    {
+      "opcode": "Opcode::Vmulps",
+      "source_mnemonic": "vmulps"
+    },
+    {
+      "opcode": "Opcode::Vmulpd",
+      "source_mnemonic": "vmulpd"
+    },
+    {
+      "opcode": "Opcode::Vdivps",
+      "source_mnemonic": "vdivps"
+    },
+    {
+      "opcode": "Opcode::Vdivpd",
+      "source_mnemonic": "vdivpd"
+    },
+    {
+      "opcode": "Opcode::Vaddss",
+      "source_mnemonic": "vaddss"
+    },
+    {
+      "opcode": "Opcode::Vaddsd",
+      "source_mnemonic": "vaddsd"
+    },
+    {
+      "opcode": "Opcode::Vsubss",
+      "source_mnemonic": "vsubss"
+    },
+    {
+      "opcode": "Opcode::Vsubsd",
+      "source_mnemonic": "vsubsd"
+    },
+    {
+      "opcode": "Opcode::Vmulss",
+      "source_mnemonic": "vmulss"
+    },
+    {
+      "opcode": "Opcode::Vmulsd",
+      "source_mnemonic": "vmulsd"
+    },
+    {
+      "opcode": "Opcode::Vdivss",
+      "source_mnemonic": "vdivss"
+    },
+    {
+      "opcode": "Opcode::Vdivsd",
+      "source_mnemonic": "vdivsd"
+    },
+    {
+      "opcode": "Opcode::Vsqrtss",
+      "source_mnemonic": "vsqrtss"
+    },
+    {
+      "opcode": "Opcode::Vsqrtsd",
+      "source_mnemonic": "vsqrtsd"
+    },
+    {
+      "opcode": "Opcode::Vminss",
+      "source_mnemonic": "vminss"
+    },
+    {
+      "opcode": "Opcode::Vminsd",
+      "source_mnemonic": "vminsd"
+    },
+    {
+      "opcode": "Opcode::Vmaxss",
+      "source_mnemonic": "vmaxss"
+    },
+    {
+      "opcode": "Opcode::Vmaxsd",
+      "source_mnemonic": "vmaxsd"
+    },
+    {
+      "opcode": "Opcode::Vucomiss",
+      "source_mnemonic": "vucomiss"
+    },
+    {
+      "opcode": "Opcode::Vucomisd",
+      "source_mnemonic": "vucomisd"
+    },
+    {
+      "opcode": "Opcode::Vmovss",
+      "source_mnemonic": "vmovss"
+    },
+    {
+      "opcode": "Opcode::Vmovsd",
+      "source_mnemonic": "vmovsd"
+    },
+    {
+      "opcode": "Opcode::Vmovaps",
+      "source_mnemonic": "vmovaps"
+    },
+    {
+      "opcode": "Opcode::Vmovups",
+      "source_mnemonic": "vmovups"
+    },
+    {
+      "opcode": "Opcode::Vmovapd",
+      "source_mnemonic": "vmovapd"
+    },
+    {
+      "opcode": "Opcode::Vmovupd",
+      "source_mnemonic": "vmovupd"
+    },
+    {
+      "opcode": "Opcode::Vandps",
+      "source_mnemonic": "vandps"
+    },
+    {
+      "opcode": "Opcode::Vandpd",
+      "source_mnemonic": "vandpd"
+    },
+    {
+      "opcode": "Opcode::Vorps",
+      "source_mnemonic": "vorps"
+    },
+    {
+      "opcode": "Opcode::Vorpd",
+      "source_mnemonic": "vorpd"
+    },
+    {
+      "opcode": "Opcode::Vxorps",
+      "source_mnemonic": "vxorps"
+    },
+    {
+      "opcode": "Opcode::Vxorpd",
+      "source_mnemonic": "vxorpd"
+    },
+    {
+      "opcode": "Opcode::Vroundss",
+      "source_mnemonic": "vroundss"
+    },
+    {
+      "opcode": "Opcode::Vroundsd",
+      "source_mnemonic": "vroundsd"
+    },
+    {
+      "opcode": "Opcode::Vzeroupper",
+      "source_mnemonic": "vzeroupper"
+    },
+    {
+      "opcode": "Opcode::Movss",
+      "source_mnemonic": "movss"
+    },
+    {
+      "opcode": "Opcode::Movsd",
+      "source_mnemonic": "movsd"
+    },
+    {
+      "opcode": "Opcode::Movaps",
+      "source_mnemonic": "movaps"
+    },
+    {
+      "opcode": "Opcode::Movups",
+      "source_mnemonic": "movups"
+    },
+    {
+      "opcode": "Opcode::Movhlps",
+      "source_mnemonic": "movhlps"
+    },
+    {
+      "opcode": "Opcode::Paddb",
+      "source_mnemonic": "paddb"
+    },
+    {
+      "opcode": "Opcode::Paddw",
+      "source_mnemonic": "paddw"
+    },
+    {
+      "opcode": "Opcode::Paddd",
+      "source_mnemonic": "paddd"
+    },
+    {
+      "opcode": "Opcode::Paddq",
+      "source_mnemonic": "paddq"
+    },
+    {
+      "opcode": "Opcode::Psubb",
+      "source_mnemonic": "psubb"
+    },
+    {
+      "opcode": "Opcode::Psubw",
+      "source_mnemonic": "psubw"
+    },
+    {
+      "opcode": "Opcode::Psubd",
+      "source_mnemonic": "psubd"
+    },
+    {
+      "opcode": "Opcode::Psubq",
+      "source_mnemonic": "psubq"
+    },
+    {
+      "opcode": "Opcode::Pmullw",
+      "source_mnemonic": "pmullw"
+    },
+    {
+      "opcode": "Opcode::Addps",
+      "source_mnemonic": "addps"
+    },
+    {
+      "opcode": "Opcode::Addpd",
+      "source_mnemonic": "addpd"
+    },
+    {
+      "opcode": "Opcode::Subps",
+      "source_mnemonic": "subps"
+    },
+    {
+      "opcode": "Opcode::Subpd",
+      "source_mnemonic": "subpd"
+    },
+    {
+      "opcode": "Opcode::Mulps",
+      "source_mnemonic": "mulps"
+    },
+    {
+      "opcode": "Opcode::Mulpd",
+      "source_mnemonic": "mulpd"
+    },
+    {
+      "opcode": "Opcode::Divps",
+      "source_mnemonic": "divps"
+    },
+    {
+      "opcode": "Opcode::Divpd",
+      "source_mnemonic": "divpd"
+    },
+    {
+      "opcode": "Opcode::Sqrtps",
+      "source_mnemonic": "sqrtps"
+    },
+    {
+      "opcode": "Opcode::Sqrtpd",
+      "source_mnemonic": "sqrtpd"
+    },
+    {
+      "opcode": "Opcode::Movapd",
+      "source_mnemonic": "movapd"
+    },
+    {
+      "opcode": "Opcode::Movupd",
+      "source_mnemonic": "movupd"
+    },
+    {
+      "opcode": "Opcode::Movd",
+      "source_mnemonic": "movd"
+    },
+    {
+      "opcode": "Opcode::Movq",
+      "source_mnemonic": "movq"
+    },
+    {
+      "opcode": "Opcode::Addss",
+      "source_mnemonic": "addss"
+    },
+    {
+      "opcode": "Opcode::Addsd",
+      "source_mnemonic": "addsd"
+    },
+    {
+      "opcode": "Opcode::Subss",
+      "source_mnemonic": "subss"
+    },
+    {
+      "opcode": "Opcode::Subsd",
+      "source_mnemonic": "subsd"
+    },
+    {
+      "opcode": "Opcode::Mulss",
+      "source_mnemonic": "mulss"
+    },
+    {
+      "opcode": "Opcode::Mulsd",
+      "source_mnemonic": "mulsd"
+    },
+    {
+      "opcode": "Opcode::Divss",
+      "source_mnemonic": "divss"
+    },
+    {
+      "opcode": "Opcode::Divsd",
+      "source_mnemonic": "divsd"
+    },
+    {
+      "opcode": "Opcode::Sqrtss",
+      "source_mnemonic": "sqrtss"
+    },
+    {
+      "opcode": "Opcode::Sqrtsd",
+      "source_mnemonic": "sqrtsd"
+    },
+    {
+      "opcode": "Opcode::Minss",
+      "source_mnemonic": "minss"
+    },
+    {
+      "opcode": "Opcode::Minsd",
+      "source_mnemonic": "minsd"
+    },
+    {
+      "opcode": "Opcode::Maxss",
+      "source_mnemonic": "maxss"
+    },
+    {
+      "opcode": "Opcode::Maxsd",
+      "source_mnemonic": "maxsd"
+    },
+    {
+      "opcode": "Opcode::Ucomiss",
+      "source_mnemonic": "ucomiss"
+    },
+    {
+      "opcode": "Opcode::Ucomisd",
+      "source_mnemonic": "ucomisd"
+    },
+    {
+      "opcode": "Opcode::Andps",
+      "source_mnemonic": "andps"
+    },
+    {
+      "opcode": "Opcode::Andpd",
+      "source_mnemonic": "andpd"
+    },
+    {
+      "opcode": "Opcode::Orps",
+      "source_mnemonic": "orps"
+    },
+    {
+      "opcode": "Opcode::Orpd",
+      "source_mnemonic": "orpd"
+    },
+    {
+      "opcode": "Opcode::Xorps",
+      "source_mnemonic": "xorps"
+    },
+    {
+      "opcode": "Opcode::Xorpd",
+      "source_mnemonic": "xorpd"
+    },
+    {
+      "opcode": "Opcode::Roundss",
+      "source_mnemonic": "roundss"
+    },
+    {
+      "opcode": "Opcode::Roundsd",
+      "source_mnemonic": "roundsd"
+    },
+    {
+      "opcode": "Opcode::Cvtsi2ss",
+      "source_mnemonic": "cvtsi2ss"
+    },
+    {
+      "opcode": "Opcode::Cvtsi2sd",
+      "source_mnemonic": "cvtsi2sd"
+    },
+    {
+      "opcode": "Opcode::Cvttss2si",
+      "source_mnemonic": "cvttss2si"
+    },
+    {
+      "opcode": "Opcode::Cvttsd2si",
+      "source_mnemonic": "cvttsd2si"
+    },
+    {
+      "opcode": "Opcode::Cvtss2sd",
+      "source_mnemonic": "cvtss2sd"
+    },
+    {
+      "opcode": "Opcode::Cvtsd2ss",
+      "source_mnemonic": "cvtsd2ss"
+    },
+    {
+      "opcode": "Opcode::Movdqa",
+      "source_mnemonic": "movdqa"
+    },
+    {
+      "opcode": "Opcode::Movdqu",
+      "source_mnemonic": "movdqu"
+    },
+    {
+      "opcode": "Opcode::Pxor",
+      "source_mnemonic": "pxor"
+    },
+    {
+      "opcode": "Opcode::Pand",
+      "source_mnemonic": "pand"
+    },
+    {
+      "opcode": "Opcode::Pandn",
+      "source_mnemonic": "pandn"
+    },
+    {
+      "opcode": "Opcode::Por",
+      "source_mnemonic": "por"
+    },
+    {
+      "opcode": "Opcode::Pcmpeqb",
+      "source_mnemonic": "pcmpeqb"
+    },
+    {
+      "opcode": "Opcode::Pcmpeqw",
+      "source_mnemonic": "pcmpeqw"
+    },
+    {
+      "opcode": "Opcode::Pcmpeqd",
+      "source_mnemonic": "pcmpeqd"
+    },
+    {
+      "opcode": "Opcode::Pcmpgtb",
+      "source_mnemonic": "pcmpgtb"
+    },
+    {
+      "opcode": "Opcode::Pcmpgtw",
+      "source_mnemonic": "pcmpgtw"
+    },
+    {
+      "opcode": "Opcode::Pcmpgtd",
+      "source_mnemonic": "pcmpgtd"
+    },
+    {
+      "opcode": "Opcode::Pshufd",
+      "source_mnemonic": "pshufd"
+    },
+    {
+      "opcode": "Opcode::Pshuflw",
+      "source_mnemonic": "pshuflw"
+    },
+    {
+      "opcode": "Opcode::Pshufhw",
+      "source_mnemonic": "pshufhw"
+    },
+    {
+      "opcode": "Opcode::Punpcklbw",
+      "source_mnemonic": "punpcklbw"
+    },
+    {
+      "opcode": "Opcode::Punpcklwd",
+      "source_mnemonic": "punpcklwd"
+    },
+    {
+      "opcode": "Opcode::Punpckldq",
+      "source_mnemonic": "punpckldq"
+    },
+    {
+      "opcode": "Opcode::Punpcklqdq",
+      "source_mnemonic": "punpcklqdq"
+    },
+    {
+      "opcode": "Opcode::Punpckhbw",
+      "source_mnemonic": "punpckhbw"
+    },
+    {
+      "opcode": "Opcode::Punpckhwd",
+      "source_mnemonic": "punpckhwd"
+    },
+    {
+      "opcode": "Opcode::Punpckhdq",
+      "source_mnemonic": "punpckhdq"
+    },
+    {
+      "opcode": "Opcode::Punpckhqdq",
+      "source_mnemonic": "punpckhqdq"
+    },
+    {
+      "opcode": "Opcode::Unpcklps",
+      "source_mnemonic": "unpcklps"
+    },
+    {
+      "opcode": "Opcode::Unpckhps",
+      "source_mnemonic": "unpckhps"
+    },
+    {
+      "opcode": "Opcode::Unpcklpd",
+      "source_mnemonic": "unpcklpd"
+    },
+    {
+      "opcode": "Opcode::Unpckhpd",
+      "source_mnemonic": "unpckhpd"
+    },
+    {
+      "opcode": "Opcode::Shufps",
+      "source_mnemonic": "shufps"
+    },
+    {
+      "opcode": "Opcode::Shufpd",
+      "source_mnemonic": "shufpd"
+    },
+    {
+      "opcode": "Opcode::Andnps",
+      "source_mnemonic": "andnps"
+    },
+    {
+      "opcode": "Opcode::Andnpd",
+      "source_mnemonic": "andnpd"
+    },
+    {
+      "opcode": "Opcode::Minps",
+      "source_mnemonic": "minps"
+    },
+    {
+      "opcode": "Opcode::Minpd",
+      "source_mnemonic": "minpd"
+    },
+    {
+      "opcode": "Opcode::Maxps",
+      "source_mnemonic": "maxps"
+    },
+    {
+      "opcode": "Opcode::Maxpd",
+      "source_mnemonic": "maxpd"
+    },
+    {
+      "opcode": "Opcode::Cmpps",
+      "source_mnemonic": "cmpps"
+    },
+    {
+      "opcode": "Opcode::Cmppd",
+      "source_mnemonic": "cmppd"
+    },
+    {
+      "opcode": "Opcode::Cmpss",
+      "source_mnemonic": "cmpss"
+    },
+    {
+      "opcode": "Opcode::Cmpsd",
+      "source_mnemonic": "cmpsd"
+    },
+    {
+      "opcode": "Opcode::Cmpltss",
+      "source_mnemonic": "cmpltss"
+    },
+    {
+      "opcode": "Opcode::Cmpltsd",
+      "source_mnemonic": "cmpltsd"
+    },
+    {
+      "opcode": "Opcode::Cmpeqsd",
+      "source_mnemonic": "cmpeqsd"
+    },
+    {
+      "opcode": "Opcode::Cmplesd",
+      "source_mnemonic": "cmplesd"
+    },
+    {
+      "opcode": "Opcode::Cmpneqsd",
+      "source_mnemonic": "cmpneqsd"
+    },
+    {
+      "opcode": "Opcode::Cmpordsd",
+      "source_mnemonic": "cmpordsd"
+    },
+    {
+      "opcode": "Opcode::Fld",
+      "source_mnemonic": "fld"
+    },
+    {
+      "opcode": "Opcode::Fstp",
+      "source_mnemonic": "fstp"
+    },
+    {
+      "opcode": "Opcode::Fxch",
+      "source_mnemonic": "fxch"
+    },
+    {
+      "opcode": "Opcode::Fucomi",
+      "source_mnemonic": "fucomi"
+    },
+    {
+      "opcode": "Opcode::Fucomip",
+      "source_mnemonic": "fucomip"
+    },
+    {
+      "opcode": "Opcode::Fadd",
+      "source_mnemonic": "fadd"
+    },
+    {
+      "opcode": "Opcode::Fmul",
+      "source_mnemonic": "fmul"
+    },
+    {
+      "opcode": "Opcode::Fmulp",
+      "source_mnemonic": "fmulp"
+    },
+    {
+      "opcode": "Opcode::Fsubp",
+      "source_mnemonic": "fsubp"
+    },
+    {
+      "opcode": "Opcode::Fsubrp",
+      "source_mnemonic": "fsubrp"
+    },
+    {
+      "opcode": "Opcode::Fcmovnb",
+      "source_mnemonic": "fcmovnb"
+    },
+    {
+      "opcode": "Opcode::Fild",
+      "source_mnemonic": "fild"
+    },
+    {
+      "opcode": "Opcode::Fistp",
+      "source_mnemonic": "fistp"
+    },
+    {
+      "opcode": "Opcode::Fldcw",
+      "source_mnemonic": "fldcw"
+    },
+    {
+      "opcode": "Opcode::Fnstcw",
+      "source_mnemonic": "fnstcw"
+    },
+    {
+      "opcode": "Opcode::Fldz",
+      "source_mnemonic": "fldz"
+    },
+    {
+      "opcode": "Opcode::Ldmxcsr",
+      "source_mnemonic": "ldmxcsr"
+    },
+    {
+      "opcode": "Opcode::Stmxcsr",
+      "source_mnemonic": "stmxcsr"
+    },
+    {
+      "opcode": "Opcode::Cmpnltps",
+      "source_mnemonic": "cmpnltps"
+    },
+    {
+      "opcode": "Opcode::Pmovmskb",
+      "source_mnemonic": "pmovmskb"
+    },
+    {
+      "opcode": "Opcode::Movmskps",
+      "source_mnemonic": "movmskps"
+    },
+    {
+      "opcode": "Opcode::Movmskpd",
+      "source_mnemonic": "movmskpd"
+    },
+    {
+      "opcode": "Opcode::Pmaddwd",
+      "source_mnemonic": "pmaddwd"
+    },
+    {
+      "opcode": "Opcode::Pmulhuw",
+      "source_mnemonic": "pmulhuw"
+    },
+    {
+      "opcode": "Opcode::Pmulhw",
+      "source_mnemonic": "pmulhw"
+    },
+    {
+      "opcode": "Opcode::Pmuludq",
+      "source_mnemonic": "pmuludq"
+    },
+    {
+      "opcode": "Opcode::Psllw",
+      "source_mnemonic": "psllw"
+    },
+    {
+      "opcode": "Opcode::Pslld",
+      "source_mnemonic": "pslld"
+    },
+    {
+      "opcode": "Opcode::Psllq",
+      "source_mnemonic": "psllq"
+    },
+    {
+      "opcode": "Opcode::Psrlw",
+      "source_mnemonic": "psrlw"
+    },
+    {
+      "opcode": "Opcode::Psrld",
+      "source_mnemonic": "psrld"
+    },
+    {
+      "opcode": "Opcode::Psrlq",
+      "source_mnemonic": "psrlq"
+    },
+    {
+      "opcode": "Opcode::Psraw",
+      "source_mnemonic": "psraw"
+    },
+    {
+      "opcode": "Opcode::Psrad",
+      "source_mnemonic": "psrad"
+    },
+    {
+      "opcode": "Opcode::Pslldq",
+      "source_mnemonic": "pslldq"
+    },
+    {
+      "opcode": "Opcode::Psrldq",
+      "source_mnemonic": "psrldq"
+    },
+    {
+      "opcode": "Opcode::Cvtdq2ps",
+      "source_mnemonic": "cvtdq2ps"
+    },
+    {
+      "opcode": "Opcode::Cvtps2dq",
+      "source_mnemonic": "cvtps2dq"
+    },
+    {
+      "opcode": "Opcode::Cvttps2dq",
+      "source_mnemonic": "cvttps2dq"
+    },
+    {
+      "opcode": "Opcode::Cvtps2pd",
+      "source_mnemonic": "cvtps2pd"
+    },
+    {
+      "opcode": "Opcode::Cvtpd2ps",
+      "source_mnemonic": "cvtpd2ps"
+    },
+    {
+      "opcode": "Opcode::Cvtdq2pd",
+      "source_mnemonic": "cvtdq2pd"
+    },
+    {
+      "opcode": "Opcode::Cvtpd2dq",
+      "source_mnemonic": "cvtpd2dq"
+    },
+    {
+      "opcode": "Opcode::Cvttpd2dq",
+      "source_mnemonic": "cvttpd2dq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Lzcnt)",
+      "source_mnemonic": "lzcnt"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Movbe)",
+      "source_mnemonic": "movbe"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vaddsubpd)",
+      "source_mnemonic": "vaddsubpd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vaddsubps)",
+      "source_mnemonic": "vaddsubps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vandnpd)",
+      "source_mnemonic": "vandnpd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vandnps)",
+      "source_mnemonic": "vandnps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vblendpd)",
+      "source_mnemonic": "vblendpd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vblendps)",
+      "source_mnemonic": "vblendps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vblendvpd)",
+      "source_mnemonic": "vblendvpd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vblendvps)",
+      "source_mnemonic": "vblendvps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vbroadcastf128)",
+      "source_mnemonic": "vbroadcastf128"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vbroadcasti128)",
+      "source_mnemonic": "vbroadcasti128"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vbroadcastsd)",
+      "source_mnemonic": "vbroadcastsd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vbroadcastss)",
+      "source_mnemonic": "vbroadcastss"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcmppd)",
+      "source_mnemonic": "vcmppd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcmpps)",
+      "source_mnemonic": "vcmpps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcmpsd)",
+      "source_mnemonic": "vcmpsd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcmpss)",
+      "source_mnemonic": "vcmpss"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcomisd)",
+      "source_mnemonic": "vcomisd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcomiss)",
+      "source_mnemonic": "vcomiss"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtdq2pd)",
+      "source_mnemonic": "vcvtdq2pd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtdq2ps)",
+      "source_mnemonic": "vcvtdq2ps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtpd2dq)",
+      "source_mnemonic": "vcvtpd2dq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtpd2ps)",
+      "source_mnemonic": "vcvtpd2ps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtph2ps)",
+      "source_mnemonic": "vcvtph2ps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtps2dq)",
+      "source_mnemonic": "vcvtps2dq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtps2pd)",
+      "source_mnemonic": "vcvtps2pd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtps2ph)",
+      "source_mnemonic": "vcvtps2ph"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtsd2si)",
+      "source_mnemonic": "vcvtsd2si"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtsd2ss)",
+      "source_mnemonic": "vcvtsd2ss"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtsi2sd)",
+      "source_mnemonic": "vcvtsi2sd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtsi2ss)",
+      "source_mnemonic": "vcvtsi2ss"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtss2sd)",
+      "source_mnemonic": "vcvtss2sd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvtss2si)",
+      "source_mnemonic": "vcvtss2si"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvttpd2dq)",
+      "source_mnemonic": "vcvttpd2dq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvttps2dq)",
+      "source_mnemonic": "vcvttps2dq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvttsd2si)",
+      "source_mnemonic": "vcvttsd2si"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vcvttss2si)",
+      "source_mnemonic": "vcvttss2si"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vdppd)",
+      "source_mnemonic": "vdppd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vdpps)",
+      "source_mnemonic": "vdpps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vextractf128)",
+      "source_mnemonic": "vextractf128"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vextracti128)",
+      "source_mnemonic": "vextracti128"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vextractps)",
+      "source_mnemonic": "vextractps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmadd132pd)",
+      "source_mnemonic": "vfmadd132pd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmadd132ps)",
+      "source_mnemonic": "vfmadd132ps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmadd132sd)",
+      "source_mnemonic": "vfmadd132sd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmadd132ss)",
+      "source_mnemonic": "vfmadd132ss"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmadd213pd)",
+      "source_mnemonic": "vfmadd213pd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmadd213ps)",
+      "source_mnemonic": "vfmadd213ps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmadd213sd)",
+      "source_mnemonic": "vfmadd213sd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmadd213ss)",
+      "source_mnemonic": "vfmadd213ss"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmadd231pd)",
+      "source_mnemonic": "vfmadd231pd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmadd231ps)",
+      "source_mnemonic": "vfmadd231ps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmadd231sd)",
+      "source_mnemonic": "vfmadd231sd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmadd231ss)",
+      "source_mnemonic": "vfmadd231ss"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmaddsub132pd)",
+      "source_mnemonic": "vfmaddsub132pd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmaddsub132ps)",
+      "source_mnemonic": "vfmaddsub132ps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmaddsub213pd)",
+      "source_mnemonic": "vfmaddsub213pd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmaddsub213ps)",
+      "source_mnemonic": "vfmaddsub213ps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmaddsub231pd)",
+      "source_mnemonic": "vfmaddsub231pd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmaddsub231ps)",
+      "source_mnemonic": "vfmaddsub231ps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsub132pd)",
+      "source_mnemonic": "vfmsub132pd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsub132ps)",
+      "source_mnemonic": "vfmsub132ps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsub132sd)",
+      "source_mnemonic": "vfmsub132sd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsub132ss)",
+      "source_mnemonic": "vfmsub132ss"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsub213pd)",
+      "source_mnemonic": "vfmsub213pd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsub213ps)",
+      "source_mnemonic": "vfmsub213ps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsub213sd)",
+      "source_mnemonic": "vfmsub213sd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsub213ss)",
+      "source_mnemonic": "vfmsub213ss"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsub231pd)",
+      "source_mnemonic": "vfmsub231pd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsub231ps)",
+      "source_mnemonic": "vfmsub231ps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsub231sd)",
+      "source_mnemonic": "vfmsub231sd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsub231ss)",
+      "source_mnemonic": "vfmsub231ss"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsubadd132pd)",
+      "source_mnemonic": "vfmsubadd132pd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsubadd132ps)",
+      "source_mnemonic": "vfmsubadd132ps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsubadd213pd)",
+      "source_mnemonic": "vfmsubadd213pd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsubadd213ps)",
+      "source_mnemonic": "vfmsubadd213ps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsubadd231pd)",
+      "source_mnemonic": "vfmsubadd231pd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfmsubadd231ps)",
+      "source_mnemonic": "vfmsubadd231ps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmadd132pd)",
+      "source_mnemonic": "vfnmadd132pd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmadd132ps)",
+      "source_mnemonic": "vfnmadd132ps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmadd132sd)",
+      "source_mnemonic": "vfnmadd132sd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmadd132ss)",
+      "source_mnemonic": "vfnmadd132ss"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmadd213pd)",
+      "source_mnemonic": "vfnmadd213pd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmadd213ps)",
+      "source_mnemonic": "vfnmadd213ps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmadd213sd)",
+      "source_mnemonic": "vfnmadd213sd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmadd213ss)",
+      "source_mnemonic": "vfnmadd213ss"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmadd231pd)",
+      "source_mnemonic": "vfnmadd231pd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmadd231ps)",
+      "source_mnemonic": "vfnmadd231ps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmadd231sd)",
+      "source_mnemonic": "vfnmadd231sd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmadd231ss)",
+      "source_mnemonic": "vfnmadd231ss"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmsub132pd)",
+      "source_mnemonic": "vfnmsub132pd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmsub132ps)",
+      "source_mnemonic": "vfnmsub132ps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmsub132sd)",
+      "source_mnemonic": "vfnmsub132sd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmsub132ss)",
+      "source_mnemonic": "vfnmsub132ss"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmsub213pd)",
+      "source_mnemonic": "vfnmsub213pd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmsub213ps)",
+      "source_mnemonic": "vfnmsub213ps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmsub213sd)",
+      "source_mnemonic": "vfnmsub213sd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmsub213ss)",
+      "source_mnemonic": "vfnmsub213ss"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmsub231pd)",
+      "source_mnemonic": "vfnmsub231pd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmsub231ps)",
+      "source_mnemonic": "vfnmsub231ps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmsub231sd)",
+      "source_mnemonic": "vfnmsub231sd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vfnmsub231ss)",
+      "source_mnemonic": "vfnmsub231ss"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vgatherdpd)",
+      "source_mnemonic": "vgatherdpd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vgatherdps)",
+      "source_mnemonic": "vgatherdps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vgatherqpd)",
+      "source_mnemonic": "vgatherqpd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vgatherqps)",
+      "source_mnemonic": "vgatherqps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vhaddpd)",
+      "source_mnemonic": "vhaddpd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vhaddps)",
+      "source_mnemonic": "vhaddps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vhsubpd)",
+      "source_mnemonic": "vhsubpd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vhsubps)",
+      "source_mnemonic": "vhsubps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vinsertf128)",
+      "source_mnemonic": "vinsertf128"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vinserti128)",
+      "source_mnemonic": "vinserti128"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vinsertps)",
+      "source_mnemonic": "vinsertps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vlddqu)",
+      "source_mnemonic": "vlddqu"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vldmxcsr)",
+      "source_mnemonic": "vldmxcsr"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmaskmovdqu)",
+      "source_mnemonic": "vmaskmovdqu"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmaskmovpd)",
+      "source_mnemonic": "vmaskmovpd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmaskmovps)",
+      "source_mnemonic": "vmaskmovps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmaxpd)",
+      "source_mnemonic": "vmaxpd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmaxps)",
+      "source_mnemonic": "vmaxps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vminpd)",
+      "source_mnemonic": "vminpd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vminps)",
+      "source_mnemonic": "vminps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovd)",
+      "source_mnemonic": "vmovd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovddup)",
+      "source_mnemonic": "vmovddup"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovdqa)",
+      "source_mnemonic": "vmovdqa"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovdqu)",
+      "source_mnemonic": "vmovdqu"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovhlps)",
+      "source_mnemonic": "vmovhlps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovhpd)",
+      "source_mnemonic": "vmovhpd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovhps)",
+      "source_mnemonic": "vmovhps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovlhps)",
+      "source_mnemonic": "vmovlhps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovlpd)",
+      "source_mnemonic": "vmovlpd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovlps)",
+      "source_mnemonic": "vmovlps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovmskpd)",
+      "source_mnemonic": "vmovmskpd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovmskps)",
+      "source_mnemonic": "vmovmskps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovntdq)",
+      "source_mnemonic": "vmovntdq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovntdqa)",
+      "source_mnemonic": "vmovntdqa"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovntpd)",
+      "source_mnemonic": "vmovntpd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovntps)",
+      "source_mnemonic": "vmovntps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovq)",
+      "source_mnemonic": "vmovq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovshdup)",
+      "source_mnemonic": "vmovshdup"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmovsldup)",
+      "source_mnemonic": "vmovsldup"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vmpsadbw)",
+      "source_mnemonic": "vmpsadbw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpabsb)",
+      "source_mnemonic": "vpabsb"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpabsd)",
+      "source_mnemonic": "vpabsd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpabsw)",
+      "source_mnemonic": "vpabsw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpackssdw)",
+      "source_mnemonic": "vpackssdw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpacksswb)",
+      "source_mnemonic": "vpacksswb"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpackusdw)",
+      "source_mnemonic": "vpackusdw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpackuswb)",
+      "source_mnemonic": "vpackuswb"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpaddb)",
+      "source_mnemonic": "vpaddb"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpaddd)",
+      "source_mnemonic": "vpaddd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpaddq)",
+      "source_mnemonic": "vpaddq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpaddsb)",
+      "source_mnemonic": "vpaddsb"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpaddsw)",
+      "source_mnemonic": "vpaddsw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpaddusb)",
+      "source_mnemonic": "vpaddusb"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpaddusw)",
+      "source_mnemonic": "vpaddusw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpaddw)",
+      "source_mnemonic": "vpaddw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpalignr)",
+      "source_mnemonic": "vpalignr"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpand)",
+      "source_mnemonic": "vpand"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpandn)",
+      "source_mnemonic": "vpandn"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpavgb)",
+      "source_mnemonic": "vpavgb"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpavgw)",
+      "source_mnemonic": "vpavgw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpblendd)",
+      "source_mnemonic": "vpblendd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpblendvb)",
+      "source_mnemonic": "vpblendvb"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpblendw)",
+      "source_mnemonic": "vpblendw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpbroadcastb)",
+      "source_mnemonic": "vpbroadcastb"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpbroadcastd)",
+      "source_mnemonic": "vpbroadcastd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpbroadcastq)",
+      "source_mnemonic": "vpbroadcastq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpbroadcastw)",
+      "source_mnemonic": "vpbroadcastw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpeqb)",
+      "source_mnemonic": "vpcmpeqb"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpeqd)",
+      "source_mnemonic": "vpcmpeqd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpeqq)",
+      "source_mnemonic": "vpcmpeqq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpeqw)",
+      "source_mnemonic": "vpcmpeqw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpestri)",
+      "source_mnemonic": "vpcmpestri"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpestri64)",
+      "source_mnemonic": "vpcmpestri"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpestrm)",
+      "source_mnemonic": "vpcmpestrm"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpestrm64)",
+      "source_mnemonic": "vpcmpestrm"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpgtb)",
+      "source_mnemonic": "vpcmpgtb"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpgtd)",
+      "source_mnemonic": "vpcmpgtd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpgtq)",
+      "source_mnemonic": "vpcmpgtq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpgtw)",
+      "source_mnemonic": "vpcmpgtw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpistri)",
+      "source_mnemonic": "vpcmpistri"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpistri64)",
+      "source_mnemonic": "vpcmpistri"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpcmpistrm)",
+      "source_mnemonic": "vpcmpistrm"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vperm2f128)",
+      "source_mnemonic": "vperm2f128"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vperm2i128)",
+      "source_mnemonic": "vperm2i128"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpermd)",
+      "source_mnemonic": "vpermd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpermilpd)",
+      "source_mnemonic": "vpermilpd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpermilps)",
+      "source_mnemonic": "vpermilps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpermpd)",
+      "source_mnemonic": "vpermpd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpermps)",
+      "source_mnemonic": "vpermps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpermq)",
+      "source_mnemonic": "vpermq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpextrb)",
+      "source_mnemonic": "vpextrb"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpextrd)",
+      "source_mnemonic": "vpextrd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpextrq)",
+      "source_mnemonic": "vpextrq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpextrw)",
+      "source_mnemonic": "vpextrw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpgatherdd)",
+      "source_mnemonic": "vpgatherdd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpgatherdq)",
+      "source_mnemonic": "vpgatherdq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpgatherqd)",
+      "source_mnemonic": "vpgatherqd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpgatherqq)",
+      "source_mnemonic": "vpgatherqq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vphaddd)",
+      "source_mnemonic": "vphaddd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vphaddsw)",
+      "source_mnemonic": "vphaddsw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vphaddw)",
+      "source_mnemonic": "vphaddw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vphminposuw)",
+      "source_mnemonic": "vphminposuw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vphsubd)",
+      "source_mnemonic": "vphsubd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vphsubsw)",
+      "source_mnemonic": "vphsubsw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vphsubw)",
+      "source_mnemonic": "vphsubw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpinsrb)",
+      "source_mnemonic": "vpinsrb"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpinsrd)",
+      "source_mnemonic": "vpinsrd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpinsrq)",
+      "source_mnemonic": "vpinsrq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpinsrw)",
+      "source_mnemonic": "vpinsrw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmaddubsw)",
+      "source_mnemonic": "vpmaddubsw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmaddwd)",
+      "source_mnemonic": "vpmaddwd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmaskmovd)",
+      "source_mnemonic": "vpmaskmovd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmaskmovq)",
+      "source_mnemonic": "vpmaskmovq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmaxsb)",
+      "source_mnemonic": "vpmaxsb"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmaxsd)",
+      "source_mnemonic": "vpmaxsd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmaxsw)",
+      "source_mnemonic": "vpmaxsw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmaxub)",
+      "source_mnemonic": "vpmaxub"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmaxud)",
+      "source_mnemonic": "vpmaxud"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmaxuw)",
+      "source_mnemonic": "vpmaxuw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpminsb)",
+      "source_mnemonic": "vpminsb"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpminsd)",
+      "source_mnemonic": "vpminsd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpminsw)",
+      "source_mnemonic": "vpminsw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpminub)",
+      "source_mnemonic": "vpminub"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpminud)",
+      "source_mnemonic": "vpminud"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpminuw)",
+      "source_mnemonic": "vpminuw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmovmskb)",
+      "source_mnemonic": "vpmovmskb"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmovsxbd)",
+      "source_mnemonic": "vpmovsxbd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmovsxbq)",
+      "source_mnemonic": "vpmovsxbq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmovsxbw)",
+      "source_mnemonic": "vpmovsxbw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmovsxdq)",
+      "source_mnemonic": "vpmovsxdq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmovsxwd)",
+      "source_mnemonic": "vpmovsxwd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmovsxwq)",
+      "source_mnemonic": "vpmovsxwq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmovzxbd)",
+      "source_mnemonic": "vpmovzxbd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmovzxbq)",
+      "source_mnemonic": "vpmovzxbq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmovzxbw)",
+      "source_mnemonic": "vpmovzxbw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmovzxdq)",
+      "source_mnemonic": "vpmovzxdq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmovzxwd)",
+      "source_mnemonic": "vpmovzxwd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmovzxwq)",
+      "source_mnemonic": "vpmovzxwq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmuldq)",
+      "source_mnemonic": "vpmuldq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmulhrsw)",
+      "source_mnemonic": "vpmulhrsw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmulhuw)",
+      "source_mnemonic": "vpmulhuw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmulhw)",
+      "source_mnemonic": "vpmulhw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmulld)",
+      "source_mnemonic": "vpmulld"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmullw)",
+      "source_mnemonic": "vpmullw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpmuludq)",
+      "source_mnemonic": "vpmuludq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpor)",
+      "source_mnemonic": "vpor"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsadbw)",
+      "source_mnemonic": "vpsadbw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpshufb)",
+      "source_mnemonic": "vpshufb"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpshufd)",
+      "source_mnemonic": "vpshufd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpshufhw)",
+      "source_mnemonic": "vpshufhw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpshuflw)",
+      "source_mnemonic": "vpshuflw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsignb)",
+      "source_mnemonic": "vpsignb"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsignd)",
+      "source_mnemonic": "vpsignd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsignw)",
+      "source_mnemonic": "vpsignw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpslld)",
+      "source_mnemonic": "vpslld"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpslldq)",
+      "source_mnemonic": "vpslldq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsllq)",
+      "source_mnemonic": "vpsllq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsllvd)",
+      "source_mnemonic": "vpsllvd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsllvq)",
+      "source_mnemonic": "vpsllvq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsllw)",
+      "source_mnemonic": "vpsllw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsrad)",
+      "source_mnemonic": "vpsrad"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsravd)",
+      "source_mnemonic": "vpsravd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsraw)",
+      "source_mnemonic": "vpsraw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsrld)",
+      "source_mnemonic": "vpsrld"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsrldq)",
+      "source_mnemonic": "vpsrldq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsrlq)",
+      "source_mnemonic": "vpsrlq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsrlvd)",
+      "source_mnemonic": "vpsrlvd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsrlvq)",
+      "source_mnemonic": "vpsrlvq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsrlw)",
+      "source_mnemonic": "vpsrlw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsubb)",
+      "source_mnemonic": "vpsubb"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsubd)",
+      "source_mnemonic": "vpsubd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsubq)",
+      "source_mnemonic": "vpsubq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsubsb)",
+      "source_mnemonic": "vpsubsb"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsubsw)",
+      "source_mnemonic": "vpsubsw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsubusb)",
+      "source_mnemonic": "vpsubusb"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsubusw)",
+      "source_mnemonic": "vpsubusw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpsubw)",
+      "source_mnemonic": "vpsubw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vptest)",
+      "source_mnemonic": "vptest"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpunpckhbw)",
+      "source_mnemonic": "vpunpckhbw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpunpckhdq)",
+      "source_mnemonic": "vpunpckhdq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpunpckhqdq)",
+      "source_mnemonic": "vpunpckhqdq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpunpckhwd)",
+      "source_mnemonic": "vpunpckhwd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpunpcklbw)",
+      "source_mnemonic": "vpunpcklbw"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpunpckldq)",
+      "source_mnemonic": "vpunpckldq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpunpcklqdq)",
+      "source_mnemonic": "vpunpcklqdq"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpunpcklwd)",
+      "source_mnemonic": "vpunpcklwd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vpxor)",
+      "source_mnemonic": "vpxor"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vrcpps)",
+      "source_mnemonic": "vrcpps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vrcpss)",
+      "source_mnemonic": "vrcpss"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vroundpd)",
+      "source_mnemonic": "vroundpd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vroundps)",
+      "source_mnemonic": "vroundps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vrsqrtps)",
+      "source_mnemonic": "vrsqrtps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vrsqrtss)",
+      "source_mnemonic": "vrsqrtss"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vshufpd)",
+      "source_mnemonic": "vshufpd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vshufps)",
+      "source_mnemonic": "vshufps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vsqrtpd)",
+      "source_mnemonic": "vsqrtpd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vsqrtps)",
+      "source_mnemonic": "vsqrtps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vstmxcsr)",
+      "source_mnemonic": "vstmxcsr"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vtestpd)",
+      "source_mnemonic": "vtestpd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vtestps)",
+      "source_mnemonic": "vtestps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vunpckhpd)",
+      "source_mnemonic": "vunpckhpd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vunpckhps)",
+      "source_mnemonic": "vunpckhps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vunpcklpd)",
+      "source_mnemonic": "vunpcklpd"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vunpcklps)",
+      "source_mnemonic": "vunpcklps"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Vzeroall)",
+      "source_mnemonic": "vzeroall"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Xgetbv)",
+      "source_mnemonic": "xgetbv"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Xrstor)",
+      "source_mnemonic": "xrstor"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Xrstor64)",
+      "source_mnemonic": "xrstor64"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Xsave)",
+      "source_mnemonic": "xsave"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Xsave64)",
+      "source_mnemonic": "xsave64"
+    },
+    {
+      "opcode": "Opcode::V3(V3Opcode::Xsetbv)",
+      "source_mnemonic": "xsetbv"
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Aesenc)",
+      "source_mnemonic": "aesenc",
+      "selector": {
+        "opcode": "DC",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Aesenclast)",
+      "source_mnemonic": "aesenclast",
+      "selector": {
+        "opcode": "DD",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Aesdec)",
+      "source_mnemonic": "aesdec",
+      "selector": {
+        "opcode": "DE",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Aesdeclast)",
+      "source_mnemonic": "aesdeclast",
+      "selector": {
+        "opcode": "DF",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Aesimc)",
+      "source_mnemonic": "aesimc",
+      "selector": {
+        "opcode": "DB",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Aeskeygenassist)",
+      "source_mnemonic": "aeskeygenassist",
+      "selector": {
+        "opcode": "DF",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::PextrwSse4)",
+      "source_mnemonic": "pextrw",
+      "selector": {
+        "opcode": "15",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pcmpestri64)",
+      "source_mnemonic": "pcmpestri",
+      "selector": {
+        "opcode": "61",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pcmpestrm64)",
+      "source_mnemonic": "pcmpestrm",
+      "selector": {
+        "opcode": "60",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pcmpistri64)",
+      "source_mnemonic": "pcmpistri",
+      "selector": {
+        "opcode": "63",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pcmpistrm64)",
+      "source_mnemonic": "pcmpistrm",
+      "selector": {
+        "opcode": "62",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Addsubpd)",
+      "source_mnemonic": "addsubpd",
+      "selector": {
+        "opcode": "D0",
+        "opcode_map": "0f"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Addsubps)",
+      "source_mnemonic": "addsubps",
+      "selector": {
+        "opcode": "D0",
+        "opcode_map": "0f"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Haddpd)",
+      "source_mnemonic": "haddpd",
+      "selector": {
+        "opcode": "7C",
+        "opcode_map": "0f"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Haddps)",
+      "source_mnemonic": "haddps",
+      "selector": {
+        "opcode": "7C",
+        "opcode_map": "0f"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Hsubpd)",
+      "source_mnemonic": "hsubpd",
+      "selector": {
+        "opcode": "7D",
+        "opcode_map": "0f"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Hsubps)",
+      "source_mnemonic": "hsubps",
+      "selector": {
+        "opcode": "7D",
+        "opcode_map": "0f"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Movddup)",
+      "source_mnemonic": "movddup",
+      "selector": {
+        "opcode": "12",
+        "opcode_map": "0f"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Movsldup)",
+      "source_mnemonic": "movsldup",
+      "selector": {
+        "opcode": "12",
+        "opcode_map": "0f"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Movshdup)",
+      "source_mnemonic": "movshdup",
+      "selector": {
+        "opcode": "16",
+        "opcode_map": "0f"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Lddqu)",
+      "source_mnemonic": "lddqu",
+      "selector": {
+        "opcode": "F0",
+        "opcode_map": "0f"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Fisttp)",
+      "source_mnemonic": "fisttp"
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pshufb)",
+      "source_mnemonic": "pshufb",
+      "selector": {
+        "opcode": "00",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Phaddw)",
+      "source_mnemonic": "phaddw",
+      "selector": {
+        "opcode": "01",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Phaddd)",
+      "source_mnemonic": "phaddd",
+      "selector": {
+        "opcode": "02",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Phaddsw)",
+      "source_mnemonic": "phaddsw",
+      "selector": {
+        "opcode": "03",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pmaddubsw)",
+      "source_mnemonic": "pmaddubsw",
+      "selector": {
+        "opcode": "04",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Phsubw)",
+      "source_mnemonic": "phsubw",
+      "selector": {
+        "opcode": "05",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Phsubd)",
+      "source_mnemonic": "phsubd",
+      "selector": {
+        "opcode": "06",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Phsubsw)",
+      "source_mnemonic": "phsubsw",
+      "selector": {
+        "opcode": "07",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Psignb)",
+      "source_mnemonic": "psignb",
+      "selector": {
+        "opcode": "08",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Psignw)",
+      "source_mnemonic": "psignw",
+      "selector": {
+        "opcode": "09",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Psignd)",
+      "source_mnemonic": "psignd",
+      "selector": {
+        "opcode": "0A",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pmulhrsw)",
+      "source_mnemonic": "pmulhrsw",
+      "selector": {
+        "opcode": "0B",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pabsb)",
+      "source_mnemonic": "pabsb",
+      "selector": {
+        "opcode": "1C",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pabsw)",
+      "source_mnemonic": "pabsw",
+      "selector": {
+        "opcode": "1D",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pabsd)",
+      "source_mnemonic": "pabsd",
+      "selector": {
+        "opcode": "1E",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Palignr)",
+      "source_mnemonic": "palignr",
+      "selector": {
+        "opcode": "0F",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pminsb)",
+      "source_mnemonic": "pminsb",
+      "selector": {
+        "opcode": "38",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pminsd)",
+      "source_mnemonic": "pminsd",
+      "selector": {
+        "opcode": "39",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pminuw)",
+      "source_mnemonic": "pminuw",
+      "selector": {
+        "opcode": "3A",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pminud)",
+      "source_mnemonic": "pminud",
+      "selector": {
+        "opcode": "3B",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pmaxsb)",
+      "source_mnemonic": "pmaxsb",
+      "selector": {
+        "opcode": "3C",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pmaxsd)",
+      "source_mnemonic": "pmaxsd",
+      "selector": {
+        "opcode": "3D",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pmaxuw)",
+      "source_mnemonic": "pmaxuw",
+      "selector": {
+        "opcode": "3E",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pmaxud)",
+      "source_mnemonic": "pmaxud",
+      "selector": {
+        "opcode": "3F",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pmuldq)",
+      "source_mnemonic": "pmuldq",
+      "selector": {
+        "opcode": "28",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pcmpeqq)",
+      "source_mnemonic": "pcmpeqq",
+      "selector": {
+        "opcode": "29",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Packusdw)",
+      "source_mnemonic": "packusdw",
+      "selector": {
+        "opcode": "2B",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pmulld)",
+      "source_mnemonic": "pmulld",
+      "selector": {
+        "opcode": "40",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Ptest)",
+      "source_mnemonic": "ptest",
+      "selector": {
+        "opcode": "17",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Phminposuw)",
+      "source_mnemonic": "phminposuw",
+      "selector": {
+        "opcode": "41",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pmovsxbw)",
+      "source_mnemonic": "pmovsxbw",
+      "selector": {
+        "opcode": "20",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pmovsxbd)",
+      "source_mnemonic": "pmovsxbd",
+      "selector": {
+        "opcode": "21",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pmovsxbq)",
+      "source_mnemonic": "pmovsxbq",
+      "selector": {
+        "opcode": "22",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pmovsxwd)",
+      "source_mnemonic": "pmovsxwd",
+      "selector": {
+        "opcode": "23",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pmovsxwq)",
+      "source_mnemonic": "pmovsxwq",
+      "selector": {
+        "opcode": "24",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pmovsxdq)",
+      "source_mnemonic": "pmovsxdq",
+      "selector": {
+        "opcode": "25",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pmovzxbw)",
+      "source_mnemonic": "pmovzxbw",
+      "selector": {
+        "opcode": "30",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pmovzxbd)",
+      "source_mnemonic": "pmovzxbd",
+      "selector": {
+        "opcode": "31",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pmovzxbq)",
+      "source_mnemonic": "pmovzxbq",
+      "selector": {
+        "opcode": "32",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pmovzxwd)",
+      "source_mnemonic": "pmovzxwd",
+      "selector": {
+        "opcode": "33",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pmovzxwq)",
+      "source_mnemonic": "pmovzxwq",
+      "selector": {
+        "opcode": "34",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pmovzxdq)",
+      "source_mnemonic": "pmovzxdq",
+      "selector": {
+        "opcode": "35",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Roundps)",
+      "source_mnemonic": "roundps",
+      "selector": {
+        "opcode": "08",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Roundpd)",
+      "source_mnemonic": "roundpd",
+      "selector": {
+        "opcode": "09",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Blendps)",
+      "source_mnemonic": "blendps",
+      "selector": {
+        "opcode": "0C",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Blendpd)",
+      "source_mnemonic": "blendpd",
+      "selector": {
+        "opcode": "0D",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pblendw)",
+      "source_mnemonic": "pblendw",
+      "selector": {
+        "opcode": "0E",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Dpps)",
+      "source_mnemonic": "dpps",
+      "selector": {
+        "opcode": "40",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Dppd)",
+      "source_mnemonic": "dppd",
+      "selector": {
+        "opcode": "41",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Mpsadbw)",
+      "source_mnemonic": "mpsadbw",
+      "selector": {
+        "opcode": "42",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Blendvps)",
+      "source_mnemonic": "blendvps",
+      "selector": {
+        "opcode": "14",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Blendvpd)",
+      "source_mnemonic": "blendvpd",
+      "selector": {
+        "opcode": "15",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pblendvb)",
+      "source_mnemonic": "pblendvb",
+      "selector": {
+        "opcode": "10",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Movntdqa)",
+      "source_mnemonic": "movntdqa",
+      "selector": {
+        "opcode": "2A",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pextrb)",
+      "source_mnemonic": "pextrb",
+      "selector": {
+        "opcode": "14",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pextrd)",
+      "source_mnemonic": "pextrd",
+      "selector": {
+        "opcode": "16",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pextrq)",
+      "source_mnemonic": "pextrq",
+      "selector": {
+        "opcode": "16",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Extractps)",
+      "source_mnemonic": "extractps",
+      "selector": {
+        "opcode": "17",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pinsrb)",
+      "source_mnemonic": "pinsrb",
+      "selector": {
+        "opcode": "20",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pinsrd)",
+      "source_mnemonic": "pinsrd",
+      "selector": {
+        "opcode": "22",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pinsrq)",
+      "source_mnemonic": "pinsrq",
+      "selector": {
+        "opcode": "22",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Insertps)",
+      "source_mnemonic": "insertps",
+      "selector": {
+        "opcode": "21",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pcmpgtq)",
+      "source_mnemonic": "pcmpgtq",
+      "selector": {
+        "opcode": "37",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pcmpestrm)",
+      "source_mnemonic": "pcmpestrm",
+      "selector": {
+        "opcode": "60",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pcmpestri)",
+      "source_mnemonic": "pcmpestri",
+      "selector": {
+        "opcode": "61",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pcmpistrm)",
+      "source_mnemonic": "pcmpistrm",
+      "selector": {
+        "opcode": "62",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Pcmpistri)",
+      "source_mnemonic": "pcmpistri",
+      "selector": {
+        "opcode": "63",
+        "opcode_map": "0f3a"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Crc32)",
+      "source_mnemonic": "crc32",
+      "selector": {
+        "opcode": "F0",
+        "opcode_map": "0f38"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Cmpxchg16b)",
+      "source_mnemonic": "cmpxchg16b",
+      "selector": {
+        "opcode": "C7",
+        "opcode_map": "0f"
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Lahf)",
+      "source_mnemonic": "lahf",
+      "selector": {
+        "opcode": "9F",
+        "opcode_map": null
+      }
+    },
+    {
+      "opcode": "Opcode::V2(V2Opcode::Sahf)",
+      "source_mnemonic": "sahf",
+      "selector": {
+        "opcode": "9E",
+        "opcode_map": null
+      }
+    },
+    {
+      "opcode": "Opcode::Core(CoreOpcode::Clflush)",
+      "source_mnemonic": "clflush"
+    }
+  ]
+}

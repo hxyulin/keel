@@ -25,6 +25,7 @@ too.
 | `keel opt` | `.keel` IR | optimized IR |
 | `keel passes` | | list of optimizer passes |
 | `keel asm` | `.s` | object file(s) |
+| `keel disasm` | AArch64 or x86-64 Mach-O/ELF | assembly listing |
 | `keel archive` | `.o` | static archive |
 | `keel link` | `.o`, `.a`, `.so` | executable |
 | `keel asm-metrics` | `.s` | instruction metrics JSON |
@@ -136,6 +137,19 @@ replacement. Details: [design](design.md#assembler),
 
 `keel cc` and `keel compile` do not go through assembly text: the backend
 builds a typed program that the assembler encodes directly.
+
+## Disassembler
+
+```sh
+keel disasm input.o
+keel disasm executable -o listing.txt
+```
+
+The file selects the architecture. The listing includes addresses, original
+bytes and symbol labels. Relocations are not applied or symbolized. AArch64
+uses `.inst` for unsupported formatting. x86 stops at an unknown instruction
+and prints the rest of that section as bytes. See the
+[API and limits](../crates/keel-disasm/README.md).
 
 ## Linking and archives
 

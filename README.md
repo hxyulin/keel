@@ -1,8 +1,8 @@
 # Keel
 
 A C compiler toolchain written in Rust: preprocessor, frontend, SSA optimizer,
-native backend, assembler, disassembler, archiver and linker. Compiling C to an object file
-never invokes Clang.
+native backend, assembler, disassembler, archiver and linker. Compiling C to an
+object file never invokes Clang.
 
 <p align="center"><img src="docs/assets/readme-pipeline.svg" alt="Keel toolchain stages: C frontend, optimizer, backend, assembler and linker, and the keel commands that run each span" width="720"></p>
 
@@ -34,7 +34,7 @@ keel cc --emit-ir hello.c -o hello.keel        # C → Keel IR
 keel opt -p gvn,dce hello.keel                 # run optimizer passes
 keel compile -O --emit-object hello.keel -o hello.o
 keel asm input.s -o input.o                    # standalone assembler
-keel disasm hello.o                           # AArch64 Mach-O or ELF disassembly
+keel disasm hello.o                           # AArch64 or x86-64 disassembly
 keel archive -o libinput.a input.o             # static archive
 ```
 
@@ -55,6 +55,7 @@ keel cc --target wasm32-unknown-unknown --emit-wasm --export add add.c -o add.wa
 | C compiler | ✓ | ✓ | ✓ | integer/pointer subset |
 | Output | Mach-O | ELF | ELF | `.wasm` module |
 | Assembler | ✓ | ✓ | ✓ (Intel, AT&T) | — |
+| Disassembler | ✓ | ✓ | ✓ | — |
 | Linker | ✓ | ✓¹ | ✓¹ | — |
 
 ¹ Native ELF links need caller-supplied startup code; `keel link --system`
@@ -91,7 +92,7 @@ Charts are generated from the benchmark data by
 - [C frontend](docs/c-frontend-coverage.md) · [SIMD IR](docs/simd-ir.md)
 - [macOS linker](docs/macos-linker.md) · [ELF linker](docs/elf-linker.md) · [Static archives](docs/static-archives.md)
 - [x86 assembler](docs/native-x86-assembler.md) · [ARM Linux](docs/arm-linux.md)
-- [AArch64 disassembler](crates/keel-disasm/README.md) · [x86 ISA generation pilot](tools/x86-isa/README.md)
+- [Disassembler](crates/keel-disasm/README.md) · [Shared x86 tables](tools/x86-isa/README.md)
 - [WebAssembly](docs/wasm-cli.md)
 - [Benchmark and application suite](suite/README.md)
 

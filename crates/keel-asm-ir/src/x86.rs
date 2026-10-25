@@ -2,6 +2,7 @@
 use crate::Expression;
 use smallvec::SmallVec;
 use std::borrow::Cow;
+pub mod isa;
 
 fn lowercase(s: &str) -> Cow<'_, str> {
     if s.bytes().any(|b| b.is_ascii_uppercase()) {

@@ -1,0 +1,94 @@
+{
+  "AVX": [
+    "avx"
+  ],
+  "AVX2": [
+    "avx",
+    "avx2"
+  ],
+  "AVX2GATHER": [
+    "avx",
+    "avx2"
+  ],
+  "FMA": [
+    "avx",
+    "fma"
+  ],
+  "F16C": [
+    "avx",
+    "f16c"
+  ],
+  "BMI1": [
+    "bmi1"
+  ],
+  "BMI2": [
+    "bmi2"
+  ],
+  "POPCNT": [
+    "popcnt"
+  ],
+  "SSE3": [
+    "sse3"
+  ],
+  "SSE3X87": [
+    "sse3"
+  ],
+  "SSSE3": [
+    "ssse3"
+  ],
+  "SSSE3MMX": [
+    "ssse3"
+  ],
+  "SSE4": [
+    "sse41"
+  ],
+  "SSE42": [
+    "sse42"
+  ],
+  "AES": [
+    "aes"
+  ],
+  "PCLMULQDQ": [
+    "pclmulqdq"
+  ],
+  "LZCNT": [
+    "lzcnt"
+  ],
+  "MOVBE": [
+    "movbe"
+  ],
+  "XSAVE": [
+    "xsave"
+  ],
+  "CMPXCHG16B": [
+    "cx16"
+  ],
+  "LAHF": [
+    "lahf_sahf"
+  ],
+  "CLFSH": [
+    "clflush"
+  ],
+  "KNCV": null,
+  "FAT_NOP": [],
+  "FCMOV": [],
+  "FCOMI": [],
+  "FXSAVE": [],
+  "FXSAVE64": [],
+  "I186": [],
+  "I386": [],
+  "I486REAL": [],
+  "I86": [],
+  "LONGMODE": [],
+  "PAUSE": [],
+  "PENTIUMMMX": [],
+  "PPRO": [],
+  "PREFETCH_NOP": [],
+  "SSE": [],
+  "SSE2": [],
+  "SSE2MMX": [],
+  "SSEMXCSR": [],
+  "SSE_PREFETCH": [],
+  "X87": [],
+  "KNC_MISC": null
+}

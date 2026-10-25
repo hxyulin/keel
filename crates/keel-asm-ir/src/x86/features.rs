@@ -257,44 +257,7 @@ impl Features {
 }
 impl super::Opcode {
     pub fn required_features(self) -> Features {
-        use super::Opcode::*;
-        match self {
-            Core(super::CoreOpcode::Clflush) => Features {
-                clflush: true,
-                ..Features::NONE
-            },
-            Pclmulqdq => Features {
-                pclmulqdq: true,
-                ..Features::NONE
-            },
-            V2(op) => op.required_features(),
-            V3(op) => op.required_features(),
-            Vaddps | Vaddpd | Vsubps | Vsubpd | Vmulps | Vmulpd | Vdivps | Vdivpd | Vaddss
-            | Vaddsd | Vsubss | Vsubsd | Vmulss | Vmulsd | Vdivss | Vdivsd | Vsqrtss | Vsqrtsd
-            | Vminss | Vminsd | Vmaxss | Vmaxsd | Vucomiss | Vucomisd | Vmovss | Vmovsd
-            | Vmovaps | Vmovups | Vmovapd | Vmovupd | Vandps | Vandpd | Vorps | Vorpd | Vxorps
-            | Vxorpd | Vroundss | Vroundsd | Vzeroupper => Features {
-                avx: true,
-                ..Features::NONE
-            },
-            Andn | Bextr | Blsi | Blsmsk | Blsr | Tzcnt => Features {
-                bmi1: true,
-                ..Features::NONE
-            },
-            Shlx | Shrx | Sarx | Rorx | Bzhi | Pext | Pdep | Mulx => Features {
-                bmi2: true,
-                ..Features::NONE
-            },
-            Popcnt => Features {
-                popcnt: true,
-                ..Features::NONE
-            },
-            Roundss | Roundsd => Features {
-                sse41: true,
-                ..Features::NONE
-            },
-            _ => Features::NONE,
-        }
+        super::isa::opcode_features(self)
     }
 }
 

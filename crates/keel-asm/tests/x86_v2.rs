@@ -211,9 +211,15 @@ fn run(c: &mut Command) {
     );
 }
 fn oracle(cases: &[String], dir: &Path) -> (usize, usize) {
+    // ALL includes optional AES identities; this byte oracle enables them
+    // explicitly without changing the psABI v2 feature profile.
+    let oracle_features = Features {
+        aes: true,
+        ..features()
+    };
     std::fs::create_dir_all(dir).unwrap();
     let source = format!(".intel_syntax noprefix\n.text\n{}\n", cases.join("\n"));
-    let ours = assemble_object_with_features(&source, features()).unwrap();
+    let ours = assemble_object_with_features(&source, oracle_features).unwrap();
     let mut typed = Program::new();
     let mut att_source = String::new();
     for case in cases {
@@ -229,11 +235,12 @@ fn oracle(cases: &[String], dir: &Path) -> (usize, usize) {
     }
     assert_eq!(
         ours,
-        assemble_program_object_with_features(&typed, features()).unwrap(),
+        assemble_program_object_with_features(&typed, oracle_features).unwrap(),
         "direct/text objects"
     );
     let att_object =
-        assemble_object_with_syntax_and_features(&att_source, Syntax::Att, features()).unwrap();
+        assemble_object_with_syntax_and_features(&att_source, Syntax::Att, oracle_features)
+            .unwrap();
     assert_eq!(section(&ours), section(&att_object), "Intel/AT&T parity");
     std::fs::write(dir.join("att.s"), &att_source).unwrap();
     let input = dir.join("input.s");
@@ -293,7 +300,8 @@ fn oracle(cases: &[String], dir: &Path) -> (usize, usize) {
             actual.clone()
         } else {
             section(
-                &assemble_object_with_features(&reference_cases.join("\n"), features()).unwrap(),
+                &assemble_object_with_features(&reference_cases.join("\n"), oracle_features)
+                    .unwrap(),
             )
         };
         let output = dir.join(format!("{assembler}.o"));

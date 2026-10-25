@@ -424,6 +424,7 @@ name = "keel-disasm"
 version = "0.1.0"
 dependencies = [
  "keel-asm",
+ "keel-asm-ir",
 ]
 
 [[package]]

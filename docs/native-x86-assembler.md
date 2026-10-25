@@ -46,7 +46,10 @@ fragments retain the source parser. The x86 compiler still rejects inline
 assembly. The assembler borrows structured items across layout passes instead
 of cloning the complete program.
 
-The encoder implements REX, legacy and VEX prefixes, ModRM, SIB, immediate and displacement
+Instruction forms, opcode bytes, operand roles and ISA requirements come from
+the [shared generated tables](../tools/x86-isa/README.md), which also drive the
+x86 disassembler. Stable opcode enums remain the assembly API. Common emission
+code handles REX, legacy and VEX prefixes, ModRM, SIB, immediate and displacement
 sizing. The `object` crate serializes ELF64 section headers, string tables,
 ordered symbol tables and RELA records; Keel owns assembly layout, symbol
 expressions, relocation selection and instruction encoding.
