@@ -296,3 +296,34 @@ The workspace compile check, both generator freshness checks, 33 generator
 and 15 runner tests pass. The adapter's 68 instruction bytes independently
 match GNU as and Clang. See [the image and return contract](x86-iretq.md).
 Remaining terminal, software-interrupt, segment and SMM work is still open.
+
+
+## Combined main and generated-metadata integration
+
+Merge `ea2c6e87` joins privileged checkpoint `e5f83489`, the generated
+register/identity/feature work, and main through `c5e27200`. It retains both
+histories and main's newer frontend and optimizer changes.
+
+The exposed privileged instructions use the shared generated ISA catalogue
+and generic assembler/decoder. This includes descriptor loads and status
+operations, MSR and CPU/cache control, CR/DR moves, interrupt control,
+SWAPGS and IRETQ. No new instruction-specific encoder or duplicate ISA
+catalogue is introduced. A literal-byte regression checks the generated fixed
+adapters against the exact forms selected by the decoder.
+
+Compiler intrinsic signatures, effects and reserved-register lowering remain
+handwritten. The adjacent STI;HLT node and terminal IRETQ image/stack contract
+also remain explicit compiler interfaces. Generated encoding metadata does
+not establish privilege, valid machine state or safe entry/return ownership.
+The remaining implementation gaps in the transition audit still apply.
+
+Validation on the combined source passes: 2,695 workspace tests, zero failures
+and 13 ignored across 492 reported groups; workspace compile check; all 33
+ISA generator tests; both generator freshness checks; and all 15 guest runner
+and evidence tests. All eleven CPL0 campaigns pass 194 expected verdicts
+under QEMU 11.1.2 TCG using 135 freshly exported objects. This rerun includes
+all older campaigns rather than carrying their prior object evidence forward.
+It remains bounded emulated evidence, not native hardware qualification.
+
+Local logs, per-campaign results and SHA-256 object digests are retained under
+`/tmp/keel-privileged-generated-integration/`.
