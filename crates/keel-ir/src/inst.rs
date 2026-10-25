@@ -1133,6 +1133,9 @@ impl InstData {
                 | Intrinsic::X86Rdpmc
                 | Intrinsic::X86Rdmsr
                 | Intrinsic::X86Wrmsr
+                | Intrinsic::X86Clts
+                | Intrinsic::X86Invd
+                | Intrinsic::X86Wbinvd
                 | Intrinsic::X86X87Ffree0
                 | Intrinsic::X86X87Ffree1
                 | Intrinsic::X86X87Ffree2

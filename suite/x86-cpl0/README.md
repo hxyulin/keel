@@ -203,3 +203,28 @@ exact READY/FAIL transcript and exit 35: omitted write, narrow read, wrong
 index, clobbered live value and no observations. All five fail as expected.
 The other campaign modes are mutually exclusive with `--msr`. See
 [raw MSR access](../../docs/x86-msr.md) for the API contract and evidence limits.
+
+## CLTS and cache-control campaign
+
+```sh
+KEEL_CPU_CONTROL_EXPORT_DIR="$PWD/target/cpu-control-exports" \
+  cargo test -p keel-codegen --test x86_privileged_control
+python3 suite/x86-cpl0/descriptor_campaign.py --cpu-control \
+  --exports target/cpu-control-exports --timeout 5
+```
+
+This mode requires exactly twelve v1 exports. It checks CLTS against three
+CR0 states, original integer inputs, incoming stack arguments and a 128-byte
+output with canaries. The generated WBINVD/INVD instructions are adjacent.
+The bridge restores its original CR0 on normal success or mismatch.
+
+All twelve variants and an independent reference pass under QEMU 11.1.2 TCG
+on macOS ARM64. Four controls fail normally with exit 35: omitted CLTS,
+altered CR0.WP, a clobbered live value and no operations. A scope control that
+omits both cache instructions also passes, demonstrating that these state
+checks do not prove physical cache writeback or invalidation. All eighteen
+verdicts match. Faults and timeouts fail the campaign.
+
+`--cpu-control` is mutually exclusive with the other campaign modes. See
+[privileged CPU/cache control](../../docs/x86-privileged-control.md) for the
+contracts and remaining evidence limits.

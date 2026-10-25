@@ -34,8 +34,12 @@ RDMSR and WRMSR have pinned typed APIs with explicit CPL0 and model-specific
 preconditions, register-liveness checks and a two-index disposable guest
 campaign. See [raw MSR access](x86-msr.md).
 
-CLI, STI, HLT, CLTS, INVD, WBINVD, SWAPGS, IRET and SYSRET have assembler
-encodings, but no typed system-state/transition contract. An
+CLTS, INVD and WBINVD have pinned typed APIs and bounded CPL0 execution
+checks. CLTS has direct CR0-state checks; physical cache writeback and
+invalidation remain unqualified. See [privileged CPU/cache control](x86-privileged-control.md).
+
+CLI, STI, HLT, SWAPGS, IRET and SYSRET have assembler encodings, but no typed
+system-state/transition contract. An
 assembler encoding alone is not evidence of working kernel code generation.
 
 ## Remaining baseline work

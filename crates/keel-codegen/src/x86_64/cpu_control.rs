@@ -74,6 +74,9 @@ impl FunctionCompiler<'_> {
                 self.emit(Opcode::Shr, [asm_arg(r64(S2)), asm_arg(32)]);
                 self.emit(Opcode::parse("wrmsr").unwrap(), []);
             }
+            Intrinsic::X86Clts => self.emit(Opcode::parse("clts").unwrap(), []),
+            Intrinsic::X86Invd => self.emit(Opcode::parse("invd").unwrap(), []),
+            Intrinsic::X86Wbinvd => self.emit(Opcode::parse("wbinvd").unwrap(), []),
             Intrinsic::X86Lfence => self.emit(Opcode::Lfence, []),
             Intrinsic::X86Sfence => self.emit(Opcode::Sfence, []),
             Intrinsic::X86Mfence => self.emit(Opcode::Mfence, []),

@@ -1,0 +1,34 @@
+func @cpu_control(ptr,i64,i64,i64,i64,i64,i64,i64,i64) {
+entry(v0:ptr,v1:i64,v2:i64,v3:i64,v4:i64,v5:i64,v6:i64,v7:i64,v8:i64):
+ v9 = iconst.i64 8
+ v10 = ptradd v0,v9
+ store align 1 v1,v10
+ intrinsic x86_clts()
+ intrinsic x86_wbinvd()
+ intrinsic x86_invd()
+ v11 = iconst.i64 16
+ v12 = ptradd v0,v11
+ store align 1 v1,v12
+ v13 = iconst.i64 24
+ v14 = ptradd v0,v13
+ store align 1 v2,v14
+ v15 = iconst.i64 32
+ v16 = ptradd v0,v15
+ store align 1 v3,v16
+ v17 = iconst.i64 40
+ v18 = ptradd v0,v17
+ store align 1 v4,v18
+ v19 = iconst.i64 48
+ v20 = ptradd v0,v19
+ store align 1 v5,v20
+ v21 = iconst.i64 56
+ v22 = ptradd v0,v21
+ store align 1 v6,v22
+ v23 = iconst.i64 64
+ v24 = ptradd v0,v23
+ store align 1 v7,v24
+ v25 = iconst.i64 72
+ v26 = ptradd v0,v25
+ store align 1 v8,v26
+ return
+}

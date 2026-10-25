@@ -907,6 +907,10 @@ pub enum Intrinsic {
     // Raw privileged MSR access, append-only IDs 776..777.
     X86Rdmsr,
     X86Wrmsr,
+    // Baseline privileged CPU/cache control, append-only IDs 778..780.
+    X86Clts,
+    X86Invd,
+    X86Wbinvd,
 }
 
 pub struct IntrinsicInfo {
@@ -918,7 +922,7 @@ pub struct IntrinsicInfo {
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 778] = [
+    pub const ALL: [Intrinsic; 781] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -1697,6 +1701,9 @@ impl Intrinsic {
         Intrinsic::X86Lidt,
         Intrinsic::X86Rdmsr,
         Intrinsic::X86Wrmsr,
+        Intrinsic::X86Clts,
+        Intrinsic::X86Invd,
+        Intrinsic::X86Wbinvd,
     ];
 
     pub fn info(self) -> IntrinsicInfo {
@@ -1784,6 +1791,9 @@ impl Intrinsic {
             Intrinsic::X86RepOuts8OwnedTerminal => ("x86_rep_outs8_owned_terminal", &[Type::I64, Type::I16, Type::Ptr, Type::I64], &[Type::Ptr, Type::I64, Type::I64, Type::I64], false),
             Intrinsic::X86RepOuts16OwnedTerminal => ("x86_rep_outs16_owned_terminal", &[Type::I64, Type::I16, Type::Ptr, Type::I64], &[Type::Ptr, Type::I64, Type::I64, Type::I64], false),
             Intrinsic::X86RepOuts32OwnedTerminal => ("x86_rep_outs32_owned_terminal", &[Type::I64, Type::I16, Type::Ptr, Type::I64], &[Type::Ptr, Type::I64, Type::I64, Type::I64], false),
+            Intrinsic::X86Clts => ("x86_clts", &[], &[], false),
+            Intrinsic::X86Invd => ("x86_invd", &[], &[], false),
+            Intrinsic::X86Wbinvd => ("x86_wbinvd", &[], &[], false),
             Intrinsic::X86Rdmsr => ("x86_rdmsr", &[Type::I32], &[Type::I64], false),
             Intrinsic::X86Wrmsr => ("x86_wrmsr", &[Type::I32, Type::I64], &[], false),
             Intrinsic::X86Rdpmc => ("x86_rdpmc", &[Type::I32], &[Type::I64], false),
@@ -7125,6 +7135,9 @@ impl Intrinsic {
                 | Self::X86Rdpmc
                 | Self::X86Rdmsr
                 | Self::X86Wrmsr
+                | Self::X86Clts
+                | Self::X86Invd
+                | Self::X86Wbinvd
                 | Self::X86Lfence
                 | Self::X86Sfence
                 | Self::X86Mfence

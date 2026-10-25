@@ -21,6 +21,8 @@ def main():
                        help='validate all twelve SLDT/STR/SMSW forms')
     modes.add_argument('--msr', action='store_true',
                        help='validate typed RDMSR/WRMSR and live inputs')
+    modes.add_argument('--cpu-control', action='store_true',
+                       help='validate CLTS state and emulated cache-control execution')
     parser.add_argument('--qemu', default='qemu-system-x86_64')
     parser.add_argument('--as', dest='assembler', default='as')
     parser.add_argument('--ld', dest='linker', default='ld')
@@ -29,7 +31,7 @@ def main():
     args = parser.parse_args()
     if not 0 < args.timeout <= 30:
         parser.error('timeout must be positive and at most 30 seconds')
-    prefix = ('msr' if args.msr else 'descriptor-status' if args.status else
+    prefix = ('cpu-control' if args.cpu_control else 'msr' if args.msr else 'descriptor-status' if args.status else
               'descriptor-load' if args.table_loads else 'descriptor')
     names = [f'{prefix}-{s}-{a}-{spill}.o'
              for s in ('Baseline', 'Trees', 'Full')
@@ -44,14 +46,14 @@ def main():
     print(json.dumps(dict(artifacts=str(work))), flush=True)
     bridge = work / 'bridge.o'
     defines = ['--defsym', 'KEEL_TABLE_LOADS=1'] if args.table_loads else []
-    bridge_source = ('msr_bridge.S' if args.msr else
+    bridge_source = ('cpu_control_bridge.S' if args.cpu_control else 'msr_bridge.S' if args.msr else
                      'descriptor_status_bridge.S' if args.status else 'descriptor_bridge.S')
     run.checked([assembler, '--64', *defines, '-o', str(bridge),
                  str(run.HERE / 'cases' / bridge_source)])
     cases = [(name, args.exports / name, False) for name in names]
     # Controls must return normally with incorrect state or output. A fault
     # or timeout cannot satisfy the expected FAIL transcript and exit status.
-    if args.status or args.msr:
+    if args.status or args.msr or args.cpu_control:
         controls = (
             ('reference', None),
             ('omitted-write', 'KEEL_OMIT_WRITE'),
@@ -64,15 +66,26 @@ def main():
                 ('wide-memory', 'KEEL_WIDE_MEMORY'),
                 ('narrow-smsw', 'KEEL_NARROW_SMSW'),
                 ('clobbered-old', 'KEEL_CLOBBER_OLD'))
-        reference = 'msr_reference.S' if args.msr else 'descriptor_status_reference.S'
-        for name, define in controls:
+        controls = [(name, define, define is not None) for name, define in controls]
+        if args.cpu_control:
+            controls = [
+                ('reference', None, False),
+                ('cache-omitted', 'KEEL_OMIT_CACHE', False),
+                ('omitted-clts', 'KEEL_OMIT_CLTS', True),
+                ('altered-cr0', 'KEEL_ALTER_CR0', True),
+                ('clobbered-live', 'KEEL_CLOBBER_LIVE', True),
+            ]
+        reference = ('cpu_control_reference.S' if args.cpu_control else
+                     'msr_reference.S' if args.msr else 'descriptor_status_reference.S')
+        for name, define, negative in controls:
             obj = work / f'{name}.o'
             defines = ['--defsym', f'{define}=1'] if define else []
             run.checked([assembler, '--64', *defines, '-o', str(obj),
                          str(run.HERE / 'cases' / reference)])
-            cases.append((name, obj, define is not None))
+            cases.append((name, obj, negative))
         source, obj = work / 'no-observation.S', work / 'no-observation.o'
-        symbol = 'msr_observe' if args.msr else 'descriptor_status'
+        symbol = ('cpu_control' if args.cpu_control else
+                  'msr_observe' if args.msr else 'descriptor_status')
         source.write_text(f'.text\n.code64\n.global {symbol}\n'
                           f'{symbol}:\nret\n'
                           '.section .note.GNU-stack,"",@progbits\n')
