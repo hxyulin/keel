@@ -210,3 +210,10 @@ expected verdicts using fresh exports. The full workspace run passes with
 2,666 tests, zero failures and 13 ignored across 485 groups. This run precedes
 the later register-schema import; it does not complete the remaining entry,
 return, segment and system-state contracts.
+
+After register-schema import `b26ba773`, targeted integration checks pass:
+workspace compile check, 444 assembler-IR/assembler/disassembler tests,
+28 focused codegen tests, 33 generator/pilot tests, both freshness checks
+and 15 runner/evidence tests. All 110 fresh guest objects are byte-for-byte
+identical to those qualified by the 155 expected verdicts. The full workspace
+result above remains scoped to the source before this import.

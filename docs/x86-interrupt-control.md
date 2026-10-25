@@ -97,3 +97,10 @@ none fail and 13 are ignored across 485 reported groups. Fresh exports pass
 all 155 expected verdicts across nine CPL0 campaigns. Both generator freshness
 checks, 25 generator/pilot tests and all 15 runner/evidence unit tests pass.
 This full run precedes the later register-schema import.
+
+The register schema is subsequently imported as `b26ba773`. Post-import
+checks pass the workspace compile check, all 444 assembler-IR/assembler/
+disassembler tests, 28 focused codegen tests, 33 generator/pilot tests, both
+freshness checks and all 15 runner/evidence tests. All 110 generated guest
+objects were freshly rewritten and retain the exact bytes qualified by the
+155-verdict run. The full workspace count above precedes this schema import.
