@@ -1,9 +1,9 @@
 //! ELF group selection, shared by archive demand and the image reader.
 //! Signatures name groups independently of symbol binding or resolution.
 use crate::Result;
+use bbtree::unsync::{BBTreeMap as BTreeMap, BBTreeSet as BTreeSet};
 use object::read::elf::{ElfFile64, SectionHeader};
 use object::{Object, ObjectSection, ObjectSymbol, RelocationTarget, SymbolSection};
-use std::collections::{BTreeMap, BTreeSet};
 
 type File<'a> = ElfFile64<'a, object::Endianness>;
 #[derive(Default)]

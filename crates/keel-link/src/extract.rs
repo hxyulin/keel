@@ -1,6 +1,6 @@
 //! Fixed-point Mach-O archive extraction over eagerly validated members.
 use crate::read::{Object, Symbol};
-use std::collections::{BTreeMap, BTreeSet};
+use bbtree::unsync::{BBTreeMap as BTreeMap, BBTreeSet as BTreeSet};
 
 fn definition(s: &Symbol) -> bool {
     s.kind & 1 != 0 && s.kind & 0xe != 0

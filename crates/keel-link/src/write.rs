@@ -1092,7 +1092,8 @@ impl Linker {
     fn exports(&self) -> Result<Vec<u8>> {
         #[derive(Default)]
         struct Node {
-            edges: BTreeMap<u8, usize>,
+            // Most trie nodes have one edge. Keep std's smaller allocations.
+            edges: std::collections::BTreeMap<u8, usize>,
             terminal: Vec<u8>,
         }
         let mut nodes = vec![Node::default()];
@@ -1241,8 +1242,8 @@ mod tests {
                 Options {
                     dylibs: vec![Dylib {
                         install_name: "/usr/lib/libSystem.B.dylib".into(),
-                        exports: BTreeSet::new(),
-                        weak_exports: BTreeSet::new(),
+                        exports: std::collections::BTreeSet::new(),
+                        weak_exports: std::collections::BTreeSet::new(),
                     }],
                     ..Options::default()
                 },

@@ -1,7 +1,7 @@
 //! Registration-table boundaries without merging input section identities.
 use super::{Result, Section, Unit};
+use bbtree::unsync::{BBTreeMap as BTreeMap, BBTreeSet as BTreeSet};
 use object::SymbolSection;
-use std::collections::{BTreeMap, BTreeSet};
 
 fn identifier(name: &str) -> bool {
     let mut bytes = name.bytes();

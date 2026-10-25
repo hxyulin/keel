@@ -1,9 +1,9 @@
 //! Shared-library interfaces and eagerly bound dynamic executable metadata.
 use super::{BASE, Section, lifecycle, put16, put32, put64, string};
 use crate::Result;
+use bbtree::unsync::{BBTreeMap as BTreeMap, BBTreeSet as BTreeSet};
 use object::read::elf::{Dyn, ElfFile64, FileHeader, ProgramHeader, SectionHeader};
 use object::{Object, ObjectSection, ObjectSymbol, SymbolFlags};
-use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct Export<'data> {
@@ -523,7 +523,7 @@ impl Dynamic {
         let version_libraries = version_indices
             .keys()
             .map(|(l, _)| *l)
-            .collect::<std::collections::BTreeSet<_>>();
+            .collect::<bbtree::unsync::BBTreeSet<_>>();
         let verneed_size = version_libraries.len() * 16 + version_indices.len() * 16;
         let verneed = add(
             ".gnu.version_r",
@@ -679,7 +679,7 @@ impl Dynamic {
             .version_indices
             .keys()
             .map(|(l, _)| *l)
-            .collect::<std::collections::BTreeSet<_>>();
+            .collect::<bbtree::unsync::BBTreeSet<_>>();
         let mut cursor = at(self.verneed);
         for (gi, lib) in groups.iter().enumerate() {
             let entries = self

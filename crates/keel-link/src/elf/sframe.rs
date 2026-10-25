@@ -3,8 +3,8 @@
 //! GC filters and orders records before layout; non-GC preserves the input order.
 use super::{BASE, LIMIT, Section, Unit};
 use crate::Result;
+use bbtree::unsync::{BBTreeMap as BTreeMap, BBTreeSet as BTreeSet};
 use object::SymbolSection;
-use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) const SHT_GNU_SFRAME: u32 = 0x6fff_fff4;
 pub(super) const PT_GNU_SFRAME: u32 = 0x6474_e554;
