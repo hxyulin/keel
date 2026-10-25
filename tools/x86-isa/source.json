@@ -1,0 +1,30 @@
+{
+  "project": "Intel XED",
+  "commit": "0bcb6237345c5066726dcc08b3d87928df3b5b26",
+  "path": "datafiles/xed-isa.txt",
+  "url": "https://raw.githubusercontent.com/intelxed/xed/0bcb6237345c5066726dcc08b3d87928df3b5b26/datafiles/xed-isa.txt",
+  "upstream_sha256": "adbe3296bbd4d079c2987711e0e5fc6bc4a27daca59112fa3d8312b8459e17c3",
+  "subset_sha256": "5b6436e634b1aeb7bfea95c58507f5280a4c0f0b457ca54f79a362f30dd93a98",
+  "selection": [
+    "CLI",
+    "CLTS",
+    "HLT",
+    "INVD",
+    "INVLPG",
+    "LGDT",
+    "LIDT",
+    "LLDT",
+    "LMSW",
+    "LTR",
+    "MOV_CR",
+    "MOV_DR",
+    "RDMSR",
+    "SGDT",
+    "SIDT",
+    "SMSW",
+    "STI",
+    "SWAPGS",
+    "WBINVD",
+    "WRMSR"
+  ]
+}

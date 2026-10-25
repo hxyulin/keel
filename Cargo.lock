@@ -352,6 +352,7 @@ dependencies = [
  "keel-asm",
  "keel-c",
  "keel-codegen",
+ "keel-disasm",
  "keel-ir",
  "keel-link",
  "keel-opt",
@@ -416,6 +417,13 @@ dependencies = [
  "keel-opt",
  "object",
  "profiling",
+]
+
+[[package]]
+name = "keel-disasm"
+version = "0.1.0"
+dependencies = [
+ "keel-asm",
 ]
 
 [[package]]

@@ -1,0 +1,9 @@
+[package]
+name = "keel-disasm"
+description = "Native AArch64 byte decoding and bounded assembly formatting"
+version.workspace = true
+edition.workspace = true
+license = "(MIT OR Apache-2.0) AND BSD-3-Clause"
+
+[dev-dependencies]
+keel-asm = { path = "../keel-asm" }
