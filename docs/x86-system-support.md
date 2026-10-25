@@ -188,3 +188,10 @@ independent guest state/liveness fixture pass. All eight CPL0 campaigns pass
 The full workspace run passes with 2,658 tests, zero failures and 13 ignored
 across 483 reported groups. This run includes optional-extension adapters and
 precedes the later feature-field and baseline/x87 identity refactors.
+
+The later feature-field and baseline/x87 identity refactors merge cleanly.
+Post-import validation passes the workspace compile check, all 440
+assembler-IR/assembler/disassembler tests, 26 focused codegen tests, 25 Python
+generator tests and both freshness checks. All 98 freshly regenerated guest
+objects retain the exact bytes qualified by the 137-verdict campaign run.
+The full workspace count above precedes these two refactors.

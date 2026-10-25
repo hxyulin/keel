@@ -81,3 +81,11 @@ pass all 137 expected guest verdicts across the eight CPL0 campaigns. Generator
 freshness, all 16 generator/pilot tests and the ten runner unit tests pass.
 This full run includes the optional-extension import but precedes the later
 feature-field and baseline/x87 identity boilerplate refactors.
+
+After importing the feature-field and baseline/x87 identity refactors as
+`021a6a6c` and `cf562b1b`, the workspace compile check, all 440
+assembler-IR/assembler/disassembler tests, 26 focused codegen tests, 25
+Python generator tests and both generator freshness checks pass. All 98
+freshly rewritten generated guest objects are byte-for-byte identical to
+the objects qualified by the 137 expected verdicts above. The full workspace
+result remains scoped to the source before these two refactors.
