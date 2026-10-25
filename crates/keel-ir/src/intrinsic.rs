@@ -904,6 +904,9 @@ pub enum Intrinsic {
     // Privileged long-mode descriptor-table loads, append-only IDs 774..775.
     X86Lgdt,
     X86Lidt,
+    // Raw privileged MSR access, append-only IDs 776..777.
+    X86Rdmsr,
+    X86Wrmsr,
 }
 
 pub struct IntrinsicInfo {
@@ -915,7 +918,7 @@ pub struct IntrinsicInfo {
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 776] = [
+    pub const ALL: [Intrinsic; 778] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -1692,6 +1695,8 @@ impl Intrinsic {
         Intrinsic::X86Aeskeygenassist128,
         Intrinsic::X86Lgdt,
         Intrinsic::X86Lidt,
+        Intrinsic::X86Rdmsr,
+        Intrinsic::X86Wrmsr,
     ];
 
     pub fn info(self) -> IntrinsicInfo {
@@ -1779,6 +1784,8 @@ impl Intrinsic {
             Intrinsic::X86RepOuts8OwnedTerminal => ("x86_rep_outs8_owned_terminal", &[Type::I64, Type::I16, Type::Ptr, Type::I64], &[Type::Ptr, Type::I64, Type::I64, Type::I64], false),
             Intrinsic::X86RepOuts16OwnedTerminal => ("x86_rep_outs16_owned_terminal", &[Type::I64, Type::I16, Type::Ptr, Type::I64], &[Type::Ptr, Type::I64, Type::I64, Type::I64], false),
             Intrinsic::X86RepOuts32OwnedTerminal => ("x86_rep_outs32_owned_terminal", &[Type::I64, Type::I16, Type::Ptr, Type::I64], &[Type::Ptr, Type::I64, Type::I64, Type::I64], false),
+            Intrinsic::X86Rdmsr => ("x86_rdmsr", &[Type::I32], &[Type::I64], false),
+            Intrinsic::X86Wrmsr => ("x86_wrmsr", &[Type::I32, Type::I64], &[], false),
             Intrinsic::X86Rdpmc => ("x86_rdpmc", &[Type::I32], &[Type::I64], false),
             Intrinsic::X86X87Ffree0 => ("x86_x87_ffree0", &[], &[], false),
             Intrinsic::X86X87Ffree1 => ("x86_x87_ffree1", &[], &[], false),
@@ -7116,6 +7123,8 @@ impl Intrinsic {
                 | Self::X86Cpuid
                 | Self::X86Rdtsc
                 | Self::X86Rdpmc
+                | Self::X86Rdmsr
+                | Self::X86Wrmsr
                 | Self::X86Lfence
                 | Self::X86Sfence
                 | Self::X86Mfence

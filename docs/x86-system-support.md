@@ -12,8 +12,8 @@ SGDT, SIDT, SLDT, STR and SMSW have typed observation APIs and assembler
 encodings. Disposable CPL0 campaigns cover SGDT/SIDT and the twelve
 SLDT/STR/SMSW forms with known selectors, two CR0 values and two old register
 containers. See [descriptor/status observations](x86-descriptor-queries.md).
-LAR, LSL, VERR and VERW have typed descriptor-query APIs. Scalar and string port I/O have typed
-APIs, with their own permission and FLAGS contracts.
+LAR, LSL, VERR and VERW have typed descriptor-query APIs. Scalar and string
+port I/O have typed APIs, with their own permission and FLAGS contracts.
 
 LGDT and LIDT now have assembler encodings and pinned typed APIs:
 `x86_lgdt(ptr)` and `x86_lidt(ptr)`. Each reads one packed ten-byte image:
@@ -30,8 +30,12 @@ The tables and execution environment must permit all subsequent generated
 code, stack accesses and returns. These APIs do not provide a boot protocol,
 interrupt handler ABI or arbitrary execution-mode transition.
 
-CLI, STI, HLT, CLTS, INVD, WBINVD, RDMSR, WRMSR, SWAPGS, IRET and SYSRET have
-assembler encodings, but no typed system-state/transition contract. An
+RDMSR and WRMSR have pinned typed APIs with explicit CPL0 and model-specific
+preconditions, register-liveness checks and a two-index disposable guest
+campaign. See [raw MSR access](x86-msr.md).
+
+CLI, STI, HLT, CLTS, INVD, WBINVD, SWAPGS, IRET and SYSRET have assembler
+encodings, but no typed system-state/transition contract. An
 assembler encoding alone is not evidence of working kernel code generation.
 
 ## Remaining baseline work
@@ -44,11 +48,14 @@ assembler encoding alone is not evidence of working kernel code generation.
 - Add INVLPG and qualify address translation/cache operations in disposable
   guests. Define the distinction between compiler barriers and hardware
   invalidation, including local-CPU scope.
-- Add typed MSR and CPU-control operations, with fixed-register liveness tests
-  and explicit model/permission preconditions.
+- Add typed CPU-control operations for the remaining baseline fixed opcodes,
+  with state and control-flow contracts. The existing typed MSR operations
+  retain explicit model/permission preconditions.
 - Define entry/return, segment state and physical stack/frame ownership for
-  SWAPGS, IRET, SYSRET and related transitions. Ordinary function returns do
-  not establish these contracts.
+  SWAPGS, IRET, SYSCALL/SYSRET, SYSENTER/SYSEXIT, far transfers and segment
+  loads. Preserve CPU/mode preconditions rather than treating v1 as a generic
+  permission or transition ABI. RSM also needs its SMM saved-state contract;
+  an ordinary function return does not implement these transitions.
 - Extend guest validation to LAR/LSL/VERR/VERW and string I/O. Keep known raw
   FLAGS/x87 and saved-context limits visible. SLDT/STR/SMSW now have bounded
   CPL0 checks, including all operand sizes, memory canaries and old-value

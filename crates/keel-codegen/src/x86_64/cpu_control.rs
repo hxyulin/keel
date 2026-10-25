@@ -28,16 +28,21 @@ impl FunctionCompiler<'_> {
                 self.emit(Opcode::Mov, [asm_arg(r64(3)), asm_arg(save)]);
                 self.pair_out(result);
             }
-            Intrinsic::X86Rdtsc | Intrinsic::X86Xgetbv0 | Intrinsic::X86Rdpmc => {
+            Intrinsic::X86Rdtsc
+            | Intrinsic::X86Xgetbv0
+            | Intrinsic::X86Rdpmc
+            | Intrinsic::X86Rdmsr => {
                 if id == Intrinsic::X86Xgetbv0 {
                     self.emit(Opcode::Xor, [asm_arg(r32(S1)), asm_arg(r32(S1))]);
                 }
-                if id == Intrinsic::X86Rdpmc {
+                if matches!(id, Intrinsic::X86Rdpmc | Intrinsic::X86Rdmsr) {
                     let index = self.use_reg(args[0], S1);
                     self.emit(Opcode::Mov, [asm_arg(r32(S1)), asm_arg(r32(index))]);
                 }
                 self.emit(
-                    Opcode::parse(if id == Intrinsic::X86Rdpmc {
+                    Opcode::parse(if id == Intrinsic::X86Rdmsr {
+                        "rdmsr"
+                    } else if id == Intrinsic::X86Rdpmc {
                         "rdpmc"
                     } else if id == Intrinsic::X86Xgetbv0 {
                         "xgetbv"
@@ -54,6 +59,20 @@ impl FunctionCompiler<'_> {
                     self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(S0))]);
                 }
                 self.def_done(result, d);
+            }
+            Intrinsic::X86Wrmsr => {
+                // RAX, RCX and RDX are reserved scratch registers. Capture the
+                // index and full SSA value before splitting EDX:EAX; neither
+                // input's allocated home is modified by the hardware access.
+                let index = self.use_reg(args[0], S1);
+                self.emit(Opcode::Mov, [asm_arg(r32(S1)), asm_arg(r32(index))]);
+                let value = self.use_reg(args[1], S0);
+                if value != S0 {
+                    self.emit(Opcode::Mov, [asm_arg(r64(S0)), asm_arg(r64(value))]);
+                }
+                self.emit(Opcode::Mov, [asm_arg(r64(S2)), asm_arg(r64(S0))]);
+                self.emit(Opcode::Shr, [asm_arg(r64(S2)), asm_arg(32)]);
+                self.emit(Opcode::parse("wrmsr").unwrap(), []);
             }
             Intrinsic::X86Lfence => self.emit(Opcode::Lfence, []),
             Intrinsic::X86Sfence => self.emit(Opcode::Sfence, []),

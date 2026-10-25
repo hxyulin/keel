@@ -178,3 +178,28 @@ campaign. `--status` and `--table-loads` are mutually exclusive.
 All eighteen verdicts match under QEMU 11.1.2 TCG on macOS ARM64. See
 [descriptor/status observations](../../docs/x86-descriptor-queries.md#cpl0-selectorstatus-fixture)
 for constants, memory layout and the limits of this emulated evidence.
+
+## MSR campaign
+
+```sh
+KEEL_MSR_EXPORT_DIR="$PWD/target/msr-exports" \
+  cargo test -p keel-codegen --test x86_msr
+python3 suite/x86-cpl0/descriptor_campaign.py --msr \
+  --exports target/msr-exports --timeout 5
+```
+
+This mode requires twelve standard explicit-v1 MSR exports and one forced
+rematerialization export. The bridge checks
+reads and writes of two canonical GS-base MSRs, original input liveness,
+eight additional live values, incoming stack arguments and output canaries.
+A separate constant-index/value function checks constant operands and its
+returned result. The bridge independently checks post-write MSR state and restores both original MSRs
+on normal success or mismatch. The fixture uses no GS-relative accesses or
+SWAPGS. It does not recover from faults.
+
+All thirteen generated variants and an independent assembly reference pass
+under QEMU 11.1.2 TCG on macOS ARM64. Five broken controls must return the
+exact READY/FAIL transcript and exit 35: omitted write, narrow read, wrong
+index, clobbered live value and no observations. All five fail as expected.
+The other campaign modes are mutually exclusive with `--msr`. See
+[raw MSR access](../../docs/x86-msr.md) for the API contract and evidence limits.

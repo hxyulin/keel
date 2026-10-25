@@ -6,7 +6,9 @@ NEON on AArch64. Baseline privileged-instruction support is an active
 
 The [x86-64 psABI feature levels](https://gitlab.com/x86-psABIs/x86-64-ABI/-/raw/master/x86-64-ABI/low-level-sys-info.tex)
 are cumulative CPU/OS capability groups. Userspace code relies on the OS to
-enable the required state; Keel does not write CR4/MSRs. AVX additionally
+enable the required state. Ordinary userspace lowering does not configure
+CR4/MSRs; [explicit privileged MSR APIs](x86-msr.md) are a separate contract.
+AVX additionally
 requires the normal OSXSAVE/XCR0 availability contract.
 
 ## At a glance

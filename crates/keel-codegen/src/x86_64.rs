@@ -2644,6 +2644,8 @@ impl<'a> FunctionCompiler<'a> {
                     | Intrinsic::X86Cpuid
                     | Intrinsic::X86Rdtsc
                     | Intrinsic::X86Rdpmc
+                    | Intrinsic::X86Rdmsr
+                    | Intrinsic::X86Wrmsr
                     | Intrinsic::X86Lfence
                     | Intrinsic::X86Sfence
                     | Intrinsic::X86Mfence
@@ -3570,6 +3572,8 @@ impl<'a> FunctionCompiler<'a> {
                 | Intrinsic::X86Cpuid
                 | Intrinsic::X86Rdtsc
                 | Intrinsic::X86Rdpmc
+                | Intrinsic::X86Rdmsr
+                | Intrinsic::X86Wrmsr
                 | Intrinsic::X86X87Ffree0
                 | Intrinsic::X86X87Ffree1
                 | Intrinsic::X86X87Ffree2
