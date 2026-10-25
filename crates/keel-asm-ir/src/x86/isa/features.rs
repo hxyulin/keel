@@ -1,5 +1,5 @@
 // Generated ISA requirements and Keel profile policy; do not edit.
-use crate::x86::{CoreOpcode, Features, Opcode, V2Opcode, V3Opcode};
+use crate::x86::{CoreOpcode, ExtensionOpcode, Features, Opcode, V2Opcode, V3Opcode};
 #[rustfmt::skip]
 pub fn opcode_features(op: Opcode) -> Features { match op {
 Opcode::Pclmulqdq => Features { pclmulqdq: true, ..Features::NONE },
@@ -467,6 +467,22 @@ Opcode::V2(V2Opcode::Cmpxchg16b) => Features { cx16: true, ..Features::NONE },
 Opcode::V2(V2Opcode::Lahf) => Features { lahf_sahf: true, ..Features::NONE },
 Opcode::V2(V2Opcode::Sahf) => Features { lahf_sahf: true, ..Features::NONE },
 Opcode::Core(CoreOpcode::Clflush) => Features { clflush: true, ..Features::NONE },
+Opcode::Extension(ExtensionOpcode::Adcx) => Features { adx: true, ..Features::NONE },
+Opcode::Extension(ExtensionOpcode::Adox) => Features { adx: true, ..Features::NONE },
+Opcode::Extension(ExtensionOpcode::Sha1msg1) => Features { sha: true, ..Features::NONE },
+Opcode::Extension(ExtensionOpcode::Sha1msg2) => Features { sha: true, ..Features::NONE },
+Opcode::Extension(ExtensionOpcode::Sha1nexte) => Features { sha: true, ..Features::NONE },
+Opcode::Extension(ExtensionOpcode::Sha1rnds4) => Features { sha: true, ..Features::NONE },
+Opcode::Extension(ExtensionOpcode::Sha256msg1) => Features { sha: true, ..Features::NONE },
+Opcode::Extension(ExtensionOpcode::Sha256msg2) => Features { sha: true, ..Features::NONE },
+Opcode::Extension(ExtensionOpcode::Sha256rnds2) => Features { sha: true, ..Features::NONE },
+Opcode::Extension(ExtensionOpcode::Vaesenc) => Features { avx: true, aes: true, ..Features::NONE },
+Opcode::Extension(ExtensionOpcode::Vaesenclast) => Features { avx: true, aes: true, ..Features::NONE },
+Opcode::Extension(ExtensionOpcode::Vaesdec) => Features { avx: true, aes: true, ..Features::NONE },
+Opcode::Extension(ExtensionOpcode::Vaesdeclast) => Features { avx: true, aes: true, ..Features::NONE },
+Opcode::Extension(ExtensionOpcode::Vaesimc) => Features { avx: true, aes: true, ..Features::NONE },
+Opcode::Extension(ExtensionOpcode::Vaeskeygenassist) => Features { avx: true, aes: true, ..Features::NONE },
+Opcode::Extension(ExtensionOpcode::Vpclmulqdq) => Features { avx: true, pclmulqdq: true, ..Features::NONE },
 _ => Features::NONE,
 } }
 #[rustfmt::skip]
@@ -493,5 +509,11 @@ pub fn feature_policy(isa: &str) -> Features { match isa {
 "CMPXCHG16B" => Features { cx16: true, ..Features::NONE },
 "LAHF" => Features { lahf_sahf: true, ..Features::NONE },
 "CLFSH" => Features { clflush: true, ..Features::NONE },
+"ADOX_ADCX" => Features { adx: true, ..Features::NONE },
+"SHA" => Features { sha: true, ..Features::NONE },
+"AVXAES" => Features { avx: true, aes: true, ..Features::NONE },
+"VAES" => Features { avx: true, vaes: true, ..Features::NONE },
+"VPCLMULQDQ" => Features { avx: true, vpclmulqdq: true, ..Features::NONE },
+"AVX_PCLMULQDQ" => Features { avx: true, pclmulqdq: true, ..Features::NONE },
 _ => Features::NONE,
 } }

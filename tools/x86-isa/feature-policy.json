@@ -90,5 +90,27 @@
   "SSEMXCSR": [],
   "SSE_PREFETCH": [],
   "X87": [],
-  "KNC_MISC": null
+  "KNC_MISC": null,
+  "ADOX_ADCX": [
+    "adx"
+  ],
+  "SHA": [
+    "sha"
+  ],
+  "AVXAES": [
+    "avx",
+    "aes"
+  ],
+  "VAES": [
+    "avx",
+    "vaes"
+  ],
+  "VPCLMULQDQ": [
+    "avx",
+    "vpclmulqdq"
+  ],
+  "AVX_PCLMULQDQ": [
+    "avx",
+    "pclmulqdq"
+  ]
 }

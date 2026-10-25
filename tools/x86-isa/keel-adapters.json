@@ -6715,5 +6715,2402 @@
       "opcode": "Opcode::Core(CoreOpcode::Clflush)",
       "source_mnemonic": "clflush"
     }
+  ],
+  "identities": {
+    "v2": [
+      {
+        "variant": "PextrwSse4",
+        "mnemonic": "pextrw.s",
+        "aliases": [
+          "pextrw"
+        ]
+      },
+      {
+        "variant": "Pcmpestri64",
+        "mnemonic": "pcmpestri64",
+        "aliases": [
+          "pcmpestriq"
+        ]
+      },
+      {
+        "variant": "Pcmpestrm64",
+        "mnemonic": "pcmpestrm64",
+        "aliases": [
+          "pcmpestrmq"
+        ]
+      },
+      {
+        "variant": "Pcmpistri64",
+        "mnemonic": "pcmpistri64",
+        "aliases": [
+          "pcmpistriq"
+        ]
+      },
+      {
+        "variant": "Pcmpistrm64",
+        "mnemonic": "pcmpistrm64",
+        "aliases": [
+          "pcmpistrmq"
+        ]
+      },
+      {
+        "variant": "Addsubpd",
+        "mnemonic": "addsubpd",
+        "aliases": []
+      },
+      {
+        "variant": "Addsubps",
+        "mnemonic": "addsubps",
+        "aliases": []
+      },
+      {
+        "variant": "Haddpd",
+        "mnemonic": "haddpd",
+        "aliases": []
+      },
+      {
+        "variant": "Haddps",
+        "mnemonic": "haddps",
+        "aliases": []
+      },
+      {
+        "variant": "Hsubpd",
+        "mnemonic": "hsubpd",
+        "aliases": []
+      },
+      {
+        "variant": "Hsubps",
+        "mnemonic": "hsubps",
+        "aliases": []
+      },
+      {
+        "variant": "Movddup",
+        "mnemonic": "movddup",
+        "aliases": []
+      },
+      {
+        "variant": "Movsldup",
+        "mnemonic": "movsldup",
+        "aliases": []
+      },
+      {
+        "variant": "Movshdup",
+        "mnemonic": "movshdup",
+        "aliases": []
+      },
+      {
+        "variant": "Lddqu",
+        "mnemonic": "lddqu",
+        "aliases": []
+      },
+      {
+        "variant": "Fisttp",
+        "mnemonic": "fisttp",
+        "aliases": []
+      },
+      {
+        "variant": "Pshufb",
+        "mnemonic": "pshufb",
+        "aliases": []
+      },
+      {
+        "variant": "Phaddw",
+        "mnemonic": "phaddw",
+        "aliases": []
+      },
+      {
+        "variant": "Phaddd",
+        "mnemonic": "phaddd",
+        "aliases": []
+      },
+      {
+        "variant": "Phaddsw",
+        "mnemonic": "phaddsw",
+        "aliases": []
+      },
+      {
+        "variant": "Pmaddubsw",
+        "mnemonic": "pmaddubsw",
+        "aliases": []
+      },
+      {
+        "variant": "Phsubw",
+        "mnemonic": "phsubw",
+        "aliases": []
+      },
+      {
+        "variant": "Phsubd",
+        "mnemonic": "phsubd",
+        "aliases": []
+      },
+      {
+        "variant": "Phsubsw",
+        "mnemonic": "phsubsw",
+        "aliases": []
+      },
+      {
+        "variant": "Psignb",
+        "mnemonic": "psignb",
+        "aliases": []
+      },
+      {
+        "variant": "Psignw",
+        "mnemonic": "psignw",
+        "aliases": []
+      },
+      {
+        "variant": "Psignd",
+        "mnemonic": "psignd",
+        "aliases": []
+      },
+      {
+        "variant": "Pmulhrsw",
+        "mnemonic": "pmulhrsw",
+        "aliases": []
+      },
+      {
+        "variant": "Pabsb",
+        "mnemonic": "pabsb",
+        "aliases": []
+      },
+      {
+        "variant": "Pabsw",
+        "mnemonic": "pabsw",
+        "aliases": []
+      },
+      {
+        "variant": "Pabsd",
+        "mnemonic": "pabsd",
+        "aliases": []
+      },
+      {
+        "variant": "Palignr",
+        "mnemonic": "palignr",
+        "aliases": []
+      },
+      {
+        "variant": "Pminsb",
+        "mnemonic": "pminsb",
+        "aliases": []
+      },
+      {
+        "variant": "Pminsd",
+        "mnemonic": "pminsd",
+        "aliases": []
+      },
+      {
+        "variant": "Pminuw",
+        "mnemonic": "pminuw",
+        "aliases": []
+      },
+      {
+        "variant": "Pminud",
+        "mnemonic": "pminud",
+        "aliases": []
+      },
+      {
+        "variant": "Pmaxsb",
+        "mnemonic": "pmaxsb",
+        "aliases": []
+      },
+      {
+        "variant": "Pmaxsd",
+        "mnemonic": "pmaxsd",
+        "aliases": []
+      },
+      {
+        "variant": "Pmaxuw",
+        "mnemonic": "pmaxuw",
+        "aliases": []
+      },
+      {
+        "variant": "Pmaxud",
+        "mnemonic": "pmaxud",
+        "aliases": []
+      },
+      {
+        "variant": "Pmuldq",
+        "mnemonic": "pmuldq",
+        "aliases": []
+      },
+      {
+        "variant": "Pcmpeqq",
+        "mnemonic": "pcmpeqq",
+        "aliases": []
+      },
+      {
+        "variant": "Packusdw",
+        "mnemonic": "packusdw",
+        "aliases": []
+      },
+      {
+        "variant": "Pmulld",
+        "mnemonic": "pmulld",
+        "aliases": []
+      },
+      {
+        "variant": "Ptest",
+        "mnemonic": "ptest",
+        "aliases": []
+      },
+      {
+        "variant": "Phminposuw",
+        "mnemonic": "phminposuw",
+        "aliases": []
+      },
+      {
+        "variant": "Pmovsxbw",
+        "mnemonic": "pmovsxbw",
+        "aliases": []
+      },
+      {
+        "variant": "Pmovsxbd",
+        "mnemonic": "pmovsxbd",
+        "aliases": []
+      },
+      {
+        "variant": "Pmovsxbq",
+        "mnemonic": "pmovsxbq",
+        "aliases": []
+      },
+      {
+        "variant": "Pmovsxwd",
+        "mnemonic": "pmovsxwd",
+        "aliases": []
+      },
+      {
+        "variant": "Pmovsxwq",
+        "mnemonic": "pmovsxwq",
+        "aliases": []
+      },
+      {
+        "variant": "Pmovsxdq",
+        "mnemonic": "pmovsxdq",
+        "aliases": []
+      },
+      {
+        "variant": "Pmovzxbw",
+        "mnemonic": "pmovzxbw",
+        "aliases": []
+      },
+      {
+        "variant": "Pmovzxbd",
+        "mnemonic": "pmovzxbd",
+        "aliases": []
+      },
+      {
+        "variant": "Pmovzxbq",
+        "mnemonic": "pmovzxbq",
+        "aliases": []
+      },
+      {
+        "variant": "Pmovzxwd",
+        "mnemonic": "pmovzxwd",
+        "aliases": []
+      },
+      {
+        "variant": "Pmovzxwq",
+        "mnemonic": "pmovzxwq",
+        "aliases": []
+      },
+      {
+        "variant": "Pmovzxdq",
+        "mnemonic": "pmovzxdq",
+        "aliases": []
+      },
+      {
+        "variant": "Roundps",
+        "mnemonic": "roundps",
+        "aliases": []
+      },
+      {
+        "variant": "Roundpd",
+        "mnemonic": "roundpd",
+        "aliases": []
+      },
+      {
+        "variant": "Blendps",
+        "mnemonic": "blendps",
+        "aliases": []
+      },
+      {
+        "variant": "Blendpd",
+        "mnemonic": "blendpd",
+        "aliases": []
+      },
+      {
+        "variant": "Pblendw",
+        "mnemonic": "pblendw",
+        "aliases": []
+      },
+      {
+        "variant": "Dpps",
+        "mnemonic": "dpps",
+        "aliases": []
+      },
+      {
+        "variant": "Dppd",
+        "mnemonic": "dppd",
+        "aliases": []
+      },
+      {
+        "variant": "Mpsadbw",
+        "mnemonic": "mpsadbw",
+        "aliases": []
+      },
+      {
+        "variant": "Blendvps",
+        "mnemonic": "blendvps",
+        "aliases": []
+      },
+      {
+        "variant": "Blendvpd",
+        "mnemonic": "blendvpd",
+        "aliases": []
+      },
+      {
+        "variant": "Pblendvb",
+        "mnemonic": "pblendvb",
+        "aliases": []
+      },
+      {
+        "variant": "Movntdqa",
+        "mnemonic": "movntdqa",
+        "aliases": []
+      },
+      {
+        "variant": "Pextrb",
+        "mnemonic": "pextrb",
+        "aliases": []
+      },
+      {
+        "variant": "Pextrd",
+        "mnemonic": "pextrd",
+        "aliases": []
+      },
+      {
+        "variant": "Pextrq",
+        "mnemonic": "pextrq",
+        "aliases": []
+      },
+      {
+        "variant": "Extractps",
+        "mnemonic": "extractps",
+        "aliases": []
+      },
+      {
+        "variant": "Pinsrb",
+        "mnemonic": "pinsrb",
+        "aliases": []
+      },
+      {
+        "variant": "Pinsrd",
+        "mnemonic": "pinsrd",
+        "aliases": []
+      },
+      {
+        "variant": "Pinsrq",
+        "mnemonic": "pinsrq",
+        "aliases": []
+      },
+      {
+        "variant": "Insertps",
+        "mnemonic": "insertps",
+        "aliases": []
+      },
+      {
+        "variant": "Pcmpgtq",
+        "mnemonic": "pcmpgtq",
+        "aliases": []
+      },
+      {
+        "variant": "Pcmpestrm",
+        "mnemonic": "pcmpestrm",
+        "aliases": []
+      },
+      {
+        "variant": "Pcmpestri",
+        "mnemonic": "pcmpestri",
+        "aliases": []
+      },
+      {
+        "variant": "Pcmpistrm",
+        "mnemonic": "pcmpistrm",
+        "aliases": []
+      },
+      {
+        "variant": "Pcmpistri",
+        "mnemonic": "pcmpistri",
+        "aliases": []
+      },
+      {
+        "variant": "Crc32",
+        "mnemonic": "crc32",
+        "aliases": []
+      },
+      {
+        "variant": "Cmpxchg16b",
+        "mnemonic": "cmpxchg16b",
+        "aliases": []
+      },
+      {
+        "variant": "Lahf",
+        "mnemonic": "lahf",
+        "aliases": []
+      },
+      {
+        "variant": "Sahf",
+        "mnemonic": "sahf",
+        "aliases": []
+      },
+      {
+        "variant": "Aesenc",
+        "mnemonic": "aesenc",
+        "aliases": []
+      },
+      {
+        "variant": "Aesenclast",
+        "mnemonic": "aesenclast",
+        "aliases": []
+      },
+      {
+        "variant": "Aesdec",
+        "mnemonic": "aesdec",
+        "aliases": []
+      },
+      {
+        "variant": "Aesdeclast",
+        "mnemonic": "aesdeclast",
+        "aliases": []
+      },
+      {
+        "variant": "Aesimc",
+        "mnemonic": "aesimc",
+        "aliases": []
+      },
+      {
+        "variant": "Aeskeygenassist",
+        "mnemonic": "aeskeygenassist",
+        "aliases": []
+      }
+    ],
+    "v3": [
+      {
+        "variant": "Lzcnt",
+        "mnemonic": "lzcnt",
+        "aliases": []
+      },
+      {
+        "variant": "Movbe",
+        "mnemonic": "movbe",
+        "aliases": []
+      },
+      {
+        "variant": "Vaddsubpd",
+        "mnemonic": "vaddsubpd",
+        "aliases": []
+      },
+      {
+        "variant": "Vaddsubps",
+        "mnemonic": "vaddsubps",
+        "aliases": []
+      },
+      {
+        "variant": "Vandnpd",
+        "mnemonic": "vandnpd",
+        "aliases": []
+      },
+      {
+        "variant": "Vandnps",
+        "mnemonic": "vandnps",
+        "aliases": []
+      },
+      {
+        "variant": "Vblendpd",
+        "mnemonic": "vblendpd",
+        "aliases": []
+      },
+      {
+        "variant": "Vblendps",
+        "mnemonic": "vblendps",
+        "aliases": []
+      },
+      {
+        "variant": "Vblendvpd",
+        "mnemonic": "vblendvpd",
+        "aliases": []
+      },
+      {
+        "variant": "Vblendvps",
+        "mnemonic": "vblendvps",
+        "aliases": []
+      },
+      {
+        "variant": "Vbroadcastf128",
+        "mnemonic": "vbroadcastf128",
+        "aliases": []
+      },
+      {
+        "variant": "Vbroadcasti128",
+        "mnemonic": "vbroadcasti128",
+        "aliases": []
+      },
+      {
+        "variant": "Vbroadcastsd",
+        "mnemonic": "vbroadcastsd",
+        "aliases": []
+      },
+      {
+        "variant": "Vbroadcastss",
+        "mnemonic": "vbroadcastss",
+        "aliases": []
+      },
+      {
+        "variant": "Vcmppd",
+        "mnemonic": "vcmppd",
+        "aliases": []
+      },
+      {
+        "variant": "Vcmpps",
+        "mnemonic": "vcmpps",
+        "aliases": []
+      },
+      {
+        "variant": "Vcmpsd",
+        "mnemonic": "vcmpsd",
+        "aliases": []
+      },
+      {
+        "variant": "Vcmpss",
+        "mnemonic": "vcmpss",
+        "aliases": []
+      },
+      {
+        "variant": "Vcomisd",
+        "mnemonic": "vcomisd",
+        "aliases": []
+      },
+      {
+        "variant": "Vcomiss",
+        "mnemonic": "vcomiss",
+        "aliases": []
+      },
+      {
+        "variant": "Vcvtdq2pd",
+        "mnemonic": "vcvtdq2pd",
+        "aliases": []
+      },
+      {
+        "variant": "Vcvtdq2ps",
+        "mnemonic": "vcvtdq2ps",
+        "aliases": []
+      },
+      {
+        "variant": "Vcvtpd2dq",
+        "mnemonic": "vcvtpd2dq",
+        "aliases": []
+      },
+      {
+        "variant": "Vcvtpd2ps",
+        "mnemonic": "vcvtpd2ps",
+        "aliases": []
+      },
+      {
+        "variant": "Vcvtph2ps",
+        "mnemonic": "vcvtph2ps",
+        "aliases": []
+      },
+      {
+        "variant": "Vcvtps2dq",
+        "mnemonic": "vcvtps2dq",
+        "aliases": []
+      },
+      {
+        "variant": "Vcvtps2pd",
+        "mnemonic": "vcvtps2pd",
+        "aliases": []
+      },
+      {
+        "variant": "Vcvtps2ph",
+        "mnemonic": "vcvtps2ph",
+        "aliases": []
+      },
+      {
+        "variant": "Vcvtsd2si",
+        "mnemonic": "vcvtsd2si",
+        "aliases": []
+      },
+      {
+        "variant": "Vcvtsd2ss",
+        "mnemonic": "vcvtsd2ss",
+        "aliases": []
+      },
+      {
+        "variant": "Vcvtsi2sd",
+        "mnemonic": "vcvtsi2sd",
+        "aliases": []
+      },
+      {
+        "variant": "Vcvtsi2ss",
+        "mnemonic": "vcvtsi2ss",
+        "aliases": []
+      },
+      {
+        "variant": "Vcvtss2sd",
+        "mnemonic": "vcvtss2sd",
+        "aliases": []
+      },
+      {
+        "variant": "Vcvtss2si",
+        "mnemonic": "vcvtss2si",
+        "aliases": []
+      },
+      {
+        "variant": "Vcvttpd2dq",
+        "mnemonic": "vcvttpd2dq",
+        "aliases": []
+      },
+      {
+        "variant": "Vcvttps2dq",
+        "mnemonic": "vcvttps2dq",
+        "aliases": []
+      },
+      {
+        "variant": "Vcvttsd2si",
+        "mnemonic": "vcvttsd2si",
+        "aliases": []
+      },
+      {
+        "variant": "Vcvttss2si",
+        "mnemonic": "vcvttss2si",
+        "aliases": []
+      },
+      {
+        "variant": "Vdppd",
+        "mnemonic": "vdppd",
+        "aliases": []
+      },
+      {
+        "variant": "Vdpps",
+        "mnemonic": "vdpps",
+        "aliases": []
+      },
+      {
+        "variant": "Vextractf128",
+        "mnemonic": "vextractf128",
+        "aliases": []
+      },
+      {
+        "variant": "Vextracti128",
+        "mnemonic": "vextracti128",
+        "aliases": []
+      },
+      {
+        "variant": "Vextractps",
+        "mnemonic": "vextractps",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmadd132pd",
+        "mnemonic": "vfmadd132pd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmadd132ps",
+        "mnemonic": "vfmadd132ps",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmadd132sd",
+        "mnemonic": "vfmadd132sd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmadd132ss",
+        "mnemonic": "vfmadd132ss",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmadd213pd",
+        "mnemonic": "vfmadd213pd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmadd213ps",
+        "mnemonic": "vfmadd213ps",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmadd213sd",
+        "mnemonic": "vfmadd213sd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmadd213ss",
+        "mnemonic": "vfmadd213ss",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmadd231pd",
+        "mnemonic": "vfmadd231pd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmadd231ps",
+        "mnemonic": "vfmadd231ps",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmadd231sd",
+        "mnemonic": "vfmadd231sd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmadd231ss",
+        "mnemonic": "vfmadd231ss",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmaddsub132pd",
+        "mnemonic": "vfmaddsub132pd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmaddsub132ps",
+        "mnemonic": "vfmaddsub132ps",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmaddsub213pd",
+        "mnemonic": "vfmaddsub213pd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmaddsub213ps",
+        "mnemonic": "vfmaddsub213ps",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmaddsub231pd",
+        "mnemonic": "vfmaddsub231pd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmaddsub231ps",
+        "mnemonic": "vfmaddsub231ps",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmsub132pd",
+        "mnemonic": "vfmsub132pd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmsub132ps",
+        "mnemonic": "vfmsub132ps",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmsub132sd",
+        "mnemonic": "vfmsub132sd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmsub132ss",
+        "mnemonic": "vfmsub132ss",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmsub213pd",
+        "mnemonic": "vfmsub213pd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmsub213ps",
+        "mnemonic": "vfmsub213ps",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmsub213sd",
+        "mnemonic": "vfmsub213sd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmsub213ss",
+        "mnemonic": "vfmsub213ss",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmsub231pd",
+        "mnemonic": "vfmsub231pd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmsub231ps",
+        "mnemonic": "vfmsub231ps",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmsub231sd",
+        "mnemonic": "vfmsub231sd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmsub231ss",
+        "mnemonic": "vfmsub231ss",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmsubadd132pd",
+        "mnemonic": "vfmsubadd132pd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmsubadd132ps",
+        "mnemonic": "vfmsubadd132ps",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmsubadd213pd",
+        "mnemonic": "vfmsubadd213pd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmsubadd213ps",
+        "mnemonic": "vfmsubadd213ps",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmsubadd231pd",
+        "mnemonic": "vfmsubadd231pd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfmsubadd231ps",
+        "mnemonic": "vfmsubadd231ps",
+        "aliases": []
+      },
+      {
+        "variant": "Vfnmadd132pd",
+        "mnemonic": "vfnmadd132pd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfnmadd132ps",
+        "mnemonic": "vfnmadd132ps",
+        "aliases": []
+      },
+      {
+        "variant": "Vfnmadd132sd",
+        "mnemonic": "vfnmadd132sd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfnmadd132ss",
+        "mnemonic": "vfnmadd132ss",
+        "aliases": []
+      },
+      {
+        "variant": "Vfnmadd213pd",
+        "mnemonic": "vfnmadd213pd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfnmadd213ps",
+        "mnemonic": "vfnmadd213ps",
+        "aliases": []
+      },
+      {
+        "variant": "Vfnmadd213sd",
+        "mnemonic": "vfnmadd213sd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfnmadd213ss",
+        "mnemonic": "vfnmadd213ss",
+        "aliases": []
+      },
+      {
+        "variant": "Vfnmadd231pd",
+        "mnemonic": "vfnmadd231pd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfnmadd231ps",
+        "mnemonic": "vfnmadd231ps",
+        "aliases": []
+      },
+      {
+        "variant": "Vfnmadd231sd",
+        "mnemonic": "vfnmadd231sd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfnmadd231ss",
+        "mnemonic": "vfnmadd231ss",
+        "aliases": []
+      },
+      {
+        "variant": "Vfnmsub132pd",
+        "mnemonic": "vfnmsub132pd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfnmsub132ps",
+        "mnemonic": "vfnmsub132ps",
+        "aliases": []
+      },
+      {
+        "variant": "Vfnmsub132sd",
+        "mnemonic": "vfnmsub132sd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfnmsub132ss",
+        "mnemonic": "vfnmsub132ss",
+        "aliases": []
+      },
+      {
+        "variant": "Vfnmsub213pd",
+        "mnemonic": "vfnmsub213pd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfnmsub213ps",
+        "mnemonic": "vfnmsub213ps",
+        "aliases": []
+      },
+      {
+        "variant": "Vfnmsub213sd",
+        "mnemonic": "vfnmsub213sd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfnmsub213ss",
+        "mnemonic": "vfnmsub213ss",
+        "aliases": []
+      },
+      {
+        "variant": "Vfnmsub231pd",
+        "mnemonic": "vfnmsub231pd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfnmsub231ps",
+        "mnemonic": "vfnmsub231ps",
+        "aliases": []
+      },
+      {
+        "variant": "Vfnmsub231sd",
+        "mnemonic": "vfnmsub231sd",
+        "aliases": []
+      },
+      {
+        "variant": "Vfnmsub231ss",
+        "mnemonic": "vfnmsub231ss",
+        "aliases": []
+      },
+      {
+        "variant": "Vgatherdpd",
+        "mnemonic": "vgatherdpd",
+        "aliases": []
+      },
+      {
+        "variant": "Vgatherdps",
+        "mnemonic": "vgatherdps",
+        "aliases": []
+      },
+      {
+        "variant": "Vgatherqpd",
+        "mnemonic": "vgatherqpd",
+        "aliases": []
+      },
+      {
+        "variant": "Vgatherqps",
+        "mnemonic": "vgatherqps",
+        "aliases": []
+      },
+      {
+        "variant": "Vhaddpd",
+        "mnemonic": "vhaddpd",
+        "aliases": []
+      },
+      {
+        "variant": "Vhaddps",
+        "mnemonic": "vhaddps",
+        "aliases": []
+      },
+      {
+        "variant": "Vhsubpd",
+        "mnemonic": "vhsubpd",
+        "aliases": []
+      },
+      {
+        "variant": "Vhsubps",
+        "mnemonic": "vhsubps",
+        "aliases": []
+      },
+      {
+        "variant": "Vinsertf128",
+        "mnemonic": "vinsertf128",
+        "aliases": []
+      },
+      {
+        "variant": "Vinserti128",
+        "mnemonic": "vinserti128",
+        "aliases": []
+      },
+      {
+        "variant": "Vinsertps",
+        "mnemonic": "vinsertps",
+        "aliases": []
+      },
+      {
+        "variant": "Vlddqu",
+        "mnemonic": "vlddqu",
+        "aliases": []
+      },
+      {
+        "variant": "Vldmxcsr",
+        "mnemonic": "vldmxcsr",
+        "aliases": []
+      },
+      {
+        "variant": "Vmaskmovdqu",
+        "mnemonic": "vmaskmovdqu",
+        "aliases": []
+      },
+      {
+        "variant": "Vmaskmovpd",
+        "mnemonic": "vmaskmovpd",
+        "aliases": []
+      },
+      {
+        "variant": "Vmaskmovps",
+        "mnemonic": "vmaskmovps",
+        "aliases": []
+      },
+      {
+        "variant": "Vmaxpd",
+        "mnemonic": "vmaxpd",
+        "aliases": []
+      },
+      {
+        "variant": "Vmaxps",
+        "mnemonic": "vmaxps",
+        "aliases": []
+      },
+      {
+        "variant": "Vminpd",
+        "mnemonic": "vminpd",
+        "aliases": []
+      },
+      {
+        "variant": "Vminps",
+        "mnemonic": "vminps",
+        "aliases": []
+      },
+      {
+        "variant": "Vmovd",
+        "mnemonic": "vmovd",
+        "aliases": []
+      },
+      {
+        "variant": "Vmovddup",
+        "mnemonic": "vmovddup",
+        "aliases": []
+      },
+      {
+        "variant": "Vmovdqa",
+        "mnemonic": "vmovdqa",
+        "aliases": []
+      },
+      {
+        "variant": "Vmovdqu",
+        "mnemonic": "vmovdqu",
+        "aliases": []
+      },
+      {
+        "variant": "Vmovhlps",
+        "mnemonic": "vmovhlps",
+        "aliases": []
+      },
+      {
+        "variant": "Vmovhpd",
+        "mnemonic": "vmovhpd",
+        "aliases": []
+      },
+      {
+        "variant": "Vmovhps",
+        "mnemonic": "vmovhps",
+        "aliases": []
+      },
+      {
+        "variant": "Vmovlhps",
+        "mnemonic": "vmovlhps",
+        "aliases": []
+      },
+      {
+        "variant": "Vmovlpd",
+        "mnemonic": "vmovlpd",
+        "aliases": []
+      },
+      {
+        "variant": "Vmovlps",
+        "mnemonic": "vmovlps",
+        "aliases": []
+      },
+      {
+        "variant": "Vmovmskpd",
+        "mnemonic": "vmovmskpd",
+        "aliases": []
+      },
+      {
+        "variant": "Vmovmskps",
+        "mnemonic": "vmovmskps",
+        "aliases": []
+      },
+      {
+        "variant": "Vmovntdq",
+        "mnemonic": "vmovntdq",
+        "aliases": []
+      },
+      {
+        "variant": "Vmovntdqa",
+        "mnemonic": "vmovntdqa",
+        "aliases": []
+      },
+      {
+        "variant": "Vmovntpd",
+        "mnemonic": "vmovntpd",
+        "aliases": []
+      },
+      {
+        "variant": "Vmovntps",
+        "mnemonic": "vmovntps",
+        "aliases": []
+      },
+      {
+        "variant": "Vmovq",
+        "mnemonic": "vmovq",
+        "aliases": []
+      },
+      {
+        "variant": "Vmovshdup",
+        "mnemonic": "vmovshdup",
+        "aliases": []
+      },
+      {
+        "variant": "Vmovsldup",
+        "mnemonic": "vmovsldup",
+        "aliases": []
+      },
+      {
+        "variant": "Vmpsadbw",
+        "mnemonic": "vmpsadbw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpabsb",
+        "mnemonic": "vpabsb",
+        "aliases": []
+      },
+      {
+        "variant": "Vpabsd",
+        "mnemonic": "vpabsd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpabsw",
+        "mnemonic": "vpabsw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpackssdw",
+        "mnemonic": "vpackssdw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpacksswb",
+        "mnemonic": "vpacksswb",
+        "aliases": []
+      },
+      {
+        "variant": "Vpackusdw",
+        "mnemonic": "vpackusdw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpackuswb",
+        "mnemonic": "vpackuswb",
+        "aliases": []
+      },
+      {
+        "variant": "Vpaddb",
+        "mnemonic": "vpaddb",
+        "aliases": []
+      },
+      {
+        "variant": "Vpaddd",
+        "mnemonic": "vpaddd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpaddq",
+        "mnemonic": "vpaddq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpaddsb",
+        "mnemonic": "vpaddsb",
+        "aliases": []
+      },
+      {
+        "variant": "Vpaddsw",
+        "mnemonic": "vpaddsw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpaddusb",
+        "mnemonic": "vpaddusb",
+        "aliases": []
+      },
+      {
+        "variant": "Vpaddusw",
+        "mnemonic": "vpaddusw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpaddw",
+        "mnemonic": "vpaddw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpalignr",
+        "mnemonic": "vpalignr",
+        "aliases": []
+      },
+      {
+        "variant": "Vpand",
+        "mnemonic": "vpand",
+        "aliases": []
+      },
+      {
+        "variant": "Vpandn",
+        "mnemonic": "vpandn",
+        "aliases": []
+      },
+      {
+        "variant": "Vpavgb",
+        "mnemonic": "vpavgb",
+        "aliases": []
+      },
+      {
+        "variant": "Vpavgw",
+        "mnemonic": "vpavgw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpblendd",
+        "mnemonic": "vpblendd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpblendvb",
+        "mnemonic": "vpblendvb",
+        "aliases": []
+      },
+      {
+        "variant": "Vpblendw",
+        "mnemonic": "vpblendw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpbroadcastb",
+        "mnemonic": "vpbroadcastb",
+        "aliases": []
+      },
+      {
+        "variant": "Vpbroadcastd",
+        "mnemonic": "vpbroadcastd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpbroadcastq",
+        "mnemonic": "vpbroadcastq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpbroadcastw",
+        "mnemonic": "vpbroadcastw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpcmpeqb",
+        "mnemonic": "vpcmpeqb",
+        "aliases": []
+      },
+      {
+        "variant": "Vpcmpeqd",
+        "mnemonic": "vpcmpeqd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpcmpeqq",
+        "mnemonic": "vpcmpeqq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpcmpeqw",
+        "mnemonic": "vpcmpeqw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpcmpestri",
+        "mnemonic": "vpcmpestri",
+        "aliases": []
+      },
+      {
+        "variant": "Vpcmpestri64",
+        "mnemonic": "vpcmpestri64",
+        "aliases": [
+          "vpcmpestriq"
+        ]
+      },
+      {
+        "variant": "Vpcmpestrm",
+        "mnemonic": "vpcmpestrm",
+        "aliases": []
+      },
+      {
+        "variant": "Vpcmpestrm64",
+        "mnemonic": "vpcmpestrm64",
+        "aliases": [
+          "vpcmpestrmq"
+        ]
+      },
+      {
+        "variant": "Vpcmpgtb",
+        "mnemonic": "vpcmpgtb",
+        "aliases": []
+      },
+      {
+        "variant": "Vpcmpgtd",
+        "mnemonic": "vpcmpgtd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpcmpgtq",
+        "mnemonic": "vpcmpgtq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpcmpgtw",
+        "mnemonic": "vpcmpgtw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpcmpistri",
+        "mnemonic": "vpcmpistri",
+        "aliases": []
+      },
+      {
+        "variant": "Vpcmpistri64",
+        "mnemonic": "vpcmpistri64",
+        "aliases": [
+          "vpcmpistriq"
+        ]
+      },
+      {
+        "variant": "Vpcmpistrm",
+        "mnemonic": "vpcmpistrm",
+        "aliases": []
+      },
+      {
+        "variant": "Vperm2f128",
+        "mnemonic": "vperm2f128",
+        "aliases": []
+      },
+      {
+        "variant": "Vperm2i128",
+        "mnemonic": "vperm2i128",
+        "aliases": []
+      },
+      {
+        "variant": "Vpermd",
+        "mnemonic": "vpermd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpermilpd",
+        "mnemonic": "vpermilpd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpermilps",
+        "mnemonic": "vpermilps",
+        "aliases": []
+      },
+      {
+        "variant": "Vpermpd",
+        "mnemonic": "vpermpd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpermps",
+        "mnemonic": "vpermps",
+        "aliases": []
+      },
+      {
+        "variant": "Vpermq",
+        "mnemonic": "vpermq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpextrb",
+        "mnemonic": "vpextrb",
+        "aliases": []
+      },
+      {
+        "variant": "Vpextrd",
+        "mnemonic": "vpextrd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpextrq",
+        "mnemonic": "vpextrq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpextrw",
+        "mnemonic": "vpextrw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpgatherdd",
+        "mnemonic": "vpgatherdd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpgatherdq",
+        "mnemonic": "vpgatherdq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpgatherqd",
+        "mnemonic": "vpgatherqd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpgatherqq",
+        "mnemonic": "vpgatherqq",
+        "aliases": []
+      },
+      {
+        "variant": "Vphaddd",
+        "mnemonic": "vphaddd",
+        "aliases": []
+      },
+      {
+        "variant": "Vphaddsw",
+        "mnemonic": "vphaddsw",
+        "aliases": []
+      },
+      {
+        "variant": "Vphaddw",
+        "mnemonic": "vphaddw",
+        "aliases": []
+      },
+      {
+        "variant": "Vphminposuw",
+        "mnemonic": "vphminposuw",
+        "aliases": []
+      },
+      {
+        "variant": "Vphsubd",
+        "mnemonic": "vphsubd",
+        "aliases": []
+      },
+      {
+        "variant": "Vphsubsw",
+        "mnemonic": "vphsubsw",
+        "aliases": []
+      },
+      {
+        "variant": "Vphsubw",
+        "mnemonic": "vphsubw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpinsrb",
+        "mnemonic": "vpinsrb",
+        "aliases": []
+      },
+      {
+        "variant": "Vpinsrd",
+        "mnemonic": "vpinsrd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpinsrq",
+        "mnemonic": "vpinsrq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpinsrw",
+        "mnemonic": "vpinsrw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmaddubsw",
+        "mnemonic": "vpmaddubsw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmaddwd",
+        "mnemonic": "vpmaddwd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmaskmovd",
+        "mnemonic": "vpmaskmovd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmaskmovq",
+        "mnemonic": "vpmaskmovq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmaxsb",
+        "mnemonic": "vpmaxsb",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmaxsd",
+        "mnemonic": "vpmaxsd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmaxsw",
+        "mnemonic": "vpmaxsw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmaxub",
+        "mnemonic": "vpmaxub",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmaxud",
+        "mnemonic": "vpmaxud",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmaxuw",
+        "mnemonic": "vpmaxuw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpminsb",
+        "mnemonic": "vpminsb",
+        "aliases": []
+      },
+      {
+        "variant": "Vpminsd",
+        "mnemonic": "vpminsd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpminsw",
+        "mnemonic": "vpminsw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpminub",
+        "mnemonic": "vpminub",
+        "aliases": []
+      },
+      {
+        "variant": "Vpminud",
+        "mnemonic": "vpminud",
+        "aliases": []
+      },
+      {
+        "variant": "Vpminuw",
+        "mnemonic": "vpminuw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmovmskb",
+        "mnemonic": "vpmovmskb",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmovsxbd",
+        "mnemonic": "vpmovsxbd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmovsxbq",
+        "mnemonic": "vpmovsxbq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmovsxbw",
+        "mnemonic": "vpmovsxbw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmovsxdq",
+        "mnemonic": "vpmovsxdq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmovsxwd",
+        "mnemonic": "vpmovsxwd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmovsxwq",
+        "mnemonic": "vpmovsxwq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmovzxbd",
+        "mnemonic": "vpmovzxbd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmovzxbq",
+        "mnemonic": "vpmovzxbq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmovzxbw",
+        "mnemonic": "vpmovzxbw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmovzxdq",
+        "mnemonic": "vpmovzxdq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmovzxwd",
+        "mnemonic": "vpmovzxwd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmovzxwq",
+        "mnemonic": "vpmovzxwq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmuldq",
+        "mnemonic": "vpmuldq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmulhrsw",
+        "mnemonic": "vpmulhrsw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmulhuw",
+        "mnemonic": "vpmulhuw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmulhw",
+        "mnemonic": "vpmulhw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmulld",
+        "mnemonic": "vpmulld",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmullw",
+        "mnemonic": "vpmullw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpmuludq",
+        "mnemonic": "vpmuludq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpor",
+        "mnemonic": "vpor",
+        "aliases": []
+      },
+      {
+        "variant": "Vpsadbw",
+        "mnemonic": "vpsadbw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpshufb",
+        "mnemonic": "vpshufb",
+        "aliases": []
+      },
+      {
+        "variant": "Vpshufd",
+        "mnemonic": "vpshufd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpshufhw",
+        "mnemonic": "vpshufhw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpshuflw",
+        "mnemonic": "vpshuflw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpsignb",
+        "mnemonic": "vpsignb",
+        "aliases": []
+      },
+      {
+        "variant": "Vpsignd",
+        "mnemonic": "vpsignd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpsignw",
+        "mnemonic": "vpsignw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpslld",
+        "mnemonic": "vpslld",
+        "aliases": []
+      },
+      {
+        "variant": "Vpslldq",
+        "mnemonic": "vpslldq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpsllq",
+        "mnemonic": "vpsllq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpsllvd",
+        "mnemonic": "vpsllvd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpsllvq",
+        "mnemonic": "vpsllvq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpsllw",
+        "mnemonic": "vpsllw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpsrad",
+        "mnemonic": "vpsrad",
+        "aliases": []
+      },
+      {
+        "variant": "Vpsravd",
+        "mnemonic": "vpsravd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpsraw",
+        "mnemonic": "vpsraw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpsrld",
+        "mnemonic": "vpsrld",
+        "aliases": []
+      },
+      {
+        "variant": "Vpsrldq",
+        "mnemonic": "vpsrldq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpsrlq",
+        "mnemonic": "vpsrlq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpsrlvd",
+        "mnemonic": "vpsrlvd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpsrlvq",
+        "mnemonic": "vpsrlvq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpsrlw",
+        "mnemonic": "vpsrlw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpsubb",
+        "mnemonic": "vpsubb",
+        "aliases": []
+      },
+      {
+        "variant": "Vpsubd",
+        "mnemonic": "vpsubd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpsubq",
+        "mnemonic": "vpsubq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpsubsb",
+        "mnemonic": "vpsubsb",
+        "aliases": []
+      },
+      {
+        "variant": "Vpsubsw",
+        "mnemonic": "vpsubsw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpsubusb",
+        "mnemonic": "vpsubusb",
+        "aliases": []
+      },
+      {
+        "variant": "Vpsubusw",
+        "mnemonic": "vpsubusw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpsubw",
+        "mnemonic": "vpsubw",
+        "aliases": []
+      },
+      {
+        "variant": "Vptest",
+        "mnemonic": "vptest",
+        "aliases": []
+      },
+      {
+        "variant": "Vpunpckhbw",
+        "mnemonic": "vpunpckhbw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpunpckhdq",
+        "mnemonic": "vpunpckhdq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpunpckhqdq",
+        "mnemonic": "vpunpckhqdq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpunpckhwd",
+        "mnemonic": "vpunpckhwd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpunpcklbw",
+        "mnemonic": "vpunpcklbw",
+        "aliases": []
+      },
+      {
+        "variant": "Vpunpckldq",
+        "mnemonic": "vpunpckldq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpunpcklqdq",
+        "mnemonic": "vpunpcklqdq",
+        "aliases": []
+      },
+      {
+        "variant": "Vpunpcklwd",
+        "mnemonic": "vpunpcklwd",
+        "aliases": []
+      },
+      {
+        "variant": "Vpxor",
+        "mnemonic": "vpxor",
+        "aliases": []
+      },
+      {
+        "variant": "Vrcpps",
+        "mnemonic": "vrcpps",
+        "aliases": []
+      },
+      {
+        "variant": "Vrcpss",
+        "mnemonic": "vrcpss",
+        "aliases": []
+      },
+      {
+        "variant": "Vroundpd",
+        "mnemonic": "vroundpd",
+        "aliases": []
+      },
+      {
+        "variant": "Vroundps",
+        "mnemonic": "vroundps",
+        "aliases": []
+      },
+      {
+        "variant": "Vrsqrtps",
+        "mnemonic": "vrsqrtps",
+        "aliases": []
+      },
+      {
+        "variant": "Vrsqrtss",
+        "mnemonic": "vrsqrtss",
+        "aliases": []
+      },
+      {
+        "variant": "Vshufpd",
+        "mnemonic": "vshufpd",
+        "aliases": []
+      },
+      {
+        "variant": "Vshufps",
+        "mnemonic": "vshufps",
+        "aliases": []
+      },
+      {
+        "variant": "Vsqrtpd",
+        "mnemonic": "vsqrtpd",
+        "aliases": []
+      },
+      {
+        "variant": "Vsqrtps",
+        "mnemonic": "vsqrtps",
+        "aliases": []
+      },
+      {
+        "variant": "Vstmxcsr",
+        "mnemonic": "vstmxcsr",
+        "aliases": []
+      },
+      {
+        "variant": "Vtestpd",
+        "mnemonic": "vtestpd",
+        "aliases": []
+      },
+      {
+        "variant": "Vtestps",
+        "mnemonic": "vtestps",
+        "aliases": []
+      },
+      {
+        "variant": "Vunpckhpd",
+        "mnemonic": "vunpckhpd",
+        "aliases": []
+      },
+      {
+        "variant": "Vunpckhps",
+        "mnemonic": "vunpckhps",
+        "aliases": []
+      },
+      {
+        "variant": "Vunpcklpd",
+        "mnemonic": "vunpcklpd",
+        "aliases": []
+      },
+      {
+        "variant": "Vunpcklps",
+        "mnemonic": "vunpcklps",
+        "aliases": []
+      },
+      {
+        "variant": "Vzeroall",
+        "mnemonic": "vzeroall",
+        "aliases": []
+      },
+      {
+        "variant": "Xgetbv",
+        "mnemonic": "xgetbv",
+        "aliases": []
+      },
+      {
+        "variant": "Xrstor",
+        "mnemonic": "xrstor",
+        "aliases": []
+      },
+      {
+        "variant": "Xrstor64",
+        "mnemonic": "xrstor64",
+        "aliases": []
+      },
+      {
+        "variant": "Xsave",
+        "mnemonic": "xsave",
+        "aliases": []
+      },
+      {
+        "variant": "Xsave64",
+        "mnemonic": "xsave64",
+        "aliases": []
+      },
+      {
+        "variant": "Xsetbv",
+        "mnemonic": "xsetbv",
+        "aliases": []
+      }
+    ],
+    "fixed": [
+      {
+        "variant": "Fabs",
+        "mnemonic": "fabs",
+        "aliases": []
+      },
+      {
+        "variant": "Fchs",
+        "mnemonic": "fchs",
+        "aliases": []
+      },
+      {
+        "variant": "Ftst",
+        "mnemonic": "ftst",
+        "aliases": []
+      },
+      {
+        "variant": "Fxam",
+        "mnemonic": "fxam",
+        "aliases": []
+      },
+      {
+        "variant": "Fld1",
+        "mnemonic": "fld1",
+        "aliases": []
+      },
+      {
+        "variant": "Fldl2t",
+        "mnemonic": "fldl2t",
+        "aliases": []
+      },
+      {
+        "variant": "Fldl2e",
+        "mnemonic": "fldl2e",
+        "aliases": []
+      },
+      {
+        "variant": "Fldpi",
+        "mnemonic": "fldpi",
+        "aliases": []
+      },
+      {
+        "variant": "Fldlg2",
+        "mnemonic": "fldlg2",
+        "aliases": []
+      },
+      {
+        "variant": "Fldln2",
+        "mnemonic": "fldln2",
+        "aliases": []
+      },
+      {
+        "variant": "F2xm1",
+        "mnemonic": "f2xm1",
+        "aliases": []
+      },
+      {
+        "variant": "Fyl2x",
+        "mnemonic": "fyl2x",
+        "aliases": []
+      },
+      {
+        "variant": "Fptan",
+        "mnemonic": "fptan",
+        "aliases": []
+      },
+      {
+        "variant": "Fpatan",
+        "mnemonic": "fpatan",
+        "aliases": []
+      },
+      {
+        "variant": "Fxtract",
+        "mnemonic": "fxtract",
+        "aliases": []
+      },
+      {
+        "variant": "Fprem1",
+        "mnemonic": "fprem1",
+        "aliases": []
+      },
+      {
+        "variant": "Fdecstp",
+        "mnemonic": "fdecstp",
+        "aliases": []
+      },
+      {
+        "variant": "Fincstp",
+        "mnemonic": "fincstp",
+        "aliases": []
+      },
+      {
+        "variant": "Fprem",
+        "mnemonic": "fprem",
+        "aliases": []
+      },
+      {
+        "variant": "Fyl2xp1",
+        "mnemonic": "fyl2xp1",
+        "aliases": []
+      },
+      {
+        "variant": "Fsqrt",
+        "mnemonic": "fsqrt",
+        "aliases": []
+      },
+      {
+        "variant": "Fsincos",
+        "mnemonic": "fsincos",
+        "aliases": []
+      },
+      {
+        "variant": "Frndint",
+        "mnemonic": "frndint",
+        "aliases": []
+      },
+      {
+        "variant": "Fscale",
+        "mnemonic": "fscale",
+        "aliases": []
+      },
+      {
+        "variant": "Fsin",
+        "mnemonic": "fsin",
+        "aliases": []
+      },
+      {
+        "variant": "Fcos",
+        "mnemonic": "fcos",
+        "aliases": []
+      },
+      {
+        "variant": "Fcompp",
+        "mnemonic": "fcompp",
+        "aliases": []
+      },
+      {
+        "variant": "Fucompp",
+        "mnemonic": "fucompp",
+        "aliases": []
+      },
+      {
+        "variant": "Fnop",
+        "mnemonic": "fnop",
+        "aliases": []
+      },
+      {
+        "variant": "Fnclex",
+        "mnemonic": "fnclex",
+        "aliases": []
+      },
+      {
+        "variant": "Fninit",
+        "mnemonic": "fninit",
+        "aliases": []
+      },
+      {
+        "variant": "Fclex",
+        "mnemonic": "fclex",
+        "aliases": []
+      },
+      {
+        "variant": "Finit",
+        "mnemonic": "finit",
+        "aliases": []
+      },
+      {
+        "variant": "Fwait",
+        "mnemonic": "fwait",
+        "aliases": []
+      },
+      {
+        "variant": "Emms",
+        "mnemonic": "emms",
+        "aliases": []
+      },
+      {
+        "variant": "Cpuid",
+        "mnemonic": "cpuid",
+        "aliases": []
+      },
+      {
+        "variant": "Rdtsc",
+        "mnemonic": "rdtsc",
+        "aliases": []
+      },
+      {
+        "variant": "Clc",
+        "mnemonic": "clc",
+        "aliases": []
+      },
+      {
+        "variant": "Stc",
+        "mnemonic": "stc",
+        "aliases": []
+      },
+      {
+        "variant": "Cmc",
+        "mnemonic": "cmc",
+        "aliases": []
+      },
+      {
+        "variant": "Cld",
+        "mnemonic": "cld",
+        "aliases": []
+      },
+      {
+        "variant": "Std",
+        "mnemonic": "std",
+        "aliases": []
+      },
+      {
+        "variant": "Pushfq",
+        "mnemonic": "pushfq",
+        "aliases": []
+      },
+      {
+        "variant": "Popfq",
+        "mnemonic": "popfq",
+        "aliases": []
+      },
+      {
+        "variant": "Leavew",
+        "mnemonic": "leavew",
+        "aliases": []
+      },
+      {
+        "variant": "Pushfw",
+        "mnemonic": "pushfw",
+        "aliases": []
+      },
+      {
+        "variant": "Popfw",
+        "mnemonic": "popfw",
+        "aliases": []
+      },
+      {
+        "variant": "Iretw",
+        "mnemonic": "iretw",
+        "aliases": []
+      },
+      {
+        "variant": "Iretd",
+        "mnemonic": "iretd",
+        "aliases": []
+      },
+      {
+        "variant": "Rdpmc",
+        "mnemonic": "rdpmc",
+        "aliases": []
+      },
+      {
+        "variant": "Sysenter",
+        "mnemonic": "sysenter",
+        "aliases": []
+      },
+      {
+        "variant": "Udb",
+        "mnemonic": "udb",
+        "aliases": []
+      },
+      {
+        "variant": "Cli",
+        "mnemonic": "cli",
+        "aliases": []
+      },
+      {
+        "variant": "Sti",
+        "mnemonic": "sti",
+        "aliases": []
+      },
+      {
+        "variant": "Hlt",
+        "mnemonic": "hlt",
+        "aliases": []
+      },
+      {
+        "variant": "Clts",
+        "mnemonic": "clts",
+        "aliases": []
+      },
+      {
+        "variant": "Invd",
+        "mnemonic": "invd",
+        "aliases": []
+      },
+      {
+        "variant": "Wbinvd",
+        "mnemonic": "wbinvd",
+        "aliases": []
+      },
+      {
+        "variant": "Rdmsr",
+        "mnemonic": "rdmsr",
+        "aliases": []
+      },
+      {
+        "variant": "Wrmsr",
+        "mnemonic": "wrmsr",
+        "aliases": []
+      },
+      {
+        "variant": "Swapgs",
+        "mnemonic": "swapgs",
+        "aliases": []
+      },
+      {
+        "variant": "Iretq",
+        "mnemonic": "iretq",
+        "aliases": []
+      },
+      {
+        "variant": "Sysret",
+        "mnemonic": "sysret",
+        "aliases": []
+      },
+      {
+        "variant": "Sysretq",
+        "mnemonic": "sysretq",
+        "aliases": []
+      }
+    ]
+  },
+  "extensions": [
+    "adcx",
+    "adox",
+    "sha1msg1",
+    "sha1msg2",
+    "sha1nexte",
+    "sha1rnds4",
+    "sha256msg1",
+    "sha256msg2",
+    "sha256rnds2",
+    "vaesenc",
+    "vaesenclast",
+    "vaesdec",
+    "vaesdeclast",
+    "vaesimc",
+    "vaeskeygenassist",
+    "vpclmulqdq"
   ]
 }

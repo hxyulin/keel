@@ -38,6 +38,30 @@ class GeneratorTests(unittest.TestCase):
         self.assertIn('isa: "AVX2GATHER"', v3)
         self.assertIn('vsib: 256', v3)
 
+    def test_duplicate_public_spellings_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'duplicate'):
+            generate.opcode_identities('Example', [dict(variant='A', mnemonic='a'),
+                                                   dict(variant='B', mnemonic='b', aliases=['a'])])
+
+    def test_extension_exposure_requires_source_forms_and_feature_policy(self):
+        with self.assertRaisesRegex(ValueError, 'no imported forms'):
+            generate.extension_adapters(self.data, ['nonexistent'])
+        identities, features, vex = generate.extension_adapters(self.data, self.adapters['extensions'])
+        self.assertEqual(len(identities), 16)
+        self.assertEqual([i['mnemonic'] for i in identities if i['scalar_suffix']], ['adcx', 'adox'])
+        non_scalar, _, _ = generate.extension_adapters(self.data, ['serialize', 'clwb'])
+        self.assertFalse(any(i['scalar_suffix'] for i in non_scalar))
+        source = generate.feature_adapters(self.data, features, self.policy)
+        self.assertIn('ExtensionOpcode::Adcx) => Features { adx: true', source)
+        source = generate.v3_adapters(self.data, vex)
+        self.assertIn('isa: "AVX_PCLMULQDQ"', source)
+        self.assertIn('isa: "VPCLMULQDQ"', source)
+
+    def test_generated_identities_retain_legacy_aliases(self):
+        for group, alias in [('v2', 'pcmpestriq'), ('v3', 'vpcmpestriq')]:
+            source = generate.opcode_identities(group.upper() + 'Opcode', self.adapters['identities'][group])
+            self.assertIn(f'"{alias}" => Self::', source)
+
 
 if __name__ == '__main__':
     unittest.main()

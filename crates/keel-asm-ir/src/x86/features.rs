@@ -22,6 +22,10 @@ impl CpuLevel {
 pub struct Features {
     /// CPUID.01H:ECX.AES[25], independent of psABI levels.
     pub aes: bool,
+    pub adx: bool,
+    pub sha: bool,
+    pub vaes: bool,
+    pub vpclmulqdq: bool,
     pub avx: bool,
     pub bmi1: bool,
     pub bmi2: bool,
@@ -55,6 +59,10 @@ impl Default for Features {
 impl Features {
     pub const NONE: Self = Self {
         aes: false,
+        adx: false,
+        sha: false,
+        vaes: false,
+        vpclmulqdq: false,
         avx: false,
         bmi1: false,
         bmi2: false,
@@ -129,6 +137,10 @@ impl Features {
     pub const fn all() -> Self {
         Self {
             aes: true,
+            adx: true,
+            sha: true,
+            vaes: true,
+            vpclmulqdq: true,
             clflush: true,
             pclmulqdq: true,
             ..Self::for_level(CpuLevel::V3)
@@ -139,7 +151,11 @@ impl Features {
         self == Self::legacy()
     }
     pub fn contains(self, required: Self) -> bool {
-        (!required.aes || self.aes)
+        (!required.adx || self.adx)
+            && (!required.sha || self.sha)
+            && (!required.vaes || self.vaes)
+            && (!required.vpclmulqdq || self.vpclmulqdq)
+            && (!required.aes || self.aes)
             && (!required.avx || self.avx)
             && (!required.bmi1 || self.bmi1)
             && (!required.bmi2 || self.bmi2)
@@ -179,6 +195,10 @@ impl Features {
             };
             let flag = match name {
                 "aes" => &mut self.aes,
+                "adx" => &mut self.adx,
+                "sha" => &mut self.sha,
+                "vaes" => &mut self.vaes,
+                "vpclmulqdq" => &mut self.vpclmulqdq,
                 "avx" => &mut self.avx,
                 "bmi1" => &mut self.bmi1,
                 "bmi2" => &mut self.bmi2,
@@ -212,9 +232,9 @@ impl Features {
     pub fn validate(self) -> Result<(), &'static str> {
         for (enabled, dependency, name) in [
             (
-                self.avx2 || self.f16c || self.fma,
+                self.avx2 || self.f16c || self.fma || self.vaes || self.vpclmulqdq,
                 self.avx,
-                "AVX2/F16C/FMA require AVX",
+                "AVX2/F16C/FMA/VAES/VPCLMULQDQ require AVX",
             ),
             (
                 self.avx && self.explicit,
@@ -231,6 +251,10 @@ impl Features {
     pub fn names(self) -> impl Iterator<Item = &'static str> {
         [
             (self.aes, "aes"),
+            (self.adx, "adx"),
+            (self.sha, "sha"),
+            (self.vaes, "vaes"),
+            (self.vpclmulqdq, "vpclmulqdq"),
             (self.avx, "avx"),
             (self.bmi1, "bmi1"),
             (self.bmi2, "bmi2"),

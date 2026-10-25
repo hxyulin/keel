@@ -339,13 +339,20 @@ fn encoding_matches_clang_and_optional_gnu() {
         "aesimc xmm0,qword ptr [rax]",
         "aeskeygenassist xmm0,xmm1,256",
         "aeskeygenassist xmm0,xmm1,-1",
-        "vaesenc xmm0,xmm1,xmm2",
     ] {
         assert!(
             keel_asm::x86::assemble_object_with_features(line, Features::all()).is_err(),
             "{line}"
         );
     }
+    assert!(
+        keel_asm::x86::assemble_object_with_features("vaesenc xmm0,xmm1,xmm2", Features::all())
+            .is_ok()
+    );
+    assert!(
+        keel_asm::x86::assemble_object_with_features("vaesenc xmm0,xmm1,xmm2", features())
+            .is_err()
+    );
     for level in [CpuLevel::V1, CpuLevel::V2, CpuLevel::V3] {
         assert!(
             keel_asm::x86::assemble_object_with_features(&src, Features::for_level(level)).is_err()
