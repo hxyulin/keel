@@ -1,0 +1,739 @@
+{
+  "platform": "macOS-27.0.1-arm64-arm-64bit",
+  "cpu": "Apple M5 Max",
+  "source_commit": "7df73312844d57988ec70380c08490d872ff54a8",
+  "source_diff_sha256": "61665848d8471c12b71a27a3203f93342a41d85836cbf3ab4464a5d66b921ee1",
+  "harness_sha256": "4cd150e9c86fc572dc8df11ad1901de0c9dbbba339f4fbca893208ef86f754a5",
+  "load_before": [
+    2.89697265625,
+    3.8828125,
+    3.01904296875
+  ],
+  "binaries": {
+    "baseline": {
+      "path": "/private/tmp/keel-bbtree-trial/keel-std",
+      "sha256": "18c85a3003accdf7a42e6be390ba051475f29a44dafc5fe2c3d43fa455294b76"
+    },
+    "candidate": {
+      "path": "/Users/hxyulin/Library/Caches/mbx/targets/v1/8925c11b587cf5cc07f0aa2912b374f1d800ad879d62e9108488a918b253a64a/release/keel",
+      "sha256": "79ead740841f0edc870b91ee1c06a5782d045da91c03a938e78fbb0428c67537"
+    }
+  },
+  "symbols": 65536,
+  "warmups": 2,
+  "rounds": 9,
+  "seed": 20261025,
+  "cases": {
+    "macho-64-direct": {
+      "command": [
+        "link",
+        "--sysroot",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+        "-mmacosx-version-min=11.0",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-64/entry.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-64/shard-0.o",
+        "-o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-64/program"
+      ],
+      "inputs": {
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-64/entry.o": "cbc18233aea3522c759e16777ba2daa1c797a97fb19b0d91f962569905ebd7e3",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-64/shard-0.o": "f5685a5ee17c75934d32ebce7ce46e3a3207ea32c327a4aff86832aa286303a1",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-64/members.a": "6cad0ec32102c71363738d5fee896b30f3d220608ce9b05bd3e3bc1de59d5e9b"
+      },
+      "output_sha256": {
+        "baseline": "ff2171f872ebc2b489c9861b18e86d4a4bb7d8b3907dea1a2f9cd08b827ea181",
+        "candidate": "ff2171f872ebc2b489c9861b18e86d4a4bb7d8b3907dea1a2f9cd08b827ea181"
+      },
+      "failure_diagnostics": {
+        "duplicate": "keel: /private/tmp/keel-bbtree-trial/vendor-vs-std/macho-64/entry.o: duplicate definition `_main`\n",
+        "undefined": "keel: undefined symbol `_ZN4keel24collections_benchmark17shared_namespace20symbol_heavy_workload00000000Ev`: absent from input definitions and selected macOS arm64 TBD interfaces\n"
+      },
+      "samples_ms": {
+        "baseline": [
+          8.118,
+          7.965583,
+          8.245875,
+          8.396041,
+          8.155375,
+          8.231416,
+          8.098208,
+          8.136416,
+          8.113166
+        ],
+        "candidate": [
+          8.333,
+          8.484708,
+          8.4425,
+          8.478,
+          8.708042,
+          8.616083,
+          8.436583,
+          8.221875,
+          8.615083
+        ]
+      },
+      "median_ms": {
+        "baseline": 8.136416,
+        "candidate": 8.478
+      },
+      "candidate_change_percent": 4.19821208748421,
+      "peak_rss_bytes_single_run": {
+        "baseline": 8290304,
+        "candidate": 8617984
+      },
+      "orders_including_warmups": [
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ]
+      ]
+    },
+    "macho-65536-direct": {
+      "command": [
+        "link",
+        "--sysroot",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+        "-mmacosx-version-min=11.0",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/entry.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-0.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-1.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-2.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-3.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-4.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-5.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-6.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-7.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-8.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-9.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-10.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-11.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-12.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-13.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-14.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-15.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-16.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-17.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-18.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-19.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-20.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-21.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-22.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-23.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-24.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-25.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-26.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-27.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-28.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-29.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-30.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-31.o",
+        "-o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/program"
+      ],
+      "inputs": {
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/entry.o": "cbc18233aea3522c759e16777ba2daa1c797a97fb19b0d91f962569905ebd7e3",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-0.o": "91c7eb6f49cbdb9d338bf190dfd0919458d019bdb41236cb22ab3242b28821f2",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-1.o": "47de091251d2be8e2bbe3037b4d4f762db1e8fb0f822d0f866655d66f70b62ca",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-2.o": "538ae841b7bdbf0ad6c1ef5fdf63a499f9ef0995e9e46c9557e1c9250b9d83e4",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-3.o": "beda7fe7babdca68a9562dca037a2d9b4388fff977c64650de433ecda2acf612",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-4.o": "4eeaca01c392d1ee86468a4edf4745375a53103dec002474c0c6494ac335c11b",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-5.o": "117a30888b9b81de49d604f0165457d3c79007d6916f35cb0d2d36a06e725e82",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-6.o": "893126d2344e62b79ad157e0fed38cf5bc6e74921f8083b54a2808027eaaa930",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-7.o": "8787bcff225aeb94f708392963c39828b5b2bbcbebce0caf88ba6a5f210f9779",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-8.o": "def78a23924cd22247bc6ea8827d58ced6f9b693ddb1e441168333c215b6c3cf",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-9.o": "cdf2ef794518157cf0d5458be486ceb240c4d7fe6ffcdabe830d929606b09db3",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-10.o": "11061a883a491a2921a6170d278a07f509d95ce21d1b37e9d617bb83f5a3dd43",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-11.o": "8c7779e92e64ddbfc45f28767cf672bacc0bc76ef743872fb95e9a7a243cfc3d",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-12.o": "51a304634fdd9cc40b76d90a092c486ed0c04a3276fcfd795b996488720217b0",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-13.o": "eb611688b9450104ad29d98bf0e40eeeb695630526401a525132427b99fee88c",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-14.o": "0845b87396bfa2c9b9994fd4544cffa778ff512b6bc69e824998744724d72192",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-15.o": "5e680b57d6eeae53066f8f6b331da9012f79cfc40972b2b8c741daddb6c6ca65",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-16.o": "c3073ae6cf5a4c495f998b45bd8376e899b1c8ab7452871e9fe045af78e53f40",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-17.o": "a558e406004178ec290e8c05fd27d1e252730d918916ab1eabb08f782dcb1b5a",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-18.o": "376dfe2aa0bae5b5db60edd0b4d5cc5b29062683d8946f33d6958422a263ee75",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-19.o": "9f423c6f89714b578eb72fe2f2fecec2310cd82c6e78075a5da88f865a849199",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-20.o": "1db4f646c732b1ad5014dbceb012b5e5774de099debd677c29daeb10f507520a",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-21.o": "c5abe6e177767d7d4782bb67ec00b0f437da83da61e50c13f671929672ee0672",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-22.o": "d5127f7aa8f9d652538615198a510e150cdb26b86bbe45c2757753f7f00396d6",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-23.o": "75d7355912d701dbdc693b50ac59ac9f77eb355254e0f6f769244df71dcc6043",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-24.o": "802833ef266f4083493e6c127a4994fdc354de2522bb874b8fb81cc339ea49fd",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-25.o": "6c0626a7c737baa601cae4175d123d5c4e65883a63324ae669094438fe6a0bdf",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-26.o": "a323a6a3810c8ad1dc61d7ce1cd042d548ce67440187fd7023995829284a03e5",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-27.o": "bff8ba1cc86284b4c29bea366447f740cc61ab46e533e95e2a07d02e436f4d60",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-28.o": "0642fab5556b4f2b05bdadc94f07edd1ed3ae7337bc8a62797aa52c9ee3cd079",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-29.o": "6398065ef9fbf878f16452231de574de813c9cda3baeebc7067db0c4e4c52bc0",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-30.o": "3d906da2ab54162102082162485270a4fcf339001c9e88ca8bcf7ec90305d89f",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-31.o": "9ed731bc6047771d9eff8bdc146b0cb31ead8a7e5899fab4f378840ed28e5d39",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/members.a": "7c2518a5a2c85ab643548f67d61e284cf63344fcab322a2b317f0d7ef859db3a"
+      },
+      "output_sha256": {
+        "baseline": "78760a49f7d57086f6af4454168a9d30e63a9f54102563c4bcf73963397018fb",
+        "candidate": "78760a49f7d57086f6af4454168a9d30e63a9f54102563c4bcf73963397018fb"
+      },
+      "failure_diagnostics": {
+        "duplicate": "keel: /private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/entry.o: duplicate definition `_main`\n",
+        "undefined": "keel: undefined symbol `_ZN4keel24collections_benchmark17shared_namespace20symbol_heavy_workload00000000Ev`: absent from input definitions and selected macOS arm64 TBD interfaces\n"
+      },
+      "samples_ms": {
+        "baseline": [
+          84.558833,
+          87.391167,
+          85.426042,
+          85.333708,
+          84.980916,
+          85.793458,
+          85.272541,
+          86.869166,
+          84.953875
+        ],
+        "candidate": [
+          79.630542,
+          80.908166,
+          80.843208,
+          81.388292,
+          84.065125,
+          79.626,
+          79.982958,
+          81.420875,
+          80.927625
+        ]
+      },
+      "median_ms": {
+        "baseline": 85.333708,
+        "candidate": 80.908166
+      },
+      "candidate_change_percent": -5.186159260769507,
+      "peak_rss_bytes_single_run": {
+        "baseline": 95010816,
+        "candidate": 96108544
+      },
+      "orders_including_warmups": [
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ]
+      ]
+    },
+    "macho-65536-archive": {
+      "command": [
+        "link",
+        "--sysroot",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+        "-mmacosx-version-min=11.0",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/entry.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/members.a",
+        "-o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/program"
+      ],
+      "inputs": {
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/entry.o": "cbc18233aea3522c759e16777ba2daa1c797a97fb19b0d91f962569905ebd7e3",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-0.o": "91c7eb6f49cbdb9d338bf190dfd0919458d019bdb41236cb22ab3242b28821f2",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-1.o": "47de091251d2be8e2bbe3037b4d4f762db1e8fb0f822d0f866655d66f70b62ca",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-2.o": "538ae841b7bdbf0ad6c1ef5fdf63a499f9ef0995e9e46c9557e1c9250b9d83e4",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-3.o": "beda7fe7babdca68a9562dca037a2d9b4388fff977c64650de433ecda2acf612",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-4.o": "4eeaca01c392d1ee86468a4edf4745375a53103dec002474c0c6494ac335c11b",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-5.o": "117a30888b9b81de49d604f0165457d3c79007d6916f35cb0d2d36a06e725e82",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-6.o": "893126d2344e62b79ad157e0fed38cf5bc6e74921f8083b54a2808027eaaa930",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-7.o": "8787bcff225aeb94f708392963c39828b5b2bbcbebce0caf88ba6a5f210f9779",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-8.o": "def78a23924cd22247bc6ea8827d58ced6f9b693ddb1e441168333c215b6c3cf",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-9.o": "cdf2ef794518157cf0d5458be486ceb240c4d7fe6ffcdabe830d929606b09db3",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-10.o": "11061a883a491a2921a6170d278a07f509d95ce21d1b37e9d617bb83f5a3dd43",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-11.o": "8c7779e92e64ddbfc45f28767cf672bacc0bc76ef743872fb95e9a7a243cfc3d",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-12.o": "51a304634fdd9cc40b76d90a092c486ed0c04a3276fcfd795b996488720217b0",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-13.o": "eb611688b9450104ad29d98bf0e40eeeb695630526401a525132427b99fee88c",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-14.o": "0845b87396bfa2c9b9994fd4544cffa778ff512b6bc69e824998744724d72192",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-15.o": "5e680b57d6eeae53066f8f6b331da9012f79cfc40972b2b8c741daddb6c6ca65",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-16.o": "c3073ae6cf5a4c495f998b45bd8376e899b1c8ab7452871e9fe045af78e53f40",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-17.o": "a558e406004178ec290e8c05fd27d1e252730d918916ab1eabb08f782dcb1b5a",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-18.o": "376dfe2aa0bae5b5db60edd0b4d5cc5b29062683d8946f33d6958422a263ee75",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-19.o": "9f423c6f89714b578eb72fe2f2fecec2310cd82c6e78075a5da88f865a849199",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-20.o": "1db4f646c732b1ad5014dbceb012b5e5774de099debd677c29daeb10f507520a",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-21.o": "c5abe6e177767d7d4782bb67ec00b0f437da83da61e50c13f671929672ee0672",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-22.o": "d5127f7aa8f9d652538615198a510e150cdb26b86bbe45c2757753f7f00396d6",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-23.o": "75d7355912d701dbdc693b50ac59ac9f77eb355254e0f6f769244df71dcc6043",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-24.o": "802833ef266f4083493e6c127a4994fdc354de2522bb874b8fb81cc339ea49fd",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-25.o": "6c0626a7c737baa601cae4175d123d5c4e65883a63324ae669094438fe6a0bdf",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-26.o": "a323a6a3810c8ad1dc61d7ce1cd042d548ce67440187fd7023995829284a03e5",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-27.o": "bff8ba1cc86284b4c29bea366447f740cc61ab46e533e95e2a07d02e436f4d60",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-28.o": "0642fab5556b4f2b05bdadc94f07edd1ed3ae7337bc8a62797aa52c9ee3cd079",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-29.o": "6398065ef9fbf878f16452231de574de813c9cda3baeebc7067db0c4e4c52bc0",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-30.o": "3d906da2ab54162102082162485270a4fcf339001c9e88ca8bcf7ec90305d89f",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/shard-31.o": "9ed731bc6047771d9eff8bdc146b0cb31ead8a7e5899fab4f378840ed28e5d39",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/members.a": "7c2518a5a2c85ab643548f67d61e284cf63344fcab322a2b317f0d7ef859db3a"
+      },
+      "output_sha256": {
+        "baseline": "78760a49f7d57086f6af4454168a9d30e63a9f54102563c4bcf73963397018fb",
+        "candidate": "78760a49f7d57086f6af4454168a9d30e63a9f54102563c4bcf73963397018fb"
+      },
+      "failure_diagnostics": {
+        "duplicate": "keel: /private/tmp/keel-bbtree-trial/vendor-vs-std/macho-65536/entry.o: duplicate definition `_main`\n",
+        "undefined": "keel: undefined symbol `_ZN4keel24collections_benchmark17shared_namespace20symbol_heavy_workload00000000Ev`: absent from input definitions and selected macOS arm64 TBD interfaces\n"
+      },
+      "samples_ms": {
+        "baseline": [
+          98.848208,
+          99.72775,
+          100.929292,
+          99.41125,
+          99.611917,
+          98.455584,
+          99.59225,
+          99.9655,
+          99.749625
+        ],
+        "candidate": [
+          96.575584,
+          93.582917,
+          97.109334,
+          93.39775,
+          94.537083,
+          94.0345,
+          96.377875,
+          94.637333,
+          95.769542
+        ]
+      },
+      "median_ms": {
+        "baseline": 99.611917,
+        "candidate": 94.637333
+      },
+      "candidate_change_percent": -4.993964728135902,
+      "peak_rss_bytes_single_run": {
+        "baseline": 111181824,
+        "candidate": 97452032
+      },
+      "orders_including_warmups": [
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ]
+      ]
+    },
+    "elf-65536-direct": {
+      "command": [
+        "link",
+        "--target",
+        "x86_64-unknown-linux-gnu",
+        "--static",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/entry.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-0.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-1.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-2.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-3.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-4.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-5.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-6.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-7.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-8.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-9.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-10.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-11.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-12.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-13.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-14.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-15.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-16.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-17.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-18.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-19.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-20.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-21.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-22.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-23.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-24.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-25.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-26.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-27.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-28.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-29.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-30.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-31.o",
+        "-o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/program"
+      ],
+      "inputs": {
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/entry.o": "9dec383b74c0c7c6dfef5e24787ee3427129c3f94a94c54c7e2c15b3cf88d22f",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-0.o": "6960a71afac262096608f8b52bfe9509d283a3ade21570e8c7df9a514e27cf87",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-1.o": "d38f48d7d872f8a747bd051041517ba68d980bba807ea1e9cde4ef0c1d21369a",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-2.o": "c198d4a15d9ad94fa725e15f3ab2513ece702a74ca679b22f02094772fd59314",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-3.o": "486081bef1cba426fd274b72bce56079378d3b3ae77259f27bcd0f59d9d7a77d",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-4.o": "26c1cbfe988e8cbac5b77dd9cd7060d0d5627bd7371a52198066089d19dae96f",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-5.o": "f15edf3d1a772a458c39f1a765b156d1d0a8cd959eb80d6d36fbc5481e7148ca",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-6.o": "ad70128e0c14f0ca0b8e4dbbe2b4f994ac1f45cb72af4e5a5016eb607ec4170c",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-7.o": "88145e858f2b4d40b1d8f1a0cedbc240ed9d561baa81c5657cf45a15f7f9c0aa",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-8.o": "772b319cf78d555ecaa8a5f9faa64573a87645aa62f687cac7e480a3aa9aeafe",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-9.o": "1728d87c36c4360b05ced1e32eeb59451923203720c837b6a14dfcdbec268ef7",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-10.o": "b32c0bb4ee72044970d7dc6cef4f8395bbcaab8ab9d16dbd87e8e05db1ddd79f",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-11.o": "e4fa41ad86c0361304efc82aa83a587e6f5f14f72e911bfc34ec50ed4e7afac2",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-12.o": "860dd8a8a645a8e4030afe1fdc902a0e82fa7f1ee155eed4b85e8c40a95a5efb",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-13.o": "15087e43242137c27995fe73c227036e8628edf0c1345e5a4910b4dcb64119ff",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-14.o": "ce82c07ba3733fed9f02cefaea90dc333838bda2c37e50731cc4de3c51b61ee0",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-15.o": "cc327a5f612cbe185c7d58b0eaaa92eb331a87e35f687fa5317a84d256d51bbe",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-16.o": "dd23ea490bc87cc1190576f43a65f594150f50a82832f47614bd827512f15f6a",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-17.o": "a06214540e13f677f6bf205137cbfb165cdd072d61dbc10eb38c4e5fd14ce2e0",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-18.o": "1830228059927997b9666b75be1e99c5c5b4170437d384769b38294bda91e481",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-19.o": "b93dd734d05f15d2845fb6a57396a3fe91b93369da37c7cecd0903eec571d44f",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-20.o": "290607d5ff11d0c16664be0c671bd5c416675749354ba5686febc800e61d1ace",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-21.o": "e1d470c25999f5ac58e38200bcad2412e77a3a20a10f792d7f92931625550cc1",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-22.o": "71f0eae5d2a01a3a3b14e98e1e3b231990997a9b4d1fb008ea7e9e382d87d021",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-23.o": "ec36b9884613f76463c154fc72c73b985f4d2b7e775494537827d19fee291cc2",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-24.o": "71d469bf42b546c0ef2dcddf3c806f64a4a02e805bb7e8a4ac4a6ce24d2d2dcc",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-25.o": "68884554cadb9b3a20847ede5b24dec1aad353a549f095275ad4dd19e26ef544",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-26.o": "5eab1cd0cae3783b7663c10f4bd30d44410f70e81036f156c316053cc57d781d",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-27.o": "ecc978c27c7c1e230ac2d103e396fd30291e7df99b8021628ce8f4a25f778a2c",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-28.o": "5e316b65e1d370c9c83d39549c8340ca875ebad0ec9ca495202534193ac99ab2",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-29.o": "720b4b1ddd8cb6d228dc48cd2d5b8fb16506d48f9903bef8039cb32496450f41",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-30.o": "00603a0b5d1394523ea529c850c25a9910afa3473963e015482f39d653e4bbc0",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-31.o": "eb413281479f4115778581c0b5db9ba3fbeaaa5e2c3219e062afd599f74f0874",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/members.a": "78a8ce6165b8e59b2a5dc15d2fefca719dbda93b629d71623227f5dc8cd51a33"
+      },
+      "output_sha256": {
+        "baseline": "cde37184957f4b357ee7e4505056bfd909ba7b6193311976f3cca98a9284bba7",
+        "candidate": "cde37184957f4b357ee7e4505056bfd909ba7b6193311976f3cca98a9284bba7"
+      },
+      "failure_diagnostics": {
+        "duplicate": "keel: /private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/entry.o: duplicate definition `_start` (also in /private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/entry.o)\n",
+        "undefined": "keel: /private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/entry.o: undefined symbol `_ZN4keel24collections_benchmark17shared_namespace20symbol_heavy_workload00000000Ev`\n"
+      },
+      "samples_ms": {
+        "baseline": [
+          55.251542,
+          54.732459,
+          55.610958,
+          54.515042,
+          54.668,
+          54.243084,
+          54.714167,
+          54.377708,
+          54.862291
+        ],
+        "candidate": [
+          47.884167,
+          47.140542,
+          48.005125,
+          46.207417,
+          46.322166,
+          46.216917,
+          48.4175,
+          47.703208,
+          45.888166
+        ]
+      },
+      "median_ms": {
+        "baseline": 54.714167,
+        "candidate": 47.140542
+      },
+      "candidate_change_percent": -13.842164498273357,
+      "peak_rss_bytes_single_run": {
+        "baseline": 72564736,
+        "candidate": 68386816
+      },
+      "orders_including_warmups": [
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ]
+      ]
+    },
+    "elf-65536-archive": {
+      "command": [
+        "link",
+        "--target",
+        "x86_64-unknown-linux-gnu",
+        "--static",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/entry.o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/members.a",
+        "-o",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/program"
+      ],
+      "inputs": {
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/entry.o": "9dec383b74c0c7c6dfef5e24787ee3427129c3f94a94c54c7e2c15b3cf88d22f",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-0.o": "6960a71afac262096608f8b52bfe9509d283a3ade21570e8c7df9a514e27cf87",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-1.o": "d38f48d7d872f8a747bd051041517ba68d980bba807ea1e9cde4ef0c1d21369a",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-2.o": "c198d4a15d9ad94fa725e15f3ab2513ece702a74ca679b22f02094772fd59314",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-3.o": "486081bef1cba426fd274b72bce56079378d3b3ae77259f27bcd0f59d9d7a77d",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-4.o": "26c1cbfe988e8cbac5b77dd9cd7060d0d5627bd7371a52198066089d19dae96f",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-5.o": "f15edf3d1a772a458c39f1a765b156d1d0a8cd959eb80d6d36fbc5481e7148ca",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-6.o": "ad70128e0c14f0ca0b8e4dbbe2b4f994ac1f45cb72af4e5a5016eb607ec4170c",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-7.o": "88145e858f2b4d40b1d8f1a0cedbc240ed9d561baa81c5657cf45a15f7f9c0aa",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-8.o": "772b319cf78d555ecaa8a5f9faa64573a87645aa62f687cac7e480a3aa9aeafe",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-9.o": "1728d87c36c4360b05ced1e32eeb59451923203720c837b6a14dfcdbec268ef7",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-10.o": "b32c0bb4ee72044970d7dc6cef4f8395bbcaab8ab9d16dbd87e8e05db1ddd79f",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-11.o": "e4fa41ad86c0361304efc82aa83a587e6f5f14f72e911bfc34ec50ed4e7afac2",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-12.o": "860dd8a8a645a8e4030afe1fdc902a0e82fa7f1ee155eed4b85e8c40a95a5efb",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-13.o": "15087e43242137c27995fe73c227036e8628edf0c1345e5a4910b4dcb64119ff",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-14.o": "ce82c07ba3733fed9f02cefaea90dc333838bda2c37e50731cc4de3c51b61ee0",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-15.o": "cc327a5f612cbe185c7d58b0eaaa92eb331a87e35f687fa5317a84d256d51bbe",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-16.o": "dd23ea490bc87cc1190576f43a65f594150f50a82832f47614bd827512f15f6a",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-17.o": "a06214540e13f677f6bf205137cbfb165cdd072d61dbc10eb38c4e5fd14ce2e0",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-18.o": "1830228059927997b9666b75be1e99c5c5b4170437d384769b38294bda91e481",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-19.o": "b93dd734d05f15d2845fb6a57396a3fe91b93369da37c7cecd0903eec571d44f",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-20.o": "290607d5ff11d0c16664be0c671bd5c416675749354ba5686febc800e61d1ace",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-21.o": "e1d470c25999f5ac58e38200bcad2412e77a3a20a10f792d7f92931625550cc1",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-22.o": "71f0eae5d2a01a3a3b14e98e1e3b231990997a9b4d1fb008ea7e9e382d87d021",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-23.o": "ec36b9884613f76463c154fc72c73b985f4d2b7e775494537827d19fee291cc2",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-24.o": "71d469bf42b546c0ef2dcddf3c806f64a4a02e805bb7e8a4ac4a6ce24d2d2dcc",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-25.o": "68884554cadb9b3a20847ede5b24dec1aad353a549f095275ad4dd19e26ef544",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-26.o": "5eab1cd0cae3783b7663c10f4bd30d44410f70e81036f156c316053cc57d781d",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-27.o": "ecc978c27c7c1e230ac2d103e396fd30291e7df99b8021628ce8f4a25f778a2c",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-28.o": "5e316b65e1d370c9c83d39549c8340ca875ebad0ec9ca495202534193ac99ab2",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-29.o": "720b4b1ddd8cb6d228dc48cd2d5b8fb16506d48f9903bef8039cb32496450f41",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-30.o": "00603a0b5d1394523ea529c850c25a9910afa3473963e015482f39d653e4bbc0",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/shard-31.o": "eb413281479f4115778581c0b5db9ba3fbeaaa5e2c3219e062afd599f74f0874",
+        "/private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/members.a": "78a8ce6165b8e59b2a5dc15d2fefca719dbda93b629d71623227f5dc8cd51a33"
+      },
+      "output_sha256": {
+        "baseline": "cde37184957f4b357ee7e4505056bfd909ba7b6193311976f3cca98a9284bba7",
+        "candidate": "cde37184957f4b357ee7e4505056bfd909ba7b6193311976f3cca98a9284bba7"
+      },
+      "failure_diagnostics": {
+        "duplicate": "keel: /private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/entry.o: duplicate definition `_start` (also in /private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/entry.o)\n",
+        "undefined": "keel: /private/tmp/keel-bbtree-trial/vendor-vs-std/elf-65536/entry.o: undefined symbol `_ZN4keel24collections_benchmark17shared_namespace20symbol_heavy_workload00000000Ev`\n"
+      },
+      "samples_ms": {
+        "baseline": [
+          314.141084,
+          316.678667,
+          314.867125,
+          365.49725,
+          340.564667,
+          343.483,
+          340.868041,
+          338.487875,
+          339.480667
+        ],
+        "candidate": [
+          209.863208,
+          207.363833,
+          224.971375,
+          222.778084,
+          234.650291,
+          217.634334,
+          225.193334,
+          237.319917,
+          234.117333
+        ]
+      },
+      "median_ms": {
+        "baseline": 339.480667,
+        "candidate": 224.971375
+      },
+      "candidate_change_percent": -33.730725526116636,
+      "peak_rss_bytes_single_run": {
+        "baseline": 72286208,
+        "candidate": 68190208
+      },
+      "orders_including_warmups": [
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ]
+      ]
+    }
+  },
+  "load_after": [
+    2.8759765625,
+    3.82373046875,
+    3.01220703125
+  ]
+}

@@ -4,7 +4,8 @@ On 2026-10-25, replacing internal linker ordered collections with bbtree 0.1.5
 reduced whole-process link time on generated workloads with 65,536 symbols.
 Public `Dylib.exports` and `weak_exports` remain standard `BTreeSet` values.
 Mach-O export trie edges also retain standard maps because most nodes have
-one edge and bbtree allocates larger nodes.
+one edge and bbtree allocates larger nodes. A subsequent vendored alignment
+change removes most of the direct Mach-O memory increase described below.
 
 ## Results
 
@@ -50,6 +51,65 @@ archives directly and completes all five cases.
 Two temporary collections need explicit drops because bbtree's drop checking
 keeps their borrowed data live until destruction. Dense symbol caches and
 vector fast paths retain their existing representations.
+
+## Vendored allocation alignment
+
+The linker now uses the published 0.1.5 sources in `third-party/bbtree`, with
+an opt-in `cache-line-alignment` feature. It lowers allocation alignment from
+the full 512- or 1,024-byte page size to 64 bytes. Stricter alignment required
+by keys, values, pointers, or a leaf annex still applies. Node sizes,
+capacities, and slot offsets stay unchanged. This targets allocator padding
+without shrinking nodes or changing tree depth.
+
+In a new paired comparison with the same std baseline binary, large direct
+Mach-O links used 91.7 MiB versus std's 90.6 MiB, a 1.1 MiB increase. Mach-O
+archives used 92.9 versus 106.0 MiB. ELF direct and archive links used 65.2
+and 65.0 MiB versus 69.2 and 68.9 MiB. These memory values are separate
+single-run observations, as in the initial trial.
+
+Median times versus std in that comparison were:
+
+- Mach-O, 64 symbols: 8.14 ms to 8.48 ms, 4.2% higher.
+- Mach-O, large direct: 85.33 ms to 80.91 ms, 5.2% lower.
+- Mach-O, large archive: 99.61 ms to 94.64 ms, 5.0% lower.
+- ELF, large direct: 54.71 ms to 47.14 ms, 13.8% lower.
+- ELF, large archive: 339.48 ms to 224.97 ms, 33.7% lower.
+
+A second paired run used the previous upstream-bbtree binary as the baseline;
+its hash matches the initial trial's candidate. Cache-line alignment reduced
+large Mach-O direct memory from 100.9 to 91.7 MiB and archive memory from
+102.0 to 93.0 MiB. Median times differed by less than 1.1% for the large
+direct links and Mach-O archive. The ELF archive median was 3.8% lower, with
+overlapping sample ranges. The small Mach-O median was 1.3% higher.
+The patch's demonstrated benefit is memory usage; these comparisons do not
+establish a further speed improvement over upstream bbtree.
+
+[Samples versus std](bbtree-vendor-vs-std.json) and
+[samples versus upstream bbtree](bbtree-vendor-vs-upstream-complete.json)
+retain hashes, commands, diagnostics, and every timing sample. Both runs
+required identical output bytes and failure diagnostics and verified and
+executed the Mach-O outputs. The benchmark fields now use `baseline` and
+`candidate` so either baseline implementation is named accurately.
+
+The remaining 1.1 MiB direct-link increase is small enough to retain this
+experiment given the measured large-link improvements. Production C++ and
+Rust workloads are still needed before making a general adoption decision.
+Vendor provenance and the patch's alignment invariants are documented in
+[`VENDORED.md`](../../third-party/bbtree/VENDORED.md).
+
+A separate memory-only comparison ran each of std, upstream bbtree, and the
+vendored version three times per case in shuffled order, without concurrent
+builds. Medians for large direct Mach-O links were 90.6, 100.7, and 91.7 MiB,
+respectively. The approximately 9 MiB reduction versus upstream and 1 MiB
+increase versus std persisted across these samples.
+[Repeated memory samples](bbtree-vendor-memory.json) retain every observation
+and require matching output hashes. The harness now collects three memory
+runs by default; `--memory-rounds` changes that count.
+
+The vendored suite passed 387 unit and documentation tests with the feature
+off and 411 with all features on. Keel's linker and CLI packages passed
+393 tests with two ignored. Strict Clippy still reports the same ten existing
+linker diagnostics as before vendoring.
 
 ## Validation
 

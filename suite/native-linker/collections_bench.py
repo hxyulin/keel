@@ -81,14 +81,15 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--symbols", type=int, default=65536)
     parser.add_argument("--rounds", type=int, default=9)
+    parser.add_argument("--memory-rounds", type=int, default=3)
     args = parser.parse_args()
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         parser.error("requires arm64 macOS and Apple's cross-target assembler")
-    if args.symbols < 4096 or args.rounds < 3:
-        parser.error("use at least 4096 symbols and 3 rounds")
+    if args.symbols < 4096 or args.rounds < 3 or args.memory_rounds < 1:
+        parser.error("use at least 4096 symbols, 3 rounds, and 1 memory round")
     args.out = args.out.resolve()
     args.out.mkdir(parents=True, exist_ok=False)
-    binaries = {"std": args.baseline.resolve(), "bbtree": args.candidate.resolve()}
+    binaries = {"baseline": args.baseline.resolve(), "candidate": args.candidate.resolve()}
     sdk = checked(["xcrun", "--show-sdk-path"]).stdout.decode().strip()
     report = {"platform": platform.platform(), "cpu": checked([
         "sysctl", "-n", "machdep.cpu.brand_string"]).stdout.decode().strip(),
@@ -97,6 +98,7 @@ def main():
         "harness_sha256": digest(Path(__file__)), "load_before": os.getloadavg(),
         "binaries": {k: {"path": str(v), "sha256": digest(v)} for k, v in binaries.items()},
         "symbols": args.symbols, "warmups": 2, "rounds": args.rounds,
+        "memory_rounds": args.memory_rounds,
         "seed": 20261025, "cases": {}}
     rng = random.Random(report["seed"])
     for elf, count in [(False, 64), (False, args.symbols), (True, args.symbols)]:
@@ -111,10 +113,14 @@ def main():
             output = directory / "program"
             command = ["link", *flags, entry, *([archive] if archived else objects), "-o", output]
             samples = {k: [] for k in binaries}
-            hashes, memory, orders = {}, {}, []
+            hashes, memory, memory_samples, orders = {}, {}, {}, []
             for key, binary in binaries.items():
-                measured = checked(["/usr/bin/time", "-l", binary, *command])
-                memory[key] = int(re.search(rb"(\d+)\s+maximum resident set size", measured.stderr)[1])
+                memory_samples[key] = []
+                for _ in range(args.memory_rounds):
+                    measured = checked(["/usr/bin/time", "-l", binary, *command])
+                    memory_samples[key].append(int(re.search(
+                        rb"(\d+)\s+maximum resident set size", measured.stderr)[1]))
+                memory[key] = statistics.median(memory_samples[key])
                 hashes[key] = digest(output)
                 if not elf:
                     checked(["codesign", "--verify", "--strict", output])
@@ -142,15 +148,16 @@ def main():
                     elapsed = (time.perf_counter_ns() - start) / 1e6
                     if iteration >= 2:
                         samples[key].append(elapsed)
-            if digest(output) != hashes["std"]:
+            if digest(output) != hashes["baseline"]:
                 raise RuntimeError(f"{case}: output changed during timing")
             medians = {k: statistics.median(v) for k, v in samples.items()}
             report["cases"][case] = {"command": list(map(str, command)),
                 "inputs": {str(p): digest(p) for p in [entry, *objects, archive]},
                 "output_sha256": hashes, "failure_diagnostics": failures,
                 "samples_ms": samples, "median_ms": medians,
-                "candidate_change_percent": 100 * (medians["bbtree"] / medians["std"] - 1),
-                "peak_rss_bytes_single_run": memory, "orders_including_warmups": orders}
+                "candidate_change_percent": 100 * (medians["candidate"] / medians["baseline"] - 1),
+                "peak_rss_bytes_median": memory, "peak_rss_bytes_samples": memory_samples,
+                "orders_including_warmups": orders}
             (args.out / "raw.json").write_text(json.dumps(report, indent=2) + "\n")
             print(case, json.dumps(medians), flush=True)
     report["load_after"] = os.getloadavg()
