@@ -1,0 +1,6 @@
+func @descriptor_load(ptr,ptr) {
+entry(v0:ptr,v1:ptr):
+ intrinsic x86_lgdt(v0)
+ intrinsic x86_lidt(v1)
+ return
+}

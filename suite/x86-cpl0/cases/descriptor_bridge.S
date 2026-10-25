@@ -4,7 +4,11 @@
 .section .text,"ax"
 .code64
 .global guest_main
+.ifdef KEEL_TABLE_LOADS
+.extern descriptor_load
+.else
 .extern descriptor_observe
+.endif
 guest_main:
     mov %cs, %ax
     cmp $8, %ax
@@ -18,8 +22,17 @@ guest_main:
     mov %ss, %ax
     cmp $16, %ax
     jne mismatch
+.ifdef KEEL_TABLE_LOADS
+    /* Only the separately linked generated payload loads the seed tables. */
+    lea seeded_gdtr(%rip), %rdi
+    lea seeded_idtr(%rip), %rsi
+    sub $8, %rsp
+    call descriptor_load
+    add $8, %rsp
+.else
     lgdt seeded_gdtr(%rip)
     lidt seeded_idtr(%rip)
+.endif
     lea output(%rip), %rdi
     mov $32, %ecx
     mov $0xa5, %al
@@ -29,7 +42,14 @@ guest_main:
     sub $8, %rsp
     /* Opaque, separately linked Keel object: reference bytes cannot be folded
      * into or substituted for the two observations by a bridge compiler. */
+.ifdef KEEL_TABLE_LOADS
+    /* Trusted observer after the generated mutations; no output supplied by
+     * the payload can stand in for the resulting descriptor state. */
+    sgdt 1(%rdi)
+    sidt 17(%rdi)
+.else
     call descriptor_observe
+.endif
     add $8, %rsp
     lea output(%rip), %rsi
     lea expected(%rip), %rdi

@@ -10,7 +10,8 @@ lists, ordinary ABI behavior, feature legality and documented
 value/memory/exception contracts against the existing tests, and closing
 concrete gaps found that way.
 
-Kernel instructions, CPL0 guests, arbitrary physical registers and frames, full
-saved FLAGS images and signal-resumption experiments are optional tracks. They
-do not block userspace support, and their unfinished parts are documented as
-unfinished in their own pages.
+Baseline privileged/system instructions are now an active separate goal. See
+[system instruction work](x86-system-support.md) for implemented operations,
+contracts and remaining work. CPL0 guests, physical registers and frames, saved
+FLAGS images and signal resumption need their own validation. Their unfinished
+parts do not change the userspace support contract.

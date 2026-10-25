@@ -14,6 +14,8 @@ import run
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--exports', type=Path, required=True)
+    parser.add_argument('--table-loads', action='store_true',
+                        help='validate LGDT/LIDT exports using a trusted observer')
     parser.add_argument('--qemu', default='qemu-system-x86_64')
     parser.add_argument('--as', dest='assembler', default='as')
     parser.add_argument('--ld', dest='linker', default='ld')
@@ -22,7 +24,8 @@ def main():
     args = parser.parse_args()
     if not 0 < args.timeout <= 30:
         parser.error('timeout must be positive and at most 30 seconds')
-    names = [f'descriptor-{s}-{a}-{spill}.o'
+    prefix = 'descriptor-load' if args.table_loads else 'descriptor'
+    names = [f'{prefix}-{s}-{a}-{spill}.o'
              for s in ('Baseline', 'Trees', 'Full')
              for a in ('Fast', 'Full') for spill in ('false', 'true')]
     if sorted(p.name for p in args.exports.glob('*.o')) != sorted(names):
@@ -32,17 +35,23 @@ def main():
     work = Path(tempfile.mkdtemp(prefix='keel-descriptor-campaign-', dir='/tmp'))
     print(json.dumps(dict(artifacts=str(work))), flush=True)
     bridge = work / 'bridge.o'
-    run.checked([assembler, '--64', '-o', str(bridge),
+    defines = ['--defsym', 'KEEL_TABLE_LOADS=1'] if args.table_loads else []
+    run.checked([assembler, '--64', *defines, '-o', str(bridge),
                  str(run.HERE / 'cases/descriptor_bridge.S')])
     cases = [(name, args.exports / name, False) for name in names]
-    # Missing observations must fail, as must a correct observation followed
-    # by a one-byte canary overwrite. Both still return normally to the bridge.
-    for name, body in (
-            ('no-observation', 'ret'),
-            ('corrupt-canary', 'sgdt 1(%rdi)\nsidt 17(%rdi)\nmovb $0, (%rdi)\nret')):
+    # Controls must return normally with incorrect state or output. A fault
+    # or timeout cannot satisfy the expected FAIL transcript and exit status.
+    controls = (
+        ('no-load', 'ret'),
+        ('swapped-tables', 'lgdt (%rsi)\nlidt (%rdi)\nret'),
+    ) if args.table_loads else (
+        ('no-observation', 'ret'),
+        ('corrupt-canary', 'sgdt 1(%rdi)\nsidt 17(%rdi)\nmovb $0, (%rdi)\nret'))
+    symbol = 'descriptor_load' if args.table_loads else 'descriptor_observe'
+    for name, body in controls:
         source, obj = work / f'{name}.S', work / f'{name}.o'
-        source.write_text('.text\n.code64\n.global descriptor_observe\n'
-                          'descriptor_observe:\n' + body +
+        source.write_text(f'.text\n.code64\n.global {symbol}\n'
+                          f'{symbol}:\n' + body +
                           '\n.section .note.GNU-stack,"",@progbits\n')
         run.checked([assembler, '--64', '-o', str(obj), str(source)])
         cases.append((name, obj, True))

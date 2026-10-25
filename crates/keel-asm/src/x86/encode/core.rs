@@ -450,12 +450,20 @@ pub(super) fn encode<'a>(
                 None,
             )?;
         }
-        (CoreOpcode::Sgdt | CoreOpcode::Sidt, [a @ M(m)]) if matches!(m.width, 0 | 80) => {
+        (CoreOpcode::Sgdt | CoreOpcode::Sidt | CoreOpcode::Lgdt | CoreOpcode::Lidt, [a @ M(m)])
+            if matches!(m.width, 0 | 80) =>
+        {
             e.rm(
                 0,
                 &[0x0f, 0x01],
                 32,
-                if op == CoreOpcode::Sgdt { 0 } else { 1 },
+                match op {
+                    CoreOpcode::Sgdt => 0,
+                    CoreOpcode::Sidt => 1,
+                    CoreOpcode::Lgdt => 2,
+                    CoreOpcode::Lidt => 3,
+                    _ => unreachable!(),
+                },
                 a,
                 None,
             )?;

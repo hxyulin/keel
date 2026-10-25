@@ -1,16 +1,61 @@
 //! Compile/export only: privileged instructions must never execute on the host.
 use keel_asm_ir::x86::CpuLevel;
 use keel_codegen::{SelectionTier, regalloc::AllocationTier};
+use keel_ir::EntityRef;
 use object::{Object, ObjectSymbol};
 
 #[path = "common/userspace.rs"]
 mod userspace;
 
 const SOURCE: &str = include_str!("../../../suite/x86-cpl0/cases/descriptor.keel");
+const LOAD_SOURCE: &str = include_str!("../../../suite/x86-cpl0/cases/descriptor_load.keel");
 
 #[test]
 fn descriptor_observation_payload_export_and_parity() {
-    let export = std::env::var_os("KEEL_DESCRIPTOR_EXPORT_DIR").map(std::path::PathBuf::from);
+    export_payload(
+        SOURCE,
+        "KEEL_DESCRIPTOR_EXPORT_DIR",
+        "descriptor",
+        "descriptor_observe",
+        ["sgdt", "sidt"],
+    );
+}
+
+#[test]
+fn descriptor_load_payload_export_and_parity() {
+    export_payload(
+        LOAD_SOURCE,
+        "KEEL_DESCRIPTOR_LOAD_EXPORT_DIR",
+        "descriptor-load",
+        "descriptor_load",
+        ["lgdt", "lidt"],
+    );
+    let m = keel_ir::parse(LOAD_SOURCE).unwrap();
+    assert!(keel_codegen::aarch64::compile(&m).is_err());
+    for (id, name) in [
+        (keel_ir::Intrinsic::X86Lgdt, "x86_lgdt"),
+        (keel_ir::Intrinsic::X86Lidt, "x86_lidt"),
+    ] {
+        assert_eq!(id.info().name, name);
+        assert_eq!(id.info().params, &[keel_ir::Type::Ptr]);
+        assert!(id.info().returns.is_empty());
+        assert!(!id.info().pure);
+        assert!(id.is_x86_target());
+        assert_eq!(
+            keel_ir::InstData::Intrinsic {
+                id,
+                args: vec![keel_ir::Value::new(0)]
+            }
+            .memory_effects(),
+            keel_ir::MemoryEffects::Barrier
+        );
+    }
+    assert_eq!(keel_ir::Intrinsic::X86Lgdt as usize, 774);
+    assert_eq!(keel_ir::Intrinsic::X86Lidt as usize, 775);
+}
+
+fn export_payload(source: &str, variable: &str, prefix: &str, symbol: &str, ops: [&str; 2]) {
+    let export = std::env::var_os(variable).map(std::path::PathBuf::from);
     if let Some(dir) = &export {
         std::fs::create_dir_all(dir).unwrap();
     }
@@ -21,8 +66,8 @@ fn descriptor_observation_payload_export_and_parity() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for spilled in [false, true] {
-                let (object, text) = userspace::compile(SOURCE, CpuLevel::V1, s, a, spilled);
-                for query in ["sgdt", "sidt"] {
+                let (object, text) = userspace::compile(source, CpuLevel::V1, s, a, spilled);
+                for query in ops {
                     assert_eq!(
                         text.lines()
                             .filter(|line| line.split_whitespace().next() == Some(query))
@@ -36,7 +81,7 @@ fn descriptor_observation_payload_export_and_parity() {
                 assert_eq!(file.architecture(), object::Architecture::X86_64);
                 assert!(
                     file.symbols()
-                        .any(|sym| sym.name() == Ok("descriptor_observe") && sym.is_definition())
+                        .any(|sym| sym.name() == Ok(symbol) && sym.is_definition())
                 );
                 assert!(
                     file.symbols()
@@ -44,7 +89,7 @@ fn descriptor_observation_payload_export_and_parity() {
                     "payload needs an external helper"
                 );
                 if let Some(dir) = &export {
-                    let stem = format!("descriptor-{s:?}-{a:?}-{spilled}");
+                    let stem = format!("{prefix}-{s:?}-{a:?}-{spilled}");
                     std::fs::write(dir.join(format!("{stem}.o")), object).unwrap();
                     std::fs::write(dir.join(format!("{stem}.s")), text).unwrap();
                 }

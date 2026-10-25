@@ -116,3 +116,35 @@ fn exact_operand_sizes_and_native_memory_writes() {
     }
     assert_eq!(rejected_prefix_mutants, 6);
 }
+
+#[test]
+fn exact_table_loads_read_the_original_pointer() {
+    let empty = Pools {
+        caller_saved: &[],
+        callee_saved: &[],
+        float_caller_saved: &[],
+        float_callee_saved: &[],
+    };
+    for (name, field) in [("x86_lgdt", 0x10), ("x86_lidt", 0x18)] {
+        let source =
+            format!("func @query(ptr) {{\nentry(v0:ptr):\n intrinsic {name}(v0)\n return\n}}\n");
+        let m = keel_ir::parse(&source).unwrap();
+        let pipeline = CodegenPipeline {
+            selector: &SelectionTier::Baseline,
+            allocator: &AllocationTier::Full,
+        };
+        let program =
+            keel_codegen::x86_64::compile_program_with_pipeline(&m, &empty, &pipeline).unwrap();
+        let obj = keel_asm::x86::assemble_program_object_with_features(
+            &program,
+            keel_asm_ir::x86::Features::NONE,
+        )
+        .unwrap();
+        let file = object::File::parse(&*obj).unwrap();
+        let sym = file.symbols().find(|s| s.name() == Ok("query")).unwrap();
+        let section = file.section_by_index(sym.section_index().unwrap()).unwrap();
+        let start = (sym.address() - section.address()) as usize;
+        let body = &section.data().unwrap()[start..start + sym.size() as usize];
+        assert_eq!(body, exact_body(&[0x0f, 0x01, field], false), "{name}");
+    }
+}

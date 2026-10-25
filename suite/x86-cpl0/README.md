@@ -132,3 +132,26 @@ This qualifies only the bounded emulated SGDT/SIDT comparison and canaries.
 The generic smoke and compile/encoding gates are separate evidence. Native
 bare-metal behavior, the other twelve descriptor/status APIs, SMSW wide
 containers and arbitrary FLAGS/x87 state remain outside this checkpoint.
+
+## LGDT/LIDT campaign
+
+Export the twelve table-load objects, then use the same campaign with
+`--table-loads`:
+
+```sh
+KEEL_DESCRIPTOR_LOAD_EXPORT_DIR="$PWD/target/descriptor-load-exports" \
+  cargo test -p keel-codegen --test x86_descriptor_cpl0 \
+  --test x86_descriptor_queries_encoding
+python3 suite/x86-cpl0/descriptor_campaign.py --table-loads \
+  --exports target/descriptor-load-exports --timeout 5
+```
+
+The bridge calls the generated `descriptor_load` with known GDTR/IDTR images
+instead of loading them itself. Trusted SGDT/SIDT observations then check both
+bases and limits. Negative controls omit the loads or swap the table images.
+Both must return FAIL with exit 35. Normal exports must return PASS with exit
+33. See [system support](../../docs/x86-system-support.md) for API contracts.
+
+All twelve load variants pass under QEMU 11.1.2 TCG on macOS ARM64. Both
+negative controls return the exact READY/FAIL transcript and exit 35. This is
+bounded emulated evidence, not native bare-metal qualification.

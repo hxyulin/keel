@@ -901,6 +901,9 @@ pub enum Intrinsic {
     X86Aesdeclast128,
     X86Aesimc128,
     X86Aeskeygenassist128,
+    // Privileged long-mode descriptor-table loads, append-only IDs 774..775.
+    X86Lgdt,
+    X86Lidt,
 }
 
 pub struct IntrinsicInfo {
@@ -912,7 +915,7 @@ pub struct IntrinsicInfo {
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 774] = [
+    pub const ALL: [Intrinsic; 776] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -1687,6 +1690,8 @@ impl Intrinsic {
         Intrinsic::X86Aesdeclast128,
         Intrinsic::X86Aesimc128,
         Intrinsic::X86Aeskeygenassist128,
+        Intrinsic::X86Lgdt,
+        Intrinsic::X86Lidt,
     ];
 
     pub fn info(self) -> IntrinsicInfo {
@@ -1801,6 +1806,8 @@ impl Intrinsic {
             Intrinsic::X86Out8Imm => ("x86_out8_imm", &[Type::I16, Type::I8], &[], false),
             Intrinsic::X86Out16Imm => ("x86_out16_imm", &[Type::I16, Type::I16], &[], false),
             Intrinsic::X86Out32Imm => ("x86_out32_imm", &[Type::I16, Type::I32], &[], false),
+            Intrinsic::X86Lgdt => ("x86_lgdt", &[Type::Ptr], &[], false),
+            Intrinsic::X86Lidt => ("x86_lidt", &[Type::Ptr], &[], false),
             Intrinsic::X86Sgdt => ("x86_sgdt", &[Type::Ptr], &[], false),
             Intrinsic::X86Sidt => ("x86_sidt", &[Type::Ptr], &[], false),
             Intrinsic::X86SldtMem => ("x86_sldt_mem", &[Type::Ptr], &[], false),
@@ -7113,7 +7120,8 @@ impl Intrinsic {
                 | Self::X86Sfence
                 | Self::X86Mfence
                 | Self::X86Pause
-        ) || self.x86_descriptor_query().is_some()
+        ) || matches!(self, Self::X86Lgdt | Self::X86Lidt)
+            || self.x86_descriptor_query().is_some()
             || self.x86_selector_query().is_some()
             || self.x86_port_io().is_some()
             || self.x86_string_port_io().is_some()
