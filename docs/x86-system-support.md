@@ -52,9 +52,10 @@ containers. See [descriptor/status observations](x86-descriptor-queries.md).
 LAR, LSL, VERR and VERW have typed descriptor-query APIs. Scalar and string
 port I/O have typed APIs, with their own permission and FLAGS contracts.
 The [query/I/O binding migration](x86-query-bindings.md) generates metadata for
-42 existing APIs. It also records four pre-existing assembly gaps in the
-32/64-bit register LAR/LSL APIs; those paths need an operand spelling/matcher
-fix before CPL0 qualification.
+42 existing APIs. Its follow-up fixes the four pre-existing
+32/64-bit register LAR/LSL assembly gaps by selecting the destination-width
+source register view. All 42 APIs now assemble across the compilation matrix;
+CPL0 execution qualification remains open.
 
 LGDT and LIDT now have assembler encodings and pinned typed APIs:
 `x86_lgdt(ptr)` and `x86_lidt(ptr)`. Each reads one packed ten-byte image:

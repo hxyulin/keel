@@ -24,7 +24,13 @@ impl FunctionCompiler<'_> {
         let source = if mem {
             asm_arg(sized(memory(r64(S1), 0), 16))
         } else {
-            asm_arg(r16(S1))
+            // LAR/LSL encode the register view at destination width, even
+            // though only its low 16 selector bits are consumed. VERR/VERW
+            // have no destination width and use a 16-bit register view.
+            asm_arg(Register {
+                width: if query { width } else { 16 },
+                ..r64(S1)
+            })
         };
         let opcode = Opcode::parse(op).expect("baseline descriptor query");
         if query {

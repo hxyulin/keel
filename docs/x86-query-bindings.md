@@ -83,3 +83,39 @@ also passed after removing unrelated formatting changes. Logs are
 `/tmp/keel-query-bindings-workspace.log`, `/tmp/keel-query-bindings-check.log`,
 `/tmp/keel-query-bindings-final-focused.log` and
 `/tmp/keel-query-bindings-final-generator.log`.
+
+## LAR/LSL register-view follow-up
+
+The four assembly gaps above are fixed. The selector emitter uses the
+same-width register spelling as the LAR/LSL destination. Only the low 16 bits
+carry the selector. Memory sources remain m16, and VERR/VERW register sources
+remain r16. Staging, old-destination handling and immediate ZF capture are
+unchanged. No generated ISA or operand-matcher change is needed.
+
+The successful-object matrix now includes all 42 bindings across all 36
+configurations, with text/typed/chunked parity and original input liveness.
+It no longer excludes the four wide register APIs. These expanded objects
+are not compared against the earlier 38-binding object snapshots.
+
+Six literal byte witnesses cover both instructions at all three register
+widths, including extended registers and REX.W. Keel accepts both Intel and
+AT&T spellings. Clang matches the literal encodings directly. GNU as 2.46
+omits REX.W for these wide register forms in both dialects; its independent
+witness therefore requests `rex.W` explicitly. This check preserves the
+64-bit encoding instead of accepting GNU's unprefixed 32-bit encoding.
+
+This closes compilation gaps, not the separate descriptor-state execution
+qualification. No privileged instructions execute on the host.
+
+Follow-up validation: both focused compiler tests passed, including all 42
+bindings across 36 configurations and explicit register-view checks. The
+literal/Clang/GNU oracle passed in both dialects. Both generator freshness
+checks and formatting/diff checks passed.
+
+The full workspace run completed 500 groups: 2,716 passed, 13 ignored and one
+failure in an earlier compiled version of the new oracle test, which used
+unsupported suffixed AT&T spellings. The final test uses register-inferred
+widths and passed when rerun with workspace settings. All other targets passed.
+Logs: `/tmp/keel-selector-fix-workspace.log`,
+`/tmp/keel-selector-fix-workspace-oracle.log`,
+`/tmp/keel-selector-fix-focused.log` and `/tmp/keel-selector-fix-codegen.log`.

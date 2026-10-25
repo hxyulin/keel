@@ -6,17 +6,11 @@ use keel_ir::Intrinsic;
 #[path = "common/userspace.rs"]
 mod userspace;
 
-fn source(include_gaps: bool) -> String {
+fn source() -> String {
     let mut source = String::new();
     let rows = include_str!("../../keel-ir/tests/fixtures/x86-query-bindings.txt");
     for row in rows.lines().filter(|s| !s.starts_with('#')) {
         let fields: Vec<_> = row.split('|').collect();
-        // Existing wide LAR/LSL register forms fail the operand matcher before
-        // this metadata migration. Keep them in the metadata fixture, outside
-        // this successful-object matrix. See docs/x86-query-bindings.md.
-        if !include_gaps && matches!(fields[0], "703" | "705" | "709" | "711") {
-            continue;
-        }
         let id = Intrinsic::from_name(fields[2]).unwrap();
         let info = id.info();
         let mut types: Vec<_> = info.params.iter().map(ToString::to_string).collect();
@@ -61,16 +55,13 @@ fn source(include_gaps: bool) -> String {
         }
         source += " return\n}\n";
     }
-    assert_eq!(
-        source.matches("func @").count(),
-        if include_gaps { 42 } else { 38 }
-    );
+    assert_eq!(source.matches("func @").count(), 42);
     source
 }
 
 #[test]
 fn query_and_scalar_io_binding_transport_matrix() {
-    let source = source(false);
+    let source = source();
     let export = std::env::var_os("KEEL_QUERY_BINDINGS_EXPORT_DIR").map(std::path::PathBuf::from);
     if let Some(dir) = &export {
         std::fs::create_dir_all(dir).unwrap();
@@ -87,6 +78,15 @@ fn query_and_scalar_io_binding_transport_matrix() {
                 for empty in [false, true] {
                     let (object, text) =
                         userspace::compile(&source, level, selector, allocator, empty);
+                    for opcode in ["lar", "lsl"] {
+                        for (destination, selector) in
+                            [("ax", "cx"), ("eax", "ecx"), ("rax", "rcx")]
+                        {
+                            assert!(
+                                text.contains(&format!("\t{opcode}\t{destination}, {selector}"))
+                            );
+                        }
+                    }
                     if let Some(dir) = &export {
                         std::fs::write(dir.join(format!("matrix-{count:02}.o")), object).unwrap();
                         std::fs::write(dir.join(format!("matrix-{count:02}.s")), text).unwrap();
@@ -101,7 +101,7 @@ fn query_and_scalar_io_binding_transport_matrix() {
 
 #[test]
 fn all_query_bindings_reach_typed_lowering_and_reject_foreign_targets() {
-    let module = keel_ir::parse(&source(true)).unwrap();
+    let module = keel_ir::parse(&source()).unwrap();
     keel_ir::verify_module(&module).unwrap();
     let program = keel_codegen::x86_64::compile_program_with_pipeline(
         &module,

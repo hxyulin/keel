@@ -10,8 +10,10 @@ digest below record the original audit checkpoint.
 
 The later [query/I/O binding migration](x86-query-bindings.md) generates 42
 existing binding tables. Its baseline probe found assembly failures in the
-32/64-bit register LAR/LSL paths. Those four APIs need a spelling/matcher fix
-before the descriptor-query qualification recommended below.
+32/64-bit register LAR/LSL paths. A follow-up fixes those four APIs by using
+the destination-width register view for the selector. All 42 query/I/O bindings
+now pass the compile/assembly matrix. Descriptor-query execution qualification
+remains open.
 
 Most remaining baseline work concerns compiler contracts and qualification,
 rather than missing instruction bytes. Two public assembler gaps are confirmed:
