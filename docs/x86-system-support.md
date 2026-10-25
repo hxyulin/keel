@@ -13,6 +13,10 @@ remaining work below tracks those layers and their validation. The
 forms and declarative candidates; it does not infer execution qualification
 from these historical records.
 
+The [remaining instruction audit](x86-system-audit.md) inventories 122 selected
+source records and separates public assembler gaps, missing compiler contracts,
+existing interfaces needing qualification, and optional extension work.
+
 ## Checkpoint boundary
 
 The implementation checkpoint is `583297c7`. Its recorded validation is

@@ -4,11 +4,16 @@ This audit separates existing interfaces from the contracts still needed to
 complete baseline system support. Opcode recognition does not establish a
 compiler entry or return ABI.
 
+The [instruction audit](x86-system-audit.md) joins these contracts to the
+generated ledger and checks current public assembler exposure. It separates
+missing interfaces from existing APIs that still need execution qualification.
+
 | Area | Current interface | Remaining contract |
 |---|---|---|
 | Returning Linux SYSCALL | `x86_64::linux_syscall::{signature, program, assembly}` transports syscall number, six arguments and raw RAX through an ordinary imported C function. | Arbitrary OS entry, stack replacement and non-returning syscalls need a separate protocol. |
 | IRETQ | [Owned terminal GPR/frame adapter](x86-iretq.md), with CPL0 and CPL3 landing witnesses. | Broader descriptor/flag combinations, malformed-frame recovery, asynchronous entry and other context components remain caller-owned and unqualified. |
-| SYSRET/SYSEXIT | Fixed assembler identities. | Target registers and stack, configured selector/MSR policy, CPU/mode preconditions and fault delivery after stack replacement. |
+| SYSRET | Fixed assembler identities `sysret` and `sysretq`. | Target registers and stack, configured selector/MSR policy, CPU/mode preconditions and fault delivery after stack replacement. |
+| SYSEXIT | Imported encoding/decoder form; no public assembler identity. | Public identity and width policy, then a vendor-qualified terminal stack/register and selector/MSR contract. |
 | SYSENTER/general SYSCALL entry | Assembler identities. | First-instruction entry shim, physical stack acquisition and register capture before ordinary compiled code. CPU/vendor availability remains explicit. |
 | Software interrupts | `debugtrap` lowers to INT3; assembler Core grammar exposes INT imm8. | Arbitrary-vector native IR transport still needs an immediate-vector contract, handler register preservation and a valid continuation or terminal policy. |
 | Far transfers and segment loads | Core assembler grammar includes far calls/jumps/returns and LFS/LGS/LSS; MOV/POP segment forms also exist. | Descriptor/privilege rules, segment cache effects, interrupt shadows and a valid continuation or terminal transfer. |

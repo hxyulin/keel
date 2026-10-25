@@ -111,6 +111,12 @@ form IDs. It must distinguish encoding comparisons, actual decode witnesses,
 emulated execution and native execution, including expected negative controls.
 No such results are inferred from prose or file names here.
 
+The [remaining system instruction audit](../../docs/x86-system-audit.md) uses
+`python3 tools/x86-isa/audit_system.py` to join a manual system roster and a
+category/CPL sweep to this ledger. That read-only report keeps the original
+candidate/validation distinctions; handwritten API and contract findings live
+in the audit document rather than being inferred from empty links.
+
 ## Implementation verification
 
 The workspace run passed 2,711 tests with zero failures and 13 ignored across
