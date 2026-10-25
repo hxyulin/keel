@@ -12,6 +12,7 @@ import api_identities
 import registers
 import core_mappings
 import att_rules
+import intrinsic_registry
 import system_intrinsics
 import query_bindings
 import coverage_ledger
@@ -417,6 +418,7 @@ def main():
     outputs.update(registers.outputs(ROOT, OUTPUT))
     outputs.update(core_mappings.outputs(ROOT, OUTPUT))
     outputs.update(att_rules.outputs(ROOT, OUTPUT))
+    outputs.update(intrinsic_registry.outputs(ROOT))
     outputs.update(system_intrinsics.outputs(ROOT, OUTPUT))
     outputs.update(query_bindings.outputs(ROOT))
     outputs.update(coverage_ledger.outputs(ROOT, data, adapters, exclusion_reasons, form_isa))

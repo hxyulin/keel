@@ -91,9 +91,9 @@ insufficient.
 
 The older descriptor/status, selector and scalar port-I/O families now have
 [generated metadata and public helper tables](../../docs/x86-query-bindings.md)
-for 42 existing prefix IDs. Their shared emission code has not migrated into
-this recipe engine. Four wide LAR/LSL register paths have existing assembler
-operand gaps documented there.
+for 42 existing IDs. Their shared emission code has not migrated into
+this recipe engine. The four wide LAR/LSL register
+operand gaps found during that migration are now fixed.
 
 CPUID is outside this schema and needs an RBX save slot and prologue save/CFI
 planning. Its instruction emission cannot be migrated independently of those
@@ -105,12 +105,11 @@ intrinsic recipes. Stack installation, terminal control flow, fault delivery
 and asynchronous state ownership remain distinct contracts. Port I/O and x87
 regions also need their own reviewed recipes.
 
-The metadata generator still assumes an immutable 774-entry prefix and a
-contiguous system tail. Its total inventory length uses that assumption. This
-migration reuses the existing 45 IDs and adds no intrinsic. Before unrelated
-families interleave with new system IDs, separate global ID allocation from
-family membership and inventory length. The scalar type vocabulary also needs
-extension before vector intrinsic migration.
+The [global intrinsic registry](README.md#intrinsic-registry-and-family-declarations)
+owns IDs and inventory positions independently of family membership. System
+metadata no longer requires a contiguous tail or a fixed handwritten prefix;
+an unrelated family can allocate an ID between system declarations. The scalar
+type vocabulary still needs extension before vector intrinsic metadata migration.
 
 ## Compatibility evidence
 

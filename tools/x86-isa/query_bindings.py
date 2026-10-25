@@ -1,6 +1,6 @@
 """Reviewed metadata for existing descriptor/status, selector and scalar I/O APIs.
 
-Enum declarations and ALL membership remain in the existing global registry.
+Enum declarations and ALL membership come from intrinsic-registry.json.
 Generated const assertions check the schema's IDs against that registry.
 """
 import json
@@ -36,8 +36,8 @@ def validate(schema, root):
                 'id', 'variant', 'name', 'params', 'returns', 'pure', 'memory',
                 'target', 'doc', 'binding'}:
             raise ValueError('unknown or missing query binding fields')
-        if type(row['id']) is not int or not previous < row['id'] < 774:
-            raise ValueError('query binding IDs must be ordered existing prefix IDs')
+        if type(row['id']) is not int or row['id'] <= previous:
+            raise ValueError('query binding IDs must be nonnegative, unique and ordered')
         previous = row['id']
         for key, seen, pattern in [('variant', variants, r'X86[A-Za-z0-9]+'),
                                     ('name', names, r'x86_[a-z0-9_]+')]:

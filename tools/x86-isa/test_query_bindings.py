@@ -28,8 +28,8 @@ class QueryBindingTests(unittest.TestCase):
             self.assertIn(f'pub fn {method}(', source)
 
     def test_ids_and_duplicate_identities_fail(self):
-        self.rejects(0, lambda r: r.update(id=774), 'prefix IDs')
-        self.rejects(1, lambda r: r.update(id=687), 'prefix IDs')
+        self.rejects(0, lambda r: r.update(id=-1), 'IDs')
+        self.rejects(1, lambda r: r.update(id=687), 'IDs')
         self.rejects(1, lambda r: r.update(variant='X86Sgdt'), 'duplicate')
         self.rejects(1, lambda r: r.update(name='x86_sgdt'), 'duplicate')
 

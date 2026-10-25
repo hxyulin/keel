@@ -15,14 +15,13 @@ class SystemIntrinsicTests(unittest.TestCase):
         self.assertEqual([r['id'] for r in rows], list(range(774, 819)))
         self.assertTrue(all(not r['pure'] and r['memory'] == 'Barrier' for r in rows))
         source = system_intrinsics.generate(self.schema)
-        self.assertIn('X86Lgdt = 774,', source)
-        self.assertIn('X86Swapgs = 818,', source)
-        self.assertIn('ALL: [Intrinsic; 819]', source)
+        self.assertNotIn('pub enum Intrinsic', source)
+        self.assertNotIn('define_intrinsic_inventory', source)
         self.assertIn('(x86_64) =>', source)
         self.assertIn('(Barrier) =>', source)
 
-    def test_ids_are_explicit_contiguous_and_ordered(self):
-        for value in [773, 775, True, '774']:
+    def test_ids_are_explicit_nonnegative_and_ordered(self):
+        for value in [-1, 775, True, '774']:
             schema = copy.deepcopy(self.schema)
             schema['intrinsics'][0]['id'] = value
             with self.assertRaisesRegex(ValueError, 'IDs'):
@@ -31,8 +30,9 @@ class SystemIntrinsicTests(unittest.TestCase):
         schema['intrinsics'].reverse()
         with self.assertRaisesRegex(ValueError, 'IDs'):
             system_intrinsics.generate(schema)
-        schema['first_id'] = 0
-        with self.assertRaisesRegex(ValueError, 'prefix'):
+        schema['intrinsics'][1]['id'] = 776
+        schema['intrinsics'][2]['id'] = 775
+        with self.assertRaisesRegex(ValueError, 'IDs'):
             system_intrinsics.generate(schema)
 
     def test_duplicate_and_invalid_names(self):
@@ -83,14 +83,14 @@ class SystemIntrinsicTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'empty'):
             system_intrinsics.generate(schema)
 
-    def test_appending_updates_declarations_and_all_classifications(self):
+    def test_appending_updates_metadata_and_all_classifications(self):
         schema = copy.deepcopy(self.schema)
         row = dict(schema['intrinsics'][-1], id=819, variant='X86Example', name='x86_example')
         schema['intrinsics'].append(row)
         source = system_intrinsics.generate(schema)
-        self.assertIn('ALL: [Intrinsic; 820]', source)
-        self.assertIn('X86Example = 819,', source)
-        # Inventory, availability and effects all follow the same new row.
+        self.assertNotIn('ALL:', source)
+        self.assertIn('Self::X86Example => IntrinsicInfo', source)
+        # Availability and effects follow the family row; the registry owns inventory.
         self.assertEqual(source.count('$crate::Intrinsic::X86Example'), 3)
 
 

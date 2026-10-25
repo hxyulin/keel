@@ -35,12 +35,12 @@ Rust. Their staging order, result publication, ZF capture, zero extension,
 allocator interaction and rematerialization behavior are unchanged. No new
 instruction, intrinsic ID, encoder, operand rule or execution contract is added.
 
-Enum declarations and `ALL` entries for these 42 IDs remain in the existing
-774-entry handwritten prefix. Generated const assertions check every schema ID
-against the actual enum. The frozen global inventory checks numeric IDs and
-iteration order independently. Generating that prefix's declarations requires
-the separate global-registry migration; this change does not broaden the
-existing append-only system-tail generator.
+Enum declarations and `ALL` entries now come from the
+[global intrinsic registry](../tools/x86-isa/README.md#intrinsic-registry-and-family-declarations).
+Generated const assertions and the registry's family join check every query
+ID. The frozen inventory checks numeric IDs and iteration order independently.
+The registry cleanup removes the former 774-entry handwritten prefix and
+contiguous system-tail assumption. Query metadata and lowering stay separate.
 
 The structural coverage ledger still tracks its original 45 system lowering
 declarations. It does not yet join these 42 query/I/O bindings. Empty compiler

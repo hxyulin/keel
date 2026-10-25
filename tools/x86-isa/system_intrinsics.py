@@ -10,20 +10,20 @@ MEMORY = {'None', 'Read', 'Write', 'ReadWrite', 'Barrier'}
 
 
 def validate(schema):
-    if not isinstance(schema, dict) or set(schema) != {'first_id', 'intrinsics'}:
+    if not isinstance(schema, dict) or set(schema) != {'intrinsics'}:
         raise ValueError('unknown or missing system intrinsic schema fields')
-    if type(schema['first_id']) is not int or schema['first_id'] != 774:
-        raise ValueError('system intrinsic prefix must retain 774 IDs')
     rows = schema['intrinsics']
     if not isinstance(rows, list) or not rows:
         raise ValueError('system intrinsic inventory must not be empty')
     variants, names = set(), set()
-    for offset, row in enumerate(rows):
+    previous = -1
+    for row in rows:
         if not isinstance(row, dict) or set(row) != {'id', 'variant', 'name', 'params', 'returns', 'pure',
                         'memory', 'target', 'doc', 'lowering'}:
             raise ValueError('unknown or missing system intrinsic fields')
-        if type(row['id']) is not int or row['id'] != schema['first_id'] + offset:
-            raise ValueError('system intrinsic IDs must be contiguous and ordered')
+        if type(row['id']) is not int or row['id'] <= previous:
+            raise ValueError('system intrinsic IDs must be nonnegative, unique and ordered')
+        previous = row['id']
         variant, name = row['variant'], row['name']
         if not isinstance(variant, str) or not re.fullmatch(r'X86[A-Za-z0-9]+', variant) or variant in variants:
             raise ValueError('invalid or duplicate system intrinsic variant')
@@ -49,19 +49,7 @@ def validate(schema):
 def generate(schema):
     rows = validate(schema)
     lines = [HEADER, '// Semantic policy is reviewed in system-intrinsics.json, not inferred from ISA bytes.',
-             'use super::{Intrinsic, IntrinsicInfo};', 'use crate::Type;', '',
-             'macro_rules! define_intrinsics {', '    ($($prefix:tt)*) => {',
-             '        #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]',
-             '        pub enum Intrinsic {', '            $($prefix)*']
-    for row in rows:
-        lines += [f'            #[doc = {json.dumps(row["doc"], ensure_ascii=False)}]',
-                  f'            {row["variant"]} = {row["id"]},']
-    lines += ['        }', '    };', '}', '',
-              'macro_rules! define_intrinsic_inventory {', '    ($($prefix:path,)*) => {',
-              f'        pub const ALL: [Intrinsic; {schema["first_id"] + len(rows)}] = [',
-              '            $($prefix,)*']
-    lines += [f'            Intrinsic::{row["variant"]},' for row in rows]
-    lines += ['        ];', '    };', '}', '']
+             'use super::{Intrinsic, IntrinsicInfo};', 'use crate::Type;', '']
     lines += metadata(rows, 'system')
     lines += system_lowering.ir_helpers(rows)
     lines += ['}', '']

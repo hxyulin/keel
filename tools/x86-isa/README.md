@@ -227,48 +227,64 @@ Neither table generation nor an encoding comparison proves execution semantics.
 
 See `LICENSE-ZYDIS` for production ISA data and `LICENSE-XED` for the pilot.
 
-## System intrinsic declarations
+## Intrinsic registry and family declarations
 
-`system-intrinsics.json` owns the 45 existing x86 system intrinsic declarations
-at IDs 774 through 818. `system_intrinsics.py` generates their enum variants,
-`ALL` inventory entries and length, names, parameter/result types, Rust docs,
-purity, compiler memory effects and x86-only classification patterns. Each row
-also requires a validated regular lowering recipe or an explicit MSR hook. Name lookup
-continues to use `ALL` and `info()`, so it consumes the same generated names.
-The earlier intrinsic declarations remain handwritten.
+`intrinsic-registry.json` owns all 819 intrinsic variants, explicit numeric IDs,
+`ALL` positions and metadata ownership. It includes target-neutral intrinsics,
+not only x86 intrinsics. `intrinsic_registry.py` generates the public enum and
+inventory in `crates/keel-ir/src/generated/intrinsic_registry.rs`. The public
+`Intrinsic` paths, derives and inventory type remain unchanged.
 
-`query-bindings.json` separately owns metadata and helper mappings for 42
-existing descriptor/status, selector and scalar port-I/O APIs in that prefix.
-`query_bindings.py` emits their signatures, effects, target patterns and helper
-tables while const-checking IDs against the existing declarations. Shared
-emitters remain handwritten. See [the migration and known operand gaps](../../docs/x86-query-bindings.md).
+IDs and `ALL` iteration order are separate contracts. The existing inventory
+has 226 positions that differ from numeric order. Both are explicit in the
+manifest and checked against the independent frozen fixture from `a80be8ca`.
+There is no handwritten enum prefix, fixed prefix length or family-owned tail.
 
-The generated enum and inventory macros retain the handwritten prefix. Numeric
-IDs and `ALL` iteration order are separate contracts: the earlier prefix does
-not iterate in numeric order. Frozen fixtures captured from `a80be8ca` check
-all 819 numeric IDs and inventory entries independently, plus every migrated
-signature, name, purity, memory effect and target classification.
+Each row names its metadata owner: `handwritten`, `x86_system` or `x86_query`.
+The generator checks both directions: every generated-family declaration needs
+an identical registry ID/variant/owner, and every registry member of that family
+needs a declaration. It rejects duplicate identities, duplicate family names,
+missing members and unknown owners. Global IDs remain contiguous from zero;
+family IDs need only be ordered and unique, so families can interleave.
+
+`system-intrinsics.json` owns signatures, names, docs, effects, target policy and
+reviewed lowering recipes for 45 existing system intrinsics at IDs 774..818.
+`system_intrinsics.py` generates their metadata and classification patterns;
+it no longer declares variants or computes global inventory length.
+
+`query-bindings.json` owns equivalent metadata and helper mappings for 42
+existing descriptor/status, selector and scalar port-I/O APIs.
+`query_bindings.py` generates their tables and const-checks their IDs.
+Shared emitters remain handwritten. The four wide LAR/LSL compilation gaps
+found during migration are fixed; see [the query binding notes](../../docs/x86-query-bindings.md).
+
+The other 732 intrinsics retain handwritten metadata and lowering. Their
+existing enum documentation lives in the registry; generated-family contract
+documentation stays in its family schema. Canonical name lookup still uses
+`ALL` and `info()`. This cleanup does not migrate signatures or semantics.
 
 Effects and target availability are explicit reviewed policy. They are not
 inferred from the encoding catalogue or mnemonic. All current rows are pinned
 compiler memory barriers and x86-64-only; a compiler barrier does not promise
-hardware fencing. The schema validates contiguous explicit IDs, unique names
+hardware fencing. The family schema validates ordered explicit IDs, unique names
 and variants, supported scalar types, effects and target domains. Pure entries
 cannot claim memory effects. Generic instruction-memory classification and
 AArch64 rejection/exhaustive classification consume the generated policy.
 
-To add another system intrinsic in this append-only range:
+To add an intrinsic:
 
-1. Append its declaration with the next stable ID, signature, effects, target
-   and contract documentation to `system-intrinsics.json`.
-2. Run `python3 tools/x86-isa/generate.py`. Declarations, lookup inputs, effects
-   and target classifications follow the new row.
-3. Select a supported lowering recipe and review privilege, state and continuation
-   contracts. Existing recipe bindings and dispatch are generated; shared emitters,
-   new recipe semantics, MSR sequences and terminal transfers remain handwritten.
-   Add independent encoding/runtime witnesses as needed.
-4. Extend the compatibility fixtures for the intentional new ID and signature,
-   then run the generator tests, freshness checks and affected Rust suites.
+1. Append a row to `intrinsic-registry.json` with the next global ID and the
+   next `ALL` position, a unique variant and its metadata owner. Do not reorder
+   existing IDs or inventory positions.
+2. Add the declaration to the owner's schema with the same ID and variant.
+   For `handwritten`, implement the metadata/classification matches in Rust.
+   Family membership does not require neighbouring IDs or a generator edit.
+3. Select an existing lowering recipe or implement the new behavior. Review
+   permission, state, clobber and continuation contracts explicitly.
+4. Run `python3 tools/x86-isa/generate.py`. The enum, global inventory and family
+   outputs follow their schemas. Update the independent frozen fixture for the
+   intentional append, then run generator tests, freshness and affected Rust
+   suites. Add independent byte/runtime witnesses as needed.
 
 This migration introduces no instruction, intrinsic ID, runtime permission,
 feature requirement or kernel entry/return contract. Existing lowering and
