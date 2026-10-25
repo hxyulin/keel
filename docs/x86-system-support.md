@@ -6,6 +6,10 @@ CPU capabilities, not a kernel execution environment. The existing
 [userspace contract](userspace-isa-status.md) still has its documented limits;
 full baseline system support remains unfinished.
 
+The assembler and decoder share generated ISA forms. Public mnemonic/operand
+adapters and typed lowering determine which compiler paths are exposed. The
+remaining work below tracks those layers and their validation.
+
 ## Current coverage
 
 SGDT, SIDT, SLDT, STR and SMSW have typed observation APIs and assembler
@@ -44,13 +48,14 @@ assembler encoding alone is not evidence of working kernel code generation.
 
 ## Remaining baseline work
 
-- Add LLDT, LTR and LMSW operand forms and contracts, including descriptor
-  side effects and permitted state changes.
-- Add control/debug register operands and MOV encodings. Design typed access
+- Expose LLDT, LTR and LMSW assembler identities and typed operations over
+  the generated forms, including descriptor side effects and permitted state
+  changes.
+- Expose control/debug register operands and generated MOV forms. Design typed access
   around the registers whose mutation permits ordinary compiled code to
   continue; mode-changing operations need an explicit transition contract.
-- Add INVLPG and qualify address translation/cache operations in disposable
-  guests. Define the distinction between compiler barriers and hardware
+- Expose INVLPG's address-only operand and typed operation, then qualify
+  address translation/cache operations in disposable guests. Define the distinction between compiler barriers and hardware
   invalidation, including local-CPU scope.
 - Add typed CPU-control operations for the remaining baseline fixed opcodes,
   with state and control-flow contracts. The existing typed MSR operations
@@ -106,3 +111,18 @@ bare-metal execution, exception resumption or every input.
 Instruction semantics and privilege requirements follow Intel's
 [instruction reference](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-2a-manual.pdf)
 and [system programming guide](https://cdrdv2-public.intel.com/874249/253668-090-sdm-vol-3a.pdf).
+
+## Generated encoder integration
+
+The privileged-instruction branch includes the shared-table migration and
+its AArch64 disassembler/import-pilot prerequisite. The generator freshness
+check and thirteen generator/pilot unit tests pass. The full assembler and
+disassembler package suites, the workspace compile check and thirteen
+focused privileged codegen tests pass against the generated encoder.
+
+All five CPL0 campaigns pass using freshly regenerated objects: 14 table
+observations, 14 table loads, 18 selector/status cases, 19 MSR cases and 18
+CPU/cache-control cases. These are 83 expected guest verdicts. The individual
+campaigns retain their documented limits. This integration check does not
+establish that all workspace tests pass or complete the remaining system
+instruction APIs.
