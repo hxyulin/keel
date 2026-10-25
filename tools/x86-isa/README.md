@@ -40,9 +40,14 @@ EVEX, MVEX, XOP and 3DNow records are outside this import.
 - `keel-adapters.json` binds stable public enums and dialect aliases to source
   forms. Encoding selectors identify exact alternatives. Memory-width and
   family expectations guard compatibility; they do not supply emitted bytes.
+- `feature-fields.json` lists capability fields in public struct and `names()`
+  order, with field docs and CLI aliases. `feature_fields.py` generates the
+  struct, `NONE`, containment, CLI lookup and names iteration.
 - `feature-policy.json` maps upstream ISA sets onto Keel feature fields.
   Empty lists mean baseline capabilities; null entries exclude unsupported
-  interpretation families. The profile definitions remain handwritten.
+  interpretation families. The generator rejects undeclared feature fields.
+  Profile membership, dependency validation, AVX state side effects and explicit
+  target state semantics remain handwritten in `x86/features.rs`.
 - `keel-extensions.json` preserves the existing intentional long-mode D6 trap
   spelling, `udb`, which is absent from this upstream snapshot.
 
@@ -82,8 +87,8 @@ The XMM requirement is documented in Intel's
 
 New extension identities, scalar AT&T suffix eligibility, operand-specific
 VEX form adapters and feature queries are generated from that exposure list
-and the source records. Adding a feature field and deciding the CPU profile
-policy remain explicit Rust changes. EVEX/AVX-512 vector forms remain outside
+and the source records. Adding a feature field requires a schema entry; deciding
+the CPU profile policy remains an explicit Rust change. EVEX/AVX-512 vector forms remain outside
 this increment.
 
 ## Decoding limits
