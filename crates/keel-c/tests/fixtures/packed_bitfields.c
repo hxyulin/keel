@@ -57,3 +57,27 @@ long packed_update(void *pointer, int value) {
     p->sign += value;
     return ++p->sign;
 }
+
+long packed_result(void *pointer, int operation, int value) {
+    volatile struct Wide *p = pointer;
+    switch (operation) {
+    case 0: return (p->sign = value);
+    case 1: return (p->sign += value);
+    case 2: return ++p->sign;
+    case 3: return p->sign++;
+    case 4: return --p->sign;
+    default: return p->sign--;
+    }
+}
+
+unsigned int packed_unsigned_result(void *pointer, int operation, unsigned int value) {
+    volatile struct Cross *p = pointer;
+    switch (operation) {
+    case 0: return (p->high = value);
+    case 1: return (p->high += value);
+    case 2: return ++p->high;
+    case 3: return p->high++;
+    case 4: return --p->high;
+    default: return p->high--;
+    }
+}

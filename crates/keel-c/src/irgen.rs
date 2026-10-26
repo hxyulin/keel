@@ -2743,11 +2743,8 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             ExprKind::Assign(lhs, rhs) => {
                 let place = self.place(lhs)?.unwrap();
                 let v = self.val(rhs)?;
-                self.store_place(&place, v);
-                // The assignment expression yields the value written;
-                // reading its destination again can observe a later mutation
-                // (or perform an extra read of volatile destination storage).
-                v
+                // Normalize bit-fields without rereading volatile storage.
+                self.store_place(&place, v)
             }
             ExprKind::OpAssign { op, lhs, rhs } if lhs.ty.is_complex() || rhs.ty.is_complex() => {
                 let place = self.place(lhs)?.unwrap();
@@ -2768,8 +2765,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 let r = self.val(rhs)?;
                 let new = self.complex_arith(*op, &lt, &rhs.ty, old, r, e.loc)?;
                 let new = self.convert(new, &calc, &lhs.ty, e.loc)?;
-                self.store_place(&place, new);
-                new
+                self.store_place(&place, new)
             }
             ExprKind::OpAssign { op, lhs, rhs } => {
                 let ty = &rhs.ty;
@@ -2779,16 +2775,14 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 let r = self.val(rhs)?;
                 let new = self.arith(*op, ty, old, r, e.loc)?;
                 let new = self.convert(new, ty, &lhs.ty, e.loc)?;
-                self.store_place(&place, new);
-                new
+                self.store_place(&place, new)
             }
             ExprKind::PtrOpAssign { lhs, rhs, size } => {
                 let place = self.place(lhs)?.unwrap();
                 let old = self.load_place(&place);
                 let offset = self.scaled(rhs, *size)?;
                 let new = self.b.ins().ptradd(old, offset);
-                self.store_place(&place, new);
-                new
+                self.store_place(&place, new)
             }
             ExprKind::IncDec { lhs, inc, prefix } => {
                 let place = self.place(lhs)?.unwrap();
@@ -2834,8 +2828,8 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                         }
                     }
                 };
-                self.store_place(&place, new);
-                if *prefix { new } else { old }
+                let stored = self.store_place(&place, new);
+                if *prefix { stored } else { old }
             }
             // `sizeof(x) == sizeof(float) ? f(x) : g(x)`, as <math.h>
             // macros dispatch on the type: only the selected arm. The other
@@ -3520,7 +3514,33 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         }
     }
 
-    fn store_place(&mut self, place: &Place, v: Value) {
+    /// Return the converted value actually stored, including bit-field truncation.
+    fn store_place(&mut self, place: &Place, v: Value) -> Value {
+        let v = match *place {
+            Place::Bits {
+                unit,
+                field,
+                signed,
+                ..
+            } => {
+                let extension = unit.bytes().unwrap() * 8 - field.width;
+                if extension == 0 {
+                    v
+                } else if !signed && field.width < 64 {
+                    let mask = self.b.ins().iconst(unit, (1i64 << field.width) - 1);
+                    self.b.ins().and(v, mask)
+                } else {
+                    let shift = self.b.ins().iconst(unit, i64::from(extension));
+                    let shifted = self.b.ins().shl(v, shift);
+                    if signed {
+                        self.b.ins().sshr(shifted, shift)
+                    } else {
+                        self.b.ins().ushr(shifted, shift)
+                    }
+                }
+            }
+            _ => v,
+        };
         match *place {
             Place::Var(var) => self.b.def_var(var, v),
             Place::Mem(addr, _, flags) => {
@@ -3540,7 +3560,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             } => {
                 if field.bytewise {
                     self.store_packed_bits(addr, unit, field, v, flags);
-                    return;
+                    return v;
                 }
                 let mask = (u128::MAX >> (128 - field.width)) << field.shift;
                 let word = self.b.ins().load_with_flags(unit, addr, flags);
@@ -3559,6 +3579,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.b.ins().store_with_flags(merged, addr, flags);
             }
         }
+        v
     }
 
     /// Assemble only the field's bytes, keeping all shifts below the value width.

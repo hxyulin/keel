@@ -9,6 +9,8 @@ extern unsigned long packed_read(void *, unsigned);
 extern void packed_write(void *, unsigned, unsigned long);
 extern void packed_initial(unsigned char *, int);
 extern long packed_update(void *, int);
+extern long packed_result(void *, int, int);
+extern unsigned int packed_unsigned_result(void *, int, unsigned int);
 static const unsigned start[] = {0, 31, 7, 71, 31, 31, 0, 32};
 static const unsigned width[] = {3, 2, 64, 9, 2, 2, 9, 3};
 static const unsigned size[] = {1, 5, 11, 11, 5, 6, 2, 5};
@@ -67,6 +69,33 @@ int main(void) {
     if (packed_update(actual, 3) != -16) return 8;
     insert(expected, 71, 9, -16UL);
     if (memcmp(expected, actual, 11)) return 9;
+    for (int op = 0; op < 6; op++) {
+        for (int old = -256; old <= 255; old += 73) {
+            for (int delta = -700; delta < 700; delta += 71) {
+                insert(expected, 71, 9, old);
+                memcpy(actual, expected, 11);
+                int next = op == 0 ? delta : op == 1 ? old + delta : op < 4 ? old + 1 : old - 1;
+                next = (next & 511) - ((next & 256) ? 512 : 0);
+                long result = (op == 3 || op == 5) ? old : next;
+                if (packed_result(actual, op, delta) != result) return 10;
+                insert(expected, 71, 9, next);
+                if (memcmp(expected, actual, 11)) return 11;
+            }
+        }
+    }
+    for (unsigned op = 0; op < 6; op++) {
+        for (unsigned old = 0; old < 4; old++) {
+            for (unsigned delta = 0; delta < 1024; delta += 41) {
+                insert(expected, 31, 2, old);
+                memcpy(actual, expected, 11);
+                unsigned next = (op == 0 ? delta : op == 1 ? old + delta : op < 4 ? old + 1 : old - 1) & 3;
+                unsigned result = (op == 3 || op == 5) ? old : next;
+                if (packed_unsigned_result(actual, op, delta) != result) return 12;
+                insert(expected, 31, 2, next);
+                if (memcmp(expected, actual, 11)) return 13;
+            }
+        }
+    }
     munmap(mapping, page * 3);
     puts("PASS");
     return 0;
