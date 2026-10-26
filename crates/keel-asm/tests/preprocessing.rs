@@ -125,7 +125,6 @@ fn diagnostics_and_metrics_retain_source_lines() {
 fn unsupported_constructs_and_malformed_blocks_are_errors() {
     for (source, expected) in [
         (".macro x p=1\n.endm", "plain names"),
-        (".macro x p:req\n.endm", "plain names"),
         (".macro x p:vararg\n.endm", "plain names"),
         (".macro x p,p\n.endm", "plain names"),
         (".macro x p\n.endm\nx", "expects 1 arguments"),
@@ -135,7 +134,6 @@ fn unsupported_constructs_and_malformed_blocks_are_errors() {
             ".macro x\n.byte \\unknown\n.endm\nx",
             "unknown macro parameter",
         ),
-        (".macro x\nLtmp\\@:\n.endm\nx", "unsupported macro"),
         (".macro x a,b\n.endm\nx 1 2", "must be quoted"),
         (".macro x a\n.endm\nx a=1", "keyword"),
         (".macro x a\n.endm\nx \"a\" \"b\"", "mixed quoted"),
@@ -208,4 +206,17 @@ fn expansion_combines_with_block_comments_radices_and_physical_lines() {
 #[test]
 fn standalone_example_matches_clang() {
     common::compare_clang(include_str!("../examples/standalone.s"));
+}
+
+#[test]
+fn required_parameters_and_unique_invocations_match_clang() {
+    common::compare_clang(".macro f reg:req\nLtmp\\@: add \\reg, \\reg, #1\n.endm\nf x0\nf x1\n");
+    for source in [".macro f a:req\n.endm\nf", ".macro f a:req,b\n.endm\nf ,1"] {
+        assert!(
+            assemble(source)
+                .unwrap_err()
+                .message
+                .contains("required macro argument")
+        );
+    }
 }

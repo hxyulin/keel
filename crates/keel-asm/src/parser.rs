@@ -42,7 +42,7 @@ mod debug;
 pub(crate) mod elf;
 mod float;
 mod memory;
-mod preprocess;
+pub(crate) mod preprocess;
 mod program;
 pub(crate) use program::Compact;
 mod relocate;

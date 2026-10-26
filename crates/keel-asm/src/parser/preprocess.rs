@@ -1,11 +1,12 @@
 //! Optional, bounded textual assembly expansion. Entered only after the ordinary
 //! parser encounters a preprocessing directive; no filesystem access or global state.
 //!
-//! Supported: plain named macro parameters, comma-separated positional calls,
+//! Supported: named macro parameters (including GNU `:req`), `\@` invocation
+//! numbers, comma-separated positional calls,
 //! `\name` substitution and `\()` concatenation; nested literal `.rept`;
 //! literal `.if`/`.ifeq`/`.ifne`/`.ifgt`/`.ifge`/`.iflt`/`.ifle` with
 //! `.elseif`, `.else`, `.endif`. Expressions and symbol-dependent tests, defaults,
-//! keyword/variadic/required parameters and Darwin positional operators are rejected.
+//! keyword/variadic parameters and Darwin positional operators are rejected.
 //! Macro calls/directives must occupy their own line (labels can precede them
 //! on a separate line). Diagnostics/metrics name definition lines; expanded
 //! diagnostics also identify the outer invocation. Bounds apply per assembly.
@@ -16,7 +17,7 @@ const MAX_DEPTH: usize = 64;
 const MAX_STEPS: usize = 100_000;
 const MAX_BYTES: usize = 8 * 1024 * 1024;
 
-pub(super) fn required(error: &Error) -> bool {
+pub(crate) fn required(error: &Error) -> bool {
     error
         .message
         .strip_prefix("unsupported directive `")
@@ -59,17 +60,17 @@ impl Line {
     }
 }
 
-pub(super) struct Expanded {
-    pub(super) source: String,
+pub(crate) struct Expanded {
+    pub(crate) source: String,
     origins: Vec<Line>,
 }
 impl Expanded {
-    pub(super) fn original_line(&self, line: usize) -> usize {
+    pub(crate) fn original_line(&self, line: usize) -> usize {
         self.origins
             .get(line.wrapping_sub(1))
             .map_or(line, |l| l.line)
     }
-    pub(super) fn remap(&self, error: Error) -> Error {
+    pub(crate) fn remap(&self, error: Error) -> Error {
         self.origins
             .get(error.line.wrapping_sub(1))
             .map_or_else(|| error.clone(), |line| line.error(error.message.clone()))
@@ -79,17 +80,20 @@ impl Expanded {
 #[derive(Clone)]
 struct Macro {
     parameters: Vec<String>,
+    required: Vec<bool>,
     body: Vec<Line>,
 }
 #[derive(Default)]
-struct Processor {
+pub(crate) struct Processor {
     macros: BTreeMap<String, Macro>,
     output: String,
     origins: Vec<Line>,
     steps: usize,
+    invocations: usize,
+    emitted_bytes: usize,
 }
 
-pub(super) fn expand(source: &str) -> Result<Expanded, Error> {
+pub(crate) fn expand(source: &str) -> Result<Expanded, Error> {
     let arena = bumpalo::Bump::new();
     let lines: Vec<_> = scanning::Lines::new(source, &arena)
         .map(|result| {
@@ -100,12 +104,63 @@ pub(super) fn expand(source: &str) -> Result<Expanded, Error> {
             })
         })
         .collect::<Result<_, Error>>()?;
+    process(lines)
+}
+
+// The x86 lexer supplies statements because GNU x86 uses semicolons as
+// separators and # as comments, unlike the shared AArch64 scanner.
+pub(crate) fn expand_statements(
+    processor: &mut Processor,
+    lines: Vec<(usize, String)>,
+) -> Result<Expanded, Error> {
+    let lines: Vec<_> = lines
+        .into_iter()
+        .map(|(line, text)| Line {
+            text,
+            line,
+            invocation: None,
+        })
+        .collect();
+    if !processor.macros.is_empty()
+        || lines.iter().any(|l| {
+            matches!(
+                parts(&l.text).0,
+                ".macro"
+                    | ".endm"
+                    | ".endmacro"
+                    | ".rept"
+                    | ".endr"
+                    | ".if"
+                    | ".ifeq"
+                    | ".ifne"
+                    | ".ifgt"
+                    | ".ifge"
+                    | ".iflt"
+                    | ".ifle"
+                    | ".else"
+                    | ".elseif"
+                    | ".endif"
+            )
+        })
+    {
+        processor.expand_lines(&lines)
+    } else {
+        // Ordinary inputs have no expansion budget and need no macro lookup.
+        let mut source = String::new();
+        for line in &lines {
+            source.push_str(&line.text);
+            source.push('\n');
+        }
+        Ok(Expanded {
+            source,
+            origins: lines,
+        })
+    }
+}
+
+fn process(lines: Vec<Line>) -> Result<Expanded, Error> {
     let mut processor = Processor::default();
-    processor.run(&lines, 0)?;
-    Ok(Expanded {
-        source: processor.output,
-        origins: processor.origins,
-    })
+    processor.expand_lines(&lines)
 }
 
 fn parts(text: &str) -> (&str, &str) {
@@ -220,6 +275,13 @@ fn arguments(text: &str, line: &Line, declaration: bool) -> Result<Vec<String>, 
 }
 
 impl Processor {
+    fn expand_lines(&mut self, lines: &[Line]) -> Result<Expanded, Error> {
+        self.run(lines, 0)?;
+        Ok(Expanded {
+            source: std::mem::take(&mut self.output),
+            origins: std::mem::take(&mut self.origins),
+        })
+    }
     fn step(&mut self, line: &Line) -> Result<(), Error> {
         self.steps += 1;
         if self.steps > MAX_STEPS {
@@ -228,7 +290,8 @@ impl Processor {
         Ok(())
     }
     fn emit(&mut self, line: &Line) -> Result<(), Error> {
-        if self.output.len().saturating_add(line.text.len() + 1) > MAX_BYTES {
+        self.emitted_bytes = self.emitted_bytes.saturating_add(line.text.len() + 1);
+        if self.emitted_bytes > MAX_BYTES {
             return Err(line.error("assembly expansion exceeds 8 MiB"));
         }
         self.output.push_str(&line.text);
@@ -310,12 +373,18 @@ impl Processor {
                             if !identifier(name) {
                                 return Err(line.error("macro name must be an identifier"));
                             }
-                            let parameters = arguments(params, line, true)?;
+                            let declarations = arguments(params, line, true)?;
+                            let mut parameters = Vec::new();
+                            let mut required = Vec::new();
                             let mut seen = std::collections::BTreeSet::new();
-                            for parameter in &parameters {
-                                if !identifier(parameter) || !seen.insert(parameter.clone()) {
-                                    return Err(line.error("macro parameters must be unique plain names; defaults, :req and :vararg are unsupported"));
+                            for declaration in &declarations {
+                                let parameter =
+                                    declaration.strip_suffix(":req").unwrap_or(declaration);
+                                if !identifier(parameter) || !seen.insert(parameter.to_owned()) {
+                                    return Err(line.error("macro parameters must be unique plain names; defaults and :vararg are unsupported"));
                                 }
+                                parameters.push(parameter.to_owned());
+                                required.push(declaration.ends_with(":req"));
                             }
                             if self.macros.contains_key(name) {
                                 return Err(line.error(format!("macro `{name}` already defined")));
@@ -324,6 +393,7 @@ impl Processor {
                                 name.into(),
                                 Macro {
                                     parameters,
+                                    required,
                                     body: lines[i + 1..end].to_vec(),
                                 },
                             );
@@ -346,6 +416,14 @@ impl Processor {
                 _ if active => {
                     if let Some(mac) = self.macros.get(op).cloned() {
                         let values = arguments(args, line, false)?;
+                        for (index, required) in mac.required.iter().enumerate() {
+                            if *required && values.get(index).is_none_or(|v| v.is_empty()) {
+                                return Err(line.error(format!(
+                                    "required macro argument `{}` is missing",
+                                    mac.parameters[index]
+                                )));
+                            }
+                        }
                         if values.len() != mac.parameters.len() {
                             return Err(line.error(format!(
                                 "macro `{op}` expects {} arguments, got {}",
@@ -353,12 +431,14 @@ impl Processor {
                                 values.len()
                             )));
                         }
+                        let invocation = self.invocations;
+                        self.invocations += 1;
                         let mut body_bytes = 0usize;
                         let body = mac
                             .body
                             .iter()
                             .map(|body| {
-                                let text = substitute(body, &mac.parameters, &values)?;
+                                let text = substitute(body, &mac.parameters, &values, invocation)?;
                                 body_bytes = body_bytes.saturating_add(text.len() + 1);
                                 if body_bytes > MAX_BYTES {
                                     return Err(line.error("macro substitution exceeds 8 MiB"));
@@ -421,7 +501,12 @@ fn block_end(lines: &[Line], start: usize) -> Result<usize, Error> {
     Err(lines[start].error("unterminated .macro or .rept block"))
 }
 
-fn substitute(line: &Line, parameters: &[String], values: &[String]) -> Result<String, Error> {
+fn substitute(
+    line: &Line,
+    parameters: &[String],
+    values: &[String],
+    invocation: usize,
+) -> Result<String, Error> {
     if line
         .text
         .as_bytes()
@@ -441,13 +526,18 @@ fn substitute(line: &Line, parameters: &[String], values: &[String]) -> Result<S
             rest = tail;
             continue;
         }
+        if let Some(tail) = rest.strip_prefix('@') {
+            result.push_str(&invocation.to_string());
+            rest = tail;
+            continue;
+        }
         let end = rest
             .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
             .unwrap_or(rest.len());
         if end == 0 {
             // Preserve string escapes such as \" and \\. Unsupported macro
             // operators must fail instead of being silently reinterpreted.
-            if rest.starts_with(['@', '+']) {
+            if rest.starts_with('+') {
                 return Err(line.error("unsupported macro substitution operator"));
             }
             result.push('\\');

@@ -6,6 +6,7 @@ mod encode;
 mod metadata;
 mod relax;
 mod sections;
+mod source;
 mod symbolic;
 use crate::Error;
 use crate::fxhash::{FxHashSet, FxHasher};
@@ -277,6 +278,8 @@ struct Assembler {
     aliases: usize,
     fixes: Vec<Fix>,
     current: usize,
+    previous: Option<usize>,
+    section_stack: Vec<usize>,
     cfi: Option<metadata::Frame>,
     frames: Vec<metadata::Frame>,
     debug: dwarf::Debug,
@@ -505,6 +508,8 @@ struct Items {
     symbols: Symbols,
     features: x86::Features,
     parser: x86::SourceParser,
+    locals: source::Locals,
+    preprocessor: crate::parser::preprocess::Processor,
     // Parse errors anywhere take precedence over feature errors.
     unsupported: Option<Error>,
     parsed: usize,
@@ -523,41 +528,63 @@ impl Items {
             symbols: Symbols::default(),
             features,
             parser: x86::SourceParser::default(),
+            locals: source::Locals::default(),
+            preprocessor: crate::parser::preprocess::Processor::default(),
             unsupported: None,
             parsed: 0,
         }
     }
     fn parse(&mut self, source: &str, first: usize) -> Result<(), Error> {
         // Move syntax state out while the callback collects directly into self.
+        let statements = source::statements(source)
+            .map_err(|mut e| {
+                e.line += first - 1;
+                e
+            })?
+            .into_iter()
+            .map(|(line, text)| (line + first - 1, text))
+            .collect();
+        let expanded =
+            crate::parser::preprocess::expand_statements(&mut self.preprocessor, statements)?;
         let mut parser = std::mem::take(&mut self.parser);
-        let result = source.lines().enumerate().try_for_each(|(index, source)| {
-            let line = first + index;
-            parser
-                .parse_with(source, |_, item| match item {
-                    x86::SourceItem::Instruction(i) => self.x86_instruction(&i, line),
-                    x86::SourceItem::Label(name) => {
-                        let sym = self.symbols.intern(&name);
-                        self.push(Entry::Label {
-                            sym,
-                            line: line32(line),
-                        })
-                    }
-                    x86::SourceItem::Text(text) => {
-                        let line = line32(line);
-                        let entry = if let Some((bytes, width)) = literal_data(text) {
-                            Entry::LiteralData { bytes, width, line }
-                        } else {
-                            self.texts.push(text.into());
-                            Entry::Text {
-                                index: index32(self.texts.len() - 1),
-                                line,
-                            }
-                        };
-                        self.push(entry);
-                    }
-                })
-                .map_err(|e| Error::new(line, e.strip_prefix("line 1: ").unwrap_or(&e)))
-        });
+        let result = expanded
+            .source
+            .lines()
+            .enumerate()
+            .try_for_each(|(index, source)| {
+                let line = expanded.original_line(index + 1);
+                let source = self.locals.rewrite(source, line)?;
+                parser
+                    .parse_with(&source, |_, item| match item {
+                        x86::SourceItem::Instruction(i) => self.x86_instruction(&i, line),
+                        x86::SourceItem::Label(name) => {
+                            let sym = self.symbols.intern(&name);
+                            self.push(Entry::Label {
+                                sym,
+                                line: line32(line),
+                            })
+                        }
+                        x86::SourceItem::Text(text) => {
+                            let line = line32(line);
+                            let entry = if let Some((bytes, width)) = literal_data(text) {
+                                Entry::LiteralData { bytes, width, line }
+                            } else {
+                                self.texts.push(text.into());
+                                Entry::Text {
+                                    index: index32(self.texts.len() - 1),
+                                    line,
+                                }
+                            };
+                            self.push(entry);
+                        }
+                    })
+                    .map_err(|e| {
+                        expanded.remap(Error::new(
+                            index + 1,
+                            e.strip_prefix("line 1: ").unwrap_or(&e),
+                        ))
+                    })
+            });
         self.parser = parser;
         result
     }
@@ -674,7 +701,10 @@ impl Items {
         true
     }
     fn finish(self) -> Result<Self, Error> {
-        self.features.validate().map_err(|message| Error::new(1, message))?;
+        self.locals.finish()?;
+        self.features
+            .validate()
+            .map_err(|message| Error::new(1, message))?;
         match self.unsupported {
             Some(e) => Err(e),
             None => Ok(self),
@@ -1024,6 +1054,7 @@ impl Assembler {
         let mut a = Self::default();
         a.section(".text", Some(6), false)
             .map_err(|e| Error::new(0, e))?;
+        a.previous = None;
         Ok(a)
     }
     // Binding-sensitive expressions must reach the linker, including aliases
@@ -1096,10 +1127,11 @@ impl Assembler {
         // GNU as gives retained and ordinary contributions distinct input
         // sections, even when their names match (including the default .text).
         if let Some(i) = self.sections.iter().position(|s| {
-            s.name == name && s.group == group && s.unique == unique
+            s.name == name
+                && s.group == group
+                && s.unique == unique
                 && flags.is_none_or(|f| (s.flags ^ f) & 0x200000 == 0)
-        })
-        {
+        }) {
             let s = &self.sections[i];
             // A bare .section name switches back without redeclaring attributes.
             if flags.is_some_and(|f| {
@@ -1110,11 +1142,13 @@ impl Assembler {
             }) {
                 return Err(format!("conflicting section attributes for {name}"));
             }
+            self.previous = Some(self.current);
             self.current = i;
             return Ok(());
         }
         let flags = flags.unwrap_or_else(|| sections::default_flags(name));
         sections::validate(name, flags, nobits, entry_size, group.as_deref())?;
+        self.previous = Some(self.current);
         self.current = self.sections.len();
         self.sections.push(Section {
             name: name.into(),
@@ -1253,8 +1287,7 @@ impl Assembler {
                     self.try_eval(&e, 0)
                 }
             {
-                if i.opcode.is_direct_branch() && matches!(operand, x86::Operand::Immediate(_))
-                {
+                if i.opcode.is_direct_branch() && matches!(operand, x86::Operand::Immediate(_)) {
                     return Err("direct branch target cannot be absolute".into());
                 }
                 let operand = &mut folded.get_or_insert_with(|| i.clone()).operands[index];
@@ -1443,6 +1476,7 @@ impl Assembler {
                 thread_local,
             } => {
                 let old = self.current;
+                let previous = self.previous;
                 self.section(if *thread_local { ".tbss" } else { ".bss" }, None, true)?;
                 self.align(u32::from(*alignment), None)?;
                 let id = self.symbols.intern(symbol);
@@ -1451,6 +1485,7 @@ impl Assembler {
                     Some(Box::new(Expr::constant(i128::from(*size))));
                 self.zero(*size, 0)?;
                 self.current = old;
+                self.previous = previous;
                 Ok(())
             }
             Directive::Global(s) => {
@@ -1615,7 +1650,31 @@ impl Assembler {
             "" => Ok(()),
             ".intel_syntax" if args == "noprefix" => Ok(()),
             ".text" | ".data" | ".bss" if args.is_empty() => self.section(op, None, op == ".bss"),
-            ".section" => {
+            ".code64" if args.is_empty() && self.arm.is_none() => Ok(()),
+            ".code16" | ".code32" | ".code16gcc" => Err(format!(
+                "{op} is unsupported; only 64-bit x86 assembly is supported"
+            )),
+            ".popsection" if args.is_empty() => {
+                let section = self
+                    .section_stack
+                    .pop()
+                    .ok_or(".popsection without .pushsection")?;
+                self.previous = Some(self.current);
+                self.current = section;
+                Ok(())
+            }
+            ".previous" if args.is_empty() => {
+                let section = self
+                    .previous
+                    .ok_or(".previous without a previous section")?;
+                self.previous = Some(self.current);
+                self.current = section;
+                Ok(())
+            }
+            ".section" | ".pushsection" => {
+                if op == ".pushsection" {
+                    self.section_stack.push(self.current);
+                }
                 let section = sections::parse(&parts)?;
                 self.section_full(
                     &section.name,
@@ -1706,6 +1765,7 @@ impl Assembler {
                 sym.global = !local;
                 if local {
                     let old = self.current;
+                    let previous = self.previous;
                     self.section(".bss", None, true)?;
                     self.align(align.trailing_zeros(), None)?;
                     self.symbols.get_mut(id).unwrap().common = None;
@@ -1713,7 +1773,8 @@ impl Assembler {
                     self.symbols.get_mut(id).unwrap().size =
                         Some(Box::new(Expr::constant(size.into())));
                     self.zero(size, 0)?;
-                    self.current = old
+                    self.current = old;
+                    self.previous = previous;
                 }
                 Ok(())
             }
@@ -1762,6 +1823,51 @@ impl Assembler {
                 }
                 Ok(())
             }
+            ".org" if parts.len() == 1 || parts.len() == 2 => {
+                let address = x86::address(parts[0])?;
+                if address.modifier != Modifier::None {
+                    return Err(".org relocation modifiers are unsupported".into());
+                }
+                let e = self.symbols.expr(&address.expression);
+                let e = self.capture_dot(e)?;
+                // ELF section names denote their section's origin, even before
+                // a relocation has caused a section symbol to be materialized.
+                for id in e.add.into_iter().chain(e.subtract) {
+                    if self.symbols.get(id).is_none()
+                        && let Some(section) = self
+                            .sections
+                            .iter()
+                            .position(|s| s.name == self.symbols.name(id))
+                    {
+                        let sym = self.symbols.entry(id);
+                        sym.section = Some(section);
+                        sym.kind = SymbolKind::Section;
+                    }
+                }
+                let (section, value) = self.eval(&e, 0)?;
+                if section.is_some_and(|s| s != self.current) {
+                    return Err(".org requires the current section or an absolute offset".into());
+                }
+                let target =
+                    u64::try_from(value).map_err(|_| ".org requires a nonnegative offset")?;
+                let size = target
+                    .checked_sub(self.offset())
+                    .ok_or(".org cannot move backwards")?;
+                let fill = parts
+                    .get(1)
+                    .map(|s| x86::integer(s))
+                    .transpose()?
+                    .unwrap_or(0) as u8;
+                // GNU ignores an .org fill in NOBITS sections.
+                self.zero(
+                    size,
+                    if self.sections[self.current].nobits {
+                        0
+                    } else {
+                        fill
+                    },
+                )
+            }
             ".zero" | ".space" | ".skip" => {
                 if parts.len() > 2 {
                     return Err("too many space operands".into());
@@ -1803,6 +1909,7 @@ impl Assembler {
             ".ident" => {
                 let value = x86::unquote(args)?;
                 let old = self.current;
+                let previous = self.previous;
                 self.section_metadata(".comment", Some(0x30), false, 1, None)?;
                 if self.offset() == 0 {
                     self.bytes(&[0])?;
@@ -1810,6 +1917,7 @@ impl Assembler {
                 self.bytes(&value)?;
                 self.bytes(&[0])?;
                 self.current = old;
+                self.previous = previous;
                 Ok(())
             }
             ".addrsig" if args.is_empty() => {
