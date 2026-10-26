@@ -3748,13 +3748,28 @@ impl<'a> Parser<'a> {
         for field in &mut fields {
             field.5 |= attrs.packed;
         }
+        // AAPCS64 Linux gives zero-width bit-fields their declared alignment
+        // even in packed records. Darwin and x86 use them only as bit barriers.
+        let zero_width_align = if self.target == Target::Aarch64LinuxGnu {
+            fields
+                .iter()
+                .filter(|field| field.3 == Some(0))
+                .map(|field| {
+                    field
+                        .2
+                        .alignment(&self.typedefs)
+                        .unwrap_or_else(|| self.align_of(&field.1))
+                })
+                .max()
+                .unwrap_or(1)
+        } else {
+            1
+        };
         let (members, mut size, mut align) =
             layout_struct(&self.types(), &self.typedefs, is_union, fields, pack)
                 .map_err(|message| Error::new(loc, message))?;
-        if let Some(a) = attrs.aligned {
-            align = align.max(a);
-            size = size.next_multiple_of(align);
-        }
+        align = align.max(zero_width_align).max(attrs.aligned.unwrap_or(1));
+        size = size.next_multiple_of(align);
         let def = &mut self.structs[id];
         def.members = members;
         def.size = size;

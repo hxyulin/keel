@@ -19,7 +19,15 @@ fn compile(source: &str, target: Target, debug_info: bool) -> keel_ir::Module {
 fn packed_layout_and_initializers_work_on_native_targets() {
     for target in Target::NATIVE {
         for debug in [false, true] {
-            let m = compile(SOURCE, target, debug);
+            let (size, align) = if target == Target::Aarch64LinuxGnu {
+                (8, 4)
+            } else {
+                (5, 1)
+            };
+            let source = format!(
+                "{SOURCE}\n_Static_assert(sizeof(struct Zero) == {size}, \"zero size\");\n_Static_assert(_Alignof(struct Zero) == {align}, \"zero align\");"
+            );
+            let m = compile(&source, target, debug);
             let text = m.to_string();
             keel_ir::verify_module(&keel_ir::parse(&text).unwrap()).unwrap();
             keel_codegen::compile(&m, target).unwrap();

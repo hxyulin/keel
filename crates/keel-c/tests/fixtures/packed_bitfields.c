@@ -19,7 +19,6 @@ _Static_assert(__builtin_offsetof(struct Wide, tail) == 10, "tail");
 _Static_assert(sizeof(struct Member) == 5, "member");
 _Static_assert(sizeof(struct Pragma) == 6 && _Alignof(struct Pragma) == 2, "pragma");
 _Static_assert(sizeof(union Choice) == 2, "union");
-_Static_assert(sizeof(struct Zero) == 5, "zero width");
 
 static struct Wide initialized = { 85, 0xfedcba9876543210UL, -129, 53 };
 
