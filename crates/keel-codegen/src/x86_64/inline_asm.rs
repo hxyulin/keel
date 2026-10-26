@@ -14,12 +14,25 @@ fn available(r: u8, frame: Option<u8>) -> bool {
 }
 
 pub(super) fn plan(
+    module: &Module,
     func: &Function,
     asm: &InlineAsm,
     args: &[Value],
     frame: Option<u8>,
     unique: u64,
 ) -> Result<Plan, String> {
+    for (&constraint, &arg) in asm.inputs.iter().zip(args) {
+        if constraint == Constraint::Imm
+            && let Some((symbol, _)) = keel_ir::symbolic_immediate(func, arg)
+            && module
+                .data_object(func.symbol_name(symbol))
+                .is_some_and(|d| d.thread_local)
+        {
+            return Err(
+                "TLS symbols require a relocation contract not supported by asm immediates".into(),
+            );
+        }
+    }
     let n = asm.outputs.len();
     let mut early = vec![false; n];
     for &out in &asm.early_clobbers {
@@ -72,7 +85,11 @@ pub(super) fn plan(
                 taken[r.num as usize] = true;
                 regs[i] = Some(r.num);
             }
-            Constraint::Imm if i >= n && iconst(func, args[i - n]).is_some() => {}
+            Constraint::Imm | Constraint::NumericImm
+                if i >= n
+                    && (iconst(func, args[i - n]).is_some()
+                        || (*op == Constraint::Imm
+                            && keel_ir::symbolic_immediate(func, args[i - n]).is_some())) => {}
             Constraint::Tied(out)
                 if i >= n && (out as usize) < n && asm.outputs[out as usize].1 == ty => {}
             _ => {
@@ -183,11 +200,23 @@ fn substitute(
             if i < n || !matches!(modifier, None | Some('c')) {
                 return Err("unsupported x86 asm immediate modifier".into());
             }
-            let value = iconst(func, args[i - n]).ok_or("asm immediate must be an iconst")?;
+            let arg = args[i - n];
             if modifier.is_none() {
                 text.push('$');
             }
-            write!(text, "{value}").unwrap();
+            if let Some(value) = iconst(func, arg) {
+                write!(text, "{value}").unwrap();
+            } else if let Some((symbol, addend)) = keel_ir::symbolic_immediate(func, arg) {
+                text.push_str(func.symbol_name(symbol));
+                if addend > 0 {
+                    write!(text, "+{addend}").unwrap();
+                }
+                if addend < 0 {
+                    write!(text, "{addend}").unwrap();
+                }
+            } else {
+                return Err("asm immediate requires a constant".into());
+            }
         }
     }
     Ok(text)
@@ -213,7 +242,8 @@ impl FunctionCompiler<'_> {
         }
         for (i, &arg) in args.iter().enumerate() {
             let op = self.func.inst_data(inst);
-            if matches!(op, InstData::InlineAsm { asm, .. } if asm.inputs[i] == Constraint::Imm) {
+            if matches!(op, InstData::InlineAsm { asm, .. } if matches!(asm.inputs[i], Constraint::Imm | Constraint::NumericImm))
+            {
                 continue;
             }
             let dst = memory_at(self, 16 + i);

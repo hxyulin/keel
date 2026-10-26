@@ -11,6 +11,9 @@ BINARY(asm_fixed)
 BINARY(asm_mul)
 BINARY(asm_early)
 #define UNARY(n) extern U n(U), ref_##n(U);
+unsigned char asm_deferred_anchor[64];
+UNARY(asm_deferred_number)
+UNARY(asm_deferred_address)
 UNARY(asm_macro)
 UNARY(asm_aligned)
 UNARY(asm_views)
@@ -35,6 +38,7 @@ int main(void) {
     for(U i=0;i<512;i++) {
         U a=next(),b=next(),c=next(),d=next(),e=next(),f=next(),g=next(),h=next();
         if(i<5){static const U edge[]={0,1,~0UL,0x8000000000000000UL,0x7fffffffffffffffUL};a=edge[i];b=edge[4-i];}
+        CHECK(asm_deferred_number,a);CHECK(asm_deferred_address,a);
         CHECK(asm_flags,a,b);CHECK(asm_scratch,a,b);CHECK(asm_macro,a);CHECK(asm_add,a,b);CHECK(asm_fixed,a,b);CHECK(asm_six,a,b,c,d,e,f);
         CHECK(asm_mul,a,b);CHECK(asm_early,a,b);CHECK(asm_views,a);
         CHECK(asm_aligned,a);CHECK(asm_constants,a);CHECK(asm_clobber,a,b,c,d,e,f,g,h);

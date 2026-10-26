@@ -550,7 +550,7 @@ fn eligibility_reason(f: &Function, admit_noninterposable: bool) -> Option<&'sta
                 Some("callee_tail_call")
             }
             InstData::X86RflagsRegion { .. } => Some("callee_owned_flags_region"),
-            InstData::InlineAsm { .. } => Some("callee_inline_asm"),
+            InstData::InlineAsm { .. } if !f.attrs.alwaysinline => Some("callee_inline_asm"),
             _ => None,
         };
         if reason.is_some() {
@@ -1442,4 +1442,183 @@ mod recursion_tests {
         assert!(!recursive[0]);
         assert!(recursive[1..].iter().all(|&r| r));
     }
+}
+
+/// Expand mandatory C inline calls before validating deferred asm immediates.
+/// This phase does not use optional optimizer profitability budgets. Hard
+/// legality and module growth limits still produce explicit diagnostics.
+pub fn required_inline_asm(module: &mut Module) -> Result<(), String> {
+    fn discard_unused(module: &mut Module) {
+        let mut live: FxHashSet<String> = module
+            .functions
+            .iter()
+            .filter(|f| !f.local || !f.attrs.alwaysinline || f.attrs.used || f.attrs.retain)
+            .map(|f| f.name.clone())
+            .collect();
+        for d in &module.data {
+            if let Some(init) = &d.init {
+                for item in &init.items {
+                    if let keel_ir::DataItem::Ptr { symbol, .. }
+                    | keel_ir::DataItem::RttiName { symbol } = item
+                    {
+                        live.insert(symbol.clone());
+                    }
+                }
+            }
+        }
+        loop {
+            let before = live.len();
+            for f in &module.functions {
+                if !live.contains(&f.name) {
+                    continue;
+                }
+                for (_, i) in f.layout_insts() {
+                    match f.inst_data(i) {
+                        InstData::Call { func, .. }
+                        | InstData::ReturnCall { func, .. }
+                        | InstData::Invoke { func, .. } => {
+                            live.insert(f.callee(*func).name.clone());
+                        }
+                        InstData::SymbolAddr {
+                            symbol: Symbol::Func(r),
+                        } => {
+                            live.insert(f.callee(*r).name.clone());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            if live.len() == before {
+                break;
+            }
+        }
+        for f in &module.functions {
+            if !live.contains(&f.name) && !module.decls.iter().any(|d| d.name == f.name) {
+                module.decls.push(keel_ir::FuncDecl {
+                    name: f.name.clone(),
+                    sig: f.sig.clone(),
+                    attrs: f.attrs,
+                });
+            }
+        }
+        module.functions.retain(|f| live.contains(&f.name));
+    }
+    discard_unused(module);
+    // Reject recursive mandatory edges before cloning can grow the graph.
+    let sites: Vec<Vec<Inst>> = module
+        .functions
+        .iter()
+        .map(|f| {
+            f.layout_insts()
+                .filter_map(|(_, i)| {
+                    matches!(
+                        f.inst_data(i),
+                        InstData::Call { .. }
+                            | InstData::ReturnCall { .. }
+                            | InstData::Invoke { .. }
+                    )
+                    .then_some(i)
+                })
+                .collect()
+        })
+        .collect();
+    let recursive = recursive_definitions(module, &sites);
+    let recursive: FxHashSet<String> = module
+        .functions
+        .iter()
+        .zip(recursive)
+        .filter(|(_, r)| *r)
+        .map(|(f, _)| f.name.clone())
+        .collect();
+    let mut expanded = 0usize;
+    loop {
+        let mut next = None;
+        for (index, caller) in module.functions.iter().enumerate() {
+            for (_, call) in caller.layout_insts() {
+                let reference = match caller.inst_data(call) {
+                    InstData::Call { func, .. }
+                    | InstData::ReturnCall { func, .. }
+                    | InstData::Invoke { func, .. } => *func,
+                    _ => continue,
+                };
+                let decl = caller.callee(reference);
+                let definition = module.functions.iter().position(|f| f.name == decl.name);
+                if !decl.attrs.alwaysinline
+                    && !definition.is_some_and(|i| module.functions[i].attrs.alwaysinline)
+                {
+                    continue;
+                }
+                let fail = |why: &str| {
+                    format!(
+                        "required inlining of @{} in @{} failed: {why}",
+                        decl.name, caller.name
+                    )
+                };
+                if !matches!(caller.inst_data(call), InstData::Call { .. }) {
+                    return Err(fail("unsupported call instruction"));
+                }
+                let target = definition.ok_or_else(|| fail("no definition"))?;
+                let callee = &module.functions[target];
+                if recursive.contains(&callee.name) {
+                    return Err(fail("recursive callee"));
+                }
+                if caller.sig.returns_twice || caller.personality.is_some() {
+                    return Err(fail("unsupported caller"));
+                }
+                if decl.attrs.noinline {
+                    return Err(fail("noinline conflicts with always_inline"));
+                }
+                if decl.sig != callee.sig {
+                    return Err(fail("ABI signature mismatch"));
+                }
+                if let Some(reason) = eligibility_reason(callee, true) {
+                    return Err(fail(reason));
+                }
+                expanded = expanded
+                    .checked_add(callee.layout_insts().count())
+                    .ok_or_else(|| fail("growth overflow"))?;
+                if expanded > 1_000_000 {
+                    return Err(fail(
+                        "required inline growth exceeds one million instructions",
+                    ));
+                }
+                next = Some((index, call, target));
+                break;
+            }
+            if next.is_some() {
+                break;
+            }
+        }
+        let Some((index, call, target)) = next else {
+            break;
+        };
+        let (caller, callee) = two_functions(&mut module.functions, index, target);
+        inline_call(caller, call, callee);
+        crate::phi_simplify::run(caller);
+        crate::simplify_cfg::run(caller);
+    }
+    discard_unused(module);
+    // Constant cleanup is required for constraint legality, independently of -O.
+    for f in &mut module.functions {
+        if !f.layout_insts().any(|(_, i)| match f.inst_data(i) {
+            InstData::InlineAsm { asm, args } => asm.inputs.iter().zip(args).any(|(op, arg)| {
+                if !matches!(op, keel_ir::AsmOperand::Imm | keel_ir::AsmOperand::NumericImm) { return false; }
+                let numeric = matches!(f.value_def(f.resolve(*arg)), keel_ir::ValueDef::Result(def, _) if matches!(f.inst_data(def), InstData::Iconst { .. }));
+                !numeric && !(*op == keel_ir::AsmOperand::Imm && keel_ir::symbolic_immediate(f, *arg).is_some())
+            }),
+            _ => false,
+        }) { continue; }
+        for _ in 0..8 {
+            let mut changed = crate::phi_simplify::run(f);
+            changed |= crate::gvn::run(f);
+            changed |= crate::memory_forward::run(f);
+            changed |= crate::const_fold::run(f);
+            changed |= crate::instcombine::run(f);
+            changed |= crate::simplify_cfg::run(f);
+            if !changed {
+                break;
+            }
+        }
+    }
+    Ok(())
 }

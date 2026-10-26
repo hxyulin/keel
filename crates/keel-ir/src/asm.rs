@@ -39,8 +39,10 @@ pub enum AsmOperand {
     Fixed(PhysReg),
     /// `m`: memory; the operand is its address. Inputs only.
     Mem,
-    /// `i` or `n`: a constant, the operand being an `iconst`. Inputs only.
+    /// `i`: a numeric constant or symbol address. Inputs only.
     Imm,
+    /// `n`: a numeric constant, excluding symbol addresses. Inputs only.
+    NumericImm,
     /// `0`, `1`…: in the same register as that output, which it initializes.
     /// Inputs only.
     Tied(u16),
@@ -168,7 +170,8 @@ fn operand(code: &str) -> Result<AsmOperand, String> {
         "r" => AsmOperand::Reg,
         "w" => AsmOperand::FloatReg,
         "m" => AsmOperand::Mem,
-        "i" | "n" => AsmOperand::Imm,
+        "i" => AsmOperand::Imm,
+        "n" => AsmOperand::NumericImm,
         _ if code.starts_with('{') => AsmOperand::Fixed(PhysReg::parse(
             braced(code).ok_or_else(|| format!("unclosed register in `{code}`"))?,
         )?),
@@ -251,6 +254,7 @@ impl fmt::Display for AsmOperand {
             AsmOperand::Fixed(r) => write!(f, "{{{r}}}"),
             AsmOperand::Mem => f.write_str("m"),
             AsmOperand::Imm => f.write_str("i"),
+            AsmOperand::NumericImm => f.write_str("n"),
             AsmOperand::Tied(n) => write!(f, "{n}"),
         }
     }
@@ -270,7 +274,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             asm.constraints(),
-            "=r,=&{x3},r,{v1},m,i,0,~{x30},~{memory},~{cc}"
+            "=r,=&{x3},r,{v1},m,n,0,~{x30},~{memory},~{cc}"
         );
         let again = InlineAsm::new("", &asm.constraints(), &[Type::I64, Type::I32]).unwrap();
         assert_eq!(asm, again);
@@ -305,5 +309,95 @@ mod tests {
         assert!(err("q", 0).contains("unknown constraint"));
         assert!(err("{x31}", 0).contains("unknown register"));
         assert!(err("~{unknown}", 0).contains("unknown register"));
+    }
+}
+
+/// Resolve the relocatable subset accepted by the `i` constraint. An address
+/// remains one symbol plus a checked signed byte addend; loads are never folded.
+pub fn symbolic_immediate(
+    func: &crate::Function,
+    value: crate::Value,
+) -> Option<(crate::Symbol, i64)> {
+    fn walk(f: &crate::Function, v: crate::Value, depth: usize) -> Option<(crate::Symbol, i64)> {
+        use crate::{BinaryOp, ConvertOp, InstData, ValueDef};
+        if depth == 64 {
+            return None;
+        }
+        let ValueDef::Result(i, _) = f.value_def(f.resolve(v)) else {
+            return None;
+        };
+        match f.inst_data(i) {
+            InstData::SymbolAddr { symbol } => Some((*symbol, 0)),
+            InstData::Convert {
+                op: ConvertOp::PtrToInt | ConvertOp::IntToPtr,
+                arg,
+                ..
+            } => walk(f, *arg, depth + 1),
+            InstData::Binary {
+                op: BinaryOp::Ptradd | BinaryOp::Iadd | BinaryOp::Isub,
+                args,
+                ..
+            } => {
+                let number = |v| {
+                    let ValueDef::Result(i, _) = f.value_def(f.resolve(v)) else {
+                        return None;
+                    };
+                    if let InstData::Iconst { imm, .. } = f.inst_data(i) {
+                        Some(*imm)
+                    } else {
+                        None
+                    }
+                };
+                let (symbol, addend) = walk(f, args[0], depth + 1)?;
+                let offset = number(args[1])?;
+                let addend = if matches!(
+                    f.inst_data(i),
+                    InstData::Binary {
+                        op: BinaryOp::Isub,
+                        ..
+                    }
+                ) {
+                    addend.checked_sub(offset)?
+                } else {
+                    addend.checked_add(offset)?
+                };
+                Some((symbol, addend))
+            }
+            _ => None,
+        }
+    }
+    walk(func, value, 0)
+}
+
+#[cfg(test)]
+mod immediate_tests {
+    #[test]
+    fn final_verification_distinguishes_symbols_numbers_and_runtime_values() {
+        for (constraint, operand, good) in [
+            ("i", "v2", true),
+            ("n", "v2", false),
+            ("n", "v1", true),
+            ("i", "v0", false),
+        ] {
+            let m = crate::parse(&format!("decl data @anchor\nfunc @f(i64) {{\nblock0(v0: i64):\n v1 = iconst.i64 7\n v2 = symbol_addr @anchor\n asm \"\", \"{constraint}\"({operand})\n return\n}}\n")).unwrap();
+            assert_eq!(
+                crate::verify_module(&m).is_ok(),
+                good,
+                "{constraint} {operand}"
+            );
+        }
+    }
+
+    #[test]
+    fn symbolic_addends_are_checked_without_folding_loads_or_overflow() {
+        let m = crate::parse("decl data @anchor\nfunc @f() {\nblock0:\n v0 = symbol_addr @anchor\n v1 = iconst.i64 -7\n v2 = ptradd v0, v1\n v3 = iconst.i64 -9223372036854775808\n v4 = ptradd v2, v3\n v5 = load.ptr v0\n return\n}\n").unwrap();
+        let f = &m.functions[0];
+        let values: Vec<_> = f
+            .layout_insts()
+            .filter_map(|(_, i)| f.inst_results(i).first().copied())
+            .collect();
+        assert_eq!(super::symbolic_immediate(f, values[2]).unwrap().1, -7);
+        assert_eq!(super::symbolic_immediate(f, values[4]), None);
+        assert_eq!(super::symbolic_immediate(f, values[5]), None);
     }
 }

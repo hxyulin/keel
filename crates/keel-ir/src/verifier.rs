@@ -888,7 +888,7 @@ impl Verifier<'_> {
             }
             AsmOperand::FloatReg | AsmOperand::Fixed(PhysReg { float: true, .. }) => ty.is_float(),
             AsmOperand::Mem => ty == Type::Ptr,
-            AsmOperand::Imm | AsmOperand::Tied(_) => true,
+            AsmOperand::Imm | AsmOperand::NumericImm | AsmOperand::Tied(_) => true,
         };
         for (n, &(op, ty)) in asm.outputs.iter().enumerate() {
             if !fits(op, ty) {
@@ -903,13 +903,19 @@ impl Verifier<'_> {
                 self.inst_error(inst, format!("asm operand {n} (`{op}`) cannot be {ty}"));
             }
             match op {
-                AsmOperand::Imm => {
+                AsmOperand::Imm | AsmOperand::NumericImm => {
                     let is_const = matches!(
                         func.value_def(func.resolve(arg)),
                         ValueDef::Result(def, _) if matches!(func.inst_data(def), InstData::Iconst { .. })
                     );
-                    if !is_const {
-                        self.inst_error(inst, format!("asm operand {n} (`i`) must be an iconst"));
+                    if !is_const
+                        && !(op == AsmOperand::Imm
+                            && crate::asm::symbolic_immediate(func, arg).is_some())
+                    {
+                        self.inst_error(
+                            inst,
+                            format!("asm operand {n} (`{op}`) requires a constant immediate"),
+                        );
                     }
                 }
                 AsmOperand::Tied(out) => match asm.outputs.get(out as usize) {

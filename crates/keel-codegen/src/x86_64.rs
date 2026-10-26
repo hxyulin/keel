@@ -1523,6 +1523,7 @@ impl<'a> FunctionCompiler<'a> {
         for (_, inst) in func.layout_insts() {
             if let InstData::InlineAsm { asm, args } = func.inst_data(inst) {
                 let plan = inline_asm::plan(
+                    module,
                     func,
                     asm,
                     args,

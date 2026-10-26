@@ -168,6 +168,8 @@ pub fn compile_with_binding(
         .run()
         .map_err(|e| diagnostic(&files, e))?;
     apply_function_binding(&mut module, opts.target, binding);
+    finalize_inline_asm(&mut module, opts.target)
+        .map_err(|message| diagnostic(&files, Error::new(Loc::default(), message)))?;
     if opts.target == keel_ir::Target::Wasm32UnknownUnknown {
         keel_ir::verify_module_with_layout(&module, keel_ir::DataLayout::WASM32).map_err(|e| {
             diagnostic(
@@ -220,4 +222,22 @@ fn apply_function_binding(
     if changed {
         module.sync_function_attrs();
     }
+}
+
+// Pending immediate operands are internal to C lowering. Public compile APIs
+// return only finalized IR, so ordinary verification and codegen stay strict.
+fn finalize_inline_asm(
+    module: &mut keel_ir::Module,
+    target: keel_ir::Target,
+) -> Result<(), String> {
+    if target != keel_ir::Target::X86_64LinuxGnu
+        || !module.functions.iter().any(|f| {
+            f.layout_insts()
+                .any(|(_, i)| matches!(f.inst_data(i), keel_ir::InstData::InlineAsm { .. }))
+        })
+    {
+        return Ok(());
+    }
+    keel_opt::required_inline_asm(module)?;
+    keel_ir::verify_module(module).map_err(|errors| format!("inline asm finalization: {errors:?}"))
 }

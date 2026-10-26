@@ -7374,7 +7374,7 @@ fn asm_regs(asm: &InlineAsm) -> Result<Vec<Option<PhysReg>>, String> {
                 regs[i] = regs[out as usize];
                 continue;
             }
-            AsmOperand::Fixed(_) | AsmOperand::Imm => continue,
+            AsmOperand::Fixed(_) | AsmOperand::Imm | AsmOperand::NumericImm => continue,
         };
         let pool: &[u8] = if float { &ASM_FREGS } else { &ASM_REGS };
         let r = (pool.iter())
@@ -7458,17 +7458,17 @@ fn asm_text(
             format!("`%{shown}{n}` does not fit operand {n} (`{op}`)")
         };
         match (op, regs[n], modifier) {
-            (AsmOperand::Imm, _, None | Some('c')) => {
+            (AsmOperand::Imm | AsmOperand::NumericImm, _, None | Some('c')) => {
                 let ValueDef::Result(def, _) = func.value_def(func.resolve(args[n - n_out])) else {
-                    unreachable!("the verifier checks constants");
+                    return Err("AArch64 asm immediate requires an iconst".into());
                 };
                 let InstData::Iconst { imm, .. } = func.inst_data(def) else {
-                    unreachable!("the verifier checks constants");
+                    return Err("AArch64 asm immediate requires an iconst".into());
                 };
                 write!(out, "{imm}").unwrap();
             }
             (AsmOperand::Mem, Some(r), None) => write!(out, "[x{}]", r.num).unwrap(),
-            (AsmOperand::Imm | AsmOperand::Mem, _, _) => return Err(bad()),
+            (AsmOperand::Imm | AsmOperand::NumericImm | AsmOperand::Mem, _, _) => return Err(bad()),
             (_, Some(r), None) if r.float => write!(out, "{}", freg(r.num, ty)).unwrap(),
             (_, Some(r), None) => write!(out, "{}", reg(r.num, ty)).unwrap(),
             (_, Some(r), Some(m @ ('s' | 'd' | 'q' | 'h' | 'b'))) if r.float => {

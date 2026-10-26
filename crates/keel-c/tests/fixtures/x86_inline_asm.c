@@ -115,3 +115,24 @@ unsigned long NAME(asm_macro)(unsigned long a) {
     asm("keel_inc %0\n.purgem keel_inc" : "+r"(a) :: "cc");
     return a;
 }
+
+extern unsigned char asm_deferred_anchor[64];
+static __attribute__((always_inline)) inline void *deferred_rip(void *p) {
+    asm("leaq %c1(%%rip),%0" : "=r"(p) : "i"(p));
+    return p;
+}
+static __attribute__((always_inline)) inline void *deferred_outer(void *p) {
+    return deferred_rip(p);
+}
+static __attribute__((always_inline)) inline unsigned long deferred_add(unsigned long x, unsigned long n) {
+    asm(".Ldeferred_%=: addq %1,%0" : "+r"(x) : "n"(n) : "cc");
+    return x;
+}
+unsigned long NAME(asm_deferred_number)(unsigned long x) {
+    return deferred_add(deferred_add(x, 17 + 6), 42);
+}
+unsigned long NAME(asm_deferred_address)(unsigned long x) {
+    unsigned char *a = deferred_outer(asm_deferred_anchor + 7);
+    unsigned char *b = deferred_rip(asm_deferred_anchor + 19);
+    return (x ^ (unsigned long)a) + (unsigned long)b;
+}

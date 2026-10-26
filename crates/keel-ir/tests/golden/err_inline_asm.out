@@ -2,7 +2,7 @@ verifier errors:
   @f inst0 `v4 = asm "", "=r,w,m,i,r"(v0, v0, v0, v3) -> f64`: asm operand 0 (`r`) cannot be f64
   @f inst0 `v4 = asm "", "=r,w,m,i,r"(v0, v0, v0, v3) -> f64`: asm operand 1 (`w`) cannot be i64
   @f inst0 `v4 = asm "", "=r,w,m,i,r"(v0, v0, v0, v3) -> f64`: asm operand 2 (`m`) cannot be i64
-  @f inst0 `v4 = asm "", "=r,w,m,i,r"(v0, v0, v0, v3) -> f64`: asm operand 3 (`i`) must be an iconst
+  @f inst0 `v4 = asm "", "=r,w,m,i,r"(v0, v0, v0, v3) -> f64`: asm operand 3 (`i`) requires a constant immediate
   @f inst0 `v4 = asm "", "=r,w,m,i,r"(v0, v0, v0, v3) -> f64`: asm operand 4 (`r`) cannot be i128
   @f inst1 `v5, v6 = asm "", "=r,=r,2,0,0,1"(v0, v0, v0, v1) -> (i64, i64)`: asm operand 2 is tied to output 2, which does not exist
   @f inst1 `v5, v6 = asm "", "=r,=r,2,0,0,1"(v0, v0, v0, v1) -> (i64, i64)`: output 0 is tied to more than one input

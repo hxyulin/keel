@@ -238,3 +238,16 @@ files first need constraint unions, two need unsupported output constraints
 (memory or register/memory union), and five need file-scope asm. These first
 errors still hide later gaps. The reference config and captured source inputs
 are unchanged; no Keel objects were linked into or executed as the kernel.
+
+## Deferred immediate follow-up
+
+X86 C compilation now expands required inline helpers before checking immediate
+constraints, including when optional optimization is disabled. The kernel-style
+`rip_rel_ptr(&global)` pattern has local compiler, object and independent
+assembler witnesses. The [implemented contract](../../docs/x86-c-inline-asm.md#required-inlining-and-deferred-immediates)
+records remaining limits.
+
+The reports above remain historical measurements. The pinned corpus was not
+rerun during this increment because its input host was unreachable. The shared
+450-file first error is addressed by the new mechanism, but later errors remain
+unmeasured. No new acceptance count, kernel link or execution result is claimed.

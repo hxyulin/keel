@@ -162,21 +162,33 @@ impl<'a> Parser<'a> {
                                     expr = self.address_of(expr, loc)?;
                                 }
                                 "i" | "n" => {
-                                    let value = crate::eval::eval_constant(&expr, false)
-                                        .filter(|_| expr.ty.is_integer());
-                                    let Some(crate::eval::Const::Int(value)) = value else {
-                                        return Err(Error::new(
-                                            expr.loc,
-                                            "asm immediate requires an integer constant expression",
-                                        ));
-                                    };
+                                    if x86 {
+                                        expr = self.rvalue(expr);
+                                        if !expr.ty.is_integer()
+                                            && expr.ty.ir() != keel_ir::Type::Ptr
+                                        {
+                                            return Err(Error::new(
+                                                expr.loc,
+                                                "asm immediate requires an integer or pointer",
+                                            ));
+                                        }
+                                    } else {
+                                        let value = crate::eval::eval_constant(&expr, false)
+                                            .filter(|_| expr.ty.is_integer());
+                                        let Some(crate::eval::Const::Int(value)) = value else {
+                                            return Err(Error::new(
+                                                expr.loc,
+                                                "asm immediate requires an integer constant expression",
+                                            ));
+                                        };
+                                        expr.kind = ExprKind::Int(value);
+                                    }
                                     if expr.ty.ir() == keel_ir::Type::I128 {
                                         return Err(Error::new(
                                             expr.loc,
                                             "128-bit asm immediates are not supported",
                                         ));
                                     }
-                                    expr.kind = ExprKind::Int(value);
                                 }
                                 "r" | "w" if !x86 || constraint == "r" => {
                                     expr = self.rvalue(expr);

@@ -58,6 +58,8 @@ pub fn compile(
         .run()
         .map_err(|e| diagnostic(&files, e))?;
     crate::apply_function_binding(&mut module, opts.target, crate::FunctionBinding::default());
+    crate::finalize_inline_asm(&mut module, opts.target)
+        .map_err(|message| diagnostic(&files, crate::Error::new(crate::Loc::default(), message)))?;
     let irgen_ms = start.elapsed().as_secs_f64() * 1000.;
     let start = Instant::now();
     drop(parser);

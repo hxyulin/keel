@@ -28,7 +28,7 @@ pub use vector_capabilities::VectorCapabilities;
 pub mod verifier;
 pub mod x87_owned_stack;
 
-pub use asm::{AsmArch, AsmClobber, AsmOperand, InlineAsm, PhysReg};
+pub use asm::{AsmArch, AsmClobber, AsmOperand, InlineAsm, PhysReg, symbolic_immediate};
 pub use builder::InstBuilder;
 pub use data::{DataInit, DataItem, DataObject};
 pub use data_layout::DataLayout;

@@ -22,11 +22,11 @@ memmap2 = "0.9"
 simdutf8 = "0.1"
 keel-ir = { path = "../keel-ir" }
 keel-frontend = { path = "../keel-frontend" }
+keel-opt = { path = "../keel-opt" }
 
 [dev-dependencies]
 keel-wasm = { path = "../keel-wasm" }
 keel-codegen = { path = "../keel-codegen" }
-keel-opt = { path = "../keel-opt" }
 keel-asm = { path = "../keel-asm" }
 keel-link = { path = "../keel-link" }
 object = { version = "0.36", default-features = false, features = ["read", "std"] }

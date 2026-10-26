@@ -127,7 +127,24 @@ fn contracts_and_effects_survive_optimization() {
     let text = m.to_string();
     let parsed = keel_ir::parse(&text).unwrap();
     keel_ir::verify_module(&parsed).unwrap();
-    assert_eq!(text, parsed.to_string());
+    // Parsing renumbers SSA values after required inlining removed calls.
+    let contracts = |m: &keel_ir::Module| {
+        m.functions
+            .iter()
+            .flat_map(|f| {
+                f.layout_insts().filter_map(move |(_, i)| {
+                    if let InstData::InlineAsm { asm, .. } = f.inst_data(i) {
+                        Some(asm.clone())
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(contracts(&m), contracts(&parsed));
+    let normalized = parsed.to_string();
+    assert_eq!(normalized, keel_ir::parse(&normalized).unwrap().to_string());
     keel_opt::optimize(&mut m).unwrap();
     assert_eq!(count(&m), before);
 }
@@ -140,7 +157,7 @@ fn unsupported_and_impossible_contracts_are_diagnosed() {
         ("asm(\"\" : \"=r,r\"(x));", "output constraint"),
         ("asm(\"\" :: \"m\"(x));", "input constraint"),
         ("asm(\"\" :: \"w\"(x));", "input constraint"),
-        ("asm(\"\" :: \"i\"(x));", "integer constant"),
+        ("asm(\"\" :: \"i\"(x));", "constant immediate"),
         ("asm(\"\" ::: \"rsp\");", "stack or frame pointer"),
         ("asm(\"\" ::: \"ebp\");", "stack or frame pointer"),
         ("asm(\"\" ::: \"x0\");", "another architecture"),
@@ -225,4 +242,175 @@ fn forced_rematerialization_preserves_fixed_operands() {
         std::fs::create_dir_all(&path).unwrap();
         std::fs::write(std::path::Path::new(&path).join("forced-remat.o"), obj).unwrap();
     }
+}
+
+#[test]
+fn required_inline_finalizes_numeric_and_symbolic_immediates_without_optimization() {
+    let source = r#"
+extern long global;
+extern long other;
+static __attribute__((always_inline)) inline void *rip(void *p) {
+    asm("leaq %c1(%%rip), %0" : "=r"(p) : "i"(p));
+    return p;
+}
+static __attribute__((always_inline)) inline long number(long n) {
+    long out;
+    asm("movq %1,%0" : "=r"(out) : "n"(n));
+    return out;
+}
+static __attribute__((always_inline)) inline void *outer(void *p) { return rip(p); }
+void *address(void) { return outer(&global); }
+void *offset(void) { return rip((char *)&other + 7); }
+long constant(void) { return number(19 + 23); }
+static __attribute__((always_inline)) inline void unused(long x) { asm("" :: "i"(x)); }
+"#;
+    for debug in [false, true] {
+        let m = compile(source, debug).unwrap();
+        keel_ir::verify_module(&m).unwrap();
+        assert!(
+            !m.functions
+                .iter()
+                .any(|f| matches!(f.name.as_str(), "rip" | "outer" | "number" | "unused"))
+        );
+        let text = keel_codegen::compile(&m, Target::X86_64LinuxGnu).unwrap();
+        assert!(text.contains("global(%rip)"), "{text}");
+        assert!(text.contains("other+7(%rip)"), "{text}");
+        assert!(text.contains("$42"), "{text}");
+        let p = keel_codegen::x86_64::compile_program_with_pipeline(
+            &m,
+            &keel_codegen::x86_64::REGISTERS,
+            &CodegenPipeline {
+                selector: &SelectionTier::Full,
+                allocator: &AllocationTier::Full,
+            },
+        )
+        .unwrap();
+        let a = keel_asm::x86::assemble_object(&text).unwrap();
+        let b =
+            keel_asm::x86::assemble_program_object_with_features(&p, Features::default()).unwrap();
+        assert_eq!(a, b);
+    }
+}
+
+#[test]
+fn deferred_immediates_reject_runtime_symbols_for_n_and_failed_required_calls() {
+    for (source, expected) in [
+        (
+            r#"void f(long x) { asm("" :: "i"(x)); }"#,
+            "constant immediate",
+        ),
+        (
+            r#"void f(void) { long x=7; asm("" :: "r"(&x) : "memory"); asm("" :: "i"(x)); }"#,
+            "constant immediate",
+        ),
+        (
+            r#"void f(volatile long *p) { asm("" :: "i"(*p)); }"#,
+            "constant immediate",
+        ),
+        (
+            r#"extern int g; void f(void) { asm("" :: "n"(&g)); }"#,
+            "constant immediate",
+        ),
+        (
+            r#"static __attribute__((always_inline)) inline void f(long x) { asm("" :: "i"(x)); } void g(long x) { f(x); }"#,
+            "constant immediate",
+        ),
+        (
+            r#"static __attribute__((always_inline)) inline void f(long x) { f(x); asm("" :: "i"(x)); } void g(void) { f(1); }"#,
+            "recursive",
+        ),
+        (
+            r#"__attribute__((always_inline)) void f(long); void g(void) { f(1); asm(""); }"#,
+            "no definition",
+        ),
+        (
+            r#"static __attribute__((always_inline,noinline)) void f(void) { asm(""); } void g(void) { f(); }"#,
+            "noinline",
+        ),
+        (
+            r#"static __attribute__((always_inline)) inline void f(long x) { asm("" :: "i"(x)); } void (*p)(long)=f;"#,
+            "constant immediate",
+        ),
+    ] {
+        let err = compile(source, false).unwrap_err();
+        assert!(err.contains(expected), "{source}: {err}");
+    }
+}
+
+#[test]
+fn finalized_symbol_relocations_match_clang_and_gnu() {
+    use object::{Object, ObjectSection, ObjectSymbol, RelocationTarget};
+    use std::{fs, process::Command};
+    let source = r#"
+extern unsigned char anchor[64];
+static __attribute__((always_inline)) inline void *get(void *p) {
+    asm("leaq %c1(%%rip),%0" : "=r"(p) : "i"(p));
+    return p;
+}
+unsigned long f(void) {
+    void *p = get(anchor + 7);
+    unsigned long q;
+    asm("movabsq %1,%0" : "=r"(q) : "i"(anchor + 19));
+    return (unsigned long)p ^ q;
+}
+"#;
+    let m = compile(source, false).unwrap();
+    let text = keel_codegen::compile(&m, Target::X86_64LinuxGnu).unwrap();
+    let own = keel_asm::x86::assemble_object(&text).unwrap();
+    let inspect = |bytes: &[u8]| {
+        let file = object::File::parse(bytes).unwrap();
+        let section = file.section_by_name(".text").unwrap();
+        let relocs = section
+            .relocations()
+            .map(|(offset, r)| {
+                let RelocationTarget::Symbol(index) = r.target() else {
+                    panic!("expected symbol relocation");
+                };
+                (
+                    offset,
+                    file.symbol_by_index(index)
+                        .unwrap()
+                        .name()
+                        .unwrap()
+                        .to_owned(),
+                    r.addend(),
+                    r.flags(),
+                )
+            })
+            .collect::<Vec<_>>();
+        (section.data().unwrap().to_vec(), relocs)
+    };
+    let expected = inspect(&own);
+    assert!(expected.1.iter().any(|r| r.1 == "anchor" && r.2 == 3)); // +7 minus RIP's four-byte field.
+    assert!(expected.1.iter().any(|r| r.1 == "anchor" && r.2 == 19));
+    let dir = std::env::temp_dir().join(format!("keel-deferred-oracles-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("test.s");
+    fs::write(&input, &text).unwrap();
+    for gnu in [false, true] {
+        let mut command = if gnu {
+            let mut command =
+                Command::new(std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into()));
+            command.args(["--64", "-mrelax-relocations=no"]);
+            command
+        } else {
+            let mut command = Command::new("clang");
+            command.args([
+                "-target",
+                "x86_64-unknown-linux-gnu",
+                "-c",
+                "-Wa,-mrelax-relocations=no",
+            ]);
+            command
+        };
+        let output = dir.join("test.o");
+        let result = command.arg(&input).arg("-o").arg(&output).output().unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(expected, inspect(&fs::read(&output).unwrap()), "GNU={gnu}");
+    }
+    fs::remove_dir_all(dir).unwrap();
 }

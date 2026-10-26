@@ -44,6 +44,9 @@ def main():
         for name, broken in [
             ("wrong-add", original.replace("return a;", "return a ^ 1;", 1)),
             ("wrong-clobber-result", original.replace("return out ^ (a +", "return 1 ^ out ^ (a +", 1)),
+            ("wrong-deferred-symbol", original.replace("deferred_outer(asm_deferred_anchor + 7)", "deferred_outer(asm_deferred_anchor + 8)", 1)),
+            ("wrong-deferred-number", original.replace("deferred_add(x, 17 + 6)", "deferred_add(x, 17 + 7)", 1)),
+            ("missing-deferred-symbol", original.replace("leaq %c1(%%rip),%0", "movq $7,%0", 1)),
         ]:
             assert broken != original
             source = work / f"{index}-{name}.c"

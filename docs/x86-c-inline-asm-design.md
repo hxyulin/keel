@@ -178,7 +178,7 @@ identifies target constraints and points to their compiler definitions. Pin the
 relevant x86 definitions and compatibility witnesses when implementing the
 constraint schema; generated ISA operand kinds are not a substitute.
 
-## Scalar milestone kernel follow-up
+## Scalar milestone kernel follow-up (historical measurement)
 
 The unchanged configured corpus now accepts four of 484 C inputs and 326 of
 506 assembly inputs. All 326 previously accepted assembly objects are unchanged.
@@ -201,3 +201,16 @@ call-site constants, symbolic addresses, nonconstant calls and duplicated asm
 instances with independent GCC/Clang witnesses. Memory constraints, unions,
 file-scope asm and asm goto remain separate milestones; later errors are still
 masked by these shared headers.
+
+## Deferred-immediate implementation
+
+The follow-up described above now runs during x86 C compilation whenever the
+translation unit contains asm. It expands required direct calls before optional
+optimization, then finalizes `i` versus `n` legality and verifies the resulting
+module. The public IR verifier remains strict. The
+[implemented contract](x86-c-inline-asm.md#required-inlining-and-deferred-immediates)
+records bounds, diagnostics and retained-body behavior.
+
+The 450-file count remains the earlier first-error measurement. The unchanged
+kernel corpus was not rerun because its Linux test host was unreachable. No new
+kernel acceptance, link or execution result is claimed.
