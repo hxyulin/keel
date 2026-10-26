@@ -19,9 +19,13 @@ latest preceding definition and `Nf` to the next definition in source order.
 Undefined references are errors, including references in data directives.
 Internal local names do not become external undefined symbols. Numeric tokens
 inside strings, integer literals and ordinary symbol names keep their meaning.
-Existing expression limits still apply: parenthesized symbol terms such as
-`(1b)` and deferred `.skip` expressions remain separate gaps found in the
-configured Linux corpus.
+Parenthesized linear terms, including `(1b) - .`, preserve the existing
+relocation model. A bounded GNU expression parser supplies constant arithmetic,
+shifts, bitwise operators, comparisons and logical operators. It follows GNU
+precedence and returns -1 for true comparisons. Integer literals and checked
+intermediate values stay within the supported 64-bit magnitude; arithmetic
+wraparound is not implemented. Expressions allow at most 64 levels of nesting,
+512 parser nodes and 64 KiB of source.
 
 The section stack stores section identities, including unique sections.
 `.previous` swaps the current and previous section. Temporary section switches
@@ -41,9 +45,34 @@ cross-section origins which GNU rejects; Keel follows GNU's section rule.
 
 Macro parameters accept `:req`; empty or missing required values fail.
 `\@` is a zero-based invocation number, shared by nested macro calls.
-The existing restricted macro grammar still requires the declared argument
-count and comma-separated positional calls. Defaults, keyword and variadic
-arguments and symbol-dependent conditionals remain unsupported.
+GNU x86 macros accept omitted optional parameters, defaults, keyword arguments
+and comma or whitespace separators. Positional arguments must precede keyword
+arguments. `.irp` and ASCII `.irpc` reuse the bounded expansion engine;
+`.ifc`/`.ifnc` compare strings and `.purgem` removes a macro definition.
+GNU's empty `.irp` runs once with an empty value; LLVM omits that iteration.
+Unquoted empty `.irpc` strings are rejected.
+
+Assembly conditionals and repetition counts can use previously defined absolute
+`.set`/`.equ` values, including mutable counters and constant expressions.
+Register equality and inequality support the unwind macros' `%rsp == %rsp`
+form. Undefined symbols, forward absolute aliases and layout-dependent tests
+remain errors at expansion. Register arithmetic, variadic macros, `.altmacro`,
+`.ifdef`/`.ifndef`, `.ifb`/`.ifnb` and file inclusion remain unsupported.
+Absolute assignments can be repeated. Redefining a symbolic alias remains an
+error. Textual expansion tracks assignments from text fragments; it does not
+read preceding structured `Directive::Set` items.
+
+`.skip`, `.space` and `.zero` accept deferred absolute expressions over label
+differences. Linux alternatives can compare the lengths of code in separate
+sections: each subtraction must first produce an absolute same-section
+difference. Unknown symbols and cross-section subtraction fail. No unresolved
+symbol receives a default value. A provisional zero *width* reserves the initial
+layout slot; each complete layout evaluates its expression with all labels
+available, then repeats layout when any width changes. The existing branch
+widening, directive cycle detection and layout work bound include these slots.
+Dot captures the directive's position on each pass. Each space directive is
+limited to 64 MiB. Existing `.org` evaluation and backward-placement constraints
+still apply on every layout pass.
 
 `crates/keel-asm/tests/x86_gnu_language.rs` compares section bytes, sizes, flags,
 and normalized ELF relocation types, targets and addends against both Clang
@@ -52,3 +81,11 @@ exception-table section deltas, macro invocations, NOBITS fill and negative
 language witnesses. Shared preprocessing tests also compare the new macro
 operators against Clang on AArch64. These checks do not establish kernel-build
 coverage.
+
+`crates/keel-asm/tests/x86_gnu_expressions.rs` adds GNU and Clang section-byte,
+flag, size and normalized relocation comparisons for exception-table iteration,
+unwind defaults, register conditionals, mutable counters, grouped symbol terms
+and alternatives padding. The empty-iteration difference uses GNU as its oracle.
+Negative witnesses cover undefined and cross-section expressions, alias and
+layout cycles, expression bounds, missing arguments and rejected legacy modes.
+These focused checks do not update the configured corpus acceptance counts.

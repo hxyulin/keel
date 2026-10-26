@@ -3,6 +3,7 @@ use crate::Expression;
 use smallvec::SmallVec;
 use std::borrow::Cow;
 pub mod evex;
+pub mod expression;
 pub mod isa;
 pub use evex::{EvexMnemonic, EvexOpcode, EvexOptions, Rounding};
 
@@ -159,6 +160,9 @@ pub fn split_inline(s: &str, delimiter: char) -> SmallVec<[&str; 4]> {
     parts
 }
 pub fn integer(s: &str) -> Result<i128, String> {
+    integer_literal(s).or_else(|_| expression::constant(s))
+}
+fn integer_literal(s: &str) -> Result<i128, String> {
     let s = s.trim();
     let (sign, s) = if let Some(s) = s.strip_prefix('-') {
         (-1, s)
@@ -245,50 +249,10 @@ pub fn symbol(s: &str) -> Result<String, String> {
 /// Parse the linear symbol expressions emitted by the compiler.
 pub fn address(s: &str) -> Result<Address, String> {
     let mut out = Address::default();
-    let (mut quote, mut escaped, mut start, mut sign) = (false, false, 0, 1i128);
-    let mut terms = SmallVec::<[_; 4]>::new();
-    for (i, c) in s.char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if quote && c == '\\' {
-            escaped = true;
-            continue;
-        }
-        if c == '"' {
-            quote = !quote
-        }
-        if !quote && (c == '+' || c == '-') {
-            if i > start && !s[start..i].trim().is_empty() {
-                terms.push((sign, &s[start..i]));
-            }
-            sign = if c == '-' { -1 } else { 1 };
-            start = i + 1;
-        }
-    }
-    if quote {
-        return Err("unterminated symbol quote".into());
-    }
-    terms.push((sign, &s[start..]));
-    for (sign, term) in terms {
-        let term = term.trim();
-        // Symbol names cannot start with a digit. Avoid formatting an integer
-        // parse error for every ordinary symbolic address term.
-        let number = if term.as_bytes().first().is_some_and(u8::is_ascii_digit) {
-            integer(term).ok()
-        } else {
-            None
-        };
-        if let Some(n) = number {
-            out.expression.constant = out
-                .expression
-                .constant
-                .checked_add(sign * n)
-                .ok_or("expression overflow")?;
-            continue;
-        }
-        let parts = split_inline(term, '@');
+    let (constant, terms) = expression::parse(s)?.linear()?;
+    out.expression.constant = constant;
+    for (term, sign) in terms {
+        let parts = split_inline(&term, '@');
         let name = symbol(parts[0])?;
         if parts.len() > 2 {
             return Err("multiple relocation modifiers".into());
@@ -305,6 +269,9 @@ pub fn address(s: &str) -> Result<Address, String> {
                 "dtpoff" => Modifier::DtpOff,
                 _ => return Err(format!("unsupported relocation modifier `{modifier}`")),
             };
+        }
+        if sign != 1 && sign != -1 {
+            return Err("expression has multiple symbols with the same sign".into());
         }
         let slot = if sign == 1 {
             &mut out.expression.add

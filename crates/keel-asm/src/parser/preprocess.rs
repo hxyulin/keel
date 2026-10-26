@@ -1,15 +1,9 @@
 //! Optional, bounded textual assembly expansion. Entered only after the ordinary
 //! parser encounters a preprocessing directive; no filesystem access or global state.
 //!
-//! Supported: named macro parameters (including GNU `:req`), `\@` invocation
-//! numbers, comma-separated positional calls,
-//! `\name` substitution and `\()` concatenation; nested literal `.rept`;
-//! literal `.if`/`.ifeq`/`.ifne`/`.ifgt`/`.ifge`/`.iflt`/`.ifle` with
-//! `.elseif`, `.else`, `.endif`. Expressions and symbol-dependent tests, defaults,
-//! keyword/variadic parameters and Darwin positional operators are rejected.
-//! Macro calls/directives must occupy their own line (labels can precede them
-//! on a separate line). Diagnostics/metrics name definition lines; expanded
-//! diagnostics also identify the outer invocation. Bounds apply per assembly.
+//! GNU x86 enables optional/default/keyword arguments, iteration and bounded
+//! integer expressions. AArch64 retains its existing restricted macro grammar.
+//! Expansion never assumes values for unresolved symbols or layout positions.
 use super::{Error, scanning};
 use std::collections::BTreeMap;
 
@@ -82,10 +76,13 @@ struct Macro {
     parameters: Vec<String>,
     required: Vec<bool>,
     body: Vec<Line>,
+    defaults: Vec<String>,
 }
 #[derive(Default)]
 pub(crate) struct Processor {
     macros: BTreeMap<String, Macro>,
+    constants: BTreeMap<String, i128>,
+    gnu: bool,
     output: String,
     origins: Vec<Line>,
     steps: usize,
@@ -113,6 +110,7 @@ pub(crate) fn expand_statements(
     processor: &mut Processor,
     lines: Vec<(usize, String)>,
 ) -> Result<Expanded, Error> {
+    processor.gnu = true;
     let lines: Vec<_> = lines
         .into_iter()
         .map(|(line, text)| Line {
@@ -122,12 +120,22 @@ pub(crate) fn expand_statements(
         })
         .collect();
     if !processor.macros.is_empty()
+        || !processor.constants.is_empty()
         || lines.iter().any(|l| {
-            matches!(
+            l.text.split_once('=').is_some_and(|(name, rhs)| {
+                keel_asm_ir::x86::symbol(name).is_ok() && !rhs.starts_with('=')
+            }) || matches!(
                 parts(&l.text).0,
                 ".macro"
                     | ".endm"
                     | ".endmacro"
+                    | ".irp"
+                    | ".irpc"
+                    | ".ifc"
+                    | ".ifnc"
+                    | ".purgem"
+                    | ".set"
+                    | ".equ"
                     | ".rept"
                     | ".endr"
                     | ".if"
@@ -183,8 +191,8 @@ fn literal(text: &str, line: &Line) -> Result<i64, Error> {
 }
 
 // LLVM protects commas in strings and parentheses, but not A64 address brackets.
-// Restrict calls to comma-separated arguments; parameter declarations also accept spaces.
-fn arguments(text: &str, line: &Line, declaration: bool) -> Result<Vec<String>, Error> {
+// GNU x86 also permits whitespace separators outside parenthesized operands.
+fn arguments(text: &str, line: &Line, declaration: bool, gnu: bool) -> Result<Vec<String>, Error> {
     if text.is_empty() {
         return Ok(Vec::new());
     }
@@ -217,7 +225,7 @@ fn arguments(text: &str, line: &Line, declaration: bool) -> Result<Vec<String>, 
                     return Err(line.error("unbalanced macro argument"));
                 }
             }
-            '=' if !declaration => {
+            '=' if !declaration && !gnu => {
                 return Err(line.error("keyword macro arguments are unsupported"));
             }
             ',' if nesting.is_empty() => commas.push(i),
@@ -233,7 +241,7 @@ fn arguments(text: &str, line: &Line, declaration: bool) -> Result<Vec<String>, 
     let mut start = 0;
     for end in if comma_mode {
         commas
-    } else if declaration {
+    } else if declaration || gnu {
         spaces
     } else {
         Vec::new()
@@ -247,6 +255,17 @@ fn arguments(text: &str, line: &Line, declaration: bool) -> Result<Vec<String>, 
     let arg = text[start..].trim();
     if comma_mode || !arg.is_empty() {
         result.push(arg.to_owned());
+    }
+    if gnu && comma_mode {
+        let mut mixed = Vec::new();
+        for arg in result {
+            if arg.is_empty() {
+                mixed.push(arg);
+            } else {
+                mixed.extend(arguments(&arg, line, declaration, gnu)?);
+            }
+        }
+        return Ok(mixed);
     }
     if !declaration {
         for arg in &mut result {
@@ -266,7 +285,7 @@ fn arguments(text: &str, line: &Line, declaration: bool) -> Result<Vec<String>, 
                     return Err(line.error("mixed quoted macro arguments are unsupported"));
                 }
                 *arg = arg[1..arg.len() - 1].to_owned();
-            } else if arg.chars().any(char::is_whitespace) {
+            } else if !gnu && arg.chars().any(char::is_whitespace) {
                 return Err(line.error("macro arguments containing whitespace must be quoted"));
             }
         }
@@ -275,6 +294,137 @@ fn arguments(text: &str, line: &Line, declaration: bool) -> Result<Vec<String>, 
 }
 
 impl Processor {
+    fn number(&self, text: &str, line: &Line) -> Result<i128, Error> {
+        if !self.gnu {
+            return literal(text, line).map(i128::from);
+        }
+        // Kernel unwind macros compare register spellings. Registers are not
+        // integer constants, so support equality without inventing numeric IDs.
+        for op in ["==", "!="] {
+            if let Some((a, b)) = text.split_once(op) {
+                if a.trim().starts_with('%') || b.trim().starts_with('%') {
+                    let register = |s: &str| {
+                        s.trim()
+                            .strip_prefix('%')
+                            .and_then(keel_asm_ir::x86::Register::parse)
+                            .ok_or_else(|| {
+                                line.error(
+                                    "register conditional requires two registers and == or !=",
+                                )
+                            })
+                    };
+                    return Ok(-i128::from((register(a)? == register(b)?) == (op == "==")));
+                }
+            }
+        }
+        keel_asm_ir::x86::expression::parse(text)
+            .and_then(|e| {
+                e.eval(&mut |s| {
+                    self.constants
+                        .get(s)
+                        .copied()
+                        .map(keel_asm_ir::x86::expression::Value::absolute)
+                        .ok_or_else(|| {
+                            format!(
+                                "undefined or layout-dependent symbol `{s}` in assembly conditional"
+                            )
+                        })
+                })
+            })
+            .map(|v| v.number)
+            .map_err(|e| line.error(e))
+    }
+    fn string_test(&self, args: &str, line: &Line) -> Result<bool, Error> {
+        let values = keel_asm_ir::x86::split_inline(args, ',');
+        if values.len() != 2 {
+            return Err(line.error("string conditional requires two comma-separated arguments"));
+        }
+        let normalize = |s: &str| {
+            s.trim()
+                .strip_prefix('"')
+                .and_then(|s| s.strip_suffix('"'))
+                .unwrap_or(s.trim())
+                .to_owned()
+        };
+        Ok(normalize(values[0]) == normalize(values[1]))
+    }
+    fn gnu_line(&mut self, line: &Line) -> Result<Line, Error> {
+        let (op, args) = parts(&line.text);
+        let assignment = if matches!(op, ".set" | ".equ") {
+            args.split_once(',')
+        } else {
+            line.text.split_once('=').filter(|(name, rhs)| {
+                keel_asm_ir::x86::symbol(name).is_ok() && !rhs.starts_with('=')
+            })
+        };
+        if let Some((name, expr)) = assignment {
+            let name = name.trim();
+            keel_asm_ir::x86::symbol(name).map_err(|e| line.error(e))?;
+            let text = replace_constants(expr, &self.constants, false);
+            if let Ok(value) = keel_asm_ir::x86::integer(&text) {
+                self.constants.insert(name.into(), value);
+                return Ok(Line {
+                    text: format!(".set {name}, {value}"),
+                    ..line.clone()
+                });
+            }
+            self.constants.remove(name);
+            return Ok(Line {
+                text: format!(".set {name}, {text}"),
+                ..line.clone()
+            });
+        }
+        // Only operand expressions are substituted. Names in labels, section
+        // declarations and symbol attributes retain their identity.
+        if !op.ends_with(':')
+            && (!op.starts_with('.')
+                || matches!(
+                    op,
+                    ".byte"
+                        | ".word"
+                        | ".short"
+                        | ".long"
+                        | ".int"
+                        | ".quad"
+                        | ".4byte"
+                        | ".8byte"
+                        | ".2byte"
+                        | ".skip"
+                        | ".space"
+                        | ".zero"
+                        | ".org"
+                        | ".rept"
+                        | ".uleb128"
+                        | ".sleb128"
+                        | ".align"
+                        | ".balign"
+                        | ".p2align"
+                ))
+        {
+            let operands = if !op.starts_with('.') {
+                replace_constants(args, &self.constants, true)
+            } else {
+                keel_asm_ir::x86::split_inline(args, ',')
+                    .iter()
+                    .map(|arg| {
+                        if keel_asm_ir::x86::address(arg).is_ok_and(|a| {
+                            a.expression.add.is_some() && a.expression.subtract.is_some()
+                        }) {
+                            (*arg).to_owned()
+                        } else {
+                            replace_constants(arg, &self.constants, false)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",")
+            };
+            return Ok(Line {
+                text: format!("{op} {operands}"),
+                ..line.clone()
+            });
+        }
+        Ok(line.clone())
+    }
     fn expand_lines(&mut self, lines: &[Line]) -> Result<Expanded, Error> {
         self.run(lines, 0)?;
         Ok(Expanded {
@@ -316,9 +466,17 @@ impl Processor {
             let lower = op.to_ascii_lowercase();
             let active = conditions.last().is_none_or(|c| c.2);
             match lower.as_str() {
-                ".if" | ".ifeq" | ".ifne" | ".ifgt" | ".ifge" | ".iflt" | ".ifle" => {
+                ".ifc" | ".ifnc" | ".irp" | ".irpc" if !self.gnu => {
+                    return Err(line.error(format!("unsupported directive `{lower}`")));
+                }
+                ".if" | ".ifeq" | ".ifne" | ".ifgt" | ".ifge" | ".iflt" | ".ifle" | ".ifc"
+                | ".ifnc" => {
                     let yes = if active {
-                        let n = literal(args, line)?;
+                        let n = if lower == ".ifc" || lower == ".ifnc" {
+                            i128::from(self.string_test(args, line)? == (lower == ".ifc"))
+                        } else {
+                            self.number(args, line)?
+                        };
                         match lower.as_str() {
                             ".ifeq" => n == 0,
                             ".ifgt" => n > 0,
@@ -349,7 +507,7 @@ impl Processor {
                         c.3 = true;
                         true
                     } else if c.0 && !c.1 {
-                        literal(args, line)? != 0
+                        self.number(args, line)? != 0
                     } else {
                         false
                     };
@@ -364,7 +522,7 @@ impl Processor {
                         .pop()
                         .ok_or_else(|| line.error("unmatched .endif"))?;
                 }
-                ".macro" | ".rept" => {
+                ".macro" | ".rept" | ".irp" | ".irpc" => {
                     let end = block_end(lines, i)?;
                     if active {
                         if lower == ".macro" {
@@ -373,16 +531,33 @@ impl Processor {
                             if !identifier(name) {
                                 return Err(line.error("macro name must be an identifier"));
                             }
-                            let declarations = arguments(params, line, true)?;
+                            let declarations = arguments(params, line, true, self.gnu)?;
                             let mut parameters = Vec::new();
                             let mut required = Vec::new();
+                            let mut defaults = Vec::new();
                             let mut seen = std::collections::BTreeSet::new();
                             for declaration in &declarations {
+                                let (declaration, default) = if self.gnu {
+                                    declaration.split_once('=').unwrap_or((declaration, ""))
+                                } else {
+                                    (declaration.as_str(), "")
+                                };
                                 let parameter =
                                     declaration.strip_suffix(":req").unwrap_or(declaration);
                                 if !identifier(parameter) || !seen.insert(parameter.to_owned()) {
                                     return Err(line.error("macro parameters must be unique plain names; defaults and :vararg are unsupported"));
                                 }
+                                if declaration.ends_with(":req") && !default.is_empty() {
+                                    return Err(line
+                                        .error("required macro parameter cannot have a default"));
+                                }
+                                defaults.push(
+                                    default
+                                        .strip_prefix('"')
+                                        .and_then(|s| s.strip_suffix('"'))
+                                        .unwrap_or(default)
+                                        .to_owned(),
+                                );
                                 parameters.push(parameter.to_owned());
                                 required.push(declaration.ends_with(":req"));
                             }
@@ -394,12 +569,64 @@ impl Processor {
                                 Macro {
                                     parameters,
                                     required,
+                                    defaults,
                                     body: lines[i + 1..end].to_vec(),
                                 },
                             );
+                        } else if lower == ".irp" || lower == ".irpc" {
+                            let (name, text) = args.split_once(',').unwrap_or((args, ""));
+                            let name = name.trim();
+                            if !identifier(name) {
+                                return Err(line.error("iteration parameter must be an identifier"));
+                            }
+                            let values = if lower == ".irp" {
+                                if text.trim().is_empty() {
+                                    vec![String::new()]
+                                } else {
+                                    arguments(text.trim(), line, false, true)?
+                                }
+                            } else {
+                                let text = text.trim();
+                                if text.is_empty() {
+                                    return Err(line.error(".irpc requires a character string"));
+                                }
+                                let text = text
+                                    .strip_prefix('"')
+                                    .and_then(|s| s.strip_suffix('"'))
+                                    .unwrap_or(text);
+                                if !text.is_ascii() {
+                                    return Err(line.error(".irpc requires ASCII characters"));
+                                }
+                                text.chars().map(|c| c.to_string()).collect()
+                            };
+                            for value in values {
+                                self.step(line)?;
+                                let mut parameters = vec![name.into()];
+                                let mut values = vec![value];
+                                iteration_bindings(
+                                    &lines[i + 1..end],
+                                    &mut parameters,
+                                    &mut values,
+                                );
+                                let body = lines[i + 1..end]
+                                    .iter()
+                                    .map(|body| {
+                                        Ok(Line {
+                                            text: substitute(
+                                                body,
+                                                &parameters,
+                                                &values,
+                                                self.invocations,
+                                            )?,
+                                            ..body.clone()
+                                        })
+                                    })
+                                    .collect::<Result<Vec<_>, Error>>()?;
+                                self.run(&body, depth + 1)?;
+                            }
                         } else {
-                            let count = literal(args, line)?;
-                            if !(0..=MAX_STEPS as i64).contains(&count) {
+                            let count = self.number(args, line)?;
+                            if !(0..=MAX_STEPS as i128).contains(&count) {
                                 return Err(line.error(".rept count must be in 0..=100000"));
                             }
                             for _ in 0..count {
@@ -415,7 +642,61 @@ impl Processor {
                 }
                 _ if active => {
                     if let Some(mac) = self.macros.get(op).cloned() {
-                        let values = arguments(args, line, false)?;
+                        let supplied = arguments(args, line, false, self.gnu)?;
+                        let values = if self.gnu {
+                            let mut values = mac.defaults.clone();
+                            let mut seen = vec![false; values.len()];
+                            let (mut positional, mut keyword) = (0, false);
+                            for value in supplied {
+                                let (index, value) =
+                                    if let Some((name, value)) = value.split_once('=') {
+                                        keyword = true;
+                                        let index = mac
+                                            .parameters
+                                            .iter()
+                                            .position(|p| p == name.trim())
+                                            .ok_or_else(|| {
+                                                line.error(format!(
+                                                    "unknown keyword macro argument `{name}`"
+                                                ))
+                                            })?;
+                                        let value = value.trim();
+                                        (
+                                            index,
+                                            value
+                                                .strip_prefix('"')
+                                                .and_then(|s| s.strip_suffix('"'))
+                                                .unwrap_or(value)
+                                                .to_owned(),
+                                        )
+                                    } else {
+                                        if keyword {
+                                            return Err(line.error(
+                                                "positional macro argument after keyword argument",
+                                            ));
+                                        }
+                                        let index = positional;
+                                        positional += 1;
+                                        (index, value)
+                                    };
+                                if index >= values.len() {
+                                    return Err(line.error(format!(
+                                        "macro `{op}` expects at most {} arguments",
+                                        values.len()
+                                    )));
+                                }
+                                if seen[index] {
+                                    return Err(line.error("duplicate macro argument"));
+                                }
+                                seen[index] = true;
+                                if !value.is_empty() {
+                                    values[index] = value;
+                                }
+                            }
+                            values
+                        } else {
+                            supplied
+                        };
                         for (index, required) in mac.required.iter().enumerate() {
                             if *required && values.get(index).is_none_or(|v| v.is_empty()) {
                                 return Err(line.error(format!(
@@ -433,12 +714,15 @@ impl Processor {
                         }
                         let invocation = self.invocations;
                         self.invocations += 1;
+                        let mut parameters = mac.parameters.clone();
+                        let mut values = values;
+                        iteration_bindings(&mac.body, &mut parameters, &mut values);
                         let mut body_bytes = 0usize;
                         let body = mac
                             .body
                             .iter()
                             .map(|body| {
-                                let text = substitute(body, &mac.parameters, &values, invocation)?;
+                                let text = substitute(body, &parameters, &values, invocation)?;
                                 body_bytes = body_bytes.saturating_add(text.len() + 1);
                                 if body_bytes > MAX_BYTES {
                                     return Err(line.error("macro substitution exceeds 8 MiB"));
@@ -451,8 +735,17 @@ impl Processor {
                             })
                             .collect::<Result<Vec<_>, Error>>()?;
                         self.run(&body, depth + 1)?;
+                    } else if self.gnu && lower == ".purgem" {
+                        if self.macros.remove(args).is_none() {
+                            return Err(line.error("undefined macro in .purgem"));
+                        }
                     } else {
-                        self.emit(line)?;
+                        let line = if self.gnu {
+                            self.gnu_line(line)?
+                        } else {
+                            line.clone()
+                        };
+                        self.emit(&line)?;
                     }
                 }
                 _ => {}
@@ -475,7 +768,7 @@ fn block_end(lines: &[Line], start: usize) -> Result<usize, Error> {
         let (op, args) = parts(&line.text);
         match op.to_ascii_lowercase().as_str() {
             ".macro" => stack.push("macro"),
-            ".rept" => stack.push("rept"),
+            ".rept" | ".irp" | ".irpc" => stack.push("rept"),
             ".endm" | ".endmacro" | ".endr" => {
                 let expected = if op.eq_ignore_ascii_case(".endr") {
                     "rept"
@@ -572,4 +865,82 @@ fn substitute(
         return Err(line.error("macro substitution exceeds 8 MiB"));
     }
     Ok(result)
+}
+
+// Quoted strings and relocation names are opaque. Parentheses protect negative
+// values and preserve precedence when a named absolute constant is substituted.
+fn replace_constants(
+    text: &str,
+    constants: &BTreeMap<String, i128>,
+    immediates_only: bool,
+) -> String {
+    let mut out = String::new();
+    let mut chars = text.char_indices().peekable();
+    let (mut quoted, mut escaped) = (false, false);
+    let (mut immediate, mut depth) = (false, 0usize);
+    while let Some((start, c)) = chars.next() {
+        if escaped {
+            out.push(c);
+            escaped = false;
+            continue;
+        }
+        if quoted && c == '\\' {
+            escaped = true;
+            out.push(c);
+            continue;
+        }
+        if c == '"' {
+            quoted = !quoted;
+        }
+        if !quoted {
+            if c == '$' {
+                immediate = true;
+            }
+            if c == '(' {
+                depth += 1;
+            }
+            if c == ')' {
+                depth = depth.saturating_sub(1);
+            }
+            if c == ',' && depth == 0 {
+                immediate = false;
+            }
+        }
+        if !quoted && (c.is_ascii_alphanumeric() || "_.$".contains(c)) {
+            let mut end = start + c.len_utf8();
+            while let Some(&(i, c)) = chars.peek() {
+                if !(c.is_ascii_alphanumeric() || "_.$".contains(c)) {
+                    break;
+                }
+                chars.next();
+                end = i + c.len_utf8();
+            }
+            let name = &text[start..end];
+            if (immediates_only && !immediate) || text.as_bytes().get(end) == Some(&b'@') {
+                out.push_str(name);
+            } else if let Some(n) = constants.get(name) {
+                out.push_str(&format!("({n})"));
+            } else if let Some(n) = name.strip_prefix('$').and_then(|name| constants.get(name)) {
+                out.push_str(&format!("$({n})"));
+            } else {
+                out.push_str(name);
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+fn iteration_bindings(body: &[Line], parameters: &mut Vec<String>, values: &mut Vec<String>) {
+    for nested in body {
+        let (op, args) = parts(&nested.text);
+        if matches!(op, ".irp" | ".irpc") {
+            let name = args.split(',').next().unwrap().trim();
+            if !parameters.iter().any(|p| p == name) {
+                parameters.push(name.into());
+                values.push(format!("\\{name}"));
+            }
+        }
+    }
 }

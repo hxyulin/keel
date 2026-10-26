@@ -64,11 +64,11 @@ fn literal_data_fallbacks_keep_complete_diagnostics_and_precedence() {
             1,
             "out of range literal value for `.short`",
         ),
-        (".byte 08", 1, "invalid symbol `08`"),
+        (".byte 08", 1, "invalid integer `8`"),
         (
             ".quad 18446744073709551616",
             1,
-            "invalid symbol `18446744073709551616`",
+            "integer literal `18446744073709551616` exceeds 64 bits",
         ),
         (".byte 1,256", 1, "out of range literal value for `.byte`"),
         (

@@ -287,6 +287,8 @@ struct Assembler {
     addrsig: Option<Vec<String>>,
     leb_widths: Vec<usize>,
     lebs: Vec<(usize, u64, Expr, bool, usize)>,
+    space_widths: Vec<u64>,
+    spaces: Vec<(usize, u64, x86::expression::Expr, usize)>,
     pref_powers: Vec<u32>,
     /// Section sizes from the previous layout pass, which declares the same
     /// sections in the same order: reserve them instead of regrowing.
@@ -810,6 +812,7 @@ fn assemble_items_inner<const PROFILE: bool>(
     // diagnose a cyclic directive layout without capping branch relaxation.
     let mut leb_widths = Vec::new();
     let mut pref_powers = Vec::new();
+    let mut space_widths = Vec::new();
     // Brent's cycle detector retains one directive state, not a history per
     // pass. A branch widening changes the transition function, so reset it.
     let mut checkpoint = None;
@@ -827,6 +830,7 @@ fn assemble_items_inner<const PROFILE: bool>(
         (a.symbols, a.fixes) = std::mem::take(&mut recycled);
         a.leb_widths = leb_widths.clone();
         a.pref_powers = pref_powers.clone();
+        a.space_widths = space_widths.clone();
         a.size_hints = std::mem::take(&mut size_hints);
         let mut branches = Vec::new();
         let mut run = 0;
@@ -968,6 +972,45 @@ fn assemble_items_inner<const PROFILE: bool>(
                 a.sections[*section].data[at..at + width].copy_from_slice(&bytes);
             }
         }
+        for (i, (section, offset, expression, line)) in a.spaces.iter().enumerate() {
+            let value = expression
+                .eval(&mut |name| {
+                    if name == "." {
+                        return Ok(x86::expression::Value {
+                            section: Some(*section),
+                            number: i128::from(*offset),
+                        });
+                    }
+                    let name = x86::symbol(name)?;
+                    let id =
+                        a.symbols.names.get(&name).ok_or_else(|| {
+                            format!("undefined symbol `{name}` in space expression")
+                        })?;
+                    let (section, number) = a.eval_symbol(id, 0)?;
+                    Ok(x86::expression::Value { section, number })
+                })
+                .map_err(|e| Error::new(*line, e))?;
+            if value.section.is_some() {
+                return Err(Error::new(
+                    *line,
+                    "space size requires an absolute expression",
+                ));
+            }
+            let Ok(size) = u64::try_from(value.number) else {
+                pending_leb_error.get_or_insert_with(|| {
+                    Error::new(*line, "space size requires a nonnegative value")
+                });
+                continue;
+            };
+            if size > 64 * 1024 * 1024 {
+                return Err(Error::new(*line, "deferred space exceeds 64 MiB"));
+            }
+            if space_widths.len() <= i {
+                space_widths.resize(i + 1, 0);
+            }
+            space_widths[i] = size;
+            variable_changed |= a.space_widths.get(i).copied().unwrap_or(0) != size;
+        }
         for (i, (section, start, padding, preferred, end, line)) in a.prefs.iter().enumerate() {
             let (sec, value) = a.eval_symbol(*end, 0).map_err(|e| Error::new(*line, e))?;
             if sec != Some(*section) || value < i128::from(start + padding) {
@@ -1026,14 +1069,17 @@ fn assemble_items_inner<const PROFILE: bool>(
                 ));
             }
             distance += 1;
-            if checkpoint
-                .as_ref()
-                .is_some_and(|(lebs, prefs)| lebs == &leb_widths && prefs == &pref_powers)
-            {
+            if checkpoint.as_ref().is_some_and(|(lebs, prefs, spaces)| {
+                lebs == &leb_widths && prefs == &pref_powers && spaces == &space_widths
+            }) {
                 return Err(Error::new(0, "cyclic variable-length directive layout"));
             }
             if checkpoint.is_none() || distance == period {
-                checkpoint = Some((leb_widths.clone(), pref_powers.clone()));
+                checkpoint = Some((
+                    leb_widths.clone(),
+                    pref_powers.clone(),
+                    space_widths.clone(),
+                ));
                 period = period.saturating_mul(2);
                 distance = 0;
             }
@@ -1602,7 +1648,12 @@ impl Assembler {
     }
     fn set(&mut self, id: SymId, e: Expr) -> Result<(), String> {
         let sym = self.symbols.entry(id);
-        if sym.section.is_some() || sym.alias.is_some() {
+        if sym.section.is_some()
+            || sym
+                .alias
+                .as_ref()
+                .is_some_and(|old| old.symbolic() || e.symbolic())
+        {
             return Err(format!("duplicate symbol `{}`", self.symbols.name(id)));
         }
         sym.alias = Some(Box::new(e));
@@ -1872,9 +1923,23 @@ impl Assembler {
                 if parts.len() > 2 {
                     return Err("too many space operands".into());
                 }
-                let n = num(parts[0])?;
                 let fill = parts.get(1).map(|s| num(s)).transpose()?.unwrap_or(0);
-                self.data_zero(n, u8::try_from(fill).map_err(|_| "fill exceeds a byte")?)
+                let fill = u8::try_from(fill).map_err(|_| "fill exceeds a byte")?;
+                if let Ok(n) = num(parts[0]) {
+                    if n > 64 * 1024 * 1024 {
+                        return Err("space size exceeds 64 MiB".into());
+                    }
+                    return self.data_zero(n, fill);
+                }
+                let expression = x86::expression::parse(parts[0])?;
+                let width = self
+                    .space_widths
+                    .get(self.spaces.len())
+                    .copied()
+                    .unwrap_or(0);
+                self.spaces
+                    .push((self.current, self.offset(), expression, line));
+                self.data_zero(width, fill)
             }
             ".ascii" | ".asciz" | ".string" => {
                 for p in parts {
