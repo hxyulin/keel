@@ -39,6 +39,11 @@ fn affinity_objects_match_text_on_both_targets() {
                         keel_asm::assemble_program_object(&program, Default::default()).unwrap(),
                         keel_asm::assemble_object(&text).unwrap(),
                     ),
+                    Target::Aarch64LinuxGnu => (
+                        keel_asm::assemble_elf_program_object(&program, Default::default())
+                            .unwrap(),
+                        keel_asm::assemble_elf_object(&text).unwrap(),
+                    ),
                     Target::X86_64LinuxGnu => (
                         keel_asm::x86::assemble_program_object(&program).unwrap(),
                         keel_asm::x86::assemble_object(&text).unwrap(),
