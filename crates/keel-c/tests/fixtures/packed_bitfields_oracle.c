@@ -11,10 +11,10 @@ extern void packed_initial(unsigned char *, int);
 extern long packed_update(void *, int);
 extern long packed_result(void *, int, int);
 extern unsigned int packed_unsigned_result(void *, int, unsigned int);
-static const unsigned start[] = {0, 31, 7, 71, 31, 31, 0, 32};
-static const unsigned width[] = {3, 2, 64, 9, 2, 2, 9, 3};
-static const unsigned size[] = {1, 5, 11, 11, 5, 6, 2, 5};
-static const unsigned sign[] = {1, 0, 0, 1, 0, 0, 1, 0};
+static const unsigned start[] = {0, 31, 7, 71, 31, 31, 0, 32, 0, 0};
+static const unsigned width[] = {3, 2, 64, 9, 2, 2, 9, 3, 63, 63};
+static const unsigned size[] = {1, 5, 11, 11, 5, 6, 2, 5, 8, 8};
+static const unsigned sign[] = {1, 0, 0, 1, 0, 0, 1, 0, 0, 1};
 
 static void insert(unsigned char *p, unsigned shift, unsigned bits, unsigned long v) {
     for (unsigned i = 0; i < bits; i++) {
@@ -39,7 +39,7 @@ int main(void) {
     unsigned long state = 0x8617a539a12905cdUL;
     for (unsigned n = 0; n < 256; n++) {
         state ^= state << 13; state ^= state >> 7; state ^= state << 17;
-        for (unsigned k = 0; k < 8; k++) {
+        for (unsigned k = 0; k < 10; k++) {
             unsigned char actual[32], expected[32];
             for (unsigned i = 0; i < 32; i++) actual[i] = expected[i] = (state >> (i % 8) * 8) ^ i;
             if (packed_read(actual + 3, k) != extract(expected + 3, k)) return 3;

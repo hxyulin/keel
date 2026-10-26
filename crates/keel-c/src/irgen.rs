@@ -3527,7 +3527,8 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 if extension == 0 {
                     v
                 } else if !signed && field.width < 64 {
-                    let mask = self.b.ins().iconst(unit, (1i64 << field.width) - 1);
+                    let bits = (u64::MAX >> (64 - field.width)) as i64;
+                    let mask = self.b.ins().iconst(unit, bits);
                     self.b.ins().and(v, mask)
                 } else {
                     let shift = self.b.ins().iconst(unit, i64::from(extension));

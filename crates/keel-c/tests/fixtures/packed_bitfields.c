@@ -1,3 +1,5 @@
+struct __attribute__((packed)) Unsigned63 { unsigned long value:63; };
+struct __attribute__((packed)) Signed63 { signed long value:63; };
 struct __attribute__((packed)) Tiny { signed int value:3; };
 struct __attribute__((packed)) Cross { unsigned int low:31, high:2; };
 struct __attribute__((packed)) Wide {
@@ -31,7 +33,9 @@ unsigned long packed_read(void *pointer, unsigned which) {
     case 4: return ((struct Member *)pointer)->high;
     case 5: return ((struct Pragma *)pointer)->high;
     case 6: return ((union Choice *)pointer)->sign;
-    default: return ((struct Zero *)pointer)->high;
+    case 7: return ((struct Zero *)pointer)->high;
+    case 8: return ((struct Unsigned63 *)pointer)->value;
+    default: return ((struct Signed63 *)pointer)->value;
     }
 }
 void packed_write(void *pointer, unsigned which, unsigned long value) {
@@ -43,7 +47,9 @@ void packed_write(void *pointer, unsigned which, unsigned long value) {
     case 4: ((struct Member *)pointer)->high = value; break;
     case 5: ((struct Pragma *)pointer)->high = value; break;
     case 6: ((union Choice *)pointer)->sign = value; break;
-    default: ((struct Zero *)pointer)->high = value; break;
+    case 7: ((struct Zero *)pointer)->high = value; break;
+    case 8: ((struct Unsigned63 *)pointer)->value = value; break;
+    default: ((struct Signed63 *)pointer)->value = value; break;
     }
 }
 void packed_initial(unsigned char *out, int local) {
