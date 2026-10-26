@@ -513,3 +513,44 @@ fn invalid_memory_outputs_are_diagnosed() {
             .contains("memory modifier")
     );
 }
+
+#[test]
+fn q_register_contracts_normalize_to_the_long_mode_gpr_class() {
+    let m = compile(SOURCE, false).unwrap();
+    let f = m.functions.iter().find(|f| f.name == "asm_q_rex").unwrap();
+    let asm = f
+        .layout_insts()
+        .find_map(|(_, i)| {
+            if let InstData::InlineAsm { asm, .. } = f.inst_data(i) {
+                Some(asm)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert_eq!(asm.outputs, [(AsmOperand::Reg, keel_ir::Type::I8)]);
+    assert_eq!(asm.early_clobbers, [0]);
+    assert_eq!(asm.inputs, [AsmOperand::Reg, AsmOperand::Reg]);
+    let text = keel_codegen::compile(&m, Target::X86_64LinuxGnu).unwrap();
+    // All six non-stack legacy GPRs are clobbered. The byte operands must use
+    // the extended register views admitted by q in 64-bit mode.
+    assert!(text.contains("movb %r9b,%r8b; addb %r10b,%r8b"), "{text}");
+    for source in [
+        r#"void f(double x) { asm("" : "=q"(x)); }"#,
+        r#"void f(__int128 x) { asm("" :: "q"(x)); }"#,
+        r#"void f(long x) { asm("" : "=Q"(x)); }"#,
+    ] {
+        assert!(compile(source, false).is_err(), "{source}");
+    }
+    let source = r#"void f(long x) { asm("" : "+q"(x)); }"#;
+    let err = keel_c::compile(
+        source,
+        "q-aarch64.c",
+        keel_c::Options {
+            target: Target::Aarch64AppleDarwin,
+            debug_info: false,
+        },
+    )
+    .unwrap_err();
+    assert!(err.message.contains("output constraint"), "{err}");
+}

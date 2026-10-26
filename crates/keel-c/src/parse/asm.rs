@@ -96,12 +96,16 @@ impl<'a> Parser<'a> {
                             let code = &constraint[1..];
                             let code = code.strip_prefix('&').unwrap_or(code);
                             if !(matches!(code, "r" | "w") && (!x86 || code == "r")
-                                || x86 && matches!(code, "a" | "b" | "c" | "d" | "S" | "D" | "m"))
+                                || x86
+                                    && matches!(
+                                        code,
+                                        "q" | "a" | "b" | "c" | "d" | "S" | "D" | "m"
+                                    ))
                             {
                                 return Err(Error::new(
                                     loc,
                                     if x86 {
-                                        "unsupported asm output constraint (supported: r, a, b, c, d, S, D, m with =/+; & applies to register outputs)"
+                                        "unsupported asm output constraint (supported: r, q, a, b, c, d, S, D, m with =/+; & applies to register outputs)"
                                     } else {
                                         "unsupported asm output constraint (supported: =r, +r, =w, +w, with optional &; memory outputs are not supported)"
                                     },
@@ -211,14 +215,14 @@ impl<'a> Parser<'a> {
                                     expr = self.rvalue(expr);
                                     asm_register_type(&constraint, expr.ty, loc)?;
                                 }
-                                "a" | "b" | "c" | "d" | "S" | "D" if x86 => {
+                                "q" | "a" | "b" | "c" | "d" | "S" | "D" if x86 => {
                                     expr = self.rvalue(expr);
                                     asm_register_type(&constraint, expr.ty, loc)?;
                                     constraint = asm_constraint(&constraint, true).to_string();
                                 }
                                 _ => {
                                     let n = constraint.parse::<usize>().ok().filter(|n| *n < outputs.len())
-                                        .ok_or_else(|| Error::new(loc, format!("unsupported asm input constraint `{constraint}` (supported: r, w, m, i, n, output number or [name])")))?;
+                                        .ok_or_else(|| Error::new(loc, format!("unsupported asm input constraint `{constraint}` (supported: r, q (x86), w (AArch64), m, i, n, output number or [name])")))?;
                                     if output_memory[n] {
                                         return Err(Error::new(
                                             loc,
@@ -437,7 +441,7 @@ fn asm_template(
 
 fn asm_register_type(code: &str, ty: Ty<'_>, loc: Loc) -> R<()> {
     let ok = match code {
-        "r" | "a" | "b" | "c" | "d" | "S" | "D" | "{rax}" | "{rbx}" | "{rcx}" | "{rdx}"
+        "r" | "q" | "a" | "b" | "c" | "d" | "S" | "D" | "{rax}" | "{rbx}" | "{rcx}" | "{rdx}"
         | "{rsi}" | "{rdi}" => matches!(ty, Ty::Int(k) if k.size() <= 8) || ty.is_ptr(),
         "w" => matches!(ty, Ty::Float | Ty::Double),
         _ => false,
@@ -461,12 +465,15 @@ fn asm_const(sugar: Sugar<'_>, defs: &[TypedefDef<'_>]) -> bool {
     }
 }
 
-/// GNU fixed-register constraints become target-tagged register identities in IR.
+/// GNU register constraints become shared classes or target-tagged identities.
 fn asm_constraint(code: &str, x86: bool) -> &str {
     if !x86 {
         return code;
     }
     match code {
+        // In x86-64, q admits all integer registers, just as r does. This is
+        // not the four-register q class used in 32-bit mode, nor uppercase Q.
+        "q" => "r",
         "a" => "{rax}",
         "b" => "{rbx}",
         "c" => "{rcx}",

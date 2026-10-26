@@ -50,6 +50,8 @@ def main():
             ("missing-memory-write", original.replace('asm("addq %1,%0" : "+m"(*p)', 'asm("" : "+m"(*p)', 1)),
             ("wrong-memory-address", original.replace('"+m"(*p++)', '"+m"(*++p)', 1)),
             ("wrong-memory-read", original.replace('asm("movq %1,%0" : "=r"(value) : "m"(*p))', 'asm("movq $0,%0" : "=r"(value) : "m"(*p))', 1)),
+            ("wrong-q-output", original.replace('return out + 3;', 'return out + 4;', 1)),
+            ("wrong-q-byte-result", original.replace('movb %b1,%0; addb %b2,%0', 'movb %b1,%0; subb %b2,%0', 1)),
         ]:
             assert broken != original
             source = work / f"{index}-{name}.c"

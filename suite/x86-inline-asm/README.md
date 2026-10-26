@@ -20,7 +20,7 @@ Use a fresh export directory. Each reference compiler independently compiles the
 GNU C asm fixture with renamed functions. The runner links each Keel object with
 that reference and the C comparison harness. Every executable must return zero
 and print exactly `PASS`. It checks 512 inputs per function, including integer
-edges, narrow values, live values and memory canaries. Eight deliberately wrong
+edges, narrow values, live values and memory canaries. Ten deliberately wrong
 implementations per reference compiler must return one with a `FAIL` transcript;
 crashes and timeouts never count as a control passing.
 
@@ -51,3 +51,9 @@ GCC 13.3.0 on Linux x86-64, with all eight broken controls returning normal
 failure. This qualifies the 35-function fixture above, including optimized and
 unoptimized builds, both debug settings, both pools and the forced-rematerialized
 configuration. A native Clang comparison of this expanded fixture was not run.
+
+The q-class extension adds four functions, for 39 exported functions. They
+exercise `=q`, `+q`, `=&q`, `+&q`, byte/word/dword/qword views and pointers.
+Clobbering all six non-stack legacy GPRs forces the byte operands into extended
+registers. Two more negative controls corrupt a q output and its byte result.
+The previous native counts precede this fixture extension.

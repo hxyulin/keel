@@ -191,3 +191,31 @@ unsigned long NAME(asm_memory_alias_inputs)(unsigned long *p, unsigned long *q) 
     asm("movq %1,%%rax; addq %%rax,%0" : "+m"(*p) : "m"(*q) : "rax", "cc");
     return *p + *q;
 }
+
+unsigned long NAME(asm_q_output)(unsigned long a) {
+    unsigned long out;
+    asm("movq %1,%0" : "=q"(out) : "q"(a));
+    return out + 3;
+}
+unsigned long NAME(asm_q_views)(unsigned long a, unsigned long b) {
+    unsigned char byte = a;
+    unsigned short word = a;
+    unsigned int dword = a;
+    unsigned long wide = a;
+    asm("addb %1,%0" : "+q"(byte) : "q"((unsigned char)b) : "cc");
+    asm("xorw %1,%0" : "+q"(word) : "q"((unsigned short)b) : "cc");
+    asm("addl %1,%0" : "+q"(dword) : "q"((unsigned int)b) : "cc");
+    asm("xorq %1,%0" : "+&q"(wide) : "q"(b) : "cc");
+    return (unsigned long)byte + 3UL * word + 5UL * dword + 7UL * wide;
+}
+unsigned long NAME(asm_q_rex)(unsigned long a, unsigned long b) {
+    unsigned char out;
+    asm("movb %b1,%0; addb %b2,%0"
+        : "=&q"(out) : "q"((unsigned char)a), "q"((unsigned char)b)
+        : "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "cc");
+    return (unsigned long)out + a * 3UL + b * 5UL;
+}
+unsigned long *NAME(asm_q_pointer)(unsigned long *p) {
+    asm("addq $8,%0" : "+q"(p) :: "cc");
+    return p;
+}

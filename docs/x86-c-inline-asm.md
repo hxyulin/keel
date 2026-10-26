@@ -19,7 +19,7 @@ unsigned long add(unsigned long a, unsigned long b) {
 ## Accepted contracts
 
 Register operands accept integers through 64 bits and pointers. Register constraints are
-`r`, and fixed `a`, `b`, `c`, `d`, `S`, `D` for RAX, RBX, RCX, RDX, RSI, RDI.
+`r` and x86-64 `q`, and fixed `a`, `b`, `c`, `d`, `S`, `D` for RAX, RBX, RCX, RDX, RSI, RDI.
 Outputs use `=` or `+`, optionally followed by early-clobber `&`. Matching input
 constraints use an output number or `[name]` and require the same IR type.
 Output addresses and input expressions are evaluated once. A read/write register output
@@ -210,3 +210,24 @@ normally rejected controls. The
 accepts 402 assembly inputs and four C inputs. All 330 previously accepted
 objects remain byte-for-byte identical. Later constraint failures still prevent
 further C acceptance; these tests do not qualify kernel code generation.
+
+## The x86-64 q register class
+
+C inputs and outputs accept `q`, including `=q`, `+q` and the early-clobber
+forms `=&q` and `+&q`. GCC's
+[x86 constraint definition](https://gcc.gnu.org/onlinedocs/gcc/Machine-Constraints.html)
+allows every integer register in 64-bit mode. The C frontend therefore
+normalizes `q` to the existing IR `r` class. Backend allocation, reserved
+register rules, ties and input staging are unchanged.
+
+Operand type still selects byte, word, dword or qword views; `q` does not force
+a byte-sized value. Pointers are accepted. Byte operands can use the low-byte
+views of extended registers and RSI/RDI. Uppercase `Q`, which identifies a
+different class, remains unsupported. This normalization does not implement
+the restricted 32-bit `q` class or extend AArch64's constraint set.
+
+The fixture adds four functions for write-only outputs, read/write values at
+all scalar widths, early-clobber byte outputs forced beyond the legacy GPRs,
+and pointer values. The native controls also corrupt a `q` output and a byte
+operation. Earlier fixture and audit counts above belong to their named
+checkpoints.
