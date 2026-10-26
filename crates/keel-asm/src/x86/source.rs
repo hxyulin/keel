@@ -3,7 +3,7 @@ use crate::Error;
 use std::collections::BTreeMap;
 
 /// Preserve physical lines while removing comments and separating statements.
-pub(super) fn statements(source: &str) -> Result<Vec<(usize, String)>, Error> {
+pub(crate) fn statements(source: &str) -> Result<Vec<(usize, String)>, Error> {
     let mut result = Vec::new();
     let mut text = String::new();
     let (mut line, mut start) = (1, 1);

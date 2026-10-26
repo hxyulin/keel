@@ -51,6 +51,10 @@ arguments. `.irp` and ASCII `.irpc` reuse the bounded expansion engine;
 `.ifc`/`.ifnc` compare strings and `.purgem` removes a macro definition.
 GNU's empty `.irp` runs once with an empty value; LLVM omits that iteration.
 Unquoted empty `.irpc` strings are rejected.
+GNU macro bodies retain `$number` instruction immediates. Expanded argument
+text is scanned again for statements, labels and nested macro calls, including
+semicolon-separated alternatives. The existing integer-data fields also accept
+GNU `.value`, `.2byte`, `.4byte` and `.8byte` spellings emitted by these macros.
 
 Assembly conditionals and repetition counts can use previously defined absolute
 `.set`/`.equ` values, including mutable counters and constant expressions.

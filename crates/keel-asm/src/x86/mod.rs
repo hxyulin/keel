@@ -6,7 +6,7 @@ mod encode;
 mod metadata;
 mod relax;
 mod sections;
-mod source;
+pub(crate) mod source;
 mod symbolic;
 use crate::Error;
 use crate::fxhash::{FxHashSet, FxHasher};
@@ -1858,11 +1858,12 @@ impl Assembler {
                     .transpose()?;
                 self.align_fill(power, max, fill.map_or(AlignFill::Default, AlignFill::Byte))
             }
-            ".byte" | ".short" | ".word" | ".long" | ".int" | ".quad" => {
+            ".byte" | ".short" | ".word" | ".value" | ".2byte" | ".long" | ".int" | ".4byte"
+            | ".quad" | ".8byte" => {
                 let width = match op {
                     ".byte" => 1,
-                    ".short" | ".word" => 2,
-                    ".long" | ".int" => 4,
+                    ".short" | ".word" | ".value" | ".2byte" => 2,
+                    ".long" | ".int" | ".4byte" => 4,
                     _ => 8,
                 };
                 for p in parts {

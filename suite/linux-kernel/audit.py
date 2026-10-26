@@ -168,7 +168,15 @@ def compare(args):
             row['reference_diagnostic'] = run.stderr.decode(errors='replace')
         else:
             row['reference_object_sha256'] = sha(reference)
-            row['comparison'] = inspector.compare(inspector.parse(reference), inspector.parse(actual))
+            expected, got = inspector.parse(reference), inspector.parse(actual)
+            row['comparison'] = inspector.compare(expected, got)
+            shared = [r for r in row['comparison']['sections'].values() if r.get('present')]
+            row['shared_section_bytes_equal'] = all(r['bytes'] for r in shared)
+            row['shared_section_relocations_equal'] = all(r['relocations'] for r in shared)
+            row['shared_section_layout_equal'] = all(all(r[k] for k in (
+                'size', 'type_flags', 'align_equal', 'entsize')) for r in shared)
+            row['public_symbols_equal'] = ([s for s in expected['symbols'] if s[1] != 0] ==
+                                           [s for s in got['symbols'] if s[1] != 0])
         rows.append(row)
     report = dict(schema=1, config_sha256=results['config_sha256'],
                   keel_sha256=results['keel_sha256'],
@@ -179,6 +187,10 @@ def compare(args):
                   reference_failed=sum(r['reference_returncode'] != 0 for r in rows),
                   all_equal=sum(r.get('comparison', {}).get('all_equal', False) for r in rows),
                   code_data_equal=sum(r.get('comparison', {}).get('code_data_equal', False) for r in rows),
+                  shared_section_bytes_equal=sum(r.get('shared_section_bytes_equal', False) for r in rows),
+                  shared_section_relocations_equal=sum(r.get('shared_section_relocations_equal', False) for r in rows),
+                  shared_section_layout_equal=sum(r.get('shared_section_layout_equal', False) for r in rows),
+                  public_symbols_equal=sum(r.get('public_symbols_equal', False) for r in rows),
                   results=rows)
     write(args.out / 'comparison.json', report)
     print(json.dumps({k:report[k] for k in ('total', 'reference_failed', 'all_equal', 'code_data_equal')}))

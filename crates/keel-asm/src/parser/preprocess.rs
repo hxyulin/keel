@@ -468,6 +468,23 @@ impl Processor {
         self.origins.push(line.clone());
         Ok(())
     }
+    fn rescan(&self, lines: Vec<Line>) -> Result<Vec<Line>, Error> {
+        if !self.gnu {
+            return Ok(lines);
+        }
+        let mut out = Vec::new();
+        for line in lines {
+            let statements =
+                crate::x86::source::statements(&line.text).map_err(|e| line.error(e.message))?;
+            for (_, text) in statements {
+                out.push(Line {
+                    text,
+                    ..line.clone()
+                });
+            }
+        }
+        Ok(out)
+    }
     fn run(&mut self, lines: &[Line], depth: usize) -> Result<(), Error> {
         if depth > MAX_DEPTH {
             return Err(lines.first().map_or_else(
@@ -636,11 +653,13 @@ impl Processor {
                                                 &parameters,
                                                 &values,
                                                 self.invocations,
+                                                self.gnu,
                                             )?,
                                             ..body.clone()
                                         })
                                     })
                                     .collect::<Result<Vec<_>, Error>>()?;
+                                let body = self.rescan(body)?;
                                 self.run(&body, depth + 1)?;
                             }
                         } else {
@@ -741,7 +760,8 @@ impl Processor {
                             .body
                             .iter()
                             .map(|body| {
-                                let text = substitute(body, &parameters, &values, invocation)?;
+                                let text =
+                                    substitute(body, &parameters, &values, invocation, self.gnu)?;
                                 body_bytes = body_bytes.saturating_add(text.len() + 1);
                                 if body_bytes > MAX_BYTES {
                                     return Err(line.error("macro substitution exceeds 8 MiB"));
@@ -753,6 +773,7 @@ impl Processor {
                                 })
                             })
                             .collect::<Result<Vec<_>, Error>>()?;
+                        let body = self.rescan(body)?;
                         self.run(&body, depth + 1)?;
                     } else if self.gnu && lower == ".purgem" {
                         if self.macros.remove(args).is_none() {
@@ -818,12 +839,14 @@ fn substitute(
     parameters: &[String],
     values: &[String],
     invocation: usize,
+    gnu: bool,
 ) -> Result<String, Error> {
-    if line
-        .text
-        .as_bytes()
-        .windows(2)
-        .any(|s| s[0] == b'$' && s[1].is_ascii_digit())
+    if !gnu
+        && line
+            .text
+            .as_bytes()
+            .windows(2)
+            .any(|s| s[0] == b'$' && s[1].is_ascii_digit())
     {
         return Err(
             line.error("Darwin positional macro parameters are unsupported; use named parameters")

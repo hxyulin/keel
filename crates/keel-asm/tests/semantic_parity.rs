@@ -108,7 +108,10 @@ fn x86_data_literals_that_llvm_wraps_are_rejected() {
     ] {
         assert!(clang(X86, source).is_ok(), "clang now rejects:\n{source}");
         let error = assemble_object(source).unwrap_err().to_string();
-        assert!(error.contains("out of range literal"), "{source}: {error}");
+        assert!(
+            error.contains("out of range literal") || error.contains("expression exceeds 64 bits"),
+            "{source}: {error}"
+        );
     }
 }
 

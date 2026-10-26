@@ -104,6 +104,33 @@ fn compare_tools(source: &str, clang: bool) {
 }
 
 #[test]
+fn expanded_statements_resolve_nested_macros_numeric_labels_and_dollar_immediates() {
+    compare(
+        r#"
+.text
+.macro leaf n:req
+addq $\n,%rax
+.endm
+.macro wrapper old:req
+\old
+.endm
+wrapper "999: leaf 1; jmp 999b"
+.irp n,2,3
+wrapper "888: leaf \n; jmp 888b"
+.endr
+.data
+.macro fields
+.value 0x1234
+.2byte external+1
+.4byte external+3
+.8byte external+5
+.endm
+fields
+"#,
+    );
+}
+
+#[test]
 fn grouped_operands_and_unary_chains_keep_registers_separate_from_symbols() {
     compare(
         r#"
