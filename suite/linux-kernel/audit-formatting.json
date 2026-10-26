@@ -1,0 +1,158 @@
+{
+  "schema": 1,
+  "date": "2026-10-26",
+  "implementation_checkpoint": "2959b5368e031382e2b0b0239139e162ba8917fb",
+  "baseline_report": "audit-q-registers.json",
+  "config_sha256": "af7dd9b29c4ac472ffe32d338821425912fe92ad62b30281ef1356947930e129",
+  "keel_binary_sha256": "7223c1d3f914db9f0416fe13a24b04b6c7828e3e3c0b5d6378d31318046e7a09",
+  "source_manifest_sha256": "908006c3e46761f50342cf6556fcd86a05d7edf51cf2e85de449d19cfd2c5135",
+  "source_inputs_unchanged": true,
+  "all_992_inputs_rehashed": true,
+  "reference_artifacts_rehashed_unchanged": true,
+  "reference_rebuilt_or_rebooted": false,
+  "kernel_codegen_contract": false,
+  "keel_objects_linked_or_run": false,
+  "results": {
+    "c": {
+      "total": 484,
+      "accepted": 4,
+      "rejected": 480,
+      "crashed": 0,
+      "timeouts": 0,
+      "categories": {
+        "unsupported asm input constraint `*` (supported: r, q (x86), w (AArch64), m, i, n, output number or [name])": 263,
+        "unsupported asm output constraint (supported: r, q, a, b, c, d, S, D, m with =/+; & applies to register outputs)": 211,
+        "accepted": 4,
+        "file-scope-asm": 5,
+        "special/TLS/COMDAT section placement is unsupported": 1
+      },
+      "accepted_paths": [
+        "arch/x86/kernel/cpu/capflags.i",
+        "arch/x86/lib/inat.i",
+        "arch/x86/lib/misc.i",
+        "lib/union_find.i"
+      ]
+    },
+    "asm": {
+      "total": 506,
+      "accepted": 402,
+      "rejected": 104,
+      "crashed": 0,
+      "timeouts": 0,
+      "categories": {
+        "accepted": 402,
+        "assembler-directive:.type": 17,
+        "instruction-binding:rdgsbase": 2,
+        "instruction-binding:rdtscp": 5,
+        "unexpected expression input `*`": 1,
+        "standalone-prefix": 58,
+        "invalid symbol `*`": 5,
+        "unsupported generated operands for And: [Memory(Memory { width: 8, base: Some(Register { class: Gpr, number: 3, width: 64, high_byte: false }), index: None, scale: 1, segment: None": 1,
+        "instruction-binding:rdrand": 2,
+        "instruction-binding:fxrstorq": 2,
+        "unsupported generated operands for Mov: [Register(Register { class: Segment, number: 3, width: 16, high_byte: false }), Register(Register { class: Gpr, number: 0, width: 32, high_b": 1,
+        "feature-policy": 3,
+        "instruction-binding:prefetchw": 2,
+        "unsupported generated operands for And: [Memory(Memory { width: 8, base: Some(Register { class: Gpr, number: 7, width: 64, high_byte: false }), index: None, scale: 1, segment: None": 1,
+        "instruction-binding:invpcid": 1,
+        "assembler-directive:.incbin": 2,
+        "unsupported generated operands for And: [Memory(Memory { width: 8, base: Some(Register { class: Gpr, number: 12, width: 64, high_byte: false }), index: None, scale: 1, segment: Non": 1
+      }
+    }
+  },
+  "prior_address_first_errors": {
+    "total": 254,
+    "remaining": 0,
+    "next_errors": {
+      "unsupported asm output constraint (supported: r, q, a, b, c, d, S, D, m with =/+; & applies to register outputs)": 153,
+      "unsupported asm input constraint `rm` (supported: r, q (x86), w (AArch64), m, i, n, output number or [name])": 80,
+      "unsupported asm input constraint `iq` (supported: r, q (x86), w (AArch64), m, i, n, output number or [name])": 21
+    }
+  },
+  "prior_accepted_objects": {
+    "total": 406,
+    "byte_identical": 406,
+    "by_kind": {
+      "asm": 402,
+      "c": 4
+    },
+    "changed": []
+  },
+  "acceptance_regressions": 0,
+  "c_first_constraints": {
+    "inputs": {
+      "iq": 138,
+      "rm": 123,
+      "g": 2
+    },
+    "outputs": {
+      "=@ccz": 153,
+      "=@cce": 57,
+      "+rm": 1
+    }
+  },
+  "native_inline_asm": {
+    "exported_functions": 45,
+    "objects": 145,
+    "positive_executions": 145,
+    "negative_controls": [
+      "wrong-add",
+      "wrong-clobber-result",
+      "wrong-deferred-symbol",
+      "wrong-deferred-number",
+      "missing-deferred-symbol",
+      "missing-memory-write",
+      "wrong-memory-address",
+      "wrong-memory-read",
+      "wrong-q-output",
+      "wrong-q-byte-result",
+      "wrong-address-symbol",
+      "wrong-negated-offset"
+    ],
+    "reference_compiler": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "input_cases_per_function": 512,
+    "note": "Actual exported objects executed against independently compiled GNU C. Userspace evidence, not kernel qualification. Native Clang execution was not run.",
+    "negative_controls_rejected": 12
+  },
+  "gnu_assembly_comparison": {
+    "gnu_as_version": "GNU assembler (GNU Binutils) 2.46",
+    "reference_flags": [
+      "--64",
+      "-mrelax-relocations=no"
+    ],
+    "note": "Unmodified accepted assembly inputs; GNU relaxation disabled to match the existing relocation contract. No objtool, link or execution of Keel objects.",
+    "total": 402,
+    "reference_failed": 0,
+    "all_equal": 0,
+    "code_data_equal": 0,
+    "shared_section_bytes_equal": 121,
+    "shared_section_relocations_equal": 331,
+    "shared_section_layout_equal": 383,
+    "public_symbols_equal": 377
+  },
+  "notes": [
+    "%a supports 32/64-bit register addresses, numeric absolute addresses and RIP-relative symbol-plus-addend addresses in AT&T syntax. It does not infer memory effects.",
+    "%n accepts numeric constants with wrapping 64-bit negation. Symbolic negation, memory address modifiers and narrow address registers diagnose.",
+    "All 254 prior %a first errors disappear. They expose 153 unsupported output constraints, 80 rm input constraints and 21 iq input constraints.",
+    "C remains at four accepted inputs and assembly remains at 402. All 406 previously accepted objects remain byte-for-byte identical, with no crashes, timeouts or acceptance regressions.",
+    "Constraint choices and flag outputs remain separate work. First diagnostics precede complete kernel compilation and do not establish kernel code-generation contracts.",
+    "The source corpus and reference artifacts were rehashed, not rebuilt or rebooted. No Keel object was linked into or executed as the kernel.",
+    "The 153 newly exposed output constraints are =@ccz in preempt_count_set; the other output first errors are 57 =@cce and one +rm. Adjacent string literals were checked in saved preprocessed input."
+  ],
+  "validation": {
+    "focused_inline_asm_tests_passed": 11,
+    "workspace_check": true,
+    "profiling_feature_check": true,
+    "generator_tests_passed": 98,
+    "audit_harness_tests_passed": 3,
+    "both_generator_freshness_checks": true,
+    "scoped_rustfmt": true,
+    "diff_check": true,
+    "workspace": {
+      "passed": 2768,
+      "failed": 0,
+      "ignored": 13,
+      "reported_groups": 507
+    }
+  }
+}

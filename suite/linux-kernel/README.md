@@ -382,3 +382,44 @@ Full workspace validation at `b60de289` passed 2,767 tests, zero failures and
 13 ignored across 507 groups. Workspace and profiling checks, 98 generator
 tests, three audit harness tests, both freshness checks, scoped formatting and
 diff checks passed. No production source changed after that run.
+
+## Address and negation formatting audit
+
+The [formatting audit](audit-formatting.json) uses checkpoint `2959b536` on
+that same corpus. `%a` formats register operands as addresses, preserving
+32-bit address widths; numeric immediates become absolute addresses and
+symbol-plus-addend immediates become RIP-relative addresses. `%n` prints
+negated numeric constants, including wrapping at the signed 64-bit minimum.
+Address formatting does not infer a memory effect. Templates must declare
+memory accesses using operands or clobbers.
+
+All **254** prior `%a` first errors disappear. They expose 153 `=@ccz` flag
+outputs, 80 `rm` input choices and 21 `iq` input choices. The
+current C first errors are:
+
+| First blocker | Files |
+| --- | ---: |
+| Input choices: `iq` (138), `rm` (123), `g` (2) | 263 |
+| Flag outputs: `=@ccz` (153), `=@cce` (57) | 210 |
+| `+rm` output choice | 1 |
+| File-scope asm | 5 |
+| Section placement | 1 |
+
+C acceptance remains four of 484; assembly remains 402 of 506. All **406**
+previously accepted objects retain their exact bytes. All 992 corpus files and
+the three reference artifacts were rehashed unchanged. There are no crashes,
+timeouts or acceptance regressions. The reference kernel was neither rebuilt
+nor rebooted, and no Keel object was linked into or executed as the kernel.
+These are first-error measurements, not complete kernel qualification.
+
+The expanded 45-function fixture passes all 145 native GCC 13.3.0 comparisons
+and rejects twelve broken controls normally. It covers pointer reads, 32-bit
+register addresses, numeric and symbol addresses, positive/negative numeric
+negation and the minimum signed constant. Clang/GNU assembler checks compare
+bytes and relocation targets/addends for positive and negative symbol addends.
+Native Clang execution of this expanded fixture was not run.
+
+Full workspace validation at `2959b536` passed 2,768 tests, zero failures and
+13 ignored across 507 groups. Workspace and profiling checks, all 98 generator
+tests, three audit harness tests, both generator freshness checks, scoped
+formatting and diff checks passed. No production source changed after that run.
