@@ -16,6 +16,9 @@ long add(long a, long b) {
 }
 ```
 
+The proposed [x86-64 design](x86-c-inline-asm-design.md) covers the separate
+x86 backend, memory contracts, file-scope asm and asm goto. It is not implemented.
+
 ## Syntax and constraints
 
 - `asm`, `__asm`, and `__asm__` statements accept narrow string literals,
