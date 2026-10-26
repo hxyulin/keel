@@ -371,6 +371,7 @@ jmp external@PLT
 movq external@GOTPCREL(%rip),%r9
 leaq external+7(%rip),%r10
 movl $external,%r11d
+movq $external+11,%r11
 movabsq $external+9,%r12
 movl external,%r13d
 movq %fs:tls@TPOFF,%r14
@@ -488,7 +489,6 @@ fn malformed_or_unrepresentable_forms_fail_on_the_source_line() {
         "leaq external+-8(%rip),%rax",
         "movq $--8,%rax",
         "setel (%rax)",
-        "movq $external,%r11",
         "pushl $7",
         "nopw",
     ] {

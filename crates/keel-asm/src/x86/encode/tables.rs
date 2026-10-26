@@ -304,6 +304,11 @@ fn matches_operand(spec: IsaOperand, o: &Operand, size: u16, address: u16) -> bo
             match constant(a) {
                 None => bytes >= 4,
                 Some(n) => {
+                    let n = if signed && size == 64 {
+                        signed_word64(n)
+                    } else {
+                        n
+                    };
                     n >= -(1i128 << (bytes * 8 - 1))
                         && n < (1i128 << (bytes * 8 - u16::from(signed)))
                 }

@@ -45,6 +45,15 @@ fn constant(a: &Address) -> Option<i128> {
         None
     }
 }
+/// Interpret an unsigned 64-bit spelling of a machine-word bit pattern.
+/// Values outside that word are left intact so range checks still reject them.
+pub(super) fn signed_word64(n: i128) -> i128 {
+    if (1i128 << 63..=i128::from(u64::MAX)).contains(&n) {
+        n - (1i128 << 64)
+    } else {
+        n
+    }
+}
 impl<'a> Encoding<'a> {
     fn finish(&mut self) -> Result<(), String> {
         if self.bytes.len() > 15 {
@@ -63,6 +72,7 @@ impl<'a> Encoding<'a> {
     }
     fn imm(&mut self, a: &'a Address, bytes: u8, signed: bool) -> Result<(), String> {
         if let Some(n) = constant(a) {
+            let n = if signed { signed_word64(n) } else { n };
             let bits = 8 * u32::from(bytes);
             if n < -(1i128 << (bits - 1)) || n >= (1i128 << (bits - u32::from(signed))) {
                 return Err(format!(

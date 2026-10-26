@@ -2171,7 +2171,7 @@ impl Assembler {
                 // below. An absolute positive symbol still needs its identity
                 // in that relocation, just like an explicit PC-relative fixup.
                 let pc_relative = matches!(f.kind, 2 | 4)
-                    || f.kind == 10
+                    || matches!(f.kind, 10 | 11)
                         && f.width == 4
                         && f.expr.subtract.is_some_and(|id| {
                             self.try_eval_symbol(id, 0)
@@ -2235,10 +2235,16 @@ impl Assembler {
             }
             let (section, value) = if s.alias.is_some() {
                 let (sec, value) = self.eval_symbol(id, 0).map_err(err)?;
-                (
-                    sec,
-                    u64::try_from(value).map_err(|_| err("alias value out of range".into()))?,
-                )
+                // An absolute ELF64 symbol may spell a negative machine word.
+                // Section offsets and values wider than one word still fail.
+                let value = if sec.is_none()
+                    && (i128::from(i64::MIN)..=i128::from(u64::MAX)).contains(&value)
+                {
+                    value as u64
+                } else {
+                    u64::try_from(value).map_err(|_| err("alias value out of range".into()))?
+                };
+                (sec, value)
             } else {
                 (s.section, s.value)
             };
@@ -2352,6 +2358,11 @@ impl Assembler {
                 None
             };
             if let Some(value) = absolute {
+                let value = if kind == 11 {
+                    encode::signed_word64(value)
+                } else {
+                    value
+                };
                 let bits = u32::from(f.width) * 8;
                 let signed = matches!(kind, 2 | 4 | 15 | 11 | 23);
                 if value < -(1i128 << (bits - 1)) || value >= (1i128 << (bits - u32::from(signed)))
@@ -2371,7 +2382,7 @@ impl Assembler {
                 let (sec, value) = self
                     .eval_symbol(sub, 0)
                     .map_err(|e| Error::new(f.line, e))?;
-                if sec != Some(f.section) || f.width != 4 || kind != 10 {
+                if sec != Some(f.section) || f.width != 4 || !matches!(kind, 10 | 11) {
                     return Err(Error::new(
                         f.line,
                         "unsupported cross-section symbol difference",

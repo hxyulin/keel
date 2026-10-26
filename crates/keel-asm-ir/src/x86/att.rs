@@ -528,15 +528,18 @@ pub(super) fn parse(s: &str, prefix: bool) -> Result<Instruction, String> {
     {
         ops.swap(0, 1);
     }
-    // The current Mov model chooses imm64 for symbolic GPR moves. AT&T movq
-    // requires imm32 with R_X86_64_32S; accepting it as imm64 changes link-time
-    // overflow semantics. Keep that gap explicit until the model can select it.
-    if opcode == Mov
+    // A symbolic AT&T movq uses the sign-extended ModRM immediate. The exact
+    // adapter keeps that constraint through typed serialization and alias
+    // folding; movabsq remains the explicit full-width relocation spelling.
+    let opcode = if opcode == Mov
         && matches!(ops.as_slice(), [Operand::Register(r), Operand::Immediate(a)]
-        if r.width == 64 && (a.expression.add.is_some() || a.expression.subtract.is_some()))
+        if r.class == RegisterClass::Gpr && r.width == 64
+            && (a.expression.add.is_some() || a.expression.subtract.is_some()))
     {
-        return Err("AT&T symbolic movq requires a signed 32-bit immediate relocation, not yet supported by the instruction model".into());
-    }
+        Core(CoreOpcode::MovImm)
+    } else {
+        opcode
+    };
     // AT&T's omitted shift count means one. Normalize to the existing model.
     if matches!(
         opcode,

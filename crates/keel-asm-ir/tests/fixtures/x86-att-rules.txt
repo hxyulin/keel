@@ -436,7 +436,7 @@ movl %cr8, %eax|ERR|AT&T suffix requires a 32-bit register
 movq %dr7, %rax|Instruction { opcode: Mov, operands: [Register(Register { class: Gpr, number: 0, width: 64, high_byte: false }), Register(Register { class: Debug, number: 7, width: 64, high_byte: false })], lock: false }|mov	rax, dr7
 movq %fs, %rax|Instruction { opcode: Mov, operands: [Register(Register { class: Gpr, number: 0, width: 64, high_byte: false }), Register(Register { class: Segment, number: 4, width: 16, high_byte: false })], lock: false }|mov	rax, fs
 movq %xmm1, %xmm2|Instruction { opcode: Movq, operands: [Register(Register { class: Xmm, number: 2, width: 128, high_byte: false }), Register(Register { class: Xmm, number: 1, width: 128, high_byte: false })], lock: false }|movq	xmm2, xmm1
-movq $external, %rax|ERR|AT&T symbolic movq requires a signed 32-bit immediate relocation, not yet supported by the instruction model
+movq $external, %rax|Instruction { opcode: Core(MovImm), operands: [Register(Register { class: Gpr, number: 0, width: 64, high_byte: false }), Immediate(Address { expression: Expression { add: Some("external"), subtract: None, constant: 0 }, modifier: None })], lock: false }|mov.imm	rax, offset "external"
 jmp %rax|ERR|AT&T indirect branch requires `*`
 call $target|ERR|AT&T indirect branch requires `*`
 setne w|Instruction { opcode: Setcc(5), operands: [Memory(Memory { width: 0, base: None, index: None, scale: 1, segment: None, displacement: Address { expression: Expression { add: Some("w"), subtract: None, constant: 0 }, modifier: None } })], lock: false }|setne	["w"]

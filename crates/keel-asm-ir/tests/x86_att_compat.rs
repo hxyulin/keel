@@ -1,4 +1,6 @@
-//! Frozen AT&T behavior from 14bed00d; expected values are not generated.
+//! Frozen AT&T cases from 14bed00d, with reviewed support expansions.
+//! The symbolic movq case now selects the existing exact immediate adapter.
+//! Expected values are not generated.
 use keel_asm_ir::x86::Instruction;
 
 #[test]
