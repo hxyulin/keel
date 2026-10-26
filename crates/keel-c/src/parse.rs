@@ -312,6 +312,7 @@ pub struct Parser<'a> {
     pub globals: Vec<Global<'a>>,
     pub funcs: Vec<FuncDef<'a>>,
     pub strings: Vec<StrLit<'a>>,
+    pub(crate) assembly: Vec<String>,
     literal_ids: [HashMap<&'a [u8], usize>; 2],
     /// Emptied statement buffers, for blocks to reuse.
     stmt_bufs: Vec<Vec<Stmt<'a>>>,
@@ -569,6 +570,7 @@ impl<'a> Parser<'a> {
             globals: Vec::new(),
             funcs: Vec::new(),
             strings: Vec::new(),
+            assembly: Vec::new(),
             literal_ids: [HashMap::default(), HashMap::default()],
             stmt_bufs: Vec::new(),
             expr_bufs: Vec::new(),
@@ -1172,7 +1174,9 @@ impl<'a> Parser<'a> {
 
     fn declarations(&mut self) -> R<()> {
         while self.peek() != Tok::Eof {
-            if !self.eat(";") {
+            if self.is("asm") || self.is("__asm") || self.is("__asm__") {
+                self.asm_declaration()?;
+            } else if !self.eat(";") {
                 // File-scope declarations initialize no locals.
                 self.declaration(true, &mut Vec::new())?;
             }

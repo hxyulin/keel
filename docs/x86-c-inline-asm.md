@@ -287,3 +287,31 @@ At implementation checkpoint `b60de289`, the full workspace passed 2,767 tests,
 zero failures and 13 ignored across 507 groups. Workspace and profiling checks,
 all 98 generator tests, three audit tests, both generator freshness checks,
 scoped formatting and diff checks also passed.
+
+## File-scope assembly
+
+On x86-64 Linux, `asm("...");`, `__asm("...");` and `__asm__("...");`
+accept adjacent narrow string literals. They use GNU basic-asm syntax: percent
+signs remain literal and there are no operands, clobbers or template substitutions.
+Qualifiers and extended-asm colons are rejected at file scope.
+
+The module stores ordered fragments as `module_asm "..."` in text IR. They
+survive optimization and round-tripping, and precede generated definitions in
+both text and typed output. The fragments share AT&T syntax, macro definitions,
+section state and numeric labels. Generated code resumes in `.text` with Intel
+syntax. GNU preprocessing, feature checks, symbol binding and relocation handling
+remain in the shared assembler. Unsupported directives still produce errors;
+Keel does not forward object assembly to an external tool.
+
+Static C definitions referenced only by opaque assembly need `used`, as in the
+[GNU basic-asm contract](https://gcc.gnu.org/onlinedocs/gcc-14.1.0/gcc/Basic-Asm.html).
+File-scope assembly is currently rejected by the AArch64, WebAssembly, LLVM bridge
+and Cranelift bridge paths. This does not provide source-order placement between
+C definitions, top-level extended asm or additional instruction support.
+
+ELF section attributes now admit ordinary `.init.*` and `.fini.*` names rather
+than treating them as special ELF sections. Known kernel text/data/rodata lifetime
+sections validate their storage classes. Zero-initialized `.init.data`,
+`.exit.data` and `.meminit.data` objects occupy PROGBITS bytes and can share a
+section with initialized data. Special ELF names such as `.init_array`, TLS and
+COMDAT retain their existing checks.

@@ -7,6 +7,9 @@ use std::fmt;
 
 #[derive(Clone, Debug, Default)]
 pub struct Module {
+    /// Ordered GNU assembly fragments, emitted before generated definitions.
+    /// Currently supported by the native x86-64 Linux backend only.
+    pub assembly: Vec<String>,
     /// Functions defined elsewhere, e.g. in libc.
     pub decls: Vec<FuncDecl>,
     /// Data objects, defined here or declared (`decl data`).
@@ -126,13 +129,19 @@ impl fmt::Display for Module {
         if let Some(language) = self.debug_language {
             writeln!(f, "dlanguage {language}")?;
         }
+        for assembly in &self.assembly {
+            f.write_str("module_asm ")?;
+            crate::data::write_quoted(f, assembly.as_bytes())?;
+            f.write_str("\n")?;
+        }
         for decl in &self.decls {
             writeln!(f, "decl @{}{}{}", decl.name, decl.sig, decl.attrs)?;
         }
         for data in &self.data {
             writeln!(f, "{data}")?;
         }
-        let header = !self.files.is_empty()
+        let header = !self.assembly.is_empty()
+            || !self.files.is_empty()
             || !self.decls.is_empty()
             || !self.data.is_empty()
             || !self.debug_types.is_empty()

@@ -47,6 +47,22 @@ impl Output {
             Self::Structured(out) => out.text(&text),
         }
     }
+    /// Basic asm keeps literal percent signs and shares one source stream.
+    pub(super) fn module_assembly(&mut self, fragments: &[String]) {
+        if fragments.is_empty() {
+            return;
+        }
+        let mut text = String::from(".text\n.att_syntax prefix\n");
+        for fragment in fragments {
+            text.push_str(fragment);
+            text.push('\n');
+        }
+        text.push_str(".text\n.intel_syntax noprefix\n");
+        match self {
+            Self::Text(out) => out.push_str(&text),
+            Self::Structured(out) => out.text(&text),
+        }
+    }
     /// Append the already resource-checked raw region identically in both paths.
     pub(super) fn checked_region(&mut self, program: Program) {
         match self {

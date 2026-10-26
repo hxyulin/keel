@@ -26,6 +26,20 @@ impl<'a> Parser<'a> {
         String::from_utf8(text).map_err(|_| Error::new(loc, "asm requires UTF-8 text"))
     }
 
+    pub(super) fn asm_declaration(&mut self) -> R<()> {
+        let loc = self.loc();
+        if self.target != Target::X86_64LinuxGnu {
+            return Err(Error::new(loc, "file-scope assembly requires x86-64 Linux"));
+        }
+        self.advance();
+        self.expect("(")?;
+        let text = self.asm_string()?;
+        self.expect(")")?;
+        self.expect(";")?;
+        self.assembly.push(text);
+        Ok(())
+    }
+
     pub(super) fn asm_statement(&mut self) -> R<Stmt<'a>> {
         use keel_ir::InlineAsm;
         let loc = self.loc();

@@ -72,6 +72,26 @@ impl Placement {
     }
 }
 impl SectionName {
+    /// Zero initializers in conventional ELF data sections still occupy bytes.
+    pub fn initialized_storage(self, placement: Placement) -> Placement {
+        let name = self.as_str();
+        if placement == Placement::ZeroFill
+            && [
+                ".data",
+                ".data1",
+                ".init.data",
+                ".exit.data",
+                ".meminit.data",
+            ]
+            .iter()
+            .any(|p| name == *p || name.strip_prefix(p).is_some_and(|s| s.starts_with('.')))
+        {
+            Placement::Data
+        } else {
+            placement
+        }
+    }
+
     pub fn validate(self, target: crate::Target, placement: Placement) -> Result<(), &'static str> {
         use Placement::*;
         let name = self.as_str();
@@ -94,8 +114,6 @@ impl SectionName {
                     || name.starts_with(".debug_")
                     || name.starts_with(".zdebug_")
                     || [
-                        ".init",
-                        ".fini",
                         ".preinit_array",
                         ".init_array",
                         ".fini_array",
@@ -131,6 +149,22 @@ impl SectionName {
                     .any(|p| prefix(p))
                 {
                     return Err("special/TLS/COMDAT section placement is unsupported");
+                }
+                if ((matches!(name, ".init" | ".fini")
+                    || [".init.text", ".exit.text", ".meminit.text"]
+                        .iter()
+                        .any(|p| prefix(p)))
+                    && placement != Code)
+                    || ([".init.data", ".exit.data", ".meminit.data"]
+                        .iter()
+                        .any(|p| prefix(p))
+                        && !matches!(placement, Data | ZeroFill | Relro))
+                    || ([".init.rodata", ".exit.rodata", ".meminit.rodata"]
+                        .iter()
+                        .any(|p| prefix(p))
+                        && !matches!(placement, ReadOnly | Relro))
+                {
+                    return Err("kernel lifetime section conflicts with storage class");
                 }
                 let tls = matches!(placement, TlsData | TlsZeroFill);
                 if (prefix(".tdata") && placement != TlsData)
@@ -239,6 +273,9 @@ impl SectionName {
 
 /// Validates the full emitted module, shared by both native backend paths.
 pub fn validate_module(module: &crate::Module, target: crate::Target) -> Result<(), String> {
+    if !module.assembly.is_empty() && target != crate::Target::X86_64LinuxGnu {
+        return Err("module assembly requires the native x86-64 Linux backend".into());
+    }
     if target == crate::Target::Wasm32UnknownUnknown {
         return Err(
             "unsupported target wasm32-unknown-unknown: native module sections are unavailable"
@@ -256,7 +293,7 @@ pub fn validate_module(module: &crate::Module, target: crate::Target) -> Result<
                 // incompatible requests rather than broadening retention silently.
                 let key = section.as_str().to_owned();
                 let properties = (
-                    placement,
+                    section.initialized_storage(placement),
                     matches!(
                         target,
                         crate::Target::X86_64LinuxGnu | crate::Target::Aarch64LinuxGnu

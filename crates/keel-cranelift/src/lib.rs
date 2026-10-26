@@ -311,6 +311,9 @@ impl Compiled {
 
 /// Module-level features this bridge rejects before translating any body.
 fn check_module(module: &k::Module) -> Result<()> {
+    if !module.assembly.is_empty() {
+        return Err("module assembly is unsupported by the Cranelift bridge".into());
+    }
     if module.functions.iter().any(|f| f.layout_insts().any(|(_, i)| matches!(f.inst_data(i), k::InstData::AggregateVaArg { .. }) || f.inst_data(i).call_args().is_some_and(|a| a.has_explicit_abi()))) {
         return Err("explicit call operand ABI and aggregate va_arg homes are unsupported by Cranelift".into());
     }

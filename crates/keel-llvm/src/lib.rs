@@ -94,6 +94,9 @@ fn attrs(a: FunctionAttrs) -> String {
 /// Verify and translate the complete module in memory. Errors never return
 /// partial LLVM text. The caller must not publish output until this succeeds.
 pub fn export(module: &Module, target: TargetProfile) -> ExportResult<String> {
+    if !module.assembly.is_empty() {
+        return Err("module assembly is unsupported by the LLVM bridge".into());
+    }
 
     if module.functions.iter().any(|f| f.layout_insts().any(|(_, i)| matches!(f.inst_data(i), keel_ir::InstData::AggregateVaArg { .. }) || f.inst_data(i).call_args().is_some_and(|a| a.has_explicit_abi()))) {
         return Err("explicit call operand ABI and aggregate va_arg homes are unsupported by LLVM".into());

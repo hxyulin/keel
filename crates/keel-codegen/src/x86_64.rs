@@ -284,6 +284,7 @@ fn compile_output(
             });
         }
     }
+    out.module_assembly(&module.assembly);
     let mut frames = Vec::new();
     let symbols = crate::symbols::Symbols::new(module);
     for original in &module.functions {

@@ -1,7 +1,8 @@
 //! Parser for the text format produced by `Module`'s `Display` impl.
 //!
 //! A file is one module: `decl` lines for external functions and data,
-//! `data` definitions and `func` definitions, in any order, and `file`
+//! `data` definitions, `func` definitions and ordered `module_asm` strings,
+//! in any order, and `file`
 //! lines naming the source files instruction locations refer to, each
 //! before its first use; `dtype` and `dglobal` lines describe source-level
 //! types and variables for debuggers (see `debug.rs`). A call or a
@@ -64,6 +65,7 @@ fn parse_module(src: &str, ir_path: Option<&str>) -> Result<Module, ParseError> 
         files: HashMap::new(),
     };
     let mut files = Vec::new();
+    let mut assembly = Vec::new();
     let mut decls = Vec::new();
     let mut data = Vec::new();
     let mut parsed = Vec::new();
@@ -74,6 +76,10 @@ fn parse_module(src: &str, ir_path: Option<&str>) -> Result<Module, ParseError> 
     while !parser.at(&Tok::Eof) {
         let (kw, loc) = parser.ident("`func`, `data`, `decl` or `file`")?;
         match kw.as_str() {
+            "module_asm" => {
+                assembly.push(parser.string("an assembly string")?);
+                parser.expect(Tok::Newline)?;
+            }
             "func" => parsed.push(parser.function()?),
             "file" => {
                 let (name, name_loc) = parser.ident("a file name like `f0`")?;
@@ -175,6 +181,7 @@ fn parse_module(src: &str, ir_path: Option<&str>) -> Result<Module, ParseError> 
         .map(|func| build(func, &sigs, &data_names, ir_file))
         .collect::<Result<_, _>>()?;
     let mut module = Module {
+        assembly,
         decls,
         data,
         functions,

@@ -154,9 +154,9 @@ pub(crate) fn emit_elf(out: &mut impl Sink, data: &DataObject, init: &DataInit) 
         (false, true, _) if init.has_relocations() => (".data.rel.ro", 3, false),
         _ => (".rodata", 2, false),
     };
-    // Conventional data sections remain PROGBITS even for zero initializers.
-    if data.section.is_some_and(|s| {
-        s.as_str() == ".data" || s.as_str() == ".data1" || s.as_str().starts_with(".data.")
+    if data.section.is_some_and(|section| {
+        section.initialized_storage(keel_ir::section::Placement::for_object(data.thread_local, init))
+            == keel_ir::section::Placement::Data
     }) {
         nobits = false;
     }

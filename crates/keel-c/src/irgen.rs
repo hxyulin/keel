@@ -114,6 +114,7 @@ impl<'p> Gen<'p> {
     }
 
     pub fn run(mut self) -> R<Module> {
+        self.module.assembly = self.p.assembly.clone();
         if self.p.c_layout != CDataLayout::NATIVE_LP64 {
             self.check_private_scalar_profile()?;
         }
@@ -212,7 +213,7 @@ impl<'p> Gen<'p> {
                     .map_err(|e| Error::new(Loc::default(), e))?;
                 let key = section.as_str().to_owned();
                 let props = (
-                    placement,
+                    section.initialized_storage(placement),
                     self.p.target != keel_ir::Target::Aarch64AppleDarwin && global.retain.is_some(),
                 );
                 if placements

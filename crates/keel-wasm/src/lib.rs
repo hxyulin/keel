@@ -294,6 +294,9 @@ fn prepare<'a>(
     if !has_placement && !module.data.is_empty() {
         return Err(reject("module data is unsupported"));
     }
+    if !module.assembly.is_empty() {
+        return Err(reject("module assembly is unsupported by WebAssembly"));
+    }
     let indices: HashMap<_, _> = module
         .functions
         .iter()
