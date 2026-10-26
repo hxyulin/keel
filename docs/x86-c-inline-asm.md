@@ -144,8 +144,11 @@ calls, numeric arguments, symbolic offsets and unique labels. The historical
 145 fresh native executions against GCC 13.3.0 on Linux x86-64, with five broken
 controls rejected normally. The harness includes both new functions in all
 512-input cases. Clang/GNU byte-and-relocation comparisons also passed.
-The pinned kernel corpus still needs a fresh run because its input host was
-unreachable; no updated acceptance count is claimed.
+A subsequent [unchanged-input audit](../suite/linux-kernel/audit-deferred-immediates.json)
+on a reproduced corpus removes all 450 earlier immediate first errors. Accepted
+C inputs remain four of 484 because unsupported constraints and section
+placement become the next errors. Assembly stays at 326 of 506. No crashes or
+timeouts occur, and no Keel object is linked into or run as the kernel.
 
 Production changes passed `cargo test --workspace --no-fail-fast`: 2,762 passed,
 zero failed and 13 ignored across 506 reported groups. During that run the

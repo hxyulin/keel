@@ -211,6 +211,9 @@ module. The public IR verifier remains strict. The
 [implemented contract](x86-c-inline-asm.md#required-inlining-and-deferred-immediates)
 records bounds, diagnostics and retained-body behavior.
 
-The 450-file count remains the earlier first-error measurement. The unchanged
-kernel corpus was not rerun because its Linux test host was unreachable. No new
-kernel acceptance, link or execution result is claimed.
+The [subsequent audit](../suite/linux-kernel/audit-deferred-immediates.json)
+reproduces all 992 captured files and the original reference images on another
+Linux machine. All 450 immediate first errors disappear; later output/input
+constraints and section placement keep C acceptance at four of 484. This is
+unchanged-input audit evidence, not kernel code-generation or execution
+qualification of Keel objects.

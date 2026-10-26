@@ -251,3 +251,48 @@ The reports above remain historical measurements. The pinned corpus was not
 rerun during this increment because its input host was unreachable. The shared
 450-file first error is addressed by the new mechanism, but later errors remain
 unmeasured. No new acceptance count, kernel link or execution result is claimed.
+
+## Reproduced corpus and deferred-immediate audit
+
+The [new audit](audit-deferred-immediates.json) recreates the corpus on a second
+Linux x86-64 machine. All **992 captured files**, including the two external
+build helpers, and the complete manifest match byte-for-byte. The resolved
+configuration, `vmlinux` and `bzImage` also match the original hashes. The fresh
+external reference boot prints the expected marker and exits with status 33.
+
+The toolchain runs in an isolated container. GCC 14.4.0, binutils 2.46, Rust
+1.99.1 with LLVM 23.1.1, pahole 1.32 and QEMU 11.1.2 preserve the pinned capability
+fields. The host compiler is GCC 16.2.0; its difference from the original host
+compiler does not change the reproduced artifacts. Generated data remains
+outside Git.
+
+Nix build-shell defaults need care when reproducing this corpus. Implicit
+register-clearing hardening changes generated assembly despite identical
+captured commands. The shell's synthetic `-rpath ...-nix-shell/lib` also changes
+the embedded vDSO. Disable that implicit hardening and omit that synthetic
+runtime path while retaining dependency search flags for host tools. Verify
+saved-input hashes before treating a new build as the same corpus. Do not
+remove instructions or patch saved inputs to force a match.
+
+Keel checkpoint `6b36102f` probes the same **484 C and 506 assembly inputs**:
+
+| Input kind | Accepted | Rejected | First errors |
+| --- | ---: | ---: | --- |
+| C | 4 | 480 | 429 output constraints, 45 input constraints, five file-scope asm cases, one section-placement case. |
+| Assembly | 326 | 180 | Same acceptance set and remaining assembler categories as the previous audit. |
+
+All 450 earlier immediate-validation first errors disappear. They expose 427
+output-constraint failures, 22 input-constraint failures and one section-placement
+failure. Thus the accepted input sets remain unchanged. The dominant output
+witness is `+m` in `asm/bitops.h`. Input failures first require 43 `rm`
+alternatives and two `g` constraints. Fixing only immediate validation does not
+provide memory operands or constraint selection. These parser failures can
+precede IR generation, so this does not qualify every kernel helper call.
+
+There are no crashes, timeouts or acceptance regressions. GNU as accepts all
+326 accepted assembly inputs; the strict comparison still finds zero complete
+object matches. Shared-section byte, relocation and layout metrics remain 115,
+281 and 312, with 311 public-symbol matches. These are separate diagnostics,
+not whole-object equality. No Keel object is linked into or executed as the
+kernel. Only corpus reproduction, reference boot and audit harness checks ran
+for this report; compiler production source is unchanged.
