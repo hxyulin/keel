@@ -45,3 +45,9 @@ register ties, aliasing addresses, byte/word/dword memory operations, array
 objects, single-evaluation addresses and aligned stack homes. The three new
 broken controls omit a write, choose a wrong memory address or return a wrong
 memory read. The historical native counts above precede this extension.
+
+At memory-operand checkpoint `7572b6ef`, all 145 fresh objects passed against
+GCC 13.3.0 on Linux x86-64, with all eight broken controls returning normal
+failure. This qualifies the 35-function fixture above, including optimized and
+unoptimized builds, both debug settings, both pools and the forced-rematerialized
+configuration. A native Clang comparison of this expanded fixture was not run.

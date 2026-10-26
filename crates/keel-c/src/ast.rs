@@ -253,7 +253,7 @@ pub enum InitItem<'a> {
     Bytes { offset: u64, bytes: &'a [u8] },
 }
 
-/// Checked GNU assembly; read/write outputs also supply implicit tied inputs.
+/// Checked GNU assembly; read/write register outputs supply implicit tied inputs.
 #[derive(Copy, Clone, Debug)]
 pub struct AsmStmt<'a> {
     pub template: &'a str,

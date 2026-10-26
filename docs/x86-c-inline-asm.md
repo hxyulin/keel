@@ -200,3 +200,13 @@ read/write ties, single address evaluation, aliasing input/output objects,
 byte/word/dword widths, array objects, unused outputs and aligned stack objects.
 Its native controls include omitted writes, wrong addresses and wrong reads.
 Earlier native and kernel audit counts above refer to their named checkpoints.
+
+This increment passed all 2,766 workspace tests, zero failures and 13 ignored
+across 507 reported groups at checkpoint `7572b6ef`. Workspace and profiling
+feature checks, 98 generator tests, both freshness checks and scoped formatting
+also passed. All 145 fresh native objects passed against GCC 13.3.0 with eight
+normally rejected controls. The
+[unchanged kernel-corpus audit](../suite/linux-kernel/audit-memory-operands.json)
+accepts 402 assembly inputs and four C inputs. All 330 previously accepted
+objects remain byte-for-byte identical. Later constraint failures still prevent
+further C acceptance; these tests do not qualify kernel code generation.

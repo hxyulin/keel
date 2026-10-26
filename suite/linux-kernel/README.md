@@ -296,3 +296,49 @@ object matches. Shared-section byte, relocation and layout metrics remain 115,
 not whole-object equality. No Keel object is linked into or executed as the
 kernel. Only corpus reproduction, reference boot and audit harness checks ran
 for this report; compiler production source is unchanged.
+
+## Flags aliases and explicit memory operands
+
+The [next audit](audit-memory-operands.json) probes the same inputs at Keel
+checkpoint `7572b6ef`. Generated GNU AT&T `pushf`/`popf` aliases select the
+existing long-mode forms. Explicit C `m`, `=m` and `+m` operands now lower to
+addresses of the original objects. Source operand numbering and register ties
+survive that lowering. The existing pinned, unknown read/write memory effect
+protects optimizer ordering; no optimizer algorithm changes are required.
+
+Assembly acceptance grows from **326 to 402 of 506**. All 100 former `pushf`
+first errors disappear: 76 inputs assemble completely and 24 expose later
+prefix, symbol, directive, feature or operand gaps. The remaining leading ASM
+errors are standalone prefixes (58), `.type` syntax (17), and smaller binding,
+expression, feature-policy, operand-matching and `.incbin` groups.
+
+C acceptance stays at **four of 484**. The new first constraints are:
+
+| Constraint | Files | Role |
+| --- | ---: | --- |
+| `=q` | 254 | Register output class in per-CPU macros. |
+| `=@cce` | 57 | Condition-code output in `cmpxchg16b` wrappers. |
+| `+rm` | 1 | Read/write register-or-memory output. |
+| `iq` | 117 | Immediate-or-register input. |
+| `rm` | 43 | Register-or-memory input. |
+| `g` | 2 | General input constraint. |
+
+Five file-scope asm cases and one section-placement case also remain. These
+first errors can precede IR generation; accepting explicit memory operands does
+not provide constraint selection, flag outputs or complete kernel C support.
+
+All 992 captured files and the three reference artifacts were rehashed and
+remain unchanged. All 330 previously accepted objects, comprising 326 assembly
+and four C objects, remain byte-for-byte identical. There are no crashes,
+timeouts or acceptance regressions. GNU as accepts all 402 assembly inputs, but
+strict whole-object equality remains zero. Shared-section byte, relocation and
+layout matches are 121, 331 and 383, with 377 public-symbol matches.
+
+The full workspace passed 2,766 tests, zero failures and 13 ignored across
+507 groups. Nine inline-asm C tests exercise object parity across 145 exported
+configurations; all those objects pass native GCC 13.3.0 comparison across the
+35-function fixture, with eight broken controls rejected normally. Workspace
+and profiling checks, all 98 generator tests, both freshness checks, scoped
+formatting and diff checks passed. The existing reference was reused without
+rebuilding or rebooting it. No Keel object was linked into or executed as the
+kernel.
