@@ -77,7 +77,7 @@ unsigned long *NAME(asm_pointer)(unsigned long *p) {
 unsigned long NAME(asm_unused)(unsigned long a) {
     unsigned long unused;
     asm("movq %1,%0" : "=r"(unused) : "r"(a));
-    asm volatile("" ::: "memory", "cc", "eax", "r11");
+    asm volatile("" ::: "memory", "cc", "eax", "r11", "ah", "ch", "dh", "bh");
     asm("nop");
     return a + 1;
 }

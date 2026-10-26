@@ -190,7 +190,8 @@ impl PhysReg {
             return Ok(Self {
                 arch: AsmArch::X86,
                 float: false,
-                num: r.number,
+                // AH/CH/DH/BH encode as 4..7 but alias GPRs 0..3.
+                num: if r.high_byte { r.number - 4 } else { r.number },
             });
         }
         let bad = || format!("unknown register `{name}`");
