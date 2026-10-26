@@ -32,8 +32,8 @@ parser/encoder. Do not introduce another instruction encoder or shell out to
 an assembler for production compilation.
 
 At the start of this work the IR supported register outputs, inputs, ties and clobbers, but its
-physical-register representation and parser are AArch64-specific. Memory is
-input-address-only. Early-clobber information is discarded because that backend
+physical-register representation and parser were AArch64-specific. Memory was
+input-address-only. Early-clobber information was discarded because that backend
 assigns distinct registers. The x86 backend rejected InlineAsm. Removing the
 frontend target check alone would be incorrect.
 
@@ -177,3 +177,27 @@ operand, clobber, template and goto contracts. GNU
 identifies target constraints and points to their compiler definitions. Pin the
 relevant x86 definitions and compatibility witnesses when implementing the
 constraint schema; generated ISA operand kinds are not a substitute.
+
+## Scalar milestone kernel follow-up
+
+The unchanged configured corpus now accepts four of 484 C inputs and 326 of
+506 assembly inputs. All 326 previously accepted assembly objects are unchanged.
+The [new report](../suite/linux-kernel/audit-inline-asm.json) records first
+errors without claiming a kernel code-generation contract or link/run evidence.
+
+450 C inputs now first stop at `rip_rel_ptr(void *p)` in `asm/asm.h`, whose
+`"i"(p)` operand becomes a symbolic constant only after its always-inline call
+is expanded. The scalar milestone requires immediate integer constant
+expressions during parsing. The existing inliner also excludes asm-bearing
+callees. Accepting symbolic addresses alone will not resolve this helper.
+
+The next implementation needs to retain such expressions as typed IR operands,
+carry asm contracts through required inlining, remap operands and unique labels,
+and validate immediate legality after inlining/constant propagation. Required
+inlining must also run when optional optimization is disabled. Diagnose
+any unresolved constraint before code emission. Distinguish mandatory inlining
+failure from a normal profitability decision. Cover unused inline definitions,
+call-site constants, symbolic addresses, nonconstant calls and duplicated asm
+instances with independent GCC/Clang witnesses. Memory constraints, unions,
+file-scope asm and asm goto remain separate milestones; later errors are still
+masked by these shared headers.

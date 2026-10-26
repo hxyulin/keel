@@ -207,7 +207,7 @@ prefixes (42), whitespace `.type` syntax (15), optional instruction bindings,
 register aliases, `.incbin` dependencies and operand-matcher limits. First errors
 still hide later gaps. Register aliases in `vgetrandom-chacha` and the documented
 bounded macro/expression cases remain explicit errors. Prefix/adapter and ELF
-syntax work precede the x86 inline-assembly stage.
+syntax work remain separate from the x86 inline-assembly work.
 
 Validation of this follow-up passed **2,752 workspace tests**, zero failures
 and 13 ignored across 505 reported groups. The assembler-IR/assembler/disassembler
@@ -219,3 +219,22 @@ pin/count/link/diff checks passed. Final workspace log:
 ```sh
 python3 -m unittest discover -s suite/linux-kernel -p 'test_*.py'
 ```
+
+
+## Scalar inline assembly follow-up
+
+The [scalar x86 C inline-assembly milestone](../../docs/x86-c-inline-asm.md)
+accepts register operands, ties, fixed registers, numeric immediates and clobbers.
+Its [unchanged-input probe](audit-inline-asm.json) accepts **4 of 484 C inputs**
+and **326 of 506 assembly inputs**, with no crashes or timeouts. All 326
+previously accepted assembly objects remain byte-for-byte identical. The new C
+input is `arch/x86/lib/inat.i`; acceptance is not an execution result.
+
+The next shared blocker appears in 450 C files: `rip_rel_ptr(void *p)` passes
+`"i"(p)` to asm and needs required inlining before its symbolic immediate can
+be validated. The current scalar subset checks integer constant expressions
+at C parsing time, and the inliner excludes asm-bearing callees. Another 23 C
+files first need constraint unions, two need unsupported output constraints
+(memory or register/memory union), and five need file-scope asm. These first
+errors still hide later gaps. The reference config and captured source inputs
+are unchanged; no Keel objects were linked into or executed as the kernel.

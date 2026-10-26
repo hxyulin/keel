@@ -34,7 +34,8 @@ operand type; pointers use 64 bits. Immediate substitutions include `$` unless
 modifiers are not supported. Numeric local labels and GNU macros use the shared
 assembler, including definitions used by a later asm statement.
 
-Clobbers accept `cc`, `memory` and generated GPR names/aliases. RSP and RBP
+Clobbers accept `cc`, `memory` and generated GPR names/aliases. High-byte
+names AH/CH/DH/BH clobber their parent RAX/RCX/RDX/RBX registers. RSP and RBP
 cannot be clobbered. R15 is also reserved in functions whose aligned frame needs
 it as a base pointer. FP/SIMD, control/debug and other register classes are not
 asm operands or clobbers in this milestone. The IR retains target-tagged physical
@@ -93,3 +94,13 @@ clobbers and aligned frames. The separate
 [native runner](../suite/x86-inline-asm/README.md) checks the actual exported
 objects against independently compiled GCC and Clang references, with broken
 controls. AArch64's existing inline-asm suite remains a separate regression.
+
+The full workspace run completed with 2,754 passed, three failed and 13 ignored
+across 506 groups. The failures were the retired x86-asm rejection assertion,
+the newly added high-byte-parent alias test, and the IR golden output that now
+retains `&`. The alias mapping and both expected results were corrected. All
+150 IR package tests and 20 affected C/branch tests then passed, and workspace
+check passed. The full workspace was not repeated after these fixes. Both
+generator freshness checks, all 98 generator tests and three audit tests passed.
+The final 145 exported objects match the native-qualified bytes exactly; the
+updated fixture also passed all 290 native executions and four broken controls.

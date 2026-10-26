@@ -1,0 +1,72 @@
+{
+  "schema": 1,
+  "date": "2026-10-26",
+  "implementation_checkpoint": "b5b01e80",
+  "baseline_report": "audit-followup.json",
+  "config_sha256": "af7dd9b29c4ac472ffe32d338821425912fe92ad62b30281ef1356947930e129",
+  "keel_binary_sha256": "5c28f7b5aab6fe4a62731554517312d4894319171f2d5f08ba92724cc8151507",
+  "source_manifest_sha256": "908006c3e46761f50342cf6556fcd86a05d7edf51cf2e85de449d19cfd2c5135",
+  "source_inputs_unchanged": true,
+  "kernel_codegen_contract": false,
+  "keel_objects_linked_or_run": false,
+  "results": {
+    "c": {
+      "total": 484,
+      "accepted": 4,
+      "rejected": 480,
+      "crashed": 0,
+      "timeouts": 0,
+      "categories": {
+        "asm immediate requires an integer constant expression": 450,
+        "unsupported asm input constraint `*` (supported: r, w, m, i, n, output number or [name])": 23,
+        "unsupported asm output constraint (supported: r, a, b, c, d, S, D with =/+ and optional &; memory outputs are not supported)": 2,
+        "accepted": 4,
+        "file-scope-asm": 5
+      },
+      "accepted_paths": [
+        "arch/x86/kernel/cpu/capflags.i",
+        "arch/x86/lib/inat.i",
+        "arch/x86/lib/misc.i",
+        "lib/union_find.i"
+      ]
+    },
+    "asm": {
+      "total": 506,
+      "accepted": 326,
+      "rejected": 180,
+      "crashed": 0,
+      "timeouts": 0,
+      "categories": {
+        "accepted": 326,
+        "assembler-directive:.type": 15,
+        "instruction-binding:rdgsbase": 2,
+        "instruction-binding:rdtscp": 5,
+        "unexpected expression input `*`": 1,
+        "standalone-prefix": 42,
+        "instruction-binding:pushf": 100,
+        "unsupported generated operands for And: [Memory(Memory { width: 8, base: Some(Register { class: Gpr, number: 3, width: 64, high_byte: false }), index: None, scale: 1, segment: None": 1,
+        "instruction-binding:rdrand": 2,
+        "instruction-binding:fxrstorq": 2,
+        "unsupported generated operands for Mov: [Register(Register { class: Segment, number: 3, width: 16, high_byte: false }), Register(Register { class: Gpr, number: 0, width: 32, high_b": 1,
+        "invalid symbol `*`": 2,
+        "feature-policy": 1,
+        "instruction-binding:prefetchw": 2,
+        "unsupported generated operands for And: [Memory(Memory { width: 8, base: Some(Register { class: Gpr, number: 7, width: 64, high_byte: false }), index: None, scale: 1, segment: None": 1,
+        "instruction-binding:invpcid": 1,
+        "assembler-directive:.incbin": 2
+      }
+    }
+  },
+  "prior_accepted_assembly_objects": {
+    "objects": 326,
+    "byte_identical": 326,
+    "acceptance_regressions": 0
+  },
+  "notes": [
+    "First errors on unchanged configured inputs, not exhaustive coverage or correctness evidence.",
+    "450 C inputs stop at rip_rel_ptr(void *p): asm(\"leaq %c1(%%rip), %0\" : \"=r\"(p) : \"i\"(p)). It needs deferred immediate validation and inlining before constraints can be checked.",
+    "The existing inliner excludes asm-bearing callees. Supporting symbolic immediates alone does not resolve that helper.",
+    "Other first C blockers are input/output constraint unions, memory outputs and file-scope asm.",
+    "Standalone assembly acceptance and all 326 previously accepted assembly objects are unchanged. Whole-object GNU equivalence and kernel link/boot qualification remain open."
+  ]
+}

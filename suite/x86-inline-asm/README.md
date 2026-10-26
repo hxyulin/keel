@@ -25,7 +25,7 @@ implementations per reference compiler must return one with a `FAIL` transcript;
 crashes and timeouts never count as a control passing.
 
 There are 144 ordinary configurations and one forced-rematerialization object.
-Both reference compilers passed all 145 objects in the initial run: 290 positive
+GCC 16.2.0 and Clang 23.1.3 passed all 145 objects: 290 positive
 executions and four normally rejected broken controls. `report.json` under the
 work directory records each verdict. These are userspace witnesses, not kernel
 or privileged-execution qualification.

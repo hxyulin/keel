@@ -1,8 +1,8 @@
 # GNU C inline assembly: first frontend milestone
 
 C assembly statements lower to the existing `InlineAsm` IR on
-`aarch64-apple-darwin`. The [x86-64 scalar implementation](x86-c-inline-asm.md) is documented separately. This is a bounded GNU C
-subset, not general GCC constraint compatibility.
+`aarch64-apple-darwin`. The [x86-64 scalar implementation](x86-c-inline-asm.md)
+is documented separately. This is a bounded GNU C subset, not general GCC constraint compatibility.
 
 ```c
 long add(long a, long b) {
