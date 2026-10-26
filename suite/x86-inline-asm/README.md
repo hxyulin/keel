@@ -13,16 +13,21 @@ Copy that directory, `run.py`, `oracle.c` and
 ```sh
 python3 run.py --objects /tmp/keel-inline-objects \
   --source x86_inline_asm.c --work-dir /tmp/keel-inline-run \
-  --compiler gcc --compiler clang
+  --compiler gcc
 ```
 
 Use a fresh export directory. Each reference compiler independently compiles the
 GNU C asm fixture with renamed functions. The runner links each Keel object with
 that reference and the C comparison harness. Every executable must return zero
 and print exactly `PASS`. It checks 512 inputs per function, including integer
-edges, narrow values, live values and memory canaries. Ten deliberately wrong
+edges, narrow values, live values and memory canaries. Fifteen deliberately wrong
 implementations per reference compiler must return one with a `FAIL` transcript;
 crashes and timeouts never count as a control passing.
+
+The current fixture uses sixteen simultaneous flag outputs, which the local
+Clang C frontend rejects for register pressure. GCC is the qualified reference
+for this fixture. Additional `--compiler` options require a compiler that
+accepts the complete source; earlier Clang results below cover earlier fixtures.
 
 There are 144 ordinary configurations and one forced-rematerialization object.
 At the scalar milestone, GCC 16.2.0 and Clang 23.1.3 passed all 145 objects: 290 positive
@@ -82,3 +87,9 @@ flag results, register ties and memory outputs. Three new controls corrupt a
 choice immediate, a flag condition and a memory write. GCC accepts this GNU
 fixture; the local Clang C reference rejects its sixteen simultaneous flag
 outputs. Clang/GNU assembly comparisons remain separate from native C execution.
+
+At choice/flag checkpoint `d14e3958`, all 145 fresh objects passed against
+GCC 13.3.0 on Linux x86-64 across the 55-function fixture. All fifteen controls
+returned normal failure. Every object also passed the independent C flag-bit
+oracle. Native Clang execution was not run; its local C frontend rejects the
+sixteen concurrent flag outputs used by this fixture.

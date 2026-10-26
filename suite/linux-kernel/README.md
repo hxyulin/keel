@@ -423,3 +423,49 @@ Full workspace validation at `2959b536` passed 2,768 tests, zero failures and
 13 ignored across 507 groups. Workspace and profiling checks, all 98 generator
 tests, three audit harness tests, both generator freshness checks, scoped
 formatting and diff checks passed. No production source changed after that run.
+
+## Constraint choices and flag outputs
+
+The [choice/flag audit](audit-choices-flags.json) uses checkpoint `d14e3958` on
+the same corpus. Scalar unions such as `iq`, `rm` and `g` select from supported
+immediates and GPRs after required inlining and constant cleanup. Non-GPR
+addressable inputs with a memory option use memory. Flag outputs use generated
+condition mappings and capture zero-or-one results with `SETcc` directly after
+the template. This does not change generated ISA data or instruction encoders.
+The [inline-asm contract](../../docs/x86-c-inline-asm.md) records the bounded
+selection policy and remaining alternatives/pressure limits.
+
+All **474** prior first errors from input choices, flag outputs and `+rm`
+disappear. The current C first errors are:
+
+| First blocker | Files |
+| --- | ---: |
+| Machine-specific input choices: `er` (179), `Ir` (140) | 319 |
+| Empty struct-member declarations | 153 |
+| File-scope asm | 7 |
+| Section placement | 1 |
+
+The empty-member case is an extra semicolon in the preempt guard structs,
+not a file-scope empty declaration. Two previously blocked C files now reach
+file-scope asm. These counts identify first diagnostics, not every missing
+feature in each file.
+
+C acceptance remains four of 484; assembly remains 402 of 506. All **406**
+previously accepted objects retain their exact bytes. All 992 inputs and three
+reference artifacts were rehashed after the audit and remain unchanged. There
+are no crashes, timeouts or acceptance regressions. The reference kernel was
+not rebuilt or rebooted. No Keel object was linked into or executed as the kernel.
+
+The 55-function fixture passes all 145 native GCC 13.3.0 executions and rejects
+fifteen broken controls normally. It covers optional immediates, scalar and
+aggregate choices, single-evaluation outputs, narrow flags mixed with memory
+and tied registers, unused flags and all sixteen conditions captured together.
+Comparison conditions also match a C calculation of carry, zero, sign,
+overflow and parity. Clang/GNU assembler byte and relocation comparisons pass.
+The local Clang C reference rejects sixteen simultaneous flag outputs; native
+Clang execution of this fixture was not run.
+
+Full workspace validation at `d14e3958` passed 2,773 tests, zero failures and
+13 ignored across 507 groups. Workspace and profiling checks, all 98 generator
+tests, three audit harness tests, both freshness checks, scoped formatting and
+diff checks passed. No production source changed after that run.
