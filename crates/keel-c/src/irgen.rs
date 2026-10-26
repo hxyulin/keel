@@ -196,6 +196,31 @@ impl<'p> Gen<'p> {
             }
             if let Some(section) = global.section {
                 use keel_ir::section::Placement;
+                // An imported object's initializer and final section flags belong
+                // to its defining translation unit. Check names without assigning
+                // storage or allocating a section in this module.
+                if !global.defined && !matches!(global.ty, Ty::Func(_)) {
+                    let candidates = if global.thread_local {
+                        &[Placement::TlsData, Placement::TlsZeroFill][..]
+                    } else {
+                        &[
+                            Placement::Data,
+                            Placement::ZeroFill,
+                            Placement::ReadOnly,
+                            Placement::Relro,
+                        ][..]
+                    };
+                    if candidates
+                        .iter()
+                        .all(|&placement| section.validate(self.p.target, placement).is_err())
+                    {
+                        return Err(Error::new(
+                            Loc::default(),
+                            "section name is invalid for an external object",
+                        ));
+                    }
+                    continue;
+                }
                 let placement = if matches!(global.ty, Ty::Func(_)) {
                     Placement::Code
                 } else if global.defined {
@@ -211,6 +236,9 @@ impl<'p> Gen<'p> {
                 section
                     .validate(self.p.target, placement)
                     .map_err(|e| Error::new(Loc::default(), e))?;
+                if !global.defined {
+                    continue;
+                }
                 let key = section.as_str().to_owned();
                 let props = (
                     section.initialized_storage(placement),
@@ -266,10 +294,10 @@ impl<'p> Gen<'p> {
                     ));
                 }
             }
-            if (global.section.is_some() || global.retain.is_some()) && !global.defined {
+            if global.retain.is_some() && !global.defined {
                 return Err(Error::new(
                     global.retain.unwrap_or_default(),
-                    "section/retain requires a definition in this translation unit",
+                    "retain requires a definition in this translation unit",
                 ));
             }
             if let Some(loc) = global.lifecycle {
@@ -315,6 +343,8 @@ impl<'p> Gen<'p> {
                         name: global.symbol.to_owned(),
                         attrs: keel_ir::FunctionAttrs {
                             weak: global.weak.is_some(),
+                            // Placement annotates definitions, not call contracts.
+                            section: None,
                             ..global.function_attrs
                         },
                         sig,

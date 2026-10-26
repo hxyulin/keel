@@ -427,3 +427,65 @@ fn emitted_module_asm_matches_clang_and_gnu_sections_symbols_and_relocations() {
     }
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn external_section_annotations_do_not_allocate_storage() {
+    let module = compile(
+        r#"
+extern int imported __attribute__((section(".init.data")));
+extern const void * const pointer __attribute__((section(".data.rel.ro")));
+extern _Thread_local int tls __attribute__((section(".tbss")));
+extern int external(void) __attribute__((section(".init.text")));
+int read_external(void) { return imported + external(); }
+extern int owned __attribute__((section(".init.data")));
+int owned = 7;
+int defined(void) __attribute__((section(".init.text")));
+int defined(void) { return owned; }
+"#,
+    );
+    let decl = module.decls.iter().find(|d| d.name == "external").unwrap();
+    assert!(decl.attrs.section.is_none());
+    assert!(
+        module
+            .data
+            .iter()
+            .find(|d| d.name == "imported")
+            .unwrap()
+            .section
+            .is_none()
+    );
+    assert_eq!(
+        module
+            .functions
+            .iter()
+            .find(|f| f.name == "defined")
+            .unwrap()
+            .attrs
+            .section
+            .unwrap()
+            .as_str(),
+        ".init.text"
+    );
+    assert_eq!(
+        module
+            .data
+            .iter()
+            .find(|d| d.name == "owned")
+            .unwrap()
+            .section
+            .unwrap()
+            .as_str(),
+        ".init.data"
+    );
+    let roundtrip = keel_ir::parse(&module.to_string()).unwrap();
+    let bytes = keel_asm::x86::assemble_program_object(
+        &keel_codegen::compile_program(&roundtrip, Target::X86_64LinuxGnu).unwrap(),
+    )
+    .unwrap();
+    let file = object::File::parse(bytes.as_slice()).unwrap();
+    assert!(file.symbol_by_name("external").unwrap().is_undefined());
+    assert!(file.symbol_by_name("imported").unwrap().is_undefined());
+    assert!(file.section_by_name(".tbss").is_none());
+    assert!(file.section_by_name(".data.rel.ro").is_none());
+    assert_eq!(file.section_by_name(".init.data").unwrap().size(), 4);
+}

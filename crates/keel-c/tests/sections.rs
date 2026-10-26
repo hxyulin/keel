@@ -139,7 +139,7 @@ fn placement_and_retention_diagnose_before_pruning() {
             "int x __attribute__((section(\"bad\\nname\")));".into(),
             "int x __attribute__((section(L\"wide\")));".into(),
             "extern int x __attribute__((retain));".into(),
-            format!("extern int x __attribute__((section(\"{data}\")));"),
+            format!("extern int x __attribute__((section(\"{data}\"), retain));"),
             "void f(void) { int x __attribute__((retain)); }".into(),
             format!("void f(void) {{ int x __attribute__((section(\"{data}\"))); }}"),
             format!("typedef int I __attribute__((section(\"{data}\")));"),

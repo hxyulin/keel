@@ -315,3 +315,9 @@ sections validate their storage classes. Zero-initialized `.init.data`,
 `.exit.data` and `.meminit.data` objects occupy PROGBITS bytes and can share a
 section with initialized data. Special ELF names such as `.init_array`, TLS and
 COMDAT retain their existing checks.
+
+Section annotations on external declarations are accepted without allocating
+storage or carrying placement into imported call contracts. A later definition
+inherits the annotation and receives the ordinary storage checks. Reserved
+section names, conflicting redeclarations and retain-without-definition still
+produce diagnostics.
