@@ -231,3 +231,16 @@ all scalar widths, early-clobber byte outputs forced beyond the legacy GPRs,
 and pointer values. The native controls also corrupt a `q` output and a byte
 operation. Earlier fixture and audit counts above belong to their named
 checkpoints.
+
+All 145 fresh objects passed native GCC 13.3.0 comparison for this 39-function
+fixture, with all ten broken controls rejected normally. The
+[unchanged-input kernel audit](../suite/linux-kernel/audit-q-registers.json)
+removes all 254 prior `=q` first errors. Those files now stop at the `%a`
+template modifier. Acceptance remains four C and 402 assembly inputs, and all
+406 previously accepted objects remain byte-for-byte identical. There are no
+crashes, timeouts or acceptance regressions.
+
+At implementation checkpoint `b60de289`, the full workspace passed 2,767 tests,
+zero failures and 13 ignored across 507 groups. Workspace and profiling checks,
+all 98 generator tests, three audit tests, both generator freshness checks,
+scoped formatting and diff checks also passed.

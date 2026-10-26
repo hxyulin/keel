@@ -342,3 +342,43 @@ and profiling checks, all 98 generator tests, both freshness checks, scoped
 formatting and diff checks passed. The existing reference was reused without
 rebuilding or rebooting it. No Keel object was linked into or executed as the
 kernel.
+
+## The q register class
+
+The [q-class audit](audit-q-registers.json) uses checkpoint `b60de289` on the
+same corpus. X86 C accepts standalone `q` inputs and `=q`, `+q`, `=&q` and
+`+&q` outputs. In 64-bit mode the frontend normalizes this class to the existing
+GPR class; no backend, allocator, IR-schema or optimizer algorithm changes are
+needed. Integer values through 64 bits and pointers use their normal operand
+widths. Uppercase `Q` and 32-bit `q` semantics remain separate.
+
+All **254** prior `=q` first errors disappear. Each exposes the `%a` template
+modifier in the per-CPU macros. The current C first errors are:
+
+| First blocker | Files |
+| --- | ---: |
+| `%a` template modifier | 254 |
+| Input choices: `iq` (117), `rm` (43), `g` (2) | 162 |
+| `=@cce` flag outputs | 57 |
+| `+rm` output choice | 1 |
+| File-scope asm | 5 |
+| Section placement | 1 |
+
+C acceptance remains four of 484; assembly remains 402 of 506. All **406**
+previously accepted objects retain their exact bytes. All 992 corpus files and
+the three reference artifacts were rehashed and match their qualified hashes.
+There are no crashes, timeouts or acceptance regressions. Reference artifacts
+were reused without rebuilding or rebooting. No Keel object is linked into or
+executed as the kernel.
+
+The 39-function inline-asm fixture passes all 145 native GCC 13.3.0 comparisons
+and rejects ten broken controls normally. It covers write-only and read/write
+q outputs, all scalar widths, pointer values, early clobbers, and byte operands
+forced into R8–R10 by the Keel allocator's reserved-register and clobber rules.
+Whole-input counts remain first-error measurements, not complete kernel C
+qualification.
+
+Full workspace validation at `b60de289` passed 2,767 tests, zero failures and
+13 ignored across 507 groups. Workspace and profiling checks, 98 generator
+tests, three audit harness tests, both freshness checks, scoped formatting and
+diff checks passed. No production source changed after that run.

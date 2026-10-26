@@ -54,6 +54,11 @@ configuration. A native Clang comparison of this expanded fixture was not run.
 
 The q-class extension adds four functions, for 39 exported functions. They
 exercise `=q`, `+q`, `=&q`, `+&q`, byte/word/dword/qword views and pointers.
-Clobbering all six non-stack legacy GPRs forces the byte operands into extended
-registers. Two more negative controls corrupt a q output and its byte result.
+With Keel's stack/frame registers reserved, clobbering the other six legacy
+GPRs forces its byte operands into extended registers. Two more negative controls corrupt a q output and its byte result.
 The previous native counts precede this fixture extension.
+
+At q-class checkpoint `b60de289`, all 145 fresh objects passed against GCC
+13.3.0 on Linux x86-64 across the 39-function fixture. All ten broken controls
+returned normal failure. These are userspace witnesses; native Clang execution
+of the expanded fixture was not run.
