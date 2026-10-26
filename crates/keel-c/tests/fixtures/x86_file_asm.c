@@ -7,7 +7,7 @@ static unsigned long kept_fn(void) __attribute__((used));
 static unsigned long kept_fn(void) { return kept; }
 unsigned long target(unsigned long x) __attribute__((section(".init.text")));
 unsigned long target(unsigned long x) { return x + datum + table[0]; }
-asm(".text\n.globl asm_leaf\n.type asm_leaf,@function\nasm_leaf:\nmovl $3,%ecx\n1:\ndecl %ecx\njnz 1b\nanswer\nret\n.size asm_leaf,.-asm_leaf\n"
+asm(".text\n.globl asm_leaf\n.type asm_leaf,@function\nasm_leaf:\nmovl $3,%ecx\n1:\ndecl %ecx\njnz 1b\nanswer\nret\n.size asm_leaf,.-asm_leaf\n.balign 16,0\n"
     ".weak alias\n.set alias,target\n"
     ".pushsection .keel.exports,\"aw\",@progbits\n.balign 8\n.globl records\nrecords:\n.quad target,datum,kept_fn\n"
     ".pushsection .init.rodata,\"a\",@progbits\n.globl asm_bytes\nasm_bytes:\n.byte 3,5,7,11\n.popsection\n.popsection\n"
