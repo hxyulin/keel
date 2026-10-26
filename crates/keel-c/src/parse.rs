@@ -3648,6 +3648,9 @@ impl<'a> Parser<'a> {
         };
         let mut fields = Vec::new();
         while !self.eat("}") {
+            if self.eat(";") {
+                continue;
+            }
             if self.static_assert()? {
                 continue;
             }

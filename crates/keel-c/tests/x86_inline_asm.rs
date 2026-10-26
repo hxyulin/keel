@@ -762,3 +762,102 @@ fn flag_output_capability_is_advertised_only_for_x86() {
     }
     compile("#ifndef __GCC_ASM_FLAG_OUTPUTS__\n#error missing flag output capability\n#endif\nint f(long x) { int z; asm(\"testq %1,%1\" : \"=@ccz\"(z) : \"r\"(x)); return z; }", false).unwrap();
 }
+
+#[test]
+fn machine_immediate_choices_select_by_range_after_required_inlining() {
+    for optimize in [false, true] {
+        for (constraint, kind, cases) in [
+            (
+                "er",
+                AsmOperand::RegSignedImm32,
+                vec![
+                    (-2147483649i64, false),
+                    (-2147483648, true),
+                    (-1, true),
+                    (0, true),
+                    (2147483647, true),
+                    (2147483648, false),
+                    (4294967295, false),
+                    (i64::MIN, false),
+                    (i64::MAX, false),
+                ],
+            ),
+            (
+                "Ir",
+                AsmOperand::RegShiftImm5,
+                vec![
+                    (-1, false),
+                    (0, true),
+                    (31, true),
+                    (32, false),
+                    (63, false),
+                    (i64::MAX, false),
+                ],
+            ),
+        ] {
+            for (value, immediate) in cases {
+                let source = format!(
+                    r#"
+static __attribute__((always_inline)) inline long pick(long n) {{
+    long out; asm("movq %1,%0" : "=r"(out) : "{constraint}"(n)); return out;
+}}
+long f(void) {{ return pick({value}L); }}
+"#
+                );
+                let mut m = compile(&source, false).unwrap();
+                if optimize {
+                    keel_opt::optimize(&mut m).unwrap();
+                }
+                keel_ir::verify_module(&m).unwrap();
+                let f = m.functions.iter().find(|f| f.name == "f").unwrap();
+                let asm = f
+                    .layout_insts()
+                    .find_map(|(_, i)| match f.inst_data(i) {
+                        InstData::InlineAsm { asm, .. } => Some(asm),
+                        _ => None,
+                    })
+                    .unwrap();
+                assert_eq!(asm.inputs, [kind]);
+                let roundtrip = keel_ir::parse(&m.to_string()).unwrap();
+                keel_ir::verify_module(&roundtrip).unwrap();
+                let text = keel_codegen::compile(&m, Target::X86_64LinuxGnu).unwrap();
+                assert_eq!(
+                    text.contains(&format!("movq ${value},")),
+                    immediate,
+                    "{constraint} {value}: {text}"
+                );
+                keel_asm::x86::assemble_object(&text).unwrap();
+            }
+        }
+    }
+    for constraint in ["er", "re", "Ir", "rI"] {
+        let source = format!(
+            r#"long f(long x) {{ long out; asm("movq %1,%0" : "=r"(out) : "{constraint}"(x)); return out; }}"#
+        );
+        let m = compile(&source, false).unwrap();
+        let text = keel_codegen::compile(&m, Target::X86_64LinuxGnu).unwrap();
+        assert!(!text.contains("movq $"), "{text}");
+        keel_asm::x86::assemble_object(&text).unwrap();
+        assert!(
+            compile(
+                &format!("void f(double x) {{ asm(\"\" :: \"{constraint}\"(x)); }}"),
+                false
+            )
+            .is_err()
+        );
+    }
+    // A symbol's signed-32-bit range is not established by the default code model.
+    let m = compile(r#"extern char anchor; void *f(void) { void *out; asm("movq %1,%0" : "=r"(out) : "er"(&anchor)); return out; }"#, false).unwrap();
+    let text = keel_codegen::compile(&m, Target::X86_64LinuxGnu).unwrap();
+    assert!(!text.contains("movq $anchor"), "{text}");
+    keel_asm::x86::assemble_object(&text).unwrap();
+    for constraint in ["e", "I", "eer", "IIr", "eIr", "er,m"] {
+        assert!(
+            compile(
+                &format!("void f(long x) {{ asm(\"\" :: \"{constraint}\"(x)); }}"),
+                false
+            )
+            .is_err()
+        );
+    }
+}

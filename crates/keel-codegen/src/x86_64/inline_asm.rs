@@ -52,13 +52,25 @@ pub(super) fn plan(
         .chain(asm.inputs.iter().copied())
         .collect();
     for (op, &arg) in ops.iter_mut().skip(n).zip(args) {
-        if *op == Constraint::RegImm {
+        if matches!(
+            *op,
+            Constraint::RegImm | Constraint::RegSignedImm32 | Constraint::RegShiftImm5
+        ) {
             let symbolic = keel_ir::symbolic_immediate(func, arg).is_some_and(|(symbol, _)| {
                 !module
                     .data_object(func.symbol_name(symbol))
                     .is_some_and(|d| d.thread_local)
             });
-            *op = if iconst(func, arg).is_some() || symbolic {
+            let numeric = iconst(func, arg);
+            let immediate = match *op {
+                Constraint::RegImm => numeric.is_some() || symbolic,
+                Constraint::RegSignedImm32 => numeric.is_some_and(|n| i32::try_from(n).is_ok()),
+                Constraint::RegShiftImm5 => numeric.is_some_and(|n| (0..=31).contains(&n)),
+                _ => unreachable!(),
+            };
+            // No code-model/range guarantee exists for symbolic e operands.
+            // Preserve their value through the register alternative instead.
+            *op = if immediate {
                 Constraint::Imm
             } else {
                 Constraint::Reg

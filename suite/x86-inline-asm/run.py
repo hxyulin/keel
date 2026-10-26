@@ -54,6 +54,8 @@ def main():
             ("wrong-q-byte-result", original.replace('movb %b1,%0; addb %b2,%0', 'movb %b1,%0; subb %b2,%0', 1)),
             ("wrong-address-symbol", original.replace('"i"(asm_deferred_anchor + 13)', '"i"(asm_deferred_anchor + 14)', 1)),
             ("wrong-negated-offset", original.replace('[delta] "n"(37)', '[delta] "n"(38)', 1)),
+            ("wrong-signed-choice-boundary", original.replace("signed_choice_add(a, 2147483648UL)", "signed_choice_add(a, 2147483649UL)", 1)),
+            ("wrong-bit-choice-boundary", original.replace("bit_choice(a, 0), 31", "bit_choice(a, 0), 30", 1)),
             ("wrong-choice-immediate", original.replace('choice_add(a, 17 + 6)', 'choice_add(a, 17 + 7)', 1)),
             ("wrong-flag-condition", original.replace('"=@cce"(f4)', '"=@ccne"(f4)', 1)),
             ("missing-flag-memory-write", original.replace('subq %[rhs],%[value]; movq %[value],%[mem]', 'subq %[rhs],%[value]', 1)),

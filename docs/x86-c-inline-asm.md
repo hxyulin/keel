@@ -38,9 +38,13 @@ Scalar integers and pointers prefer numeric or supported non-TLS symbolic
 immediates when `i` is allowed, then registers. This choice happens after
 required inlining and constant cleanup, even without `-O`. Addressable non-GPR
 objects use the existing memory path when `m` is allowed. These are unions
-within one constraint column. Comma-separated alternatives, machine-specific
-immediate classes and memory retries after scalar register exhaustion remain
-unsupported. Keel does not infer instruction-specific immediate ranges from
+within one constraint column. Inputs also accept `er`/`re` and `Ir`/`rI`.
+The `e` option accepts numeric constants in the signed 32-bit range; `I` accepts
+0 through 31. Other values use a register. These predicates survive required
+inlining in IR as `re` and `rI`. Symbols use a register for `er`, because Keel
+does not establish a signed-32-bit symbol range through a code-model contract.
+Standalone `e`/`I`, other machine immediate classes, comma-separated alternatives
+and memory retries after scalar register exhaustion remain unsupported. Keel does not infer instruction-specific immediate ranges from
 arbitrary templates.
 
 Flag outputs use `=@cc<condition>` and integer lvalues through 64 bits. Generated
@@ -230,8 +234,8 @@ All asm remains pinned with unknown read/write memory effects. Optimizers may
 simplify address computations and surrounding code, but must preserve memory
 observations across the asm. No new optimizer algorithm or precise object-extent
 alias model is introduced. This is deliberately conservative, including for a
-read-only `m` operand. `rm`, `g`, `iq`, `Ir` and other location choices or machine
-constraints are separate work.
+read-only `m` operand. The constraint choices described above use these same
+pinned effects.
 
 The execution fixture adds memory reads/writes, mixed memory/register outputs,
 read/write ties, single address evaluation, aliasing input/output objects,

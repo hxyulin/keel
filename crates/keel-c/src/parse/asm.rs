@@ -190,6 +190,10 @@ impl<'a> Parser<'a> {
                             outputs.push((expr, readwrite));
                             output_memory.push(memory);
                         } else {
+                            if x86 && matches!(constraint.as_str(), "er" | "re" | "Ir" | "rI") {
+                                constraint =
+                                    if constraint.contains('e') { "re" } else { "rI" }.into();
+                            }
                             if x86 && let Some((immediate, memory)) = asm_choice(&constraint) {
                                 constraint = if asm_gpr_type(expr.ty) {
                                     if immediate { "ri" } else { "r" }
@@ -221,7 +225,7 @@ impl<'a> Parser<'a> {
                                 constraint = n.to_string();
                             }
                             match constraint.as_str() {
-                                "ri" if x86 => {
+                                "ri" | "re" | "rI" if x86 => {
                                     expr = self.rvalue(expr);
                                     asm_register_type("r", expr.ty, loc)?;
                                 }

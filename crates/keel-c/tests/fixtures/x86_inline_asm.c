@@ -314,3 +314,22 @@ void NAME(asm_flag_unused)(unsigned long *p) {
     unsigned int zero;
     asm volatile("addq $7,%0" : "+m"(*p), "=@ccz"(zero) :: "cc");
 }
+
+static __attribute__((always_inline)) inline unsigned long signed_choice_add(unsigned long x, unsigned long n) {
+    asm("addq %1,%0" : "+r"(x) : "er"(n) : "cc");
+    return x;
+}
+unsigned long NAME(asm_choice_er)(unsigned long a, unsigned long b) {
+    a = signed_choice_add(a, -2147483647L - 1);
+    a = signed_choice_add(a, 2147483647L);
+    a = signed_choice_add(a, -2147483649L);
+    a = signed_choice_add(a, 2147483648UL);
+    return signed_choice_add(a, b);
+}
+static __attribute__((always_inline)) inline unsigned long bit_choice(unsigned long x, unsigned long n) {
+    asm("btcq %1,%0" : "+r"(x) : "Ir"(n) : "cc");
+    return x;
+}
+unsigned long NAME(asm_choice_Ir)(unsigned long a, unsigned long b) {
+    return bit_choice(bit_choice(bit_choice(bit_choice(a, 0), 31), 32), b);
+}

@@ -7368,7 +7368,10 @@ fn asm_regs(asm: &InlineAsm) -> Result<Vec<Option<PhysReg>>, String> {
     }
     for (i, &op) in operands.iter().enumerate() {
         let float = match op {
-            AsmOperand::RegImm | AsmOperand::Flag(_) => {
+            AsmOperand::RegImm
+            | AsmOperand::RegSignedImm32
+            | AsmOperand::RegShiftImm5
+            | AsmOperand::Flag(_) => {
                 return Err("x86 constraint in AArch64 inline assembly".into());
             }
             AsmOperand::Reg | AsmOperand::Mem => false,

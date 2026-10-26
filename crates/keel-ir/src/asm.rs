@@ -49,6 +49,10 @@ pub enum AsmOperand {
     NumericImm,
     /// `ri`: an immediate when legal, otherwise a GPR. X86 inputs only.
     RegImm,
+    /// `re`: a signed 32-bit numeric immediate, otherwise a GPR. X86 inputs only.
+    RegSignedImm32,
+    /// `rI`: a numeric immediate in 0..=31, otherwise a GPR. X86 inputs only.
+    RegShiftImm5,
     /// `@ccz`, etc.: x86 flags captured as a boolean integer result.
     Flag(u8),
     /// `0`, `1`…: in the same register as that output, which it initializes.
@@ -193,6 +197,8 @@ fn operand(code: &str) -> Result<AsmOperand, String> {
         "i" => AsmOperand::Imm,
         "n" => AsmOperand::NumericImm,
         "ri" => AsmOperand::RegImm,
+        "re" => AsmOperand::RegSignedImm32,
+        "rI" => AsmOperand::RegShiftImm5,
         _ if code.starts_with("@cc") => AsmOperand::Flag(
             keel_asm_ir::x86::isa::parse_condition_code(&code[3..])
                 .ok_or_else(|| format!("unknown x86 flag condition `{code}`"))?,
@@ -283,6 +289,8 @@ impl fmt::Display for AsmOperand {
             AsmOperand::Imm => f.write_str("i"),
             AsmOperand::NumericImm => f.write_str("n"),
             AsmOperand::RegImm => f.write_str("ri"),
+            AsmOperand::RegSignedImm32 => f.write_str("re"),
+            AsmOperand::RegShiftImm5 => f.write_str("rI"),
             AsmOperand::Flag(cc) => match keel_asm_ir::x86::isa::condition_code_name(*cc) {
                 Some(name) => write!(f, "@cc{name}"),
                 None => write!(f, "@cc({cc})"),
@@ -298,7 +306,7 @@ mod tests {
 
     #[test]
     fn x86_flags_and_optional_immediates_round_trip() {
-        let asm = InlineAsm::new("", "=@ccz,=@ccpo,ri", &[Type::I8, Type::I64]).unwrap();
+        let asm = InlineAsm::new("", "=@ccz,=@ccpo,ri,re,rI", &[Type::I8, Type::I64]).unwrap();
         assert_eq!(
             asm.outputs,
             [
@@ -306,8 +314,15 @@ mod tests {
                 (AsmOperand::Flag(11), Type::I64)
             ]
         );
-        assert_eq!(asm.inputs, [AsmOperand::RegImm]);
-        assert_eq!(asm.constraints(), "=@cce,=@ccnp,ri");
+        assert_eq!(
+            asm.inputs,
+            [
+                AsmOperand::RegImm,
+                AsmOperand::RegSignedImm32,
+                AsmOperand::RegShiftImm5
+            ]
+        );
+        assert_eq!(asm.constraints(), "=@cce,=@ccnp,ri,re,rI");
         assert_eq!(
             asm,
             InlineAsm::new("", &asm.constraints(), &[Type::I8, Type::I64]).unwrap()

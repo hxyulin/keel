@@ -885,6 +885,8 @@ impl Verifier<'_> {
         let fits = |op: AsmOperand, ty: Type| match op {
             AsmOperand::Reg
             | AsmOperand::RegImm
+            | AsmOperand::RegSignedImm32
+            | AsmOperand::RegShiftImm5
             | AsmOperand::Fixed(PhysReg { float: false, .. }) => {
                 (ty.is_int() && ty != Type::I128) || ty == Type::Ptr
             }

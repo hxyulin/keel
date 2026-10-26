@@ -5,6 +5,8 @@
 #define U unsigned long
 #define BINARY(n) extern U n(U,U), ref_##n(U,U);
 BINARY(asm_q_views)
+BINARY(asm_choice_er)
+BINARY(asm_choice_Ir)
 BINARY(asm_choice_iq)
 BINARY(asm_choice_rm)
 BINARY(asm_choice_g)
@@ -80,6 +82,8 @@ int main(void) {
         CHECK(asm_q_output,a);CHECK(asm_q_views,a,b);CHECK(asm_q_rex,a,b);
         CHECK(asm_address_width,a);CHECK(asm_address_symbol,a);CHECK(asm_address_constant,a);
         CHECK(asm_negated,a);CHECK(asm_negated_min,a);
+        CHECK(asm_choice_er,a,b);CHECK(asm_choice_Ir,a,b);
+        if(asm_choice_er(a,b)!=a+b-2UL || asm_choice_Ir(a,b)!=(a ^ 1UL ^ (1UL<<31) ^ (1UL<<32) ^ (1UL<<(b&63)))){puts("FAIL independent ranged choices");return 1;}
         CHECK(asm_choice_iq,a,b);CHECK(asm_choice_rm,a,b);CHECK(asm_choice_g,a,b);CHECK(asm_choice_symbol,a);
         CHECK(asm_flag_conditions,a,b);
         if(asm_flag_conditions(a,b)!=cmp_flags(a,b)){puts("FAIL independent flag bits");return 1;}
