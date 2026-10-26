@@ -2,6 +2,11 @@
 
 Audit date: 2026-10-25. Source checkpoint: `151e7ac7`.
 
+The later [Linux kernel readiness audit](linux-kernel-readiness.md) checks
+selected instruction bindings, GNU assembly syntax, C frontend behavior and
+build-driver gaps at `2da2e6a6`. It proposes a configured kernel target rather
+than treating typed system APIs as a prerequisite for compiling Linux assembly.
+
 Follow-up: [SYSEXIT/RSM assembler support](x86-system-exits.md) closes the two
 assembler exposure gaps below and adds width-specific formatting. Its explicit
 RSM policy also resolves the I486 classification gap. Terminal compiler
