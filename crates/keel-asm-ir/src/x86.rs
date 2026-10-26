@@ -443,10 +443,11 @@ fn operand(s: &str, prefix: bool) -> Result<Operand, String> {
         }) {
             return Err("addresses require 32-bit or 64-bit general base registers".into());
         }
-        if let (Some(base), Some(index)) = (mem.base, mem.index) {
-            if index.class == RegisterClass::Gpr && base.width != index.width {
-                return Err("mixed address register widths".into());
-            }
+        if let (Some(base), Some(index)) = (mem.base, mem.index)
+            && index.class == RegisterClass::Gpr
+            && base.width != index.width
+        {
+            return Err("mixed address register widths".into());
         }
         if mem.index.is_some_and(|r| {
             !matches!(
@@ -555,6 +556,7 @@ pub fn parse_program(source: &str) -> Result<crate::Program, String> {
 
 /// A parsed source statement. Directive text borrows the input so consumers can
 /// decode it without first allocating a temporary program or string.
+#[derive(Debug)]
 pub enum SourceItem<'a> {
     Instruction(Instruction),
     Label(String),

@@ -324,15 +324,15 @@ pub(super) fn finish(a: &mut Assembler) -> Result<(), String> {
     }
     super::dwarf::finish(a)?;
     if a.addrsig.is_some() {
-        a.section_full(
-            ".llvm_addrsig",
-            Some(0x8000_0000),
-            false,
-            0,
-            None,
-            Some(0x6fff4c03),
-            None,
-        )?;
+        a.section_full(super::sections::Declaration {
+            name: ".llvm_addrsig",
+            flags: Some(0x8000_0000),
+            nobits: false,
+            entry_size: 0,
+            group: None,
+            section_type: Some(0x6fff4c03),
+            unique: None,
+        })?;
     }
     Ok(())
 }

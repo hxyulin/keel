@@ -258,19 +258,31 @@ impl<'a> Encoding<'a> {
     }
 }
 
+struct VexPrefix {
+    map: u8,
+    pp: u8,
+    field: u8,
+    source: Option<u8>,
+    vector256: bool,
+    wide: bool,
+}
+
 impl<'a> Encoding<'a> {
-    pub(super) fn vex_rm_bits(
+    fn vex_rm_bits(
         &mut self,
-        map: u8,
-        pp: u8,
+        prefix: VexPrefix,
         byte: u8,
-        field: u8,
-        source: Option<u8>,
         rm: &'a Operand,
-        l: bool,
-        w: bool,
         address32: bool,
     ) -> Result<(), String> {
+        let VexPrefix {
+            map,
+            pp,
+            field,
+            source,
+            vector256: l,
+            wide: w,
+        } = prefix;
         let (b, x) = match rm {
             R(r) => (r.number >> 3, 0),
             M(m) => (
@@ -392,10 +404,11 @@ fn validate(i: &Instruction) -> Result<(), String> {
                 {
                     return Err("32-bit addresses are not supported on VEX/v3 forms".into());
                 }
-                if let (Some(base), Some(index)) = (m.base, m.index) {
-                    if index.class == RegisterClass::Gpr && base.width != index.width {
-                        return Err("mixed address register widths".into());
-                    }
+                if let (Some(base), Some(index)) = (m.base, m.index)
+                    && index.class == RegisterClass::Gpr
+                    && base.width != index.width
+                {
+                    return Err("mixed address register widths".into());
                 }
                 for (is_index, r) in [(false, m.base), (true, m.index)]
                     .into_iter()

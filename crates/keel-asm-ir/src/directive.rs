@@ -307,7 +307,11 @@ impl Directive {
                         f.write_char(c)?;
                     }
                 }
-                f.write_str(if *nobits { "\",@nobits" } else { "\",@progbits" })
+                f.write_str(if *nobits {
+                    "\",@nobits"
+                } else {
+                    "\",@progbits"
+                })
             }
             Self::ElfSectionMetadata {
                 name,
@@ -333,7 +337,11 @@ impl Directive {
                         f.write_char(c)?;
                     }
                 }
-                f.write_str(if *nobits { "\",@nobits" } else { "\",@progbits" })?;
+                f.write_str(if *nobits {
+                    "\",@nobits"
+                } else {
+                    "\",@progbits"
+                })?;
                 if flags & 0x10 != 0 {
                     f.write_str(",")?;
                     write_int(f, (*entry_size).into(), false)?;
@@ -660,17 +668,17 @@ impl Directive {
                 }
             }
             Self::Cfi(Cfi::Personality(s) | Cfi::Lsda(s)) => symbol(s)?,
-            Self::Cfi(Cfi::DefCfa { register, .. } | Cfi::Offset { register, .. }) => {
-                if *register > 95 {
-                    return Err("invalid CFI register".into());
-                }
+            Self::Cfi(Cfi::DefCfa { register, .. } | Cfi::Offset { register, .. })
+                if *register > 95 =>
+            {
+                return Err("invalid CFI register".into());
             }
             _ => {}
         }
-        if let Self::Align(n) | Self::ZeroFill { alignment: n, .. } = self {
-            if *n > 16 {
-                return Err("alignment exceeds 16".into());
-            }
+        if let Self::Align(n) | Self::ZeroFill { alignment: n, .. } = self
+            && *n > 16
+        {
+            return Err("alignment exceeds 16".into());
         }
         Ok(())
     }

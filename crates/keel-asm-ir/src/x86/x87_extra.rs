@@ -8,7 +8,7 @@ impl X87Opcode {
             Self::Fldenv | Self::Fstenv | Self::Fnstenv | Self::Fsave | Self::Fnsave | Self::Frstor
         )
     }
-    pub(super) fn from_att(self, args: &[super::Operand]) -> Self {
+    pub(super) fn canonicalize_att(self, args: &[super::Operand]) -> Self {
         use super::{Operand, RegisterClass};
         // GAS/LLVM retain the historical reversed subtraction/division spelling
         // for ST(i)-destination forms. The shared model uses Intel semantics.
@@ -29,13 +29,13 @@ impl X87Opcode {
 
 impl super::Instruction {
     pub(super) fn x87_data16(mut self) -> Result<Self, String> {
-        if !self.lock && matches!(self.opcode, super::Opcode::X87(op) if op.environment()) {
-            if let [super::Operand::Memory(m)] = self.operands.as_mut_slice() {
-                if m.width == 0 {
-                    m.width = 16;
-                    return Ok(self);
-                }
-            }
+        if !self.lock
+            && matches!(self.opcode, super::Opcode::X87(op) if op.environment())
+            && let [super::Operand::Memory(m)] = self.operands.as_mut_slice()
+            && m.width == 0
+        {
+            m.width = 16;
+            return Ok(self);
         }
         Err("data16 requires an unsized x87 environment/state memory operand".into())
     }

@@ -207,15 +207,14 @@ fn instruction_with_features(
     a: &[&str],
     features: crate::TargetFeatures,
 ) -> Result<u32, String> {
-    if op.starts_with("aes")
+    if (op.starts_with("aes")
         || op.starts_with("sha")
         || matches!(op, "pmull" | "pmull2")
             && a.first()
-                .is_some_and(|s| s.ends_with(".1q") || s.ends_with(".1Q"))
+                .is_some_and(|s| s.ends_with(".1q") || s.ends_with(".1Q")))
+        && let Some(word) = system::instruction(op, a, features)?
     {
-        if let Some(word) = system::instruction(op, a, features)? {
-            return Ok(word);
-        }
+        return Ok(word);
     }
     if let Some(word) = vector::extra(op, a)? {
         return Ok(word);
@@ -1430,7 +1429,7 @@ fn assemble_pass(
                 offset: data::position(&result, current) as usize,
             });
         }
-        if let Some(spec) = control::branch(&op, &args, &arena).map_err(err)? {
+        if let Some(spec) = control::branch(op, &args, &arena).map_err(err)? {
             if !is_integer(spec.target) {
                 let expression = relocate::expression(spec.target).map_err(err)?;
                 if expression.modifier.is_some() {
@@ -1447,7 +1446,7 @@ fn assemble_pass(
             data::instruction(&mut result, current, &[0; 4]).map_err(err)?;
             continue;
         }
-        if let Some((word, mut relocation)) = relocate::instruction(&op, &args).map_err(err)? {
+        if let Some((word, mut relocation)) = relocate::instruction(op, &args).map_err(err)? {
             relocation.section = current;
             relocation.offset = data::position(&result, current)
                 .try_into()
@@ -1460,7 +1459,7 @@ fn assemble_pass(
         if op == "adr" || op == "adrp" {
             count(&args, 2, 2).map_err(err)?;
             let word = if is_integer(args[1]) {
-                relocate::address_word(&op, args[0], integer(args[1]).map_err(err)?).map_err(err)?
+                relocate::address_word(op, args[0], integer(args[1]).map_err(err)?).map_err(err)?
             } else {
                 let expr = relocate::expression(args[1]).map_err(err)?;
                 if expr.modifier.is_some() {
@@ -1478,9 +1477,9 @@ fn assemble_pass(
             data::instruction(&mut result, current, &word.to_le_bytes()).map_err(err)?;
             continue;
         }
-        let word = match scalable::instruction(&op, &args, features).map_err(err)? {
+        let word = match scalable::instruction(op, &args, features).map_err(err)? {
             Some(word) => word,
-            None => match vector::numeric(&op, &args, features).map_err(err)? {
+            None => match vector::numeric(op, &args, features).map_err(err)? {
                 Some(word) => word,
                 None => instruction_with_features(op, &args, features).map_err(err)?,
             },

@@ -1,7 +1,7 @@
 [
   {
     "field": "aes",
-    "doc": "CPUID.01H:ECX.AES[25], independent of psABI levels.",
+    "doc": "`CPUID.01H:ECX.AES[25]`, independent of psABI levels.",
     "bit": 0
   },
   {
@@ -44,12 +44,12 @@
   },
   {
     "field": "clflush",
-    "doc": "CPUID.01H:EDX.CLFSH[19]; independent of SSE2 and all psABI levels.",
+    "doc": "`CPUID.01H:EDX.CLFSH[19]`; independent of SSE2 and all psABI levels.",
     "bit": 8
   },
   {
     "field": "pclmulqdq",
-    "doc": "Independent CPUID.01H:ECX.PCLMULQDQ[1]; absent from psABI v3.",
+    "doc": "Independent `CPUID.01H:ECX.PCLMULQDQ[1]`; absent from psABI v3.",
     "aliases": [
       "pclmul"
     ],
@@ -118,7 +118,7 @@
   },
   {
     "field": "osxsave",
-    "doc": "OS-enabled XSAVE state management (CPUID.OSXSAVE); AVX also needs XCR0 state at runtime.",
+    "doc": "OS-enabled XSAVE state management (`CPUID.OSXSAVE`); AVX also needs XCR0 state at runtime.",
     "bit": 23
   },
   {

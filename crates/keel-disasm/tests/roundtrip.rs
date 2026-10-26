@@ -72,8 +72,7 @@ svc #0
 brk #123
 ";
     let input = keel_asm::assemble(source).unwrap();
-    for chunk in input.text.chunks_exact(4) {
-        let bytes = chunk.try_into().unwrap();
+    for &bytes in input.text.as_chunks::<4>().0 {
         let instruction = decode_word(bytes, 0);
         assert!(
             matches!(instruction.recognition, Recognition::Unique(_)),

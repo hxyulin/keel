@@ -73,7 +73,8 @@ def generate(fields, policy):
     lines += ['    } }', '    /// Stable schema bit IDs, covering every capability.',
               '    pub const fn fingerprint(self) -> u64 {']
     lines += [('        ' if i == 0 else '            | ') +
-              f'((self.{row["field"]} as u64) << {row["bit"]})' for i, row in enumerate(fields)]
+              (f'(self.{row["field"]} as u64)' if row["bit"] == 0 else
+               f'((self.{row["field"]} as u64) << {row["bit"]})') for i, row in enumerate(fields)]
     lines += ['    }', '    pub const fn is_empty(self) -> bool { self.fingerprint() == 0 }',
               '    pub const fn contains(self, required: Self) -> bool {',
               '        self.fingerprint() & required.fingerprint() == required.fingerprint()',

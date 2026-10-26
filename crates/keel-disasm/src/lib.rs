@@ -92,12 +92,17 @@ pub fn decode_word(bytes: [u8; 4], address: u64) -> Instruction {
                     value: (word >> f.start) & (u32::MAX >> (32 - f.width)),
                 })
                 .collect(),
-        })
-        .collect::<Vec<_>>();
-    let recognition = match matches.len() {
-        0 => Recognition::Unknown,
-        1 => Recognition::Unique(matches.pop().unwrap()),
-        _ => Recognition::Ambiguous(matches),
+        });
+    let recognition = match matches.next() {
+        None => Recognition::Unknown,
+        Some(first) => match matches.next() {
+            None => Recognition::Unique(first),
+            Some(second) => {
+                let mut alternatives = vec![first, second];
+                alternatives.extend(matches);
+                Recognition::Ambiguous(alternatives)
+            }
+        },
     };
     Instruction {
         address,

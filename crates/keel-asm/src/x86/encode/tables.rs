@@ -325,16 +325,27 @@ struct Choice<'a> {
     operands: SmallVec<[Option<&'a Operand>; 4]>,
 }
 
-fn match_form<'a>(
-    form: &'static IsaForm,
-    i: &'a Instruction,
-    d: &Dialect,
+struct FormContext {
     short: bool,
     size: u16,
     p66: bool,
     w: bool,
     address: u16,
+}
+
+fn match_form<'a>(
+    form: &'static IsaForm,
+    i: &'a Instruction,
+    d: &Dialect,
+    context: FormContext,
 ) -> Option<Choice<'a>> {
+    let FormContext {
+        short,
+        size,
+        p66,
+        w,
+        address,
+    } = context;
     if !form.allows_size(size)
         || form.addresses & if address == 32 { 2 } else { 4 } == 0
         || d.size.is_some_and(|n| n != size)
@@ -455,14 +466,13 @@ fn match_form<'a>(
     } else if form.operands.iter().any(|s| s.kind == "moffs") {
         return None;
     }
-    if let Some(direction) = d.direction {
-        if form
+    if let Some(direction) = d.direction
+        && form
             .operands
             .get(direction)
             .is_none_or(|s| s.encoding != "modrm_reg")
-        {
-            return None;
-        }
+    {
+        return None;
     }
     if matches!(i.opcode, Core(CoreOpcode::PushRm | CoreOpcode::PopRm)) && form.mod_mask == 0 {
         return None;
@@ -587,35 +597,30 @@ fn match_form<'a>(
             }
             operands.push(Some(&i.operands[used]));
             used += 1;
-        } else if spec.kind == "implicit_reg" && spec.register == "st0" && form.extension == "X87" {
-            operands.push(None);
-        } else if spec.encoding == "modrm_reg"
-            && form.reg_mask.count_ones() == 1
-            && used == i.operands.len()
-        {
-            operands.push(None);
-        } else if (spec.kind == "implicit_imm1" && used == i.operands.len())
+        } else if (spec.kind == "implicit_reg" && spec.register == "st0" && form.extension == "X87")
+            || (spec.encoding == "modrm_reg"
+                && form.reg_mask.count_ones() == 1
+                && used == i.operands.len())
+            || (spec.kind == "implicit_imm1" && used == i.operands.len())
             || (spec.kind == "imm" && d.control.is_some() && index + 1 == form.operands.len())
-        {
-            operands.push(None);
-        } else if spec.kind == "fpr"
-            && i.operands.is_empty()
-            && matches!(
-                d.name.as_str(),
-                "fxch"
-                    | "fucomi"
-                    | "fucomip"
-                    | "fcom"
-                    | "fcomp"
-                    | "fucom"
-                    | "fucomp"
-                    | "faddp"
-                    | "fmulp"
-                    | "fsubp"
-                    | "fsubrp"
-                    | "fdivp"
-                    | "fdivrp"
-            )
+            || (spec.kind == "fpr"
+                && i.operands.is_empty()
+                && matches!(
+                    d.name.as_str(),
+                    "fxch"
+                        | "fucomi"
+                        | "fucomip"
+                        | "fcom"
+                        | "fcomp"
+                        | "fucom"
+                        | "fucomp"
+                        | "faddp"
+                        | "fmulp"
+                        | "fsubp"
+                        | "fsubrp"
+                        | "fdivp"
+                        | "fdivrp"
+                ))
         {
             operands.push(None);
         } else {
@@ -677,10 +682,10 @@ fn emit<'a>(
     }
     let segment = d.segment.or_else(|| {
         f.operands.iter().zip(&choice.operands).find_map(|(s, o)| {
-            if s.kind == "moffs" {
-                if let Some(M(m)) = o {
-                    return m.segment;
-                }
+            if s.kind == "moffs"
+                && let Some(M(m)) = o
+            {
+                return m.segment;
             }
             None
         })
@@ -739,14 +744,16 @@ fn emit<'a>(
         };
         if let Some(rm) = rm {
             e.vex_rm_bits(
-                f.map,
-                pp,
+                VexPrefix {
+                    map: f.map,
+                    pp,
+                    field,
+                    source,
+                    vector256: f.vector == 256,
+                    wide: choice.w,
+                },
                 f.byte,
-                field,
-                source,
                 rm,
-                f.vector == 256,
-                choice.w,
                 false,
             )?;
         } else {
@@ -825,15 +832,15 @@ fn emit<'a>(
     }
     // LLVM/GAS canonicalize operand size before F2/F3, and LOCK after the
     // segment/address/operand-size prefixes. Fixup offsets are unchanged.
-    if prefix == 0xf2 || prefix == 0xf3 {
-        if let Some(p) = e.bytes.windows(2).position(|p| p == [prefix, 0x66]) {
-            e.bytes.swap(p, p + 1);
-        }
+    if (prefix == 0xf2 || prefix == 0xf3)
+        && let Some(p) = e.bytes.windows(2).position(|p| p == [prefix, 0x66])
+    {
+        e.bytes.swap(p, p + 1);
     }
     if i.lock {
         let end = 1 + e.bytes[1..]
             .iter()
-            .take_while(|b| matches!(b, 0x64 | 0x65 | 0x66 | 0x67))
+            .take_while(|b| matches!(b, 0x64..=0x67))
             .count();
         e.bytes[..end].rotate_left(1);
     }
@@ -872,11 +879,10 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding<'_>, Strin
     if d.segment.is_some_and(|s| !matches!(s, 0x64 | 0x65)) {
         return Err("invalid segment override".into());
     }
-    if let Core(CoreOpcode::Loop { .. }) = i.opcode {
-        if !matches!(i.operands.as_slice(),[I(a)] if a.expression.add.is_some()&&a.expression.subtract.is_none()&&a.modifier==Modifier::None)
-        {
-            return Err("loop requires a plain symbol target".into());
-        }
+    if let Core(CoreOpcode::Loop { .. }) = i.opcode
+        && !matches!(i.operands.as_slice(),[I(a)] if a.expression.add.is_some()&&a.expression.subtract.is_none()&&a.modifier==Modifier::None)
+    {
+        return Err("loop requires a plain symbol target".into());
     }
     if matches!(i.opcode, Mov)
         && matches!(i.operands.first(),Some(R(r)) if r.class==RegisterClass::Segment&&r.number==1)
@@ -929,17 +935,27 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding<'_>, Strin
                     continue;
                 }
                 let size = f.operand_size(p66, w);
-                let Some(mut choice) = match_form(f, i, &d, short, size, p66, w, address) else {
+                let Some(mut choice) = match_form(
+                    f,
+                    i,
+                    &d,
+                    FormContext {
+                        short,
+                        size,
+                        p66,
+                        w,
+                        address,
+                    },
+                ) else {
                     continue;
                 };
                 if matches!(i.opcode, Vandps | Vandpd | Vorps | Vorpd | Vxorps | Vxorpd) {
                     let src = f.operands.iter().position(|o| o.encoding == "ndsndd");
                     let rm = f.operands.iter().position(|o| o.encoding == "modrm_rm");
-                    if let (Some(src), Some(rm)) = (src, rm) {
-                        if matches!((choice.operands[src],choice.operands[rm]),(Some(R(a)),Some(R(b))) if a.number<8&&b.number>=8)
-                        {
-                            choice.operands.swap(src, rm);
-                        }
+                    if let (Some(src), Some(rm)) = (src, rm)
+                        && matches!((choice.operands[src],choice.operands[rm]),(Some(R(a)),Some(R(b))) if a.number<8&&b.number>=8)
+                    {
+                        choice.operands.swap(src, rm);
                     }
                 }
                 let Ok(encoded) = emit(&choice, i, &d, address) else {

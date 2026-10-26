@@ -13,6 +13,15 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 profiling = { version = "1.0", default-features = false }
 
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "warn"
+redundant_clone = "warn"
+dbg_macro = "warn"
+
 # Release plus whole-program optimization, for installed or shipped compilers.
 # Cuts retired instructions a further 2-5% on the compile-time corpus, at
 # roughly 2.5x the clean build time of `release`.

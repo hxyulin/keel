@@ -18,6 +18,8 @@ def domain(value, values):
         return f'{value} < {len(values)}'
     if len(values) == 1:
         return f'{value} == {values[0]}'
+    if values == list(range(values[0], values[-1] + 1)):
+        return f'matches!({value}, {values[0]}..={values[-1]})'
     return f'matches!({value}, ' + ' | '.join(map(str, values)) + ')'
 
 
@@ -125,7 +127,7 @@ def dimensions(row):
     return {
         'number': domain('self.number', numbers),
         'width': domain('self.width', widths),
-        'high_byte': ('(!self.high_byte || (' + domain('self.number', list(range(high['first'], high['first'] + len(high['names'])))) + f' && self.width == {high["width"]}))') if high else '!self.high_byte',
+        'high_byte': ('!self.high_byte || (' + domain('self.number', list(range(high['first'], high['first'] + len(high['names'])))) + f' && self.width == {high["width"]})') if high else '!self.high_byte',
     }
 
 
@@ -171,15 +173,21 @@ def definitions(schema):
             p = view.get('numbered')
             if not p:
                 continue
-            lines += [f'        if let Some(rest) = s.strip_prefix({json.dumps(p["prefix"])}) {{',
-                      f'            if let Some(number) = rest.strip_suffix({json.dumps(p.get("suffix", ""))}) {{']
+            lines += [f'        if let Some(rest) = s.strip_prefix({json.dumps(p["prefix"])})',
+                      f'            && let Some(number) = rest.strip_suffix({json.dumps(p.get("suffix", ""))})']
             digits = p.get('parse_digits')
             if digits:
-                lines += [f'                if number.len() != {digits} {{', '                    return None;', '                }']
-            lines += ['                if let Ok(number) = number.parse::<u8>() {',
-                      f'                    if {domain("number", p["numbers"])} {{',
-                      f'                        return Some(Self {{ class: RegisterClass::{row["variant"]}, number, width: {view["width"]}, high_byte: false }});',
-                      '                    }', '                }', '            }', '        }']
+                lines += ['        {', f'            if number.len() != {digits} {{',
+                          '                return None;', '            }',
+                          '            if let Ok(number) = number.parse::<u8>()',
+                          f'                && {domain("number", p["numbers"])}', '            {']
+            else:
+                lines += ['            && let Ok(number) = number.parse::<u8>()',
+                          f'            && {domain("number", p["numbers"])}', '        {']
+            lines += [f'                return Some(Self {{ class: RegisterClass::{row["variant"]}, number, width: {view["width"]}, high_byte: false }});']
+            if digits:
+                lines.append('            }')
+            lines.append('        }')
     lines += ['        None', '    }',
               '    /// Structural validity, independent of instruction/address restrictions.',
               '    pub fn is_valid(self) -> bool {', '        match self.class {']
@@ -214,7 +222,8 @@ def formatting(schema):
         fmt = row.get('format', {})
         checks = fmt.get('check', DIMS)
         if checks:
-            expr = ' && '.join(f'({dimensions(row)[d]})' for d in checks)
+            expr = (dimensions(row)[checks[0]] if len(checks) == 1 else
+                    ' && '.join(f'({dimensions(row)[d]})' for d in checks))
             lines += [f'                if !({expr}) {{', '                    return Err(fmt::Error);', '                }']
         high = row.get('high_byte')
         if high:

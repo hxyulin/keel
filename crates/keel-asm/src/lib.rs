@@ -483,6 +483,7 @@ pub fn assemble_program_object(
 /// assemble exactly like their concatenation, including diagnostic positions.
 /// Plain instructions are encoded as they arrive and retain only their word,
 /// so a whole module's structured program never needs to be resident at once.
+#[derive(Debug)]
 pub struct ProgramAssembler(parser::Compact);
 impl ProgramAssembler {
     pub fn new(features: TargetFeatures) -> Self {
@@ -929,6 +930,7 @@ pub fn assemble_elf_object_with_features(
 }
 
 /// Incremental AArch64 ELF assembly using the shared ELF metadata/DWARF writer.
+#[derive(Debug)]
 pub struct ElfProgramAssembler(x86::ProgramAssembler);
 impl ElfProgramAssembler {
     pub fn new(features: TargetFeatures) -> Self {

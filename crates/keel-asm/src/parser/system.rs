@@ -40,41 +40,36 @@ pub(super) fn instruction(
                 "jc" => 6,
                 _ => return Err("invalid BTI target".into()),
             };
-            return encode_with_features("BTI_HB_hints", &[(FieldId::op2, value)], features)
-                .map(Some);
+            encode_with_features("BTI_HB_hints", &[(FieldId::op2, value)], features).map(Some)
         }
         "retaa" | "retab" => {
             count(a, 0, 0)?;
-            return encode_named_features(
-                format_args!("{}_64E_branch_reg", upper(op)),
-                &[],
-                features,
-            )
-            .map(Some);
+            encode_named_features(format_args!("{}_64E_branch_reg", upper(op)), &[], features)
+                .map(Some)
         }
         "braa" | "brab" | "blraa" | "blrab" => {
             count(a, 2, 2)?;
             let n = xreg(a[0], false)?;
             let m = xreg(a[1], true)?;
-            return encode_named_features(
+            encode_named_features(
                 format_args!("{}_64P_branch_reg", upper(op)),
                 &[(FieldId::Rn, n), (FieldId::Rm, m)],
                 features,
             )
-            .map(Some);
+            .map(Some)
         }
         "braaz" | "brabz" | "blraaz" | "blrabz" => {
             count(a, 1, 1)?;
-            return encode_named_features(
+            encode_named_features(
                 format_args!("{}_64_branch_reg", upper(op)),
                 &[(FieldId::Rn, xreg(a[0], false)?)],
                 features,
             )
-            .map(Some);
+            .map(Some)
         }
         "pacia" | "pacib" | "pacda" | "pacdb" | "autia" | "autib" | "autda" | "autdb" => {
             count(a, 2, 2)?;
-            return encode_named_features(
+            encode_named_features(
                 format_args!("{}_64P_dp_1src", upper(op)),
                 &[
                     (FieldId::Rd, xreg(a[0], false)?),
@@ -82,21 +77,21 @@ pub(super) fn instruction(
                 ],
                 features,
             )
-            .map(Some);
+            .map(Some)
         }
         "paciza" | "pacizb" | "pacdza" | "pacdzb" | "autiza" | "autizb" | "autdza" | "autdzb"
         | "xpaci" | "xpacd" => {
             count(a, 1, 1)?;
-            return encode_named_features(
+            encode_named_features(
                 format_args!("{}_64Z_dp_1src", upper(op)),
                 &[(FieldId::Rd, xreg(a[0], false)?)],
                 features,
             )
-            .map(Some);
+            .map(Some)
         }
         "pacga" => {
             count(a, 3, 3)?;
-            return encode_with_features(
+            encode_with_features(
                 "PACGA_64P_dp_2src",
                 &[
                     (FieldId::Rd, xreg(a[0], false)?),
@@ -105,7 +100,7 @@ pub(super) fn instruction(
                 ],
                 features,
             )
-            .map(Some);
+            .map(Some)
         }
         "mrs" | "msr" | "dc" | "ic" => {
             count(a, if op == "ic" { 1 } else { 2 }, 2)?;
@@ -127,7 +122,7 @@ pub(super) fn instruction(
                 "msr" => "MSR_SR_systemmove",
                 _ => "SYS_CR_systeminstrs",
             };
-            return encode_with_features(encoding, &fields[..1 + system.len()], features).map(Some);
+            encode_with_features(encoding, &fields[..1 + system.len()], features).map(Some)
         }
         "sys" => {
             count(a, 4, 5)?;
@@ -145,7 +140,7 @@ pub(super) fn instruction(
                 (FieldId::op2, unsigned(a[3], 7)?),
                 (FieldId::Rt, a.get(4).map_or(Ok(31), |s| xreg(s, false))?),
             ];
-            return encode_with_features("SYS_CR_systeminstrs", &fields, features).map(Some);
+            encode_with_features("SYS_CR_systeminstrs", &fields, features).map(Some)
         }
         "ldapr" | "ldaprb" | "ldaprh" => {
             count(a, 2, 2)?;
@@ -154,17 +149,17 @@ pub(super) fn instruction(
                 return Err("byte/halfword LDAPR requires W registers".into());
             }
             let n = super::memory::atomic_base(a[1])?;
-            return encode_named_features(
+            encode_named_features(
                 format_args!("{}_{}L_memop", upper(op), t.bits),
                 &[(FieldId::Rt, t.number), (FieldId::Rn, n.number)],
                 features,
             )
-            .map(Some);
+            .map(Some)
         }
         "ldapur" | "ldapurb" | "ldapurh" | "ldapursb" | "ldapursh" | "ldapursw" | "stlur"
-        | "stlurb" | "stlurh" => return super::memory::lrcpc2(op, a, features).map(Some),
-        "prfm" | "prfum" => return super::memory::prefetch(op, a).map(Some),
-        _ => return crypto(op, a, features),
+        | "stlurb" | "stlurh" => super::memory::lrcpc2(op, a, features).map(Some),
+        "prfm" | "prfum" => super::memory::prefetch(op, a).map(Some),
+        _ => crypto(op, a, features),
     }
 }
 fn xreg(s: &str, sp: bool) -> Result<u32, String> {

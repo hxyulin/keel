@@ -21,6 +21,7 @@ use object::{
     SymbolFlags, SymbolKind, SymbolScope,
 };
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::hash::Hasher;
 
 struct Section {
@@ -347,6 +348,17 @@ pub struct ProgramAssembler {
     items: Items,
     next_line: usize,
     error: Option<Error>,
+}
+
+impl fmt::Debug for ProgramAssembler {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ProgramAssembler")
+            .field("entries", &self.items.entries.len())
+            .field("encoded_bytes", &self.items.encoded.len())
+            .field("next_line", &self.next_line)
+            .field("error", &self.error)
+            .finish_non_exhaustive()
+    }
 }
 impl ProgramAssembler {
     pub fn new(features: x86::Features) -> Self {
@@ -1150,18 +1162,30 @@ impl Assembler {
         entry_size: u64,
         group: Option<String>,
     ) -> Result<(), String> {
-        self.section_full(name, flags, nobits, entry_size, group, None, None)
+        self.section_full(sections::Declaration {
+            name,
+            flags,
+            nobits,
+            entry_size,
+            group,
+            section_type: None,
+            unique: None,
+        })
     }
     fn section_full(
         &mut self,
-        name: &str,
-        flags: Option<u64>,
-        nobits: bool,
-        entry_size: u64,
-        group: Option<String>,
-        section_type: Option<u32>,
-        unique: Option<u64>,
+        declaration: sections::Declaration<impl AsRef<str>>,
     ) -> Result<(), String> {
+        let sections::Declaration {
+            name,
+            flags,
+            nobits,
+            entry_size,
+            group,
+            section_type,
+            unique,
+        } = declaration;
+        let name = name.as_ref();
         let nobits = nobits || matches!(name, ".bss" | ".tbss");
         let section_type = section_type.unwrap_or(if nobits {
             8
@@ -1423,15 +1447,15 @@ impl Assembler {
                 let e = self.symbols.expr(&address.expression);
                 self.integer(*width, e, address.modifier, line)
             }
-            Directive::ElfLifecycleArray { fini } => self.section_full(
-                if *fini { ".fini_array" } else { ".init_array" },
-                Some(3),
-                false,
-                0,
-                None,
-                Some(if *fini { 15 } else { 14 }),
-                None,
-            ),
+            Directive::ElfLifecycleArray { fini } => self.section_full(sections::Declaration {
+                name: if *fini { ".fini_array" } else { ".init_array" },
+                flags: Some(3),
+                nobits: false,
+                entry_size: 0,
+                group: None,
+                section_type: Some(if *fini { 15 } else { 14 }),
+                unique: None,
+            }),
             Directive::ElfSection {
                 name,
                 flags,
@@ -1650,7 +1674,7 @@ impl Assembler {
         let depends = |e: &Expr| e.add == Some(id) || e.subtract == Some(id);
         let referenced = self.fixes.iter().any(|f| depends(&f.expr))
             || self.symbols.iter().any(|(_, s)| {
-                s.alias.as_deref().is_some_and(&depends) || s.size.as_deref().is_some_and(&depends)
+                s.alias.as_deref().is_some_and(depends) || s.size.as_deref().is_some_and(depends)
             });
         let sym = self.symbols.entry(id);
         if sym.alias.is_some() && referenced {
@@ -1735,15 +1759,7 @@ impl Assembler {
                     self.section_stack.push(self.current);
                 }
                 let section = sections::parse(&parts)?;
-                self.section_full(
-                    &section.name,
-                    section.flags,
-                    section.nobits,
-                    section.entry_size,
-                    section.group,
-                    section.section_type,
-                    section.unique,
-                )
+                self.section_full(section)
             }
             ".globl" | ".global" | ".local" | ".weak" | ".hidden" => {
                 for name in parts {

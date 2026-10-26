@@ -40,7 +40,10 @@ pub(super) fn word(
     w: &crate::parser::elf::Word,
     line: usize,
 ) -> Result<(), String> {
-    if a.offset() % 4 != 0 || a.sections[a.current].nobits || a.sections[a.current].flags & 4 == 0 {
+    if !a.offset().is_multiple_of(4)
+        || a.sections[a.current].nobits
+        || a.sections[a.current].flags & 4 == 0
+    {
         return Err("AArch64 instruction requires aligned executable PROGBITS data".into());
     }
     if let Some((kind, name, addend)) = &w.relocation {
@@ -172,14 +175,14 @@ pub(super) fn parse(items: &mut Items, source: &str, first: usize) -> Result<(),
                 if text.is_empty() {
                     return Ok(());
                 }
-                if let Some(i) = text.find(':') {
-                    if !text[..i].contains(char::is_whitespace) {
-                        let label = x86::symbol(&text[..i])?;
-                        items.item(Item::Label(label), line);
-                        text = text[i + 1..].trim();
-                        if text.is_empty() {
-                            return Ok(());
-                        }
+                if let Some(i) = text.find(':')
+                    && !text[..i].contains(char::is_whitespace)
+                {
+                    let label = x86::symbol(&text[..i])?;
+                    items.item(Item::Label(label), line);
+                    text = text[i + 1..].trim();
+                    if text.is_empty() {
+                        return Ok(());
                     }
                 }
                 let (op, rest) = text.split_once(char::is_whitespace).unwrap_or((text, ""));

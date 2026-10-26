@@ -332,14 +332,28 @@ def generate_decoder(data):
             if kind == 'AST.Function':
                 return 'true'
             if kind == 'AST.UnaryOp':
-                return f'!({condition(node["expr"])})'
+                inner = condition(node['expr'])
+                return {'true': 'false', 'false': 'true'}.get(inner, f'!({inner})')
             op = node['op']
             if op in ('&&', '||'):
-                return f'({condition(node["left"])}) {op} ({condition(node["right"])})'
+                # Visit both sides before folding, retaining field masks and
+                # validation even when one branch determines the result.
+                left, right = condition(node['left']), condition(node['right'])
+                if left == right:
+                    return left
+                identity, absorbing = ('true', 'false') if op == '&&' else ('false', 'true')
+                if absorbing in (left, right):
+                    return absorbing
+                if left == identity:
+                    return right
+                if right == identity:
+                    return left
+                return f'({left}) {op} ({right})'
             field = by_name[node['left']['value']]['range']
             start, width = field['start'], field['width']
             predicate_mask |= ((1 << width) - 1) << start
-            value = f'((word >> {start}) & {(1 << width) - 1})'
+            shifted = f'(word >> {start})' if start else 'word'
+            value = f'({shifted} & {(1 << width) - 1})'
             values = node['right']['values'] if op == 'IN' else [node['right']]
             terms = []
             for item in values:

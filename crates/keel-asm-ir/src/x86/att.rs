@@ -205,10 +205,11 @@ fn memory(s: &str, prefix: bool) -> Result<Operand, String> {
     }) {
         return Err("addresses require 32-bit or 64-bit general base registers".into());
     }
-    if let (Some(base), Some(index)) = (m.base, m.index) {
-        if index.class == RegisterClass::Gpr && base.width != index.width {
-            return Err("mixed address register widths".into());
-        }
+    if let (Some(base), Some(index)) = (m.base, m.index)
+        && index.class == RegisterClass::Gpr
+        && base.width != index.width
+    {
+        return Err("mixed address register widths".into());
     }
     if m.index.is_some_and(|r| {
         !matches!(
@@ -503,7 +504,7 @@ pub(super) fn parse(s: &str, prefix: bool) -> Result<Instruction, String> {
         }
     };
     let opcode = match opcode {
-        Opcode::X87(op) => Opcode::X87(op.from_att(&ops)),
+        Opcode::X87(op) => Opcode::X87(op.canonicalize_att(&ops)),
         other => other,
     };
     // These commutative forms encode the register in ModRM.reg. Canonicalize

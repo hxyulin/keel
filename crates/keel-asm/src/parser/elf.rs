@@ -142,7 +142,7 @@ pub(crate) fn instruction(text: &str, features: crate::TargetFeatures) -> Result
             &operand[..start],
             if operand.ends_with(']') { "]" } else { "" }
         );
-        let mut patched: Vec<&str> = args.iter().copied().collect();
+        let mut patched: Vec<&str> = args.to_vec();
         patched[i] = &replacement;
         let word = instruction_with_features(&op, &patched, features)?;
         let kind = if op == "add" && !got {

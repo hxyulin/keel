@@ -1,9 +1,10 @@
 //! Long-mode byte decoding from the same generated forms as the assembler.
 use keel_asm_ir::x86::{
-    EvexOptions, Rounding,
+    EvexOptions, Register, RegisterClass, Rounding,
     evex::EvexForm,
     isa::{self, IsaForm, IsaOperand},
 };
+use std::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operand {
@@ -31,25 +32,85 @@ pub struct Instruction {
     pub repeat: u8,
     pub evex: Option<EvexOptions>,
 }
-impl Instruction {
-    pub fn assembly(&self) -> String {
-        let mut text = String::new();
+impl fmt::Display for Operand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Register(name) => f.write_str(name),
+            Self::Immediate(value) => write!(f, "{value}"),
+            Self::Target(address) => write!(f, "0x{address:x}"),
+            Self::Memory {
+                bits,
+                base,
+                index,
+                scale,
+                displacement,
+                segment,
+                ..
+            } => {
+                let width = match bits {
+                    8 => "byte",
+                    16 => "word",
+                    32 => "dword",
+                    48 => "fword",
+                    64 => "qword",
+                    80 => "tbyte",
+                    128 => "xmmword",
+                    256 => "ymmword",
+                    512 => "zmmword",
+                    _ => "",
+                };
+                if !width.is_empty() {
+                    write!(f, "{width} ptr ")?;
+                }
+                if let Some(segment) = segment {
+                    write!(f, "{segment}:")?;
+                }
+                f.write_str("[")?;
+                let mut has_address = false;
+                if let Some(base) = base {
+                    f.write_str(base)?;
+                    has_address = !base.is_empty();
+                }
+                if let Some(index) = index {
+                    if has_address {
+                        f.write_str(" + ")?;
+                    }
+                    f.write_str(index)?;
+                    has_address |= !index.is_empty();
+                    if *scale != 1 {
+                        write!(f, "*{scale}")?;
+                        has_address = true;
+                    }
+                }
+                if !has_address {
+                    write!(f, "{displacement}")?;
+                } else if *displacement != 0 {
+                    f.write_str(if *displacement < 0 { " - " } else { " + " })?;
+                    write!(f, "{}", displacement.unsigned_abs())?;
+                }
+                f.write_str("]")
+            }
+        }
+    }
+}
+
+impl fmt::Display for Instruction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(options) = self.evex {
             if options.address32 {
-                text.push_str("addr32 ");
+                f.write_str("addr32 ")?;
             }
-            text.push_str("{evex} ");
+            f.write_str("{evex} ")?;
         }
         if self.lock {
-            text.push_str("lock ");
+            f.write_str("lock ")?;
         }
-        if self.repeat == 0xf3 {
-            text.push_str("rep ");
+        match self.repeat {
+            0xf3 => f.write_str("rep ")?,
+            0xf2 => f.write_str("repne ")?,
+            _ => {}
         }
-        if self.repeat == 0xf2 {
-            text.push_str("repne ");
-        }
-        text.push_str(if self.form.far {
+        let mnemonic = if self.form.far {
             match self.form.mnemonic {
                 "call" => "callf",
                 "jmp" => "jmpf",
@@ -63,96 +124,70 @@ impl Instruction {
         } else {
             isa::fixed_width_mnemonic(self.form.mnemonic, self.operand_size)
                 .unwrap_or(self.form.mnemonic)
+        };
+        f.write_str(mnemonic)?;
+        let rounding = self.evex.and_then(|options| options.rounding).map(|round| {
+            let before_last = match self.operands.last() {
+                Some(Operand::Immediate(_)) => true,
+                Some(Operand::Register(name)) => Register::parse(name)
+                    .is_some_and(|register| register.class == RegisterClass::Gpr),
+                _ => false,
+            };
+            let index = if before_last {
+                self.operands.len().saturating_sub(1)
+            } else {
+                self.operands.len()
+            };
+            (index, round)
         });
-        let mut operands: Vec<_> = self
-            .operands
-            .iter()
-            .map(|o| match o {
-                Operand::Register(r) => r.clone(),
-                Operand::Immediate(n) => format!("{n}"),
-                Operand::Target(n) => format!("0x{n:x}"),
-                Operand::Memory {
-                    bits,
-                    base,
-                    index,
-                    scale,
-                    displacement,
-                    segment,
-                    ..
-                } => {
-                    let width = match bits {
-                        8 => "byte",
-                        16 => "word",
-                        32 => "dword",
-                        48 => "fword",
-                        64 => "qword",
-                        80 => "tbyte",
-                        128 => "xmmword",
-                        256 => "ymmword",
-                        512 => "zmmword",
-                        _ => "",
-                    };
-                    let mut address = base.clone().unwrap_or_default();
-                    if let Some(index) = index {
-                        if !address.is_empty() {
-                            address.push_str(" + ");
-                        }
-                        address.push_str(index);
-                        if *scale != 1 {
-                            address.push_str(&format!("*{scale}"));
-                        }
-                    }
-                    if *displacement != 0 || address.is_empty() {
-                        if !address.is_empty() {
-                            address.push_str(if *displacement < 0 { " - " } else { " + " });
-                            address.push_str(&displacement.unsigned_abs().to_string());
-                        } else {
-                            address.push_str(&displacement.to_string());
-                        }
-                    }
-                    let segment = segment.map_or(String::new(), |s| format!("{s}:"));
-                    format!(
-                        "{}{}{segment}[{address}]",
-                        width,
-                        if width.is_empty() { "" } else { " ptr " }
-                    )
-                }
-            })
-            .collect();
-        if let Some(options) = self.evex {
-            if let Some(first) = operands.first_mut() {
+        let broadcast = self
+            .evex
+            .filter(|options| options.broadcast != 0)
+            .and_then(|options| {
+                self.operands
+                    .iter()
+                    .position(|operand| matches!(operand, Operand::Memory { .. }))
+                    .map(|index| (index, options.broadcast))
+            });
+        let mut separator = " ";
+        for (index, operand) in self.operands.iter().enumerate() {
+            if let Some((at, round)) = rounding
+                && at == index
+            {
+                write!(f, "{separator}{{{}}}", round.name())?;
+                separator = ", ";
+            }
+            write!(f, "{separator}{operand}")?;
+            separator = ", ";
+            if index == 0
+                && let Some(options) = self.evex
+            {
                 if let Some(mask) = options.mask {
-                    first.push_str(&format!("{{k{mask}}}"));
+                    write!(f, "{{k{mask}}}")?;
                 }
                 if options.zero {
-                    first.push_str("{z}");
+                    f.write_str("{z}")?;
                 }
             }
-            if options.broadcast != 0 {
-                if let Some(n) = self
-                    .operands
-                    .iter()
-                    .position(|o| matches!(o, Operand::Memory { .. }))
-                {
-                    operands[n].push_str(&format!("{{1to{}}}", options.broadcast));
-                }
-            }
-            if let Some(round) = options.rounding {
-                let before_last = matches!(self.operands.last(), Some(Operand::Immediate(_)))
-                    || matches!(self.operands.last(), Some(Operand::Register(r)) if keel_asm_ir::x86::Register::parse(r).is_some_and(|r| r.class == keel_asm_ir::x86::RegisterClass::Gpr));
-                let at = if before_last {
-                    operands.len().saturating_sub(1)
-                } else {
-                    operands.len()
-                };
-                operands.insert(at, format!("{{{}}}", round.name()));
+            if let Some((at, count)) = broadcast
+                && at == index
+            {
+                write!(f, "{{1to{count}}}")?;
             }
         }
-        if !operands.is_empty() {
-            text.push(' ');
-            text.push_str(&operands.join(", "));
+        if let Some((at, round)) = rounding
+            && at == self.operands.len()
+        {
+            write!(f, "{separator}{{{}}}", round.name())?;
         }
-        text
+        Ok(())
+    }
+}
+
+impl Instruction {
+    /// Return the canonical assembly spelling, including EVEX decorators.
+    pub fn assembly(&self) -> String {
+        self.to_string()
     }
 }
 
@@ -479,13 +514,12 @@ fn decode_form(
     } else {
         None
     };
-    if let Some(m) = m {
-        if (!f.ignore_mod && f.mod_mask & (1 << (m >> 6)) == 0)
+    if let Some(m) = m
+        && ((!f.ignore_mod && f.mod_mask & (1 << (m >> 6)) == 0)
             || f.reg_mask & (1 << ((m >> 3) & 7)) == 0
-            || f.rm_mask & (1 << (m & 7)) == 0
-        {
-            return None;
-        }
+            || f.rm_mask & (1 << (m & 7)) == 0)
+    {
+        return None;
     }
     let mut mem = if let Some(m) = m {
         if m >> 6 != 3 && !f.ignore_mod {

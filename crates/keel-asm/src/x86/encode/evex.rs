@@ -41,14 +41,16 @@ pub(super) fn encode(i: &Instruction) -> Result<Encoding<'_>, String> {
     };
     if f.form.vex {
         out.vex_rm_bits(
-            f.form.map,
-            pp,
+            VexPrefix {
+                map: f.form.map,
+                pp,
+                field,
+                source,
+                vector256: f.form.vector == 256,
+                wide: f.form.w == 1,
+            },
             f.form.byte,
-            field,
-            source,
             rm,
-            f.form.vector == 256,
-            f.form.w == 1,
             op.options.address32
                 || matches!(rm, M(m) if m.base.into_iter().chain(m.index).any(|r| r.width == 32)),
         )?;

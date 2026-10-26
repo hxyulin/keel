@@ -108,18 +108,17 @@ impl SymbolicInstruction {
         }
     }
     pub fn validate(&self) -> Result<(), String> {
-        if let Self::Conditional { condition, .. } = self {
-            if *condition > 15 {
-                return Err("invalid branch condition".into());
-            }
+        if let Self::Conditional { condition, .. } = self
+            && *condition > 15
+        {
+            return Err("invalid branch condition".into());
         }
         if let Self::PageOffset {
             load: false, kind, ..
         } = self
+            && *kind != PageKind::Direct
         {
-            if *kind != PageKind::Direct {
-                return Err("GOT/TLVP page offsets require a load".into());
-            }
+            return Err("GOT/TLVP page offsets require a load".into());
         }
         Ok(())
     }

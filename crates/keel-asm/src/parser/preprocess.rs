@@ -301,20 +301,18 @@ impl Processor {
         // Kernel unwind macros compare register spellings. Registers are not
         // integer constants, so support equality without inventing numeric IDs.
         for op in ["==", "!="] {
-            if let Some((a, b)) = text.split_once(op) {
-                if a.trim().starts_with('%') || b.trim().starts_with('%') {
-                    let register = |s: &str| {
-                        s.trim()
-                            .strip_prefix('%')
-                            .and_then(keel_asm_ir::x86::Register::parse)
-                            .ok_or_else(|| {
-                                line.error(
-                                    "register conditional requires two registers and == or !=",
-                                )
-                            })
-                    };
-                    return Ok(-i128::from((register(a)? == register(b)?) == (op == "==")));
-                }
+            if let Some((a, b)) = text.split_once(op)
+                && (a.trim().starts_with('%') || b.trim().starts_with('%'))
+            {
+                let register = |s: &str| {
+                    s.trim()
+                        .strip_prefix('%')
+                        .and_then(keel_asm_ir::x86::Register::parse)
+                        .ok_or_else(|| {
+                            line.error("register conditional requires two registers and == or !=")
+                        })
+                };
+                return Ok(-i128::from((register(a)? == register(b)?) == (op == "==")));
             }
         }
         keel_asm_ir::x86::expression::parse(text)

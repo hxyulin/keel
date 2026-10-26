@@ -9666,7 +9666,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -9755,7 +9755,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -9965,7 +9965,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -10064,7 +10064,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -10158,7 +10158,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -10252,7 +10252,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -10346,7 +10346,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -10435,7 +10435,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -10482,7 +10482,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -10744,7 +10744,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -11192,7 +11192,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -11291,7 +11291,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -11375,7 +11375,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -11464,7 +11464,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -11548,7 +11548,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -11647,7 +11647,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -11731,7 +11731,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -11820,7 +11820,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -11904,7 +11904,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -12003,7 +12003,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -12087,7 +12087,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -12176,7 +12176,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -12369,7 +12369,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -12453,7 +12453,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -12537,7 +12537,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -12621,7 +12621,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -13692,7 +13692,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -13776,7 +13776,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -14142,7 +14142,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -14226,7 +14226,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -14639,7 +14639,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -14728,7 +14728,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -15099,7 +15099,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -15188,7 +15188,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -15559,7 +15559,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -15648,7 +15648,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -16019,7 +16019,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -16108,7 +16108,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -16521,7 +16521,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -16610,7 +16610,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -16981,7 +16981,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -17070,7 +17070,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -17832,7 +17832,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -17879,7 +17879,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -17973,7 +17973,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -18015,7 +18015,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 19) & 15) & 15) != 0)
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -18703,7 +18703,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -18750,7 +18750,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -18844,7 +18844,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -18886,7 +18886,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 19) & 15) & 15) != 0)
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -19373,7 +19373,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -19690,7 +19690,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -19737,7 +19737,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -19821,7 +19821,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -20103,7 +20103,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -20202,7 +20202,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -20249,7 +20249,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -20333,7 +20333,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -20615,7 +20615,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -20714,7 +20714,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -20761,7 +20761,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -20845,7 +20845,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -21127,7 +21127,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -21226,7 +21226,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -21273,7 +21273,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -21357,7 +21357,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -21639,7 +21639,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -21914,7 +21914,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -22090,7 +22090,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -22137,7 +22137,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -22479,7 +22479,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -22655,7 +22655,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -22702,7 +22702,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -23531,7 +23531,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -23876,7 +23876,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -24047,7 +24047,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -24094,7 +24094,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -24250,7 +24250,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -24433,7 +24433,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -24604,7 +24604,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -24651,7 +24651,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -24933,7 +24933,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -25411,7 +25411,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -25495,7 +25495,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -25584,7 +25584,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -25673,7 +25673,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -25752,7 +25752,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -26471,7 +26471,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -26607,7 +26607,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -26827,7 +26827,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -27047,7 +27047,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -27267,7 +27267,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -27487,7 +27487,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -27707,7 +27707,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -27796,7 +27796,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -27880,7 +27880,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -27969,7 +27969,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -28058,7 +28058,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -28268,7 +28268,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -28503,7 +28503,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -28805,7 +28805,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -29263,7 +29263,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -29315,7 +29315,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -29367,7 +29367,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -29419,7 +29419,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -29781,7 +29781,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -29905,7 +29905,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -30029,7 +30029,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -30153,7 +30153,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -30339,7 +30339,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -30500,7 +30500,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -30862,7 +30862,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -30986,7 +30986,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -31110,7 +31110,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -31234,7 +31234,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -31420,7 +31420,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -31581,7 +31581,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -31943,7 +31943,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -32067,7 +32067,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -32191,7 +32191,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -32315,7 +32315,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -32501,7 +32501,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -32662,7 +32662,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -33024,7 +33024,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -33148,7 +33148,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -33272,7 +33272,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -33396,7 +33396,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -40198,7 +40198,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 57344,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 13) & 7) & 7) != 3)
+            (((word >> 13) & 7) & 7) != 3
         },
         fields: &[
             Field {
@@ -49974,7 +49974,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 31,
         predicate: |word| {
             let _ = word;
-            !((((word >> 0) & 31) & 24) == 24)
+            !(((word & 31) & 24) == 24)
         },
         fields: &[
             Field {
@@ -50974,7 +50974,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -52439,7 +52439,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -52486,7 +52486,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -52575,7 +52575,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -52617,7 +52617,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 19) & 15) & 15) != 0)
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -53381,7 +53381,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -53480,7 +53480,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -53579,7 +53579,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -54804,8 +54804,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
             let _ = word;
             (!(((((word >> 16) & 7) & 7) == 0)
                 && (((((word >> 5) & 7) & 6) == 0) || ((((word >> 5) & 7) & 7) == 2))))
-                && ((((true) && ((((word >> 16) & 7) & 7) == 3))
-                    && ((((word >> 8) & 15) & 9) == 1))
+                && ((((((word >> 16) & 7) & 7) == 3) && ((((word >> 8) & 15) & 9) == 1))
                     && ((((word >> 5) & 7) & 7) == 3))
         },
         fields: &[
@@ -54845,8 +54844,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
             let _ = word;
             (!(((((word >> 16) & 7) & 7) == 0)
                 && (((((word >> 5) & 7) & 6) == 0) || ((((word >> 5) & 7) & 7) == 2))))
-                && ((((true) && ((((word >> 16) & 7) & 7) == 3))
-                    && ((((word >> 8) & 15) & 9) == 0))
+                && ((((((word >> 16) & 7) & 7) == 3) && ((((word >> 8) & 15) & 9) == 0))
                     && ((((word >> 5) & 7) & 7) == 3))
         },
         fields: &[
@@ -56909,7 +56907,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -56961,7 +56959,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 19) & 15) & 15) != 0)
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -57008,7 +57006,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -57060,7 +57058,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 19) & 15) & 15) != 0)
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -57107,7 +57105,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -57159,7 +57157,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 19) & 15) & 15) != 0)
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -57258,7 +57256,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -57357,7 +57355,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 19) & 15) & 15) != 0)
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -57404,7 +57402,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -57456,7 +57454,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 19) & 15) & 15) != 0)
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -57503,7 +57501,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -57555,7 +57553,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 19) & 15) & 15) != 0)
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -57896,7 +57894,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -58094,7 +58092,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -58203,7 +58201,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -58312,7 +58310,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -58463,7 +58461,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -58572,7 +58570,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -59171,7 +59169,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -59223,7 +59221,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -59275,7 +59273,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -59327,7 +59325,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -59689,7 +59687,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -59813,7 +59811,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -59937,7 +59935,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -60061,7 +60059,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -60222,7 +60220,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -60584,7 +60582,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -60708,7 +60706,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -60832,7 +60830,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -60956,7 +60954,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -61117,7 +61115,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -61479,7 +61477,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -61603,7 +61601,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -61727,7 +61725,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -61851,7 +61849,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -62012,7 +62010,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -62374,7 +62372,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -62498,7 +62496,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -62622,7 +62620,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -62746,7 +62744,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -65143,7 +65141,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 57344,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 13) & 7) & 7) != 3)
+            (((word >> 13) & 7) & 7) != 3
         },
         fields: &[
             Field {
@@ -70206,7 +70204,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -70253,7 +70251,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -70342,7 +70340,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -70384,7 +70382,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 19) & 15) & 15) != 0)
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -72283,7 +72281,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -72335,7 +72333,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 19) & 15) & 15) != 0)
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -72434,7 +72432,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -72533,7 +72531,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 19) & 15) & 15) != 0)
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -72580,7 +72578,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -72632,7 +72630,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            (true) && ((((word >> 19) & 15) & 15) != 0)
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -73035,7 +73033,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -73186,7 +73184,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -73404,7 +73402,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -73555,7 +73553,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -73790,7 +73788,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 7864320,
         predicate: |word| {
             let _ = word;
-            ((((word >> 19) & 15) & 15) != 0) && ((true) && ((((word >> 19) & 15) & 15) != 0))
+            (((word >> 19) & 15) & 15) != 0
         },
         fields: &[
             Field {
@@ -74349,7 +74347,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -74973,7 +74971,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -75015,7 +75013,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -75270,7 +75268,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -75317,7 +75315,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -75364,7 +75362,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -75411,7 +75409,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -75458,7 +75456,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -75505,7 +75503,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -75542,7 +75540,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -75579,7 +75577,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 12582912,
         predicate: |word| {
             let _ = word;
-            ((true) || (true)) && ((((word >> 22) & 3) & 3) != 0)
+            (((word >> 22) & 3) & 3) != 0
         },
         fields: &[
             Field {
@@ -75621,7 +75619,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -75678,7 +75676,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -76344,7 +76342,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -76401,7 +76399,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) && (true)
+            true
         },
         fields: &[
             Field {
@@ -77503,7 +77501,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 12582912,
         predicate: |word| {
             let _ = word;
-            ((true) || (true)) && ((((word >> 22) & 3) & 3) != 0)
+            (((word >> 22) & 3) & 3) != 0
         },
         fields: &[
             Field {
@@ -77545,7 +77543,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 12582912,
         predicate: |word| {
             let _ = word;
-            ((true) || (true)) && ((((word >> 22) & 3) & 3) != 0)
+            (((word >> 22) & 3) & 3) != 0
         },
         fields: &[
             Field {
@@ -77587,7 +77585,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -77639,7 +77637,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -77686,7 +77684,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -77733,7 +77731,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -77780,7 +77778,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -77827,7 +77825,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            ((true) || (true)) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -77869,7 +77867,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            ((true) || (true)) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -77911,7 +77909,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            ((true) || (true)) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -77953,7 +77951,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            ((true) || (true)) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -78042,7 +78040,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -78089,7 +78087,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            ((true) || (true)) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -78183,7 +78181,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -78230,7 +78228,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -78277,7 +78275,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -78324,7 +78322,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            ((true) || (true)) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -78366,7 +78364,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            ((true) || (true)) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -78408,7 +78406,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            ((true) || (true)) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -78549,7 +78547,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -78596,7 +78594,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -78643,7 +78641,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -78690,7 +78688,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            ((true) || (true)) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -78732,7 +78730,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            ((true) || (true)) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -78774,7 +78772,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            ((true) || (true)) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -78816,7 +78814,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -78863,7 +78861,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -78910,7 +78908,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            ((true) || (true)) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -78952,7 +78950,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            ((true) || (true)) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -78994,7 +78992,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -79041,7 +79039,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            ((true) || (true)) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -79083,7 +79081,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -79130,7 +79128,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -79177,7 +79175,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            ((true) || (true)) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -79219,7 +79217,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            ((true) || (true)) && ((((word >> 16) & 31) & 31) != 31)
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -81067,7 +81065,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -81104,7 +81102,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -81156,7 +81154,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -81240,7 +81238,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -81624,7 +81622,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -81671,7 +81669,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            ((((word >> 16) & 31) & 31) != 31) && ((true) || (true))
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -81760,7 +81758,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -81807,7 +81805,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            ((((word >> 16) & 31) & 31) != 31) && ((true) || (true))
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -81906,7 +81904,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -81953,7 +81951,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            ((((word >> 16) & 31) & 31) != 31) && ((true) || (true))
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -82094,7 +82092,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -82141,7 +82139,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 2031616,
         predicate: |word| {
             let _ = word;
-            ((((word >> 16) & 31) & 31) != 31) && ((true) || (true))
+            (((word >> 16) & 31) & 31) != 31
         },
         fields: &[
             Field {
@@ -82324,7 +82322,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -83476,7 +83474,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -83528,7 +83526,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -83580,7 +83578,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {
@@ -83632,7 +83630,7 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         predicate_mask: 0,
         predicate: |word| {
             let _ = word;
-            (true) || (true)
+            true
         },
         fields: &[
             Field {

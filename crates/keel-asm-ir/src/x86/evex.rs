@@ -209,13 +209,12 @@ impl EvexForm {
                     {
                         return false;
                     }
-                    if let Some(base) = m.base {
-                        if !base.is_valid()
+                    if let Some(base) = m.base
+                        && (!base.is_valid()
                             || !matches!(base.class, RegisterClass::Gpr | RegisterClass::Rip)
-                            || !matches!(base.width, 32 | 64)
-                        {
-                            return false;
-                        }
+                            || !matches!(base.width, 32 | 64))
+                    {
+                        return false;
                     }
                     let vsib = match spec.kind {
                         "mem_vsibx" => Some(RegisterClass::Xmm),
@@ -286,10 +285,9 @@ pub fn promote(opcode: Opcode, operands: &[Operand]) -> Opcode {
         Operand::Register(r) => wide(r),
         Operand::Memory(m) => m.width == 512 || m.index.as_ref().is_some_and(wide),
         _ => false,
-    }) {
-        if let Some(op) = EvexOpcode::parse(&opcode.to_string()) {
-            return Opcode::Evex(op);
-        }
+    }) && let Some(op) = EvexOpcode::parse(&opcode.to_string())
+    {
+        return Opcode::Evex(op);
     }
     opcode
 }
@@ -355,8 +353,7 @@ pub(super) fn decorated(s: &str, att: bool, prefix: bool) -> Result<Option<Instr
     if !s.contains('{') {
         return Ok(None);
     }
-    if s.trim_start()
-        .split_whitespace()
+    if s.split_whitespace()
         .next()
         .is_some_and(|s| s.eq_ignore_ascii_case("addr32"))
     {

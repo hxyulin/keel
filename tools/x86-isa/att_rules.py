@@ -121,8 +121,9 @@ def generate(schema, identities, core, adapters):
     packed = schema['packed_conversions']
     if len(packed) != len(set(packed)):
         raise ValueError('duplicate packed conversion')
-    function('packed_conversion', 'op: Opcode', 'bool',
-             [(opcode(n, 'v3'), 'true') for n in packed], 'false')
+    pattern = ' | '.join(opcode(n, 'v3') for n in packed)
+    lines.extend(['fn packed_conversion(op: Opcode) -> bool {',
+                  f'    matches!(op, {pattern})' if packed else '    false', '}', ''])
 
     # Additional x87 spellings have a separate lookup and keep their existing
     # precedence over the baseline x87 names in the AT&T parser.

@@ -52,31 +52,6 @@ the implemented change.
 
 ## Should fix
 
-### Simplify AArch64 predicates in the generator
-
-Location: `crates/keel-asm/tools/generate.py:337`.
-
-Rule: `clippy::eq_op` and `clippy::nonminimal_bool`.
-
-The decoder generator emits feature-only expressions such as `(true) &&
-(true)`. A broader Clippy run reaches the unchanged AArch64 output and fails
-on 167 equal-expression diagnostics. Fold Boolean constants and duplicate
-terms while generating predicates:
-
-```python
-left = condition(node['left'])
-right = condition(node['right'])
-if left == right:
-    return left
-```
-
-Add the corresponding AND/OR identity and negation rules. Visit both operands
-before simplifying, so an unknown AST or feature in a discarded branch still
-fails validation. Preserve predicate masks and the exhaustive overlap checks.
-Rust already optimizes these expressions; the benefit is cleaner generated
-source, less frontend work and a usable lint baseline, not a proven decoder
-throughput gain.
-
 ### Type operand roles and EVEX rules
 
 Locations: `crates/keel-asm-ir/src/x86/isa.rs:20` and
@@ -183,24 +158,54 @@ and interned-name identity; changing those requires separate measurements.
 
 ## Lint policy
 
-The workspace has no shared lint table. The strict baseline run stops in
-`keel-asm-ir` with 52 diagnostics, mostly mechanical style findings. Keep that
-baseline distinct from new diagnostics when reviewing this refactor.
-The post-change strict run reproduces those same messages. Running with
-pedantic warnings without promoting warnings to errors reaches the unchanged
-AArch64 output and stops on the 167 predicate errors described above.
+The workspace defines shared warnings for missing `Debug` implementations,
+unsafe operations inside unsafe functions, undocumented unsafe blocks,
+redundant clones and debugging macros. `keel-asm-ir`, `keel-asm` and
+`keel-disasm` inherit them. Other crates have not yet opted in.
 
-Adopt a reviewed subset of
+The idiomatic Rust follow-up clears the initial 52 assembler-IR diagnostics,
+40 assembler diagnostics and 167 equal-expression errors in generated
+AArch64 predicates. It fixes generators rather than suppressing their output.
+The all-targets/features strict check covers assembler-IR and disassembler;
+the assembler also has a strict library check. This is not a claim that a
+whole-workspace Clippy run is clean.
+
+Broader adoption of
 [BeautifulRust's lint configuration](https://github.com/morganlinton/BeautifulRust/blob/main/lints/lints.toml)
-through `[workspace.lints]` and member inheritance after reducing the existing
-baseline. `missing_debug_implementations`, `redundant_clone` and
-`undocumented_unsafe_blocks` are useful starting checks. Blanket pedantic or
-cast warnings need a compiler-specific review because instruction encoders
-deliberately manipulate widths and bit patterns. String-domain modeling and
-generated-table indexing still require design review; lint configuration
-cannot substitute for either.
+needs a crate-by-crate review. Primitive casts and independent flags in
+instruction encoders need specific consideration. Closed-domain modeling
+and generated-table indexing still require design review.
 
-## Validation
+## Idiomatic Rust follow-up
+
+- x86 operands and instructions implement `Display`. Formatting writes directly
+  to the destination and propagates formatting errors. `assembly()` retains
+  its existing string-returning API and canonical spelling. It no longer
+  clones register names or builds an intermediate `Vec<String>`.
+- AArch64 recognition consumes the first two matches before deciding whether
+  to allocate an alternatives vector. Unique matches need no temporary match
+  vector or check-then-unwrap. Ambiguous matches retain their original order.
+- Named VEX prefix and form-selection fields replace long positional argument
+  lists. Section switching accepts the existing declaration model, with owned
+  or borrowed names, instead of seven positional section arguments.
+- Validation uses match guards and let-chains. Equivalent fallback branches
+  share one body. The private x87 conversion method has a receiver-oriented
+  name, `canonicalize_att`, rather than `from_att`.
+- Public source items and incremental assemblers implement `Debug`. Assembler
+  summaries report counts and pending errors rather than dumping their buffers.
+- The AArch64 generator folds constant and duplicate Boolean terms, while
+  visiting both branches to preserve validation and predicate masks. It also
+  avoids shifts by zero. The register, AT&T and feature generators emit the
+  lint fixes themselves. CPUID bit names use code formatting in rustdoc.
+
+Pinned formatting tests cover memory widths, minimum signed displacements,
+segments, decorator placement and prior malformed-operand spellings. A
+bounded formatting sink tests error propagation. Generator regressions cover
+Boolean identities, discarded-field masks and unknown discarded features.
+The existing exhaustive predicate-overlap audit remains independent of the
+simplifier. No throughput benchmark is claimed for these changes.
+
+## Validation of the initial table refactor
 
 - The full workspace run passed all 2,788 unit and integration tests, with
   13 ignored tests. It then failed in eight doctest targets with dependency
@@ -214,5 +219,23 @@ cannot substitute for either.
 - Scoped Rust formatting and diff checks passed.
 - Rustdoc built the three affected libraries, reporting three existing broken
   links in unchanged generated feature documentation.
-- Strict Clippy remains blocked by the same 52 baseline diagnostics. The broader
-  pedantic run also exposes the unchanged AArch64 predicate errors described above.
+- At that checkpoint, strict Clippy was blocked by 52 baseline diagnostics and
+  a broader run exposed 167 AArch64 predicate errors. The follow-up clears them.
+
+## Validation of the idiomatic Rust follow-up
+
+- `cargo test --workspace --no-fail-fast`: 2,792 passed, zero failed,
+  13 ignored across 512 reported groups, including doctests. GNU assembler
+  oracle tests used `KEEL_GNU_AS`.
+- `cargo check --workspace --all-targets --all-features` passed. Warnings remain
+  in unchanged codegen test helpers.
+- Strict Clippy passed with all targets/features for `keel-asm-ir` and
+  `keel-disasm`, and with library/all-features for `keel-asm`.
+- `cargo doc -p keel-asm-ir -p keel-asm -p keel-disasm --no-deps` passed with
+  zero warnings.
+- All 99 x86 generator tests, four AArch64 generator tests, both generator
+  freshness checks, scoped Rust formatting and diff checks passed.
+
+Rust source and generator outputs remained unchanged throughout the final
+sequential test/check/doc run. No runtime throughput benchmark or new kernel
+qualification is claimed.

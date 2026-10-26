@@ -3,8 +3,8 @@ use super::Section;
 use keel_asm_ir::x86;
 use std::collections::{BTreeMap, BTreeSet};
 
-pub(super) struct Declaration {
-    pub name: String,
+pub(super) struct Declaration<Name = String> {
+    pub name: Name,
     pub flags: Option<u64>,
     pub nobits: bool,
     pub entry_size: u64,
@@ -57,9 +57,11 @@ pub(super) fn default_flags(name: &str) -> u64 {
         2
     } else if has_prefix(name, ".text") || matches!(name, ".init" | ".fini") {
         6
-    } else if array_type(name).is_some() {
-        3
-    } else if has_prefix(name, ".data") || name == ".data1" || has_prefix(name, ".bss") {
+    } else if array_type(name).is_some()
+        || has_prefix(name, ".data")
+        || name == ".data1"
+        || has_prefix(name, ".bss")
+    {
         3
     } else if has_prefix(name, ".tdata") || has_prefix(name, ".tbss") {
         0x403
@@ -345,10 +347,10 @@ pub(super) fn finalize(
         let mut payload = Vec::new();
         let mut seen = BTreeSet::new();
         for name in names {
-            if let Some(&index) = symbols.get(name.as_bytes()) {
-                if seen.insert(index) {
-                    super::metadata::leb(&mut payload, index as i128, false)?;
-                }
+            if let Some(&index) = symbols.get(name.as_bytes())
+                && seen.insert(index)
+            {
+                super::metadata::leb(&mut payload, index as i128, false)?;
             }
         }
         let index = sections

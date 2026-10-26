@@ -107,12 +107,7 @@ fn conversion_operand(op: Opcode) -> Option<usize> {
 }
 
 fn packed_conversion(op: Opcode) -> bool {
-    match op {
-        Opcode::V3(V3Opcode::Vcvtpd2dq) => true,
-        Opcode::V3(V3Opcode::Vcvttpd2dq) => true,
-        Opcode::V3(V3Opcode::Vcvtpd2ps) => true,
-        _ => false,
-    }
+    matches!(op, Opcode::V3(V3Opcode::Vcvtpd2dq) | Opcode::V3(V3Opcode::Vcvttpd2dq) | Opcode::V3(V3Opcode::Vcvtpd2ps))
 }
 
 fn x87_memory(name: &str) -> Option<(X87Opcode, u16)> {

@@ -2,6 +2,7 @@
 use super::{Error, scanning};
 use bumpalo::Bump;
 use keel_asm_ir::{Directive, Instruction, Item, Program, SymbolicInstruction};
+use std::fmt;
 
 #[derive(Clone, Copy)]
 pub(super) enum Input<'a> {
@@ -151,6 +152,16 @@ pub(crate) struct Compact {
     reservations: Reservations,
     features: crate::TargetFeatures,
 }
+
+impl fmt::Debug for Compact {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Compact")
+            .field("items", &self.items.len())
+            .field("words", &self.words.len())
+            .field("features", &self.features)
+            .finish_non_exhaustive()
+    }
+}
 const SEPARATOR: char = '\0';
 #[derive(Clone, Copy, Default)]
 pub(super) struct Reservations {
@@ -176,8 +187,15 @@ impl Reservations {
 /// A [`Compact`] item in twelve bytes.
 enum Stored {
     /// `names[start..start + len]`.
-    Label { start: u32, len: u32 },
-    Branch { link: bool, start: u32, len: u32 },
+    Label {
+        start: u32,
+        len: u32,
+    },
+    Branch {
+        link: bool,
+        start: u32,
+        len: u32,
+    },
     Symbolic(u32),
     Directive(u32),
     Other(u32),
@@ -216,7 +234,10 @@ impl Compact {
         found(&self.names)
             || self.symbolic.iter().any(|s| found(s.target()))
             || self.directives.iter().any(|d| d.contains(needle))
-            || self.other.iter().any(|item| matches!(item, Item::Text(s) if found(s)))
+            || self
+                .other
+                .iter()
+                .any(|item| matches!(item, Item::Text(s) if found(s)))
     }
     #[inline]
     fn item(&self, stored: &Stored) -> ItemRef<'_> {
@@ -338,7 +359,7 @@ pub(super) fn materialize(
     input: Input<'_>,
     features: crate::TargetFeatures,
 ) -> Result<String, Error> {
-    use std::fmt::Write;
+    use fmt::Write;
     let (gaps, mut words): (&[u32], &[u32]) = match input {
         Input::Text(_) => unreachable!("only structured programs are materialized"),
         Input::Program(_) => (&[], &[]),

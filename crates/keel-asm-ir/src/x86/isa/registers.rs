@@ -131,127 +131,113 @@ impl Register {
         if let Some((class, number, width, high_byte)) = named {
             return Some(Self { class, number, width, high_byte });
         }
-        if let Some(rest) = s.strip_prefix("r") {
-            if let Some(number) = rest.strip_suffix("b") {
-                if let Ok(number) = number.parse::<u8>() {
-                    if matches!(number, 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15) {
-                        return Some(Self { class: RegisterClass::Gpr, number, width: 8, high_byte: false });
-                    }
-                }
+        if let Some(rest) = s.strip_prefix("r")
+            && let Some(number) = rest.strip_suffix("b")
+            && let Ok(number) = number.parse::<u8>()
+            && matches!(number, 8..=15)
+        {
+                return Some(Self { class: RegisterClass::Gpr, number, width: 8, high_byte: false });
+        }
+        if let Some(rest) = s.strip_prefix("r")
+            && let Some(number) = rest.strip_suffix("w")
+            && let Ok(number) = number.parse::<u8>()
+            && matches!(number, 8..=15)
+        {
+                return Some(Self { class: RegisterClass::Gpr, number, width: 16, high_byte: false });
+        }
+        if let Some(rest) = s.strip_prefix("r")
+            && let Some(number) = rest.strip_suffix("d")
+            && let Ok(number) = number.parse::<u8>()
+            && matches!(number, 8..=15)
+        {
+                return Some(Self { class: RegisterClass::Gpr, number, width: 32, high_byte: false });
+        }
+        if let Some(rest) = s.strip_prefix("r")
+            && let Some(number) = rest.strip_suffix("")
+            && let Ok(number) = number.parse::<u8>()
+            && matches!(number, 8..=15)
+        {
+                return Some(Self { class: RegisterClass::Gpr, number, width: 64, high_byte: false });
+        }
+        if let Some(rest) = s.strip_prefix("xmm")
+            && let Some(number) = rest.strip_suffix("")
+            && let Ok(number) = number.parse::<u8>()
+            && number < 32
+        {
+                return Some(Self { class: RegisterClass::Xmm, number, width: 128, high_byte: false });
+        }
+        if let Some(rest) = s.strip_prefix("mm")
+            && let Some(number) = rest.strip_suffix("")
+        {
+            if number.len() != 1 {
+                return None;
+            }
+            if let Ok(number) = number.parse::<u8>()
+                && number < 8
+            {
+                return Some(Self { class: RegisterClass::Mmx, number, width: 64, high_byte: false });
             }
         }
-        if let Some(rest) = s.strip_prefix("r") {
-            if let Some(number) = rest.strip_suffix("w") {
-                if let Ok(number) = number.parse::<u8>() {
-                    if matches!(number, 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15) {
-                        return Some(Self { class: RegisterClass::Gpr, number, width: 16, high_byte: false });
-                    }
-                }
+        if let Some(rest) = s.strip_prefix("ymm")
+            && let Some(number) = rest.strip_suffix("")
+            && let Ok(number) = number.parse::<u8>()
+            && number < 32
+        {
+                return Some(Self { class: RegisterClass::Ymm, number, width: 256, high_byte: false });
+        }
+        if let Some(rest) = s.strip_prefix("st(")
+            && let Some(number) = rest.strip_suffix(")")
+        {
+            if number.len() != 1 {
+                return None;
+            }
+            if let Ok(number) = number.parse::<u8>()
+                && number < 8
+            {
+                return Some(Self { class: RegisterClass::X87, number, width: 80, high_byte: false });
             }
         }
-        if let Some(rest) = s.strip_prefix("r") {
-            if let Some(number) = rest.strip_suffix("d") {
-                if let Ok(number) = number.parse::<u8>() {
-                    if matches!(number, 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15) {
-                        return Some(Self { class: RegisterClass::Gpr, number, width: 32, high_byte: false });
-                    }
-                }
+        if let Some(rest) = s.strip_prefix("cr")
+            && let Some(number) = rest.strip_suffix("")
+        {
+            if number.len() != 1 {
+                return None;
+            }
+            if let Ok(number) = number.parse::<u8>()
+                && matches!(number, 0 | 2 | 3 | 4 | 8)
+            {
+                return Some(Self { class: RegisterClass::Control, number, width: 64, high_byte: false });
             }
         }
-        if let Some(rest) = s.strip_prefix("r") {
-            if let Some(number) = rest.strip_suffix("") {
-                if let Ok(number) = number.parse::<u8>() {
-                    if matches!(number, 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15) {
-                        return Some(Self { class: RegisterClass::Gpr, number, width: 64, high_byte: false });
-                    }
-                }
+        if let Some(rest) = s.strip_prefix("dr")
+            && let Some(number) = rest.strip_suffix("")
+        {
+            if number.len() != 1 {
+                return None;
+            }
+            if let Ok(number) = number.parse::<u8>()
+                && number < 8
+            {
+                return Some(Self { class: RegisterClass::Debug, number, width: 64, high_byte: false });
             }
         }
-        if let Some(rest) = s.strip_prefix("xmm") {
-            if let Some(number) = rest.strip_suffix("") {
-                if let Ok(number) = number.parse::<u8>() {
-                    if number < 32 {
-                        return Some(Self { class: RegisterClass::Xmm, number, width: 128, high_byte: false });
-                    }
-                }
-            }
+        if let Some(rest) = s.strip_prefix("zmm")
+            && let Some(number) = rest.strip_suffix("")
+            && let Ok(number) = number.parse::<u8>()
+            && number < 32
+        {
+                return Some(Self { class: RegisterClass::Zmm, number, width: 512, high_byte: false });
         }
-        if let Some(rest) = s.strip_prefix("mm") {
-            if let Some(number) = rest.strip_suffix("") {
-                if number.len() != 1 {
-                    return None;
-                }
-                if let Ok(number) = number.parse::<u8>() {
-                    if number < 8 {
-                        return Some(Self { class: RegisterClass::Mmx, number, width: 64, high_byte: false });
-                    }
-                }
+        if let Some(rest) = s.strip_prefix("k")
+            && let Some(number) = rest.strip_suffix("")
+        {
+            if number.len() != 1 {
+                return None;
             }
-        }
-        if let Some(rest) = s.strip_prefix("ymm") {
-            if let Some(number) = rest.strip_suffix("") {
-                if let Ok(number) = number.parse::<u8>() {
-                    if number < 32 {
-                        return Some(Self { class: RegisterClass::Ymm, number, width: 256, high_byte: false });
-                    }
-                }
-            }
-        }
-        if let Some(rest) = s.strip_prefix("st(") {
-            if let Some(number) = rest.strip_suffix(")") {
-                if number.len() != 1 {
-                    return None;
-                }
-                if let Ok(number) = number.parse::<u8>() {
-                    if number < 8 {
-                        return Some(Self { class: RegisterClass::X87, number, width: 80, high_byte: false });
-                    }
-                }
-            }
-        }
-        if let Some(rest) = s.strip_prefix("cr") {
-            if let Some(number) = rest.strip_suffix("") {
-                if number.len() != 1 {
-                    return None;
-                }
-                if let Ok(number) = number.parse::<u8>() {
-                    if matches!(number, 0 | 2 | 3 | 4 | 8) {
-                        return Some(Self { class: RegisterClass::Control, number, width: 64, high_byte: false });
-                    }
-                }
-            }
-        }
-        if let Some(rest) = s.strip_prefix("dr") {
-            if let Some(number) = rest.strip_suffix("") {
-                if number.len() != 1 {
-                    return None;
-                }
-                if let Ok(number) = number.parse::<u8>() {
-                    if number < 8 {
-                        return Some(Self { class: RegisterClass::Debug, number, width: 64, high_byte: false });
-                    }
-                }
-            }
-        }
-        if let Some(rest) = s.strip_prefix("zmm") {
-            if let Some(number) = rest.strip_suffix("") {
-                if let Ok(number) = number.parse::<u8>() {
-                    if number < 32 {
-                        return Some(Self { class: RegisterClass::Zmm, number, width: 512, high_byte: false });
-                    }
-                }
-            }
-        }
-        if let Some(rest) = s.strip_prefix("k") {
-            if let Some(number) = rest.strip_suffix("") {
-                if number.len() != 1 {
-                    return None;
-                }
-                if let Ok(number) = number.parse::<u8>() {
-                    if number < 8 {
-                        return Some(Self { class: RegisterClass::Mask, number, width: 64, high_byte: false });
-                    }
-                }
+            if let Ok(number) = number.parse::<u8>()
+                && number < 8
+            {
+                return Some(Self { class: RegisterClass::Mask, number, width: 64, high_byte: false });
             }
         }
         None
@@ -259,7 +245,7 @@ impl Register {
     /// Structural validity, independent of instruction/address restrictions.
     pub fn is_valid(self) -> bool {
         match self.class {
-            RegisterClass::Gpr => (self.number < 16) && (matches!(self.width, 8 | 16 | 32 | 64)) && ((!self.high_byte || (matches!(self.number, 4 | 5 | 6 | 7) && self.width == 8))),
+            RegisterClass::Gpr => (self.number < 16) && (matches!(self.width, 8 | 16 | 32 | 64)) && (!self.high_byte || (matches!(self.number, 4..=7) && self.width == 8)),
             RegisterClass::Xmm => (self.number < 32) && (self.width == 128) && (!self.high_byte),
             RegisterClass::Mmx => (self.number < 8) && (self.width == 64) && (!self.high_byte),
             RegisterClass::Ymm => (self.number < 32) && (self.width == 256) && (!self.high_byte),

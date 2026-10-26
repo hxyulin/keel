@@ -127,7 +127,7 @@ impl Register {
                 w.write_str(")")
             }
             RegisterClass::Segment => {
-                if !((self.number < 6)) {
+                if !(self.number < 6) {
                     return Err(fmt::Error);
                 }
                 w.write_str(match self.number {
