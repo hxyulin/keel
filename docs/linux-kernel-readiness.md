@@ -2,6 +2,12 @@
 
 Audit date: 2026-10-26. Keel source: `2da2e6a6`.
 
+Follow-up: the [minimal 64-bit kernel fixture](../suite/linux-kernel/README.md)
+now pins and boots a reference configuration and captures actual configured
+inputs. Its [results](../suite/linux-kernel/audit-summary.json) supersede the
+synthetic probes below as the implementation work list. The following text
+records the original preliminary audit, before that configured build.
+
 Linux is a useful integration target. Completing its instruction inventory
 alone will not make Keel a kernel compiler. The first blocking areas are GNU
 driver compatibility, x86 inline assembly and kernel code-generation policy.

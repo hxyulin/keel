@@ -30,3 +30,6 @@
 /tools/x86-isa/evex.json linguist-vendored=true
 /crates/keel-disasm/tests/generated/* linguist-generated=true
 /crates/keel-codegen/tests/generated/* linguist-generated=true
+
+# Pinned Kconfig output for the minimal 64-bit Linux fixture.
+/suite/linux-kernel/resolved.config linguist-generated=true

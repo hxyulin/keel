@@ -19,6 +19,9 @@ latest preceding definition and `Nf` to the next definition in source order.
 Undefined references are errors, including references in data directives.
 Internal local names do not become external undefined symbols. Numeric tokens
 inside strings, integer literals and ordinary symbol names keep their meaning.
+Existing expression limits still apply: parenthesized symbol terms such as
+`(1b)` and deferred `.skip` expressions remain separate gaps found in the
+configured Linux corpus.
 
 The section stack stores section identities, including unique sections.
 `.previous` swaps the current and previous section. Temporary section switches

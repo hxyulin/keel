@@ -1,0 +1,8 @@
+{
+  "version": "6.12",
+  "tag": "v6.12",
+  "commit": "adc218676eef25575469234709c2d87185ca223a",
+  "archive_url": "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.12.tar.xz",
+  "archive_sha256": "b1a2562be56e42afb3f8489d4c2a7ac472ac23098f1ef1c1e40da601f54625eb",
+  "makefile_sha256": "96ec6a92139d7af01fa3c4be4f8f521f86f48d249861c578dc00f4ff38df1b61"
+}
