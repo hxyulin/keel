@@ -390,11 +390,13 @@ pub struct Member<'a> {
 }
 
 /// Where a bit-field is: `width` bits from bit `shift` of the storage unit
-/// of its declared type at the member's offset.
+/// of its declared type at the member's offset, or a bounded byte span when packed.
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub struct BitField {
     pub shift: u32,
     pub width: u32,
+    /// Access only the bytes containing the field, rather than its declared unit.
+    pub bytewise: bool,
 }
 
 pub const INT: Ty<'static> = Ty::Int(IntKind::Int);
@@ -964,9 +966,8 @@ pub type StructField<'a> = (
 /// Lays out a struct or union's members, including alignment and packing,
 /// returning the members with their offsets, the size and the alignment.
 /// `max_align` caps member alignment for `#pragma pack(n)`.
-/// Bit-fields follow AAPCS64: a bit-field goes in the next bits that do not
-/// cross a boundary of its declared type's size, and a zero-width one
-/// aligns the next to its type.
+/// Ordinary bit-fields stay within a declared-type container. Packed fields
+/// may cross containers; zero-width fields align the next field to their type.
 pub fn layout_struct<'a>(
     types: &Types,
     typedefs: &[TypedefDef<'a>],
@@ -993,7 +994,6 @@ pub fn layout_struct<'a>(
     let mut bit: u64 = 0;
     let mut size: u64 = 0;
     let mut align: u64 = 1;
-    let mut packed_accesses = Vec::new();
     for (name, ty, sugar, width, requested_align, packed) in fields {
         let natural = sugar
             .alignment(typedefs)
@@ -1024,18 +1024,15 @@ pub fn layout_struct<'a>(
                     bit = bit.next_multiple_of(falign * 8);
                 }
                 let unit_bits = fsize * 8;
-                if bit / unit_bits != (bit + u64::from(w) - 1) / unit_bits {
-                    if packed {
-                        return Err(
-                            "packed bit-fields requiring cross-container accesses are not supported",
-                        );
-                    }
+                let bytewise = packed || max_align.is_some();
+                if !bytewise && bit / unit_bits != (bit + u64::from(w) - 1) / unit_bits {
                     bit = bit.next_multiple_of(unit_bits);
                 }
-                let offset = bit / unit_bits * fsize;
-                if packed {
-                    packed_accesses.push((offset, fsize));
-                }
+                let offset = if bytewise {
+                    bit / 8
+                } else {
+                    bit / unit_bits * fsize
+                };
                 members.push(Member {
                     name,
                     ty,
@@ -1045,6 +1042,7 @@ pub fn layout_struct<'a>(
                     bits: Some(BitField {
                         shift: (bit - offset * 8) as u32,
                         width: w,
+                        bytewise,
                     }),
                 });
                 bit += u64::from(w);
@@ -1072,12 +1070,6 @@ pub fn layout_struct<'a>(
     let size = size.next_multiple_of(align);
     if types.layout != CDataLayout::NATIVE_LP64 && size > u32::MAX as u64 {
         return Err("non-native record storage exceeds wasm32 bounds");
-    }
-    if packed_accesses
-        .iter()
-        .any(|(offset, width)| offset + width > size)
-    {
-        return Err("packed bit-fields requiring partial-container accesses are not supported");
     }
     for m in &members {
         let natural = types.align(&m.ty);

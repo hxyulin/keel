@@ -1089,11 +1089,14 @@ impl<'p> Gen<'p> {
                     match value {
                         Const::Int(v) => match bits {
                             Some(bf) => {
-                                let mask = (1u128 << bf.width) - 1;
-                                let mut unit = read_le(&bytes[offset..offset + width]);
-                                unit &= !(mask << bf.shift);
-                                unit |= (v as u128 & mask) << bf.shift;
-                                write_le(&mut bytes[offset..offset + width], unit);
+                                // Write the field itself, including a possible ninth byte for
+                                // an unaligned 64-bit field. Never touch its declared unit's tail.
+                                for bit in 0..bf.width {
+                                    let target = bf.shift + bit;
+                                    let byte = &mut bytes[offset + (target / 8) as usize];
+                                    let mask = 1 << (target % 8);
+                                    *byte = (*byte & !mask) | (((v as u128 >> bit) as u8 & 1) * mask);
+                                }
                             }
                             None => {
                                 let v = if expr.ty.is_signed() {
@@ -1199,13 +1202,6 @@ impl<'p> Gen<'p> {
             }),
         })
     }
-}
-
-fn read_le(bytes: &[u8]) -> u128 {
-    bytes
-        .iter()
-        .rev()
-        .fold(0u128, |acc, &b| (acc << 8) | u128::from(b))
 }
 
 fn write_le(bytes: &mut [u8], v: u128) {
@@ -3502,6 +3498,9 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 signed,
             } => {
                 let bits = i64::from(unit.bytes().unwrap() * 8);
+                if field.bytewise {
+                    return self.load_packed_bits(addr, unit, field, signed, flags);
+                }
                 let word = self.b.ins().load_with_flags(unit, addr, flags);
                 let left = bits - i64::from(field.shift) - i64::from(field.width);
                 // A field in the top bits needs no shift up.
@@ -3539,7 +3538,11 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 field,
                 ..
             } => {
-                let mask = ((1u128 << field.width) - 1) << field.shift;
+                if field.bytewise {
+                    self.store_packed_bits(addr, unit, field, v, flags);
+                    return;
+                }
+                let mask = (u128::MAX >> (128 - field.width)) << field.shift;
                 let word = self.b.ins().load_with_flags(unit, addr, flags);
                 let keep = self.b.ins().iconst(unit, !mask as i64);
                 let kept = self.b.ins().and(word, keep);
@@ -3555,6 +3558,93 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 let merged = self.b.ins().or(kept, new);
                 self.b.ins().store_with_flags(merged, addr, flags);
             }
+        }
+    }
+
+    /// Assemble only the field's bytes, keeping all shifts below the value width.
+    fn load_packed_bits(
+        &mut self,
+        addr: Value,
+        unit: Type,
+        field: BitField,
+        signed: bool,
+        flags: MemoryFlags,
+    ) -> Value {
+        let mut value = self.b.ins().iconst(unit, 0);
+        let mut consumed = 0;
+        while consumed < field.width {
+            let position = field.shift + consumed;
+            let shift = position % 8;
+            let width = (8 - shift).min(field.width - consumed);
+            let address = self.offset(addr, u64::from(position / 8));
+            let mut byte = self.b.ins().load_with_flags(Type::I8, address, flags);
+            if shift != 0 {
+                let amount = self.b.ins().iconst(Type::I8, i64::from(shift));
+                byte = self.b.ins().ushr(byte, amount);
+            }
+            if width < 8 {
+                let mask = self.b.ins().iconst(Type::I8, (1 << width) - 1);
+                byte = self.b.ins().and(byte, mask);
+            }
+            let mut part = if unit == Type::I8 {
+                byte
+            } else {
+                self.b.ins().convert(ConvertOp::Uext, unit, byte)
+            };
+            if consumed != 0 {
+                let amount = self.b.ins().iconst(unit, i64::from(consumed));
+                part = self.b.ins().shl(part, amount);
+            }
+            value = self.b.ins().or(value, part);
+            consumed += width;
+        }
+        let extension = unit.bytes().unwrap() * 8 - field.width;
+        if signed && extension != 0 {
+            let amount = self.b.ins().iconst(unit, i64::from(extension));
+            let shifted = self.b.ins().shl(value, amount);
+            value = self.b.ins().sshr(shifted, amount);
+        }
+        value
+    }
+
+    /// Preserve neighboring bits without reading or writing outside the field's span.
+    fn store_packed_bits(
+        &mut self,
+        addr: Value,
+        unit: Type,
+        field: BitField,
+        value: Value,
+        flags: MemoryFlags,
+    ) {
+        let mut consumed = 0;
+        while consumed < field.width {
+            let position = field.shift + consumed;
+            let shift = position % 8;
+            let width = (8 - shift).min(field.width - consumed);
+            let address = self.offset(addr, u64::from(position / 8));
+            let mut part = value;
+            if consumed != 0 {
+                let amount = self.b.ins().iconst(unit, i64::from(consumed));
+                part = self.b.ins().ushr(part, amount);
+            }
+            if unit != Type::I8 {
+                part = self.b.ins().convert(ConvertOp::Trunc, Type::I8, part);
+            }
+            if shift != 0 {
+                let amount = self.b.ins().iconst(Type::I8, i64::from(shift));
+                part = self.b.ins().shl(part, amount);
+            }
+            if width != 8 {
+                let mask = ((1i64 << width) - 1) << shift;
+                let bits = self.b.ins().iconst(Type::I8, mask);
+                part = self.b.ins().and(part, bits);
+                let old = self.b.ins().load_with_flags(Type::I8, address, flags);
+                let keep = self.b.ins().iconst(Type::I8, !mask);
+                let kept = self.b.ins().and(old, keep);
+                part = self.b.ins().or(kept, part);
+            }
+            self.b.ins().store_with_flags(part, address, flags);
+            consumed += width;
         }
     }
 

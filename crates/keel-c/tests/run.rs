@@ -923,14 +923,6 @@ fn rejected() {
             "error: builtin takes 0 argument(s)",
         ),
         (
-            "struct __attribute__((packed)) S { unsigned x:3; };",
-            "error: packed bit-fields requiring partial-container accesses are not supported",
-        ),
-        (
-            "struct __attribute__((packed)) S { unsigned x:31; unsigned y:2; };",
-            "error: packed bit-fields requiring cross-container accesses are not supported",
-        ),
-        (
             "struct __attribute__((packed)) S { char c; _Atomic int x; };",
             "error: unaligned atomic members are not supported",
         ),
