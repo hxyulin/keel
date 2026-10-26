@@ -389,3 +389,8 @@ full upstream source passed. Logs are `/tmp/keel-evex-workspace.log`,
 `/tmp/keel-evex-check.log`, `/tmp/keel-evex-python.log` and
 `/tmp/keel-evex-upstream.log`. This is encoding/transport evidence for EVEX;
 no native AVX-512 execution qualification is claimed.
+
+GNU AT&T aliases can select fixed identities as well as scalar identities.
+`pushf` and `popf` select the existing 64-bit `Pushfq`/`Popfq` forms in long
+mode. Explicit word spellings retain their operand-size prefixes; no 32-bit
+flags-stack form is enabled in long mode. The mappings live in `att-rules.json`.

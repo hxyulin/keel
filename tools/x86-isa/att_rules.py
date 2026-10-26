@@ -13,6 +13,7 @@ def generate(schema, identities, core, adapters):
     domains = {
         'baseline': {r['variant'] for r in identities['baseline'] if 'payload' not in r},
         'core': {r['variant'] for r in core if 'fields' not in r},
+        'fixed': {r['variant'] for r in adapters['identities']['fixed']},
         'v2': {r['variant'] for r in adapters['identities']['v2']},
         'v3': {r['variant'] for r in adapters['identities']['v3']},
         'conditions': {'Cmovcc', 'Setcc', 'Jcc'},

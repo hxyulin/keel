@@ -21,9 +21,9 @@ class AttRuleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, message):
             att_rules.generate(schema, *self.args)
 
-    def test_original_rule_membership_and_widths(self):
+    def test_rule_membership_and_widths(self):
         digest = hashlib.sha256(json.dumps(self.schema, sort_keys=True).encode()).hexdigest()
-        self.assertEqual(digest, '5da79f96bf0b60d08e7d7aa5f39bbd94ae9311791ff61d421ccafb5046ce4f98')
+        self.assertEqual(digest, '56f7d58f305f834d020036ebd142ad4e5d353bd8a2216bf8b1fdec35439288e1')
         att_rules.generate(self.schema, *self.args)
 
     def test_unknown_groups_and_opcodes_are_rejected(self):

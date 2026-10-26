@@ -82,6 +82,8 @@ fn alias(name: &str) -> Option<Opcode> {
         "cltq" => Some(Opcode::Cdqe),
         "cltd" => Some(Opcode::Cdq),
         "cqto" => Some(Opcode::Cqo),
+        "pushf" => Some(Opcode::Fixed(FixedOpcode::Pushfq)),
+        "popf" => Some(Opcode::Fixed(FixedOpcode::Popfq)),
         _ => None,
     }
 }

@@ -305,6 +305,16 @@
     {
       "name": "cqto",
       "opcode": "Cqo"
+    },
+    {
+      "name": "pushf",
+      "opcode": "Pushfq",
+      "group": "fixed"
+    },
+    {
+      "name": "popf",
+      "opcode": "Popfq",
+      "group": "fixed"
     }
   ],
   "integer_conversions": [
