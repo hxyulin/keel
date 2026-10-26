@@ -11,6 +11,9 @@ The exact adapter preserves the field constraint through Intel formatting
 keeps its full-width `R_X86_64_64` relocation, and `movl` keeps unsigned
 `R_X86_64_32`. A signed symbolic form does not silently widen when a resolved
 value is outside its range; use the full-width spelling when needed.
+Previously defined absolute names can instead reduce to numeric operands during
+GNU preprocessing, allowing the ordinary numeric MOV selection. For example,
+an absolute `0x80000000` selects the full-width encoding, matching GNU as.
 
 Sign-extended fields recognize an unsigned 64-bit spelling of a negative
 machine word, such as `0xffffffff80000000`. This normalization applies only

@@ -73,6 +73,10 @@ python3 suite/linux-kernel/audit.py probe \
   --build "$kernel_audit_root/reference-out/build" \
   --manifest "$kernel_audit_root/reference-out/inputs.json" \
   --keel "$PWD/target/debug/keel" --out "$kernel_audit_root/keel-probes"
+python3 suite/linux-kernel/audit.py compare \
+  --build "$kernel_audit_root/reference-out/build" \
+  --probe-out "$kernel_audit_root/keel-probes" \
+  --out "$kernel_audit_root/gnu-comparison"
 ```
 
 Capture joins GCC's saved `.i`/`.s` files with Kbuild's `.o.cmd` commands. It
@@ -101,6 +105,13 @@ still needs an assembler input-access contract; the audit does not inline them.
 Keel's unsupported Kbuild flags are not forwarded or silently accepted. The C
 probe uses its ordinary userspace code-generation mode. Accepted objects are
 not yet checked by objtool or linked into the reference image.
+
+The `compare` command assembles each accepted assembly input with GNU as and
+uses the existing `compiler_asm_compat/objinspect.py` normalizer. GNU relocation
+relaxation is disabled to match the current assembler contract. It retains
+strict section/symbol differences. Shared-section and public-symbol metrics are
+additional diagnostics; they do not excuse missing sections or establish whole
+object equivalence. Use `--gnu-as` to select the reference assembler.
 
 Generated build trees, saved inputs, objects and raw logs stay outside Git.
 Commit only reviewed configuration, tools and compact reports. The preceding
@@ -134,7 +145,7 @@ acceptance counts, not instruction support percentages or correctness verdicts.
 The capture and all probes preserve the original inputs. All C failures in this
 run occur at assembly constructs, so they mask further frontend/backend gaps.
 
-The next assembler work is now concrete:
+At this initial audit, the assembler work list was:
 
 1. Preserve signed 32-bit symbolic immediate relocations for AT&T `movq`.
    The current instruction model deliberately rejects these, which dominates
@@ -159,12 +170,51 @@ commands request an 8-byte preferred stack boundary, no SIMD/red zone, kernel
 addressing and specific optimizer policies. An ordinary SysV userspace target
 and instruction feature flags do not establish those contracts.
 
-Validation at this checkpoint: the full workspace passed **2,736 tests**, zero
+Validation of the initial pin: the full workspace passed **2,736 tests**, zero
 failed and 13 ignored across 503 reported groups. Workspace check, both generator
 freshness checks, the three audit harness tests, scoped Rust formatting and
 pin/count/document checks passed. Full workspace log:
 `/tmp/keel-linux64-workspace.log`. These checks do not turn compile acceptance
 into execution qualification of Keel-generated kernel objects.
+
+## Signed immediates and macro/expression follow-up
+
+The [follow-up report](audit-followup.json) uses the same config and unchanged
+input hashes. Assembly acceptance grows from **112 to 259** with signed
+immediates, then to **326 of 506** with the macro/expression changes. No input
+loses acceptance. All 112 previously accepted assembly objects remain byte-for-
+byte identical; all 259 accepted at the signed-immediate checkpoint also remain
+identical after macro integration. C stays at 3 accepted and 481 rejected at
+inline/file-scope assembly.
+
+The [signed-immediate adapter](../../docs/x86-signed-symbolic-immediates.md)
+reuses existing generated forms. [GNU language support](../../docs/x86-gnu-assembly-language.md)
+now includes defaults, keyword/whitespace arguments, iteration, string and
+absolute-symbol conditionals, grouped expressions and deferred alternatives
+padding. Expanded arguments are scanned again for labels/statements and nested
+macros. GNU integer-field aliases emitted by macros are accepted.
+
+GNU successfully assembles all 326 accepted inputs, but the strict object
+comparison reports zero complete matches, just as it does for the original 112.
+The GNU ISA-used note is absent from every Keel object; empty default sections,
+NOP padding, layout, symbol retention, relocation types and unwind section types
+also differ in parts of the corpus. Shared sections have matching bytes in 115
+files, relocations in 281 and layout in 312; public symbols match in 311. These
+separate measurements are not complete-object or runtime qualification.
+
+The remaining 180 assembly failures first hit `pushf` aliases (100), standalone
+prefixes (42), whitespace `.type` syntax (15), optional instruction bindings,
+register aliases, `.incbin` dependencies and operand-matcher limits. First errors
+still hide later gaps. Register aliases in `vgetrandom-chacha` and the documented
+bounded macro/expression cases remain explicit errors. Prefix/adapter and ELF
+syntax work precede the x86 inline-assembly stage.
+
+Validation of this follow-up passed **2,752 workspace tests**, zero failures
+and 13 ignored across 505 reported groups. The assembler-IR/assembler/disassembler
+packages passed 489 tests. Workspace check, all 98 generator tests, both
+freshness checks, the three audit harness tests, scoped Rust formatting and
+pin/count/link/diff checks passed. Final workspace log:
+`/tmp/keel-gnu-final-workspace.log`.
 
 ```sh
 python3 -m unittest discover -s suite/linux-kernel -p 'test_*.py'

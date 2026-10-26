@@ -1,0 +1,411 @@
+{
+  "schema": 1,
+  "date": "2026-10-26",
+  "implementation_checkpoint": "2804a7e93bf97d72fec8ffe9e882f86b19df62a6",
+  "implementation_commits": [
+    "8a59e9ae",
+    "08302056",
+    "255257b2",
+    "2804a7e9"
+  ],
+  "config_sha256": "af7dd9b29c4ac472ffe32d338821425912fe92ad62b30281ef1356947930e129",
+  "keel_binary_sha256": "f8c0eaf1119932eb7ba8a9c7a5577ff38c42788b1ae06dfbb282009faabd725e",
+  "baseline_report": "audit-summary.json",
+  "source_manifest_sha256": "908006c3e46761f50342cf6556fcd86a05d7edf51cf2e85de449d19cfd2c5135",
+  "source_inputs_unchanged": true,
+  "probe_options": {
+    "target": "x86_64-unknown-linux-gnu",
+    "c": [
+      "cc",
+      "--emit-object"
+    ],
+    "asm": [
+      "asm",
+      "--x86-syntax",
+      "att",
+      "--cpu-level",
+      "v3"
+    ],
+    "working_directory": "Kbuild output directory",
+    "kernel_codegen_contract": false,
+    "keel_objects_linked_or_run": false
+  },
+  "assembly_stages": [
+    {
+      "name": "original pinned audit",
+      "accepted": 112,
+      "total": 506
+    },
+    {
+      "name": "signed immediates",
+      "accepted": 259,
+      "total": 506
+    },
+    {
+      "name": "macro/expression integration",
+      "accepted": 326,
+      "total": 506
+    }
+  ],
+  "prior_accepted_assembly_objects": {
+    "baseline": {
+      "objects": 112,
+      "byte_identical": 112,
+      "acceptance_regressions": 0
+    },
+    "signed_step": {
+      "objects": 259,
+      "byte_identical": 259,
+      "acceptance_regressions": 0
+    }
+  },
+  "results": {
+    "c": {
+      "total": 484,
+      "accepted": 3,
+      "rejected": 481,
+      "categories": [
+        {
+          "category": "x86-inline-asm",
+          "count": 476,
+          "examples": [
+            {
+              "path": "arch/x86/entry/common.i",
+              "diagnostic": "keel: <source>/arch/x86/include/asm/asm.h:120:2: error: C inline assembly requires the AArch64 backend; x86 inline assembly is not supported",
+              "source_line": ""
+            },
+            {
+              "path": "arch/x86/entry/syscall_64.i",
+              "diagnostic": "keel: <source>/arch/x86/include/asm/asm.h:120:2: error: C inline assembly requires the AArch64 backend; x86 inline assembly is not supported",
+              "source_line": ""
+            }
+          ]
+        },
+        {
+          "category": "file-scope-asm",
+          "count": 5,
+          "examples": [
+            {
+              "path": "kernel/time/timecounter.i",
+              "diagnostic": "keel: <source>/kernel/time/timecounter.c:18:228: error: expected a type, found `asm`",
+              "source_line": ""
+            },
+            {
+              "path": "lib/bcd.i",
+              "diagnostic": "keel: <source>/lib/bcd.c:9:196: error: expected a type, found `asm`",
+              "source_line": ""
+            }
+          ]
+        },
+        {
+          "category": "accepted",
+          "count": 3,
+          "examples": [
+            {
+              "path": "arch/x86/kernel/cpu/capflags.i",
+              "diagnostic": "",
+              "source_line": ""
+            },
+            {
+              "path": "arch/x86/lib/misc.i",
+              "diagnostic": "",
+              "source_line": ""
+            }
+          ]
+        }
+      ]
+    },
+    "asm": {
+      "total": 506,
+      "accepted": 326,
+      "rejected": 180,
+      "categories": [
+        {
+          "category": "accepted",
+          "count": 326,
+          "examples": [
+            {
+              "path": "arch/x86/entry/common.s",
+              "diagnostic": "",
+              "source_line": ""
+            },
+            {
+              "path": "arch/x86/entry/syscall_64.s",
+              "diagnostic": "",
+              "source_line": ""
+            }
+          ]
+        },
+        {
+          "category": "instruction-binding:pushf",
+          "count": 100,
+          "examples": [
+            {
+              "path": "arch/x86/events/intel/core.s",
+              "diagnostic": "keel: <build>/arch/x86/events/intel/core.s: line 559: unsupported AT&T instruction `pushf`",
+              "source_line": "\tpushf ; pop %r9"
+            },
+            {
+              "path": "arch/x86/kernel/alternative.s",
+              "diagnostic": "keel: <build>/arch/x86/kernel/alternative.s: line 1200: unsupported AT&T instruction `pushf`",
+              "source_line": "\tpushf ; pop -96(%rbp)"
+            }
+          ]
+        },
+        {
+          "category": "standalone-prefix",
+          "count": 42,
+          "examples": [
+            {
+              "path": "arch/x86/events/amd/core.s",
+              "diagnostic": "keel: <build>/arch/x86/events/amd/core.s: line 548: unsupported AT&T instruction ``",
+              "source_line": "\trep; bsf %rbx,%rbx"
+            },
+            {
+              "path": "arch/x86/events/core.s",
+              "diagnostic": "keel: <build>/arch/x86/events/core.s: line 1234: unsupported AT&T instruction ``",
+              "source_line": "\trep; bsf %rcx,%rcx"
+            }
+          ]
+        },
+        {
+          "category": "assembler-directive:.type",
+          "count": 15,
+          "examples": [
+            {
+              "path": "arch/x86/entry/entry.s",
+              "diagnostic": "keel: <build>/arch/x86/entry/entry.s: line 708: unsupported ELF directive `.type`",
+              "source_line": ".type entry_ibpb STT_FUNC ; .set .L__sym_size_entry_ibpb, .-entry_ibpb ; .size entry_ibpb, .L__sym_size_entry_ibpb"
+            },
+            {
+              "path": "arch/x86/lib/clear_page_64.s",
+              "diagnostic": "keel: <build>/arch/x86/lib/clear_page_64.s: line 111: unsupported ELF directive `.type`",
+              "source_line": ".type clear_page_rep STT_FUNC ; .set .L__sym_size_clear_page_rep, .-clear_page_rep ; .size clear_page_rep, .L__sym_size_clear_page_rep"
+            }
+          ]
+        },
+        {
+          "category": "instruction-binding:rdtscp",
+          "count": 5,
+          "examples": [
+            {
+              "path": "arch/x86/entry/vdso/vclock_gettime.s",
+              "diagnostic": "keel: <build>/arch/x86/entry/vdso/vclock_gettime.s: line 65: unsupported AT&T instruction `rdtscp`",
+              "source_line": "\trdtscp"
+            },
+            {
+              "path": "arch/x86/events/msr.s",
+              "diagnostic": "keel: <build>/arch/x86/events/msr.s: line 248: unsupported AT&T instruction `rdtscp`",
+              "source_line": "\trdtscp"
+            }
+          ]
+        },
+        {
+          "category": "operand-matcher",
+          "count": 3,
+          "examples": [
+            {
+              "path": "arch/x86/kernel/cpu/bugs.s",
+              "diagnostic": "keel: <build>/arch/x86/kernel/cpu/bugs.s: line 1681: unsupported generated operands for And: [Memory(Memory { width: 8, base: Some(Register { class: Gpr, number: 3, width: 64, high_byte: false }), index: None, scale: 1, segment: None, displacement: Address { expression: Expression { add: None, subtract: None, constant: 720 }, modifier: None } }), Immediate(Address { expression: Expression { add: None, subtract: None, constant: -129 }, modifier: None })]",
+              "source_line": "\tandb $-129,720(%rbx)"
+            },
+            {
+              "path": "arch/x86/kernel/head64.s",
+              "diagnostic": "keel: <build>/arch/x86/kernel/head64.s: line 601: unsupported generated operands for Mov: [Register(Register { class: Segment, number: 3, width: 16, high_byte: false }), Register(Register { class: Gpr, number: 0, width: 32, high_byte: false })]",
+              "source_line": "\tmovl %eax, %ds"
+            }
+          ]
+        },
+        {
+          "category": "assembler-directive:.incbin",
+          "count": 2,
+          "examples": [
+            {
+              "path": "arch/x86/realmode/rmpiggy.s",
+              "diagnostic": "keel: <build>/arch/x86/realmode/rmpiggy.s: line 129: unsupported ELF directive `.incbin`",
+              "source_line": " .incbin \"arch/x86/realmode/rm/realmode.bin\""
+            },
+            {
+              "path": "usr/initramfs_data.s",
+              "diagnostic": "keel: <build>/usr/initramfs_data.s: line 18: unsupported ELF directive `.incbin`",
+              "source_line": ".incbin \"usr/initramfs_inc_data\""
+            }
+          ]
+        },
+        {
+          "category": "instruction-binding:fxrstorq",
+          "count": 2,
+          "examples": [
+            {
+              "path": "arch/x86/kernel/fpu/core.s",
+              "diagnostic": "keel: <build>/arch/x86/kernel/fpu/core.s: line 14: unsupported AT&T instruction `fxrstorq`",
+              "source_line": "\t1:fxrstorq (%rdi)"
+            },
+            {
+              "path": "arch/x86/kernel/fpu/signal.s",
+              "diagnostic": "keel: <build>/arch/x86/kernel/fpu/signal.s: line 30: unsupported AT&T instruction `fxrstorq`",
+              "source_line": "1: fxrstorq (%rdi)"
+            }
+          ]
+        },
+        {
+          "category": "instruction-binding:prefetchw",
+          "count": 2,
+          "examples": [
+            {
+              "path": "arch/x86/mm/fault.s",
+              "diagnostic": "keel: <build>/arch/x86/mm/fault.s: line 1182: unsupported AT&T instruction `prefetchw`",
+              "source_line": "\tprefetchw 80(%rax)"
+            },
+            {
+              "path": "mm/vmscan.s",
+              "diagnostic": "keel: <build>/mm/vmscan.s: line 650: unsupported AT&T instruction `prefetchw`",
+              "source_line": "\tprefetchw -8(%rax)"
+            }
+          ]
+        },
+        {
+          "category": "instruction-binding:rdgsbase",
+          "count": 2,
+          "examples": [
+            {
+              "path": "arch/x86/entry/entry_64.s",
+              "diagnostic": "keel: <build>/arch/x86/entry/entry_64.s: line 768: unsupported AT&T instruction `rdgsbase` (expanded at line 1307)",
+              "source_line": " rdgsbase \\save_reg"
+            },
+            {
+              "path": "arch/x86/kernel/process_64.s",
+              "diagnostic": "keel: <build>/arch/x86/kernel/process_64.s: line 78: unsupported AT&T instruction `rdgsbase`",
+              "source_line": "\trdgsbase %rax"
+            }
+          ]
+        },
+        {
+          "category": "instruction-binding:rdrand",
+          "count": 2,
+          "examples": [
+            {
+              "path": "arch/x86/kernel/cpu/rdrand.s",
+              "diagnostic": "keel: <build>/arch/x86/kernel/cpu/rdrand.s: line 26: unsupported AT&T instruction `rdrand`",
+              "source_line": "\trdrand %rsi"
+            },
+            {
+              "path": "drivers/char/random.s",
+              "diagnostic": "keel: <build>/drivers/char/random.s: line 88: unsupported AT&T instruction `rdrand`",
+              "source_line": "\trdrand %rcx"
+            }
+          ]
+        },
+        {
+          "category": "invalid symbol `*`",
+          "count": 2,
+          "examples": [
+            {
+              "path": "arch/x86/kernel/hw_breakpoint.s",
+              "diagnostic": "keel: <build>/arch/x86/kernel/hw_breakpoint.s: line 14: invalid symbol `%db0`",
+              "source_line": "\tmov %rax, %db0"
+            },
+            {
+              "path": "arch/x86/kernel/traps.s",
+              "diagnostic": "keel: <build>/arch/x86/kernel/traps.s: line 355: invalid symbol `%db7`",
+              "source_line": "\tmov %db7, %rbx"
+            }
+          ]
+        },
+        {
+          "category": "feature-policy",
+          "count": 1,
+          "examples": [
+            {
+              "path": "arch/x86/lib/usercopy_64.s",
+              "diagnostic": "keel: <build>/arch/x86/lib/usercopy_64.s: line 26: clflush requires x86 target features: clflush",
+              "source_line": "\t.byte 0x3e; clflush (%rax)"
+            }
+          ]
+        },
+        {
+          "category": "instruction-binding:invpcid",
+          "count": 1,
+          "examples": [
+            {
+              "path": "arch/x86/mm/tlb.s",
+              "diagnostic": "keel: <build>/arch/x86/mm/tlb.s: line 132: unsupported AT&T instruction `invpcid`",
+              "source_line": "\tinvpcid (%rsp), %rax"
+            }
+          ]
+        },
+        {
+          "category": "unexpected expression input `*`",
+          "count": 1,
+          "examples": [
+            {
+              "path": "arch/x86/entry/vdso/vgetrandom-chacha.s",
+              "diagnostic": "keel: <build>/arch/x86/entry/vdso/vgetrandom-chacha.s: line 150: unexpected expression input `(key)`",
+              "source_line": " movups 0x00(key),copy1"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "gnu_object_comparison": {
+    "schema": 1,
+    "config_sha256": "af7dd9b29c4ac472ffe32d338821425912fe92ad62b30281ef1356947930e129",
+    "keel_sha256": "f8c0eaf1119932eb7ba8a9c7a5577ff38c42788b1ae06dfbb282009faabd725e",
+    "gnu_as_version": "GNU assembler (GNU Binutils) 2.46",
+    "reference_flags": [
+      "--64",
+      "-mrelax-relocations=no"
+    ],
+    "note": "Unmodified accepted assembly inputs; GNU relaxation disabled to match the existing relocation contract. No objtool, link or execution of Keel objects.",
+    "total": 326,
+    "reference_failed": 0,
+    "all_equal": 0,
+    "code_data_equal": 0,
+    "shared_section_bytes_equal": 115,
+    "shared_section_relocations_equal": 281,
+    "shared_section_layout_equal": 312,
+    "public_symbols_equal": 311
+  },
+  "baseline_object_comparison": {
+    "total": 112,
+    "reference_failed": 0,
+    "all_equal": 0,
+    "code_data_equal": 0
+  },
+  "object_comparison_findings": [
+    "The strict object comparator reports no complete matches, including on the original 112 accepted inputs. It does not discard missing metadata or empty sections.",
+    "GNU emits an ISA-used .note.gnu.property note for every compared object. Keel does not. GNU also creates empty default .data/.bss sections that Keel can omit.",
+    "Sampled text differences include different valid NOP fill sequences. Other differences include layout, local/section symbol retention, PC32 versus PLT32 relocation types, and ELF unwind section types. These have not been fully qualified or normalized away.",
+    "Shared-section metrics exclude absent sections and do not establish complete object equality. Public-symbol equality is separate from local symbol and section comparisons."
+  ],
+  "remaining_macro_limits": [
+    "Register aliases assigned with .set (the vgetrandom-chacha input) are not implemented.",
+    "Conditional symbols require preceding textual absolute definitions. Forward and layout-dependent tests, and reading structured Directive::Set values during preprocessing, remain unsupported.",
+    "No variadic macros, .altmacro, .ifdef/.ifndef, .ifb/.ifnb, or register arithmetic.",
+    "Rebinding aliases referenced by pending relocation/alias/size expressions is rejected. Expressions and expansion retain documented work/size bounds."
+  ],
+  "qualification": "Compilation/assembly acceptance and finite assembler/linker oracles only. No Keel-produced kernel objects were linked into the reference kernel or executed.",
+  "validation": {
+    "source_checkpoint": "2804a7e9",
+    "workspace": {
+      "passed": 2752,
+      "failed": 0,
+      "ignored": 13,
+      "reported_groups": 505,
+      "log": "/tmp/keel-gnu-final-workspace.log"
+    },
+    "asm_ir_asm_disasm_packages": {
+      "passed": 489,
+      "failed": 0,
+      "log": "/tmp/keel-gnu-final-packages.log"
+    },
+    "workspace_check": "passed",
+    "generator_tests": 98,
+    "isa_freshness": "passed",
+    "arm_freshness": "passed",
+    "audit_harness_tests": 3,
+    "scoped_rustfmt": "passed",
+    "pin_count_links_and_diff_checks": "passed"
+  }
+}

@@ -33,3 +33,4 @@
 
 # Pinned Kconfig output for the minimal 64-bit Linux fixture.
 /suite/linux-kernel/resolved.config linguist-generated=true
+/suite/linux-kernel/audit-*.json linguist-generated=true
