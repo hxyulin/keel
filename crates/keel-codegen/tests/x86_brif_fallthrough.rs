@@ -186,7 +186,7 @@ block2:
 }
 
 #[test]
-fn no_op_block_arguments_allow_inversion_and_inline_asm_stays_rejected() {
+fn no_op_block_arguments_allow_inversion_and_inline_asm_defines_its_flags() {
     let src = "func @f(i64, i64) -> i64 {
 block0(v0: i64, v1: i64):
  brif v0, block1(v0), block2
@@ -202,16 +202,27 @@ block2:
     });
     let src = src.replace(
         "return v2",
-        "v3 = asm \"sete %b0\", \"=r\"() -> i8\n v4 = uext.i64 v3\n return v4",
+        "v3 = asm \"cmpq $0,%q1; sete %b0\", \"=r,r,~{cc}\"(v2) -> i8\n v4 = uext.i64 v3\n return v4",
     );
     let module = keel_ir::parse(&src).unwrap();
     keel_ir::verify_module(&module).unwrap();
-    assert!(
-        keel_codegen::x86_64::compile(&module)
-            .unwrap_err()
-            .to_string()
-            .contains("inline assembly not supported")
-    );
+    // The asm defines its own flags instead of observing the compiler's
+    // branch TEST. Explicit user fragments are allowed on both object routes.
+    matrix(|tier, alloc, pools| {
+        let pipeline = CodegenPipeline {
+            selector: &tier,
+            allocator: &alloc,
+        };
+        let text = keel_codegen::x86_64::compile_with_pipeline(&module, pools, &pipeline).unwrap();
+        let program =
+            keel_codegen::x86_64::compile_program_with_pipeline(&module, pools, &pipeline).unwrap();
+        assert!(text.contains("cmpq $0,"));
+        assert!(text.contains("sete %"));
+        assert_eq!(
+            keel_asm::x86::assemble_program_object(&program).unwrap(),
+            keel_asm::x86::assemble_object(&text).unwrap()
+        );
+    });
 }
 
 #[test]
