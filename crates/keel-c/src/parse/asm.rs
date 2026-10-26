@@ -95,7 +95,32 @@ impl<'a> Parser<'a> {
                             }
                             let code = &constraint[1..];
                             let code = code.strip_prefix('&').unwrap_or(code);
+                            let flag = x86 && code.starts_with("@cc");
+                            if flag && code.contains(',') {
+                                return Err(Error::new(
+                                    loc,
+                                    "flag output constraints do not allow alternatives",
+                                ));
+                            }
+                            if flag && (readwrite || constraint.starts_with("=&")) {
+                                return Err(Error::new(
+                                    loc,
+                                    "flag outputs require = without + or &",
+                                ));
+                            }
+                            let code = if x86 && matches!(code, "rm" | "mr" | "qm" | "mq" | "g") {
+                                if !asm_gpr_type(expr.ty) {
+                                    return Err(Error::new(
+                                        loc,
+                                        "asm output choices require a scalar integer or pointer; use m for other objects",
+                                    ));
+                                }
+                                "r"
+                            } else {
+                                code
+                            };
                             if !(matches!(code, "r" | "w") && (!x86 || code == "r")
+                                || flag
                                 || x86
                                     && matches!(
                                         code,
@@ -105,9 +130,11 @@ impl<'a> Parser<'a> {
                                 return Err(Error::new(
                                     loc,
                                     if x86 {
-                                        "unsupported asm output constraint (supported: r, q, a, b, c, d, S, D, m with =/+; & applies to register outputs)"
+                                        format!(
+                                            "unsupported asm output constraint `{constraint}` (supported: r, q, a, b, c, d, S, D, m, rm, g and =@cc<condition>; & applies to register outputs)"
+                                        )
                                     } else {
-                                        "unsupported asm output constraint (supported: =r, +r, =w, +w, with optional &; memory outputs are not supported)"
+                                        "unsupported asm output constraint (supported: =r, +r, =w, +w, with optional &; memory outputs are not supported)".into()
                                     },
                                 ));
                             }
@@ -143,7 +170,16 @@ impl<'a> Parser<'a> {
                                 expr = self.address_of(expr, loc)?;
                                 constraint = if readwrite { "mreadwrite" } else { "mwrite" }.into();
                             } else {
-                                asm_register_type(code, expr.ty, loc)?;
+                                if flag {
+                                    if !matches!(expr.ty, Ty::Int(k) if k.size() <= 8) {
+                                        return Err(Error::new(
+                                            loc,
+                                            "asm flag output requires an integer through 64 bits",
+                                        ));
+                                    }
+                                } else {
+                                    asm_register_type(code, expr.ty, loc)?;
+                                }
                                 let early = if constraint[1..].starts_with('&') {
                                     "&"
                                 } else {
@@ -154,6 +190,19 @@ impl<'a> Parser<'a> {
                             outputs.push((expr, readwrite));
                             output_memory.push(memory);
                         } else {
+                            if x86 && let Some((immediate, memory)) = asm_choice(&constraint) {
+                                constraint = if asm_gpr_type(expr.ty) {
+                                    if immediate { "ri" } else { "r" }
+                                } else if memory {
+                                    "m"
+                                } else {
+                                    return Err(Error::new(
+                                        loc,
+                                        "asm register choice requires a scalar integer or pointer",
+                                    ));
+                                }
+                                .into();
+                            }
                             if let Some(name) = constraint
                                 .strip_prefix('[')
                                 .and_then(|s| s.strip_suffix(']'))
@@ -172,6 +221,10 @@ impl<'a> Parser<'a> {
                                 constraint = n.to_string();
                             }
                             match constraint.as_str() {
+                                "ri" if x86 => {
+                                    expr = self.rvalue(expr);
+                                    asm_register_type("r", expr.ty, loc)?;
+                                }
                                 "m" => {
                                     if matches!(expr.ty, Ty::Void | Ty::Func(_)) {
                                         return Err(Error::new(
@@ -222,8 +275,8 @@ impl<'a> Parser<'a> {
                                 }
                                 _ => {
                                     let n = constraint.parse::<usize>().ok().filter(|n| *n < outputs.len())
-                                        .ok_or_else(|| Error::new(loc, format!("unsupported asm input constraint `{constraint}` (supported: r, q (x86), w (AArch64), m, i, n, output number or [name])")))?;
-                                    if output_memory[n] {
+                                        .ok_or_else(|| Error::new(loc, format!("unsupported asm input constraint `{constraint}` (supported: r, q (x86), w (AArch64), m, i, n, x86 r/q choices with i/m or g, output number or [name])")))?;
+                                    if output_memory[n] || constraints[n].starts_with("=@cc") {
                                         return Err(Error::new(
                                             loc,
                                             "asm matching input requires a register output",
@@ -342,7 +395,12 @@ impl<'a> Parser<'a> {
             );
         }
         let template = if extended {
-            asm_template(&template, &names, &numbering, loc, x86)?
+            let flags: Vec<_> = constraints
+                .iter()
+                .take(outputs.len())
+                .map(|c| c.starts_with("=@cc"))
+                .collect();
+            asm_template(&template, &names, &numbering, &flags, loc, x86)?
         } else {
             template
         };
@@ -370,6 +428,7 @@ fn asm_template(
     template: &str,
     names: &[(&str, usize)],
     numbering: &[usize],
+    flags: &[bool],
     loc: Loc,
     x86: bool,
 ) -> R<String> {
@@ -425,6 +484,12 @@ fn asm_template(
                 "asm template operand number is out of range",
             ));
         }
+        if flags.get(n) == Some(&true) {
+            return Err(Error::new(
+                loc,
+                "flag outputs cannot be referenced in an asm template",
+            ));
+        }
         let n = numbering[n];
         // A named reference has an explicit end. Preserve it if a literal
         // digit follows: %[in]0 must not become operand %10.
@@ -454,6 +519,36 @@ fn asm_register_type(code: &str, ty: Ty<'_>, loc: Loc) -> R<()> {
             format!("asm `{code}` constraint does not support this operand type"),
         ))
     }
+}
+
+fn asm_gpr_type(ty: Ty<'_>) -> bool {
+    matches!(ty, Ty::Int(k) if k.size() <= 8) || ty.is_ptr()
+}
+
+/// Single-column unions of the already supported x86 classes. Memory is
+/// selected for non-GPR objects; scalar choices retain an immediate option.
+fn asm_choice(code: &str) -> Option<(bool, bool)> {
+    if code == "g" {
+        return Some((true, true));
+    }
+    if code.len() < 2 || !code.contains(['r', 'q']) {
+        return None;
+    }
+    let mut seen = 0u8;
+    for c in code.bytes() {
+        let bit = match c {
+            b'r' => 1,
+            b'q' => 2,
+            b'i' => 4,
+            b'm' => 8,
+            _ => return None,
+        };
+        if seen & bit != 0 {
+            return None;
+        }
+        seen |= bit;
+    }
+    Some((seen & 4 != 0, seen & 8 != 0))
 }
 
 fn asm_const(sugar: Sugar<'_>, defs: &[TypedefDef<'_>]) -> bool {

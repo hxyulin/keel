@@ -47,6 +47,10 @@ pub enum AsmOperand {
     Imm,
     /// `n`: a numeric constant, excluding symbol addresses. Inputs only.
     NumericImm,
+    /// `ri`: an immediate when legal, otherwise a GPR. X86 inputs only.
+    RegImm,
+    /// `@ccz`, etc.: x86 flags captured as a boolean integer result.
+    Flag(u8),
     /// `0`, `1`…: in the same register as that output, which it initializes.
     /// Inputs only.
     Tied(u16),
@@ -117,13 +121,23 @@ impl InlineAsm {
                 let operand = operand(code)?;
                 if !matches!(
                     operand,
-                    AsmOperand::Reg | AsmOperand::FloatReg | AsmOperand::Fixed(_)
+                    AsmOperand::Reg
+                        | AsmOperand::FloatReg
+                        | AsmOperand::Fixed(_)
+                        | AsmOperand::Flag(_)
                 ) {
                     return Err(format!("output `{part}` must be a register"));
                 }
+                if matches!(operand, AsmOperand::Flag(_)) && part.starts_with("=&") {
+                    return Err("flag outputs cannot be early-clobber".into());
+                }
                 output_kinds.push(operand);
             } else {
-                asm.inputs.push(operand(part)?);
+                let op = operand(part)?;
+                if matches!(op, AsmOperand::Flag(_)) {
+                    return Err("flag constraints require an output".into());
+                }
+                asm.inputs.push(op);
             }
         }
         if output_kinds.len() != output_types.len() {
@@ -178,6 +192,11 @@ fn operand(code: &str) -> Result<AsmOperand, String> {
         "mreadwrite" => AsmOperand::MemReadWrite,
         "i" => AsmOperand::Imm,
         "n" => AsmOperand::NumericImm,
+        "ri" => AsmOperand::RegImm,
+        _ if code.starts_with("@cc") => AsmOperand::Flag(
+            keel_asm_ir::x86::isa::parse_condition_code(&code[3..])
+                .ok_or_else(|| format!("unknown x86 flag condition `{code}`"))?,
+        ),
         _ if code.starts_with('{') => AsmOperand::Fixed(PhysReg::parse(
             braced(code).ok_or_else(|| format!("unclosed register in `{code}`"))?,
         )?),
@@ -263,6 +282,11 @@ impl fmt::Display for AsmOperand {
             AsmOperand::MemReadWrite => f.write_str("mreadwrite"),
             AsmOperand::Imm => f.write_str("i"),
             AsmOperand::NumericImm => f.write_str("n"),
+            AsmOperand::RegImm => f.write_str("ri"),
+            AsmOperand::Flag(cc) => match keel_asm_ir::x86::isa::condition_code_name(*cc) {
+                Some(name) => write!(f, "@cc{name}"),
+                None => write!(f, "@cc({cc})"),
+            },
             AsmOperand::Tied(n) => write!(f, "{n}"),
         }
     }
@@ -271,6 +295,36 @@ impl fmt::Display for AsmOperand {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn x86_flags_and_optional_immediates_round_trip() {
+        let asm = InlineAsm::new("", "=@ccz,=@ccpo,ri", &[Type::I8, Type::I64]).unwrap();
+        assert_eq!(
+            asm.outputs,
+            [
+                (AsmOperand::Flag(4), Type::I8),
+                (AsmOperand::Flag(11), Type::I64)
+            ]
+        );
+        assert_eq!(asm.inputs, [AsmOperand::RegImm]);
+        assert_eq!(asm.constraints(), "=@cce,=@ccnp,ri");
+        assert_eq!(
+            asm,
+            InlineAsm::new("", &asm.constraints(), &[Type::I8, Type::I64]).unwrap()
+        );
+        for (constraints, types, expected) in [
+            ("=@ccwat", &[Type::I64][..], "unknown x86 flag condition"),
+            ("=&@ccz", &[Type::I64][..], "early-clobber"),
+            ("@ccz", &[][..], "require an output"),
+            ("=ri", &[Type::I64][..], "must be a register"),
+        ] {
+            assert!(
+                InlineAsm::new("", constraints, types)
+                    .unwrap_err()
+                    .contains(expected)
+            );
+        }
+    }
 
     #[test]
     fn constraints_round_trip() {

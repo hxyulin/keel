@@ -152,7 +152,7 @@ fn contracts_and_effects_survive_optimization() {
 fn unsupported_and_impossible_contracts_are_diagnosed() {
     for (body, expected) in [
         ("asm goto(\"\"::::done); done:;", "asm goto"),
-        ("asm(\"\" : \"=rm\"(x));", "output constraint"),
+        ("asm(\"\" : \"=ri\"(x));", "output constraint"),
         ("asm(\"\" : \"=&m\"(x));", "early-clobber"),
         ("asm(\"\" : \"=m\"(x) : \"0\"(x));", "register output"),
         ("asm(\"\" :: \"m\"(x+1));", "assignable"),
@@ -339,7 +339,7 @@ fn deferred_immediates_reject_runtime_symbols_for_n_and_failed_required_calls() 
 }
 
 #[test]
-fn finalized_symbol_relocations_match_clang_and_gnu() {
+fn finalized_symbol_choices_and_flags_match_clang_and_gnu() {
     use object::{Object, ObjectSection, ObjectSymbol, RelocationTarget};
     use std::{fs, process::Command};
     let source = r#"
@@ -352,7 +352,9 @@ unsigned long f(void) {
     void *p = get(anchor + 7);
     unsigned long q;
     asm("movabsq %1,%0" : "=r"(q) : "i"(anchor + 19));
-    return (unsigned long)p ^ q ^ (unsigned long)get(anchor - 7);
+    unsigned long zero, carry;
+    asm("cmpq %3,%2" : "=@ccz"(zero), "=@ccc"(carry) : "r"(p), "g"(7) : "cc");
+    return (unsigned long)p ^ q ^ (unsigned long)get(anchor - 7) ^ zero ^ carry;
 }
 "#;
     let m = compile(source, false).unwrap();
@@ -599,4 +601,164 @@ unsigned long f(unsigned long x) {
     assert!(text.contains("leaq (%ecx),%rax"), "{text}");
     assert!(text.contains("leaq -30(%rax),%rax"), "{text}");
     keel_asm::x86::assemble_object(&text).unwrap();
+}
+
+#[test]
+fn choices_keep_optional_immediates_until_backend_selection() {
+    let source = r#"
+static __attribute__((always_inline)) inline long add(long x, long n) {
+    asm("addq %1,%0" : "+rm"(x) : "iq"(n) : "cc"); return x;
+}
+long f(long x) { return add(add(x, 17+6), x); }
+"#;
+    for optimize in [false, true] {
+        let mut m = compile(source, false).unwrap();
+        if optimize {
+            keel_opt::optimize(&mut m).unwrap();
+        }
+        keel_ir::verify_module(&m).unwrap();
+        let f = m.functions.iter().find(|f| f.name == "f").unwrap();
+        let contracts: Vec<_> = f
+            .layout_insts()
+            .filter_map(|(_, i)| match f.inst_data(i) {
+                InstData::InlineAsm { asm, .. } => Some(asm),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(contracts.len(), 2);
+        assert!(
+            contracts
+                .iter()
+                .all(|asm| asm.inputs[0] == AsmOperand::RegImm)
+        );
+        let text = keel_codegen::compile(&m, Target::X86_64LinuxGnu).unwrap();
+        assert!(text.contains("addq $23,"), "{text}");
+        assert!(text.contains("addq %"), "{text}");
+        keel_asm::x86::assemble_object(&text).unwrap();
+        let roundtrip = keel_ir::parse(&m.to_string()).unwrap();
+        keel_ir::verify_module(&roundtrip).unwrap();
+    }
+    for choice in [
+        "iq", "qi", "ri", "ir", "rm", "mr", "qm", "mq", "irm", "mri", "g",
+    ] {
+        let source = format!(
+            "long f(long x) {{ long out; asm(\"movq %1,%0\" : \"=r\"(out) : \"{choice}\"(x)); return out; }}"
+        );
+        let m = compile(&source, false).unwrap();
+        let text = keel_codegen::compile(&m, Target::X86_64LinuxGnu).unwrap();
+        keel_asm::x86::assemble_object(&text).unwrap();
+    }
+    let source = r##"void f(void) { asm("# %c0" :: "iq"(42) : "rax","rcx","rdx","rbx","rsi","rdi","r8","r9","r10","r11","r12","r13","r14","r15"); }"##;
+    let m = compile(source, false).unwrap();
+    assert!(
+        keel_codegen::compile(&m, Target::X86_64LinuxGnu)
+            .unwrap()
+            .contains("# 42")
+    );
+}
+
+#[test]
+fn flags_are_typed_boolean_results_with_generated_conditions() {
+    let mut m = compile(SOURCE, false).unwrap();
+    let f = m
+        .functions
+        .iter()
+        .find(|f| f.name == "asm_flag_conditions")
+        .unwrap();
+    let asm = f
+        .layout_insts()
+        .find_map(|(_, i)| match f.inst_data(i) {
+            InstData::InlineAsm { asm, .. } => Some(asm),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(asm.outputs.len(), 16);
+    for (cc, &(kind, ty)) in asm.outputs.iter().enumerate() {
+        assert_eq!(kind, AsmOperand::Flag(cc as u8));
+        assert_eq!(ty, keel_ir::Type::I64);
+    }
+    assert!(asm.early_clobbers.is_empty());
+    let flag_only = compile(
+        r#"long f(long x) { long z; asm("testq %1,%1" : "=@ccz"(z) : "r"(x)); return z; }"#,
+        false,
+    )
+    .unwrap();
+    assert!(
+        keel_codegen::compile(&flag_only, Target::Aarch64AppleDarwin)
+            .unwrap_err()
+            .to_string()
+            .contains("x86 constraint")
+    );
+    let f = m
+        .functions
+        .iter_mut()
+        .find(|f| f.name == "asm_flag_conditions")
+        .unwrap();
+    let i = f
+        .layout_insts()
+        .find_map(|(_, i)| matches!(f.inst_data(i), InstData::InlineAsm { .. }).then_some(i))
+        .unwrap();
+    let InstData::InlineAsm { asm, .. } = f.inst_data_mut(i) else {
+        unreachable!()
+    };
+    asm.outputs[0].0 = AsmOperand::Flag(16);
+    assert!(keel_ir::verify_module(&m).is_err());
+}
+
+#[test]
+fn malformed_flag_and_choice_contracts_are_diagnosed() {
+    for (body, expected) in [
+        (r#"asm("" : "+@ccz"(x));"#, "require ="),
+        (r#"asm("" : "=&@ccz"(x));"#, "require ="),
+        (r#"asm("" : "=@ccwat"(x));"#, "unknown x86 flag condition"),
+        (r#"asm("" : "=@cc"(x));"#, "unknown x86 flag condition"),
+        (r#"asm("" : "=@ccz,@cce"(x));"#, "alternatives"),
+        (r#"asm("%0" : "=@ccz"(x));"#, "cannot be referenced"),
+        (
+            r#"asm("%c[flag]" : [flag] "=@ccz"(x));"#,
+            "cannot be referenced",
+        ),
+        (r#"asm("" : "=@ccz"(x) : "0"(x));"#, "register output"),
+        (r#"asm("" :: "iq,m"(x));"#, "input constraint"),
+        (r#"asm("" :: "rr"(x));"#, "input constraint"),
+    ] {
+        let source = format!("void f(long x){{{body}}}");
+        let err = compile(&source, false).unwrap_err();
+        assert!(err.contains(expected), "{source}: {err}");
+    }
+    for source in [
+        r#"void f(double x) { asm("" : "=@ccz"(x)); }"#,
+        r#"void f(void *x) { asm("" : "=@ccz"(x)); }"#,
+        r#"void f(__int128 x) { asm("" : "=@ccz"(x)); }"#,
+        r#"void f(void) { const long x=1; asm("" : "=@ccz"(x)); }"#,
+        r#"void f(void) { _Atomic(long) x=1; asm("" : "=@ccz"(x)); }"#,
+        r#"struct S { int x:3; }; void f(struct S *p) { asm("" : "=@ccz"(p->x)); }"#,
+        r#"struct S { long x[3]; }; void f(struct S *p) { asm("" : "+rm"(*p)); }"#,
+        r#"void f(double x) { asm("" :: "iq"(x)); }"#,
+    ] {
+        assert!(compile(source, false).is_err(), "{source}");
+    }
+    let m = compile(r##"void f(long x) { asm("# %c0" :: "iq"(x)); }"##, false).unwrap();
+    assert!(
+        keel_codegen::compile(&m, Target::X86_64LinuxGnu)
+            .unwrap_err()
+            .to_string()
+            .contains("register modifier")
+    );
+}
+
+#[test]
+fn flag_output_capability_is_advertised_only_for_x86() {
+    for target in [
+        Target::X86_64LinuxGnu,
+        Target::Aarch64AppleDarwin,
+        Target::Aarch64LinuxGnu,
+    ] {
+        let macros = keel_c::predefined_macros(target, None).unwrap();
+        assert_eq!(
+            macros.contains("#define __GCC_ASM_FLAG_OUTPUTS__ 1"),
+            target == Target::X86_64LinuxGnu
+        );
+    }
+    compile("#ifndef __GCC_ASM_FLAG_OUTPUTS__\n#error missing flag output capability\n#endif\nint f(long x) { int z; asm(\"testq %1,%1\" : \"=@ccz\"(z) : \"r\"(x)); return z; }", false).unwrap();
 }

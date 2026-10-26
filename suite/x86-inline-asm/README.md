@@ -72,3 +72,13 @@ offset. Native results for this extension are recorded separately below.
 At formatting checkpoint `2959b536`, all 145 fresh objects passed against
 GCC 13.3.0 on Linux x86-64 across the 45-function fixture. All twelve controls
 returned normal failure. Native Clang execution of this extension was not run.
+
+The choice/flag extension adds ten functions, for 55 exported functions. It
+covers `iq` immediate/register fallback after mandatory inlining, scalar `rm`
+and `g`, aggregate `rm` inputs, symbolic choices and single-evaluation output
+addresses. All sixteen conditions are captured together and checked against
+an independent C calculation of comparison flags. Mixed cases combine narrow
+flag results, register ties and memory outputs. Three new controls corrupt a
+choice immediate, a flag condition and a memory write. GCC accepts this GNU
+fixture; the local Clang C reference rejects its sixteen simultaneous flag
+outputs. Clang/GNU assembly comparisons remain separate from native C execution.

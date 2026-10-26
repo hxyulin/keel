@@ -1602,7 +1602,7 @@ pub fn required_inline_asm(module: &mut Module) -> Result<(), String> {
     for f in &mut module.functions {
         if !f.layout_insts().any(|(_, i)| match f.inst_data(i) {
             InstData::InlineAsm { asm, args } => asm.inputs.iter().zip(args).any(|(op, arg)| {
-                if !matches!(op, keel_ir::AsmOperand::Imm | keel_ir::AsmOperand::NumericImm) { return false; }
+                if !matches!(op, keel_ir::AsmOperand::Imm | keel_ir::AsmOperand::NumericImm | keel_ir::AsmOperand::RegImm) { return false; }
                 let numeric = matches!(f.value_def(f.resolve(*arg)), keel_ir::ValueDef::Result(def, _) if matches!(f.inst_data(def), InstData::Iconst { .. }));
                 !numeric && !(*op == keel_ir::AsmOperand::Imm && keel_ir::symbolic_immediate(f, *arg).is_some())
             }),

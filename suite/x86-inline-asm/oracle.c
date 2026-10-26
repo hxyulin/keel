@@ -5,6 +5,10 @@
 #define U unsigned long
 #define BINARY(n) extern U n(U,U), ref_##n(U,U);
 BINARY(asm_q_views)
+BINARY(asm_choice_iq)
+BINARY(asm_choice_rm)
+BINARY(asm_choice_g)
+BINARY(asm_flag_conditions)
 BINARY(asm_q_rex)
 BINARY(asm_flags)
 BINARY(asm_scratch)
@@ -30,10 +34,16 @@ extern void asm_memory_array(U*), ref_asm_memory_array(U*);
 UNARY(asm_q_output)
 UNARY(asm_address_width)
 UNARY(asm_address_symbol)
+UNARY(asm_choice_symbol)
 UNARY(asm_address_constant)
 UNARY(asm_negated)
 UNARY(asm_negated_min)
 extern U asm_address_read(U*), ref_asm_address_read(U*);
+extern U asm_choice_once(U*,U), ref_asm_choice_once(U*,U);
+extern U asm_choice_object(U*), ref_asm_choice_object(U*);
+extern U asm_flag_mixed(U*,U,U), ref_asm_flag_mixed(U*,U,U);
+extern U asm_flag_once(U*,U), ref_asm_flag_once(U*,U);
+extern void asm_flag_unused(U*), ref_asm_flag_unused(U*);
 extern U *asm_q_pointer(U*), *ref_asm_q_pointer(U*);
 UNARY(asm_macro)
 UNARY(asm_aligned)
@@ -54,6 +64,14 @@ extern unsigned int asm_dword(unsigned int,unsigned int),ref_asm_dword(unsigned 
 #define CHECK(n, ...) do { U got=n(__VA_ARGS__), want=ref_##n(__VA_ARGS__); if(got!=want){printf("FAIL %s %lu: %lx != %lx\n",#n,i,got,want);return 1;} } while(0)
 static uint64_t state=0xabcde123456789ULL;
 static U next(void){state^=state<<13;state^=state>>7;state^=state<<17;return state;}
+static U cmp_flags(U a, U b) {
+    U d=a-b, c=a<b, z=a==b, s=d>>63, o=((a^b)&(a^d))>>63;
+    U parity=0;
+    for(unsigned j=0;j<8;j++) parity^=(d>>j)&1;
+    U p=!parity, l=s^o;
+    return o | (!o)<<1 | c<<2 | (!c)<<3 | z<<4 | (!z)<<5 | (c|z)<<6 | (!(c|z))<<7
+        | s<<8 | (!s)<<9 | p<<10 | (!p)<<11 | l<<12 | (!l)<<13 | (z|l)<<14 | (!(z|l))<<15;
+}
 int main(void) {
     _Static_assert(sizeof(U)==8,"LP64 required");
     for(U i=0;i<512;i++) {
@@ -62,6 +80,9 @@ int main(void) {
         CHECK(asm_q_output,a);CHECK(asm_q_views,a,b);CHECK(asm_q_rex,a,b);
         CHECK(asm_address_width,a);CHECK(asm_address_symbol,a);CHECK(asm_address_constant,a);
         CHECK(asm_negated,a);CHECK(asm_negated_min,a);
+        CHECK(asm_choice_iq,a,b);CHECK(asm_choice_rm,a,b);CHECK(asm_choice_g,a,b);CHECK(asm_choice_symbol,a);
+        CHECK(asm_flag_conditions,a,b);
+        if(asm_flag_conditions(a,b)!=cmp_flags(a,b)){puts("FAIL independent flag bits");return 1;}
         CHECK(asm_memory_aligned,a);CHECK(asm_memory_local,a);CHECK(asm_memory_write,a);
         CHECK(asm_deferred_number,a);CHECK(asm_deferred_address,a);
         CHECK(asm_flags,a,b);CHECK(asm_scratch,a,b);CHECK(asm_macro,a);CHECK(asm_add,a,b);CHECK(asm_fixed,a,b);CHECK(asm_six,a,b,c,d,e,f);
@@ -71,6 +92,17 @@ int main(void) {
         CHECK(asm_byte,a,b);CHECK(asm_word,a,b);CHECK(asm_dword,a,b);
         U x[]={c,a,b,d}, y[]={c,a,b,d};
         CHECK(asm_address_read,x+1);
+        U choice_x[]={c,a,b,d,e},choice_y[]={c,a,b,d,e};
+        U choice_got=asm_choice_object(choice_x+1),choice_want=ref_asm_choice_object(choice_y+1);
+        if(choice_got!=choice_want || memcmp(choice_x,choice_y,sizeof choice_x)){puts("FAIL asm_choice_object");return 1;}
+        choice_got=asm_choice_once(choice_x+1,b);choice_want=ref_asm_choice_once(choice_y+1,b);
+        if(choice_got!=choice_want || memcmp(choice_x,choice_y,sizeof choice_x)){puts("FAIL asm_choice_once");return 1;}
+        choice_got=asm_flag_mixed(choice_x+1,a,b);choice_want=ref_asm_flag_mixed(choice_y+1,a,b);
+        if(choice_got!=choice_want || memcmp(choice_x,choice_y,sizeof choice_x)){puts("FAIL asm_flag_mixed");return 1;}
+        choice_got=asm_flag_once(choice_x+1,a);choice_want=ref_asm_flag_once(choice_y+1,a);
+        if(choice_got!=choice_want || memcmp(choice_x,choice_y,sizeof choice_x)){puts("FAIL asm_flag_once");return 1;}
+        asm_flag_unused(choice_x+1);ref_asm_flag_unused(choice_y+1);
+        if(memcmp(choice_x,choice_y,sizeof choice_x)){puts("FAIL asm_flag_unused");return 1;}
         U got=asm_once(x+1,x+2),want=ref_asm_once(y+1,y+2);
         if(got!=want || memcmp(x,y,sizeof x)){puts("FAIL asm_once");return 1;}
         got=asm_memory_barrier(x+1);want=ref_asm_memory_barrier(y+1);

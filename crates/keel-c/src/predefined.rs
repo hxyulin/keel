@@ -452,6 +452,7 @@ pub fn predefined_macros(
         for name in ["__x86_64", "__x86_64__", "__amd64", "__amd64__"] {
             def(name, "1");
         }
+        def("__GCC_ASM_FLAG_OUTPUTS__", "1");
     }
     Ok(out)
 }

@@ -5,6 +5,7 @@ use keel_ir::{AsmArch, AsmClobber, AsmOperand as Constraint, InlineAsm};
 
 pub(super) struct Plan {
     regs: Vec<Option<u8>>,
+    flags: Vec<(usize, u8)>,
     text: String,
     pub bytes: usize,
 }
@@ -44,12 +45,26 @@ pub(super) fn plan(
     if args.len() != asm.inputs.len() {
         return Err("asm input arity mismatch".into());
     }
-    let ops: Vec<_> = asm
+    let mut ops: Vec<_> = asm
         .outputs
         .iter()
         .map(|(o, _)| *o)
         .chain(asm.inputs.iter().copied())
         .collect();
+    for (op, &arg) in ops.iter_mut().skip(n).zip(args) {
+        if *op == Constraint::RegImm {
+            let symbolic = keel_ir::symbolic_immediate(func, arg).is_some_and(|(symbol, _)| {
+                !module
+                    .data_object(func.symbol_name(symbol))
+                    .is_some_and(|d| d.thread_local)
+            });
+            *op = if iconst(func, arg).is_some() || symbolic {
+                Constraint::Imm
+            } else {
+                Constraint::Reg
+            };
+        }
+    }
     let mut taken = [false; 16];
     for c in &asm.clobbers {
         if let AsmClobber::Reg(r) = c {
@@ -73,6 +88,7 @@ pub(super) fn plan(
         }
         match *op {
             Constraint::Reg => {}
+            Constraint::Flag(cc) if i < n && cc < 16 && ty.is_int() && !early[i] => {}
             Constraint::Mem | Constraint::MemWrite | Constraint::MemReadWrite
                 if i >= n && ty == Type::Ptr => {}
             Constraint::Fixed(r) => {
@@ -93,7 +109,10 @@ pub(super) fn plan(
                         || (*op == Constraint::Imm
                             && keel_ir::symbolic_immediate(func, args[i - n]).is_some())) => {}
             Constraint::Tied(out)
-                if i >= n && (out as usize) < n && asm.outputs[out as usize].1 == ty => {}
+                if i >= n
+                    && (out as usize) < n
+                    && asm.outputs[out as usize].1 == ty
+                    && !matches!(asm.outputs[out as usize].0, Constraint::Flag(_)) => {}
             _ => {
                 return Err(format!(
                     "unsupported x86 asm constraint `{op}` for operand {i}"
@@ -130,6 +149,15 @@ pub(super) fn plan(
     // (numeric local labels and macros in particular).
     Ok(Plan {
         regs,
+        flags: asm
+            .outputs
+            .iter()
+            .enumerate()
+            .filter_map(|(i, (op, _))| match op {
+                Constraint::Flag(cc) => Some((i, *cc)),
+                _ => None,
+            })
+            .collect(),
         text,
         bytes: 8 * (16 + args.len() + n),
     })
@@ -169,6 +197,9 @@ fn substitute(
             .map_err(|_| "asm % requires an operand number, %% or %=")?;
         if i >= regs.len() {
             return Err("asm operand reference out of range".into());
+        }
+        if i < n && matches!(asm.outputs[i].0, Constraint::Flag(_)) {
+            return Err("flag outputs cannot be referenced in an asm template".into());
         }
         if let Some(r) = regs[i] {
             if i >= n
@@ -274,6 +305,7 @@ impl FunctionCompiler<'_> {
             .inline_asm_plans
             .remove(&inst)
             .expect("asm checked before emission");
+        let n = plan.regs.len() - args.len();
         let memory_at = |this: &Self, slot| sized(this.frame(home + 8 * slot), 64);
         // Preserve every GPR home, including scratch registers. This runs before
         // any input rematerialization or memory-to-memory copy uses RAX.
@@ -286,9 +318,7 @@ impl FunctionCompiler<'_> {
             }
         }
         for (i, &arg) in args.iter().enumerate() {
-            let op = self.func.inst_data(inst);
-            if matches!(op, InstData::InlineAsm { asm, .. } if matches!(asm.inputs[i], Constraint::Imm | Constraint::NumericImm))
-            {
+            if plan.regs[n + i].is_none() {
                 continue;
             }
             let dst = memory_at(self, 16 + i);
@@ -301,7 +331,6 @@ impl FunctionCompiler<'_> {
             }
             self.emit(Opcode::Mov, [asm_arg(dst), asm_arg(r64(S0))]);
         }
-        let n = plan.regs.len() - args.len();
         // Every input now has a stable frame home. Loading RAX last is not
         // needed: these MOV loads use only the stable frame base.
         for (i, _) in args.iter().enumerate() {
@@ -312,9 +341,26 @@ impl FunctionCompiler<'_> {
                 );
             }
         }
+        // Initialize full-width boolean homes without touching flags after
+        // the template. SETcc then writes only each slot's low byte.
+        for &(i, _) in &plan.flags {
+            self.emit(
+                Opcode::Mov,
+                [asm_arg(memory_at(self, 16 + args.len() + i)), asm_arg(0i64)],
+            );
+        }
         self.out.inline_assembly(&plan.text);
+        for &(i, cc) in &plan.flags {
+            self.emit(
+                Opcode::Setcc(cc),
+                [asm_arg(sized(
+                    self.frame(home + 8 * (16 + args.len() + i)),
+                    8,
+                ))],
+            );
+        }
         for i in 0..n {
-            let r = plan.regs[i].expect("register output");
+            let Some(r) = plan.regs[i] else { continue };
             self.emit(
                 Opcode::Mov,
                 [

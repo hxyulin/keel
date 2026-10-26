@@ -883,14 +883,24 @@ impl Verifier<'_> {
             early.push(out);
         }
         let fits = |op: AsmOperand, ty: Type| match op {
-            AsmOperand::Reg | AsmOperand::Fixed(PhysReg { float: false, .. }) => {
+            AsmOperand::Reg
+            | AsmOperand::RegImm
+            | AsmOperand::Fixed(PhysReg { float: false, .. }) => {
                 (ty.is_int() && ty != Type::I128) || ty == Type::Ptr
             }
             AsmOperand::FloatReg | AsmOperand::Fixed(PhysReg { float: true, .. }) => ty.is_float(),
             AsmOperand::Mem | AsmOperand::MemWrite | AsmOperand::MemReadWrite => ty == Type::Ptr,
+            AsmOperand::Flag(cc) => cc < 16 && ty.is_int() && ty != Type::I128,
             AsmOperand::Imm | AsmOperand::NumericImm | AsmOperand::Tied(_) => true,
         };
         for (n, &(op, ty)) in asm.outputs.iter().enumerate() {
+            if !matches!(
+                op,
+                AsmOperand::Reg | AsmOperand::FloatReg | AsmOperand::Fixed(_) | AsmOperand::Flag(_)
+            ) || matches!(op, AsmOperand::Flag(_)) && early.contains(&(n as u16))
+            {
+                self.inst_error(inst, format!("invalid asm output {n} (`{op}`)"));
+            }
             if !fits(op, ty) {
                 self.inst_error(inst, format!("asm operand {n} (`{op}`) cannot be {ty}"));
             }
@@ -903,6 +913,9 @@ impl Verifier<'_> {
                 self.inst_error(inst, format!("asm operand {n} (`{op}`) cannot be {ty}"));
             }
             match op {
+                AsmOperand::Flag(_) => {
+                    self.inst_error(inst, "flag constraints require an output".into())
+                }
                 AsmOperand::Imm | AsmOperand::NumericImm => {
                     let is_const = matches!(
                         func.value_def(func.resolve(arg)),
@@ -927,6 +940,9 @@ impl Verifier<'_> {
                         inst,
                         format!("asm operand {n} is {ty}, but its output {out} is {out_ty}"),
                     ),
+                    Some(&(AsmOperand::Flag(_), _)) => {
+                        self.inst_error(inst, "asm ties require a register output".into())
+                    }
                     Some(_) if tied.contains(&out) => self
                         .inst_error(inst, format!("output {out} is tied to more than one input")),
                     Some(_) => tied.push(out),

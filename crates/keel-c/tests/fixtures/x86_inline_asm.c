@@ -250,3 +250,67 @@ unsigned long NAME(asm_negated_min)(unsigned long x) {
     asm("movabsq $%n1,%0" : "=r"(out) : "n"((-9223372036854775807L-1)));
     return out ^ x;
 }
+
+static __attribute__((always_inline)) inline unsigned long choice_add(unsigned long x, unsigned long n) {
+    asm("addq %1,%0" : "+r"(x) : "iq"(n) : "cc");
+    return x;
+}
+unsigned long NAME(asm_choice_iq)(unsigned long a, unsigned long b) {
+    return choice_add(choice_add(a, 17 + 6), b);
+}
+unsigned long NAME(asm_choice_rm)(unsigned long a, unsigned long b) {
+    unsigned long v = a;
+    asm("addq %1,%0" : "+rm"(v) : "rm"(b) : "cc");
+    return v ^ a ^ b;
+}
+unsigned long NAME(asm_choice_g)(unsigned long a, unsigned long b) {
+    unsigned long out;
+    asm("movq %1,%0; addq %2,%0" : "=&r"(out) : "g"(a), "g"(5) : "cc");
+    return out ^ b;
+}
+unsigned long NAME(asm_choice_symbol)(unsigned long x) {
+    unsigned long out;
+    asm("leaq %a1,%0" : "=r"(out) : "g"(asm_deferred_anchor + 23));
+    return out ^ x;
+}
+unsigned long NAME(asm_choice_once)(unsigned long *p, unsigned long n) {
+    unsigned long *start = p;
+    asm("addq %1,%0" : "+rm"(*p++) : "rm"(n++) : "cc");
+    return p[-1] + n + (unsigned long)(p - start);
+}
+struct ChoiceBlock { unsigned long a, b, c; };
+unsigned long NAME(asm_choice_object)(unsigned long *p) {
+    unsigned long out;
+    asm("addq $9,%0" : "+m"(*(struct ChoiceBlock *)p) :: "cc");
+    asm("movq %1,%0" : "=r"(out) : "rm"(*(struct ChoiceBlock *)p));
+    return out;
+}
+unsigned long NAME(asm_flag_conditions)(unsigned long a, unsigned long b) {
+    unsigned long f0,f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13,f14,f15;
+    asm("cmpq %[rhs],%[lhs]"
+        : "=@cco"(f0), "=@ccno"(f1), "=@ccb"(f2), "=@ccae"(f3),
+          "=@cce"(f4), "=@ccne"(f5), "=@ccbe"(f6), "=@cca"(f7),
+          "=@ccs"(f8), "=@ccns"(f9), "=@ccp"(f10), "=@ccnp"(f11),
+          "=@ccl"(f12), "=@ccge"(f13), "=@ccle"(f14), "=@ccg"(f15)
+        : [lhs] "r"(a), [rhs] "r"(b) : "cc");
+    return f0 | f1<<1 | f2<<2 | f3<<3 | f4<<4 | f5<<5 | f6<<6 | f7<<7
+        | f8<<8 | f9<<9 | f10<<10 | f11<<11 | f12<<12 | f13<<13 | f14<<14 | f15<<15;
+}
+unsigned long NAME(asm_flag_mixed)(unsigned long *p, unsigned long a, unsigned long b) {
+    unsigned long value = a;
+    unsigned char equal;
+    unsigned int carry;
+    asm("subq %[rhs],%[value]; movq %[value],%[mem]"
+        : [mem] "=m"(*p), [equal] "=@ccz"(equal), [value] "+&r"(value), [carry] "=@ccc"(carry)
+        : [rhs] "r"(b) : "cc");
+    return (value ^ a ^ b) + equal * 3UL + carry * 5UL;
+}
+unsigned long NAME(asm_flag_once)(unsigned long *p, unsigned long a) {
+    unsigned long *start = p;
+    asm("testq %1,%1" : "=@ccz"(*p++) : "r"(a) : "cc");
+    return p[-1] + (unsigned long)(p - start);
+}
+void NAME(asm_flag_unused)(unsigned long *p) {
+    unsigned int zero;
+    asm volatile("addq $7,%0" : "+m"(*p), "=@ccz"(zero) :: "cc");
+}

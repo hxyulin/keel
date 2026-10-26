@@ -3,8 +3,9 @@
 Keel supports scalar GNU C inline assembly on `x86_64-unknown-linux-gnu`.
 This implements scalar fallthrough asm and deferred immediate validation from
 the [design](x86-c-inline-asm-design.md).
-Explicit memory operands are supported. Constraint alternatives, asm goto and
-file-scope asm remain unsupported.
+Explicit memory operands, bounded constraint choices and integer flag outputs
+are supported. Comma-separated alternatives, asm goto and file-scope asm remain
+unsupported.
 
 ```c
 unsigned long add(unsigned long a, unsigned long b) {
@@ -27,6 +28,31 @@ captures its initial value and writes its final value to that captured address.
 One input may initialize each tied output. Untied operands receive distinct
 registers, even when GNU could reuse them. Fixed-register overlaps require a tie.
 Register exhaustion produces a diagnostic rather than relaxing a constraint.
+
+Scalar register outputs also accept `rm`, `mr`, `qm`, `mq` and `g` with `=` or
+`+`, optionally with `&`. They select the existing GPR path, including captured
+output locations and read/write ties. Use explicit `m` for non-GPR outputs.
+Inputs accept nonduplicated combinations of `r`/`q`, `i` and `m` that include
+`r` or `q`, such as `iq`, `ri`, `rm` and `irm`; `g` permits all three locations.
+Scalar integers and pointers prefer numeric or supported non-TLS symbolic
+immediates when `i` is allowed, then registers. This choice happens after
+required inlining and constant cleanup, even without `-O`. Addressable non-GPR
+objects use the existing memory path when `m` is allowed. These are unions
+within one constraint column. Comma-separated alternatives, machine-specific
+immediate classes and memory retries after scalar register exhaustion remain
+unsupported. Keel does not infer instruction-specific immediate ranges from
+arbitrary templates.
+
+Flag outputs use `=@cc<condition>` and integer lvalues through 64 bits. Generated
+x86 condition mappings accept the normal `SETcc` suffixes and their aliases,
+including `z`/`e` and `c`/`b`. Results are zero or one in the complete integer
+width. Flag outputs count in source operand numbering but cannot appear in
+template substitutions or matching constraints. They reject `+`, `&`, and
+alternatives. Multiple flag outputs observe the same final template flags.
+`__GCC_ASM_FLAG_OUTPUTS__` is predefined as `1` only on x86-64 Linux. The
+[GNU constraint rules](https://gcc.gnu.org/onlinedocs/gcc/Simple-Constraints.html)
+and [flag output contract](https://gcc.gnu.org/onlinedocs/gcc/Extended-Asm.html#Flag-Output-Operands)
+describe the source semantics; the selection limits above define Keel's subset.
 
 `n` inputs require numeric constants through 64 bits. `i` also accepts one
 symbol address plus a checked signed byte addend. Symbolic inputs use relocations;
@@ -65,7 +91,9 @@ emit a hardware memory fence. Basic asm currently accepts only empty text or
 ## Lowering and boundaries
 
 The backend snapshots GPR homes and stages every register input in frame slots
-before filling operand registers. It captures every output before restoring
+before filling operand registers. Flag result slots are zeroed before the
+template, then `SETcc` writes their low bytes immediately after it. These
+captures preserve flags and require no GPR operands. It captures every output before restoring
 old homes, then installs SSA results. This handles fixed-register cycles,
 rematerialized inputs and values live across arbitrary declared GPR clobbers
 without changing the general allocator. Functions with asm also save the
@@ -90,8 +118,8 @@ transfers and branches to C labels need contracts this milestone does not model;
 the compiler does not infer these effects by inspecting arbitrary instructions
 or directive bytes. Section switches must return to the function's section.
 
-Still diagnosed: unions/alternatives, TLS
-immediates, flag outputs, local register variables, FP/SIMD operands, asm goto
+Still diagnosed: comma-separated alternatives, unsupported constraint unions,
+TLS-only immediates, local register variables, FP/SIMD register operands, asm goto
 and file-scope asm. Supporting their instruction bytes in the assembler does
 not provide the missing C operand or control-flow contract.
 
