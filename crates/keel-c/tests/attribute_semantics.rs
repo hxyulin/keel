@@ -66,12 +66,22 @@ fn cleanup_is_accepted_but_undefined_retention_stays_diagnosed() {
                 compile(&source, target).unwrap();
             }
         }
-        for attr in ["alias(\"other\")", "section(\"registry\")", "retain"] {
+        for attr in ["alias(\"other\")", "retain"] {
             let source = format!(
                 "extern int other; extern int value; extern int value __attribute__(({attr}));"
             );
             assert!(compile(&source, target).is_err(), "{source}");
         }
+        let section = if target == Target::Aarch64AppleDarwin {
+            "__DATA,__registry"
+        } else {
+            "registry"
+        };
+        compile(
+            &format!("extern int value __attribute__((section(\"{section}\")));"),
+            target,
+        )
+        .unwrap();
     }
 }
 
