@@ -1278,9 +1278,14 @@ Some accepted extensions have deliberately limited behavior:
   parameters and type names, and by-value aggregates aligned above 16 bytes
   are diagnosed. On x86-64, by-value aggregates with unaligned fields are
   also diagnosed because their SysV MEMORY classification cannot be
-  represented by the current IR signature. Packed bit-fields requiring
-  partial or crossing storage-container accesses, unaligned atomic members
-  and unaligned pointer relocations are diagnosed rather than emitted.
+  represented by the current IR signature. Native LP64 packed integer bit-fields
+  use only the bytes containing the field, including fields crossing their declared
+  storage container. Stores preserve neighboring bits, and assignment and increment
+  results reflect field-width truncation without rereading volatile storage.
+  Each byte access retains volatile flags; this does not promise a single access
+  for memory-mapped devices. Zero-width fields also raise record alignment on
+  AArch64 Linux, following its ABI. Unaligned atomic members and unaligned pointer
+  relocations remain diagnosed.
 - Attribute syntax is accepted broadly. `returns_twice` affects calls;
   `_Noreturn` and GNU `noreturn` terminate direct calls with a trap if the
   callee unexpectedly returns, exposing the absent continuation to CFG

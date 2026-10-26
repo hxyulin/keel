@@ -565,3 +565,50 @@ the harness and its test passes. Documentation builds complete with existing
 warnings. All 98 generator tests, three audit harness tests, both freshness
 checks, scoped formatting and diff checks pass. Strict Clippy stops at 52
 diagnostics in untouched `keel-asm-ir` code.
+
+## Packed bit-fields
+
+Checkpoint `eb21397c` supports packed bit-fields that need partial or crossing
+container accesses. Loads and stores use only the field's byte span, preserve
+neighboring bits, and keep volatile flags. Assignment and increment results use
+the stored field width without another volatile read. A Clang layout comparison
+also exposed and fixed AArch64 Linux zero-width field alignment.
+
+The [unchanged-input audit](audit-packed-bitfields.json) clears all **434** prior
+packed-field first errors. Each now reaches a later function-scope basic-asm
+restriction in `arch/x86/include/asm/special_insns.h:301`:
+
+```c
+asm volatile(".byte 0xc4, 0xe2, 0x78, 0x49, 0xc0");
+```
+
+This is the `tile_release` helper. The parser checks its body even when the
+helper is unused. The observed diagnostic is a basic-asm language restriction,
+not an instruction feature-policy rejection.
+
+Whole-input acceptance remains **30/484 C inputs** and **402/506 assembly inputs**.
+The other C first-error counts remain eight fallthrough attribute statements,
+four `Nd` constraints, three semicolon-separated `rep; bsf` prefixes, two alias
+attributes, one POPCNT policy failure, one `__builtin_has_attribute`, and one
+assignment type mismatch. These counts describe the first error per file.
+
+All **432** previously accepted objects retain their exact bytes. All 992 inputs
+and the three reference artifacts were rehashed unchanged, with no crashes,
+timeouts or acceptance regressions. The reference was not rebuilt or rebooted.
+No Keel object was linked into or executed as the kernel.
+
+The [packed-field fixture suite](../x86-packed-bitfields/README.md) checks 48
+explicit-V1 objects, four native-host configurations, guard pages, canaries,
+initializers, volatile updates and expression-result truncation. An independent
+GCC reference and five broken controls exercise the Linux oracle. The layout
+matrix matches 256 generated records against Clang on each of x86-64 Linux and
+AArch64 Linux, including record bytes, sizes and alignments. This is userspace
+and layout evidence, not a kernel code-generation qualification.
+
+At semantic checkpoint `eb21397c`, the full workspace run passes **2,788 tests**,
+with zero failures and 13 ignored across 510 reported groups. The all-targets,
+all-features check, 98 generator tests, three audit-harness tests, and both
+freshness checks pass. Rustdoc builds with existing warnings. Strict Clippy
+still stops at 52 existing diagnostics in untouched `keel-asm-ir` code. Later
+changes only format one initializer assignment, strengthen the layout-matrix
+count assertion (rerun passed), and record documentation/evidence.

@@ -72,6 +72,7 @@ def main():
             str(reference)], check=True, capture_output=True)
         got = data_symbols(inspector, actual)
         want = data_symbols(inspector, reference)
+        assert len(want) == 512, (target, len(want))
         assert got.keys() == want.keys(), (target, got.keys() ^ want.keys())
         for name in got:
             assert got[name] == want[name], (target, name, got[name], want[name])

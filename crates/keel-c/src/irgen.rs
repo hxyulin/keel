@@ -1095,7 +1095,8 @@ impl<'p> Gen<'p> {
                                     let target = bf.shift + bit;
                                     let byte = &mut bytes[offset + (target / 8) as usize];
                                     let mask = 1 << (target % 8);
-                                    *byte = (*byte & !mask) | (((v as u128 >> bit) as u8 & 1) * mask);
+                                    *byte =
+                                        (*byte & !mask) | (((v as u128 >> bit) as u8 & 1) * mask);
                                 }
                             }
                             None => {
