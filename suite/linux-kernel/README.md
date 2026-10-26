@@ -469,3 +469,46 @@ Full workspace validation at `d14e3958` passed 2,773 tests, zero failures and
 13 ignored across 507 groups. Workspace and profiling checks, all 98 generator
 tests, three audit harness tests, both freshness checks, scoped formatting and
 diff checks passed. No production source changed after that run.
+
+## Ranged choices and empty record members
+
+Checkpoint `212901fc` adds `er`/`re` and `Ir`/`rI` inputs, preserving their
+predicates through required inlining and constant cleanup. `e` chooses numeric
+signed-32-bit immediates; `I` chooses constants from 0 through 31. Other values
+use registers. Symbols use registers for `er` because no code-model contract
+establishes their signed-32-bit range. Standalone `e`/`I` constraints remain
+unsupported. Empty declarations inside structs and unions add no fields and
+preserve layout and initialization.
+
+The [ranged-choice audit](audit-ranged-choices-empty-members.json) uses the
+same saved inputs. All 319 prior `er`/`Ir` first errors and all 153 empty-member
+first errors disappear. Current C first errors are:
+
+| First blocker | Files |
+| --- | ---: |
+| Packed bit-fields requiring partial-container access | 434 |
+| File-scope asm | 25 |
+| GNU fallthrough attribute statements | 7 |
+| Section placement | 7 |
+| `Nd` input constraints | 4 |
+| Alias attributes | 2 |
+| `__builtin_has_attribute` | 1 |
+
+The seven remaining `expected a type, found ;` diagnostics occur at
+`__attribute__((__fallthrough__));` statements, including `include/linux/signal.h`;
+they are distinct from the empty record members fixed in this checkpoint.
+C acceptance remains four of 484 and standalone assembly remains 402 of 506.
+These are first errors rather than an exhaustive inventory of missing support.
+
+All 406 previously accepted objects remain byte-for-byte identical, with no
+crashes, timeouts or acceptance regressions. All 992 inputs and the three
+reference artifacts were rehashed unchanged after this audit. No reference
+rebuild or reboot occurred, and no Keel object was linked into or run as the
+kernel. The 57-function userspace fixture passes all 145 fresh objects against
+GCC 13.3.0 and rejects seventeen broken controls normally. Independent C checks
+the ranged additions, bit toggles and comparison flag results.
+
+Full workspace validation at `212901fc` passed 2,777 tests, zero failures
+and 13 ignored across 508 groups. Workspace and profiling checks, all 98
+generator tests, three audit harness tests, both freshness checks, scoped
+formatting and diff checks passed. No production source changed after that run.

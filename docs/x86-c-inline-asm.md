@@ -43,7 +43,8 @@ The `e` option accepts numeric constants in the signed 32-bit range; `I` accepts
 0 through 31. Other values use a register. These predicates survive required
 inlining in IR as `re` and `rI`. Symbols use a register for `er`, because Keel
 does not establish a signed-32-bit symbol range through a code-model contract.
-Standalone `e`/`I`, other machine immediate classes, comma-separated alternatives
+The [GCC x86 constraint definitions](https://gcc.gnu.org/onlinedocs/gcc/Machine-Constraints.html)
+define these numeric predicates. Standalone `e`/`I`, other machine immediate classes, comma-separated alternatives
 and memory retries after scalar register exhaustion remain unsupported. Keel does not infer instruction-specific immediate ranges from
 arbitrary templates.
 

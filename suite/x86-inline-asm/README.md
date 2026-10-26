@@ -93,3 +93,15 @@ GCC 13.3.0 on Linux x86-64 across the 55-function fixture. All fifteen controls
 returned normal failure. Every object also passed the independent C flag-bit
 oracle. Native Clang execution was not run; its local C frontend rejects the
 sixteen concurrent flag outputs used by this fixture.
+
+The ranged-choice extension adds two functions, for 57 exports. Required-inline
+helpers exercise signed-32-bit boundaries, out-of-range and runtime `er` inputs,
+and `Ir` bit indices 0, 31, 32 and a runtime index. The oracle also checks their
+results against independent C arithmetic and bit operations. Two added controls
+corrupt the signed-choice boundary and a bit index. The earlier results above
+precede this extension.
+
+At ranged-choice checkpoint `212901fc`, all 145 fresh objects passed against
+GCC 13.3.0 on Linux x86-64 across the 57-function fixture. All seventeen controls
+failed normally. Every object passed the independent C range-choice and flag
+oracles. Native Clang execution was not run.
