@@ -44,7 +44,7 @@ pub struct IsaForm {
     pub prefix: i16,
     pub sizes: u8,
     pub addresses: u8,
-    pub osz: &'static str,
+    pub osz: OperandSizeRule,
     pub mod_mask: u8,
     pub reg_mask: u8,
     pub rm_mask: u8,
@@ -65,6 +65,28 @@ pub struct IsaForm {
     /// Upstream's explicit privilege metadata, when present. Absence is unknown.
     pub cpl: Option<u8>,
 }
+
+/// Imported rules for interpreting operand-size prefixes in long mode.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OperandSizeRule {
+    /// Use the normal 16/32/64-bit prefix selection.
+    Default,
+    /// The instruction operates on bytes regardless of operand-size prefixes.
+    Byte,
+    /// Default to 64 bits, with a 16-bit operand-size override.
+    Default64,
+    /// Always use 64-bit operands.
+    Force64,
+    /// The imported long-mode rule selects 64-bit operands.
+    Force32Or64,
+    /// REX.W selects 64 bits; otherwise use 32 bits, ignoring 66.
+    Force32OrRexW,
+    /// Ignore 66 and select 32 or 64 bits through REX.W.
+    Ignore66,
+    /// Use normal prefix selection; separate form filters constrain REX.W.
+    RexW32,
+}
+
 impl IsaForm {
     pub fn allows_size(self, bits: u16) -> bool {
         self.sizes
@@ -79,24 +101,23 @@ impl IsaForm {
     /// Effective operand size after interpreting legacy 66 and REX.W.
     pub fn operand_size(self, p66: bool, w: bool) -> u16 {
         match self.osz {
-            "byteop" => 8,
-            "force64" => 64,
-            "default64" => {
+            OperandSizeRule::Byte => 8,
+            OperandSizeRule::Force64 | OperandSizeRule::Force32Or64 => 64,
+            OperandSizeRule::Default64 => {
                 if p66 {
                     16
                 } else {
                     64
                 }
             }
-            "force32_or_64" => 64,
-            "ignore66" | "force32_or_rexw" => {
+            OperandSizeRule::Ignore66 | OperandSizeRule::Force32OrRexW => {
                 if w {
                     64
                 } else {
                     32
                 }
             }
-            _ => {
+            OperandSizeRule::Default | OperandSizeRule::RexW32 => {
                 if w {
                     64
                 } else if p66 && self.prefix != 0x66 {

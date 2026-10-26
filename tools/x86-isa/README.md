@@ -16,6 +16,13 @@ python3 -m unittest discover -s tools/x86-isa -p 'test_*.py'
 Ordinary Cargo builds use checked-in Rust. They need no network access,
 Python, C decoder, or upstream generator.
 
+The generated legacy/VEX and EVEX catalogues share repeated operand lists
+within each table. Imported operand-size rules use an exhaustive Rust enum;
+unknown rules stop generation. The `isa_table_layout` Cargo example reports
+record sizes and distinct operand-slice storage.
+See the [Rust refactor review](../../docs/rust-refactor-review.md) for measured
+source-size changes and remaining representation work.
+
 The input is a subset of the MIT-licensed
 [Zydis instruction database](https://github.com/zyantific/zydis-db/tree/eaf92a02dca616b90c12b2ebc338d87ed943c84f),
 pinned to `eaf92a02dca616b90c12b2ebc338d87ed943c84f`. The snapshot retains

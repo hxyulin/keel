@@ -2,7 +2,7 @@
 use super::*;
 use keel_asm_ir::x86::{
     CoreOpcode, Repeat,
-    isa::{self, IsaForm, IsaOperand},
+    isa::{self, IsaForm, IsaOperand, OperandSizeRule},
 };
 use smallvec::SmallVec;
 
@@ -347,7 +347,12 @@ fn match_form<'a>(
     if p66 && w && form.prefix != 0x66 {
         return None;
     }
-    if w && form.w < 0 && matches!(form.osz, "default64" | "force64") {
+    if w && form.w < 0
+        && matches!(
+            form.osz,
+            OperandSizeRule::Default64 | OperandSizeRule::Force64
+        )
+    {
         return None;
     }
     if d.group.is_some_and(|g| form.reg_mask != 1 << g) {

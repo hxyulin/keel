@@ -26,6 +26,12 @@ class GeneratorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             generate.generate([row])
 
+    def test_unknown_operand_size_rule_fails_closed(self):
+        row = copy.deepcopy(next(r for r in self.data if r['mnemonic'] == 'lgdt'))
+        row['opsize_map'] = 'new_size_rule'
+        with self.assertRaisesRegex(ValueError, 'unsupported operand-size rule'):
+            generate.generate([row])
+
     def test_unclassified_feature_set_requires_policy(self):
         row = copy.deepcopy(next(r for r in self.data if r['mnemonic'] == 'aesenc'))
         row['meta_info']['isa_set'] = 'NEW_FEATURE'
