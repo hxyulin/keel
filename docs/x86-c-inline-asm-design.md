@@ -1,8 +1,8 @@
 # x86-64 C inline assembly design
 
-Status: proposed implementation plan, 2026-10-26. No x86 inline assembly is
-implemented by this document. The existing [AArch64 subset](c-inline-asm.md)
-remains supported.
+Status: scalar fallthrough milestone implemented, 2026-10-26. See the
+[current contract](x86-c-inline-asm.md). The remaining milestones below are
+implementation plans. The [AArch64 subset](c-inline-asm.md) remains supported.
 
 ## Current blockers
 
@@ -24,17 +24,17 @@ Inline asm will expose further C errors. Kernel compiler options, ABI policy
 linking and execution still need separate qualification. Supporting privileged
 instruction bytes does not establish these contracts.
 
-## Reuse and changes
+## Starting architecture and planned changes
 
 Reuse the C operand AST and its evaluate-once lvalue capture, the InlineAsm IR
 entry point, generated x86 register/condition mappings and existing GNU assembly
 parser/encoder. Do not introduce another instruction encoder or shell out to
 an assembler for production compilation.
 
-The current IR supports register outputs, inputs, ties and clobbers, but its
+At the start of this work the IR supported register outputs, inputs, ties and clobbers, but its
 physical-register representation and parser are AArch64-specific. Memory is
 input-address-only. Early-clobber information is discarded because that backend
-assigns distinct registers. The x86 backend rejects InlineAsm. Removing the
+assigns distinct registers. The x86 backend rejected InlineAsm. Removing the
 frontend target check alone would be incorrect.
 
 Extend the contract to retain operand access (read, write, read/write), value

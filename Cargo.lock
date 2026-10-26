@@ -439,6 +439,9 @@ dependencies = [
 [[package]]
 name = "keel-ir"
 version = "0.1.0"
+dependencies = [
+ "keel-asm-ir",
+]
 
 [[package]]
 name = "keel-link"

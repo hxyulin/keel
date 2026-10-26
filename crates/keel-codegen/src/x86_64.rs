@@ -80,6 +80,7 @@ mod cpu_control;
 mod cx16;
 mod f80;
 mod flags_state;
+mod inline_asm;
 mod legacy_x87_images;
 mod loop_align;
 mod owned_x87_stack;
@@ -492,7 +493,6 @@ fn unsupported(func: &Function, inst: Inst) -> Option<&'static str> {
             "exceptions"
         }
         InstData::Neon { .. } => "ARM NEON architectural intrinsic",
-        InstData::InlineAsm { .. } => "inline assembly",
         _ => return None,
     })
 }
@@ -668,6 +668,8 @@ struct FunctionCompiler<'a> {
     cx16_save: Option<usize>,
     string_io_home: Option<usize>,
     string_io_programs: HashMap<Inst, keel_asm_ir::Program>,
+    inline_asm_home: Option<usize>,
+    inline_asm_plans: HashMap<Inst, inline_asm::Plan>,
     rflags_home: Option<usize>,
     rflags_programs: HashMap<Inst, keel_asm_ir::Program>,
     /// Offset from `rsp` of the slot keeping this function's own `sret`
@@ -1499,12 +1501,45 @@ impl<'a> FunctionCompiler<'a> {
             matches!(func.inst_data(i), InstData::Intrinsic { id, .. } if id.x86_string_port_io().is_some())
         }).then_some(offset.next_multiple_of(8));
         let offset = string_io_home.map_or(offset, |home| home + string_port_io::FRAME_BYTES);
-        let rflags_bytes = func.layout_insts().filter_map(|(_, i)| match func.inst_data(i) {
-            InstData::X86RflagsRegion { plan, .. } => Some(8 * (1 + plan.captures.len() + plan.observations)),
-            _ => None,
-        }).max().unwrap_or(0);
+        let rflags_bytes = func
+            .layout_insts()
+            .filter_map(|(_, i)| match func.inst_data(i) {
+                InstData::X86RflagsRegion { plan, .. } => {
+                    Some(8 * (1 + plan.captures.len() + plan.observations))
+                }
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0);
         let rflags_home = (rflags_bytes != 0).then_some(offset.next_multiple_of(8));
         let offset = rflags_home.map_or(offset, |home| home + rflags_bytes);
+        let function_index = module
+            .functions
+            .iter()
+            .position(|f| f.name == func.name)
+            .expect("lowered function keeps its module identity")
+            as u64;
+        let mut inline_asm_plans = HashMap::default();
+        for (_, inst) in func.layout_insts() {
+            if let InstData::InlineAsm { asm, args } = func.inst_data(inst) {
+                let plan = inline_asm::plan(
+                    func,
+                    asm,
+                    args,
+                    frame_register,
+                    (function_index << 32) | inst.index() as u64,
+                )
+                .map_err(err)?;
+                inline_asm_plans.insert(inst, plan);
+            }
+        }
+        let asm_bytes = inline_asm_plans
+            .values()
+            .map(|p| p.bytes)
+            .max()
+            .unwrap_or(0);
+        let inline_asm_home = (asm_bytes != 0).then_some(offset.next_multiple_of(8));
+        let offset = inline_asm_home.map_or(offset, |home| home + asm_bytes);
         let (stack_slot_offsets, offset) =
             crate::stack_frame::SlotOffsets::layout(func, offset, !module.files.is_empty());
         // rsp is 16-byte aligned after `push rbp`; the pushes and the frame
@@ -1516,8 +1551,17 @@ impl<'a> FunctionCompiler<'a> {
         if cx16_save.is_some() && !saved.contains(&3) {
             saved.push(3);
         }
+        if inline_asm_home.is_some() {
+            for r in [3, 12, 13, 14, 15] {
+                if !saved.contains(&r) {
+                    saved.push(r);
+                }
+            }
+        }
         if let Some(r) = frame_register {
-            saved.push(r);
+            if !saved.contains(&r) {
+                saved.push(r);
+            }
         }
         let frame_size = (offset + 8 * saved.len()).next_multiple_of(16) - 8 * saved.len()
             + if frame_register.is_some() {
@@ -1593,6 +1637,8 @@ impl<'a> FunctionCompiler<'a> {
             cx16_save,
             string_io_home,
             string_io_programs: HashMap::default(),
+            inline_asm_home,
+            inline_asm_plans,
             rflags_home,
             rflags_programs: HashMap::default(),
             sret_ptr,
@@ -3727,13 +3773,18 @@ impl<'a> FunctionCompiler<'a> {
                 self.epilogue();
                 self.emit(Opcode::Ret, []);
             }
+            InstData::InlineAsm { ref args, .. } => self.native_inline_asm(inst, args),
             InstData::X86RflagsRegion { ref args, .. } => self.native_rflags_region(inst, args),
             InstData::VaArg { ty, list, .. } => self.va_arg(inst, ty, list, result),
-            InstData::AggregateVaArg { ref layout, list, home, x86_vector_abi } => self.aggregate_va_arg(inst, layout, list, home, x86_vector_abi, result),
+            InstData::AggregateVaArg {
+                ref layout,
+                list,
+                home,
+                x86_vector_abi,
+            } => self.aggregate_va_arg(inst, layout, list, home, x86_vector_abi, result),
             InstData::Invoke { .. }
             | InstData::LandingPad { .. }
             | InstData::EhTypeid { .. }
-            | InstData::InlineAsm { .. }
             | InstData::Neon { .. } => unreachable!("rejected in `new`"),
         }
     }

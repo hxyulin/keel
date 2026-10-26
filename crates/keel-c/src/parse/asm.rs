@@ -48,10 +48,11 @@ impl<'a> Parser<'a> {
             // All IR asm is pinned. `inline` is only an inlining size hint.
             self.advance();
         }
-        if self.target != Target::Aarch64AppleDarwin {
+        let x86 = self.target == Target::X86_64LinuxGnu;
+        if !x86 && self.target != Target::Aarch64AppleDarwin {
             return Err(Error::new(
                 loc,
-                "C inline assembly requires the AArch64 backend; x86 inline assembly is not supported",
+                "C inline assembly requires the AArch64 Darwin or x86-64 Linux backend",
             ));
         }
         self.expect("(")?;
@@ -93,10 +94,16 @@ impl<'a> Parser<'a> {
                             }
                             let code = &constraint[1..];
                             let code = code.strip_prefix('&').unwrap_or(code);
-                            if !matches!(code, "r" | "w") {
+                            if !(matches!(code, "r" | "w") && (!x86 || code == "r")
+                                || x86 && matches!(code, "a" | "b" | "c" | "d" | "S" | "D"))
+                            {
                                 return Err(Error::new(
                                     loc,
-                                    "unsupported asm output constraint (supported: =r, +r, =w, +w, with optional &; memory outputs are not supported)",
+                                    if x86 {
+                                        "unsupported asm output constraint (supported: r, a, b, c, d, S, D with =/+ and optional &; memory outputs are not supported)"
+                                    } else {
+                                        "unsupported asm output constraint (supported: =r, +r, =w, +w, with optional &; memory outputs are not supported)"
+                                    },
                                 ));
                             }
                             self.check_lvalue(&expr)?;
@@ -118,7 +125,12 @@ impl<'a> Parser<'a> {
                                 ));
                             }
                             asm_register_type(code, expr.ty, loc)?;
-                            constraint = format!("={code}");
+                            let early = if constraint[1..].starts_with('&') {
+                                "&"
+                            } else {
+                                ""
+                            };
+                            constraint = format!("={early}{}", asm_constraint(code, x86));
                             outputs.push((expr, readwrite));
                         } else {
                             if let Some(name) = constraint
@@ -139,7 +151,7 @@ impl<'a> Parser<'a> {
                                 constraint = n.to_string();
                             }
                             match constraint.as_str() {
-                                "m" => {
+                                "m" if !x86 => {
                                     if matches!(expr.ty, Ty::Void | Ty::Func(_)) {
                                         return Err(Error::new(
                                             expr.loc,
@@ -166,16 +178,23 @@ impl<'a> Parser<'a> {
                                     }
                                     expr.kind = ExprKind::Int(value);
                                 }
-                                "r" | "w" => {
+                                "r" | "w" if !x86 || constraint == "r" => {
                                     expr = self.rvalue(expr);
                                     asm_register_type(&constraint, expr.ty, loc)?;
+                                }
+                                "a" | "b" | "c" | "d" | "S" | "D" if x86 => {
+                                    expr = self.rvalue(expr);
+                                    asm_register_type(&constraint, expr.ty, loc)?;
+                                    constraint = asm_constraint(&constraint, true).to_string();
                                 }
                                 _ => {
                                     let n = constraint.parse::<usize>().ok().filter(|n| *n < outputs.len())
                                         .ok_or_else(|| Error::new(loc, format!("unsupported asm input constraint `{constraint}` (supported: r, w, m, i, n, output number or [name])")))?;
                                     expr = self.rvalue(expr);
                                     asm_register_type(
-                                        constraints[n].trim_start_matches('='),
+                                        constraints[n]
+                                            .trim_start_matches('=')
+                                            .trim_start_matches('&'),
                                         expr.ty,
                                         expr.loc,
                                     )?;
@@ -220,7 +239,19 @@ impl<'a> Parser<'a> {
                         if !matches!(clobber.as_str(), "memory" | "cc") {
                             let reg = keel_ir::PhysReg::parse(&clobber)
                                 .map_err(|e| Error::new(loc, e))?;
-                            if !reg.float && matches!(reg.num, 18 | 29) {
+                            if (reg.arch == keel_ir::AsmArch::X86) != x86 {
+                                return Err(Error::new(
+                                    loc,
+                                    "asm clobber register belongs to another architecture",
+                                ));
+                            }
+                            if x86 && matches!(reg.num, 4 | 5) {
+                                return Err(Error::new(
+                                    loc,
+                                    "asm cannot clobber the stack or frame pointer",
+                                ));
+                            }
+                            if !x86 && !reg.float && matches!(reg.num, 18 | 29) {
                                 return Err(Error::new(
                                     loc,
                                     "asm cannot clobber reserved x18 or frame pointer x29",
@@ -246,7 +277,7 @@ impl<'a> Parser<'a> {
         self.expect(")")?;
         self.expect(";")?;
         let template = if extended {
-            asm_template(&template, &names, outputs.len() + inputs.len(), loc)?
+            asm_template(&template, &names, outputs.len() + inputs.len(), loc, x86)?
         } else {
             template
         };
@@ -264,7 +295,13 @@ impl<'a> Parser<'a> {
 }
 
 /// Keep named substitutions separate from token parsing: %% never starts a name.
-fn asm_template(template: &str, names: &[(&str, usize)], count: usize, loc: Loc) -> R<String> {
+fn asm_template(
+    template: &str,
+    names: &[(&str, usize)],
+    count: usize,
+    loc: Loc,
+    x86: bool,
+) -> R<String> {
     let mut chars = template.chars().peekable();
     let mut text = String::new();
     while let Some(c) = chars.next() {
@@ -276,8 +313,12 @@ fn asm_template(template: &str, names: &[(&str, usize)], count: usize, loc: Loc)
             text.push('%');
             continue;
         }
+        if x86 && chars.next_if_eq(&'=').is_some() {
+            text.push('=');
+            continue;
+        }
         if let Some(m) = chars.next_if(|c| c.is_ascii_alphabetic()) {
-            if !"wxsdqhbc".contains(m) {
+            if !(if x86 { "bwkqc" } else { "wxsdqhbc" }).contains(m) {
                 return Err(Error::new(
                     loc,
                     format!("unsupported asm template modifier `%{m}`"),
@@ -328,7 +369,8 @@ fn asm_template(template: &str, names: &[(&str, usize)], count: usize, loc: Loc)
 
 fn asm_register_type(code: &str, ty: Ty<'_>, loc: Loc) -> R<()> {
     let ok = match code {
-        "r" => matches!(ty, Ty::Int(k) if k.size() <= 8) || ty.is_ptr(),
+        "r" | "a" | "b" | "c" | "d" | "S" | "D" | "{rax}" | "{rbx}" | "{rcx}" | "{rdx}"
+        | "{rsi}" | "{rdi}" => matches!(ty, Ty::Int(k) if k.size() <= 8) || ty.is_ptr(),
         "w" => matches!(ty, Ty::Float | Ty::Double),
         _ => false,
     };
@@ -348,5 +390,21 @@ fn asm_const(sugar: Sugar<'_>, defs: &[TypedefDef<'_>]) -> bool {
         Sugar::Typedef(i) => asm_const(defs[i].sugar, defs),
         Sugar::Volatile(s) | Sugar::Restrict(s) => asm_const(*s, defs),
         _ => false,
+    }
+}
+
+/// GNU fixed-register constraints become target-tagged register identities in IR.
+fn asm_constraint(code: &str, x86: bool) -> &str {
+    if !x86 {
+        return code;
+    }
+    match code {
+        "a" => "{rax}",
+        "b" => "{rbx}",
+        "c" => "{rcx}",
+        "d" => "{rdx}",
+        "S" => "{rsi}",
+        "D" => "{rdi}",
+        _ => code,
     }
 }

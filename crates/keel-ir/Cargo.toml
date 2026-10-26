@@ -4,3 +4,6 @@ description = "Keel's intermediate representation"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+
+[dependencies]
+keel-asm-ir = { path = "../keel-asm-ir" }

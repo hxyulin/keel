@@ -38,6 +38,15 @@ impl Output {
             }),
         }
     }
+    /// Keep the fragment in the enclosing assembly stream for directives,
+    /// numeric local labels and relocations. Restore compiler syntax afterward.
+    pub(super) fn inline_assembly(&mut self, text: &str) {
+        let text = format!(".att_syntax prefix\n{text}\n.intel_syntax noprefix\n");
+        match self {
+            Self::Text(out) => out.push_str(&text),
+            Self::Structured(out) => out.text(&text),
+        }
+    }
     /// Append the already resource-checked raw region identically in both paths.
     pub(super) fn checked_region(&mut self, program: Program) {
         match self {

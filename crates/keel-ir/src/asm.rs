@@ -21,6 +21,8 @@ use std::fmt;
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct InlineAsm {
     pub template: String,
+    /// Output indices whose registers are written before inputs are consumed.
+    pub early_clobbers: Vec<u16>,
     /// Each output and the type of its result.
     pub outputs: Vec<(AsmOperand, Type)>,
     pub inputs: Vec<AsmOperand>,
@@ -45,11 +47,20 @@ pub enum AsmOperand {
 }
 
 /// A register by class and number: `x5` and `w5` are the general-purpose
-/// register 5, `v5`, `d5` and `s5` the SIMD/FP register 5.
+/// register 5, `v5`, `d5` and `s5` the SIMD/FP register 5. x86 GPR
+/// views such as rax/eax/al share the generated physical register number.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub struct PhysReg {
+    pub arch: AsmArch,
     pub float: bool,
     pub num: u8,
+}
+
+/// Architecture of an explicitly named register.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub enum AsmArch {
+    Aarch64,
+    X86,
 }
 
 /// What the template changes besides its outputs.
@@ -68,6 +79,7 @@ impl InlineAsm {
     pub fn new(template: &str, constraints: &str, output_types: &[Type]) -> Result<Self, String> {
         let mut asm = InlineAsm {
             template: template.to_string(),
+            early_clobbers: Vec::new(),
             outputs: Vec::new(),
             inputs: Vec::new(),
             clobbers: Vec::new(),
@@ -88,9 +100,14 @@ impl InlineAsm {
                 if !asm.inputs.is_empty() {
                     return Err(format!("output `{part}` comes after an input"));
                 }
-                // `&` (early clobber) asks for a register no input uses,
-                // which every output gets anyway.
-                let code = code.strip_prefix('&').unwrap_or(code);
+                let code = if let Some(code) = code.strip_prefix('&') {
+                    asm.early_clobbers.push(
+                        u16::try_from(output_kinds.len()).map_err(|_| "too many asm outputs")?,
+                    );
+                    code
+                } else {
+                    code
+                };
                 let operand = operand(code)?;
                 if !matches!(
                     operand,
@@ -119,7 +136,14 @@ impl InlineAsm {
 
     /// The constraint string, as [`InlineAsm::new`] reads it.
     pub fn constraints(&self) -> String {
-        let outputs = self.outputs.iter().map(|(op, _)| format!("={op}"));
+        let outputs = self.outputs.iter().enumerate().map(|(i, (op, _))| {
+            let early = if self.early_clobbers.contains(&(i as u16)) {
+                "&"
+            } else {
+                ""
+            };
+            format!("={early}{op}")
+        });
         let inputs = self.inputs.iter().map(|op| op.to_string());
         let clobbers = self.clobbers.iter().map(|c| match c {
             AsmClobber::Reg(r) => format!("~{{{r}}}"),
@@ -157,18 +181,30 @@ fn operand(code: &str) -> Result<AsmOperand, String> {
 
 impl PhysReg {
     /// `x0`–`x30` and `w0`–`w30` (also `fp` and `lr`), or `v0`–`v31` and
-    /// their `q`, `d`, `s`, `h` and `b` views.
+    /// their `q`, `d`, `s`, `h` and `b` views. Also accepts generated x86 GPR
+    /// names and aliases, retaining their architecture and canonical number.
     pub fn parse(name: &str) -> Result<Self, String> {
+        if let Some(r) = keel_asm_ir::x86::Register::parse(name)
+            && r.class == keel_asm_ir::x86::RegisterClass::Gpr
+        {
+            return Ok(Self {
+                arch: AsmArch::X86,
+                float: false,
+                num: r.number,
+            });
+        }
         let bad = || format!("unknown register `{name}`");
         match name {
             "fp" => {
                 return Ok(PhysReg {
+                    arch: AsmArch::Aarch64,
                     float: false,
                     num: 29,
                 });
             }
             "lr" => {
                 return Ok(PhysReg {
+                    arch: AsmArch::Aarch64,
                     float: false,
                     num: 30,
                 });
@@ -182,12 +218,25 @@ impl PhysReg {
             "v" | "q" | "d" | "s" | "h" | "b" if num <= 31 => true,
             _ => return Err(bad()),
         };
-        Ok(PhysReg { float, num })
+        Ok(PhysReg {
+            arch: AsmArch::Aarch64,
+            float,
+            num,
+        })
     }
 }
 
 impl fmt::Display for PhysReg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.arch == AsmArch::X86 {
+            let r = keel_asm_ir::x86::Register {
+                class: keel_asm_ir::x86::RegisterClass::Gpr,
+                number: self.num,
+                width: 64,
+                high_byte: false,
+            };
+            return write!(f, "{r}");
+        }
         let class = if self.float { 'v' } else { 'x' };
         write!(f, "{class}{}", self.num)
     }
@@ -220,10 +269,29 @@ mod tests {
         .unwrap();
         assert_eq!(
             asm.constraints(),
-            "=r,={x3},r,{v1},m,i,0,~{x30},~{memory},~{cc}"
+            "=r,=&{x3},r,{v1},m,i,0,~{x30},~{memory},~{cc}"
         );
         let again = InlineAsm::new("", &asm.constraints(), &[Type::I64, Type::I32]).unwrap();
         assert_eq!(asm, again);
+    }
+
+    #[test]
+    fn x86_register_aliases_and_early_clobbers_round_trip() {
+        let asm = InlineAsm::new("", "=&{eax},{rdx},0,~{r11d}", &[Type::I64]).unwrap();
+        assert_eq!(asm.constraints(), "=&{rax},{rdx},0,~{r11}");
+        assert_eq!(asm.early_clobbers, [0]);
+        assert_eq!(
+            asm,
+            InlineAsm::new("", &asm.constraints(), &[Type::I64]).unwrap()
+        );
+        assert_eq!(
+            PhysReg::parse("ah").unwrap(),
+            PhysReg::parse("rax").unwrap()
+        );
+        assert_ne!(
+            PhysReg::parse("x0").unwrap(),
+            PhysReg::parse("rax").unwrap()
+        );
     }
 
     #[test]
@@ -235,6 +303,6 @@ mod tests {
         assert!(err("=r", 0).contains("1 output constraint(s) but 0"));
         assert!(err("q", 0).contains("unknown constraint"));
         assert!(err("{x31}", 0).contains("unknown register"));
-        assert!(err("~{sp}", 0).contains("unknown register"));
+        assert!(err("~{unknown}", 0).contains("unknown register"));
     }
 }

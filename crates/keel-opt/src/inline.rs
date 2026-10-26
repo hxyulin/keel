@@ -1389,6 +1389,7 @@ mod report_tests {
         *f.inst_data_mut(inst) = InstData::InlineAsm {
             asm: Box::new(keel_ir::InlineAsm {
                 template: String::new(),
+                early_clobbers: vec![],
                 outputs: vec![],
                 inputs: vec![],
                 clobbers: vec![],

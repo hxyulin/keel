@@ -727,10 +727,12 @@ fn is_call(func: &Function, data: &InstData) -> bool {
         // Inline assembly that clobbers allocatable caller-saved registers
         // is treated like a call, which keeps values out of all of them.
         InstData::InlineAsm { asm, .. } => asm.clobbers.iter().any(|c| match c {
-            AsmClobber::Reg(PhysReg { float: false, num }) => REGISTERS.caller_saved.contains(num),
-            AsmClobber::Reg(PhysReg { float: true, num }) => {
-                REGISTERS.float_caller_saved.contains(num)
-            }
+            AsmClobber::Reg(PhysReg {
+                float: false, num, ..
+            }) => REGISTERS.caller_saved.contains(num),
+            AsmClobber::Reg(PhysReg {
+                float: true, num, ..
+            }) => REGISTERS.float_caller_saved.contains(num),
             AsmClobber::Memory | AsmClobber::Flags => false,
         }),
         InstData::Binary { op, args } => {
@@ -7322,6 +7324,19 @@ fn arg_kind<'s>(func: &Function, params: &'s [AbiParam], i: usize, arg: Value) -
 /// tied (or an input names an output's register: it is read before the
 /// output is written). A constant gets none.
 fn asm_regs(asm: &InlineAsm) -> Result<Vec<Option<PhysReg>>, String> {
+    if asm
+        .outputs
+        .iter()
+        .map(|(o, _)| o)
+        .chain(&asm.inputs)
+        .any(|o| matches!(o, AsmOperand::Fixed(r) if r.arch != keel_ir::AsmArch::Aarch64))
+        || asm
+            .clobbers
+            .iter()
+            .any(|c| matches!(c, AsmClobber::Reg(r) if r.arch != keel_ir::AsmArch::Aarch64))
+    {
+        return Err("x86 register in AArch64 inline assembly".into());
+    }
     let n_out = asm.outputs.len();
     let operands: Vec<AsmOperand> = (asm.outputs.iter().map(|&(op, _)| op))
         .chain(asm.inputs.iter().copied())
@@ -7363,7 +7378,11 @@ fn asm_regs(asm: &InlineAsm) -> Result<Vec<Option<PhysReg>>, String> {
         };
         let pool: &[u8] = if float { &ASM_FREGS } else { &ASM_REGS };
         let r = (pool.iter())
-            .map(|&num| PhysReg { float, num })
+            .map(|&num| PhysReg {
+                arch: keel_ir::AsmArch::Aarch64,
+                float,
+                num,
+            })
             .find(|r| !taken.contains(r))
             .ok_or("too many asm operands for the free registers")?;
         regs[i] = Some(r);

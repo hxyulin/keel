@@ -875,6 +875,13 @@ impl Verifier<'_> {
             );
             return;
         }
+        let mut early = Vec::new();
+        for &out in &asm.early_clobbers {
+            if out as usize >= asm.outputs.len() || early.contains(&out) {
+                self.inst_error(inst, "invalid or duplicate asm early-clobber output".into());
+            }
+            early.push(out);
+        }
         let fits = |op: AsmOperand, ty: Type| match op {
             AsmOperand::Reg | AsmOperand::Fixed(PhysReg { float: false, .. }) => {
                 (ty.is_int() && ty != Type::I128) || ty == Type::Ptr

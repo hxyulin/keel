@@ -1,8 +1,7 @@
 # GNU C inline assembly: first frontend milestone
 
 C assembly statements lower to the existing `InlineAsm` IR on
-`aarch64-apple-darwin`. The x86-64 C frontend diagnoses assembly statements;
-its IR backend also still rejects inline assembly. This is a bounded GNU C
+`aarch64-apple-darwin`. The [x86-64 scalar implementation](x86-c-inline-asm.md) is documented separately. This is a bounded GNU C
 subset, not general GCC constraint compatibility.
 
 ```c
@@ -16,8 +15,8 @@ long add(long a, long b) {
 }
 ```
 
-The proposed [x86-64 design](x86-c-inline-asm-design.md) covers the separate
-x86 backend, memory contracts, file-scope asm and asm goto. It is not implemented.
+The [x86-64 design](x86-c-inline-asm-design.md) also records the remaining
+memory contracts, file-scope asm and asm-goto milestones.
 
 ## Syntax and constraints
 

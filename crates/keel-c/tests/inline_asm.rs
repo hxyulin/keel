@@ -124,7 +124,7 @@ fn invalid_or_unsupported_source_is_diagnosed() {
         ("asm(\"%[bad\" :: \"r\"(x));", "unclosed"),
         ("asm(\"%=\" :::);", "requires an operand"),
         ("asm(\"%z0\" :: \"r\"(x));", "modifier"),
-        ("asm(\"\" ::: \"sp\");", "unknown register"),
+        ("asm(\"\" ::: \"sp\");", "another architecture"),
         ("asm(\"\" ::: \"x18\");", "reserved"),
         ("asm(\"\" ::: \"x29\");", "frame pointer"),
         ("asm(\"\" ::: \"w18\");", "reserved"),
@@ -143,7 +143,7 @@ fn invalid_or_unsupported_source_is_diagnosed() {
             "expected {expected}: {source}\n{err}"
         );
     }
-    let err = keel_c::compile(
+    let module = keel_c::compile(
         "void f(void){asm(\"nop\");}",
         "x86.c",
         keel_c::Options {
@@ -151,9 +151,8 @@ fn invalid_or_unsupported_source_is_diagnosed() {
             debug_info: false,
         },
     )
-    .unwrap_err()
-    .to_string();
-    assert!(err.contains("x86 inline assembly is not supported"));
+    .unwrap();
+    keel_codegen::compile(&module, Target::X86_64LinuxGnu).unwrap();
 }
 
 #[test]

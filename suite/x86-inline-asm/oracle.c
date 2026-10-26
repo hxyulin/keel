@@ -1,0 +1,52 @@
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#define U unsigned long
+#define BINARY(n) extern U n(U,U), ref_##n(U,U);
+BINARY(asm_flags)
+BINARY(asm_scratch)
+BINARY(asm_add)
+BINARY(asm_fixed)
+BINARY(asm_mul)
+BINARY(asm_early)
+#define UNARY(n) extern U n(U), ref_##n(U);
+UNARY(asm_macro)
+UNARY(asm_aligned)
+UNARY(asm_views)
+UNARY(asm_constants)
+UNARY(asm_unique)
+UNARY(asm_loop)
+UNARY(asm_unused)
+UNARY(asm_remat)
+extern U asm_six(U,U,U,U,U,U), ref_asm_six(U,U,U,U,U,U);
+extern U asm_clobber(U,U,U,U,U,U,U,U), ref_asm_clobber(U,U,U,U,U,U,U,U);
+extern U asm_memory_barrier(U*),ref_asm_memory_barrier(U*);
+extern U asm_once(U*,U*), ref_asm_once(U*,U*);
+extern U *asm_pointer(U*), *ref_asm_pointer(U*);
+extern unsigned char asm_byte(unsigned char,unsigned char),ref_asm_byte(unsigned char,unsigned char);
+extern unsigned short asm_word(unsigned short,unsigned short),ref_asm_word(unsigned short,unsigned short);
+extern unsigned int asm_dword(unsigned int,unsigned int),ref_asm_dword(unsigned int,unsigned int);
+#define CHECK(n, ...) do { U got=n(__VA_ARGS__), want=ref_##n(__VA_ARGS__); if(got!=want){printf("FAIL %s %lu: %lx != %lx\n",#n,i,got,want);return 1;} } while(0)
+static uint64_t state=0xabcde123456789ULL;
+static U next(void){state^=state<<13;state^=state>>7;state^=state<<17;return state;}
+int main(void) {
+    _Static_assert(sizeof(U)==8,"LP64 required");
+    for(U i=0;i<512;i++) {
+        U a=next(),b=next(),c=next(),d=next(),e=next(),f=next(),g=next(),h=next();
+        if(i<5){static const U edge[]={0,1,~0UL,0x8000000000000000UL,0x7fffffffffffffffUL};a=edge[i];b=edge[4-i];}
+        CHECK(asm_flags,a,b);CHECK(asm_scratch,a,b);CHECK(asm_macro,a);CHECK(asm_add,a,b);CHECK(asm_fixed,a,b);CHECK(asm_six,a,b,c,d,e,f);
+        CHECK(asm_mul,a,b);CHECK(asm_early,a,b);CHECK(asm_views,a);
+        CHECK(asm_aligned,a);CHECK(asm_constants,a);CHECK(asm_clobber,a,b,c,d,e,f,g,h);
+        CHECK(asm_unique,a);CHECK(asm_loop,a);CHECK(asm_unused,a);CHECK(asm_remat,a);
+        CHECK(asm_byte,a,b);CHECK(asm_word,a,b);CHECK(asm_dword,a,b);
+        U x[]={c,a,b,d}, y[]={c,a,b,d};
+        U got=asm_once(x+1,x+2),want=ref_asm_once(y+1,y+2);
+        if(got!=want || memcmp(x,y,sizeof x)){puts("FAIL asm_once");return 1;}
+        got=asm_memory_barrier(x+1);want=ref_asm_memory_barrier(y+1);
+        if(got!=want || memcmp(x,y,sizeof x)){puts("FAIL asm_memory_barrier");return 1;}
+        if(asm_pointer(x+1)!=ref_asm_pointer(x+1)){puts("FAIL asm_pointer");return 1;}
+    }
+    puts("PASS");
+    return 0;
+}
