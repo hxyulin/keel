@@ -58,6 +58,7 @@ impl<'a> Parser<'a> {
         self.expect("(")?;
         let template = self.asm_string()?;
         let mut outputs = Vec::new();
+        let mut output_memory = Vec::new();
         let mut inputs = Vec::new();
         let mut constraints: Vec<String> = Vec::new();
         let mut names = Vec::new();
@@ -95,18 +96,20 @@ impl<'a> Parser<'a> {
                             let code = &constraint[1..];
                             let code = code.strip_prefix('&').unwrap_or(code);
                             if !(matches!(code, "r" | "w") && (!x86 || code == "r")
-                                || x86 && matches!(code, "a" | "b" | "c" | "d" | "S" | "D"))
+                                || x86 && matches!(code, "a" | "b" | "c" | "d" | "S" | "D" | "m"))
                             {
                                 return Err(Error::new(
                                     loc,
                                     if x86 {
-                                        "unsupported asm output constraint (supported: r, a, b, c, d, S, D with =/+ and optional &; memory outputs are not supported)"
+                                        "unsupported asm output constraint (supported: r, a, b, c, d, S, D, m with =/+; & applies to register outputs)"
                                     } else {
                                         "unsupported asm output constraint (supported: =r, +r, =w, +w, with optional &; memory outputs are not supported)"
                                     },
                                 ));
                             }
-                            self.check_lvalue(&expr)?;
+                            if !(code == "m" && matches!(expr.ty, Ty::Array(..))) {
+                                self.check_lvalue(&expr)?;
+                            }
                             if asm_const(expr.sugar, &self.typedefs)
                                 || matches!(expr.ty, Ty::Atomic(_))
                             {
@@ -124,14 +127,28 @@ impl<'a> Parser<'a> {
                                     "asm bit-field and vector-element outputs are not supported",
                                 ));
                             }
-                            asm_register_type(code, expr.ty, loc)?;
-                            let early = if constraint[1..].starts_with('&') {
-                                "&"
+                            let memory = code == "m";
+                            if memory {
+                                if constraint[1..].starts_with('&') {
+                                    return Err(Error::new(
+                                        loc,
+                                        "early-clobber requires a register output",
+                                    ));
+                                }
+                                // Capture the object's address, never a scalar copy of its contents.
+                                expr = self.address_of(expr, loc)?;
+                                constraint = if readwrite { "mreadwrite" } else { "mwrite" }.into();
                             } else {
-                                ""
-                            };
-                            constraint = format!("={early}{}", asm_constraint(code, x86));
+                                asm_register_type(code, expr.ty, loc)?;
+                                let early = if constraint[1..].starts_with('&') {
+                                    "&"
+                                } else {
+                                    ""
+                                };
+                                constraint = format!("={early}{}", asm_constraint(code, x86));
+                            }
                             outputs.push((expr, readwrite));
+                            output_memory.push(memory);
                         } else {
                             if let Some(name) = constraint
                                 .strip_prefix('[')
@@ -151,7 +168,7 @@ impl<'a> Parser<'a> {
                                 constraint = n.to_string();
                             }
                             match constraint.as_str() {
-                                "m" if !x86 => {
+                                "m" => {
                                     if matches!(expr.ty, Ty::Void | Ty::Func(_)) {
                                         return Err(Error::new(
                                             expr.loc,
@@ -202,6 +219,12 @@ impl<'a> Parser<'a> {
                                 _ => {
                                     let n = constraint.parse::<usize>().ok().filter(|n| *n < outputs.len())
                                         .ok_or_else(|| Error::new(loc, format!("unsupported asm input constraint `{constraint}` (supported: r, w, m, i, n, output number or [name])")))?;
+                                    if output_memory[n] {
+                                        return Err(Error::new(
+                                            loc,
+                                            "asm matching input requires a register output",
+                                        ));
+                                    }
                                     expr = self.rvalue(expr);
                                     asm_register_type(
                                         constraints[n]
@@ -240,7 +263,7 @@ impl<'a> Parser<'a> {
                 }
             }
             for (n, (_, readwrite)) in outputs.iter().enumerate() {
-                if *readwrite {
+                if *readwrite && !output_memory[n] {
                     constraints.push(n.to_string());
                 }
             }
@@ -288,18 +311,50 @@ impl<'a> Parser<'a> {
         }
         self.expect(")")?;
         self.expect(";")?;
+        // Register results precede address operands in IR. Preserve GNU's
+        // source numbering by remapping only the output references and ties.
+        let n_reg = output_memory.iter().filter(|&&m| !m).count();
+        let mut next_reg = 0;
+        let mut next_mem = n_reg;
+        let mut numbering = Vec::new();
+        for &memory in &output_memory {
+            let next = if memory { &mut next_mem } else { &mut next_reg };
+            numbering.push(*next);
+            *next += 1;
+        }
+        numbering.extend(outputs.len()..outputs.len() + inputs.len());
+        let mut normalized = Vec::new();
+        for memory in [false, true] {
+            for (n, &is_memory) in output_memory.iter().enumerate() {
+                if memory == is_memory {
+                    normalized.push(constraints[n].clone());
+                }
+            }
+        }
+        for c in constraints.iter().skip(outputs.len()) {
+            normalized.push(
+                c.parse::<usize>()
+                    .map_or_else(|_| c.clone(), |n| numbering[n].to_string()),
+            );
+        }
         let template = if extended {
-            asm_template(&template, &names, outputs.len() + inputs.len(), loc, x86)?
+            asm_template(&template, &names, &numbering, loc, x86)?
         } else {
             template
         };
-        let constraints = constraints.join(",");
-        let types: Vec<_> = outputs.iter().map(|(e, _)| e.ty.ir()).collect();
+        let constraints = normalized.join(",");
+        let types: Vec<_> = outputs
+            .iter()
+            .zip(&output_memory)
+            .filter(|(_, m)| !**m)
+            .map(|((e, _), _)| e.ty.ir())
+            .collect();
         InlineAsm::new(&template, &constraints, &types).map_err(|e| Error::new(loc, e))?;
         Ok(Stmt::Asm(self.nodes.alloc(AsmStmt {
             template: self.text.intern(&template),
             constraints: self.text.intern(&constraints),
             outputs: self.slice(&outputs),
+            output_memory: self.slice(&output_memory),
             inputs: self.slice(&inputs),
             loc,
         })))
@@ -310,7 +365,7 @@ impl<'a> Parser<'a> {
 fn asm_template(
     template: &str,
     names: &[(&str, usize)],
-    count: usize,
+    numbering: &[usize],
     loc: Loc,
     x86: bool,
 ) -> R<String> {
@@ -360,12 +415,13 @@ fn asm_template(
                 .parse::<usize>()
                 .map_err(|_| Error::new(loc, "asm `%` requires an operand number/name or `%%`"))?
         };
-        if n >= count {
+        if n >= numbering.len() {
             return Err(Error::new(
                 loc,
                 "asm template operand number is out of range",
             ));
         }
+        let n = numbering[n];
         // A named reference has an explicit end. Preserve it if a literal
         // digit follows: %[in]0 must not become operand %10.
         if chars.peek().is_some_and(char::is_ascii_digit) {
@@ -400,7 +456,7 @@ fn asm_const(sugar: Sugar<'_>, defs: &[TypedefDef<'_>]) -> bool {
     match sugar {
         Sugar::Const(_) => true,
         Sugar::Typedef(i) => asm_const(defs[i].sugar, defs),
-        Sugar::Volatile(s) | Sugar::Restrict(s) => asm_const(*s, defs),
+        Sugar::Volatile(s) | Sugar::Restrict(s) | Sugar::Array(s) => asm_const(*s, defs),
         _ => false,
     }
 }

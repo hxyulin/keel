@@ -73,6 +73,8 @@ pub(super) fn plan(
         }
         match *op {
             Constraint::Reg => {}
+            Constraint::Mem | Constraint::MemWrite | Constraint::MemReadWrite
+                if i >= n && ty == Type::Ptr => {}
             Constraint::Fixed(r) => {
                 if r.arch != AsmArch::X86 || r.float || !available(r.num, frame) {
                     return Err(format!("unsupported or reserved x86 asm operand {r}"));
@@ -100,7 +102,10 @@ pub(super) fn plan(
         }
     }
     for (i, op) in ops.iter().enumerate() {
-        if *op == Constraint::Reg {
+        if matches!(
+            op,
+            Constraint::Reg | Constraint::Mem | Constraint::MemWrite | Constraint::MemReadWrite
+        ) {
             let r = (0..16)
                 .find(|&r| available(r, frame) && !taken[r as usize])
                 .ok_or("too many x86 asm operands for the free registers")?;
@@ -166,6 +171,18 @@ fn substitute(
             return Err("asm operand reference out of range".into());
         }
         if let Some(r) = regs[i] {
+            if i >= n
+                && matches!(
+                    asm.inputs[i - n],
+                    Constraint::Mem | Constraint::MemWrite | Constraint::MemReadWrite
+                )
+            {
+                if modifier.is_some() {
+                    return Err("unsupported x86 asm memory modifier".into());
+                }
+                write!(text, "(%{})", r64(r)).unwrap();
+                continue;
+            }
             let ty = if i < n {
                 asm.outputs[i].1
             } else {

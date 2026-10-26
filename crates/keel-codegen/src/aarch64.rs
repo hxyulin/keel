@@ -7369,6 +7369,9 @@ fn asm_regs(asm: &InlineAsm) -> Result<Vec<Option<PhysReg>>, String> {
     for (i, &op) in operands.iter().enumerate() {
         let float = match op {
             AsmOperand::Reg | AsmOperand::Mem => false,
+            AsmOperand::MemWrite | AsmOperand::MemReadWrite => {
+                return Err("memory output operands require the x86 backend".into());
+            }
             AsmOperand::FloatReg => true,
             AsmOperand::Tied(out) => {
                 regs[i] = regs[out as usize];

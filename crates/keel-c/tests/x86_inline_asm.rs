@@ -152,10 +152,11 @@ fn contracts_and_effects_survive_optimization() {
 fn unsupported_and_impossible_contracts_are_diagnosed() {
     for (body, expected) in [
         ("asm goto(\"\"::::done); done:;", "asm goto"),
-        ("asm(\"\" : \"=m\"(x));", "output constraint"),
         ("asm(\"\" : \"=rm\"(x));", "output constraint"),
+        ("asm(\"\" : \"=&m\"(x));", "early-clobber"),
+        ("asm(\"\" : \"=m\"(x) : \"0\"(x));", "register output"),
+        ("asm(\"\" :: \"m\"(x+1));", "assignable"),
         ("asm(\"\" : \"=r,r\"(x));", "output constraint"),
-        ("asm(\"\" :: \"m\"(x));", "input constraint"),
         ("asm(\"\" :: \"w\"(x));", "input constraint"),
         ("asm(\"\" :: \"i\"(x));", "constant immediate"),
         ("asm(\"\" ::: \"rsp\");", "stack or frame pointer"),
@@ -413,4 +414,102 @@ unsigned long f(void) {
         assert_eq!(expected, inspect(&fs::read(&output).unwrap()), "GNU={gnu}");
     }
     fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn memory_outputs_use_real_addresses_and_keep_ordinary_loads_after_the_barrier() {
+    let direct = compile(
+        r#"void f(volatile long *p) { asm("incq %0" : "+m"(*p) :: "cc"); }"#,
+        false,
+    )
+    .unwrap();
+    let f = &direct.functions[0];
+    assert!(!f.layout_insts().any(|(_, i)| matches!(
+        f.inst_data(i),
+        InstData::Load { .. } | InstData::Store { .. }
+    )));
+    let inst = f
+        .layout_insts()
+        .find_map(|(_, i)| matches!(f.inst_data(i), InstData::InlineAsm { .. }).then_some(i))
+        .unwrap();
+    assert!(f.inst_results(inst).is_empty());
+    let source = r#"
+unsigned long f(unsigned long *p) {
+    unsigned long before = *p, reg = 7, out;
+    asm("addq %4,%1; addq %1,%0; movq %0,%3; movq %3,%2"
+        : "+m"(p[0]), "+&r"(reg), "=m"(p[1]), "=r"(out) : "r"(before) : "cc");
+    return before + *p + reg + out;
+}
+"#;
+    for debug in [false, true] {
+        let original = compile(source, debug).unwrap();
+        for optimize in [false, true] {
+            let mut m = original.clone();
+            if optimize {
+                keel_opt::optimize(&mut m).unwrap();
+            }
+            keel_ir::verify_module(&m).unwrap();
+            let f = &m.functions[0];
+            let asm_inst = f
+                .layout_insts()
+                .find_map(|(_, i)| {
+                    matches!(f.inst_data(i), InstData::InlineAsm { .. }).then_some(i)
+                })
+                .unwrap();
+            let InstData::InlineAsm { asm, args } = f.inst_data(asm_inst) else {
+                unreachable!()
+            };
+            assert_eq!(asm.outputs.len(), 2);
+            assert_eq!(asm.early_clobbers, [0]);
+            assert_eq!(
+                &asm.inputs[..2],
+                &[AsmOperand::MemReadWrite, AsmOperand::MemWrite]
+            );
+            assert_eq!(asm.inputs[3], AsmOperand::Tied(0));
+            for arg in &args[..2] {
+                assert_eq!(f.value_type(f.resolve(*arg)), keel_ir::Type::Ptr);
+            }
+            let mut after = false;
+            assert!(f.layout_insts().any(|(_, i)| {
+                if i == asm_inst {
+                    after = true;
+                }
+                after && matches!(f.inst_data(i), InstData::Load { .. })
+            }));
+            let text = m.to_string();
+            keel_ir::verify_module(&keel_ir::parse(&text).unwrap()).unwrap();
+        }
+    }
+}
+
+#[test]
+fn invalid_memory_outputs_are_diagnosed() {
+    for (source, expected) in [
+        (
+            r#"void f(void) { const long x=1; asm("" : "+m"(x)); }"#,
+            "modifiable",
+        ),
+        (
+            r#"void f(void) { const long x[2]={1,2}; asm("" : "+m"(x)); }"#,
+            "modifiable",
+        ),
+        (
+            r#"void f(void) { _Atomic(long) x=1; asm("" : "+m"(x)); }"#,
+            "non-atomic",
+        ),
+        (
+            r#"struct S { int b:3; }; void f(struct S *s) { asm("" : "+m"(s->b)); }"#,
+            "bit-field",
+        ),
+    ] {
+        let err = compile(source, false).unwrap_err();
+        assert!(err.contains(expected), "{source}: {err}");
+    }
+    let m = compile(r#"void f(long *p) { asm("incq %q0" : "+m"(*p)); }"#, false).unwrap();
+    assert!(
+        keel_codegen::compile(&m, Target::X86_64LinuxGnu)
+            .unwrap_err()
+            .to_string()
+            .contains("memory modifier")
+    );
 }

@@ -217,3 +217,15 @@ Linux machine. All 450 immediate first errors disappear; later output/input
 constraints and section placement keep C acceptance at four of 484. This is
 unchanged-input audit evidence, not kernel code-generation or execution
 qualification of Keel objects.
+
+## Explicit-memory increment
+
+The implemented x86 subset now includes object-address `m`, `=m` and `+m`
+operands. Register results retain SSA values; memory outputs are pointer
+arguments tagged `mwrite` or `mreadwrite`. Source numbering and register ties
+are remapped during C lowering. The backend uses dedicated address registers
+and directly accesses the original objects. The existing pinned, unknown
+read/write memory effect remains the optimizer contract. Precise extents and
+less conservative alias effects remain future work. Constraint alternatives and
+other x86 machine constraints are still diagnosed; see the
+[current contract](x86-c-inline-asm.md#explicit-memory-operands).

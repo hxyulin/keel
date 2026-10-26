@@ -14,6 +14,17 @@ BINARY(asm_early)
 unsigned char asm_deferred_anchor[64];
 UNARY(asm_deferred_number)
 UNARY(asm_deferred_address)
+UNARY(asm_memory_aligned)
+extern U asm_memory_alias_inputs(U*,U*), ref_asm_memory_alias_inputs(U*,U*);
+UNARY(asm_memory_local)
+UNARY(asm_memory_write)
+extern U asm_memory_read(U*), ref_asm_memory_read(U*);
+extern U asm_memory_mixed(U*,U,U), ref_asm_memory_mixed(U*,U,U);
+extern U asm_memory_once(U*), ref_asm_memory_once(U*);
+extern U asm_memory_alias(U*,U*,U), ref_asm_memory_alias(U*,U*,U);
+extern void asm_memory_unused(U*), ref_asm_memory_unused(U*);
+extern void asm_memory_widths(unsigned char*), ref_asm_memory_widths(unsigned char*);
+extern void asm_memory_array(U*), ref_asm_memory_array(U*);
 UNARY(asm_macro)
 UNARY(asm_aligned)
 UNARY(asm_views)
@@ -38,6 +49,7 @@ int main(void) {
     for(U i=0;i<512;i++) {
         U a=next(),b=next(),c=next(),d=next(),e=next(),f=next(),g=next(),h=next();
         if(i<5){static const U edge[]={0,1,~0UL,0x8000000000000000UL,0x7fffffffffffffffUL};a=edge[i];b=edge[4-i];}
+        CHECK(asm_memory_aligned,a);CHECK(asm_memory_local,a);CHECK(asm_memory_write,a);
         CHECK(asm_deferred_number,a);CHECK(asm_deferred_address,a);
         CHECK(asm_flags,a,b);CHECK(asm_scratch,a,b);CHECK(asm_macro,a);CHECK(asm_add,a,b);CHECK(asm_fixed,a,b);CHECK(asm_six,a,b,c,d,e,f);
         CHECK(asm_mul,a,b);CHECK(asm_early,a,b);CHECK(asm_views,a);
@@ -50,6 +62,25 @@ int main(void) {
         got=asm_memory_barrier(x+1);want=ref_asm_memory_barrier(y+1);
         if(got!=want || memcmp(x,y,sizeof x)){puts("FAIL asm_memory_barrier");return 1;}
         if(asm_pointer(x+1)!=ref_asm_pointer(x+1)){puts("FAIL asm_pointer");return 1;}
+        CHECK(asm_memory_read,x+1);
+        got=asm_memory_mixed(x+1,a,b);want=ref_asm_memory_mixed(y+1,a,b);
+        if(got!=want || memcmp(x,y,sizeof x)){puts("FAIL asm_memory_mixed");return 1;}
+        got=asm_memory_once(x+1);want=ref_asm_memory_once(y+1);
+        if(got!=want || memcmp(x,y,sizeof x)){puts("FAIL asm_memory_once");return 1;}
+        got=asm_memory_alias(x+1,x+1,a);want=ref_asm_memory_alias(y+1,y+1,a);
+        if(got!=want || memcmp(x,y,sizeof x)){puts("FAIL asm_memory_alias_same");return 1;}
+        got=asm_memory_alias(x+1,x+2,b);want=ref_asm_memory_alias(y+1,y+2,b);
+        if(got!=want || memcmp(x,y,sizeof x)){puts("FAIL asm_memory_alias_separate");return 1;}
+        got=asm_memory_alias_inputs(x+1,x+1);want=ref_asm_memory_alias_inputs(y+1,y+1);
+        if(got!=want || memcmp(x,y,sizeof x)){puts("FAIL asm_memory_alias_inputs_same");return 1;}
+        got=asm_memory_alias_inputs(x+1,x+2);want=ref_asm_memory_alias_inputs(y+1,y+2);
+        if(got!=want || memcmp(x,y,sizeof x)){puts("FAIL asm_memory_alias_inputs_separate");return 1;}
+        asm_memory_unused(x+1);ref_asm_memory_unused(y+1);
+        if(memcmp(x,y,sizeof x)){puts("FAIL asm_memory_unused");return 1;}
+        asm_memory_widths((unsigned char *)(x+1));ref_asm_memory_widths((unsigned char *)(y+1));
+        if(memcmp(x,y,sizeof x)){puts("FAIL asm_memory_widths");return 1;}
+        asm_memory_array(x+1);ref_asm_memory_array(y+1);
+        if(memcmp(x,y,sizeof x)){puts("FAIL asm_memory_array");return 1;}
     }
     puts("PASS");
     return 0;

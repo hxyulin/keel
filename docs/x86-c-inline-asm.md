@@ -3,7 +3,8 @@
 Keel supports scalar GNU C inline assembly on `x86_64-unknown-linux-gnu`.
 This implements scalar fallthrough asm and deferred immediate validation from
 the [design](x86-c-inline-asm-design.md).
-Memory constraints, asm goto and file-scope asm remain unsupported.
+Explicit memory operands are supported. Constraint alternatives, asm goto and
+file-scope asm remain unsupported.
 
 ```c
 unsigned long add(unsigned long a, unsigned long b) {
@@ -17,11 +18,11 @@ unsigned long add(unsigned long a, unsigned long b) {
 
 ## Accepted contracts
 
-Operands accept integers through 64 bits and pointers. Register constraints are
+Register operands accept integers through 64 bits and pointers. Register constraints are
 `r`, and fixed `a`, `b`, `c`, `d`, `S`, `D` for RAX, RBX, RCX, RDX, RSI, RDI.
 Outputs use `=` or `+`, optionally followed by early-clobber `&`. Matching input
 constraints use an output number or `[name]` and require the same IR type.
-Output addresses and input expressions are evaluated once. A read/write output
+Output addresses and input expressions are evaluated once. A read/write register output
 captures its initial value and writes its final value to that captured address.
 One input may initialize each tied output. Untied operands receive distinct
 registers, even when GNU could reuse them. Fixed-register overlaps require a tie.
@@ -79,7 +80,7 @@ transfers and branches to C labels need contracts this milestone does not model;
 the compiler does not infer these effects by inspecting arbitrary instructions
 or directive bytes. Section switches must return to the function's section.
 
-Still diagnosed: memory operands/outputs, unions/alternatives, TLS
+Still diagnosed: unions/alternatives, TLS
 immediates, flag outputs, local register variables, FP/SIMD operands, asm goto
 and file-scope asm. Supporting their instruction bytes in the assembler does
 not provide the missing C operand or control-flow contract.
@@ -159,3 +160,43 @@ objects passed the native GCC run and all five broken controls. The full suite
 was not repeated for that test-only adjustment. Workspace check, the profiling
 feature build, both generator freshness checks, all 98 generator tests, three
 audit harness tests, scoped formatting and diff checks also passed.
+
+## Explicit memory operands
+
+X86 C supports `m` inputs, `=m` write-only outputs and `+m` read/write outputs.
+Each operand refers to an addressable object, including an array object. The
+frontend captures its address once before evaluating explicit inputs. Memory
+outputs require writable objects; directly atomic, const-qualified, bit-field
+and vector-element outputs remain diagnosed. Memory operands do not accept
+register-view modifiers, matching-register ties or early-clobber `&`.
+
+```c
+void add(unsigned long *p, unsigned long n) {
+    asm("addq %1,%0" : "+m"(*p) : "r"(n) : "cc");
+}
+```
+
+The backend emits the original object's memory reference. It does not load a
+scalar copy and store it back after asm. An address gets its own GPR, distinct
+from register outputs, other untied operands and clobbers. Input staging protects
+it from scratch-register use and operand shuffles. Operand size follows the asm
+instruction and its suffix, as in GNU AT&T syntax.
+
+IR uses pointer arguments with `m`, `mwrite` and `mreadwrite` constraints.
+Memory outputs have no SSA result. Register results precede these address
+arguments internally; C template references and ties are remapped while GNU
+source numbering and named operands keep their meaning. Required inlining
+clones these pointer operands normally.
+
+All asm remains pinned with unknown read/write memory effects. Optimizers may
+simplify address computations and surrounding code, but must preserve memory
+observations across the asm. No new optimizer algorithm or precise object-extent
+alias model is introduced. This is deliberately conservative, including for a
+read-only `m` operand. `rm`, `g`, `iq`, `Ir` and other location choices or machine
+constraints are separate work.
+
+The execution fixture adds memory reads/writes, mixed memory/register outputs,
+read/write ties, single address evaluation, aliasing input/output objects,
+byte/word/dword widths, array objects, unused outputs and aligned stack objects.
+Its native controls include omitted writes, wrong addresses and wrong reads.
+Earlier native and kernel audit counts above refer to their named checkpoints.

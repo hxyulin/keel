@@ -20,7 +20,7 @@ Use a fresh export directory. Each reference compiler independently compiles the
 GNU C asm fixture with renamed functions. The runner links each Keel object with
 that reference and the C comparison harness. Every executable must return zero
 and print exactly `PASS`. It checks 512 inputs per function, including integer
-edges, narrow values, live values and memory canaries. Five deliberately wrong
+edges, narrow values, live values and memory canaries. Eight deliberately wrong
 implementations per reference compiler must return one with a `FAIL` transcript;
 crashes and timeouts never count as a control passing.
 
@@ -38,3 +38,10 @@ these additions. The expanded fixture passed 145 fresh native executions
 against GCC 13.3.0 on Linux x86-64, with all five broken controls returning normal
 failure. A fresh native Clang comparison remains outstanding; local Clang/GNU
 assembler comparisons passed for the symbolic byte/relocation witnesses.
+
+The memory-operand extension adds eleven functions, for 35 exported functions in
+the current fixture. They cover `m`, `=m` and `+m`, mixed operand numbering,
+register ties, aliasing addresses, byte/word/dword memory operations, array
+objects, single-evaluation addresses and aligned stack homes. The three new
+broken controls omit a write, choose a wrong memory address or return a wrong
+memory read. The historical native counts above precede this extension.

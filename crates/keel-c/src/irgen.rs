@@ -1992,7 +1992,12 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.set_loc(asm.loc);
                 let mut places = Vec::new();
                 let mut readwrite = Vec::new();
-                for (e, rw) in asm.outputs {
+                let mut memory_args = Vec::new();
+                for ((e, rw), &memory) in asm.outputs.iter().zip(asm.output_memory) {
+                    if memory {
+                        memory_args.push(self.val(e)?);
+                        continue;
+                    }
                     // Capture once, before inputs: postincrement and calls in
                     // an output address must not run again on writeback.
                     let place = self.place(e)?.expect("checked asm output");
@@ -2001,7 +2006,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     }
                     places.push(place);
                 }
-                let mut args = Vec::new();
+                let mut args = memory_args;
                 for e in asm.inputs {
                     args.push(self.val(e)?);
                 }
@@ -2009,7 +2014,9 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 let types: Vec<_> = asm
                     .outputs
                     .iter()
-                    .map(|(e, _)| e.ty.ir_with_layout(self.g.p.c_layout))
+                    .zip(asm.output_memory)
+                    .filter(|(_, memory)| !**memory)
+                    .map(|((e, _), _)| e.ty.ir_with_layout(self.g.p.c_layout))
                     .collect();
                 let contract = keel_ir::InlineAsm::new(asm.template, asm.constraints, &types)
                     .map_err(|e| Error::new(asm.loc, e))?;

@@ -887,7 +887,7 @@ impl Verifier<'_> {
                 (ty.is_int() && ty != Type::I128) || ty == Type::Ptr
             }
             AsmOperand::FloatReg | AsmOperand::Fixed(PhysReg { float: true, .. }) => ty.is_float(),
-            AsmOperand::Mem => ty == Type::Ptr,
+            AsmOperand::Mem | AsmOperand::MemWrite | AsmOperand::MemReadWrite => ty == Type::Ptr,
             AsmOperand::Imm | AsmOperand::NumericImm | AsmOperand::Tied(_) => true,
         };
         for (n, &(op, ty)) in asm.outputs.iter().enumerate() {

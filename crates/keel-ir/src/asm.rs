@@ -39,6 +39,10 @@ pub enum AsmOperand {
     Fixed(PhysReg),
     /// `m`: memory; the operand is its address. Inputs only.
     Mem,
+    /// `mwrite`: a write-only object, supplied by its address. No SSA result.
+    MemWrite,
+    /// `mreadwrite`: a read/write object, supplied by its address. No SSA result.
+    MemReadWrite,
     /// `i`: a numeric constant or symbol address. Inputs only.
     Imm,
     /// `n`: a numeric constant, excluding symbol addresses. Inputs only.
@@ -170,6 +174,8 @@ fn operand(code: &str) -> Result<AsmOperand, String> {
         "r" => AsmOperand::Reg,
         "w" => AsmOperand::FloatReg,
         "m" => AsmOperand::Mem,
+        "mwrite" => AsmOperand::MemWrite,
+        "mreadwrite" => AsmOperand::MemReadWrite,
         "i" => AsmOperand::Imm,
         "n" => AsmOperand::NumericImm,
         _ if code.starts_with('{') => AsmOperand::Fixed(PhysReg::parse(
@@ -253,6 +259,8 @@ impl fmt::Display for AsmOperand {
             AsmOperand::FloatReg => f.write_str("w"),
             AsmOperand::Fixed(r) => write!(f, "{{{r}}}"),
             AsmOperand::Mem => f.write_str("m"),
+            AsmOperand::MemWrite => f.write_str("mwrite"),
+            AsmOperand::MemReadWrite => f.write_str("mreadwrite"),
             AsmOperand::Imm => f.write_str("i"),
             AsmOperand::NumericImm => f.write_str("n"),
             AsmOperand::Tied(n) => write!(f, "{n}"),
@@ -399,5 +407,38 @@ mod immediate_tests {
         assert_eq!(super::symbolic_immediate(f, values[2]).unwrap().1, -7);
         assert_eq!(super::symbolic_immediate(f, values[4]), None);
         assert_eq!(super::symbolic_immediate(f, values[5]), None);
+    }
+}
+
+#[cfg(test)]
+mod memory_tests {
+    #[test]
+    fn address_operands_round_trip_without_memory_ssa_results() {
+        let asm =
+            super::InlineAsm::new("", "=r,m,mwrite,mreadwrite,~{cc}", &[crate::Type::I64]).unwrap();
+        assert_eq!(asm.outputs.len(), 1);
+        assert_eq!(
+            asm.inputs,
+            [
+                super::AsmOperand::Mem,
+                super::AsmOperand::MemWrite,
+                super::AsmOperand::MemReadWrite
+            ]
+        );
+        assert_eq!(
+            asm,
+            super::InlineAsm::new("", &asm.constraints(), &[crate::Type::I64]).unwrap()
+        );
+        for ty in ["ptr", "i64"] {
+            let m = crate::parse(&format!(
+                "func @f({ty}) {{\nblock0(v0: {ty}):\n asm \"\", \"mreadwrite\"(v0)\n return\n}}\n"
+            ))
+            .unwrap();
+            assert_eq!(crate::verify_module(&m).is_ok(), ty == "ptr");
+            let f = &m.functions[0];
+            let i = f.layout_insts().next().unwrap().1;
+            assert!(f.inst_data(i).is_pinned());
+            assert!(f.inst_data(i).memory_effects().may_write());
+        }
     }
 }

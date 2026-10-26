@@ -136,3 +136,58 @@ unsigned long NAME(asm_deferred_address)(unsigned long x) {
     unsigned char *b = deferred_rip(asm_deferred_anchor + 19);
     return (x ^ (unsigned long)a) + (unsigned long)b;
 }
+
+static __attribute__((always_inline)) inline void memory_add(unsigned long *p, unsigned long n) {
+    asm("addq %1,%0" : "+m"(*p) : "r"(n) : "cc");
+}
+unsigned long NAME(asm_memory_local)(unsigned long a) {
+    unsigned long value = a;
+    memory_add(&value, 7);
+    return value + a;
+}
+unsigned long NAME(asm_memory_write)(unsigned long a) {
+    unsigned long value;
+    asm("movq %1,%0" : "=m"(value) : "r"(a));
+    return value ^ 0x13579;
+}
+unsigned long NAME(asm_memory_read)(unsigned long *p) {
+    unsigned long value;
+    asm("movq %1,%0" : "=r"(value) : "m"(*p));
+    return value;
+}
+unsigned long NAME(asm_memory_mixed)(unsigned long *p, unsigned long a, unsigned long b) {
+    unsigned long reg = a, out;
+    asm("addq %[rhs],%[reg]; addq %[reg],%[mem]; movq %[mem],%[out]; movq %[out],%[written]"
+        : [mem] "+m"(p[0]), [reg] "+&r"(reg), [written] "=m"(p[1]), [out] "=r"(out)
+        : [rhs] "r"(b) : "cc");
+    return reg + out * 3 + a + b;
+}
+unsigned long NAME(asm_memory_once)(unsigned long *p) {
+    unsigned long *start = p;
+    asm("addq $11,%0" : "+m"(*p++) :: "cc");
+    return (unsigned long)(p - start) + p[-1];
+}
+unsigned long NAME(asm_memory_alias)(unsigned long *p, unsigned long *q, unsigned long n) {
+    unsigned long before = *q;
+    asm("addq %1,%0" : "+m"(*p) : "r"(n) : "cc");
+    return before + *q;
+}
+void NAME(asm_memory_unused)(unsigned long *p) {
+    asm("movq $73,%0" : "=m"(*p));
+}
+void NAME(asm_memory_widths)(unsigned char *p) {
+    asm("addb $3,%0; xorw $0x1234,%1; addl $0x345678,%2"
+        : "+m"(p[0]), "+m"(*(unsigned short *)(p+2)), "+m"(*(unsigned int *)(p+4)) :: "cc");
+}
+void NAME(asm_memory_array)(unsigned long *p) {
+    asm("addq $3,%0" : "+m"(*(unsigned long (*)[2])p) :: "cc");
+}
+unsigned long NAME(asm_memory_aligned)(unsigned long a) {
+    unsigned long value __attribute__((aligned(32))) = a;
+    asm("addq $9,%0" : "+m"(value) :: "cc");
+    return value + a;
+}
+unsigned long NAME(asm_memory_alias_inputs)(unsigned long *p, unsigned long *q) {
+    asm("movq %1,%%rax; addq %%rax,%0" : "+m"(*p) : "m"(*q) : "rax", "cc");
+    return *p + *q;
+}

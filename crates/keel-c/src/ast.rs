@@ -259,6 +259,8 @@ pub struct AsmStmt<'a> {
     pub template: &'a str,
     pub constraints: &'a str,
     pub outputs: &'a [(Expr<'a>, bool)],
+    /// Memory outputs carry addresses and have no SSA result or writeback.
+    pub output_memory: &'a [bool],
     pub inputs: &'a [Expr<'a>],
     pub loc: Loc,
 }
