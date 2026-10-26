@@ -85,8 +85,8 @@ fn operands(s: &str) -> Result<Vec<&str>, String> {
             match c {
                 '(' => {
                     depth += 1;
-                    if depth > 1 {
-                        return Err("nested AT&T address parentheses".into());
+                    if depth > 64 {
+                        return Err("AT&T operand nesting exceeds 64".into());
                     }
                 }
                 ')' => {
@@ -113,38 +113,6 @@ fn operands(s: &str) -> Result<Vec<&str>, String> {
     Ok(out)
 }
 
-// The shared linear-expression helper does not represent unary sign chains.
-// Reject them here rather than silently changing a relocation addend.
-fn expression(s: &str) -> Result<Address, String> {
-    let (mut quote, mut escaped, mut sign) = (false, false, false);
-    for c in s.chars() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if quote && c == '\\' {
-            escaped = true;
-            continue;
-        }
-        if c == '"' {
-            quote = !quote;
-            sign = false;
-            continue;
-        }
-        if !quote && !c.is_whitespace() {
-            if c == '+' || c == '-' {
-                if sign {
-                    return Err("consecutive expression signs are not supported".into());
-                }
-                sign = true;
-            } else {
-                sign = false;
-            }
-        }
-    }
-    address(s)
-}
-
 fn memory(s: &str, prefix: bool) -> Result<Operand, String> {
     let (mut s, mut segment) = (s.trim(), None);
     for (name, byte) in if prefix {
@@ -166,8 +134,9 @@ fn memory(s: &str, prefix: bool) -> Result<Operand, String> {
         segment,
         displacement: Address::default(),
     };
-    // A quoted symbol may contain parentheses; only an unquoted '(' opens a tuple.
-    let (mut quote, mut escaped, mut tuple) = (false, false, None);
+    // Grouped displacement expressions may precede the register tuple. Only
+    // a top-level parenthesis beginning a register/comma tuple denotes it.
+    let (mut quote, mut escaped, mut depth, mut tuple) = (false, false, 0, None);
     for (i, c) in s.char_indices() {
         if escaped {
             escaped = false;
@@ -180,9 +149,20 @@ fn memory(s: &str, prefix: bool) -> Result<Operand, String> {
         if c == '"' {
             quote = !quote;
         }
-        if c == '(' && !quote {
-            tuple = Some(i);
-            break;
+        if !quote {
+            if c == '(' {
+                if depth == 0 {
+                    let body = s[i + 1..].trim_start();
+                    let head = body.split([',', ')']).next().unwrap_or("").trim();
+                    if body.starts_with(',') || register(head, prefix).is_some() {
+                        tuple = Some(i);
+                        break;
+                    }
+                }
+                depth += 1;
+            } else if c == ')' {
+                depth -= 1;
+            }
         }
     }
     if let Some(open) = tuple {
@@ -210,10 +190,15 @@ fn memory(s: &str, prefix: bool) -> Result<Operand, String> {
             return Err("empty AT&T address tuple".into());
         }
         if !s[..open].trim().is_empty() {
-            m.displacement = expression(s[..open].trim())?;
+            m.displacement = address(s[..open].trim())?;
         }
     } else {
-        m.displacement = expression(s)?;
+        if !prefix && expression::has_unquoted_register(&expression::parse(s)?) {
+            return Err(
+                "grouped register arithmetic is not supported in memory expressions".into(),
+            );
+        }
+        m.displacement = address(s)?;
     }
     if m.base.is_some_and(|r| {
         !matches!(r.width, 32 | 64) || !matches!(r.class, RegisterClass::Gpr | RegisterClass::Rip)
@@ -239,7 +224,7 @@ fn memory(s: &str, prefix: bool) -> Result<Operand, String> {
 
 fn operand(s: &str, prefix: bool) -> Result<Operand, String> {
     if let Some(s) = s.strip_prefix('$') {
-        return Ok(Operand::Immediate(expression(s)?));
+        return Ok(Operand::Immediate(address(s)?));
     }
     if let Some(r) = register(s, prefix) {
         return Ok(Operand::Register(r));
@@ -340,7 +325,7 @@ pub(super) fn parse(s: &str, prefix: bool) -> Result<Instruction, String> {
                 if register(s, prefix).is_some() || s.starts_with('$') {
                     return Err("AT&T indirect branch requires `*`".into());
                 }
-                ops.push(Operand::Immediate(expression(s)?));
+                ops.push(Operand::Immediate(address(s)?));
             }
         } else {
             ops.push(operand(s, prefix)?);

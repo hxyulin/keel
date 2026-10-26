@@ -7,6 +7,7 @@ wrap or impersonate GCC, modify Linux inputs, or qualify generated code.
 import argparse
 import collections
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import re
@@ -138,6 +139,51 @@ def probe(args):
     print(json.dumps(collections.Counter(x['category'] for x in rows), indent=2))
 
 
+def compare(args):
+    """Reuse the suite's ELF normalization; do not infer equality from acceptance."""
+    inspector_path = Path(__file__).resolve().parent.parent / 'compiler_asm_compat' / 'objinspect.py'
+    spec = importlib.util.spec_from_file_location('kernel_objinspect', inspector_path)
+    inspector = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(inspector)
+    build = args.build.resolve()
+    probe_out = args.probe_out.resolve()
+    results = json.loads((probe_out / 'results.json').read_text())
+    if sha(build / '.config') != results['config_sha256']:
+        raise SystemExit('Resolved config differs from probe results.')
+    args.out.mkdir(parents=True, exist_ok=False)
+    rows = []
+    for index, item in enumerate(results['results']):
+        if item['kind'] != 'asm' or item['status'] != 'accepted':
+            continue
+        source = build / item['path']
+        if sha(source) != item['sha256']:
+            raise SystemExit('Changed input: ' + item['path'])
+        actual = probe_out / f'{index}.o'
+        reference = args.out.resolve() / f'{index}.gnu.o'
+        run = subprocess.run([args.gnu_as, '--64', '-mrelax-relocations=no',
+                              str(source), '-o', str(reference)], cwd=build, capture_output=True)
+        row = dict(path=item['path'], input_sha256=item['sha256'],
+                   keel_object_sha256=sha(actual), reference_returncode=run.returncode)
+        if run.returncode:
+            row['reference_diagnostic'] = run.stderr.decode(errors='replace')
+        else:
+            row['reference_object_sha256'] = sha(reference)
+            row['comparison'] = inspector.compare(inspector.parse(reference), inspector.parse(actual))
+        rows.append(row)
+    report = dict(schema=1, config_sha256=results['config_sha256'],
+                  keel_sha256=results['keel_sha256'],
+                  gnu_as_version=subprocess.check_output([args.gnu_as, '--version'], text=True).splitlines()[0],
+                  reference_flags=['--64', '-mrelax-relocations=no'],
+                  note='Unmodified accepted assembly inputs; GNU relaxation disabled to match the existing relocation contract. No objtool, link or execution of Keel objects.',
+                  total=len(rows),
+                  reference_failed=sum(r['reference_returncode'] != 0 for r in rows),
+                  all_equal=sum(r.get('comparison', {}).get('all_equal', False) for r in rows),
+                  code_data_equal=sum(r.get('comparison', {}).get('code_data_equal', False) for r in rows),
+                  results=rows)
+    write(args.out / 'comparison.json', report)
+    print(json.dumps({k:report[k] for k in ('total', 'reference_failed', 'all_equal', 'code_data_equal')}))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='action', required=True)
@@ -151,8 +197,13 @@ def main():
     check.add_argument('--keel', type=Path, required=True)
     check.add_argument('--out', type=Path, required=True)
     check.add_argument('--timeout', type=int, default=60)
+    oracle = sub.add_parser('compare')
+    oracle.add_argument('--build', type=Path, required=True)
+    oracle.add_argument('--probe-out', type=Path, required=True)
+    oracle.add_argument('--out', type=Path, required=True)
+    oracle.add_argument('--gnu-as', default='as')
     args = parser.parse_args()
-    (capture if args.action == 'capture' else probe)(args)
+    dict(capture=capture, probe=probe, compare=compare)[args.action](args)
 
 
 if __name__ == '__main__':

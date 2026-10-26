@@ -402,7 +402,26 @@ impl Processor {
                 ))
         {
             let operands = if !op.starts_with('.') {
-                replace_constants(args, &self.constants, true)
+                // A positive absolute symbol in S-A may be the identity used
+                // by a PC-relative relocation. Do not turn it into a pure
+                // constant minus a section symbol, which ELF cannot represent
+                // through the public linear expression model.
+                let protected: Vec<_> = keel_asm_ir::x86::split_inline(args, ',')
+                    .iter()
+                    .filter_map(|arg| arg.trim().strip_prefix('$'))
+                    .filter_map(|arg| keel_asm_ir::x86::address(arg).ok())
+                    .filter(|a| a.expression.add.is_some() && a.expression.subtract.is_some())
+                    .flat_map(|a| [a.expression.add.unwrap(), a.expression.subtract.unwrap()])
+                    .collect();
+                if protected.is_empty() {
+                    replace_constants(args, &self.constants, true)
+                } else {
+                    let mut constants = self.constants.clone();
+                    for name in protected {
+                        constants.remove(&name);
+                    }
+                    replace_constants(args, &constants, true)
+                }
             } else {
                 keel_asm_ir::x86::split_inline(args, ',')
                     .iter()

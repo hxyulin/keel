@@ -61,6 +61,11 @@ remain errors at expansion. Register arithmetic, variadic macros, `.altmacro`,
 Absolute assignments can be repeated. Redefining a symbolic alias remains an
 error. Textual expansion tracks assignments from text fragments; it does not
 read preceding structured `Directive::Set` items.
+Rebinding an alias still referenced by a deferred relocation, alias or symbol
+size is rejected; it requires an explicit value snapshot rather than changing
+an earlier use. Grouped constants and unary chains work in instruction operands.
+Grouped register arithmetic that the address model cannot represent is
+diagnosed instead of becoming a relocation against a register's name.
 
 `.skip`, `.space` and `.zero` accept deferred absolute expressions over label
 differences. Linux alternatives can compare the lengths of code in separate

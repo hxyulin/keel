@@ -1647,7 +1647,15 @@ impl Assembler {
         Ok(())
     }
     fn set(&mut self, id: SymId, e: Expr) -> Result<(), String> {
+        let depends = |e: &Expr| e.add == Some(id) || e.subtract == Some(id);
+        let referenced = self.fixes.iter().any(|f| depends(&f.expr))
+            || self.symbols.iter().any(|(_, s)| {
+                s.alias.as_deref().is_some_and(&depends) || s.size.as_deref().is_some_and(&depends)
+            });
         let sym = self.symbols.entry(id);
+        if sym.alias.is_some() && referenced {
+            return Err("cannot redefine an alias referenced by a deferred expression".into());
+        }
         if sym.section.is_some()
             || sym
                 .alias

@@ -8,6 +8,14 @@ pub enum Expr {
     Unary(u8, Box<Expr>),
     Binary(String, Box<Expr>, Box<Expr>),
 }
+pub(super) fn has_unquoted_register(e: &Expr) -> bool {
+    match e {
+        Expr::Symbol(s) => super::Register::parse(s).is_some(),
+        Expr::Unary(_, e) => has_unquoted_register(e),
+        Expr::Binary(_, a, b) => has_unquoted_register(a) || has_unquoted_register(b),
+        Expr::Constant(_) => false,
+    }
+}
 #[derive(Clone, Copy, Debug)]
 pub struct Value {
     pub section: Option<usize>,

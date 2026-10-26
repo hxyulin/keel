@@ -223,6 +223,7 @@ fn exact_signed_form_does_not_widen_on_overflow_or_invalid_relocations() {
         ".att_syntax\nmovq $external@PLT,%rax",
         ".att_syntax\nmovq $external@GOTPCREL,%rax",
         ".att_syntax\nmovq $left-right,%rax",
+        ".att_syntax\n.set .Labs,4096\n.Lstart:\nmovq $.Labs-.Lstart,%rax\n.set .Labs,8192\n",
     ] {
         assert!(assemble_object(source).is_err(), "{source}");
     }

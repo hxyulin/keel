@@ -340,7 +340,7 @@ fn operand(s: &str, prefix: bool) -> Result<Operand, String> {
             displacement: Address::default(),
         };
         // Split signed address terms outside quotes; registers cannot be subtracted.
-        let (mut quote, mut escaped, mut start, mut sign) = (false, false, 0, 1);
+        let (mut quote, mut escaped, mut start, mut sign, mut depth) = (false, false, 0, 1, 0);
         let mut terms = SmallVec::<[_; 4]>::new();
         for (i, c) in body.char_indices() {
             if escaped {
@@ -354,9 +354,25 @@ fn operand(s: &str, prefix: bool) -> Result<Operand, String> {
             if c == '"' {
                 quote = !quote
             }
-            if !quote && (c == '+' || c == '-') {
+            if !quote && c == '(' {
+                depth += 1;
+                if depth > 64 {
+                    return Err("memory expression nesting exceeds 64".into());
+                }
+            }
+            if !quote && c == ')' {
+                depth -= 1;
+                if depth < 0 {
+                    return Err("unexpected memory expression closing parenthesis".into());
+                }
+            }
+            if !quote && depth == 0 && (c == '+' || c == '-') {
                 if !body[start..i].trim().is_empty() {
                     terms.push((sign, body[start..i].trim()));
+                } else if i != 0 {
+                    // Retain unary signs inside the term. The expression
+                    // parser must distinguish rax--8 from rax-8.
+                    continue;
                 }
                 sign = if c == '-' { -1 } else { 1 };
                 start = i + 1;
@@ -372,9 +388,11 @@ fn operand(s: &str, prefix: bool) -> Result<Operand, String> {
                 } else if let Some(r) = intel_register(factors[1], prefix) {
                     Some((r, integer(factors[0])?))
                 } else {
-                    return Err("memory scale requires a register".into());
+                    None
                 }
-            } else if factors.len() > 2 {
+            } else if factors.len() > 2
+                && factors.iter().any(|s| intel_register(s, prefix).is_some())
+            {
                 return Err("invalid address product".into());
             } else {
                 None
@@ -412,6 +430,11 @@ fn operand(s: &str, prefix: bool) -> Result<Operand, String> {
             }
         }
         if !remaining.is_empty() {
+            if expression::has_unquoted_register(&expression::parse(&remaining)?) {
+                return Err(
+                    "grouped register arithmetic is not supported in memory expressions".into(),
+                );
+            }
             mem.displacement = address(&remaining)?
         }
         if mem.base.is_some_and(|r| {

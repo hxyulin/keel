@@ -104,6 +104,43 @@ fn compare_tools(source: &str, clang: bool) {
 }
 
 #[test]
+fn grouped_operands_and_unary_chains_keep_registers_separate_from_symbols() {
+    compare(
+        r#"
+.text
+movq $((1)<<6),%rax
+leaq (external+7)(%rip),%rax
+leaq external--8(%rip),%r12
+leaq external- -8(%rip),%r13
+leaq external+-8(%rip),%r14
+movq $--8,%r15
+movq (external),%rax
+movq 4+(-8)(%rax),%rdx
+movq (,%rax,(1<<2)),%rdx
+.intel_syntax noprefix
+mov rax,[rbx-(-8)]
+mov rax,[rbx+(1<<2)*3]
+mov rax,[rbx+rcx*4]
+mov rax,[rbx+"rcx"]
+.att_syntax prefix
+"#,
+    );
+    // GNU accepts adjacent unary minus here; LLVM's Intel lexer rejects it.
+    compare_tools(
+        ".intel_syntax noprefix\nmov rax,[rbx--8]\nmov rax,[rbx+rcx*((1)<<2)]\n",
+        false,
+    );
+    for source in [
+        "mov rax,[rbx+(rcx)]",
+        "mov rax,[rbx+(rcx-8)]",
+        "mov rax,[--rbx]",
+        ".att_syntax noprefix\nmovq (rax+8),rdx",
+    ] {
+        assert!(assemble_object(source).is_err(), "{source}");
+    }
+}
+
+#[test]
 fn optional_keyword_whitespace_and_iteration() {
     compare(
         r#"
