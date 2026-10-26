@@ -345,14 +345,14 @@ fn finalized_symbol_relocations_match_clang_and_gnu() {
     let source = r#"
 extern unsigned char anchor[64];
 static __attribute__((always_inline)) inline void *get(void *p) {
-    asm("leaq %c1(%%rip),%0" : "=r"(p) : "i"(p));
+    asm("leaq %a1,%0" : "=r"(p) : "i"(p));
     return p;
 }
 unsigned long f(void) {
     void *p = get(anchor + 7);
     unsigned long q;
     asm("movabsq %1,%0" : "=r"(q) : "i"(anchor + 19));
-    return (unsigned long)p ^ q;
+    return (unsigned long)p ^ q ^ (unsigned long)get(anchor - 7);
 }
 "#;
     let m = compile(source, false).unwrap();
@@ -384,6 +384,7 @@ unsigned long f(void) {
     let expected = inspect(&own);
     assert!(expected.1.iter().any(|r| r.1 == "anchor" && r.2 == 3)); // +7 minus RIP's four-byte field.
     assert!(expected.1.iter().any(|r| r.1 == "anchor" && r.2 == 19));
+    assert!(expected.1.iter().any(|r| r.1 == "anchor" && r.2 == -11));
     let dir = std::env::temp_dir().join(format!("keel-deferred-oracles-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     let input = dir.join("test.s");
@@ -553,4 +554,49 @@ fn q_register_contracts_normalize_to_the_long_mode_gpr_class() {
     )
     .unwrap_err();
     assert!(err.message.contains("output constraint"), "{err}");
+}
+
+#[test]
+fn address_and_negation_modifiers_check_operand_kinds() {
+    for (source, expected) in [
+        (
+            r##"void f(char x) { asm("# %a0" :: "r"(x)); }"##,
+            "32- or 64-bit register",
+        ),
+        (
+            r##"void f(long x) { asm("# %n0" :: "r"(x)); }"##,
+            "register modifier",
+        ),
+        (
+            r##"void f(long x) { asm("# %a0" :: "m"(x)); }"##,
+            "memory modifier",
+        ),
+        (
+            r##"extern char anchor; void f(void) { asm("# %n0" :: "i"(&anchor)); }"##,
+            "numeric constant",
+        ),
+        (
+            r##"extern _Thread_local long x; void f(void) { asm("# %a0" :: "i"(&x)); }"##,
+            "TLS symbols",
+        ),
+    ] {
+        let m = compile(source, false).unwrap();
+        let err = keel_codegen::compile(&m, Target::X86_64LinuxGnu)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains(expected), "{source}: {err}");
+    }
+    let source = r#"
+unsigned long f(unsigned long x) {
+    unsigned long out;
+    asm("leaq %a1,%0" : "=a"(out) : "c"((unsigned int)x));
+    asm("leaq %n[delta]0(%0),%0" : "+a"(out) : [delta] "n"(3));
+    return out;
+}
+"#;
+    let m = compile(source, false).unwrap();
+    let text = keel_codegen::compile(&m, Target::X86_64LinuxGnu).unwrap();
+    assert!(text.contains("leaq (%ecx),%rax"), "{text}");
+    assert!(text.contains("leaq -30(%rax),%rax"), "{text}");
+    keel_asm::x86::assemble_object(&text).unwrap();
 }

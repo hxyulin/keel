@@ -389,7 +389,7 @@ fn asm_template(
             continue;
         }
         if let Some(m) = chars.next_if(|c| c.is_ascii_alphabetic()) {
-            if !(if x86 { "bwkqc" } else { "wxsdqhbc" }).contains(m) {
+            if !(if x86 { "bwkqcan" } else { "wxsdqhbc" }).contains(m) {
                 return Err(Error::new(
                     loc,
                     format!("unsupported asm template modifier `%{m}`"),

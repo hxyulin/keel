@@ -36,7 +36,17 @@ including with optional optimization disabled.
 Templates use AT&T syntax, numeric/named operands, `%%`, unique `%=` labels,
 and `%b`, `%w`, `%k`, `%q` register views. Default register width follows the
 operand type; pointers use 64 bits. Immediate substitutions include `$` unless
-`%c` requests the bare constant. High-byte `%h`, dialect alternatives and other
+`%c` requests the bare constant. `%n` prints a negated numeric constant without
+`$`, using 64-bit wrapping negation; symbolic `%n` is rejected.
+`%a` treats an operand as an address: a 32- or 64-bit register becomes
+`(%reg)`, a numeric immediate becomes a bare absolute address, and a symbol
+plus addend becomes `symbol+addend(%rip)`. It does not add a memory effect;
+templates that dereference register/immediate addresses must declare that effect
+through memory operands or the `memory` clobber. Memory operands and narrow
+registers reject `%a`. These follow the
+[GNU operand modifier rules](https://gcc.gnu.org/onlinedocs/gcc/Extended-Asm.html#Generic-Operand-Modifiers)
+within the supported operand subset.
+High-byte `%h`, dialect alternatives and other
 modifiers are not supported. Numeric local labels and GNU macros use the shared
 assembler, including definitions used by a later asm statement.
 

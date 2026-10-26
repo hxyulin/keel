@@ -28,6 +28,12 @@ extern void asm_memory_unused(U*), ref_asm_memory_unused(U*);
 extern void asm_memory_widths(unsigned char*), ref_asm_memory_widths(unsigned char*);
 extern void asm_memory_array(U*), ref_asm_memory_array(U*);
 UNARY(asm_q_output)
+UNARY(asm_address_width)
+UNARY(asm_address_symbol)
+UNARY(asm_address_constant)
+UNARY(asm_negated)
+UNARY(asm_negated_min)
+extern U asm_address_read(U*), ref_asm_address_read(U*);
 extern U *asm_q_pointer(U*), *ref_asm_q_pointer(U*);
 UNARY(asm_macro)
 UNARY(asm_aligned)
@@ -54,6 +60,8 @@ int main(void) {
         U a=next(),b=next(),c=next(),d=next(),e=next(),f=next(),g=next(),h=next();
         if(i<5){static const U edge[]={0,1,~0UL,0x8000000000000000UL,0x7fffffffffffffffUL};a=edge[i];b=edge[4-i];}
         CHECK(asm_q_output,a);CHECK(asm_q_views,a,b);CHECK(asm_q_rex,a,b);
+        CHECK(asm_address_width,a);CHECK(asm_address_symbol,a);CHECK(asm_address_constant,a);
+        CHECK(asm_negated,a);CHECK(asm_negated_min,a);
         CHECK(asm_memory_aligned,a);CHECK(asm_memory_local,a);CHECK(asm_memory_write,a);
         CHECK(asm_deferred_number,a);CHECK(asm_deferred_address,a);
         CHECK(asm_flags,a,b);CHECK(asm_scratch,a,b);CHECK(asm_macro,a);CHECK(asm_add,a,b);CHECK(asm_fixed,a,b);CHECK(asm_six,a,b,c,d,e,f);
@@ -62,6 +70,7 @@ int main(void) {
         CHECK(asm_unique,a);CHECK(asm_loop,a);CHECK(asm_unused,a);CHECK(asm_remat,a);
         CHECK(asm_byte,a,b);CHECK(asm_word,a,b);CHECK(asm_dword,a,b);
         U x[]={c,a,b,d}, y[]={c,a,b,d};
+        CHECK(asm_address_read,x+1);
         U got=asm_once(x+1,x+2),want=ref_asm_once(y+1,y+2);
         if(got!=want || memcmp(x,y,sizeof x)){puts("FAIL asm_once");return 1;}
         got=asm_memory_barrier(x+1);want=ref_asm_memory_barrier(y+1);

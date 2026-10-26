@@ -52,6 +52,8 @@ def main():
             ("wrong-memory-read", original.replace('asm("movq %1,%0" : "=r"(value) : "m"(*p))', 'asm("movq $0,%0" : "=r"(value) : "m"(*p))', 1)),
             ("wrong-q-output", original.replace('return out + 3;', 'return out + 4;', 1)),
             ("wrong-q-byte-result", original.replace('movb %b1,%0; addb %b2,%0', 'movb %b1,%0; subb %b2,%0', 1)),
+            ("wrong-address-symbol", original.replace('"i"(asm_deferred_anchor + 13)', '"i"(asm_deferred_anchor + 14)', 1)),
+            ("wrong-negated-offset", original.replace('[delta] "n"(37)', '[delta] "n"(38)', 1)),
         ]:
             assert broken != original
             source = work / f"{index}-{name}.c"

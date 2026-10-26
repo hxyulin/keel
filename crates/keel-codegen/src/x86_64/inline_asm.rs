@@ -200,8 +200,20 @@ fn substitute(
                 Some('w') => 16,
                 Some('k') => 32,
                 Some('q') => 64,
+                Some('a') => match ty {
+                    Type::Ptr | Type::I64 => 64,
+                    Type::I32 => 32,
+                    _ => {
+                        return Err(
+                            "x86 asm address modifier requires a 32- or 64-bit register".into()
+                        );
+                    }
+                },
                 _ => return Err("unsupported x86 asm register modifier".into()),
             };
+            if modifier == Some('a') {
+                text.push('(');
+            }
             write!(
                 text,
                 "%{}",
@@ -213,8 +225,11 @@ fn substitute(
                 }
             )
             .unwrap();
+            if modifier == Some('a') {
+                text.push(')');
+            }
         } else {
-            if i < n || !matches!(modifier, None | Some('c')) {
+            if i < n || !matches!(modifier, None | Some('c' | 'a' | 'n')) {
                 return Err("unsupported x86 asm immediate modifier".into());
             }
             let arg = args[i - n];
@@ -222,14 +237,27 @@ fn substitute(
                 text.push('$');
             }
             if let Some(value) = iconst(func, arg) {
+                // GNU negates in the host-wide integer domain, including
+                // wrapping INT64_MIN back to itself.
+                let value = if modifier == Some('n') {
+                    value.wrapping_neg()
+                } else {
+                    value
+                };
                 write!(text, "{value}").unwrap();
             } else if let Some((symbol, addend)) = keel_ir::symbolic_immediate(func, arg) {
+                if modifier == Some('n') {
+                    return Err("x86 asm negation modifier requires a numeric constant".into());
+                }
                 text.push_str(func.symbol_name(symbol));
                 if addend > 0 {
                     write!(text, "+{addend}").unwrap();
                 }
                 if addend < 0 {
                     write!(text, "{addend}").unwrap();
+                }
+                if modifier == Some('a') {
+                    text.push_str("(%rip)");
                 }
             } else {
                 return Err("asm immediate requires a constant".into());

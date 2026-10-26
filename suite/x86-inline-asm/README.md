@@ -62,3 +62,9 @@ At q-class checkpoint `b60de289`, all 145 fresh objects passed against GCC
 13.3.0 on Linux x86-64 across the 39-function fixture. All ten broken controls
 returned normal failure. These are userspace witnesses; native Clang execution
 of the expanded fixture was not run.
+
+The address/negation extension adds six functions, for 45 exported functions.
+They cover `%a` on pointer and 32-bit registers, numeric absolute addresses,
+RIP-relative symbol addresses, and `%n` on positive, negative and minimum
+signed 64-bit constants. Two controls corrupt the symbol addend and negated
+offset. Native results for this extension are recorded separately below.

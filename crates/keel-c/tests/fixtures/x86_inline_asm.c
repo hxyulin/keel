@@ -219,3 +219,34 @@ unsigned long *NAME(asm_q_pointer)(unsigned long *p) {
     asm("addq $8,%0" : "+q"(p) :: "cc");
     return p;
 }
+
+unsigned long NAME(asm_address_read)(unsigned long *p) {
+    unsigned long out;
+    asm("movq %a[ptr],%[out]" : [out] "=r"(out) : [ptr] "r"(p) : "memory");
+    return out;
+}
+unsigned long NAME(asm_address_width)(unsigned long x) {
+    unsigned long out;
+    asm("leaq %a1,%0" : "=r"(out) : "r"((unsigned int)x));
+    return out;
+}
+unsigned long NAME(asm_address_symbol)(unsigned long x) {
+    unsigned long out;
+    asm("leaq %a[ptr],%0" : "=r"(out) : [ptr] "i"(asm_deferred_anchor + 13));
+    return out ^ x;
+}
+unsigned long NAME(asm_address_constant)(unsigned long x) {
+    unsigned long out;
+    asm("leaq %a1,%0" : "=r"(out) : "i"(0x1234));
+    return out ^ x;
+}
+unsigned long NAME(asm_negated)(unsigned long x) {
+    asm("leaq %n[delta](%0),%0" : "+r"(x) : [delta] "n"(37));
+    asm("leaq %n1(%0),%0" : "+r"(x) : "n"(-11));
+    return x;
+}
+unsigned long NAME(asm_negated_min)(unsigned long x) {
+    unsigned long out;
+    asm("movabsq $%n1,%0" : "=r"(out) : "n"((-9223372036854775807L-1)));
+    return out ^ x;
+}
