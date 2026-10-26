@@ -34,3 +34,9 @@ The assembler comparison checks section bytes, flags, alignment, symbol metadata
 and relocation targets/addends against Clang and GNU as. GAS rewrites the weak
 alias call through its `.set` target; Keel and Clang preserve alias identity.
 The test names this difference and compares the other fields exactly.
+
+At implementation `96680637`, all 48 exported objects and the GCC 13.3.0
+reference passed. All six controls returned normal FAIL/exit 1. The fresh local
+exports match the exact bytes executed on Linux. Native Clang execution was not
+run. The independent Clang/GNU assembly comparisons passed with the explicit
+weak-alias difference described above.

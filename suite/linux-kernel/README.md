@@ -512,3 +512,56 @@ Full workspace validation at `212901fc` passed 2,777 tests, zero failures
 and 13 ignored across 508 groups. Workspace and profiling checks, all 98
 generator tests, three audit harness tests, both freshness checks, scoped
 formatting and diff checks passed. No production source changed after that run.
+
+## File-scope asm and kernel sections
+
+The [file-asm/section audit](audit-file-asm-sections.json) uses implementation
+checkpoint `96680637` on the unchanged corpus. GNU basic asm is stored as ordered
+module fragments and emitted through the shared x86 assembler, including macros,
+aliases, section stacks and relocations. ELF `.init.*` sections are admitted with
+storage checks. Zero-initialized `.init.data` occupies PROGBITS bytes. External
+section annotations are accepted and inherited by later definitions; imports do
+not allocate storage or carry placement into call contracts.
+
+C acceptance increases from **4 to 30 of 484**. All 32 prior first errors from
+file-scope asm and section placement disappear: 26 inputs now compile, while six
+reach later errors. Current first errors are:
+
+| First blocker | Files |
+| --- | ---: |
+| Packed bit-fields requiring partial-container access | 434 |
+| GNU fallthrough attribute statements | 8 |
+| `Nd` input constraints | 4 |
+| Semicolon-separated `rep; bsf` prefixes | 3 |
+| Alias attributes | 2 |
+| POPCNT feature policy | 1 |
+| `__builtin_has_attribute` | 1 |
+| Assignment type compatibility | 1 |
+
+Standalone assembly remains 402 of 506. All 406 previously accepted objects
+retain identical bytes; there are no crashes, timeouts or acceptance regressions.
+All 992 inputs and three reference artifacts were rehashed unchanged. No reference
+rebuild or reboot occurred. No Keel object was linked into or run as the kernel.
+These counts identify first diagnostics, not exhaustive support or kernel
+code-generation, objtool, link or boot qualification.
+
+The [file-asm execution fixture](../x86-file-asm/README.md) passes 48 generated
+V1 objects and an independent GCC reference, each checked against 512 runtime
+input pairs and independent C pointer, data and relocation expectations. Six
+broken controls fail normally. All 48 fresh local exports have the exact bytes
+executed on Linux. Clang/GNU assembly comparisons pass with the stated GAS weak
+alias relocation difference; padding at the assembly/C boundary is explicit.
+
+The complete workspace run reported 2,783 passing tests, one obsolete test
+expectation and 13 ignored across 509 groups. The test expected external
+section annotations to be rejected. Commit `3e602086` updates that expectation;
+all seven tests in its target pass on rerun. This leaves 2,784 distinct workspace
+tests passing and no outstanding test failures. No production code changed
+after `96680637`.
+
+Workspace, profiling, and all-targets/all-features checks pass. The latter
+exposed a missing AArch64 ELF arm in an opt-in allocator test; `27c451b1` repairs
+the harness and its test passes. Documentation builds complete with existing
+warnings. All 98 generator tests, three audit harness tests, both freshness
+checks, scoped formatting and diff checks pass. Strict Clippy stops at 52
+diagnostics in untouched `keel-asm-ir` code.
