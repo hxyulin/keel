@@ -429,7 +429,9 @@ impl<'a> Parser<'a> {
             };
             let name = self.unique_name("elvis");
             let ty = cond.ty;
-            let sugar = cond.sugar;
+            // Capture a value, not a qualified object. Keep the original
+            // expression's read qualifiers and the pointer's pointee qualifiers.
+            let sugar = *cond.sugar.unqualified(&self.typedefs);
             let t = self.new_local(name, ty, sugar, false);
             let local = || mk(ExprKind::Local(t), ty, loc).with_sugar(sugar);
             let set = self.assignment("=", local(), cond, loc)?;

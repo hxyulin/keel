@@ -93,3 +93,29 @@ and byte-identical. The [follow-up ledger](../suite/linux-kernel/audit-empty-agg
 records qualification and remaining first errors. There are still 86 rejected C
 inputs under the optional policy; this increment does not establish full C
 acceptance or kernel link/boot support.
+
+## GNU conditional qualifier follow-up
+
+GNU `a ?: b` evaluates `a` once. Its internal capture holds an unqualified value;
+copying the source object's outer `const` or `volatile` onto that temporary is
+incorrect. The frontend now removes those outer qualifiers only from the
+capture. The original expression retains its read qualifiers, and pointer
+pointee qualifiers survive. Ordinary const-write checks are unchanged.
+
+This removes all 18 prior const-write first errors. Thirteen inputs now accept;
+five expose cleanup-goto, constant-expression, output-bearing asm-goto or feature
+permission boundaries. C acceptance is 411/484 under the unchanged optional
+policy and 404/484 under the original pinned policy. Assembly remains 506/506
+and 490/506 respectively. All 904 previously accepted optional-policy objects
+are byte-identical. The [qualifier ledger](../suite/linux-kernel/audit-gnu-conditional-qualifiers.json)
+records source hashes, first errors and retained objects.
+
+Three regression tests cover const scalar/pointer/member/typedef values,
+single evaluation and fallback effects, one volatile source read with no
+volatile temporary writes, and rejection of actual const writes. Generated
+code runs in four debug/optimization combinations on the local Arm host and
+with both GCC and Clang callers on Linux. Two compiler-built references also
+pass. Debug objects from different build directories differ in debug data;
+code, data and unwind sections match. Full validation passes 2,887 tests and
+one doctest, with 13 skipped tests. Kernel link/boot qualification remains outside
+this source-acceptance checkpoint.

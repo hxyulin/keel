@@ -1246,3 +1246,18 @@ calls, stack arguments, ordinary aggregate returns, variadics, required inlining
 debug objects and empty-returning cleanup callbacks. Remaining C rejections are
 still led by const-qualified writes, feature permissions and shared-section
 storage/retention rules.
+
+### GNU conditional qualifier checkpoint
+
+[The qualifier ledger](audit-gnu-conditional-qualifiers.json) records a frontend
+fix to GNU `a ?: b`: the single-evaluation temporary holds an unqualified value.
+The source read and pointer-pointee qualifiers remain intact. This removes all
+18 const-write first errors and admits 13 more C inputs. Five expose other
+existing boundaries.
+
+The unchanged optional policy now accepts 411/484 C and 506/506 assembly inputs;
+the original pinned policy accepts 404/484 C and 490/506 assembly inputs. Every
+prior accepted object is byte-identical. All captured inputs and reference
+artifacts were rehashed unchanged. No kernel link, rebuild or boot was performed.
+Full validation passes 2,887 tests and one doctest. Native checks pass four local
+Arm executions, eight generated Linux executions and two compiler references.
