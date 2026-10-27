@@ -1,14 +1,13 @@
 # Minimal Linux x86-64 compiler target
 
-Latest measured status: **469/484 C inputs** and **506/506 assembly inputs**
+Latest measured status: **484/484 C inputs** and **506/506 assembly inputs**
 accepted under the opt-in [kernel audit policy](kernel-audit-policy.json).
-The [C inline-finalization checkpoint](audit-c-inline-finalization.json) removes
-constant-dead asm paths and admits explicit C-owned strong public mandatory
-inline definitions. All 970 preceding accepted inputs remain accepted; 664
-objects are byte-identical and 306 C objects change with finalization. All 506
-assembly objects are byte-identical. Fifteen C inputs still reject at
-implementation boundaries. Original and earlier optional policies retain their
-separate historical results below.
+The [C contract checkpoint](audit-c-contracts.json) implements checked asm register
+sharing, cleanup-aware jumps, packed pointer relocations, ELF notes and function
+alignment. All 975 preceding accepted inputs remain accepted; 798 objects are
+byte-identical and 177 C objects change. All 506 assembly objects are
+byte-identical. The pinned source-to-object acceptance goal is complete.
+Original and earlier optional policies retain their historical results below.
 
 This fixture targets the **64-bit parts** of Linux v6.12. Host programs,
 16/32-bit code and mixed-mode assembly remain external. The supported x86 C
@@ -1328,8 +1327,8 @@ limits. Native checks pass four local Arm executions plus a Clang reference,
 eight generated x86 PIE executions and two GCC/Clang references. A negative
 regression ensures symbolic addresses cannot overwrite bitfield storage.
 
-The open C acceptance goal is 484/484 source-to-object inputs. Its current checkpoint
-is recorded in [audit-c-acceptance-goal.json](audit-c-acceptance-goal.json), with
+The 484/484 source-to-object goal was still open at the checkpoint recorded in
+[audit-c-acceptance-goal.json](audit-c-acceptance-goal.json), with
 native builtin, generic-pointer, output-bearing asm-goto and cleanup-switch
 witnesses. Feature permissions remain explicit. See the
 [goal contract](../../docs/c-linux64-acceptance.md#full-acceptance-goal).

@@ -2,24 +2,25 @@
 
 The pinned Linux v6.12 audit measures source-to-object acceptance for its
 64-bit inputs. It does not qualify a Keel-linked or Keel-booted kernel.
-The checkpoint ledger is [recorded with the corpus](../suite/linux-kernel/audit-c-acceptance.json).
+The latest ledger is [recorded with the corpus](../suite/linux-kernel/audit-c-contracts.json).
 
 ## Full-acceptance goal
 
 The target is 484/484 captured C inputs producing x86-64 objects under the
 opt-in [kernel audit policy](../suite/linux-kernel/kernel-audit-policy.json).
-The goal is open. The user approved this explicit permission list; ordinary v1
-defaults and historical audit policies remain unchanged. Keep the reference inputs and resolved config fixed, preserve prior
-acceptances, and record each compiler checkpoint and its feature policy.
+The pinned source-to-object goal is complete at 484/484. The user approved this
+explicit permission list; ordinary v1 defaults and historical audit policies
+remain unchanged. Keep the reference inputs and resolved config fixed, preserve
+prior acceptances, and record each compiler checkpoint and its feature policy.
 Do not count feature-permission rejections as missing instruction encodings or
 silently enable instructions to improve the result. Kernel linking, booting and
 runtime correctness are separate milestones.
 
-Continue frontend and assembly fixes while they fit the existing contracts.
-Report a significant IR/backend change before expanding into it. In particular,
-cleanup jumps need lifetime-aware exits, fixed-register overlaps need a checked
-operand-sharing contract, and packed relocations/function alignment need storage
-metadata that survives every emitter. Removing their diagnostics is not support.
+The user approved designing and implementing the remaining operand, lifetime
+and storage contracts in parallel. Their designs are recorded in
+[shared asm registers](c-inline-asm-shared-registers.md),
+[cleanup jumps](c-cleanup-jumps.md), and [storage metadata](c-storage-metadata.md).
+Future significant IR/backend changes still need a design before expansion.
 
 ## Implemented contracts
 
@@ -358,3 +359,49 @@ ELF note-section placement and one function alignment. These require checked
 operand sharing, declaration-lifetime exits, or storage metadata through IR and
 emitters. The next work needs a contract design rather than relaxing guards.
 The 484/484 acceptance goal remains open. No Keel kernel was linked or booted.
+
+## Checked operand, lifetime and storage contracts
+
+The [contract ledger](../suite/linux-kernel/audit-c-contracts.json) records
+484/484 C inputs and 506/506 assembly inputs under the unchanged named kernel
+policy. All 15 former rejections now produce objects. All 975 prior accepted
+inputs remain accepted. Of their objects, 798 are byte-identical; 177 C objects
+change with register-group initialization. All 506 assembly objects are
+byte-identical. All 992 saved inputs, config, reference artifacts and binary
+dependencies were rehashed unchanged. The pinned source-to-object goal is complete.
+
+Shared asm inputs must have provably equal common low bits. The widest input
+initializes each physical register once. Conflicting initializers, independent
+early-clobber overlaps, duplicate output registers and clobber overlaps reject.
+The IR keeps its existing serialized fields. AArch64 retains its restriction
+against multiple inputs naming the same register.
+
+Cleanup-aware direct jumps unwind declaration lifetimes in reverse order.
+Forward entry across cleanup initialization rejects. Dynamic computed and asm
+jumps require identical lifetime regions, and VM-type jumps still reject.
+Literal computed jumps use direct lifetime handling. GCC 14 skips an exited
+cleanup in the literal-computed-jump fixture, while Clang and Keel run it.
+Both GCC optimization modes return 10 for that unmodified fixture; these are
+recorded compiler differences, not passing reference executions.
+
+Packed pointers use byte-offset relocations, with overlap, bounds, bitfield and
+addend checks retained. Minimum function alignment survives IR roundtrips and
+native, LLVM and Cranelift emission; wasm rejects native function alignment.
+Readonly relocation-free ELF notes emit SHT_NOTE with allocation and optional
+retention flags. Keel's executable linker still rejects producer notes such as
+.note.Linux. Darwin packed pointer runtime requires classic dyld fixups.
+
+The clean full workspace run passes 2,933 tests and one doctest, with 13 skipped.
+The first run found three outdated rejection expectations; their replacements
+pass before the full rerun. The Arm diagnostic matrix is now explicitly targeted
+and passes locally and on Linux. Workspace checking and both generator freshness
+checks pass. Documentation builds complete with eight existing warnings.
+Linux witnesses pass 75 generated executions and eight reference executions.
+The shared-register
+reference collapses redundant matching inputs because Clang rejects those source
+constraints. The upper-bit-loss control exits 4 as expected. The focused runs
+pass 38 tests at the production snapshot and 27 at the final qualification
+snapshot, with repeated tests counted in each run. Strict Clippy remains blocked
+by existing diagnostics. Formatting comparisons find no new differences across
+39 changed Rust files; pre-existing differences remain. The reference kernel
+was not rebuilt or rebooted, and no Keel kernel was linked or booted.

@@ -47,4 +47,10 @@ out of an inner cleanup block runs the callback before reaching the outer label.
 dynamic computed jump and asm goto across the same boundary are rejected.
 The regression tests retain these cases as executable witnesses.
 
+GCC 14.4 differs for literal `goto *&&label` leaving a cleanup lifetime: the
+unmodified fixture returns 10 at both `-O0` and `-O2`, because the inner cleanup
+is skipped. Clang 21.1.8 and Keel run that cleanup and pass the fixture.
+Keel deliberately follows the checked Clang contract for this form. The audit
+records GCC's different result separately from passing reference executions.
+
 The [GCC cleanup attribute contract](https://gcc.gnu.org/onlinedocs/gcc-14.4.0/gcc/Common-Variable-Attributes.html) specifies callbacks on scope exit. [Clang cleanup lowering](https://clang.llvm.org/docs/LLVMExceptionHandlingCodeGen.html) describes cleanup-aware direct edges.
