@@ -1604,6 +1604,17 @@ impl Assembler {
                 let e = self.symbols.expr(&address.expression);
                 self.integer(*width, e, address.modifier, line)
             }
+            Directive::ElfNoteSection { name, retain } => {
+                self.section_full(sections::Declaration {
+                    name,
+                    flags: Some(2 | if *retain { 0x200000 } else { 0 }),
+                    nobits: false,
+                    entry_size: 0,
+                    group: None,
+                    section_type: Some(7),
+                    unique: None,
+                })
+            }
             Directive::ElfLifecycleArray { fini } => self.section_full(sections::Declaration {
                 name: if *fini { ".fini_array" } else { ".init_array" },
                 flags: Some(3),

@@ -74,6 +74,7 @@ pub enum DataItem {
     },
     /// The address of `symbol` plus `addend` bytes, filled in by the linker.
     /// Eight bytes by default; explicit layout queries use its pointer width.
+    /// Stored at the current byte cursor without padding, even in align-1 objects.
     Ptr {
         symbol: String,
         addend: u32,

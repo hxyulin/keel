@@ -105,9 +105,6 @@ impl<'a> Placement<'a> {
                         ()
                     }
                     DataItem::Ptr { symbol, addend } => {
-                        if init.align < 4 || offset % 4 != 0 {
-                            return Err(reject("data pointer requires four-byte alignment"));
-                        }
                         placement.fixup(symbol, *addend, memory_bytes)?;
                     }
                     _ => {

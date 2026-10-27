@@ -2244,7 +2244,7 @@ impl<'a> FunctionCompiler<'a> {
                 Directive::WeakDefinition(["_", name].concat())
             });
         }
-        out.align(2);
+        out.align(func.attrs.align.unwrap_or(4).max(4).trailing_zeros());
         out.label(self.symbol(name));
         if self.linux {
             out.directive(Directive::ElfType {

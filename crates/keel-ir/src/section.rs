@@ -40,6 +40,8 @@ pub enum Placement {
     Code,
     Data,
     ReadOnly,
+    /// Allocated ELF note bytes supplied by the producer, without relocations.
+    Note,
     ZeroFill,
     Relro,
     TlsData,
@@ -76,7 +78,9 @@ impl SectionName {
     /// sections can contain statically resolved pointer relocations.
     pub fn initialized_storage(self, placement: Placement) -> Placement {
         let name = self.as_str();
-        if placement == Placement::Relro
+        if placement == Placement::ReadOnly && (name == ".note" || name.starts_with(".note.")) {
+            Placement::Note
+        } else if placement == Placement::Relro
             && (name == ".rodata1"
                 || [
                     ".rodata",
@@ -110,6 +114,7 @@ impl SectionName {
     pub fn validate(self, target: crate::Target, placement: Placement) -> Result<(), &'static str> {
         use Placement::*;
         let name = self.as_str();
+        let placement = self.initialized_storage(placement);
         match target {
             crate::Target::Wasm32UnknownUnknown => {
                 return Err(
@@ -125,6 +130,17 @@ impl SectionName {
                 }
                 let prefix =
                     |p: &str| name == p || name.strip_prefix(p).is_some_and(|s| s.starts_with('.'));
+                if matches!(name, ".note.GNU-stack" | ".note.gnu.property") {
+                    return Err(
+                        "compiler-owned stack/property note section placement is unsupported",
+                    );
+                }
+                if prefix(".note") && placement != Note {
+                    return Err("ELF notes require non-TLS readonly bytes without relocations");
+                }
+                if placement == Note && !prefix(".note") {
+                    return Err("ELF note placement requires a .note or .note.* section");
+                }
                 if name.starts_with(".gnu_")
                     || name.starts_with(".debug_")
                     || name.starts_with(".zdebug_")
@@ -134,7 +150,6 @@ impl SectionName {
                         ".fini_array",
                         ".ctors",
                         ".dtors",
-                        ".note",
                         ".debug",
                         ".zdebug",
                         ".eh_frame",
@@ -212,6 +227,9 @@ impl SectionName {
                 }
             }
             crate::Target::Aarch64AppleDarwin => {
+                if placement == Note {
+                    return Err("ELF note placement is unavailable on Darwin");
+                }
                 let (segment, section) = name
                     .split_once(',')
                     .ok_or("Darwin section requires segment,section")?;
@@ -362,6 +380,16 @@ pub fn validate_module(module: &crate::Module, target: crate::Target) -> Result<
                     "@{}: custom/retained data alignment must be a power of two up to {}",
                     d.name,
                     crate::MAX_DATA_ALIGN
+                ));
+            }
+            if d.section.is_some_and(|section| {
+                section.initialized_storage(Placement::for_object(d.thread_local, init))
+                    == Placement::Note
+            }) && init.align < 4
+            {
+                return Err(format!(
+                    "@{}: ELF notes require alignment of at least 4",
+                    d.name
                 ));
             }
             check(

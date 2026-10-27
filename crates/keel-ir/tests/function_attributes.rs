@@ -128,3 +128,31 @@ fn semantic_interposition_contract_roundtrips_without_exact_binding() {
     assert_eq!(attrs, again.functions[0].attrs);
     assert!(parse("decl @f() no_semantic_interposition no_semantic_interposition\n").is_err());
 }
+
+#[test]
+fn function_alignment_roundtrips_merges_and_verifies() {
+    let mut attrs = FunctionAttrs {
+        align: Some(64),
+        ..Default::default()
+    };
+    attrs.merge(FunctionAttrs {
+        align: Some(32),
+        ..Default::default()
+    });
+    attrs.merge(FunctionAttrs::default());
+    assert_eq!(attrs.align, Some(64));
+    let m = parse("decl @f() align 64\nfunc @g() align 32 {\nblock0:\n call @f()\n return\n}\n")
+        .unwrap();
+    verify_module(&m).unwrap();
+    assert_eq!(parse(&m.to_string()).unwrap().to_string(), m.to_string());
+    for alignment in [0, 3, 131072] {
+        let m = parse(&format!("decl @f() align {alignment}\n")).unwrap();
+        assert!(verify_module(&m).is_err());
+        let m = parse(&format!(
+            "func @f() align {alignment} {{\nblock0:\n return\n}}\n"
+        ))
+        .unwrap();
+        assert!(verify_module(&m).is_err());
+    }
+    assert!(parse("decl @f() align 16 align 32").is_err());
+}

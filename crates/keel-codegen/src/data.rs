@@ -174,7 +174,19 @@ pub(crate) fn emit_elf(out: &mut impl Sink, data: &DataObject, init: &DataInit) 
             section.into()
         }
     });
-    if data.weak_odr {
+    let note = data.section.is_some_and(|section| {
+        section.initialized_storage(keel_ir::section::Placement::for_object(
+            data.thread_local,
+            init,
+        )) == keel_ir::section::Placement::Note
+    });
+    if note {
+        out.directive(Directive::ElfNoteSection {
+            name: section,
+            retain: data.retain,
+        });
+        nobits = false;
+    } else if data.weak_odr {
         out.directive(Directive::ElfSectionMetadata {
             name: format!("{section}.{}", data.name),
             flags: flags | 0x200,

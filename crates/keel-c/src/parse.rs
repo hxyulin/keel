@@ -1530,10 +1530,10 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 self.check_nonstring(d.ty, attrs, name_loc)?;
-                if attrs.alignment().is_some() || attrs.alignas.is_some() {
+                if attrs.alignas.is_some() {
                     return Err(Error::new(
                         name_loc,
-                        "function alignment attributes are not supported",
+                        "`_Alignas` cannot apply to a function",
                     ));
                 }
                 let g = self
@@ -1948,6 +1948,7 @@ impl<'a> Parser<'a> {
             );
         self.globals[g].returns_twice |= returns_twice;
         let mut policies = attrs.function_attrs;
+        policies.align = attrs.aligned.map(|a| a as u32);
         policies.inlinehint |= spec.inline;
         policies.noreturn |= attrs.noreturn;
         self.globals[g].function_attrs.merge(policies);

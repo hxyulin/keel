@@ -301,3 +301,33 @@ fn f80_values_and_constants_are_explicitly_unsupported() {
         assert!(compile(src).unwrap_err().contains("f80"));
     }
 }
+
+#[test]
+fn packed_pointer_storage_and_function_alignment_survive_object_emission() {
+    if !common::host_ok() {
+        return;
+    }
+    let dir = common::workdir("storage-alignment");
+    let m = keel_ir::parse("data @target = align 1 { b\"abcd\" }\ndata @packed = align 1 { i8 90, ptr @target + 3, i8 85 }\nfunc @before() {\nblock0:\n return\n}\nfunc @aligned() align 64 {\nblock0:\n return\n}\n").unwrap();
+    let driver = common::write(
+        &dir,
+        "driver.c",
+        br#"
+#include <stdint.h>
+#include <string.h>
+extern void aligned(void);
+extern unsigned char packed[];
+int main(void) {
+    unsigned char *p;
+    memcpy(&p, packed+1, sizeof(p));
+    return ((uintptr_t)aligned % 64) || packed[0]!=90 || packed[9]!=85 || *p!='d';
+}
+"#,
+    );
+    for opt in [OptLevel::None, OptLevel::Speed] {
+        let object = common::write(&dir, "storage.o", &common::clif(&m, opt));
+        let exe = common::link(&dir, "run", &driver, &["-Wl,-no_fixup_chains"], &[&object]);
+        common::run(&mut Command::new(exe));
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}

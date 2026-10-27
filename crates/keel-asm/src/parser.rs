@@ -603,7 +603,8 @@ fn assemble_pass(
                 use keel_asm_ir::Directive as D;
                 d.validate().map_err(err)?;
                 match d {
-                    D::ElfLifecycleArray { .. }
+                    D::ElfNoteSection { .. }
+                    | D::ElfLifecycleArray { .. }
                     | D::ElfSection { .. }
                     | D::ElfSectionMetadata { .. }
                     | D::ElfType { .. }

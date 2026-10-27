@@ -26,13 +26,7 @@ fn wasm32_adjacent_pointers_and_i32_records_verify_without_rewriting() {
         Ok(())
     );
     assert_eq!(module.to_string(), before);
-    assert_eq!(
-        errors(&module, DataLayout::NATIVE64),
-        [
-            "@records: holds pointers, so it needs align 8 or more, got 4",
-            "@records: ptr @bytes is at offset 20, which is not a multiple of 8",
-        ]
-    );
+    assert!(errors(&module, DataLayout::NATIVE64).is_empty());
     assert_eq!(
         module.data[1].init.as_ref().unwrap().items.last(),
         Some(&DataItem::Bytes(vec![0xa5]))
@@ -40,35 +34,16 @@ fn wasm32_adjacent_pointers_and_i32_records_verify_without_rewriting() {
 }
 
 #[test]
-fn alignment_and_cursor_follow_only_the_selected_pointer_storage() {
-    for (prefix, wasm_offset, native_offset) in [("i32 7, ", 4, 4), ("ptr @bytes, i32 7, ", 8, 12)]
-    {
-        let module = parse(&format!(
-            "data @bytes = align 1 {{ b\"x\" }}\n\
-             data @p = align 8 {{ {prefix}ptr @bytes }}"
-        ))
-        .unwrap();
-        assert!(
-            errors(&module, DataLayout::WASM32).is_empty(),
-            "{wasm_offset}"
-        );
-        assert_eq!(
-            errors(&module, DataLayout::NATIVE64),
-            [format!(
-                "@p: ptr @bytes is at offset {native_offset}, which is not a multiple of 8"
-            )]
-        );
+fn pointer_storage_accepts_byte_alignment_for_both_layouts() {
+    for layout in [DataLayout::WASM32, DataLayout::NATIVE64] {
+        for prefix in ["i8 7, ", "ptr @bytes, i32 7, "] {
+            let module = parse(&format!(
+                "decl data @bytes\ndata @p = align 1 {{ {prefix}ptr @bytes }}"
+            ))
+            .unwrap();
+            assert!(errors(&module, layout).is_empty());
+        }
     }
-    let module = parse("decl data @bytes\ndata @p = align 2 { ptr @bytes, ptr @bytes }").unwrap();
-    assert_eq!(
-        errors(&module, DataLayout::WASM32),
-        ["@p: holds pointers, so it needs align 4 or more, got 2"]
-    );
-    let module = parse("decl data @bytes\ndata @p = align 8 { i8 1, ptr @bytes }").unwrap();
-    assert_eq!(
-        errors(&module, DataLayout::WASM32),
-        ["@p: ptr @bytes is at offset 1, which is not a multiple of 4"]
-    );
 }
 
 #[test]
@@ -336,10 +311,7 @@ fn mixed_pointer_rtti_alignment_reports_each_requirement_once() {
     for (items, wasm_requirements) in [
         (
             "ptr @name, zero 4, rtti_name @name, ptr @name, zero 4, rtti_name @name",
-            vec![
-                "@mixed: holds pointers, so it needs align 4 or more, got 1",
-                "@mixed: holds pointers, so it needs align 8 or more, got 1",
-            ],
+            vec!["@mixed: holds pointers, so it needs align 8 or more, got 1"],
         ),
         (
             "rtti_name @name, ptr @name, zero 4, rtti_name @name, ptr @name",

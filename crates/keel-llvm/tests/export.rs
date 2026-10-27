@@ -357,3 +357,35 @@ fn custom_placement_and_retention_cannot_be_silently_exported() {
         );
     }
 }
+
+#[test]
+fn byte_pointer_storage_and_function_alignment_reach_llvm() {
+    let ll = translate("data @target = align 1 { b\"abcd\" }\ndata @packed = align 1 { i8 90, ptr @target + 3, i8 85 }\ndecl @external() align 32\nfunc @before() {\nblock0:\n return\n}\nfunc @aligned() align 64 {\nblock0:\n return\n}\n").unwrap();
+    assert!(ll.contains("<{ i8, ptr, i8 }>"), "{ll}");
+    assert!(
+        ll.lines()
+            .any(|l| l.starts_with("declare void") && l.ends_with("() nobuiltin align 32")),
+        "{ll}"
+    );
+    assert!(
+        ll.lines()
+            .any(|l| l.starts_with("define void") && l.ends_with("() nobuiltin align 64 {")),
+        "{ll}"
+    );
+    let dir = std::env::temp_dir().join(format!("keel-llvm-storage-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("storage.ll"), ll).unwrap();
+    let output = Command::new("clang")
+        .args(["-c", "-x", "ir"])
+        .arg(dir.join("storage.ll"))
+        .arg("-o")
+        .arg(dir.join("storage.o"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}

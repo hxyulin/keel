@@ -156,7 +156,7 @@ pub fn compile_verified(
         clif_instructions: translation
             .functions
             .iter()
-            .map(|(_, _, f)| f.dfg.num_insts())
+            .map(|f| f.body.dfg.num_insts())
             .sum(),
         code_bytes: 0,
     };
@@ -181,8 +181,8 @@ pub fn translate_to_clif(module: &k::Module, options: &Options) -> Result<String
     );
     let translation = translate_into(module, object)?;
     let mut out = String::new();
-    for (_, name, f) in &translation.functions {
-        out.push_str(&format!("; @{name}\n{}\n", f.display()));
+    for f in &translation.functions {
+        out.push_str(&format!("; @{}\n{}\n", f.name, f.body.display()));
     }
     Ok(out)
 }
@@ -226,10 +226,17 @@ pub fn function_support(module: &k::Module) -> Vec<(String, Result<()>)> {
     out
 }
 
+struct TranslatedFunction {
+    id: FuncId,
+    name: String,
+    body: ir::Function,
+    align: u32,
+}
+
 /// Translated CLIF functions and data, before code generation.
 pub struct Translation {
     object: ObjectModule,
-    functions: Vec<(FuncId, String, ir::Function)>,
+    functions: Vec<TranslatedFunction>,
     data: Vec<(DataId, DataDescription)>,
 }
 
@@ -248,16 +255,22 @@ pub struct Compiled {
 
 impl Translation {
     pub fn functions(&self) -> impl Iterator<Item = (&str, &ir::Function)> {
-        self.functions.iter().map(|(_, n, f)| (n.as_str(), f))
+        self.functions.iter().map(|f| (f.name.as_str(), &f.body))
     }
 
     /// Cranelift code generation for every function, in module order.
     pub fn codegen(self) -> Result<Compiled> {
         let mut ctx = Context::new();
         let mut out = Vec::with_capacity(self.functions.len());
-        for (id, name, func) in self.functions {
+        for TranslatedFunction {
+            id,
+            name,
+            body,
+            align,
+        } in self.functions
+        {
             ctx.clear();
-            ctx.func = func;
+            ctx.func = body;
             ctx.compile(self.object.isa(), &mut ControlPlane::default())
                 .map_err(|e| {
                     format!(
@@ -266,7 +279,7 @@ impl Translation {
                     )
                 })?;
             let code = ctx.compiled_code().expect("compiled");
-            let alignment = u64::from(code.buffer.alignment);
+            let alignment = u64::from(code.buffer.alignment).max(u64::from(align));
             let bytes = code.code_buffer().to_vec();
             let relocs = code
                 .buffer
@@ -630,7 +643,12 @@ fn translate_into(module: &k::Module, mut object: ObjectModule) -> Result<Transl
             config,
         )
         .map_err(|e| format!("function @{}: {e}", f.name))?;
-        functions.push((id, f.name.clone(), func));
+        functions.push(TranslatedFunction {
+            id,
+            name: f.name.clone(),
+            body: func,
+            align: f.attrs.align.unwrap_or(1),
+        });
     }
     Ok(Translation {
         object,

@@ -801,6 +801,13 @@ impl Parser {
     fn function_attrs(&mut self) -> Result<crate::FunctionAttrs, ParseError> {
         let mut attrs = crate::FunctionAttrs::default();
         loop {
+            if self.eat(&Tok::Ident("align".into())) {
+                if attrs.align.is_some() {
+                    return Err(self.unexpected("one function alignment attribute"));
+                }
+                attrs.align = Some(self.u32("a function alignment")?);
+                continue;
+            }
             if self.eat(&Tok::Ident("section".into())) {
                 if attrs.section.is_some() {
                     return Err(self.unexpected("one section attribute"));

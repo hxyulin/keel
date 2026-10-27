@@ -90,7 +90,7 @@ pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
 }
 
 /// Verifies the actual module using explicit storage properties only for data
-/// initializer cursors, pointer alignment, and relocation target sizes. All
+/// initializer cursors, RTTI alignment, and relocation target sizes. All
 /// structural, function, reference, debug, type and metadata checks are retained.
 /// This neither infers a target nor authorizes backend support. RTTI names keep
 /// their native eight-byte storage and alignment under either layout.
@@ -470,24 +470,21 @@ fn check_data(lookup: &Names<'_>, init: &DataInit, layout: DataLayout) -> Vec<St
                         Some(_) => {}
                     }
                 }
-                // Native loaders require pointer alignment. RTTI tagging is
-                // always native, even with a narrower portable pointer model.
-                let pointer_align = if matches!(item, DataItem::RttiName { .. }) {
-                    PTR_BYTES
-                } else {
-                    layout.pointer_align()
-                };
-                if let Some(offset) = offset.filter(|offset| offset % pointer_align != 0) {
-                    errors.push(format!(
-                        "ptr @{symbol} is at offset {offset}, which is not a multiple of {pointer_align}"
-                    ));
-                }
-                if u64::from(init.align) < pointer_align && reported_pointer_align < pointer_align {
-                    errors.push(format!(
-                        "holds pointers, so it needs align {pointer_align} or more, got {}",
-                        init.align
-                    ));
-                    reported_pointer_align = pointer_align; // report once per requirement
+                // Ordinary pointers are byte storage relocations. Native RTTI
+                // tagging retains its separate eight-byte alignment contract.
+                if matches!(item, DataItem::RttiName { .. }) {
+                    if let Some(offset) = offset.filter(|offset| !offset.is_multiple_of(PTR_BYTES)) {
+                        errors.push(format!(
+                            "ptr @{symbol} is at offset {offset}, which is not a multiple of {PTR_BYTES}"
+                        ));
+                    }
+                    if u64::from(init.align) < PTR_BYTES && reported_pointer_align < PTR_BYTES {
+                        errors.push(format!(
+                            "holds pointers, so it needs align {PTR_BYTES} or more, got {}",
+                            init.align
+                        ));
+                        reported_pointer_align = PTR_BYTES;
+                    }
                 }
             }
             DataItem::Bytes(_) | DataItem::Zero(_) => {}

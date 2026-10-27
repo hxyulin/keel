@@ -1294,22 +1294,24 @@ impl<'p> Gen<'p> {
         let mut items = Vec::new();
         let mut pos = 0;
         for (offset, symbol, addend) in relocs {
-            if !offset.is_multiple_of(pointer_bytes)
-                || offset < pos
+            if offset < pos
                 || offset
                     .checked_add(pointer_bytes)
                     .is_none_or(|end| end > size)
             {
                 return Err(Error::new(
                     Loc::default(),
-                    "unaligned pointer relocations are not supported",
+                    "pointer relocations overlap or exceed object storage",
                 ));
             }
             push_bytes(&mut items, &bytes[pos..offset]);
             let Ok(addend) = u32::try_from(addend) else {
                 return Err(Error::new(
                     Loc::default(),
-                    format!("`{}`: negative offset from `{symbol}`", global.name),
+                    format!(
+                        "`{}`: pointer relocation addend {addend} from `{symbol}` is outside 0..=4294967295",
+                        global.name
+                    ),
                 ));
             };
             items.push(DataItem::Ptr { symbol, addend });

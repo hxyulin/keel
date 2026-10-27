@@ -1716,7 +1716,7 @@ impl<'a> FunctionCompiler<'a> {
         if func.hidden {
             out.directive(Directive::ElfHidden(symbol.clone()));
         }
-        out.align(4);
+        out.align(func.attrs.align.unwrap_or(16).max(16).trailing_zeros());
         out.directive(Directive::ElfType {
             name: symbol.clone(),
             function: true,

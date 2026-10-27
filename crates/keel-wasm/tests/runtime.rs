@@ -129,7 +129,8 @@ fn runtime_rejects_unsupported_data_including_unused_metadata() {
         "data @x = retain align 4 { i32 0 }",
         "data @x = align 8 { rtti_name @x }",
         "data @x = align 4 { ptr @f }\nfunc @f() {\nblock0:\n return\n}",
-        "data @x = align 4 { i8 0, ptr @x }",
+        "func @f() align 64 {\nblock0:\n return\n}",
+        "decl @f() align 64",
         "data @x = align 4 { ptr @x + 5 }",
         "data @x = align 1 { i8 256 }",
     ] {
@@ -598,4 +599,32 @@ fn review_malformed_runtime_references_return_diagnostics() {
     let mut m = original;
     m.data[0].init.as_mut().unwrap().align = 0;
     assert!(emit_wasm32_runtime_module(&m, &options(&[])).is_err());
+}
+
+#[test]
+fn byte_aligned_static_pointer_fixups_preserve_neighbor_bytes() {
+    let m = checked(
+        r#"
+data @target = align 1 { b"abcd" }
+data @packed = align 1 { i8 90, ptr @target + 3, i8 85 }
+func @addr() -> i64 {
+block0:
+ v0 = symbol_addr @packed
+ v1 = ptrtoint.i64 v0
+ return v1
+}
+"#,
+    );
+    execute(
+        &m,
+        &options(&["addr"]),
+        r#"
+const p=Number(e.addr());
+assert.equal(p,21);
+assert.equal(u[p],90);
+assert.equal(dv.getUint32(p+1,true),20);
+assert.equal(u[p+5],85);
+assert.equal(u[dv.getUint32(p+1,true)],100);
+"#,
+    );
 }

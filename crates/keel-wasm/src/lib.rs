@@ -99,6 +99,9 @@ fn signature(sig: &Signature) -> Result<(), Diagnostic> {
     Ok(())
 }
 fn attrs(a: FunctionAttrs) -> Result<(), Diagnostic> {
+    if a.align.is_some() {
+        return Err(reject("native function alignment is unavailable on wasm32"));
+    }
     if a.weak || a.constructor || a.destructor || a.used || a.retain || a.section.is_some() {
         return Err(reject("unsupported linkage/lifecycle/section attributes"));
     }

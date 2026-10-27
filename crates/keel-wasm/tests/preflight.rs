@@ -31,7 +31,6 @@ fn rejected(module: &Module, options: &Wasm32RuntimeOptions) -> keel_wasm::Diagn
 fn complete_preflight_error_parity_without_export_pruning() {
     for source in [
         "decl data @external",
-        "data @x = align 1 { ptr @x }",
         "data @x = align 4 { ptr @missing }",
         "data @x = align 4 { zero 65536 }",
         "decl @missing(i32)->i32",
@@ -226,9 +225,9 @@ fn diagnostic_precedence_retains_original_admission_order() {
 
 #[test]
 fn actual_wasm32_layout_keeps_older_entrypoint_contracts() {
-    // Adjacent four-byte pointers pass only the explicit WASM32 verifier.
+    // Both layouts accept byte storage; only the runtime entry point places data.
     let module = parse("data @table = align 4 { ptr @table, ptr @table + 8 }").unwrap();
-    assert!(keel_ir::verify_module(&module).is_err());
+    keel_ir::verify_module(&module).unwrap();
     let before = format!("{module:?}");
     let opts = options();
     validate_wasm32_runtime_module(&module, &opts).unwrap();

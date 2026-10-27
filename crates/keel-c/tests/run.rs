@@ -927,12 +927,8 @@ fn rejected() {
             "error: unaligned atomic members are not supported",
         ),
         (
-            "int x; struct __attribute__((packed)) S { char c; int *p; } s = { 0, &x };",
-            "unaligned pointer relocations are not supported",
-        ),
-        (
             "_Alignas(0) int f(void);",
-            "error: function alignment attributes are not supported",
+            "error: `_Alignas` cannot apply to a function",
         ),
         (
             "_Alignas(1) int x;",
@@ -965,10 +961,6 @@ fn rejected() {
         (
             "typedef int Wide __attribute__((aligned(16))); Wide xs[2];",
             "error: array element size is not a multiple of its alignment",
-        ),
-        (
-            "int f(void) __attribute__((aligned(32)));",
-            "error: function alignment attributes are not supported",
         ),
         (
             "struct S { _Alignas(16) unsigned x:3; };",

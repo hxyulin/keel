@@ -88,6 +88,9 @@ fn attrs(a: FunctionAttrs) -> String {
         .filter_map(|(set, s)| set.then_some(format!(" {s}")))
         .collect::<String>(),
     );
+    if let Some(align) = a.align {
+        attributes.push_str(&format!(" align {align}"));
+    }
     attributes
 }
 

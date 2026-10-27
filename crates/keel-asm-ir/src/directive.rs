@@ -162,6 +162,11 @@ pub enum Directive {
     ElfLifecycleArray {
         fini: bool,
     },
+    /// Allocated ELF SHT_NOTE section, optionally retained by the linker.
+    ElfNoteSection {
+        name: String,
+        retain: bool,
+    },
     /// ELF section name, SHF_* flags, and SHT_NOBITS selection.
     ElfSection {
         name: String,
@@ -293,6 +298,15 @@ impl Directive {
             Self::ElfLifecycleArray { fini } => {
                 let name = if *fini { "fini_array" } else { "init_array" };
                 write!(f, ".section .{name},\"aw\",@{name}")
+            }
+            Self::ElfNoteSection { name, retain } => {
+                f.write_str(".section\t")?;
+                quoted(f, name.as_bytes())?;
+                f.write_str(if *retain {
+                    ",\"aR\",@note"
+                } else {
+                    ",\"a\",@note"
+                })
             }
             Self::ElfSection {
                 name,

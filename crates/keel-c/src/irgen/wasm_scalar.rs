@@ -243,16 +243,8 @@ impl Gen<'_> {
                                     ));
                                 }
                             };
-                            if width != 4
-                                || g.align < 4
-                                || offset % 4 != 0
-                                || addend < 0
-                                || addend as u64 > target_size
-                            {
-                                return Err(reject(
-                                    expr.loc,
-                                    "pointer initializer alignment/bounds",
-                                ));
+                            if width != 4 || addend < 0 || addend as u64 > target_size {
+                                return Err(reject(expr.loc, "pointer initializer width/bounds"));
                             }
                         }
                         _ => {

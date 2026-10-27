@@ -263,6 +263,8 @@ pub struct FunctionAttrs {
     /// Compiler emission and linker garbage-collection root.
     pub retain: bool,
     pub section: Option<crate::SectionName>,
+    /// Minimum function entry alignment in bytes. A power of two up to MAX_DATA_ALIGN.
+    pub align: Option<u32>,
     /// Producer promises that direct references cannot resolve to a different
     /// definition, even though the symbol may remain externally visible.
     /// This does not change linkage, visibility, ABI, or linker options.
@@ -285,6 +287,7 @@ impl FunctionAttrs {
         self.used |= other.used;
         self.retain |= other.retain;
         self.section = self.section.or(other.section);
+        self.align = self.align.into_iter().chain(other.align).max();
         self.destructor |= other.destructor;
         self.noninterposable |= other.noninterposable;
         self.no_semantic_interposition |= other.no_semantic_interposition;
@@ -296,6 +299,12 @@ impl FunctionAttrs {
     }
 
     pub fn validate(self, returns_twice: bool) -> Result<(), &'static str> {
+        if self
+            .align
+            .is_some_and(|a| !a.is_power_of_two() || a > crate::MAX_DATA_ALIGN)
+        {
+            return Err("function alignment must be a power of two up to 65536");
+        }
         if self.alwaysinline && self.noinline {
             return Err("alwaysinline conflicts with noinline");
         }
@@ -328,6 +337,9 @@ impl fmt::Display for FunctionAttrs {
         }
         if let Some(section) = self.section {
             write!(f, " section {section}")?;
+        }
+        if let Some(align) = self.align {
+            write!(f, " align {align}")?;
         }
         Ok(())
     }
