@@ -2393,14 +2393,35 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 let blocks: Vec<Block> = (0..*labels).map(|_| self.new_block()).collect();
                 let exit = self.new_block();
                 let default_block = default.map_or(exit, |d| blocks[d]);
+                let ty = cond.ty.ir_with_layout(self.g.p.c_layout);
+                for case in cases.iter().filter(|case| case.first != case.last) {
+                    let first = self.b.ins().iconst(ty, case.first);
+                    let last = self.b.ins().iconst(ty, case.last);
+                    let (ge, le) = if cond.ty.is_signed() {
+                        (IntCC::Sge, IntCC::Sle)
+                    } else {
+                        (IntCC::Uge, IntCC::Ule)
+                    };
+                    let above = self.b.ins().icmp(ge, value, first);
+                    let below = self.b.ins().icmp(le, value, last);
+                    let matches = self.b.ins().and(above, below);
+                    let next = self.new_block();
+                    self.b
+                        .ins()
+                        .brif(matches, blocks[case.label], &[], next, &[]);
+                    self.terminated = true;
+                    self.b.seal_block(next);
+                    self.switch_to(next);
+                }
                 let table = cases
                     .iter()
-                    .map(|&(v, label)| {
+                    .filter(|case| case.first == case.last)
+                    .map(|case| {
                         let dest = keel_ir::BlockCall {
-                            block: blocks[label],
+                            block: blocks[case.label],
                             args: Vec::new(),
                         };
-                        (v, dest)
+                        (case.first, dest)
                     })
                     .collect();
                 let default_call = keel_ir::BlockCall {

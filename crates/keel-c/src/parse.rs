@@ -298,7 +298,7 @@ pub struct Declarator<'a> {
 
 pub(crate) struct SwitchCtx<'a> {
     pub ty: Ty<'a>,
-    pub cases: Vec<(i64, usize)>,
+    pub cases: Vec<SwitchCase>,
     pub default: Option<usize>,
     pub labels: usize,
 }
@@ -4491,7 +4491,7 @@ impl<'a> Parser<'a> {
                 }
                 "case" | "default" => {
                     self.advance();
-                    // GNU's `case 1 ... 5:` is a case for each value.
+                    // Keep GNU case ranges compact, including full-width intervals.
                     let values = if word == "case" {
                         let v = self.const_int()?;
                         let last = if self.eat("...") {
@@ -4499,10 +4499,7 @@ impl<'a> Parser<'a> {
                         } else {
                             v
                         };
-                        if last < v || last.checked_sub(v).is_none_or(|span| span >= 1 << 16) {
-                            return Err(Error::new(loc, "case range is empty or too big"));
-                        }
-                        Some(v..=last)
+                        Some((v, last))
                     } else {
                         None
                     };
@@ -4513,15 +4510,32 @@ impl<'a> Parser<'a> {
                     let label = sw.labels;
                     sw.labels += 1;
                     match values {
-                        Some(values) => {
-                            for v in values {
-                                let v =
-                                    crate::eval::normalize_with_layout(v, &sw.ty, self.c_layout);
-                                if sw.cases.iter().any(|&(c, _)| c == v) {
-                                    return Err(Error::new(loc, format!("duplicate case {v}")));
-                                }
-                                sw.cases.push((v, label));
+                        Some((first, last)) => {
+                            let first =
+                                crate::eval::normalize_with_layout(first, &sw.ty, self.c_layout);
+                            let last =
+                                crate::eval::normalize_with_layout(last, &sw.ty, self.c_layout);
+                            // i64 stores unsigned constants as bits. Order those bits
+                            // according to the controlling type, after conversion.
+                            let key =
+                                |v: i64| (v as u64) ^ if sw.ty.is_signed() { 1 << 63 } else { 0 };
+                            if key(last) < key(first) {
+                                return Err(Error::new(loc, "case range is empty"));
                             }
+                            for case in &sw.cases {
+                                if key(first) <= key(case.last) && key(case.first) <= key(last) {
+                                    let duplicate = if key(first) >= key(case.first) {
+                                        first
+                                    } else {
+                                        case.first
+                                    };
+                                    return Err(Error::new(
+                                        loc,
+                                        format!("duplicate case {duplicate}"),
+                                    ));
+                                }
+                            }
+                            sw.cases.push(SwitchCase { first, last, label });
                         }
                         None => {
                             if sw.default.is_some() {

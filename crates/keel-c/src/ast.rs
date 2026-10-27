@@ -9,6 +9,14 @@ use crate::arena::BodyArena;
 use crate::types::{BitField, FuncTy, Sugar, Ty};
 use keel_ir::{Intrinsic, OverflowOp, RmwOp};
 
+/// A switch interval after conversion to the promoted controlling type.
+#[derive(Copy, Clone, Debug)]
+pub struct SwitchCase {
+    pub first: i64,
+    pub last: i64,
+    pub label: usize,
+}
+
 pub type LocalId = usize;
 
 #[derive(Copy, Clone, Debug)]
@@ -310,12 +318,12 @@ pub enum Stmt<'a> {
         step: Option<&'a Expr<'a>>,
         body: &'a Stmt<'a>,
     },
-    /// The cases are the values of the `Case` labels in the body, by their
-    /// index, and which one is `default`.
+    /// Converted case intervals and their label indices in the body,
+    /// and which label is `default`.
     Switch {
         cond: &'a Expr<'a>,
         body: &'a Stmt<'a>,
-        cases: &'a [(i64, usize)],
+        cases: &'a [SwitchCase],
         default: Option<usize>,
         labels: usize,
     },

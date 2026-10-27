@@ -485,18 +485,15 @@ fn maintained_fixture_and_native_control() {
 }
 
 #[test]
-fn oversized_switch_range_is_diagnostic() {
+fn full_width_switch_range_is_compact() {
     let src = "int f(long long x) { switch (x) { case (-9223372036854775807LL-1) ... 9223372036854775807LL: return 1; default: return 0; } }";
-    let err = lower(src, false).unwrap_err();
-    assert!(
-        err.message.contains("case range is empty or too big"),
-        "{err:?}"
-    );
-    let err = crate::compile(src, "range.c", crate::Options::default()).unwrap_err();
-    assert!(
-        err.message.contains("case range is empty or too big"),
-        "{err:?}"
-    );
+    for module in [
+        lower(src, false).unwrap(),
+        crate::compile(src, "range.c", crate::Options::default()).unwrap(),
+    ] {
+        keel_ir::verify_module(&module).unwrap();
+        assert!(module.functions[0].to_string().len() < 2000);
+    }
 }
 
 #[test]
