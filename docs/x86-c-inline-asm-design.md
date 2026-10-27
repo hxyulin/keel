@@ -130,11 +130,13 @@ percent signs; do not apply extended-asm operand substitution. This covers
 metadata and symbol directives but does not promise arbitrary compiler-owned
 function prologues can be replaced by basic asm.
 
-Asm goto requires a new terminator with explicit fallthrough and listed label
-successors. Resolve labels using the C function's existing scope rules; retain
-all possible edges through optimization, liveness and block layout. Substitute
-%l references using compiler-owned labels. Do not hide branches in an ordinary
-fallthrough InlineAsm instruction.
+The implemented output-free asm goto uses restoration trampolines and an
+ordinary IR switch instead of adding a new terminator. Every assembly path
+converges before the existing inline-asm register restoration. The selector
+then exposes fallthrough and listed C label successors to SSA, optimization,
+liveness and block layout. `%l` substitutions name compiler-owned trampolines,
+including when their addresses appear in metadata. See the
+[implemented contract](x86-c-inline-asm.md#asm-goto).
 
 First support output-free asm goto. Add output-bearing asm goto only with
 edge-defined SSA values and per-edge writeback blocks: outputs promised by the

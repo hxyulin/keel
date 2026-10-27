@@ -384,6 +384,7 @@ impl Processor {
                         | ".long"
                         | ".int"
                         | ".quad"
+                        | ".octa"
                         | ".4byte"
                         | ".8byte"
                         | ".2byte"
@@ -499,6 +500,22 @@ impl Processor {
             let line = &lines[i];
             self.step(line)?;
             let (op, args) = parts(&line.text);
+            // GAS ends the macro name at `(`, but keeps the parentheses in
+            // the argument. This is assembler syntax, not C macro expansion.
+            let (op, args) = if self.gnu {
+                line.text
+                    .trim()
+                    .find('(')
+                    .and_then(|i| {
+                        let name = &line.text.trim()[..i];
+                        self.macros
+                            .contains_key(name)
+                            .then_some((name, &line.text.trim()[i..]))
+                    })
+                    .unwrap_or((op, args))
+            } else {
+                (op, args)
+            };
             let lower = op.to_ascii_lowercase();
             let active = conditions.last().is_none_or(|c| c.2);
             match lower.as_str() {

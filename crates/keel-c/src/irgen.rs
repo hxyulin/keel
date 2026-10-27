@@ -886,6 +886,7 @@ impl<'p> Gen<'p> {
             breaks: Vec::new(),
             continues: Vec::new(),
             labels: HashMap::default(),
+            asm_goto_targets: Vec::new(),
             callees: HashMap::default(),
             dispatch: None,
             dispatch_table,
@@ -1040,6 +1041,14 @@ impl<'p> Gen<'p> {
         }
         if !fg.terminated {
             fg.return_default()?;
+        }
+        for &(label, loc) in &fg.asm_goto_targets {
+            if fg.b.function().block_insts(fg.labels[label]).is_empty() {
+                return Err(Error::new(
+                    loc,
+                    format!("asm goto references undefined label `{label}`"),
+                ));
+            }
         }
         fg.emit_dispatch();
         fg.b.seal_all_blocks();
@@ -1812,6 +1821,7 @@ struct FnGen<'g, 'p, 'f> {
     exit_actions: Vec<ExitAction>,
     has_cleanup: bool,
     labels: HashMap<&'p str, Block>,
+    asm_goto_targets: Vec<(&'p str, Loc)>,
     /// Functions already imported, by global: their signatures are fixed
     /// by a prototype or definition.
     callees: HashMap<usize, keel_ir::FuncRef>,
@@ -2022,6 +2032,12 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             Stmt::Asm(asm) => {
                 self.ensure_block();
                 self.set_loc(asm.loc);
+                if !asm.goto_labels.is_empty() && (self.has_cleanup() || self.has_vm_types()) {
+                    return Err(Error::new(
+                        asm.loc,
+                        "asm goto in a function containing cleanup locals or VLAs is not supported",
+                    ));
+                }
                 let mut places = Vec::new();
                 let mut readwrite = Vec::new();
                 let mut memory_args = Vec::new();
@@ -2043,19 +2059,41 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     args.push(self.val(e)?);
                 }
                 args.extend(readwrite);
-                let types: Vec<_> = asm
+                let mut types: Vec<_> = asm
                     .outputs
                     .iter()
                     .zip(asm.output_memory)
                     .filter(|(_, memory)| !**memory)
                     .map(|((e, _), _)| e.ty.ir_with_layout(self.g.p.c_layout))
                     .collect();
+                if !asm.goto_labels.is_empty() {
+                    types.insert(0, Type::I32);
+                }
                 let contract = keel_ir::InlineAsm::new(asm.template, asm.constraints, &types)
                     .map_err(|e| Error::new(asm.loc, e))?;
                 let inst = self.b.ins().inline_asm(contract, &args);
                 let values = self.b.function().inst_results(inst).to_vec();
-                for (place, value) in places.iter().zip(values) {
-                    self.store_place(place, value);
+                if asm.goto_labels.is_empty() {
+                    for (place, value) in places.iter().zip(values) {
+                        self.store_place(place, value);
+                    }
+                } else {
+                    let fallthrough = self.new_block();
+                    let call = |block| keel_ir::BlockCall {
+                        block,
+                        args: Vec::new(),
+                    };
+                    let cases = asm
+                        .goto_labels
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &label)| {
+                            self.asm_goto_targets.push((label, asm.loc));
+                            (i as i64 + 1, call(self.label_block(label)))
+                        })
+                        .collect();
+                    self.b.ins().switch(values[0], call(fallthrough), cases);
+                    self.switch_to(fallthrough);
                 }
             }
             Stmt::Expr(e) => {

@@ -68,7 +68,7 @@ def main():
 
     rejected = [
         ('weak', 'static int hook(void) __attribute__((weak));'),
-        ('alias', 'int implementation(void) { return 1; } int hook(void) __attribute__((alias("implementation")));'),
+        ('alias', 'int hook(void) __attribute__((alias("missing_implementation")));'),
         ('constructor', 'static void init(void) __attribute__((constructor)); static void init(void) {}'),
         ('cleanup', 'void release(int *); int x __attribute__((cleanup(release)));'),
         ('visibility', 'int hook(void); int hook(void) __attribute__((visibility("protected")));'),

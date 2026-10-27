@@ -1,10 +1,11 @@
 # Minimal Linux x86-64 compiler target
 
-Latest measured status: **41/484 C inputs** and **488/506 assembly inputs**
+Latest measured status: **45/484 C inputs** and **490/506 assembly inputs**
 accepted under the original feature policy. A separate explicit-feature probe
-accepts **43 C inputs and 503 assembly inputs**. The
-[binary-input/attribute follow-up](#binary-inputs-and-attribute-queries) records the current blockers;
-asm-goto remains outside this increment's backend scope.
+accepts **47 C inputs and all 506 assembly inputs**. The
+[asm-goto/alias follow-up](#asm-goto-function-aliases-and-assembly-completion)
+records the current blockers. Nonzero-depth frame-address queries are now the
+common C first error.
 
 This fixture targets the **64-bit parts** of Linux v6.12. Host programs,
 16/32-bit code and mixed-mode assembly remain external. The supported x86 C
@@ -816,3 +817,70 @@ source/structured/chunked parity and both CLI object paths. GCC validates
 `nonstring` queries; native host execution and three-target object assembly pass.
 Scoped Clippy completes with existing library warnings. System instructions
 were not executed. Full log: `/tmp/keel-kernel-completion-tests.log`.
+
+## Asm goto, function aliases and assembly completion
+
+The [follow-up audit](audit-asm-goto-aliases.json) adds output-free x86 asm goto,
+checked function aliases, adjacent parenthesized GNU macro invocations,
+128-bit `.octa` literals and full-word x86 ELF relocation addends. No generated
+ISA, compiler IR, allocator or backend files changed.
+
+Asm goto lowers label references to restoration trampolines and an ordinary IR
+switch. Every outgoing path restores saved GPR homes before entering C code.
+The [contract](../../docs/x86-c-inline-asm.md#asm-goto) covers input constraints,
+clobbers, named/numeric labels, backedges and metadata references. Output
+operands, other targets and cleanup/VLA functions remain diagnosed. Function
+aliases resolve forward definitions and chains by final assembler name with
+whole-unit type, contract and linkage checks. Weak aliases retain replaceable
+call/address references. This subset is x86-64 Linux only; object aliases and
+lifecycle/retain/section attributes on aliases remain rejected.
+
+| Policy | Accepted C / 484 | Accepted assembly / 506 |
+| --- | ---: | ---: |
+| Original C v1, assembly v3 | 45 | 490 |
+| Explicit optional features | 47 | 506 |
+
+The optional policy remains unchanged: `+popcnt` for C, and
+`+rdtscp,+fsgsbase,+rdrand,+prefetchw,+invpcid,+clflush,+rdseed,+waitpkg` for
+assembly. All 529 previously accepted original-policy objects and all 546
+previously accepted optional-policy objects remain accepted and byte-identical.
+All 992 captured inputs, binary dependencies and reference artifacts rehash
+unchanged. No crashes, timeouts or acceptance regressions occur.
+
+Both weak-alias inputs, `vgetcpu.i` and `blake2s-generic.i`, now compile.
+`powerflags.i` and `fpu/bugs.i` also compile after asm goto support. Under the
+optional policy, the remaining 437 C first errors are:
+
+- 436 nonzero-depth `__builtin_frame_address` queries, first seen in
+  `arch/x86/include/asm/thread_info.h`.
+- One RDRAND feature gate in `arch/x86/kernel/cpu/rdrand.i`; the C policy enables
+  POPCNT only. The original policy has two additional POPCNT rejections.
+
+All assembly inputs are accepted with explicit permissions. The original
+policy still rejects 16 inputs at optional feature gates. First errors can
+mask later unsupported C forms. Frame-chain access needs a checked frame and
+calling-convention contract before further compiler support.
+
+Independent GNU comparisons cover all three newly accepted assembly inputs.
+The ChaCha input's shared sections match in bytes, layout and relocations.
+Whole-object equality is not claimed: GNU emits additional property/default
+sections, and the entry/head inputs also differ in branch relaxation, alignment
+bytes, symbols and relocation representation. Focused reduced witnesses match
+GNU/Clang where each accepts the spelling. No Keel object was linked into or
+executed as the kernel, and the reference kernel was not rebuilt or rebooted.
+
+Validation passed 2,830 workspace tests and one doctest, with 13 ignored.
+All-targets/all-features check, 99 generator tests, four audit harness tests,
+both freshness checks, scoped formatting and Rustdoc passed. Scoped Clippy
+completed with existing warnings. After that full run, two test-only fixes
+made the cross-host target explicit and forced alias-pointer comparisons to
+observe actual linker addresses rather than Clang constant folding. Production
+code is unchanged; all four focused tests passed again on macOS and all five
+passed on Linux.
+
+All 24 asm-goto object variants passed both GCC and Clang native runners,
+with two independent reference executions. Two broken branch controls failed
+normally with exit 1. Eight alias executions covered optimization on/off and
+weak-default/strong-override binding with both compilers. Full workspace log:
+`/tmp/keel-goto-alias-tests-final.log`; native log:
+`/tmp/keel-goto-alias-native-complete.log`.

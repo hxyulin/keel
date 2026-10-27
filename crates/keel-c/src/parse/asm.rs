@@ -5,7 +5,7 @@ use super::*;
 
 impl<'a> Parser<'a> {
     /// Adjacent narrow strings, without a C terminator (the lexer stores none).
-    fn asm_string(&mut self) -> R<String> {
+    pub(super) fn asm_string(&mut self) -> R<String> {
         let loc = self.loc();
         let mut text = Vec::new();
         let mut any = false;
@@ -44,6 +44,7 @@ impl<'a> Parser<'a> {
         use keel_ir::InlineAsm;
         let loc = self.loc();
         self.advance();
+        let mut goto = false;
         while matches!(
             self.peek(),
             Tok::Ident(
@@ -57,7 +58,7 @@ impl<'a> Parser<'a> {
             )
         ) {
             if self.is("goto") {
-                return Err(Error::new(loc, "asm goto is not supported"));
+                goto = true;
             }
             // All IR asm is pinned. `inline` is only an inlining size hint.
             self.advance();
@@ -69,8 +70,19 @@ impl<'a> Parser<'a> {
                 "C inline assembly requires the AArch64 Darwin or x86-64 Linux backend",
             ));
         }
+        if goto && !x86 {
+            return Err(Error::new(loc, "asm goto requires x86-64 Linux"));
+        }
+        if goto {
+            self.fs
+                .as_mut()
+                .unwrap()
+                .cleanup_unsupported_exit
+                .get_or_insert((loc, "asm goto"));
+        }
         self.expect("(")?;
         let template = self.asm_string()?;
+        let mut goto_labels = Vec::new();
         let mut outputs = Vec::new();
         let mut output_memory = Vec::new();
         let mut inputs = Vec::new();
@@ -377,8 +389,27 @@ impl<'a> Parser<'a> {
                         }
                     }
                 }
-                if self.is(":") {
-                    return Err(Error::new(loc, "asm goto label operands are not supported"));
+                if self.eat(":") {
+                    if !goto {
+                        return Err(Error::new(
+                            loc,
+                            "asm goto label operands require the goto qualifier",
+                        ));
+                    }
+                    if !self.is(")") {
+                        loop {
+                            let label = self.ident()?;
+                            if goto_labels.contains(&label)
+                                || names.iter().any(|(name, _)| *name == label)
+                            {
+                                return Err(Error::new(loc, "duplicate asm operand name"));
+                            }
+                            goto_labels.push(label);
+                            if !self.eat(",") {
+                                break;
+                            }
+                        }
+                    }
                 }
             }
         } else if !template.trim().is_empty() {
@@ -396,6 +427,18 @@ impl<'a> Parser<'a> {
         }
         self.expect(")")?;
         self.expect(";")?;
+        if goto && goto_labels.is_empty() {
+            return Err(Error::new(
+                loc,
+                "asm goto requires at least one label operand",
+            ));
+        }
+        if goto && !outputs.is_empty() {
+            return Err(Error::new(
+                loc,
+                "asm goto output operands are not supported",
+            ));
+        }
         // Register results precede address operands in IR. Preserve GNU's
         // source numbering by remapping only the output references and ties.
         let n_reg = output_memory.iter().filter(|&&m| !m).count();
@@ -422,25 +465,49 @@ impl<'a> Parser<'a> {
                     .map_or_else(|_| c.clone(), |n| numbering[n].to_string()),
             );
         }
-        let template = if extended {
+        let mut template = if extended {
             let flags: Vec<_> = constraints
                 .iter()
                 .take(outputs.len())
                 .map(|c| c.starts_with("=@cc"))
                 .collect();
-            asm_template(&template, &names, &numbering, &flags, loc, x86)?
+            asm_template(
+                &template,
+                &names,
+                &numbering,
+                &flags,
+                &goto_labels,
+                loc,
+                x86,
+            )?
         } else {
             // Basic asm has no template substitutions. Escape literal percent
             // signs for the IR's extended-template representation.
             template.replace('%', "%%")
         };
+        if goto {
+            // All outgoing paths converge inside the template before the
+            // backend restores GPR homes. Only then does ordinary IR branch.
+            normalized.insert(0, "=&r".into());
+            template.push_str("\n\tmovl $0, %k0\n\tjmp .Lkeel_asm_goto_%=_end\n");
+            for i in 0..goto_labels.len() {
+                template.push_str(&format!(
+                    ".Lkeel_asm_goto_%=_{i}:\n\tmovl ${}, %k0\n\tjmp .Lkeel_asm_goto_%=_end\n",
+                    i + 1
+                ));
+            }
+            template.push_str(".Lkeel_asm_goto_%=_end:\n");
+        }
         let constraints = normalized.join(",");
-        let types: Vec<_> = outputs
+        let mut types: Vec<_> = outputs
             .iter()
             .zip(&output_memory)
             .filter(|(_, m)| !**m)
             .map(|((e, _), _)| e.ty.ir())
             .collect();
+        if goto {
+            types.insert(0, keel_ir::Type::I32);
+        }
         InlineAsm::new(&template, &constraints, &types).map_err(|e| Error::new(loc, e))?;
         Ok(Stmt::Asm(self.nodes.alloc(AsmStmt {
             template: self.text.intern(&template),
@@ -448,6 +515,7 @@ impl<'a> Parser<'a> {
             outputs: self.slice(&outputs),
             output_memory: self.slice(&output_memory),
             inputs: self.slice(&inputs),
+            goto_labels: self.slice(&goto_labels),
             loc,
         })))
     }
@@ -459,6 +527,7 @@ fn asm_template(
     names: &[(&str, usize)],
     numbering: &[usize],
     flags: &[bool],
+    goto_labels: &[&str],
     loc: Loc,
     x86: bool,
 ) -> R<String> {
@@ -475,6 +544,32 @@ fn asm_template(
         }
         if x86 && chars.next_if_eq(&'=').is_some() {
             text.push('=');
+            continue;
+        }
+        if !goto_labels.is_empty() && chars.next_if_eq(&'l').is_some() {
+            // GNU label numbering counts source operands, before our hidden
+            // selector is added. Named labels live in a separate namespace.
+            let i = if chars.next_if_eq(&'[').is_some() {
+                let name: String = std::iter::from_fn(|| chars.next_if(|c| *c != ']')).collect();
+                if chars.next() != Some(']') {
+                    return Err(Error::new(loc, "unclosed asm label name"));
+                }
+                goto_labels
+                    .iter()
+                    .position(|label| *label == name)
+                    .ok_or_else(|| Error::new(loc, format!("unknown asm label operand `{name}`")))?
+            } else {
+                let digits: String =
+                    std::iter::from_fn(|| chars.next_if(char::is_ascii_digit)).collect();
+                digits
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|n| n.checked_sub(numbering.len()))
+                    .filter(|&i| i < goto_labels.len())
+                    .ok_or_else(|| Error::new(loc, "asm label operand number is out of range"))?
+            };
+            text.pop(); // The label is assembly text, not an IR operand.
+            text.push_str(&format!(".Lkeel_asm_goto_%=_{i}"));
             continue;
         }
         if let Some(m) = chars.next_if(|c| c.is_ascii_alphabetic()) {
@@ -520,7 +615,7 @@ fn asm_template(
                 "flag outputs cannot be referenced in an asm template",
             ));
         }
-        let n = numbering[n];
+        let n = numbering[n] + usize::from(!goto_labels.is_empty());
         // A named reference has an explicit end. Preserve it if a literal
         // digit follows: %[in]0 must not become operand %10.
         if chars.peek().is_some_and(char::is_ascii_digit) {

@@ -44,6 +44,8 @@ fallback of assuming zero for an undefined `.org` symbol. LLVM accepts some
 cross-section origins which GNU rejects; Keel follows GNU's section rule.
 
 Macro parameters accept `:req`; empty or missing required values fail.
+An adjacent parenthesized invocation such as `record(symbol)` is recognized;
+GNU retains `(symbol)` as the argument text. It is not C macro argument syntax.
 `\@` is a zero-based invocation number, shared by nested macro calls.
 GNU x86 macros accept omitted optional parameters, defaults, keyword arguments
 and comma or whitespace separators. Positional arguments must precede keyword
@@ -98,6 +100,18 @@ and alternatives padding. The empty-iteration difference uses GNU as its oracle.
 Negative witnesses cover undefined and cross-section expressions, alias and
 layout cycles, expression bounds, missing arguments and rejected legacy modes.
 These focused checks do not update the configured corpus acceptance counts.
+
+`.octa` emits 16-byte little-endian integers. It accepts signed/unsigned literals
+through 128 bits and constant expressions under the existing checked 64-bit
+magnitude rules. It does not add symbolic 128-bit relocations or widen shared
+expression arithmetic. Clang and GNU agree on positive full-width literals;
+GNU supplies the signed-literal and expression oracle.
+
+X86 ELF64 relocation addends accept positive or negative 64-bit magnitudes.
+They are normalized to the signed ELF addend representation before field-width
+checks and PC-relative adjustments. This handles high-half kernel address
+constants without accepting overflowing instruction fields. Larger magnitudes
+remain errors. ARM relocation behavior is unchanged.
 
 ## Fill and register symbols
 

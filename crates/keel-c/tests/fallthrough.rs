@@ -77,7 +77,7 @@ fn malformed_or_semantic_statement_attributes_are_rejected() {
             "statement attribute",
         ),
         (
-            "__attribute__((alias(\"other\"), fallthrough));",
+            "__attribute__((ifunc(\"other\"), fallthrough));",
             "requires semantics",
         ),
     ] {

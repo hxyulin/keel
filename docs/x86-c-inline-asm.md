@@ -4,7 +4,8 @@ Keel supports scalar GNU C inline assembly on `x86_64-unknown-linux-gnu`.
 This implements scalar fallthrough asm and deferred immediate validation from
 the [design](x86-c-inline-asm-design.md).
 Explicit memory operands, bounded constraint choices and integer flag outputs
-are supported. Comma-separated alternatives and asm goto remain unsupported.
+are supported. Input/clobber-only asm goto is supported through restoration
+trampolines and ordinary IR control flow. Comma-separated alternatives remain unsupported.
 Basic asm is supported at function and file scope on x86-64 Linux.
 
 ```c
@@ -100,8 +101,9 @@ registers and early-clobber markers, including in textual round trips.
 
 All asm is pinned and conservatively invalidates memory knowledge, even without
 `volatile` or a `memory` clobber. This retains more code than GCC; it does not
-emit a hardware memory fence. Basic asm currently accepts only empty text or
-`nop`; use extended asm for effects. `inline` has no size-hint effect.
+emit a hardware memory fence. Function-scope basic asm preserves literal text,
+assumes GPR preservation and models memory and flags conservatively.
+`inline` has no size-hint effect.
 
 ## Lowering and boundaries
 
@@ -127,16 +129,44 @@ does not validate the template's instruction syntax or encoding. The compiler
 restores Intel syntax for its own instructions after each AT&T fragment.
 
 The programmer must declare every effect, define each output, preserve the
-stack/frame bases and the direction flag required by the ABI, and return through
-normal fallthrough. Local branches may stay within the template. Calls, terminal
-transfers and branches to C labels need contracts this milestone does not model;
+stack/frame bases and the direction flag required by the ABI. Ordinary asm must
+return through normal fallthrough; local branches may stay within the template.
+Asm goto may also transfer to its listed C labels. Calls and terminal
+transfers need contracts this milestone does not model;
 the compiler does not infer these effects by inspecting arbitrary instructions
 or directive bytes. Section switches must return to the function's section.
 
 Still diagnosed: comma-separated alternatives, unsupported constraint unions,
-TLS-only immediates, local register variables, FP/SIMD register operands, asm goto
-and file-scope asm. Supporting their instruction bytes in the assembler does
+TLS-only immediates, local register variables, FP/SIMD register operands and
+output-bearing asm goto. Supporting their instruction bytes in the assembler does
 not provide the missing C operand or control-flow contract.
+
+## Asm goto
+
+On x86-64 Linux, `asm goto` accepts existing input constraints and clobbers,
+with numeric `%lN` and named `%l[label]` references to the listed C labels.
+Numeric label operands follow the source inputs. Inputs are evaluated once.
+All asm remains pinned, including an empty template. Duplicate destinations
+and backward edges use the ordinary C label machinery.
+
+Each label reference names an assembly-local trampoline. The trampoline writes
+an early-clobber selector output with `MOV` and converges with fallthrough
+before the backend restores GPR homes. An ordinary IR switch then selects the
+C successor. This exposes every possible C edge to SSA, optimization and
+liveness without allowing a raw assembly branch to bypass restoration.
+`%=` gives each emitted instance distinct labels, including cloned inline
+helpers. Label addresses in metadata also name these restoration trampolines.
+
+Output operands remain rejected. Functions containing cleanup locals or
+variably modified types reject asm goto under the existing scope-exit rules.
+AArch64 asm goto remains unsupported. This does not establish Linux kernel
+stack, calling convention, objtool or runtime compatibility.
+
+`cargo test -p keel-c --test x86_asm_goto` checks diagnostics, ordinary CFG
+edges, IR round trips and text/typed/chunked object parity across selectors,
+allocators, normal/empty pools and optimization on/off. Its fixture covers
+multiple labels, live values across clobbers, backedges, input side effects,
+required inlining and metadata-driven indirect branches.
 
 ## Validation
 

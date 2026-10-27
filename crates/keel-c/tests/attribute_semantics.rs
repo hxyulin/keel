@@ -23,7 +23,6 @@ fn linkage_and_lifetime_attributes_are_diagnosed_on_declarations_and_redeclarati
             ("weak_import", ""),
             ("weak_odr", ""),
             ("weak_unknown", ""),
-            ("alias", "(\"implementation\")"),
             ("ifunc", "(\"resolver\")"),
         ] {
             for name in [attribute.to_string(), format!("__{attribute}__")] {

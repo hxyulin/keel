@@ -452,3 +452,84 @@ fn absolute_assignment_snapshots_survive_text_fragments() {
         &[1, 2]
     );
 }
+
+#[test]
+fn parenthesized_macro_invocations_preserve_assembler_arguments() {
+    compare(
+        r#"
+.text
+.macro record symbol:req
+.pushsection .data
+.long \symbol - .
+.popsection
+.endm
+first: nop
+record(first)
+record (first)
+second: ret
+.macro wrapper target:req
+record(\target)
+.endm
+wrapper second
+.macro spell arg:req
+.ascii "<\arg>"
+.endm
+spell(foo)
+"#,
+    );
+}
+
+#[test]
+fn full_width_symbolic_addends_match_elf64_word_semantics() {
+    compare(
+        r#"
+.text
+addq $(external - 0xffffffff80000000), %rcx
+movq $(external + 0xffffffffffffffff), %rax
+leaq external-0xffffffffffffffff(%rip), %rcx
+.data
+.quad external-0xffffffffffffffff
+.quad external+0xffffffffffffffff
+.quad external-0x8000000000000001
+.long external-0xffffffff80000000
+.short external+0xffffffffffffffff
+.byte external-0xffffffffffffffff
+"#,
+    );
+    compare_tools("addq $(external - 0xffffffff80000000), %rax", false);
+    for source in [
+        ".quad external+0xffffffffffffffff+1",
+        ".quad external-0xffffffffffffffff-1",
+    ] {
+        let error = assemble_object(source).unwrap_err().to_string();
+        assert!(error.contains("exceeds 64 bits"), "{error}");
+    }
+}
+
+#[test]
+fn octa_data_preserves_all_128_bits() {
+    compare(
+        r#"
+.data
+.octa 0, 0x6b20657479622d323320646e61707865
+.octa 340282366920938463463374607431768211455
+.octa 0xffffffffffffffffffffffffffffffff
+.octa 0b10101, 0777
+.text
+ret
+"#,
+    );
+    compare_tools(
+        ".data\n.octa -1, -0xffffffffffffffffffffffffffffffff, 1+2\n",
+        false,
+    );
+    for source in [
+        ".octa 340282366920938463463374607431768211456",
+        ".octa 0x100000000000000000000000000000000",
+        ".octa 0xg",
+        ".octa external",
+        ".octa",
+    ] {
+        assert!(assemble_object(source).is_err(), "{source}");
+    }
+}

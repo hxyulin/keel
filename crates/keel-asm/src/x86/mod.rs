@@ -802,6 +802,52 @@ impl Items {
         }
     }
 }
+// `.octa` extends literal width without widening the shared expression model.
+// Arithmetic retains the existing checked 64-bit-magnitude expression rules.
+fn octa_value(text: &str) -> Result<u128, String> {
+    let text = text.trim();
+    let (negative, digits) = if let Some(s) = text.strip_prefix('-') {
+        (true, s)
+    } else {
+        (false, text.strip_prefix('+').unwrap_or(text))
+    };
+    let (radix, digits) = if let Some(s) = digits
+        .strip_prefix("0x")
+        .or_else(|| digits.strip_prefix("0X"))
+    {
+        (16, s)
+    } else if let Some(s) = digits.strip_prefix("0b") {
+        (2, s)
+    } else if digits.len() > 1 && digits.starts_with('0') {
+        (8, &digits[1..])
+    } else {
+        (10, digits)
+    };
+    if !digits.starts_with(['+', '-'])
+        && let Ok(value) = u128::from_str_radix(digits, radix)
+    {
+        return Ok(if negative {
+            value.wrapping_neg()
+        } else {
+            value
+        });
+    }
+    x86::integer(text).map(|value| value as u128).map_err(|_| {
+        ".octa requires a 128-bit integer literal or a checked constant expression".into()
+    })
+}
+
+// ELF64 stores addends as signed words. GNU treats a full-width positive or
+// negative integer spelling as the same 64-bit bit pattern, independently of
+// the eventual relocation field width. Values wider than one word still fail.
+fn relocation_addend(value: i128) -> Result<i64, String> {
+    if (-i128::from(u64::MAX)..=i128::from(u64::MAX)).contains(&value) {
+        Ok(value as u64 as i64)
+    } else {
+        Err("relocation addend exceeds 64 bits".into())
+    }
+}
+
 fn symbol_free(a: &Address) -> bool {
     a.expression.add.is_none() && a.expression.subtract.is_none()
 }
@@ -1485,6 +1531,7 @@ impl Assembler {
         let at = self.offset();
         for f in e.fixups {
             let mut expr = self.symbols.expr(&f.address.expression);
+            expr.constant = i128::from(relocation_addend(expr.constant)?);
             expr.constant += f.adjust;
             self.fixes.push(Fix {
                 section: self.current,
@@ -1990,6 +2037,12 @@ impl Assembler {
                     .map(|s| x86::integer(s).map(|n| n as u8))
                     .transpose()?;
                 self.align_fill(power, max, fill.map_or(AlignFill::Default, AlignFill::Byte))
+            }
+            ".octa" => {
+                for part in parts {
+                    self.data_bytes(&octa_value(part)?.to_le_bytes())?;
+                }
+                Ok(())
             }
             ".byte" | ".short" | ".word" | ".value" | ".2byte" | ".long" | ".int" | ".4byte"
             | ".quad" | ".8byte" => {
@@ -2580,7 +2633,11 @@ impl Assembler {
         for f in &self.fixes {
             let expr = &f.expr;
             let mut kind = f.kind;
-            let mut addend = expr.constant;
+            let mut addend = if self.arm.is_none() {
+                i128::from(relocation_addend(expr.constant).map_err(|e| Error::new(f.line, e))?)
+            } else {
+                expr.constant
+            };
             let name = expr
                 .add
                 .ok_or_else(|| Error::new(f.line, "relocation requires a positive symbol"))?;
@@ -2613,7 +2670,9 @@ impl Assembler {
                 None
             };
             if let Some(value) = absolute {
-                let value = if kind == 11 {
+                let value = if self.arm.is_none() {
+                    relocation_addend(value).map_or(value, i128::from)
+                } else if kind == 11 {
                     encode::signed_word64(value)
                 } else {
                     value
@@ -2674,8 +2733,12 @@ impl Assembler {
                     Relocation {
                         offset: f.offset,
                         symbol,
-                        addend: i64::try_from(addend)
-                            .map_err(|_| Error::new(f.line, "relocation addend exceeds i64"))?,
+                        addend: if self.arm.is_none() {
+                            relocation_addend(addend).map_err(|e| Error::new(f.line, e))?
+                        } else {
+                            i64::try_from(addend)
+                                .map_err(|_| Error::new(f.line, "relocation addend exceeds i64"))?
+                        },
                         flags: RelocationFlags::Elf {
                             r_type: if self.arm.is_some() {
                                 arm::relocation(kind).map_err(|e| Error::new(f.line, e))?

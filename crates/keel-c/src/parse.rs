@@ -11,6 +11,7 @@
 //! semantics), `__asm` labels that rename a symbol, `__inline`, `__restrict`,
 //! nullability qualifiers, `__extension__`, `__int128` and a few `__builtin_`s.
 
+mod aliases;
 mod asm;
 
 use crate::arena::BodyArena;
@@ -83,6 +84,8 @@ pub enum TypeMode {
 #[derive(Default, Clone, Copy, PartialEq)]
 pub struct Attrs {
     pub nonstring: bool,
+    pub alias: Option<(usize, Loc)>,
+    pub alias_conflict: Option<Loc>,
     pub mode: Option<(TypeMode, Loc)>,
     pub vector_size: Option<(u64, Loc)>,
     pub aligned: Option<u64>,
@@ -112,6 +115,11 @@ impl Attrs {
             self.set_visibility(visibility, loc);
         }
         self.visibility_conflict = self.visibility_conflict.or(other.visibility_conflict);
+        if self.alias.is_some() && other.alias.is_some() {
+            self.alias_conflict = other.alias.map(|(_, loc)| loc);
+        }
+        self.alias_conflict = self.alias_conflict.or(other.alias_conflict);
+        self.alias = self.alias.or(other.alias);
         self.weak = self.weak.or(other.weak);
         self.lifecycle = self.lifecycle.or(other.lifecycle);
         self.used = self.used.or(other.used);
@@ -186,6 +194,12 @@ impl Attrs {
     }
     fn no_symbol_attrs(&self) -> R<()> {
         self.no_cleanup()?;
+        if let Some((_, loc)) = self.alias {
+            return Err(Error::new(
+                loc,
+                "alias requires a file-scope function declaration",
+            ));
+        }
         if let Some(loc) = self
             .lifecycle
             .or(self.used)
@@ -321,6 +335,8 @@ pub struct Parser<'a> {
     pub funcs: Vec<FuncDef<'a>>,
     pub strings: Vec<StrLit<'a>>,
     pub(crate) assembly: Vec<String>,
+    alias_names: Vec<&'a str>,
+    aliases: HashMap<usize, (usize, Loc)>,
     literal_ids: [HashMap<&'a [u8], usize>; 2],
     /// Emptied statement buffers, for blocks to reuse.
     stmt_bufs: Vec<Vec<Stmt<'a>>>,
@@ -579,6 +595,8 @@ impl<'a> Parser<'a> {
             funcs: Vec::new(),
             strings: Vec::new(),
             assembly: Vec::new(),
+            alias_names: Vec::new(),
+            aliases: HashMap::default(),
             literal_ids: [HashMap::default(), HashMap::default()],
             stmt_bufs: Vec::new(),
             expr_bufs: Vec::new(),
@@ -1180,6 +1198,7 @@ impl<'a> Parser<'a> {
                 self.globals[f.global].internal = true;
             }
         }
+        self.resolve_aliases()?;
         Ok(())
     }
 
@@ -1467,6 +1486,7 @@ impl<'a> Parser<'a> {
                     .map_err(|message| Error::new(name_loc, message))?;
                 self.globals[g].sugar = d.sugar;
                 self.symbol_attrs(g, &attrs)?;
+                self.function_alias(g, attrs, file_scope)?;
                 if file_scope && self.is("{") {
                     self.function_body(g, fty, name_loc)?;
                     return Ok(());
@@ -1636,6 +1656,12 @@ impl<'a> Parser<'a> {
         inferred_init: Option<Init<'a>>,
     ) -> R<()> {
         let (name, name_loc) = *d.name.as_ref().unwrap();
+        if d.attrs.alias.is_some() {
+            return Err(Error::new(
+                name_loc,
+                "alias requires a file-scope function declaration",
+            ));
+        }
         self.check_nonstring(d.ty, d.attrs, name_loc)?;
         let align = self.object_alignment(&d.ty, &d.sugar, d.attrs, name_loc)?;
         let local_static = !file_scope && spec.storage == Storage::Static;
@@ -2269,13 +2295,24 @@ impl<'a> Parser<'a> {
                     // Accepting their syntax without implementing the contract
                     // would silently change the program, even on a prototype
                     // or on an otherwise unused declaration.
-                    "weakref" | "weak_import" | "alias" | "ifunc" | "ms_abi" | "sysv_abi"
-                    | "stdcall" | "fastcall" | "thiscall" | "vectorcall" | "regcall" | "pcs"
+                    "weakref" | "weak_import" | "ifunc" | "ms_abi" | "sysv_abi" | "stdcall"
+                    | "fastcall" | "thiscall" | "vectorcall" | "regcall" | "pcs"
                     | "aarch64_sve_pcs" | "aarch64_vector_pcs" | "preserve_most"
                     | "preserve_all" | "cdecl" | "regparm" | "sseregparm" | "interrupt"
                     | "naked" | "swiftcall" | "swiftasync" | "preserve_none"
                     | "riscv_vector_cc" | "ext_vector_type" | "transparent_union" => {
                         return Err(unsupported_attribute(loc, name));
+                    }
+                    "alias" => {
+                        self.expect("(")?;
+                        let name = self.asm_string()?;
+                        self.expect(")")?;
+                        if attrs.alias.is_some() {
+                            return Err(Error::new(loc, "duplicate alias attribute"));
+                        }
+                        let index = self.alias_names.len();
+                        self.alias_names.push(self.text.intern(&name));
+                        attrs.alias = Some((index, loc));
                     }
                     "constructor" | "destructor" => {
                         if self.eat("(") {

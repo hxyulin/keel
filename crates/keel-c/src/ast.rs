@@ -263,6 +263,8 @@ pub struct AsmStmt<'a> {
     /// Memory outputs carry addresses and have no SSA result or writeback.
     pub output_memory: &'a [bool],
     pub inputs: &'a [Expr<'a>],
+    /// C destinations selected by an asm-local restoration trampoline.
+    pub goto_labels: &'a [&'a str],
     pub loc: Loc,
 }
 

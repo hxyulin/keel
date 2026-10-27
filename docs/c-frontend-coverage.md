@@ -22,7 +22,7 @@ the permissive catch-all for unknown attributes (see below).
 | x86 `long double` | Opaque storage with the target layout; no x87 arithmetic. Apple arm64 `long double` is `double`. | [Plan stage 7](c-language-implementation-plan.md#7-x86-extended-long-double--not-implemented) |
 | `__float128`, `_FloatN`, `mode(TC)` | Declarations and layout only (TC on x86-64 Linux); any value, call or ABI use is diagnosed. GCC builtin `_Float32` and friends are not supported. | [Unsupported values](c-unsupported-values.md), [system headers](c-system-header-compat.md) |
 | K&R (old-style) definitions | Explicitly typed integer, float/double and pointer parameters with promoted ABI entry conversions. Implicit `int` and aggregate/complex/vector parameters are diagnosed. | [Plan stage 8](c-language-implementation-plan.md#8-kr-definitions--explicit-fixed-size-parameter-milestone-implemented) |
-| Inline assembly | AArch64 GNU subset (`r`, `w`, `m`, `i`/`n`, ties, named operands, clobbers). The x86 frontend rejects asm statements; asm-goto and memory outputs are diagnosed. | [C inline assembly](c-inline-asm.md) |
+| Inline assembly | AArch64 GNU scalar subset. X86-64 Linux supports scalar constraints, explicit memory operands, flag outputs, basic/file-scope asm and input/clobber-only asm goto. Output-bearing asm goto remains diagnosed. | [C inline assembly](c-inline-asm.md), [x86 contracts](x86-c-inline-asm.md) |
 | GNU vectors | `vector_size(16)` on all targets, `vector_size(32)` on x86-64 with AVX, plus bounded scalar broadcasts and `__builtin_shufflevector`. | [GNU vectors and modes](gnu-vector-mode.md) |
 | Integer `mode` attribute | `QI`, `HI`, `SI`, `DI`, `TI` (and `byte`, `word`, `pointer`). | [GNU vectors and modes](gnu-vector-mode.md#integer-modes) |
 | x86 intrinsic headers | Embedded `xmmintrin.h`, `emmintrin.h`, `smmintrin.h`, `avxintrin.h`, `avx2intrin.h`, `wmmintrin.h`, `immintrin.h` with a finite name list. | [C x86 intrinsics](c-x86-intrinsics.md) |
@@ -53,6 +53,7 @@ GNU `__name__` spellings are accepted wherever the plain spelling is.
 | `vector_size`, `mode` | Bounded sizes and modes. | [GNU vectors and modes](gnu-vector-mode.md) |
 | `aligned`, `packed` | Existing alignment and packing handling. | [Design](design.md#c-frontend) |
 | `nonstring` | Retained on character-array/pointer declarations and members for checked attribute queries. No string-warning analysis. | [Feature queries](#feature-queries) |
+| Function `alias` | X86-64 Linux only. Whole-unit checks require compatible function types/contracts and an ultimately defined target. Weak binding, visibility, chains, assembler names and target retention are preserved. Object aliases and lifecycle/retain/section attributes on aliases are rejected. `__has_attribute(alias)` remains conservatively false. | [Alias tests](../crates/keel-c/tests/function_aliases.rs) |
 
 ### Accepted without semantic effect
 
@@ -68,7 +69,7 @@ unknown attribute whose semantics a program relies on may be ignored.
 
 | Attribute or form | Reason |
 | --- | --- |
-| `alias`, `weakref`, `weak_import`, `ifunc` | Need symbol identity semantics not yet implemented. |
+| Object `alias`, `weakref`, `weak_import`, `ifunc` | Need symbol identity semantics beyond the checked x86-64 Linux function-alias subset. |
 | `visibility("protected")`, unknown or malformed visibility strings | `STV_PROTECTED` is not supported. |
 | Conflicting explicit visibilities across declarations | Matches Clang. |
 | `weak` on static symbols, TLS, typedefs, members, parameters, locals | Unsupported or meaningless placements. Hidden/internal weak undefined references are also rejected. |
