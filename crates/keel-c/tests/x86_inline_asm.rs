@@ -243,18 +243,13 @@ fn unsupported_and_impossible_contracts_are_diagnosed() {
         ("asm(\"\" ::: \"x0\");", "another architecture"),
         ("asm(\"\" ::: \"xmm0\");", "unknown register"),
         ("asm(\"%h0\" :: \"r\"(x));", "modifier"),
-        ("asm(\"\" : \"+r\"(x) : \"0\"(x));", "more than one"),
-        (
-            "asm(\"\" : \"=r\"(x) : \"0\"(x),\"0\"(x));",
-            "more than one",
-        ),
     ] {
         let source = format!("void f(long x){{{body}}}");
         let err = compile(&source, false).unwrap_err();
         assert!(err.contains(expected), "{source}: {err}");
     }
     for (body, expected) in [
-        ("asm(\"\" : \"=a\"(x) : \"a\"(x));", "overlaps"),
+        ("asm(\"\" : \"=&a\"(x) : \"a\"(x));", "overlaps"),
         ("asm(\"\" : \"=a\"(x) :: \"eax\");", "overlaps"),
         (
             "asm(\"\" : \"=r\"(x) :: \"rax\",\"rcx\",\"rdx\",\"rbx\",\"rsi\",\"rdi\",\"r8\",\"r9\",\"r10\",\"r11\",\"r12\",\"r13\",\"r14\",\"r15\");",

@@ -72,6 +72,10 @@ pub enum AsmOperand {
     /// Inputs only. Scalar GPR ties may use different input/result widths;
     /// each operand retains its own type and register view. This does not
     /// promise an extension of the input into unspecified upper bits.
+    /// Multiple inputs may initialize one output only when their common low
+    /// bits are proven equal by `same_register_input`. The widest input owns
+    /// initialization. An explicit tie may initialize an early-clobber output;
+    /// an independent fixed input may overlap only a non-early output on x86.
     Tied(u16),
 }
 
@@ -454,6 +458,80 @@ mod tests {
         assert!(err("{x31}", 0).contains("unknown register"));
         assert!(err("~{unknown}", 0).contains("unknown register"));
     }
+}
+
+/// Proves that two simultaneous inputs can initialize one scalar register.
+/// Only the common low bits matter. SSA aliases, lossless low-bit views,
+/// numeric constants and equal symbolic addresses establish equality. Distinct
+/// loads, arithmetic and unrelated block parameters do not. In particular,
+/// equal source spelling or equal allocated homes never establish equality.
+/// This is conservative: failure also means equality was not proven.
+pub fn same_register_input(func: &crate::Function, a: crate::Value, b: crate::Value) -> bool {
+    use crate::{ConvertOp, InstData, Type, ValueDef};
+    let a = func.resolve(a);
+    let b = func.resolve(b);
+    if a == b {
+        return true;
+    }
+    let scalar = |ty: Type| (ty.is_int() && ty != Type::I128) || ty == Type::Ptr;
+    if !scalar(func.value_type(a)) || !scalar(func.value_type(b)) {
+        return false;
+    }
+    let bits = func
+        .value_type(a)
+        .bytes()
+        .unwrap_or(8)
+        .min(func.value_type(b).bytes().unwrap_or(8))
+        * 8;
+    let low_view = |mut value| {
+        // Bound traversal even for malformed, cyclic IR supplied to a backend.
+        for _ in 0..64 {
+            let ValueDef::Result(inst, 0) = func.value_def(value) else {
+                break;
+            };
+            let InstData::Convert { op, arg, .. } = func.inst_data(inst) else {
+                break;
+            };
+            if !matches!(
+                op,
+                ConvertOp::Trunc
+                    | ConvertOp::Uext
+                    | ConvertOp::Sext
+                    | ConvertOp::PtrToInt
+                    | ConvertOp::IntToPtr
+                    | ConvertOp::Bitcast
+            ) {
+                break;
+            }
+            let arg = func.resolve(*arg);
+            if !scalar(func.value_type(arg)) || func.value_type(arg).bytes().unwrap_or(8) * 8 < bits
+            {
+                break;
+            }
+            value = arg;
+        }
+        value
+    };
+    let a = low_view(a);
+    let b = low_view(b);
+    if a == b {
+        return true;
+    }
+    let constant = |value| {
+        let ValueDef::Result(inst, 0) = func.value_def(value) else {
+            return None;
+        };
+        match func.inst_data(inst) {
+            InstData::Iconst { imm, .. } => Some(*imm as u64),
+            _ => None,
+        }
+    };
+    if let (Some(a), Some(b)) = (constant(a), constant(b)) {
+        let mask = u64::MAX >> (64 - bits);
+        return a & mask == b & mask;
+    }
+    matches!((symbolic_immediate(func, a), symbolic_immediate(func, b)),
+        (Some(a), Some(b)) if a == b)
 }
 
 /// Whether `value` is the canonical `i64` stack-dependency snapshot:

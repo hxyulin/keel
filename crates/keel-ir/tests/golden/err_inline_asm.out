@@ -5,7 +5,6 @@ verifier errors:
   @f inst0 `v4 = asm "", "=r,w,m,i,r"(v0, v0, v0, v3) -> f64`: asm operand 3 (`i`) requires a constant immediate
   @f inst0 `v4 = asm "", "=r,w,m,i,r"(v0, v0, v0, v3) -> f64`: asm operand 4 (`r`) cannot be i128
   @f inst1 `v5, v6 = asm "", "=r,=r,2,0,0,1"(v0, v0, v0, v1) -> (i64, i64)`: asm operand 2 is tied to output 2, which does not exist
-  @f inst1 `v5, v6 = asm "", "=r,=r,2,0,0,1"(v0, v0, v0, v1) -> (i64, i64)`: output 0 is tied to more than one input
   @f inst1 `v5, v6 = asm "", "=r,=r,2,0,0,1"(v0, v0, v0, v1) -> (i64, i64)`: asm operand 5 is f64, but its output 1 is i64
   @f inst2 `v7 = asm "", "={x0},{v1}"(v0) -> f64`: asm operand 0 (`{x0}`) cannot be f64
   @f inst2 `v7 = asm "", "={x0},{v1}"(v0) -> f64`: asm operand 1 (`{v1}`) cannot be i64

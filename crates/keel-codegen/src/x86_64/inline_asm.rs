@@ -6,6 +6,7 @@ use keel_ir::{AsmArch, AsmClobber, AsmOperand as Constraint, InlineAsm};
 pub(super) struct Plan {
     regs: Vec<Option<u8>>,
     flags: Vec<(usize, u8)>,
+    initializers: [Option<usize>; 16],
     text: String,
     pub bytes: usize,
 }
@@ -103,7 +104,6 @@ pub(super) fn plan(
         }
     }
     let mut regs = vec![None; ops.len()];
-    let mut tied = vec![false; n];
     for (i, op) in ops.iter().enumerate() {
         let ty = if i < n {
             asm.outputs[i].1
@@ -125,26 +125,19 @@ pub(super) fn plan(
                 if r.arch != AsmArch::X86 || r.float || !available(r.num, frame) {
                     return Err(format!("unsupported or reserved x86 asm operand {r}"));
                 }
-                if taken[r.num as usize] {
-                    // Kernel alternative calls use =D/D for the same
-                    // read-then-written hardware operand. Permit one such
-                    // input only under the balanced-stack contract.
-                    let output = if i >= n && stack_input.is_some() {
-                        (0..n).find(|&out| {
-                            regs[out] == Some(r.num)
-                                && !early[out]
-                                && !tied[out]
-                                && asm.outputs[out].1 == ty
-                        })
-                    } else {
-                        None
-                    };
-                    let Some(out) = output else {
-                        return Err(format!(
-                            "asm operand {i}: register {r} overlaps another operand or clobber; use a matching constraint"
-                        ));
-                    };
-                    tied[out] = true;
+                // Outputs have overlapping write lifetimes. Fixed inputs may
+                // share a non-early output, but never a clobber or early output.
+                if taken[r.num as usize]
+                    && (i < n
+                        || asm
+                            .clobbers
+                            .iter()
+                            .any(|c| matches!(c, AsmClobber::Reg(clobber) if *clobber == r))
+                        || (0..n).any(|out| regs[out] == Some(r.num) && early[out]))
+                {
+                    return Err(format!(
+                        "asm operand {i}: register {r} overlaps another output, early-clobber or clobber"
+                    ));
                 }
                 taken[r.num as usize] = true;
                 regs[i] = Some(r.num);
@@ -180,11 +173,32 @@ pub(super) fn plan(
     for (i, op) in ops.iter().enumerate().skip(n) {
         if let Constraint::Tied(out) = *op {
             let out = out as usize;
-            if tied[out] {
-                return Err("asm output is tied to more than one input".into());
-            }
-            tied[out] = true;
             regs[i] = Some(regs[out].ok_or("asm tie requires a register output")?);
+        }
+    }
+    // Each physical register gets exactly one initialization. Compare with
+    // the widest input so no narrower reload can destroy required upper bits.
+    let mut initializers: [Option<usize>; 16] = [None; 16];
+    for (i, &arg) in args.iter().enumerate() {
+        let Some(r) = regs[n + i] else { continue };
+        let slot = &mut initializers[r as usize];
+        if let Some(previous) = *slot {
+            if !keel_ir::asm::same_register_input(func, args[previous], arg) {
+                return Err(format!(
+                    "asm inputs {previous} and {i} require conflicting or unproven values in {}",
+                    r64(r)
+                ));
+            }
+            if func.value_type(func.resolve(arg)).bytes().unwrap_or(8)
+                > func
+                    .value_type(func.resolve(args[previous]))
+                    .bytes()
+                    .unwrap_or(8)
+            {
+                *slot = Some(i);
+            }
+        } else {
+            *slot = Some(i);
         }
     }
     let text = substitute(func, asm, args, &regs, unique)?;
@@ -193,6 +207,7 @@ pub(super) fn plan(
     // (numeric local labels and macros in particular).
     Ok(Plan {
         regs,
+        initializers,
         flags: asm
             .outputs
             .iter()
@@ -392,11 +407,11 @@ impl FunctionCompiler<'_> {
         }
         // Every input now has a stable frame home. Loading RAX last is not
         // needed: these MOV loads use only the stable frame base.
-        for (i, _) in args.iter().enumerate() {
-            if let Some(r) = plan.regs[n + i] {
+        for (r, initializer) in plan.initializers.iter().enumerate() {
+            if let Some(i) = *initializer {
                 self.emit(
                     Opcode::Mov,
-                    [asm_arg(r64(r)), asm_arg(memory_at(self, 16 + i))],
+                    [asm_arg(r64(r as u8)), asm_arg(memory_at(self, 16 + i))],
                 );
             }
         }

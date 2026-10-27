@@ -908,7 +908,7 @@ impl Verifier<'_> {
                 self.inst_error(inst, format!("asm operand {n} (`{op}`) cannot be {ty}"));
             }
         }
-        let mut tied = Vec::new();
+        let mut tied: Vec<(u16, Value)> = Vec::new();
         for (i, (&op, &arg)) in asm.inputs.iter().zip(args).enumerate() {
             let n = asm.outputs.len() + i;
             let ty = func.value_type(func.resolve(arg));
@@ -962,9 +962,18 @@ impl Verifier<'_> {
                     Some(&(AsmOperand::Flag(_), _)) => {
                         self.inst_error(inst, "asm ties require a register output".into())
                     }
-                    Some(_) if tied.contains(&out) => self
-                        .inst_error(inst, format!("output {out} is tied to more than one input")),
-                    Some(_) => tied.push(out),
+                    Some(_) => {
+                        for &(previous_out, previous_arg) in &tied {
+                            if previous_out == out
+                                && !crate::asm::same_register_input(func, previous_arg, arg)
+                            {
+                                self.inst_error(inst, format!(
+                                    "output {out} has conflicting or unproven matching input values"
+                                ));
+                            }
+                        }
+                        tied.push((out, arg));
+                    }
                 },
                 _ => {}
             }

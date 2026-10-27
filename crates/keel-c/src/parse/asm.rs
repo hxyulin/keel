@@ -427,14 +427,8 @@ impl<'a> Parser<'a> {
                     break;
                 }
             }
-            let mut tied = HashSet::default();
-            for c in constraints.iter().skip(outputs.len()) {
-                if let Ok(n) = c.parse::<usize>()
-                    && (outputs[n].1 || !tied.insert(n))
-                {
-                    return Err(Error::new(loc, "asm output is tied to more than one input"));
-                }
-            }
+            // Repeated matching inputs (including the implicit + input) are
+            // checked against their SSA values after expression lowering.
             for (n, (_, readwrite)) in outputs.iter().enumerate() {
                 if *readwrite && output_kinds[n] == AsmOutputKind::Register {
                     constraints.push(n.to_string());

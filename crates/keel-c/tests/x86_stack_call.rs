@@ -126,12 +126,10 @@ fn balanced_stack_calls_keep_the_reserved_register_and_call_barrier() {
 }
 
 #[test]
-fn reserved_stack_fixed_sharing_is_bounded_and_views_remain_full_width() {
+fn reserved_stack_sharing_rejects_write_conflicts_and_rsp_views_remain_full_width() {
     for body in [
         r#"unsigned long out; asm("" : "+r"(sp), "=&D"(out) : "D"(x));"#,
-        r#"unsigned long out; asm("" : "+r"(sp), "=D"(out) : "D"(x), "D"(x));"#,
         r#"unsigned long a,b; asm("" : "+r"(sp), "=D"(a), "=D"(b));"#,
-        r#"unsigned int out; asm("" : "+r"(sp), "=D"(out) : "D"(x));"#,
         r#"unsigned long out; asm("" : "+r"(sp), "=D"(out) : "D"(x) : "rdi");"#,
     ] {
         let source =
@@ -142,15 +140,6 @@ fn reserved_stack_fixed_sharing_is_bounded_and_views_remain_full_width() {
             .to_string();
         assert!(error.contains("overlaps"), "{source}: {error}");
     }
-    let ordinary =
-        compile(r#"void f(unsigned long x) {unsigned long out; asm("" : "=D"(out) : "D"(x));}"#)
-            .unwrap();
-    assert!(
-        keel_codegen::compile(&ordinary, Target::X86_64LinuxGnu)
-            .unwrap_err()
-            .to_string()
-            .contains("overlaps")
-    );
     for modifier in ['b', 'w', 'k', 'a'] {
         let source = format!(
             "register unsigned long sp asm(\"rsp\"); void f(void) {{asm(\"mov %{modifier}0, %%rax\" : \"+r\"(sp));}}"
