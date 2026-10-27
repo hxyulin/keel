@@ -1,8 +1,8 @@
 //! The keel driver:
 //!
 //! ```text
-//! keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
-//! keel cc [-O] [-g] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]  C to assembly
+//! keel compile [--code-model pic|kernel] [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
+//! keel cc [-O] [-g] [--code-model pic|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]  C to assembly
 //! keel opt [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
 //! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s> -o <output.o>                 assembly to native object
 //! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s>... --out-dir <directory>      batch assembly
@@ -39,8 +39,8 @@ mod wasm;
 mod x86_options;
 
 const USAGE: &str = "usage:
-  keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
-  keel cc [-O] [-g] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]
+  keel compile [--code-model pic|kernel] [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
+  keel cc [-O] [-g] [--code-model pic|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]
   keel opt [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
   keel compile|cc|opt [--verify-each | --no-verify-each] [--opt-report <new-report.json>] <input> [-o <output>]
   keel compile|cc [--emit-object] <input> -o <output.o>  (AArch64 Mach-O or AArch64/x86-64 ELF)
@@ -104,6 +104,7 @@ struct Options {
     emit_ir: bool,
     function_binding: Option<keel_c::FunctionBinding>,
     link_intent: Option<CLinkIntent>,
+    x86_code_model: Option<keel_codegen::x86_64::CodeModel>,
     emit_object: bool,
     emit_wasm: bool,
     wasm: wasm::Options,
@@ -469,6 +470,16 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             }
             "-g" => opts.ir_lines = true,
             "--emit-ir" => opts.emit_ir = true,
+            "--code-model" => {
+                if opts.x86_code_model.is_some() {
+                    return Err("`--code-model` may only be supplied once".into());
+                }
+                opts.x86_code_model = Some(match args.next().map(String::as_str) {
+                    Some("pic") => keel_codegen::x86_64::CodeModel::PositionIndependent,
+                    Some("kernel") => keel_codegen::x86_64::CodeModel::Kernel,
+                    _ => return Err("`--code-model` needs pic or kernel".into()),
+                });
+            }
             "--link-intent" => {
                 opts.link_intent = Some(match args.next().map(String::as_str) {
                     Some("executable") => CLinkIntent::Executable,
@@ -540,6 +551,14 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
     opts.x86_features = opts.x86_options.resolve()?;
     if opts.x86_options.supplied() && opts.target()? != Target::X86_64LinuxGnu {
         return Err("x86 target features require x86_64-unknown-linux-gnu".into());
+    }
+    if opts.x86_code_model.is_some() && opts.target()? != Target::X86_64LinuxGnu {
+        return Err("x86 code model requires x86_64-unknown-linux-gnu".into());
+    }
+    if opts.x86_code_model == Some(keel_codegen::x86_64::CodeModel::Kernel)
+        && opts.link_intent == Some(CLinkIntent::Shared)
+    {
+        return Err("kernel code model requires a statically linked executable image".into());
     }
     wasm::validate_options(&opts, &supplied)?;
     if !opts.emit_wasm {
@@ -673,6 +692,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "-p",
                     "-g",
                     "--target",
+                    "--code-model",
                     "--emit-object",
                     "--emit-wasm",
                     "--wasm-opt",
@@ -724,6 +744,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "-isystem",
                     "-mmacosx-version-min",
                     "--target",
+                    "--code-model",
                     "--emit-object",
                     "--emit-wasm",
                     "--wasm-opt",
@@ -919,8 +940,18 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
             Target::Aarch64AppleDarwin => &mut aarch64_sink,
             Target::X86_64LinuxGnu => &mut x86_sink,
         };
-        keel_codegen::compile_program_chunks_with_pipeline(&module, target, &pipeline, sink)
-            .map_err(|e| e.to_string())?;
+        if opts.x86_code_model == Some(keel_codegen::x86_64::CodeModel::Kernel) {
+            keel_codegen::x86_64::compile_program_chunks_with_pipeline_and_code_model(
+                &module,
+                &keel_codegen::x86_64::REGISTERS,
+                &pipeline,
+                keel_codegen::x86_64::CodeModel::Kernel,
+                sink,
+            )
+        } else {
+            keel_codegen::compile_program_chunks_with_pipeline(&module, target, &pipeline, sink)
+        }
+        .map_err(|e| e.to_string())?;
         drop(module);
         let object = match target {
             Target::Wasm32UnknownUnknown => return Err(
@@ -934,8 +965,17 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
         std::fs::write(output, object).map_err(|e| format!("{output}: {e}"))
     } else {
-        let source = keel_codegen::compile_with_pipeline(&module, target, &pipeline)
-            .map_err(|e| e.to_string())?;
+        let source = if opts.x86_code_model == Some(keel_codegen::x86_64::CodeModel::Kernel) {
+            keel_codegen::x86_64::compile_with_pipeline_and_code_model(
+                &module,
+                &keel_codegen::x86_64::REGISTERS,
+                &pipeline,
+                keel_codegen::x86_64::CodeModel::Kernel,
+            )
+        } else {
+            keel_codegen::compile_with_pipeline(&module, target, &pipeline)
+        }
+        .map_err(|e| e.to_string())?;
         // The process exits once the text is written, and the system takes
         // the module's memory back faster than freeing its every allocation.
         std::mem::forget(module);

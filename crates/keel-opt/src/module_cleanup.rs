@@ -1,8 +1,8 @@
 //! Remove proven empty calls and functions made unreachable by optimization.
 
 use crate::Pass;
-use keel_ir::fxhash::{FxHashMap, FxHashSet};
-use keel_ir::{CallConv, DataItem, FuncDecl, Function, InstData, Module, Purpose};
+use keel_ir::fxhash::FxHashMap;
+use keel_ir::{CallConv, FuncDecl, Function, InstData, Module, Purpose};
 
 pub struct EmptyCalls;
 impl Pass for EmptyCalls {
@@ -87,50 +87,16 @@ impl Pass for UnusedFunctions {
 }
 
 fn remove_unused_functions(module: &mut Module) -> bool {
-    let mut live = FxHashSet::default();
-    let mut assembly: Vec<&str> = module.assembly.iter().map(String::as_str).collect();
-    for f in &module.functions {
-        // Fast declarations are invalid without their local definition. Keep
-        // these bodies until callee-table compaction can remove stale imports.
-        if !f.local
-            || f.sig.cc == CallConv::Fast
-            || f.attrs.used
-            || f.attrs.retain
-            || f.attrs.constructor
-            || f.attrs.destructor
-        {
-            live.insert(f.name.clone());
-        }
-        if let Some(personality) = &f.personality {
-            live.insert(personality.clone());
-        }
-        for (_, i) in f.layout_insts() {
-            if let InstData::InlineAsm { asm, .. } = f.inst_data(i) {
-                assembly.push(&asm.template);
-            }
-        }
-    }
-    // Assembly macros can construct names by concatenation. Without an expanded
-    // symbol inventory, keep every local body in modules containing that syntax.
-    let opaque_assembly = assembly
-        .iter()
-        .any(|text| text.contains('\\') || text.contains(".macro") || text.contains(".altmacro"));
-    for f in &module.functions {
-        if opaque_assembly || assembly.iter().any(|text| text.contains(&f.name)) {
-            live.insert(f.name.clone());
-        }
-    }
-    // Data is not collected by this pass. Every initializer is therefore a root,
-    // including local tables containing callbacks and assembly-defined aliases.
-    for d in &module.data {
-        if let Some(init) = &d.init {
-            for item in &init.items {
-                if let DataItem::Ptr { symbol, .. } | DataItem::RttiName { symbol } = item {
-                    live.insert(symbol.clone());
-                }
-            }
-        }
-    }
+    let mut live = crate::assembly_symbols::roots(module);
+    // Fast declarations are invalid without their local definition. Keep
+    // these bodies until callee-table compaction can remove stale imports.
+    live.extend(
+        module
+            .functions
+            .iter()
+            .filter(|f| f.sig.cc == CallConv::Fast)
+            .map(|f| f.name.clone()),
+    );
     let functions: FxHashMap<_, _> = module
         .functions
         .iter()

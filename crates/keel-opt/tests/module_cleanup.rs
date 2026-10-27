@@ -91,7 +91,7 @@ fn keeps_nonempty_and_nonreturning_calls() {
 #[test]
 fn does_not_discard_bodies_when_macros_can_construct_symbol_names() {
     let module = clean(
-        "module_asm \".macro target name\\n call \\\\name\\n.endm\"\nfunc @helper() local {\nblock0:\n return\n}",
+        "module_asm \".macro target name\\n call prefix\\\\name\\n.endm\"\nfunc @helper() local {\nblock0:\n return\n}",
     );
     assert_eq!(module.functions.len(), 1);
 }

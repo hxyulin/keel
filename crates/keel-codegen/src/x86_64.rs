@@ -196,13 +196,39 @@ pub fn compile_with_options(
     )
 }
 
+/// Address materialization for an x86-64 ELF image. Independent of CPU features.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CodeModel {
+    /// RIP-relative definitions and GOT-bound external addresses for userspace.
+    #[default]
+    PositionIndependent,
+    /// Absolute 64-bit linked virtual addresses for a statically linked kernel image.
+    /// Does not establish a no-SIMD, unwind, red-zone or interrupt-safe ABI.
+    Kernel,
+}
+
 /// Compile using independently replaceable selection and allocation stages.
 pub fn compile_with_pipeline(
     module: &Module,
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
 ) -> Result<String, CodegenError> {
-    let Output::Text(text) = compile_output(module, pools, pipeline, false, None)? else {
+    compile_with_pipeline_and_code_model(module, pools, pipeline, CodeModel::default())
+}
+
+/// Compile text with an explicit address model.
+///
+/// # Errors
+/// Returns target/IR validation failures; Kernel also rejects userspace TLS.
+pub fn compile_with_pipeline_and_code_model(
+    module: &Module,
+    pools: &Pools,
+    pipeline: &crate::CodegenPipeline<'_>,
+    code_model: CodeModel,
+) -> Result<String, CodegenError> {
+    let Output::Text(text) = compile_output(module, pools, pipeline, code_model, false, None)?
+    else {
         unreachable!()
     };
     Ok(text.into_string())
@@ -212,7 +238,22 @@ pub fn compile_program_with_pipeline(
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
 ) -> Result<keel_asm_ir::Program, CodegenError> {
-    let Output::Structured(program) = compile_output(module, pools, pipeline, true, None)? else {
+    compile_program_with_pipeline_and_code_model(module, pools, pipeline, CodeModel::default())
+}
+
+/// Compile structured assembly with an explicit address model.
+///
+/// # Errors
+/// Returns target/IR validation failures; Kernel also rejects userspace TLS.
+pub fn compile_program_with_pipeline_and_code_model(
+    module: &Module,
+    pools: &Pools,
+    pipeline: &crate::CodegenPipeline<'_>,
+    code_model: CodeModel,
+) -> Result<keel_asm_ir::Program, CodegenError> {
+    let Output::Structured(program) =
+        compile_output(module, pools, pipeline, code_model, true, None)?
+    else {
         unreachable!()
     };
     Ok(program)
@@ -224,8 +265,28 @@ pub fn compile_program_chunks_with_pipeline(
     pipeline: &crate::CodegenPipeline<'_>,
     sink: &mut dyn FnMut(keel_asm_ir::Program),
 ) -> Result<(), CodegenError> {
+    compile_program_chunks_with_pipeline_and_code_model(
+        module,
+        pools,
+        pipeline,
+        CodeModel::default(),
+        sink,
+    )
+}
+
+/// Stream structured assembly with an explicit address model.
+///
+/// # Errors
+/// Returns target/IR validation failures; Kernel also rejects userspace TLS.
+pub fn compile_program_chunks_with_pipeline_and_code_model(
+    module: &Module,
+    pools: &Pools,
+    pipeline: &crate::CodegenPipeline<'_>,
+    code_model: CodeModel,
+    sink: &mut dyn FnMut(keel_asm_ir::Program),
+) -> Result<(), CodegenError> {
     let Output::Structured(program) =
-        compile_output(module, pools, pipeline, true, Some(&mut *sink))?
+        compile_output(module, pools, pipeline, code_model, true, Some(&mut *sink))?
     else {
         unreachable!()
     };
@@ -236,9 +297,16 @@ fn compile_output(
     module: &Module,
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
+    code_model: CodeModel,
     structured: bool,
     mut sink: Option<&mut dyn FnMut(keel_asm_ir::Program)>,
 ) -> Result<Output, CodegenError> {
+    if code_model == CodeModel::Kernel && module.data.iter().any(|d| d.thread_local) {
+        return Err(CodegenError {
+            func: String::new(),
+            message: "kernel code model does not support userspace TLS".into(),
+        });
+    }
     keel_ir::section::validate_module(module, crate::Target::X86_64LinuxGnu).map_err(
         |message| CodegenError {
             func: String::new(),
@@ -297,6 +365,7 @@ fn compile_output(
         );
         let mut compiler = FunctionCompiler::new(&func, &symbols, pools, pipeline, structured)?;
         compiler.debug = debug;
+        compiler.code_model = code_model;
         let slots = if debug {
             compiler.slot_frame_offsets()
         } else {
@@ -631,6 +700,7 @@ enum AggregateResult<'a> {
 }
 
 struct FunctionCompiler<'a> {
+    code_model: CodeModel,
     features: keel_asm_ir::x86::Features,
     feature_error: Option<String>,
     func: &'a Function,
@@ -1615,6 +1685,7 @@ impl<'a> FunctionCompiler<'a> {
                     )
             });
         let mut compiler = Self {
+            code_model: CodeModel::default(),
             func,
             symbols,
             alloc,
@@ -2293,7 +2364,15 @@ impl<'a> FunctionCompiler<'a> {
                 // Intel operand syntax reserves names such as `offset`, `ptr`
                 // and register names. Quoting keeps C symbols unambiguous.
                 let name = name.to_owned();
-                if thread_local && defined {
+                if self.code_model == CodeModel::Kernel {
+                    self.emit(
+                        Opcode::Movabs,
+                        [
+                            asm_arg(r64(d)),
+                            asm_arg(symbol_address(&name, Modifier::None)),
+                        ],
+                    );
+                } else if thread_local && defined {
                     self.emit(
                         Opcode::Mov,
                         [asm_arg(r64(d)), asm_arg(sized(fs_zero(), 64))],

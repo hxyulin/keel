@@ -17,11 +17,13 @@ use std::fmt;
 mod adjacent_abs;
 mod adjacent_diff;
 mod analysis;
+mod assembly_symbols;
 mod branch_ranges;
 mod call_contracts;
 mod call_load_reuse;
 mod canonicalize;
 mod const_fold;
+mod constant_args;
 mod wasm32;
 pub use wasm32::optimize_wasm32_basic;
 mod dce;
@@ -364,6 +366,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[21],
     &call_load_reuse::CallLoadReuse,
     &internal_fast_calls::InternalFastCalls,
+    &constant_args::ConstantArgs,
     &module_cleanup::EmptyCalls,
     &module_cleanup::UnusedFunctions,
     &private_aggregate::PrivateAggregate,
@@ -480,7 +483,7 @@ const FULL_ROUND: [&str; 16] = [
 
 const FULL_ROUNDS: usize = 3;
 
-const FULL_EPILOGUE: [&str; 23] = [
+const FULL_EPILOGUE: [&str; 25] = [
     "load-reuse",
     "stack-promote",
     "phi-simplify",
@@ -495,6 +498,8 @@ const FULL_EPILOGUE: [&str; 23] = [
     "loop-rotate",
     "phi-simplify",
     "dce",
+    "constant-args",
+    "simplify-cfg",
     "known-bits",
     "simplify-cfg",
     "dce",
