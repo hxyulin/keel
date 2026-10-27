@@ -100,9 +100,8 @@ asm operands or clobbers in this milestone. The IR retains target-tagged physica
 registers and early-clobber markers, including in textual round trips.
 
 Read-only global `rsp` bindings have a separate
-[C observer contract](c-stack-observers.md). Linux's read/write
-`ASM_CALL_CONSTRAINT` remains rejected: it needs a reserved-stack asm operand,
-not an ordinary GPR output or a data symbol named `rsp`.
+[C observer contract](c-stack-observers.md). Their exact `+r` operand supports
+Linux's `ASM_CALL_CONSTRAINT` through the balanced stack contract below.
 
 All asm is pinned and conservatively invalidates memory knowledge, even without
 `volatile` or a `memory` clobber. This retains more code than GCC; it does not
@@ -136,8 +135,8 @@ restores Intel syntax for its own instructions after each AT&T fragment.
 The programmer must declare every effect, define each output, preserve the
 stack/frame bases and the direction flag required by the ABI. Ordinary asm must
 return through normal fallthrough; local branches may stay within the template.
-Asm goto may also transfer to its listed C labels. Calls and terminal
-transfers need contracts this milestone does not model;
+Asm goto may also transfer to its listed C labels. Balanced calls require the
+reserved-stack operand below. Terminal transfers need separate contracts;
 the compiler does not infer these effects by inspecting arbitrary instructions
 or directive bytes. Section switches must return to the function's section.
 
@@ -145,6 +144,52 @@ Still diagnosed: comma-separated alternatives, unsupported constraint unions,
 TLS-only immediates, local register variables, FP/SIMD register operands and
 output-bearing asm goto. Supporting their instruction bytes in the assembler does
 not provide the missing C operand or control-flow contract.
+
+## Balanced stack calls
+
+X86-64 Linux asm accepts one exact `"+r"` operand naming a bound global RSP
+variable. This supports Linux's `ASM_CALL_CONSTRAINT`:
+
+```c
+register unsigned long current_stack_pointer asm("rsp");
+extern void helper(void);
+
+void invoke_helper(void) {
+    asm volatile("call %c[target]"
+        : "+r"(current_stack_pointer)
+        : [target] "i"(helper)
+        : "cc", "memory");
+}
+```
+
+The template must preserve the enclosing frame bases and direction flag,
+restore RSP on every normal path, and maintain SysV call alignment at each
+call. Temporary stack adjustments and manually placed stack arguments are
+allowed when balanced. The compiler supplies an aligned entry stack and an
+ABI caller-clobber barrier, including live SIMD values. It captures ordinary
+outputs before restoring GPR homes. It does not infer call arguments or return
+types from the template. Unwinding, nonlocal exits and terminal transfers remain
+outside this contract.
+
+The RSP operand retains its GNU source number and name. It prints physical
+`%rsp`, accepting the default or `%q` view. Narrow views, ordinary writes,
+`=r`, early-clobber, duplicate stack operands, ties to the stack operand and
+output-bearing asm goto are rejected. In balanced mode, one compatible fixed
+input may share a non-early fixed output, including Linux's `=D`/`D` form.
+Competing inputs, duplicate outputs and explicit clobber conflicts still fail.
+Ordinary asm keeps its existing fixed-register matching policy.
+
+IR represents the dependency as an input-only `rsp` constraint with an `i64`
+snapshot from `stack_save` followed by `ptrtoint.i64`. The verifier resolves
+value aliases and checks that provenance, type, uniqueness and reserved-register
+conflicts. There is no SSA stack result or assignment to RSP. The snapshot
+establishes ordering; substitution reads live RSP after all operands have been
+evaluated. A later input `alloca` therefore cannot rewind the stack. AArch64
+rejects this x86 constraint.
+
+The `asm_stack_call`, `x86_stack_call` and IR `stack_pointer_asm` tests cover
+source remapping, verifier failures, text/typed/chunked parity, ABI call barriers,
+dynamic/aligned frames, stack arguments and Linux alternative-call metadata.
 
 ## Asm goto
 

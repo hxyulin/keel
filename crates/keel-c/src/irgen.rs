@@ -2040,10 +2040,13 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 }
                 let mut places = Vec::new();
                 let mut readwrite = Vec::new();
-                let mut memory_args = Vec::new();
-                for ((e, rw), &memory) in asm.outputs.iter().zip(asm.output_memory) {
-                    if memory {
-                        memory_args.push(self.val(e)?);
+                let mut output_inputs = Vec::new();
+                for ((e, rw), &kind) in asm.outputs.iter().zip(asm.output_kinds) {
+                    if kind != AsmOutputKind::Register {
+                        // Memory contributes an address; RSP contributes only
+                        // an observer dependency, never an SSA result/writeback.
+                        // Later operand evaluations may change the live RSP.
+                        output_inputs.push(self.val(e)?);
                         continue;
                     }
                     // Capture once, before inputs: postincrement and calls in
@@ -2054,7 +2057,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     }
                     places.push(place);
                 }
-                let mut args = memory_args;
+                let mut args = output_inputs;
                 for e in asm.inputs {
                     args.push(self.val(e)?);
                 }
@@ -2062,8 +2065,8 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 let mut types: Vec<_> = asm
                     .outputs
                     .iter()
-                    .zip(asm.output_memory)
-                    .filter(|(_, memory)| !**memory)
+                    .zip(asm.output_kinds)
+                    .filter(|(_, kind)| **kind == AsmOutputKind::Register)
                     .map(|((e, _), _)| e.ty.ir_with_layout(self.g.p.c_layout))
                     .collect();
                 if !asm.goto_labels.is_empty() {

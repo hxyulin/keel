@@ -84,7 +84,7 @@ impl<'a> Parser<'a> {
         let template = self.asm_string()?;
         let mut goto_labels = Vec::new();
         let mut outputs = Vec::new();
-        let mut output_memory = Vec::new();
+        let mut output_kinds = Vec::new();
         let mut inputs = Vec::new();
         let mut constraints: Vec<String> = Vec::new();
         let mut names = Vec::new();
@@ -113,114 +113,133 @@ impl<'a> Parser<'a> {
                         self.expect(")")?;
                         if section == 0 {
                             if matches!(expr.kind, ExprKind::Builtin(Builtin::StackPointer, _)) {
-                                return Err(Error::new(
-                                    expr.loc,
-                                    "stack-pointer asm outputs require a stack-call contract",
-                                ));
-                            }
-                            let readwrite = constraint.starts_with('+');
-                            if !readwrite && !constraint.starts_with('=') {
-                                return Err(Error::new(
-                                    loc,
-                                    "asm output constraint must start with `=` or `+`",
-                                ));
-                            }
-                            let code = &constraint[1..];
-                            let code = code.strip_prefix('&').unwrap_or(code);
-                            let flag = x86 && code.starts_with("@cc");
-                            if flag && code.contains(',') {
-                                return Err(Error::new(
-                                    loc,
-                                    "flag output constraints do not allow alternatives",
-                                ));
-                            }
-                            if flag && (readwrite || constraint.starts_with("=&")) {
-                                return Err(Error::new(
-                                    loc,
-                                    "flag outputs require = without + or &",
-                                ));
-                            }
-                            let code = if x86 && matches!(code, "rm" | "mr" | "qm" | "mq" | "g") {
-                                if !asm_gpr_type(expr.ty) {
+                                if !x86 || constraint != "+r" {
                                     return Err(Error::new(
-                                        loc,
-                                        "asm output choices require a scalar integer or pointer; use m for other objects",
+                                        expr.loc,
+                                        "stack-pointer asm output requires exactly +r for a balanced stack-call contract",
                                     ));
                                 }
-                                "r"
-                            } else {
-                                code
-                            };
-                            if !(matches!(code, "r" | "w") && (!x86 || code == "r")
-                                || flag
-                                || x86
-                                    && matches!(
-                                        code,
-                                        "q" | "a" | "b" | "c" | "d" | "S" | "D" | "m"
-                                    ))
-                            {
-                                return Err(Error::new(
-                                    loc,
-                                    if x86 {
-                                        format!(
-                                            "unsupported asm output constraint `{constraint}` (supported: r, q, a, b, c, d, S, D, m, rm, g and =@cc<condition>; & applies to register outputs)"
-                                        )
-                                    } else {
-                                        "unsupported asm output constraint (supported: =r, +r, =w, +w, with optional &; memory outputs are not supported)".into()
-                                    },
-                                ));
-                            }
-                            if !(code == "m" && matches!(expr.ty, Ty::Array(..))) {
-                                self.check_lvalue(&expr)?;
-                            }
-                            if asm_const(expr.sugar, &self.typedefs)
-                                || matches!(expr.ty, Ty::Atomic(_))
-                            {
-                                return Err(Error::new(
-                                    expr.loc,
-                                    "asm output requires a modifiable non-atomic lvalue",
-                                ));
-                            }
-                            if matches!(
-                                expr.kind,
-                                ExprKind::Member { bits: Some(_), .. } | ExprKind::VectorIndex(..)
-                            ) {
-                                return Err(Error::new(
-                                    expr.loc,
-                                    "asm bit-field and vector-element outputs are not supported",
-                                ));
-                            }
-                            let memory = code == "m";
-                            if memory {
-                                if constraint[1..].starts_with('&') {
+                                if output_kinds.contains(&AsmOutputKind::StackPointer) {
                                     return Err(Error::new(
-                                        loc,
-                                        "early-clobber requires a register output",
+                                        expr.loc,
+                                        "asm allows only one stack-pointer output",
                                     ));
                                 }
-                                // Capture the object's address, never a scalar copy of its contents.
-                                expr = self.address_of(expr, loc)?;
-                                constraint = if readwrite { "mreadwrite" } else { "mwrite" }.into();
+                                constraint = "rsp".into();
+                                outputs.push((expr, true));
+                                output_kinds.push(AsmOutputKind::StackPointer);
                             } else {
-                                if flag {
-                                    if !matches!(expr.ty, Ty::Int(k) if k.size() <= 8) {
+                                let readwrite = constraint.starts_with('+');
+                                if !readwrite && !constraint.starts_with('=') {
+                                    return Err(Error::new(
+                                        loc,
+                                        "asm output constraint must start with `=` or `+`",
+                                    ));
+                                }
+                                let code = &constraint[1..];
+                                let code = code.strip_prefix('&').unwrap_or(code);
+                                let flag = x86 && code.starts_with("@cc");
+                                if flag && code.contains(',') {
+                                    return Err(Error::new(
+                                        loc,
+                                        "flag output constraints do not allow alternatives",
+                                    ));
+                                }
+                                if flag && (readwrite || constraint.starts_with("=&")) {
+                                    return Err(Error::new(
+                                        loc,
+                                        "flag outputs require = without + or &",
+                                    ));
+                                }
+                                let code = if x86 && matches!(code, "rm" | "mr" | "qm" | "mq" | "g")
+                                {
+                                    if !asm_gpr_type(expr.ty) {
                                         return Err(Error::new(
                                             loc,
-                                            "asm flag output requires an integer through 64 bits",
+                                            "asm output choices require a scalar integer or pointer; use m for other objects",
                                         ));
                                     }
+                                    "r"
                                 } else {
-                                    asm_register_type(code, expr.ty, loc)?;
-                                }
-                                let early = if constraint[1..].starts_with('&') {
-                                    "&"
-                                } else {
-                                    ""
+                                    code
                                 };
-                                constraint = format!("={early}{}", asm_constraint(code, x86));
+                                if !(matches!(code, "r" | "w") && (!x86 || code == "r")
+                                    || flag
+                                    || x86
+                                        && matches!(
+                                            code,
+                                            "q" | "a" | "b" | "c" | "d" | "S" | "D" | "m"
+                                        ))
+                                {
+                                    return Err(Error::new(
+                                        loc,
+                                        if x86 {
+                                            format!(
+                                                "unsupported asm output constraint `{constraint}` (supported: r, q, a, b, c, d, S, D, m, rm, g and =@cc<condition>; & applies to register outputs)"
+                                            )
+                                        } else {
+                                            "unsupported asm output constraint (supported: =r, +r, =w, +w, with optional &; memory outputs are not supported)".into()
+                                        },
+                                    ));
+                                }
+                                if !(code == "m" && matches!(expr.ty, Ty::Array(..))) {
+                                    self.check_lvalue(&expr)?;
+                                }
+                                if asm_const(expr.sugar, &self.typedefs)
+                                    || matches!(expr.ty, Ty::Atomic(_))
+                                {
+                                    return Err(Error::new(
+                                        expr.loc,
+                                        "asm output requires a modifiable non-atomic lvalue",
+                                    ));
+                                }
+                                if matches!(
+                                    expr.kind,
+                                    ExprKind::Member { bits: Some(_), .. }
+                                        | ExprKind::VectorIndex(..)
+                                ) {
+                                    return Err(Error::new(
+                                        expr.loc,
+                                        "asm bit-field and vector-element outputs are not supported",
+                                    ));
+                                }
+                                let memory = code == "m";
+                                if memory {
+                                    if constraint[1..].starts_with('&') {
+                                        return Err(Error::new(
+                                            loc,
+                                            "early-clobber requires a register output",
+                                        ));
+                                    }
+                                    // Capture the object's address, never a scalar copy of its contents.
+                                    expr = self.address_of(expr, loc)?;
+                                    constraint =
+                                        if readwrite { "mreadwrite" } else { "mwrite" }.into();
+                                } else {
+                                    if flag {
+                                        if !matches!(expr.ty, Ty::Int(k) if k.size() <= 8) {
+                                            return Err(Error::new(
+                                                loc,
+                                                "asm flag output requires an integer through 64 bits",
+                                            ));
+                                        }
+                                    } else {
+                                        asm_register_type(code, expr.ty, loc)?;
+                                    }
+                                    let early = if constraint[1..].starts_with('&') {
+                                        "&"
+                                    } else {
+                                        ""
+                                    };
+                                    constraint = format!("={early}{}", asm_constraint(code, x86));
+                                }
+                                outputs.push((expr, readwrite));
+                                output_kinds.push(if memory {
+                                    AsmOutputKind::Memory
+                                } else {
+                                    AsmOutputKind::Register
+                                });
                             }
-                            outputs.push((expr, readwrite));
-                            output_memory.push(memory);
                         } else {
                             if x86 && matches!(constraint.as_str(), "er" | "re" | "Ir" | "rI") {
                                 constraint =
@@ -315,7 +334,9 @@ impl<'a> Parser<'a> {
                                 _ => {
                                     let n = constraint.parse::<usize>().ok().filter(|n| *n < outputs.len())
                                         .ok_or_else(|| Error::new(loc, format!("unsupported asm input constraint `{constraint}` (supported: r, q (x86), w (AArch64), m, i, n, x86 Nd and r/q choices with i/m or g, output number or [name])")))?;
-                                    if output_memory[n] || constraints[n].starts_with("=@cc") {
+                                    if output_kinds[n] != AsmOutputKind::Register
+                                        || constraints[n].starts_with("=@cc")
+                                    {
                                         return Err(Error::new(
                                             loc,
                                             "asm matching input requires a register output",
@@ -359,7 +380,7 @@ impl<'a> Parser<'a> {
                 }
             }
             for (n, (_, readwrite)) in outputs.iter().enumerate() {
-                if *readwrite && !output_memory[n] {
+                if *readwrite && output_kinds[n] == AsmOutputKind::Register {
                     constraints.push(n.to_string());
                 }
             }
@@ -445,22 +466,29 @@ impl<'a> Parser<'a> {
                 "asm goto output operands are not supported",
             ));
         }
-        // Register results precede address operands in IR. Preserve GNU's
-        // source numbering by remapping only the output references and ties.
-        let n_reg = output_memory.iter().filter(|&&m| !m).count();
+        // Register results precede memory and stack-state inputs in IR.
+        // Preserve GNU's source numbering when remapping output references/ties.
+        let n_reg = output_kinds
+            .iter()
+            .filter(|&&kind| kind == AsmOutputKind::Register)
+            .count();
         let mut next_reg = 0;
         let mut next_mem = n_reg;
         let mut numbering = Vec::new();
-        for &memory in &output_memory {
-            let next = if memory { &mut next_mem } else { &mut next_reg };
+        for &kind in &output_kinds {
+            let next = if kind == AsmOutputKind::Register {
+                &mut next_reg
+            } else {
+                &mut next_mem
+            };
             numbering.push(*next);
             *next += 1;
         }
         numbering.extend(outputs.len()..outputs.len() + inputs.len());
         let mut normalized = Vec::new();
-        for memory in [false, true] {
-            for (n, &is_memory) in output_memory.iter().enumerate() {
-                if memory == is_memory {
+        for inputs in [false, true] {
+            for (n, &kind) in output_kinds.iter().enumerate() {
+                if inputs == (kind != AsmOutputKind::Register) {
                     normalized.push(constraints[n].clone());
                 }
             }
@@ -507,8 +535,8 @@ impl<'a> Parser<'a> {
         let constraints = normalized.join(",");
         let mut types: Vec<_> = outputs
             .iter()
-            .zip(&output_memory)
-            .filter(|(_, m)| !**m)
+            .zip(&output_kinds)
+            .filter(|(_, kind)| **kind == AsmOutputKind::Register)
             .map(|((e, _), _)| e.ty.ir())
             .collect();
         if goto {
@@ -519,7 +547,7 @@ impl<'a> Parser<'a> {
             template: self.text.intern(&template),
             constraints: self.text.intern(&constraints),
             outputs: self.slice(&outputs),
-            output_memory: self.slice(&output_memory),
+            output_kinds: self.slice(&output_kinds),
             inputs: self.slice(&inputs),
             goto_labels: self.slice(&goto_labels),
             loc,

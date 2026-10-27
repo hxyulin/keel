@@ -204,10 +204,6 @@ fn unsupported_register_declarations_and_writes_fail_closed() {
             "register unsigned long sp asm(\"rsp\"); void f(void){asm(\"\":\"=r\"(sp));}",
             "stack-call contract",
         ),
-        (
-            "register unsigned long sp asm(\"rsp\"); void f(void){asm(\"\":\"+r\"(sp));}",
-            "stack-call contract",
-        ),
     ] {
         let error = compile(source, Target::X86_64LinuxGnu).unwrap_err();
         assert!(

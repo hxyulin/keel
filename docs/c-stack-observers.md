@@ -38,16 +38,19 @@ register unsigned long current_stack_pointer asm("rsp");
 
 Every reference samples the current stack pointer. It creates no global data
 object or symbol named `rsp`. Reads remain separate observations across dynamic
-stack changes. Writes, increments, address-taking and asm output uses are
-rejected. Other global registers, types, qualifiers, initializers and declaration
+stack changes. Ordinary writes, increments and address-taking are rejected.
+The exact `"+r"` asm operand has the separate balanced-call contract below.
+Other global registers, types, qualifiers, initializers and declaration
 attributes remain unsupported. Matching declarations may repeat; conflicting
 ordinary declarations are rejected. Ordinary local and parameter `register`
 storage keeps its existing behavior.
 
 Linux's `ASM_CALL_CONSTRAINT` uses a read/write `"+r"` operand naming this
-binding. It is not an ordinary GPR output: it needs a reserved-stack operand
-contract. Keel currently diagnoses that form explicitly. Supporting the
-declaration's read-only uses does not provide this asm-call contract.
+binding. Keel represents it as an input-only reserved-stack dependency, with no
+SSA stack result or writeback. The backend uses live physical RSP, even if a
+later input expression allocates stack space after the dependency snapshot.
+It also applies an ABI call barrier for caller-clobbered GPR and SIMD values.
+See the [balanced asm-call contract](x86-c-inline-asm.md#balanced-stack-calls).
 
 ## Inlining
 

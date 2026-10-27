@@ -506,6 +506,12 @@ fn is_call(func: &Function, data: &InstData, features: keel_asm_ir::x86::Feature
             op.can_trap() && func.value_type(func.resolve(args[0])) == Type::I128
         }
         InstData::Call { .. } | InstData::CallIndirect { .. } => true,
+        // The reserved-stack dependency permits balanced template calls.
+        // Treat those calls as ABI barriers even when a template's explicit
+        // clobbers name only the GPRs used by a reduced kernel call sequence.
+        InstData::InlineAsm { asm, .. } => {
+            asm.inputs.contains(&keel_ir::AsmOperand::StackPointer)
+        }
         InstData::Fma { args } => {
             func.value_type(func.resolve(args[0])) == Type::F80 || !(features.avx && features.fma)
         }

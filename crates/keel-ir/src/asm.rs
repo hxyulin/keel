@@ -55,6 +55,17 @@ pub enum AsmOperand {
     RegShiftImm5,
     /// `Nd`: an unsigned byte immediate, otherwise RDX. X86 inputs only.
     PortImm8,
+    /// `rsp`: one balanced x86 stack dependency, supplied by an `i64`
+    /// snapshot from `StackSave` followed by `PtrToInt`. Inputs only, with no
+    /// SSA output, tie or writeback. The backend renders live physical RSP;
+    /// it never copies this argument's numeric value into RSP. Evaluating
+    /// other inputs can change the live stack after the snapshot.
+    ///
+    /// The template may change RSP temporarily, but must restore the same
+    /// stack/frame state and return normally. Calls obey the ABI, including
+    /// its SIMD clobbers. This contract does not model a persistent stack
+    /// switch, terminal transfer or unwinding through the template.
+    StackPointer,
     /// `@ccz`, etc.: x86 flags captured as a boolean integer result.
     Flag(u8),
     /// `0`, `1`…: in the same register as that output, which it initializes.
@@ -125,6 +136,9 @@ impl InlineAsm {
                     code
                 };
                 let operand = operand(code)?;
+                if operand == AsmOperand::StackPointer {
+                    return Err("rsp stack dependency is input-only".into());
+                }
                 if !matches!(
                     operand,
                     AsmOperand::Reg
@@ -157,7 +171,52 @@ impl InlineAsm {
             .into_iter()
             .zip(output_types.iter().copied())
             .collect();
+        asm.stack_pointer_input()?;
         Ok(asm)
+    }
+
+    /// Returns the unique `rsp` input index, rejecting malformed stack
+    /// dependencies and conflicting fixed/clobbered RSP aliases.
+    ///
+    /// Input types and capture provenance need the enclosing function; the
+    /// verifier checks them with [`is_stack_pointer_snapshot`]. Architecture
+    /// legality belongs to the target backend.
+    pub fn stack_pointer_input(&self) -> Result<Option<usize>, String> {
+        if self
+            .outputs
+            .iter()
+            .any(|(op, _)| *op == AsmOperand::StackPointer)
+        {
+            return Err("rsp stack dependency is input-only".into());
+        }
+        let mut inputs = self
+            .inputs
+            .iter()
+            .enumerate()
+            .filter_map(|(i, op)| (*op == AsmOperand::StackPointer).then_some(i));
+        let Some(index) = inputs.next() else {
+            return Ok(None);
+        };
+        if inputs.next().is_some() {
+            return Err("duplicate rsp stack dependency".into());
+        }
+        let stack_register = |r: PhysReg| r.arch == AsmArch::X86 && !r.float && r.num == 4;
+        if self
+            .outputs
+            .iter()
+            .map(|(op, _)| op)
+            .chain(&self.inputs)
+            .any(|op| matches!(op, AsmOperand::Fixed(r) if stack_register(*r)))
+            || self
+                .clobbers
+                .iter()
+                .any(|c| matches!(c, AsmClobber::Reg(r) if stack_register(*r)))
+        {
+            return Err(
+                "rsp stack dependency conflicts with a fixed or clobbered stack register".into(),
+            );
+        }
+        Ok(Some(index))
     }
 
     /// The constraint string, as [`InlineAsm::new`] reads it.
@@ -202,6 +261,7 @@ fn operand(code: &str) -> Result<AsmOperand, String> {
         "re" => AsmOperand::RegSignedImm32,
         "rI" => AsmOperand::RegShiftImm5,
         "Nd" => AsmOperand::PortImm8,
+        "rsp" => AsmOperand::StackPointer,
         _ if code.starts_with("@cc") => AsmOperand::Flag(
             keel_asm_ir::x86::isa::parse_condition_code(&code[3..])
                 .ok_or_else(|| format!("unknown x86 flag condition `{code}`"))?,
@@ -295,6 +355,7 @@ impl fmt::Display for AsmOperand {
             AsmOperand::RegSignedImm32 => f.write_str("re"),
             AsmOperand::RegShiftImm5 => f.write_str("rI"),
             AsmOperand::PortImm8 => f.write_str("Nd"),
+            AsmOperand::StackPointer => f.write_str("rsp"),
             AsmOperand::Flag(cc) => match keel_asm_ir::x86::isa::condition_code_name(*cc) {
                 Some(name) => write!(f, "@cc{name}"),
                 None => write!(f, "@cc({cc})"),
@@ -391,6 +452,38 @@ mod tests {
         assert!(err("{x31}", 0).contains("unknown register"));
         assert!(err("~{unknown}", 0).contains("unknown register"));
     }
+}
+
+/// Whether `value` is the canonical `i64` stack-dependency snapshot:
+/// `PtrToInt(StackSave())`. Value aliases are resolved at both steps. Block
+/// parameters, loads, arithmetic and invented integer values do not establish
+/// a stack observation. This proves capture provenance, not the current RSP
+/// value or the template's balanced-stack promise.
+pub fn is_stack_pointer_snapshot(func: &crate::Function, value: crate::Value) -> bool {
+    use crate::{ConvertOp, InstData, Intrinsic, ValueDef};
+    let value = func.resolve(value);
+    if func.value_type(value) != Type::I64 {
+        return false;
+    }
+    let ValueDef::Result(convert, 0) = func.value_def(value) else {
+        return false;
+    };
+    let InstData::Convert {
+        op: ConvertOp::PtrToInt,
+        ty: Type::I64,
+        arg,
+    } = func.inst_data(convert)
+    else {
+        return false;
+    };
+    let pointer = func.resolve(*arg);
+    if func.value_type(pointer) != Type::Ptr {
+        return false;
+    }
+    let ValueDef::Result(capture, 0) = func.value_def(pointer) else {
+        return false;
+    };
+    matches!(func.inst_data(capture), InstData::Intrinsic { id: Intrinsic::StackSave, args } if args.is_empty())
 }
 
 /// Resolve the relocatable subset accepted by the `i` constraint. An address

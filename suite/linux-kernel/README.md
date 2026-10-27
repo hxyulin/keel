@@ -1,11 +1,11 @@
 # Minimal Linux x86-64 compiler target
 
-Latest measured status: **38/484 C inputs** and **490/506 assembly inputs**
+Latest measured status: **65/484 C inputs** and **490/506 assembly inputs**
 accepted under the original feature policy. A separate explicit-feature probe
-accepts **40 C inputs and all 506 assembly inputs**. The
-[frame/stack follow-up](#frame-and-stack-observers) records the current blocker:
-Linux's reserved-stack asm-call operands. Seven formerly accepted inputs now
-reject an unmodeled contract instead of treating `rsp` as ordinary data.
+accepts **68 C inputs and all 506 assembly inputs**. The
+[reserved-stack follow-up](#reserved-stack-asm-calls) restores all seven
+withdrawn C inputs. The dominant next blockers are aggregate asm operands and
+runtime `offsetof` expressions.
 
 This fixture targets the **64-bit parts** of Linux v6.12. Host programs,
 16/32-bit code and mixed-mode assembly remain external. The supported x86 C
@@ -944,3 +944,76 @@ compilers. Unsafe walks beyond the known caller chain are not executed.
 Logs: `/tmp/keel-c-frame-tests.log`, `/tmp/keel-c-frame-native-final.log` and
 `/tmp/keel-c-frame-final-probe.log`. Further implementation stops at the reserved
 stack operand/backend contract, as requested for significant backend work.
+
+## Reserved-stack asm calls
+
+The [follow-up audit](audit-rsp-stack-call.json) adds the reserved-stack IR and
+backend contract authorized after the preceding stop. Exact `"+r"` on the bound
+RSP variable normalizes to an input-only `rsp` dependency with no SSA stack
+result or writeback. The verifier checks its I64 `StackSave`/`PtrToInt`
+provenance, uniqueness and reserved-register conflicts. C source operand names
+and numbers remain stable across register, memory and stack operands.
+
+The backend renders live physical RSP and never installs the snapshot value.
+A later input expression may allocate stack space without rewinding the stack.
+Token-bearing asm receives an ABI call barrier for caller-clobbered GPR/SIMD
+values. The template must balance stack changes, preserve the frame bases and
+DF, maintain call alignment and return normally. This does not infer argument
+or return types or model unwinding/nonlocal exits. Linux's `=D`/`D` read-then-write
+pair is admitted in this mode when types match and the output is non-early;
+competing inputs, duplicate outputs and clobber conflicts remain errors.
+Ordinary asm keeps its prior fixed-register matching policy. The
+[contract](../../docs/x86-c-inline-asm.md#balanced-stack-calls) records the limits.
+
+| Policy | Accepted C / 484 | Accepted assembly / 506 |
+| --- | ---: | ---: |
+| Original C v1, assembly v3 | 65 | 490 |
+| Explicit optional features | 68 | 506 |
+
+This restores all seven previously withdrawn inputs and accepts another 20 C
+inputs under the original policy, for 27 new acceptances relative to the last
+checkpoint. The optional policy gains 28 C inputs. All 528 previously accepted
+original-policy objects and all 546 optional-policy objects remain accepted
+and byte-identical. All 992 captured inputs, binary dependencies and reference
+artifacts rehash unchanged. No crashes or timeouts occur. The reference was not
+rebuilt/rebooted, and no Keel object was linked into or executed as the kernel.
+
+The optional permissions remain `+popcnt,+rdrand` for C and the existing eight
+assembly features. The next C first errors under that policy are:
+
+| First-error family | Inputs |
+| --- | ---: |
+| Aggregate `q` asm operand in `pgtable.h` (`pmd_t` in `WRITE_ONCE`) | 256 |
+| Constant-expression requirement at runtime `offsetof` in `rbtree_latch.h` | 136 |
+| Nonconstant static initializers | 5 |
+| Matching asm operand type/width | 4 |
+| Required inlining of public `native_save_fl` definitions | 8 |
+| RDTSCP permission in `trace_clock.i` | 1 |
+| Other syntax, section and builtin gaps | 6 |
+
+The last group includes GNU local labels, declaration syntax, custom-section
+rules and `__builtin_isdigit`. These remain first diagnostics, not an exhaustive
+list. `trace_clock.i` independently compiles when `+rdtscp` is explicitly added
+to the C policy; that supplemental single-input check does not change the
+headline corpus policy or CPU profile membership. Public inline binding guards
+remain intact.
+
+Validation passes 2,848 workspace tests and one doctest, with 13 ignored.
+Workspace all-targets/all-features check, 99 generator tests, five audit tests
+and both freshness checks pass. Scoped formatting, Clippy and Rustdoc complete
+with existing warnings. All-target IR Clippy separately encounters the unchanged
+`almost_swapped` denial in `tests/call_operand_abi.rs:15`; the new IR contract
+target and consumer checks pass.
+
+All 48 v1/v3 object variants pass with GCC and Clang native harnesses, for 96
+executions. Independent assembly callees check exact entry/return RSP, nested
+alignment, eight register/stack arguments, GPR/SIMD liveness, dynamic and aligned
+frames, alternative-call metadata, output remapping and input `alloca` after
+the snapshot. Four controls fail normally with exact exits 1, 5, 7 and 9 for
+missing scalar/SIMD behavior, wrong stack arguments, omitted page writes and
+missing operand allocation. The shared C fixture is not treated as a GNU
+compiler reference: its reserved-stack contract deliberately supplies implicit
+ABI SIMD clobbers that GNU inline asm would need to declare explicitly.
+
+Logs: `/tmp/keel-rsp-contract-tests.log`, `/tmp/keel-rsp-contract-remote.log`
+and `/tmp/keel-rsp-contract-evidence.json`.

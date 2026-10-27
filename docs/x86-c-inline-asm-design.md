@@ -69,7 +69,8 @@ until their respective milestones. Do not accept them and approximate their
 meaning. Reject RSP clobbers and reserve a live frame pointer. Diagnose register
 exhaustion. Fixed input/output overlap is legal only through a declared tie;
 clobbers cannot overlap operand registers. The stack pointer and direction flag
-must satisfy the function ABI on normal fallthrough. Calls and terminal
+must satisfy the function ABI on normal fallthrough. Balanced calls now use the
+[reserved-stack contract](x86-c-inline-asm.md#balanced-stack-calls). Other calls and terminal
 transfers inside a template need separate contracts.
 
 Start with a conservative asm-boundary plan: snapshot input sources before

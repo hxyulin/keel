@@ -258,14 +258,23 @@ pub enum InitItem<'a> {
     Bytes { offset: u64, bytes: &'a [u8] },
 }
 
+/// How an output contributes to the lowered assembly contract.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum AsmOutputKind {
+    Register,
+    /// An address input with no SSA result or writeback.
+    Memory,
+    /// A balanced hardware-RSP dependency, supplied as a snapshot input.
+    StackPointer,
+}
+
 /// Checked GNU assembly; read/write register outputs supply implicit tied inputs.
 #[derive(Copy, Clone, Debug)]
 pub struct AsmStmt<'a> {
     pub template: &'a str,
     pub constraints: &'a str,
     pub outputs: &'a [(Expr<'a>, bool)],
-    /// Memory outputs carry addresses and have no SSA result or writeback.
-    pub output_memory: &'a [bool],
+    pub output_kinds: &'a [AsmOutputKind],
     pub inputs: &'a [Expr<'a>],
     /// C destinations selected by an asm-local restoration trampoline.
     pub goto_labels: &'a [&'a str],

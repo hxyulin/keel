@@ -1,0 +1,660 @@
+{
+  "schema": 1,
+  "date": "2026-10-27",
+  "implementation_base": "cf82585d",
+  "baseline_report": "audit-c-stack-observers.json",
+  "source_manifest_sha256": "908006c3e46761f50342cf6556fcd86a05d7edf51cf2e85de449d19cfd2c5135",
+  "config_sha256": "af7dd9b29c4ac472ffe32d338821425912fe92ad62b30281ef1356947930e129",
+  "all_992_inputs_rehashed_unchanged": true,
+  "reference_artifacts_rehashed_unchanged": true,
+  "reference_rebuilt_or_rebooted": false,
+  "kernel_codegen_contract": false,
+  "keel_objects_linked_or_run_as_kernel": false,
+  "policies": {
+    "pinned": {
+      "target_policy": {
+        "c": {
+          "cpu_level": "v1",
+          "target_features": null
+        },
+        "asm": {
+          "cpu_level": "v3",
+          "target_features": null
+        }
+      },
+      "baseline_target_policy": {
+        "c": {
+          "cpu_level": "v1",
+          "target_features": null
+        },
+        "asm": {
+          "cpu_level": "v3",
+          "target_features": null
+        }
+      },
+      "keel_binary_sha256": "a3d349609b331bdc1d1940c49b9a58b61e7c134cf3ff27e0bf51012ae8fe96eb",
+      "results": {
+        "c": {
+          "total": 484,
+          "accepted": 65,
+          "rejected": 419,
+          "crashed": 0,
+          "timeout": 0,
+          "first_errors": [
+            {
+              "category": "asm `*` constraint does not support this operand type",
+              "count": 256,
+              "example": {
+                "path": "arch/x86/entry/common.i",
+                "diagnostic": "keel: <source>/arch/x86/include/asm/pgtable.h:1430:210: error: asm `q` constraint does not support this operand type"
+              }
+            },
+            {
+              "category": "expected a constant expression",
+              "count": 136,
+              "example": {
+                "path": "arch/x86/events/intel/ds.i",
+                "diagnostic": "keel: <source>/include/linux/rbtree_latch.h:72:347: error: expected a constant expression"
+              }
+            },
+            {
+              "category": "initializer is not a constant",
+              "count": 5,
+              "example": {
+                "path": "arch/x86/lib/pc-conf-reg.i",
+                "diagnostic": "keel: <source>/arch/x86/lib/pc-conf-reg.c:13:31: error: initializer is not a constant"
+              }
+            },
+            {
+              "category": "asm matching input and output must have the same IR type",
+              "count": 4,
+              "example": {
+                "path": "arch/x86/entry/vdso/vclock_gettime.i",
+                "diagnostic": "keel: <source>/arch/x86/include/asm/vdso/gettimeofday.h:76:12: error: asm matching input and output must have the same IR type"
+              }
+            },
+            {
+              "category": "feature-policy",
+              "count": 4,
+              "example": {
+                "path": "arch/x86/kernel/cpu/rdrand.i",
+                "diagnostic": "keel: <build>/arch/x86/kernel/cpu/rdrand.i: line 274: rdrand requires x86 target features: rdrand"
+              }
+            },
+            {
+              "category": "expected a type, found `*`",
+              "count": 2,
+              "example": {
+                "path": "fs/init.i",
+                "diagnostic": "keel: <source>/include/linux/signal.h:199:35: error: expected a type, found `;`"
+              }
+            },
+            {
+              "category": "incompatible storage or retention in shared custom section",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/kernel/io_delay.i",
+                "diagnostic": "keel: <build>/arch/x86/kernel/io_delay.i:0:0: error: incompatible storage or retention in shared custom section"
+              }
+            },
+            {
+              "category": "special/TLS/COMDAT section placement is unsupported",
+              "count": 1,
+              "example": {
+                "path": "init/version.i",
+                "diagnostic": "keel: <build>/init/version.i:0:0: error: special/TLS/COMDAT section placement is unsupported"
+              }
+            },
+            {
+              "category": "`*` is not declared",
+              "count": 1,
+              "example": {
+                "path": "kernel/rcu/sync.i",
+                "diagnostic": "keel: <source>/kernel/rcu/sync.c:139:942: error: `__label__` is not declared"
+              }
+            },
+            {
+              "category": "required inlining of @native_save_fl in @smp_call_function_single failed: public_definition",
+              "count": 1,
+              "example": {
+                "path": "kernel/up.i",
+                "diagnostic": "keel: <build>/kernel/up.i:0:0: error: required inlining of @native_save_fl in @smp_call_function_single failed: public_definition"
+              }
+            },
+            {
+              "category": "required inlining of @native_save_fl in @_atomic_dec_and_lock_irqsave failed: public_definition",
+              "count": 1,
+              "example": {
+                "path": "lib/dec_and_lock.i",
+                "diagnostic": "keel: <build>/lib/dec_and_lock.i:0:0: error: required inlining of @native_save_fl in @_atomic_dec_and_lock_irqsave failed: public_definition"
+              }
+            },
+            {
+              "category": "required inlining of @native_save_fl in @percpu_counter_add failed: public_definition",
+              "count": 1,
+              "example": {
+                "path": "lib/flex_proportions.i",
+                "diagnostic": "keel: <build>/lib/flex_proportions.i:0:0: error: required inlining of @native_save_fl in @percpu_counter_add failed: public_definition"
+              }
+            },
+            {
+              "category": "required inlining of @native_save_fl in @ida_alloc_range failed: public_definition",
+              "count": 1,
+              "example": {
+                "path": "lib/idr.i",
+                "diagnostic": "keel: <build>/lib/idr.i:0:0: error: required inlining of @native_save_fl in @ida_alloc_range failed: public_definition"
+              }
+            },
+            {
+              "category": "required inlining of @native_save_fl in @objpool_pop failed: public_definition",
+              "count": 1,
+              "example": {
+                "path": "lib/objpool.i",
+                "diagnostic": "keel: <build>/lib/objpool.i:0:0: error: required inlining of @native_save_fl in @objpool_pop failed: public_definition"
+              }
+            },
+            {
+              "category": "`*` is not supported",
+              "count": 1,
+              "example": {
+                "path": "lib/parser.i",
+                "diagnostic": "keel: <source>/lib/parser.c:54:7: error: `__builtin_isdigit` is not supported"
+              }
+            },
+            {
+              "category": "required inlining of @native_save_fl in @___ratelimit failed: public_definition",
+              "count": 1,
+              "example": {
+                "path": "lib/ratelimit.i",
+                "diagnostic": "keel: <build>/lib/ratelimit.i:0:0: error: required inlining of @native_save_fl in @___ratelimit failed: public_definition"
+              }
+            },
+            {
+              "category": "required inlining of @native_save_fl in @refcount_dec_and_lock_irqsave failed: public_definition",
+              "count": 1,
+              "example": {
+                "path": "lib/refcount.i",
+                "diagnostic": "keel: <build>/lib/refcount.i:0:0: error: required inlining of @native_save_fl in @refcount_dec_and_lock_irqsave failed: public_definition"
+              }
+            },
+            {
+              "category": "required inlining of @native_save_fl in @xa_destroy failed: public_definition",
+              "count": 1,
+              "example": {
+                "path": "lib/xarray.i",
+                "diagnostic": "keel: <build>/lib/xarray.i:0:0: error: required inlining of @native_save_fl in @xa_destroy failed: public_definition"
+              }
+            }
+          ]
+        },
+        "asm": {
+          "total": 506,
+          "accepted": 490,
+          "rejected": 16,
+          "crashed": 0,
+          "timeout": 0,
+          "first_errors": [
+            {
+              "category": "feature-policy",
+              "count": 16,
+              "example": {
+                "path": "arch/x86/entry/entry_64.s",
+                "diagnostic": "keel: <build>/arch/x86/entry/entry_64.s: line 768: rdgsbase requires x86 target features: fsgsbase"
+              }
+            }
+          ]
+        }
+      },
+      "first_error_feature_gates": [
+        {
+          "kind": "asm",
+          "instruction": "clflush",
+          "required_features": [
+            "clflush"
+          ],
+          "rejected_inputs": 3
+        },
+        {
+          "kind": "asm",
+          "instruction": "invpcid",
+          "required_features": [
+            "invpcid"
+          ],
+          "rejected_inputs": 1
+        },
+        {
+          "kind": "asm",
+          "instruction": "prefetchw",
+          "required_features": [
+            "prefetchw"
+          ],
+          "rejected_inputs": 3
+        },
+        {
+          "kind": "asm",
+          "instruction": "rdgsbase",
+          "required_features": [
+            "fsgsbase"
+          ],
+          "rejected_inputs": 2
+        },
+        {
+          "kind": "asm",
+          "instruction": "rdrand",
+          "required_features": [
+            "rdrand"
+          ],
+          "rejected_inputs": 2
+        },
+        {
+          "kind": "asm",
+          "instruction": "rdtscp",
+          "required_features": [
+            "rdtscp"
+          ],
+          "rejected_inputs": 5
+        },
+        {
+          "kind": "c",
+          "instruction": "popcnt",
+          "required_features": [
+            "popcnt"
+          ],
+          "rejected_inputs": 2
+        },
+        {
+          "kind": "c",
+          "instruction": "rdrand",
+          "required_features": [
+            "rdrand"
+          ],
+          "rejected_inputs": 1
+        },
+        {
+          "kind": "c",
+          "instruction": "rdtscp",
+          "required_features": [
+            "rdtscp"
+          ],
+          "rejected_inputs": 1
+        }
+      ],
+      "prior_accepted_objects": {
+        "total": 528,
+        "retained": 528,
+        "byte_identical": 528,
+        "changed": [],
+        "withdrawn_acceptance": []
+      },
+      "new_accepted_c": [
+        "arch/x86/entry/vdso/vdso-image-64.i",
+        "arch/x86/events/probe.i",
+        "arch/x86/kernel/cpu/powerflags.i",
+        "arch/x86/kernel/fpu/bugs.i",
+        "arch/x86/kernel/resource.i",
+        "arch/x86/kernel/time.i",
+        "arch/x86/kernel/tsc_sync.i",
+        "arch/x86/lib/msr-reg-export.i",
+        "drivers/base/firmware_loader/builtin/main.i",
+        "init/calibrate.i",
+        "init/version-timestamp.i",
+        "lib/argv_split.i",
+        "lib/debug_locks.i",
+        "lib/generic-radix-tree.i",
+        "lib/iomap_copy.i",
+        "lib/irq_regs.i",
+        "lib/kasprintf.i",
+        "lib/lockref.i",
+        "lib/lwq.i",
+        "lib/memcat_p.i",
+        "lib/random32.i",
+        "lib/rbtree.i",
+        "lib/rcuref.i",
+        "lib/siphash.i",
+        "lib/string.i",
+        "lib/timerqueue.i",
+        "lib/zlib_inflate/infutil.i"
+      ]
+    },
+    "explicit_optional_features": {
+      "target_policy": {
+        "c": {
+          "cpu_level": "v1",
+          "target_features": "+popcnt,+rdrand"
+        },
+        "asm": {
+          "cpu_level": "v3",
+          "target_features": "+rdtscp,+fsgsbase,+rdrand,+prefetchw,+invpcid,+clflush,+rdseed,+waitpkg"
+        }
+      },
+      "baseline_target_policy": {
+        "c": {
+          "cpu_level": "v1",
+          "target_features": "+popcnt,+rdrand"
+        },
+        "asm": {
+          "cpu_level": "v3",
+          "target_features": "+rdtscp,+fsgsbase,+rdrand,+prefetchw,+invpcid,+clflush,+rdseed,+waitpkg"
+        }
+      },
+      "keel_binary_sha256": "a3d349609b331bdc1d1940c49b9a58b61e7c134cf3ff27e0bf51012ae8fe96eb",
+      "results": {
+        "c": {
+          "total": 484,
+          "accepted": 68,
+          "rejected": 416,
+          "crashed": 0,
+          "timeout": 0,
+          "first_errors": [
+            {
+              "category": "asm `*` constraint does not support this operand type",
+              "count": 256,
+              "example": {
+                "path": "arch/x86/entry/common.i",
+                "diagnostic": "keel: <source>/arch/x86/include/asm/pgtable.h:1430:210: error: asm `q` constraint does not support this operand type"
+              }
+            },
+            {
+              "category": "expected a constant expression",
+              "count": 136,
+              "example": {
+                "path": "arch/x86/events/intel/ds.i",
+                "diagnostic": "keel: <source>/include/linux/rbtree_latch.h:72:347: error: expected a constant expression"
+              }
+            },
+            {
+              "category": "initializer is not a constant",
+              "count": 5,
+              "example": {
+                "path": "arch/x86/lib/pc-conf-reg.i",
+                "diagnostic": "keel: <source>/arch/x86/lib/pc-conf-reg.c:13:31: error: initializer is not a constant"
+              }
+            },
+            {
+              "category": "asm matching input and output must have the same IR type",
+              "count": 4,
+              "example": {
+                "path": "arch/x86/entry/vdso/vclock_gettime.i",
+                "diagnostic": "keel: <source>/arch/x86/include/asm/vdso/gettimeofday.h:76:12: error: asm matching input and output must have the same IR type"
+              }
+            },
+            {
+              "category": "expected a type, found `*`",
+              "count": 2,
+              "example": {
+                "path": "fs/init.i",
+                "diagnostic": "keel: <source>/include/linux/signal.h:199:35: error: expected a type, found `;`"
+              }
+            },
+            {
+              "category": "incompatible storage or retention in shared custom section",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/kernel/io_delay.i",
+                "diagnostic": "keel: <build>/arch/x86/kernel/io_delay.i:0:0: error: incompatible storage or retention in shared custom section"
+              }
+            },
+            {
+              "category": "feature-policy",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/kernel/trace_clock.i",
+                "diagnostic": "keel: <build>/arch/x86/kernel/trace_clock.i: line 77: rdtscp requires x86 target features: rdtscp"
+              }
+            },
+            {
+              "category": "special/TLS/COMDAT section placement is unsupported",
+              "count": 1,
+              "example": {
+                "path": "init/version.i",
+                "diagnostic": "keel: <build>/init/version.i:0:0: error: special/TLS/COMDAT section placement is unsupported"
+              }
+            },
+            {
+              "category": "`*` is not declared",
+              "count": 1,
+              "example": {
+                "path": "kernel/rcu/sync.i",
+                "diagnostic": "keel: <source>/kernel/rcu/sync.c:139:942: error: `__label__` is not declared"
+              }
+            },
+            {
+              "category": "required inlining of @native_save_fl in @smp_call_function_single failed: public_definition",
+              "count": 1,
+              "example": {
+                "path": "kernel/up.i",
+                "diagnostic": "keel: <build>/kernel/up.i:0:0: error: required inlining of @native_save_fl in @smp_call_function_single failed: public_definition"
+              }
+            },
+            {
+              "category": "required inlining of @native_save_fl in @_atomic_dec_and_lock_irqsave failed: public_definition",
+              "count": 1,
+              "example": {
+                "path": "lib/dec_and_lock.i",
+                "diagnostic": "keel: <build>/lib/dec_and_lock.i:0:0: error: required inlining of @native_save_fl in @_atomic_dec_and_lock_irqsave failed: public_definition"
+              }
+            },
+            {
+              "category": "required inlining of @native_save_fl in @percpu_counter_add failed: public_definition",
+              "count": 1,
+              "example": {
+                "path": "lib/flex_proportions.i",
+                "diagnostic": "keel: <build>/lib/flex_proportions.i:0:0: error: required inlining of @native_save_fl in @percpu_counter_add failed: public_definition"
+              }
+            },
+            {
+              "category": "required inlining of @native_save_fl in @ida_alloc_range failed: public_definition",
+              "count": 1,
+              "example": {
+                "path": "lib/idr.i",
+                "diagnostic": "keel: <build>/lib/idr.i:0:0: error: required inlining of @native_save_fl in @ida_alloc_range failed: public_definition"
+              }
+            },
+            {
+              "category": "required inlining of @native_save_fl in @objpool_pop failed: public_definition",
+              "count": 1,
+              "example": {
+                "path": "lib/objpool.i",
+                "diagnostic": "keel: <build>/lib/objpool.i:0:0: error: required inlining of @native_save_fl in @objpool_pop failed: public_definition"
+              }
+            },
+            {
+              "category": "`*` is not supported",
+              "count": 1,
+              "example": {
+                "path": "lib/parser.i",
+                "diagnostic": "keel: <source>/lib/parser.c:54:7: error: `__builtin_isdigit` is not supported"
+              }
+            },
+            {
+              "category": "required inlining of @native_save_fl in @___ratelimit failed: public_definition",
+              "count": 1,
+              "example": {
+                "path": "lib/ratelimit.i",
+                "diagnostic": "keel: <build>/lib/ratelimit.i:0:0: error: required inlining of @native_save_fl in @___ratelimit failed: public_definition"
+              }
+            },
+            {
+              "category": "required inlining of @native_save_fl in @refcount_dec_and_lock_irqsave failed: public_definition",
+              "count": 1,
+              "example": {
+                "path": "lib/refcount.i",
+                "diagnostic": "keel: <build>/lib/refcount.i:0:0: error: required inlining of @native_save_fl in @refcount_dec_and_lock_irqsave failed: public_definition"
+              }
+            },
+            {
+              "category": "required inlining of @native_save_fl in @xa_destroy failed: public_definition",
+              "count": 1,
+              "example": {
+                "path": "lib/xarray.i",
+                "diagnostic": "keel: <build>/lib/xarray.i:0:0: error: required inlining of @native_save_fl in @xa_destroy failed: public_definition"
+              }
+            }
+          ]
+        },
+        "asm": {
+          "total": 506,
+          "accepted": 506,
+          "rejected": 0,
+          "crashed": 0,
+          "timeout": 0,
+          "first_errors": []
+        }
+      },
+      "first_error_feature_gates": [
+        {
+          "kind": "c",
+          "instruction": "rdtscp",
+          "required_features": [
+            "rdtscp"
+          ],
+          "rejected_inputs": 1
+        }
+      ],
+      "prior_accepted_objects": {
+        "total": 546,
+        "retained": 546,
+        "byte_identical": 546,
+        "changed": [],
+        "withdrawn_acceptance": []
+      },
+      "new_accepted_c": [
+        "arch/x86/entry/vdso/vdso-image-64.i",
+        "arch/x86/events/probe.i",
+        "arch/x86/kernel/cpu/powerflags.i",
+        "arch/x86/kernel/cpu/rdrand.i",
+        "arch/x86/kernel/fpu/bugs.i",
+        "arch/x86/kernel/resource.i",
+        "arch/x86/kernel/time.i",
+        "arch/x86/kernel/tsc_sync.i",
+        "arch/x86/lib/msr-reg-export.i",
+        "drivers/base/firmware_loader/builtin/main.i",
+        "init/calibrate.i",
+        "init/version-timestamp.i",
+        "lib/argv_split.i",
+        "lib/debug_locks.i",
+        "lib/generic-radix-tree.i",
+        "lib/iomap_copy.i",
+        "lib/irq_regs.i",
+        "lib/kasprintf.i",
+        "lib/lockref.i",
+        "lib/lwq.i",
+        "lib/memcat_p.i",
+        "lib/random32.i",
+        "lib/rbtree.i",
+        "lib/rcuref.i",
+        "lib/siphash.i",
+        "lib/string.i",
+        "lib/timerqueue.i",
+        "lib/zlib_inflate/infutil.i"
+      ]
+    }
+  },
+  "binary_inputs": {
+    "arch/x86/realmode/rm/realmode.bin": {
+      "bytes": 20516,
+      "sha256": "97d7c5f5b0a0f1aab01cc827f4e3c4b3b4a5d83b18e68f9b15083c926f95d50c"
+    },
+    "arch/x86/realmode/rm/realmode.relocs": {
+      "bytes": 136,
+      "sha256": "07723db7eae26557a7d5af8e15018040010a2581594021c355aedb2d96c1c655"
+    },
+    "usr/initramfs_inc_data": {
+      "bytes": 512,
+      "sha256": "c74972e537a33a0d680202d650d08c9e249f07d5d33a830345672138da1fb14e"
+    }
+  },
+  "native_matrix": {
+    "generated_objects": 48,
+    "generated_executions": 96,
+    "compilers": [
+      "gcc",
+      "clang"
+    ],
+    "normally_rejected_controls": [
+      {
+        "function": "balanced_live",
+        "exit": 1
+      },
+      {
+        "function": "balanced_stack_arguments",
+        "exit": 5
+      },
+      {
+        "function": "balanced_clear_page",
+        "exit": 7
+      },
+      {
+        "function": "balanced_operand_alloca",
+        "exit": 9
+      }
+    ]
+  },
+  "implemented": [
+    "Input-only reserved-stack rsp IR constraint with snapshot provenance checks",
+    "C +r(bound_rsp) normalization preserving source operand numbering without SSA SP result/writeback",
+    "Physical RSP substitution with no snapshot installation",
+    "ABI call barrier preserving live GPR/SIMD state",
+    "Compatible non-early fixed input/output sharing in balanced-stack mode",
+    "AArch64 rejection and malformed-contract diagnostics"
+  ],
+  "limits": [
+    "Templates must restore RSP and preserve frame bases/DF, maintain call alignment and return normally. Unwinding/nonlocal exits/terminal transfers remain unsupported.",
+    "The marker does not infer call argument or return types. Stack arguments must be supplied by the template.",
+    "Only exact +r on a bound global RSP variable is accepted. Marker duplicates, output ties, narrow RSP views, competing fixed inputs and early-clobber overlaps reject.",
+    "Snapshot provenance is canonical StackSave to PtrToInt I64 with value aliases resolved; arbitrary integers, arithmetic, phis and reloads are rejected.",
+    "Kernel ABI, objtool, linking and boot remain unqualified."
+  ],
+  "restored_previous_withdrawals": [
+    "arch/x86/kernel/cpu/powerflags.i",
+    "arch/x86/kernel/fpu/bugs.i",
+    "lib/iomap_copy.i",
+    "lib/rbtree.i",
+    "lib/rcuref.i",
+    "lib/string.i",
+    "lib/timerqueue.i"
+  ],
+  "validation": {
+    "workspace": {
+      "regular_tests_passed": 2848,
+      "doctests_passed": 1,
+      "failed": 0,
+      "ignored": 13,
+      "log": "/tmp/keel-rsp-contract-tests.log"
+    },
+    "all_targets_all_features_check": true,
+    "generator_tests_passed": 99,
+    "audit_harness_tests_passed": 5,
+    "both_generator_freshness_checks": true,
+    "scoped_formatting": true,
+    "scoped_clippy": "New IR contract test and consumer libraries/tests completed with existing warnings. All-target IR Clippy encountered the unchanged almost_swapped denial in tests/call_operand_abi.rs:15.",
+    "rustdoc_build": true,
+    "native_log": "/tmp/keel-rsp-contract-remote.log",
+    "native_oracle": "Independent assembly callees and numeric/state harness linked with GCC and Clang; the shared float-live source is not treated as a GNU reference because its reserved-stack contract supplies implicit ABI SIMD clobbers.",
+    "system_instructions_executed": false
+  },
+  "supplemental_feature_permission": {
+    "path": "arch/x86/kernel/trace_clock.i",
+    "target_features": "+popcnt,+rdrand,+rdtscp",
+    "accepted": true,
+    "scope": "One unchanged input, separate from the primary optional-policy corpus; no CPU profile membership changes."
+  },
+  "implementation_inputs_sha256": {
+    "crates/keel-ir/src/asm.rs": "44d12cab2b7a8618c1ec5a67b48b3a11810ba64f59290235f2816628ccb9c665",
+    "crates/keel-ir/src/lib.rs": "c59c83a63b2bd17c626f1c27ba620fbe8784c3edf410a00bfc0f916d06fd8dcf",
+    "crates/keel-ir/src/verifier.rs": "38baac940cf42eef62a73ab46e6de8d2b0af1358276e999957bf9373ca54e9fb",
+    "crates/keel-codegen/src/aarch64.rs": "d7ec6c17ebab8fe1043921ba7a3ff238d1906bc167728820f770ccad08bc0a3c",
+    "crates/keel-codegen/src/x86_64.rs": "d709e7699773790979b5bb6f90b0888b2a5fdbcb42fc107fdc4eb0bcd911d32e",
+    "crates/keel-codegen/src/x86_64/inline_asm.rs": "24ed446045112b4153165c4de534e525f4ddc0315e0bbb8e4f81d8c8f9dfe05c",
+    "crates/keel-c/src/ast.rs": "d89cb1a17679c4fae254b422feeb9aaf9f6794bc468f5b7a829ebb59dd5a57a1",
+    "crates/keel-c/src/irgen.rs": "f8caf9a1311b64df56a74e98839f98b2a93ad68e6a36577db3527d51b21adc6e",
+    "crates/keel-c/src/parse/asm.rs": "47ddcfe8ededbfa8bf69f1486f721d1ef793b4fa27f59a3a210f92b153108768",
+    "crates/keel-c/tests/x86_stack_register.rs": "c4368635d05d691223f7fd9cf9595b566e31494e8eb0595b3da57e9977a4b032",
+    "crates/keel-c/tests/asm_stack_call.rs": "775453acc2fc1b81d9fea2ab3c14608d660dfe3f623eab81f241b6ec80d72d5d",
+    "crates/keel-c/tests/x86_stack_call.rs": "8eb33e0b3c8fe93461a69b7aa543c9d879a8a539276cdb483b4630f42b746d67",
+    "crates/keel-ir/tests/stack_pointer_asm.rs": "86e55d5730a747e69db4bec25eaed3edf410cdd435c686ad5e26d6eee6bcc4c4",
+    "crates/keel-c/tests/fixtures/x86_stack_call.c": "1e8853abfa51f86cd59b3166f0f73884c18ab7dfcc3f76440c069c83d59dbb82",
+    "crates/keel-c/tests/fixtures/x86_stack_call_callees.s": "df6108941def9a2852f6ffd136ca5a7b9b00c3e0d117df10d8f6f94cf7e545eb",
+    "crates/keel-c/tests/fixtures/x86_stack_call_runner.c": "3919bf31259ea39596b1f0523a95ef71340f54e1419a397cb1d9e8e63a841a3f"
+  }
+}

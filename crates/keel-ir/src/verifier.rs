@@ -871,6 +871,9 @@ impl Verifier<'_> {
             );
             return;
         }
+        if let Err(message) = asm.stack_pointer_input() {
+            self.inst_error(inst, message);
+        }
         let mut early = Vec::new();
         for &out in &asm.early_clobbers {
             if out as usize >= asm.outputs.len() || early.contains(&out) {
@@ -887,6 +890,7 @@ impl Verifier<'_> {
             | AsmOperand::Fixed(PhysReg { float: false, .. }) => {
                 (ty.is_int() && ty != Type::I128) || ty == Type::Ptr
             }
+            AsmOperand::StackPointer => ty == Type::I64,
             AsmOperand::FloatReg | AsmOperand::Fixed(PhysReg { float: true, .. }) => ty.is_float(),
             AsmOperand::Mem | AsmOperand::MemWrite | AsmOperand::MemReadWrite => ty == Type::Ptr,
             AsmOperand::Flag(cc) => cc < 16 && ty.is_int() && ty != Type::I128,
@@ -912,6 +916,14 @@ impl Verifier<'_> {
                 self.inst_error(inst, format!("asm operand {n} (`{op}`) cannot be {ty}"));
             }
             match op {
+                AsmOperand::StackPointer => {
+                    if !crate::asm::is_stack_pointer_snapshot(func, arg) {
+                        self.inst_error(
+                            inst,
+                            "rsp stack dependency requires a StackSave-to-i64 snapshot".into(),
+                        );
+                    }
+                }
                 AsmOperand::Flag(_) => {
                     self.inst_error(inst, "flag constraints require an output".into())
                 }

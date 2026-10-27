@@ -45,6 +45,12 @@ pub(super) fn plan(
     if args.len() != asm.inputs.len() {
         return Err("asm input arity mismatch".into());
     }
+    let stack_input = asm.stack_pointer_input()?;
+    if let Some(i) = stack_input
+        && !keel_ir::is_stack_pointer_snapshot(func, args[i])
+    {
+        return Err("reserved-stack asm requires an actual stack-pointer snapshot".into());
+    }
     let mut ops: Vec<_> = asm
         .outputs
         .iter()
@@ -97,6 +103,7 @@ pub(super) fn plan(
         }
     }
     let mut regs = vec![None; ops.len()];
+    let mut tied = vec![false; n];
     for (i, op) in ops.iter().enumerate() {
         let ty = if i < n {
             asm.outputs[i].1
@@ -110,6 +117,7 @@ pub(super) fn plan(
         }
         match *op {
             Constraint::Reg => {}
+            Constraint::StackPointer if i >= n && ty == Type::I64 => {}
             Constraint::Flag(cc) if i < n && cc < 16 && ty.is_int() && !early[i] => {}
             Constraint::Mem | Constraint::MemWrite | Constraint::MemReadWrite
                 if i >= n && ty == Type::Ptr => {}
@@ -118,9 +126,25 @@ pub(super) fn plan(
                     return Err(format!("unsupported or reserved x86 asm operand {r}"));
                 }
                 if taken[r.num as usize] {
-                    return Err(format!(
-                        "asm operand {i}: register {r} overlaps another operand or clobber; use a matching constraint"
-                    ));
+                    // Kernel alternative calls use =D/D for the same
+                    // read-then-written hardware operand. Permit one such
+                    // input only under the balanced-stack contract.
+                    let output = if i >= n && stack_input.is_some() {
+                        (0..n).find(|&out| {
+                            regs[out] == Some(r.num)
+                                && !early[out]
+                                && !tied[out]
+                                && asm.outputs[out].1 == ty
+                        })
+                    } else {
+                        None
+                    };
+                    let Some(out) = output else {
+                        return Err(format!(
+                            "asm operand {i}: register {r} overlaps another operand or clobber; use a matching constraint"
+                        ));
+                    };
+                    tied[out] = true;
                 }
                 taken[r.num as usize] = true;
                 regs[i] = Some(r.num);
@@ -154,7 +178,6 @@ pub(super) fn plan(
             regs[i] = Some(r);
         }
     }
-    let mut tied = vec![false; n];
     for (i, op) in ops.iter().enumerate().skip(n) {
         if let Constraint::Tied(out) = *op {
             let out = out as usize;
@@ -222,6 +245,16 @@ fn substitute(
         }
         if i < n && matches!(asm.outputs[i].0, Constraint::Flag(_)) {
             return Err("flag outputs cannot be referenced in an asm template".into());
+        }
+        if i >= n && asm.inputs[i - n] == Constraint::StackPointer {
+            if !matches!(modifier, None | Some('q')) {
+                return Err("reserved-stack asm supports only the 64-bit RSP view".into());
+            }
+            // The input value establishes a dependency, not a value to load
+            // into RSP. Printing the physical register is safe only while the
+            // template preserves the enclosing frame bases and restores RSP.
+            text.push_str("%rsp");
+            continue;
         }
         if let Some(r) = regs[i] {
             if i >= n
