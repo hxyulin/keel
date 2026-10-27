@@ -130,9 +130,16 @@ fn invalid_or_unsupported_source_is_diagnosed() {
     ];
     for (body, expected) in cases {
         let source = format!("void f(int x) {{ {body} }}");
-        let err = keel_c::compile(&source, "bad-asm.c", keel_c::Options::default())
-            .unwrap_err()
-            .to_string();
+        let err = keel_c::compile(
+            &source,
+            "bad-asm.c",
+            keel_c::Options {
+                target: Target::Aarch64AppleDarwin,
+                debug_info: false,
+            },
+        )
+        .unwrap_err()
+        .to_string();
         assert!(
             err.contains(expected),
             "expected {expected}: {source}\n{err}"
