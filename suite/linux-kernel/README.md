@@ -1223,3 +1223,26 @@ return-address, transparent-union and inline-ownership fixtures.
 Logs: `/tmp/keel-c-acceptance-final-tests.log`,
 `/tmp/keel-c-acceptance-final-remote.log`,
 `/tmp/keel-c-acceptance-evidence.json` and `/tmp/keel-empty-abi-oracle.log`.
+
+### Empty aggregate ABI checkpoint
+
+[The follow-up ledger](audit-empty-aggregate-abi.json) records x86-64 SysV
+omission of complete, fieldless, alignment-one GNU structs/unions. The frontend
+keeps local parameter objects and expression effects, but emits no ABI operand
+or hidden result pointer for those values. IR aggregate layouts stay nonempty.
+[The mapping contract](../../docs/c-empty-aggregate-abi.md) records the retained
+limits and how to export the native interoperability fixture.
+
+`mm/vma.i` now accepts. Under the unchanged optional-feature policy, C acceptance
+is 398/484 and assembly acceptance is 506/506. The original pinned policy accepts
+391/484 C inputs and 490/506 assembly inputs. Every prior accepted object remains
+byte-identical. All 992 captured inputs and the reference artifacts were rehashed
+unchanged; no reference rebuild, kernel link or boot was performed.
+
+The full workspace run passes 2,884 tests and one doctest, with 13 tests skipped.
+The final fixture passes 96 generated native executions across GCC and Clang,
+two compiler references and two normally failing controls. It covers indirect
+calls, stack arguments, ordinary aggregate returns, variadics, required inlining,
+debug objects and empty-returning cleanup callbacks. Remaining C rejections are
+still led by const-qualified writes, feature permissions and shared-section
+storage/retention rules.

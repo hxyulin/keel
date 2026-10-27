@@ -187,10 +187,10 @@ fn local_static_compound_copies_remain_constant_initialization() {
 }
 
 #[test]
-fn zero_size_aggregate_abi_stays_an_explicit_boundary() {
+fn non_fieldless_zero_size_aggregate_abi_stays_an_explicit_boundary() {
     for source in [
-        "struct Empty{}; int f(struct Empty value,int x){return x;}",
-        "struct Empty{}; struct Empty f(void){return (struct Empty){};}",
+        "struct Empty{int a[0];}; int f(struct Empty value,int x){return x;}",
+        "struct Empty{}; struct Nested{struct Empty value;}; struct Nested f(void){return (struct Nested){};}",
     ] {
         let error = compile(source).unwrap_err();
         assert!(

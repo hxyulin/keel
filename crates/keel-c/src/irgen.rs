@@ -34,6 +34,28 @@ type R<T> = Result<T, Error>;
 
 pub(crate) mod wasm_scalar;
 
+/// A source parameter either has one IR operand or no ABI payload.
+#[derive(Clone, Copy, Debug)]
+enum ParamMapping {
+    Omitted,
+    Operand(usize),
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ResultMapping {
+    Void,
+    Empty,
+    Direct,
+    Indirect,
+}
+
+/// Keeps source parameter positions separate from ABI operand positions.
+struct CAbiMapping {
+    signature: Signature,
+    params: Vec<ParamMapping>,
+    result: ResultMapping,
+}
+
 pub struct Gen<'p> {
     p: &'p Parser<'p>,
     /// The parser's function definitions, each dropped once emitted.
@@ -733,12 +755,26 @@ impl<'p> Gen<'p> {
         })
     }
 
-    /// The keel signature of a C function type. A struct result becomes a
-    /// leading `sret` parameter. `g` is the function, if known by name.
-    fn signature(&self, fty: &FuncTy, g: usize, extra: &[Ty]) -> R<Signature> {
+    /// Qualify omission independently of the IR's nonempty aggregate layouts.
+    /// Initially only fieldless GNU records on x86-64 SysV are admitted.
+    fn empty_abi_value(&self, ty: &Ty) -> bool {
+        let Ty::Struct(id) = ty else { return false };
+        let record = &self.p.structs[*id];
+        self.p.target == keel_ir::Target::X86_64LinuxGnu
+            && self.p.c_layout == CDataLayout::NATIVE_LP64
+            && self.types().unsupported_value(ty).is_none()
+            && record.complete
+            && record.size == 0
+            && record.align == 1
+            && record.members.is_empty()
+    }
+
+    fn abi_mapping(&self, fty: &FuncTy, g: usize, extra: &[Ty]) -> R<CAbiMapping> {
         let mut sig = Signature::new(&[], &[]);
         sig.params.reserve(fty.params.len() + extra.len() + 1);
-        if fty.ret.is_pair_or_struct() {
+        let result = if self.empty_abi_value(&fty.ret) {
+            ResultMapping::Empty
+        } else if fty.ret.is_pair_or_struct() {
             sig.params.push(AbiParam {
                 ty: Type::Ptr,
                 ext: ArgExt::None,
@@ -747,19 +783,37 @@ impl<'p> Gen<'p> {
                         .map_err(|t| self.unsupported(g, t))?,
                 ),
             });
+            ResultMapping::Indirect
         } else if fty.ret != Ty::Void {
             sig.returns.push(
                 self.abi_param(&fty.ret)
                     .map_err(|t| self.unsupported(g, t))?,
             );
-        }
+            ResultMapping::Direct
+        } else {
+            ResultMapping::Void
+        };
+        let mut params = Vec::with_capacity(fty.params.len() + extra.len());
         for ty in fty.params.iter().chain(extra) {
-            sig.params
-                .push(self.abi_param(ty).map_err(|t| self.unsupported(g, t))?);
+            if self.empty_abi_value(ty) {
+                params.push(ParamMapping::Omitted);
+            } else {
+                params.push(ParamMapping::Operand(sig.params.len()));
+                sig.params
+                    .push(self.abi_param(ty).map_err(|t| self.unsupported(g, t))?);
+            }
         }
         sig.variadic = fty.variadic;
         sig.returns_twice = g != usize::MAX && self.p.globals[g].returns_twice;
-        Ok(sig)
+        Ok(CAbiMapping {
+            signature: sig,
+            params,
+            result,
+        })
+    }
+
+    fn signature(&self, fty: &FuncTy, g: usize, extra: &[Ty]) -> R<Signature> {
+        Ok(self.abi_mapping(fty, g, extra)?.signature)
     }
 
     /// The error for a call to or definition of function `g` (if known)
@@ -850,7 +904,8 @@ impl<'p> Gen<'p> {
 
     fn function(&mut self, def: &FuncDef<'p>) -> R<Function> {
         let global = &self.p.globals[def.global];
-        let sig = self.signature(&def.ty, def.global, &[])?;
+        let mapping = self.abi_mapping(def.ty, def.global, &[])?;
+        let sig = &mapping.signature;
         let mut func = Function::new(global.symbol.to_owned(), sig.clone());
         // Most functions take 110 to 180 bytes of tree per instruction (a
         // little more per value), and 500 to 900 per block. Reserving as if
@@ -864,9 +919,9 @@ impl<'p> Gen<'p> {
             let local = &def.locals[id];
             if matches!(&local.ty, Ty::Ptr(t) if !matches!(t, Ty::Func(_) | Ty::Void))
                 && local.sugar.is_restrict(&self.p.typedefs)
+                && let ParamMapping::Operand(operand) = mapping.params[index]
             {
-                func.restrict_params
-                    .push((index + usize::from(def.ty.ret.is_pair_or_struct())) as u32);
+                func.restrict_params.push(operand as u32);
             }
         }
         func.attrs = keel_ir::FunctionAttrs {
@@ -892,6 +947,7 @@ impl<'p> Gen<'p> {
             locals: Vec::with_capacity(def.locals.len()),
             alignments: HashMap::default(),
             sret: None,
+            result: mapping.result,
             breaks: Vec::new(),
             continues: Vec::new(),
             labels: HashMap::default(),
@@ -1003,11 +1059,16 @@ impl<'p> Gen<'p> {
                 }
             }
         }
-        let mut params = params.into_iter();
-        if def.ty.ret.is_pair_or_struct() {
-            fg.sret = params.next();
+        if matches!(mapping.result, ResultMapping::Indirect) {
+            fg.sret = Some(params[0]);
         }
-        for ((&id, value), abi_ty) in def.params.iter().zip(params).zip(def.ty.params) {
+        for ((&id, parameter), abi_ty) in def.params.iter().zip(&mapping.params).zip(def.ty.params)
+        {
+            let ParamMapping::Operand(index) = *parameter else {
+                // The local slot is the C parameter object; no incoming bytes exist.
+                continue;
+            };
+            let value = params[index];
             // Old-style definitions receive promoted values but own objects of
             // the declared type. Convert before SSA binding AND width-sensitive
             // stores (including debug/address-taken/volatile parameter slots).
@@ -1865,6 +1926,7 @@ struct FnGen<'g, 'p, 'f> {
     /// Facts attached to distinct SSA definitions, never to a mutable C variable.
     alignments: HashMap<Value, u32>,
     sret: Option<Value>,
+    result: ResultMapping,
     breaks: Vec<(Block, usize)>,
     continues: Vec<(Block, usize)>,
     /// Registered as declarations execute; emit in reverse order on each exit.
@@ -2036,9 +2098,10 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     self.set_loc(loc);
                     let addr = self.addr(&object)?;
                     let mut args = Vec::new();
-                    // The normal ABI uses a hidden result address for pairs
-                    // and structs, even though cleanup discards that result.
-                    if fty.ret.is_pair_or_struct() {
+                    // Cleanup discards the result, but nonempty aggregates still
+                    // require the normal hidden result address.
+                    let mapping = self.g.abi_mapping(fty, g, &[])?;
+                    if matches!(mapping.result, ResultMapping::Indirect) {
                         let size = self.size(&fty.ret);
                         let align = self.g.types().align(&fty.ret);
                         let slot = self.b.create_stack_slot(size.max(1) as u32, align as u32);
@@ -2380,7 +2443,11 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 match value {
                     None => self.return_default()?,
                     Some(e) => {
-                        if let Some(sret) = self.sret {
+                        if matches!(self.result, ResultMapping::Empty) {
+                            self.val(e)?;
+                            self.emit_exit_actions(0)?;
+                            self.b.ins().return_(&[]);
+                        } else if let Some(sret) = self.sret {
                             let src = self.val(e)?;
                             let ty = e.ty;
                             self.copy(sret, src, &ty);
@@ -3058,6 +3125,9 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 return Ok(None);
             }
             ExprKind::VaArg(ap) => {
+                if e.ty.is_pair_or_struct() {
+                    return Err(Error::new(e.loc, "va_arg of an aggregate is not supported"));
+                }
                 let addr = self.val(ap)?;
                 match &e.ty {
                     Ty::Vector(..) => {
@@ -3937,12 +4007,15 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
 
     fn call(&mut self, f: &Expr<'p>, args: &[Expr<'p>], e: &Expr<'p>) -> R<Option<Value>> {
         let fty = f.ty.pointee().and_then(Ty::func).unwrap();
+        let mapping = self.g.abi_mapping(fty, usize::MAX, &[])?;
         self.set_loc(e.loc);
         let mut vals = Vec::new();
         let ret_slot = if fty.ret.is_pair_or_struct() {
             let (size, align) = (self.size(&fty.ret), self.g.types().align(&fty.ret));
             let slot = self.b.create_stack_slot(size.max(1) as u32, align as u32);
-            vals.push(self.b.ins().stack_addr(slot));
+            if matches!(mapping.result, ResultMapping::Indirect) {
+                vals.push(self.b.ins().stack_addr(slot));
+            }
             Some(slot)
         } else {
             None
@@ -3963,7 +4036,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             if !fty.prototyped && arg.ty.is_pair_or_struct() {
                 return Err(Error::new(arg.loc, "struct argument without a prototype"));
             }
-            if vals.len() >= fty.params.len() + usize::from(ret_slot.is_some())
+            if index >= fty.params.len()
                 && (arg.ty.is_pair_or_struct()
                     || arg
                         .ty
@@ -3977,6 +4050,9 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 ));
             }
             let mut value = self.val(arg)?;
+            if matches!(mapping.params.get(index), Some(ParamMapping::Omitted)) {
+                continue;
+            }
             if arg.ty.is_pair_or_struct() && snapshots[index] {
                 let layout =
                     self.aggregate_place(value, &arg.ty, MemoryFlags::default(), arg.loc)?;

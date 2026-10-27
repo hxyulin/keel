@@ -65,7 +65,7 @@ addresses, and retains a constructor. Host checks also execute scoped labels,
 compound copies and flexible-array storage. Attribute placement tests now check
 all 65 retained Clang oracle rows, including seven newly accepted declarators.
 
-## Stop boundary: empty aggregate ABI values
+## Original stop boundary: empty aggregate ABI values
 
 `mm/vma.i` passes an empty `struct vm_userfaultfd_ctx` by value, including in
 public function signatures. The IR requires nonempty `byval`/`sret` layouts.
@@ -77,3 +77,19 @@ returns, per-target classification, callee parameter objects, argument-expressio
 effects, indirect calls and debug parameter indexing. Passing a dummy pointer
 would change following register/stack arguments. Dropping expressions would lose
 effects. This is the architecture change at which the user requested a pause.
+
+## X86-64 SysV follow-up
+
+The [empty aggregate mapping](c-empty-aggregate-abi.md) now admits complete,
+fieldless, alignment-one GNU structs and unions on x86-64 SysV. They retain local
+object storage and expression effects while consuming no call operand or result
+slot. Other targets and empty shapes retain their diagnostic. IR nonempty-layout
+rules and the machine backends are unchanged.
+
+`mm/vma.i` now accepts. C acceptance is 398/484 under the unchanged explicit
+optional-feature policy and 391/484 under the original pinned policy. Assembly
+remains 506/506 and 490/506 respectively. All prior accepted objects are retained
+and byte-identical. The [follow-up ledger](../suite/linux-kernel/audit-empty-aggregate-abi.json)
+records qualification and remaining first errors. There are still 86 rejected C
+inputs under the optional policy; this increment does not establish full C
+acceptance or kernel link/boot support.
