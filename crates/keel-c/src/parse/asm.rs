@@ -112,6 +112,12 @@ impl<'a> Parser<'a> {
                         let mut expr = self.expr()?;
                         self.expect(")")?;
                         if section == 0 {
+                            if matches!(expr.kind, ExprKind::Builtin(Builtin::StackPointer, _)) {
+                                return Err(Error::new(
+                                    expr.loc,
+                                    "stack-pointer asm outputs require a stack-call contract",
+                                ));
+                            }
                             let readwrite = constraint.starts_with('+');
                             if !readwrite && !constraint.starts_with('=') {
                                 return Err(Error::new(

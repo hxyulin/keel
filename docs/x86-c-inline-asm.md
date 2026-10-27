@@ -99,6 +99,11 @@ it as a base pointer. FP/SIMD, control/debug and other register classes are not
 asm operands or clobbers in this milestone. The IR retains target-tagged physical
 registers and early-clobber markers, including in textual round trips.
 
+Read-only global `rsp` bindings have a separate
+[C observer contract](c-stack-observers.md). Linux's read/write
+`ASM_CALL_CONSTRAINT` remains rejected: it needs a reserved-stack asm operand,
+not an ordinary GPR output or a data symbol named `rsp`.
+
 All asm is pinned and conservatively invalidates memory knowledge, even without
 `volatile` or a `memory` clobber. This retains more code than GCC; it does not
 emit a hardware memory fence. Function-scope basic asm preserves literal text,

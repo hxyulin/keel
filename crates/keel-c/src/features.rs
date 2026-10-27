@@ -144,7 +144,12 @@ fn builtin(name: &str, target: Target) -> bool {
     }
     if matches!(
         base,
-        "ia32_pclmulqdq128" | "ia32_cmpps256" | "ia32_cmppd256"
+        "ia32_pclmulqdq128"
+            | "ia32_cmpps256"
+            | "ia32_cmppd256"
+            | "return_address"
+            | "extract_return_addr"
+            | "frob_return_addr"
     ) {
         return target == Target::X86_64LinuxGnu;
     }

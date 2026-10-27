@@ -13,6 +13,7 @@
 
 mod aliases;
 mod asm;
+mod registers;
 
 use crate::arena::BodyArena;
 use crate::ast::*;
@@ -37,6 +38,8 @@ pub struct StrLit<'a> {
 enum Sym {
     Local(LocalId),
     Global(usize),
+    /// Read-only hardware RSP, without an addressable global object.
+    StackPointer,
     /// By index in the typedef table.
     Typedef(usize),
     Enum(i64),
@@ -68,6 +71,7 @@ struct DeclSpec<'a> {
     implicit_int: bool,
     storage: Storage,
     auto_storage: bool,
+    register_storage: bool,
     is_const: bool,
     is_volatile: bool,
     inline: bool,
@@ -1070,6 +1074,12 @@ impl<'a> Parser<'a> {
                 ty: self.globals[g].ty,
                 loc,
             }),
+            Some(Sym::StackPointer) => Ok(Expr {
+                kind: ExprKind::Builtin(Builtin::StackPointer, &[]),
+                sugar: Sugar::Plain,
+                ty: ULONG,
+                loc,
+            }),
             Some(Sym::Enum(v)) => Ok(Expr {
                 kind: ExprKind::Int(v),
                 sugar: Sugar::Plain,
@@ -1222,6 +1232,12 @@ impl<'a> Parser<'a> {
             return Ok(());
         }
         let spec = self.decl_spec()?;
+        if file_scope && spec.register_storage && self.target != Target::X86_64LinuxGnu {
+            return Err(Error::new(
+                self.loc(),
+                "global register variables require x86-64 Linux",
+            ));
+        }
         if spec.infer && spec.storage == Storage::Typedef {
             return Err(Error::new(
                 self.loc(),
@@ -1327,6 +1343,15 @@ impl<'a> Parser<'a> {
             let Some((name, name_loc)) = d.name else {
                 return Err(Error::new(loc, "declaration needs a name"));
             };
+            if file_scope
+                && !spec.register_storage
+                && matches!(self.lookup(name), Some(Sym::StackPointer))
+            {
+                return Err(Error::new(
+                    name_loc,
+                    "stack register variable cannot be redeclared as an ordinary symbol",
+                ));
+            }
             if self.names.get(&self.name_key(name)).is_some_and(|b|
                 matches!(b.last(), Some((depth, Sym::Local(_))) if *depth == self.scopes.len() - 1)) {
                 return Err(Error::new(name_loc, "duplicate local or parameter name"));
@@ -1410,7 +1435,9 @@ impl<'a> Parser<'a> {
             }
             let is_const = d.is_const || (spec.is_const && base);
             let is_volatile = d.is_volatile || (spec.is_volatile && base);
-            if spec.storage == Storage::Typedef {
+            if file_scope && spec.register_storage {
+                self.stack_pointer_declaration(spec, &d, label)?;
+            } else if spec.storage == Storage::Typedef {
                 if attrs.nonstring {
                     return Err(Error::new(name_loc, "nonstring cannot annotate a typedef"));
                 }
@@ -1756,6 +1783,14 @@ impl<'a> Parser<'a> {
         label: Option<&'a str>,
         ty: Ty<'a>,
     ) -> Result<usize, &'static str> {
+        if self
+            .names
+            .get(&self.name_key(name))
+            .and_then(|bindings| bindings.first())
+            .is_some_and(|(depth, s)| *depth == 0 && matches!(s, Sym::StackPointer))
+        {
+            return Err("stack register variable cannot be redeclared as an ordinary symbol");
+        }
         let existing = self
             .names
             .get(&self.name_key(name))
@@ -2614,6 +2649,7 @@ impl<'a> Parser<'a> {
             implicit_int: false,
             storage: Storage::None,
             auto_storage: false,
+            register_storage: false,
             is_const: false,
             is_volatile: false,
             inline: false,
@@ -2634,9 +2670,18 @@ impl<'a> Parser<'a> {
                 _ => None,
             };
             if let Some(s) = storage {
+                if (word == "register" && spec.storage != Storage::None)
+                    || (spec.register_storage && s != Storage::None)
+                {
+                    return Err(Error::new(
+                        loc,
+                        "register cannot be combined with another storage class",
+                    ));
+                }
                 self.advance();
                 spec.storage = s;
                 spec.auto_storage |= word == "auto";
+                spec.register_storage |= word == "register";
                 continue;
             }
             match word {

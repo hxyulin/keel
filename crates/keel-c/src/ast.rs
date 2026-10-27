@@ -198,8 +198,12 @@ pub enum Builtin {
     Trap,
     /// A resumable debugger breakpoint, unlike the terminating `Trap`.
     Debugtrap,
-    /// `__builtin_frame_address(0)`.
-    FrameAddress,
+    /// A fresh read of the read-only x86 global RSP register variable.
+    StackPointer,
+    /// `__builtin_return_address(0)` on x86-64 Linux.
+    ReturnAddress,
+    /// Native `__builtin_frame_address(depth)`, bounded to 0..64.
+    FrameAddress(u8),
     /// The atomic builtins (`__atomic_*`, `__sync_*`, `__c11_atomic_*`),
     /// with their arguments put in one shape, the C11 memory order last
     /// except compare-exchange (see below). Nonconstant orders use seq_cst.

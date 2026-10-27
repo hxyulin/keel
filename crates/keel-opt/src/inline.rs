@@ -489,6 +489,20 @@ fn profitability_reason(f: &Function, full: bool) -> Option<&'static str> {
 }
 
 fn eligibility_reason(f: &Function, admit_noninterposable: bool) -> Option<&'static str> {
+    eligibility_reason_with_frames(f, admit_noninterposable, FrameSemantics::Preserve)
+}
+
+#[derive(Clone, Copy)]
+enum FrameSemantics {
+    Preserve,
+    CRequiredInline,
+}
+
+fn eligibility_reason_with_frames(
+    f: &Function,
+    admit_noninterposable: bool,
+    frames: FrameSemantics,
+) -> Option<&'static str> {
     if f.attrs.weak
         || f.weak_odr
         || (!f.local
@@ -537,7 +551,8 @@ fn eligibility_reason(f: &Function, admit_noninterposable: bool) -> Option<&'sta
                         | Intrinsic::Memmove
                         | Intrinsic::Memset
                         | Intrinsic::Debugtrap
-                ) =>
+                ) && !(matches!(frames, FrameSemantics::CRequiredInline)
+                    && matches!(id, Intrinsic::FrameAddress | Intrinsic::StackSave)) =>
             {
                 Some("unsupported_callee_intrinsic")
             }
@@ -1447,6 +1462,8 @@ mod recursion_tests {
 /// Expand mandatory C inline calls before validating deferred asm immediates.
 /// This phase does not use optional optimizer profitability budgets. Hard
 /// legality and module growth limits still produce explicit diagnostics.
+/// C frame/stack observers bind to the emitted caller frame after expansion.
+/// Ordinary IR inlining keeps its frame-preservation restrictions.
 pub fn required_inline_asm(module: &mut Module) -> Result<(), String> {
     fn discard_unused(module: &mut Module) {
         let mut live: FxHashSet<String> = module
@@ -1571,7 +1588,9 @@ pub fn required_inline_asm(module: &mut Module) -> Result<(), String> {
                 if decl.sig != callee.sig {
                     return Err(fail("ABI signature mismatch"));
                 }
-                if let Some(reason) = eligibility_reason(callee, true) {
+                if let Some(reason) =
+                    eligibility_reason_with_frames(callee, true, FrameSemantics::CRequiredInline)
+                {
                     return Err(fail(reason));
                 }
                 expanded = expanded

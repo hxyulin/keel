@@ -70,6 +70,8 @@ def capture(args):
 
 def category(message, source_line=''):
     message = re.sub(r'^keel: .*?: line \d+: ', '', message)
+    if 'stack-pointer asm outputs require a stack-call contract' in message:
+        return 'asm-stack-call-contract'
     if 'asm goto' in message:
         return 'asm-goto'
     if 'inline assembly' in message:
@@ -90,6 +92,18 @@ def category(message, source_line=''):
     return re.sub(r'`[^`]+`', '`*`', message)[:180]
 
 
+def feature_gate(message):
+    """Record the instruction's requirements, not inferred missing permissions."""
+    match = re.search(
+        r'(?:^|:\s+)([a-z][a-z0-9_]*(?: [a-z][a-z0-9_]*)*)'
+        r' requires x86 target features: ([a-z0-9_]+(?:,[a-z0-9_]+)*)$',
+        message,
+    )
+    if not match:
+        return None
+    return dict(instruction=match[1], required_features=match[2].split(','))
+
+
 def probe(args):
     build = args.build.resolve()
     args.out.mkdir(parents=True, exist_ok=False)
@@ -98,6 +112,7 @@ def probe(args):
         raise SystemExit('Resolved config differs from captured manifest.')
     keel_sha256 = sha(args.keel)
     rows = []
+    feature_gates = collections.Counter()
     for item in manifest['inputs']:
         if item['scope'] != 'kernel64':
             continue
@@ -129,10 +144,15 @@ def probe(args):
         lines = path.read_text(errors='replace').splitlines() if location else []
         line_index = int(location[1]) - 1 if location else -1
         source_line = lines[line_index] if 0 <= line_index < len(lines) else ''
-        rows.append(dict(path=item['path'], kind=item['kind'], sha256=item['sha256'],
-                         status=status, returncode=code, diagnostic=diagnostic,
-                         first_source_line=source_line,
-                         category=category(message, source_line) if status == 'rejected' else status))
+        row = dict(path=item['path'], kind=item['kind'], sha256=item['sha256'],
+                   status=status, returncode=code, diagnostic=diagnostic,
+                   first_source_line=source_line,
+                   category=category(message, source_line) if status == 'rejected' else status)
+        gate = feature_gate(message) if status == 'rejected' else None
+        if gate:
+            row['feature_gate'] = gate
+            feature_gates[(item['kind'], gate['instruction'], tuple(gate['required_features']))] += 1
+        rows.append(row)
         # Preserve progress if the audit is interrupted.
         write(args.out / 'results.json', dict(schema=1,
               note='First diagnostics on unchanged reference inputs; not exhaustive gaps or execution evidence.',
@@ -140,6 +160,10 @@ def probe(args):
               keel_sha256=keel_sha256, results=rows,
               target_policy={'c': {'cpu_level': 'v1', 'target_features': args.c_target_features},
                              'asm': {'cpu_level': 'v3', 'target_features': args.asm_target_features}},
+              first_error_feature_gates=[
+                  dict(kind=kind, instruction=instruction, required_features=list(features),
+                       rejected_inputs=count)
+                  for (kind, instruction, features), count in sorted(feature_gates.items())],
               categories=dict(collections.Counter(x['category'] for x in rows))))
     print(json.dumps(collections.Counter(x['category'] for x in rows), indent=2))
 

@@ -1,11 +1,11 @@
 # Minimal Linux x86-64 compiler target
 
-Latest measured status: **45/484 C inputs** and **490/506 assembly inputs**
+Latest measured status: **38/484 C inputs** and **490/506 assembly inputs**
 accepted under the original feature policy. A separate explicit-feature probe
-accepts **47 C inputs and all 506 assembly inputs**. The
-[asm-goto/alias follow-up](#asm-goto-function-aliases-and-assembly-completion)
-records the current blockers. Nonzero-depth frame-address queries are now the
-common C first error.
+accepts **40 C inputs and all 506 assembly inputs**. The
+[frame/stack follow-up](#frame-and-stack-observers) records the current blocker:
+Linux's reserved-stack asm-call operands. Seven formerly accepted inputs now
+reject an unmodeled contract instead of treating `rsp` as ordinary data.
 
 This fixture targets the **64-bit parts** of Linux v6.12. Host programs,
 16/32-bit code and mixed-mode assembly remain external. The supported x86 C
@@ -884,3 +884,63 @@ normally with exit 1. Eight alias executions covered optimization on/off and
 weak-default/strong-override binding with both compilers. Full workspace log:
 `/tmp/keel-goto-alias-tests-final.log`; native log:
 `/tmp/keel-goto-alias-native-complete.log`.
+
+## Frame and stack observers
+
+The [follow-up audit](audit-c-stack-observers.json) implements native frame
+queries at constant depths 0..64, x86-64 Linux return-address queries at depth
+zero, pointer extraction/frobbing and read-only global `rsp` bindings. The
+[C observer contract](../../docs/c-stack-observers.md) records the frame-chain
+preconditions and target limits. C-required inlining rebinds observations to
+the emitted frame; ordinary IR inlining keeps its frame-preservation guards.
+No intrinsic IDs, assembler tables or backend emitters change.
+
+The fresh corpus no longer stops at frame queries. It instead reaches Linux's
+`ASM_CALL_CONSTRAINT`, expanded as `"+r"(current_stack_pointer)` in the
+`clear_page` alternatives helper. This is a reserved-stack dependency, not an
+ordinary register-variable load/store. The frontend now diagnoses the missing
+contract explicitly. The prior parser discarded `register` and created an
+ordinary object named `rsp`, so that earlier acceptance did not model this
+operand correctly. General stack-pointer writes remain unsupported.
+
+| Policy | Accepted C / 484 | Accepted assembly / 506 |
+| --- | ---: | ---: |
+| Original C v1, assembly v3 | 38 | 490 |
+| Explicit optional features | 40 | 506 |
+
+There are 444 C first errors at the stack-call contract under both policies.
+The original policy has another two POPCNT first errors. The optional C policy
+now enables `+popcnt,+rdrand`; the assembly permission list is unchanged. RDRAND
+was independently accepted with explicit permission by the preceding compiler,
+but its current input reaches the earlier stack-call diagnostic. Probe rows
+and summaries now record each feature-gated instruction and its complete
+required feature set, without inferring missing permissions from GCC flags.
+
+Seven previously accepted C inputs now reject: `cpu/powerflags.i`,
+`fpu/bugs.i`, `lib/iomap_copy.i`, `lib/rbtree.i`, `lib/rcuref.i`, `lib/string.i`
+and `lib/timerqueue.i` (the first two are under `arch/x86/kernel`). This is an
+intentional withdrawal of acceptance at an unimplemented contract. Another
+28 original-policy and 30 optional-policy C objects change to remove bogus
+`rsp` data symbols; every shared executable section remains byte-identical.
+All retained assembly objects are byte-identical. All 992 captured inputs,
+binary dependencies and reference artifacts rehash unchanged. No crashes or
+timeouts occur. No Keel object is linked into or executed as the kernel.
+
+The full workspace passes 2,840 tests and one doctest, with 13 ignored. A final
+diagnostic refinement then passes all eight affected C tests and five audit
+tests. Workspace all-targets/all-features check, 99 generator tests, both
+freshness checks and scoped formatting pass. Clippy completes with existing
+warnings; Rustdoc completes with an unrelated existing bare-URL warning.
+
+All 72 matrix objects pass native execution with both GCC and Clang, for 144
+generated executions, plus six independently compiled references and three
+normally rejected controls. Frame/return references use `-O2`; stack-register
+references use `-O0` because optimized GCC merges global-register reads across
+`alloca`. Every optimized/unoptimized Keel variant is checked against separate
+inline-asm RSP observations. The native Rust frame target also exercises
+controlled caller chains, dynamic frames and required inline helpers with both
+compilers. Unsafe walks beyond the known caller chain are not executed.
+
+Logs: `/tmp/keel-c-frame-tests.log`, `/tmp/keel-c-frame-native-final.log` and
+`/tmp/keel-c-frame-final-probe.log`. Further implementation stops at the reserved
+stack operand/backend contract, as requested for significant backend work.

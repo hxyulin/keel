@@ -4536,9 +4536,29 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 let inst = ins.intrinsic(Intrinsic::StackAlloc, &vals);
                 self.b.function().inst_results(inst)[0]
             }
-            Builtin::FrameAddress => {
+            Builtin::StackPointer => {
+                let inst = ins.intrinsic(Intrinsic::StackSave, &[]);
+                let stack = self.b.function().inst_results(inst)[0];
+                self.b.ins().convert(ConvertOp::PtrToInt, Type::I64, stack)
+            }
+            Builtin::ReturnAddress => {
                 let inst = ins.intrinsic(Intrinsic::FrameAddress, &[]);
-                self.b.function().inst_results(inst)[0]
+                let frame = self.b.function().inst_results(inst)[0];
+                // The x86 frame intrinsic prevents frameless emission. RBP
+                // names the saved caller RBP; the return slot follows it.
+                let slot = self.offset_by(frame, 8);
+                self.b.ins().load(Type::Ptr, slot)
+            }
+            Builtin::FrameAddress(depth) => {
+                let inst = ins.intrinsic(Intrinsic::FrameAddress, &[]);
+                let mut frame = self.b.function().inst_results(inst)[0];
+                // Native frame records begin with the caller's saved RBP/x29.
+                // Nonzero depths require readable caller frame records; do not
+                // fabricate a frame or replace a missing chain with null.
+                for _ in 0..depth {
+                    frame = self.b.ins().load(Type::Ptr, frame);
+                }
+                frame
             }
             Builtin::AtomicLoad
             | Builtin::AtomicStore

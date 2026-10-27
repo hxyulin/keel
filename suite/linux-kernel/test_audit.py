@@ -46,6 +46,8 @@ class AuditTests(unittest.TestCase):
             self.assertEqual(row['sha256'], audit.sha(root / 'kernel.i'))
 
     def test_first_error_grouping(self):
+        self.assertEqual(audit.category('error: stack-pointer asm outputs require a stack-call contract'),
+                         'asm-stack-call-contract')
         self.assertEqual(audit.category('error: asm goto is not supported'), 'asm-goto')
         self.assertEqual(audit.category('unsupported ELF directive `.pushsection`'),
                          'assembler-directive:.pushsection')
@@ -82,6 +84,53 @@ class AuditTests(unittest.TestCase):
                     'c': {'cpu_level': 'v1', 'target_features': c_features},
                     'asm': {'cpu_level': 'v3', 'target_features': asm_features},
                 })
+                self.assertEqual(result['first_error_feature_gates'], [])
+
+    def test_probe_records_instruction_requirements_without_granting_features(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / '.config').write_text('CONFIG_64BIT=y\n')
+            (root / 'compiler').write_text('compiler witness')
+            inputs = [('c', 'find.i', 'popcnt', 'popcnt'),
+                      ('c', 'weight.i', 'popcnt', 'popcnt'),
+                      ('c', 'random.i', 'rdrand', 'rdrand'),
+                      ('asm', 'vector.s', 'vaddps', 'avx512f,avx512vl')]
+            for _, path, _, _ in inputs:
+                (root / path).write_text('unchanged witness\n')
+            manifest = root / 'manifest.json'
+            manifest.write_text(json.dumps({
+                'config_sha256': audit.sha(root / '.config'),
+                'inputs': [{'kind': kind, 'path': path, 'scope': 'kernel64',
+                            'sha256': audit.sha(root / path)}
+                           for kind, path, _, _ in inputs],
+            }))
+            args = types.SimpleNamespace(build=root, manifest=manifest, keel=root / 'compiler',
+                out=root / 'probe', timeout=60, c_target_features=None,
+                asm_target_features='+avx512f')
+            failures = [types.SimpleNamespace(returncode=1, stderr=(
+                f'keel: {root / path}: line 1: {instruction} requires x86 target features: {features}'
+            ).encode()) for _, path, instruction, features in inputs]
+            with patch.object(audit.subprocess, 'run', side_effect=failures) as run:
+                audit.probe(args)
+            result = json.loads((args.out / 'results.json').read_text())
+            self.assertEqual(result['first_error_feature_gates'], [
+                {'kind': 'asm', 'instruction': 'vaddps',
+                 'required_features': ['avx512f', 'avx512vl'], 'rejected_inputs': 1},
+                {'kind': 'c', 'instruction': 'popcnt',
+                 'required_features': ['popcnt'], 'rejected_inputs': 2},
+                {'kind': 'c', 'instruction': 'rdrand',
+                 'required_features': ['rdrand'], 'rejected_inputs': 1},
+            ])
+            for row, (_, _, instruction, features) in zip(result['results'], inputs):
+                self.assertEqual(row['category'], 'feature-policy')
+                self.assertEqual(row['feature_gate'], {
+                    'instruction': instruction, 'required_features': features.split(',')})
+            # Reporting a requirement never changes the caller's explicit policy.
+            for call in run.call_args_list[:3]:
+                self.assertNotIn('--target-features', call.args[0])
+            command = run.call_args_list[3].args[0]
+            self.assertEqual(command[command.index('--target-features') + 1], '+avx512f')
+            self.assertIsNone(audit.feature_gate('unknown instruction `rdrand`'))
 
 
 if __name__ == '__main__':

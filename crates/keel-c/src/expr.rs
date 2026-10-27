@@ -13,6 +13,9 @@ use crate::{Error, Loc};
 use keel_ir::Target;
 use keel_ir::{Intrinsic, OverflowOp, RmwOp};
 
+/// Bounds the number of frame-record loads emitted by one C builtin.
+const MAX_FRAME_ADDRESS_DEPTH: i64 = 64;
+
 pub(crate) fn mk<'a>(kind: ExprKind<'a>, ty: Ty<'a>, loc: Loc) -> Expr<'a> {
     Expr {
         kind,
@@ -50,9 +53,9 @@ fn broadcast_constant(e: &Expr<'_>, layout: CDataLayout) -> Option<Const> {
     supported(e).then(|| eval_constant(e, false)).flatten()
 }
 
-/// x86 immediate controls are bounded C ICEs, not arbitrary folds by the general
+/// Integer controls are bounded C ICEs, not arbitrary folds by the general
 /// evaluator (which deliberately wraps shifts/overflow and saturates FP casts).
-fn x86_immediate_control(e: &Expr<'_>, layout: CDataLayout) -> Option<i64> {
+fn integer_constant_control(e: &Expr<'_>, layout: CDataLayout) -> Option<i64> {
     if layout != CDataLayout::NATIVE_LP64 {
         return None;
     }
@@ -1610,7 +1613,7 @@ impl<'a> Parser<'a> {
             }
             if immediate {
                 // Reuse the reviewed bounded ICE proof, including undefined-expression checks.
-                let Some(n) = x86_immediate_control(&args[1], self.c_layout)
+                let Some(n) = integer_constant_control(&args[1], self.c_layout)
                     .filter(|n| (0..=255).contains(n))
                 else {
                     return Err(Error::new(
@@ -1671,7 +1674,7 @@ impl<'a> Parser<'a> {
                     "PCLMULQDQ requires matching i64x2 integer vectors on x86-64",
                 ));
             }
-            let Some(n) = x86_immediate_control(&args[2], self.c_layout) else {
+            let Some(n) = integer_constant_control(&args[2], self.c_layout) else {
                 return Err(Error::new(
                     loc,
                     "PCLMULQDQ control must be an integer constant expression in0..=255",
@@ -1704,7 +1707,7 @@ impl<'a> Parser<'a> {
             }
             if keygen {
                 // Reuse the reviewed PCLMUL bounded ICE proof unchanged.
-                let Some(n) = x86_immediate_control(&args[1], self.c_layout) else {
+                let Some(n) = integer_constant_control(&args[1], self.c_layout) else {
                     return Err(Error::new(
                         loc,
                         "AESKEYGENASSIST requires an integer constant expression in 0..255",
@@ -2155,16 +2158,67 @@ impl<'a> Parser<'a> {
                 let ptr = self.ptr_type(Ty::Void);
                 self.builtin_call(Builtin::Alloca, &[ULONG], ptr, loc)
             }
-            "frame_address" => {
+            "return_address" => {
                 let args = self.builtin_args(1, loc)?;
-                if eval_int_with_layout(&args[0], self.c_layout) != Some(0) {
+                if self.target != Target::X86_64LinuxGnu {
                     return Err(Error::new(
                         loc,
-                        "`__builtin_frame_address` is only supported for frame 0",
+                        "`__builtin_return_address` requires x86-64 Linux",
+                    ));
+                }
+                if integer_constant_control(&args[0], self.c_layout) != Some(0) {
+                    return Err(Error::new(
+                        loc,
+                        "`__builtin_return_address` requires constant integer depth 0",
                     ));
                 }
                 Ok(mk(
-                    ExprKind::Builtin(Builtin::FrameAddress, &[]),
+                    ExprKind::Builtin(Builtin::ReturnAddress, &[]),
+                    self.ptr_type(Ty::Void),
+                    loc,
+                ))
+            }
+            "extract_return_addr" | "frob_return_addr" => {
+                let args = self.builtin_args(1, loc)?;
+                if self.target != Target::X86_64LinuxGnu {
+                    return Err(Error::new(
+                        loc,
+                        format!("`__builtin_{base}` requires x86-64 Linux"),
+                    ));
+                }
+                // SysV x86-64 stores the actual continuation address. Other
+                // targets may encode or sign it and need their own contract.
+                if !args[0].ty.is_ptr()
+                    && integer_constant_control(&args[0], self.c_layout) != Some(0)
+                {
+                    return Err(Error::new(
+                        loc,
+                        "return-address conversion requires a pointer",
+                    ));
+                }
+                let ptr = self.ptr_type(Ty::Void);
+                self.convert_for_assign(args[0], &ptr)
+            }
+            "frame_address" => {
+                let args = self.builtin_args(1, loc)?;
+                if !Target::NATIVE.contains(&self.target) {
+                    return Err(Error::new(
+                        loc,
+                        "`__builtin_frame_address` requires a native frame-record ABI",
+                    ));
+                }
+                // Bound emitted pointer loads without relaxing the shared ICE
+                // evaluator's checks for overflow, shifts and side effects.
+                let Some(depth) = integer_constant_control(&args[0], self.c_layout)
+                    .filter(|n| (0..=MAX_FRAME_ADDRESS_DEPTH).contains(n))
+                else {
+                    return Err(Error::new(
+                        loc,
+                        "`__builtin_frame_address` requires an integer constant expression in 0..64",
+                    ));
+                };
+                Ok(mk(
+                    ExprKind::Builtin(Builtin::FrameAddress(depth as u8), &[]),
                     self.ptr_type(Ty::Void),
                     loc,
                 ))
@@ -3527,10 +3581,13 @@ mod integer_layout_tests {
     fn native_proofs_explicitly_reject_the_private_model() {
         let arena = Bump::new();
         let e = expression("1L + 2L", &arena, CDataLayout::WASM32);
-        assert_eq!(x86_immediate_control(&e, CDataLayout::WASM32), None);
+        assert_eq!(integer_constant_control(&e, CDataLayout::WASM32), None);
         assert_eq!(broadcast_constant(&e, CDataLayout::WASM32), None);
         let e = expression("1L + 2L", &arena, CDataLayout::NATIVE_LP64);
-        assert_eq!(x86_immediate_control(&e, CDataLayout::NATIVE_LP64), Some(3));
+        assert_eq!(
+            integer_constant_control(&e, CDataLayout::NATIVE_LP64),
+            Some(3)
+        );
         assert_eq!(
             broadcast_constant(&e, CDataLayout::NATIVE_LP64),
             Some(Const::Int(3))
@@ -3586,7 +3643,7 @@ mod integer_layout_tests {
         ] {
             let e = expression(src, &arena, CDataLayout::NATIVE_LP64);
             assert_eq!(
-                x86_immediate_control(&e, CDataLayout::NATIVE_LP64),
+                integer_constant_control(&e, CDataLayout::NATIVE_LP64),
                 None,
                 "{src}"
             );
