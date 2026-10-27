@@ -1,5 +1,5 @@
-//! Bounded Linux/x86 GNU notes. Input arrays may be unsorted and repeated;
-//! output is one sorted, unique property note (see docs/elf-linker.md).
+//! Bounded Linux notes and Linux/x86 GNU notes. GNU property arrays may be
+//! unsorted and repeated; output is one sorted, unique property note.
 use super::{Section, put32};
 use crate::Result;
 use bbtree::unsync::BBTreeMap as BTreeMap;
@@ -26,6 +26,20 @@ pub(super) fn validate(
     link: u32,
     info: u32,
 ) -> Result<Option<Kind>> {
+    if name == ".note.Linux" {
+        if kind != object::elf::SHT_NOTE
+            || flags != u64::from(object::elf::SHF_ALLOC)
+            || alignment != 4
+            || entsize != 0
+            || link != 0
+            || info != 0
+        {
+            return Err(".note.Linux requires SHT_NOTE, SHF_ALLOC only, alignment 4, and zero entsize/link/info".into());
+        }
+        // Linux records retain their bytes, symbols and section identity.
+        // The caller must validate the payload with linux before retaining it.
+        return Ok(None);
+    }
     let note = match name {
         ".note.gnu.property" => Kind::Property,
         ".note.ABI-tag" => Kind::Abi,
@@ -57,6 +71,46 @@ fn word(data: &[u8], at: usize) -> Result<u32> {
         .get(at..end)
         .ok_or("truncated note header or payload")?;
     Ok(u32::from_le_bytes(bytes.try_into().unwrap()))
+}
+
+/// Validate opaque Linux records without assigning meaning to their types or data.
+/// Linux's include/linux/elfnote.h defines 4-byte name/descriptor padding and
+/// places no constraints on descriptor contents, including for unknown types.
+pub(super) fn linux(data: &[u8]) -> Result<()> {
+    let mut at: usize = 0;
+    while at < data.len() {
+        let header_end = at.checked_add(12).ok_or("Linux note offset overflow")?;
+        let header = data
+            .get(at..header_end)
+            .ok_or("truncated Linux note header")?;
+        let namesz = word(header, 0)?;
+        let descsz = word(header, 4)? as usize;
+        if namesz != 6 {
+            return Err(".note.Linux requires owner Linux and namesz=6".into());
+        }
+        // Linux\0 occupies six bytes plus two padding bytes. Both name and
+        // descriptor padding belong to the record and must be present.
+        let desc = header_end
+            .checked_add(8)
+            .ok_or("Linux note offset overflow")?;
+        let name = data
+            .get(header_end..desc)
+            .ok_or("truncated Linux note owner or padding")?;
+        if &name[..6] != b"Linux\0" {
+            return Err(".note.Linux requires owner Linux and namesz=6".into());
+        }
+        let padded = descsz
+            .checked_add(3)
+            .ok_or("Linux note descriptor overflow")?
+            & !3;
+        let end = desc
+            .checked_add(padded)
+            .ok_or("Linux note descriptor overflow")?;
+        data.get(desc..end)
+            .ok_or("truncated Linux note descriptor or padding")?;
+        at = end;
+    }
+    Ok(())
 }
 
 pub(super) fn properties(data: &[u8], out: &mut Properties) -> Result<()> {
@@ -159,6 +213,7 @@ fn merge(objects: &[Properties], generated_code: bool) -> Properties {
 pub(super) struct Plan {
     pub property: Option<usize>,
     pub abi: Option<usize>,
+    linux: Vec<usize>,
 }
 impl Plan {
     pub fn prepare(
@@ -167,6 +222,15 @@ impl Plan {
         objects: &[Properties],
         generated_code: bool,
     ) -> Result<()> {
+        self.linux.clear();
+        for (i, section) in sections.iter().enumerate() {
+            if section.name == ".note.Linux" {
+                linux(&section.data)?;
+                if section.size != 0 {
+                    self.linux.push(i);
+                }
+            }
+        }
         let properties = merge(objects, generated_code);
         if properties.get(&FEATURE_1_AND).is_some_and(|v| v & 1 != 0) {
             return Err("merged GNU IBT property is unsupported until ENDBR64 generated stubs are implemented".into());
@@ -198,7 +262,9 @@ impl Plan {
         Ok(())
     }
     pub fn header_count(&self) -> usize {
-        2 * usize::from(self.property.is_some()) + usize::from(self.abi.is_some())
+        2 * usize::from(self.property.is_some())
+            + usize::from(self.abi.is_some())
+            + self.linux.len()
     }
     pub fn headers(&self, sections: &[Section]) -> Vec<(u32, u32, u64, u64, u64, u64)> {
         let mut headers = Vec::new();
@@ -212,6 +278,10 @@ impl Plan {
             let s = &sections[i];
             headers.push((object::elf::PT_NOTE, 4, s.offset, s.size, s.size, 4));
         }
+        for &i in &self.linux {
+            let s = &sections[i];
+            headers.push((object::elf::PT_NOTE, 4, s.offset, s.size, s.size, 4));
+        }
         headers
     }
 }
@@ -219,6 +289,127 @@ impl Plan {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const LINUX: &[u8] =
+        include_bytes!("../../tests/fixtures/linux-notes/aggregate.note.Linux.bin");
+
+    fn linux_record(kind: u32, descriptor: &[u8]) -> Vec<u8> {
+        let mut data = Vec::new();
+        for word in [6, descriptor.len() as u32, kind] {
+            data.extend_from_slice(&word.to_le_bytes());
+        }
+        data.extend_from_slice(b"Linux\0\0\0");
+        data.extend_from_slice(descriptor);
+        data.resize((data.len() + 3) & !3, 0);
+        data
+    }
+
+    #[test]
+    fn linux_aggregate_matches_literal_and_gnu_ld_oracle() {
+        let mut literal = linux_record(0x100, &[0]);
+        literal.extend(linux_record(0x101, &[0; 4]));
+        assert_eq!(LINUX, literal);
+        assert_eq!(
+            LINUX,
+            include_bytes!("../../tests/fixtures/linux-notes/gnu-ld.note.Linux.bin")
+        );
+        linux(LINUX).unwrap();
+    }
+
+    #[test]
+    fn linux_unknown_types_descriptors_and_padding_are_opaque() {
+        for kind in [0, 0x100, 0x101, u32::MAX] {
+            for size in [0, 1, 2, 3, 4, 5, 256, 4097] {
+                let mut data = linux_record(kind, &vec![0xff; size]);
+                data[18..20].fill(0xa5);
+                data[20 + size..].fill(0xa5);
+                data.extend(linux_record(kind, &[]));
+                linux(&data).unwrap();
+            }
+        }
+        linux(&[]).unwrap();
+    }
+
+    #[test]
+    fn linux_rejects_incomplete_headers_owners_descriptors_and_padding() {
+        for size in 1..LINUX.len() {
+            if size != 24 {
+                assert!(linux(&LINUX[..size]).is_err(), "truncation at {size}");
+            }
+        }
+        for (offset, value) in [(0, 0), (0, 5), (0, 7), (0, u32::MAX), (4, u32::MAX)] {
+            let mut data = LINUX.to_vec();
+            put32(&mut data, offset, value);
+            assert!(linux(&data).is_err(), "offset {offset}, value {value}");
+        }
+        for offset in 12..18 {
+            let mut data = LINUX.to_vec();
+            data[offset] ^= 0xff;
+            assert!(linux(&data).is_err(), "owner byte {offset}");
+        }
+        let mut data = LINUX.to_vec();
+        data.push(0);
+        assert!(linux(&data).is_err(), "trailing partial record");
+    }
+
+    #[test]
+    fn linux_section_fields_are_validated_without_consuming_the_section() {
+        assert!(validate(".note.Linux", 7, 2, 4, 0, 0, 0).unwrap().is_none());
+        for fields in [
+            (1, 2, 4, 0, 0, 0),
+            (7, 0, 4, 0, 0, 0),
+            (7, 3, 4, 0, 0, 0),
+            (7, 6, 4, 0, 0, 0),
+            (7, 2, 1, 0, 0, 0),
+            (7, 2, 8, 0, 0, 0),
+            (7, 2, 4, 1, 0, 0),
+            (7, 2, 4, 0, 1, 0),
+            (7, 2, 4, 0, 0, 1),
+        ] {
+            let (kind, flags, alignment, entsize, link, info) = fields;
+            assert!(
+                validate(".note.Linux", kind, flags, alignment, entsize, link, info).is_err(),
+                "fields {fields:?}"
+            );
+        }
+        assert!(validate(".note.other", 7, 2, 4, 0, 0, 0).is_err());
+        assert!(validate(".note.gnu.property", 7, 2, 4, 0, 0, 0).is_err());
+    }
+
+    fn linux_section(data: &[u8], offset: u64) -> Section {
+        Section {
+            name: ".note.Linux".into(),
+            flags: 2,
+            kind: 7,
+            align: 4,
+            size: data.len() as u64,
+            bss: false,
+            data: data.to_vec(),
+            offset,
+        }
+    }
+
+    #[test]
+    fn linux_plan_preserves_multiple_sections_and_emits_exact_note_ranges() {
+        let unknown = linux_record(u32::MAX, &[1, 2, 3]);
+        let mut sections = vec![
+            linux_section(LINUX, 0x1000),
+            linux_section(&[], 0x1030),
+            linux_section(&unknown, 0x1030),
+        ];
+        let mut plan = Plan::default();
+        plan.prepare(&mut sections, &[], false).unwrap();
+        assert_eq!(sections.len(), 3);
+        assert_eq!(sections[0].data, LINUX);
+        assert_eq!(sections[2].data, unknown);
+        assert_eq!(plan.header_count(), 2);
+        assert_eq!(
+            plan.headers(&sections),
+            vec![(4, 4, 0x1000, 48, 48, 4), (4, 4, 0x1030, 24, 24, 4)]
+        );
+        sections[0].data.pop();
+        assert!(plan.prepare(&mut sections, &[], false).is_err());
+    }
 
     #[test]
     fn retained_gnu_split_oracle_before_ibt_policy() {
