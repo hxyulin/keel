@@ -1,5 +1,9 @@
 # Linux64 link fixes and runtime boundary
 
+The [kernel code-model follow-up](linux-kernel-code-model.md) resolves the two
+link references and startup substitution below. This page records the earlier
+checkpoint and its temporary workaround.
+
 The compiler fixes reduce the pinned kernel's automatic final link from 22
 unresolved references to two: `convert_from_fxsr` and `convert_to_fxsr` in
 `arch/x86/kernel/fpu/signal.i`. All 484 C inputs compile with `-O` and explicit

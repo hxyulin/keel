@@ -1,0 +1,964 @@
+{
+  "schema": 1,
+  "scope": "Pinned Linux v6.12 x86-64 captured core link, packaging and bounded QEMU TCG runtime qualification",
+  "compiler": {
+    "commit": "8cd387c86a7b83a90a13c9159d8eb0ba2983bade",
+    "binary_sha256": "7f5dff652f6b110dee277bcec224659eee9d7d63109392b1455eae58a9877f0e",
+    "modified_production_source_sha256": {
+      "crates/keel-opt/src/lib.rs": "4d1beeabe57ea741e535bd45480777f50541a106780d93f9a152a5863407a78c",
+      "crates/keel-opt/src/module_cleanup.rs": "dda30fc4dcfe5a78292fe40d91754d4bf8bb48da1df7c7aaba832ab4ca1de176",
+      "crates/keel-opt/src/constant_args.rs": "bf8bf97a19a867f6a98d93ffce8f63ede209132652bcfda4ae635eb480afaf14",
+      "crates/keel-opt/src/assembly_symbols.rs": "f165d7f4a13697b165f491df02b1a26cfd8cc3db9e26aceca827248cb227d753",
+      "crates/keel-codegen/src/x86_64.rs": "ed564c3f991d413579075b8e91c6fcdec1c2bad6c532033da4476263350c6e25",
+      "crates/keel/src/main.rs": "f94b8619a9104c2f77365259ffb80951fb16941e135662d541d1594cd0a466df"
+    },
+    "qualified_remote_and_local_production_files_match": true
+  },
+  "pins": {
+    "linux_commit": "adc218676eef25575469234709c2d87185ca223a",
+    "manifest_sha256": "908006c3e46761f50342cf6556fcd86a05d7edf51cf2e85de449d19cfd2c5135",
+    "config_sha256": "af7dd9b29c4ac472ffe32d338821425912fe92ad62b30281ef1356947930e129",
+    "reference_vmlinux_sha256": "2c399397364a7240d3b63e45c9cb70e50bd5b0df66547639aed5de32132c27df",
+    "reference_bzimage_sha256": "6eb40ddbf8129ff75d43ece9778aa6b4a09d044ccf2b22235e9f592e2e566a86",
+    "kernel_policy_sha256": "60189c2bbc51bd84487d041c69715c670688dfbcfb2d1afa24a6c9aae16fcfbc",
+    "kernel_policy": "linux-v6.12-x86-64-kernel-audit",
+    "policy_unchanged": true
+  },
+  "saved_inputs_rehashed_unchanged": 992,
+  "external_binary_dependencies_rehashed_unchanged": {
+    "arch/x86/realmode/rm/realmode.bin": {
+      "bytes": 20516,
+      "sha256": "97d7c5f5b0a0f1aab01cc827f4e3c4b3b4a5d83b18e68f9b15083c926f95d50c"
+    },
+    "arch/x86/realmode/rm/realmode.relocs": {
+      "bytes": 136,
+      "sha256": "07723db7eae26557a7d5af8e15018040010a2581594021c355aedb2d96c1c655"
+    },
+    "usr/initramfs_inc_data": {
+      "bytes": 512,
+      "sha256": "c74972e537a33a0d680202d650d08c9e249f07d5d33a830345672138da1fb14e"
+    }
+  },
+  "tools": {
+    "ld": "GNU ld (GNU Binutils) 2.46",
+    "gcc": "gcc (GCC) 14.4.0",
+    "clang": "clang version 21.1.8",
+    "qemu-system-x86_64": "QEMU emulator version 11.1.2"
+  },
+  "compilation": {
+    "c_inputs": 484,
+    "successful": 484,
+    "flags": [
+      "-O",
+      "--code-model",
+      "kernel",
+      "--link-intent",
+      "executable",
+      "--target",
+      "x86_64-unknown-linux-gnu",
+      "--cpu-level",
+      "v1"
+    ],
+    "features": "unchanged pinned C audit policy",
+    "parallel_processes": 4,
+    "per_unit_timeout_seconds": 180,
+    "ordered_path_and_object_hashes_sha256": "ad0e3adeca2535e8d5f20900299f1676c8103ffd4a5bd983ffe0155cc9078876"
+  },
+  "direct_link": {
+    "total": 501,
+    "keel_c_objects": 481,
+    "keel_assembly_objects": 20,
+    "reference_c_substitutions": 0,
+    "manual_ir_overrides": 0,
+    "ignored_unresolved_references": false,
+    "stubs": false,
+    "sorttable": "passed",
+    "not_direct_members": [
+      "arch/x86/entry/vdso/vclock_gettime.o",
+      "arch/x86/entry/vdso/vdso-note.o",
+      "arch/x86/entry/vdso/vgetcpu.o",
+      "arch/x86/entry/vdso/vgetrandom-chacha.o",
+      "arch/x86/entry/vdso/vgetrandom.o"
+    ]
+  },
+  "link_cases": {
+    "kernel-model-qualified-link": {
+      "archive_format": "normal",
+      "ordered_archive_contents_verified": true,
+      "optimization": "-O --link-intent executable --code-model kernel",
+      "partial": {
+        "returncode": 0,
+        "command": [
+          "ld",
+          "-m",
+          "elf_x86_64",
+          "-z",
+          "noexecstack",
+          "--no-warn-rwx-segments",
+          "-r",
+          "-o",
+          "aggregate.o",
+          "--whole-archive",
+          "vmlinux.a",
+          "--no-whole-archive",
+          "--start-group",
+          "lib/lib.a",
+          "arch/x86/lib/lib.a",
+          "--end-group"
+        ],
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "raw-link": {
+        "returncode": 0,
+        "command": [
+          "ld",
+          "-m",
+          "elf_x86_64",
+          "-z",
+          "noexecstack",
+          "--no-warn-rwx-segments",
+          "-z",
+          "max-page-size=0x200000",
+          "--build-id=sha1",
+          "--orphan-handling=warn",
+          "--script=arch/x86/kernel/vmlinux.lds",
+          "-o",
+          "vmlinux.linked",
+          "--whole-archive",
+          "vmlinux.a",
+          "init/version-timestamp.o",
+          "--no-whole-archive",
+          "--start-group",
+          "lib/lib.a",
+          "arch/x86/lib/lib.a",
+          "--end-group"
+        ],
+        "log_sha256": "f51b0ed909c50b832238b6834f212cfeab95b1d15d48326426fd0a0474a52fd8"
+      },
+      "post-objtool-link": {
+        "returncode": 0,
+        "command": [
+          "ld",
+          "-m",
+          "elf_x86_64",
+          "-z",
+          "noexecstack",
+          "--no-warn-rwx-segments",
+          "-z",
+          "max-page-size=0x200000",
+          "--build-id=sha1",
+          "--orphan-handling=warn",
+          "--script=arch/x86/kernel/vmlinux.lds",
+          "-o",
+          "vmlinux.linked",
+          "--whole-archive",
+          "vmlinux.a",
+          "init/version-timestamp.o",
+          "--no-whole-archive",
+          "--start-group",
+          "lib/lib.a",
+          "arch/x86/lib/lib.a",
+          "--end-group"
+        ],
+        "log_sha256": "f51b0ed909c50b832238b6834f212cfeab95b1d15d48326426fd0a0474a52fd8"
+      },
+      "sorttable": {
+        "returncode": 0,
+        "command": [
+          "./scripts/sorttable",
+          "vmlinux.linked"
+        ],
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "sorttable_success": true,
+      "image_sha256": "7d1230d74d6694063aed7a4d56ef13c1a3acce31d6e574ae2a7e1d5a5d88e040",
+      "reference_byte_identical": false,
+      "ordered_archived_payloads": 500,
+      "undefined_symbols": [],
+      "objtool": {
+        "checked": 480,
+        "nonzero": 0,
+        "warnings": 328,
+        "log_sha256": "cec2641b3a1b7263b7f949788d576edf5108c4228103a4f6a26d180f99a2359a"
+      }
+    },
+    "kernel-model-qualified-head-pic": {
+      "archive_format": "normal",
+      "ordered_archive_contents_verified": true,
+      "optimization": "-O --link-intent executable --code-model kernel",
+      "control": {
+        "kind": "head-pic",
+        "path": "arch/x86/kernel/head64.o",
+        "sha256": "a2abb1609d802bdfdb8d34ab69289426c1ef32e42084dd638665c56b9ba30b7e"
+      },
+      "partial": {
+        "returncode": 0,
+        "command": [
+          "ld",
+          "-m",
+          "elf_x86_64",
+          "-z",
+          "noexecstack",
+          "--no-warn-rwx-segments",
+          "-r",
+          "-o",
+          "aggregate.o",
+          "--whole-archive",
+          "vmlinux.a",
+          "--no-whole-archive",
+          "--start-group",
+          "lib/lib.a",
+          "arch/x86/lib/lib.a",
+          "--end-group"
+        ],
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "raw-link": {
+        "returncode": 0,
+        "command": [
+          "ld",
+          "-m",
+          "elf_x86_64",
+          "-z",
+          "noexecstack",
+          "--no-warn-rwx-segments",
+          "-z",
+          "max-page-size=0x200000",
+          "--build-id=sha1",
+          "--orphan-handling=warn",
+          "--script=arch/x86/kernel/vmlinux.lds",
+          "-o",
+          "vmlinux.linked",
+          "--whole-archive",
+          "vmlinux.a",
+          "init/version-timestamp.o",
+          "--no-whole-archive",
+          "--start-group",
+          "lib/lib.a",
+          "arch/x86/lib/lib.a",
+          "--end-group"
+        ],
+        "log_sha256": "f51b0ed909c50b832238b6834f212cfeab95b1d15d48326426fd0a0474a52fd8"
+      },
+      "post-objtool-link": {
+        "returncode": 0,
+        "command": [
+          "ld",
+          "-m",
+          "elf_x86_64",
+          "-z",
+          "noexecstack",
+          "--no-warn-rwx-segments",
+          "-z",
+          "max-page-size=0x200000",
+          "--build-id=sha1",
+          "--orphan-handling=warn",
+          "--script=arch/x86/kernel/vmlinux.lds",
+          "-o",
+          "vmlinux.linked",
+          "--whole-archive",
+          "vmlinux.a",
+          "init/version-timestamp.o",
+          "--no-whole-archive",
+          "--start-group",
+          "lib/lib.a",
+          "arch/x86/lib/lib.a",
+          "--end-group"
+        ],
+        "log_sha256": "f51b0ed909c50b832238b6834f212cfeab95b1d15d48326426fd0a0474a52fd8"
+      },
+      "sorttable": {
+        "returncode": 0,
+        "command": [
+          "./scripts/sorttable",
+          "vmlinux.linked"
+        ],
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "sorttable_success": true,
+      "image_sha256": "cc2a1b40233bdb533cae5a13ec32ce09011e08b687b28a87b9bd79bd3dd4b913",
+      "reference_byte_identical": false,
+      "ordered_archived_payloads": 500,
+      "undefined_symbols": [],
+      "objtool": {
+        "checked": 480,
+        "nonzero": 0,
+        "warnings": 328,
+        "log_sha256": "cec2641b3a1b7263b7f949788d576edf5108c4228103a4f6a26d180f99a2359a"
+      }
+    },
+    "kernel-model-qualified-fpu-no-constants": {
+      "archive_format": "normal",
+      "ordered_archive_contents_verified": true,
+      "optimization": "-O --link-intent executable --code-model kernel",
+      "control": {
+        "kind": "fpu-no-constants",
+        "path": "arch/x86/kernel/fpu/signal.o",
+        "sha256": "9b66ecaa3e5d4f7d2e389c721299854665c3304217cc84b20612ea31d22fff53"
+      },
+      "partial": {
+        "returncode": 0,
+        "command": [
+          "ld",
+          "-m",
+          "elf_x86_64",
+          "-z",
+          "noexecstack",
+          "--no-warn-rwx-segments",
+          "-r",
+          "-o",
+          "aggregate.o",
+          "--whole-archive",
+          "vmlinux.a",
+          "--no-whole-archive",
+          "--start-group",
+          "lib/lib.a",
+          "arch/x86/lib/lib.a",
+          "--end-group"
+        ],
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "raw-link": {
+        "returncode": 1,
+        "command": [
+          "ld",
+          "-m",
+          "elf_x86_64",
+          "-z",
+          "noexecstack",
+          "--no-warn-rwx-segments",
+          "-z",
+          "max-page-size=0x200000",
+          "--build-id=sha1",
+          "--orphan-handling=warn",
+          "--script=arch/x86/kernel/vmlinux.lds",
+          "-o",
+          "vmlinux.linked",
+          "--whole-archive",
+          "vmlinux.a",
+          "init/version-timestamp.o",
+          "--no-whole-archive",
+          "--start-group",
+          "lib/lib.a",
+          "arch/x86/lib/lib.a",
+          "--end-group"
+        ],
+        "log_sha256": "234d94914e5d90af2a98ba3e7e353cce17bdde40e1888f0531b0ebaad8e9b94a"
+      },
+      "post-objtool-link": {
+        "returncode": 1,
+        "command": [
+          "ld",
+          "-m",
+          "elf_x86_64",
+          "-z",
+          "noexecstack",
+          "--no-warn-rwx-segments",
+          "-z",
+          "max-page-size=0x200000",
+          "--build-id=sha1",
+          "--orphan-handling=warn",
+          "--script=arch/x86/kernel/vmlinux.lds",
+          "-o",
+          "vmlinux.linked",
+          "--whole-archive",
+          "vmlinux.a",
+          "init/version-timestamp.o",
+          "--no-whole-archive",
+          "--start-group",
+          "lib/lib.a",
+          "arch/x86/lib/lib.a",
+          "--end-group"
+        ],
+        "log_sha256": "234d94914e5d90af2a98ba3e7e353cce17bdde40e1888f0531b0ebaad8e9b94a"
+      },
+      "ordered_archived_payloads": 500,
+      "undefined_symbols": [
+        "convert_to_fxsr"
+      ],
+      "objtool": {
+        "checked": 480,
+        "nonzero": 0,
+        "warnings": 328,
+        "log_sha256": "cec2641b3a1b7263b7f949788d576edf5108c4228103a4f6a26d180f99a2359a"
+      }
+    },
+    "kernel-model-qualified-fpu-no-collection": {
+      "archive_format": "normal",
+      "ordered_archive_contents_verified": true,
+      "optimization": "-O --link-intent executable --code-model kernel",
+      "control": {
+        "kind": "fpu-no-collection",
+        "path": "arch/x86/kernel/fpu/signal.o",
+        "sha256": "cd055c565a519993d2f6c26e70c1ed044881d5c696a5bdfba7ff5a0b21852c18"
+      },
+      "partial": {
+        "returncode": 0,
+        "command": [
+          "ld",
+          "-m",
+          "elf_x86_64",
+          "-z",
+          "noexecstack",
+          "--no-warn-rwx-segments",
+          "-r",
+          "-o",
+          "aggregate.o",
+          "--whole-archive",
+          "vmlinux.a",
+          "--no-whole-archive",
+          "--start-group",
+          "lib/lib.a",
+          "arch/x86/lib/lib.a",
+          "--end-group"
+        ],
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "raw-link": {
+        "returncode": 1,
+        "command": [
+          "ld",
+          "-m",
+          "elf_x86_64",
+          "-z",
+          "noexecstack",
+          "--no-warn-rwx-segments",
+          "-z",
+          "max-page-size=0x200000",
+          "--build-id=sha1",
+          "--orphan-handling=warn",
+          "--script=arch/x86/kernel/vmlinux.lds",
+          "-o",
+          "vmlinux.linked",
+          "--whole-archive",
+          "vmlinux.a",
+          "init/version-timestamp.o",
+          "--no-whole-archive",
+          "--start-group",
+          "lib/lib.a",
+          "arch/x86/lib/lib.a",
+          "--end-group"
+        ],
+        "log_sha256": "a8b9efda4d2b9362e5063de6459c61b346a1bfb92aac411049fcec403e8678de"
+      },
+      "post-objtool-link": {
+        "returncode": 1,
+        "command": [
+          "ld",
+          "-m",
+          "elf_x86_64",
+          "-z",
+          "noexecstack",
+          "--no-warn-rwx-segments",
+          "-z",
+          "max-page-size=0x200000",
+          "--build-id=sha1",
+          "--orphan-handling=warn",
+          "--script=arch/x86/kernel/vmlinux.lds",
+          "-o",
+          "vmlinux.linked",
+          "--whole-archive",
+          "vmlinux.a",
+          "init/version-timestamp.o",
+          "--no-whole-archive",
+          "--start-group",
+          "lib/lib.a",
+          "arch/x86/lib/lib.a",
+          "--end-group"
+        ],
+        "log_sha256": "a8b9efda4d2b9362e5063de6459c61b346a1bfb92aac411049fcec403e8678de"
+      },
+      "ordered_archived_payloads": 500,
+      "undefined_symbols": [
+        "convert_from_fxsr"
+      ],
+      "objtool": {
+        "checked": 480,
+        "nonzero": 0,
+        "warnings": 328,
+        "log_sha256": "cec2641b3a1b7263b7f949788d576edf5108c4228103a4f6a26d180f99a2359a"
+      }
+    }
+  },
+  "negative_control_objects": {
+    "head-pic": {
+      "source": "arch/x86/kernel/head64.i",
+      "model": "pic",
+      "omitted_pass": null,
+      "returncode": 0,
+      "object_sha256": "a2abb1609d802bdfdb8d34ab69289426c1ef32e42084dd638665c56b9ba30b7e",
+      "undefined_symbols": [
+        "__brk_base",
+        "__brk_limit",
+        "__bss_start",
+        "__bss_stop",
+        "__supported_pte_mask",
+        "_end",
+        "_text",
+        "boot_command_line",
+        "boot_params",
+        "clear_page_erms",
+        "clear_page_orig",
+        "clear_page_rep",
+        "cpu_tlbstate",
+        "early_dynamic_pgts",
+        "early_fixup_exception",
+        "early_top_pgt",
+        "gdt_page",
+        "idt_setup_early_handler",
+        "init_top_pgt",
+        "level2_fixmap_pgt",
+        "level2_kernel_pgt",
+        "level3_kernel_pgt",
+        "load_ucode_bsp",
+        "memcpy",
+        "memset",
+        "native_write_cr4",
+        "phys_base",
+        "start_kernel",
+        "x86_early_init_platform_quirks"
+      ]
+    },
+    "fpu-no-constants": {
+      "source": "arch/x86/kernel/fpu/signal.i",
+      "model": "kernel",
+      "omitted_pass": "constant-args",
+      "returncode": 0,
+      "object_sha256": "9b66ecaa3e5d4f7d2e389c721299854665c3304217cc84b20612ea31d22fff53",
+      "undefined_symbols": [
+        "__fpu_state_size_dynamic",
+        "__get_user_nocheck_4",
+        "__local_bh_enable_ip",
+        "__put_user_nocheck_4",
+        "alternatives_patched",
+        "boot_cpu_data",
+        "const_pcpu_hot",
+        "convert_to_fxsr",
+        "copy_sigframe_from_user_to_xstate",
+        "fault_in_readable",
+        "fpregs_mark_activate",
+        "fpu__clear_user_states",
+        "fpu_fpregs_owner_ctx",
+        "fpu_kernel_cfg",
+        "fpu_user_cfg",
+        "init_fpstate",
+        "mxcsr_feature_mask",
+        "pcpu_hot",
+        "rep_movs_alternative",
+        "rep_stos_alternative",
+        "restore_fpregs_from_fpstate",
+        "xfd_state"
+      ]
+    },
+    "fpu-no-collection": {
+      "source": "arch/x86/kernel/fpu/signal.i",
+      "model": "kernel",
+      "omitted_pass": "unused-functions",
+      "returncode": 0,
+      "object_sha256": "cd055c565a519993d2f6c26e70c1ed044881d5c696a5bdfba7ff5a0b21852c18",
+      "undefined_symbols": [
+        "__copy_overflow",
+        "__fpu_state_size_dynamic",
+        "__get_user_nocheck_4",
+        "__local_bh_enable_ip",
+        "__put_user_nocheck_2",
+        "__put_user_nocheck_4",
+        "alternatives_patched",
+        "boot_cpu_data",
+        "const_pcpu_hot",
+        "convert_from_fxsr",
+        "fault_in_readable",
+        "fpregs_mark_activate",
+        "fpu__clear_user_states",
+        "fpu_fpregs_owner_ctx",
+        "fpu_kernel_cfg",
+        "fpu_user_cfg",
+        "init_fpstate",
+        "pcpu_hot",
+        "rep_movs_alternative",
+        "rep_stos_alternative",
+        "restore_fpregs_from_fpstate",
+        "xfd_state"
+      ]
+    }
+  },
+  "packaging_and_basic_boot": {
+    "reference": {
+      "input_sha256": "2c399397364a7240d3b63e45c9cb70e50bd5b0df66547639aed5de32132c27df",
+      "stages": [
+        {
+          "name": "nm",
+          "returncode": 0
+        },
+        {
+          "name": "strip",
+          "returncode": 0
+        },
+        {
+          "name": "gzip",
+          "returncode": 0
+        },
+        {
+          "name": "piggy-source",
+          "returncode": 0
+        },
+        {
+          "name": "misc",
+          "returncode": 0
+        },
+        {
+          "name": "piggy",
+          "returncode": 0
+        },
+        {
+          "name": "compressed-link",
+          "returncode": 0
+        },
+        {
+          "name": "compressed-nm",
+          "returncode": 0
+        },
+        {
+          "name": "compressed-binary",
+          "returncode": 0
+        },
+        {
+          "name": "header",
+          "returncode": 0
+        },
+        {
+          "name": "setup-link",
+          "returncode": 0
+        },
+        {
+          "name": "setup-binary",
+          "returncode": 0
+        },
+        {
+          "name": "bzimage",
+          "returncode": 0
+        }
+      ],
+      "bzimage_sha256": "6eb40ddbf8129ff75d43ece9778aa6b4a09d044ccf2b22235e9f592e2e566a86",
+      "reference_bzimage_identical": true,
+      "boot": {
+        "returncode": 33,
+        "passed": true,
+        "log_sha256": "c97b0778e9d0b2fe49bff6b27e18f4f66168a3b039492ff51bf5d034cb1c99a3"
+      }
+    },
+    "kernel": {
+      "input_sha256": "7d1230d74d6694063aed7a4d56ef13c1a3acce31d6e574ae2a7e1d5a5d88e040",
+      "stages": [
+        {
+          "name": "nm",
+          "returncode": 0
+        },
+        {
+          "name": "strip",
+          "returncode": 0
+        },
+        {
+          "name": "gzip",
+          "returncode": 0
+        },
+        {
+          "name": "piggy-source",
+          "returncode": 0
+        },
+        {
+          "name": "misc",
+          "returncode": 0
+        },
+        {
+          "name": "piggy",
+          "returncode": 0
+        },
+        {
+          "name": "compressed-link",
+          "returncode": 0
+        },
+        {
+          "name": "compressed-nm",
+          "returncode": 0
+        },
+        {
+          "name": "compressed-binary",
+          "returncode": 0
+        },
+        {
+          "name": "header",
+          "returncode": 0
+        },
+        {
+          "name": "setup-link",
+          "returncode": 0
+        },
+        {
+          "name": "setup-binary",
+          "returncode": 0
+        },
+        {
+          "name": "bzimage",
+          "returncode": 0
+        }
+      ],
+      "bzimage_sha256": "4c4dff0a15c2eff6dd7e41f07b74119bdc9489818b014d671783cca8a60c25df",
+      "reference_bzimage_identical": false,
+      "boot": {
+        "returncode": 33,
+        "passed": true,
+        "log_sha256": "74ac8433e6c564afe0d8848d629944ffed53505defa519f9771bef2b8c58d18a"
+      }
+    },
+    "head-pic": {
+      "input_sha256": "cc2a1b40233bdb533cae5a13ec32ce09011e08b687b28a87b9bd79bd3dd4b913",
+      "stages": [
+        {
+          "name": "nm",
+          "returncode": 0
+        },
+        {
+          "name": "strip",
+          "returncode": 0
+        },
+        {
+          "name": "gzip",
+          "returncode": 0
+        },
+        {
+          "name": "piggy-source",
+          "returncode": 0
+        },
+        {
+          "name": "misc",
+          "returncode": 0
+        },
+        {
+          "name": "piggy",
+          "returncode": 0
+        },
+        {
+          "name": "compressed-link",
+          "returncode": 0
+        },
+        {
+          "name": "compressed-nm",
+          "returncode": 0
+        },
+        {
+          "name": "compressed-binary",
+          "returncode": 0
+        },
+        {
+          "name": "header",
+          "returncode": 0
+        },
+        {
+          "name": "setup-link",
+          "returncode": 0
+        },
+        {
+          "name": "setup-binary",
+          "returncode": 0
+        },
+        {
+          "name": "bzimage",
+          "returncode": 0
+        }
+      ],
+      "bzimage_sha256": "aae4153b5aba23221e6d7799802e15498566ab07c6dbc6897564fadb9d4e3a4b",
+      "reference_bzimage_identical": false,
+      "boot": {
+        "returncode": 0,
+        "passed": false,
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    }
+  },
+  "head_pic_control": {
+    "only_substitution": "arch/x86/kernel/head64.o compiled by the same Keel compiler with --code-model pic",
+    "first_fault": "     0: v=0e e=0008 i=0 cpl=0 IP=0010:ffffffff810391e8 pc=ffffffff810391e8 SP=0018:0000000001a03f58 CR2=ffffffff810391e8",
+    "triple_fault": true,
+    "passed": false
+  },
+  "runtime": {
+    "fixture": "runtime.c",
+    "fixture_sha256": "8c7fb255783e0974b36597ca4d92a26314a406937faf1549304f0ff9ee3a1c00",
+    "runner": "runtime.py",
+    "runner_sha256": "27b8e2cf7c106d1de9365ebf56392bd0374d435fdcc5584d01c030e82e40223b",
+    "userspace_producer": "external GCC",
+    "accelerator": "tcg",
+    "memory_mib": 128,
+    "cpus": 1,
+    "timeout_seconds": 60,
+    "stages": [
+      "Initramfs executable ELF header through open/read/close",
+      "Mapped-memory writes, exact reads, page faults, permissions and unmapping",
+      "Fork, stack COW, pipe payload, child status and wait"
+    ],
+    "positive": {
+      "kernel_sha256": "4c4dff0a15c2eff6dd7e41f07b74119bdc9489818b014d671783cca8a60c25df",
+      "init_source_sha256": "8c7fb255783e0974b36597ca4d92a26314a406937faf1549304f0ff9ee3a1c00",
+      "compiler": "gcc (GCC) 14.4.0",
+      "qemu": "QEMU emulator version 11.1.2",
+      "compile": {
+        "command": [
+          "gcc",
+          "-O2",
+          "-static",
+          "-nostdlib",
+          "-ffreestanding",
+          "-fno-pie",
+          "-no-pie",
+          "-fno-stack-protector",
+          "-Wl,--build-id=none",
+          "-Wl,-e,_start",
+          "<corpus>/kernel-runtime.c",
+          "-o",
+          "<corpus>/link-contract-20261028/runtime-kernel-model-qualified/init"
+        ],
+        "returncode": 0
+      },
+      "init_sha256": "2b38372d4a175415b4fcd994d32198cbebc7f2db70e942e725fb77301d9208a7",
+      "initramfs_sha256": "fdba6092287d7c12c0d0630f919703e5a07a8ce66609523f5f7d8f590ad15a14",
+      "boot": {
+        "returncode": 33,
+        "timeout": false,
+        "passed": true,
+        "log_sha256": "2add22eacd0b5d37686e8dcca070cfc9d0f68239c105d88f33ed2271b4c7626e"
+      }
+    },
+    "negative_controls": {
+      "wrong-marker": {
+        "kernel_sha256": "4c4dff0a15c2eff6dd7e41f07b74119bdc9489818b014d671783cca8a60c25df",
+        "init_source_sha256": "3f1f4a27204373b5cf37806864885da37d1f16b0b3223a04c2568643576bfb32",
+        "compiler": "gcc (GCC) 14.4.0",
+        "qemu": "QEMU emulator version 11.1.2",
+        "compile": {
+          "command": [
+            "gcc",
+            "-O2",
+            "-static",
+            "-nostdlib",
+            "-ffreestanding",
+            "-fno-pie",
+            "-no-pie",
+            "-fno-stack-protector",
+            "-Wl,--build-id=none",
+            "-Wl,-e,_start",
+            "<corpus>/link-contract-20261028/wrong-marker.c",
+            "-o",
+            "<corpus>/link-contract-20261028/runtime-model-qualified-control-wrong-marker/init"
+          ],
+          "returncode": 0
+        },
+        "init_sha256": "67b8c94d8050988ef02f363353f27a4ffd4a2bee22f35081988d1f286ea2f925",
+        "initramfs_sha256": "2e7cd1244be7075cf4e2fbb2385da084a13da0edf6f0812a8719ec5e28ac57b6",
+        "boot": {
+          "returncode": 33,
+          "timeout": false,
+          "passed": false,
+          "log_sha256": "9045f9f05b6472b3f3485938b9a763e071a632e02cb9bacebf850b31609e8c60"
+        },
+        "runner_returncode": 1
+      },
+      "wrong-exit": {
+        "kernel_sha256": "4c4dff0a15c2eff6dd7e41f07b74119bdc9489818b014d671783cca8a60c25df",
+        "init_source_sha256": "d5a9bcd78ac19bbfdcfc99d5655b7894541b30ec331a2e94aa0674e3121e15be",
+        "compiler": "gcc (GCC) 14.4.0",
+        "qemu": "QEMU emulator version 11.1.2",
+        "compile": {
+          "command": [
+            "gcc",
+            "-O2",
+            "-static",
+            "-nostdlib",
+            "-ffreestanding",
+            "-fno-pie",
+            "-no-pie",
+            "-fno-stack-protector",
+            "-Wl,--build-id=none",
+            "-Wl,-e,_start",
+            "<corpus>/link-contract-20261028/wrong-exit.c",
+            "-o",
+            "<corpus>/link-contract-20261028/runtime-model-qualified-control-wrong-exit/init"
+          ],
+          "returncode": 0
+        },
+        "init_sha256": "af3fa4a2c7cf1d172b3aea9aa88c29fe24f9882812626e0e23a9b7112691194f",
+        "initramfs_sha256": "b20ece5086b1aa96537b4c33776bfc33b2d1e3fd24e8d295b0471a89be089e38",
+        "boot": {
+          "returncode": 35,
+          "timeout": false,
+          "passed": false,
+          "log_sha256": "ea9a5b80e00ba6558978916bb9b171eb80ead62637cb75784449e1ff4a35890d"
+        },
+        "runner_returncode": 1
+      },
+      "memory-mismatch": {
+        "kernel_sha256": "4c4dff0a15c2eff6dd7e41f07b74119bdc9489818b014d671783cca8a60c25df",
+        "init_source_sha256": "cce83d09763bd4366cdeb835c976c78d33dd1978f73656be7d2bc00daadb4941",
+        "compiler": "gcc (GCC) 14.4.0",
+        "qemu": "QEMU emulator version 11.1.2",
+        "compile": {
+          "command": [
+            "gcc",
+            "-O2",
+            "-static",
+            "-nostdlib",
+            "-ffreestanding",
+            "-fno-pie",
+            "-no-pie",
+            "-fno-stack-protector",
+            "-Wl,--build-id=none",
+            "-Wl,-e,_start",
+            "<corpus>/link-contract-20261028/memory-mismatch.c",
+            "-o",
+            "<corpus>/link-contract-20261028/runtime-model-qualified-control-memory-mismatch/init"
+          ],
+          "returncode": 0
+        },
+        "init_sha256": "77552200e8a5628c8558a1c2596a041edcc4cafe9dfbfe4c7462462e25ab7bef",
+        "initramfs_sha256": "ef73f4af0c48a7e0a73ad733d6662b41d982dc5316c34e46105c90a68e237ffa",
+        "boot": {
+          "returncode": 35,
+          "timeout": false,
+          "passed": false,
+          "log_sha256": "2d61409aa226ac346a03dfdb291a78da191e80b92d324d333f3e5a7f42c73785"
+        },
+        "runner_returncode": 1
+      }
+    },
+    "verdict": "All stage markers once in order, one final marker, no FAIL marker and exit 33; faults/timeouts never count as passing."
+  },
+  "validation": {
+    "workspace_tests": {
+      "passed": 2951,
+      "failed": 0,
+      "skipped": 13,
+      "doctests_passed": 1,
+      "runner": "nextest test-fast, then Cargo doctests"
+    },
+    "workspace_all_targets_all_features_check": "passed",
+    "code_model_output_matrix": "Text/typed/chunked parity and absolute relocation witnesses across three selectors, two allocators and two pools; default PIC output unchanged.",
+    "cli_regression": "C/IR object modes plus target/shared-intent rejection passed.",
+    "optimizer_regressions": "Common literals, differing/unknown calls, escape roots, macros, interpolation, comments and idempotence passed.",
+    "generator_freshness": {
+      "x86": "passed",
+      "aarch64": "passed"
+    },
+    "audit_tests_passed": 7,
+    "rust_docs": "built with pre-existing warnings",
+    "formatting": "Changed Rust regions pass; unrelated baseline formatting remains.",
+    "strict_clippy": "Blocked by pre-existing IR diagnostics; targeted optimizer Clippy also reports existing diagnostics outside the new modules.",
+    "qualification_history": "An intermediate overly conservative block-comment guard retained dead bodies and failed the corpus link; it was corrected and both the full workspace and all 484 units were rerun before these qualified results."
+  },
+  "remaining_scope": [
+    "328 objtool warnings remain despite zero tool exit codes; this is not objtool-clean qualification.",
+    "The vDSO payload, real-mode blobs, setup/decompressor and initramfs preparation remain external.",
+    "The reference-generated version strings are unchanged captured source content and do not identify the compiler producing the replacement objects.",
+    "No SMP, different configs, native hardware, general no-SIMD/interrupt-safe ABI or arbitrary FP-state qualification is established.",
+    "This is not a full Kbuild invocation from raw source and does not prove absence of miscompilation."
+  ]
+}

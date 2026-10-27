@@ -1375,3 +1375,17 @@ mixed-image evidence. The remaining backend boundary is an explicit kernel code
 model; objtool still reports warnings. See [audit-link-fixes.json](audit-link-fixes.json)
 for exact scope, artifact hashes and controls. `runtime.py` can run the bounded
 smoke test against a supplied `bzImage`; it builds an independent userspace init.
+
+## Kernel address model and automatic linking
+
+The [kernel code-model follow-up](../../docs/linux-kernel-code-model.md) removes
+both temporary substitutions from the preceding checkpoint. All 484 captured C
+inputs compile with `-O --link-intent executable --code-model kernel` and the
+unchanged audit feature policy. GNU ld links 481 Keel C objects and 20 Keel ASM
+objects; table sorting, boot and the runtime smoke checks pass under QEMU TCG.
+
+[The ledger](audit-kernel-code-model.json) includes two pass-omission link
+controls, a PIC-startup boot control and three runtime-verdict controls. The
+positive link uses no manually edited IR or reference C replacement. External
+boot/decompression/vDSO stages and 328 objtool warnings remain outside this
+bounded qualification. Default userspace address generation is unchanged.
