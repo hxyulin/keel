@@ -1953,35 +1953,72 @@ impl<'a> Parser<'a> {
                 let ty = self.type_name()?;
                 self.expect(",")?;
                 let mut ty = ty;
-                let mut offset = 0;
+                let layout = self.c_layout;
+                let constant = |value: u64| {
+                    mk(
+                        ExprKind::Int(normalize_with_layout(value as i64, &ULONG, layout)),
+                        ULONG,
+                        loc,
+                    )
+                };
+                let mut offset = constant(0);
+                let mut first = true;
                 loop {
-                    if self.eat("[") {
-                        let i = self.const_int()?;
+                    if !first && self.eat("[") {
+                        let index = self.expr()?;
                         self.expect("]")?;
-                        let Some(elem) = ty.pointee().cloned() else {
+                        let Ty::Array(array) = ty else {
                             return Err(Error::new(loc, "`offsetof` subscript of a non-array"));
                         };
-                        offset += i as u64 * self.size_of(&elem);
-                        ty = elem;
+                        let index = self.rvalue(index);
+                        if !index.ty.is_integer() {
+                            return Err(Error::new(
+                                index.loc,
+                                "`offsetof` array index must be an integer",
+                            ));
+                        }
+                        // Compute a byte offset in size_t arithmetic. No object
+                        // exists here, so array subscripts must not create a
+                        // pointer or dereference memory. Negative indices wrap
+                        // in the target's unsigned size domain, as GNU does.
+                        self.elem_size(&ty, loc)?;
+                        let index = self.cast(index, ULONG);
+                        let stride = self.size_expr(&array.elem, loc);
+                        let scaled = self.binop("*", index, stride, loc)?;
+                        offset = self.binop("+", offset, scaled, loc)?;
+                        ty = array.elem;
                         continue;
                     }
-                    if !offset_member_follows(self, offset == 0 && matches!(ty, Ty::Struct(_))) {
+                    if !offset_member_follows(self, first) {
+                        if first {
+                            return Err(Error::new(loc, "`offsetof` requires a member designator"));
+                        }
                         break;
                     }
+                    first = false;
                     let name = self.ident()?;
                     let Ty::Struct(id) = ty else {
                         return Err(Error::new(loc, "`offsetof` member of a non-struct"));
                     };
                     let Some((off, m)) =
-                        self.structs[id].find(&name, &self.structs, &self.typedefs, self.arena)
+                        self.structs[id].find(name, &self.structs, &self.typedefs, self.arena)
                     else {
                         return Err(Error::new(loc, format!("no member `{name}`")));
                     };
-                    offset += off;
+                    if m.bits.is_some() {
+                        return Err(Error::new(loc, "`offsetof` cannot name a bit-field"));
+                    }
+                    offset = self.binop("+", offset, constant(off), loc)?;
                     ty = m.ty;
                 }
                 self.expect(")")?;
-                Ok(mk(ExprKind::Int(offset as i64), ULONG, loc))
+                // Keep static designators as integer constants for enum values,
+                // initializers and existing ICE consumers. The checked-operand
+                // evaluator preserves side effects in runtime index expressions.
+                Ok(match eval_constant_with_layout(&offset, true, layout) {
+                    Some(Const::Int(value)) => mk(ExprKind::Int(value), ULONG, loc),
+                    _ => offset,
+                })
             }
             "expect" => self.builtin_call(Builtin::Hint, &[LONG, LONG], LONG, loc),
             "expect_with_probability" => {
@@ -2110,7 +2147,11 @@ impl<'a> Parser<'a> {
             }
             "constant_p" => {
                 let args = self.builtin_args(1, loc)?;
-                let known = eval_int_with_layout(&args[0], self.c_layout).is_some();
+                let known = args[0].ty.is_integer()
+                    && matches!(
+                        eval_constant_with_layout(&args[0], true, self.c_layout),
+                        Some(Const::Int(_))
+                    );
                 Ok(mk(ExprKind::Int(i64::from(known)), INT, loc))
             }
             "inf" | "inff" | "infl" | "huge_val" | "huge_valf" | "huge_vall" | "nan" | "nanf"

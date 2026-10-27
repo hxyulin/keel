@@ -2,6 +2,7 @@
 //! expressions until lowering captures their locations/values exactly once.
 
 use super::*;
+use crate::expr::mk;
 
 impl<'a> Parser<'a> {
     /// Adjacent narrow strings, without a C terminator (the lexer stores none).
@@ -153,16 +154,34 @@ impl<'a> Parser<'a> {
                                 }
                                 let code = if x86 && matches!(code, "rm" | "mr" | "qm" | "mq" | "g")
                                 {
-                                    if !asm_gpr_type(expr.ty) {
+                                    if matches!(expr.ty, Ty::Struct(_))
+                                        && self.asm_record_bits_type(expr.ty).is_none()
+                                    {
+                                        "m"
+                                    } else if asm_gpr_type(expr.ty)
+                                        || self.asm_record_bits_type(expr.ty).is_some()
+                                    {
+                                        "r"
+                                    } else {
                                         return Err(Error::new(
                                             loc,
-                                            "asm output choices require a scalar integer or pointer; use m for other objects",
+                                            "asm output choices require a scalar or record; use m for other objects",
                                         ));
                                     }
-                                    "r"
                                 } else {
                                     code
                                 };
+                                if x86 && code != "m" && !flag {
+                                    expr = self.asm_aggregate_operand(expr, true)?;
+                                }
+                                if matches!(expr.ty, Ty::Struct(_))
+                                    && self.asm_record_access(expr.ty, expr.sugar).constant
+                                {
+                                    return Err(Error::new(
+                                        expr.loc,
+                                        "asm aggregate output has nonmodifiable members",
+                                    ));
+                                }
                                 if !(matches!(code, "r" | "w") && (!x86 || code == "r")
                                     || flag
                                     || x86
@@ -251,6 +270,10 @@ impl<'a> Parser<'a> {
                             if x86 && let Some((immediate, memory)) = asm_choice(&constraint) {
                                 constraint = if asm_gpr_type(expr.ty) {
                                     if immediate { "ri" } else { "r" }
+                                } else if self.asm_record_bits_type(expr.ty).is_some() {
+                                    // Aggregates use their register representation,
+                                    // not the numeric immediate alternative.
+                                    "r"
                                 } else if memory {
                                     "m"
                                 } else {
@@ -278,6 +301,9 @@ impl<'a> Parser<'a> {
                                     })?;
                                 constraint = n.to_string();
                             }
+                            if x86 && !matches!(constraint.as_str(), "m" | "i" | "n") {
+                                expr = self.asm_aggregate_operand(expr, false)?;
+                            }
                             match constraint.as_str() {
                                 "ri" | "re" | "rI" | "Nd" if x86 => {
                                     expr = self.rvalue(expr);
@@ -296,9 +322,7 @@ impl<'a> Parser<'a> {
                                 "i" | "n" => {
                                     if x86 {
                                         expr = self.rvalue(expr);
-                                        if !expr.ty.is_integer()
-                                            && expr.ty.ir() != keel_ir::Type::Ptr
-                                        {
+                                        if !expr.ty.is_integer() && !expr.ty.is_ptr() {
                                             return Err(Error::new(
                                                 expr.loc,
                                                 "asm immediate requires an integer or pointer",
@@ -661,6 +685,93 @@ fn asm_template(
         }
     }
     Ok(text)
+}
+
+#[derive(Default)]
+struct RecordAccess {
+    constant: bool,
+    volatile: bool,
+    atomic: bool,
+}
+
+impl<'a> Parser<'a> {
+    fn asm_record_bits_type(&self, ty: Ty<'a>) -> Option<Ty<'a>> {
+        let Ty::Struct(id) = ty else { return None };
+        if !self.structs[id].complete {
+            return None;
+        }
+        Some(Ty::Int(match self.size_of(&ty) {
+            1 => IntKind::UChar,
+            2 => IntKind::UShort,
+            4 => IntKind::UInt,
+            8 => IntKind::ULong,
+            _ => return None,
+        }))
+    }
+
+    fn asm_record_access(&self, ty: Ty<'a>, sugar: Sugar<'a>) -> RecordAccess {
+        let mut access = RecordAccess {
+            constant: sugar.is_const(&self.typedefs),
+            volatile: sugar.is_volatile(&self.typedefs),
+            atomic: matches!(ty, Ty::Atomic(_)),
+        };
+        let mut merge = |other: RecordAccess| {
+            access.constant |= other.constant;
+            access.volatile |= other.volatile;
+            access.atomic |= other.atomic;
+        };
+        match ty {
+            Ty::Struct(id) => {
+                for member in &self.structs[id].members {
+                    merge(self.asm_record_access(member.ty, member.sugar));
+                }
+            }
+            Ty::Array(array) => {
+                merge(self.asm_record_access(array.elem, sugar.pointee(&self.typedefs)));
+            }
+            _ => {}
+        }
+        access
+    }
+
+    /// Reinterpret one complete object as an unsigned register-sized word.
+    /// Scalar IR loads/stores have conservative alignment and retain qualifiers.
+    fn asm_aggregate_operand(&mut self, expr: Expr<'a>, output: bool) -> R<Expr<'a>> {
+        if !matches!(expr.ty, Ty::Struct(_)) {
+            return Ok(expr);
+        }
+        let Some(bits) = self.asm_record_bits_type(expr.ty) else {
+            return Err(Error::new(
+                expr.loc,
+                "asm aggregate register operands require a complete 1, 2, 4 or 8-byte record",
+            ));
+        };
+        let access = self.asm_record_access(expr.ty, expr.sugar);
+        if access.atomic || output && access.constant {
+            return Err(Error::new(
+                expr.loc,
+                "asm aggregate register operand has atomic or nonmodifiable members",
+            ));
+        }
+        let loc = expr.loc;
+        if output {
+            let address = self.address_of(expr, loc)?;
+            let pointer = self.ptr_type(bits);
+            let address = self.cast(address, pointer);
+            let sugar = if access.volatile {
+                Sugar::Volatile(&PLAIN_SUGAR)
+            } else {
+                Sugar::Plain
+            };
+            Ok(mk(ExprKind::Deref(self.node(address)), bits, loc).with_sugar(sugar))
+        } else {
+            Ok(mk(
+                ExprKind::Builtin(Builtin::AsmAggregateBits, self.slice(&[expr])),
+                bits,
+                loc,
+            ))
+        }
+    }
 }
 
 fn asm_register_type(code: &str, ty: Ty<'_>, loc: Loc) -> R<()> {

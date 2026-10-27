@@ -20,7 +20,8 @@ unsigned long add(unsigned long a, unsigned long b) {
 
 ## Accepted contracts
 
-Register operands accept integers through 64 bits and pointers. Register constraints are
+Register operands accept integers through 64 bits, pointers and the bounded
+aggregate representation described below. Register constraints are
 `r` and x86-64 `q`, and fixed `a`, `b`, `c`, `d`, `S`, `D` for RAX, RBX, RCX, RDX, RSI, RDI.
 Outputs use `=` or `+`, optionally followed by early-clobber `&`. Matching input
 constraints use an output number or `[name]` and require the same IR type.
@@ -98,6 +99,31 @@ cannot be clobbered. R15 is also reserved in functions whose aligned frame needs
 it as a base pointer. FP/SIMD, control/debug and other register classes are not
 asm operands or clobbers in this milestone. The IR retains target-tagged physical
 registers and early-clobber markers, including in textual round trips.
+
+### Aggregate register operands
+
+Complete structs and unions of 1, 2, 4 or 8 bytes may use a single GPR. Inputs
+load the unsigned bit representation, including initialized padding; returned
+and compound record values are materialized once. Outputs capture a modifiable
+object's address once and store exactly that width. Read/write outputs initialize
+the register from those same bytes. Same-width integer/record ties share the
+normalized scalar IR type. Packed accesses retain alignment 1; whole-object and
+member volatile effects remain observable.
+
+Small records may choose a GPR for `g` and register/memory unions. Nonword and
+wider records retain the existing memory alternative where allowed; explicit
+`m` keeps its addressable-object contract. Const-member outputs reject in both
+register and memory paths. Atomic-member register packing, different-width ties,
+empty/nonword GPR values and multi-register modes remain conservatively
+unsupported. GCC supports some wider modes; this is Keel's bound. Aggregate
+`i`/`n` inputs diagnose rather than passing an address as their value.
+
+Padding checks use initialized lvalue objects; ABI argument/return copies do
+not promise to retain indeterminate padding. Clang rejects some tied-indirect
+generic forms such as a nonword `+g`; explicit `+m` remains the memory spelling.
+The `x86_aggregate_asm` fixture covers bit patterns, padding, packed/volatile
+objects, returned values, evaluation count, memory fallback and the kernel's
+`WRITE_ONCE` switch.
 
 Read-only global `rsp` bindings have a separate
 [C observer contract](c-stack-observers.md). Their exact `+r` operand supports

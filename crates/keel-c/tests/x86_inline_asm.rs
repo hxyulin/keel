@@ -816,7 +816,7 @@ fn malformed_flag_and_choice_contracts_are_diagnosed() {
         r#"void f(void) { const long x=1; asm("" : "=@ccz"(x)); }"#,
         r#"void f(void) { _Atomic(long) x=1; asm("" : "=@ccz"(x)); }"#,
         r#"struct S { int x:3; }; void f(struct S *p) { asm("" : "=@ccz"(p->x)); }"#,
-        r#"struct S { long x[3]; }; void f(struct S *p) { asm("" : "+rm"(*p)); }"#,
+        r#"struct S { long x[3]; }; void f(struct S *p) { asm("" : "+r"(*p)); }"#,
         r#"void f(double x) { asm("" :: "iq"(x)); }"#,
     ] {
         assert!(compile(source, false).is_err(), "{source}");

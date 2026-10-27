@@ -1086,15 +1086,12 @@ impl<'p> Gen<'p> {
                     let offset = *offset as usize;
                     // All declarations have merged: only final strong binding
                     // proves a global address nonnull in a static initializer.
-                    let value = if self.p.c_layout == CDataLayout::NATIVE_LP64 {
-                        crate::eval::eval_with(expr, &|g| self.p.globals[g].weak.is_none())
-                    } else {
-                        crate::eval::eval_with_binding_and_layout(
-                            expr,
-                            &|g| self.p.globals[g].weak.is_none(),
-                            self.p.c_layout,
-                        )
-                    };
+                    let value = crate::eval::eval_constant_with_binding_and_layout(
+                        expr,
+                        true,
+                        &|g| self.p.globals[g].weak.is_none(),
+                        self.p.c_layout,
+                    );
                     let Some(value) = value else {
                         return Err(Error::new(expr.loc, "initializer is not a constant"));
                     };
@@ -4538,6 +4535,14 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 }
                 let inst = ins.intrinsic(Intrinsic::StackAlloc, &vals);
                 self.b.function().inst_results(inst)[0]
+            }
+            Builtin::AsmAggregateBits => {
+                // Aggregate values are addresses of their complete byte
+                // representation. Their evaluation already preserves volatile
+                // aggregate reads and materializes returned values once.
+                self.b
+                    .ins()
+                    .load(e.ty.ir_with_layout(self.g.p.c_layout), vals[0])
             }
             Builtin::StackPointer => {
                 let inst = ins.intrinsic(Intrinsic::StackSave, &[]);

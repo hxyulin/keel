@@ -1,11 +1,11 @@
 # Minimal Linux x86-64 compiler target
 
-Latest measured status: **65/484 C inputs** and **490/506 assembly inputs**
+Latest measured status: **118/484 C inputs** and **490/506 assembly inputs**
 accepted under the original feature policy. A separate explicit-feature probe
-accepts **68 C inputs and all 506 assembly inputs**. The
-[reserved-stack follow-up](#reserved-stack-asm-calls) restores all seven
-withdrawn C inputs. The dominant next blockers are aggregate asm operands and
-runtime `offsetof` expressions.
+accepts **122 C inputs and all 506 assembly inputs**. The
+[offset/aggregate follow-up](#runtime-offsets-and-aggregate-asm-operands)
+clears the preceding two dominant blockers. Packed-enum layout is now the
+common C first error.
 
 This fixture targets the **64-bit parts** of Linux v6.12. Host programs,
 16/32-bit code and mixed-mode assembly remain external. The supported x86 C
@@ -1017,3 +1017,78 @@ ABI SIMD clobbers that GNU inline asm would need to declare explicitly.
 
 Logs: `/tmp/keel-rsp-contract-tests.log`, `/tmp/keel-rsp-contract-remote.log`
 and `/tmp/keel-rsp-contract-evidence.json`.
+
+## Runtime offsets and aggregate asm operands
+
+The [follow-up audit](audit-offsetof-aggregate-asm.json) adds runtime integer
+array designators to `__builtin_offsetof` and bounded x86 aggregate GPR operands.
+Both use existing scalar IR/backend operations; no ISA tables or public
+intrinsic IDs change.
+
+[Offset designators](../../docs/c-runtime-offsetof.md) compute target-sized
+unsigned byte offsets, including nested/anonymous/flexible members and zero
+strides. Index effects run once. Constant results remain usable in enums,
+initializers and static assertions. Pointer-member traversal and bitfields
+reject. Evaluated-operand proofs now also prevent runtime effects from being
+discarded in constant controls or static initializers, while retaining final
+weak-binding checks. Unevaluated queries remain unevaluated.
+
+[Aggregate operands](../../docs/x86-c-inline-asm.md#aggregate-register-operands)
+load/store the full representation of 1/2/4/8-byte structs and unions in a GPR.
+Output addresses are evaluated once. Returned/compound inputs, initialized
+padding, packed alignment and recursive volatile effects are preserved. Generic
+constraints retain memory fallback. Const-member outputs reject in both paths;
+atomic register packing, different-width ties and wider register modes remain
+conservative bounds. Aggregate immediates now diagnose instead of reaching a
+non-scalar conversion panic. The fixture includes the kernel's `WRITE_ONCE`
+switch, whose byte/word/dword/qword branches must all type-check an S8 wrapper.
+
+| Policy | Accepted C / 484 | Accepted assembly / 506 |
+| --- | ---: | ---: |
+| Original C v1, assembly v3 | 118 | 490 |
+| Explicit optional features | 122 | 506 |
+
+This adds 53 original-policy and 54 optional-policy C acceptances. All 555
+previously accepted original-policy objects and all 574 optional-policy objects
+remain accepted and byte-identical. The permission lists are unchanged. All
+992 captured inputs, binary dependencies and reference artifacts rehash
+unchanged, with no crashes, timeouts or acceptance regressions. The reference
+was not rebuilt/rebooted, and no Keel object was linked into or run as the kernel.
+
+The next optional-policy C first errors are:
+
+| Family | Inputs |
+| --- | ---: |
+| Packed-enum size assertion in `rw_hint.h` | 293 |
+| Static initializers | 22 |
+| Declaration syntax | 16 |
+| Required inlining of public `native_save_fl` definitions | 15 |
+| Other asm, syntax, section, builtin and permission gaps | 16 |
+
+The common assertion is `sizeof(enum rw_hint) == 1`; enum packing remains a
+layout/ABI gap. The remaining group includes four matching-operand type errors,
+three asm-string syntax errors, three GNU local-label errors, three
+section/lifecycle errors, `__builtin_isdigit`, output-bearing asm goto and one
+RDTSCP permission error. These counts describe first errors, not exhaustive
+compatibility. Public inline-binding restrictions remain intact.
+
+Validation passes 2,855 workspace tests and one doctest, with 13 ignored.
+Workspace all-targets/all-features check, 99 generator tests, five audit tests,
+both freshness checks, scoped formatting and Rustdoc pass. Scoped Clippy
+completes with existing warnings. The private Wasm32 offset test executes with
+Node locally; it is filtered from the isolated Linux shell, which lacks Node.
+All seven remaining focused Linux tests pass.
+
+Two 24-object matrices pass GCC and Clang native harnesses, for 96 generated
+executions plus four compiler references. Six broken controls fail normally
+with exact exits 1, 7, 11, 8, 9 and 14 for wrong offsets, omitted comma/zero-stride
+index effects, lost padding, omitted packed updates and omitted `WRITE_ONCE`
+writes. Another 214 independent compiler probes check aggregate mode boundaries.
+The shared offset reference omits the nested `constant_p` wrapper because of
+observed Clang side effects there; Keel objects execute it and check its
+unevaluated contract. Direct offset calculations and index effects compare
+against both compilers.
+
+Logs: `/tmp/keel-offset-aggregate-tests.log`,
+`/tmp/keel-offset-aggregate-native-final.log` and
+`/tmp/keel-offset-aggregate-evidence.json`.

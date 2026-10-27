@@ -3995,8 +3995,13 @@ impl<'a> Parser<'a> {
     pub(crate) fn const_int(&mut self) -> R<i64> {
         let loc = self.loc();
         let e = self.conditional()?;
-        crate::eval::eval_int_with_layout(&e, self.c_layout)
-            .ok_or_else(|| Error::new(loc, "expected a constant expression"))
+        if e.ty.is_integer()
+            && let Some(crate::eval::Const::Int(value)) =
+                crate::eval::eval_constant_with_layout(&e, true, self.c_layout)
+        {
+            return Ok(value);
+        }
+        Err(Error::new(loc, "expected a constant expression"))
     }
 
     // ---- statements ----

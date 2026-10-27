@@ -200,6 +200,8 @@ pub enum Builtin {
     Debugtrap,
     /// A fresh read of the read-only x86 global RSP register variable.
     StackPointer,
+    /// An asm GPR input's object representation, read from an aggregate value.
+    AsmAggregateBits,
     /// `__builtin_return_address(0)` on x86-64 Linux.
     ReturnAddress,
     /// Native `__builtin_frame_address(depth)`, bounded to 0..64.

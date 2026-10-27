@@ -33,9 +33,6 @@ pub fn eval_constant(e: &Expr<'_>, allow_comma: bool) -> Option<Const> {
 pub fn eval(e: &Expr<'_>) -> Option<Const> {
     eval_with_layout(e, CDataLayout::NATIVE_LP64)
 }
-pub fn eval_with(e: &Expr<'_>, nonnull: &dyn Fn(usize) -> bool) -> Option<Const> {
-    eval_with_binding_and_layout(e, nonnull, CDataLayout::NATIVE_LP64)
-}
 
 /// The value of an integer constant expression.
 pub fn eval_int_with_layout(e: &Expr<'_>, layout: CDataLayout) -> Option<i64> {
@@ -103,10 +100,11 @@ pub fn eval_constant_with_layout(
     allow_comma: bool,
     layout: CDataLayout,
 ) -> Option<Const> {
-    eval_constant_with(e, allow_comma, &|_| false, layout)
+    eval_constant_with_binding_and_layout(e, allow_comma, &|_| false, layout)
 }
 
-fn eval_constant_with(
+/// Prove evaluated operands constant while using final declaration binding.
+pub(crate) fn eval_constant_with_binding_and_layout(
     e: &Expr<'_>,
     allow_comma: bool,
     nonnull: &dyn Fn(usize) -> bool,
@@ -114,38 +112,38 @@ fn eval_constant_with(
 ) -> Option<Const> {
     match &e.kind {
         ExprKind::Cast(a) | ExprKind::Unary(_, a) => {
-            eval_constant_with(a, allow_comma, nonnull, layout)?;
+            eval_constant_with_binding_and_layout(a, allow_comma, nonnull, layout)?;
         }
         ExprKind::Binary(_, a, b) | ExprKind::PtrAdd(a, b, _) | ExprKind::PtrDiff(a, b, _) => {
-            eval_constant_with(a, allow_comma, nonnull, layout)?;
-            eval_constant_with(b, allow_comma, nonnull, layout)?;
+            eval_constant_with_binding_and_layout(a, allow_comma, nonnull, layout)?;
+            eval_constant_with_binding_and_layout(b, allow_comma, nonnull, layout)?;
         }
         ExprKind::Comma(a, b) => {
             if !allow_comma {
                 return None;
             }
-            eval_constant_with(a, allow_comma, nonnull, layout)?;
-            eval_constant_with(b, allow_comma, nonnull, layout)?;
+            eval_constant_with_binding_and_layout(a, allow_comma, nonnull, layout)?;
+            eval_constant_with_binding_and_layout(b, allow_comma, nonnull, layout)?;
         }
         ExprKind::LogAnd(a, b) | ExprKind::LogOr(a, b) => {
             let first = truthy(
-                eval_constant_with(a, allow_comma, nonnull, layout)?,
+                eval_constant_with_binding_and_layout(a, allow_comma, nonnull, layout)?,
                 nonnull,
             )?;
             if first == matches!(e.kind, ExprKind::LogAnd(..)) {
-                eval_constant_with(b, allow_comma, nonnull, layout)?;
+                eval_constant_with_binding_and_layout(b, allow_comma, nonnull, layout)?;
             }
         }
         ExprKind::Cond(c, a, b) => {
             let selected = if truthy(
-                eval_constant_with(c, allow_comma, nonnull, layout)?,
+                eval_constant_with_binding_and_layout(c, allow_comma, nonnull, layout)?,
                 nonnull,
             )? {
                 a
             } else {
                 b
             };
-            eval_constant_with(selected, allow_comma, nonnull, layout)?;
+            eval_constant_with_binding_and_layout(selected, allow_comma, nonnull, layout)?;
         }
         _ => {}
     }
@@ -168,23 +166,25 @@ pub fn eval_with_binding_and_layout(
         ExprKind::Float(f) => Const::Float(*f),
         ExprKind::Builtin(Builtin::Complex, args) => {
             let (Const::Float(r), Const::Float(i)) = (
-                eval_with_binding_and_layout(&args[0], nonnull, layout)?,
-                eval_with_binding_and_layout(&args[1], nonnull, layout)?,
+                eval_constant_with_binding_and_layout(&args[0], true, nonnull, layout)?,
+                eval_constant_with_binding_and_layout(&args[1], true, nonnull, layout)?,
             ) else {
                 return None;
             };
             Const::Complex(r, i)
         }
         ExprKind::Member { base, offset, .. } if base.ty.is_complex() => {
-            let Const::Complex(r, i) = eval_with_binding_and_layout(base, nonnull, layout)? else {
+            let Const::Complex(r, i) =
+                eval_constant_with_binding_and_layout(base, true, nonnull, layout)?
+            else {
                 return None;
             };
             Const::Float(if *offset == 0 { r } else { i })
         }
         ExprKind::Builtin(Builtin::Hint | Builtin::AssumeAligned(_), args) => {
-            let value = eval_constant_with(&args[0], true, nonnull, layout)?;
+            let value = eval_constant_with_binding_and_layout(&args[0], true, nonnull, layout)?;
             for arg in &args[1..] {
-                eval_constant_with(arg, true, nonnull, layout)?;
+                eval_constant_with_binding_and_layout(arg, true, nonnull, layout)?;
             }
             value
         }
@@ -363,10 +363,12 @@ fn eval_addr(e: &Expr<'_>, nonnull: &dyn Fn(usize) -> bool, layout: CDataLayout)
             })),
             Const::Float(_) | Const::Complex(..) => None,
         },
-        ExprKind::Deref(p) => match eval_with_binding_and_layout(p, nonnull, layout)? {
-            c @ (Const::Addr(..) | Const::Int(_)) => Some(c),
-            Const::Float(_) | Const::Complex(..) => None,
-        },
+        ExprKind::Deref(p) => {
+            match eval_constant_with_binding_and_layout(p, true, nonnull, layout)? {
+                c @ (Const::Addr(..) | Const::Int(_)) => Some(c),
+                Const::Float(_) | Const::Complex(..) => None,
+            }
+        }
         _ => None,
     }
 }

@@ -1,8 +1,8 @@
 # C frontend support summary
 
 Keel's C frontend (`crates/keel-c`) compiles C11 with a bounded set of GNU
-extensions for its two native targets, `aarch64-apple-darwin` and
-`x86_64-unknown-linux-gnu`. This page summarizes what is and is not supported
+extensions for its native targets, `aarch64-apple-darwin`,
+`aarch64-unknown-linux-gnu` and `x86_64-unknown-linux-gnu`. This page summarizes what is and is not supported
 and links to the detailed contract for each feature. It is not a claim of full
 C11 or GNU C compatibility.
 
@@ -22,7 +22,8 @@ the permissive catch-all for unknown attributes (see below).
 | x86 `long double` | Opaque storage with the target layout; no x87 arithmetic. Apple arm64 `long double` is `double`. | [Plan stage 7](c-language-implementation-plan.md#7-x86-extended-long-double--not-implemented) |
 | `__float128`, `_FloatN`, `mode(TC)` | Declarations and layout only (TC on x86-64 Linux); any value, call or ABI use is diagnosed. GCC builtin `_Float32` and friends are not supported. | [Unsupported values](c-unsupported-values.md), [system headers](c-system-header-compat.md) |
 | K&R (old-style) definitions | Explicitly typed integer, float/double and pointer parameters with promoted ABI entry conversions. Implicit `int` and aggregate/complex/vector parameters are diagnosed. | [Plan stage 8](c-language-implementation-plan.md#8-kr-definitions--explicit-fixed-size-parameter-milestone-implemented) |
-| Inline assembly | AArch64 GNU scalar subset. X86-64 Linux supports scalar constraints, explicit memory operands, flag outputs, basic/file-scope asm and input/clobber-only asm goto. Output-bearing asm goto remains diagnosed. | [C inline assembly](c-inline-asm.md), [x86 contracts](x86-c-inline-asm.md) |
+| Runtime `offsetof` | Integer array subscripts, nested/anonymous/flexible members and target-sized unsigned arithmetic. Constant designators retain ICE use; pointer traversal and bitfields reject. | [Offset designators](c-runtime-offsetof.md) |
+| Inline assembly | AArch64 GNU scalar subset. X86-64 Linux supports scalar and one-word aggregate constraints, explicit memory operands, flag outputs, basic/file-scope asm and input/clobber-only asm goto. Output-bearing asm goto remains diagnosed. | [C inline assembly](c-inline-asm.md), [x86 contracts](x86-c-inline-asm.md) |
 | Frame and stack observers | Native frame addresses at constant depths 0..64; x86-64 Linux return address at depth 0 and read-only global `rsp` bindings. Exact `+r` RSP operands support balanced asm calls with an ABI call barrier. | [Frame contracts](c-stack-observers.md) |
 | GNU vectors | `vector_size(16)` on all targets, `vector_size(32)` on x86-64 with AVX, plus bounded scalar broadcasts and `__builtin_shufflevector`. | [GNU vectors and modes](gnu-vector-mode.md) |
 | Integer `mode` attribute | `QI`, `HI`, `SI`, `DI`, `TI` (and `byte`, `word`, `pointer`). | [GNU vectors and modes](gnu-vector-mode.md#integer-modes) |
