@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "name": "linux-v6.12-x86-64-kernel-audit",
+  "target": "x86_64-unknown-linux-gnu",
+  "scope": "Instruction availability for the pinned 64-bit kernel audit. Not a CPU baseline, ambient kernel code-generation mode or runtime capability guarantee.",
+  "c_target_features": [
+    "popcnt",
+    "rdrand",
+    "rdtscp",
+    "xsave",
+    "clflush",
+    "fsgsbase",
+    "prefetchw",
+    "invpcid",
+    "rdseed",
+    "cx16",
+    "waitpkg"
+  ],
+  "asm_target_features": [
+    "rdtscp",
+    "fsgsbase",
+    "rdrand",
+    "prefetchw",
+    "invpcid",
+    "clflush",
+    "rdseed",
+    "waitpkg"
+  ],
+  "rationale": {
+    "popcnt": "Retain the preceding C audit permission for kernel bit-population code.",
+    "rdrand": "Retain the preceding C and assembly audit permission for random-number instruction forms.",
+    "rdtscp": "Permit captured timestamp-reading C and assembly templates.",
+    "xsave": "Permit captured XGETBV/XSAVE-family C templates; runtime state and CPU support remain caller obligations.",
+    "clflush": "Permit captured cache-flush C templates and assembly.",
+    "fsgsbase": "Permit captured FS/GS-base C templates and assembly.",
+    "prefetchw": "Permit captured write-prefetch C templates and assembly.",
+    "invpcid": "Permit captured PCID-invalidation C templates and assembly.",
+    "rdseed": "Permit captured seed-reading C templates and assembly.",
+    "cx16": "Permit captured 16-byte compare/exchange C templates.",
+    "waitpkg": "Permit captured TPAUSE C templates and retain the preceding assembly permission for wait-package forms."
+  }
+}

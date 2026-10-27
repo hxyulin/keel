@@ -104,7 +104,39 @@ def feature_gate(message):
     return dict(instruction=match[1], required_features=match[2].split(','))
 
 
+def resolve_feature_policy(args):
+    """Resolve audit-only permissions without changing Keel CPU profiles."""
+    features = {'c': args.c_target_features, 'asm': args.asm_target_features}
+    path = getattr(args, 'feature_policy', None)
+    if path is None:
+        return features, None
+    if any(value is not None for value in features.values()):
+        raise SystemExit('--feature-policy cannot be combined with target-feature overrides.')
+    try:
+        raw = path.read_bytes()
+        policy = json.loads(raw)
+    except (OSError, ValueError) as error:
+        raise SystemExit(f'Cannot load feature policy: {error}') from error
+    if (not isinstance(policy, dict) or policy.get('schema') != 1
+            or policy.get('target') != 'x86_64-unknown-linux-gnu'):
+        raise SystemExit('Feature policy requires schema 1 and the x86-64 Linux target.')
+    name = policy.get('name')
+    if not isinstance(name, str) or not name.strip():
+        raise SystemExit('Feature policy requires a nonempty name.')
+    fields = Path(__file__).resolve().parents[2] / 'tools/x86-isa/feature-fields.json'
+    known = {field['field'] for field in json.loads(fields.read_text())}
+    for kind in features:
+        values = policy.get(kind + '_target_features')
+        if (not isinstance(values, list)
+                or any(not isinstance(value, str) or value not in known for value in values)
+                or len(values) != len(set(values))):
+            raise SystemExit(f'Feature policy {kind} permissions must be unique canonical feature names.')
+        features[kind] = ','.join('+' + value for value in values) or None
+    return features, {'name': name, 'sha256': hashlib.sha256(raw).hexdigest()}
+
+
 def probe(args):
+    features, policy = resolve_feature_policy(args)
     build = args.build.resolve()
     args.out.mkdir(parents=True, exist_ok=False)
     manifest = json.loads(args.manifest.read_text())
@@ -125,10 +157,10 @@ def probe(args):
         if item['kind'] == 'asm':
             command += ['--x86-syntax', 'att', '--cpu-level', 'v3']
         else:
-            command += ['--emit-object']
-        features = args.asm_target_features if item['kind'] == 'asm' else args.c_target_features
-        if features is not None:
-            command += ['--target-features', features]
+            command += ['--emit-object', '--cpu-level', 'v1']
+        extra_features = features[item['kind']]
+        if extra_features is not None:
+            command += ['--target-features', extra_features]
         command += [str(path), '-o', str(args.out.resolve() / f'{index}.o')]
         try:
             run = subprocess.run(command, cwd=build, capture_output=True, timeout=args.timeout)
@@ -158,8 +190,9 @@ def probe(args):
               note='First diagnostics on unchanged reference inputs; not exhaustive gaps or execution evidence.',
               config_sha256=manifest['config_sha256'],
               keel_sha256=keel_sha256, results=rows,
-              target_policy={'c': {'cpu_level': 'v1', 'target_features': args.c_target_features},
-                             'asm': {'cpu_level': 'v3', 'target_features': args.asm_target_features}},
+              target_policy={'c': {'cpu_level': 'v1', 'target_features': features['c']},
+                             'asm': {'cpu_level': 'v3', 'target_features': features['asm']}},
+              **({'feature_policy': policy} if policy is not None else {}),
               first_error_feature_gates=[
                   dict(kind=kind, instruction=instruction, required_features=list(features),
                        rejected_inputs=count)
@@ -238,6 +271,7 @@ def main():
     check.add_argument('--keel', type=Path, required=True)
     check.add_argument('--out', type=Path, required=True)
     check.add_argument('--timeout', type=int, default=60)
+    check.add_argument('--feature-policy', type=Path, help='Audit feature-policy JSON; cannot be combined with target-feature overrides.')
     check.add_argument('--asm-target-features', help='Explicit extra assembler features; omit for the pinned v3 policy.')
     check.add_argument('--c-target-features', help='Explicit extra C target features; omit for the pinned v1 policy.')
     oracle = sub.add_parser('compare')

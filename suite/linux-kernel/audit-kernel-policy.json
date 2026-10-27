@@ -1,0 +1,413 @@
+{
+  "schema": 1,
+  "date": "2026-10-27",
+  "implementation_base": "864f92c0",
+  "compiler_qualification_report": "audit-c-acceptance-goal.json",
+  "scope": "User-approved, explicit kernel-audit instruction permissions. No compiler, encoder, decoder or CPU-profile source changes. Not kernel ABI, link, boot or runtime qualification.",
+  "goal": {
+    "status": "open",
+    "target_c_accepted": 484,
+    "current_c_accepted": 460,
+    "remaining_c_inputs": 24,
+    "feature_policy": {
+      "name": "linux-v6.12-x86-64-kernel-audit",
+      "sha256": "60189c2bbc51bd84487d041c69715c670688dfbcfb2d1afa24a6c9aae16fcfbc"
+    }
+  },
+  "source_manifest_sha256": "908006c3e46761f50342cf6556fcd86a05d7edf51cf2e85de449d19cfd2c5135",
+  "config_sha256": "af7dd9b29c4ac472ffe32d338821425912fe92ad62b30281ef1356947930e129",
+  "all_992_inputs_rehashed_unchanged": true,
+  "reference_artifacts_rehashed_unchanged": true,
+  "reference_rebuilt_or_rebooted": false,
+  "compiler_qualification_sources_rehashed_unchanged": true,
+  "keel_objects_linked_or_run_as_kernel": false,
+  "tool_source_sha256": {
+    "suite/linux-kernel/audit.py": "e1ae829fc2a2bc78551e1b00c7432fec29f34a187ba1f8e5b81309fbce250733",
+    "suite/linux-kernel/test_audit.py": "b72af992ca39d49a4195559dd0e231707590b0ede9276618987c0946f0da18c2",
+    "suite/linux-kernel/kernel-audit-policy.json": "60189c2bbc51bd84487d041c69715c670688dfbcfb2d1afa24a6c9aae16fcfbc",
+    "tools/x86-isa/feature-fields.json": "2ade75f06352efe8580b5aa328186e30a6d99042348c4837d92b2b6e27353180"
+  },
+  "keel_binary_sha256": "c756d9d9694dcf2b39a685942a04f6f81cd70d0e602dd35733d5df3b9276dddb",
+  "feature_policy": {
+    "name": "linux-v6.12-x86-64-kernel-audit",
+    "sha256": "60189c2bbc51bd84487d041c69715c670688dfbcfb2d1afa24a6c9aae16fcfbc"
+  },
+  "target_policy": {
+    "c": {
+      "cpu_level": "v1",
+      "target_features": "+popcnt,+rdrand,+rdtscp,+xsave,+clflush,+fsgsbase,+prefetchw,+invpcid,+rdseed,+cx16,+waitpkg"
+    },
+    "asm": {
+      "cpu_level": "v3",
+      "target_features": "+rdtscp,+fsgsbase,+rdrand,+prefetchw,+invpcid,+clflush,+rdseed,+waitpkg"
+    }
+  },
+  "baseline": {
+    "report": "audit-c-acceptance-goal.json",
+    "target_policy": {
+      "c": {
+        "cpu_level": "v1",
+        "target_features": "+popcnt,+rdrand"
+      },
+      "asm": {
+        "cpu_level": "v3",
+        "target_features": "+rdtscp,+fsgsbase,+rdrand,+prefetchw,+invpcid,+clflush,+rdseed,+waitpkg"
+      }
+    },
+    "c_accepted": 446,
+    "asm_accepted": 506
+  },
+  "results": {
+    "c": {
+      "total": 484,
+      "accepted": 460,
+      "rejected": 24,
+      "crashed": 0,
+      "timeout": 0,
+      "first_errors": [
+        {
+          "category": "goto in a function containing cleanup locals is not supported yet",
+          "count": 4,
+          "example": {
+            "path": "drivers/base/core.i",
+            "diagnostic": "keel: <source>/drivers/base/core.c:571:3: error: goto in a function containing cleanup locals is not supported yet"
+          }
+        },
+        {
+          "category": "invalid cast",
+          "count": 1,
+          "example": {
+            "path": "arch/x86/events/amd/ibs.i",
+            "diagnostic": "keel: <source>/arch/x86/events/amd/ibs.c:348:34: error: invalid cast"
+          }
+        },
+        {
+          "category": "keel: <build>/arch/x86/events/intel/core.i: @mul_u64_u64_div_u64: asm operand 1: register rax overlaps another operand or clobber; use a matching constraint",
+          "count": 1,
+          "example": {
+            "path": "arch/x86/events/intel/core.i",
+            "diagnostic": "keel: <build>/arch/x86/events/intel/core.i: @mul_u64_u64_div_u64: asm operand 1: register rax overlaps another operand or clobber; use a matching constraint"
+          }
+        },
+        {
+          "category": "keel: <build>/arch/x86/kernel/apic/apic.i: @spurious_interrupt: asm output is tied to more than one input",
+          "count": 1,
+          "example": {
+            "path": "arch/x86/kernel/apic/apic.i",
+            "diagnostic": "keel: <build>/arch/x86/kernel/apic/apic.i: @spurious_interrupt: asm output is tied to more than one input"
+          }
+        },
+        {
+          "category": "keel: <build>/arch/x86/kernel/fpu/signal.i: @xsave_to_user_sigframe: asm operand 3: register rax overlaps another operand or clobber; use a matching constraint",
+          "count": 1,
+          "example": {
+            "path": "arch/x86/kernel/fpu/signal.i",
+            "diagnostic": "keel: <build>/arch/x86/kernel/fpu/signal.i: @xsave_to_user_sigframe: asm operand 3: register rax overlaps another operand or clobber; use a matching constraint"
+          }
+        },
+        {
+          "category": "keel: <build>/arch/x86/kernel/fpu/xstate.i: @xsaves: asm operand 3: register rax overlaps another operand or clobber; use a matching constraint",
+          "count": 1,
+          "example": {
+            "path": "arch/x86/kernel/fpu/xstate.i",
+            "diagnostic": "keel: <build>/arch/x86/kernel/fpu/xstate.i: @xsaves: asm operand 3: register rax overlaps another operand or clobber; use a matching constraint"
+          }
+        },
+        {
+          "category": "unaligned pointer relocations are not supported",
+          "count": 1,
+          "example": {
+            "path": "arch/x86/kernel/idt.i",
+            "diagnostic": "keel: <build>/arch/x86/kernel/idt.i:0:0: error: unaligned pointer relocations are not supported"
+          }
+        },
+        {
+          "category": "keel: <build>/arch/x86/kernel/irq.i: @common_interrupt: asm output is tied to more than one input",
+          "count": 1,
+          "example": {
+            "path": "arch/x86/kernel/irq.i",
+            "diagnostic": "keel: <build>/arch/x86/kernel/irq.i: @common_interrupt: asm output is tied to more than one input"
+          }
+        },
+        {
+          "category": "keel: <build>/arch/x86/kernel/irq_work.i: @fred_sysvec_irq_work: asm output is tied to more than one input",
+          "count": 1,
+          "example": {
+            "path": "arch/x86/kernel/irq_work.i",
+            "diagnostic": "keel: <build>/arch/x86/kernel/irq_work.i: @fred_sysvec_irq_work: asm output is tied to more than one input"
+          }
+        },
+        {
+          "category": "unsupported generated operands for Core(Lar): [Register(Register { class: Gpr, number: 0, width: 32, high_byte: false }), Register(Register { class: Gpr, number: 1, width: 16, high",
+          "count": 1,
+          "example": {
+            "path": "arch/x86/kernel/signal_64.i",
+            "diagnostic": "keel: <build>/arch/x86/kernel/signal_64.i: line 2192: unsupported generated operands for Core(Lar): [Register(Register { class: Gpr, number: 0, width: 32, high_byte: false }), Register(Register { class: Gpr, number: 1, width: 16, high_byte: false })]"
+          }
+        },
+        {
+          "category": "required inlining of @decode_bug in @handle_bug failed: public_definition",
+          "count": 1,
+          "example": {
+            "path": "arch/x86/kernel/traps.i",
+            "diagnostic": "keel: <build>/arch/x86/kernel/traps.i:0:0: error: required inlining of @decode_bug in @handle_bug failed: public_definition"
+          }
+        },
+        {
+          "category": "required inlining of @__cyc2ns_read in @__set_cyc2ns_scale failed: public_definition",
+          "count": 1,
+          "example": {
+            "path": "arch/x86/kernel/tsc.i",
+            "diagnostic": "keel: <build>/arch/x86/kernel/tsc.i:0:0: error: required inlining of @__cyc2ns_read in @__set_cyc2ns_scale failed: public_definition"
+          }
+        },
+        {
+          "category": "case range is empty or too big",
+          "count": 1,
+          "example": {
+            "path": "fs/binfmt_elf.i",
+            "diagnostic": "keel: <source>/fs/binfmt_elf.c:934:3: error: case range is empty or too big"
+          }
+        },
+        {
+          "category": "special/TLS/COMDAT section placement is unsupported",
+          "count": 1,
+          "example": {
+            "path": "init/version.i",
+            "diagnostic": "keel: <build>/init/version.i:0:0: error: special/TLS/COMDAT section placement is unsupported"
+          }
+        },
+        {
+          "category": "required inlining of @exit_to_user_mode_loop in @syscall_exit_to_user_mode_work failed: public_definition",
+          "count": 1,
+          "example": {
+            "path": "kernel/entry/common.i",
+            "diagnostic": "keel: <build>/kernel/entry/common.i:0:0: error: required inlining of @exit_to_user_mode_loop in @syscall_exit_to_user_mode_work failed: public_definition"
+          }
+        },
+        {
+          "category": "function alignment attributes are not supported",
+          "count": 1,
+          "example": {
+            "path": "kernel/exit.i",
+            "diagnostic": "keel: <source>/kernel/exit.c:1967:65: error: function alignment attributes are not supported"
+          }
+        },
+        {
+          "category": "inline asm finalization: [VerifierError { location: \"@__mutex_lock\", message: \"callee @__mutex_lock_common attributes disagree with module\" }, VerifierError { location: \"@__ww_mute",
+          "count": 1,
+          "example": {
+            "path": "kernel/locking/mutex.i",
+            "diagnostic": "keel: <build>/kernel/locking/mutex.i:0:0: error: inline asm finalization: [VerifierError { location: \"@__mutex_lock\", message: \"callee @__mutex_lock_common attributes disagree with module\" }, VerifierError { location: \"@__ww_mutex_lock\", message: \"callee @__mutex_lock_common attributes disagree with module\" }]"
+          }
+        },
+        {
+          "category": "keel: <build>/kernel/softirq.i: @do_softirq: asm output is tied to more than one input",
+          "count": 1,
+          "example": {
+            "path": "kernel/softirq.i",
+            "diagnostic": "keel: <build>/kernel/softirq.i: @do_softirq: asm output is tied to more than one input"
+          }
+        },
+        {
+          "category": "keel: <build>/kernel/time/timekeeping.i: @mul_u64_u64_div_u64: asm operand 1: register rax overlaps another operand or clobber; use a matching constraint",
+          "count": 1,
+          "example": {
+            "path": "kernel/time/timekeeping.i",
+            "diagnostic": "keel: <build>/kernel/time/timekeeping.i: @mul_u64_u64_div_u64: asm operand 1: register rax overlaps another operand or clobber; use a matching constraint"
+          }
+        },
+        {
+          "category": "AT&T suffix requires a 32-bit register",
+          "count": 1,
+          "example": {
+            "path": "mm/maccess.i",
+            "diagnostic": "keel: <build>/mm/maccess.i: line 163: AT&T suffix requires a 32-bit register"
+          }
+        },
+        {
+          "category": "required inlining of @free_pages_prepare in @__free_pages_ok failed: public_definition",
+          "count": 1,
+          "example": {
+            "path": "mm/page_alloc.i",
+            "diagnostic": "keel: <build>/mm/page_alloc.i:0:0: error: required inlining of @free_pages_prepare in @__free_pages_ok failed: public_definition"
+          }
+        }
+      ]
+    },
+    "asm": {
+      "total": 506,
+      "accepted": 506,
+      "rejected": 0,
+      "crashed": 0,
+      "timeout": 0,
+      "first_errors": []
+    }
+  },
+  "prior_accepted_objects": {
+    "total": 952,
+    "retained": 952,
+    "byte_identical": 952,
+    "changed": [],
+    "withdrawn_acceptance": []
+  },
+  "new_accepted_c": [
+    "arch/x86/entry/vdso/vclock_gettime.i",
+    "arch/x86/events/msr.i",
+    "arch/x86/kernel/fpu/core.i",
+    "arch/x86/kernel/process.i",
+    "arch/x86/kernel/process_64.i",
+    "arch/x86/kernel/trace_clock.i",
+    "arch/x86/lib/delay.i",
+    "arch/x86/lib/usercopy_64.i",
+    "arch/x86/mm/fault.i",
+    "arch/x86/mm/pat/set_memory.i",
+    "arch/x86/mm/tlb.i",
+    "drivers/char/random.i",
+    "mm/slub.i",
+    "mm/vmscan.i"
+  ],
+  "former_feature_rejections": [
+    {
+      "path": "arch/x86/entry/vdso/vclock_gettime.i",
+      "previous_diagnostic": "keel: <build>/arch/x86/entry/vdso/vclock_gettime.i: line 968: rdtscp requires x86 target features: rdtscp",
+      "status": "accepted",
+      "diagnostic": ""
+    },
+    {
+      "path": "arch/x86/events/msr.i",
+      "previous_diagnostic": "keel: <build>/arch/x86/events/msr.i: line 602: rdtscp requires x86 target features: rdtscp",
+      "status": "accepted",
+      "diagnostic": ""
+    },
+    {
+      "path": "arch/x86/kernel/fpu/core.i",
+      "previous_diagnostic": "keel: <build>/arch/x86/kernel/fpu/core.i: line 2107: xgetbv requires x86 target features: xsave",
+      "status": "accepted",
+      "diagnostic": ""
+    },
+    {
+      "path": "arch/x86/kernel/process.i",
+      "previous_diagnostic": "keel: <build>/arch/x86/kernel/process.i: line 1870: clflush requires x86 target features: clflush",
+      "status": "accepted",
+      "diagnostic": ""
+    },
+    {
+      "path": "arch/x86/kernel/process_64.i",
+      "previous_diagnostic": "keel: <build>/arch/x86/kernel/process_64.i: line 552: wrfsbase requires x86 target features: fsgsbase",
+      "status": "accepted",
+      "diagnostic": ""
+    },
+    {
+      "path": "arch/x86/kernel/trace_clock.i",
+      "previous_diagnostic": "keel: <build>/arch/x86/kernel/trace_clock.i: line 77: rdtscp requires x86 target features: rdtscp",
+      "status": "accepted",
+      "diagnostic": ""
+    },
+    {
+      "path": "arch/x86/lib/delay.i",
+      "previous_diagnostic": "keel: <build>/arch/x86/lib/delay.i: line 201: rdtscp requires x86 target features: rdtscp",
+      "status": "accepted",
+      "diagnostic": ""
+    },
+    {
+      "path": "arch/x86/lib/usercopy_64.i",
+      "previous_diagnostic": "keel: <build>/arch/x86/lib/usercopy_64.i: line 357: clflush requires x86 target features: clflush",
+      "status": "accepted",
+      "diagnostic": ""
+    },
+    {
+      "path": "arch/x86/mm/fault.i",
+      "previous_diagnostic": "keel: <build>/arch/x86/mm/fault.i: line 105: prefetchw requires x86 target features: prefetchw",
+      "status": "accepted",
+      "diagnostic": ""
+    },
+    {
+      "path": "arch/x86/mm/pat/set_memory.i",
+      "previous_diagnostic": "keel: <build>/arch/x86/mm/pat/set_memory.i: line 9774: clflush requires x86 target features: clflush",
+      "status": "accepted",
+      "diagnostic": ""
+    },
+    {
+      "path": "arch/x86/mm/tlb.i",
+      "previous_diagnostic": "keel: <build>/arch/x86/mm/tlb.i: line 654: invpcid requires x86 target features: invpcid",
+      "status": "accepted",
+      "diagnostic": ""
+    },
+    {
+      "path": "drivers/char/random.i",
+      "previous_diagnostic": "keel: <build>/drivers/char/random.i: line 2014: rdseed requires x86 target features: rdseed",
+      "status": "accepted",
+      "diagnostic": ""
+    },
+    {
+      "path": "mm/slub.i",
+      "previous_diagnostic": "keel: <build>/mm/slub.i: line 620: cmpxchg16b requires x86 target features: cx16",
+      "status": "accepted",
+      "diagnostic": ""
+    },
+    {
+      "path": "mm/vmscan.i",
+      "previous_diagnostic": "keel: <build>/mm/vmscan.i: line 9310: prefetchw requires x86 target features: prefetchw",
+      "status": "accepted",
+      "diagnostic": ""
+    }
+  ],
+  "default_v1_and_explicit_policy_witnesses": {
+    "feature_policy": {
+      "name": "linux-v6.12-x86-64-kernel-audit",
+      "sha256": "60189c2bbc51bd84487d041c69715c670688dfbcfb2d1afa24a6c9aae16fcfbc"
+    },
+    "keel_binary_sha256": "c756d9d9694dcf2b39a685942a04f6f81cd70d0e602dd35733d5df3b9276dddb",
+    "cases": [
+      {
+        "instruction_feature": "rdtscp",
+        "mode": "default",
+        "returncode": 1,
+        "source_sha256": "32c92450a31551058a8340604d02c84a2687b2b2d27852db943825600964df22",
+        "diagnostic": "keel: <fixture>/rdtscp.i: line 40: rdtscp requires x86 target features: rdtscp"
+      },
+      {
+        "instruction_feature": "rdtscp",
+        "mode": "explicit_v1",
+        "returncode": 1,
+        "source_sha256": "32c92450a31551058a8340604d02c84a2687b2b2d27852db943825600964df22",
+        "diagnostic": "keel: <fixture>/rdtscp.i: line 40: rdtscp requires x86 target features: rdtscp"
+      },
+      {
+        "instruction_feature": "rdtscp",
+        "mode": "kernel_audit",
+        "returncode": 0,
+        "source_sha256": "32c92450a31551058a8340604d02c84a2687b2b2d27852db943825600964df22",
+        "object_sha256": "769a2297a79af0ec673df93f91598815209c13ec10e2365ecafcb291d07bd77d"
+      },
+      {
+        "instruction_feature": "xsave",
+        "mode": "default",
+        "returncode": 1,
+        "source_sha256": "60964e8bca81bf8c017e91bb228125dcc2fb439ee06928002b4115af023c2a11",
+        "diagnostic": "keel: <fixture>/xsave.i: line 44: xgetbv requires x86 target features: xsave"
+      },
+      {
+        "instruction_feature": "xsave",
+        "mode": "explicit_v1",
+        "returncode": 1,
+        "source_sha256": "60964e8bca81bf8c017e91bb228125dcc2fb439ee06928002b4115af023c2a11",
+        "diagnostic": "keel: <fixture>/xsave.i: line 44: xgetbv requires x86 target features: xsave"
+      },
+      {
+        "instruction_feature": "xsave",
+        "mode": "kernel_audit",
+        "returncode": 0,
+        "source_sha256": "60964e8bca81bf8c017e91bb228125dcc2fb439ee06928002b4115af023c2a11",
+        "object_sha256": "5726578f7f0e11691a41815ab0b26af796d4d47fee29d2fd1bcf91356c3d540f"
+      }
+    ],
+    "instructions_executed": false
+  },
+  "validation": {
+    "python_audit_tests_passed": 7,
+    "python_bytecode_check": true,
+    "rust_workspace_validation": "Not repeated for audit tooling/data-only changes. See the unchanged compiler qualification report."
+  }
+}

@@ -1,11 +1,11 @@
 # Minimal Linux x86-64 compiler target
 
-Latest measured status: **118/484 C inputs** and **490/506 assembly inputs**
-accepted under the original feature policy. A separate explicit-feature probe
-accepts **122 C inputs and all 506 assembly inputs**. The
-[offset/aggregate follow-up](#runtime-offsets-and-aggregate-asm-operands)
-clears the preceding two dominant blockers. Packed-enum layout is now the
-common C first error.
+Latest measured status: **460/484 C inputs** and **506/506 assembly inputs**
+accepted under the opt-in [kernel audit policy](kernel-audit-policy.json).
+The [policy checkpoint](audit-kernel-policy.json) uses the same compiler as
+`864f92c0`; its gain comes from explicit instruction permissions. Twenty-four C
+inputs still reject at implementation boundaries. Original and earlier optional
+policies retain their separate historical results below.
 
 This fixture targets the **64-bit parts** of Linux v6.12. Host programs,
 16/32-bit code and mixed-mode assembly remain external. The supported x86 C
@@ -126,6 +126,30 @@ Generated build trees, saved inputs, objects and raw logs stay outside Git.
 explicit extra features independently. Omit them to retain the original
 assembler v3 and C v1 policies. Results record both policies. Keep reports from
 different policies separate when comparing acceptance counts.
+
+The opt-in [kernel audit policy](kernel-audit-policy.json) grants instruction
+availability for this corpus without changing Keel's CPU levels. Select it with:
+
+```sh
+python3 suite/linux-kernel/audit.py probe \
+  --build /path/to/build --manifest inputs.json \
+  --keel target/debug/keel --out probe-kernel-policy \
+  --feature-policy suite/linux-kernel/kernel-audit-policy.json
+```
+
+This keeps C at v1 and assembly at v3, then supplies the JSON's explicit extra
+features. The C list grants POPCNT, RDRAND, RDTSCP, XSAVE, CLFLUSH, FSGSBASE,
+PREFETCHW, INVPCID, RDSEED, CX16 and WAITPKG. The assembler retains the preceding
+eight-feature permission list. Each permission has a rationale in the JSON.
+The probe validates canonical names against the generated feature schema and
+records the policy name, content hash and resolved flags. Combining this option
+with either target-feature override is rejected before probing.
+
+This policy permits assembly of the captured instructions. It does not change
+normal compiler defaults, establish CPU/OS state preconditions, disable the
+red zone or SIMD, or qualify kernel ABI, linking or execution. Ordinary probes
+without feature options retain the original policies. Historical reports keep
+their original permissions and remain separate from the named-policy results.
 
 Commit only reviewed configuration, tools and compact reports. The preceding
 [readiness audit](../../docs/linux-kernel-readiness.md) describes the compiler,
@@ -1306,3 +1330,25 @@ is recorded in [audit-c-acceptance-goal.json](audit-c-acceptance-goal.json), wit
 native builtin, generic-pointer, output-bearing asm-goto and cleanup-switch
 witnesses. Feature permissions remain explicit. See the
 [goal contract](../../docs/c-linux64-acceptance.md#full-acceptance-goal).
+
+## Explicit kernel-audit permissions
+
+The user-approved `kernel-audit-policy.json` is separate from compiler CPU
+profiles. The named-policy rerun accepts 460/484 C inputs and 506/506 assembly
+inputs. The preceding optional policy accepts 446/484 C and 506/506 assembly;
+its report remains unchanged. All 14 feature-permission first errors clear,
+including the TPAUSE permission reached after RDTSCP in the delay input.
+
+All 952 previously accepted objects remain byte-identical. All 992 saved inputs,
+the config, reference binaries and binary input dependencies were rehashed
+unchanged. The compiler binary and its qualified source are unchanged.
+Seven policy tests pass on both audit hosts. Real CLI checks show that default
+and explicit v1 still reject RDTSCP and XGETBV, while the named policy assembles
+them. These witnesses do not execute either instruction.
+
+The [policy report](audit-kernel-policy.json) records resolved flags, the policy
+hash, remaining first errors, new acceptances and unchanged objects. This round
+does not change compiler, assembler, decoder or CPU-profile source. Rust
+workspace validation is not repeated for this tooling/data change; the earlier
+compiler qualification remains scoped to its recorded checkpoint. Kernel ABI,
+linking, boot and runtime qualification remain separate.

@@ -86,6 +86,69 @@ class AuditTests(unittest.TestCase):
                 })
                 self.assertEqual(result['first_error_feature_gates'], [])
 
+    def test_named_kernel_policy_reaches_commands_and_report(self):
+        policy_path = Path(__file__).with_name('kernel-audit-policy.json')
+        policy = json.loads(policy_path.read_text())
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / '.config').write_text('CONFIG_64BIT=y\n')
+            (root / 'compiler').write_text('compiler witness')
+            (root / 'kernel.i').write_text('int x;\n')
+            (root / 'kernel.s').write_text('rdtscp\n')
+            manifest = root / 'manifest.json'
+            manifest.write_text(json.dumps({
+                'config_sha256': audit.sha(root / '.config'),
+                'inputs': [{'kind': kind, 'path': path, 'scope': 'kernel64',
+                            'sha256': audit.sha(root / path)}
+                           for kind, path in [('c', 'kernel.i'), ('asm', 'kernel.s')]],
+            }))
+            args = types.SimpleNamespace(build=root, manifest=manifest, keel=root / 'compiler',
+                out=root / 'probe', timeout=60, c_target_features=None,
+                asm_target_features=None, feature_policy=policy_path)
+            with patch.object(audit.subprocess, 'run', return_value=types.SimpleNamespace(returncode=0, stderr=b'')) as run:
+                audit.probe(args)
+            for call, kind, level in zip(run.call_args_list, ['c', 'asm'], ['v1', 'v3']):
+                command = call.args[0]
+                self.assertEqual(command[command.index('--cpu-level') + 1], level)
+                self.assertEqual(command[command.index('--target-features') + 1],
+                                 ','.join('+' + f for f in policy[kind + '_target_features']))
+            result = json.loads((args.out / 'results.json').read_text())
+            self.assertEqual(result['feature_policy'], {
+                'name': policy['name'], 'sha256': audit.sha(policy_path)})
+            self.assertIsNone(args.c_target_features)
+            self.assertIsNone(args.asm_target_features)
+
+    def test_invalid_or_ambiguous_policy_stops_before_probing(self):
+        original = json.loads(Path(__file__).with_name('kernel-audit-policy.json').read_text())
+        variants = [None, [], dict(original, schema=2),
+                    dict(original, target='aarch64-unknown-linux-gnu'),
+                    dict(original, name=''), dict(original, c_target_features=['not_a_feature']),
+                    dict(original, c_target_features=['xsave', 'xsave']),
+                    dict(original, c_target_features=[['xsave']]),
+                    dict(original, asm_target_features=None)]
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            policy_path = root / 'policy.json'
+            args = types.SimpleNamespace(feature_policy=policy_path, c_target_features=None,
+                                         asm_target_features=None, out=root / 'probe')
+            for policy in variants:
+                with self.subTest(policy=policy):
+                    policy_path.write_text(json.dumps(policy))
+                    with patch.object(audit.subprocess, 'run') as run:
+                        with self.assertRaises(SystemExit):
+                            audit.probe(args)
+                        run.assert_not_called()
+                    self.assertFalse(args.out.exists())
+            policy_path.write_text(json.dumps(original))
+            for name in ['c_target_features', 'asm_target_features']:
+                setattr(args, name, '+rdtscp')
+                with self.assertRaisesRegex(SystemExit, 'cannot be combined'):
+                    audit.probe(args)
+                setattr(args, name, None)
+            policy_path.write_text('{')
+            with self.assertRaisesRegex(SystemExit, 'Cannot load feature policy'):
+                audit.probe(args)
+
     def test_probe_records_instruction_requirements_without_granting_features(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

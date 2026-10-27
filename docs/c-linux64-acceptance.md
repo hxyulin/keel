@@ -6,8 +6,10 @@ The checkpoint ledger is [recorded with the corpus](../suite/linux-kernel/audit-
 
 ## Full-acceptance goal
 
-The target is 484/484 captured C inputs producing x86-64 objects. The goal is
-open. Keep the reference inputs and resolved config fixed, preserve prior
+The target is 484/484 captured C inputs producing x86-64 objects under the
+opt-in [kernel audit policy](../suite/linux-kernel/kernel-audit-policy.json).
+The goal is open. The user approved this explicit permission list; ordinary v1
+defaults and historical audit policies remain unchanged. Keep the reference inputs and resolved config fixed, preserve prior
 acceptances, and record each compiler checkpoint and its feature policy.
 Do not count feature-permission rejections as missing instruction encodings or
 silently enable instructions to improve the result. Kernel linking, booting and
@@ -255,3 +257,20 @@ execution covers eight generated variants and two references. The remaining
 38 C first errors include 14 explicit feature permissions, eight shared-register
 asm contracts, four cleanup gotos and four public mandatory-inline ownership
 checks. Other first errors are recorded in the ledger. The 484/484 goal is open.
+
+## Explicit kernel audit policy
+
+The user approved an opt-in kernel-audit permission list while retaining normal
+v1 defaults. The [policy](../suite/linux-kernel/kernel-audit-policy.json) is audit
+data, selected with `audit.py probe --feature-policy`. It keeps C at v1 and
+assembly at v3, then grants the listed extra features. Reports record the policy
+name, hash and resolved flags; separate override flags cannot be mixed with it.
+
+Under this policy the unchanged compiler accepts 460/484 C inputs and all
+506 assembly inputs. All 14 preceding feature-permission rejections clear, and
+all 952 prior accepted objects remain byte-identical. Default and explicit v1
+still reject RDTSCP and XGETBV witnesses. No CPU profile or compiler source is
+changed. The [policy ledger](../suite/linux-kernel/audit-kernel-policy.json)
+records seven policy tests, real CLI gate witnesses and the complete corpus
+rerun. The remaining 24 C rejections are implementation gaps; the 484/484 goal
+remains open. Feature permission does not establish kernel runtime support.
