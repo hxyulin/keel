@@ -1549,6 +1549,9 @@ pub fn required_inline_asm_with_c_bodies(
             }
         }
         module.functions.retain(|f| live.contains(&f.name));
+        // Removed calls leave callee imports behind. Refresh their contracts
+        // from the declarations that now own the discarded bodies' names.
+        module.sync_function_attrs();
     }
     discard_unused(module);
     // Reject recursive mandatory edges before cloning can grow the graph.
