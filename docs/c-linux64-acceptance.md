@@ -57,9 +57,9 @@ metadata that survives every emitter. Removing their diagnostics is not support.
   definition. Non-mandatory extern-inline calls remain external. Weak/visibility/retention/lifecycle combinations on inline-only
   bodies reject. Aliases cannot target an unemitted body.
 
-The mandatory inliner retains its public and weak binding checks. GNU bodies
-arrive through a separate C-owned body list; the ordinary IR entry point does
-not receive that ownership. Constructor/destructor roots survive cleanup, and
+The ordinary IR mandatory inliner retains its public and weak binding checks.
+The C frontend supplies separate ownership for inline-only GNU bodies and
+strong public mandatory-inline definitions. Constructor/destructor roots survive cleanup, and
 placement metadata does not remain on declarations after a body is discarded.
 Normal and profiled C compilation share this finalization path.
 
@@ -315,3 +315,46 @@ cleanup gotos, four public mandatory-inline ownership checks, packed pointer
 relocations, special section placement, function alignment and unreachable
 width-specific asm. Their first diagnostics are unchanged. The acceptance goal
 remains open; this checkpoint does not link or boot a Keel kernel.
+
+## Constant asm paths and public mandatory-inline definitions
+
+The [inline-finalization ledger](../suite/linux-kernel/audit-c-inline-finalization.json)
+records 469/484 C inputs and 506/506 assembly inputs under the unchanged named
+kernel policy. `traps.i`, `tsc.i`, `kernel/entry/common.i`, `mm/maccess.i` and
+`mm/page_alloc.i` now compile. All 970 prior accepted inputs remain accepted.
+Of their objects, 664 are byte-identical; 306 C objects change with finalization.
+All 506 assembly objects are byte-identical. Reference inputs, config, reference
+artifacts and binary dependencies were rehashed unchanged.
+
+Before validating asm, mandatory C finalization runs bounded phi simplification,
+constant folding and CFG cleanup on asm-bearing functions. Width-selecting
+`sizeof` branches can therefore contain invalid asm in paths that are never
+emitted, independently of optional optimization. This uses the IR CFG rather
+than discarding source statements. Direct and computed goto targets remain
+reachable, and invalid asm in runtime-selected paths still rejects. Existing
+constant cleanup for deferred immediate operands retains its stronger passes.
+
+The C frontend explicitly supplies its strong public `always_inline` definitions
+to the mandatory inliner. Direct calls can expand those bodies while their
+public symbols, stored addresses and binding attributes remain intact. No
+noninterposable or no-semantic-interposition flag is added. Inline-only GNU
+bodies retain their separate discard rule. Ordinary IR clients retain the
+public-definition gate; weak, missing, local and non-mandatory definitions cannot
+use the new public-ownership context. Other eligibility, recursion, signature
+and growth checks still apply.
+
+Full validation passes 2,915 tests and one doctest, with 13 skipped. The initial
+full run exposed one declaration-matrix expectation that public mandatory calls
+would remain calls. The updated target passes locally and on Linux; the full
+rerun passes. Workspace checking, scoped formatting, documentation builds and
+both generator freshness checks pass. Strict Clippy remains blocked by existing
+dependency warnings. Sixteen focused Linux Rust tests pass, including optimizer
+verification. Native witnesses cover 16 generated executions and four unmodified
+GCC/Clang references on Linux, plus four generated public-inline variants on Arm.
+
+The remaining 15 first diagnostics are unchanged: eight asm register-sharing
+contracts, four cleanup-aware goto cases, one packed pointer relocation, one
+ELF note-section placement and one function alignment. These require checked
+operand sharing, declaration-lifetime exits, or storage metadata through IR and
+emitters. The next work needs a contract design rather than relaxing guards.
+The 484/484 acceptance goal remains open. No Keel kernel was linked or booted.
