@@ -3,6 +3,8 @@
 The pinned Linux v6.12 audit measures source-to-object acceptance for its
 64-bit inputs. It does not qualify a Keel-linked or Keel-booted kernel.
 The latest ledger is [recorded with the corpus](../suite/linux-kernel/audit-c-contracts.json).
+The later [link audit](linux-kernel-link-audit.md) records assembly-only linking
+and the remaining full-C link failures.
 
 ## Full-acceptance goal
 

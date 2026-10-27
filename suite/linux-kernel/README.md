@@ -9,6 +9,12 @@ byte-identical and 177 C objects change. All 506 assembly objects are
 byte-identical. The pinned source-to-object acceptance goal is complete.
 Original and earlier optional policies retain their historical results below.
 
+The subsequent [link audit](audit-link.json) links the assembly-only replacement
+with GNU ld and passes table sorting. The full C replacement still fails the
+final link after all 484 inputs compile with `-O`: 21 symbols remain unresolved.
+The [link audit notes](../../docs/linux-kernel-link-audit.md) record optimizer
+witnesses and objtool diagnostics. No new kernel was packaged or booted.
+
 This fixture targets the **64-bit parts** of Linux v6.12. Host programs,
 16/32-bit code and mixed-mode assembly remain external. The supported x86 C
 inline-assembly subset is recorded in the follow-ups below. Do not strip
@@ -22,8 +28,8 @@ debug-exit result without requiring an ACPI power-off subsystem.
 
 This is a compatibility fixture. It disables SMP, modules, networking, optional
 instrumentation and most devices by starting from `allnoconfig`. It is not a
-production or security configuration. The kernel, initramfs program and boot
-code currently use an external compiler and linker throughout.
+production or security configuration. The booted reference kernel, initramfs program and boot code use an external
+compiler and linker. Link experiments use separate object copies.
 
 The fixture selects the frame-pointer unwinder. ORC unwind metadata is a later
 configuration target. Objtool still runs for architecture-selected features;
