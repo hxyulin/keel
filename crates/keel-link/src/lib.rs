@@ -4,6 +4,7 @@
 //! produce linker ad-hoc signatures in process on any host and install atomically.
 pub mod archive;
 pub mod elf;
+pub mod elf_selection;
 mod extract;
 mod gc;
 mod read;

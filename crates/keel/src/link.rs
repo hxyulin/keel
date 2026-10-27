@@ -41,6 +41,12 @@ fn system_selector(args: &[String]) -> Option<usize> {
                         | "-static"
                         | "-Bstatic"
                         | "-Bdynamic"
+                        | "--whole-archive"
+                        | "--no-whole-archive"
+                        | "--start-group"
+                        | "--end-group"
+                        | "-("
+                        | "-)"
                 )
                 || [
                     "--target=",
@@ -360,9 +366,11 @@ fn sdk_version(root: &Path) -> u32 {
 }
 
 fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), String> {
+    use keel_link::elf_selection::{Request as SelectionRequest, Selection};
     enum Request {
         Path(PathBuf),
         Library(String, bool),
+        Control(SelectionRequest<'static>),
     }
     let mut requests = Vec::new();
     let mut directories = Vec::new();
@@ -377,12 +385,27 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
         .take_while(|a| *a != "--")
         .any(|a| matches!(a.as_str(), "--static" | "-static"));
     let mut static_libraries = force_static;
+    let mut group_depth = 0usize;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "-o" => output = args.next().ok_or("-o requires a path")?.into(),
             "-e" | "--entry" => {
                 options.entry = args.next().ok_or("--entry requires a symbol")?.clone()
+            }
+            "--whole-archive" => requests.push(Request::Control(SelectionRequest::WholeArchive)),
+            "--no-whole-archive" => {
+                requests.push(Request::Control(SelectionRequest::NoWholeArchive))
+            }
+            "--start-group" | "-(" => {
+                group_depth += 1;
+                requests.push(Request::Control(SelectionRequest::StartGroup));
+            }
+            "--end-group" | "-)" => {
+                group_depth = group_depth
+                    .checked_sub(1)
+                    .ok_or("--end-group without --start-group")?;
+                requests.push(Request::Control(SelectionRequest::EndGroup));
             }
             "--gc-sections" => options.gc_sections = true,
             "--no-gc-sections" => options.gc_sections = false,
@@ -423,7 +446,10 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
             _ => requests.push(Request::Path(PathBuf::from(arg))),
         }
     }
-    if requests.is_empty() {
+    if group_depth != 0 {
+        return Err("--start-group without --end-group".into());
+    }
+    if !requests.iter().any(|r| !matches!(r, Request::Control(_))) {
         return Err("usage: keel link --target x86_64-unknown-linux-gnu [-e _start] [-L dir] [-l name] <input.o|input.a|input.so>... -o executable".into());
     }
     // Cross links consult only explicitly supplied paths or the target sysroot.
@@ -449,16 +475,17 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
         }
     }
     let paths = requests
-        .into_iter()
+        .iter()
         .map(|r| match r {
-            Request::Path(path) => Ok(path),
+            Request::Control(_) => Ok(None),
+            Request::Path(path) => Ok(Some(path.clone())),
             Request::Library(name, static_only) => {
                 if name.is_empty() || name.contains('/') || name.contains('\0') {
                     return Err("library names must be nonempty basenames".into());
                 }
                 let candidates = if let Some(exact) = name.strip_prefix(':') {
                     vec![exact.to_owned()]
-                } else if static_only {
+                } else if *static_only {
                     vec![format!("lib{name}.a")]
                 } else {
                     vec![format!("lib{name}.so"), format!("lib{name}.a")]
@@ -467,33 +494,47 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
                     .iter()
                     .flat_map(|d| candidates.iter().map(move |n| d.join(n)))
                     .find(|p| p.is_file())
+                    .map(Some)
                     .ok_or_else(|| format!("library `{name}` not found; pass -L or --sysroot"))
             }
         })
         .collect::<Result<Vec<_>, String>>()?;
     let owned = paths
         .iter()
-        .map(|p| {
-            Source::open(p)
-                .map(|b| (p.to_string_lossy().into_owned(), b))
-                .map_err(|e| format!("{}: {e}", p.display()))
+        .map(|path| {
+            path.as_ref()
+                .map(|p| {
+                    Source::open(p)
+                        .map(|b| (p.to_string_lossy().into_owned(), b))
+                        .map_err(|e| format!("{}: {e}", p.display()))
+                })
+                .transpose()
         })
         .collect::<Result<Vec<_>, _>>()?;
     if force_static
-        && owned.iter().any(|(_, source)| {
+        && owned.iter().flatten().any(|(_, source)| {
             let b = source.bytes();
             b.len() >= 18 && &b[..4] == b"\x7fELF" && b[16..18] == [3, 0]
         })
     {
         return Err("--static cannot link shared libraries".into());
     }
-    let inputs = owned
+    let requests = requests
         .iter()
-        .map(|(name, source)| keel_link::Input {
-            name,
-            bytes: source.bytes(),
+        .zip(&owned)
+        .map(|(request, source)| match request {
+            Request::Control(control) => *control,
+            _ => {
+                let (name, source) = source.as_ref().expect("file request was loaded");
+                SelectionRequest::File {
+                    name,
+                    bytes: source.bytes(),
+                }
+            }
         })
         .collect::<Vec<_>>();
+    let selection = Selection::prepare(&requests, &options.entry)?;
+    let inputs = selection.inputs();
     let executable = keel_link::elf::link(&inputs, options)?;
     for warning in &executable.warnings {
         eprintln!("keel link: warning: {warning}");
