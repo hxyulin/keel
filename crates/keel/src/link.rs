@@ -8,6 +8,9 @@ fn native_value_option(arg: &str) -> bool {
         arg,
         "-o" | "-e"
             | "--entry"
+            | "-T"
+            | "-z"
+            | "--script"
             | "--dynamic-linker"
             | "--rpath"
             | "-rpath"
@@ -52,6 +55,8 @@ fn system_selector(args: &[String]) -> Option<usize> {
                 )
                 || [
                     "--target=",
+                    "--script=",
+                    "-T",
                     "-target=",
                     "--sysroot=",
                     "-mmacosx-version-min=",
@@ -367,6 +372,23 @@ fn sdk_version(root: &Path) -> u32 {
         .unwrap_or(0)
 }
 
+fn append_elf_script(script: &mut Option<String>, path: &str) -> Result<(), String> {
+    use std::io::Read;
+    let combined = script.get_or_insert_with(String::new);
+    let remaining = (1024usize * 1024).saturating_sub(combined.len().saturating_add(1));
+    let file = std::fs::File::open(path).map_err(|e| format!("{path}: {e}"))?;
+    let mut text = String::new();
+    file.take(remaining as u64 + 1)
+        .read_to_string(&mut text)
+        .map_err(|e| format!("{path}: {e}"))?;
+    if text.len() > remaining {
+        return Err("linker scripts exceed 1 MiB limit".into());
+    }
+    combined.push_str(&text);
+    combined.push('\n');
+    Ok(())
+}
+
 fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), String> {
     use keel_link::elf_selection::{Request as SelectionRequest, Selection};
     enum Request {
@@ -394,7 +416,26 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
         match arg.as_str() {
             "-o" => output = args.next().ok_or("-o requires a path")?.into(),
             "-e" | "--entry" => {
-                options.entry = args.next().ok_or("--entry requires a symbol")?.clone()
+                options.entry = args.next().ok_or("--entry requires a symbol")?.clone();
+                options.entry_override = Some(options.entry.clone());
+            }
+            "-z" => {
+                let value = args.next().ok_or("-z requires an option")?;
+                if let Some(size) = value.strip_prefix("max-page-size=") {
+                    let page = if let Some(hex) = size.strip_prefix("0x") {
+                        u64::from_str_radix(hex, 16)
+                    } else {
+                        size.parse()
+                    };
+                    options.max_page_size =
+                        Some(page.map_err(|_| format!("invalid maximum page size `{size}`"))?);
+                } else if value != "noexecstack" {
+                    return Err(format!("unsupported native ELF -z option `{value}`"));
+                }
+            }
+            "-T" | "--script" => {
+                let path = args.next().ok_or("--script requires a path")?;
+                append_elf_script(&mut options.script, path)?;
             }
             "-r" | "--relocatable" => relocatable = true,
             "--whole-archive" => requests.push(Request::Control(SelectionRequest::WholeArchive)),
@@ -439,6 +480,16 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
                 requests.extend(args.map(|a| Request::Path(a.into())));
                 break;
             }
+            a if a.starts_with("--entry=") => {
+                options.entry = a[8..].into();
+                options.entry_override = Some(options.entry.clone());
+            }
+            a if a.starts_with("-e") => {
+                options.entry = a[2..].into();
+                options.entry_override = Some(options.entry.clone());
+            }
+            a if a.starts_with("--script=") => append_elf_script(&mut options.script, &a[9..])?,
+            a if a.starts_with("-T") => append_elf_script(&mut options.script, &a[2..])?,
             a if a.starts_with("-L") => directories.push(PathBuf::from(&a[2..])),
             a if a.starts_with("-l") => {
                 requests.push(Request::Library(a[2..].into(), static_libraries))
@@ -537,8 +588,13 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
             *source = Source::Read(regular);
         }
     }
-    if relocatable && (options.gc_sections || !options.runpath.is_empty()) {
-        return Err("partial linking does not support --gc-sections or --rpath".into());
+    if relocatable
+        && (options.gc_sections
+            || !options.runpath.is_empty()
+            || options.script.is_some()
+            || options.max_page_size.is_some())
+    {
+        return Err("partial linking does not support scripts, maximum-page-size overrides, --gc-sections or --rpath".into());
     }
     if force_static
         && owned.iter().flatten().any(|(_, source)| {
@@ -562,7 +618,12 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
             }
         })
         .collect::<Vec<_>>();
-    let selection = Selection::prepare(&requests, if relocatable { "" } else { &options.entry })?;
+    let entry = if relocatable {
+        String::new()
+    } else {
+        options.effective_entry()?
+    };
+    let selection = Selection::prepare(&requests, &entry)?;
     let inputs = selection.inputs();
     let executable = if relocatable {
         keel_link::elf::relocatable::link(&inputs, machine)?

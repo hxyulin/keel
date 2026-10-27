@@ -269,3 +269,93 @@ fn relocation_overflow_is_checked_at_kernel_addresses() {
     .unwrap_err();
     assert!(error.contains("relocation 10 overflow"), "{error}");
 }
+
+#[test]
+fn assignment_updates_and_shared_alias_dependencies() {
+    let mut script = "x = 1; x += 1; x = x + 3; a0 = x; ".to_owned();
+    for i in 1..=30 {
+        script.push_str(&format!("a{i} = a{} + a{}; ", i - 1, i - 1));
+    }
+    script.push_str("SECTIONS { .text 4096 : { *(.text) } }");
+    let exe = link(".text\n.globl _start\n_start: ret\n", &script).unwrap();
+    let file = object::File::parse(exe.bytes.as_slice()).unwrap();
+    assert_eq!(value(&file, "x"), 5);
+    assert_eq!(value(&file, "a30"), 5 * (1 << 30));
+}
+
+#[test]
+fn strong_definitions_supersede_common_storage() {
+    let objects = [
+        keel_asm::x86::assemble_object(".text\n.globl _start\n_start: ret\n.comm foo,64,32\n")
+            .unwrap(),
+        keel_asm::x86::assemble_object(".data\n.globl foo\nfoo: .quad 7\n").unwrap(),
+    ];
+    let inputs = objects
+        .iter()
+        .map(|bytes| Input {
+            name: "common.o",
+            bytes,
+        })
+        .collect::<Vec<_>>();
+    let exe = elf::link(
+        &inputs,
+        elf::Options {
+            script: Some(
+                "SECTIONS { .text 4096 : { *(.text) } .data : { *(.data) } .bss : { *(COMMON) } }"
+                    .into(),
+            ),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let file = object::File::parse(exe.bytes.as_slice()).unwrap();
+    assert!(file.section_by_name(".bss").is_none());
+    assert_eq!(file.section_by_name(".data").unwrap().size(), 8);
+}
+
+#[test]
+fn script_load_alignment_uses_explicit_maximum_page_size() {
+    let bytes = keel_asm::x86::assemble_object(".text\n.globl _start\n_start: ret\n").unwrap();
+    let inputs = [Input {
+        name: "aligned.o",
+        bytes: &bytes,
+    }];
+    let options = |size| elf::Options {
+        max_page_size: Some(size),
+        script: Some("SECTIONS { .text 0xffffffff81000000 : AT(0x1000000) { *(.text) } }".into()),
+        ..Default::default()
+    };
+    let image = elf::link(&inputs, options(0x200000)).unwrap().bytes;
+    let at = 64;
+    assert_eq!(
+        u64::from_le_bytes(image[at + 48..at + 56].try_into().unwrap()),
+        0x200000
+    );
+    let offset = u64::from_le_bytes(image[at + 8..at + 16].try_into().unwrap());
+    let vma = u64::from_le_bytes(image[at + 16..at + 24].try_into().unwrap());
+    assert_eq!(offset % 0x200000, vma % 0x200000);
+    assert!(
+        elf::link(&inputs, options(0x3000))
+            .unwrap_err()
+            .contains("invalid ELF maximum page size")
+    );
+}
+
+#[test]
+fn merged_gnu_properties_can_be_selected_by_scripts() {
+    let exe = link(".text\n.globl _start\n_start: ret\n.section .note.gnu.property,\"a\",@note\n.p2align 3\n.long 4,16,5\n.asciz \"GNU\"\n.long 0xc0008002,4,1,0\n", "PHDRS { text PT_LOAD FLAGS(5); note PT_NOTE FLAGS(4); } SECTIONS { .text 4096 : { *(.text) } :text .notes : { KEEP(*(.note.gnu.property)) } :text :note }").unwrap();
+    let file = object::File::parse(exe.bytes.as_slice()).unwrap();
+    let note = file.section_by_name(".notes").unwrap().data().unwrap();
+    assert_eq!(note.len(), 32);
+    assert_eq!(&note[24..28], &1u32.to_le_bytes());
+}
+
+#[test]
+fn provide_dependencies_are_emitted_when_referenced_by_scripts_or_inputs() {
+    let exe = link(".text\n.globl _start\n_start: ret\n.data\n.quad z\n", "PROVIDE(a = 7); PROVIDE(z = a + 1); PROVIDE(unused = missing); y = a; SECTIONS { .text 4096 : { *(.text) } .data : { *(.data) } }").unwrap();
+    let file = object::File::parse(exe.bytes.as_slice()).unwrap();
+    assert_eq!(value(&file, "a"), 7);
+    assert_eq!(value(&file, "z"), 8);
+    assert_eq!(value(&file, "y"), 7);
+    assert!(!file.symbols().any(|s| s.name().unwrap() == "unused"));
+}

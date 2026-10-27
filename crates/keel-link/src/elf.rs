@@ -42,8 +42,12 @@ pub struct Options {
     pub gc_sections: bool,
     /// Owned GNU linker script text for bounded static x86-64 final linking.
     pub script: Option<String>,
+    /// ELF LOAD segment alignment override; defaults to the target page size.
+    pub max_page_size: Option<u64>,
     pub machine: Machine,
     pub entry: String,
+    /// Explicit entry override, taking precedence over a script ENTRY command.
+    pub entry_override: Option<String>,
     pub interpreter: String,
     pub runpath: Vec<String>,
 }
@@ -52,12 +56,44 @@ impl Default for Options {
         Self {
             gc_sections: false,
             script: None,
+            max_page_size: None,
             machine: Machine::X86_64,
             entry: "_start".into(),
+            entry_override: None,
             interpreter: "/lib64/ld-linux-x86-64.so.2".into(),
             runpath: Vec::new(),
         }
     }
+}
+impl Options {
+    /// Return the entry used for archive selection and executable layout.
+    ///
+    /// # Errors
+    /// Returns an error for an invalid script or an empty/reserved entry name.
+    pub fn effective_entry(&self) -> Result<String> {
+        let script = self
+            .script
+            .as_deref()
+            .map(script::Script::parse)
+            .transpose()?;
+        let entry = self
+            .entry_override
+            .as_ref()
+            .or_else(|| script.as_ref().and_then(|s| s.entry.as_ref()))
+            .unwrap_or(&self.entry)
+            .clone();
+        validate_entry(&entry)?;
+        Ok(entry)
+    }
+}
+fn validate_entry(entry: &str) -> Result<()> {
+    if entry.is_empty() || entry.contains('\0') {
+        return Err("invalid entry symbol".into());
+    }
+    if linker_owned(entry) {
+        return Err("a linker-owned symbol cannot be the entry point".into());
+    }
+    Ok(())
 }
 #[derive(Debug)]
 pub struct Executable {
@@ -135,7 +171,7 @@ struct Segment {
     memory_end: u64,
 }
 fn align(n: u64, a: u64) -> Result<u64> {
-    if !a.is_power_of_two() || a > 1024 * 1024 {
+    if !a.is_power_of_two() || a > LIMIT {
         return Err(format!("unsupported alignment {a}"));
     }
     n.checked_add(a - 1)
@@ -153,22 +189,31 @@ pub fn link(inputs: &[Input<'_>], mut options: Options) -> Result<Executable> {
     if inputs.is_empty() {
         return Err("no input objects".into());
     }
-    if options.entry.is_empty() || options.entry.contains('\0') {
-        return Err("invalid entry symbol".into());
-    }
-    if linker_owned(&options.entry) {
-        return Err("a linker-owned symbol cannot be the entry point".into());
-    }
     let script = options
         .script
         .as_deref()
         .map(script::Script::parse)
         .transpose()?;
-    if let Some(entry) = script.as_ref().and_then(|s| s.entry.as_ref()) {
+    if let Some(entry) = options
+        .entry_override
+        .as_ref()
+        .or_else(|| script.as_ref().and_then(|s| s.entry.as_ref()))
+    {
         options.entry.clone_from(entry);
     }
+    validate_entry(&options.entry)?;
     let arm = options.machine == Machine::Aarch64;
-    let page = if arm { 65536 } else { PAGE };
+    let page = options
+        .max_page_size
+        .unwrap_or(if arm { 65536 } else { PAGE });
+    if !page.is_power_of_two() || !(PAGE..=LIMIT).contains(&page) {
+        return Err(format!(
+            "invalid ELF maximum page size {page}: expected a power of two between 4096 and {LIMIT}"
+        ));
+    }
+    if script.is_none() && !BASE.is_multiple_of(page) {
+        return Err("maximum page size is incompatible with the default ELF base address".into());
+    }
     let (inputs, libraries) = input::prepare(inputs, &options.entry)?;
     if arm && (!libraries.is_empty() || !options.runpath.is_empty()) {
         return Err("native AArch64 ELF linking currently supports freestanding static executables; use `keel link --system` for shared libraries/libc".into());
@@ -661,7 +706,8 @@ pub fn link(inputs: &[Input<'_>], mut options: Options) -> Result<Executable> {
             return Err("SFrame reconstruction with linker scripts is unsupported".into());
         }
         unwind::merge(&mut sections, &mut units, &mut unwind_sections)?;
-        return script::link(script, sections, units, globals, &options.entry, warnings);
+        note_plan.prepare(&mut sections, &object_properties, false)?;
+        return script::link(script, sections, units, globals, &options, warnings);
     }
     // Bind original identities and validate even dead ranges before GC or merge.
     let mut sframe_targets = sframe_section

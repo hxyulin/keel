@@ -332,3 +332,83 @@ fn thin_archive_paths_are_relative_to_archive_and_missing_reads_are_atomic() {
         b"keep existing output"
     );
 }
+
+#[test]
+fn script_cli_spellings_entry_precedence_and_archive_root() {
+    let fixture = Fixture::new("scripts");
+    std::fs::write(
+        fixture.0.join("layout.lds"),
+        "ENTRY(unused) SECTIONS { .text 4096 : { *(.text) } }",
+    )
+    .unwrap();
+    for spelling in [
+        vec!["-T", "layout.lds"],
+        vec!["-Tlayout.lds"],
+        vec!["--script", "layout.lds"],
+        vec!["--script=layout.lds"],
+    ] {
+        let mut args = spelling;
+        args.extend([
+            "-z",
+            "max-page-size=0x200000",
+            "libunused.a",
+            "-o",
+            "scripted",
+        ]);
+        success(fixture.keel(&args));
+        let bytes = std::fs::read(fixture.0.join("scripted")).unwrap();
+        let file = object::File::parse(bytes.as_slice()).unwrap();
+        assert_eq!(
+            file.entry(),
+            file.symbols()
+                .find(|s| s.name().unwrap() == "unused")
+                .unwrap()
+                .address()
+        );
+        assert_eq!(
+            u64::from_le_bytes(bytes[112..120].try_into().unwrap()),
+            0x200000
+        );
+    }
+    std::fs::write(
+        fixture.0.join("entries.o"),
+        keel_asm::x86::assemble_object(
+            ".text\n.globl _start\n_start: ret\n.globl unused\nunused: ret\n",
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    for spelling in [
+        vec!["-e", "_start"],
+        vec!["-e_start"],
+        vec!["--entry=_start"],
+    ] {
+        let mut args = vec!["-Tlayout.lds", "entries.o", "-o", "override"];
+        args.extend(spelling);
+        success(fixture.keel(&args));
+        let bytes = std::fs::read(fixture.0.join("override")).unwrap();
+        let file = object::File::parse(bytes.as_slice()).unwrap();
+        assert_eq!(
+            file.entry(),
+            file.symbols()
+                .find(|s| s.name().unwrap() == "_start")
+                .unwrap()
+                .address()
+        );
+    }
+}
+
+#[test]
+fn oversized_expression_returns_a_diagnostic_without_aborting() {
+    let fixture = Fixture::new("expression-limit");
+    let script = format!(
+        "x = {}; SECTIONS {{ .text 4096 : {{ *(.text) }} }}",
+        vec!["1"; 120000].join("+")
+    );
+    assert!(script.len() < 1024 * 1024);
+    std::fs::write(fixture.0.join("deep.lds"), script).unwrap();
+    let output = fixture.keel(&["-Tdeep.lds", "unused.o", "-o", "must-not-exist"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("expression node limit exceeded"));
+    assert!(!fixture.0.join("must-not-exist").exists());
+}

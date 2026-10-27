@@ -1,6 +1,16 @@
 //! Script layout and emission. Input identities survive aggregation so local
 //! symbols and relocation places retain their original offsets.
-use super::*;
+use super::{Assignment, Command, Expr, Output, Phdr, Script};
+use crate::{
+    Result,
+    elf::{
+        Executable, Options, PAGE, Section, Symbol, Unit, align, end, put16, put32, put64, shdr,
+        string,
+    },
+};
+use bbtree::unsync::{BBTreeMap as BTreeMap, BBTreeSet as BTreeSet};
+use object::SymbolSection;
+use std::cell::RefCell;
 
 #[derive(Clone, Copy, Debug)]
 struct Value {
@@ -25,11 +35,24 @@ impl Value {
     }
 }
 #[derive(Clone)]
-struct Definition {
-    expr: Expr,
-    dot: Value,
-    context: Option<usize>,
-    provide: bool,
+enum Definition {
+    Expression {
+        expr: Expr,
+        dot: Value,
+        context: Option<usize>,
+        provide: bool,
+    },
+    Captured {
+        value: Value,
+        provide: bool,
+    },
+}
+impl Definition {
+    fn provide(&self) -> bool {
+        match self {
+            Self::Expression { provide, .. } | Self::Captured { provide, .. } => *provide,
+        }
+    }
 }
 #[derive(Clone, Copy)]
 struct Placement {
@@ -57,6 +80,8 @@ struct Layout<'a> {
     used: Vec<bool>,
     outputs: Vec<OutputSection>,
     definitions: BTreeMap<String, Definition>,
+    resolved: RefCell<BTreeMap<String, Value>>,
+    used_provides: RefCell<BTreeSet<String>>,
     dot: Value,
     assertions: Vec<(Expr, Value, Option<usize>)>,
 }
@@ -144,23 +169,39 @@ impl Layout<'_> {
                 "cyclic script symbol expression involving `{name}`"
             ));
         }
-        if let Some(def) = self.definitions.get(name) {
-            let mut value = self.eval(&def.expr, def.dot, depth + 1)?;
-            if !value.absolute && value.section.is_none() {
-                if let Some(index) = def.context {
-                    value.n = self.outputs[index].vma.wrapping_add(value.n);
-                    value.section = Some(index);
-                } else {
-                    value.absolute = true;
-                }
-            }
+        if self.definitions.get(name).is_some_and(Definition::provide) {
+            self.used_provides.borrow_mut().insert(name.to_owned());
+        }
+        if let Some(value) = self.resolved.borrow().get(name).copied() {
             return Ok(value);
         }
-        let &(ui, si) = self
-            .globals
-            .get(name)
-            .ok_or_else(|| format!("unresolved script symbol `{name}`"))?;
-        self.raw_symbol(ui, &self.units[ui].symbols[&si])
+        let value = if let Some(def) = self.definitions.get(name) {
+            match def {
+                Definition::Captured { value, .. } => *value,
+                Definition::Expression {
+                    expr, dot, context, ..
+                } => {
+                    let mut value = self.eval(expr, *dot, depth + 1)?;
+                    if !value.absolute && value.section.is_none() {
+                        if let Some(index) = *context {
+                            value.n = self.outputs[index].vma.wrapping_add(value.n);
+                            value.section = Some(index);
+                        } else {
+                            value.absolute = true;
+                        }
+                    }
+                    value
+                }
+            }
+        } else {
+            let &(ui, si) = self
+                .globals
+                .get(name)
+                .ok_or_else(|| format!("unresolved script symbol `{name}`"))?;
+            self.raw_symbol(ui, &self.units[ui].symbols[&si])?
+        };
+        self.resolved.borrow_mut().insert(name.to_owned(), value);
+        Ok(value)
     }
     fn eval(&self, expr: &Expr, dot: Value, depth: usize) -> Result<Value> {
         if depth > 256 {
@@ -288,6 +329,7 @@ impl Layout<'_> {
         }
     }
     fn assign(&mut self, a: &Assignment, context: Option<usize>) -> Result<()> {
+        self.resolved.get_mut().clear();
         if a.name == "." {
             // ASSERT evaluates lazily and returns one when used as an expression.
             if matches!(a.expr, Expr::Assert(..)) {
@@ -328,19 +370,27 @@ impl Layout<'_> {
             || !self.globals.contains_key(&a.name) && !self.definitions.contains_key(&a.name)
         {
             // Freeze dot at the assignment; defer forward aliases until addresses exist.
-            self.definitions.insert(
-                a.name.clone(),
-                Definition {
+            let definition = if self.definitions.contains_key(&a.name) && a.expr.references(&a.name)
+            {
+                Definition::Captured {
+                    value: self.eval(&a.expr, self.dot, 0)?,
+                    provide: a.provide,
+                }
+            } else {
+                Definition::Expression {
                     expr: a.expr.clone(),
                     dot: self.dot,
                     context,
                     provide: a.provide,
-                },
-            );
+                }
+            };
+            self.definitions.insert(a.name.clone(), definition);
         }
+        self.resolved.get_mut().clear();
         Ok(())
     }
     fn input(&mut self, patterns: &[(String, bool)], output: Option<usize>) -> Result<()> {
+        self.resolved.get_mut().clear();
         let mut matches: Vec<_> = self
             .inputs
             .iter()
@@ -400,6 +450,7 @@ impl Layout<'_> {
         phdrs: &[Phdr],
         inherited: &mut Vec<usize>,
     ) -> Result<()> {
+        self.resolved.get_mut().clear();
         if command.name == "/DISCARD/" {
             for cmd in &command.body {
                 let Command::Input(patterns) = cmd else {
@@ -521,6 +572,7 @@ impl Layout<'_> {
             }
         }
         self.dot = Value::absolute(vma.checked_add(o.size).ok_or("script address overflow")?);
+        self.resolved.get_mut().clear();
         Ok(())
     }
 }
@@ -530,9 +582,11 @@ pub(in crate::elf) fn link(
     mut sections: Vec<Section>,
     mut units: Vec<Unit>,
     globals: BTreeMap<String, (usize, usize)>,
-    entry_name: &str,
+    options: &Options,
     warnings: Vec<String>,
 ) -> Result<Executable> {
+    let page = options.max_page_size.unwrap_or(PAGE);
+    let entry_name = &options.entry;
     // Allocate common definitions before script matching, preserving input symbol IDs.
     let common_index = sections.len();
     let mut common = Section {
@@ -552,6 +606,12 @@ pub(in crate::elf) fn link(
             .values()
             .filter(|s| s.section == SymbolSection::Common)
         {
+            let selected = globals
+                .get(&symbol.name)
+                .is_some_and(|&(ui, si)| units[ui].symbols[&si].section == SymbolSection::Common);
+            if !selected {
+                continue;
+            }
             let entry = common_offsets
                 .entry(symbol.name.clone())
                 .or_insert((0u64, 1u64, 0u64));
@@ -579,7 +639,9 @@ pub(in crate::elf) fn link(
             .values_mut()
             .filter(|s| s.section == SymbolSection::Common)
         {
-            let (size, _, offset) = common_offsets[&symbol.name];
+            let Some(&(size, _, offset)) = common_offsets.get(&symbol.name) else {
+                continue;
+            };
             symbol.section = SymbolSection::Section(object::SectionIndex(synthetic));
             symbol.value = offset;
             symbol.size = size;
@@ -623,6 +685,8 @@ pub(in crate::elf) fn link(
         used: vec![false; sections.len()],
         outputs: Vec::new(),
         definitions: BTreeMap::new(),
+        resolved: RefCell::new(BTreeMap::new()),
+        used_provides: RefCell::new(BTreeSet::new()),
         dot: Value::absolute(0),
         assertions: Vec::new(),
     };
@@ -650,10 +714,24 @@ pub(in crate::elf) fn link(
     // PROVIDE is lazy, as GNU ld requires; unresolved unused provides are harmless.
     let mut script_values = BTreeMap::new();
     for (name, def) in &layout.definitions {
-        let referenced = units
-            .iter()
-            .any(|u| u.symbols.values().any(|s| s.global() && s.name == *name));
-        if !def.provide || referenced {
+        if !def.provide() {
+            script_values.insert(name.clone(), layout.named(name, 0)?);
+        }
+    }
+    // Resolve input references first, including dependencies on other PROVIDEs.
+    // A second pass emits every PROVIDE reached by input or script expressions.
+    for (name, def) in &layout.definitions {
+        if def.provide()
+            && units
+                .iter()
+                .any(|u| u.symbols.values().any(|s| s.global() && s.name == *name))
+        {
+            layout.named(name, 0)?;
+        }
+    }
+    for (name, def) in &layout.definitions {
+        let used = layout.used_provides.borrow().contains(name);
+        if def.provide() && used {
             script_values.insert(name.clone(), layout.named(name, 0)?);
         }
     }
@@ -665,7 +743,14 @@ pub(in crate::elf) fn link(
     }) {
         return Err("script entry must lie in executable VMA or LMA".into());
     }
-    emit(&mut layout, &script.phdrs, &script_values, entry, warnings)
+    emit(
+        &mut layout,
+        &script.phdrs,
+        &script_values,
+        entry,
+        warnings,
+        page,
+    )
 }
 
 fn emit(
@@ -674,6 +759,7 @@ fn emit(
     script_values: &BTreeMap<String, Value>,
     entry: u64,
     warnings: Vec<String>,
+    page: u64,
 ) -> Result<Executable> {
     // With explicit PHDRS only those headers are emitted. Without PHDRS use
     // one LOAD per allocated output, avoiding assumptions about permission order.
@@ -689,7 +775,7 @@ fn emit(
         Vec::new()
     };
     let phnum = phdrs.len().max(automatic.len());
-    if 64 + phnum * 56 > PAGE as usize {
+    if 64 + phnum * 56 > page as usize {
         return Err("script program headers exceed first page".into());
     }
     let mut segment_alignments = BTreeMap::new();
@@ -709,11 +795,11 @@ fn emit(
                 .collect()
         };
         for load in loads {
-            let a = segment_alignments.entry(load).or_insert(PAGE);
+            let a = segment_alignments.entry(load).or_insert(page);
             *a = (*a).max(o.align);
         }
     }
-    let mut cursor = PAGE;
+    let mut cursor = page;
     let mut segment_origins: BTreeMap<usize, (u64, u64, u64)> = BTreeMap::new();
     for (index, o) in layout.outputs.iter_mut().enumerate() {
         if o.size == 0 {
@@ -824,6 +910,9 @@ fn emit(
             let at = (out.offset + place.offset + r.offset) as usize;
             bytes[at..at + encoded.1].copy_from_slice(&encoded.0.to_le_bytes()[..encoded.1]);
         }
+    }
+    if layout.outputs.iter().filter(|o| o.size != 0).count() + 4 >= 0xff00 {
+        return Err("too many script output sections".into());
     }
     let mut names = vec![0];
     let mut headers = vec![[0; 64]];
@@ -999,7 +1088,7 @@ fn emit(
                 &mut bytes,
                 at + 48,
                 if kind == 1 {
-                    members.iter().map(|o| o.align).max().unwrap_or(1).max(PAGE)
+                    members.iter().map(|o| o.align).max().unwrap_or(1).max(page)
                 } else {
                     first.align
                 },

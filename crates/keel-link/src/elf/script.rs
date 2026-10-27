@@ -1,6 +1,6 @@
 //! Bounded GNU script grammar. Unknown syntax is an error, never a layout hint.
 mod layout;
-use super::*;
+use crate::Result;
 pub(super) use layout::link;
 
 #[derive(Clone, Debug)]
@@ -11,6 +11,17 @@ enum Expr {
     Binary(String, Box<Expr>, Box<Expr>),
     Call(String, Vec<Expr>),
     Assert(Box<Expr>, String),
+}
+impl Expr {
+    fn references(&self, name: &str) -> bool {
+        match self {
+            Self::Name(n) => n == name,
+            Self::Unary(_, e) | Self::Assert(e, _) => e.references(name),
+            Self::Binary(_, a, b) => a.references(name) || b.references(name),
+            Self::Call(_, args) => args.iter().any(|a| a.references(name)),
+            Self::Number(_) => false,
+        }
+    }
 }
 #[derive(Debug)]
 struct Assignment {
@@ -50,6 +61,7 @@ pub(super) struct Script {
 struct Parser {
     tokens: Vec<String>,
     at: usize,
+    expression_nodes: usize,
 }
 impl Parser {
     fn error(&self, message: &str) -> String {
@@ -95,11 +107,16 @@ impl Parser {
         }
     }
     fn expr(&mut self, min: u8) -> Result<Expr> {
+        self.expression_nodes = 0;
         self.expression(min, 0)
     }
     fn expression(&mut self, min: u8, depth: usize) -> Result<Expr> {
         if depth > 128 {
             return Err(self.error("expression nesting limit exceeded"));
+        }
+        self.expression_nodes += 1;
+        if self.expression_nodes > 512 {
+            return Err(self.error("expression node limit exceeded"));
         }
         let token = self.take()?;
         let mut left = if matches!(token.as_str(), "~" | "-" | "+" | "!") {
@@ -172,6 +189,10 @@ impl Parser {
             };
             if precedence < min {
                 break;
+            }
+            self.expression_nodes += 1;
+            if self.expression_nodes > 512 {
+                return Err(self.error("expression node limit exceeded"));
             }
             let op = self.take()?;
             let right = self.expression(precedence + 1, depth + 1)?;
@@ -325,6 +346,7 @@ impl Script {
         let mut p = Parser {
             tokens: lex(text)?,
             at: 0,
+            expression_nodes: 0,
         };
         // The lexer preserves wildcard adjacency only inside input selectors.
         let mut script = Self {
