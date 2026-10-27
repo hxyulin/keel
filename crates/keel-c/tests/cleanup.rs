@@ -260,7 +260,7 @@ fn invalid_cleanup_declarations_and_unmodeled_exits_are_diagnosed() {
         ),
         (
             "void c(int*); static inline int f(void){goto end; int x __attribute__((cleanup(c)))=1;end:return 0;}",
-            "goto in a function",
+            "bypasses initialization",
         ),
         (
             "void c(int*); int twice(void*); static inline int f(void){int x __attribute__((cleanup(c)))=1;return twice(0);} int twice(void*) __attribute__((returns_twice));",
@@ -281,14 +281,6 @@ fn invalid_cleanup_declarations_and_unmodeled_exits_are_diagnosed() {
         (
             "struct S {int x;}; struct S c(int*); int f(void){int x __attribute__((cleanup(c)))=1;return x;} void c(int *p){}",
             "incompatible return-type redeclarations",
-        ),
-        (
-            "void c(int*); int f(void){int x __attribute__((cleanup(c)))=1;goto end;end:return 0;}",
-            "goto in a function",
-        ),
-        (
-            "void c(int*); int f(void){int x __attribute__((cleanup(c)))=1;goto *&&end;end:return 0;}",
-            "computed goto",
         ),
         (
             "void c(int*); void longjmp(void*,int); int f(void){int x __attribute__((cleanup(c)))=1;longjmp(0,1);return 0;}",

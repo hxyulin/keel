@@ -31,6 +31,7 @@
 
 mod arena;
 mod ast;
+mod cleanup_jumps;
 mod complex_eval;
 mod debug;
 mod eval;

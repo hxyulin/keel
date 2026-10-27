@@ -964,6 +964,7 @@ impl<'p> Gen<'p> {
             labels_placed: false,
             exit_actions: Vec::new(),
             has_cleanup: def.locals.iter().any(|l| l.cleanup.is_some()),
+            cleanup_jumps: crate::cleanup_jumps::CleanupJumps::analyze(def)?,
         };
         for local in &def.locals {
             let storage = if local.ty.runtime_sized() {
@@ -1941,6 +1942,7 @@ struct FnGen<'g, 'p, 'f> {
     /// Branch exits do not consume the list used to compile sibling paths.
     exit_actions: Vec<ExitAction>,
     has_cleanup: bool,
+    cleanup_jumps: crate::cleanup_jumps::CleanupJumps<'p>,
     labels: HashMap<&'p str, Block>,
     asm_goto_targets: Vec<(&'p str, Loc)>,
     /// Functions already imported, by global: their signatures are fixed
@@ -2154,10 +2156,10 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             Stmt::Asm(asm) => {
                 self.ensure_block();
                 self.set_loc(asm.loc);
-                if !asm.goto_labels.is_empty() && (self.has_cleanup() || self.has_vm_types()) {
+                if !asm.goto_labels.is_empty() && self.has_vm_types() {
                     return Err(Error::new(
                         asm.loc,
-                        "asm goto in a function containing cleanup locals or VLAs is not supported",
+                        "asm goto in a function containing VLAs is not supported",
                     ));
                 }
                 let mut places = Vec::new();
@@ -2491,12 +2493,6 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 }
             }
             Stmt::Goto(label) => {
-                if self.has_cleanup() {
-                    return Err(Error::new(
-                        self.def.loc,
-                        "goto in a function containing cleanup locals is not supported yet",
-                    ));
-                }
                 if self.has_vm_types() {
                     return Err(Error::new(
                         self.def.loc,
@@ -2504,16 +2500,13 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     ));
                 }
                 self.ensure_block();
+                if self.has_cleanup() {
+                    self.emit_exit_actions(self.cleanup_jumps.depth(label))?;
+                }
                 let block = self.label_block(label);
                 self.jump_to(block);
             }
             Stmt::GotoIndirect(target) => {
-                if self.has_cleanup() {
-                    return Err(Error::new(
-                        target.loc,
-                        "computed goto in a function containing cleanup locals is not supported yet",
-                    ));
-                }
                 if self.has_vm_types() {
                     return Err(Error::new(
                         target.loc,
@@ -2522,6 +2515,15 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 }
                 self.ensure_block();
                 self.set_loc(target.loc);
+                if self.has_cleanup()
+                    && let ExprKind::LabelAddr(label) = target.kind
+                {
+                    let label = self.def.label_addrs[label - 1];
+                    self.emit_exit_actions(self.cleanup_jumps.depth(label))?;
+                    let block = self.label_block(label);
+                    self.jump_to(block);
+                    return Ok(());
+                }
                 let n = if let Some(table) = &self.dispatch_table {
                     let (global, index) = dispatch_index(target).expect("preflighted dispatch");
                     debug_assert_eq!(global, table.global);

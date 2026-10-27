@@ -74,13 +74,6 @@ impl<'a> Parser<'a> {
         if goto && !x86 {
             return Err(Error::new(loc, "asm goto requires x86-64 Linux"));
         }
-        if goto {
-            self.fs
-                .as_mut()
-                .unwrap()
-                .cleanup_unsupported_exit
-                .get_or_insert((loc, "asm goto"));
-        }
         self.expect("(")?;
         let template = self.asm_string()?;
         let mut goto_labels = Vec::new();

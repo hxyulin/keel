@@ -2287,7 +2287,7 @@ impl<'a> Parser<'a> {
                 format!("{kind} in a function containing cleanup locals is not supported yet"),
             ));
         }
-        self.funcs.push(FuncDef {
+        let def = FuncDef {
             global: g,
             ty: fty,
             params: ids,
@@ -2299,7 +2299,9 @@ impl<'a> Parser<'a> {
             body,
             loc,
             nodes,
-        });
+        };
+        crate::cleanup_jumps::CleanupJumps::analyze(&def)?;
+        self.funcs.push(def);
         let global = &mut self.globals[g];
         global.func = Some(self.funcs.len() - 1);
         global.defined = true;
@@ -4574,16 +4576,6 @@ impl<'a> Parser<'a> {
                     return Ok(Stmt::Return(Some(e), loc));
                 }
                 "goto" => {
-                    let kind = if matches!(self.peek_at(1), Tok::Punct("*")) {
-                        "computed goto"
-                    } else {
-                        "goto"
-                    };
-                    self.fs
-                        .as_mut()
-                        .unwrap()
-                        .cleanup_unsupported_exit
-                        .get_or_insert((loc, kind));
                     self.advance();
                     if self.eat("*") {
                         let e = self.expr()?;
