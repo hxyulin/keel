@@ -1,5 +1,7 @@
 """Selection safety and Cargo/nextest command parity."""
 import importlib.util
+import contextlib
+import io
 from pathlib import Path
 import unittest
 
@@ -16,6 +18,54 @@ class SelectionTests(unittest.TestCase):
             "cli": {"directory": "crates/cli", "dependencies": [{"name": "codegen"}]},
             "unrelated": {"directory": "crates/unrelated", "dependencies": []},
         }
+
+    def test_named_components_are_independent_by_default(self):
+        packages = {
+            "keel-asm-ir": {"dependencies": []},
+            "keel-asm": {"dependencies": [{"name": "keel-asm-ir"}]},
+            "keel-codegen": {"dependencies": [{"name": "keel-asm"}]},
+            "keel": {"dependencies": [{"name": "keel-codegen"}]},
+            "keel-link": {"dependencies": []},
+        }
+        direct = {"keel-asm-ir", "keel-asm"}
+        self.assertEqual(runner.component_packages(["assembler"], packages), direct)
+        self.assertEqual(runner.component_packages(["assembler", "linker"], packages), direct | {"keel-link"})
+        self.assertEqual(runner.component_packages(["assembler"], packages, True),
+                         direct | {"keel-codegen", "keel"})
+        self.assertEqual(runner.component_packages(["full"], packages), set(packages))
+
+    def test_no_arguments_select_full_workspace(self):
+        args = runner.arguments([])
+        self.assertEqual(args.scopes, ["full"])
+        self.assertFalse(args.consumers)
+
+    def test_invalid_combinations_fail_before_running_tests(self):
+        for args in [["typo"], ["full", "linker"], ["--consumers"],
+                     ["linker", "--changed", "main"],
+                     ["linker", "--unit", "--test", "archive"]]:
+            with self.subTest(args=args), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    runner.arguments(args)
+                self.assertEqual(error.exception.code, 2)
+
+    def test_multiple_components_and_narrow_targets_parse(self):
+        args = runner.arguments(["assembler", "linker", "--test", "archive", "--quick"])
+        self.assertEqual(args.scopes, ["assembler", "linker"])
+        self.assertEqual(args.test, ["archive"])
+        self.assertTrue(args.quick)
+
+    def test_explicit_targets_skip_doctests_in_both_runners(self):
+        for backend in ["cargo", "nextest"]:
+            with self.subTest(backend=backend):
+                unit = runner.commands("cargo", backend, "test-fast", ["ir"], False, unit=True)
+                self.assertEqual(len(unit), 1)
+                self.assertIn("--lib", unit[0])
+                targets = runner.commands("cargo", backend, "test-fast", ["ir"], True,
+                                          targets=["parse", "format"])
+                self.assertEqual(len(targets), 1)
+                self.assertEqual(targets[0].count("--test"), 2)
+                self.assertNotIn("--tests", targets[0])
+                self.assertNotIn("--lib", targets[0])
 
     def test_source_change_includes_transitive_consumers(self):
         self.assertEqual(runner.changed_packages(["crates/ir/src/lib.rs"], self.packages),

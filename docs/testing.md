@@ -6,26 +6,55 @@ debug assertions and overflow checks. Plain `cargo test` retains its original
 unoptimized profile and includes every nonignored matrix.
 
 ```sh
-python3 tools/test.py                         # All workspace Rust tests and doctests
-python3 tools/test.py frontend --quick       # Frontend and downstream consumer tests
-python3 tools/test.py assembler              # Assembler and downstream consumer tests
-python3 tools/test.py decoder --direct       # Decoder package only
-python3 tools/test.py --changed main --quick # Changed packages and affected consumers
-python3 tools/test.py --dry-run              # Print packages and commands without building
+python3 tools/test.py                              # All workspace Rust tests and doctests
+python3 tools/test.py assembler --unit --quick     # Assembler library unit tests
+python3 tools/test.py assembler --quick            # Assembler packages only
+python3 tools/test.py linker --quick               # Linker package only
+python3 tools/test.py assembler linker --quick     # Both components
+python3 tools/test.py frontend --consumers --quick # Frontend and downstream tests
+python3 tools/test.py codegen --unit --quick       # Library unit tests only
+python3 tools/test.py linker --test archive        # One integration-test target
+python3 tools/test.py --changed main --quick       # Changed packages and affected consumers
+python3 tools/test.py --dry-run                    # Print packages and commands without building
 ```
 
-Other component names are `optimizer` and `codegen`. Component selections include
-transitive workspace consumers, including dev dependencies. This can select much
-of the workspace for shared IR or assembler changes. `--direct` deliberately
-limits a named selection to its component packages. It is useful during local
-iteration, but does not validate consumers.
+Named components run only their own packages by default. Building their test
+binaries still builds required dependencies, but does not run those dependencies'
+test suites. Add `--consumers` to include transitive workspace consumers,
+including dev dependencies. This can select much of the workspace for shared IR
+or assembler changes. `--direct` remains accepted and means the default component
+selection. Changes selected with `--changed` retain their conservative consumer
+coverage; the component default does not narrow automatic change selection.
+
+| Component | Packages |
+| --- | --- |
+| `assembler` | `keel-asm-ir`, `keel-asm` |
+| `decoder` | `keel-disasm` |
+| `linker` | `keel-link` |
+| `ir` | `keel-ir` |
+| `frontend` | `keel-c`, `keel-frontend` |
+| `optimizer` | `keel-opt` |
+| `codegen` | `keel-codegen` |
+| `cli` | `keel` |
+| `wasm` | `keel-wasm` |
+| `llvm` | `keel-llvm` |
+| `toolchain` | `keel-toolchain` |
+| `full` or no component | Entire workspace |
+
+Combine named components in one invocation. Use `--unit` for library unit tests
+without integration tests, or `--test TARGET` for a specific integration-test
+binary; repeat `--test` to select several. Both target options omit doctests.
+They work with Cargo and nextest and can be combined with `--quick` to exclude
+exhaustive tests within the selected targets. Named selections without target
+options or `--quick` include the component's integration tests and doctests.
 
 `--changed BASE` includes differences between BASE and the current working tree,
 including staged, unstaged and untracked files. A source change selects its
-package and consumers. A top-level integration test source selects its package. Shared test helpers
-and fixtures select the entire workspace because several crates include each
-other's test inputs without Cargo dependency edges. Root manifests, generator changes, unknown paths and deleted packages
-select the entire workspace. This is a conservative file/dependency selection,
+package and consumers. A top-level integration test source selects its package.
+Shared test helpers and fixtures select the entire workspace because several
+crates include each other's test inputs without Cargo dependency edges. Root
+manifests, generator changes, unknown paths and deleted packages select the
+entire workspace. This is a conservative file/dependency selection,
 not execution coverage or proof that unselected code cannot be affected.
 
 ## Quick and exhaustive coverage
@@ -74,7 +103,7 @@ regular test failed. Nextest writes JUnit results under `target/nextest/default/
 Both runners use the same Cargo profile. To compare with unoptimized tests:
 
 ```sh
-python3 tools/test.py codegen --direct --runner cargo --profile test
+python3 tools/test.py codegen --runner cargo --profile test
 ```
 
 For a single test target, Cargo remains sufficient:
@@ -101,7 +130,35 @@ wall time and exit codes. It does not infer test counts. Build time is included;
 compare warm execution separately before attributing a change to test code.
 A full runner exit succeeds only when all commands, including doctests, succeed.
 
-## Measurements
+## Component measurements
+
+Independent component runs passed on the same macOS ARM64 host. These execution
+times exclude compilation; selecting a new dependency/feature combination can
+require a build even when a full-workspace run has already been built.
+
+| Selection | Passed tests | Test execution |
+| --- | ---: | ---: |
+| `assembler --unit --quick` | 27 | 0.09 s |
+| `assembler --quick` | 471 | 13.56 s |
+| `linker --unit --quick` | 35 | 0.13 s |
+| `linker --quick` | 259 | 1.76 s |
+| `decoder --quick` | 21 | 0.12 s |
+| `ir --quick` | 154 | 0.25 s |
+| `optimizer --quick` | 611 | 2.02 s |
+| `frontend --quick` | 369 | 34.28 s |
+| `codegen --unit --quick` | 125 | 4.21 s |
+| `linker --test archive --quick --runner cargo` | 8 | 0.02 s |
+
+With artifacts built, the entire assembler and linker unit-only commands took
+0.28 and 0.32 seconds respectively, including runner/Cargo startup. The single
+archive target took 0.13 seconds end to end. Existing ignored tests remain
+ignored. These selections validate their components, not downstream consumers.
+
+The runner's 14 selection/parser tests passed. All tooling Python tests passed
+(21 passed, one optional integration skipped). Rust test sources and production
+code were unchanged in this follow-up; the full-workspace suite was not rerun.
+
+## Full-suite measurements at checkpoint 82405d36
 
 Measured on the same macOS ARM64 host. Execution times exclude Cargo compilation.
 The five-binary comparison uses the preceding full-run log as its baseline;
