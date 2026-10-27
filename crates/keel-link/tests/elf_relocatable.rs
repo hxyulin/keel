@@ -50,7 +50,7 @@ fn partial_keeps_undefined_relocations_and_final_result() {
         ".text\n.globl _start\n_start: call answer\nret\n.data\n.globl pointer\npointer: .quad answer+3\n",
     );
     let callee = assemble(".text\n.globl answer\nanswer: mov eax,42\nret\n");
-    let intermediate = partial(&[caller.clone()]).unwrap();
+    let intermediate = partial(std::slice::from_ref(&caller)).unwrap();
     let file = object::File::parse(intermediate.bytes.as_slice()).unwrap();
     assert_eq!(file.kind(), object::ObjectKind::Relocatable);
     assert!(

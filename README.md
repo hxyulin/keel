@@ -70,12 +70,13 @@ and [ISA status](docs/userspace-isa-status.md) for the details and limits.
 Keel compiles and assembles the core of a pinned minimal x86-64 Linux v6.12
 kernel. The resulting kernel boots and passes checked filesystem, memory,
 fork/COW and pipe workloads. No replacement GCC C objects or manual IR patches
-are needed. The build uses captured preprocessed inputs, GNU ld for linking,
-and reference boot, decompressor and vDSO stages. Full raw-source Kbuild and
-[native kernel linking](docs/linux-kernel-native-linker-audit.md) remain work
-in progress. [Build and boot evidence](docs/linux-kernel-code-model.md).
+are needed. Keel also performs [native core linking](docs/linux-kernel-native-linker-audit.md),
+including GNU script layout, regular/thin archives and relocatable aggregation.
+The build uses captured preprocessed inputs and reference boot, decompressor
+and vDSO stages. Full raw-source Kbuild remains work in progress.
+[Build and boot evidence](docs/linux-kernel-code-model.md).
 
-The compressed image is **1.61 MB versus GCC's 0.93 MB**, 73% larger. Guest
+The earlier GNU-linked benchmark image is **1.61 MB versus GCC's 0.93 MB**, 73% larger. Guest
 init-entry timing is similar, about 257 ms versus 259 ms. Five checked
 kernel-heavy workloads take **1.52–2.38× as long** as GCC 14.4's size-optimized
 kernel. These measurements use nine alternating pairs on an AMD Ryzen 9

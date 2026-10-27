@@ -2,7 +2,7 @@
 
 `keel link` has a native, host-independent ELF64 executable path for x86-64
 Linux. It consumes relocatable objects from Keel, Clang or GNU as, regular
-archives and ELF shared-library interfaces, resolves symbols and relocations,
+archives (including CLI-loaded GNU thin archives) and ELF shared-library interfaces, resolves symbols and relocations,
 and writes an `ET_EXEC` image without invoking a system linker. It can
 cross-link from macOS. (Freestanding AArch64 Linux linking is covered in
 [ARM Linux](arm-linux.md).)
@@ -36,7 +36,12 @@ link the installed CRT objects explicitly (see
 | Option | Meaning |
 | --- | --- |
 | `-o PATH` | Output executable (default `a.out`). |
-| `-e SYM`, `--entry SYM` | Entry symbol; must be defined inside executable code. |
+| `-e SYM`, `--entry SYM` | Entry override; scripts may define a validated physical entry. |
+| `-T PATH`, `--script=PATH` | Bounded GNU script for static x86-64 final layout. |
+| `-z max-page-size=SIZE` | LOAD alignment override; decimal or hexadecimal. |
+| `-r`, `--relocatable` | Emit an ELF relocatable object without applying final addresses. |
+| `--whole-archive`, `--no-whole-archive` | Enable or disable unconditional archive member inclusion. |
+| `--start-group`, `--end-group` | Search an archive group to a fixed point; groups may nest. |
 | `-L DIR`, `-LDIR` | Add a library search directory. |
 | `-l NAME`, `-lNAME` | Search `libNAME.so`, then `libNAME.a`, in each directory. `-l:FILE` selects an exact filename. |
 | `-Bstatic`, `-Bdynamic` | Switch how subsequent `-l` options search. |
@@ -56,7 +61,7 @@ x86-64 Linux library directories. Cross links consult only explicit paths and
 The library API is `keel_link::elf::link(&[Input], elf::Options)`, which returns
 image bytes and warnings without filesystem access. The CLI maps or reads the
 inputs, writes a temporary file beside the destination, sets executable
-permissions on Unix and renames it into place; a failed link preserves an
+permissions on Unix (ordinary file permissions for `-r`) and renames it into place; a failed link preserves an
 existing output. Allocated image size is limited to 512 MiB.
 
 For bounded GNU script final linking through the library API, see
@@ -68,7 +73,7 @@ For bounded GNU script final linking through the library API, see
 - Allocated PROGBITS code, read-only constants, writable data and NOBITS BSS.
   Input sections are kept independently, in input order within each
   permission/zero-fill class. Mergeable strings and constants are kept without
-  deduplication. Alignment is preserved up to 1 MiB.
+  deduplication. Power-of-two alignment is bounded by the 512 MiB image limit.
 - Local, global, absolute, common and weak symbols. Strong definitions override
   commons and weak definitions; commons combine maximum size and alignment; the
   first weak definition wins. Undefined weak references resolve to zero. Strong
@@ -79,7 +84,7 @@ For bounded GNU script final linking through the library API, see
   GOT loads keep their original instructions and use resolved read-only GOT
   slots. Narrow relocations are overflow-checked; 64-bit absolute arithmetic
   wraps.
-- Fixed base `0x400000`, 4 KiB segment alignment, separate R/RX/RW LOAD
+- The default layout uses base `0x400000`, 4 KiB segment alignment, separate R/RX/RW LOAD
   segments, zero-filled BSS and a non-executable `GNU_STACK` header. Output is
   not PIE. Static output has no interpreter or dynamic relocations.
 - Section headers and local/global symbol tables for `readelf`, `nm` and
@@ -93,7 +98,7 @@ For bounded GNU script final linking through the library API, see
 
 Not supported: automatic libc/CRT startup, static libc, PIE, shared-object
 output, native TLS relocations, native IFUNC/GNU-unique definitions, REL
-relocations, other allocated notes, linker scripts, identical-code folding,
+relocations, other allocated notes, unrestricted GNU scripts, identical-code folding,
 relaxation and source debugging. Runtime-loader IFUNC resolution and
 constructors inside input shared libraries do work. Unsupported sections,
 flags, relocations and options are errors. This is not a general GNU ld
@@ -107,9 +112,15 @@ introduced dependencies until no more members are needed. Strong unresolved
 references and the entry symbol pull members; undefined weak references do not.
 An archive's strong definition can replace an earlier common. Unused members
 are not linked, so their duplicate symbols do not conflict, and only selected
-members get full target/relocation validation. Thin archives and archive groups
-are unsupported; repeat an archive after its users when dependencies cross
-archives.
+regular-archive members get full target/relocation validation. Whole-archive
+controls include otherwise unused members. Explicit groups rescan their
+archives to a fixed point and may nest. Outside a group, repeat an archive
+after its users when dependencies cross archives.
+
+The CLI snapshots GNU thin archives by reading member paths relative to the
+archive. This materialization validates all member objects and regenerates an
+index. Library callers use `archive::materialize_thin` with an explicit reader,
+then pass the resulting regular bytes to the selection API.
 
 ```sh
 keel link --target x86_64-unknown-linux-gnu start.o libhelpers.a -o program
@@ -336,7 +347,9 @@ grouped so CRT list/end bounds stay equal. Nonempty clone tables are errors.
 
 Objects may contain allocated `.note.gnu.property` and one Linux
 `.note.ABI-tag` (`SHT_NOTE`, `SHF_ALLOC` only, zero entry size/link/info,
-alignment eight and four respectively). Unknown allocated notes, malformed
+alignment eight and four respectively). Allocated `.note.Linux` uses 4-byte
+alignment and bounded Linux-owner records; descriptor bytes and unknown record
+types are preserved. Unknown allocated notes, malformed
 bounds, note relocations and additional ABI tags are errors. ABI-tag bytes are
 preserved.
 
@@ -437,8 +450,9 @@ division runtime helper, `_DYNAMIC`, out-of-line C++ construction/destruction,
 empty clone-table bounds with optional ITM callbacks from a shared library, and
 C++ template COMDAT selection. Outputs combine GNU property and ABI notes,
 SFrame, unwind data and real CRT lifecycle code. Pass concrete DSO paths to
-avoid installed GNU linker scripts. Arbitrary C++ exceptions, PIE, linker
-scripts and drop-in Clang-driver compatibility are out of scope.
+avoid installed GNU libc INPUT/GROUP scripts, which remain unsupported.
+Arbitrary C++ exceptions, PIE and drop-in Clang-driver compatibility are out of scope.
+Explicit static GNU layout scripts are covered separately above.
 
 ```sh
 python3 suite/validate_elf_crt.py --keel target/release/keel --out target/elf-crt
