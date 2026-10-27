@@ -1,7 +1,7 @@
 {
   "schema": 2,
   "date": "2026-10-24",
-  "machine": "Apple M5 Max · macOS 27",
+  "machine": "Apple M5 Max \u00b7 macOS 27",
   "source_commit": "2cd5176629ffbae049843e7af5dea2bce671ce3a",
   "statistic": "median of 7 runs",
   "sources": {
@@ -16,12 +16,16 @@
     "runtime": {
       "path": "docs/benchmarks/runtime-20261022.json",
       "sha256": "567c46ad0c3ca66d424154427e0ba2749690b3ce25bf92e5395d7fc0a4705ac3"
+    },
+    "kernel": {
+      "path": "suite/linux-kernel/audit-kernel-bench.json",
+      "sha256": "32955973013bb1b43309fe010868eaf9958ed124ea40fbab469788b76aa6d17d"
     }
   },
   "charts": [
     {
       "id": "c-object",
-      "title": "C source → object file",
+      "title": "C source \u2192 object file",
       "unit": "ms",
       "headline": {
         "fast": "Keel -O",
@@ -76,7 +80,7 @@
     },
     {
       "id": "ir-object",
-      "title": "Keel IR → object file (backend only)",
+      "title": "Keel IR \u2192 object file (backend only)",
       "unit": "us",
       "headline": {
         "fast": "Keel full",
@@ -143,7 +147,7 @@
     },
     {
       "id": "assembly",
-      "title": "Assembly → object file",
+      "title": "Assembly \u2192 object file",
       "unit": "ms",
       "headline": {
         "fast": "keel asm",
@@ -187,7 +191,7 @@
     },
     {
       "id": "link",
-      "title": "Objects → signed executable",
+      "title": "Objects \u2192 signed executable",
       "unit": "ms",
       "headline": {
         "fast": "keel link",
@@ -285,6 +289,66 @@
             "geomean_ratio"
           ],
           "value": 1.8852487155516908
+        }
+      ]
+    },
+    {
+      "id": "kernel-runtime",
+      "kind": "ratio",
+      "title": "Pinned Linux v6.12 kernel workloads",
+      "reference": "GCC 14.4 -Os",
+      "machine": "Ryzen 9 9950X3D \u00b7 KVM \u00b7 1 vCPU",
+      "statistic": "median of 9 paired runs",
+      "rows": [
+        {
+          "label": "getpid",
+          "source": "kernel",
+          "pointer": [
+            "summary",
+            "getpid",
+            "median_paired_keel_over_gcc"
+          ],
+          "value": 1.5217021418927381
+        },
+        {
+          "label": "Open/read/close",
+          "source": "kernel",
+          "pointer": [
+            "summary",
+            "open_read_close",
+            "median_paired_keel_over_gcc"
+          ],
+          "value": 2.3827530981929526
+        },
+        {
+          "label": "Page faults + protect",
+          "source": "kernel",
+          "pointer": [
+            "summary",
+            "page_fault_mprotect",
+            "median_paired_keel_over_gcc"
+          ],
+          "value": 2.16605608629925
+        },
+        {
+          "label": "Fork/COW/wait",
+          "source": "kernel",
+          "pointer": [
+            "summary",
+            "fork_cow_wait",
+            "median_paired_keel_over_gcc"
+          ],
+          "value": 2.0628116077624488
+        },
+        {
+          "label": "Pipe ping-pong",
+          "source": "kernel",
+          "pointer": [
+            "summary",
+            "pipe_pingpong",
+            "median_paired_keel_over_gcc"
+          ],
+          "value": 1.7442515457135088
         }
       ]
     }

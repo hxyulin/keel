@@ -76,8 +76,9 @@ def render(data, chart):
         label_value = lambda v: f'{fmt(v)} {unit}'
         desc = '; '.join(f'{label}: {fmt(v)} {unit}' for label, v, _ in rows)
         desc += f'. {headline["fast"]} is {speedup:.1f}× faster than {headline["slow"]}.'
+    machine = chart.get('machine', data['machine'])
     statistic = chart.get('statistic', data['statistic'])
-    desc += f' {data["machine"]}, {statistic}.'
+    desc += f' {machine}, {statistic}.'
 
     step = 0.5 if ratio else nice_step(max(v for _, v, _ in rows))
     limit = step * math.ceil(max(v for _, v, _ in rows) / step)
@@ -96,7 +97,7 @@ def render(data, chart):
            f'<rect width="{WIDTH}" height="{height}" rx="10" fill="var(--surface)"/>',
            f'<text x="{PAD}" y="38" font-size="18" font-weight="650">{esc(chart["title"])}</text>',
            f'<text class="muted" x="{PAD}" y="60" font-size="12">'
-           f'{esc(data["machine"])} · {esc(statistic)}</text>',
+           f'{esc(machine)} · {esc(statistic)}</text>',
            f'<text x="{WIDTH - PAD}" y="40" font-size="26" font-weight="700" text-anchor="end">'
            f'{headline_text}</text>',
            f'<text class="muted" x="{WIDTH - PAD}" y="60" font-size="12" text-anchor="end">'

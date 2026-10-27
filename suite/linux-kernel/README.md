@@ -1,5 +1,12 @@
 # Minimal Linux x86-64 compiler target
 
+The latest [kernel boot qualification](../../docs/linux-kernel-code-model.md)
+uses Keel for every captured core C and assembly object, with GNU ld for linking.
+The [native linker audit](../../docs/linux-kernel-native-linker-audit.md) records
+the remaining script/layout and input-selection gaps. The paired
+[KVM benchmarks](../../docs/linux-kernel-benchmarks.md) compare the pinned GCC
+and Keel images for size, startup and five checked kernel workloads.
+
 Latest measured status: **484/484 C inputs** and **506/506 assembly inputs**
 accepted under the opt-in [kernel audit policy](kernel-audit-policy.json).
 The [C contract checkpoint](audit-c-contracts.json) implements checked asm register

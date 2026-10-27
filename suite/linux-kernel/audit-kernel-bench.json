@@ -1,0 +1,1130 @@
+{
+  "schema": 1,
+  "acceleration": "KVM",
+  "guest_cpu": "qemu64",
+  "guest_vcpus": 1,
+  "guest_ram_mib": 128,
+  "host_cpu_model": "AMD Ryzen 9 9950X3D 16-Core Processor",
+  "host_logical_cpu": 2,
+  "host_kernel": "7.3.0-5-cachyos",
+  "governor": "powersave",
+  "host_load_start": [
+    1.14501953125,
+    0.59375,
+    0.3251953125
+  ],
+  "repeats": 9,
+  "qemu": "QEMU emulator version 11.1.2",
+  "userspace_cc": "gcc (GCC) 16.2.1 20260810",
+  "kernel_sha256": {
+    "gcc": "6eb40ddbf8129ff75d43ece9778aa6b4a09d044ccf2b22235e9f592e2e566a86",
+    "keel": "4c4dff0a15c2eff6dd7e41f07b74119bdc9489818b014d671783cca8a60c25df"
+  },
+  "source_sha256": "cb56bfe048133324e989abecbafa8dfc65eaadba9957daa3580983e746b01fa2",
+  "init_sha256": "2aa5bc869c090b5bb410e7fd1975facfc365edab4fe6be06e7d8d30fb99e7892",
+  "initramfs_sha256": "86da2d848fb1c0e3dd955f6984187dc1729e9028bb4d6bcf39fc2d569f9c683c",
+  "counts": {
+    "getpid": 5000000,
+    "open_read_close": 300000,
+    "page_fault_mprotect": 1310720,
+    "fork_cow_wait": 5000,
+    "pipe_pingpong": 200000
+  },
+  "warmups": [
+    {
+      "returncode": 33,
+      "timeout": false,
+      "host_startup_ns": 583614095,
+      "log_sha256": "07d1567b31891ddebc8e2008dd9e3d59651d0bd83930fc930da376a22ac7738c",
+      "values": {
+        "guest_boot_ns": 259162785,
+        "getpid": 165097839,
+        "open_read_close": 92614705,
+        "page_fault_mprotect": 410716821,
+        "fork_cow_wait": 29879912,
+        "pipe_pingpong": 249078484,
+        "host_startup_ns": 583614095
+      },
+      "kernel": "gcc",
+      "pair": -1
+    },
+    {
+      "returncode": 33,
+      "timeout": false,
+      "host_startup_ns": 508937334,
+      "log_sha256": "6df3116bcbfb0d08afcdb9357351bb3ce05a5d1e195182e6186c9a562e3ce5b3",
+      "values": {
+        "guest_boot_ns": 256782203,
+        "getpid": 252144545,
+        "open_read_close": 220166430,
+        "page_fault_mprotect": 888447388,
+        "fork_cow_wait": 62164150,
+        "pipe_pingpong": 446140029,
+        "host_startup_ns": 508937334
+      },
+      "kernel": "keel",
+      "pair": -1
+    }
+  ],
+  "runs": [
+    {
+      "returncode": 33,
+      "timeout": false,
+      "host_startup_ns": 442163618,
+      "log_sha256": "e5875663ed49cebc4eb107acfafa65eb4ae79e5efd83eaa49e8c30932e02cb9c",
+      "values": {
+        "guest_boot_ns": 256751114,
+        "getpid": 251275185,
+        "open_read_close": 220572822,
+        "page_fault_mprotect": 888614430,
+        "fork_cow_wait": 61945042,
+        "pipe_pingpong": 435298689,
+        "host_startup_ns": 442163618
+      },
+      "kernel": "keel",
+      "pair": 0
+    },
+    {
+      "returncode": 33,
+      "timeout": false,
+      "host_startup_ns": 432458811,
+      "log_sha256": "f3b410537e76533de0fd587b2baaefd200456bd5352b937e8caee2b3d172494e",
+      "values": {
+        "guest_boot_ns": 259133065,
+        "getpid": 165143455,
+        "open_read_close": 92570574,
+        "page_fault_mprotect": 410876078,
+        "fork_cow_wait": 29892030,
+        "pipe_pingpong": 250359885,
+        "host_startup_ns": 432458811
+      },
+      "kernel": "gcc",
+      "pair": 0
+    },
+    {
+      "returncode": 33,
+      "timeout": false,
+      "host_startup_ns": 448751385,
+      "log_sha256": "bf6a319fdceaab0f8d8d034d2127636e8a3d6ea83975c487405d438504a8040a",
+      "values": {
+        "guest_boot_ns": 259096803,
+        "getpid": 164982722,
+        "open_read_close": 92559534,
+        "page_fault_mprotect": 410655644,
+        "fork_cow_wait": 29946824,
+        "pipe_pingpong": 251195813,
+        "host_startup_ns": 448751385
+      },
+      "kernel": "gcc",
+      "pair": 1
+    },
+    {
+      "returncode": 33,
+      "timeout": false,
+      "host_startup_ns": 406545746,
+      "log_sha256": "c3d5b45918d1db98ac4f3225fcb7cef67d002e2e87c04f922756a1438efcfb39",
+      "values": {
+        "guest_boot_ns": 256834317,
+        "getpid": 251027610,
+        "open_read_close": 228168309,
+        "page_fault_mprotect": 890800237,
+        "fork_cow_wait": 61325358,
+        "pipe_pingpong": 435570983,
+        "host_startup_ns": 406545746
+      },
+      "kernel": "keel",
+      "pair": 1
+    },
+    {
+      "returncode": 33,
+      "timeout": false,
+      "host_startup_ns": 415452197,
+      "log_sha256": "61d24d34acbf6055a7e7645482b55192757f9f81ba6e7eee0a0c51c23c50b653",
+      "values": {
+        "guest_boot_ns": 256766459,
+        "getpid": 251545316,
+        "open_read_close": 225626318,
+        "page_fault_mprotect": 888794902,
+        "fork_cow_wait": 61531567,
+        "pipe_pingpong": 437589617,
+        "host_startup_ns": 415452197
+      },
+      "kernel": "keel",
+      "pair": 2
+    },
+    {
+      "returncode": 33,
+      "timeout": false,
+      "host_startup_ns": 404152489,
+      "log_sha256": "d484a9fba5210dc60302581659c3d057409806db7da0ab2c4907ec76e3fda336",
+      "values": {
+        "guest_boot_ns": 259248419,
+        "getpid": 164939897,
+        "open_read_close": 92493314,
+        "page_fault_mprotect": 410979638,
+        "fork_cow_wait": 29577249,
+        "pipe_pingpong": 248286310,
+        "host_startup_ns": 404152489
+      },
+      "kernel": "gcc",
+      "pair": 2
+    },
+    {
+      "returncode": 33,
+      "timeout": false,
+      "host_startup_ns": 470698641,
+      "log_sha256": "a574506c8733b30bff41aa6dc5ef3ccb07125d16c3cdc5fd4b8adc858e234ae0",
+      "values": {
+        "guest_boot_ns": 259163684,
+        "getpid": 165053429,
+        "open_read_close": 92468597,
+        "page_fault_mprotect": 410993968,
+        "fork_cow_wait": 29751746,
+        "pipe_pingpong": 250652204,
+        "host_startup_ns": 470698641
+      },
+      "kernel": "gcc",
+      "pair": 3
+    },
+    {
+      "returncode": 33,
+      "timeout": false,
+      "host_startup_ns": 398564343,
+      "log_sha256": "c99b6cb1e45a790e769144a380082c331ddb6cdd67e27998f9af6329e03ad2be",
+      "values": {
+        "guest_boot_ns": 256741782,
+        "getpid": 251379567,
+        "open_read_close": 228418094,
+        "page_fault_mprotect": 886864559,
+        "fork_cow_wait": 61372247,
+        "pipe_pingpong": 434663709,
+        "host_startup_ns": 398564343
+      },
+      "kernel": "keel",
+      "pair": 3
+    },
+    {
+      "returncode": 33,
+      "timeout": false,
+      "host_startup_ns": 411918940,
+      "log_sha256": "e49e8570331aaa0bb3c7634793027208dd4db00d607ec1e91ada82ef13ea8b22",
+      "values": {
+        "guest_boot_ns": 256734749,
+        "getpid": 251156660,
+        "open_read_close": 225870664,
+        "page_fault_mprotect": 889917363,
+        "fork_cow_wait": 61230253,
+        "pipe_pingpong": 438252489,
+        "host_startup_ns": 411918940
+      },
+      "kernel": "keel",
+      "pair": 4
+    },
+    {
+      "returncode": 33,
+      "timeout": false,
+      "host_startup_ns": 427073170,
+      "log_sha256": "2a0d52edd22991813e19f5d8683de7c46aa20eb859942bab3ab366d6a96f9e59",
+      "values": {
+        "guest_boot_ns": 259192960,
+        "getpid": 164994884,
+        "open_read_close": 92612673,
+        "page_fault_mprotect": 410731620,
+        "fork_cow_wait": 29756425,
+        "pipe_pingpong": 251255325,
+        "host_startup_ns": 427073170
+      },
+      "kernel": "gcc",
+      "pair": 4
+    },
+    {
+      "returncode": 33,
+      "timeout": false,
+      "host_startup_ns": 492126670,
+      "log_sha256": "7273d27a5190cfe74cd646f87ad059e24245e136dc4d96e22f98ffc3b002ba50",
+      "values": {
+        "guest_boot_ns": 259290639,
+        "getpid": 165154414,
+        "open_read_close": 92583336,
+        "page_fault_mprotect": 409729397,
+        "fork_cow_wait": 29662209,
+        "pipe_pingpong": 251767753,
+        "host_startup_ns": 492126670
+      },
+      "kernel": "gcc",
+      "pair": 5
+    },
+    {
+      "returncode": 33,
+      "timeout": false,
+      "host_startup_ns": 503512032,
+      "log_sha256": "259875f9c7cff6e02ffbb86036254f6440b7e496ba0eab9c661d4d204ad704b5",
+      "values": {
+        "guest_boot_ns": 256777576,
+        "getpid": 251124198,
+        "open_read_close": 219954331,
+        "page_fault_mprotect": 889075749,
+        "fork_cow_wait": 61906486,
+        "pipe_pingpong": 441899383,
+        "host_startup_ns": 503512032
+      },
+      "kernel": "keel",
+      "pair": 5
+    },
+    {
+      "returncode": 33,
+      "timeout": false,
+      "host_startup_ns": 590815416,
+      "log_sha256": "ff8fe31d5386466bb67be7562d5f074d8c84a0aa2c57de9fa9192f06fcd84aea",
+      "values": {
+        "guest_boot_ns": 256716222,
+        "getpid": 251312458,
+        "open_read_close": 220077702,
+        "page_fault_mprotect": 890893636,
+        "fork_cow_wait": 61410817,
+        "pipe_pingpong": 436438149,
+        "host_startup_ns": 590815416
+      },
+      "kernel": "keel",
+      "pair": 6
+    },
+    {
+      "returncode": 33,
+      "timeout": false,
+      "host_startup_ns": 401552772,
+      "log_sha256": "e5f1b362a6f988677f48fb14567b03b687529e755550f48bb99b11298fcbba65",
+      "values": {
+        "guest_boot_ns": 259274653,
+        "getpid": 165152201,
+        "open_read_close": 92589616,
+        "page_fault_mprotect": 412359414,
+        "fork_cow_wait": 30057887,
+        "pipe_pingpong": 251963254,
+        "host_startup_ns": 401552772
+      },
+      "kernel": "gcc",
+      "pair": 6
+    },
+    {
+      "returncode": 33,
+      "timeout": false,
+      "host_startup_ns": 508377793,
+      "log_sha256": "7d9846f7cddec69419f308655cbb321c1d153d9e8b10e399d3ba414c6a335b27",
+      "values": {
+        "guest_boot_ns": 259163754,
+        "getpid": 165062233,
+        "open_read_close": 92553049,
+        "page_fault_mprotect": 410450472,
+        "fork_cow_wait": 29814598,
+        "pipe_pingpong": 251006691,
+        "host_startup_ns": 508377793
+      },
+      "kernel": "gcc",
+      "pair": 7
+    },
+    {
+      "returncode": 33,
+      "timeout": false,
+      "host_startup_ns": 443621573,
+      "log_sha256": "54dc168d79c5051445c2b65bc6cdc64f440ef5c71929402a21011c2e2201dda8",
+      "values": {
+        "guest_boot_ns": 256816996,
+        "getpid": 251044506,
+        "open_read_close": 220005741,
+        "page_fault_mprotect": 889058743,
+        "fork_cow_wait": 61048884,
+        "pipe_pingpong": 442392767,
+        "host_startup_ns": 443621573
+      },
+      "kernel": "keel",
+      "pair": 7
+    },
+    {
+      "returncode": 33,
+      "timeout": false,
+      "host_startup_ns": 537159667,
+      "log_sha256": "9e625dcc0abc03c686c3d553b639119c58e82786e05df20b3d5a025383d51b2a",
+      "values": {
+        "guest_boot_ns": 256771122,
+        "getpid": 251370082,
+        "open_read_close": 220128506,
+        "page_fault_mprotect": 892699943,
+        "fork_cow_wait": 62288380,
+        "pipe_pingpong": 441009836,
+        "host_startup_ns": 537159667
+      },
+      "kernel": "keel",
+      "pair": 8
+    },
+    {
+      "returncode": 33,
+      "timeout": false,
+      "host_startup_ns": 579988603,
+      "log_sha256": "036660642ee790db8f2c041ef923473be23ade949ffbf09f2c07353f6250e7c3",
+      "values": {
+        "guest_boot_ns": 259167856,
+        "getpid": 165032853,
+        "open_read_close": 92556096,
+        "page_fault_mprotect": 411371259,
+        "fork_cow_wait": 29579149,
+        "pipe_pingpong": 251553027,
+        "host_startup_ns": 579988603
+      },
+      "kernel": "gcc",
+      "pair": 8
+    }
+  ],
+  "qemu_arguments": [
+    "-accel",
+    "kvm",
+    "-machine",
+    "pc",
+    "-cpu",
+    "qemu64",
+    "-m",
+    "128M",
+    "-smp",
+    "1",
+    "-display",
+    "none",
+    "-serial",
+    "stdio",
+    "-monitor",
+    "none",
+    "-no-reboot",
+    "-nic",
+    "none",
+    "-device",
+    "isa-debug-exit,iobase=0xf4,iosize=4",
+    "-initrd",
+    "<benchmark>/initramfs.cpio.gz",
+    "-append",
+    "console=ttyS0,115200 rdinit=/init panic=-1 quiet loglevel=3"
+  ],
+  "summary": {
+    "guest_boot_ns": {
+      "median_ns": {
+        "gcc": 259167856,
+        "keel": 256766459
+      },
+      "min_ns": {
+        "gcc": 259096803,
+        "keel": 256716222
+      },
+      "max_ns": {
+        "gcc": 259290639,
+        "keel": 256834317
+      },
+      "median_paired_keel_over_gcc": 0.9906549329650678,
+      "paired_ratios": [
+        0.9908080005151022,
+        0.9912677965385779,
+        0.990426325415701,
+        0.9906549329650678,
+        0.9905159036726924,
+        0.9903079300907581,
+        0.9901323520429126,
+        0.9909448834423042,
+        0.990752194207294
+      ]
+    },
+    "getpid": {
+      "median_ns": {
+        "gcc": 165053429,
+        "keel": 251275185
+      },
+      "min_ns": {
+        "gcc": 164939897,
+        "keel": 251027610
+      },
+      "max_ns": {
+        "gcc": 165154414,
+        "keel": 251545316
+      },
+      "median_paired_keel_over_gcc": 1.5217021418927381,
+      "paired_ratios": [
+        1.5215570305223418,
+        1.521538782709622,
+        1.5250725905327807,
+        1.5230193551446907,
+        1.5222087734550607,
+        1.5205418487936992,
+        1.5217021418927381,
+        1.5209082140552406,
+        1.5231517690601883
+      ]
+    },
+    "open_read_close": {
+      "median_ns": {
+        "gcc": 92559534,
+        "keel": 220572822
+      },
+      "min_ns": {
+        "gcc": 92468597,
+        "keel": 219954331
+      },
+      "max_ns": {
+        "gcc": 92612673,
+        "keel": 228418094
+      },
+      "median_paired_keel_over_gcc": 2.3827530981929526,
+      "paired_ratios": [
+        2.3827530981929526,
+        2.4650978579905125,
+        2.4393797588439745,
+        2.470223420822531,
+        2.438874256442204,
+        2.3757442808066456,
+        2.376915592780944,
+        2.3770771830542285,
+        2.3783253131160587
+      ]
+    },
+    "page_fault_mprotect": {
+      "median_ns": {
+        "gcc": 410876078,
+        "keel": 889075749
+      },
+      "min_ns": {
+        "gcc": 409729397,
+        "keel": 886864559
+      },
+      "max_ns": {
+        "gcc": 412359414,
+        "keel": 892699943
+      },
+      "median_paired_keel_over_gcc": 2.16605608629925,
+      "paired_ratios": [
+        2.162730997446875,
+        2.1692146449593177,
+        2.1626251517599515,
+        2.1578529809469127,
+        2.1666638740888757,
+        2.169909592793997,
+        2.1604784703666304,
+        2.16605608629925,
+        2.1700590973955234
+      ]
+    },
+    "fork_cow_wait": {
+      "median_ns": {
+        "gcc": 29756425,
+        "keel": 61410817
+      },
+      "min_ns": {
+        "gcc": 29577249,
+        "keel": 61048884
+      },
+      "max_ns": {
+        "gcc": 30057887,
+        "keel": 62288380
+      },
+      "median_paired_keel_over_gcc": 2.0628116077624488,
+      "paired_ratios": [
+        2.0722929155363485,
+        2.0478084086646384,
+        2.0803681572954944,
+        2.0628116077624488,
+        2.057715367353437,
+        2.0870490798578083,
+        2.043084964688303,
+        2.047617210870997,
+        2.1058205562303365
+      ]
+    },
+    "pipe_pingpong": {
+      "median_ns": {
+        "gcc": 251195813,
+        "keel": 437589617
+      },
+      "min_ns": {
+        "gcc": 248286310,
+        "keel": 434663709
+      },
+      "max_ns": {
+        "gcc": 251963254,
+        "keel": 442392767
+      },
+      "median_paired_keel_over_gcc": 1.7442515457135088,
+      "paired_ratios": [
+        1.7386918395492952,
+        1.733989821717291,
+        1.7624395682548908,
+        1.734130807802512,
+        1.7442515457135088,
+        1.7551865865840253,
+        1.732149994379736,
+        1.7624740011412683,
+        1.7531485955841828
+      ]
+    },
+    "host_startup_ns": {
+      "median_ns": {
+        "gcc": 448751385,
+        "keel": 442163618
+      },
+      "min_ns": {
+        "gcc": 401552772,
+        "keel": 398564343
+      },
+      "max_ns": {
+        "gcc": 579988603,
+        "keel": 590815416
+      },
+      "median_paired_keel_over_gcc": 0.9645160804646192,
+      "paired_ratios": [
+        1.0224409972768482,
+        0.9059487270440402,
+        1.0279590211802456,
+        0.8467505709242105,
+        0.9645160804646192,
+        1.0231350233467331,
+        1.4713269517661305,
+        0.8726218554554369,
+        0.9261555558532243
+      ]
+    }
+  },
+  "host_load_end": [
+    1.0859375,
+    0.64013671875,
+    0.35205078125
+  ],
+  "scope": "Pinned Linux v6.12 captured core, one-vCPU KVM microbenchmarks. Not a bare-metal or full Kbuild comparison.",
+  "kernel_compilers": {
+    "gcc": "GCC 14.4.0, pinned reference configuration uses -Os",
+    "keel": "8cd387c86a7b83a90a13c9159d8eb0ba2983bade, -O --code-model kernel --link-intent executable and pinned kernel audit policy"
+  },
+  "warmup_policy": "One excluded whole-guest run per image. Nine measured pairs, alternating which kernel runs first.",
+  "timing": "Direct guest CLOCK_MONOTONIC syscall for workload and init-entry times. Host monotonic launch-to-serial-marker is reported separately.",
+  "boot_scope": "Guest init-entry time excludes firmware, decompressor and pre-timekeeping startup. Host launch time includes QEMU/firmware/serial overhead.",
+  "userspace_compile_flags": [
+    "-O2",
+    "-march=x86-64",
+    "-mno-sse",
+    "-mno-sse2",
+    "-mno-red-zone",
+    "-static",
+    "-nostdlib",
+    "-ffreestanding",
+    "-fno-pie",
+    "-no-pie",
+    "-fno-stack-protector",
+    "-fno-asynchronous-unwind-tables",
+    "-Wl,--build-id=none",
+    "-Wl,-e,_start"
+  ],
+  "negative_guest_controls": [
+    {
+      "kernel": "gcc",
+      "returncode": 35,
+      "normal_fail_marker": true,
+      "checker_rejected": true,
+      "log_sha256": "e054508d280887ecfe72ea55f1919f89e5218aa002269e324ecd18c913cf912a"
+    },
+    {
+      "kernel": "keel",
+      "returncode": 35,
+      "normal_fail_marker": true,
+      "checker_rejected": true,
+      "log_sha256": "e7078d1a376daebad138d454fa12a44518ececbf8229bdb05d85af58cbbafedf"
+    }
+  ],
+  "parser_tests": {
+    "passed": 5,
+    "other_kernel_audit_runner_tests_passed": 7
+  },
+  "size": {
+    "gcc": {
+      "bytes": 10242096,
+      "sha256": "2c399397364a7240d3b63e45c9cb70e50bd5b0df66547639aed5de32132c27df",
+      "allocated_bytes": 6614682,
+      "executable_section_bytes": 4326770,
+      "stt_func_covered_bytes": 1250322,
+      "function_sizes": {
+        "pipe_write": 1126,
+        "pipe_read": 737,
+        "copy_process": 5146,
+        "__x64_sys_getpid": 27,
+        "vfs_read": 269,
+        "do_filp_open": 226,
+        "do_syscall_64": 168,
+        "handle_mm_fault": 275
+      },
+      "sections": [
+        {
+          "name": "",
+          "kind": 0,
+          "flags": 0,
+          "address": 0,
+          "size": 0
+        },
+        {
+          "name": ".text",
+          "kind": 1,
+          "flags": 6,
+          "address": 18446744071578845184,
+          "size": 4194304
+        },
+        {
+          "name": ".rodata",
+          "kind": 1,
+          "flags": 3,
+          "address": 18446744071583039488,
+          "size": 238000
+        },
+        {
+          "name": ".pci_fixup",
+          "kind": 1,
+          "flags": 2,
+          "address": 18446744071583277488,
+          "size": 544
+        },
+        {
+          "name": "__param",
+          "kind": 1,
+          "flags": 2,
+          "address": 18446744071583278032,
+          "size": 1040
+        },
+        {
+          "name": "__ex_table",
+          "kind": 1,
+          "flags": 2,
+          "address": 18446744071583279072,
+          "size": 3900
+        },
+        {
+          "name": ".notes",
+          "kind": 7,
+          "flags": 2,
+          "address": 18446744071583282972,
+          "size": 84
+        },
+        {
+          "name": ".data",
+          "kind": 1,
+          "flags": 3,
+          "address": 18446744071585136640,
+          "size": 752960
+        },
+        {
+          "name": "__bug_table",
+          "kind": 1,
+          "flags": 3,
+          "address": 18446744071585889600,
+          "size": 13400
+        },
+        {
+          "name": ".vvar",
+          "kind": 1,
+          "flags": 3,
+          "address": 18446744071585906688,
+          "size": 4096
+        },
+        {
+          "name": ".init.text",
+          "kind": 1,
+          "flags": 6,
+          "address": 18446744071585910784,
+          "size": 127463
+        },
+        {
+          "name": ".altinstr_aux",
+          "kind": 1,
+          "flags": 6,
+          "address": 18446744071586038247,
+          "size": 2682
+        },
+        {
+          "name": ".init.data",
+          "kind": 1,
+          "flags": 3,
+          "address": 18446744071586041856,
+          "size": 359464
+        },
+        {
+          "name": ".x86_cpu_dev.init",
+          "kind": 1,
+          "flags": 2,
+          "address": 18446744071586401320,
+          "size": 40
+        },
+        {
+          "name": ".altinstructions",
+          "kind": 1,
+          "flags": 2,
+          "address": 18446744071586401360,
+          "size": 8988
+        },
+        {
+          "name": ".altinstr_replacement",
+          "kind": 1,
+          "flags": 6,
+          "address": 18446744071586410348,
+          "size": 2131
+        },
+        {
+          "name": ".apicdrivers",
+          "kind": 1,
+          "flags": 3,
+          "address": 18446744071586412480,
+          "size": 8
+        },
+        {
+          "name": ".exit.text",
+          "kind": 1,
+          "flags": 6,
+          "address": 18446744071586412496,
+          "size": 190
+        },
+        {
+          "name": ".data..percpu",
+          "kind": 1,
+          "flags": 3,
+          "address": 18446744071586414592,
+          "size": 0
+        },
+        {
+          "name": "runtime_shift_d_hash_shift",
+          "kind": 1,
+          "flags": 2,
+          "address": 18446744071586414592,
+          "size": 16
+        },
+        {
+          "name": "runtime_ptr_dentry_hashtable",
+          "kind": 1,
+          "flags": 2,
+          "address": 18446744071586414608,
+          "size": 16
+        },
+        {
+          "name": "runtime_ptr_USER_PTR_MAX",
+          "kind": 1,
+          "flags": 2,
+          "address": 18446744071586414624,
+          "size": 140
+        },
+        {
+          "name": ".smp_locks",
+          "kind": 1,
+          "flags": 1,
+          "address": 18446744071586418688,
+          "size": 0
+        },
+        {
+          "name": ".data_nosave",
+          "kind": 1,
+          "flags": 1,
+          "address": 18446744071586418688,
+          "size": 0
+        },
+        {
+          "name": ".bss",
+          "kind": 8,
+          "flags": 3,
+          "address": 18446744071586418688,
+          "size": 815104
+        },
+        {
+          "name": ".brk",
+          "kind": 8,
+          "flags": 3,
+          "address": 18446744071587233792,
+          "size": 90112
+        },
+        {
+          "name": ".comment",
+          "kind": 1,
+          "flags": 48,
+          "address": 0,
+          "size": 18
+        },
+        {
+          "name": ".symtab",
+          "kind": 2,
+          "flags": 0,
+          "address": 0,
+          "size": 337680
+        },
+        {
+          "name": ".strtab",
+          "kind": 3,
+          "flags": 0,
+          "address": 0,
+          "size": 235392
+        },
+        {
+          "name": ".shstrtab",
+          "kind": 3,
+          "flags": 0,
+          "address": 0,
+          "size": 345
+        }
+      ],
+      "bzimage": {
+        "bytes": 926720,
+        "sha256": "6eb40ddbf8129ff75d43ece9778aa6b4a09d044ccf2b22235e9f592e2e566a86"
+      }
+    },
+    "keel": {
+      "bytes": 14940344,
+      "sha256": "7d1230d74d6694063aed7a4d56ef13c1a3acce31d6e574ae2a7e1d5a5d88e040",
+      "allocated_bytes": 11199029,
+      "executable_section_bytes": 8777355,
+      "stt_func_covered_bytes": 4869950,
+      "function_sizes": {
+        "do_mprotect_pkey": 1419,
+        "pipe_read": 1813,
+        "pipe_write": 2199,
+        "copy_process": 10590,
+        "__x64_sys_getpid": 53,
+        "vfs_read": 358,
+        "do_filp_open": 370,
+        "do_syscall_64": 717,
+        "handle_mm_fault": 358
+      },
+      "sections": [
+        {
+          "name": "",
+          "kind": 0,
+          "flags": 0,
+          "address": 0,
+          "size": 0
+        },
+        {
+          "name": ".text",
+          "kind": 1,
+          "flags": 6,
+          "address": 18446744071578845184,
+          "size": 8388608
+        },
+        {
+          "name": ".rodata",
+          "kind": 1,
+          "flags": 3,
+          "address": 18446744071587233792,
+          "size": 211816
+        },
+        {
+          "name": ".eh_frame",
+          "kind": 1879048193,
+          "flags": 2,
+          "address": 18446744071587445608,
+          "size": 418380
+        },
+        {
+          "name": ".pci_fixup",
+          "kind": 1,
+          "flags": 2,
+          "address": 18446744071587864000,
+          "size": 544
+        },
+        {
+          "name": "__param",
+          "kind": 1,
+          "flags": 3,
+          "address": 18446744071587864544,
+          "size": 1040
+        },
+        {
+          "name": "__ex_table",
+          "kind": 1,
+          "flags": 2,
+          "address": 18446744071587865584,
+          "size": 3768
+        },
+        {
+          "name": ".notes",
+          "kind": 7,
+          "flags": 2,
+          "address": 18446744071587869352,
+          "size": 84
+        },
+        {
+          "name": ".data",
+          "kind": 1,
+          "flags": 3,
+          "address": 18446744071589330944,
+          "size": 763456
+        },
+        {
+          "name": ".data.rel.ro",
+          "kind": 1,
+          "flags": 3,
+          "address": 18446744071590094400,
+          "size": 25520
+        },
+        {
+          "name": "__bug_table",
+          "kind": 1,
+          "flags": 3,
+          "address": 18446744071590119920,
+          "size": 14760
+        },
+        {
+          "name": ".vvar",
+          "kind": 8,
+          "flags": 3,
+          "address": 18446744071590137856,
+          "size": 4096
+        },
+        {
+          "name": ".init.text",
+          "kind": 1,
+          "flags": 6,
+          "address": 18446744071590141952,
+          "size": 383671
+        },
+        {
+          "name": ".altinstr_aux",
+          "kind": 1,
+          "flags": 6,
+          "address": 18446744071590525623,
+          "size": 2700
+        },
+        {
+          "name": ".init.data",
+          "kind": 1,
+          "flags": 3,
+          "address": 18446744071590531072,
+          "size": 379528
+        },
+        {
+          "name": ".x86_cpu_dev.init",
+          "kind": 1,
+          "flags": 3,
+          "address": 18446744071590910600,
+          "size": 40
+        },
+        {
+          "name": ".altinstructions",
+          "kind": 1,
+          "flags": 2,
+          "address": 18446744071590910640,
+          "size": 8666
+        },
+        {
+          "name": ".altinstr_replacement",
+          "kind": 1,
+          "flags": 6,
+          "address": 18446744071590919306,
+          "size": 1992
+        },
+        {
+          "name": ".apicdrivers",
+          "kind": 1,
+          "flags": 3,
+          "address": 18446744071590921304,
+          "size": 8
+        },
+        {
+          "name": ".exit.text",
+          "kind": 1,
+          "flags": 6,
+          "address": 18446744071590921312,
+          "size": 384
+        },
+        {
+          "name": ".data..percpu",
+          "kind": 1,
+          "flags": 3,
+          "address": 18446744071590924288,
+          "size": 0
+        },
+        {
+          "name": "runtime_shift_d_hash_shift",
+          "kind": 1,
+          "flags": 2,
+          "address": 18446744071590924288,
+          "size": 4
+        },
+        {
+          "name": "runtime_ptr_dentry_hashtable",
+          "kind": 1,
+          "flags": 2,
+          "address": 18446744071590924296,
+          "size": 4
+        },
+        {
+          "name": "runtime_ptr_USER_PTR_MAX",
+          "kind": 1,
+          "flags": 2,
+          "address": 18446744071590924304,
+          "size": 136
+        },
+        {
+          "name": ".smp_locks",
+          "kind": 1,
+          "flags": 1,
+          "address": 18446744071590928384,
+          "size": 0
+        },
+        {
+          "name": ".data_nosave",
+          "kind": 1,
+          "flags": 1,
+          "address": 18446744071590928384,
+          "size": 0
+        },
+        {
+          "name": ".bss",
+          "kind": 8,
+          "flags": 3,
+          "address": 18446744071590928384,
+          "size": 499712
+        },
+        {
+          "name": ".brk",
+          "kind": 8,
+          "flags": 3,
+          "address": 18446744071591428096,
+          "size": 90112
+        },
+        {
+          "name": ".symtab",
+          "kind": 2,
+          "flags": 0,
+          "address": 0,
+          "size": 496512
+        },
+        {
+          "name": ".strtab",
+          "kind": 3,
+          "flags": 0,
+          "address": 0,
+          "size": 265077
+        },
+        {
+          "name": ".shstrtab",
+          "kind": 3,
+          "flags": 0,
+          "address": 0,
+          "size": 359
+        }
+      ],
+      "bzimage": {
+        "bytes": 1606656,
+        "sha256": "4c4dff0a15c2eff6dd7e41f07b74119bdc9489818b014d671783cca8a60c25df"
+      }
+    }
+  },
+  "size_metric_notes": {
+    "allocated_bytes": "Sum of SHF_ALLOC section sizes including NOBITS and internal section padding, excluding inter-section gaps. Not measured RSS.",
+    "executable_section_bytes": "Sum of allocated SHF_EXECINSTR section sizes, including linker padding.",
+    "stt_func_covered_bytes": "Union of nonzero STT_FUNC symbol address ranges. Descriptive symbol coverage, not a complete machine-code census."
+  },
+  "limitations": [
+    "Only the pinned minimal, single-CPU configuration; no network or block storage.",
+    "KVM executes native x86 instructions but retains virtualization and interrupt overhead.",
+    "qemu64 masks host CPU features; this is not -cpu host or bare-metal boot.",
+    "Host powersave governor and boost remain unchanged; no CPU isolation, governor changes or host reboot.",
+    "One identical reference-compiled userspace binary, not a comparison of userspace compilers.",
+    "Reference GCC uses size optimization; Keel uses its existing Full optimization pipeline.",
+    "Boot timers do not establish a startup speedup.",
+    "External vDSO, realmode, setup and decompressor stages remain unchanged.",
+    "Existing 328 objtool warnings and general kernel ABI qualification gaps remain.",
+    "No profiling-based attribution of runtime costs was performed."
+  ]
+}

@@ -65,9 +65,30 @@ C support targets C11 with common GNU extensions (vectors, VLAs, attributes,
 complex numbers, AArch64 inline assembly). See [C coverage](docs/c-frontend-coverage.md)
 and [ISA status](docs/userspace-isa-status.md) for the details and limits.
 
+## Linux kernel milestone
+
+Keel compiles and assembles the core of a pinned minimal x86-64 Linux v6.12
+kernel. The resulting kernel boots and passes checked filesystem, memory,
+fork/COW and pipe workloads. No replacement GCC C objects or manual IR patches
+are needed. The build uses captured preprocessed inputs, GNU ld for linking,
+and reference boot, decompressor and vDSO stages. Full raw-source Kbuild and
+[native kernel linking](docs/linux-kernel-native-linker-audit.md) remain work
+in progress. [Build and boot evidence](docs/linux-kernel-code-model.md).
+
+The compressed image is **1.61 MB versus GCC's 0.93 MB**, 73% larger. Guest
+init-entry timing is similar, about 257 ms versus 259 ms. Five checked
+kernel-heavy workloads take **1.52–2.38× as long** as GCC 14.4's size-optimized
+kernel. These measurements use nine alternating pairs on an AMD Ryzen 9
+9950X3D with native KVM execution, one vCPU and identical userspace.
+[Methodology, samples and limits](docs/linux-kernel-benchmarks.md).
+
+<p align="center"><img src="docs/assets/readme-kernel-runtime.svg" alt="Pinned Linux v6.12 kernel workload time, Keel relative to GCC 14.4 -Os: getpid 1.52x, open/read/close 2.38x, page faults and protection 2.17x, fork/COW/wait 2.06x, pipe ping-pong 1.74x. Native KVM, one vCPU, median of nine paired runs; lower is better." width="720"></p>
+
 ## Performance
 
-Keel compiles quickly; the code it generates is not yet as fast as Clang's.
+Keel compiles quickly and supports application workloads and the kernel
+milestone above. Generated code still trails GCC and Clang in runtime and
+size optimization on the measured workloads.
 Measured on an Apple M5 Max. [Compiler](docs/benchmarks/compiler-20261024.md) ·
 [assembler/linker](docs/benchmarks/assembly-link-20261024.md) ·
 [runtime](docs/benchmarks/runtime-20261022.md) methodology
