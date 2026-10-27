@@ -1,5 +1,9 @@
 # Pinned Linux64 link audit
 
+Later optimizer fixes and boot experiments are recorded in the
+[link fixes and runtime boundary](linux-kernel-link-fixes.md). The measurements
+below describe the earlier compiler checkpoint.
+
 The assembly-only replacement links into `vmlinux` with GNU ld and passes Linux's
 exception-table sorting step. The full C replacement does not link yet. Its
 optimized objects leave 22 undefined references to 21 symbols across ten units.

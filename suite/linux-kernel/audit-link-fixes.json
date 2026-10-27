@@ -1,0 +1,872 @@
+{
+  "schema": 1,
+  "scope": "Pinned Linux v6.12 x86-64 source/link follow-up and bounded emulated runtime checks",
+  "compiler": {
+    "commit": "fb43733f11c74a3f6046784461fc7aa642c019df",
+    "binary_sha256": "7d8c0991bbc83ad1c28c7a04d018527f9451578d6f32a991a3599ffbd888393a",
+    "modified_production_source_sha256": {
+      "crates/keel-opt/src/module_cleanup.rs": "0d78ecce591f760943a9efc1f55579b4c7c4a337f4f14bffacaa62720bdda366",
+      "crates/keel-opt/src/lib.rs": "029e5a546169aff9ecc53082d684522f2764a8e8ba3a66e531472f22d4099250",
+      "crates/keel-opt/src/instcombine.rs": "b5bed6d3c4517c32da3febfa4e0202f9785c20415c0da6dc5b2615ee9b4d1b44"
+    },
+    "local_and_qualified_remote_production_files_match": true
+  },
+  "pins": {
+    "linux_commit": "adc218676eef25575469234709c2d87185ca223a",
+    "inputs_sha256": "908006c3e46761f50342cf6556fcd86a05d7edf51cf2e85de449d19cfd2c5135",
+    "config_sha256": "af7dd9b29c4ac472ffe32d338821425912fe92ad62b30281ef1356947930e129",
+    "reference_vmlinux_sha256": "2c399397364a7240d3b63e45c9cb70e50bd5b0df66547639aed5de32132c27df",
+    "reference_bzimage_sha256": "6eb40ddbf8129ff75d43ece9778aa6b4a09d044ccf2b22235e9f592e2e566a86",
+    "target_policy": "linux-v6.12-x86-64-kernel-audit",
+    "target_policy_sha256": "60189c2bbc51bd84487d041c69715c670688dfbcfb2d1afa24a6c9aae16fcfbc"
+  },
+  "input_provenance": {
+    "saved_inputs_rehashed": 992,
+    "unchanged": true,
+    "binary_dependencies": {
+      "arch/x86/realmode/rm/realmode.bin": {
+        "bytes": 20516,
+        "sha256": "97d7c5f5b0a0f1aab01cc827f4e3c4b3b4a5d83b18e68f9b15083c926f95d50c"
+      },
+      "arch/x86/realmode/rm/realmode.relocs": {
+        "bytes": 136,
+        "sha256": "07723db7eae26557a7d5af8e15018040010a2581594021c355aedb2d96c1c655"
+      },
+      "usr/initramfs_inc_data": {
+        "bytes": 512,
+        "sha256": "c74972e537a33a0d680202d650d08c9e249f07d5d33a830345672138da1fb14e"
+      }
+    }
+  },
+  "tools": {
+    "ld": "GNU ld (GNU Binutils) 2.46",
+    "gcc": "gcc (GCC) 14.4.0",
+    "clang": "clang version 21.1.8",
+    "qemu-system-x86_64": "QEMU emulator version 11.1.2"
+  },
+  "compilation": {
+    "c_inputs": 484,
+    "successful": 484,
+    "flags": [
+      "-O",
+      "--link-intent",
+      "executable",
+      "--target",
+      "x86_64-unknown-linux-gnu",
+      "--cpu-level",
+      "v1"
+    ],
+    "features": "unchanged explicit kernel-audit C policy",
+    "parallel_processes": 4,
+    "per_input_timeout_seconds": 180
+  },
+  "direct_link_selection": {
+    "total": 501,
+    "c_objects": 481,
+    "assembly_objects": 20,
+    "not_direct_link_members": [
+      "arch/x86/entry/vdso/vclock_gettime.o",
+      "arch/x86/entry/vdso/vdso-note.o",
+      "arch/x86/entry/vdso/vgetrandom-chacha.o",
+      "arch/x86/entry/vdso/vgetrandom.o",
+      "arch/x86/entry/vdso/vgetcpu.o"
+    ]
+  },
+  "link": {
+    "checkpoint-auto": {
+      "archive_format": "normal",
+      "ordered_archive_contents_verified": true,
+      "optimization": "-O --link-intent executable",
+      "partial": {
+        "returncode": 0,
+        "command": [
+          "ld",
+          "-m",
+          "elf_x86_64",
+          "-z",
+          "noexecstack",
+          "--no-warn-rwx-segments",
+          "-r",
+          "-o",
+          "aggregate.o",
+          "--whole-archive",
+          "vmlinux.a",
+          "--no-whole-archive",
+          "--start-group",
+          "lib/lib.a",
+          "arch/x86/lib/lib.a",
+          "--end-group"
+        ],
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "raw-link": {
+        "returncode": 1,
+        "command": [
+          "ld",
+          "-m",
+          "elf_x86_64",
+          "-z",
+          "noexecstack",
+          "--no-warn-rwx-segments",
+          "-z",
+          "max-page-size=0x200000",
+          "--build-id=sha1",
+          "--orphan-handling=warn",
+          "--script=arch/x86/kernel/vmlinux.lds",
+          "-o",
+          "vmlinux.linked",
+          "--whole-archive",
+          "vmlinux.a",
+          "init/version-timestamp.o",
+          "--no-whole-archive",
+          "--start-group",
+          "lib/lib.a",
+          "arch/x86/lib/lib.a",
+          "--end-group"
+        ],
+        "log_sha256": "aa2c4e893764ea73da3017d27adbcbf7f8a416e185f3b35d95ebf0b3bce07397"
+      },
+      "post-objtool-link": {
+        "returncode": 1,
+        "command": [
+          "ld",
+          "-m",
+          "elf_x86_64",
+          "-z",
+          "noexecstack",
+          "--no-warn-rwx-segments",
+          "-z",
+          "max-page-size=0x200000",
+          "--build-id=sha1",
+          "--orphan-handling=warn",
+          "--script=arch/x86/kernel/vmlinux.lds",
+          "-o",
+          "vmlinux.linked",
+          "--whole-archive",
+          "vmlinux.a",
+          "init/version-timestamp.o",
+          "--no-whole-archive",
+          "--start-group",
+          "lib/lib.a",
+          "arch/x86/lib/lib.a",
+          "--end-group"
+        ],
+        "log_sha256": "aa2c4e893764ea73da3017d27adbcbf7f8a416e185f3b35d95ebf0b3bce07397"
+      },
+      "direct_archived_objects": 500,
+      "undefined_symbols": [
+        "convert_from_fxsr",
+        "convert_to_fxsr"
+      ],
+      "objtool": {
+        "checked": 480,
+        "nonzero": 0,
+        "warnings": 329,
+        "log_sha256": "c79522c229d7034b00b05a4b9ce41804f7570a26c07b1db8287ba7247c687b79"
+      }
+    },
+    "checkpoint-manual": {
+      "archive_format": "normal",
+      "ordered_archive_contents_verified": true,
+      "optimization": "-O --link-intent executable",
+      "manual_override": {
+        "path": "arch/x86/kernel/fpu/signal.o",
+        "sha256": "cd5f281e7ffef89ec62a74e9770cdd7e9abf5ef08ef916a6d4543e79df34d336",
+        "description": "pinned IR helper reachability and sole-call constant specialization; no GCC replacement or unresolved-symbol stubs"
+      },
+      "partial": {
+        "returncode": 0,
+        "command": [
+          "ld",
+          "-m",
+          "elf_x86_64",
+          "-z",
+          "noexecstack",
+          "--no-warn-rwx-segments",
+          "-r",
+          "-o",
+          "aggregate.o",
+          "--whole-archive",
+          "vmlinux.a",
+          "--no-whole-archive",
+          "--start-group",
+          "lib/lib.a",
+          "arch/x86/lib/lib.a",
+          "--end-group"
+        ],
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "raw-link": {
+        "returncode": 0,
+        "command": [
+          "ld",
+          "-m",
+          "elf_x86_64",
+          "-z",
+          "noexecstack",
+          "--no-warn-rwx-segments",
+          "-z",
+          "max-page-size=0x200000",
+          "--build-id=sha1",
+          "--orphan-handling=warn",
+          "--script=arch/x86/kernel/vmlinux.lds",
+          "-o",
+          "vmlinux.linked",
+          "--whole-archive",
+          "vmlinux.a",
+          "init/version-timestamp.o",
+          "--no-whole-archive",
+          "--start-group",
+          "lib/lib.a",
+          "arch/x86/lib/lib.a",
+          "--end-group"
+        ],
+        "log_sha256": "f51b0ed909c50b832238b6834f212cfeab95b1d15d48326426fd0a0474a52fd8"
+      },
+      "post-objtool-link": {
+        "returncode": 0,
+        "command": [
+          "ld",
+          "-m",
+          "elf_x86_64",
+          "-z",
+          "noexecstack",
+          "--no-warn-rwx-segments",
+          "-z",
+          "max-page-size=0x200000",
+          "--build-id=sha1",
+          "--orphan-handling=warn",
+          "--script=arch/x86/kernel/vmlinux.lds",
+          "-o",
+          "vmlinux.linked",
+          "--whole-archive",
+          "vmlinux.a",
+          "init/version-timestamp.o",
+          "--no-whole-archive",
+          "--start-group",
+          "lib/lib.a",
+          "arch/x86/lib/lib.a",
+          "--end-group"
+        ],
+        "log_sha256": "f51b0ed909c50b832238b6834f212cfeab95b1d15d48326426fd0a0474a52fd8"
+      },
+      "sorttable": {
+        "returncode": 0,
+        "command": [
+          "./scripts/sorttable",
+          "vmlinux.linked"
+        ],
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "sorttable_success": true,
+      "image_sha256": "cdd6db5af1d8d9f77049b5d58374c466834f8b24a829f5f8c1ffbec14fa64606",
+      "reference_byte_identical": false,
+      "direct_archived_objects": 500,
+      "undefined_symbols": [],
+      "objtool": {
+        "checked": 480,
+        "nonzero": 0,
+        "warnings": 329,
+        "log_sha256": "c79522c229d7034b00b05a4b9ce41804f7570a26c07b1db8287ba7247c687b79"
+      }
+    },
+    "checkpoint-head": {
+      "archive_format": "normal",
+      "ordered_archive_contents_verified": true,
+      "optimization": "-O --link-intent executable",
+      "manual_override": {
+        "path": "arch/x86/kernel/fpu/signal.o",
+        "sha256": "cd5f281e7ffef89ec62a74e9770cdd7e9abf5ef08ef916a6d4543e79df34d336",
+        "description": "pinned IR helper reachability and sole-call constant specialization; no GCC replacement or unresolved-symbol stubs"
+      },
+      "reference_override": "arch/x86/kernel/head64.o",
+      "partial": {
+        "returncode": 0,
+        "command": [
+          "ld",
+          "-m",
+          "elf_x86_64",
+          "-z",
+          "noexecstack",
+          "--no-warn-rwx-segments",
+          "-r",
+          "-o",
+          "aggregate.o",
+          "--whole-archive",
+          "vmlinux.a",
+          "--no-whole-archive",
+          "--start-group",
+          "lib/lib.a",
+          "arch/x86/lib/lib.a",
+          "--end-group"
+        ],
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "raw-link": {
+        "returncode": 0,
+        "command": [
+          "ld",
+          "-m",
+          "elf_x86_64",
+          "-z",
+          "noexecstack",
+          "--no-warn-rwx-segments",
+          "-z",
+          "max-page-size=0x200000",
+          "--build-id=sha1",
+          "--orphan-handling=warn",
+          "--script=arch/x86/kernel/vmlinux.lds",
+          "-o",
+          "vmlinux.linked",
+          "--whole-archive",
+          "vmlinux.a",
+          "init/version-timestamp.o",
+          "--no-whole-archive",
+          "--start-group",
+          "lib/lib.a",
+          "arch/x86/lib/lib.a",
+          "--end-group"
+        ],
+        "log_sha256": "2b9c2f9cea5ee4c8c5d4b517a97a8add802b6bb3fbbcc64c85eed51ba7608cd3"
+      },
+      "post-objtool-link": {
+        "returncode": 0,
+        "command": [
+          "ld",
+          "-m",
+          "elf_x86_64",
+          "-z",
+          "noexecstack",
+          "--no-warn-rwx-segments",
+          "-z",
+          "max-page-size=0x200000",
+          "--build-id=sha1",
+          "--orphan-handling=warn",
+          "--script=arch/x86/kernel/vmlinux.lds",
+          "-o",
+          "vmlinux.linked",
+          "--whole-archive",
+          "vmlinux.a",
+          "init/version-timestamp.o",
+          "--no-whole-archive",
+          "--start-group",
+          "lib/lib.a",
+          "arch/x86/lib/lib.a",
+          "--end-group"
+        ],
+        "log_sha256": "2b9c2f9cea5ee4c8c5d4b517a97a8add802b6bb3fbbcc64c85eed51ba7608cd3"
+      },
+      "sorttable": {
+        "returncode": 0,
+        "command": [
+          "./scripts/sorttable",
+          "vmlinux.linked"
+        ],
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "sorttable_success": true,
+      "image_sha256": "72b0a0cb24e40f6e7a6fc717ac78dc2d8513c5ffa46a193b195192ca6674ab60",
+      "reference_byte_identical": false,
+      "direct_archived_objects": 500,
+      "undefined_symbols": [],
+      "objtool": {
+        "checked": 480,
+        "nonzero": 0,
+        "warnings": 328,
+        "log_sha256": "270227cfe6c753f906c3c2fdf7664123f2f168f3cf5a007f5a83ce5a75049677"
+      }
+    }
+  },
+  "manual_fpu_workaround": {
+    "source_unit": "arch/x86/kernel/fpu/signal.i",
+    "input_ir_sha256": "0a74ece5da962e5ceae52251ce84ae668a2a12c160867c9b441d146bebf20cf6",
+    "fixture": "fpu-link-workaround.py",
+    "fixture_sha256": "77c303965d93360ce65ae66c1ca0ca85e460dd7532eb0ad50f4eb41a5367343f",
+    "reviewed_steps": [
+      "Check the sole direct __fpu_restore_sig call passes a literal i8 zero as its third argument.",
+      "Check helper names have no address, initializer or assembly-text references.",
+      "Manually review the pinned assembly macros: register/constant construction does not add references to these helpers.",
+      "Remove the unreferenced local save_fsave_header body.",
+      "Substitute zero for uses of ia32_fxstate inside local __fpu_restore_sig, preserving its ABI and arguments.",
+      "Run ordinary CFG, instruction and dead-code cleanup, then verify and emit an object."
+    ],
+    "qualified_raw_object_sha256": "cd5f281e7ffef89ec62a74e9770cdd7e9abf5ef08ef916a6d4543e79df34d336",
+    "fresh_final_compiler_ir_reproduces_qualified_object": true,
+    "committed_python_fixture_reproduces_qualified_object": true,
+    "general_optimizer_implementation": false,
+    "stubs": false,
+    "ignore_unresolved_link_options": false
+  },
+  "mixed_image_substitution": {
+    "path": "arch/x86/kernel/head64.o",
+    "producer": "reference GCC",
+    "keel_c_objects": 480,
+    "reference_c_objects": 1,
+    "keel_assembly_objects": 20,
+    "includes_manual_fpu_workaround": true
+  },
+  "packaging_and_basic_boot": {
+    "reference": {
+      "input_sha256": "2c399397364a7240d3b63e45c9cb70e50bd5b0df66547639aed5de32132c27df",
+      "stages": [
+        {
+          "name": "nm",
+          "returncode": 0
+        },
+        {
+          "name": "strip",
+          "returncode": 0
+        },
+        {
+          "name": "gzip",
+          "returncode": 0
+        },
+        {
+          "name": "piggy-source",
+          "returncode": 0
+        },
+        {
+          "name": "misc",
+          "returncode": 0
+        },
+        {
+          "name": "piggy",
+          "returncode": 0
+        },
+        {
+          "name": "compressed-link",
+          "returncode": 0
+        },
+        {
+          "name": "compressed-nm",
+          "returncode": 0
+        },
+        {
+          "name": "compressed-binary",
+          "returncode": 0
+        },
+        {
+          "name": "header",
+          "returncode": 0
+        },
+        {
+          "name": "setup-link",
+          "returncode": 0
+        },
+        {
+          "name": "setup-binary",
+          "returncode": 0
+        },
+        {
+          "name": "bzimage",
+          "returncode": 0
+        }
+      ],
+      "bzimage_sha256": "6eb40ddbf8129ff75d43ece9778aa6b4a09d044ccf2b22235e9f592e2e566a86",
+      "reference_bzimage_identical": true,
+      "boot": {
+        "returncode": 33,
+        "passed": true,
+        "log_sha256": "e5af71e1fbf685bcaf6e3d8876079f713704c09d37519a9da5f63f84c13feb32"
+      }
+    },
+    "manual": {
+      "input_sha256": "cdd6db5af1d8d9f77049b5d58374c466834f8b24a829f5f8c1ffbec14fa64606",
+      "stages": [
+        {
+          "name": "nm",
+          "returncode": 0
+        },
+        {
+          "name": "strip",
+          "returncode": 0
+        },
+        {
+          "name": "gzip",
+          "returncode": 0
+        },
+        {
+          "name": "piggy-source",
+          "returncode": 0
+        },
+        {
+          "name": "misc",
+          "returncode": 0
+        },
+        {
+          "name": "piggy",
+          "returncode": 0
+        },
+        {
+          "name": "compressed-link",
+          "returncode": 0
+        },
+        {
+          "name": "compressed-nm",
+          "returncode": 0
+        },
+        {
+          "name": "compressed-binary",
+          "returncode": 0
+        },
+        {
+          "name": "header",
+          "returncode": 0
+        },
+        {
+          "name": "setup-link",
+          "returncode": 0
+        },
+        {
+          "name": "setup-binary",
+          "returncode": 0
+        },
+        {
+          "name": "bzimage",
+          "returncode": 0
+        }
+      ],
+      "bzimage_sha256": "2603e2325f91f1651d4dea4548973a3b132c5d7884131129fd2c8a5f6edf3697",
+      "reference_bzimage_identical": false,
+      "boot": {
+        "returncode": 0,
+        "passed": false,
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "head": {
+      "input_sha256": "72b0a0cb24e40f6e7a6fc717ac78dc2d8513c5ffa46a193b195192ca6674ab60",
+      "stages": [
+        {
+          "name": "nm",
+          "returncode": 0
+        },
+        {
+          "name": "strip",
+          "returncode": 0
+        },
+        {
+          "name": "gzip",
+          "returncode": 0
+        },
+        {
+          "name": "piggy-source",
+          "returncode": 0
+        },
+        {
+          "name": "misc",
+          "returncode": 0
+        },
+        {
+          "name": "piggy",
+          "returncode": 0
+        },
+        {
+          "name": "compressed-link",
+          "returncode": 0
+        },
+        {
+          "name": "compressed-nm",
+          "returncode": 0
+        },
+        {
+          "name": "compressed-binary",
+          "returncode": 0
+        },
+        {
+          "name": "header",
+          "returncode": 0
+        },
+        {
+          "name": "setup-link",
+          "returncode": 0
+        },
+        {
+          "name": "setup-binary",
+          "returncode": 0
+        },
+        {
+          "name": "bzimage",
+          "returncode": 0
+        }
+      ],
+      "bzimage_sha256": "f9edd4afb812440e475af9403251cf6641d7db37e9b80d59aa299a4bc1b58146",
+      "reference_bzimage_identical": false,
+      "boot": {
+        "returncode": 33,
+        "passed": true,
+        "log_sha256": "99cd32a1cc8fd0d4df69d4c818330e0e82a6c8751a3acdc5beca3fec5a0094b0"
+      }
+    }
+  },
+  "all_keel_c_first_fault": {
+    "first_exception": "     0: v=0e e=0008 i=0 cpl=0 IP=0010:ffffffff8103cb88 pc=ffffffff8103cb88 SP=0018:0000000001a03f58 CR2=ffffffff8103cb88",
+    "triple_fault": true,
+    "debug_log_sha256": "5e2bd6bd16c737404c3ea6711da6fbf5f90f975aece41e52705b10026ac33083"
+  },
+  "runtime": {
+    "fixture": "runtime.c",
+    "fixture_sha256": "8c7fb255783e0974b36597ca4d92a26314a406937faf1549304f0ff9ee3a1c00",
+    "runner": "runtime.py",
+    "runner_sha256": "27b8e2cf7c106d1de9365ebf56392bd0374d435fdcc5584d01c030e82e40223b",
+    "userspace_producer": "independent external GCC",
+    "memory_mib": 128,
+    "cpus": 1,
+    "accelerator": "tcg",
+    "timeout_seconds": 60,
+    "stages": [
+      "VFS and executable ELF header",
+      "mmap, data checks, page faults, mprotect and munmap",
+      "fork, stack COW, pipe transport, child status and wait"
+    ],
+    "verdict": "All stage markers once in order, final marker once, no FAIL marker, and host exit 33. Faults/timeouts never pass.",
+    "results": {
+      "reference": {
+        "kernel_sha256": "6eb40ddbf8129ff75d43ece9778aa6b4a09d044ccf2b22235e9f592e2e566a86",
+        "init_source_sha256": "8c7fb255783e0974b36597ca4d92a26314a406937faf1549304f0ff9ee3a1c00",
+        "compiler": "gcc (GCC) 14.4.0",
+        "qemu": "QEMU emulator version 11.1.2",
+        "compile": {
+          "command": [
+            "gcc",
+            "-O2",
+            "-static",
+            "-nostdlib",
+            "-ffreestanding",
+            "-fno-pie",
+            "-no-pie",
+            "-fno-stack-protector",
+            "-Wl,--build-id=none",
+            "-Wl,-e,_start",
+            "<corpus>/kernel-runtime.c",
+            "-o",
+            "<corpus>/link-contract-20261028/runtime-reference/init"
+          ],
+          "returncode": 0
+        },
+        "init_sha256": "2b38372d4a175415b4fcd994d32198cbebc7f2db70e942e725fb77301d9208a7",
+        "initramfs_sha256": "fdba6092287d7c12c0d0630f919703e5a07a8ce66609523f5f7d8f590ad15a14",
+        "boot": {
+          "returncode": 33,
+          "timeout": false,
+          "passed": true,
+          "log_sha256": "d2aa717e364acb055bc7a802f9636158b27caed9cd5d9054077b7cd3536aee47"
+        }
+      },
+      "asm": {
+        "kernel_sha256": "1a32c13b128c0184faff78074507aa43767dfa47a779056e18f1f640afd8c86f",
+        "init_source_sha256": "8c7fb255783e0974b36597ca4d92a26314a406937faf1549304f0ff9ee3a1c00",
+        "compiler": "gcc (GCC) 14.4.0",
+        "qemu": "QEMU emulator version 11.1.2",
+        "compile": {
+          "command": [
+            "gcc",
+            "-O2",
+            "-static",
+            "-nostdlib",
+            "-ffreestanding",
+            "-fno-pie",
+            "-no-pie",
+            "-fno-stack-protector",
+            "-Wl,--build-id=none",
+            "-Wl,-e,_start",
+            "<corpus>/kernel-runtime.c",
+            "-o",
+            "<corpus>/link-contract-20261028/runtime-asm/init"
+          ],
+          "returncode": 0
+        },
+        "init_sha256": "2b38372d4a175415b4fcd994d32198cbebc7f2db70e942e725fb77301d9208a7",
+        "initramfs_sha256": "fdba6092287d7c12c0d0630f919703e5a07a8ce66609523f5f7d8f590ad15a14",
+        "boot": {
+          "returncode": 33,
+          "timeout": false,
+          "passed": true,
+          "log_sha256": "be2457b48caa506f2b6fc48e315c8e1bf092af95b78f2e8fd94db227e598dabf"
+        }
+      },
+      "checkpoint-head": {
+        "kernel_sha256": "f9edd4afb812440e475af9403251cf6641d7db37e9b80d59aa299a4bc1b58146",
+        "init_source_sha256": "8c7fb255783e0974b36597ca4d92a26314a406937faf1549304f0ff9ee3a1c00",
+        "compiler": "gcc (GCC) 14.4.0",
+        "qemu": "QEMU emulator version 11.1.2",
+        "compile": {
+          "command": [
+            "gcc",
+            "-O2",
+            "-static",
+            "-nostdlib",
+            "-ffreestanding",
+            "-fno-pie",
+            "-no-pie",
+            "-fno-stack-protector",
+            "-Wl,--build-id=none",
+            "-Wl,-e,_start",
+            "<corpus>/kernel-runtime.c",
+            "-o",
+            "<corpus>/link-contract-20261028/runtime-checkpoint-head/init"
+          ],
+          "returncode": 0
+        },
+        "init_sha256": "2b38372d4a175415b4fcd994d32198cbebc7f2db70e942e725fb77301d9208a7",
+        "initramfs_sha256": "fdba6092287d7c12c0d0630f919703e5a07a8ce66609523f5f7d8f590ad15a14",
+        "boot": {
+          "returncode": 33,
+          "timeout": false,
+          "passed": true,
+          "log_sha256": "a2baf5c5616a4bed8d6f7b7e30795fb85456a252fcd721f7641dc5717f6885b2"
+        }
+      }
+    },
+    "negative_controls": {
+      "wrong-marker": {
+        "kernel_sha256": "1a32c13b128c0184faff78074507aa43767dfa47a779056e18f1f640afd8c86f",
+        "init_source_sha256": "3f1f4a27204373b5cf37806864885da37d1f16b0b3223a04c2568643576bfb32",
+        "compiler": "gcc (GCC) 14.4.0",
+        "qemu": "QEMU emulator version 11.1.2",
+        "compile": {
+          "command": [
+            "gcc",
+            "-O2",
+            "-static",
+            "-nostdlib",
+            "-ffreestanding",
+            "-fno-pie",
+            "-no-pie",
+            "-fno-stack-protector",
+            "-Wl,--build-id=none",
+            "-Wl,-e,_start",
+            "<corpus>/link-contract-20261028/wrong-marker.c",
+            "-o",
+            "<corpus>/link-contract-20261028/runtime-control-wrong-marker/init"
+          ],
+          "returncode": 0
+        },
+        "init_sha256": "67b8c94d8050988ef02f363353f27a4ffd4a2bee22f35081988d1f286ea2f925",
+        "initramfs_sha256": "2e7cd1244be7075cf4e2fbb2385da084a13da0edf6f0812a8719ec5e28ac57b6",
+        "boot": {
+          "returncode": 33,
+          "timeout": false,
+          "passed": false,
+          "log_sha256": "796de4829cbb207fdba086f555bcb6d86d42238bb10747e75821abe438696435"
+        },
+        "runner_returncode": 1
+      },
+      "wrong-exit": {
+        "kernel_sha256": "1a32c13b128c0184faff78074507aa43767dfa47a779056e18f1f640afd8c86f",
+        "init_source_sha256": "d5a9bcd78ac19bbfdcfc99d5655b7894541b30ec331a2e94aa0674e3121e15be",
+        "compiler": "gcc (GCC) 14.4.0",
+        "qemu": "QEMU emulator version 11.1.2",
+        "compile": {
+          "command": [
+            "gcc",
+            "-O2",
+            "-static",
+            "-nostdlib",
+            "-ffreestanding",
+            "-fno-pie",
+            "-no-pie",
+            "-fno-stack-protector",
+            "-Wl,--build-id=none",
+            "-Wl,-e,_start",
+            "<corpus>/link-contract-20261028/wrong-exit.c",
+            "-o",
+            "<corpus>/link-contract-20261028/runtime-control-wrong-exit/init"
+          ],
+          "returncode": 0
+        },
+        "init_sha256": "af3fa4a2c7cf1d172b3aea9aa88c29fe24f9882812626e0e23a9b7112691194f",
+        "initramfs_sha256": "b20ece5086b1aa96537b4c33776bfc33b2d1e3fd24e8d295b0471a89be089e38",
+        "boot": {
+          "returncode": 35,
+          "timeout": false,
+          "passed": false,
+          "log_sha256": "644735aff050fe0354afea0c1411061a5be2a892c63b03a9501e66ebda34212b"
+        },
+        "runner_returncode": 1
+      },
+      "memory-mismatch": {
+        "kernel_sha256": "1a32c13b128c0184faff78074507aa43767dfa47a779056e18f1f640afd8c86f",
+        "init_source_sha256": "cce83d09763bd4366cdeb835c976c78d33dd1978f73656be7d2bc00daadb4941",
+        "compiler": "gcc (GCC) 14.4.0",
+        "qemu": "QEMU emulator version 11.1.2",
+        "compile": {
+          "command": [
+            "gcc",
+            "-O2",
+            "-static",
+            "-nostdlib",
+            "-ffreestanding",
+            "-fno-pie",
+            "-no-pie",
+            "-fno-stack-protector",
+            "-Wl,--build-id=none",
+            "-Wl,-e,_start",
+            "<corpus>/link-contract-20261028/memory-mismatch.c",
+            "-o",
+            "<corpus>/link-contract-20261028/runtime-control-memory-mismatch/init"
+          ],
+          "returncode": 0
+        },
+        "init_sha256": "77552200e8a5628c8558a1c2596a041edcc4cafe9dfbfe4c7462462e25ab7bef",
+        "initramfs_sha256": "ef73f4af0c48a7e0a73ad733d6662b41d982dc5316c34e46105c90a68e237ffa",
+        "boot": {
+          "returncode": 35,
+          "timeout": false,
+          "passed": false,
+          "log_sha256": "0fe977f182e927c822758f7f4c70c789dca2fa10f42fe51b97f3429d26eca344"
+        },
+        "runner_returncode": 1
+      }
+    }
+  },
+  "native_compiler_regressions": {
+    "none": {
+      "returncode": 0,
+      "random_cases": 10000,
+      "boundary_pairs": 36
+    },
+    "instcombine": {
+      "returncode": 0,
+      "random_cases": 10000,
+      "boundary_pairs": 36
+    },
+    "keel-effects": {
+      "returncode": 0
+    },
+    "gcc-effects": {
+      "returncode": 0
+    },
+    "clang-effects": {
+      "returncode": 0
+    }
+  },
+  "validation": {
+    "workspace_tests": {
+      "passed": 2943,
+      "failed": 0,
+      "skipped": 13,
+      "doctests_passed": 1,
+      "runner": "nextest with test-fast, followed by Cargo doctests"
+    },
+    "workspace_all_targets_all_features_check": "passed",
+    "generator_freshness": {
+      "x86": "passed",
+      "aarch64": "passed"
+    },
+    "rust_docs": "built with pre-existing warnings",
+    "changed_rust_formatting": "passed",
+    "whole_workspace_formatting": "fails on 66 unchanged files",
+    "strict_clippy": "blocked by pre-existing diagnostics; no new module_cleanup diagnostic",
+    "initial_full_run": "2936 passed, six failed; corrected a fast-definition retention bug and obsolete emission assertions, and narrowed pointer-offset folding to constants before the clean full rerun",
+    "audit_runner_tests_passed": 7
+  },
+  "remaining_boundaries": [
+    "Automatic link still requires checked interprocedural specialization and assembly-reference information for the two FPU helper paths.",
+    "All-Keel C startup faults before serial output; a reference head64.o substitution supports the missing kernel code-model diagnosis.",
+    "Explicit kernel addressing, SIMD/FPU, red-zone, sibling-call and unwind/objtool policies are not established by the feature permission list.",
+    "329 objtool warnings on the automatic/manual variants and 328 with reference startup remain unqualified.",
+    "The vDSO image, real-mode payloads, boot setup, decompressor and initramfs preparation remain external.",
+    "Passing bounded TCG smoke tests does not establish absence of miscompilation or native hardware qualification."
+  ]
+}

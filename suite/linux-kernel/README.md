@@ -1360,3 +1360,18 @@ does not change compiler, assembler, decoder or CPU-profile source. Rust
 workspace validation is not repeated for this tooling/data change; the earlier
 compiler qualification remains scoped to its recorded checkpoint. Kernel ABI,
 linking, boot and runtime qualification remain separate.
+
+## Link fixes and runtime boundary
+
+The [follow-up](../../docs/linux-kernel-link-fixes.md) reduces the automatic C
+link from 22 unresolved references to two FPU helpers. A reviewed, pinned IR
+workaround resolves them, but the all-Keel C image triple-faults during its early
+page-table transition. Substituting only the reference `head64.o` produces an
+image that boots and passes VFS, memory, fork/COW, pipe and wait checks.
+
+The successful image uses 480 Keel C objects, one reference C startup object and
+20 Keel assembly objects. Its FPU unit includes the manual workaround. This is
+mixed-image evidence. The remaining backend boundary is an explicit kernel code
+model; objtool still reports warnings. See [audit-link-fixes.json](audit-link-fixes.json)
+for exact scope, artifact hashes and controls. `runtime.py` can run the bounded
+smoke test against a supplied `bzImage`; it builds an independent userspace init.
