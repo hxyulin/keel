@@ -59,6 +59,9 @@ inputs, writes a temporary file beside the destination, sets executable
 permissions on Unix and renames it into place; a failed link preserves an
 existing output. Allocated image size is limited to 512 MiB.
 
+For bounded GNU script final linking through the library API, see
+[GNU linker scripts](gnu-linker-scripts.md).
+
 ## Supported scope
 
 - Little-endian x86-64 ELF64 `ET_REL` objects with the System V/Linux OS ABI.

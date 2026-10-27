@@ -9,6 +9,7 @@ mod input;
 mod lifecycle;
 mod notes;
 pub mod relocatable;
+mod script;
 mod selected;
 mod sframe;
 mod unwind;
@@ -39,6 +40,8 @@ pub enum Machine {
 pub struct Options {
     /// Collect unreachable ELF input sections. Disabled by default.
     pub gc_sections: bool,
+    /// Owned GNU linker script text for bounded static x86-64 final linking.
+    pub script: Option<String>,
     pub machine: Machine,
     pub entry: String,
     pub interpreter: String,
@@ -48,6 +51,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             gc_sections: false,
+            script: None,
             machine: Machine::X86_64,
             entry: "_start".into(),
             interpreter: "/lib64/ld-linux-x86-64.so.2".into(),
@@ -145,7 +149,7 @@ fn end(n: u64, size: u64) -> Result<u64> {
         .ok_or("ELF image exceeds 512 MiB limit".into())
 }
 
-pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
+pub fn link(inputs: &[Input<'_>], mut options: Options) -> Result<Executable> {
     if inputs.is_empty() {
         return Err("no input objects".into());
     }
@@ -155,11 +159,22 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
     if linker_owned(&options.entry) {
         return Err("a linker-owned symbol cannot be the entry point".into());
     }
+    let script = options
+        .script
+        .as_deref()
+        .map(script::Script::parse)
+        .transpose()?;
+    if let Some(entry) = script.as_ref().and_then(|s| s.entry.as_ref()) {
+        options.entry.clone_from(entry);
+    }
     let arm = options.machine == Machine::Aarch64;
     let page = if arm { 65536 } else { PAGE };
     let (inputs, libraries) = input::prepare(inputs, &options.entry)?;
     if arm && (!libraries.is_empty() || !options.runpath.is_empty()) {
         return Err("native AArch64 ELF linking currently supports freestanding static executables; use `keel link --system` for shared libraries/libc".into());
+    }
+    if script.is_some() && (arm || !libraries.is_empty() || options.gc_sections) {
+        return Err("scripts currently require static x86-64 output without --gc-sections".into());
     }
     let mut sections = Vec::new();
     let mut units = Vec::new();
@@ -320,6 +335,14 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                     raw.sh_link(file.endian()),
                     raw.sh_info(file.endian()),
                 )?;
+                let linux_note = name == ".note.Linux";
+                if linux_note {
+                    notes::linux(data)?;
+                    section.elf_linked_rela().map_err(|e| e.to_string())?;
+                    if section.relocations().next().is_some() {
+                        return Err("relocations into .note.Linux are unsupported".into());
+                    }
+                }
                 if let Some(note) = note {
                     end(0, section.size())?;
                     if data.len() as u64 != section.size() {
@@ -392,6 +415,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                 if !lifecycle
                     && !sframe
                     && note.is_none()
+                    && !linux_note
                     && !matches!(
                         section.kind(),
                         object::SectionKind::Text
@@ -631,6 +655,13 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
             }
             globals.insert(s.name.clone(), (ui, si));
         }
+    }
+    if let Some(script) = script {
+        if sframe_section.is_some() {
+            return Err("SFrame reconstruction with linker scripts is unsupported".into());
+        }
+        unwind::merge(&mut sections, &mut units, &mut unwind_sections)?;
+        return script::link(script, sections, units, globals, &options.entry, warnings);
     }
     // Bind original identities and validate even dead ranges before GC or merge.
     let mut sframe_targets = sframe_section

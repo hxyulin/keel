@@ -23,19 +23,18 @@ Linux owner, preserves all types and descriptor bytes, and requires complete
 padding without interpreting its bytes. Empty sections and empty descriptors
 are valid. It allocates no memory based on untrusted record lengths.
 
-## Caller integration required
+## Caller integration
 
 The implementation in `notes.rs` validates Linux section metadata and returns
 `None` so these sections retain ordinary section and symbol identity.
 `Plan::prepare` validates retained payloads and records a PT_NOTE for each
 nonempty Linux section, including when GNU properties are absent.
 
-The current `elf.rs` caller still rejects `SectionKind::Note` on the ordinary
-section path. Within that caller, `.note.Linux` needs payload validation via
-`notes::linux(data)` before GC and an exception in the allocated-section kind
-check. Relocation handling must reject writes into these validated payloads
-or validate the final bytes again. No caller change is included because this
-work is scoped to `notes.rs` and focused note tests and fixtures.
+The `elf.rs` caller validates payloads with `notes::linux(data)` before GC,
+permits the validated `.note.Linux` section kind, and rejects relocations into
+these payloads. The default layout uses `Plan::prepare` for NOTE headers. The
+script layout derives NOTE headers from its final output mappings, so a renamed
+or merged `.notes` output retains the requested segment range.
 
 GC currently roots `.note.ABI-tag` but not `.note.Linux`. A script can retain
 Linux notes with KEEP and assign its output note section to explicit PT_NOTE.
