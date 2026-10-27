@@ -50,9 +50,11 @@ fn inline_emission_is_finalized_after_all_declarations() {
                                 let h = m.functions.iter().find(|f| f.name == "h").unwrap();
                                 assert_eq!(h.local, local, "{source}\n{m}");
                                 let f = m.functions.iter().find(|f| f.name == "f").unwrap();
+                                let mandatory_public_inline = policy == "always_inline" && !local;
                                 assert_eq!(
                                     calls(f, "h"),
-                                    !optimized || !local || policy == "noinline",
+                                    !mandatory_public_inline
+                                        && (!optimized || !local || policy == "noinline"),
                                     "{source}\n{m}"
                                 );
                                 keel_codegen::compile(&m, target).unwrap();
