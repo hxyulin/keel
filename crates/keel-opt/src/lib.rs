@@ -66,6 +66,7 @@ impl From<VectorTarget> for OptimizationContext {
 
 mod memory_alias;
 mod memory_forward;
+mod module_cleanup;
 mod phi_simplify;
 mod run_balance_predicate;
 mod sccp;
@@ -363,6 +364,8 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[21],
     &call_load_reuse::CallLoadReuse,
     &internal_fast_calls::InternalFastCalls,
+    &module_cleanup::EmptyCalls,
+    &module_cleanup::UnusedFunctions,
     &private_aggregate::PrivateAggregate,
     &private_aggregate::PrivateAggregateCleanup,
 ];
@@ -477,7 +480,7 @@ const FULL_ROUND: [&str; 16] = [
 
 const FULL_ROUNDS: usize = 3;
 
-const FULL_EPILOGUE: [&str; 16] = [
+const FULL_EPILOGUE: [&str; 23] = [
     "load-reuse",
     "stack-promote",
     "phi-simplify",
@@ -491,6 +494,13 @@ const FULL_EPILOGUE: [&str; 16] = [
     "loop-reduce-multi",
     "loop-rotate",
     "phi-simplify",
+    "dce",
+    "known-bits",
+    "simplify-cfg",
+    "dce",
+    "empty-calls",
+    "dce",
+    "unused-functions",
     "dce",
     "private-aggregate-cleanup",
     "internal-fast-calls",
@@ -530,7 +540,7 @@ const fn full_pipeline() -> [&'static str; 1 + FULL_ROUND.len() * FULL_ROUNDS + 
 }
 
 /// The passes `keel compile -O` runs: private aggregate cleanup, three bounded
-/// rounds, then memory/loop cleanup.
+/// rounds, then memory/loop, known-bit, call and reachability cleanup.
 pub const DEFAULT_PIPELINE: &[&str] = &full_pipeline();
 
 pub fn find_pass(name: &str) -> Option<&'static dyn Pass> {

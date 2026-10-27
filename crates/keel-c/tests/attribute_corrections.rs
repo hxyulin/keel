@@ -47,8 +47,17 @@ fn inline_emission_is_finalized_after_all_declarations() {
                                     keel_opt::optimize(&mut m).unwrap();
                                 }
                                 keel_ir::verify_module(&m).unwrap();
-                                let h = m.functions.iter().find(|f| f.name == "h").unwrap();
-                                assert_eq!(h.local, local, "{source}\n{m}");
+                                let h = m.functions.iter().find(|f| f.name == "h");
+                                assert_eq!(
+                                    h.is_some(),
+                                    !optimized || !local || policy == "noinline",
+                                    "{source}\n{m}"
+                                );
+                                if let Some(h) = h {
+                                    assert_eq!(h.local, local, "{source}\n{m}");
+                                } else {
+                                    assert!(m.decls.iter().any(|d| d.name == "h"), "{source}\n{m}");
+                                }
                                 let f = m.functions.iter().find(|f| f.name == "f").unwrap();
                                 let mandatory_public_inline = policy == "always_inline" && !local;
                                 assert_eq!(

@@ -1020,9 +1020,39 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
             {
                 return Some(Fold::Data(InstData::Convert { op, ty, arg: x }));
             }
+            if op == ConvertOp::PtrToInt
+                && let Some((BinaryOp::Ptradd, [base, offset])) = binary(func, arg)
+                && let ValueDef::Result(base_inst, _) = func.value_def(base)
+                && let InstData::Convert {
+                    op: ConvertOp::IntToPtr,
+                    arg: number,
+                    ..
+                } = *func.inst_data(base_inst)
+                && let (Some(number), Some(offset)) = (bits(func, number), bits(func, offset))
+            {
+                return Some(Fold::Data(InstData::Iconst {
+                    ty: Type::I64,
+                    imm: number.wrapping_add(offset) as u64 as i64,
+                }));
+            }
             let ValueDef::Result(inner, _) = func.value_def(arg) else {
                 return None;
             };
+            // Native IR uses 64-bit addresses. The Wasm32 optimizer has a
+            // separate pass allowlist and does not run native instcombine.
+            if let InstData::Convert {
+                op: inner_op,
+                arg: original,
+                ..
+            } = *func.inst_data(inner)
+                && matches!(
+                    (op, inner_op),
+                    (ConvertOp::PtrToInt, ConvertOp::IntToPtr)
+                        | (ConvertOp::IntToPtr, ConvertOp::PtrToInt)
+                )
+            {
+                return Some(Fold::Value(original));
+            }
             if let InstData::Convert {
                 op: inner_op,
                 arg: original,

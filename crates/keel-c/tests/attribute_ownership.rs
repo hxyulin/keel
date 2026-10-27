@@ -29,8 +29,17 @@ fn block_declarations_merge_contracts_without_requesting_external_emission() {
                 for policy in ["", "noinline", "always_inline"] {
                     let source = block_source(storage, declaration, late, policy);
                     check_matrix(&source, |m, optimized| {
-                        let h = m.functions.iter().find(|f| f.name == "h").unwrap();
-                        assert!(h.local, "{source}\n{m}");
+                        let h = m.functions.iter().find(|f| f.name == "h");
+                        assert_eq!(
+                            h.is_some(),
+                            !optimized || policy == "noinline",
+                            "{source}\n{m}"
+                        );
+                        if let Some(h) = h {
+                            assert!(h.local, "{source}\n{m}");
+                        } else {
+                            assert!(m.decls.iter().any(|d| d.name == "h"), "{source}\n{m}");
+                        }
                         assert_eq!(
                             calls(m.functions.iter().find(|f| f.name == "f").unwrap(), "h"),
                             !optimized || policy == "noinline",

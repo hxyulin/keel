@@ -30,7 +30,7 @@ fn optimization_keeps_policy_and_untagged_output_is_unchanged() {
     );
     for policy in ["gnu", "clang"] {
         let src = format!(
-            "func @f(i64)->i64 x86_vector_abi({policy}) local {{\nblock0(v0:i64):\n return v0\n}}"
+            "func @f(i64)->i64 x86_vector_abi({policy}) used local {{\nblock0(v0:i64):\n return v0\n}}"
         );
         let mut m = keel_ir::parse(&src).unwrap();
         keel_opt::optimize(&mut m).unwrap();
