@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+bbtree = { path = "../../third-party/bbtree", features = ["cache-line-alignment"] }
 object = { version = "0.36", default-features = false, features = ["read", "std"] }
 sha2 = "0.11.1"
 serde = "1"

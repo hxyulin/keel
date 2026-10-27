@@ -365,7 +365,9 @@ fn validate_raw(file: &object::File<'_>, bytes: &[u8]) -> Result<()> {
                         let width = if file.architecture() == object::Architecture::Aarch64 {
                             // Unknown relocation semantics remain packaging-only.
                             super::elf::aarch64::width(info as u32).ok()
-                        } else { elf_relocation_width(info as u32) };
+                        } else {
+                            elf_relocation_width(info as u32)
+                        };
                         if let Some(width) = width {
                             let offset = u64::from_le_bytes(relocation[..8].try_into().unwrap());
                             validate_site(offset, width, target_size)?;

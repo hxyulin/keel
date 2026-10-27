@@ -1,8 +1,8 @@
 //! Executable initialization/finalization contributions. Layout keeps each
 //! input's symbol/relocation identity while placing runtime spans together.
 use super::{BASE, Result, Section, Unit};
+use bbtree::unsync::BBTreeMap as BTreeMap;
 use object::SymbolSection;
-use std::collections::BTreeMap;
 
 const ARRAYS: [(&str, u32, u64, u64); 3] = [
     (".preinit_array", 16, 32, 33),

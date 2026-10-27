@@ -1,7 +1,7 @@
 //! Reachability uses original contribution indices until one final compaction.
 use super::{Result, Section, Symbol, Unit, sframe, unwind};
+use bbtree::unsync::{BBTreeMap as BTreeMap, BBTreeSet as BTreeSet};
 use object::SymbolSection;
-use std::collections::{BTreeMap, BTreeSet};
 
 type Key = (usize, usize);
 
@@ -453,6 +453,8 @@ pub(super) fn collect(
     }
     // Release symbol borrows before metadata mutates/removes input symbols.
     drop(selected);
+    // Boundary names borrow sections, which metadata rewriting mutates below.
+    drop(boundaries);
     for (&section, list) in &owners {
         if list
             .iter()

@@ -2,8 +2,8 @@
 use super::dynamic::Library;
 use super::groups::Plan;
 use crate::{Input, Result};
+use bbtree::unsync::{BBTreeMap as BTreeMap, BBTreeSet as BTreeSet};
 use object::{Object, ObjectSymbol};
-use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) struct Named<'a> {
     pub name: String,

@@ -2,7 +2,7 @@
 //! omitted sections and unresolved locals must still fail at their original use.
 use super::{Symbol, Unit, dynamic};
 use crate::Result;
-use std::collections::BTreeMap;
+use bbtree::unsync::BBTreeMap as BTreeMap;
 
 #[derive(Clone, Copy)]
 pub(super) struct Selection<'a> {
@@ -92,8 +92,8 @@ impl<'a> Index<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bbtree::unsync::BBTreeSet as BTreeSet;
     use object::SymbolSection;
-    use std::collections::BTreeSet;
 
     fn symbol(name: &str, info: u8, section: SymbolSection) -> Symbol {
         Symbol {

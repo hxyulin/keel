@@ -2,7 +2,7 @@
 //! output is one sorted, unique property note (see docs/elf-linker.md).
 use super::{Section, put32};
 use crate::Result;
-use std::collections::BTreeMap;
+use bbtree::unsync::BBTreeMap as BTreeMap;
 
 const FEATURE_1_AND: u32 = 0xc0000002;
 const ISA_1_NEEDED: u32 = 0xc0008002;

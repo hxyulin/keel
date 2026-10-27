@@ -2,7 +2,7 @@
 //! CFI instructions remain opaque; this is not an unwind instruction validator.
 use super::{BASE, Section, Unit, align, end, put32};
 use crate::Result;
-use std::collections::BTreeMap;
+use bbtree::unsync::BBTreeMap as BTreeMap;
 
 #[derive(Clone, Copy)]
 struct Pointer {
@@ -468,7 +468,7 @@ impl Filtered {
 pub(super) fn filter(
     section: &object::read::elf::ElfSection64<'_, '_, object::Endianness>,
     file: &object::read::elf::ElfFile64<'_, object::Endianness>,
-    discarded: &std::collections::BTreeSet<usize>,
+    discarded: &bbtree::unsync::BBTreeSet<usize>,
 ) -> Result<Option<Filtered>> {
     use object::{Object, ObjectSection, ObjectSymbol, RelocationTarget, SymbolSection};
     let data = section.data().map_err(|e| e.to_string())?;
@@ -485,7 +485,7 @@ pub(super) fn filter(
             return Err("duplicate .eh_frame pointer relocation".into());
         }
     }
-    let mut dead = std::collections::BTreeSet::new();
+    let mut dead = bbtree::unsync::BBTreeSet::new();
     for frame in &parsed.frames {
         if let Some(r) = relocs.get(&(frame.pc.offset as u64)) {
             if let object::RelocationFlags::Elf { r_type } = r.flags() {
@@ -541,8 +541,8 @@ impl Frames {
     pub(super) fn compact(
         &self,
         data: &[u8],
-        dead: &std::collections::BTreeSet<usize>,
-        relocated: &std::collections::BTreeSet<u64>,
+        dead: &bbtree::unsync::BBTreeSet<usize>,
+        relocated: &bbtree::unsync::BBTreeSet<u64>,
     ) -> Result<Filtered> {
         // CIE offsets come from validated FDEs, not a potentially sparse input
         // index. Store only referenced CIEs and avoid repeated tree insertion
@@ -686,11 +686,11 @@ mod tests {
     fn compact_reference(
         parsed: &Frames,
         data: &[u8],
-        dead: &std::collections::BTreeSet<usize>,
-        relocated: &std::collections::BTreeSet<u64>,
+        dead: &bbtree::unsync::BBTreeSet<usize>,
+        relocated: &bbtree::unsync::BBTreeSet<u64>,
     ) -> Result<Filtered> {
         let mut records = Vec::new();
-        let mut used_cies = std::collections::BTreeSet::new();
+        let mut used_cies = bbtree::unsync::BBTreeSet::new();
         let mut at = 0;
         while at + 4 <= data.len() {
             let length = u32::from_le_bytes(data[at..at + 4].try_into().unwrap()) as usize;
@@ -785,7 +785,7 @@ mod tests {
             let original = compact_fixture(8, 4, relative);
             let parsed = Frames::parse(&original).unwrap();
             for mask in 0..256 {
-                let mut dead: std::collections::BTreeSet<_> = parsed
+                let mut dead: bbtree::unsync::BBTreeSet<_> = parsed
                     .frames
                     .iter()
                     .enumerate()

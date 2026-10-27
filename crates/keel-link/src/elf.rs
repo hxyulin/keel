@@ -12,12 +12,12 @@ mod selected;
 mod sframe;
 mod unwind;
 use crate::{Input, Result};
+use bbtree::unsync::{BBTreeMap as BTreeMap, BBTreeSet as BTreeSet};
 use object::read::elf::{ElfFile64, FileHeader, SectionHeader};
 use object::{
     Object, ObjectSection, ObjectSymbol, RelocationFlags, RelocationTarget, SectionFlags,
     SymbolFlags, SymbolSection,
 };
-use std::collections::{BTreeMap, BTreeSet};
 
 const BASE: u64 = 0x400000;
 const PAGE: u64 = 4096;
@@ -475,7 +475,6 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                             2 | 4 | 9 | 10 | 11 | 41 | 42 => 4,
                             _ => return Err(format!("unsupported x86-64 relocation {kind}")),
                         }
-
                     };
                     if bss || offset.checked_add(width).is_none_or(|e| e > size) {
                         return Err("relocation field is outside file-backed section data".into());
@@ -795,13 +794,16 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
     let mut got = BTreeMap::new();
     for (ui, u) in units.iter().enumerate() {
         for r in &u.relocs {
-            if if arm { aarch64::got(r.kind) } else { matches!(r.kind, 9 | 41 | 42) } {
+            if if arm {
+                aarch64::got(r.kind)
+            } else {
+                matches!(r.kind, 9 | 41 | 42)
+            } {
                 let selection = selected.get(ui, r.symbol)?;
                 if selection.import.is_none() {
                     let next = got.len() as u64 * 8;
                     got.entry(selection.key).or_insert(next);
                 }
-
             }
         }
     }
@@ -1006,7 +1008,11 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                     } else {
                         i128::from(d.stub(name, &sections)?)
                     }
-                } else if if arm { aarch64::got(r.kind) } else { matches!(r.kind, 9 | 41 | 42) } {
+                } else if if arm {
+                    aarch64::got(r.kind)
+                } else {
+                    matches!(r.kind, 9 | 41 | 42)
+                } {
                     i128::from(BASE + sections[got_section].offset + got[&selection.key])
                 } else {
                     i128::from(definition_address(selection.key.0, selection.definition)?)
@@ -1014,7 +1020,10 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                 if arm {
                     let width = aarch64::width(r.kind)? as usize;
                     let encoded = aarch64::apply(
-                        r.kind, value, p, &bytes[offset as usize..offset as usize + width],
+                        r.kind,
+                        value,
+                        p,
+                        &bytes[offset as usize..offset as usize + width],
                     )?;
                     let mut data = [0u8; 8];
                     data[..width].copy_from_slice(&encoded);
