@@ -8,6 +8,7 @@ mod groups;
 mod input;
 mod lifecycle;
 mod notes;
+pub mod relocatable;
 mod selected;
 mod sframe;
 mod unwind;
