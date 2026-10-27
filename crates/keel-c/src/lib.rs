@@ -237,7 +237,20 @@ fn finalize_inline_asm(
         .filter(|g| g.gnu_inline_only)
         .map(|g| g.symbol)
         .collect();
+    let definitions: Vec<_> = parser
+        .globals
+        .iter()
+        .filter(|g| {
+            g.func.is_some()
+                && !g.internal
+                && !g.gnu_inline_only
+                && g.weak.is_none()
+                && g.function_attrs.alwaysinline
+        })
+        .map(|g| g.symbol)
+        .collect();
     if inline_only.is_empty()
+        && definitions.is_empty()
         && (target != keel_ir::Target::X86_64LinuxGnu
             || !module.functions.iter().any(|f| {
                 f.layout_insts()
@@ -246,6 +259,6 @@ fn finalize_inline_asm(
     {
         return Ok(());
     }
-    keel_opt::required_inline_asm_with_c_bodies(module, &inline_only)?;
+    keel_opt::required_inline_asm_with_c_definitions(module, &inline_only, &definitions)?;
     keel_ir::verify_module(module).map_err(|errors| format!("inline asm finalization: {errors:?}"))
 }

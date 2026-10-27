@@ -31,8 +31,10 @@ mod gvn;
 mod if_convert;
 mod inline;
 mod report;
-pub use inline::{required_inline_asm, required_inline_asm_with_c_bodies};
 pub use inline::{InlineReport, InlineSkip, run_with_report as inline_with_report};
+pub use inline::{
+    required_inline_asm, required_inline_asm_with_c_bodies, required_inline_asm_with_c_definitions,
+};
 pub use report::{InlineSite, IrCounts, OptimizationReport, PassObservation};
 mod instcombine;
 mod internal_fast_calls;

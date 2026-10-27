@@ -511,6 +511,10 @@ fn eligibility_reason_with_frames(
     {
         return Some("public_definition");
     }
+    body_eligibility_reason(f, frames)
+}
+
+fn body_eligibility_reason(f: &Function, frames: FrameSemantics) -> Option<&'static str> {
     if f.attrs.noinline {
         return Some("noinline");
     }
@@ -1480,6 +1484,37 @@ pub fn required_inline_asm_with_c_bodies(
     module: &mut Module,
     inline_only: &[&str],
 ) -> Result<(), String> {
+    required_inline_asm_with_c_definitions(module, inline_only, &[])
+}
+
+/// Finalize mandatory C inlining with explicit ownership of strong public bodies.
+/// Direct mandatory calls may use these definitions without changing their
+/// public symbols or semantic-interposition attributes. Inline-only GNU bodies
+/// retain the separate discard contract of [`required_inline_asm_with_c_bodies`].
+///
+/// # Errors
+/// Returns an error for a missing, local, weak or non-mandatory owned definition,
+/// an illegal mandatory call, or an invalid inline-only body.
+pub fn required_inline_asm_with_c_definitions(
+    module: &mut Module,
+    inline_only: &[&str],
+    definitions: &[&str],
+) -> Result<(), String> {
+    for name in definitions {
+        let Some(function) = module.functions.iter().find(|f| f.name == *name) else {
+            return Err(format!("C-owned mandatory definition @{name} is missing"));
+        };
+        if function.local
+            || function.attrs.weak
+            || function.weak_odr
+            || !function.attrs.alwaysinline
+            || inline_only.contains(name)
+        {
+            return Err(format!(
+                "C-owned mandatory definition @{name} is not a strong public alwaysinline body"
+            ));
+        }
+    }
     fn discard_unused(module: &mut Module) {
         let mut live: FxHashSet<String> = module
             .functions
@@ -1621,9 +1656,12 @@ pub fn required_inline_asm_with_c_bodies(
                 if decl.sig != callee.sig {
                     return Err(fail("ABI signature mismatch"));
                 }
-                if let Some(reason) =
+                let reason = if definitions.contains(&callee.name.as_str()) {
+                    body_eligibility_reason(callee, FrameSemantics::CRequiredInline)
+                } else {
                     eligibility_reason_with_frames(callee, true, FrameSemantics::CRequiredInline)
-                {
+                };
+                if let Some(reason) = reason {
                     return Err(fail(reason));
                 }
                 expanded = expanded
@@ -1680,6 +1718,23 @@ pub fn required_inline_asm_with_c_bodies(
     discard_unused(module);
     // Constant cleanup is required for constraint legality, independently of -O.
     for f in &mut module.functions {
+        if !f
+            .layout_insts()
+            .any(|(_, i)| matches!(f.inst_data(i), InstData::InlineAsm { .. }))
+        {
+            continue;
+        }
+        // Width-selecting C macros can contain invalid asm in constant-dead
+        // branches even when every operand is already a legal register or
+        // memory operand. Use the CFG so incoming goto edges stay reachable.
+        for _ in 0..8 {
+            let mut changed = crate::phi_simplify::run(f);
+            changed |= crate::const_fold::run(f);
+            changed |= crate::simplify_cfg::run(f);
+            if !changed {
+                break;
+            }
+        }
         if !f.layout_insts().any(|(_, i)| match f.inst_data(i) {
             InstData::InlineAsm { asm, args } => asm.inputs.iter().zip(args).any(|(op, arg)| {
                 if !matches!(op, keel_ir::AsmOperand::Imm | keel_ir::AsmOperand::NumericImm | keel_ir::AsmOperand::RegImm | keel_ir::AsmOperand::RegSignedImm32 | keel_ir::AsmOperand::RegShiftImm5 | keel_ir::AsmOperand::PortImm8) { return false; }
