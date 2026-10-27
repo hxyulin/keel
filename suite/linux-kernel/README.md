@@ -1,9 +1,13 @@
 # Minimal Linux x86-64 compiler target
 
+Latest measured status: **33/484 C inputs** and **402/506 assembly inputs**
+accepted. The [basic-asm/alignment follow-up](#basic-asm-and-kernel-sized-alignment)
+records the current blockers and the stop at asm-goto's backend requirements.
+
 This fixture targets the **64-bit parts** of Linux v6.12. Host programs,
-16/32-bit code and mixed-mode assembly remain external. X86 C inline assembly
-is a later implementation stage. Do not strip assembly or attributes from
-Linux to make the probe pass.
+16/32-bit code and mixed-mode assembly remain external. The supported x86 C
+inline-assembly subset is recorded in the follow-ups below. Do not strip
+assembly or attributes from Linux to make the probe pass.
 
 `source.json` pins the release archive and source identity. `minimal.config`
 is the input to `allnoconfig`; `resolved.config` records the reference result.
@@ -612,3 +616,66 @@ freshness checks pass. Rustdoc builds with existing warnings. Strict Clippy
 still stops at 52 existing diagnostics in untouched `keel-asm-ir` code. Later
 changes only format one initializer assignment, strengthen the layout-matrix
 count assertion (rerun passed), and record documentation/evidence.
+
+## Basic asm and kernel-sized alignment
+
+The [unchanged-input audit](audit-basic-asm-alignment.json) clears the previous
+434 function-scope basic-asm first errors. Nonempty x86 basic asm uses existing
+pinned IR assembly with memory/flags clobbers and literal percent signs. It
+assumes preserved GPRs and ordinary C stack/fallthrough behavior. The raw
+`tile_release` bytes assemble when emitted; no AMX execution is claimed.
+
+Those inputs first expose the 4 KiB C alignment limit at `struct irq_stack`.
+C object declarations and static IR data now share a 64 KiB alignment limit.
+Linux's 16 KiB local and global objects use existing storage paths. Direct IR
+stack-slot limits and restrictions on by-value over-aligned aggregates remain
+unchanged. No backend implementation changed in this increment.
+
+Acceptance grows from **30 to 33 C inputs**: `lib/rbtree.i`, `lib/rcuref.i`
+and `lib/timerqueue.i` now compile. Assembly remains **402 of 506**. All 432
+previously accepted objects retain their exact bytes. All 992 captured inputs
+and the config, `vmlinux` and `bzImage` were rehashed unchanged. There are no
+crashes, timeouts or acceptance regressions. The external reference was not
+rebuilt or rebooted, and no Keel object was linked into or run as the kernel.
+
+Current C first errors are:
+
+| First blocker | Files |
+| --- | ---: |
+| Asm-goto | 419 |
+| GNU fallthrough attribute statements | 20 |
+| `Nd` port constraints | 4 |
+| Semicolon-separated `rep; bsf` prefixes | 3 |
+| Alias attributes | 2 |
+| POPCNT feature policy | 1 |
+| `__builtin_has_attribute` | 1 |
+| Assignment type compatibility | 1 |
+
+Implementation stops at **asm-goto**, as requested for work needing significant
+backend changes. `cpufeature.h:178` uses it for static CPU-feature tests. The
+current asm node has no branch successors. This needs explicit IR/CFG edges,
+SSA liveness and allocation across those edges, output-availability rules and
+backend emission. Treating the text as ordinary fallthrough asm would miscompile
+the kernel. The smaller C gaps remain recorded rather than bypassing this stop.
+
+The 104 standalone assembly first errors remain standalone prefixes (58),
+whitespace `.type` syntax (17), debug-register aliases (5), optional instruction
+bindings (14), feature gates (3), operand matching (4), `.incbin` access (2) and
+one macro expression. These counts describe first diagnostics, not all missing
+features. Kernel environment policy, objtool, linking and a mixed-toolchain boot
+remain separate qualification steps even after source acceptance.
+
+Two optimized/unoptimized userspace objects verify that basic asm writes remain
+visible to C across 2,001 input values each. Two more verify 16 KiB global and
+local addresses over 2,001 invocations each. Both independent C oracles reject
+their deliberately broken controls with exit 1. These executions do not qualify
+Keel-generated kernel code.
+
+The full workspace run passed 2,797 regular tests and found one stale golden
+diagnostic naming the old 4 KiB limit. Updating that fixture and rerunning its
+target passes, giving 2,798 distinct regular tests verified, plus one doctest;
+13 tests remain ignored. The full run was not repeated. All-targets/all-features
+check, rustdoc, the three audit tests and both generator freshness checks pass.
+Scoped Clippy completes with existing library warnings. Full run and fixture
+rerun logs are `/tmp/keel-kernel-gap-tests.log` and
+`/tmp/keel-kernel-gap-golden.log`.

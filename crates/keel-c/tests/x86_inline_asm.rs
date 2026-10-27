@@ -25,6 +25,86 @@ fn compile(source: &str, debug: bool) -> Result<keel_ir::Module, String> {
     )
     .map_err(|e| e.to_string())
 }
+
+#[test]
+fn basic_asm_preserves_literal_text_and_global_memory_effects() {
+    let source = r#"
+int basic_global;
+int basic_store(int x) {
+    basic_global = x;
+    asm("movl $37, basic_global(%rip)\n\t# literal %0 and %% and %=");
+    return basic_global;
+}
+
+void tile_bytes(void) { asm volatile(".byte 0xc4, 0xe2, 0x78, 0x49, 0xc0"); }
+static inline void unused_basic(void) { asm("unsupported_unused_instruction"); }
+"#;
+    for optimize in [false, true] {
+        let mut module = compile(source, false).unwrap();
+        if optimize {
+            keel_opt::optimize(&mut module).unwrap();
+        }
+        keel_ir::verify_module(&module).unwrap();
+        let function = module
+            .functions
+            .iter()
+            .find(|f| f.name == "basic_store")
+            .unwrap();
+        let asm = function
+            .layout_insts()
+            .find_map(|(_, i)| match function.inst_data(i) {
+                InstData::InlineAsm { asm, .. } => Some(asm),
+                _ => None,
+            })
+            .unwrap();
+        assert!(asm.clobbers.contains(&keel_ir::AsmClobber::Memory));
+        assert!(asm.clobbers.contains(&keel_ir::AsmClobber::Flags));
+        let text = keel_codegen::compile(&module, Target::X86_64LinuxGnu).unwrap();
+        assert!(text.contains("movl $37, basic_global(%rip)"), "{text}");
+        assert!(text.contains("# literal %0 and %% and %="), "{text}");
+        let program = keel_codegen::compile_program(&module, Target::X86_64LinuxGnu).unwrap();
+        let object = keel_asm::x86::assemble_program_object(&program).unwrap();
+        assert_eq!(object, keel_asm::x86::assemble_object(&text).unwrap());
+        if let Some(path) = std::env::var_os("KEEL_X86_BASIC_ASM_EXPORT") {
+            std::fs::create_dir_all(&path).unwrap();
+            std::fs::write(
+                std::path::Path::new(&path).join(format!("basic-opt{optimize}.o")),
+                object,
+            )
+            .unwrap();
+        }
+    }
+}
+#[test]
+fn kernel_sized_alignment_uses_existing_storage_paths() {
+    let source = r#"
+struct irq_stack { char bytes[16384]; } __attribute__((aligned(16384)));
+struct irq_stack irq_global __attribute__((section(".init.data")));
+unsigned long kernel_alignment(void) {
+    struct irq_stack local;
+    asm("" :: "r"(&local) : "memory");
+    return ((unsigned long)&local | (unsigned long)&irq_global) & 16383;
+}
+"#;
+    for optimize in [false, true] {
+        let mut module = compile(source, false).unwrap();
+        if optimize {
+            keel_opt::optimize(&mut module).unwrap();
+        }
+        keel_ir::verify_module(&module).unwrap();
+        let program = keel_codegen::compile_program(&module, Target::X86_64LinuxGnu).unwrap();
+        let object = keel_asm::x86::assemble_program_object(&program).unwrap();
+        if let Some(path) = std::env::var_os("KEEL_X86_BASIC_ASM_EXPORT") {
+            std::fs::create_dir_all(&path).unwrap();
+            std::fs::write(
+                std::path::Path::new(&path).join(format!("alignment-opt{optimize}.o")),
+                object,
+            )
+            .unwrap();
+        }
+    }
+}
+
 #[test]
 fn scalar_constraints_emit_identical_text_typed_and_chunked_objects() {
     let empty = Pools {

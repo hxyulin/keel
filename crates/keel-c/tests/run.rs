@@ -951,8 +951,8 @@ fn rejected() {
             "error: alignment must be a power of two",
         ),
         (
-            "_Alignas(8192) int x;",
-            "error: alignment above 4096 is not supported",
+            "_Alignas(131072) int x;",
+            "error: alignment above 65536 is not supported",
         ),
         (
             "int n; _Alignas(n) int x;",

@@ -19,6 +19,10 @@
 use crate::{DataLayout, Type};
 use std::fmt;
 
+/// Largest supported byte alignment for static data and C object declarations.
+/// Bounds padding while admitting kernel stacks and 64 KiB page-sized objects.
+pub const MAX_DATA_ALIGN: u32 = 1 << 16;
+
 /// A named data object: defined here (`init` is `Some`) or elsewhere.
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct DataObject {

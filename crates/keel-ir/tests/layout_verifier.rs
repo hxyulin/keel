@@ -187,7 +187,7 @@ fn malformed_initializers_are_checked_on_the_actual_items() {
         },
     ];
     let expected = [
-        "@bad: alignment must be a power of two up to 4096, got 3",
+        "@bad: alignment must be a power of two up to 65536, got 3",
         "@bad: data integers must be i8 to i64, got ptr",
         "@bad: data integers must be i8 to i64, got f64",
         "@bad: data integers must be i8 to i64, got i128",

@@ -378,11 +378,18 @@ impl<'a> Parser<'a> {
                     return Err(Error::new(loc, "asm goto label operands are not supported"));
                 }
             }
-        } else if !template.trim().is_empty() && template.trim() != "nop" {
-            return Err(Error::new(
-                loc,
-                "basic asm currently supports only an empty template or `nop`; use extended asm with explicit operands and clobbers",
-            ));
+        } else if !template.trim().is_empty() {
+            if !x86 && template.trim() != "nop" {
+                return Err(Error::new(
+                    loc,
+                    "basic asm currently supports only an empty template or `nop`; use extended asm with explicit operands and clobbers",
+                ));
+            }
+            if x86 {
+                // GNU basic asm preserves GPRs but can access global memory.
+                // Model flags conservatively as well; asm is already pinned.
+                constraints.extend(["~{memory}".into(), "~{cc}".into()]);
+            }
         }
         self.expect(")")?;
         self.expect(";")?;
@@ -420,7 +427,9 @@ impl<'a> Parser<'a> {
                 .collect();
             asm_template(&template, &names, &numbering, &flags, loc, x86)?
         } else {
-            template
+            // Basic asm has no template substitutions. Escape literal percent
+            // signs for the IR's extended-template representation.
+            template.replace('%', "%%")
         };
         let constraints = normalized.join(",");
         let types: Vec<_> = outputs

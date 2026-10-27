@@ -4,8 +4,8 @@ Keel supports scalar GNU C inline assembly on `x86_64-unknown-linux-gnu`.
 This implements scalar fallthrough asm and deferred immediate validation from
 the [design](x86-c-inline-asm-design.md).
 Explicit memory operands, bounded constraint choices and integer flag outputs
-are supported. Comma-separated alternatives, asm goto and file-scope asm remain
-unsupported.
+are supported. Comma-separated alternatives and asm goto remain unsupported.
+Basic asm is supported at function and file scope on x86-64 Linux.
 
 ```c
 unsigned long add(unsigned long a, unsigned long b) {
@@ -287,6 +287,23 @@ At implementation checkpoint `b60de289`, the full workspace passed 2,767 tests,
 zero failures and 13 ignored across 507 groups. Workspace and profiling checks,
 all 98 generator tests, three audit tests, both generator freshness checks,
 scoped formatting and diff checks also passed.
+
+## Function-scope basic assembly
+
+On x86-64 Linux, basic asm without colons accepts arbitrary assembler text.
+Percent signs are literal, including register names such as `%rip`; `%0`, `%%`
+and `%=` have no substitution meaning. The frontend escapes them when storing
+the text in IR's extended-template representation. The shared assembler still
+checks emitted instruction spellings, directives and feature requirements.
+Unused inline definitions do not require their assembler text to be emitted.
+
+Basic asm stays pinned. Nonempty templates carry memory and flags clobbers,
+so optimization cannot reuse a global load across an opaque assembly write.
+As in the [GNU basic-asm contract](https://gcc.gnu.org/onlinedocs/gcc-15.1.0/gcc/Basic-Asm.html),
+the compiler assumes GPRs are preserved. Assembly must preserve the C stack and
+register state and fall through. Use extended asm to describe register inputs,
+outputs and changes. Opaque bytes do not establish instruction validity or
+runtime support. AArch64 retains its empty-or-`nop` basic-asm subset.
 
 ## File-scope assembly
 

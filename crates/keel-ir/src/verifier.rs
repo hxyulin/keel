@@ -10,8 +10,8 @@ use crate::dominators::{ControlFlowGraph, DominatorTree};
 use crate::fxhash::{FxHashMap, FxHashSet};
 use crate::{
     ArgExt, AsmOperand, BinaryOp, Block, BlockCall, CallConv, Clause, ConvertOp, EntityRef,
-    Function, InlineAsm, Inst, InstData, Intrinsic, Ordering, PhysReg, Purpose, RmwOp, Signature,
-    Type, UnaryOp, Value, ValueDef,
+    Function, InlineAsm, Inst, InstData, Intrinsic, MAX_DATA_ALIGN, Ordering, PhysReg, Purpose,
+    RmwOp, Signature, Type, UnaryOp, Value, ValueDef,
 };
 use crate::{
     DataInit, DataItem, DataLayout, DataObject, DebugScope, DebugType, DebugTypeData,
@@ -407,10 +407,6 @@ fn check_debug_info(module: &Module, lookup: &Names<'_>) -> Vec<VerifierError> {
     }
     errors
 }
-
-/// The largest alignment a data object may ask for: a page, which is as
-/// much as the linker can guarantee.
-const MAX_DATA_ALIGN: u32 = 4096;
 
 fn check_data(lookup: &Names<'_>, init: &DataInit, layout: DataLayout) -> Vec<String> {
     let mut errors = Vec::new();

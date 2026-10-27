@@ -1,6 +1,6 @@
 verifier errors:
   @f: is declared or defined more than once
-  @bad_align: alignment must be a power of two up to 4096, got 3
+  @bad_align: alignment must be a power of two up to 65536, got 3
   @empty: data object is empty
   @too_big: 256 does not fit in i8
   @too_big: -32769 does not fit in i16

@@ -2483,8 +2483,14 @@ impl<'a> Parser<'a> {
         {
             return Err(Error::new(loc, "alignment must be a power of two"));
         }
-        if n > 4096 {
-            return Err(Error::new(loc, "alignment above 4096 is not supported"));
+        if n > i64::from(keel_ir::MAX_DATA_ALIGN) {
+            return Err(Error::new(
+                loc,
+                format!(
+                    "alignment above {} is not supported",
+                    keel_ir::MAX_DATA_ALIGN
+                ),
+            ));
         }
         Ok(n as u64)
     }

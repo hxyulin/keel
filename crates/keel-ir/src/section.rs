@@ -335,11 +335,12 @@ pub fn validate_module(module: &crate::Module, target: crate::Target) -> Result<
         }
         if let Some(init) = &d.init {
             if (d.section.is_some() || d.retain)
-                && (!init.align.is_power_of_two() || init.align > 4096)
+                && (!init.align.is_power_of_two() || init.align > crate::MAX_DATA_ALIGN)
             {
                 return Err(format!(
-                    "@{}: custom/retained data alignment must be a power of two up to 4096",
-                    d.name
+                    "@{}: custom/retained data alignment must be a power of two up to {}",
+                    d.name,
+                    crate::MAX_DATA_ALIGN
                 ));
             }
             check(

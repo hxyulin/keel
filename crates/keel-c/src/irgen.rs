@@ -187,11 +187,15 @@ impl<'p> Gen<'p> {
         for (g, global) in self.p.globals.iter().enumerate() {
             if (global.section.is_some() || global.retain.is_some())
                 && !matches!(global.ty, Ty::Func(_))
-                && (global.align > 4096 || !global.align.max(1).is_power_of_two())
+                && (global.align > u64::from(keel_ir::MAX_DATA_ALIGN)
+                    || !global.align.max(1).is_power_of_two())
             {
                 return Err(Error::new(
                     Loc::default(),
-                    "custom/retained data alignment must be a power of two up to 4096",
+                    format!(
+                        "custom/retained data alignment must be a power of two up to {}",
+                        keel_ir::MAX_DATA_ALIGN
+                    ),
                 ));
             }
             if let Some(section) = global.section {

@@ -1,0 +1,319 @@
+{
+  "schema": 1,
+  "date": "2026-10-27",
+  "implementation_base": "970282c5",
+  "implementation": "GNU x86 basic asm and shared 64 KiB C/static-data alignment limit; compiler snapshot before final Rust formatting.",
+  "baseline_report": "audit-packed-bitfields.json",
+  "config_sha256": "af7dd9b29c4ac472ffe32d338821425912fe92ad62b30281ef1356947930e129",
+  "source_manifest_sha256": "908006c3e46761f50342cf6556fcd86a05d7edf51cf2e85de449d19cfd2c5135",
+  "keel_binary_sha256": "9f9581ed628ee870dcb3a60fc584487d3f8c65f9f3adf31dd8f6259b8c81175c",
+  "all_992_inputs_rehashed_unchanged": true,
+  "reference_artifacts_rehashed_unchanged": true,
+  "reference_rebuilt_or_rebooted": false,
+  "kernel_codegen_contract": false,
+  "keel_objects_linked_or_run_as_kernel": false,
+  "results": {
+    "c": {
+      "total": 484,
+      "accepted": 33,
+      "rejected": 451,
+      "crashed": 0,
+      "timeout": 0,
+      "first_errors": [
+        {
+          "category": "asm-goto",
+          "count": 419,
+          "example": {
+            "path": "arch/x86/entry/common.i",
+            "diagnostic": "keel: <source>/arch/x86/include/asm/cpufeature.h:178:2: error: asm goto is not supported"
+          }
+        },
+        {
+          "category": "expected a type, found `*`",
+          "count": 20,
+          "example": {
+            "path": "arch/x86/kernel/i8259.i",
+            "diagnostic": "keel: <source>/include/linux/signal.h:157:408: error: expected a type, found `;`"
+          }
+        },
+        {
+          "category": "unsupported asm input constraint `*` (supported: r, q (x86), w (AArch64), m, i, n, x86 r/q choices with i/m or g, output number or [name])",
+          "count": 4,
+          "example": {
+            "path": "arch/x86/kernel/cpu/hygon.i",
+            "diagnostic": "keel: <source>/arch/x86/include/asm/shared/io.h:22:184: error: unsupported asm input constraint `Nd` (supported: r, q (x86), w (AArch64), m, i, n, x86 r/q choices with i/m or g, output number or [name])"
+          }
+        },
+        {
+          "category": "instruction-binding:?",
+          "count": 3,
+          "example": {
+            "path": "lib/clz_ctz.i",
+            "diagnostic": "keel: <build>/lib/clz_ctz.i: line 47: unsupported AT&T instruction ``"
+          }
+        },
+        {
+          "category": "attribute `*` requires semantics that are not supported",
+          "count": 2,
+          "example": {
+            "path": "arch/x86/entry/vdso/vgetcpu.i",
+            "diagnostic": "keel: <source>/arch/x86/entry/vdso/vgetcpu.c:22:23: error: attribute `alias` requires semantics that are not supported"
+          }
+        },
+        {
+          "category": "`*` is not supported",
+          "count": 1,
+          "example": {
+            "path": "lib/earlycpio.i",
+            "diagnostic": "keel: <source>/lib/earlycpio.c:129:80: error: `__builtin_has_attribute` is not supported"
+          }
+        },
+        {
+          "category": "incompatible types in assignment",
+          "count": 1,
+          "example": {
+            "path": "lib/find_bit.i",
+            "diagnostic": "keel: <source>/lib/find_bit.c:145:9: error: incompatible types in assignment"
+          }
+        },
+        {
+          "category": "feature-policy",
+          "count": 1,
+          "example": {
+            "path": "lib/memweight.i",
+            "diagnostic": "keel: <build>/lib/memweight.i: line 221: popcnt requires x86 target features: popcnt"
+          }
+        }
+      ]
+    },
+    "asm": {
+      "total": 506,
+      "accepted": 402,
+      "rejected": 104,
+      "crashed": 0,
+      "timeout": 0,
+      "first_errors": [
+        {
+          "category": "standalone-prefix",
+          "count": 58,
+          "example": {
+            "path": "arch/x86/events/amd/core.s",
+            "diagnostic": "keel: <build>/arch/x86/events/amd/core.s: line 548: unsupported AT&T instruction ``"
+          }
+        },
+        {
+          "category": "assembler-directive:.type",
+          "count": 17,
+          "example": {
+            "path": "arch/x86/entry/entry.s",
+            "diagnostic": "keel: <build>/arch/x86/entry/entry.s: line 708: unsupported ELF directive `.type`"
+          }
+        },
+        {
+          "category": "instruction-binding:rdtscp",
+          "count": 5,
+          "example": {
+            "path": "arch/x86/entry/vdso/vclock_gettime.s",
+            "diagnostic": "keel: <build>/arch/x86/entry/vdso/vclock_gettime.s: line 65: unsupported AT&T instruction `rdtscp`"
+          }
+        },
+        {
+          "category": "invalid symbol `*`",
+          "count": 5,
+          "example": {
+            "path": "arch/x86/kernel/alternative.s",
+            "diagnostic": "keel: <build>/arch/x86/kernel/alternative.s: line 1303: invalid symbol `%db7`"
+          }
+        },
+        {
+          "category": "feature-policy",
+          "count": 3,
+          "example": {
+            "path": "arch/x86/kernel/process.s",
+            "diagnostic": "keel: <build>/arch/x86/kernel/process.s: line 145: clflush requires x86 target features: clflush"
+          }
+        },
+        {
+          "category": "instruction-binding:rdgsbase",
+          "count": 2,
+          "example": {
+            "path": "arch/x86/entry/entry_64.s",
+            "diagnostic": "keel: <build>/arch/x86/entry/entry_64.s: line 768: unsupported AT&T instruction `rdgsbase` (expanded at line 1307)"
+          }
+        },
+        {
+          "category": "instruction-binding:rdrand",
+          "count": 2,
+          "example": {
+            "path": "arch/x86/kernel/cpu/rdrand.s",
+            "diagnostic": "keel: <build>/arch/x86/kernel/cpu/rdrand.s: line 26: unsupported AT&T instruction `rdrand`"
+          }
+        },
+        {
+          "category": "instruction-binding:fxrstorq",
+          "count": 2,
+          "example": {
+            "path": "arch/x86/kernel/fpu/core.s",
+            "diagnostic": "keel: <build>/arch/x86/kernel/fpu/core.s: line 14: unsupported AT&T instruction `fxrstorq`"
+          }
+        },
+        {
+          "category": "instruction-binding:prefetchw",
+          "count": 2,
+          "example": {
+            "path": "arch/x86/mm/fault.s",
+            "diagnostic": "keel: <build>/arch/x86/mm/fault.s: line 1182: unsupported AT&T instruction `prefetchw`"
+          }
+        },
+        {
+          "category": "assembler-directive:.incbin",
+          "count": 2,
+          "example": {
+            "path": "arch/x86/realmode/rmpiggy.s",
+            "diagnostic": "keel: <build>/arch/x86/realmode/rmpiggy.s: line 129: unsupported ELF directive `.incbin`"
+          }
+        },
+        {
+          "category": "unexpected expression input `*`",
+          "count": 1,
+          "example": {
+            "path": "arch/x86/entry/vdso/vgetrandom-chacha.s",
+            "diagnostic": "keel: <build>/arch/x86/entry/vdso/vgetrandom-chacha.s: line 150: unexpected expression input `(key)`"
+          }
+        },
+        {
+          "category": "unsupported generated operands for And: [Memory(Memory { width: 8, base: Some(Register { class: Gpr, number: 3, width: 64, high_byte: false }), index: None, scale: 1, segment: None",
+          "count": 1,
+          "example": {
+            "path": "arch/x86/kernel/cpu/bugs.s",
+            "diagnostic": "keel: <build>/arch/x86/kernel/cpu/bugs.s: line 1681: unsupported generated operands for And: [Memory(Memory { width: 8, base: Some(Register { class: Gpr, number: 3, width: 64, high_byte: false }), index: None, scale: 1, segment: None, displacement: Address { expression: Expression { add: None, subtract: None, constant: 720 }, modifier: None } }), Immediate(Address { expression: Expression { add: None, subtract: None, constant: -129 }, modifier: None })]"
+          }
+        },
+        {
+          "category": "unsupported generated operands for Mov: [Register(Register { class: Segment, number: 3, width: 16, high_byte: false }), Register(Register { class: Gpr, number: 0, width: 32, high_b",
+          "count": 1,
+          "example": {
+            "path": "arch/x86/kernel/head64.s",
+            "diagnostic": "keel: <build>/arch/x86/kernel/head64.s: line 601: unsupported generated operands for Mov: [Register(Register { class: Segment, number: 3, width: 16, high_byte: false }), Register(Register { class: Gpr, number: 0, width: 32, high_byte: false })]"
+          }
+        },
+        {
+          "category": "unsupported generated operands for And: [Memory(Memory { width: 8, base: Some(Register { class: Gpr, number: 7, width: 64, high_byte: false }), index: None, scale: 1, segment: None",
+          "count": 1,
+          "example": {
+            "path": "arch/x86/mm/mmap.s",
+            "diagnostic": "keel: <build>/arch/x86/mm/mmap.s: line 80: unsupported generated operands for And: [Memory(Memory { width: 8, base: Some(Register { class: Gpr, number: 7, width: 64, high_byte: false }), index: None, scale: 1, segment: None, displacement: Address { expression: Expression { add: None, subtract: None, constant: 811 }, modifier: None } }), Immediate(Address { expression: Expression { add: None, subtract: None, constant: -129 }, modifier: None })]"
+          }
+        },
+        {
+          "category": "instruction-binding:invpcid",
+          "count": 1,
+          "example": {
+            "path": "arch/x86/mm/tlb.s",
+            "diagnostic": "keel: <build>/arch/x86/mm/tlb.s: line 132: unsupported AT&T instruction `invpcid`"
+          }
+        },
+        {
+          "category": "unsupported generated operands for And: [Memory(Memory { width: 8, base: Some(Register { class: Gpr, number: 12, width: 64, high_byte: false }), index: None, scale: 1, segment: Non",
+          "count": 1,
+          "example": {
+            "path": "mm/filemap.s",
+            "diagnostic": "keel: <build>/mm/filemap.s: line 526: unsupported generated operands for And: [Memory(Memory { width: 8, base: Some(Register { class: Gpr, number: 12, width: 64, high_byte: false }), index: None, scale: 1, segment: None, displacement: Address { expression: Expression { add: None, subtract: None, constant: 0 }, modifier: None } }), Immediate(Address { expression: Expression { add: None, subtract: None, constant: -129 }, modifier: None })]"
+          }
+        }
+      ]
+    }
+  },
+  "new_accepted_c": [
+    "lib/rbtree.i",
+    "lib/rcuref.i",
+    "lib/timerqueue.i"
+  ],
+  "prior_accepted_objects": {
+    "total": 432,
+    "byte_identical": 432,
+    "acceptance_regressions": []
+  },
+  "previous_basic_asm_failures": {
+    "total": 434,
+    "next_categories": {
+      "asm-goto": 419,
+      "expected a type, found `*`": 12,
+      "accepted": 3
+    }
+  },
+  "stop_condition": {
+    "feature": "asm-goto",
+    "first_errors": 419,
+    "source": "arch/x86/include/asm/cpufeature.h:178",
+    "reason": "The current inline-asm node has no CFG successors. Supporting asm-goto requires IR branch edges, SSA/liveness, edge-output rules, register allocation and backend emission.",
+    "implementation_stopped": true
+  },
+  "native_userspace_validation": {
+    "basic_asm": {
+      "objects": 2,
+      "optimized": [
+        false,
+        true
+      ],
+      "input_values_per_object": 2001,
+      "checks": [
+        "assembly write visible to subsequent C load",
+        "global state matches independent C expectation"
+      ]
+    },
+    "alignment": {
+      "objects": 2,
+      "optimized": [
+        false,
+        true
+      ],
+      "invocations_per_object": 2001,
+      "checks": [
+        "local address aligned to 16384",
+        "custom-section global address aligned to 16384"
+      ]
+    },
+    "normally_rejected_controls": 2,
+    "raw_amx_bytes_executed": false,
+    "object_sha256": {
+      "alignment-optfalse.o": "88f2732d62ab97efa6863fa4406187854d9e64cea61dd33b7fed2d9e54b961ee",
+      "alignment-opttrue.o": "a81b10a45a96d009ee0fec185f14c2d8402c318dbdab2f3b6dedaf50c4aae03d",
+      "basic-optfalse.o": "313f73e1a0b543494acdec7ec7352e5c6610411b29b4f3ac5332445beae0dc21",
+      "basic-opttrue.o": "4f3e16014ee2f42b81f1d33cd090217f651d1699aa1186a64ae8f727c0cca29a"
+    }
+  },
+  "validation": {
+    "focused_regressions": 2,
+    "both_regressions_failed_before_their_fixes": true,
+    "all_targets_all_features_check": true,
+    "clippy": {
+      "completed": true,
+      "strict": false,
+      "note": "Existing library warnings; no diagnostics in the changed tests or newly changed lines."
+    },
+    "rustdoc_build": true,
+    "audit_harness_tests": 3,
+    "both_generator_freshness_checks": true,
+    "workspace": {
+      "regular_tests_run": 2798,
+      "initial_passed": 2797,
+      "initial_failed": 1,
+      "ignored": 13,
+      "initial_failure": "keel-ir::golden retained the old 4096-byte limit in one expected diagnostic.",
+      "fixture_corrected": true,
+      "golden_target_rerun_passed": true,
+      "distinct_regular_tests_verified_after_rerun": 2798,
+      "doctests_passed": 1,
+      "full_run_repeated": false
+    },
+    "formatting": "Changed Rust files formatted; unrelated pre-existing formatting in verifier.rs retained.",
+    "logs": {
+      "workspace": "/tmp/keel-kernel-gap-tests.log",
+      "golden_rerun": "/tmp/keel-kernel-gap-golden.log",
+      "check": "/tmp/keel-kernel-gap-check.log",
+      "clippy": "/tmp/keel-kernel-gap-clippy.log",
+      "rustdoc": "/tmp/keel-kernel-gap-doc.log"
+    }
+  }
+}
