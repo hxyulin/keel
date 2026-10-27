@@ -1465,11 +1465,33 @@ mod recursion_tests {
 /// C frame/stack observers bind to the emitted caller frame after expansion.
 /// Ordinary IR inlining keeps its frame-preservation restrictions.
 pub fn required_inline_asm(module: &mut Module) -> Result<(), String> {
+    required_inline_asm_with_c_bodies(module, &[])
+}
+
+/// Finalize C asm after mandatory inlining, discarding owned GNU extern-inline
+/// implementations while retaining their external ABI declarations.
+/// The frontend supplies local strong bodies; ordinary IR callers use
+/// [`required_inline_asm`].
+///
+/// # Errors
+/// Returns an error when mandatory inlining is illegal, an owned body is not
+/// local and strong, or immediate constraints cannot be finalized.
+pub fn required_inline_asm_with_c_bodies(
+    module: &mut Module,
+    inline_only: &[&str],
+) -> Result<(), String> {
     fn discard_unused(module: &mut Module) {
         let mut live: FxHashSet<String> = module
             .functions
             .iter()
-            .filter(|f| !f.local || !f.attrs.alwaysinline || f.attrs.used || f.attrs.retain)
+            .filter(|f| {
+                !f.local
+                    || !f.attrs.alwaysinline
+                    || f.attrs.used
+                    || f.attrs.retain
+                    || f.attrs.constructor
+                    || f.attrs.destructor
+            })
             .map(|f| f.name.clone())
             .collect();
         for d in &module.data {
@@ -1510,12 +1532,20 @@ pub fn required_inline_asm(module: &mut Module) -> Result<(), String> {
             }
         }
         for f in &module.functions {
-            if !live.contains(&f.name) && !module.decls.iter().any(|d| d.name == f.name) {
-                module.decls.push(keel_ir::FuncDecl {
-                    name: f.name.clone(),
-                    sig: f.sig.clone(),
-                    attrs: f.attrs,
-                });
+            if !live.contains(&f.name) {
+                let mut attrs = f.attrs;
+                // Placement belongs to an emitted definition, not the ABI
+                // declaration retained after its unused body is discarded.
+                attrs.section = None;
+                if let Some(decl) = module.decls.iter_mut().find(|d| d.name == f.name) {
+                    decl.attrs.section = None;
+                } else {
+                    module.decls.push(keel_ir::FuncDecl {
+                        name: f.name.clone(),
+                        sig: f.sig.clone(),
+                        attrs,
+                    });
+                }
             }
         }
         module.functions.retain(|f| live.contains(&f.name));
@@ -1615,6 +1645,34 @@ pub fn required_inline_asm(module: &mut Module) -> Result<(), String> {
         inline_call(caller, call, callee);
         crate::phi_simplify::run(caller);
         crate::simplify_cfg::run(caller);
+    }
+    if !inline_only.is_empty() {
+        for name in inline_only {
+            if let Some(function) = module.functions.iter().find(|f| f.name == *name) {
+                if !function.local || function.attrs.weak || function.weak_odr {
+                    return Err(format!(
+                        "GNU inline implementation @{name} is not a local strong body"
+                    ));
+                }
+                if !module.decls.iter().any(|decl| decl.name == *name) {
+                    module.decls.push(keel_ir::FuncDecl {
+                        name: (*name).to_owned(),
+                        sig: function.sig.clone(),
+                        attrs: function.attrs,
+                    });
+                }
+            }
+        }
+        module
+            .functions
+            .retain(|function| !inline_only.contains(&function.name.as_str()));
+        for decl in &mut module.decls {
+            if inline_only.contains(&decl.name.as_str()) {
+                decl.attrs.alwaysinline = false;
+                decl.attrs.section = None;
+            }
+        }
+        module.sync_function_attrs();
     }
     discard_unused(module);
     // Constant cleanup is required for constraint legality, independently of -O.

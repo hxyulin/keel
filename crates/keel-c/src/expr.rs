@@ -1034,6 +1034,7 @@ impl<'a> Parser<'a> {
                 // dispatch tables need.
                 self.advance();
                 let name = self.ident()?;
+                let name = self.resolve_label(name);
                 let Some(fs) = self.fs.as_mut() else {
                     return Err(Error::new(loc, "`&&label` outside a function"));
                 };
@@ -1320,7 +1321,7 @@ impl<'a> Parser<'a> {
         for i in 0..args.len() {
             let arg = args[i];
             args[i] = if let Some(param) = fty.params.get(i).filter(|_| fty.prototyped) {
-                self.convert_for_assign(arg, param)?
+                self.convert_argument(arg, param)?
             } else if fty.variadic || !fty.prototyped {
                 self.default_promote(arg)
             } else {
@@ -2218,14 +2219,15 @@ impl<'a> Parser<'a> {
                         "`__builtin_return_address` requires x86-64 Linux",
                     ));
                 }
-                if integer_constant_control(&args[0], self.c_layout) != Some(0) {
+                let depth = integer_constant_control(&args[0], self.c_layout);
+                let Some(depth @ 0..=64) = depth else {
                     return Err(Error::new(
                         loc,
-                        "`__builtin_return_address` requires constant integer depth 0",
+                        "`__builtin_return_address` requires constant integer depth 0..64",
                     ));
-                }
+                };
                 Ok(mk(
-                    ExprKind::Builtin(Builtin::ReturnAddress, &[]),
+                    ExprKind::Builtin(Builtin::ReturnAddress(depth as u8), &[]),
                     self.ptr_type(Ty::Void),
                     loc,
                 ))
@@ -2978,18 +2980,28 @@ impl<'a> Parser<'a> {
             ));
         }
         let (init, ty) = self.initializer(&ty)?;
+        Ok(self.initialized_compound_literal(ty, sugar, loc, init))
+    }
+
+    fn initialized_compound_literal(
+        &mut self,
+        ty: Ty<'a>,
+        sugar: Sugar<'a>,
+        loc: Loc,
+        init: Init<'a>,
+    ) -> Expr<'a> {
         if self.fs.is_none() {
             let name = self.unique_name("__compound_literal");
             let g = self.add_static(name, ty, init, false);
             self.globals[g].align = self.type_alignment(&ty, &sugar);
             self.globals[g].sugar = sugar;
-            return Ok(mk(ExprKind::Global(g), ty, loc));
+            return mk(ExprKind::Global(g), ty, loc);
         }
         // The name cannot clash: it is not an identifier.
         let name = self.unique_name("compound literal");
         let id = self.new_local(name, ty, sugar, true);
         self.fs.as_mut().unwrap().locals[id].compound_literal = true;
-        Ok(mk(ExprKind::CompoundLit(id, self.init_node(init)), ty, loc))
+        mk(ExprKind::CompoundLit(id, self.init_node(init)), ty, loc)
     }
 
     // ---- conversions ----
@@ -3111,6 +3123,37 @@ impl<'a> Parser<'a> {
         self.cast(e, ty)
     }
 
+    /// A transparent union admits its member pointer types at call boundaries.
+    fn convert_argument(&mut self, expr: Expr<'a>, ty: &Ty<'a>) -> R<Expr<'a>> {
+        let expr = self.rvalue(expr);
+        if let Ty::Struct(id) = *ty
+            && self.structs[id].transparent_union
+            && expr.ty != *ty
+        {
+            let null = expr.ty.is_integer()
+                && matches!(
+                    crate::eval::eval_constant_with_layout(&expr, false, self.c_layout),
+                    Some(crate::eval::Const::Int(0))
+                );
+            let member = self.structs[id].members.iter().find(|member| {
+                member.ty.compatible(&expr.ty) || null
+                    || matches!((member.ty, expr.ty), (Ty::Ptr(a), Ty::Ptr(b)) if *a == Ty::Void || *b == Ty::Void)
+            }).ok_or_else(|| Error::new(expr.loc, "argument does not match a transparent union member"))?;
+            let member_ty = member.ty;
+            let loc = expr.loc;
+            let value = self.convert_for_assign(expr, &member_ty)?;
+            let init = Init {
+                items: self.slice(&[InitItem::Expr {
+                    offset: 0,
+                    expr: self.node(value),
+                    bits: None,
+                }]),
+            };
+            return Ok(self.initialized_compound_literal(*ty, Sugar::Plain, loc, init));
+        }
+        self.convert_for_assign(expr, ty)
+    }
+
     /// Conversion as if by assignment, to parameters and returns too.
     pub(crate) fn convert_for_assign(&mut self, e: Expr<'a>, ty: &Ty<'a>) -> R<Expr<'a>> {
         let e = self.rvalue(e);
@@ -3127,6 +3170,16 @@ impl<'a> Parser<'a> {
         }
         if !ty.is_scalar() || !e.ty.is_scalar() {
             return Err(Error::new(e.loc, "incompatible types in assignment"));
+        }
+        if let (Some(source), Some(destination)) = (
+            e.ty.pointee().and_then(Ty::func),
+            ty.pointee().and_then(Ty::func),
+        ) && source.microsoft_x64 != destination.microsoft_x64
+        {
+            return Err(Error::new(
+                e.loc,
+                "incompatible function-pointer calling conventions",
+            ));
         }
         if (ty.is_ptr() && (e.ty.is_float() || e.ty.is_complex()))
             || ((ty.is_float() || ty.is_complex()) && e.ty.is_ptr())

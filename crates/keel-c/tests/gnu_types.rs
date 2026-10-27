@@ -127,16 +127,14 @@ fn modes_and_calling_conventions_fail_closed() {
             "naked",
         ] {
             for source in [
-                format!("int f(void) __attribute__(({attr}));"),
-                format!("typedef int (__attribute__(({attr})) *F)(void);"),
+                format!("int f(void) __attribute__(({attr})) {{return 0;}}"),
+                format!("typedef int (__attribute__(({attr})) *F)(void); int g(F f){{return f();}}"),
             ] {
-                assert!(
-                    compile(&source, target)
-                        .unwrap_err()
-                        .message
-                        .contains("requires semantics"),
-                    "{source}"
-                );
+                let error = compile(&source, target).unwrap_err();
+                let expected = if target == Target::X86_64LinuxGnu && attr.trim_matches('_') == "ms_abi" {
+                    "Microsoft x64"
+                } else { "requires semantics" };
+                assert!(error.message.contains(expected), "{source}: {error}");
             }
         }
     }

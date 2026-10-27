@@ -24,7 +24,9 @@ Register operands accept integers through 64 bits, pointers and the bounded
 aggregate representation described below. Register constraints are
 `r` and x86-64 `q`, and fixed `a`, `b`, `c`, `d`, `S`, `D` for RAX, RBX, RCX, RDX, RSI, RDI.
 Outputs use `=` or `+`, optionally followed by early-clobber `&`. Matching input
-constraints use an output number or `[name]` and require the same IR type.
+constraints use an output number or `[name]`. Scalar GPR inputs and results
+may have different widths and keep their own register views; a tie does not
+promise an extension into unspecified input bits.
 Output addresses and input expressions are evaluated once. A read/write register output
 captures its initial value and writes its final value to that captured address.
 One input may initialize each tied output. Untied operands receive distinct
@@ -113,7 +115,7 @@ member volatile effects remain observable.
 Small records may choose a GPR for `g` and register/memory unions. Nonword and
 wider records retain the existing memory alternative where allowed; explicit
 `m` keeps its addressable-object contract. Const-member outputs reject in both
-register and memory paths. Atomic-member register packing, different-width ties,
+register and memory paths. Atomic-member register packing,
 empty/nonword GPR values and multi-register modes remain conservatively
 unsupported. GCC supports some wider modes; this is Keel's bound. Aggregate
 `i`/`n` inputs diagnose rather than passing an address as their value.

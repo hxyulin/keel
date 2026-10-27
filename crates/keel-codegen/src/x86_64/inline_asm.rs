@@ -157,7 +157,6 @@ pub(super) fn plan(
             Constraint::Tied(out)
                 if i >= n
                     && (out as usize) < n
-                    && asm.outputs[out as usize].1 == ty
                     && !matches!(asm.outputs[out as usize].0, Constraint::Flag(_)) => {}
             _ => {
                 return Err(format!(

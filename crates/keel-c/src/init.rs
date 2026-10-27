@@ -47,6 +47,48 @@ impl<'a> Parser<'a> {
         ))
     }
 
+    /// GNU constant compound-literal copies in static storage, including
+    /// block-scope static objects. Scalar leaves still undergo data constant
+    /// checks; addresses of automatic compound literals are never promoted.
+    pub(crate) fn static_initializer(&mut self, init: Init<'a>) -> Init<'a> {
+        fn append<'a>(parser: &Parser<'a>, init: Init<'a>, base: u64, out: &mut Vec<InitItem<'a>>) {
+            for item in init.items {
+                match *item {
+                    InitItem::Expr {
+                        offset,
+                        expr,
+                        bits: None,
+                    } if expr.ty.is_struct() && !expr.sugar.is_volatile(&parser.typedefs) => {
+                        match expr.kind {
+                            ExprKind::CompoundLit(_, nested) => {
+                                append(parser, *nested, base + offset, out)
+                            }
+                            _ => out.push(InitItem::Expr {
+                                offset: base + offset,
+                                expr,
+                                bits: None,
+                            }),
+                        }
+                    }
+                    InitItem::Expr { offset, expr, bits } => out.push(InitItem::Expr {
+                        offset: base + offset,
+                        expr,
+                        bits,
+                    }),
+                    InitItem::Bytes { offset, bytes } => out.push(InitItem::Bytes {
+                        offset: base + offset,
+                        bytes,
+                    }),
+                }
+            }
+        }
+        let mut items = Vec::new();
+        append(self, init, 0, &mut items);
+        Init {
+            items: self.slice(&items),
+        }
+    }
+
     /// One initializer for `slot`: a braced list, a string for a character
     /// array, or an expression. Returns how many array elements it gave.
     fn init_braced_or_expr(&mut self, slot: &Slot<'a>, items: &mut Vec<InitItem<'a>>) -> R<u64> {
@@ -130,6 +172,31 @@ impl<'a> Parser<'a> {
     fn init_with(&mut self, slot: &Slot<'a>, e: Expr<'a>, items: &mut Vec<InitItem<'a>>) -> R<()> {
         if slot.ty.is_scalar() || ((slot.ty.is_struct() || slot.ty.is_vector()) && e.ty == slot.ty)
         {
+            // GNU permits a static aggregate to copy a constant compound
+            // literal. Flatten its initializer, retaining scalar constant and
+            // binding checks in data lowering rather than folding a read.
+            if self.fs.is_none()
+                && slot.ty.is_struct()
+                && !e.sugar.is_volatile(&self.typedefs)
+                && let ExprKind::Global(g) = e.kind
+                && self.globals[g].compound_literal
+                && let Some(init) = &self.globals[g].init
+            {
+                for item in init.items {
+                    items.push(match *item {
+                        InitItem::Expr { offset, expr, bits } => InitItem::Expr {
+                            offset: slot.offset + offset,
+                            expr,
+                            bits,
+                        },
+                        InitItem::Bytes { offset, bytes } => InitItem::Bytes {
+                            offset: slot.offset + offset,
+                            bytes,
+                        },
+                    });
+                }
+                return Ok(());
+            }
             let expr = self.convert_for_assign(e, &slot.ty)?;
             items.push(InitItem::Expr {
                 offset: slot.offset,

@@ -1866,6 +1866,13 @@ impl<'a> FunctionCompiler<'a> {
             };
             has_inline_asm = true;
             let at = |message: String| err(format!("`{}`: {message}", func.display_inst(inst)));
+            for (&constraint, &arg) in asm.inputs.iter().zip(args) {
+                if let AsmOperand::Tied(out) = constraint
+                    && func.value_type(func.resolve(arg)) != asm.outputs[out as usize].1
+                {
+                    return Err(at("different-width asm ties require the x86 backend".into()));
+                }
+            }
             let regs = asm_regs(asm).map_err(at)?;
             asm_text(func, asm, args, &regs).map_err(at)?;
             for clobber in &asm.clobbers {

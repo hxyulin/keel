@@ -121,8 +121,8 @@ fn accepted_clang_placement_oracle_preserves_named_declarations() {
         }
         assert_eq!(
             (accepted, rejected),
-            (58, 7),
-            "{attr}: annotated void lists are empty prototypes; unsupported placements stay diagnosed"
+            (65, 0),
+            "{attr}: all retained Clang placements parse and preserve their named contracts"
         );
     }
 }

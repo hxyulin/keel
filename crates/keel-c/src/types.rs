@@ -172,6 +172,8 @@ pub struct ArrayTy<'a> {
 
 #[derive(PartialEq, Debug)]
 pub struct FuncTy<'a> {
+    /// Foreign ABI type metadata only; evaluated calls and definitions reject.
+    pub microsoft_x64: bool,
     pub ret: Ty<'a>,
     pub params: &'a [Ty<'a>],
     /// Qualifiers below each parameter's top level, in pointer/array order.
@@ -190,6 +192,9 @@ impl FuncTy<'_> {
     /// policy for unrelated return-type redeclarations.
     pub(crate) fn parameters_compatible(&self, other: &Self) -> bool {
         let (a, b) = (self, other);
+        if a.microsoft_x64 != b.microsoft_x64 {
+            return false;
+        }
         if (a.prototyped || a.old_style) && (b.prototyped || b.old_style) {
             a.variadic == b.variadic
                 && a.params.len() == b.params.len()
@@ -369,6 +374,8 @@ pub struct EnumDef<'a> {
 
 #[derive(Clone, Debug)]
 pub struct StructDef<'a> {
+    /// Pointer-only GNU transparent union, passed using its first member ABI.
+    pub transparent_union: bool,
     pub tag: Option<&'a str>,
     pub is_union: bool,
     pub members: Vec<Member<'a>>,
@@ -1209,6 +1216,7 @@ mod layout_tests {
             );
             assert_eq!((size, align), (3 * p, p));
             let record = StructDef {
+                transparent_union: false,
                 tag: None,
                 is_union: false,
                 members,
@@ -1301,6 +1309,7 @@ mod layout_tests {
             );
             assert_eq!((size, align), expected);
             let defs = [StructDef {
+                transparent_union: false,
                 tag: None,
                 is_union: false,
                 members,

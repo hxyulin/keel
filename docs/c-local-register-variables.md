@@ -19,8 +19,7 @@ Direct input, output and read/write operands retain their binding through
 `r`, `q`, supported register/immediate or register/memory choices and `g`.
 A fixed-letter constraint must name the same register. Numeric and named
 matching inputs propagate their binding to a generic register output, or check
-that an existing output binding agrees. Matching operands still require the
-same IR type and width. Early-clobber markers remain intact.
+that an existing output binding agrees. Matching GPR operands retain their own input and result widths. Early-clobber markers remain intact.
 
 Taking a bound local's address rejects, including explicit memory asm operands.
 Pure immediate constraints and incompatible register classes reject. A cast,

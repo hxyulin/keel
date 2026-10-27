@@ -1166,3 +1166,60 @@ both freshness checks, scoped formatting and diff checks pass.
 Logs: `/tmp/keel-local-register-final-tests.log`,
 `/tmp/keel-local-register-final-remote.log` and
 `/tmp/keel-local-register-evidence.json`.
+
+## C acceptance and ABI stop boundary
+
+The [C acceptance checkpoint](audit-c-acceptance.json) implements mixed-width
+GPR ties, pointer-only transparent unions, GNU local labels, ancestor return
+addresses, static compound copies, initialized flexible-array storage,
+GNU extern-inline ownership and declaration-only foreign function ABI metadata.
+It also fixes chunk-boundary fallthrough recognition and adjacent static-assert
+messages. [The contracts and stop boundary](../../docs/c-linux64-acceptance.md)
+describe the supported bounds.
+
+| Policy | Accepted C / 484 | Accepted assembly / 506 |
+| --- | ---: | ---: |
+| Original C v1, assembly v3 | 390 | 490 |
+| Unchanged explicit optional features | 397 | 506 |
+
+This adds 272 original-policy and 275 optional-policy C acceptances. All 608
+previously accepted original-policy objects and all 628 optional-policy objects
+remain accepted. Of those, 529 and 547 respectively remain byte-identical.
+The changed 79 and 81 objects each remove the previously emitted global
+`native_save_fl` definition; GNU extern-inline bodies are inline implementations
+and do not own the external symbol. No other defined global function is added
+or removed in those changed objects. The ledger records each symbol difference.
+
+The final audit reports no crashes or timeouts. Static flexible-array storage
+now includes the initialized tail, fixing the `init_mm` data-buffer panic
+exposed in an intermediate probe. All 992 inputs, binary dependencies and
+reference artifacts rehash unchanged. The reference kernel was not rebuilt or
+rebooted. No Keel object was linked into or run as the kernel.
+
+The full C acceptance goal stops at the requested architecture boundary:
+`mm/vma.i` passes an empty `vm_userfaultfd_ctx` by value, including across public
+function interfaces. The IR requires nonempty `byval`/`sret` layouts. GCC 14.4
+and Clang 21.1 assembly oracles confirm that the empty SysV argument occupies
+no register, while an expression returning an empty value still executes.
+Correct support needs explicit source-to-IR argument/return mapping and
+side-effect preservation. The frontend now gives a direct unsupported-ABI
+diagnostic. The goal remains incomplete; 87 optional-policy C inputs reject.
+
+The largest remaining first-error groups are const-qualified writes (18),
+feature permissions (13), shared custom sections (11), unsupported builtins
+(9), constant expressions (9), output-bearing asm goto (5), and switches with
+cleanup locals (3). Other groups include empty aggregate ABI values, fixed
+register overlap, LAR operand matching, public required-inline binding and
+alignment/section constraints. These are first errors, not a full inventory.
+
+Full workspace validation passes 2,880 tests and one doctest, with 13 ignored.
+Workspace all-targets/all-features check, the profiled C ownership check,
+scoped Clippy and Rustdoc pass; Clippy retains existing warnings. All 99
+generator tests, five audit tests, both freshness checks and scoped formatting
+checks pass. The final Linux qualification runs 100 generated executions,
+seven compiler references and seven normally rejected controls across the tie,
+return-address, transparent-union and inline-ownership fixtures.
+
+Logs: `/tmp/keel-c-acceptance-final-tests.log`,
+`/tmp/keel-c-acceptance-final-remote.log`,
+`/tmp/keel-c-acceptance-evidence.json` and `/tmp/keel-empty-abi-oracle.log`.

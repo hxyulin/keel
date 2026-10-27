@@ -69,7 +69,9 @@ pub enum AsmOperand {
     /// `@ccz`, etc.: x86 flags captured as a boolean integer result.
     Flag(u8),
     /// `0`, `1`…: in the same register as that output, which it initializes.
-    /// Inputs only.
+    /// Inputs only. Scalar GPR ties may use different input/result widths;
+    /// each operand retains its own type and register view. This does not
+    /// promise an extension of the input into unspecified upper bits.
     Tied(u16),
 }
 

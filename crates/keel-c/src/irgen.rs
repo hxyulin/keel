@@ -657,6 +657,12 @@ impl<'p> Gen<'p> {
     }
 
     fn check_value_signature(&self, fty: &FuncTy, loc: Loc) -> R<()> {
+        if fty.microsoft_x64 {
+            return Err(Error::new(
+                loc,
+                "evaluated ms_abi function calls, addresses and definitions require unsupported Microsoft x64 ABI lowering",
+            ));
+        }
         for ty in std::iter::once(&fty.ret).chain(fty.params) {
             self.check_value_type(ty, loc)?;
         }
@@ -695,6 +701,9 @@ impl<'p> Gen<'p> {
     fn aggregate_layout(&self, ty: &Ty) -> Result<keel_ir::Layout, &'static str> {
         if let Some(name) = self.types().unsupported_value(ty) {
             return Err(name);
+        }
+        if self.types().size(ty) == 0 {
+            return Err("zero-size aggregate ABI value");
         }
         if self.types().contains_vector_union(ty) {
             return Err("unions containing vectors passed by value");
@@ -1062,7 +1071,53 @@ impl<'p> Gen<'p> {
     fn data(&mut self, g: usize, record_references: bool) -> R<DataObject> {
         let global = &self.p.globals[g];
         let types = self.types();
-        let size = types.size(&global.ty) as usize;
+        let nominal = types.size(&global.ty);
+        let items = global.init.as_ref().map_or(&[][..], |i| &i.items[..]);
+        fn flexible_start(defs: &[StructDef<'_>], ty: Ty<'_>) -> Option<u64> {
+            let Ty::Struct(id) = ty else { return None };
+            let def = defs.get(id)?;
+            if def.is_union {
+                return None;
+            }
+            let member = def.members.last()?;
+            match member.ty {
+                Ty::Array(array) if array.len.is_none() => Some(member.offset),
+                ty => flexible_start(defs, ty)?.checked_add(member.offset),
+            }
+        }
+        let flexible = flexible_start(&self.p.structs, global.ty);
+        let mut extent = nominal;
+        for item in items {
+            let (offset, width) = match item {
+                InitItem::Bytes { offset, bytes } => (*offset, bytes.len() as u64),
+                InitItem::Expr { offset, expr, bits } => (
+                    *offset,
+                    bits.map_or_else(
+                        || types.size(&expr.ty),
+                        |field| u64::from(field.shift + field.width).div_ceil(8),
+                    ),
+                ),
+            };
+            let end = offset
+                .checked_add(width)
+                .ok_or_else(|| Error::new(Loc::default(), "static initializer extent overflows"))?;
+            if end > nominal && !flexible.is_some_and(|start| offset >= start) {
+                return Err(Error::new(
+                    Loc::default(),
+                    "initializer exceeds static object storage",
+                ));
+            }
+            extent = extent.max(end);
+        }
+        let size = usize::try_from(extent)
+            .ok()
+            .filter(|&size| size <= u32::MAX as usize)
+            .ok_or_else(|| {
+                Error::new(
+                    Loc::default(),
+                    "static object storage exceeds the supported size",
+                )
+            })?;
         let align = if self.p.c_layout.pointer_bytes() == 4
             && matches!(global.ty, Ty::Array(_))
             && size >= 16
@@ -1074,7 +1129,6 @@ impl<'p> Gen<'p> {
         let pointer_bytes = self.p.c_layout.pointer_bytes() as usize;
         let mut bytes = vec![0u8; size];
         let mut relocs: Vec<(usize, String, i64)> = Vec::new();
-        let items = global.init.as_ref().map_or(&[][..], |i| &i.items[..]);
         for item in items {
             match item {
                 InitItem::Bytes { offset, bytes: b } => {
@@ -4549,9 +4603,12 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 let stack = self.b.function().inst_results(inst)[0];
                 self.b.ins().convert(ConvertOp::PtrToInt, Type::I64, stack)
             }
-            Builtin::ReturnAddress => {
+            Builtin::ReturnAddress(depth) => {
                 let inst = ins.intrinsic(Intrinsic::FrameAddress, &[]);
-                let frame = self.b.function().inst_results(inst)[0];
+                let mut frame = self.b.function().inst_results(inst)[0];
+                for _ in 0..depth {
+                    frame = self.b.ins().load(Type::Ptr, frame);
+                }
                 // The x86 frame intrinsic prevents frameless emission. RBP
                 // names the saved caller RBP; the return slot follows it.
                 let slot = self.offset_by(frame, 8);

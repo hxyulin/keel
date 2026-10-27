@@ -21,8 +21,10 @@ also makes nonzero-depth queries dependent on the actual calling environment.
 
 ## Return addresses
 
-On x86-64 Linux, `__builtin_return_address(0)` reads the saved continuation
-address from the current frame. Nonzero or runtime depths remain unsupported.
+On x86-64 Linux, `__builtin_return_address(depth)` accepts constant depths
+0 through 64. It follows that many saved frame links and reads the selected
+continuation slot. Nonzero depths require readable caller frame records.
+Runtime, negative and overflowing depth controls reject.
 `__builtin_extract_return_addr` and `__builtin_frob_return_addr` are pointer
 identities on this target and evaluate their arguments once. Other targets
 remain rejected because their stored return-address representations may differ.

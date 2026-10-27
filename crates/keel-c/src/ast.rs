@@ -202,8 +202,8 @@ pub enum Builtin {
     StackPointer,
     /// An asm GPR input's object representation, read from an aggregate value.
     AsmAggregateBits,
-    /// `__builtin_return_address(0)` on x86-64 Linux.
-    ReturnAddress,
+    /// `__builtin_return_address(depth)` on x86-64 Linux, bounded to 0..64.
+    ReturnAddress(u8),
     /// Native `__builtin_frame_address(depth)`, bounded to 0..64.
     FrameAddress(u8),
     /// The atomic builtins (`__atomic_*`, `__sync_*`, `__c11_atomic_*`),
@@ -381,6 +381,10 @@ pub struct FuncDef<'a> {
 /// (including `static` locals and file-scope compound literals).
 #[derive(Clone, Debug)]
 pub struct Global<'a> {
+    /// GNU inline emission rules apply to this function's declarations.
+    pub gnu_inline: bool,
+    /// A GNU extern-inline body is available for inlining, never emitted.
+    pub gnu_inline_only: bool,
     pub nonstring: bool,
     pub name: &'a str,
     /// The linker name (`__asm("_" "realpath" "$DARWIN_EXTSN")` renames).

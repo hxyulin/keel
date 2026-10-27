@@ -65,6 +65,12 @@ impl Parser<'_> {
                     format!("alias target `{target_name}` is not defined in this translation unit"),
                 ));
             };
+            if other.gnu_inline_only {
+                return Err(Error::new(
+                    loc,
+                    "alias target has no emitted GNU extern-inline definition",
+                ));
+            }
             if matches.next().is_some() {
                 return Err(Error::new(loc, "alias target assembler name is ambiguous"));
             }

@@ -406,7 +406,7 @@ impl<'a> Parser<'a> {
                                         expr.ty,
                                         expr.loc,
                                     )?;
-                                    if expr.ty.ir() != outputs[n].0.ty.ir() {
+                                    if !x86 && expr.ty.ir() != outputs[n].0.ty.ir() {
                                         return Err(Error::new(
                                             expr.loc,
                                             "asm matching input and output must have the same IR type",
@@ -599,6 +599,10 @@ impl<'a> Parser<'a> {
             types.insert(0, keel_ir::Type::I32);
         }
         InlineAsm::new(&template, &constraints, &types).map_err(|e| Error::new(loc, e))?;
+        let goto_labels: Vec<_> = goto_labels
+            .into_iter()
+            .map(|label| self.resolve_label(label))
+            .collect();
         Ok(Stmt::Asm(self.nodes.alloc(AsmStmt {
             template: self.text.intern(&template),
             constraints: self.text.intern(&constraints),

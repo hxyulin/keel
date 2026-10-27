@@ -856,8 +856,8 @@ impl Verifier<'_> {
 
     /// Each operand's type fits its constraint: registers hold scalars of
     /// their class, up to 64 bits, `m` takes an address, `i` a constant,
-    /// and a tied input the type of its output, which it may initialize
-    /// only once.
+    /// and tied inputs share their output's class. Scalar GPR ties may have
+    /// different widths; each output may be initialized only once.
     fn check_asm(&mut self, inst: Inst, asm: &InlineAsm, args: &[Value]) {
         let func = self.func;
         if args.len() != asm.inputs.len() {
@@ -947,10 +947,18 @@ impl Verifier<'_> {
                         inst,
                         format!("asm operand {n} is tied to output {out}, which does not exist"),
                     ),
-                    Some(&(_, out_ty)) if out_ty != ty => self.inst_error(
-                        inst,
-                        format!("asm operand {n} is {ty}, but its output {out} is {out_ty}"),
-                    ),
+                    Some(&(kind, out_ty))
+                        if out_ty != ty
+                            && !(matches!(
+                                kind,
+                                AsmOperand::Reg | AsmOperand::Fixed(PhysReg { float: false, .. })
+                            ) && fits(kind, ty)) =>
+                    {
+                        self.inst_error(
+                            inst,
+                            format!("asm operand {n} is {ty}, but its output {out} is {out_ty}"),
+                        )
+                    }
                     Some(&(AsmOperand::Flag(_), _)) => {
                         self.inst_error(inst, "asm ties require a register output".into())
                     }

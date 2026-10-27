@@ -46,6 +46,8 @@ fn return_addresses_keep_a_frame_and_survive_all_object_routes() {
             "read_return_after_call",
             "read_aligned_return",
             "read_dynamic_return",
+            "read_parent_return",
+            "read_grandparent_return",
         ] {
             let function = module.functions.iter().find(|f| f.name == name).unwrap();
             assert!(
@@ -128,7 +130,7 @@ fn return_addresses_keep_a_frame_and_survive_all_object_routes() {
 #[test]
 fn return_address_queries_check_target_depth_and_pointer_arguments() {
     for argument in [
-        "1",
+        "65",
         "-1",
         "n",
         "0.0",

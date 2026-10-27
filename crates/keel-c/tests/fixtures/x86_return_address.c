@@ -40,3 +40,10 @@ static __attribute__((noinline)) void *observed_pointer(void *p) {
 void *return_identity_once(void *p) {
     return __builtin_extract_return_addr(__builtin_frob_return_addr(observed_pointer(p)));
 }
+
+void *read_parent_return(void) {
+    return __builtin_return_address(1);
+}
+void *read_grandparent_return(void) {
+    return __builtin_return_address(2);
+}

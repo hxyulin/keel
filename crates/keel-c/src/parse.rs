@@ -49,6 +49,8 @@ enum Sym {
 struct Scope<'a> {
     /// Names first bound in this scope, restored in reverse order on exit.
     names: Vec<&'a str>,
+    /// GNU local labels, in their separate lexical namespace.
+    local_labels: HashMap<&'a str, &'a str>,
     /// Struct and union definitions, or `None` for an enum tag.
     tags: HashMap<&'a str, Option<usize>>,
     /// Enum tags, by index in the enum table, for debug info.
@@ -94,6 +96,9 @@ pub struct Attrs {
     pub aligned: Option<u64>,
     pub alignas: Option<u64>,
     pub packed: bool,
+    pub transparent_union: Option<Loc>,
+    pub microsoft_x64: Option<Loc>,
+    pub gnu_inline: bool,
     pub returns_twice: bool,
     pub noreturn: bool,
     pub function_attrs: keel_ir::FunctionAttrs,
@@ -151,6 +156,9 @@ impl Attrs {
         }
         self.nonstring |= other.nonstring;
         self.packed |= other.packed;
+        self.transparent_union = self.transparent_union.or(other.transparent_union);
+        self.microsoft_x64 = self.microsoft_x64.or(other.microsoft_x64);
+        self.gnu_inline |= other.gnu_inline;
         self.returns_twice |= other.returns_twice;
         self.noreturn |= other.noreturn;
         self.function_attrs.merge(other.function_attrs);
@@ -167,6 +175,9 @@ impl Attrs {
     /// Rejects the attributes that only a function or an object with
     /// linkage can carry, written where no such symbol is declared.
     fn no_type_attrs(&self) -> R<()> {
+        if let Some(loc) = self.microsoft_x64 {
+            return Err(unsupported_attribute(loc, "ms_abi"));
+        }
         self.no_cleanup()?;
         if self.nonstring {
             return Err(Error::new(
@@ -196,6 +207,9 @@ impl Attrs {
         Ok(())
     }
     fn no_symbol_attrs(&self) -> R<()> {
+        if let Some(loc) = self.microsoft_x64 {
+            return Err(unsupported_attribute(loc, "ms_abi"));
+        }
         self.no_cleanup()?;
         if let Some((_, loc)) = self.alias {
             return Err(Error::new(
@@ -380,7 +394,7 @@ const RESERVED: u8 = 2;
 /// Keywords and what they are. The few type keywords that are typedef-like
 /// names (`__builtin_va_list`, `__int128_t`, `__uint128_t`) are not
 /// reserved.
-const KEYWORDS: [(&str, u8); 77] = [
+const KEYWORDS: [(&str, u8); 78] = [
     ("void", TYPE_WORD | RESERVED),
     ("_Bool", TYPE_WORD | RESERVED),
     ("char", TYPE_WORD | RESERVED),
@@ -409,6 +423,7 @@ const KEYWORDS: [(&str, u8); 77] = [
     ("__const", TYPE_WORD | RESERVED),
     ("__volatile", TYPE_WORD | RESERVED),
     ("__volatile__", TYPE_WORD | RESERVED),
+    ("__label__", RESERVED),
     ("inline", TYPE_WORD | RESERVED),
     ("__inline", TYPE_WORD | RESERVED),
     ("__inline__", TYPE_WORD | RESERVED),
@@ -689,6 +704,7 @@ impl<'a> Parser<'a> {
             };
             let void_ptr = Ty::Ptr(&Ty::Void);
             self.structs.push(StructDef {
+                transparent_union: false,
                 tag: Some("__va_list_tag".into()),
                 is_union: false,
                 members: if self.target == Target::Aarch64LinuxGnu {
@@ -749,7 +765,9 @@ impl<'a> Parser<'a> {
     /// the current one is always lexed.
     #[inline]
     fn bump(&mut self) {
-        if self.pos + 2 < self.toks.len() {
+        // Statement attributes inspect through the fourth token. Keep that
+        // lookahead valid even when the lexer refills its token chunk.
+        if self.pos + 4 < self.toks.len() {
             self.pos += 1;
         } else {
             self.bump_slow();
@@ -1139,6 +1157,8 @@ impl<'a> Parser<'a> {
     ) -> usize {
         let align = self.align_of(&ty);
         self.globals.push(Global {
+            gnu_inline: false,
+            gnu_inline_only: false,
             nonstring: false,
             symbol: name,
             name,
@@ -1204,7 +1224,15 @@ impl<'a> Parser<'a> {
         // inline-only emission depends on all file-scope declarations in this
         // unit, including declarations that follow the definition.
         for f in &self.funcs {
-            if !self.external_def.contains(&f.global) {
+            if self.globals[f.global].gnu_inline_only {
+                let global = &self.globals[f.global];
+                if global.internal || global.weak.is_some() || global.visibility.is_some_and(Visibility::hidden)
+                    || global.used || global.retain.is_some() || global.lifecycle.is_some()
+                {
+                    return Err(Error::new(f.loc, "GNU extern-inline bodies with binding or retention attributes are not supported"));
+                }
+                self.globals[f.global].internal = true;
+            } else if !self.external_def.contains(&f.global) {
                 self.globals[f.global].internal = true;
             }
         }
@@ -1515,6 +1543,11 @@ impl<'a> Parser<'a> {
                 self.symbol_attrs(g, &attrs)?;
                 self.function_alias(g, attrs, file_scope)?;
                 if file_scope && self.is("{") {
+                    if fty.microsoft_x64 {
+                        return Err(Error::new(name_loc, "ms_abi definitions require unsupported Microsoft x64 ABI lowering"));
+                    }
+                    self.globals[g].gnu_inline_only = self.globals[g].gnu_inline
+                        && spec.inline && spec.storage == Storage::Extern;
                     self.function_body(g, fty, name_loc)?;
                     return Ok(());
                 }
@@ -1660,7 +1693,12 @@ impl<'a> Parser<'a> {
         self.expect("(")?;
         let value = self.const_int()?;
         if self.eat(",") {
-            self.advance();
+            if !matches!(self.peek(), Tok::Str { .. }) {
+                return Err(self.unexpected("a static assertion string literal"));
+            }
+            while matches!(self.peek(), Tok::Str { .. }) {
+                self.advance();
+            }
         }
         self.expect(")")?;
         self.expect(";")?;
@@ -1699,6 +1737,8 @@ impl<'a> Parser<'a> {
                 self.text.intern(&symbol)
             };
             self.globals.push(Global {
+                gnu_inline: false,
+                gnu_inline_only: false,
                 nonstring: false,
                 name: name,
                 symbol,
@@ -1765,6 +1805,7 @@ impl<'a> Parser<'a> {
                 Some(init) => (init, ty),
                 None => self.initializer(&ty)?,
             };
+            let init = self.static_initializer(init);
             let global = &mut self.globals[g];
             global.ty = ty;
             global.init = Some(init);
@@ -1837,6 +1878,8 @@ impl<'a> Parser<'a> {
             }
             None => {
                 self.globals.push(Global {
+                    gnu_inline: false,
+                    gnu_inline_only: false,
                     nonstring: false,
                     name: self.text.intern(name),
                     symbol: self.text.intern(name),
@@ -1890,7 +1933,12 @@ impl<'a> Parser<'a> {
         if spec.storage == Storage::Static {
             self.globals[g].internal = true;
         }
-        if file_scope && (!spec.inline || spec.storage == Storage::Extern) {
+        self.globals[g].gnu_inline |= attrs.gnu_inline;
+        if file_scope
+            && (!spec.inline
+                || (spec.storage == Storage::Extern && !self.globals[g].gnu_inline)
+                || (self.globals[g].gnu_inline && spec.storage != Storage::Extern))
+        {
             self.external_def.insert(g);
         }
         let returns_twice = attrs.returns_twice
@@ -2328,13 +2376,20 @@ impl<'a> Parser<'a> {
                     // Accepting their syntax without implementing the contract
                     // would silently change the program, even on a prototype
                     // or on an otherwise unused declaration.
+                    "ms_abi" if self.target == Target::X86_64LinuxGnu => {
+                        attrs.microsoft_x64.get_or_insert(loc);
+                    }
                     "weakref" | "weak_import" | "ifunc" | "ms_abi" | "sysv_abi" | "stdcall"
                     | "fastcall" | "thiscall" | "vectorcall" | "regcall" | "pcs"
                     | "aarch64_sve_pcs" | "aarch64_vector_pcs" | "preserve_most"
                     | "preserve_all" | "cdecl" | "regparm" | "sseregparm" | "interrupt"
                     | "naked" | "swiftcall" | "swiftasync" | "preserve_none"
-                    | "riscv_vector_cc" | "ext_vector_type" | "transparent_union" => {
+                    | "riscv_vector_cc" | "ext_vector_type" => {
                         return Err(unsupported_attribute(loc, name));
+                    }
+                    "gnu_inline" => attrs.gnu_inline = true,
+                    "transparent_union" => {
+                        attrs.transparent_union.get_or_insert(loc);
                     }
                     "alias" => {
                         self.expect("(")?;
@@ -2949,8 +3004,56 @@ impl<'a> Parser<'a> {
     }
 
     /// Type-changing attributes are consumed once, before layout and compatibility.
+    /// Preserve foreign function-pointer declarations without authorizing calls.
+    fn microsoft_function_type(&mut self, ty: Ty<'a>) -> Option<Ty<'a>> {
+        match ty {
+            Ty::Func(function) => Some(Ty::Func(self.arena.alloc(FuncTy {
+                microsoft_x64: true,
+                ..*function
+            }))),
+            Ty::Ptr(inner) => {
+                let annotated = self.microsoft_function_type(*inner)?;
+                Some(self.ptr_type(annotated))
+            }
+            Ty::Array(array) => {
+                let elem = self.microsoft_function_type(array.elem)?;
+                Some(Ty::Array(self.arena.alloc(ArrayTy { elem, ..*array })))
+            }
+            _ => None,
+        }
+    }
+
     fn apply_type_attrs(&mut self, ty: Ty<'a>, attrs: &mut Attrs) -> R<Ty<'a>> {
         let mut ty = ty;
+        if attrs.microsoft_x64.is_some()
+            && let Some(annotated) = self.microsoft_function_type(ty)
+        {
+            ty = annotated;
+            attrs.microsoft_x64 = None;
+        }
+        if let Some(loc) = attrs.transparent_union.take() {
+            self.require_native_layout(loc, "transparent unions")?;
+            let Ty::Struct(id) = ty else {
+                return Err(Error::new(loc, "transparent_union requires a union type"));
+            };
+            let def = &self.structs[id];
+            if !def.is_union
+                || !def.complete
+                || def.members.is_empty()
+                || def.size != 8
+                || def.align != 8
+                || def
+                    .members
+                    .iter()
+                    .any(|m| !m.ty.is_ptr() || m.bits.is_some())
+            {
+                return Err(Error::new(
+                    loc,
+                    "transparent_union requires a complete naturally aligned pointer-only union",
+                ));
+            }
+            self.structs[id].transparent_union = true;
+        }
         if let Some((mode, loc)) = attrs.mode.take() {
             match mode {
                 TypeMode::ComplexBinary128 => {
@@ -3172,6 +3275,7 @@ impl<'a> Parser<'a> {
             && Self::contract_owner(&ty).is_some();
         let (mut is_const, mut is_volatile) = (false, false);
         let mut attrs = Attrs::default();
+        self.attributes(&mut attrs)?;
         // `^` is a block pointer (Apple's closures, in headers when
         // `__BLOCKS__` is defined); as a value it is just a pointer.
         while self.eat("*") || self.eat("^") {
@@ -3560,6 +3664,7 @@ impl<'a> Parser<'a> {
             ));
         }
         let mut fty = FuncTy {
+            microsoft_x64: false,
             ret,
             params: &[],
             param_quals: &[],
@@ -3767,6 +3872,7 @@ impl<'a> Parser<'a> {
         };
         let new_struct = |p: &mut Parser<'a>, tag: Option<&'a str>| {
             p.structs.push(StructDef {
+                transparent_union: false,
                 tag,
                 is_union,
                 members: Vec::new(),
@@ -3782,7 +3888,7 @@ impl<'a> Parser<'a> {
             };
             if let Some(id) = self.scopes.iter().rev().find_map(|s| s.tags.get(&tag)) {
                 return match id {
-                    Some(id) => Ok(Ty::Struct(*id)),
+                    Some(id) => self.apply_type_attrs(Ty::Struct(*id), &mut attrs),
                     None => Err(Error::new(loc, format!("`{tag}` is an enum"))),
                 };
             }
@@ -3933,7 +4039,7 @@ impl<'a> Parser<'a> {
         def.size = size;
         def.align = align;
         def.complete = true;
-        Ok(Ty::Struct(id))
+        self.apply_type_attrs(Ty::Struct(id), &mut attrs)
     }
 
     /// An enum specifier: its values' type, and the enum for debug info.
@@ -3950,6 +4056,9 @@ impl<'a> Parser<'a> {
             None
         };
         self.attributes(&mut attrs)?;
+        if let Some(loc) = attrs.transparent_union {
+            return Err(Error::new(loc, "transparent_union requires a union type"));
+        }
         let fixed = if self.eat(":") {
             let ty = self.type_name()?;
             if !ty.is_integer() || self.size_of(&ty) > 8 {
@@ -4079,6 +4188,9 @@ impl<'a> Parser<'a> {
             }
         }
         self.attributes(&mut attrs)?;
+        if let Some(loc) = attrs.transparent_union {
+            return Err(Error::new(loc, "transparent_union requires a union type"));
+        }
         attrs.no_type_attrs()?;
         attrs.no_symbol_attrs()?;
         if attrs.aligned.is_some() {
@@ -4180,6 +4292,25 @@ impl<'a> Parser<'a> {
     /// The items of a `{}` block, after the `{`, in a new scope.
     /// The statements of a block, through the `}`.
     pub(crate) fn block_items(&mut self) -> R<&'a [Stmt<'a>]> {
+        while self.eat("__label__") {
+            loop {
+                let loc = self.loc();
+                let name = self.ident()?;
+                if self.scopes.last().unwrap().local_labels.contains_key(name) {
+                    return Err(Error::new(loc, "duplicate local label declaration"));
+                }
+                let unique = self.unique_name(".local_label");
+                self.scopes
+                    .last_mut()
+                    .unwrap()
+                    .local_labels
+                    .insert(name, unique);
+                if !self.eat(",") {
+                    break;
+                }
+            }
+            self.expect(";")?;
+        }
         let mut out = self.stmt_buf();
         while !self.eat("}") {
             if self.is_declaration_start() {
@@ -4190,6 +4321,14 @@ impl<'a> Parser<'a> {
             self.release_tokens();
         }
         Ok(self.finish_stmts(out))
+    }
+
+    pub(crate) fn resolve_label(&self, name: &'a str) -> &'a str {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.local_labels.get(name).copied())
+            .unwrap_or(name)
     }
 
     fn is_declaration_start(&self) -> bool {
@@ -4448,7 +4587,7 @@ impl<'a> Parser<'a> {
                     }
                     let label = self.ident()?;
                     self.expect(";")?;
-                    return Ok(Stmt::Goto(label));
+                    return Ok(Stmt::Goto(self.resolve_label(label)));
                 }
                 "asm" | "__asm" | "__asm__" => {
                     self.require_native_layout(loc, "inline assembly")?;
@@ -4461,8 +4600,9 @@ impl<'a> Parser<'a> {
                         return Err(Error::new(loc, "fallthrough cannot annotate a label"));
                     }
                     self.ignored_attributes()?;
+                    let label = self.resolve_label(word);
                     let stmt = self.labeled_statement()?;
-                    return Ok(Stmt::Block(self.slice(&[Stmt::Label(word), stmt])));
+                    return Ok(Stmt::Block(self.slice(&[Stmt::Label(label), stmt])));
                 }
                 _ => {}
             }

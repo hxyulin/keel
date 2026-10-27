@@ -8,6 +8,7 @@ void *read_dynamic_return(void);
 void *return_identity_once(void *);
 extern int return_address_evaluations;
 int observe_return(void *(*)(void));
+int observe_return_chain(void);
 static int bad_buffer;
 void touch_return_buffer(void *buffer) {
     if (*(unsigned char *)buffer != 29) bad_buffer = 1;
@@ -26,6 +27,7 @@ int main(void) {
     }
     if (bad_buffer || return_identity_once(&bad_buffer) != &bad_buffer
         || return_address_evaluations != 1) return 2;
+    if (observe_return_chain()) return 3;
     puts("return-address PASS");
     return 0;
 }
