@@ -648,7 +648,9 @@ impl SourceParser {
                 {
                     continue;
                 }
-                if s.starts_with('.') || split_inline(s, '=').len() == 2 {
+                if let Some(bytes) = standalone_prefix(s) {
+                    emit(line + 1, SourceItem::Text(bytes));
+                } else if s.starts_with('.') || split_inline(s, '=').len() == 2 {
                     emit(line + 1, SourceItem::Text(s));
                 } else {
                     emit(
@@ -663,6 +665,28 @@ impl SourceParser {
         }
         Ok(())
     }
+}
+
+// GNU standalone prefixes occupy their own byte positions. In particular,
+// labels and directives after them must not move before the prefix byte.
+fn standalone_prefix(s: &str) -> Option<&'static str> {
+    if s.contains(char::is_whitespace) {
+        return None;
+    }
+    Some(match lowercase(s).as_ref() {
+        "rep" | "repe" | "repz" | "xrelease" => ".byte 0xf3",
+        "repne" | "repnz" | "xacquire" => ".byte 0xf2",
+        "lock" => ".byte 0xf0",
+        "data16" => ".byte 0x66",
+        "addr32" => ".byte 0x67",
+        "rex" => ".byte 0x40",
+        "rex64" => ".byte 0x48",
+        "cs" => ".byte 0x2e",
+        "ds" | "notrack" => ".byte 0x3e",
+        "fs" => ".byte 0x64",
+        "gs" => ".byte 0x65",
+        _ => return None,
+    })
 }
 
 mod att;

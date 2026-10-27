@@ -3867,12 +3867,52 @@ impl<'a> Parser<'a> {
         if self.is("_Static_assert") {
             return true;
         }
+        if self.is_fallthrough_attribute() {
+            return false;
+        }
         // `T:` is a label, even if `T` is a typedef name.
         self.is_typename() && !matches!(self.peek_at(1), Tok::Punct(":"))
     }
 
+    fn is_fallthrough_attribute(&self) -> bool {
+        matches!(self.peek(), Tok::Ident("__attribute__" | "__attribute"))
+            && matches!(self.peek_at(1), Tok::Punct("("))
+            && matches!(self.peek_at(2), Tok::Punct("("))
+            && matches!(self.peek_at(3), Tok::Ident(name) if name.trim_matches('_') == "fallthrough")
+    }
+
     fn statement(&mut self) -> R<Stmt<'a>> {
         let loc = self.loc();
+        if self.is_fallthrough_attribute() {
+            if self.fs.as_ref().is_none_or(|f| f.switches.is_empty()) {
+                return Err(Error::new(loc, "fallthrough statement outside a switch"));
+            }
+            self.advance();
+            self.expect("(")?;
+            self.expect("(")?;
+            self.advance();
+            if self.is("(") {
+                return Err(Error::new(
+                    loc,
+                    "fallthrough requires an attribute without arguments",
+                ));
+            }
+            if self.eat(",") && !self.is(")") {
+                return Err(Error::new(
+                    loc,
+                    "fallthrough must be the only statement attribute",
+                ));
+            }
+            self.expect(")")?;
+            self.expect(")")?;
+            if !self.eat(";") {
+                return Err(Error::new(
+                    loc,
+                    "fallthrough must annotate a null statement",
+                ));
+            }
+            return Ok(Stmt::Block(&[]));
+        }
         if let Tok::Ident(word) = self.peek() {
             match word {
                 "if" => {
@@ -4088,6 +4128,9 @@ impl<'a> Parser<'a> {
                 _ if matches!(self.peek_at(1), Tok::Punct(":")) && !is_keyword(&word) => {
                     self.advance();
                     self.advance();
+                    if self.is_fallthrough_attribute() {
+                        return Err(Error::new(loc, "fallthrough cannot annotate a label"));
+                    }
                     self.ignored_attributes()?;
                     let stmt = self.labeled_statement()?;
                     return Ok(Stmt::Block(self.slice(&[Stmt::Label(word), stmt])));

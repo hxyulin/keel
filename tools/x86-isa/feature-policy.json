@@ -133,5 +133,20 @@
   "AVX512F_256": [
     "avx512f",
     "avx512vl"
+  ],
+  "RDTSCP": [
+    "rdtscp"
+  ],
+  "RDWRFSGS": [
+    "fsgsbase"
+  ],
+  "RDRAND": [
+    "rdrand"
+  ],
+  "INVPCID": [
+    "invpcid"
+  ],
+  "PREFETCHW": [
+    "prefetchw"
   ]
 }

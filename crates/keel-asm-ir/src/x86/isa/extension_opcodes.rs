@@ -17,6 +17,14 @@ pub enum ExtensionOpcode {
     Vaesimc,
     Vaeskeygenassist,
     Vpclmulqdq,
+    Rdtscp,
+    Rdfsbase,
+    Rdgsbase,
+    Wrfsbase,
+    Wrgsbase,
+    Rdrand,
+    Prefetchw,
+    Invpcid,
 }
 impl ExtensionOpcode {
     pub const ALL: &'static [Self] = &[
@@ -36,6 +44,14 @@ impl ExtensionOpcode {
         Self::Vaesimc,
         Self::Vaeskeygenassist,
         Self::Vpclmulqdq,
+        Self::Rdtscp,
+        Self::Rdfsbase,
+        Self::Rdgsbase,
+        Self::Wrfsbase,
+        Self::Wrgsbase,
+        Self::Rdrand,
+        Self::Prefetchw,
+        Self::Invpcid,
     ];
     pub fn parse(name: &str) -> Option<Self> {
         Some(match name {
@@ -55,6 +71,14 @@ impl ExtensionOpcode {
             "vaesimc" => Self::Vaesimc,
             "vaeskeygenassist" => Self::Vaeskeygenassist,
             "vpclmulqdq" => Self::Vpclmulqdq,
+            "rdtscp" => Self::Rdtscp,
+            "rdfsbase" => Self::Rdfsbase,
+            "rdgsbase" => Self::Rdgsbase,
+            "wrfsbase" => Self::Wrfsbase,
+            "wrgsbase" => Self::Wrgsbase,
+            "rdrand" => Self::Rdrand,
+            "prefetchw" => Self::Prefetchw,
+            "invpcid" => Self::Invpcid,
             _ => return None,
         })
     }
@@ -76,6 +100,14 @@ impl ExtensionOpcode {
             Self::Vaesimc => "vaesimc",
             Self::Vaeskeygenassist => "vaeskeygenassist",
             Self::Vpclmulqdq => "vpclmulqdq",
+            Self::Rdtscp => "rdtscp",
+            Self::Rdfsbase => "rdfsbase",
+            Self::Rdgsbase => "rdgsbase",
+            Self::Wrfsbase => "wrfsbase",
+            Self::Wrgsbase => "wrgsbase",
+            Self::Rdrand => "rdrand",
+            Self::Prefetchw => "prefetchw",
+            Self::Invpcid => "invpcid",
         }
     }
     pub const fn scalar_suffix(self) -> bool {
@@ -96,6 +128,14 @@ impl ExtensionOpcode {
             Self::Vaesimc => false,
             Self::Vaeskeygenassist => false,
             Self::Vpclmulqdq => false,
+            Self::Rdtscp => false,
+            Self::Rdfsbase => true,
+            Self::Rdgsbase => true,
+            Self::Wrfsbase => true,
+            Self::Wrgsbase => true,
+            Self::Rdrand => true,
+            Self::Prefetchw => false,
+            Self::Invpcid => false,
         }
     }
 }

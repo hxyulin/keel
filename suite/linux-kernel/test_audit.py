@@ -5,6 +5,7 @@ import tempfile
 import types
 import unittest
 import json
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('kernel_audit', Path(__file__).with_name('audit.py'))
 audit = importlib.util.module_from_spec(spec)
@@ -50,6 +51,37 @@ class AuditTests(unittest.TestCase):
                          'assembler-directive:.pushsection')
         self.assertEqual(audit.category('keel: /tmp/build/kernel.s: line 17: unsupported AT&T instruction `rdtscp`'),
                          'instruction-binding:rdtscp')
+
+    def test_probe_records_separate_explicit_feature_policies(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / '.config').write_text('CONFIG_64BIT=y\n')
+            (root / 'compiler').write_text('compiler witness')
+            (root / 'kernel.i').write_text('int x;\n')
+            (root / 'kernel.s').write_text('rdtscp\n')
+            manifest = root / 'manifest.json'
+            manifest.write_text(json.dumps({
+                'config_sha256': audit.sha(root / '.config'),
+                'inputs': [{'kind': kind, 'path': path, 'scope': 'kernel64',
+                            'sha256': audit.sha(root / path)}
+                           for kind, path in [('c', 'kernel.i'), ('asm', 'kernel.s')]],
+            }))
+            for name, c_features, asm_features in [('pinned', None, None), ('explicit', '+popcnt', '+rdtscp')]:
+                args = types.SimpleNamespace(build=root, manifest=manifest, keel=root / 'compiler',
+                    out=root / name, timeout=60, c_target_features=c_features,
+                    asm_target_features=asm_features)
+                with patch.object(audit.subprocess, 'run', return_value=types.SimpleNamespace(returncode=0, stderr=b'')) as run:
+                    audit.probe(args)
+                for call, features in zip(run.call_args_list, [c_features, asm_features]):
+                    command = call.args[0]
+                    self.assertEqual('--target-features' in command, features is not None)
+                    if features is not None:
+                        self.assertEqual(command[command.index('--target-features') + 1], features)
+                result = json.loads((args.out / 'results.json').read_text())
+                self.assertEqual(result['target_policy'], {
+                    'c': {'cpu_level': 'v1', 'target_features': c_features},
+                    'asm': {'cpu_level': 'v3', 'target_features': asm_features},
+                })
 
 
 if __name__ == '__main__':

@@ -53,6 +53,8 @@ pub enum AsmOperand {
     RegSignedImm32,
     /// `rI`: a numeric immediate in 0..=31, otherwise a GPR. X86 inputs only.
     RegShiftImm5,
+    /// `Nd`: an unsigned byte immediate, otherwise RDX. X86 inputs only.
+    PortImm8,
     /// `@ccz`, etc.: x86 flags captured as a boolean integer result.
     Flag(u8),
     /// `0`, `1`…: in the same register as that output, which it initializes.
@@ -199,6 +201,7 @@ fn operand(code: &str) -> Result<AsmOperand, String> {
         "ri" => AsmOperand::RegImm,
         "re" => AsmOperand::RegSignedImm32,
         "rI" => AsmOperand::RegShiftImm5,
+        "Nd" => AsmOperand::PortImm8,
         _ if code.starts_with("@cc") => AsmOperand::Flag(
             keel_asm_ir::x86::isa::parse_condition_code(&code[3..])
                 .ok_or_else(|| format!("unknown x86 flag condition `{code}`"))?,
@@ -291,6 +294,7 @@ impl fmt::Display for AsmOperand {
             AsmOperand::RegImm => f.write_str("ri"),
             AsmOperand::RegSignedImm32 => f.write_str("re"),
             AsmOperand::RegShiftImm5 => f.write_str("rI"),
+            AsmOperand::PortImm8 => f.write_str("Nd"),
             AsmOperand::Flag(cc) => match keel_asm_ir::x86::isa::condition_code_name(*cc) {
                 Some(name) => write!(f, "@cc{name}"),
                 None => write!(f, "@cc({cc})"),

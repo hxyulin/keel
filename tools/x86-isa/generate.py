@@ -171,7 +171,11 @@ def extension_adapters(data, mnemonics):
         opcode = f'Opcode::Extension(ExtensionOpcode::{variant})'
         kinds = {o['operand_type'] for r in rows for o in r.get('operands', [])
                  if o.get('visible', True)}
-        scalar = bool(kinds & {'gpr32', 'gpr64'}) and kinds <= {'gpr32', 'gpr64', 'mem'}
+        scalar_gprs = {'gpr32', 'gpr64', 'gpr16_32_64', 'gpr32_32_64'}
+        scalar = bool(kinds & scalar_gprs) and kinds <= scalar_gprs | {'mem'}
+        scalar = scalar and not any(o['operand_type'] == 'mem' and
+                                    any(o.get(f'width{bits}', 0) > 8 for bits in (16, 32, 64))
+                                    for r in rows for o in r.get('operands', []))
         identities.append(dict(variant=variant, mnemonic=mnemonic, scalar_suffix=scalar))
         features.append(dict(opcode=opcode, source_mnemonic=mnemonic))
         if any(r.get('encoding') == 'vex' for r in rows):
@@ -183,7 +187,11 @@ def form_isa(row):
     # The source labels the XMM VEX PCLMUL form simply AVX. Its independent
     # PCLMULQDQ capability must remain part of the public feature contract.
     isa = row['meta_info']['isa_set']
-    return 'AVX_PCLMULQDQ' if row['mnemonic'] == 'vpclmulqdq' and isa == 'AVX' else isa
+    if row['mnemonic'] == 'vpclmulqdq' and isa == 'AVX':
+        return 'AVX_PCLMULQDQ'
+    # The source groups PREFETCHW with executable prefetch NOPs. Public
+    # exposure still requires its independent architectural capability.
+    return 'PREFETCHW' if row['mnemonic'] == 'prefetchw' else isa
 
 
 def v2_adapters(data, adapters):

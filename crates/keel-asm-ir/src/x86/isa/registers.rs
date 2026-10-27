@@ -126,6 +126,14 @@ impl Register {
             "gs" => Some((RegisterClass::Segment, 5, 16, false)),
             "eip" => Some((RegisterClass::Rip, 0, 32, false)),
             "rip" => Some((RegisterClass::Rip, 0, 64, false)),
+            "db0" => Some((RegisterClass::Debug, 0, 64, false)),
+            "db1" => Some((RegisterClass::Debug, 1, 64, false)),
+            "db2" => Some((RegisterClass::Debug, 2, 64, false)),
+            "db3" => Some((RegisterClass::Debug, 3, 64, false)),
+            "db4" => Some((RegisterClass::Debug, 4, 64, false)),
+            "db5" => Some((RegisterClass::Debug, 5, 64, false)),
+            "db6" => Some((RegisterClass::Debug, 6, 64, false)),
+            "db7" => Some((RegisterClass::Debug, 7, 64, false)),
             _ => None,
         };
         if let Some((class, number, width, high_byte)) = named {

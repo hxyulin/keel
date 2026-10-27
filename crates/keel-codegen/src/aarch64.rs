@@ -7371,6 +7371,7 @@ fn asm_regs(asm: &InlineAsm) -> Result<Vec<Option<PhysReg>>, String> {
             AsmOperand::RegImm
             | AsmOperand::RegSignedImm32
             | AsmOperand::RegShiftImm5
+            | AsmOperand::PortImm8
             | AsmOperand::Flag(_) => {
                 return Err("x86 constraint in AArch64 inline assembly".into());
             }

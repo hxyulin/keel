@@ -457,7 +457,49 @@
       "decode": {
         "width": 64,
         "check_number": false
-      }
+      },
+      "aliases": [
+        {
+          "name": "db0",
+          "number": 0,
+          "width": 64
+        },
+        {
+          "name": "db1",
+          "number": 1,
+          "width": 64
+        },
+        {
+          "name": "db2",
+          "number": 2,
+          "width": 64
+        },
+        {
+          "name": "db3",
+          "number": 3,
+          "width": 64
+        },
+        {
+          "name": "db4",
+          "number": 4,
+          "width": 64
+        },
+        {
+          "name": "db5",
+          "number": 5,
+          "width": 64
+        },
+        {
+          "name": "db6",
+          "number": 6,
+          "width": 64
+        },
+        {
+          "name": "db7",
+          "number": 7,
+          "width": 64
+        }
+      ]
     },
     {
       "variant": "Zmm",

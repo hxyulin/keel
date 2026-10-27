@@ -23,7 +23,7 @@ class AttRuleTests(unittest.TestCase):
 
     def test_rule_membership_and_widths(self):
         digest = hashlib.sha256(json.dumps(self.schema, sort_keys=True).encode()).hexdigest()
-        self.assertEqual(digest, '56f7d58f305f834d020036ebd142ad4e5d353bd8a2216bf8b1fdec35439288e1')
+        self.assertEqual(digest, '24868352fc3aa42134c6c9197f69b4cb7a8fea9b8ec94cda5ae81d6ef87847af')
         att_rules.generate(self.schema, *self.args)
 
     def test_unknown_groups_and_opcodes_are_rejected(self):

@@ -136,5 +136,30 @@
       "avx512f"
     ],
     "doc": "AVX-512 128/256-bit vector-length forms."
+  },
+  {
+    "field": "rdtscp",
+    "bit": 26,
+    "doc": "RDTSCP timing and processor-ID instruction."
+  },
+  {
+    "field": "fsgsbase",
+    "bit": 27,
+    "doc": "FS/GS base register instructions; execution also requires enabled `CR4.FSGSBASE`."
+  },
+  {
+    "field": "rdrand",
+    "bit": 28,
+    "doc": "Hardware random-number instruction; callers must check the carry flag."
+  },
+  {
+    "field": "invpcid",
+    "bit": 29,
+    "doc": "INVPCID translation invalidation instruction; execution requires its privilege/state preconditions."
+  },
+  {
+    "field": "prefetchw",
+    "bit": 30,
+    "doc": "Write-prefetch instruction capability."
   }
 ]

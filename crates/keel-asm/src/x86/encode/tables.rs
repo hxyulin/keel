@@ -309,12 +309,20 @@ fn matches_operand(spec: IsaOperand, o: &Operand, size: u16, address: u16) -> bo
                     } else {
                         n
                     };
-                    n >= -(1i128 << (bytes * 8 - 1))
-                        && n < (1i128 << (bytes * 8 - u16::from(signed)))
+                    full_byte_pattern(n, bytes, size)
+                        || (n >= -(1i128 << (bytes * 8 - 1))
+                            && n < (1i128 << (bytes * 8 - u16::from(signed))))
                 }
             }
         }
     }
+}
+
+// A full-width byte immediate is an eight-bit pattern. GNU accepts negative
+// spellings down to -256; sign-extending immediates of wider operations keep
+// their strict signed range instead.
+fn full_byte_pattern(n: i128, bytes: u16, size: u16) -> bool {
+    bytes == 1 && size == 8 && (-256..=255).contains(&n)
 }
 
 struct Choice<'a> {
@@ -583,6 +591,11 @@ fn match_form<'a>(
             || d.name == "lsl"
                 && index == 1
                 && matches!(i.operands.get(used),Some(R(r)) if r.class==RegisterClass::Gpr&&r.width==size);
+        let compatible = compatible
+            || d.name == "mov"
+                && form.byte == 0x8e
+                && spec.kind == "gpr16"
+                && matches!(i.operands.get(used),Some(R(r)) if r.class==RegisterClass::Gpr && r.width==32);
         let skip_st0 = spec.kind == "implicit_reg"
             && spec.register == "st0"
             && i.operands.len() < form.operands.len();
@@ -804,11 +817,17 @@ fn emit<'a>(
             )?;
         } else if spec.kind == "imm" {
             if let Some(I(a)) = op {
-                e.imm(
-                    a,
-                    spec.bytes(choice.size) as u8,
-                    spec.encoding.starts_with('s') && (spec.bytes(choice.size) * 8 < choice.size),
-                )?;
+                if let Some(n) = constant(a)
+                    && full_byte_pattern(n, spec.bytes(choice.size), choice.size)
+                {
+                    e.number(n, 1);
+                } else {
+                    e.imm(
+                        a,
+                        spec.bytes(choice.size) as u8,
+                        spec.encoding.starts_with('s') && (spec.bytes(choice.size) * 8 < choice.size),
+                    )?;
+                }
             } else {
                 e.number(
                     d.control.unwrap_or(0) as i128,

@@ -883,6 +883,7 @@ impl Verifier<'_> {
             | AsmOperand::RegImm
             | AsmOperand::RegSignedImm32
             | AsmOperand::RegShiftImm5
+            | AsmOperand::PortImm8
             | AsmOperand::Fixed(PhysReg { float: false, .. }) => {
                 (ty.is_int() && ty != Type::I128) || ty == Type::Ptr
             }

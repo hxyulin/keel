@@ -33,6 +33,16 @@ pub struct Features {
     pub avx512f: bool,
     /// AVX-512 128/256-bit vector-length forms.
     pub avx512vl: bool,
+    /// RDTSCP timing and processor-ID instruction.
+    pub rdtscp: bool,
+    /// FS/GS base register instructions; execution also requires enabled `CR4.FSGSBASE`.
+    pub fsgsbase: bool,
+    /// Hardware random-number instruction; callers must check the carry flag.
+    pub rdrand: bool,
+    /// INVPCID translation invalidation instruction; execution requires its privilege/state preconditions.
+    pub invpcid: bool,
+    /// Write-prefetch instruction capability.
+    pub prefetchw: bool,
 }
 impl Features {
     pub const NONE: Self = Self {
@@ -62,6 +72,11 @@ impl Features {
         osxsave: false,
         avx512f: false,
         avx512vl: false,
+        rdtscp: false,
+        fsgsbase: false,
+        rdrand: false,
+        invpcid: false,
+        prefetchw: false,
     };
     /// Every declared capability, for tests and tooling; not host detection.
     pub const fn all_known() -> Self { Self {
@@ -91,6 +106,11 @@ impl Features {
         osxsave: true,
         avx512f: true,
         avx512vl: true,
+        rdtscp: true,
+        fsgsbase: true,
+        rdrand: true,
+        invpcid: true,
+        prefetchw: true,
     } }
     /// Stable schema bit IDs, covering every capability.
     pub const fn fingerprint(self) -> u64 {
@@ -120,6 +140,11 @@ impl Features {
             | ((self.osxsave as u64) << 23)
             | ((self.avx512f as u64) << 24)
             | ((self.avx512vl as u64) << 25)
+            | ((self.rdtscp as u64) << 26)
+            | ((self.fsgsbase as u64) << 27)
+            | ((self.rdrand as u64) << 28)
+            | ((self.invpcid as u64) << 29)
+            | ((self.prefetchw as u64) << 30)
     }
     pub const fn is_empty(self) -> bool { self.fingerprint() == 0 }
     pub const fn contains(self, required: Self) -> bool {
@@ -245,6 +270,21 @@ impl Features {
                     self.avx512f = true;
                 }
             }
+            "rdtscp" => {
+                self.rdtscp = enabled;
+            }
+            "fsgsbase" => {
+                self.fsgsbase = enabled;
+            }
+            "rdrand" => {
+                self.rdrand = enabled;
+            }
+            "invpcid" => {
+                self.invpcid = enabled;
+            }
+            "prefetchw" => {
+                self.prefetchw = enabled;
+            }
             _ => return false,
         }
         true
@@ -307,6 +347,11 @@ impl Features {
             (self.osxsave, "osxsave"),
             (self.avx512f, "avx512f"),
             (self.avx512vl, "avx512vl"),
+            (self.rdtscp, "rdtscp"),
+            (self.fsgsbase, "fsgsbase"),
+            (self.rdrand, "rdrand"),
+            (self.invpcid, "invpcid"),
+            (self.prefetchw, "prefetchw"),
         ]
         .into_iter()
         .filter_map(|(on, name)| on.then_some(name))

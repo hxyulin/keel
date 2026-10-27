@@ -1416,14 +1416,32 @@ impl<'a> Parser<'a> {
                 let mut stmts = self.block_items()?;
                 self.pop_block();
                 self.expect(")")?;
-                let value = match stmts.split_last() {
-                    Some((Stmt::Expr(e), rest)) => {
-                        stmts = rest;
+                let value = stmts
+                    .iter()
+                    .rposition(|s| !matches!(s, Stmt::Block([])))
+                    .and_then(|last| {
+                        let mut tail = &stmts[last];
+                        let mut labels = Vec::new();
+                        // Named labels wrap their statement without opening a
+                        // scope. Keep those labels before the result; scoped
+                        // compounds and labeled null statements still yield void.
+                        while let Stmt::Block([label @ Stmt::Label(_), next]) = tail {
+                            labels.push(*label);
+                            tail = next;
+                        }
+                        let Stmt::Expr(e) = tail else {
+                            return None;
+                        };
+                        stmts = if labels.is_empty() {
+                            &stmts[..last]
+                        } else {
+                            let mut prefix = stmts[..last].to_vec();
+                            prefix.extend(labels);
+                            self.slice(&prefix)
+                        };
                         let e = self.rvalue(*e);
                         Some(self.node(e))
-                    }
-                    _ => None,
-                };
+                    });
                 let ty = value.as_ref().map_or(Ty::Void, |v| v.ty);
                 let sugar = value
                     .as_ref()

@@ -1019,7 +1019,6 @@ fn primary_core_segment_moffs_and_nop_forms() {
     }
     for line in [
         "mov cs,ax",
-        "mov fs,eax",
         "push ds",
         "pop cs",
         "movabs r9,[123]",

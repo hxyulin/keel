@@ -108,6 +108,8 @@ instruction-pointer, control and debug register APIs. `Register` keeps its publi
 and numeric spelling rules stay unchanged. CR/DR names accept exactly one
 numeric digit; CR indices are 0/2/3/4/8 and DR indices are 0..7. DR4/5 retain
 their documented conditional alias preconditions.
+GNU `db0` through `db7` aliases parse as the corresponding debug registers;
+canonical formatting remains `dr0` through `dr7`.
 
 `Register::is_valid()` checks the structural register domain. Instruction
 operands, addressing, high-byte/REX compatibility and the current four-bit
@@ -176,16 +178,24 @@ dependency closure, v1 defaults and ordered CLI modifier resolution.
 
 ## Optional legacy/VEX extensions
 
-The `extensions` list in `keel-adapters.json` exposes 16 additional mnemonics
-through generated `ExtensionOpcode` identities (46 imported forms): ADCX/ADOX, the seven SHA
+The `extensions` list in `keel-adapters.json` exposes 24 additional mnemonics
+through generated `ExtensionOpcode` identities: ADCX/ADOX, the seven SHA
 instructions, VAESENC/VAESENCLAST/VAESDEC/VAESDECLAST, VAESIMC,
 VAESKEYGENASSIST and VPCLMULQDQ. These use the existing shared matcher and
 encoder. No compiler intrinsics or selection rules are added.
 
+The kernel adapters also expose RDTSCP, RDFSBASE/RDGSBASE/WRFSBASE/WRGSBASE,
+RDRAND, PREFETCHW and INVPCID. They require the independent `rdtscp`,
+`fsgsbase`, `rdrand`, `prefetchw` and `invpcid` capabilities. None is implied
+by the v1/v2/v3 profiles. Runtime privilege and enabled-state requirements remain
+the caller's responsibility. Upstream's `PREFETCH_NOP` label for PREFETCHW is
+overridden only in the generated feature query, preserving the source catalogue.
+AT&T `fxrstorq` and `fxsaveq` aliases select existing 64-bit state forms.
+
 Enable `adx` or `sha` independently. XMM VAES forms require `avx,aes`;
 YMM VAES forms require `avx,vaes`. VAESIMC and VAESKEYGENASSIST have XMM forms
 only. XMM VPCLMULQDQ requires `avx,pclmulqdq`; YMM requires
-`avx,vpclmulqdq`. None of the four new feature bits is implied by psABI v3.
+`avx,vpclmulqdq`. ADX/SHA/VAES/VPCLMULQDQ are not implied by psABI v3.
 The source labels XMM VPCLMULQDQ simply `AVX`; the generated adapter uses an
 explicit `AVX_PCLMULQDQ` policy label to retain its independent PCLMULQDQ
 requirement. The shared source catalogue retains the upstream ISA label.

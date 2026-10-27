@@ -1,0 +1,360 @@
+{
+  "schema": 1,
+  "date": "2026-10-27",
+  "implementation_base": "84de920f",
+  "baseline_report": "audit-basic-asm-alignment.json",
+  "source_manifest_sha256": "908006c3e46761f50342cf6556fcd86a05d7edf51cf2e85de449d19cfd2c5135",
+  "config_sha256": "af7dd9b29c4ac472ffe32d338821425912fe92ad62b30281ef1356947930e129",
+  "all_992_inputs_rehashed_unchanged": true,
+  "reference_artifacts_rehashed_unchanged": true,
+  "reference_rebuilt_or_rebooted": false,
+  "kernel_codegen_contract": false,
+  "keel_objects_linked_or_run_as_kernel": false,
+  "policies": {
+    "pinned": {
+      "target_policy": {
+        "c": {
+          "cpu_level": "v1",
+          "target_features": null
+        },
+        "asm": {
+          "cpu_level": "v3",
+          "target_features": null
+        }
+      },
+      "keel_binary_sha256": "b53e1f8e70e511ce25723e9f9d45b81bb866c558a8ee4a817d10dd898b4ec4d3",
+      "results": {
+        "c": {
+          "total": 484,
+          "accepted": 40,
+          "rejected": 444,
+          "crashed": 0,
+          "timeout": 0,
+          "first_errors": [
+            {
+              "category": "asm-goto",
+              "count": 439,
+              "example": {
+                "path": "arch/x86/entry/common.i",
+                "diagnostic": "keel: <source>/arch/x86/include/asm/cpufeature.h:178:2: error: asm goto is not supported"
+              }
+            },
+            {
+              "category": "attribute `*` requires semantics that are not supported",
+              "count": 2,
+              "example": {
+                "path": "arch/x86/entry/vdso/vgetcpu.i",
+                "diagnostic": "keel: <source>/arch/x86/entry/vdso/vgetcpu.c:22:23: error: attribute `alias` requires semantics that are not supported"
+              }
+            },
+            {
+              "category": "feature-policy",
+              "count": 2,
+              "example": {
+                "path": "lib/find_bit.i",
+                "diagnostic": "keel: <build>/lib/find_bit.i: line 860: popcnt requires x86 target features: popcnt"
+              }
+            },
+            {
+              "category": "`*` is not supported",
+              "count": 1,
+              "example": {
+                "path": "lib/earlycpio.i",
+                "diagnostic": "keel: <source>/lib/earlycpio.c:129:80: error: `__builtin_has_attribute` is not supported"
+              }
+            }
+          ]
+        },
+        "asm": {
+          "total": 506,
+          "accepted": 486,
+          "rejected": 20,
+          "crashed": 0,
+          "timeout": 0,
+          "first_errors": [
+            {
+              "category": "feature-policy",
+              "count": 13,
+              "example": {
+                "path": "arch/x86/entry/vdso/vclock_gettime.s",
+                "diagnostic": "keel: <build>/arch/x86/entry/vdso/vclock_gettime.s: line 65: rdtscp requires x86 target features: rdtscp"
+              }
+            },
+            {
+              "category": "assembler-directive:.incbin",
+              "count": 2,
+              "example": {
+                "path": "arch/x86/realmode/rmpiggy.s",
+                "diagnostic": "keel: <build>/arch/x86/realmode/rmpiggy.s: line 129: unsupported ELF directive `.incbin`"
+              }
+            },
+            {
+              "category": "instruction-binding:sysretl",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/entry/entry_64.s",
+                "diagnostic": "keel: <build>/arch/x86/entry/entry_64.s: line 1658: unsupported AT&T instruction `sysretl`"
+              }
+            },
+            {
+              "category": "unexpected expression input `*`",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/entry/vdso/vgetrandom-chacha.s",
+                "diagnostic": "keel: <build>/arch/x86/entry/vdso/vgetrandom-chacha.s: line 150: unexpected expression input `(key)`"
+              }
+            },
+            {
+              "category": "assembler-directive:.fill",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/kernel/head_64.s",
+                "diagnostic": "keel: <build>/arch/x86/kernel/head_64.s: line 1093: unsupported ELF directive `.fill`"
+              }
+            },
+            {
+              "category": "instruction-binding:tpause",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/lib/delay.s",
+                "diagnostic": "keel: <build>/arch/x86/lib/delay.s: line 149: unsupported AT&T instruction `tpause`"
+              }
+            },
+            {
+              "category": "instruction-binding:rdseed",
+              "count": 1,
+              "example": {
+                "path": "drivers/char/random.s",
+                "diagnostic": "keel: <build>/drivers/char/random.s: line 163: unsupported AT&T instruction `rdseed`"
+              }
+            }
+          ]
+        }
+      },
+      "prior_accepted_objects": {
+        "total": 435,
+        "byte_identical": 435,
+        "acceptance_regressions": []
+      },
+      "new_accepted_c": [
+        "arch/x86/lib/cmdline.i",
+        "lib/clz_ctz.i",
+        "lib/cmdline.i",
+        "lib/iomap_copy.i",
+        "lib/math/gcd.i",
+        "lib/string.i",
+        "lib/zlib_inflate/inflate.i"
+      ]
+    },
+    "explicit_optional_features": {
+      "target_policy": {
+        "c": {
+          "cpu_level": "v1",
+          "target_features": "+popcnt"
+        },
+        "asm": {
+          "cpu_level": "v3",
+          "target_features": "+rdtscp,+fsgsbase,+rdrand,+prefetchw,+invpcid,+clflush"
+        }
+      },
+      "keel_binary_sha256": "b53e1f8e70e511ce25723e9f9d45b81bb866c558a8ee4a817d10dd898b4ec4d3",
+      "results": {
+        "c": {
+          "total": 484,
+          "accepted": 42,
+          "rejected": 442,
+          "crashed": 0,
+          "timeout": 0,
+          "first_errors": [
+            {
+              "category": "asm-goto",
+              "count": 439,
+              "example": {
+                "path": "arch/x86/entry/common.i",
+                "diagnostic": "keel: <source>/arch/x86/include/asm/cpufeature.h:178:2: error: asm goto is not supported"
+              }
+            },
+            {
+              "category": "attribute `*` requires semantics that are not supported",
+              "count": 2,
+              "example": {
+                "path": "arch/x86/entry/vdso/vgetcpu.i",
+                "diagnostic": "keel: <source>/arch/x86/entry/vdso/vgetcpu.c:22:23: error: attribute `alias` requires semantics that are not supported"
+              }
+            },
+            {
+              "category": "`*` is not supported",
+              "count": 1,
+              "example": {
+                "path": "lib/earlycpio.i",
+                "diagnostic": "keel: <source>/lib/earlycpio.c:129:80: error: `__builtin_has_attribute` is not supported"
+              }
+            }
+          ]
+        },
+        "asm": {
+          "total": 506,
+          "accepted": 499,
+          "rejected": 7,
+          "crashed": 0,
+          "timeout": 0,
+          "first_errors": [
+            {
+              "category": "assembler-directive:.incbin",
+              "count": 2,
+              "example": {
+                "path": "arch/x86/realmode/rmpiggy.s",
+                "diagnostic": "keel: <build>/arch/x86/realmode/rmpiggy.s: line 129: unsupported ELF directive `.incbin`"
+              }
+            },
+            {
+              "category": "instruction-binding:sysretl",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/entry/entry_64.s",
+                "diagnostic": "keel: <build>/arch/x86/entry/entry_64.s: line 1658: unsupported AT&T instruction `sysretl`"
+              }
+            },
+            {
+              "category": "unexpected expression input `*`",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/entry/vdso/vgetrandom-chacha.s",
+                "diagnostic": "keel: <build>/arch/x86/entry/vdso/vgetrandom-chacha.s: line 150: unexpected expression input `(key)`"
+              }
+            },
+            {
+              "category": "assembler-directive:.fill",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/kernel/head_64.s",
+                "diagnostic": "keel: <build>/arch/x86/kernel/head_64.s: line 1093: unsupported ELF directive `.fill`"
+              }
+            },
+            {
+              "category": "instruction-binding:tpause",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/lib/delay.s",
+                "diagnostic": "keel: <build>/arch/x86/lib/delay.s: line 149: unsupported AT&T instruction `tpause`"
+              }
+            },
+            {
+              "category": "instruction-binding:rdseed",
+              "count": 1,
+              "example": {
+                "path": "drivers/char/random.s",
+                "diagnostic": "keel: <build>/drivers/char/random.s: line 163: unsupported AT&T instruction `rdseed`"
+              }
+            }
+          ]
+        }
+      },
+      "prior_accepted_objects": {
+        "total": 435,
+        "byte_identical": 435,
+        "acceptance_regressions": []
+      },
+      "new_accepted_c": [
+        "arch/x86/lib/cmdline.i",
+        "lib/clz_ctz.i",
+        "lib/cmdline.i",
+        "lib/find_bit.i",
+        "lib/iomap_copy.i",
+        "lib/math/gcd.i",
+        "lib/memweight.i",
+        "lib/string.i",
+        "lib/zlib_inflate/inflate.i"
+      ]
+    }
+  },
+  "implementation": [
+    "GNU fallthrough attribute statements",
+    "Labeled GNU statement-expression values and trailing null statements",
+    "Nd/dN port input constraints after required inlining",
+    "Standalone x86 prefix statements and GNU whitespace symbol types",
+    "Generated optional instruction and register aliases",
+    "Full-width byte immediate patterns and segment-selector register operands"
+  ],
+  "validation": {
+    "workspace": {
+      "regular_tests_passed": 2811,
+      "doctests_passed": 1,
+      "failed": 0,
+      "ignored": 13,
+      "log": "/tmp/keel-kernel-expansion-tests.log"
+    },
+    "all_targets_all_features_check": true,
+    "x86_generator_tests_passed": 99,
+    "arm_generator_tests_passed": 4,
+    "audit_harness_tests_passed": 4,
+    "both_generator_freshness_checks": true,
+    "independent_assembler_matrix": {
+      "cases": 80,
+      "oracles": [
+        "Clang",
+        "GNU"
+      ],
+      "intel_format_roundtrips": true
+    },
+    "native_port_constraint_surrogate": {
+      "objects": 2,
+      "optimized": [
+        false,
+        true
+      ],
+      "port_values_per_object": 65536,
+      "checks": [
+        "Immediate 255",
+        "Register fallback at 256",
+        "All unsigned-short inputs",
+        "Live wide arguments across RDX use"
+      ],
+      "io_instructions_executed": false,
+      "object_sha256": {
+        "port-optfalse.o": "90ef1d5e2a9448ac2a620c67f759af9ce3f158a810e844f34a1b8dbe464c9911",
+        "port-opttrue.o": "90ef1d5e2a9448ac2a620c67f759af9ce3f158a810e844f34a1b8dbe464c9911"
+      }
+    },
+    "native_statement_expression_tests": {
+      "optimized_and_unoptimized": true,
+      "debug_and_no_debug": true,
+      "three_native_target_object_assembly": true
+    },
+    "rustfmt": "Scoped formatting passed; pre-existing formatting in single-line match extensions retained.",
+    "clippy": "Completed with existing library warnings; no new diagnostics in changed lines/tests.",
+    "rustdoc_build": true
+  },
+  "notes": [
+    "Pinned means the unchanged C v1 / assembler v3 target policy. Explicit optional features are a separate measurement, not a policy change.",
+    "All measurements use unchanged inputs and the pinned reference configuration. First errors can mask later gaps.",
+    "No significant backend or asm-goto implementation was attempted.",
+    "No Keel-generated object was linked into or executed as the kernel."
+  ],
+  "implementation_inputs_sha256": {
+    "crates/keel-asm-ir/src/x86.rs": "f22b99a1cf8fbf6d8dd319132563ac8a6a947917b2bb25048f2c67ed9515f60e",
+    "crates/keel-asm-ir/src/x86/features.rs": "3df0caf399504c364c9a1f4b666d329c6628462ab5fddbd16554ed05db643f29",
+    "crates/keel-asm-ir/src/x86/isa/att_rules.rs": "8d6b84ee919a9851b2a637c38ce8c680aa62fcb6fce7cb48fa4eff59d397269c",
+    "crates/keel-asm-ir/src/x86/isa/extension_opcodes.rs": "fcef6349591ebd55a00f26d9eaf4bf407f0e1aa5979d0e820c1ab873b68f8dd1",
+    "crates/keel-asm-ir/src/x86/isa/feature_fields.rs": "6d2520d10f1a24500a926dabcfc9cd7de21cbacf9924d710c02fd3aef44c5d9c",
+    "crates/keel-asm-ir/src/x86/isa/features.rs": "c5fb2250441a441efa0c155b67deb5583a63834dfa4460d81971c97379afc48e",
+    "crates/keel-asm-ir/src/x86/isa/registers.rs": "9a63c1e136a2f7763d46544c89f16ffa86768f6a22d950a0b56e6c79b859d199",
+    "crates/keel-asm/src/x86/encode/tables.rs": "2d05989301b88bc52b90e9aaea14a0e8b37647596818ea3494d3376b171d2a0b",
+    "crates/keel-asm/src/x86/mod.rs": "031dedaa3b0ecb107f50c0b7b8b6c0ce4f04eeb23953dc808535c5fda0318a1d",
+    "crates/keel-c/src/expr.rs": "39bd17c815f4ef947ad77bb8644ee7f665c31623da67f134816e092e29dc5f58",
+    "crates/keel-c/src/parse.rs": "1ded7d55eb6a01d3cc0fbe0c3b5c04b599653b70ef71b0f2a61f68fb81fe0263",
+    "crates/keel-c/src/parse/asm.rs": "a753b3084d9bed99f411ba80ef078753f93646d9785dafd8e7328a3701990598",
+    "crates/keel-codegen/src/aarch64.rs": "58ba1a18c41d6c976ab2d6d8d4204a27efd04e83095164a0afef77f656e1446e",
+    "crates/keel-codegen/src/x86_64/inline_asm.rs": "c2e6c3391baa306e43fb9592e494cfcb066541b8922f87cf4cf66239fb98a348",
+    "crates/keel-ir/src/asm.rs": "3a73e1ec334caa2fae9922a61a42eba9afa6558574df88a3a6f5a3ee0db69935",
+    "crates/keel-ir/src/verifier.rs": "680de78525e558c280e7e6d221643d3509107bb5fd15d37a4ed7d4d692c053bb",
+    "crates/keel-opt/src/inline.rs": "7483d5dd24011ec5488b61d1843290624f4e6dc6e36f8581036837b048d1b7c2",
+    "suite/linux-kernel/audit.py": "77bb473a7055a21a2c8b3c052eb799bac4707aa686309435abb50910e8ee5ffd",
+    "tools/x86-isa/att-rules.json": "37248878acd439886676d96c0bbddac3e4b766416914a1c115383da0cb193b0f",
+    "tools/x86-isa/feature-fields.json": "8f504d9e14554b34864d5e0413ac1cb816461700d0dcef5cecfadb26695cf8b2",
+    "tools/x86-isa/feature-policy.json": "804bcd9679117796dd7ac1e0c2b19431152ad4f633b4b27e2ec504d61945a1bf",
+    "tools/x86-isa/generate.py": "7b65ad7138b4b9f3323f8a273ca1dc3206467cd0254955d037ad11dbb52a8034",
+    "tools/x86-isa/keel-adapters.json": "02f4efae9b031359ec2d616707cc74d98302c4d1a5eeec3ea5afca6bf98c2d97",
+    "tools/x86-isa/registers.json": "8dc1b4856964b331e892ee86a31b0dc3aa2aa3d38dfa84faad8d1f6e61b11c2b"
+  }
+}

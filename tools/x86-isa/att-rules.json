@@ -315,6 +315,14 @@
       "name": "popf",
       "opcode": "Popfq",
       "group": "fixed"
+    },
+    {
+      "name": "fxrstorq",
+      "opcode": "Fxrstor64"
+    },
+    {
+      "name": "fxsaveq",
+      "opcode": "Fxsave64"
     }
   ],
   "integer_conversions": [

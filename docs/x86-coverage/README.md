@@ -7,10 +7,10 @@ Machine-readable form records are in [coverage.json](coverage.json).
 Legacy/VEX imported source forms: **3603**, plus **1** local extension.
 Legacy/VEX catalogue: **3495** forms; **109** imported forms excluded.
 Decoder registration enabled: **3494**; disabled by policy: **1**.
-Forms with declarative assembler candidates: **2855**.
-Public binding records: **1001**; without a direct source join: **86** (not an unsupported count).
+Forms with declarative assembler candidates: **2863**.
+Public binding records: **1009**; without a direct source join: **86** (not an unsupported count).
 Tracked compiler declarations: **45**, with **43** regular recipes and **2** hooks.
-ISA policy keys without an explicit feature classification: **83**.
+ISA policy keys without an explicit feature classification: **79**.
 
 Separate AVX-512F/VL table: **1899** records and **351** mnemonic bindings.
 It contains **1884** EVEX records plus **15** VEX mask records already present in the legacy/VEX import.
@@ -91,7 +91,7 @@ An unclassified key is not automatically baseline; the runtime feature lookup cu
 | `I486REAL` | 20 | 20 | 20 | 20 | 3 | baseline | v1, v2, v3 |
 | `I86` | 463 | 429 | 429 | 395 | 7 | baseline | v1, v2, v3 |
 | `ICACHE_PREFETCH` | 2 | 2 | 2 | 0 | 0 | unclassified |  |
-| `INVPCID` | 1 | 1 | 1 | 0 | 0 | unclassified |  |
+| `INVPCID` | 1 | 1 | 1 | 1 | 0 | invpcid |  |
 | `KEEL` | 1 | 1 | 1 | 1 | 0 | unclassified |  |
 | `KEYLOCKER` | 7 | 7 | 7 | 0 | 0 | unclassified |  |
 | `KEYLOCKER_WIDE` | 4 | 4 | 4 | 0 | 0 | unclassified |  |
@@ -123,17 +123,18 @@ An unclassified key is not automatically baseline; the runtime feature lookup cu
 | `PKU` | 2 | 2 | 2 | 0 | 0 | unclassified |  |
 | `POPCNT` | 2 | 2 | 2 | 2 | 0 | popcnt | v2, v3 |
 | `PPRO` | 35 | 32 | 31 | 32 | 0 | baseline | v1, v2, v3 |
+| `PREFETCHW` | 1 | 1 | 1 | 1 | 0 | prefetchw |  |
 | `PREFETCHWT1` | 1 | 1 | 1 | 0 | 0 | unclassified |  |
-| `PREFETCH_NOP` | 8 | 8 | 8 | 1 | 0 | baseline | v1, v2, v3 |
+| `PREFETCH_NOP` | 7 | 7 | 7 | 1 | 0 | baseline | v1, v2, v3 |
 | `PT` | 4 | 2 | 2 | 0 | 0 | unclassified |  |
 | `RAO_INT` | 8 | 8 | 8 | 0 | 0 | unclassified |  |
 | `RDPID` | 2 | 1 | 1 | 0 | 0 | unclassified |  |
 | `RDPMC` | 1 | 1 | 1 | 1 | 0 | unclassified |  |
 | `RDPRU` | 1 | 1 | 1 | 0 | 0 | unclassified |  |
-| `RDRAND` | 2 | 1 | 1 | 0 | 0 | unclassified |  |
+| `RDRAND` | 2 | 1 | 1 | 1 | 0 | rdrand |  |
 | `RDSEED` | 2 | 1 | 1 | 0 | 0 | unclassified |  |
-| `RDTSCP` | 1 | 1 | 1 | 0 | 0 | unclassified |  |
-| `RDWRFSGS` | 8 | 4 | 4 | 0 | 0 | unclassified |  |
+| `RDTSCP` | 1 | 1 | 1 | 1 | 0 | rdtscp |  |
+| `RDWRFSGS` | 8 | 4 | 4 | 4 | 0 | fsgsbase |  |
 | `RTM` | 4 | 4 | 4 | 0 | 0 | unclassified |  |
 | `SERIALIZE` | 1 | 1 | 1 | 0 | 0 | unclassified |  |
 | `SGX` | 2 | 2 | 2 | 0 | 0 | unclassified |  |

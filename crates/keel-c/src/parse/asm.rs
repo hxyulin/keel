@@ -208,6 +208,9 @@ impl<'a> Parser<'a> {
                                 constraint =
                                     if constraint.contains('e') { "re" } else { "rI" }.into();
                             }
+                            if x86 && constraint == "dN" {
+                                constraint = "Nd".into();
+                            }
                             if x86 && let Some((immediate, memory)) = asm_choice(&constraint) {
                                 constraint = if asm_gpr_type(expr.ty) {
                                     if immediate { "ri" } else { "r" }
@@ -239,7 +242,7 @@ impl<'a> Parser<'a> {
                                 constraint = n.to_string();
                             }
                             match constraint.as_str() {
-                                "ri" | "re" | "rI" if x86 => {
+                                "ri" | "re" | "rI" | "Nd" if x86 => {
                                     expr = self.rvalue(expr);
                                     asm_register_type("r", expr.ty, loc)?;
                                 }
@@ -293,7 +296,7 @@ impl<'a> Parser<'a> {
                                 }
                                 _ => {
                                     let n = constraint.parse::<usize>().ok().filter(|n| *n < outputs.len())
-                                        .ok_or_else(|| Error::new(loc, format!("unsupported asm input constraint `{constraint}` (supported: r, q (x86), w (AArch64), m, i, n, x86 r/q choices with i/m or g, output number or [name])")))?;
+                                        .ok_or_else(|| Error::new(loc, format!("unsupported asm input constraint `{constraint}` (supported: r, q (x86), w (AArch64), m, i, n, x86 Nd and r/q choices with i/m or g, output number or [name])")))?;
                                     if output_memory[n] || constraints[n].starts_with("=@cc") {
                                         return Err(Error::new(
                                             loc,

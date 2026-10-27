@@ -307,9 +307,8 @@ fn reject(source: &str) {
 
 #[test]
 fn invalid_lock_vector_widths_and_controls_stay_explicit() {
+    // Standalone LOCK is a GNU prefix-byte statement, covered by x86_gnu_prefixes.
     for source in [
-        "lock",
-        "lock\t",
         "lock lock add [rax],eax",
         "lock add eax,ebx",
         "lock xadd eax,ebx",

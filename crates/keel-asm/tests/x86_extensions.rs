@@ -134,6 +134,21 @@ fn malformed_extension_operands_are_rejected() {
 fn exposed_forms_match_clang_and_gnu_and_format_roundtrip() {
     let mut cases = Vec::new();
     for op in ExtensionOpcode::ALL {
+        // Unary/system adapters have their own operand matrix and independent
+        // byte oracles in x86_kernel_adapters.rs.
+        if matches!(
+            op,
+            ExtensionOpcode::Rdtscp
+                | ExtensionOpcode::Rdfsbase
+                | ExtensionOpcode::Rdgsbase
+                | ExtensionOpcode::Wrfsbase
+                | ExtensionOpcode::Wrgsbase
+                | ExtensionOpcode::Rdrand
+                | ExtensionOpcode::Prefetchw
+                | ExtensionOpcode::Invpcid
+        ) {
+            continue;
+        }
         let name = op.mnemonic();
         for n in [0, 7, 8, 15] {
             if op.scalar_suffix() {

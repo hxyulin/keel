@@ -111,6 +111,9 @@ def probe(args):
             command += ['--x86-syntax', 'att', '--cpu-level', 'v3']
         else:
             command += ['--emit-object']
+        features = args.asm_target_features if item['kind'] == 'asm' else args.c_target_features
+        if features is not None:
+            command += ['--target-features', features]
         command += [str(path), '-o', str(args.out.resolve() / f'{index}.o')]
         try:
             run = subprocess.run(command, cwd=build, capture_output=True, timeout=args.timeout)
@@ -135,6 +138,8 @@ def probe(args):
               note='First diagnostics on unchanged reference inputs; not exhaustive gaps or execution evidence.',
               config_sha256=manifest['config_sha256'],
               keel_sha256=keel_sha256, results=rows,
+              target_policy={'c': {'cpu_level': 'v1', 'target_features': args.c_target_features},
+                             'asm': {'cpu_level': 'v3', 'target_features': args.asm_target_features}},
               categories=dict(collections.Counter(x['category'] for x in rows))))
     print(json.dumps(collections.Counter(x['category'] for x in rows), indent=2))
 
@@ -209,6 +214,8 @@ def main():
     check.add_argument('--keel', type=Path, required=True)
     check.add_argument('--out', type=Path, required=True)
     check.add_argument('--timeout', type=int, default=60)
+    check.add_argument('--asm-target-features', help='Explicit extra assembler features; omit for the pinned v3 policy.')
+    check.add_argument('--c-target-features', help='Explicit extra C target features; omit for the pinned v1 policy.')
     oracle = sub.add_parser('compare')
     oracle.add_argument('--build', type=Path, required=True)
     oracle.add_argument('--probe-out', type=Path, required=True)

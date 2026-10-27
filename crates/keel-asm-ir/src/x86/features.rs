@@ -78,7 +78,7 @@ mod tests {
         );
         assert_eq!(v3.names().count(), 17);
         assert!(v3.validate().is_ok());
-        assert_eq!(Features::all_known().names().count(), 26);
+        assert_eq!(Features::all_known().names().count(), 31);
         assert!(Features::all_known().validate().is_ok());
         for invalid in ["legacy", "v4", "V1", ""] {
             assert!(CpuLevel::parse(invalid).is_err());
@@ -167,9 +167,16 @@ mod tests {
             "movbe",
             "xsave",
             "osxsave",
+            "avx512f",
+            "avx512vl",
+            "rdtscp",
+            "fsgsbase",
+            "rdrand",
+            "invpcid",
+            "prefetchw",
         ];
         let all = Features::all_known();
-        assert_eq!(all.fingerprint(), (1 << 26) - 1);
+        assert_eq!(all.fingerprint(), (1 << 31) - 1);
         for (bit, name) in names.iter().enumerate() {
             let mut missing = all;
             assert!(missing.set_feature(name, false));

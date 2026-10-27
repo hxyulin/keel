@@ -1788,12 +1788,19 @@ impl Assembler {
                 }
                 Ok(())
             }
-            ".type" if parts.len() == 2 => {
-                let name = x86::symbol(parts[0])?;
-                let kind = match parts[1] {
-                    "@function" | "%function" => SymbolKind::Text,
-                    "@object" | "%object" => SymbolKind::Data,
-                    "@tls_object" => SymbolKind::Tls,
+            ".type" => {
+                let (name, kind) = match parts.as_slice() {
+                    [name, kind] => Some((*name, *kind)),
+                    [args] => args.rsplit_once(char::is_whitespace),
+                    _ => None,
+                }
+                .ok_or(".type expects a symbol and a type")?;
+                let name = x86::symbol(name)?;
+                let kind = match kind.trim() {
+                    "@function" | "%function" | "STT_FUNC" => SymbolKind::Text,
+                    "@object" | "%object" | "STT_OBJECT" => SymbolKind::Data,
+                    "@tls_object" | "STT_TLS" => SymbolKind::Tls,
+                    "@notype" | "%notype" | "STT_NOTYPE" => SymbolKind::Unknown,
                     _ => return Err("unsupported ELF symbol type".into()),
                 };
                 let id = self.symbols.intern(&name);

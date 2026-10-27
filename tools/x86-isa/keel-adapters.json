@@ -9150,6 +9150,14 @@
     "vaesdeclast",
     "vaesimc",
     "vaeskeygenassist",
-    "vpclmulqdq"
+    "vpclmulqdq",
+    "rdtscp",
+    "rdfsbase",
+    "rdgsbase",
+    "wrfsbase",
+    "wrgsbase",
+    "rdrand",
+    "prefetchw",
+    "invpcid"
   ]
 }

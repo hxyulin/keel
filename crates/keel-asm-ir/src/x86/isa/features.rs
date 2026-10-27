@@ -483,6 +483,14 @@ Opcode::Extension(ExtensionOpcode::Vaesdeclast) => Features { aes: true, avx: tr
 Opcode::Extension(ExtensionOpcode::Vaesimc) => Features { aes: true, avx: true, xsave: true, osxsave: true, ..Features::NONE },
 Opcode::Extension(ExtensionOpcode::Vaeskeygenassist) => Features { aes: true, avx: true, xsave: true, osxsave: true, ..Features::NONE },
 Opcode::Extension(ExtensionOpcode::Vpclmulqdq) => Features { avx: true, pclmulqdq: true, xsave: true, osxsave: true, ..Features::NONE },
+Opcode::Extension(ExtensionOpcode::Rdtscp) => Features { rdtscp: true, ..Features::NONE },
+Opcode::Extension(ExtensionOpcode::Rdfsbase) => Features { fsgsbase: true, ..Features::NONE },
+Opcode::Extension(ExtensionOpcode::Rdgsbase) => Features { fsgsbase: true, ..Features::NONE },
+Opcode::Extension(ExtensionOpcode::Wrfsbase) => Features { fsgsbase: true, ..Features::NONE },
+Opcode::Extension(ExtensionOpcode::Wrgsbase) => Features { fsgsbase: true, ..Features::NONE },
+Opcode::Extension(ExtensionOpcode::Rdrand) => Features { rdrand: true, ..Features::NONE },
+Opcode::Extension(ExtensionOpcode::Prefetchw) => Features { prefetchw: true, ..Features::NONE },
+Opcode::Extension(ExtensionOpcode::Invpcid) => Features { invpcid: true, ..Features::NONE },
 _ => Features::NONE,
 } }
 #[rustfmt::skip]
@@ -521,5 +529,10 @@ pub fn feature_policy(isa: &str) -> Features { match isa {
 "AVX512F_KOP" => Features { avx: true, xsave: true, osxsave: true, avx512f: true, ..Features::NONE },
 "AVX512F_128" => Features { avx: true, xsave: true, osxsave: true, avx512f: true, avx512vl: true, ..Features::NONE },
 "AVX512F_256" => Features { avx: true, xsave: true, osxsave: true, avx512f: true, avx512vl: true, ..Features::NONE },
+"RDTSCP" => Features { rdtscp: true, ..Features::NONE },
+"RDWRFSGS" => Features { fsgsbase: true, ..Features::NONE },
+"RDRAND" => Features { rdrand: true, ..Features::NONE },
+"INVPCID" => Features { invpcid: true, ..Features::NONE },
+"PREFETCHW" => Features { prefetchw: true, ..Features::NONE },
 _ => Features::NONE,
 } }

@@ -44,9 +44,19 @@ The `e` option accepts numeric constants in the signed 32-bit range; `I` accepts
 inlining in IR as `re` and `rI`. Symbols use a register for `er`, because Keel
 does not establish a signed-32-bit symbol range through a code-model contract.
 The [GCC x86 constraint definitions](https://gcc.gnu.org/onlinedocs/gcc/Machine-Constraints.html)
-define these numeric predicates. Standalone `e`/`I`, other machine immediate classes, comma-separated alternatives
+define these numeric predicates. Standalone `e`/`I`, comma-separated alternatives
 and memory retries after scalar register exhaustion remain unsupported. Keel does not infer instruction-specific immediate ranges from
 arbitrary templates.
+
+Inputs also accept `Nd`/`dN` for x86 ports. Constants from 0 through 255 use
+an immediate; other values use RDX. Selection happens after required inlining
+and constant cleanup, including without `-O`. Fixed-register conflicts and
+clobbers still apply to the RDX alternative. `%w` prints DX for a register
+operand and preserves the normal `$` prefix for an immediate, matching the
+kernel's `in`/`out` templates. Width modifiers `%b`, `%w`, `%k` and `%q` also
+preserve numeric immediate values. Standalone `N` remains unsupported. The
+[GCC x86 constraint definitions](https://gcc.gnu.org/onlinedocs/gcc/Machine-Constraints.html)
+define the unsigned-byte `N` alternative.
 
 Flag outputs use `=@cc<condition>` and integer lvalues through 64 bits. Generated
 x86 condition mappings accept the normal `SETcc` suffixes and their aliases,

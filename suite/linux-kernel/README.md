@@ -1,8 +1,10 @@
 # Minimal Linux x86-64 compiler target
 
-Latest measured status: **33/484 C inputs** and **402/506 assembly inputs**
-accepted. The [basic-asm/alignment follow-up](#basic-asm-and-kernel-sized-alignment)
-records the current blockers and the stop at asm-goto's backend requirements.
+Latest measured status: **40/484 C inputs** and **486/506 assembly inputs**
+accepted under the original feature policy. A separate explicit-feature probe
+accepts **42 C inputs and 499 assembly inputs**. The
+[C/assembly expansion](#c-and-assembly-expansion) records the current blockers;
+asm-goto remains outside this increment's backend scope.
 
 This fixture targets the **64-bit parts** of Linux v6.12. Host programs,
 16/32-bit code and mixed-mode assembly remain external. The supported x86 C
@@ -118,6 +120,12 @@ additional diagnostics; they do not excuse missing sections or establish whole
 object equivalence. Use `--gnu-as` to select the reference assembler.
 
 Generated build trees, saved inputs, objects and raw logs stay outside Git.
+
+`probe --asm-target-features <list>` and `--c-target-features <list>` select
+explicit extra features independently. Omit them to retain the original
+assembler v3 and C v1 policies. Results record both policies. Keep reports from
+different policies separate when comparing acceptance counts.
+
 Commit only reviewed configuration, tools and compact reports. The preceding
 [readiness audit](../../docs/linux-kernel-readiness.md) describes the compiler,
 assembler, driver and linker boundaries this fixture measures.
@@ -679,3 +687,68 @@ check, rustdoc, the three audit tests and both generator freshness checks pass.
 Scoped Clippy completes with existing library warnings. Full run and fixture
 rerun logs are `/tmp/keel-kernel-gap-tests.log` and
 `/tmp/keel-kernel-gap-golden.log`.
+
+## C and assembly expansion
+
+The [expansion audit](audit-c-asm-expansion.json) adds the following support:
+
+- GNU `fallthrough`/`__fallthrough__` attributes on null statements inside
+  switches. They emit no operation and preserve switch control flow.
+- GNU statement expressions ending in one or more named labels followed by a
+  value. Labels stay before the value's evaluation. Trailing unlabeled null
+  statements do not remove the value; labeled null statements and compound
+  statements retain void type.
+- X86 `Nd`/`dN` asm inputs. Numeric constants 0 through 255 select an immediate;
+  other values select RDX. The predicate survives required inlining. `%w` works
+  with both alternatives, preserving the `$` prefix on immediate operands.
+- Standalone x86 prefixes such as `rep; bsf`, emitted as byte statements so
+  labels, alignment, section state and relocation positions match GNU as.
+  `.type` accepts whitespace syntax and `STT_FUNC`/`STT_OBJECT`/`STT_TLS`/`STT_NOTYPE`.
+- Generated adapters for RDTSCP, FS/GS-base reads/writes, RDRAND, PREFETCHW and
+  INVPCID; generated debug-register `%dbN` and `fxsaveq`/`fxrstorq` aliases.
+  Full-width byte immediates accept negative eight-bit patterns down to -256;
+  wider sign-extending immediates keep their signed ranges. Segment loads admit
+  GPR32 sources through the existing MOV forms.
+
+Optional capabilities have explicit feature fields and policy. Existing CPU
+profile memberships and compiler instruction semantics remain unchanged.
+
+| Policy | Accepted C / 484 | Accepted assembly / 506 |
+| --- | ---: | ---: |
+| Original C v1, assembly v3 | 40 | 486 |
+| Explicit optional features | 42 | 499 |
+
+The second probe adds `+popcnt` for C and
+`+rdtscp,+fsgsbase,+rdrand,+prefetchw,+invpcid,+clflush` for assembly. Its extra
+acceptance reflects permission to encode those instructions. It does not prove
+their availability on a v3 CPU or establish a kernel code-generation policy.
+
+All 435 previously accepted objects remain byte-for-byte identical under both
+policies. All 992 captured inputs and three reference artifacts were rehashed
+unchanged, with no crashes, timeouts or acceptance regressions. No reference
+rebuild or reboot occurred. No Keel object was linked into or run as the kernel.
+
+The original-policy C first errors are now asm-goto (439), alias attributes (2),
+POPCNT permission (2) and `__builtin_has_attribute` (1). Both POPCNT cases accept
+under the explicit policy. The 20 fallthrough errors, four `Nd` errors, three
+prefix errors and one assignment-type error no longer appear. Asm-goto still
+needs the IR/CFG and backend work described in the preceding follow-up.
+
+The seven assembly failures under the explicit policy are `.incbin` file access
+(2), `sysretl`, `tpause`, `rdseed`, `.fill`, and the register-alias expression in
+`vgetrandom-chacha`. Under the original policy, 13 more inputs first fail explicit
+optional-feature checks. These remain first-error counts, not a complete feature
+inventory or kernel correctness qualification.
+
+Validation passes 2,811 workspace tests and one doctest, with zero failures and
+13 ignored tests. All-targets/all-features check, 99 x86 generator tests, four
+Arm generator tests, four audit-harness tests and both freshness checks pass.
+Scoped Clippy completes with existing library warnings. The new 80-case adapter
+matrix matches Clang and GNU bytes and round-trips through Intel formatting.
+Prefix tests also compare GNU labels, symbol types and relocation offsets.
+Native statement-expression tests cover optimization/debug combinations;
+objects assemble for all three native targets. Two native Linux port-constraint
+objects pass all 65,536 input values and live-register checks using a safe MOV
+template. Port I/O and optional system instructions were not executed.
+
+Full workspace log: `/tmp/keel-kernel-expansion-tests.log`.

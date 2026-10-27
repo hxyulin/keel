@@ -54,7 +54,10 @@ pub(super) fn plan(
     for (op, &arg) in ops.iter_mut().skip(n).zip(args) {
         if matches!(
             *op,
-            Constraint::RegImm | Constraint::RegSignedImm32 | Constraint::RegShiftImm5
+            Constraint::RegImm
+                | Constraint::RegSignedImm32
+                | Constraint::RegShiftImm5
+                | Constraint::PortImm8
         ) {
             let symbolic = keel_ir::symbolic_immediate(func, arg).is_some_and(|(symbol, _)| {
                 !module
@@ -66,12 +69,19 @@ pub(super) fn plan(
                 Constraint::RegImm => numeric.is_some() || symbolic,
                 Constraint::RegSignedImm32 => numeric.is_some_and(|n| i32::try_from(n).is_ok()),
                 Constraint::RegShiftImm5 => numeric.is_some_and(|n| (0..=31).contains(&n)),
+                Constraint::PortImm8 => numeric.is_some_and(|n| (0..=255).contains(&n)),
                 _ => unreachable!(),
             };
             // No code-model/range guarantee exists for symbolic e operands.
             // Preserve their value through the register alternative instead.
             *op = if immediate {
                 Constraint::Imm
+            } else if *op == Constraint::PortImm8 {
+                Constraint::Fixed(keel_ir::PhysReg {
+                    arch: AsmArch::X86,
+                    float: false,
+                    num: 2,
+                })
             } else {
                 Constraint::Reg
             };
@@ -272,11 +282,16 @@ fn substitute(
                 text.push(')');
             }
         } else {
-            if i < n || !matches!(modifier, None | Some('c' | 'a' | 'n')) {
+            if i < n
+                || !matches!(
+                    modifier,
+                    None | Some('c' | 'a' | 'n' | 'b' | 'w' | 'k' | 'q')
+                )
+            {
                 return Err("unsupported x86 asm immediate modifier".into());
             }
             let arg = args[i - n];
-            if modifier.is_none() {
+            if matches!(modifier, None | Some('b' | 'w' | 'k' | 'q')) {
                 text.push('$');
             }
             if let Some(value) = iconst(func, arg) {
