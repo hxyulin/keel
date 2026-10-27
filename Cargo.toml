@@ -29,3 +29,12 @@ dbg_macro = "warn"
 inherits = "release"
 lto = "fat"
 codegen-units = 1
+
+# Faster execution of compiler/assembler matrices without disabling test checks.
+# Opt in with `cargo test --profile test-fast`; the default test profile stays intact.
+[profile.test-fast]
+inherits = "test"
+opt-level = 2
+debug = 1
+debug-assertions = true
+overflow-checks = true

@@ -100,8 +100,11 @@ Charts are generated from the benchmark data by
 
 ```sh
 cargo build
-cargo test --workspace
+python3 tools/test.py
 ```
+
+See [targeted and full tests](docs/testing.md) for component selections, quick
+checks and the optimized test profile.
 
 End-to-end tests need `clang` (and `clang++` for C++ drivers). See the
 [development section](docs/toolchain-overview.md#development) for test layout.

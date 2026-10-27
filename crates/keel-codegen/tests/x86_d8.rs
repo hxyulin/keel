@@ -227,6 +227,9 @@ fn boundary_ir(wide: bool) -> String {
     s
 }
 
+#[path = "common/matrix.rs"]
+mod matrix;
+
 fn compile(
     source: &str,
     s: SelectionTier,
@@ -234,12 +237,18 @@ fn compile(
     pools: &Pools,
     features: Features,
 ) -> (String, Vec<u8>, Vec<u8>) {
-    let mut m = keel_ir::parse(source).unwrap();
-    keel_ir::verify_module(&m).unwrap();
-    if s == SelectionTier::Full {
-        keel_opt::optimize(&mut m).unwrap();
-        keel_ir::verify_module(&m).unwrap();
-    }
+    let prepared = matrix::PreparedModule::parse(source);
+    compile_prepared(&prepared, s, a, pools, features)
+}
+
+fn compile_prepared(
+    prepared: &matrix::PreparedModule,
+    s: SelectionTier,
+    a: AllocationTier,
+    pools: &Pools,
+    features: Features,
+) -> (String, Vec<u8>, Vec<u8>) {
+    let m = prepared.for_selector(s);
     let selector = FeatureSelector {
         inner: &s,
         features,
@@ -248,9 +257,8 @@ fn compile(
         selector: &selector,
         allocator: &a,
     };
-    let text = keel_codegen::x86_64::compile_with_pipeline(&m, pools, &pipeline).unwrap();
-    let program =
-        keel_codegen::x86_64::compile_program_with_pipeline(&m, pools, &pipeline).unwrap();
+    let text = keel_codegen::x86_64::compile_with_pipeline(m, pools, &pipeline).unwrap();
+    let program = keel_codegen::x86_64::compile_program_with_pipeline(m, pools, &pipeline).unwrap();
     assert_eq!(program.stats().text_bytes, 0);
     let typed = keel_asm::x86::assemble_program_object_with_features(&program, features).unwrap();
     let parsed = keel_asm::x86::assemble_object_with_features(&text, features).unwrap();
@@ -268,10 +276,23 @@ fn compile(
 }
 
 #[test]
-fn d_matrix_export_and_clang_encoding() {
+fn exhaustive_d_matrix_export_and_clang_encoding() {
+    check_d_matrix(true);
+}
+
+#[test]
+fn d_matrix_boundary_smoke() {
+    check_d_matrix(false);
+}
+
+fn check_d_matrix(exhaustive: bool) {
     use object::{Object, ObjectSection};
-    let export = std::env::var_os("KEEL_X86_D8_EXPORT_DIR").map(PathBuf::from);
-    let dir = common::temp("x86-d8");
+    let export = exhaustive
+        .then(|| std::env::var_os("KEEL_X86_D8_EXPORT_DIR"))
+        .flatten()
+        .map(PathBuf::from);
+    let dir = common::temp(if exhaustive { "x86-d8" } else { "x86-d8-smoke" });
+    let mut configurations = 0;
     for (kind, source, c) in fixtures() {
         fs::write(dir.join("reference.c"), &c).unwrap();
         let target = if cfg!(target_os = "macos") {
@@ -300,6 +321,14 @@ fn d_matrix_export_and_clang_encoding() {
             ("default", Features::default()),
             ("avx2", Features::for_level(CpuLevel::V3)),
         ] {
+            let narrow;
+            let fixture = if kind == "boundaries" && !features.avx {
+                narrow = boundary_ir(false);
+                &narrow
+            } else {
+                &source
+            };
+            let prepared = matrix::PreparedModule::parse(fixture);
             for s in [
                 SelectionTier::Baseline,
                 SelectionTier::Trees,
@@ -311,14 +340,18 @@ fn d_matrix_export_and_clang_encoding() {
                         ("tiny", &TINY),
                         ("empty", &EMPTY),
                     ] {
-                        let narrow;
-                        let source = if kind == "boundaries" && !features.avx {
-                            narrow = boundary_ir(false);
-                            &narrow
-                        } else {
-                            &source
-                        };
-                        let (text, typed, parsed) = compile(source, s, a, pools, features);
+                        if !exhaustive
+                            && !matches!(
+                                (s, a, pool),
+                                (SelectionTier::Baseline, AllocationTier::Fast, "normal")
+                                    | (SelectionTier::Full, AllocationTier::Full, "empty")
+                            )
+                        {
+                            continue;
+                        }
+                        let (text, typed, parsed) =
+                            compile_prepared(&prepared, s, a, pools, features);
+                        configurations += 1;
                         let name = format!("{kind}-{feature}-{s:?}-{a:?}-{pool}");
                         if let Some(d) = &export {
                             fs::write(d.join(format!("{name}.s")), &text).unwrap();
@@ -347,6 +380,7 @@ fn d_matrix_export_and_clang_encoding() {
             }
         }
     }
+    assert_eq!(configurations, if exhaustive { 162 } else { 18 });
     fs::remove_dir_all(dir).unwrap();
 }
 

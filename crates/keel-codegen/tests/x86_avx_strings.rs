@@ -190,6 +190,9 @@ if(_mm_getcsr()!=csr)return 11;_mm_setcsr(saved);return 0;}
 "#;
     c
 }
+#[path = "common/matrix.rs"]
+mod matrix;
+
 fn object(
     s: SelectionTier,
     a: AllocationTier,
@@ -207,11 +210,18 @@ fn object_with_forced_wide(
     wide: bool,
     force: bool,
 ) -> Result<(Vec<u8>, String), keel_codegen::CodegenError> {
-    let mut m = keel_ir::parse(&if force { forced_source() } else { source(wide) }).unwrap();
-    keel_ir::verify_module(&m).unwrap();
-    if s == SelectionTier::Full {
-        keel_opt::optimize(&mut m).unwrap();
-    }
+    use std::sync::OnceLock;
+    static NARROW: OnceLock<matrix::PreparedModule> = OnceLock::new();
+    static WIDE: OnceLock<matrix::PreparedModule> = OnceLock::new();
+    static FORCED: OnceLock<matrix::PreparedModule> = OnceLock::new();
+    let prepared = if force {
+        FORCED.get_or_init(|| matrix::PreparedModule::parse(&forced_source()))
+    } else if wide {
+        WIDE.get_or_init(|| matrix::PreparedModule::parse(&source(true)))
+    } else {
+        NARROW.get_or_init(|| matrix::PreparedModule::parse(&source(false)))
+    };
+    let m = prepared.for_selector(s);
     let selector = FeatureSelector {
         inner: &s,
         features: f,
@@ -228,8 +238,8 @@ fn object_with_forced_wide(
     } else {
         &keel_codegen::x86_64::REGISTERS
     };
-    let text = keel_codegen::x86_64::compile_with_pipeline(&m, pools, &pipeline)?;
-    let p = keel_codegen::x86_64::compile_program_with_pipeline(&m, pools, &pipeline)?;
+    let text = keel_codegen::x86_64::compile_with_pipeline(m, pools, &pipeline)?;
+    let p = keel_codegen::x86_64::compile_program_with_pipeline(m, pools, &pipeline)?;
     assert_eq!(p.stats().text_bytes, 0);
     let b = keel_asm::x86::assemble_program_object_with_features(&p, f).unwrap();
     assert_eq!(
@@ -354,10 +364,27 @@ fn native_forced_live_ymm0_across_string_masks() {
     fs::remove_dir_all(d).unwrap();
 }
 #[test]
-fn avx_strings_controls_register_spill_and_wide_alias_exports() {
-    let export = std::env::var_os("KEEL_X86_256_EXPORT_DIR").map(PathBuf::from);
-    let d = common::temp("avx-string-oracle");
+fn exhaustive_avx_strings_controls_register_spill_and_wide_alias_exports() {
+    check_string_exports(true);
+}
+
+#[test]
+fn avx_strings_boundary_smoke() {
+    check_string_exports(false);
+}
+
+fn check_string_exports(exhaustive: bool) {
+    let export = exhaustive
+        .then(|| std::env::var_os("KEEL_X86_256_EXPORT_DIR"))
+        .flatten()
+        .map(PathBuf::from);
+    let d = common::temp(if exhaustive {
+        "avx-string-oracle"
+    } else {
+        "avx-string-smoke"
+    });
     fs::create_dir_all(&d).unwrap();
+    let mut configurations = 0;
     for wide in [false, true] {
         let name = if wide {
             "avx-strings-wide"
@@ -393,6 +420,15 @@ fn avx_strings_controls_register_spill_and_wide_alias_exports() {
         ] {
             for a in [AllocationTier::Fast, AllocationTier::Full] {
                 for empty in [false, true] {
+                    if !exhaustive
+                        && !matches!(
+                            (s, a, empty),
+                            (SelectionTier::Baseline, AllocationTier::Fast, false)
+                                | (SelectionTier::Full, AllocationTier::Full, true)
+                        )
+                    {
+                        continue;
+                    }
                     let (b, text) = object(
                         s,
                         a,
@@ -401,6 +437,7 @@ fn avx_strings_controls_register_spill_and_wide_alias_exports() {
                         wide,
                     )
                     .unwrap();
+                    configurations += 1;
                     if let Some(e) = &export {
                         let n = format!("{name}-{s:?}-{a:?}-{empty}");
                         fs::write(e.join(format!("{n}.o")), b).unwrap();
@@ -410,6 +447,7 @@ fn avx_strings_controls_register_spill_and_wide_alias_exports() {
             }
         }
     }
+    assert_eq!(configurations, if exhaustive { 24 } else { 4 });
     fs::remove_dir_all(d).unwrap();
 }
 #[test]
@@ -544,7 +582,7 @@ fn exact_oracle_instruction_bytes_gnu_and_clang() {
 }
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
-fn native_avx_strings_all_controls_lengths_flags_aliases() {
+fn exhaustive_native_avx_strings_all_controls_lengths_flags_aliases() {
     if !std::is_x86_feature_detected!("avx") {
         return;
     }

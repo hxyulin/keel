@@ -5,6 +5,7 @@ import os
 import tempfile
 from pathlib import Path
 import unittest
+from unittest import mock
 
 SPEC = importlib.util.spec_from_file_location("metrics", Path(__file__).resolve().parents[1] / "instruction_metrics.py")
 metrics = importlib.util.module_from_spec(SPEC)
@@ -113,6 +114,18 @@ class IntegrationTests(unittest.TestCase):
 
 
 class SampleTests(unittest.TestCase):
+    def test_sample_uses_loaded_instruction_without_rebuilding_catalog(self):
+        instruction = {
+            "name": "sample", "encoding": {"width": 32, "values": [
+                {"name": "Rd", "range": {"start": 0, "width": 5},
+                 "value": {"value": "'xxxxx'"}},
+                {"range": {"start": 5, "width": 27},
+                 "value": {"value": "'" + "1" * 27 + "'"}},
+            ]},
+        }
+        with mock.patch.object(metrics, "catalog", side_effect=AssertionError("unexpected ISA reload")):
+            self.assertEqual(metrics.representative_word(instruction), 0xffffffe0)
+
     def test_samples_preserve_fixed_bits_and_vector_aliases(self):
         isa = json.loads(metrics.ISA.read_text())
         for instruction, row in zip(isa["instructions"], metrics.catalog()["encodings"]):

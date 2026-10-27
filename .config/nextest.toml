@@ -1,0 +1,14 @@
+# Keep external compiler processes and large codegen modules bounded on laptops.
+[profile.default]
+test-threads = 4
+fail-fast = false
+
+[test-groups.codegen]
+max-threads = 2
+
+[[profile.default.overrides]]
+filter = 'package(=keel-codegen)'
+test-group = 'codegen'
+
+[profile.default.junit]
+path = 'junit.xml'

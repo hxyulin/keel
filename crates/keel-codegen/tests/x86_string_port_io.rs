@@ -241,14 +241,26 @@ fn exact_registry_signatures_and_all743_prefix() {
     }
 }
 #[test]
-fn source_only_matrix() {
+fn exhaustive_source_only_matrix() {
+    check_source_matrix(true);
+}
+
+#[test]
+fn source_matrix_boundary_smoke() {
+    check_source_matrix(false);
+}
+
+fn check_source_matrix(exhaustive: bool) {
     let source = recipes();
     let raw = keel_ir::parse(&source).unwrap();
     keel_ir::verify_module(&raw).unwrap();
     let mut optimized = raw.clone();
     keel_opt::optimize(&mut optimized).unwrap();
     keel_ir::verify_module(&optimized).unwrap();
-    let export = std::env::var_os("KEEL_STRING_IO_EXPORT").map(PathBuf::from);
+    let export = exhaustive
+        .then(|| std::env::var_os("KEEL_STRING_IO_EXPORT"))
+        .flatten()
+        .map(PathBuf::from);
     if let Some(d) = &export {
         fs::create_dir_all(d).unwrap();
         fs::write(d.join("recipes.ir"), source).unwrap();
@@ -275,6 +287,7 @@ fn source_only_matrix() {
         .collect::<Vec<_>>();
     assert_eq!(expected.len(), 288);
     let mut config = 0;
+    let mut checked_lines = std::collections::HashSet::new();
     for (stage, m) in [("raw", &raw), ("opt", &optimized)] {
         let mut count = 0;
         for f in &m.functions {
@@ -294,19 +307,36 @@ fn source_only_matrix() {
                 .to_string()
                 .contains("x86 architectural intrinsic")
         );
-        for features in [
+        for (feature_index, features) in [
             Features::NONE,
             Features::for_level(CpuLevel::V1),
             Features::for_level(CpuLevel::V2),
             Features::for_level(CpuLevel::V3),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
             for selection in [
                 SelectionTier::Baseline,
                 SelectionTier::Trees,
                 SelectionTier::Full,
             ] {
                 for allocation in [AllocationTier::Fast, AllocationTier::Full] {
-                    for pool in [&keel_codegen::x86_64::REGISTERS, &tiny, &empty] {
+                    for (pool_index, pool) in [&keel_codegen::x86_64::REGISTERS, &tiny, &empty]
+                        .into_iter()
+                        .enumerate()
+                    {
+                        if !exhaustive
+                            && !(feature_index == 1
+                                && ((selection == SelectionTier::Baseline
+                                    && allocation == AllocationTier::Fast
+                                    && pool_index == 0)
+                                    || (selection == SelectionTier::Full
+                                        && allocation == AllocationTier::Full
+                                        && pool_index == 2)))
+                        {
+                            continue;
+                        }
                         let selector = FeatureSelector {
                             inner: &selection,
                             features,
@@ -331,9 +361,13 @@ fn source_only_matrix() {
                         let lines = principal_lines(&text);
                         assert_eq!(lines.len(), 288);
                         for (line, &(out, w, rep)) in lines.iter().zip(&expected) {
-                            let isolated = format!(".intel_syntax noprefix\n.text\n{line}\n");
-                            let b = keel_asm::x86::assemble_object(&isolated).unwrap();
-                            assert_eq!(section(&b), expected_bytes(out, w, rep), "{line}");
+                            // Whole-object parity is checked for every configuration above.
+                            // The literal byte witness depends only on this instruction.
+                            if checked_lines.insert(line.to_string()) {
+                                let isolated = format!(".intel_syntax noprefix\n.text\n{line}\n");
+                                let b = keel_asm::x86::assemble_object(&isolated).unwrap();
+                                assert_eq!(section(&b), expected_bytes(out, w, rep), "{line}");
+                            }
                         }
                         assert!(
                             !text.lines().any(|l| matches!(l.trim(), "cld" | "std")),
@@ -350,7 +384,8 @@ fn source_only_matrix() {
         }
         eprintln!("string I/O {stage} matrix complete: {config} configurations");
     }
-    assert_eq!(config, 144);
+    assert_eq!(config, if exhaustive { 144 } else { 4 });
+    assert_eq!(checked_lines.len(), 12);
 }
 #[test]
 fn malformed_types_and_memory_ordering() {

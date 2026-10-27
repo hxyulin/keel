@@ -39,7 +39,7 @@ fn arr(ty: Type) -> String {
     ty.vector()
         .map_or(e.to_string(), |v| format!("{}{e}", v.lanes()))
 }
-fn fixture() -> (String, String, usize, usize) {
+fn fixture(immediates: &[u64]) -> (String, String, usize, usize) {
     let mut ir = String::new();
     let mut c = String::from(
         "#include <stdint.h>\n#include <string.h>\n#include <stdio.h>\n#include <assert.h>\n#include <sys/mman.h>\n#include <unistd.h>\nstruct C{void(*f)(const void*,const void*,const void*,void*);void(*ref)(const void*,const void*,const void*,void*);unsigned result,a,b,c,width,fp;const char*name;};\n",
@@ -80,7 +80,7 @@ fn fixture() -> (String, String, usize, usize) {
                 int_ty
             };
             for &shift in &shifts {
-                for imm in 0..256u64 {
+                for &imm in immediates {
                     let raw = if fp {
                         let b6 = (imm >> 6) & 1;
                         if width == 4 {
@@ -214,17 +214,37 @@ __asm__ volatile("msr fpcr,%0"::"r"(savedcr):"memory");status(old);return 0;}
 "#;
     (ir, c, records, combinations)
 }
+#[path = "common/matrix.rs"]
+mod matrix;
+
 #[test]
-fn all_modified_immediate_patterns_have_native_expansion_witnesses() {
+fn exhaustive_all_modified_immediate_patterns_have_native_expansion_witnesses() {
+    check_modified_immediates(true);
+}
+
+#[test]
+fn modified_immediate_boundaries_have_native_expansion_witnesses() {
+    check_modified_immediates(false);
+}
+
+fn check_modified_immediates(exhaustive: bool) {
     use object::{Object, ObjectSection};
-    let (source, c, records, combinations) = fixture();
+    let immediates = if exhaustive {
+        (0..256).collect::<Vec<_>>()
+    } else {
+        vec![0, 1, 127, 128, 255]
+    };
+    let (source, c, records, combinations) = fixture(&immediates);
     assert_eq!(records, 15);
     eprintln!(
         "modified-immediate records {records}, exact shape/high/lane signatures {combinations}"
     );
-    let m = keel_ir::parse(&source).unwrap();
-    keel_ir::verify_module(&m).unwrap();
-    let dir = common::temp("neon-modified-immediates");
+    let prepared = matrix::PreparedModule::parse(&source);
+    let dir = common::temp(if exhaustive {
+        "neon-modified-immediates"
+    } else {
+        "neon-immediate-smoke"
+    });
     fs::write(dir.join("oracle.c"), c).unwrap();
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     common::command(
@@ -234,24 +254,28 @@ fn all_modified_immediate_patterns_have_native_expansion_witnesses() {
             .arg("-o")
             .arg(dir.join("oracle.o")),
     );
+    let mut configurations = 0;
     for selector in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
         SelectionTier::Full,
     ] {
+        let m = prepared.for_selector(selector);
         for allocator in [AllocationTier::Fast, AllocationTier::Full] {
+            if !exhaustive
+                && (selector == SelectionTier::Trees || allocator == AllocationTier::Full)
+            {
+                continue;
+            }
             for pools in [&keel_codegen::aarch64::REGISTERS, &SPILL] {
-                let mut m = m.clone();
-                if selector == SelectionTier::Full {
-                    keel_opt::optimize(&mut m).unwrap();
-                }
                 let p = CodegenPipeline {
                     selector: &selector,
                     allocator: &allocator,
                 };
-                let text = keel_codegen::aarch64::compile_with_pipeline(&m, pools, &p).unwrap();
+                let text = keel_codegen::aarch64::compile_with_pipeline(m, pools, &p).unwrap();
+                configurations += 1;
                 let program =
-                    keel_codegen::aarch64::compile_program_with_pipeline(&m, pools, &p).unwrap();
+                    keel_codegen::aarch64::compile_program_with_pipeline(m, pools, &p).unwrap();
                 let bytes =
                     keel_asm::assemble_program_object(&program, Default::default()).unwrap();
                 assert_eq!(bytes, keel_asm::assemble_object(&text).unwrap());
@@ -286,5 +310,6 @@ fn all_modified_immediate_patterns_have_native_expansion_witnesses() {
             }
         }
     }
+    assert_eq!(configurations, if exhaustive { 12 } else { 4 });
     fs::remove_dir_all(dir).unwrap();
 }

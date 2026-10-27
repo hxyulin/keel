@@ -25,26 +25,29 @@ def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def encoding_row(instruction):
+    """Build one row from an already loaded instruction, without reloading the ISA."""
+    encoding = instruction["encoding"]
+    if encoding["width"] != 32:
+        raise ValueError("expected fixed-width A64 encodings")
+    mask = base = 0
+    for field in encoding["values"]:
+        start = field["range"]["start"]
+        bits = field["value"]["value"].strip("'")
+        for offset, bit in enumerate(reversed(bits)):
+            if bit != "x":
+                mask |= 1 << (start + offset)
+                base |= int(bit) << (start + offset)
+    return {
+        "encoding": instruction["name"], "bytes": 4, "mask": mask, "base": base,
+        "latency_cycles": None, "reciprocal_throughput_cycles": None,
+        "micro_ops": None, "cpu": None,
+    }
+
+
 def catalog():
     data = json.loads(ISA.read_text())
-    records = []
-    for inst in data["instructions"]:
-        encoding = inst["encoding"]
-        if encoding["width"] != 32:
-            raise ValueError("expected fixed-width A64 encodings")
-        mask = base = 0
-        for field in encoding["values"]:
-            start = field["range"]["start"]
-            bits = field["value"]["value"].strip("'")
-            for offset, bit in enumerate(reversed(bits)):
-                if bit != "x":
-                    mask |= 1 << (start + offset)
-                    base |= int(bit) << (start + offset)
-        records.append({
-            "encoding": inst["name"], "bytes": 4, "mask": mask, "base": base,
-            "latency_cycles": None, "reciprocal_throughput_cycles": None,
-            "micro_ops": None, "cpu": None,
-        })
+    records = [encoding_row(instruction) for instruction in data["instructions"]]
     return {
         "schema_version": 1, "architecture": "aarch64",
         "provenance": {"source_url": data["source_url"],
@@ -117,7 +120,7 @@ def normalize_mca(raw, cpu, expected_instructions):
 
 def representative_word(instruction):
     """Choose one encoding sample, not a claim to cover all operand variants."""
-    row = next(r for r in catalog()["encodings"] if r["encoding"] == instruction["name"])
+    row = encoding_row(instruction)
     word = row["base"]
     registers = {"Rd": 0, "Rt": 0, "Rn": 1, "Rm": 2, "Ra": 3, "Rs": 2, "Rt2": 3}
     for field in instruction["encoding"]["values"]:
