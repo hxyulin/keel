@@ -871,6 +871,24 @@ impl<'a> Parser<'a> {
             let sugar = *sugar.unqualified(&self.typedefs);
             let e = self.cast_expr()?;
             let e = self.rvalue(e);
+            if let Ty::Struct(id) = ty
+                && self.structs[id].is_union
+                && e.ty != ty
+            {
+                let qualifiers = self.parameter_qualifiers(e.ty, e.sugar);
+                let member = self.structs[id]
+                    .members
+                    .iter()
+                    .find(|member| {
+                        member.ty.compatible(&e.ty)
+                            && self.parameter_qualifiers(member.ty, member.sugar) == qualifiers
+                            && self.union_cast_enums_compatible(member.ty, member.sugar, e.sugar)
+                    })
+                    .ok_or_else(|| Error::new(loc, "cast operand does not match a union member"))?;
+                let bits = member.bits;
+                let result = mk(ExprKind::UnionCast(self.node(e), bits), ty, loc).with_sugar(sugar);
+                return Ok(self.capture_vm_bounds(mark, result));
+            }
             let vector_cast = (ty.is_vector() || e.ty.is_vector())
                 && (ty.is_vector() || ty.is_integer())
                 && (e.ty.is_vector() || e.ty.is_integer())
@@ -902,6 +920,27 @@ impl<'a> Parser<'a> {
             return Ok(self.capture_vm_bounds(mark, result));
         }
         self.unary()
+    }
+
+    /// GCC matches compatible types, including an enum's underlying integer
+    /// type, but two distinct enums remain incompatible.
+    fn union_cast_enums_compatible(&self, ty: Ty<'a>, a: Sugar<'a>, b: Sugar<'a>) -> bool {
+        match (a.unqualified(&self.typedefs), b.unqualified(&self.typedefs)) {
+            (Sugar::Enum(a), Sugar::Enum(b)) => a == b,
+            _ => match ty {
+                Ty::Ptr(inner) => self.union_cast_enums_compatible(
+                    *inner,
+                    a.pointee(&self.typedefs),
+                    b.pointee(&self.typedefs),
+                ),
+                Ty::Array(array) => self.union_cast_enums_compatible(
+                    array.elem,
+                    a.array_element(&self.typedefs, self.arena),
+                    b.array_element(&self.typedefs, self.arena),
+                ),
+                _ => true,
+            },
+        }
     }
 
     /// Whether a type name starts `n` tokens ahead.

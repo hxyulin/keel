@@ -1585,6 +1585,7 @@ fn no_statements(e: &Expr<'_>, budget: u32) -> bool {
     match &e.kind {
         ExprKind::Unary(_, a)
         | ExprKind::Cast(a)
+        | ExprKind::UnionCast(a, _)
         | ExprKind::Deref(a)
         | ExprKind::Addr(a)
         | ExprKind::VaStart(a)
@@ -1863,6 +1864,7 @@ fn visit_exprs_as(
     match &e.kind {
         ExprKind::Unary(_, a)
         | ExprKind::Cast(a)
+        | ExprKind::UnionCast(a, _)
         | ExprKind::Deref(a)
         | ExprKind::VaStart(a)
         | ExprKind::VaArg(a)
@@ -3112,6 +3114,35 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 return Ok(v);
             }
             ExprKind::Call(f, args) => return self.call(f, args, e),
+            ExprKind::UnionCast(inner, bits) => {
+                let size = u32::try_from(self.size(&e.ty)).map_err(|_| {
+                    Error::new(e.loc, "union cast exceeds the IR stack-slot size limit")
+                })?;
+                let align = self.g.types().align(&e.ty) as u32;
+                let slot = self.b.create_stack_slot(size.max(1), align.min(16));
+                let addr = self.b.ins().stack_addr(slot);
+                self.zero_bytes_with_flags(addr, u64::from(size), MemoryFlags::default());
+                let value = self.val(inner)?;
+                let place = if let Some(field) = bits {
+                    Place::Bits {
+                        flags: MemoryFlags::default(),
+                        addr,
+                        unit: inner.ty.ir_with_layout(self.g.p.c_layout),
+                        field: *field,
+                        signed: inner.ty.is_signed(),
+                    }
+                } else if Self::is_aggregate(&inner.ty) {
+                    self.aggregate_place(addr, &inner.ty, MemoryFlags::default(), inner.loc)?
+                } else {
+                    Place::Mem(
+                        addr,
+                        inner.ty.ir_with_layout(self.g.p.c_layout),
+                        MemoryFlags::default(),
+                    )
+                };
+                self.store_place(&place, value);
+                addr
+            }
             ExprKind::Cast(inner) => {
                 if e.ty == Ty::Void {
                     self.discard(inner)?;

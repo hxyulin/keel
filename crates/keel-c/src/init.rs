@@ -60,6 +60,25 @@ impl<'a> Parser<'a> {
                         bits: None,
                     } if expr.ty.is_struct() && !expr.sugar.is_volatile(&parser.typedefs) => {
                         match expr.kind {
+                            ExprKind::UnionCast(value, bits) => {
+                                if let ExprKind::Global(g) = value.kind
+                                    && parser.globals[g].compound_literal
+                                    && value.ty.is_struct()
+                                    && !value.sugar.is_volatile(&parser.typedefs)
+                                    && let Some(init) = parser.globals[g].init
+                                {
+                                    append(parser, init, base + offset, out);
+                                    continue;
+                                }
+                                let nested = Init {
+                                    items: parser.slice(&[InitItem::Expr {
+                                        offset: 0,
+                                        expr: value,
+                                        bits,
+                                    }]),
+                                };
+                                append(parser, nested, base + offset, out);
+                            }
                             ExprKind::CompoundLit(_, nested) => {
                                 append(parser, *nested, base + offset, out)
                             }

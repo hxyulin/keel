@@ -98,6 +98,9 @@ pub enum ExprKind<'a> {
     Call(&'a Expr<'a>, &'a [Expr<'a>]),
     /// Converts the operand to this expression's type.
     Cast(&'a Expr<'a>),
+    /// GNU union construction: initialize the matching member once, yielding
+    /// a union rvalue with its own storage. The member may be a bit-field.
+    UnionCast(&'a Expr<'a>, Option<BitField>),
     VectorIndex(&'a Expr<'a>, &'a Expr<'a>),
     Deref(&'a Expr<'a>),
     Addr(&'a Expr<'a>),
