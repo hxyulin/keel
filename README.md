@@ -89,7 +89,8 @@ kernel. These measurements use nine alternating pairs on an AMD Ryzen 9
 Keel compiles quickly and supports application workloads and the kernel
 milestone above. Generated code still trails GCC and Clang in runtime and
 size optimization on the measured workloads.
-Measured on an Apple M5 Max. [Compiler](docs/benchmarks/compiler-20261024.md) ·
+The application and toolchain measurements below use an Apple M5 Max.
+[Compiler](docs/benchmarks/compiler-20261024.md) ·
 [assembler/linker](docs/benchmarks/assembly-link-20261024.md) ·
 [runtime](docs/benchmarks/runtime-20261022.md) methodology
 
