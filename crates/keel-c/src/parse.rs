@@ -82,6 +82,7 @@ pub enum TypeMode {
 
 #[derive(Default, Clone, Copy, PartialEq)]
 pub struct Attrs {
+    pub nonstring: bool,
     pub mode: Option<(TypeMode, Loc)>,
     pub vector_size: Option<(u64, Loc)>,
     pub aligned: Option<u64>,
@@ -137,6 +138,7 @@ impl Attrs {
         if let Some(a) = other.alignas {
             self.alignas = Some(self.alignas.unwrap_or(0).max(a));
         }
+        self.nonstring |= other.nonstring;
         self.packed |= other.packed;
         self.returns_twice |= other.returns_twice;
         self.noreturn |= other.noreturn;
@@ -155,6 +157,12 @@ impl Attrs {
     /// linkage can carry, written where no such symbol is declared.
     fn no_type_attrs(&self) -> R<()> {
         self.no_cleanup()?;
+        if self.nonstring {
+            return Err(Error::new(
+                Loc::default(),
+                "nonstring requires a character array or pointer declaration",
+            ));
+        }
         if let Some(loc) = self
             .mode
             .map(|(_, loc)| loc)
@@ -650,6 +658,7 @@ impl<'a> Parser<'a> {
         }
         let id = *self.va_list_tag.get_or_insert_with(|| {
             let member = |name: &'static str, ty: Ty<'a>, offset| Member {
+                nonstring: false,
                 align: Types::new(&self.structs, self.c_layout).align(&ty),
                 name: Some(name.into()),
                 ty,
@@ -1070,6 +1079,7 @@ impl<'a> Parser<'a> {
         let align = self.type_alignment(&ty, &sugar);
         let fs = self.fs.as_mut().unwrap();
         fs.locals.push(Local {
+            nonstring: false,
             name: name,
             ty,
             sugar,
@@ -1101,6 +1111,7 @@ impl<'a> Parser<'a> {
     ) -> usize {
         let align = self.align_of(&ty);
         self.globals.push(Global {
+            nonstring: false,
             symbol: name,
             name,
             ty,
@@ -1199,6 +1210,12 @@ impl<'a> Parser<'a> {
             ));
         }
         if !spec.infer && self.eat(";") {
+            if spec.attrs.nonstring {
+                return Err(Error::new(
+                    self.loc(),
+                    "nonstring requires a character array or pointer declaration",
+                ));
+            }
             spec.attrs.no_symbol_attrs()?;
             return Ok(());
         }
@@ -1375,6 +1392,9 @@ impl<'a> Parser<'a> {
             let is_const = d.is_const || (spec.is_const && base);
             let is_volatile = d.is_volatile || (spec.is_volatile && base);
             if spec.storage == Storage::Typedef {
+                if attrs.nonstring {
+                    return Err(Error::new(name_loc, "nonstring cannot annotate a typedef"));
+                }
                 attrs.no_symbol_attrs()?;
                 if attrs.alignas.is_some() {
                     return Err(Error::new(name_loc, "`_Alignas` cannot apply to a typedef"));
@@ -1435,6 +1455,7 @@ impl<'a> Parser<'a> {
                         "parameter declaration list requires an identifier-list definition",
                     ));
                 }
+                self.check_nonstring(d.ty, attrs, name_loc)?;
                 if attrs.alignment().is_some() || attrs.alignas.is_some() {
                     return Err(Error::new(
                         name_loc,
@@ -1489,7 +1510,9 @@ impl<'a> Parser<'a> {
                 }
                 // In scope from the end of its declarator: `T *p =
                 // malloc(sizeof *p)` refers to itself.
+                self.check_nonstring(d.ty, attrs, name_loc)?;
                 let id = self.new_local(name, d.ty, d.sugar, is_volatile);
+                self.fs.as_mut().unwrap().locals[id].nonstring = attrs.nonstring;
                 let align = self.object_alignment(&d.ty, &d.sugar, attrs, name_loc)?;
                 self.fs.as_mut().unwrap().locals[id].align = align;
                 let mut ty = d.ty;
@@ -1613,6 +1636,7 @@ impl<'a> Parser<'a> {
         inferred_init: Option<Init<'a>>,
     ) -> R<()> {
         let (name, name_loc) = *d.name.as_ref().unwrap();
+        self.check_nonstring(d.ty, d.attrs, name_loc)?;
         let align = self.object_alignment(&d.ty, &d.sugar, d.attrs, name_loc)?;
         let local_static = !file_scope && spec.storage == Storage::Static;
         let g = if local_static {
@@ -1624,6 +1648,7 @@ impl<'a> Parser<'a> {
                 self.text.intern(&symbol)
             };
             self.globals.push(Global {
+                nonstring: false,
                 name: name,
                 symbol,
                 ty: d.ty,
@@ -1673,6 +1698,7 @@ impl<'a> Parser<'a> {
             }
             g
         };
+        self.globals[g].nonstring |= d.attrs.nonstring;
         self.symbol_attrs(g, &d.attrs)?;
         self.globals[g].align = self.globals[g].align.max(align);
         if inferred_init.is_some() || self.eat("=") {
@@ -1752,6 +1778,7 @@ impl<'a> Parser<'a> {
             }
             None => {
                 self.globals.push(Global {
+                    nonstring: false,
                     name: self.text.intern(name),
                     symbol: self.text.intern(name),
                     ty,
@@ -2018,8 +2045,10 @@ impl<'a> Parser<'a> {
                 if self.eat("=") {
                     return Err(Error::new(ploc, "parameter cannot have an initializer"));
                 }
+                self.check_nonstring(ty, attrs, ploc)?;
                 let align = self.type_alignment(&ty, &sugar);
                 let local = &mut self.fs.as_mut().unwrap().locals[ids[index]];
+                local.nonstring = attrs.nonstring;
                 local.ty = ty;
                 local.sugar = sugar;
                 local.align = align;
@@ -2402,6 +2431,12 @@ impl<'a> Parser<'a> {
                         }
                         attrs.mode = Some((mode, loc));
                     }
+                    "nonstring" => {
+                        if self.is("(") {
+                            return Err(self.unexpected("an attribute without arguments"));
+                        }
+                        attrs.nonstring = true;
+                    }
                     "aligned" if self.eat("(") => {
                         let n = self.alignment_constant(false)?;
                         attrs.aligned = Some(attrs.aligned.unwrap_or(1).max(n));
@@ -2467,6 +2502,29 @@ impl<'a> Parser<'a> {
     }
 
     // ---- types ----
+
+    fn check_nonstring(&self, ty: Ty<'a>, attrs: Attrs, loc: Loc) -> R<()> {
+        if !attrs.nonstring {
+            return Ok(());
+        }
+        let element = match ty {
+            Ty::Array(a) => Some(a.elem),
+            Ty::Ptr(t) => Some(*t),
+            _ => None,
+        };
+        if !matches!(
+            element,
+            Some(Ty::Int(
+                IntKind::Char | IntKind::UPlainChar | IntKind::SChar | IntKind::UChar
+            ))
+        ) {
+            return Err(Error::new(
+                loc,
+                "nonstring requires a character array or pointer declaration",
+            ));
+        }
+        Ok(())
+    }
 
     fn alignment_constant(&mut self, allow_zero: bool) -> R<u64> {
         let loc = self.loc();
@@ -2940,6 +2998,12 @@ impl<'a> Parser<'a> {
         }
         spec.attrs.no_symbol_attrs()?;
         d.attrs.no_symbol_attrs()?;
+        if spec.attrs.nonstring || d.attrs.nonstring {
+            return Err(Error::new(
+                self.loc(),
+                "nonstring cannot annotate a type name",
+            ));
+        }
         if spec.attrs.alignment().is_some()
             || d.attrs.alignment().is_some()
             || spec.attrs.alignas.is_some()
@@ -3461,6 +3525,7 @@ impl<'a> Parser<'a> {
                 let fs = self.fs.as_mut().unwrap();
                 ids.push(fs.locals.len());
                 fs.locals.push(Local {
+                    nonstring: false,
                     name,
                     ty: INT,
                     sugar: Sugar::Plain,
@@ -3587,7 +3652,10 @@ impl<'a> Parser<'a> {
                 .name
                 .map(|(n, _)| n)
                 .unwrap_or_else(|| self.unique_name(".parameter"));
-            ids.push(self.new_local(name, ty, sugar, array_quals.1));
+            self.check_nonstring(ty, attrs, loc)?;
+            let id = self.new_local(name, ty, sugar, array_quals.1);
+            self.fs.as_mut().unwrap().locals[id].nonstring = attrs.nonstring;
+            ids.push(id);
             params.push(self.parameter_signature(ty));
             param_quals.push(self.parameter_qualifiers(ty, sugar));
             names.push((d.name.map(|(n, _)| n), ty, sugar, loc));
@@ -3684,6 +3752,7 @@ impl<'a> Parser<'a> {
                         None,
                         spec.attrs.alignment(),
                         spec.attrs.packed,
+                        false,
                     ));
                 }
                 continue;
@@ -3730,6 +3799,7 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 member_attrs.no_symbol_attrs()?;
+                self.check_nonstring(ty, member_attrs, floc)?;
                 self.object_alignment(&ty, &sugar, member_attrs, floc)?;
                 if width.is_some() && member_attrs.alignas.is_some() {
                     return Err(Error::new(floc, "`_Alignas` cannot apply to a bit-field"));
@@ -3741,6 +3811,7 @@ impl<'a> Parser<'a> {
                     width,
                     member_attrs.alignment(),
                     member_attrs.packed,
+                    member_attrs.nonstring,
                 ));
                 if !self.eat(",") {
                     break;

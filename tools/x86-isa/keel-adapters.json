@@ -9107,7 +9107,9 @@
       {
         "variant": "Sysret",
         "mnemonic": "sysret",
-        "aliases": []
+        "aliases": [
+          "sysretl"
+        ]
       },
       {
         "variant": "Sysretq",
@@ -9158,6 +9160,8 @@
     "wrgsbase",
     "rdrand",
     "prefetchw",
-    "invpcid"
+    "invpcid",
+    "tpause",
+    "rdseed"
   ]
 }

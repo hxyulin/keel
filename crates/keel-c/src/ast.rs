@@ -99,6 +99,7 @@ pub enum ExprKind<'a> {
         offset: u64,
         bits: Option<BitField>,
         align: u64,
+        nonstring: bool,
     },
     /// `va_start(ap)` and `va_arg(ap)` (of this expression's type), given
     /// the address of the `va_list` object. `va_copy` is an assignment, of
@@ -312,6 +313,7 @@ pub enum Stmt<'a> {
 
 #[derive(Clone, Debug)]
 pub struct Local<'a> {
+    pub nonstring: bool,
     /// The source name; made-up ones, which are not identifiers, have a
     /// `.` (`compound literal.3`).
     pub name: &'a str,
@@ -360,6 +362,7 @@ pub struct FuncDef<'a> {
 /// (including `static` locals and file-scope compound literals).
 #[derive(Clone, Debug)]
 pub struct Global<'a> {
+    pub nonstring: bool,
     pub name: &'a str,
     /// The linker name (`__asm("_" "realpath" "$DARWIN_EXTSN")` renames).
     pub symbol: &'a str,

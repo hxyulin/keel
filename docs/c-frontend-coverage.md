@@ -52,6 +52,7 @@ GNU `__name__` spellings are accepted wherever the plain spelling is.
 | `keel_noninterposable` | Keel extension; advertised by `__has_attribute`. | [Function attributes](function-attributes.md#explicit-non-interposable-binding) |
 | `vector_size`, `mode` | Bounded sizes and modes. | [GNU vectors and modes](gnu-vector-mode.md) |
 | `aligned`, `packed` | Existing alignment and packing handling. | [Design](design.md#c-frontend) |
+| `nonstring` | Retained on character-array/pointer declarations and members for checked attribute queries. No string-warning analysis. | [Feature queries](#feature-queries) |
 
 ### Accepted without semantic effect
 
@@ -86,6 +87,14 @@ bounded vector/mode attributes report **0**, so feature-tested sources keep
 their fallbacks. Explicit use of the supported subsets still works.
 `keel_noninterposable` reports 1. Clang-preprocessed input reflects Clang's
 answers instead and can enable semantics Keel does not support.
+
+`__has_attribute(nonstring)` and `__has_builtin(__builtin_has_attribute)` report
+1 for the checked `nonstring` query subset. `__builtin_has_attribute(expr,
+nonstring)` produces an unevaluated `_Bool` constant. Declaration/member
+metadata survives redeclarations and identity address expressions; casts,
+pointer arithmetic and array elements do not acquire the object's annotation.
+Unannotated types report false. Other queried attributes and malformed
+`nonstring` annotations diagnose rather than returning a guessed result.
 
 ## Visibility
 

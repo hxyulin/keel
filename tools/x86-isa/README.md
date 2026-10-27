@@ -178,7 +178,7 @@ dependency closure, v1 defaults and ordered CLI modifier resolution.
 
 ## Optional legacy/VEX extensions
 
-The `extensions` list in `keel-adapters.json` exposes 24 additional mnemonics
+The `extensions` list in `keel-adapters.json` exposes 26 additional mnemonics
 through generated `ExtensionOpcode` identities: ADCX/ADOX, the seven SHA
 instructions, VAESENC/VAESENCLAST/VAESDEC/VAESDECLAST, VAESIMC,
 VAESKEYGENASSIST and VPCLMULQDQ. These use the existing shared matcher and
@@ -191,6 +191,15 @@ by the v1/v2/v3 profiles. Runtime privilege and enabled-state requirements remai
 the caller's responsibility. Upstream's `PREFETCH_NOP` label for PREFETCHW is
 overridden only in the generated feature query, preserving the source catalogue.
 AT&T `fxrstorq` and `fxsaveq` aliases select existing 64-bit state forms.
+
+RDSEED and TPAUSE require the separate `rdseed` and `waitpkg` features; neither
+changes CPU-profile membership. `sysretl` aliases the existing 32-bit SYSRET
+return form in long mode, distinct from `sysretq`. These are assembler adapters,
+not new compiler intrinsics or execution qualification. TPAUSE takes a
+fixed-width 32-bit GPR control operand. GNU as requires unsuffixed RDRAND/RDSEED/TPAUSE
+mnemonics, so suffix inference now excludes those operand families. Canonical
+RDRAND and RDSEED still admit 16-, 32- and 64-bit register views. Clang's
+additional random-instruction suffix aliases are outside this GNU syntax subset.
 
 Enable `adx` or `sha` independently. XMM VAES forms require `avx,aes`;
 YMM VAES forms require `avx,vaes`. VAESIMC and VAESKEYGENASSIST have XMM forms

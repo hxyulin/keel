@@ -61,7 +61,7 @@ Assembly conditionals and repetition counts can use previously defined absolute
 Register equality and inequality support the unwind macros' `%rsp == %rsp`
 form. Undefined symbols, forward absolute aliases and layout-dependent tests
 remain errors at expansion. Register arithmetic, variadic macros, `.altmacro`,
-`.ifdef`/`.ifndef`, `.ifb`/`.ifnb` and file inclusion remain unsupported.
+`.ifdef`/`.ifndef`, `.ifb`/`.ifnb` and textual `.include` remain unsupported.
 Absolute assignments can be repeated. Redefining a symbolic alias remains an
 error. Textual expansion tracks assignments from text fragments; it does not
 read preceding structured `Directive::Set` items.
@@ -98,3 +98,47 @@ and alternatives padding. The empty-iteration difference uses GNU as its oracle.
 Negative witnesses cover undefined and cross-section expressions, alias and
 layout cycles, expression bounds, missing arguments and rejected legacy modes.
 These focused checks do not update the configured corpus acceptance counts.
+
+## Fill and register symbols
+
+`.fill repeat[, size[, value]]` supports defaults, GNU's size clamp to eight
+bytes and its low-32-bit little-endian fill pattern. Negative repeats or sizes
+emit nothing. Repeat expressions can depend on same-section label differences
+and dot, using the existing layout cycle detection and 64 MiB limit. Size and
+value must resolve after textual preprocessing. Mutable counters in `.rept`
+bodies are captured before layout, including the kernel's fixed-size IDT entries.
+
+Preceding `.set`/`.equ` definitions can bind register names, including chains.
+These are lexical operand aliases, so `0(key)` uses the register bound to `key`
+without creating an ELF data symbol. Aliases preserve Intel/AT&T prefix modes
+and state across chunks. Quoted strings and directives are not operand rewrites.
+Forward register aliases, ordinary-symbol-to-register rebinding and ELF symbol
+attributes on register aliases remain explicit errors. GNU supplies the Intel
+register-symbol oracle because Clang rejects that GNU spelling.
+
+## Binary inputs
+
+`.incbin "name"[, skip[, count]]` inserts binary bytes without alignment.
+Library assembly remains free of filesystem access. Call
+`x86::assemble_object_with_binary_inputs`,
+`x86::assemble_program_object_with_binary_inputs` or
+`ProgramAssembler::push_with_binary_inputs` with a resolver callback that returns
+bytes for a name. Each name is resolved once and retained across layout passes
+and chunks. Existing assembly APIs report that an explicit resolver is needed.
+Inactive conditional blocks do not request input.
+
+The x86 `keel asm` and C/IR object-emission CLI paths resolve names using the
+process working directory, including absolute paths, as GNU as does. This does
+not implement `-I` search paths or textual `.include`. The resolver owns lookup
+policy for library users. Filenames must be nonempty UTF-8 without NUL bytes.
+Skip/count expressions must be absolute after preprocessing; ranges outside the
+input are errors. Output from one directive is limited to 64 MiB.
+
+GNU as treats explicit count zero as the remainder of the file, despite emitting
+a warning; Keel matches those bytes and still validates the filename and skip.
+This follows the measured GNU behavior, alongside the
+[documented binary-input directive](https://sourceware.org/binutils/docs/as/Incbin.html).
+GNU comparisons cover section bytes, label offsets, skip/counts and layout;
+source, structured, chunked and CLI object paths produce identical payloads.
+Embedding externally built legacy-mode code is data packaging and does not add
+16/32-bit instruction assembly.

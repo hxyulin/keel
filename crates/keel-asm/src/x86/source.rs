@@ -1,6 +1,9 @@
 //! GNU statement scanning and numeric local names, before instruction parsing.
 use crate::Error;
-use std::collections::BTreeMap;
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, BTreeSet},
+};
 
 /// Preserve physical lines while removing comments and separating statements.
 pub(crate) fn statements(source: &str) -> Result<Vec<(usize, String)>, Error> {
@@ -90,6 +93,137 @@ fn push_statement(result: &mut Vec<(usize, String)>, line: usize, text: String) 
         rest = rest[end..].trim();
     }
     result.push((line, rest.to_owned()));
+}
+
+/// GNU register symbols are lexical operand aliases, not ELF data symbols.
+/// Keep their definitions between chunks, just like macro definitions.
+#[derive(Default)]
+pub(super) struct RegisterAliases {
+    names: BTreeMap<String, keel_asm_ir::x86::Register>,
+    ordinary: BTreeSet<String>,
+    prefix: bool,
+}
+impl RegisterAliases {
+    pub fn new(prefix: bool) -> Self {
+        Self {
+            prefix,
+            ..Self::default()
+        }
+    }
+    pub fn rewrite<'s>(&mut self, source: &'s str) -> Result<Option<Cow<'s, str>>, String> {
+        let source = source.trim();
+        let (op, args) = source
+            .split_once(char::is_whitespace)
+            .unwrap_or((source, ""));
+        if let Some(label) = source.strip_suffix(':') {
+            let name = keel_asm_ir::x86::symbol(label)?;
+            self.names.remove(&name);
+            self.ordinary.insert(name);
+            return Ok(Some(Cow::Borrowed(source)));
+        }
+        if matches!(
+            op,
+            ".globl"
+                | ".global"
+                | ".weak"
+                | ".local"
+                | ".hidden"
+                | ".protected"
+                | ".type"
+                | ".size"
+        ) {
+            let names = keel_asm_ir::x86::split_inline(args, ',');
+            let names = if matches!(op, ".type" | ".size") {
+                &names[..names.len().min(1)]
+            } else {
+                &names
+            };
+            for name in names {
+                if let Ok(name) = keel_asm_ir::x86::symbol(name) {
+                    if self.names.contains_key(&name) {
+                        return Err("register aliases cannot carry ELF symbol attributes".into());
+                    }
+                    self.ordinary.insert(name);
+                }
+            }
+        }
+        if matches!(op, ".att_syntax" | ".intel_syntax") {
+            self.prefix = match args.trim() {
+                "prefix" => true,
+                "noprefix" => false,
+                _ => op == ".att_syntax",
+            };
+        }
+        if matches!(op, ".set" | ".equ")
+            && let Some((name, value)) = args.split_once(',')
+        {
+            let name = keel_asm_ir::x86::symbol(name)?;
+            let value = value.trim();
+            let target = value
+                .strip_prefix('%')
+                .or((!self.prefix).then_some(value))
+                .and_then(keel_asm_ir::x86::Register::parse)
+                .or_else(|| self.names.get(value).copied());
+            if let Some(target) = target {
+                if self.ordinary.contains(&name) {
+                    return Err(
+                        "redefining an ordinary symbol as a register alias is unsupported".into(),
+                    );
+                }
+                self.names.insert(name, target);
+                return Ok(None);
+            }
+            self.names.remove(&name);
+            self.ordinary.insert(name);
+        }
+        if op.starts_with('.') || source.ends_with(':') || args.is_empty() || self.names.is_empty()
+        {
+            return Ok(Some(Cow::Borrowed(source)));
+        }
+        let mut output = String::with_capacity(source.len());
+        output.push_str(op);
+        output.push(' ');
+        let mut chars = args.char_indices().peekable();
+        let mut quoted = false;
+        let mut escaped = false;
+        let mut previous = None;
+        while let Some((start, c)) = chars.next() {
+            if escaped {
+                output.push(c);
+                escaped = false;
+            } else if quoted && c == '\\' {
+                output.push(c);
+                escaped = true;
+            } else if c == '"' {
+                output.push(c);
+                quoted = !quoted;
+            } else if !quoted && (c.is_ascii_alphabetic() || matches!(c, '_' | '.' | '$')) {
+                let mut end = start + c.len_utf8();
+                while let Some((i, next)) = chars.peek() {
+                    if !next.is_ascii_alphanumeric() && !matches!(next, '_' | '.' | '$') {
+                        break;
+                    }
+                    end = i + next.len_utf8();
+                    chars.next();
+                }
+                let name = &args[start..end];
+                if previous != Some('%')
+                    && let Some(target) = self.names.get(name)
+                {
+                    if self.prefix {
+                        output.push('%');
+                    }
+                    output.push_str(&target.to_string());
+                } else {
+                    output.push_str(name);
+                }
+            } else {
+                output.push(c);
+            }
+            previous = Some(c);
+        }
+        Ok(Some(Cow::Owned(output)))
+    }
 }
 
 #[derive(Default)]

@@ -172,7 +172,9 @@ def extension_adapters(data, mnemonics):
         kinds = {o['operand_type'] for r in rows for o in r.get('operands', [])
                  if o.get('visible', True)}
         scalar_gprs = {'gpr32', 'gpr64', 'gpr16_32_64', 'gpr32_32_64'}
-        scalar = bool(kinds & scalar_gprs) and kinds <= scalar_gprs | {'mem'}
+        # GNU scalar suffix families have a 32/64-bit view, not only fixed
+        # GPR32 (TPAUSE) or flexible 16/32/64 random operands (RDRAND/RDSEED).
+        scalar = bool(kinds & {'gpr64', 'gpr32_32_64'}) and kinds <= scalar_gprs | {'mem'}
         scalar = scalar and not any(o['operand_type'] == 'mem' and
                                     any(o.get(f'width{bits}', 0) > 8 for bits in (16, 32, 64))
                                     for r in rows for o in r.get('operands', []))

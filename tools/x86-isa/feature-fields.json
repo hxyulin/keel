@@ -161,5 +161,15 @@
     "field": "prefetchw",
     "bit": 30,
     "doc": "Write-prefetch instruction capability."
+  },
+  {
+    "field": "rdseed",
+    "bit": 31,
+    "doc": "Hardware entropy-seed instruction; callers must check the carry flag."
+  },
+  {
+    "field": "waitpkg",
+    "bit": 32,
+    "doc": "WAITPKG timed wait capability; execution also depends on OS wait-control policy."
   }
 ]

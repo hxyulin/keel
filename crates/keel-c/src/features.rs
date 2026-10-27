@@ -29,6 +29,7 @@ pub fn query(name: &str, argument: &str, target: Target) -> u64 {
         "__has_attribute" => matches!(
             arg,
             "aligned"
+                | "nonstring"
                 | "packed"
                 | "returns_twice"
                 | "noreturn"
@@ -171,6 +172,7 @@ fn builtin(name: &str, target: Target) -> bool {
             | "object_size"
             | "dynamic_object_size"
             | "types_compatible_p"
+            | "has_attribute"
             | "choose_expr"
             | "constant_p"
             | "inf"

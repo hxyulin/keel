@@ -208,10 +208,11 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
             Err(e) => return Err(format!("{}: {e}", input.display())),
         };
         let object = if opts.x86 {
-            keel_asm::x86::assemble_object_with_syntax_and_features(
+            keel_asm::x86::assemble_object_with_binary_inputs(
                 &text,
                 opts.x86_syntax.unwrap_or_default(),
                 opts.x86_features,
+                &mut crate::input::binary_input,
             )
         } else if opts.arm_elf {
             keel_asm::assemble_elf_object_with_features(&text, opts.features)

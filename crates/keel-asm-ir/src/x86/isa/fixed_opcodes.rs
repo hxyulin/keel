@@ -204,6 +204,7 @@ impl FixedOpcode {
             "swapgs" => Self::Swapgs,
             "iretq" => Self::Iretq,
             "sysret" => Self::Sysret,
+            "sysretl" => Self::Sysret,
             "sysretq" => Self::Sysretq,
             "sysexit" => Self::Sysexit,
             "sysexitd" => Self::Sysexit,

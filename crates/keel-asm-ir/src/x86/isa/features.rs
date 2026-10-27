@@ -491,6 +491,8 @@ Opcode::Extension(ExtensionOpcode::Wrgsbase) => Features { fsgsbase: true, ..Fea
 Opcode::Extension(ExtensionOpcode::Rdrand) => Features { rdrand: true, ..Features::NONE },
 Opcode::Extension(ExtensionOpcode::Prefetchw) => Features { prefetchw: true, ..Features::NONE },
 Opcode::Extension(ExtensionOpcode::Invpcid) => Features { invpcid: true, ..Features::NONE },
+Opcode::Extension(ExtensionOpcode::Tpause) => Features { waitpkg: true, ..Features::NONE },
+Opcode::Extension(ExtensionOpcode::Rdseed) => Features { rdseed: true, ..Features::NONE },
 _ => Features::NONE,
 } }
 #[rustfmt::skip]
@@ -534,5 +536,7 @@ pub fn feature_policy(isa: &str) -> Features { match isa {
 "RDRAND" => Features { rdrand: true, ..Features::NONE },
 "INVPCID" => Features { invpcid: true, ..Features::NONE },
 "PREFETCHW" => Features { prefetchw: true, ..Features::NONE },
+"RDSEED" => Features { rdseed: true, ..Features::NONE },
+"WAITPKG" => Features { waitpkg: true, ..Features::NONE },
 _ => Features::NONE,
 } }

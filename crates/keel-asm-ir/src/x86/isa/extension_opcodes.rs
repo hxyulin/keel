@@ -25,6 +25,8 @@ pub enum ExtensionOpcode {
     Rdrand,
     Prefetchw,
     Invpcid,
+    Tpause,
+    Rdseed,
 }
 impl ExtensionOpcode {
     pub const ALL: &'static [Self] = &[
@@ -52,6 +54,8 @@ impl ExtensionOpcode {
         Self::Rdrand,
         Self::Prefetchw,
         Self::Invpcid,
+        Self::Tpause,
+        Self::Rdseed,
     ];
     pub fn parse(name: &str) -> Option<Self> {
         Some(match name {
@@ -79,6 +83,8 @@ impl ExtensionOpcode {
             "rdrand" => Self::Rdrand,
             "prefetchw" => Self::Prefetchw,
             "invpcid" => Self::Invpcid,
+            "tpause" => Self::Tpause,
+            "rdseed" => Self::Rdseed,
             _ => return None,
         })
     }
@@ -108,6 +114,8 @@ impl ExtensionOpcode {
             Self::Rdrand => "rdrand",
             Self::Prefetchw => "prefetchw",
             Self::Invpcid => "invpcid",
+            Self::Tpause => "tpause",
+            Self::Rdseed => "rdseed",
         }
     }
     pub const fn scalar_suffix(self) -> bool {
@@ -133,9 +141,11 @@ impl ExtensionOpcode {
             Self::Rdgsbase => true,
             Self::Wrfsbase => true,
             Self::Wrgsbase => true,
-            Self::Rdrand => true,
+            Self::Rdrand => false,
             Self::Prefetchw => false,
             Self::Invpcid => false,
+            Self::Tpause => false,
+            Self::Rdseed => false,
         }
     }
 }

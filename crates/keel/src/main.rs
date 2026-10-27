@@ -909,7 +909,7 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
         let mut arm_elf = keel_asm::ElfProgramAssembler::new(keel_asm::TargetFeatures::default());
         let mut arm_elf_sink = |program| arm_elf.push(program);
         let mut aarch64_sink = |program| aarch64.push(program);
-        let mut x86_sink = |program| x86.push(program);
+        let mut x86_sink = |program| x86.push_with_binary_inputs(program, &mut input::binary_input);
         let sink: &mut dyn FnMut(_) = match target {
             Target::Wasm32UnknownUnknown => return Err(
                 "unsupported target wasm32-unknown-unknown: native object emission is unavailable"

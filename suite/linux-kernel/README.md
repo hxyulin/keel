@@ -1,9 +1,9 @@
 # Minimal Linux x86-64 compiler target
 
-Latest measured status: **40/484 C inputs** and **486/506 assembly inputs**
+Latest measured status: **41/484 C inputs** and **488/506 assembly inputs**
 accepted under the original feature policy. A separate explicit-feature probe
-accepts **42 C inputs and 499 assembly inputs**. The
-[C/assembly expansion](#c-and-assembly-expansion) records the current blockers;
+accepts **43 C inputs and 503 assembly inputs**. The
+[binary-input/attribute follow-up](#binary-inputs-and-attribute-queries) records the current blockers;
 asm-goto remains outside this increment's backend scope.
 
 This fixture targets the **64-bit parts** of Linux v6.12. Host programs,
@@ -752,3 +752,67 @@ objects pass all 65,536 input values and live-register checks using a safe MOV
 template. Port I/O and optional system instructions were not executed.
 
 Full workspace log: `/tmp/keel-kernel-expansion-tests.log`.
+
+## Binary inputs and attribute queries
+
+The [follow-up audit](audit-binary-inputs-attributes.json) adds GNU `.fill`,
+register symbols in instruction operands, explicit binary inputs, checked
+`nonstring` attribute queries, and generated SYSRETL/RDSEED/TPAUSE adapters.
+RDSEED and WAITPKG have separate optional feature fields; CPU profile
+memberships remain unchanged. The generator also stops inferring GNU-invalid
+RDRAND/RDSEED width suffixes and TPAUSE suffixes. Canonical forms remain supported.
+
+The assembler's [binary-input APIs](../../docs/x86-gnu-assembly-language.md#binary-inputs)
+accept a resolver callback. Input bytes are retained once per filename before
+layout, including across chunks. Existing library APIs do not read files.
+The CLI supplies working-directory lookup for x86 assembly and C/IR objects.
+`.fill` shares deferred-space convergence checks; register aliases preserve
+the API's initial syntax mode as well as in-source dialect changes.
+
+`__builtin_has_attribute(expr, nonstring)` retains checked declaration/member
+metadata and leaves the operand unevaluated. Unsupported queries diagnose.
+This clears `lib/earlycpio.i`; alias attributes remain explicit errors because
+they need whole-unit target, type, contract, retention and linkage validation.
+
+| Policy | Accepted C / 484 | Accepted assembly / 506 |
+| --- | ---: | ---: |
+| Original C v1, assembly v3 | 41 | 488 |
+| Explicit optional features | 43 | 503 |
+
+The explicit policy adds `+rdseed,+waitpkg` to the preceding assembler feature
+list and retains `+popcnt` for C. All 526 inputs accepted under the previous
+original policy remain accepted and produce identical object bytes under both
+new policies. All 992 captured inputs and the three reference artifacts were
+rehashed unchanged, with no crashes, timeouts or acceptance regressions.
+
+Three binary dependencies are now recorded with sizes and hashes:
+`realmode.bin`, `realmode.relocs` and `initramfs_inc_data`. Their bytes match
+the corresponding sections in the existing GNU reference build objects and
+both new Keel probe outputs. This is byte packaging of externally built legacy
+code, not legacy-mode compiler support. The reference was not rebuilt or
+rebooted, and no Keel object was linked into or run as the kernel.
+
+Clearing the previous seven assembly failures exposes three later first errors:
+
+| Input | Next blocker |
+| --- | --- |
+| `arch/x86/entry/entry_64.s` | Function-style GNU macro invocation `STACK_FRAME_NON_STANDARD(clear_bhb_loop)` |
+| `arch/x86/entry/vdso/vgetrandom-chacha.s` | `.octa` integer data |
+| `arch/x86/kernel/head_64.s` | Full-width symbolic relocation addend outside the current signed-i64 range |
+
+The original policy has another 15 assembly first errors at explicit feature
+gates. The explicit-policy C failures remain asm-goto (439) and alias attributes
+(2); the original policy additionally rejects two POPCNT users. These are
+first-error counts rather than complete kernel compatibility or correctness
+claims. Significant asm-goto backend work remains outside this increment.
+
+Validation passes 2,823 regular workspace tests and one doctest, with zero
+failures and 13 ignored tests. All-targets/all-features check, 99 x86 generator
+tests, four Arm generator tests, four audit tests and both freshness checks pass.
+The new 19-case instruction matrix matches Clang/GNU bytes. `.fill` and alias
+tests compare GNU output, with Clang comparisons where it supports the GNU
+spelling. Binary-input tests compare GNU bytes and label offsets and check
+source/structured/chunked parity and both CLI object paths. GCC validates
+`nonstring` queries; native host execution and three-target object assembly pass.
+Scoped Clippy completes with existing library warnings. System instructions
+were not executed. Full log: `/tmp/keel-kernel-completion-tests.log`.

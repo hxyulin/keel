@@ -7,10 +7,10 @@ Machine-readable form records are in [coverage.json](coverage.json).
 Legacy/VEX imported source forms: **3603**, plus **1** local extension.
 Legacy/VEX catalogue: **3495** forms; **109** imported forms excluded.
 Decoder registration enabled: **3494**; disabled by policy: **1**.
-Forms with declarative assembler candidates: **2863**.
-Public binding records: **1009**; without a direct source join: **86** (not an unsupported count).
+Forms with declarative assembler candidates: **2865**.
+Public binding records: **1011**; without a direct source join: **86** (not an unsupported count).
 Tracked compiler declarations: **45**, with **43** regular recipes and **2** hooks.
-ISA policy keys without an explicit feature classification: **79**.
+ISA policy keys without an explicit feature classification: **77**.
 
 Separate AVX-512F/VL table: **1899** records and **351** mnemonic bindings.
 It contains **1884** EVEX records plus **15** VEX mask records already present in the legacy/VEX import.
@@ -132,7 +132,7 @@ An unclassified key is not automatically baseline; the runtime feature lookup cu
 | `RDPMC` | 1 | 1 | 1 | 1 | 0 | unclassified |  |
 | `RDPRU` | 1 | 1 | 1 | 0 | 0 | unclassified |  |
 | `RDRAND` | 2 | 1 | 1 | 1 | 0 | rdrand |  |
-| `RDSEED` | 2 | 1 | 1 | 0 | 0 | unclassified |  |
+| `RDSEED` | 2 | 1 | 1 | 1 | 0 | rdseed |  |
 | `RDTSCP` | 1 | 1 | 1 | 1 | 0 | rdtscp |  |
 | `RDWRFSGS` | 8 | 4 | 4 | 4 | 0 | fsgsbase |  |
 | `RTM` | 4 | 4 | 4 | 0 | 0 | unclassified |  |
@@ -166,7 +166,7 @@ An unclassified key is not automatically baseline; the runtime feature lookup cu
 | `VMFUNC` | 1 | 1 | 1 | 0 | 0 | unclassified |  |
 | `VPCLMULQDQ` | 2 | 2 | 2 | 2 | 0 | vpclmulqdq, avx, xsave, osxsave |  |
 | `VTX` | 18 | 14 | 14 | 0 | 0 | unclassified |  |
-| `WAITPKG` | 6 | 3 | 3 | 0 | 0 | unclassified |  |
+| `WAITPKG` | 6 | 3 | 3 | 1 | 0 | waitpkg |  |
 | `WRMSRNS` | 1 | 1 | 1 | 0 | 0 | unclassified |  |
 | `X87` | 134 | 134 | 134 | 130 | 0 | baseline | v1, v2, v3 |
 | `XOP` | 16 | 16 | 16 | 0 | 0 | unclassified |  |

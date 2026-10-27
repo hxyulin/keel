@@ -388,6 +388,8 @@ impl Processor {
                         | ".8byte"
                         | ".2byte"
                         | ".skip"
+                        | ".fill"
+                        | ".incbin"
                         | ".space"
                         | ".zero"
                         | ".org"

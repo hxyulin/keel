@@ -3,6 +3,7 @@
 mod arm;
 mod dwarf;
 mod encode;
+mod inputs;
 mod metadata;
 mod relax;
 mod sections;
@@ -10,6 +11,7 @@ pub(crate) mod source;
 mod symbolic;
 use crate::Error;
 use crate::fxhash::{FxHashSet, FxHasher};
+pub use inputs::BinaryInputResolver;
 pub use keel_asm_ir::x86::{CpuLevel, Features, Syntax};
 use keel_asm_ir::{
     Directive, Expression, Item, Program,
@@ -270,6 +272,14 @@ struct Fix {
     kind: u32,
     line: usize,
 }
+struct Space {
+    section: usize,
+    offset: u64,
+    expression: x86::expression::Expr,
+    line: usize,
+    element_size: u8,
+    negative_is_zero: bool,
+}
 #[derive(Default)]
 struct Assembler {
     arm: Option<crate::TargetFeatures>,
@@ -289,7 +299,7 @@ struct Assembler {
     leb_widths: Vec<usize>,
     lebs: Vec<(usize, u64, Expr, bool, usize)>,
     space_widths: Vec<u64>,
-    spaces: Vec<(usize, u64, x86::expression::Expr, usize)>,
+    spaces: Vec<Space>,
     pref_powers: Vec<u32>,
     /// Section sizes from the previous layout pass, which declares the same
     /// sections in the same order: reserve them instead of regrowing.
@@ -314,9 +324,24 @@ pub fn assemble_object_with_syntax_and_features(
     syntax: Syntax,
     features: x86::Features,
 ) -> Result<Vec<u8>, Error> {
+    assemble_object_with_binary_inputs(source, syntax, features, &mut inputs::unavailable)
+}
+
+/// Assemble with caller-supplied binary inputs for `.incbin`. The resolver owns
+/// path lookup and I/O; resolved bytes are retained before layout begins.
+///
+/// # Errors
+/// Returns an error for unresolved inputs, invalid ranges, or invalid assembly.
+pub fn assemble_object_with_binary_inputs(
+    source: &str,
+    syntax: Syntax,
+    features: x86::Features,
+    resolver: &mut BinaryInputResolver<'_>,
+) -> Result<Vec<u8>, Error> {
     let mut items = Items::new(features);
     items.parser = x86::SourceParser::new(syntax);
-    items.parse(source, 1)?;
+    items.register_aliases = source::RegisterAliases::new(syntax == Syntax::Att);
+    items.parse(source, 1, resolver)?;
     assemble_items(items.finish()?)
 }
 /// Consume x86 instructions and shared directives. Diagnostic positions refer
@@ -328,11 +353,23 @@ pub fn assemble_program_object_with_features(
     program: &Program,
     features: x86::Features,
 ) -> Result<Vec<u8>, Error> {
+    assemble_program_object_with_binary_inputs(program, features, &mut inputs::unavailable)
+}
+
+/// Structured-program counterpart of [`assemble_object_with_binary_inputs`].
+///
+/// # Errors
+/// Returns an error for unresolved inputs, invalid ranges, or an invalid program.
+pub fn assemble_program_object_with_binary_inputs(
+    program: &Program,
+    features: x86::Features,
+    resolver: &mut BinaryInputResolver<'_>,
+) -> Result<Vec<u8>, Error> {
     let mut items = Items::new(features);
     items.entries.reserve(program.items.len());
     for (index, item) in program.items.iter().enumerate() {
         match item {
-            Item::Text(source) => items.parse(source, index + 1)?,
+            Item::Text(source) => items.parse(source, index + 1, resolver)?,
             Item::X86Instruction(i) => items.x86_instruction(i, index + 1),
             item => items.item(item.clone(), index + 1),
         }
@@ -374,6 +411,17 @@ impl ProgramAssembler {
         out
     }
     pub fn push(&mut self, program: Program) {
+        self.push_with_binary_inputs(program, &mut inputs::unavailable);
+    }
+
+    /// Push a chunk with explicit `.incbin` resolution. Names already resolved
+    /// by earlier chunks retain their original bytes.
+    /// Errors are retained and returned by [`Self::finish`].
+    pub fn push_with_binary_inputs(
+        &mut self,
+        program: Program,
+        resolver: &mut BinaryInputResolver<'_>,
+    ) {
         if self.error.is_some() {
             return;
         }
@@ -386,7 +434,7 @@ impl ProgramAssembler {
                     if let Err(e) = if items.arm.is_some() {
                         arm::parse(items, &source, line)
                     } else {
-                        items.parse(&source, line)
+                        items.parse(&source, line, resolver)
                     } {
                         self.error = Some(e);
                         return;
@@ -523,6 +571,8 @@ struct Items {
     features: x86::Features,
     parser: x86::SourceParser,
     locals: source::Locals,
+    register_aliases: source::RegisterAliases,
+    binary_inputs: inputs::Cache,
     preprocessor: crate::parser::preprocess::Processor,
     // Parse errors anywhere take precedence over feature errors.
     unsupported: Option<Error>,
@@ -543,12 +593,19 @@ impl Items {
             features,
             parser: x86::SourceParser::default(),
             locals: source::Locals::default(),
+            register_aliases: source::RegisterAliases::default(),
+            binary_inputs: inputs::Cache::default(),
             preprocessor: crate::parser::preprocess::Processor::default(),
             unsupported: None,
             parsed: 0,
         }
     }
-    fn parse(&mut self, source: &str, first: usize) -> Result<(), Error> {
+    fn parse(
+        &mut self,
+        source: &str,
+        first: usize,
+        resolver: &mut BinaryInputResolver<'_>,
+    ) -> Result<(), Error> {
         // Move syntax state out while the callback collects directly into self.
         let statements = source::statements(source)
             .map_err(|mut e| {
@@ -568,6 +625,14 @@ impl Items {
             .try_for_each(|(index, source)| {
                 let line = expanded.original_line(index + 1);
                 let source = self.locals.rewrite(source, line)?;
+                let Some(source) = self
+                    .register_aliases
+                    .rewrite(&source)
+                    .map_err(|e| Error::new(line, e))?
+                else {
+                    return Ok(());
+                };
+                let mut input_error = None;
                 parser
                     .parse_with(&source, |_, item| match item {
                         x86::SourceItem::Instruction(i) => self.x86_instruction(&i, line),
@@ -579,6 +644,17 @@ impl Items {
                             })
                         }
                         x86::SourceItem::Text(text) => {
+                            match self.binary_inputs.include(text, resolver) {
+                                Ok(Some(bytes)) => {
+                                    self.item(Item::Directive(Directive::Bytes(bytes)), line);
+                                    return;
+                                }
+                                Ok(None) => {}
+                                Err(error) => {
+                                    input_error = Some(Error::new(line, error));
+                                    return;
+                                }
+                            }
                             let line = line32(line);
                             let entry = if let Some((bytes, width)) = literal_data(text) {
                                 Entry::LiteralData { bytes, width, line }
@@ -597,7 +673,8 @@ impl Items {
                             index + 1,
                             e.strip_prefix("line 1: ").unwrap_or(&e),
                         ))
-                    })
+                    })?;
+                input_error.map_or(Ok(()), Err)
             });
         self.parser = parser;
         result
@@ -804,7 +881,7 @@ pub fn profile_object_with_features(
     let mut profile = Profile::default();
     let start = std::time::Instant::now();
     let mut items = Items::new(features);
-    items.parse(source, 1)?;
+    items.parse(source, 1, &mut inputs::unavailable)?;
     let mut items = items.finish()?;
     profile.parse_ms = start.elapsed().as_secs_f64() * 1000.0;
     profile.items = items.parsed;
@@ -984,7 +1061,14 @@ fn assemble_items_inner<const PROFILE: bool>(
                 a.sections[*section].data[at..at + width].copy_from_slice(&bytes);
             }
         }
-        for (i, (section, offset, expression, line)) in a.spaces.iter().enumerate() {
+        for (i, space) in a.spaces.iter().enumerate() {
+            let Space {
+                section,
+                offset,
+                expression,
+                line,
+                ..
+            } = space;
             let value = expression
                 .eval(&mut |name| {
                     if name == "." {
@@ -1008,12 +1092,20 @@ fn assemble_items_inner<const PROFILE: bool>(
                     "space size requires an absolute expression",
                 ));
             }
-            let Ok(size) = u64::try_from(value.number) else {
+            let number = if space.negative_is_zero {
+                value.number.max(0)
+            } else {
+                value.number
+            };
+            let Ok(count) = u64::try_from(number) else {
                 pending_leb_error.get_or_insert_with(|| {
                     Error::new(*line, "space size requires a nonnegative value")
                 });
                 continue;
             };
+            let size = count
+                .checked_mul(u64::from(space.element_size))
+                .ok_or_else(|| Error::new(*line, "space size overflow"))?;
             if size > 64 * 1024 * 1024 {
                 return Err(Error::new(*line, "deferred space exceeds 64 MiB"));
             }
@@ -1252,6 +1344,24 @@ impl Assembler {
     fn data_zero(&mut self, size: u64, fill: u8) -> Result<(), String> {
         self.data_location(size);
         self.zero(size, fill)
+    }
+    fn data_fill(&mut self, size: u64, element_size: u8, value: i128) -> Result<(), String> {
+        if size == 0 || element_size == 0 {
+            return Ok(());
+        }
+        let pattern = u64::from(value as u32).to_le_bytes();
+        let pattern = &pattern[..usize::from(element_size)];
+        if self.sections[self.current].nobits && pattern.iter().any(|&b| b != 0) {
+            return Err("nonzero fill in NOBITS section".into());
+        }
+        let start = self.sections[self.current].data.len();
+        self.data_zero(size, 0)?;
+        if !self.sections[self.current].nobits {
+            for chunk in self.sections[self.current].data[start..].chunks_exact_mut(pattern.len()) {
+                chunk.copy_from_slice(pattern);
+            }
+        }
+        Ok(())
     }
     fn bytes(&mut self, data: &[u8]) -> Result<(), String> {
         let s = &mut self.sections[self.current];
@@ -1951,6 +2061,48 @@ impl Assembler {
                     },
                 )
             }
+            ".fill" => {
+                if parts.is_empty() || parts.len() > 3 {
+                    return Err(".fill expects repeat[, size[, value]]".into());
+                }
+                let size = parts
+                    .get(1)
+                    .map(|s| x86::integer(s))
+                    .transpose()?
+                    .unwrap_or(1)
+                    .clamp(0, 8) as u8;
+                let value = parts
+                    .get(2)
+                    .map(|s| x86::integer(s))
+                    .transpose()?
+                    .unwrap_or(0);
+                if size == 0 {
+                    return Ok(());
+                }
+                if let Ok(count) = x86::integer(parts[0]) {
+                    let total = u64::try_from(count.max(0))
+                        .ok()
+                        .and_then(|n| n.checked_mul(u64::from(size)))
+                        .filter(|&n| n <= 64 * 1024 * 1024)
+                        .ok_or("fill size exceeds 64 MiB")?;
+                    return self.data_fill(total, size, value);
+                }
+                let expression = x86::expression::parse(parts[0])?;
+                let width = self
+                    .space_widths
+                    .get(self.spaces.len())
+                    .copied()
+                    .unwrap_or(0);
+                self.spaces.push(Space {
+                    section: self.current,
+                    offset: self.offset(),
+                    expression,
+                    line,
+                    element_size: size,
+                    negative_is_zero: true,
+                });
+                self.data_fill(width, size, value)
+            }
             ".zero" | ".space" | ".skip" => {
                 if parts.len() > 2 {
                     return Err("too many space operands".into());
@@ -1969,8 +2121,14 @@ impl Assembler {
                     .get(self.spaces.len())
                     .copied()
                     .unwrap_or(0);
-                self.spaces
-                    .push((self.current, self.offset(), expression, line));
+                self.spaces.push(Space {
+                    section: self.current,
+                    offset: self.offset(),
+                    expression,
+                    line,
+                    element_size: 1,
+                    negative_is_zero: false,
+                });
                 self.data_zero(width, fill)
             }
             ".ascii" | ".asciz" | ".string" => {

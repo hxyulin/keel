@@ -43,6 +43,10 @@ pub struct Features {
     pub invpcid: bool,
     /// Write-prefetch instruction capability.
     pub prefetchw: bool,
+    /// Hardware entropy-seed instruction; callers must check the carry flag.
+    pub rdseed: bool,
+    /// WAITPKG timed wait capability; execution also depends on OS wait-control policy.
+    pub waitpkg: bool,
 }
 impl Features {
     pub const NONE: Self = Self {
@@ -77,6 +81,8 @@ impl Features {
         rdrand: false,
         invpcid: false,
         prefetchw: false,
+        rdseed: false,
+        waitpkg: false,
     };
     /// Every declared capability, for tests and tooling; not host detection.
     pub const fn all_known() -> Self { Self {
@@ -111,6 +117,8 @@ impl Features {
         rdrand: true,
         invpcid: true,
         prefetchw: true,
+        rdseed: true,
+        waitpkg: true,
     } }
     /// Stable schema bit IDs, covering every capability.
     pub const fn fingerprint(self) -> u64 {
@@ -145,6 +153,8 @@ impl Features {
             | ((self.rdrand as u64) << 28)
             | ((self.invpcid as u64) << 29)
             | ((self.prefetchw as u64) << 30)
+            | ((self.rdseed as u64) << 31)
+            | ((self.waitpkg as u64) << 32)
     }
     pub const fn is_empty(self) -> bool { self.fingerprint() == 0 }
     pub const fn contains(self, required: Self) -> bool {
@@ -285,6 +295,12 @@ impl Features {
             "prefetchw" => {
                 self.prefetchw = enabled;
             }
+            "rdseed" => {
+                self.rdseed = enabled;
+            }
+            "waitpkg" => {
+                self.waitpkg = enabled;
+            }
             _ => return false,
         }
         true
@@ -352,6 +368,8 @@ impl Features {
             (self.rdrand, "rdrand"),
             (self.invpcid, "invpcid"),
             (self.prefetchw, "prefetchw"),
+            (self.rdseed, "rdseed"),
+            (self.waitpkg, "waitpkg"),
         ]
         .into_iter()
         .filter_map(|(on, name)| on.then_some(name))

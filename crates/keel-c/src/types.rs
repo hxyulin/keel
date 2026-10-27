@@ -379,6 +379,7 @@ pub struct StructDef<'a> {
 
 #[derive(Copy, Clone, Debug)]
 pub struct Member<'a> {
+    pub nonstring: bool,
     /// `None` for an anonymous struct or union, whose members are found
     /// as if they were this struct's, and for unnamed bit-fields.
     pub name: Option<&'a str>,
@@ -961,6 +962,7 @@ pub type StructField<'a> = (
     Option<u32>,
     Option<u64>,
     bool,
+    bool,
 );
 
 /// Lays out a struct or union's members, including alignment and packing,
@@ -994,7 +996,7 @@ pub fn layout_struct<'a>(
     let mut bit: u64 = 0;
     let mut size: u64 = 0;
     let mut align: u64 = 1;
-    for (name, ty, sugar, width, requested_align, packed) in fields {
+    for (name, ty, sugar, width, requested_align, packed, nonstring) in fields {
         let natural = sugar
             .alignment(typedefs)
             .unwrap_or_else(|| types.align(&ty));
@@ -1034,6 +1036,7 @@ pub fn layout_struct<'a>(
                     bit / unit_bits * fsize
                 };
                 members.push(Member {
+                    nonstring,
                     name,
                     ty,
                     sugar,
@@ -1051,6 +1054,7 @@ pub fn layout_struct<'a>(
             None => {
                 bit = bit.next_multiple_of(falign * 8);
                 members.push(Member {
+                    nonstring,
                     name,
                     ty,
                     sugar,
@@ -1178,7 +1182,7 @@ mod layout_tests {
     }
 
     fn field<'a>(ty: Ty<'a>) -> StructField<'a> {
-        (None, ty, Sugar::Plain, None, None, false)
+        (None, ty, Sugar::Plain, None, None, false, false)
     }
 
     #[test]

@@ -212,7 +212,7 @@ pub(super) fn parse(items: &mut Items, source: &str, first: usize) -> Result<(),
                         _ => op,
                     };
                     items
-                        .parse(&format!("{op} {rest}"), line)
+                        .parse(&format!("{op} {rest}"), line, &mut inputs::unavailable)
                         .map_err(|e| e.message)?;
                 } else {
                     let word = crate::parser::elf::instruction(text, items.arm.unwrap())?;

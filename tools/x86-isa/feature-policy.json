@@ -148,5 +148,11 @@
   ],
   "PREFETCHW": [
     "prefetchw"
+  ],
+  "RDSEED": [
+    "rdseed"
+  ],
+  "WAITPKG": [
+    "waitpkg"
   ]
 }

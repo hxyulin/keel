@@ -4,6 +4,11 @@
 use memmap2::{Mmap, MmapOptions};
 use std::{fs::File, io, io::Read, path::Path};
 
+/// GNU assembler binary inputs are relative to the process working directory.
+pub(super) fn binary_input(name: &str) -> Result<Vec<u8>, String> {
+    std::fs::read(name).map_err(|error| error.to_string())
+}
+
 pub(super) enum Source {
     Read(Vec<u8>),
     Mapped(Mmap),

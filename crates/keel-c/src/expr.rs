@@ -938,6 +938,7 @@ impl<'a> Parser<'a> {
                             base: self.node(e),
                             offset: if imag { self.size_of(elem) } else { 0 },
                             bits: None,
+                            nonstring: false,
                             align: self.types().align(elem),
                         },
                         *elem,
@@ -1275,6 +1276,7 @@ impl<'a> Parser<'a> {
                 base: self.node(base),
                 offset,
                 bits: m.bits,
+                nonstring: m.nonstring,
                 align: m.align,
             },
             m.ty,
@@ -1537,6 +1539,33 @@ impl<'a> Parser<'a> {
             CHAR
         };
         mk(ExprKind::Str(i), self.array_type(elem, Some(len)), loc)
+    }
+
+    fn has_nonstring(&self, operand: &Expr<'a>) -> bool {
+        match operand.kind {
+            ExprKind::Local(id) => self.fs.as_ref().unwrap().locals[id].nonstring,
+            ExprKind::Global(id) => self.globals[id].nonstring,
+            ExprKind::Member { nonstring, .. } => nonstring,
+            ExprKind::Deref(pointer) => self
+                .attribute_referent(pointer)
+                .is_some_and(|object| object.ty == operand.ty && self.has_nonstring(object)),
+            _ => false,
+        }
+    }
+
+    // GCC folds identity address expressions before looking at declaration
+    // attributes. Preserve that distinction without following pointer values.
+    fn attribute_referent(&self, pointer: &Expr<'a>) -> Option<&'a Expr<'a>> {
+        match pointer.kind {
+            ExprKind::Addr(object) => Some(object),
+            ExprKind::Cast(inner) if inner.ty == pointer.ty => self.attribute_referent(inner),
+            ExprKind::PtrAdd(base, index, _)
+                if eval_int_with_layout(index, self.c_layout) == Some(0) =>
+            {
+                self.attribute_referent(base)
+            }
+            _ => None,
+        }
     }
 
     fn builtin(&mut self, name: &str, loc: Loc) -> R<Expr<'a>> {
@@ -2027,6 +2056,30 @@ impl<'a> Parser<'a> {
                 };
                 let v = if kind & 2 == 0 { -1 } else { 0 };
                 Ok(mk(ExprKind::Int(v), ULONG, loc))
+            }
+            "has_attribute" => {
+                self.expect("(")?;
+                let nonstring = if self.is_typename() {
+                    self.type_name()?;
+                    false
+                } else {
+                    let operand = self.assign()?;
+                    self.has_nonstring(&operand)
+                };
+                self.expect(",")?;
+                let attribute = self.ident()?;
+                if attribute.trim_matches('_') != "nonstring" {
+                    return Err(Error::new(
+                        loc,
+                        "__builtin_has_attribute currently supports only nonstring queries",
+                    ));
+                }
+                self.expect(")")?;
+                Ok(mk(
+                    ExprKind::Int(i64::from(nonstring)),
+                    Ty::Int(IntKind::Bool),
+                    loc,
+                ))
             }
             "types_compatible_p" => {
                 self.expect("(")?;

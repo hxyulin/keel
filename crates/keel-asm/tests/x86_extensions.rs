@@ -134,8 +134,8 @@ fn malformed_extension_operands_are_rejected() {
 fn exposed_forms_match_clang_and_gnu_and_format_roundtrip() {
     let mut cases = Vec::new();
     for op in ExtensionOpcode::ALL {
-        // Unary/system adapters have their own operand matrix and independent
-        // byte oracles in x86_kernel_adapters.rs.
+        // Unary/system adapters have dedicated independent byte matrices in
+        // x86_kernel_adapters.rs and x86_remaining_kernel_adapters.rs.
         if matches!(
             op,
             ExtensionOpcode::Rdtscp
@@ -146,6 +146,8 @@ fn exposed_forms_match_clang_and_gnu_and_format_roundtrip() {
                 | ExtensionOpcode::Rdrand
                 | ExtensionOpcode::Prefetchw
                 | ExtensionOpcode::Invpcid
+                | ExtensionOpcode::Tpause
+                | ExtensionOpcode::Rdseed
         ) {
             continue;
         }
