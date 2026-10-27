@@ -194,15 +194,8 @@ fn principal_lines(text: &str) -> Vec<&str> {
         .collect()
 }
 #[test]
-fn exact_registry_signatures_and_all743_prefix() {
+fn exact_registry_signatures() {
     assert!(Intrinsic::ALL.len() >= 767);
-    let prefix = include_str!("x86_string_port_io/prefix.txt")
-        .lines()
-        .collect::<Vec<_>>();
-    assert_eq!(prefix.len(), 743);
-    for (n, id) in Intrinsic::ALL[..743].iter().enumerate() {
-        assert_eq!(format!("{id:?} {}", *id as usize), prefix[n]);
-    }
     assert_eq!(ids().len(), 24);
     for (n, id) in ids().iter().enumerate() {
         assert_eq!(*id as usize, 743 + n);

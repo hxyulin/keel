@@ -283,73 +283,71 @@ fn run_with_timeout(cmd: &mut Command) -> Result<Output, String> {
     Ok(child.wait_with_output().unwrap())
 }
 
-#[test]
-fn scalar_address_oracle() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/scalar_address.keel");
-    for (pools, optimize, suffix, selection, allocation) in CONFIGS {
-        run_program(&path, &pools, optimize, suffix, selection, &allocation).unwrap();
-    }
+// Keep focused test names and catch-all exclusions in the same declaration.
+// Each fixture runs CONFIGS once, while remaining selectable by its regression name.
+macro_rules! focused_programs {
+    ($($name:ident: [$($program:literal),+ $(,)?] { $($extra:tt)* })+) => {
+        const FOCUSED_PROGRAMS: &[&str] = &[$($($program,)+)+];
+        $(
+            #[test]
+            fn $name() {
+                for program in [$($program),+] {
+                    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join(format!("tests/programs/{program}.keel"));
+                    for (pools, optimize, suffix, selection, allocation) in CONFIGS {
+                        run_program(&path, &pools, optimize, suffix, selection, &allocation)
+                            .unwrap();
+                    }
+                }
+                $($extra)*
+            }
+        )+
+    };
 }
 
-#[test]
-fn compact_frame_storage() {
-    for program in [
-        "compact_frame",
-        "dyn_alloca",
-        "unwind",
-        "exceptions",
-        "setjmp",
-    ] {
-        let path =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/programs/{program}.keel"));
-        for (pools, optimize, suffix, selection, allocation) in CONFIGS {
-            run_program(&path, &pools, optimize, suffix, selection, &allocation).unwrap();
+focused_programs! {
+    scalar_address_oracle: ["scalar_address"] {}
+    folding_duplicate_operands: ["folding_duplicate"] {}
+    switch_default_skips_case_landing_pads: ["switch_default_edges"] {}
+    option_switch_default_from_callee_preserves_none_and_some: ["option_switch_default"] {}
+    compact_frame_storage: ["compact_frame", "dyn_alloca", "unwind", "exceptions", "setjmp"] {
+        #[cfg(feature = "experimental-regalloc")]
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/compact_frame.keel");
+        #[cfg(feature = "experimental-regalloc")]
+        for allocation in [
+            AllocationTier::Local,
+            AllocationTier::Split,
+            AllocationTier::Weighted,
+        ] {
+            run_program(
+                &path,
+                &TINY,
+                false,
+                &format!("-compact-{allocation:?}"),
+                keel_codegen::SelectionOptions::ALL,
+                &allocation,
+            )
+            .unwrap();
         }
-    }
-    #[cfg(feature = "experimental-regalloc")]
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/compact_frame.keel");
-    #[cfg(feature = "experimental-regalloc")]
-    for allocation in [
-        AllocationTier::Local,
-        AllocationTier::Split,
-        AllocationTier::Weighted,
-    ] {
-        run_program(
-            &path,
-            &TINY,
-            false,
-            &format!("-compact-{allocation:?}"),
-            keel_codegen::SelectionOptions::ALL,
-            &allocation,
-        )
-        .unwrap();
-    }
-    #[cfg(feature = "experimental-regalloc")]
-    for base in [AllocationTier::Fast, AllocationTier::Full] {
-        let allocation = keel_codegen::regalloc::RematerializingAllocator {
-            base: &base,
-            prefer_spilling: true,
-            constants: true,
-            stack_addresses: true,
-            null_pointers: false,
-        };
-        run_program(
-            &path,
-            &TINY,
-            false,
-            &format!("-compact-remat-{base:?}"),
-            keel_codegen::SelectionOptions::ALL,
-            &allocation,
-        )
-        .unwrap();
-    }
-}
-
-#[test]
-fn folding_duplicate_operands() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/folding_duplicate.keel");
-    for (pools, optimize, suffix, selection, allocation) in CONFIGS {
-        run_program(&path, &pools, optimize, suffix, selection, &allocation).unwrap();
+        #[cfg(feature = "experimental-regalloc")]
+        for base in [AllocationTier::Fast, AllocationTier::Full] {
+            let allocation = keel_codegen::regalloc::RematerializingAllocator {
+                base: &base,
+                prefer_spilling: true,
+                constants: true,
+                stack_addresses: true,
+                null_pointers: false,
+            };
+            run_program(
+                &path,
+                &TINY,
+                false,
+                &format!("-compact-remat-{base:?}"),
+                keel_codegen::SelectionOptions::ALL,
+                &allocation,
+            )
+            .unwrap();
+        }
     }
 }
 
@@ -387,32 +385,17 @@ fn optimized_regressions_spills() {
 }
 
 #[test]
-fn switch_default_skips_case_landing_pads() {
-    let path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/switch_default_edges.keel");
-    for (pools, optimize, suffix, selection, allocation) in &CONFIGS {
-        let suffix = format!("{suffix}-switch-default-focused");
-        run_program(&path, pools, *optimize, &suffix, *selection, allocation).unwrap();
-    }
-}
-
-#[test]
-fn option_switch_default_from_callee_preserves_none_and_some() {
-    let path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/option_switch_default.keel");
-    for (pools, optimize, suffix, selection, allocation) in &CONFIGS {
-        let suffix = format!("{suffix}-option-switch-focused");
-        run_program(&path, pools, *optimize, &suffix, *selection, allocation).unwrap();
-    }
-}
-
-#[test]
 fn programs() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs");
     let mut paths: Vec<_> = std::fs::read_dir(&dir)
         .unwrap()
         .map(|e| e.unwrap().path())
         .filter(|p| p.extension().is_some_and(|e| e == "keel"))
+        .filter(|p| {
+            !p.file_stem()
+                .and_then(|stem| stem.to_str())
+                .is_some_and(|stem| FOCUSED_PROGRAMS.contains(&stem))
+        })
         .collect();
     paths.sort();
     assert!(!paths.is_empty());

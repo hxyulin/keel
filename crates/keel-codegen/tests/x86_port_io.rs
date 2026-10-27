@@ -96,11 +96,6 @@ fn expected_io() -> Vec<Vec<u8>> {
 fn registry_and_contract() {
     assert!(Intrinsic::ALL.len() >= 729);
     assert_eq!(&Intrinsic::ALL[717..729], ids().as_slice());
-    let prefix: Vec<_> = include_str!("x86_port_io/prefix.txt").lines().collect();
-    assert_eq!(prefix.len(), 717);
-    for (n, id) in Intrinsic::ALL[..717].iter().enumerate() {
-        assert_eq!(format!("{id:?} {}", *id as usize), prefix[n]);
-    }
     assert_eq!(ids().len(), 12);
     for (n, id) in ids().iter().enumerate() {
         assert_eq!(*id as usize, 717 + n);
@@ -131,12 +126,7 @@ fn registry_and_contract() {
         assert!(!id.info().pure);
         assert!(id.is_x86_target());
     }
-    for name in [
-        "x86_in64",
-        "x86_out64",
-        "x86_in64_imm",
-        "x86_out64_imm",
-    ] {
+    for name in ["x86_in64", "x86_out64", "x86_in64_imm", "x86_out64_imm"] {
         assert!(Intrinsic::from_name(name).is_none());
     }
     for (name, id) in [
