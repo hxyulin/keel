@@ -83,3 +83,33 @@ fn gnu_underscore_metadata_names_are_not_custom_elf_storage() {
         );
     }
 }
+
+#[test]
+fn static_readonly_relocations_and_ref_data_validate_without_c_frontend() {
+    let mut module = parse(
+        r#"
+        data @anchor = align 4 { i32 1 }
+        data @plain = section ".init.rodata" align 8 { i64 3 }
+        data @pointer = section ".init.rodata" align 8 { ptr @anchor }
+        data @zero = section ".ref.data" align 8 { zero 8 }
+        data @value = section ".ref.data" align 8 { i64 5 }
+    "#,
+    )
+    .unwrap();
+    module.data[1].init.as_mut().unwrap().constant = true;
+    module.data[2].init.as_mut().unwrap().constant = true;
+    verify_module(&module).unwrap();
+    for target in [Target::X86_64LinuxGnu, Target::Aarch64LinuxGnu] {
+        validate_module(&module, target).unwrap();
+        module.data[1].init.as_mut().unwrap().constant = false;
+        assert!(validate_module(&module, target).is_err());
+        module.data[1].init.as_mut().unwrap().constant = true;
+        module.data[2].retain = true;
+        assert!(
+            validate_module(&module, target)
+                .unwrap_err()
+                .contains("incompatible storage or retention")
+        );
+        module.data[2].retain = false;
+    }
+}

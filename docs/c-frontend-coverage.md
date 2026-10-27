@@ -52,7 +52,7 @@ GNU `__name__` spellings are accepted wherever the plain spelling is.
 | --- | --- | --- |
 | `visibility("default")`, `visibility("hidden")`, `visibility("internal")` | See [visibility](#visibility). Internal is emitted as hidden. | |
 | `weak` | External function/object definitions and undefined references, on both targets. | [C weak symbols](c-weak-symbols.md) |
-| `section("name")`, `retain` | Static-storage objects (including bounded TLS) and function definitions. | [Sections and retention](c-sections-retain.md) |
+| `section("name")`, `retain` | Static-storage objects (including bounded TLS) and function definitions. Conventional readonly ELF sections support static pointer relocations; `.ref.data` zero objects use initialized storage. | [Sections and retention](c-sections-retain.md) |
 | `constructor`, `destructor`, `used` | Default priority only; `used` is a compiler emission root, not linker retention. | [C lifecycle](c-lifecycle.md) |
 | `cleanup(fn)` | Automatic block objects only. | [Plan stage 3](c-language-implementation-plan.md#3-reusable-scope-exit-actions-and-cleanup--bounded-milestone-implemented) |
 | `always_inline`, `noinline`, `noreturn`, `nothrow`, `returns_twice`, C `_Noreturn` and `inline` | Map to IR function attributes; merged across redeclarations. | [Function attributes](function-attributes.md) |

@@ -72,16 +72,31 @@ impl Placement {
     }
 }
 impl SectionName {
-    /// Zero initializers in conventional ELF data sections still occupy bytes.
+    /// Storage for explicit ELF names: data zeros occupy bytes and readonly
+    /// sections can contain statically resolved pointer relocations.
     pub fn initialized_storage(self, placement: Placement) -> Placement {
         let name = self.as_str();
-        if placement == Placement::ZeroFill
+        if placement == Placement::Relro
+            && (name == ".rodata1"
+                || [
+                    ".rodata",
+                    ".init.rodata",
+                    ".exit.rodata",
+                    ".meminit.rodata",
+                    ".ref.rodata",
+                ]
+                .iter()
+                .any(|p| name == *p || name.strip_prefix(p).is_some_and(|s| s.starts_with('.'))))
+        {
+            Placement::ReadOnly
+        } else if placement == Placement::ZeroFill
             && [
                 ".data",
                 ".data1",
                 ".init.data",
                 ".exit.data",
                 ".meminit.data",
+                ".ref.data",
             ]
             .iter()
             .any(|p| name == *p || name.strip_prefix(p).is_some_and(|s| s.starts_with('.')))
@@ -151,17 +166,22 @@ impl SectionName {
                     return Err("special/TLS/COMDAT section placement is unsupported");
                 }
                 if ((matches!(name, ".init" | ".fini")
-                    || [".init.text", ".exit.text", ".meminit.text"]
+                    || [".init.text", ".exit.text", ".meminit.text", ".ref.text"]
                         .iter()
                         .any(|p| prefix(p)))
                     && placement != Code)
-                    || ([".init.data", ".exit.data", ".meminit.data"]
+                    || ([".init.data", ".exit.data", ".meminit.data", ".ref.data"]
                         .iter()
                         .any(|p| prefix(p))
                         && !matches!(placement, Data | ZeroFill | Relro))
-                    || ([".init.rodata", ".exit.rodata", ".meminit.rodata"]
-                        .iter()
-                        .any(|p| prefix(p))
+                    || ([
+                        ".init.rodata",
+                        ".exit.rodata",
+                        ".meminit.rodata",
+                        ".ref.rodata",
+                    ]
+                    .iter()
+                    .any(|p| prefix(p))
                         && !matches!(placement, ReadOnly | Relro))
                 {
                     return Err("kernel lifetime section conflicts with storage class");
@@ -178,7 +198,8 @@ impl SectionName {
                 }
                 if (prefix(".text") && placement != Code)
                     || (prefix(".bss") && placement != ZeroFill)
-                    || ((prefix(".rodata") || name == ".rodata1") && placement != ReadOnly)
+                    || ((prefix(".rodata") || name == ".rodata1")
+                        && !matches!(placement, ReadOnly | Relro))
                     || ((prefix(".data") || name == ".data1")
                         && !matches!(placement, Data | ZeroFill | Relro))
                 {

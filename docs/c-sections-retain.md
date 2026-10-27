@@ -27,12 +27,19 @@ types, group arguments, injected assembly and segment syntax are not accepted
 in the C string. Safe arbitrary code, writable initialized data, readonly data,
 and writable all-zero sections are supported. Code uses `SHF_ALLOC|SHF_EXECINSTR`;
 writable data uses `SHF_ALLOC|SHF_WRITE`; readonly bytes use `SHF_ALLOC`.
-All-zero writable data uses `SHT_NOBITS`, except conventional `.data`, `.data1`
-and `.data.*` placement, which remains `SHT_PROGBITS`; other storage also uses
-`SHT_PROGBITS`.
-Readonly data containing addresses uses writable relocatable-constant storage,
-matching the existing `.data.rel.ro` policy. A custom name does not itself
-arrange a system linker's RELRO segment policy.
+All-zero writable data uses `SHT_NOBITS`, except conventional `.data`, `.data1`,
+`.init.data`, `.exit.data`, `.meminit.data`, `.ref.data` and their dotted suffixes,
+which use `SHT_PROGBITS`. Other storage also uses `SHT_PROGBITS`.
+
+Unplaced readonly data containing addresses keeps writable relocatable-constant
+storage in `.data.rel.ro`. Explicit `.rodata`, `.rodata1`, `.init.rodata`,
+`.exit.rodata`, `.meminit.rodata`, `.ref.rodata` and dotted family suffixes use
+`SHF_ALLOC` without `SHF_WRITE`, including pointer relocations. This is the static
+readonly contract qualified against GCC/Clang with `-fno-pic -fno-pie` for the
+kernel corpus. PIC-mode differences and dynamic imports into readonly sections
+are not qualified by this change. The same explicit-storage rules apply to
+AArch64 ELF. An arbitrary custom name does not arrange a system linker's RELRO
+segment policy.
 
 Section names with standard placement implications (`.text`, `.data`, `.rodata`,
 `.bss` and their dotted suffixes) must match the storage class. Runtime arrays,
@@ -54,8 +61,11 @@ survive GC when it shares an input section with a live root; the attribute
 itself still makes no linker-retention request.
 
 This first milestone requires all definitions explicitly sharing a named
-section in one translation unit to have the same storage class, including
-zero-fill versus initialized data, and the same retention request on ELF.
+section in one translation unit to have the same effective storage class after
+explicit-name normalization, and the same retention request on ELF. Thus plain
+constants and relocated constants can share a conventional readonly section,
+and zero/nonzero objects can share conventional initialized data sections.
+Other zero-fill/initialized conflicts remain diagnosed.
 Conflicting requests diagnose before pruning, including unused definitions.
 This avoids silently broadening retention or changing section type.
 Data alignment must be a power of two up to 4096 bytes; sections preserve the

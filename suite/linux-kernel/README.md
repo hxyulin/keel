@@ -1261,3 +1261,22 @@ prior accepted object is byte-identical. All captured inputs and reference
 artifacts were rehashed unchanged. No kernel link, rebuild or boot was performed.
 Full validation passes 2,887 tests and one doctest. Native checks pass four local
 Arm executions, eight generated Linux executions and two compiler references.
+
+### ELF section storage checkpoint
+
+[The storage ledger](audit-section-storage.json) records static ELF placement
+for pointer-bearing readonly constants and zero objects in `.ref.data`. All 11
+prior shared-section errors disappear. Under unchanged permissions, acceptance
+is 420/484 C and 506/506 assembly inputs; the original policy accepts 411/484 C
+and 490/506 assembly inputs. Nine more C inputs accept under the optional policy.
+
+All prior acceptances remain. Only two prior objects change: their `.init.rodata`
+section loses `SHF_WRITE`; contents, symbols and relocations remain unchanged.
+All other objects are byte-identical. All captured inputs and reference artifacts
+were rehashed unchanged. No kernel link or boot was performed.
+
+Clang object comparisons cover both ELF targets. GCC/Clang static native checks
+pass two generated executions and two references. Full validation passes 2,891
+tests plus one doctest; scoped Clippy and workspace check pass. Broad Clippy stops
+at an unchanged `almost_swapped` error in `keel-ir/tests/call_operand_abi.rs:15`.
+See [the section contract](../../docs/c-sections-retain.md) for retained limits.

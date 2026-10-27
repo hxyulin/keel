@@ -119,3 +119,37 @@ pass. Debug objects from different build directories differ in debug data;
 code, data and unwind sections match. Full validation passes 2,887 tests and
 one doctest, with 13 skipped tests. Kernel link/boot qualification remains outside
 this source-acceptance checkpoint.
+
+## ELF section storage follow-up
+
+Ten prior section conflicts mixed plain constants and relocated constants in
+`.init.rodata`. One mixed zero and nonzero objects in `.ref.data`. Shared
+classification now gives explicit conventional readonly ELF sections readonly
+PROGBITS storage even with pointer relocations, and `.ref.data` zero objects
+file-backed storage. C preflight, IR validation and text/typed emission use the
+same policy. Default `.data.rel.ro` and retention conflicts are unchanged.
+
+All 11 first errors disappear. Nine more C inputs accept under the unchanged
+optional policy, for 420/484 C and 506/506 assembly inputs. The original policy
+accepts 411/484 C and 490/506 assembly inputs. The other two inputs reach existing
+fixed-register overlap and unaligned pointer-relocation limits. The
+[storage ledger](../suite/linux-kernel/audit-section-storage.json) records these
+boundaries and the qualified source hashes.
+
+All prior acceptances are retained. Two prior objects, `arch/x86/kernel/reboot.i`
+and `lib/decompress.i`, change only `.init.rodata` flags from writable/alloc to
+alloc; contents, symbols and relocations remain unchanged. All other prior
+objects remain byte-identical. Captured inputs and reference artifacts were
+rehashed unchanged. No kernel link or boot qualification is claimed.
+
+Clang object oracles cover x86-64 and AArch64 ELF flags, storage, symbol bytes and
+pointer relocations; text/typed objects agree. GCC and Clang each link and run the
+generated x86 fixture and an independent reference with non-PIC/non-PIE flags.
+The fixture reads relocated pointers and initial zeros, then mutates their
+writable targets and checks the new values. These checks qualify the static
+kernel contract; they do not establish PIC-mode parity.
+
+Full validation passes 2,891 tests and one doctest, with 13 tests skipped.
+Workspace check, scoped Clippy, documentation and generator freshness pass.
+Broad all-target Clippy stops at the unchanged `clippy::almost_swapped` error in
+`keel-ir/tests/call_operand_abi.rs:15`; that test is outside this change.

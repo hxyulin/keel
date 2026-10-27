@@ -146,7 +146,8 @@ fn emit_macho_items(out: &mut impl Sink, init: &DataInit) {
 /// `nm` show.
 pub(crate) fn emit_elf(out: &mut impl Sink, data: &DataObject, init: &DataInit) {
     let name = data.name.clone();
-    let (section, flags, mut nobits) = match (data.thread_local, init.constant, init.is_zero()) {
+    let (section, mut flags, mut nobits) = match (data.thread_local, init.constant, init.is_zero())
+    {
         (true, _, true) => (".tbss", 0x403, true),
         (true, _, false) => (".tdata", 0x403, false),
         (false, false, true) => (".bss", 3, true),
@@ -154,11 +155,16 @@ pub(crate) fn emit_elf(out: &mut impl Sink, data: &DataObject, init: &DataInit) 
         (false, true, _) if init.has_relocations() => (".data.rel.ro", 3, false),
         _ => (".rodata", 2, false),
     };
-    if data.section.is_some_and(|section| {
-        section.initialized_storage(keel_ir::section::Placement::for_object(data.thread_local, init))
-            == keel_ir::section::Placement::Data
-    }) {
-        nobits = false;
+    if let Some(section) = data.section {
+        use keel_ir::section::Placement;
+        match section.initialized_storage(Placement::for_object(data.thread_local, init)) {
+            Placement::Data => nobits = false,
+            Placement::ReadOnly => {
+                flags = 2;
+                nobits = false;
+            }
+            _ => {}
+        }
     }
     let custom = data.section.map(|s| s.as_str().to_owned());
     let section = custom.unwrap_or_else(|| {
