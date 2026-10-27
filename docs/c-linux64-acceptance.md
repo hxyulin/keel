@@ -274,3 +274,44 @@ changed. The [policy ledger](../suite/linux-kernel/audit-kernel-policy.json)
 records seven policy tests, real CLI gate witnesses and the complete corpus
 rerun. The remaining 24 C rejections are implementation gaps; the 484/484 goal
 remains open. Feature permission does not establish kernel runtime support.
+
+## Union casts, case ranges and inline finalization
+
+The [contained-gap ledger](../suite/linux-kernel/audit-contained-gaps.json)
+records 464/484 C inputs and 506/506 assembly inputs under the unchanged named
+kernel policy. AMD IBS, signal handling, ELF loading and mutex locking now
+compile. All 966 prior accepted inputs remain accepted. Of their objects, 957
+are byte-identical; nine change with compact case-range dispatch. All 992 saved
+inputs, reference artifacts and binary dependencies were rehashed unchanged.
+
+GNU union casts construct an independent union value from a matching member
+type and evaluate the operand once. Scalar, pointer and aggregate members use
+existing stores and aggregate copies. Bit-field casts and static aggregate
+cast initializers also follow Clang's accepted extension; GCC 14 rejects those
+fixture spellings. The GCC reference substitutes ordinary initializers at
+those three occurrences. The Clang reference uses the unmodified source.
+
+Switch case ranges remain converted intervals rather than an enumerated list
+of values. Existing integer comparisons handle large and full-width intervals
+without new IR operations. Tests check signed and unsigned boundaries,
+conversion before overlap detection, selector evaluation, fallthrough and
+cleanup order. LAR/LSL accept 16-bit selector-register spellings with 32-bit or
+64-bit destinations while retaining their pinned decoded register views.
+Required-inline discard synchronizes retained callee imports with their owning
+declarations; verifier and linkage checks remain intact.
+
+Full workspace validation passes 2,909 tests and one doctest, with 13 skipped.
+Workspace checking, documentation builds, both generator freshness checks and
+seven policy tests pass. The focused Linux tests pass with optimizer
+verification enabled. Runtime witnesses cover eight Clang-linked generated
+executions and two unmodified references, plus five GCC-linked generated
+executions and two references with the union adjustments described above.
+Strict Clippy remains blocked by existing dependency warnings. Whole-file
+format checks reproduce existing differences in `parse.rs` and
+`encode/tables.rs`; changed hunks are formatted.
+
+Twenty C inputs remain rejected: eight shared-register asm contracts, four
+cleanup gotos, four public mandatory-inline ownership checks, packed pointer
+relocations, special section placement, function alignment and unreachable
+width-specific asm. Their first diagnostics are unchanged. The acceptance goal
+remains open; this checkpoint does not link or boot a Keel kernel.

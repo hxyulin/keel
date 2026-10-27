@@ -1,0 +1,516 @@
+{
+  "schema": 1,
+  "date": "2026-10-27",
+  "implementation_head": "6e0dd56e",
+  "implementation_commits": [
+    "8aad1638",
+    "08bba839",
+    "487bd09e",
+    "6e0dd56e"
+  ],
+  "scope": "GNU matching-member union casts, compact GNU case ranges, LAR/LSL narrow selector spellings, and callee metadata synchronization after mandatory inlining. Source acceptance only; no Keel kernel link or boot qualification.",
+  "goal": {
+    "status": "open",
+    "target_c_accepted": 484,
+    "current_c_accepted": 464,
+    "remaining_c_inputs": 20
+  },
+  "feature_policy": {
+    "name": "linux-v6.12-x86-64-kernel-audit",
+    "sha256": "60189c2bbc51bd84487d041c69715c670688dfbcfb2d1afa24a6c9aae16fcfbc"
+  },
+  "target_policy": {
+    "c": {
+      "cpu_level": "v1",
+      "target_features": "+popcnt,+rdrand,+rdtscp,+xsave,+clflush,+fsgsbase,+prefetchw,+invpcid,+rdseed,+cx16,+waitpkg"
+    },
+    "asm": {
+      "cpu_level": "v3",
+      "target_features": "+rdtscp,+fsgsbase,+rdrand,+prefetchw,+invpcid,+clflush,+rdseed,+waitpkg"
+    }
+  },
+  "source_manifest_sha256": "908006c3e46761f50342cf6556fcd86a05d7edf51cf2e85de449d19cfd2c5135",
+  "config_sha256": "af7dd9b29c4ac472ffe32d338821425912fe92ad62b30281ef1356947930e129",
+  "all_992_inputs_rehashed_unchanged": true,
+  "reference_artifacts_and_binary_inputs_rehashed_unchanged": true,
+  "reference_rebuilt_or_rebooted": false,
+  "keel_objects_linked_or_run_as_kernel": false,
+  "all_tracked_sources_rehashed": 2375,
+  "tracked_source_manifest_sha256": "2989fd13b9c66b2631861883ffb9b0718458f9f88b55eb2c36b3e4554cdc7ed8",
+  "implementation_source_sha256": {
+    "crates/keel-asm/src/fxhash.rs": "2eaa785e4dde7ff6b96b7dca5c05699952fc917400e832e12078ce877e06f3fa",
+    "crates/keel-asm/src/generated.rs": "2d58cdc2b3b5a89628672abc202b15f174a6c421fedf5ace1a365d2fe8fcc45d",
+    "crates/keel-asm/src/lib.rs": "15b0b33aa50268e7e5077cd0ee87fb9a79b9bdc37dd05b491b2a999f80ecaf5b",
+    "crates/keel-asm/src/macho.rs": "721516ca6a74915ce959246b8d17dbf6d357788bbca0421be23e39a9fe9a3590",
+    "crates/keel-asm/src/parser.rs": "4b8dd48f2f84fe85dc3a3d608ac74bf3ffec5c13d012c0ff01e9aa296e6dee19",
+    "crates/keel-asm/src/parser/arithmetic.rs": "198684b82486db355b9fbb74d7343560a1b8c069efa1a9e357134b2817158a64",
+    "crates/keel-asm/src/parser/atomic.rs": "68b40a76e074b3372633c4a70ba0d44a8b61223e0a83e5026f9e1b5670601648",
+    "crates/keel-asm/src/parser/atoms.rs": "6fa2602c67ef6032aa2c6260bdd8b183a0ee181e2f59e089dfc57a3a4a688027",
+    "crates/keel-asm/src/parser/compact.rs": "c21960c4aa2118e150e3638ea90b7d2e489ece86e16edc2f55cdaeab8ec33425",
+    "crates/keel-asm/src/parser/control.rs": "43e47d7f0a96896bc56cc256d95aaa928ace6312b739324112fab1d7cbd9c4e9",
+    "crates/keel-asm/src/parser/data.rs": "9b3d1a7f9ccbcdda28b4f9dbbfe86d8fbff43e835a0c1ff74294bc9056222c88",
+    "crates/keel-asm/src/parser/debug.rs": "3b76d7f345142b1b1672f92c0db2b37ff31911d05d04f7199355b70bf8c9c50d",
+    "crates/keel-asm/src/parser/elf.rs": "852a70016e6f88143899199fb5a5ffb16c8cbc5e85467144170108d0506e97f6",
+    "crates/keel-asm/src/parser/float.rs": "87c39af20aa59fe3f6accd3d4d6292629aaf7f64ef7cea9315fad6f99614709c",
+    "crates/keel-asm/src/parser/memory.rs": "ce4cd21028868d527ec270c4cd743aa63564612218bf6487b1a3f2270327d96c",
+    "crates/keel-asm/src/parser/preprocess.rs": "2c16fe7e6745141fd4c9885a452efa08a27209c8377691e7a694629c8afe1f22",
+    "crates/keel-asm/src/parser/program.rs": "1d19b0a79a1a01c599c88dda819a8e62938330e4366a9e3d6eca10c2a4d6ccad",
+    "crates/keel-asm/src/parser/relocate.rs": "6c2747a19e254833842adc197003246ee48cd97f54ed4ba63e31c432cbf08ee2",
+    "crates/keel-asm/src/parser/scalable.rs": "e8af55bd0f8255f2037a9fd07a3c6e5881bde53b0e2c2b651cd432842feac342",
+    "crates/keel-asm/src/parser/scalable/matrix.rs": "a5ffaec92fa8fdea73c2cb6e6ff0b279076dc2c1aed276c2f6e54b6ab838e6fe",
+    "crates/keel-asm/src/parser/scalable/matrix/grouped.rs": "ac131a13546ae0de2ba2a9cd86402f7674626ad9fb276a1cc1710953a1a2e3c3",
+    "crates/keel-asm/src/parser/scalable/streaming.rs": "9398f7db72c741deea98b178119705a6a21592d07468511dcac8033207d4be80",
+    "crates/keel-asm/src/parser/scanning.rs": "86a049f8b12bb671c4255ebffa9f8593e0cefacb1c2ebd0193356087a1aae551",
+    "crates/keel-asm/src/parser/storage.rs": "2292f420edc88a2133726cb12160333ab4d495400d903b14af0215909de7ce41",
+    "crates/keel-asm/src/parser/system.rs": "de9df422e37857ee65d9dde35d5ce72c6b8e3ff969b89534047d61da1a05eae8",
+    "crates/keel-asm/src/parser/text.rs": "39f0aaac786b44666eb9c8e5dad69cb66cf240354091b93abd3786b442840fda",
+    "crates/keel-asm/src/parser/vector.rs": "a55009829a490b6b5b12c3e71b6b0e087f679b615fd2e8ace9a17c3cee363ce8",
+    "crates/keel-asm/src/parser/vector/fp.rs": "e4c267a8a71a77b21a51e660d7b333cd3d3a4cdef3ab551d8f51a68fdda28958",
+    "crates/keel-asm/src/parser/vector/indexed.rs": "5217b8f1a2bf2afa86e375adf1be554638b24a6443c3bd2238218c78134eda03",
+    "crates/keel-asm/src/parser/vector/integer.rs": "8c2ac9e030846181be0bd64cf595264b6603a37d625bc4ad27c7de4cd466c0dc",
+    "crates/keel-asm/src/parser/vector/memory.rs": "e97fa3ca1262defd82d3f29965fe137b1af8845e1872632246bd762a028a8dd8",
+    "crates/keel-asm/src/parser/vector/numeric.rs": "32531970042e5dabab2d1c241ab78192d1012728b69afe9228a2b48a4829673b",
+    "crates/keel-asm/src/parser/vector/numeric/half.rs": "b2632b3a80e24c91aa0af1a6e11c91a8c09ac030578f631c6abaa36e58e2ad3f",
+    "crates/keel-asm/src/parser/vector/permute.rs": "deb74a6cf076667e813763b7c69e0049853405016356c4f6b70113180d6a93dd",
+    "crates/keel-asm/src/x86/arm.rs": "eb2f728bfc644620a19930a6a59ad0d84697aeea5d6c339b6e68af2b994ff3dc",
+    "crates/keel-asm/src/x86/dwarf.rs": "176a6505e135d7dd0902f6de94a03c54ef8bca5610199ae2e59fe25003ea5364",
+    "crates/keel-asm/src/x86/encode.rs": "e4bac287813a5d53cf09b59609e55ee179033ed0234a4d16955fb35e6a1b2741",
+    "crates/keel-asm/src/x86/encode/evex.rs": "8ba7e9bf749050e13869cc676203c752639e99336399160a4c7c1e698c1dde87",
+    "crates/keel-asm/src/x86/encode/tables.rs": "a2484bd48a452a24f6b68788445edf02febcbd496f5808414ace9c708617952e",
+    "crates/keel-asm/src/x86/inputs.rs": "c6f58f47c69823115b9432a0c3bfd2b572fa141159468bc5a3cf79b59c01a5a1",
+    "crates/keel-asm/src/x86/metadata.rs": "43fcdf9690c23701c9b3a754da83844af65473caa8ee4599b02a79c73214e1c8",
+    "crates/keel-asm/src/x86/mod.rs": "48088df2ddcd825e8f07ec345bb23b27b7307aa1403c61e4ac1ccdeffae1b965",
+    "crates/keel-asm/src/x86/relax.rs": "f27c43e25d1c143bbc09e4b35829392271706dd1d91df887e9aab2d26b5a89d0",
+    "crates/keel-asm/src/x86/sections.rs": "ad9fdb8083a419b80dbcd0c49380be430f47d88df3153bf4a55abb64d30f966b",
+    "crates/keel-asm/src/x86/source.rs": "ef0b7b65fcb1ea6ef871b5d1f44648860c526bc6a3b0d05ef65da6921c5e5d28",
+    "crates/keel-asm/src/x86/symbolic.rs": "28b7686d34bdf194c07829814366a6dc77dee5dbc076840a77542d8e44cc7815",
+    "crates/keel-asm/tests/x86_selector_queries.rs": "830fddfbdf092e201a485b1863cdc3979bb94ddb9705ff982f66a52815cccb9b",
+    "crates/keel-c/src/arena.rs": "74342c7e6479909cb50e10db5e55de8eecabe3699aa98b651508c8fc331758c7",
+    "crates/keel-c/src/ast.rs": "4b5eb42409092860926c0c8adc74adacdd662e17d7ece238be7f1946adeb22bb",
+    "crates/keel-c/src/complex_eval.rs": "63bc5722048883e882a815528914438c03618527a379e8428a034932ee5f4263",
+    "crates/keel-c/src/debug.rs": "0dec903c8b3f3f10fbbea1393c2f0d6f6d9712c2e0b6a0c28d40998b6fe5ca69",
+    "crates/keel-c/src/eval.rs": "849962721abbf4e86088291769ec20696674c5cfb951b6ecc1fa6f29d5ba68cd",
+    "crates/keel-c/src/expr.rs": "7adf735257919ed3946fb35f76889118fd09a90310710961e85381dd7bed0ea5",
+    "crates/keel-c/src/features.rs": "ed064c3f49acf8d892623424afe9df731e2d0fc11dbd9b11b8f541223cabbc37",
+    "crates/keel-c/src/headers.rs": "8c9c1a9c6f30011251ca60436dfdedd5b4e2fc4b3f355867c7426fc034eaab74",
+    "crates/keel-c/src/init.rs": "9cd0cc2aae2180aba11cbd9947885e28d2c0dbf2a2a32b1fa6ad3fd38ca00af8",
+    "crates/keel-c/src/irgen.rs": "8294a6381d775ba6c14c3be7a82e6da04c42352da0bc519433f9120128317df6",
+    "crates/keel-c/src/irgen/wasm_scalar.rs": "aa5be5be7ea1926ecf00b098d95c0e09a31ecba9e70eaf4392e7995895a1e098",
+    "crates/keel-c/src/lex.rs": "cd95be0ed01e0fa0ab9faae433345ee664144a9e4dccaca74a6a7ab161ab90e2",
+    "crates/keel-c/src/lib.rs": "bdc1f3e013cf5f4c7b885c0c3afe166ed41096c7ac4446fd9c2a4cfecc4d2776",
+    "crates/keel-c/src/parse.rs": "cf0c64bbe67266aadf37649a2bb9311261dc656bae935f76936d3ae67846ccbb",
+    "crates/keel-c/src/parse/aliases.rs": "dd6c93b3691ad781da94a2d3ac1e53d9f394007cebe2a00934a1d6791c0fbf48",
+    "crates/keel-c/src/parse/asm.rs": "f61c19cdea27a2ada66a7643089b0bbb36d87f2cb845f530d0bf45d43dbac98d",
+    "crates/keel-c/src/parse/registers.rs": "4320f2695825b0d92250a79fb22cc5f44dd019cd2e9d871a0a01f79a245f3dcc",
+    "crates/keel-c/src/predefined.rs": "6b878e306293e9f36971e99d5c68dd49de1b11a93c1d3b06026e1e8f4deab835",
+    "crates/keel-c/src/preprocess.rs": "25e1c24f7e07d337916ed42068ec1e26b703c69f599421c9dc3c89fd75659e96",
+    "crates/keel-c/src/profile.rs": "b9b9d32b29b5ae51d863757dfde0ed339913196424bc4a51edb26577c24951f6",
+    "crates/keel-c/src/strings.rs": "ea8c77f119e615ca3f105ad111bca9a4c369c4f16c56bd20ea93491a37c3b2fc",
+    "crates/keel-c/src/types.rs": "3549daad33b853d5802f5f908549f831e9dbc2c13c37a96c0b14df4e9b11c28b",
+    "crates/keel-c/tests/gnu_union_casts.rs": "cd3691caa07395d533973c1121b718f6929d3444cc814f440cde9c12862cbe16",
+    "crates/keel-c/tests/required_inline_discard.rs": "60751758bcf3bad570872af4ccc63ae54a60bd110241ee3f70628a5a321b6df5",
+    "crates/keel-c/tests/switch_ranges.rs": "8e647e712f6c3da66270b946b6c7c7b7aa865f5915658c065a4f12864512d91f",
+    "crates/keel-disasm/tests/x86.rs": "22acfd36250a66350466fa778df3b6cdef32b005a6840f58b966870cb97d4d0e",
+    "crates/keel-opt/src/adjacent_abs.rs": "df7781383618b4830fa5fcebdb9cf149577d062e287d66de8c95075891fada2b",
+    "crates/keel-opt/src/adjacent_diff.rs": "99a0767b4cf7a405e15ef776101124749b9935dee39d7ab5ab8b1bab509a318b",
+    "crates/keel-opt/src/aggregate_return.rs": "938d2eae76fb2f0612601b623973a2dad81d8de6d5b22d686845021bf35e52ae",
+    "crates/keel-opt/src/analysis.rs": "1b13c44f05b2307ed6463017382ccc2f975e35bfc281f099d433ca1e7b4e0eca",
+    "crates/keel-opt/src/branch_ranges.rs": "aa7cc1cb09694eca78689b5e4853c62e9ba9b55d75ecb4e24e8f6cfd13e1eef6",
+    "crates/keel-opt/src/call_contracts.rs": "5dfcf95bb11424bda734d2b6948ddbe9aef0598524f3995bc38e7243d4bbad7c",
+    "crates/keel-opt/src/call_load_reuse.rs": "41c420eab14a0cc25c03a617baa26ea6864c96b416309b7ad3631d9ed29216bf",
+    "crates/keel-opt/src/canonicalize.rs": "571e41eebf964e456e6815ed70babdb07d857370e5ec3009cb733b5e122b26ff",
+    "crates/keel-opt/src/const_fold.rs": "31383776921725cbb365f4671c8622af5adf960822d8ebbab7a0d83b4b8dbc83",
+    "crates/keel-opt/src/const_fold/fp.rs": "ae433c153088ddb565e58db90f64ec80dffbff039665c87ca73c81ab7caa204d",
+    "crates/keel-opt/src/dce.rs": "f4532a6b034b2fa8c09be1a387356a85eb99a61196dc40f2e58f62ccd4afd730",
+    "crates/keel-opt/src/fast.rs": "4ca9b0880b4dd2d02a224677bbefcad8cad9d2abfc6fe0bd6f1aadf067baa786",
+    "crates/keel-opt/src/gcm.rs": "046322807044b0d90003e967a8adf66d9aef9d60b484c8b1c83a904973f37872",
+    "crates/keel-opt/src/gvn.rs": "18f3030aa96cfca5a6ff785570da71b4159ac172aab050215734057c0ecd7eb2",
+    "crates/keel-opt/src/if_convert.rs": "6a0206f2b1bd387bcb049b77f3162a6abc459407df64c7f38afd879b1c5ed071",
+    "crates/keel-opt/src/inline.rs": "2e37f55b5b39519c090941c9fe339438a37552c8a19883bfc9b52ce6e68ddc2b",
+    "crates/keel-opt/src/instcombine.rs": "3c457c18809325d4e680cf1b956327017446aa0027fc6ab9341e9a08ef7224e5",
+    "crates/keel-opt/src/instcombine/constant_division.rs": "98fc2daace25a77132385d5e0a1b5f137aa27734d27ceb081d3a4c0d338f00b1",
+    "crates/keel-opt/src/instcombine/vector.rs": "1957b4b31981247977f2494992c492ea9ca90a0d50078d1fd23cf7df9ef10ba6",
+    "crates/keel-opt/src/internal_fast_calls.rs": "7e0fbd31e160e0b4b3916069dd10c5d2afd7c4a60aba1260d5c81d945c066aea",
+    "crates/keel-opt/src/known_bits.rs": "40f19d37c2535330dbc771edd7e74fbd6c4a2d983f3043eee0301cde706ca79d",
+    "crates/keel-opt/src/lib.rs": "35326dce739fe544460d4347e972a18a3fa13c53e9a3d9d383f849634366c2f0",
+    "crates/keel-opt/src/load_narrow.rs": "2344b523e61f0ba8db934e090466e73656440ad2f1578749cf193ca5b2f2e9d1",
+    "crates/keel-opt/src/load_reuse.rs": "2ec9b9af0447f9aea22cfebb90c3d8a81ef3451fbb3156c7b8f628f5186e001a",
+    "crates/keel-opt/src/loop_memory.rs": "30307b0b05abab902e666914ec0b185f0b1cad0bd56344282373ea7ddd2e072a",
+    "crates/keel-opt/src/loop_rotate.rs": "64bb4816d01a590c0686a4c2fe23e5e0f9e911b2cf4c70d891ef0121bc50dfaf",
+    "crates/keel-opt/src/loop_strength_reduce.rs": "2e92d8f7753024620d38b0b7fe2a38f7edb304f4abf88cb8d0ad12e76043c357",
+    "crates/keel-opt/src/loop_unroll.rs": "9c3440d168ee89678e5135297c9c02ef189f9d8040ebc6986af9f8665523d2db",
+    "crates/keel-opt/src/loop_vectorize.rs": "8cedb1aed8f090bd76db6bf0b6c1da8a0c78819f902870093a8cdc4c364469df",
+    "crates/keel-opt/src/loop_vectorize/scan.rs": "790d670b4fff55b43a9f3fd1541831cfbf9fcdc3b4fe1f5d1ca6c81afd3a0f63",
+    "crates/keel-opt/src/memory_alias.rs": "8398f782d681ed4d90edb7ce7e6bfc713e476faa623b7c28814fe14f424dce7b",
+    "crates/keel-opt/src/memory_forward.rs": "ab936a5d197da1ca89f863f7b5f86bd314a82c25d088f885fb5ae70916e75c95",
+    "crates/keel-opt/src/phi_simplify.rs": "c516167240a6fa8746fcf6d01c1119f652f20ded41f23f0b21bc9628adfd26eb",
+    "crates/keel-opt/src/private_aggregate.rs": "c7efee6e3cac487651bd05b26f6e903be8f603721b9546fd732e2817dc440fba",
+    "crates/keel-opt/src/report.rs": "1f2ce0abbe3941488f2575f311151baee916525044277125c6b69b54ba493728",
+    "crates/keel-opt/src/run_balance_predicate.rs": "df7497af7f5695c89fb4655c53f94760eda77f7f4d4d36dfe4c673c033d05192",
+    "crates/keel-opt/src/sccp.rs": "cff66104b87d503e43d0835937d4dc7b6dd1ab437b8e6d6a04778610e6a4a5f0",
+    "crates/keel-opt/src/scratch.rs": "f2d79b7b05226b35e66952e6152d5cb207968a505093cee4449107f583c73c38",
+    "crates/keel-opt/src/sign_extend_idiom.rs": "94966279af91ad0f8829e8c559a9adaff6f29c6190ec65dcfa1ee5f096cf1a3f",
+    "crates/keel-opt/src/simplify_cfg.rs": "878c5ec7692e07e4817b98511d79c3eb02f4492ab06a927f59a258b414f5f26e",
+    "crates/keel-opt/src/small_memory.rs": "ffa1b0255c4d812bdc4e4476c5ca812770d79b7dff7edf353317b1cf1ececf8e",
+    "crates/keel-opt/src/stack_cache.rs": "42dc88f94f2d980c9aa356c760d103190efc85b4a69f27f95337566ba52d6c01",
+    "crates/keel-opt/src/stack_forward.rs": "499fa457559c90a328d83c0eb58d75fbdf1a8a8173595001adbe0a88124b96e7",
+    "crates/keel-opt/src/stack_promote.rs": "19ad62d6a4cb8bf9010653cb07faa6293e945f310ede5c2d1b645159eefb78de",
+    "crates/keel-opt/src/wasm32.rs": "e197dc2684e6475e06d1fc09172c2a4039da5d7cc35c6ed418b2b781c5bacd76",
+    "crates/keel-opt/tests/required_inline_discard.rs": "2a6293545009312c3c60a8dac8394a9efa96982231e0424163d0874f9ad0a9d5"
+  },
+  "keel_binary_sha256": "b33495effde2a2e7d5b10da650f033c8387385f23bd11c1c51e6ae7324d88b3e",
+  "baseline": {
+    "report": "audit-kernel-policy.json",
+    "c_accepted": 460,
+    "asm_accepted": 506,
+    "keel_binary_sha256": "c756d9d9694dcf2b39a685942a04f6f81cd70d0e602dd35733d5df3b9276dddb"
+  },
+  "results": {
+    "c": {
+      "total": 484,
+      "accepted": 464,
+      "rejected": 20,
+      "crashed": 0,
+      "timeout": 0,
+      "first_errors": [
+        {
+          "category": "goto in a function containing cleanup locals is not supported yet",
+          "count": 4,
+          "example": {
+            "path": "drivers/base/core.i",
+            "diagnostic": "keel: <source>/drivers/base/core.c:571:3: error: goto in a function containing cleanup locals is not supported yet"
+          }
+        },
+        {
+          "category": "keel: <build>/arch/x86/events/intel/core.i: @mul_u64_u64_div_u64: asm operand 1: register rax overlaps another operand or clobber; use a matching constraint",
+          "count": 1,
+          "example": {
+            "path": "arch/x86/events/intel/core.i",
+            "diagnostic": "keel: <build>/arch/x86/events/intel/core.i: @mul_u64_u64_div_u64: asm operand 1: register rax overlaps another operand or clobber; use a matching constraint"
+          }
+        },
+        {
+          "category": "keel: <build>/arch/x86/kernel/apic/apic.i: @spurious_interrupt: asm output is tied to more than one input",
+          "count": 1,
+          "example": {
+            "path": "arch/x86/kernel/apic/apic.i",
+            "diagnostic": "keel: <build>/arch/x86/kernel/apic/apic.i: @spurious_interrupt: asm output is tied to more than one input"
+          }
+        },
+        {
+          "category": "keel: <build>/arch/x86/kernel/fpu/signal.i: @xsave_to_user_sigframe: asm operand 3: register rax overlaps another operand or clobber; use a matching constraint",
+          "count": 1,
+          "example": {
+            "path": "arch/x86/kernel/fpu/signal.i",
+            "diagnostic": "keel: <build>/arch/x86/kernel/fpu/signal.i: @xsave_to_user_sigframe: asm operand 3: register rax overlaps another operand or clobber; use a matching constraint"
+          }
+        },
+        {
+          "category": "keel: <build>/arch/x86/kernel/fpu/xstate.i: @xsaves: asm operand 3: register rax overlaps another operand or clobber; use a matching constraint",
+          "count": 1,
+          "example": {
+            "path": "arch/x86/kernel/fpu/xstate.i",
+            "diagnostic": "keel: <build>/arch/x86/kernel/fpu/xstate.i: @xsaves: asm operand 3: register rax overlaps another operand or clobber; use a matching constraint"
+          }
+        },
+        {
+          "category": "unaligned pointer relocations are not supported",
+          "count": 1,
+          "example": {
+            "path": "arch/x86/kernel/idt.i",
+            "diagnostic": "keel: <build>/arch/x86/kernel/idt.i:0:0: error: unaligned pointer relocations are not supported"
+          }
+        },
+        {
+          "category": "keel: <build>/arch/x86/kernel/irq.i: @common_interrupt: asm output is tied to more than one input",
+          "count": 1,
+          "example": {
+            "path": "arch/x86/kernel/irq.i",
+            "diagnostic": "keel: <build>/arch/x86/kernel/irq.i: @common_interrupt: asm output is tied to more than one input"
+          }
+        },
+        {
+          "category": "keel: <build>/arch/x86/kernel/irq_work.i: @fred_sysvec_irq_work: asm output is tied to more than one input",
+          "count": 1,
+          "example": {
+            "path": "arch/x86/kernel/irq_work.i",
+            "diagnostic": "keel: <build>/arch/x86/kernel/irq_work.i: @fred_sysvec_irq_work: asm output is tied to more than one input"
+          }
+        },
+        {
+          "category": "required inlining of @decode_bug in @handle_bug failed: public_definition",
+          "count": 1,
+          "example": {
+            "path": "arch/x86/kernel/traps.i",
+            "diagnostic": "keel: <build>/arch/x86/kernel/traps.i:0:0: error: required inlining of @decode_bug in @handle_bug failed: public_definition"
+          }
+        },
+        {
+          "category": "required inlining of @__cyc2ns_read in @__set_cyc2ns_scale failed: public_definition",
+          "count": 1,
+          "example": {
+            "path": "arch/x86/kernel/tsc.i",
+            "diagnostic": "keel: <build>/arch/x86/kernel/tsc.i:0:0: error: required inlining of @__cyc2ns_read in @__set_cyc2ns_scale failed: public_definition"
+          }
+        },
+        {
+          "category": "special/TLS/COMDAT section placement is unsupported",
+          "count": 1,
+          "example": {
+            "path": "init/version.i",
+            "diagnostic": "keel: <build>/init/version.i:0:0: error: special/TLS/COMDAT section placement is unsupported"
+          }
+        },
+        {
+          "category": "required inlining of @exit_to_user_mode_loop in @syscall_exit_to_user_mode_work failed: public_definition",
+          "count": 1,
+          "example": {
+            "path": "kernel/entry/common.i",
+            "diagnostic": "keel: <build>/kernel/entry/common.i:0:0: error: required inlining of @exit_to_user_mode_loop in @syscall_exit_to_user_mode_work failed: public_definition"
+          }
+        },
+        {
+          "category": "function alignment attributes are not supported",
+          "count": 1,
+          "example": {
+            "path": "kernel/exit.i",
+            "diagnostic": "keel: <source>/kernel/exit.c:1967:65: error: function alignment attributes are not supported"
+          }
+        },
+        {
+          "category": "keel: <build>/kernel/softirq.i: @do_softirq: asm output is tied to more than one input",
+          "count": 1,
+          "example": {
+            "path": "kernel/softirq.i",
+            "diagnostic": "keel: <build>/kernel/softirq.i: @do_softirq: asm output is tied to more than one input"
+          }
+        },
+        {
+          "category": "keel: <build>/kernel/time/timekeeping.i: @mul_u64_u64_div_u64: asm operand 1: register rax overlaps another operand or clobber; use a matching constraint",
+          "count": 1,
+          "example": {
+            "path": "kernel/time/timekeeping.i",
+            "diagnostic": "keel: <build>/kernel/time/timekeeping.i: @mul_u64_u64_div_u64: asm operand 1: register rax overlaps another operand or clobber; use a matching constraint"
+          }
+        },
+        {
+          "category": "AT&T suffix requires a 32-bit register",
+          "count": 1,
+          "example": {
+            "path": "mm/maccess.i",
+            "diagnostic": "keel: <build>/mm/maccess.i: line 163: AT&T suffix requires a 32-bit register"
+          }
+        },
+        {
+          "category": "required inlining of @free_pages_prepare in @__free_pages_ok failed: public_definition",
+          "count": 1,
+          "example": {
+            "path": "mm/page_alloc.i",
+            "diagnostic": "keel: <build>/mm/page_alloc.i:0:0: error: required inlining of @free_pages_prepare in @__free_pages_ok failed: public_definition"
+          }
+        }
+      ]
+    },
+    "asm": {
+      "total": 506,
+      "accepted": 506,
+      "rejected": 0,
+      "crashed": 0,
+      "timeout": 0,
+      "first_errors": []
+    }
+  },
+  "prior_accepted_objects": {
+    "total": 966,
+    "retained": 966,
+    "byte_identical": 957,
+    "changed": [
+      {
+        "path": "arch/x86/events/amd/core.i",
+        "before_sha256": "98e75c0cfd2390892879da63db70ad7618889d743922f069d6aff1200b370f9d",
+        "after_sha256": "5fdbc7e4a6cf5d3fd08c46bda628ea2bdac67431e2cac9de8f56599a220a8e8b",
+        "source_case_ranges": [
+          "case '0' ... '7':",
+          "case 0x00000000ULL ... 0x00000010ULL:",
+          "case 0x00000020ULL ... 0x00000030ULL:",
+          "case 0x00000040ULL ... 0x00000050ULL:",
+          "case 0x00000060ULL ... 0x00000070ULL:"
+        ],
+        "cause": "Case range dispatch now uses compact comparisons rather than enumerated switch values."
+      },
+      {
+        "path": "arch/x86/events/core.i",
+        "before_sha256": "f59e36c92256baffd5304ffde1b49084a623c5152a25f1d7557171e38d0e2b05",
+        "after_sha256": "4ccd0b6b595acd96804c18b0a437f983da9a01d5ab4f5fc4f8235039e32b845e",
+        "source_case_ranges": [
+          "case '0' ... '7':",
+          "case (32 + 16) ... ((32 + 16) + 7):",
+          "case 32 ... (32 + 15)-1:"
+        ],
+        "cause": "Case range dispatch now uses compact comparisons rather than enumerated switch values."
+      },
+      {
+        "path": "arch/x86/events/utils.i",
+        "before_sha256": "863b08353128a7e718a640c095d19d75c2d58257af4d7c594d89fced0380d0cc",
+        "after_sha256": "e56b132325f6e5266ebbc5c2a90349a73e77922c9298e144e7e2af22cba91f54",
+        "source_case_ranges": [
+          "case '0' ... '7':",
+          "case 0x80 ... 0x8f:",
+          "case 0x70 ... 0x7f:",
+          "case 0xcc ... 0xce:",
+          "case 0xe0 ... 0xe3:"
+        ],
+        "cause": "Case range dispatch now uses compact comparisons rather than enumerated switch values."
+      },
+      {
+        "path": "arch/x86/kernel/alternative.i",
+        "before_sha256": "9d9ba1283dcb7e2dd57d55e5050a3e23e3385f6063ff4b201b5be7897752faca",
+        "after_sha256": "1ba56f339d59b63742e37282dad46c75afdffb3aa063ad69fa1d6fa34af85899",
+        "source_case_ranges": [
+          "case '0' ... '7':",
+          "case 0x70 ... 0x7f:"
+        ],
+        "cause": "Case range dispatch now uses compact comparisons rather than enumerated switch values."
+      },
+      {
+        "path": "arch/x86/kernel/cpu/amd.i",
+        "before_sha256": "afe640363e6c87b5bb77d766c2577947d62cc5f6e293b9597a637f63c5889114",
+        "after_sha256": "f68800bbbafbbdc8dfb66fee6d5839c7dbdbd898fadebee9a4ab6785e3d974d0",
+        "source_case_ranges": [
+          "case '0' ... '7':",
+          "case 0x00 ... 0x2f:",
+          "case 0x50 ... 0x5f:",
+          "case 0x30 ... 0x4f:",
+          "case 0x60 ... 0x7f:"
+        ],
+        "cause": "Case range dispatch now uses compact comparisons rather than enumerated switch values."
+      },
+      {
+        "path": "arch/x86/kernel/cpu/microcode/amd.i",
+        "before_sha256": "002eaf162120b109918cb1b65ab09ef67b8f1256f911f7f142a825113bf25352",
+        "after_sha256": "a30f9540cf55679010e0cedba26a229b5e83803b8bae7d6ec4f2e4cd039188f6",
+        "source_case_ranges": [
+          "case '0' ... '7':",
+          "case 0x10 ... 0x12:"
+        ],
+        "cause": "Case range dispatch now uses compact comparisons rather than enumerated switch values."
+      },
+      {
+        "path": "arch/x86/kernel/step.i",
+        "before_sha256": "6ae9f338801988d6701c129b65285def6aab22048956ac1866e4eb573a5da61a",
+        "after_sha256": "d6c181a28589198d4e296cf6d57010e7143fefa6911ea987e8455718c87097b6",
+        "source_case_ranges": [
+          "case '0' ... '7':",
+          "case 0x40 ... 0x4f:"
+        ],
+        "cause": "Case range dispatch now uses compact comparisons rather than enumerated switch values."
+      },
+      {
+        "path": "arch/x86/lib/insn-eval.i",
+        "before_sha256": "29f433e9ec8f1135cabc30b3bcb039d8900e3c0070670deccb5d158a9abc5a05",
+        "after_sha256": "b953cc2dbf4720c15ac74d7df250c831e53a9296daf48c9c206d2587c50be029",
+        "source_case_ranges": [
+          "case '0' ... '7':",
+          "case 0x6c ... 0x6f:",
+          "case 0xa4 ... 0xa7:",
+          "case 0xaa ... 0xaf:"
+        ],
+        "cause": "Case range dispatch now uses compact comparisons rather than enumerated switch values."
+      },
+      {
+        "path": "kernel/printk/printk.i",
+        "before_sha256": "7ca4a1452ace7a18c43a568e82e4794f96e00d6867b7de1af83457c4c796fba5",
+        "after_sha256": "f4fd0712294992bfc55fa4f163d7ea886e29c95b91af778556e2d07ab2ea108c",
+        "source_case_ranges": [
+          "case '0' ... '7':"
+        ],
+        "cause": "Case range dispatch now uses compact comparisons rather than enumerated switch values."
+      }
+    ],
+    "withdrawn_acceptance": []
+  },
+  "new_accepted_c": [
+    "arch/x86/events/amd/ibs.i",
+    "arch/x86/kernel/signal_64.i",
+    "fs/binfmt_elf.i",
+    "kernel/locking/mutex.i"
+  ],
+  "advanced_rejections": [],
+  "validation": {
+    "workspace_tests": {
+      "passed": 2909,
+      "skipped": 13,
+      "failed": 0,
+      "doctests_passed": 1,
+      "profile": "test-fast"
+    },
+    "workspace_check_all_targets_all_features": true,
+    "documentation_no_deps": [
+      "keel-c",
+      "keel-opt",
+      "keel-asm",
+      "keel-disasm"
+    ],
+    "both_generator_freshness_checks": true,
+    "kernel_audit_policy_tests_passed": 7,
+    "linux_focused_tests_passed": 7,
+    "linux_optimizer_verify_each": true,
+    "linux_clang_runtime": {
+      "generated_executions": 8,
+      "reference_executions": 2,
+      "unmodified_reference_source": true
+    },
+    "linux_gcc_runtime": {
+      "compiler": "gcc (GCC) 14.4.0",
+      "generated_executions": 5,
+      "reference_executions": 2,
+      "reference_adaptations": "GCC 14 rejects the Clang-compatible bit-field union casts and static aggregate cast initializer. The GCC reference uses equivalent ordinary initializers for those three occurrences; the Clang reference uses the original source.",
+      "cases": [
+        {
+          "fixture": "gnu-union-casts",
+          "source": "generated-false-false.s",
+          "source_sha256": "cc94350a22c75a515762e1f7157de1267f925248b5d75a24c5074792822839c2",
+          "exit_code": 0
+        },
+        {
+          "fixture": "gnu-union-casts",
+          "source": "generated-false-true.s",
+          "source_sha256": "6de8cf96ccb48cd703c2aa0778767bbbec7b4b1c4413a8e74ce8908c64b6fa85",
+          "exit_code": 0
+        },
+        {
+          "fixture": "gnu-union-casts",
+          "source": "generated-true-false.s",
+          "source_sha256": "ede012713350b97232b99ca3ec193c3382aa33b57250de41b3291b9bdd196d31",
+          "exit_code": 0
+        },
+        {
+          "fixture": "gnu-union-casts",
+          "source": "generated-true-true.s",
+          "source_sha256": "10e2c42a7de042b6ec8b6218d02eb3e80611eb0215bfc8c8e4c5be0d15bbe75a",
+          "exit_code": 0
+        },
+        {
+          "fixture": "gnu-union-casts",
+          "source": "gcc-witness.c",
+          "source_sha256": "66c29a6113e49a941e617e084f526fa23bba9af22dddaace2cf6dc0426722c8b",
+          "exit_code": 0
+        },
+        {
+          "fixture": "switch-ranges",
+          "source": "generated.s",
+          "source_sha256": "a4077a9b5f2dffcc2126e46210ae1dd7768c1057b00d32e41194b9f037843b70",
+          "exit_code": 0
+        },
+        {
+          "fixture": "switch-ranges",
+          "source": "source.c",
+          "source_sha256": "0dcae8ee4e4e205d5a7b05dbb6f77ae7bae7475d6ce8ed271a750bcccefc1fa1",
+          "exit_code": 0
+        }
+      ]
+    },
+    "formatting": "Changed hunks are formatted. Whole-file rustfmt reports only existing differences in parse.rs and encode/tables.rs, reproduced from baseline 89f4e13c.",
+    "strict_clippy": "Blocked by 11 existing keel-link dependency warnings promoted to errors. No clean Clippy claim."
+  }
+}

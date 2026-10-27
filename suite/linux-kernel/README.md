@@ -1,11 +1,13 @@
 # Minimal Linux x86-64 compiler target
 
-Latest measured status: **460/484 C inputs** and **506/506 assembly inputs**
+Latest measured status: **464/484 C inputs** and **506/506 assembly inputs**
 accepted under the opt-in [kernel audit policy](kernel-audit-policy.json).
-The [policy checkpoint](audit-kernel-policy.json) uses the same compiler as
-`864f92c0`; its gain comes from explicit instruction permissions. Twenty-four C
-inputs still reject at implementation boundaries. Original and earlier optional
-policies retain their separate historical results below.
+The [contained-gap checkpoint](audit-contained-gaps.json) adds GNU union casts,
+compact case ranges, narrow LAR/LSL selector spellings and callee metadata
+synchronization after required inlining. All 966 preceding accepted inputs
+remain accepted; 957 objects are byte-identical and nine change with case-range
+dispatch. Twenty C inputs still reject at implementation boundaries. Original
+and earlier optional policies retain their separate historical results below.
 
 This fixture targets the **64-bit parts** of Linux v6.12. Host programs,
 16/32-bit code and mixed-mode assembly remain external. The supported x86 C
