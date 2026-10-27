@@ -213,8 +213,10 @@ declaration (even identical ones). Explicit noreturn/returns-twice callbacks and
 known nonlocal-exit callbacks are rejected, including contracts added later.
 
 Functions containing cleanup locals conservatively reject direct/computed goto
-and switch anywhere in their bodies, including before the declaration and in
-unused static/inline bodies. Known direct nonlocal-exit/returns-twice calls
+anywhere in their bodies, including before the declaration and in unused
+static/inline bodies. Switches use the existing scope-exit actions: case
+fallthrough, switch break, enclosing-loop continue and return preserve callback
+order. The `cleanup_switch` fixture checks those paths against native references. Known direct nonlocal-exit/returns-twice calls
 (setjmp-family, longjmp-family and annotated functions) are diagnosed, including
 annotations added after calls in discarded static/inline bodies, and known
 runtime entry points reached through asm linker labels. This
@@ -238,7 +240,7 @@ aggregates, statement expressions, interrupted initializers, declaration lists,
 shadowing, nested loops, early exits, VLA cleanup and 20,000 repeated 4 KiB VLA
 allocations. x86-64 objects are not executed on the arm64 host.
 
-Remaining: declaration-region annotations for legal goto/switch/computed-goto
+Remaining: declaration-region annotations for legal goto/computed-goto
 edges, verified nonlocal-exit/exception policy, and eventually a broader feature
 query promise after the conservative whole-function gates can be lifted.
 

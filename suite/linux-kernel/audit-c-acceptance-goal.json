@@ -1,0 +1,815 @@
+{
+  "schema": 1,
+  "date": "2026-10-27",
+  "implementation_base": "64327dd2",
+  "baseline_report": "audit-constant-expressions.json",
+  "goal": {
+    "target_c_accepted": 484,
+    "status": "open",
+    "scope": "Pinned Linux v6.12 x86-64 C source-to-object acceptance; explicit feature policy, unchanged inputs and config. Stop before significant IR/backend expansion.",
+    "current_c_accepted": 446,
+    "remaining_c_inputs": 38,
+    "feature_policy_decision": "Explicit kernel-policy expansion was requested; this checkpoint keeps the existing feature policy unchanged."
+  },
+  "source_manifest_sha256": "908006c3e46761f50342cf6556fcd86a05d7edf51cf2e85de449d19cfd2c5135",
+  "config_sha256": "af7dd9b29c4ac472ffe32d338821425912fe92ad62b30281ef1356947930e129",
+  "all_992_inputs_rehashed_unchanged": true,
+  "reference_artifacts_rehashed_unchanged": true,
+  "reference_rebuilt_or_rebooted": false,
+  "keel_objects_linked_or_run_as_kernel": false,
+  "implementation_source_sha256": {
+    "crates/keel-c/src/ast.rs": "8df631e8a4b101846005cec42dc544e27260a844d3309b614b2a815307ffc3d1",
+    "crates/keel-c/src/eval.rs": "849962721abbf4e86088291769ec20696674c5cfb951b6ecc1fa6f29d5ba68cd",
+    "crates/keel-c/src/expr.rs": "952db6dde141121f537a8240551163f4bfc6d4744810d6a332b62034143ffa69",
+    "crates/keel-c/src/features.rs": "ed064c3f49acf8d892623424afe9df731e2d0fc11dbd9b11b8f541223cabbc37",
+    "crates/keel-c/src/irgen.rs": "48e9cdc21e19d8d330228185e4cc90107f11dc5e522e94d7f6ff3a524dcc07ea",
+    "crates/keel-c/src/parse.rs": "ac624e65d42ca57711b5548af5fa8e61cceb532abe0cf133979d8aee2f3251ac",
+    "crates/keel-c/src/parse/asm.rs": "f61c19cdea27a2ada66a7643089b0bbb36d87f2cb845f530d0bf45d43dbac98d",
+    "crates/keel-c/tests/integer_builtins.rs": "35e73559d1bd2799f1eac70c70aebb553d1fabb9dcf84c7d50380a916c799ffd",
+    "crates/keel-c/tests/cleanup_switch.rs": "536c537b583db0eaf84019317b5b1922e6d28400558db4b5d026f008672e810c",
+    "crates/keel-c/tests/cleanup.rs": "18546d1a120d50d8c37208a81964d52df5b09f872b17298a7da97ec67d673305",
+    "crates/keel-c/tests/x86_asm_goto.rs": "b201d63c92163a5a190602c9b544ff1fd3b852990347dd43ab5b206ac54bf188",
+    "crates/keel-c/tests/x86_inline_asm.rs": "8b15bc04e20ba693c83006423fd79431a330c525cad151a0a1ab7d3a1654931d",
+    "crates/keel-c/tests/fixtures/x86_asm_goto_outputs.c": "4207e0ad415d88e2abb5fbbbd48a0340777b4952e18bf130a7d0cd181fc85160",
+    "crates/keel-c/tests/fixtures/x86_asm_goto_outputs_main.c": "96b68fa60a247a3d39f3b56150f0fdf835e169879e2ca8b3b0bec39746ff2be5"
+  },
+  "policies": {
+    "pinned": {
+      "target_policy": {
+        "c": {
+          "cpu_level": "v1",
+          "target_features": null
+        },
+        "asm": {
+          "cpu_level": "v3",
+          "target_features": null
+        }
+      },
+      "keel_binary_sha256": "c756d9d9694dcf2b39a685942a04f6f81cd70d0e602dd35733d5df3b9276dddb",
+      "results": {
+        "c": {
+          "total": 484,
+          "accepted": 436,
+          "rejected": 48,
+          "crashed": 0,
+          "timeout": 0,
+          "first_errors": [
+            {
+              "category": "feature-policy",
+              "count": 24,
+              "example": {
+                "path": "arch/x86/entry/vdso/vclock_gettime.i",
+                "diagnostic": "keel: <build>/arch/x86/entry/vdso/vclock_gettime.i: line 968: rdtscp requires x86 target features: rdtscp"
+              }
+            },
+            {
+              "category": "goto in a function containing cleanup locals is not supported yet",
+              "count": 4,
+              "example": {
+                "path": "drivers/base/core.i",
+                "diagnostic": "keel: <source>/drivers/base/core.c:571:3: error: goto in a function containing cleanup locals is not supported yet"
+              }
+            },
+            {
+              "category": "invalid cast",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/events/amd/ibs.i",
+                "diagnostic": "keel: <source>/arch/x86/events/amd/ibs.c:348:34: error: invalid cast"
+              }
+            },
+            {
+              "category": "keel: <build>/arch/x86/events/intel/core.i: @mul_u64_u64_div_u64: asm operand 1: register rax overlaps another operand or clobber; use a matching constraint",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/events/intel/core.i",
+                "diagnostic": "keel: <build>/arch/x86/events/intel/core.i: @mul_u64_u64_div_u64: asm operand 1: register rax overlaps another operand or clobber; use a matching constraint"
+              }
+            },
+            {
+              "category": "keel: <build>/arch/x86/kernel/apic/apic.i: @spurious_interrupt: asm output is tied to more than one input",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/kernel/apic/apic.i",
+                "diagnostic": "keel: <build>/arch/x86/kernel/apic/apic.i: @spurious_interrupt: asm output is tied to more than one input"
+              }
+            },
+            {
+              "category": "keel: <build>/arch/x86/kernel/fpu/signal.i: @xsave_to_user_sigframe: asm operand 3: register rax overlaps another operand or clobber; use a matching constraint",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/kernel/fpu/signal.i",
+                "diagnostic": "keel: <build>/arch/x86/kernel/fpu/signal.i: @xsave_to_user_sigframe: asm operand 3: register rax overlaps another operand or clobber; use a matching constraint"
+              }
+            },
+            {
+              "category": "keel: <build>/arch/x86/kernel/fpu/xstate.i: @xsaves: asm operand 3: register rax overlaps another operand or clobber; use a matching constraint",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/kernel/fpu/xstate.i",
+                "diagnostic": "keel: <build>/arch/x86/kernel/fpu/xstate.i: @xsaves: asm operand 3: register rax overlaps another operand or clobber; use a matching constraint"
+              }
+            },
+            {
+              "category": "unaligned pointer relocations are not supported",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/kernel/idt.i",
+                "diagnostic": "keel: <build>/arch/x86/kernel/idt.i:0:0: error: unaligned pointer relocations are not supported"
+              }
+            },
+            {
+              "category": "keel: <build>/arch/x86/kernel/irq.i: @common_interrupt: asm output is tied to more than one input",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/kernel/irq.i",
+                "diagnostic": "keel: <build>/arch/x86/kernel/irq.i: @common_interrupt: asm output is tied to more than one input"
+              }
+            },
+            {
+              "category": "keel: <build>/arch/x86/kernel/irq_work.i: @fred_sysvec_irq_work: asm output is tied to more than one input",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/kernel/irq_work.i",
+                "diagnostic": "keel: <build>/arch/x86/kernel/irq_work.i: @fred_sysvec_irq_work: asm output is tied to more than one input"
+              }
+            },
+            {
+              "category": "unsupported generated operands for Core(Lar): [Register(Register { class: Gpr, number: 0, width: 32, high_byte: false }), Register(Register { class: Gpr, number: 1, width: 16, high",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/kernel/signal_64.i",
+                "diagnostic": "keel: <build>/arch/x86/kernel/signal_64.i: line 2192: unsupported generated operands for Core(Lar): [Register(Register { class: Gpr, number: 0, width: 32, high_byte: false }), Register(Register { class: Gpr, number: 1, width: 16, high_byte: false })]"
+              }
+            },
+            {
+              "category": "required inlining of @decode_bug in @handle_bug failed: public_definition",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/kernel/traps.i",
+                "diagnostic": "keel: <build>/arch/x86/kernel/traps.i:0:0: error: required inlining of @decode_bug in @handle_bug failed: public_definition"
+              }
+            },
+            {
+              "category": "required inlining of @__cyc2ns_read in @__set_cyc2ns_scale failed: public_definition",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/kernel/tsc.i",
+                "diagnostic": "keel: <build>/arch/x86/kernel/tsc.i:0:0: error: required inlining of @__cyc2ns_read in @__set_cyc2ns_scale failed: public_definition"
+              }
+            },
+            {
+              "category": "case range is empty or too big",
+              "count": 1,
+              "example": {
+                "path": "fs/binfmt_elf.i",
+                "diagnostic": "keel: <source>/fs/binfmt_elf.c:934:3: error: case range is empty or too big"
+              }
+            },
+            {
+              "category": "special/TLS/COMDAT section placement is unsupported",
+              "count": 1,
+              "example": {
+                "path": "init/version.i",
+                "diagnostic": "keel: <build>/init/version.i:0:0: error: special/TLS/COMDAT section placement is unsupported"
+              }
+            },
+            {
+              "category": "required inlining of @exit_to_user_mode_loop in @syscall_exit_to_user_mode_work failed: public_definition",
+              "count": 1,
+              "example": {
+                "path": "kernel/entry/common.i",
+                "diagnostic": "keel: <build>/kernel/entry/common.i:0:0: error: required inlining of @exit_to_user_mode_loop in @syscall_exit_to_user_mode_work failed: public_definition"
+              }
+            },
+            {
+              "category": "function alignment attributes are not supported",
+              "count": 1,
+              "example": {
+                "path": "kernel/exit.i",
+                "diagnostic": "keel: <source>/kernel/exit.c:1967:65: error: function alignment attributes are not supported"
+              }
+            },
+            {
+              "category": "inline asm finalization: [VerifierError { location: \"@__mutex_lock\", message: \"callee @__mutex_lock_common attributes disagree with module\" }, VerifierError { location: \"@__ww_mute",
+              "count": 1,
+              "example": {
+                "path": "kernel/locking/mutex.i",
+                "diagnostic": "keel: <build>/kernel/locking/mutex.i:0:0: error: inline asm finalization: [VerifierError { location: \"@__mutex_lock\", message: \"callee @__mutex_lock_common attributes disagree with module\" }, VerifierError { location: \"@__ww_mutex_lock\", message: \"callee @__mutex_lock_common attributes disagree with module\" }]"
+              }
+            },
+            {
+              "category": "keel: <build>/kernel/softirq.i: @do_softirq: asm output is tied to more than one input",
+              "count": 1,
+              "example": {
+                "path": "kernel/softirq.i",
+                "diagnostic": "keel: <build>/kernel/softirq.i: @do_softirq: asm output is tied to more than one input"
+              }
+            },
+            {
+              "category": "keel: <build>/kernel/time/timekeeping.i: @mul_u64_u64_div_u64: asm operand 1: register rax overlaps another operand or clobber; use a matching constraint",
+              "count": 1,
+              "example": {
+                "path": "kernel/time/timekeeping.i",
+                "diagnostic": "keel: <build>/kernel/time/timekeeping.i: @mul_u64_u64_div_u64: asm operand 1: register rax overlaps another operand or clobber; use a matching constraint"
+              }
+            },
+            {
+              "category": "AT&T suffix requires a 32-bit register",
+              "count": 1,
+              "example": {
+                "path": "mm/maccess.i",
+                "diagnostic": "keel: <build>/mm/maccess.i: line 163: AT&T suffix requires a 32-bit register"
+              }
+            },
+            {
+              "category": "required inlining of @free_pages_prepare in @__free_pages_ok failed: public_definition",
+              "count": 1,
+              "example": {
+                "path": "mm/page_alloc.i",
+                "diagnostic": "keel: <build>/mm/page_alloc.i:0:0: error: required inlining of @free_pages_prepare in @__free_pages_ok failed: public_definition"
+              }
+            }
+          ]
+        },
+        "asm": {
+          "total": 506,
+          "accepted": 490,
+          "rejected": 16,
+          "crashed": 0,
+          "timeout": 0,
+          "first_errors": [
+            {
+              "category": "feature-policy",
+              "count": 16,
+              "example": {
+                "path": "arch/x86/entry/entry_64.s",
+                "diagnostic": "keel: <build>/arch/x86/entry/entry_64.s: line 768: rdgsbase requires x86 target features: fsgsbase"
+              }
+            }
+          ]
+        }
+      },
+      "prior_accepted_objects": {
+        "total": 906,
+        "retained": 906,
+        "byte_identical": 904,
+        "changed": [
+          "drivers/base/property.i",
+          "drivers/tty/serial/serial_port.i"
+        ],
+        "withdrawn_acceptance": []
+      },
+      "new_accepted_c": [
+        "arch/x86/mm/extable.i",
+        "drivers/tty/tty_io.i",
+        "fs/libfs.i",
+        "fs/nsfs.i",
+        "fs/pidfs.i",
+        "fs/select.i",
+        "init/do_mounts.i",
+        "kernel/dma/swiotlb.i",
+        "kernel/printk/printk.i",
+        "kernel/reboot.i",
+        "kernel/sys.i",
+        "kernel/sysctl.i",
+        "lib/iov_iter.i",
+        "lib/parser.i",
+        "lib/strncpy_from_user.i",
+        "lib/strnlen_user.i",
+        "lib/usercopy.i",
+        "lib/vsprintf.i",
+        "mm/gup.i",
+        "mm/slab_common.i"
+      ]
+    },
+    "explicit_optional_features": {
+      "target_policy": {
+        "c": {
+          "cpu_level": "v1",
+          "target_features": "+popcnt,+rdrand"
+        },
+        "asm": {
+          "cpu_level": "v3",
+          "target_features": "+rdtscp,+fsgsbase,+rdrand,+prefetchw,+invpcid,+clflush,+rdseed,+waitpkg"
+        }
+      },
+      "keel_binary_sha256": "c756d9d9694dcf2b39a685942a04f6f81cd70d0e602dd35733d5df3b9276dddb",
+      "results": {
+        "c": {
+          "total": 484,
+          "accepted": 446,
+          "rejected": 38,
+          "crashed": 0,
+          "timeout": 0,
+          "first_errors": [
+            {
+              "category": "feature-policy",
+              "count": 14,
+              "example": {
+                "path": "arch/x86/entry/vdso/vclock_gettime.i",
+                "diagnostic": "keel: <build>/arch/x86/entry/vdso/vclock_gettime.i: line 968: rdtscp requires x86 target features: rdtscp"
+              }
+            },
+            {
+              "category": "goto in a function containing cleanup locals is not supported yet",
+              "count": 4,
+              "example": {
+                "path": "drivers/base/core.i",
+                "diagnostic": "keel: <source>/drivers/base/core.c:571:3: error: goto in a function containing cleanup locals is not supported yet"
+              }
+            },
+            {
+              "category": "invalid cast",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/events/amd/ibs.i",
+                "diagnostic": "keel: <source>/arch/x86/events/amd/ibs.c:348:34: error: invalid cast"
+              }
+            },
+            {
+              "category": "keel: <build>/arch/x86/events/intel/core.i: @mul_u64_u64_div_u64: asm operand 1: register rax overlaps another operand or clobber; use a matching constraint",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/events/intel/core.i",
+                "diagnostic": "keel: <build>/arch/x86/events/intel/core.i: @mul_u64_u64_div_u64: asm operand 1: register rax overlaps another operand or clobber; use a matching constraint"
+              }
+            },
+            {
+              "category": "keel: <build>/arch/x86/kernel/apic/apic.i: @spurious_interrupt: asm output is tied to more than one input",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/kernel/apic/apic.i",
+                "diagnostic": "keel: <build>/arch/x86/kernel/apic/apic.i: @spurious_interrupt: asm output is tied to more than one input"
+              }
+            },
+            {
+              "category": "keel: <build>/arch/x86/kernel/fpu/signal.i: @xsave_to_user_sigframe: asm operand 3: register rax overlaps another operand or clobber; use a matching constraint",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/kernel/fpu/signal.i",
+                "diagnostic": "keel: <build>/arch/x86/kernel/fpu/signal.i: @xsave_to_user_sigframe: asm operand 3: register rax overlaps another operand or clobber; use a matching constraint"
+              }
+            },
+            {
+              "category": "keel: <build>/arch/x86/kernel/fpu/xstate.i: @xsaves: asm operand 3: register rax overlaps another operand or clobber; use a matching constraint",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/kernel/fpu/xstate.i",
+                "diagnostic": "keel: <build>/arch/x86/kernel/fpu/xstate.i: @xsaves: asm operand 3: register rax overlaps another operand or clobber; use a matching constraint"
+              }
+            },
+            {
+              "category": "unaligned pointer relocations are not supported",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/kernel/idt.i",
+                "diagnostic": "keel: <build>/arch/x86/kernel/idt.i:0:0: error: unaligned pointer relocations are not supported"
+              }
+            },
+            {
+              "category": "keel: <build>/arch/x86/kernel/irq.i: @common_interrupt: asm output is tied to more than one input",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/kernel/irq.i",
+                "diagnostic": "keel: <build>/arch/x86/kernel/irq.i: @common_interrupt: asm output is tied to more than one input"
+              }
+            },
+            {
+              "category": "keel: <build>/arch/x86/kernel/irq_work.i: @fred_sysvec_irq_work: asm output is tied to more than one input",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/kernel/irq_work.i",
+                "diagnostic": "keel: <build>/arch/x86/kernel/irq_work.i: @fred_sysvec_irq_work: asm output is tied to more than one input"
+              }
+            },
+            {
+              "category": "unsupported generated operands for Core(Lar): [Register(Register { class: Gpr, number: 0, width: 32, high_byte: false }), Register(Register { class: Gpr, number: 1, width: 16, high",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/kernel/signal_64.i",
+                "diagnostic": "keel: <build>/arch/x86/kernel/signal_64.i: line 2192: unsupported generated operands for Core(Lar): [Register(Register { class: Gpr, number: 0, width: 32, high_byte: false }), Register(Register { class: Gpr, number: 1, width: 16, high_byte: false })]"
+              }
+            },
+            {
+              "category": "required inlining of @decode_bug in @handle_bug failed: public_definition",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/kernel/traps.i",
+                "diagnostic": "keel: <build>/arch/x86/kernel/traps.i:0:0: error: required inlining of @decode_bug in @handle_bug failed: public_definition"
+              }
+            },
+            {
+              "category": "required inlining of @__cyc2ns_read in @__set_cyc2ns_scale failed: public_definition",
+              "count": 1,
+              "example": {
+                "path": "arch/x86/kernel/tsc.i",
+                "diagnostic": "keel: <build>/arch/x86/kernel/tsc.i:0:0: error: required inlining of @__cyc2ns_read in @__set_cyc2ns_scale failed: public_definition"
+              }
+            },
+            {
+              "category": "case range is empty or too big",
+              "count": 1,
+              "example": {
+                "path": "fs/binfmt_elf.i",
+                "diagnostic": "keel: <source>/fs/binfmt_elf.c:934:3: error: case range is empty or too big"
+              }
+            },
+            {
+              "category": "special/TLS/COMDAT section placement is unsupported",
+              "count": 1,
+              "example": {
+                "path": "init/version.i",
+                "diagnostic": "keel: <build>/init/version.i:0:0: error: special/TLS/COMDAT section placement is unsupported"
+              }
+            },
+            {
+              "category": "required inlining of @exit_to_user_mode_loop in @syscall_exit_to_user_mode_work failed: public_definition",
+              "count": 1,
+              "example": {
+                "path": "kernel/entry/common.i",
+                "diagnostic": "keel: <build>/kernel/entry/common.i:0:0: error: required inlining of @exit_to_user_mode_loop in @syscall_exit_to_user_mode_work failed: public_definition"
+              }
+            },
+            {
+              "category": "function alignment attributes are not supported",
+              "count": 1,
+              "example": {
+                "path": "kernel/exit.i",
+                "diagnostic": "keel: <source>/kernel/exit.c:1967:65: error: function alignment attributes are not supported"
+              }
+            },
+            {
+              "category": "inline asm finalization: [VerifierError { location: \"@__mutex_lock\", message: \"callee @__mutex_lock_common attributes disagree with module\" }, VerifierError { location: \"@__ww_mute",
+              "count": 1,
+              "example": {
+                "path": "kernel/locking/mutex.i",
+                "diagnostic": "keel: <build>/kernel/locking/mutex.i:0:0: error: inline asm finalization: [VerifierError { location: \"@__mutex_lock\", message: \"callee @__mutex_lock_common attributes disagree with module\" }, VerifierError { location: \"@__ww_mutex_lock\", message: \"callee @__mutex_lock_common attributes disagree with module\" }]"
+              }
+            },
+            {
+              "category": "keel: <build>/kernel/softirq.i: @do_softirq: asm output is tied to more than one input",
+              "count": 1,
+              "example": {
+                "path": "kernel/softirq.i",
+                "diagnostic": "keel: <build>/kernel/softirq.i: @do_softirq: asm output is tied to more than one input"
+              }
+            },
+            {
+              "category": "keel: <build>/kernel/time/timekeeping.i: @mul_u64_u64_div_u64: asm operand 1: register rax overlaps another operand or clobber; use a matching constraint",
+              "count": 1,
+              "example": {
+                "path": "kernel/time/timekeeping.i",
+                "diagnostic": "keel: <build>/kernel/time/timekeeping.i: @mul_u64_u64_div_u64: asm operand 1: register rax overlaps another operand or clobber; use a matching constraint"
+              }
+            },
+            {
+              "category": "AT&T suffix requires a 32-bit register",
+              "count": 1,
+              "example": {
+                "path": "mm/maccess.i",
+                "diagnostic": "keel: <build>/mm/maccess.i: line 163: AT&T suffix requires a 32-bit register"
+              }
+            },
+            {
+              "category": "required inlining of @free_pages_prepare in @__free_pages_ok failed: public_definition",
+              "count": 1,
+              "example": {
+                "path": "mm/page_alloc.i",
+                "diagnostic": "keel: <build>/mm/page_alloc.i:0:0: error: required inlining of @free_pages_prepare in @__free_pages_ok failed: public_definition"
+              }
+            }
+          ]
+        },
+        "asm": {
+          "total": 506,
+          "accepted": 506,
+          "rejected": 0,
+          "crashed": 0,
+          "timeout": 0,
+          "first_errors": []
+        }
+      },
+      "prior_accepted_objects": {
+        "total": 932,
+        "retained": 932,
+        "byte_identical": 930,
+        "changed": [
+          "drivers/base/property.i",
+          "drivers/tty/serial/serial_port.i"
+        ],
+        "withdrawn_acceptance": []
+      },
+      "new_accepted_c": [
+        "arch/x86/mm/extable.i",
+        "drivers/tty/tty_io.i",
+        "fs/libfs.i",
+        "fs/nsfs.i",
+        "fs/pidfs.i",
+        "fs/select.i",
+        "init/do_mounts.i",
+        "kernel/dma/swiotlb.i",
+        "kernel/printk/printk.i",
+        "kernel/reboot.i",
+        "kernel/sys.i",
+        "kernel/sysctl.i",
+        "lib/iov_iter.i",
+        "lib/parser.i",
+        "lib/strncpy_from_user.i",
+        "lib/strnlen_user.i",
+        "lib/usercopy.i",
+        "lib/vsprintf.i",
+        "mm/gup.i",
+        "mm/slab_common.i"
+      ]
+    }
+  },
+  "native_validation": {
+    "generated_executions": 64,
+    "compiler_references": 6,
+    "compilers": [
+      "GCC 14.4.0",
+      "Clang 21.1.8"
+    ],
+    "host_native_executions": 8,
+    "host_compiler_references": 2,
+    "clang_integer_reference_adaptation": "Clang lacks __builtin_isdigit. Only its reference maps that spelling to a decimal-range expression; the generated digit function is checked for EOF and all byte values. GCC uses the unadapted source.",
+    "reference_flags": [
+      "-O2",
+      "-fPIE",
+      "-pie"
+    ],
+    "fixtures": {
+      "integer_builtins": {
+        "variants": 4,
+        "object_sha256": {
+          "integer-false-false.o": "c915dffccd43089a6b1d1c57a401095fc578270f1c8c94888bf63428b81de931",
+          "integer-false-true.o": "8c6bb4866c0f500607bfeee62142cc7122028a21a71c6d5260c548ffbc7c45cc",
+          "integer-true-false.o": "fa1adcbfe822f2c58f54d8f9355b754171e6f104c5160baa06c27076f861a29d",
+          "integer-true-true.o": "695fcd6dfb1e2ca55aeacc0f69517df9f0ab60fe47cad288ef55073968dc44d5"
+        },
+        "fixture_sha256": {
+          "source.c": "e7d708c591f58c9c7f246bc659dd54e7ac2ed3f09eabaf37460d4a42e2b425ab",
+          "main.c": "3e7eb4f250c1e186cac255256f7c0c28bd62e1ffe60008c78ac71d86644a4efe"
+        }
+      },
+      "asm_goto_outputs": {
+        "variants": 24,
+        "object_sha256": {
+          "Baseline-Fast-empty-optfalse.o": "2b26997ddddd84f5d7364c36255583a97d27b3b523dba7d5bb25450e8142312e",
+          "Baseline-Fast-empty-opttrue.o": "2803652b2f4980b29ab6109a5ffd3f546d40384def956a5224e7efe9a13a5c3a",
+          "Baseline-Fast-normal-optfalse.o": "0bd7e79166770bdb7a83d48e8df8d09d6dc71398e56b8f51530baf74eb08dde7",
+          "Baseline-Fast-normal-opttrue.o": "39ca16f7fa72990672c5fa3897071ebb1352f0e434997cd43e0552a03831358a",
+          "Baseline-Full-empty-optfalse.o": "2b26997ddddd84f5d7364c36255583a97d27b3b523dba7d5bb25450e8142312e",
+          "Baseline-Full-empty-opttrue.o": "2803652b2f4980b29ab6109a5ffd3f546d40384def956a5224e7efe9a13a5c3a",
+          "Baseline-Full-normal-optfalse.o": "d7a75b7c396fe7b61e9d4b9d94fad390710bb05ed9db86e66ae544fca8ee276e",
+          "Baseline-Full-normal-opttrue.o": "4df4d66b8f30ad1de41b38cd8438409132c692b3ca5eb13cc5fefb567c6ec253",
+          "Full-Fast-empty-optfalse.o": "d7595fe752988d09fcd14cf419ebbc9931cb8e1dd949c5280672065c2db8821d",
+          "Full-Fast-empty-opttrue.o": "204f2e4fd2225f406ced079d769fc31c150478da4cbd9c081629ba47f6d6acd8",
+          "Full-Fast-normal-optfalse.o": "0bd7e79166770bdb7a83d48e8df8d09d6dc71398e56b8f51530baf74eb08dde7",
+          "Full-Fast-normal-opttrue.o": "2ed133498f27438b1380f1830dc196afd4d2c9f5ea2804126098b25a045ca612",
+          "Full-Full-empty-optfalse.o": "d7595fe752988d09fcd14cf419ebbc9931cb8e1dd949c5280672065c2db8821d",
+          "Full-Full-empty-opttrue.o": "204f2e4fd2225f406ced079d769fc31c150478da4cbd9c081629ba47f6d6acd8",
+          "Full-Full-normal-optfalse.o": "ee18c4efafcd98221c974ce8aa04585cbc102fe8cf85b47341085f3dfb35246d",
+          "Full-Full-normal-opttrue.o": "ee560eafa566a55cdd11d6ba9877974089095ff6e08a493eeb2989e1013a3e94",
+          "Trees-Fast-empty-optfalse.o": "2b26997ddddd84f5d7364c36255583a97d27b3b523dba7d5bb25450e8142312e",
+          "Trees-Fast-empty-opttrue.o": "1d16540fbfdff42711e56dd75ff8fca553d7f79af65235d3a44b44fa56ba87f2",
+          "Trees-Fast-normal-optfalse.o": "0bd7e79166770bdb7a83d48e8df8d09d6dc71398e56b8f51530baf74eb08dde7",
+          "Trees-Fast-normal-opttrue.o": "2ed133498f27438b1380f1830dc196afd4d2c9f5ea2804126098b25a045ca612",
+          "Trees-Full-empty-optfalse.o": "2b26997ddddd84f5d7364c36255583a97d27b3b523dba7d5bb25450e8142312e",
+          "Trees-Full-empty-opttrue.o": "1d16540fbfdff42711e56dd75ff8fca553d7f79af65235d3a44b44fa56ba87f2",
+          "Trees-Full-normal-optfalse.o": "d7a75b7c396fe7b61e9d4b9d94fad390710bb05ed9db86e66ae544fca8ee276e",
+          "Trees-Full-normal-opttrue.o": "086b73dbf92dc7b2204e7da2f3271a7c677fa2f7fbb30a929035bdee8a71d5d1"
+        },
+        "fixture_sha256": {
+          "source.c": "4207e0ad415d88e2abb5fbbbd48a0340777b4952e18bf130a7d0cd181fc85160",
+          "main.c": "96b68fa60a247a3d39f3b56150f0fdf835e169879e2ca8b3b0bec39746ff2be5"
+        }
+      },
+      "cleanup_switch": {
+        "variants": 4,
+        "object_sha256": {
+          "switch-false-false.o": "adfc1be903dc7039933c3542f1e9cb3cdc9de52fb17470a42841861295926f0e",
+          "switch-false-true.o": "5ecedc753c8e40fb048feec381eed442f7dd1bc8580c3475ee2bd63ace430045",
+          "switch-true-false.o": "e320fa2898cddee7d6de7c36a854f6dae98637293c0e2ec87081c09610f47fa0",
+          "switch-true-true.o": "a99d4bed2e074f60942a7bc3a67fb3f92c730862ce774ec8093dc8a156062b9e"
+        },
+        "fixture_sha256": {
+          "source.c": "19a5454e755871f217e54882b806605a35ae1fd3ca364c320c08cd82d8f15e15",
+          "main.c": "3e7eb4f250c1e186cac255256f7c0c28bd62e1ffe60008c78ac71d86644a4efe"
+        }
+      }
+    }
+  },
+  "intentional_prior_object_changes": {
+    "property": {
+      "only_differences": "Const-correct generic-selected helper call relocations and its import, when newly needed. All section contents, sizes, flags, alignment and other relocations match.",
+      "helper_before": "__dev_fwnode",
+      "helper_after": "__dev_fwnode_const",
+      "changed_call_relocations": [
+        {
+          "section": ".text",
+          "offset": 147,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 221,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 301,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 381,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 461,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 5169,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 541,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 5427,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 6014,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 6041,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 6066,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 6098,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 6109,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 612,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 6190,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 6221,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 6250,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 6286,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 6313,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 6338,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 6370,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 6381,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 6420,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 6510,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 6537,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 6562,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 6594,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 6605,
+          "relocation_type": 4
+        },
+        {
+          "section": ".text",
+          "offset": 676,
+          "relocation_type": 4
+        }
+      ],
+      "added_undefined_symbols": []
+    },
+    "serial": {
+      "only_differences": "Const-correct generic-selected helper call relocations and its import, when newly needed. All section contents, sizes, flags, alignment and other relocations match.",
+      "helper_before": "__dev_fwnode",
+      "helper_after": "__dev_fwnode_const",
+      "changed_call_relocations": [
+        {
+          "section": ".text",
+          "offset": 1419,
+          "relocation_type": 4
+        }
+      ],
+      "added_undefined_symbols": [
+        [
+          "__dev_fwnode_const",
+          1,
+          0,
+          0,
+          null,
+          0
+        ]
+      ]
+    }
+  },
+  "validation": {
+    "full_tests_passed": 2900,
+    "doctests_passed": 1,
+    "tests_skipped": 13,
+    "workspace_check_all_targets_all_features": true,
+    "clippy_c_all_targets_all_features": "Passed with existing warnings.",
+    "c_rustdoc_no_deps": true,
+    "x86_generator_freshness": true,
+    "arm_generator_freshness": true,
+    "changed_rust_and_scoped_parser_formatting": true,
+    "diff_checks": true
+  },
+  "next_contracts": [
+    {
+      "area": "Shared-register inline assembly",
+      "evidence": "Four fixed-register overlap and four multiply tied output first errors.",
+      "work": "Define which values may share a physical register, prove equal initialization where required, and validate assignment, width views and rematerialization before relaxing backend checks."
+    },
+    {
+      "area": "Cleanup jumps",
+      "evidence": "Four direct-goto first errors.",
+      "work": "Track cleanup lifetime regions at labels and transfers, including forward jumps and backward jumps across declarations. Preserve reverse-order exits and reject unsupported entries."
+    },
+    {
+      "area": "IR storage and alignment",
+      "evidence": "Unaligned pointer relocation in IDT storage and explicit function alignment.",
+      "work": "Design explicit contracts through IR verification and native data/function emitters; existing pointer-layout and placement invariants remain enforced."
+    },
+    {
+      "area": "Remaining frontend and middle-end gaps",
+      "evidence": "GNU union cast, large case range, public mandatory-inline ownership, declaration attribute synchronization, special section placement and unreachable width-specific asm.",
+      "work": "Keep each change scoped to its source contract and reprobe without changing corpus inputs."
+    }
+  ]
+}

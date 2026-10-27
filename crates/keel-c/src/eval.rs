@@ -148,7 +148,7 @@ pub(crate) fn eval_constant_with_binding_and_layout(
             };
             eval_constant_with_binding_and_layout(selected, allow_comma, nonnull, layout)?;
         }
-        ExprKind::Builtin(Builtin::Bswap, args)
+        ExprKind::Builtin(Builtin::Bswap | Builtin::Ffs, args)
             if !args
                 .iter()
                 .all(|arg| scalar_constant_tree(arg, allow_comma, layout, 64)) =>
@@ -160,7 +160,7 @@ pub(crate) fn eval_constant_with_binding_and_layout(
     eval_with_binding_and_layout(e, nonnull, layout)
 }
 
-/// Byte-swap proofs exclude effects and intermediates wider than Const::Int.
+/// Integer builtin proofs exclude effects and intermediates wider than Const::Int.
 /// Keep comma policy even inside builtin arguments and bound the extra walk.
 fn scalar_constant_tree(e: &Expr<'_>, allow_comma: bool, layout: CDataLayout, depth: u8) -> bool {
     if depth == 0
@@ -180,7 +180,7 @@ fn scalar_constant_tree(e: &Expr<'_>, allow_comma: bool, layout: CDataLayout, de
         }
         ExprKind::Comma(a, b) => allow_comma && child(a) && child(b),
         ExprKind::Cond(c, a, b) => child(c) && child(a) && child(b),
-        ExprKind::Builtin(Builtin::Bswap, args) => args.iter().all(child),
+        ExprKind::Builtin(Builtin::Bswap | Builtin::Ffs, args) => args.iter().all(child),
         _ => false,
     }
 }
@@ -199,7 +199,7 @@ pub fn eval_with_binding_and_layout(
     let value = match &e.kind {
         ExprKind::Int(v) => Const::Int(*v),
         ExprKind::Float(f) => Const::Float(*f),
-        ExprKind::Builtin(Builtin::Bswap, args) => {
+        ExprKind::Builtin(Builtin::Bswap | Builtin::Ffs, args) => {
             // Existing builtin signatures are native LP64; do not infer a
             // 64-bit swap from unsigned long on the private ILP32 profile.
             if layout != CDataLayout::NATIVE_LP64 {
@@ -212,6 +212,18 @@ pub fn eval_with_binding_and_layout(
             let Const::Int(value) = eval_with_binding_and_layout(arg, nonnull, layout)? else {
                 return None;
             };
+            if matches!(e.kind, ExprKind::Builtin(Builtin::Ffs, _)) {
+                let value = match arg.ty.int_kind()?.size_with_layout(layout) {
+                    4 => u64::from(value as u32),
+                    8 => value as u64,
+                    _ => return None,
+                };
+                return Some(Const::Int(if value == 0 {
+                    0
+                } else {
+                    i64::from(value.trailing_zeros() + 1)
+                }));
+            }
             Const::Int(match e.ty.int_kind()?.size_with_layout(layout) {
                 2 => i64::from((value as u16).swap_bytes()),
                 4 => i64::from((value as u32).swap_bytes()),

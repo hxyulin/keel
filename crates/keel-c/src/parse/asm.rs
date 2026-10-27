@@ -516,10 +516,10 @@ impl<'a> Parser<'a> {
                 "asm goto requires at least one label operand",
             ));
         }
-        if goto && !outputs.is_empty() {
+        if goto && output_kinds.contains(&AsmOutputKind::StackPointer) {
             return Err(Error::new(
                 loc,
-                "asm goto output operands are not supported",
+                "asm goto output cannot be the stack pointer",
             ));
         }
         // Register results precede memory and stack-state inputs in IR.
@@ -566,7 +566,10 @@ impl<'a> Parser<'a> {
                 &names,
                 &numbering,
                 &flags,
-                &goto_labels,
+                AsmLabelOperands {
+                    names: &goto_labels,
+                    first: numbering.len() + outputs.iter().filter(|(_, rw)| *rw).count(),
+                },
                 loc,
                 x86,
             )?
@@ -578,6 +581,11 @@ impl<'a> Parser<'a> {
         if goto {
             // All outgoing paths converge inside the template before the
             // backend restores GPR homes. Only then does ordinary IR branch.
+            for constraint in &mut normalized {
+                if let Ok(output) = constraint.parse::<usize>() {
+                    *constraint = (output + 1).to_string();
+                }
+            }
             normalized.insert(0, "=&r".into());
             template.push_str("\n\tmovl $0, %k0\n\tjmp .Lkeel_asm_goto_%=_end\n");
             for i in 0..goto_labels.len() {
@@ -615,16 +623,23 @@ impl<'a> Parser<'a> {
     }
 }
 
+/// GNU counts read/write outputs twice when numbering label operands.
+struct AsmLabelOperands<'a> {
+    names: &'a [&'a str],
+    first: usize,
+}
+
 /// Keep named substitutions separate from token parsing: %% never starts a name.
 fn asm_template(
     template: &str,
     names: &[(&str, usize)],
     numbering: &[usize],
     flags: &[bool],
-    goto_labels: &[&str],
+    labels: AsmLabelOperands<'_>,
     loc: Loc,
     x86: bool,
 ) -> R<String> {
+    let goto_labels = labels.names;
     let mut chars = template.chars().peekable();
     let mut text = String::new();
     while let Some(c) = chars.next() {
@@ -658,7 +673,7 @@ fn asm_template(
                 digits
                     .parse::<usize>()
                     .ok()
-                    .and_then(|n| n.checked_sub(numbering.len()))
+                    .and_then(|n| n.checked_sub(labels.first))
                     .filter(|&i| i < goto_labels.len())
                     .ok_or_else(|| Error::new(loc, "asm label operand number is out of range"))?
             };

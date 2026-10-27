@@ -21,6 +21,26 @@ fn compile(source: &str) -> Result<keel_ir::Module, String> {
 
 #[test]
 fn restoration_trampolines_use_ordinary_cfg_and_survive_codegen() {
+    check_codegen(SOURCE, "KEEL_X86_ASM_GOTO_EXPORT");
+}
+
+#[test]
+fn goto_outputs_reach_all_successors_after_register_restoration() {
+    let source = include_str!("fixtures/x86_asm_goto_outputs.c");
+    if let Some(dir) = std::env::var_os("KEEL_X86_ASM_GOTO_OUTPUTS_EXPORT") {
+        let dir = std::path::PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("source.c"), source).unwrap();
+        std::fs::write(
+            dir.join("main.c"),
+            include_str!("fixtures/x86_asm_goto_outputs_main.c"),
+        )
+        .unwrap();
+    }
+    check_codegen(source, "KEEL_X86_ASM_GOTO_OUTPUTS_EXPORT");
+}
+
+fn check_codegen(source: &str, export_name: &str) {
     let empty = Pools {
         caller_saved: &[],
         callee_saved: &[],
@@ -28,12 +48,12 @@ fn restoration_trampolines_use_ordinary_cfg_and_survive_codegen() {
         float_callee_saved: &[],
     };
     let features = Features::for_level(CpuLevel::V1);
-    let export = std::env::var_os("KEEL_X86_ASM_GOTO_EXPORT").map(std::path::PathBuf::from);
+    let export = std::env::var_os(export_name).map(std::path::PathBuf::from);
     if let Some(path) = &export {
         std::fs::create_dir_all(path).unwrap();
     }
     for optimize in [false, true] {
-        let mut module = compile(SOURCE).unwrap();
+        let mut module = compile(source).unwrap();
         if optimize {
             keel_opt::optimize(&mut module).unwrap();
         }
@@ -41,8 +61,8 @@ fn restoration_trampolines_use_ordinary_cfg_and_survive_codegen() {
         for function in &module.functions {
             for (_, inst) in function.layout_insts() {
                 if let InstData::InlineAsm { asm, .. } = function.inst_data(inst) {
-                    assert_eq!(asm.outputs, [(AsmOperand::Reg, keel_ir::Type::I32)]);
-                    assert_eq!(asm.early_clobbers, [0]);
+                    assert_eq!(asm.outputs[0], (AsmOperand::Reg, keel_ir::Type::I32));
+                    assert!(asm.early_clobbers.contains(&0));
                     assert!(asm.template.contains(".Lkeel_asm_goto_%=_end:"));
                 }
             }
@@ -119,10 +139,6 @@ fn unsupported_goto_contracts_are_diagnosed() {
         (
             "int f(void){asm goto(\"\"::::); return 0;}",
             "at least one label",
-        ),
-        (
-            "int f(int x){asm goto(\"\":\"=r\"(x):::hit); hit:return x;}",
-            "output operands",
         ),
         (
             "int f(void){asm goto(\"jmp %l[absent]\"::::hit); hit:return 0;}",

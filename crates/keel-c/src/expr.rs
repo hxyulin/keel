@@ -1510,7 +1510,9 @@ impl<'a> Parser<'a> {
     fn generic(&mut self, loc: Loc) -> R<Expr<'a>> {
         self.expect("(")?;
         let e = self.assign()?;
-        let ty = *self.rvalue(e).ty.unatomic();
+        let e = self.rvalue(e);
+        let ty = *e.ty.unatomic();
+        let qualifiers = self.parameter_qualifiers(ty, e.sugar);
         if ty.variably_modified() {
             return Err(Error::new(
                 loc,
@@ -1523,13 +1525,21 @@ impl<'a> Parser<'a> {
             let assoc_ty = if is_default {
                 None
             } else {
-                Some(self.type_name()?)
+                Some(self.type_name_sugar()?)
             };
             self.expect(":")?;
             let value = self.assign()?;
             match assoc_ty {
                 None => default = Some(value),
-                Some(t) if t == ty => chosen = Some(value),
+                Some((t, sugar))
+                    if t.compatible(&ty)
+                        && !sugar.is_const(&self.typedefs)
+                        && !sugar.is_volatile(&self.typedefs)
+                        && !sugar.is_restrict(&self.typedefs)
+                        && self.parameter_qualifiers(t, sugar) == qualifiers =>
+                {
+                    chosen = Some(value);
+                }
                 Some(_) => {}
             }
         }
@@ -2208,6 +2218,23 @@ impl<'a> Parser<'a> {
                 };
                 let arg = if base.ends_with('l') { ULONG } else { UINT };
                 self.builtin_call(op, &[arg], INT, loc)
+            }
+            "ffs" | "ffsl" | "ffsll" => {
+                let arg = match base {
+                    "ffs" => INT,
+                    "ffsl" => LONG,
+                    _ => Ty::Int(IntKind::LLong),
+                };
+                self.builtin_call(Builtin::Ffs, &[arg], INT, loc)
+            }
+            "isdigit" => {
+                let mut args = self.builtin_args(1, loc)?;
+                let arg = self.convert_for_assign(args.remove(0), &INT)?;
+                // Unsigned subtraction covers the decimal range with one use
+                // of the argument, including EOF and values below '0'.
+                let arg = self.cast(arg, UINT);
+                let shifted = self.binop("-", arg, mk(ExprKind::Int(48), UINT, loc), loc)?;
+                self.binop("<=", shifted, mk(ExprKind::Int(9), UINT, loc), loc)
             }
             "alloca" => {
                 let ptr = self.ptr_type(Ty::Void);

@@ -1300,3 +1300,9 @@ runtime effects, weak binding, opaque address truth and existing relocation
 limits. Native checks pass four local Arm executions plus a Clang reference,
 eight generated x86 PIE executions and two GCC/Clang references. A negative
 regression ensures symbolic addresses cannot overwrite bitfield storage.
+
+The open C acceptance goal is 484/484 source-to-object inputs. Its current checkpoint
+is recorded in [audit-c-acceptance-goal.json](audit-c-acceptance-goal.json), with
+native builtin, generic-pointer, output-bearing asm-goto and cleanup-switch
+witnesses. Feature permissions remain explicit. See the
+[goal contract](../../docs/c-linux64-acceptance.md#full-acceptance-goal).

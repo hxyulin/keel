@@ -231,10 +231,6 @@ fn contracts_and_effects_survive_optimization() {
 #[test]
 fn unsupported_and_impossible_contracts_are_diagnosed() {
     for (body, expected) in [
-        (
-            "asm goto(\"\" : \"=r\"(x) :::done); done:;",
-            "output operands",
-        ),
         ("asm(\"\" : \"=ri\"(x));", "output constraint"),
         ("asm(\"\" : \"=&m\"(x));", "early-clobber"),
         ("asm(\"\" : \"=m\"(x) : \"0\"(x));", "register output"),

@@ -4,6 +4,21 @@ The pinned Linux v6.12 audit measures source-to-object acceptance for its
 64-bit inputs. It does not qualify a Keel-linked or Keel-booted kernel.
 The checkpoint ledger is [recorded with the corpus](../suite/linux-kernel/audit-c-acceptance.json).
 
+## Full-acceptance goal
+
+The target is 484/484 captured C inputs producing x86-64 objects. The goal is
+open. Keep the reference inputs and resolved config fixed, preserve prior
+acceptances, and record each compiler checkpoint and its feature policy.
+Do not count feature-permission rejections as missing instruction encodings or
+silently enable instructions to improve the result. Kernel linking, booting and
+runtime correctness are separate milestones.
+
+Continue frontend and assembly fixes while they fit the existing contracts.
+Report a significant IR/backend change before expanding into it. In particular,
+cleanup jumps need lifetime-aware exits, fixed-register overlaps need a checked
+operand-sharing contract, and packed relocations/function alignment need storage
+metadata that survives every emitter. Removing their diagnostics is not support.
+
 ## Implemented contracts
 
 - X86 scalar GPR matching operands may have different input and output widths.
@@ -194,3 +209,49 @@ exports; debug paths differ by build directory.
 Full validation passes 2,896 tests and one doctest, with 13 tests skipped.
 Workspace check, C all-target/all-feature Clippy, documentation and generator
 freshness checks pass. Existing Clippy warnings remain.
+
+## Integer builtins, generic pointers and assembly successors
+
+The frontend supports `__builtin_ffs`, `ffsl`, `ffsll` and `isdigit` on native
+targets. Bit searches convert to the declared argument width, evaluate once and
+return zero for zero. The existing defined-at-zero IR `ctz` supplies the bit
+position; no new IR opcode or machine lowering is added. Pure native LP64 integer
+trees also fold in static contexts. Capability queries advertise these builtins
+on native targets and retain the conservative Wasm policy.
+
+`_Generic` matching preserves qualifiers below the outer value layer. A writable
+structure pointer no longer matches a pointer-to-const association. Typedefs and
+nested pointer qualifiers use the same canonical qualification identity as
+function parameters. Actual writes through const pointers still reject.
+
+X86 Linux `asm goto` accepts register, flag and memory outputs. Assembly paths
+join the existing restoration trampoline, then register outputs are written back
+before C dispatch. The hidden selector shifts matching constraints, and numeric
+label references count each read/write source output twice as GNU requires.
+Output addresses evaluate once. Reserved-stack outputs, cleanup/VLA crossings
+and other existing unsupported contracts retain their checks.
+
+Switches can share a function with cleanup locals. Existing scope-exit actions
+handle break, continue, return and case fallthrough. Direct/computed goto and
+nonlocal exits with cleanup locals remain unsupported. The native fixture checks
+callback order and distinguishes switch break from loop continue.
+
+The [goal checkpoint ledger](../suite/linux-kernel/audit-c-acceptance-goal.json)
+records the corpus results, source hashes, prior-object comparison and native
+witnesses. This is an acceptance checkpoint, not full kernel qualification.
+
+The checkpoint accepts 446/484 C inputs under the unchanged optional-feature
+policy and 436/484 under the original pinned policy. Assembly remains 506/506
+and 490/506 respectively. No prior acceptance is lost. Of 932 prior accepted
+optional-policy objects, 930 are byte-identical. The other two change only
+const-correct `__dev_fwnode_const` call relocations and its import where needed;
+all section bytes, storage properties and other relocations match. The captured
+GCC serial-port assembly also calls that const helper.
+
+Full validation passes 2,900 tests and one doctest, with 13 skipped tests. The
+new Linux fixtures pass 64 generated executions and six compiler references;
+the Clang digit reference adapts GCC's unavailable builtin spelling. Local Arm
+execution covers eight generated variants and two references. The remaining
+38 C first errors include 14 explicit feature permissions, eight shared-register
+asm contracts, four cleanup gotos and four public mandatory-inline ownership
+checks. Other first errors are recorded in the ledger. The 484/484 goal is open.

@@ -184,6 +184,8 @@ pub enum Builtin {
     Signbit,
     Clz,
     Ctz,
+    /// One-based least significant set bit; zero for a zero input.
+    Ffs,
     Popcount,
     /// `(a, b, result_ptr)`: stores the wrapped result and returns `_Bool`.
     Overflow(OverflowOp),

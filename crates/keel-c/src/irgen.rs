@@ -2201,6 +2201,11 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                         self.store_place(place, value);
                     }
                 } else {
+                    // Every template edge joins the restoration trampoline.
+                    // Write back its real outputs before branching to C labels.
+                    for (place, &value) in places.iter().zip(&values[1..]) {
+                        self.store_place(place, value);
+                    }
                     let fallthrough = self.new_block();
                     let call = |block| keel_ir::BlockCall {
                         block,
@@ -2376,12 +2381,6 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 default,
                 labels,
             } => {
-                if self.has_cleanup() {
-                    return Err(Error::new(
-                        cond.loc,
-                        "switch in a function containing cleanup locals is not supported yet",
-                    ));
-                }
                 if self.has_vm_types() {
                     return Err(Error::new(
                         cond.loc,
@@ -4661,6 +4660,23 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 } else {
                     r
                 }
+            }
+            Builtin::Ffs => {
+                let ty = self.b.function().value_type(vals[0]);
+                let zero = self.b.ins().iconst(ty, 0);
+                let nonzero = self.b.ins().icmp(IntCC::Ne, vals[0], zero);
+                // IR ctz is defined at zero (returns its bit width), so both
+                // select arms are safe to evaluate without introducing a branch.
+                let count = self.b.ins().ctz(vals[0]);
+                let count = if ty == Type::I64 {
+                    self.b.ins().trunc(Type::I32, count)
+                } else {
+                    count
+                };
+                let one = self.b.ins().iconst(Type::I32, 1);
+                let position = self.b.ins().binary(BinaryOp::Iadd, count, one);
+                let zero = self.b.ins().iconst(Type::I32, 0);
+                self.b.ins().select(nonzero, position, zero)
             }
             Builtin::Alloca => {
                 if self.def.has_vm {

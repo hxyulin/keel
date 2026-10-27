@@ -4,8 +4,8 @@ Keel supports scalar GNU C inline assembly on `x86_64-unknown-linux-gnu`.
 This implements scalar fallthrough asm and deferred immediate validation from
 the [design](x86-c-inline-asm-design.md).
 Explicit memory operands, bounded constraint choices and integer flag outputs
-are supported. Input/clobber-only asm goto is supported through restoration
-trampolines and ordinary IR control flow. Comma-separated alternatives remain unsupported.
+are supported. Asm goto supports these outputs through restoration trampolines
+and ordinary IR control flow. Comma-separated alternatives remain unsupported.
 Basic asm is supported at function and file scope on x86-64 Linux.
 
 ```c
@@ -223,7 +223,8 @@ dynamic/aligned frames, stack arguments and Linux alternative-call metadata.
 
 On x86-64 Linux, `asm goto` accepts existing input constraints and clobbers,
 with numeric `%lN` and named `%l[label]` references to the listed C labels.
-Numeric label operands follow the source inputs. Inputs are evaluated once.
+Numeric labels follow source inputs and outputs, counting each read/write
+output twice. Input expressions and output addresses are evaluated once.
 All asm remains pinned, including an empty template. Duplicate destinations
 and backward edges use the ordinary C label machinery.
 
@@ -235,8 +236,13 @@ liveness without allowing a raw assembly branch to bypass restoration.
 `%=` gives each emitted instance distinct labels, including cloned inline
 helpers. Label addresses in metadata also name these restoration trampolines.
 
-Output operands remain rejected. Functions containing cleanup locals or
-variably modified types reject asm goto under the existing scope-exit rules.
+Register, flag and memory outputs use the same operand contracts as fallthrough
+asm. Real register outputs are written back after restoration and before C
+successor dispatch, including taken edges and backedges. The hidden selector is
+not a source operand; matching constraints and template references are remapped
+around it. Reserved-stack outputs remain rejected. Functions containing cleanup
+locals or variably modified types reject asm goto under the existing scope-exit
+rules.
 AArch64 asm goto remains unsupported. This does not establish Linux kernel
 stack, calling convention, objtool or runtime compatibility.
 
@@ -244,7 +250,10 @@ stack, calling convention, objtool or runtime compatibility.
 edges, IR round trips and text/typed/chunked object parity across selectors,
 allocators, normal/empty pools and optimization on/off. Its fixture covers
 multiple labels, live values across clobbers, backedges, input side effects,
-required inlining and metadata-driven indirect branches.
+required inlining and metadata-driven indirect branches. A second fixture checks
+register/flag/memory outputs, numeric read/write label numbering, output-address
+side effects and live register/stack arguments. Its 24 generated objects pass
+GCC and Clang callers on Linux, with both compiler references.
 
 ## Validation
 

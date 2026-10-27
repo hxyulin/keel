@@ -3633,7 +3633,7 @@ impl<'a> Parser<'a> {
     /// Canonical qualifier identity for a function parameter. Typedefs and
     /// adjusted arrays retain their pointee qualifiers; only the parameter
     /// object's own qualifiers are ignored by C function compatibility.
-    fn parameter_qualifiers(&self, mut ty: Ty<'a>, mut sugar: Sugar<'a>) -> &'a [u8] {
+    pub(crate) fn parameter_qualifiers(&self, mut ty: Ty<'a>, mut sugar: Sugar<'a>) -> &'a [u8] {
         let mut quals = Vec::new();
         loop {
             match ty {
@@ -4464,11 +4464,6 @@ impl<'a> Parser<'a> {
                     return Ok(Stmt::Scoped(scope, self.slice(&[for_])));
                 }
                 "switch" => {
-                    self.fs
-                        .as_mut()
-                        .unwrap()
-                        .cleanup_unsupported_exit
-                        .get_or_insert((loc, "switch"));
                     self.advance();
                     self.expect("(")?;
                     let cond = self.expr()?;

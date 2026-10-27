@@ -291,14 +291,6 @@ fn invalid_cleanup_declarations_and_unmodeled_exits_are_diagnosed() {
             "computed goto",
         ),
         (
-            "void c(int*); int f(int n){switch(n){case 0:break;} int x __attribute__((cleanup(c)))=1;return 0;}",
-            "switch in a function",
-        ),
-        (
-            "void c(int*); int f(int n){int x __attribute__((cleanup(c)))=1;switch(n){case 0:break;}return 0;}",
-            "switch in a function",
-        ),
-        (
             "void c(int*); void longjmp(void*,int); int f(void){int x __attribute__((cleanup(c)))=1;longjmp(0,1);return 0;}",
             "nonlocal exit",
         ),
