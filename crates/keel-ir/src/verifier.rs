@@ -473,7 +473,8 @@ fn check_data(lookup: &Names<'_>, init: &DataInit, layout: DataLayout) -> Vec<St
                 // Ordinary pointers are byte storage relocations. Native RTTI
                 // tagging retains its separate eight-byte alignment contract.
                 if matches!(item, DataItem::RttiName { .. }) {
-                    if let Some(offset) = offset.filter(|offset| !offset.is_multiple_of(PTR_BYTES)) {
+                    if let Some(offset) = offset.filter(|offset| !offset.is_multiple_of(PTR_BYTES))
+                    {
                         errors.push(format!(
                             "ptr @{symbol} is at offset {offset}, which is not a multiple of {PTR_BYTES}"
                         ));
