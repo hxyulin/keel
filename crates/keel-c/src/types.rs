@@ -362,7 +362,7 @@ pub struct TypedefDef<'a> {
 #[derive(Clone, Debug)]
 pub struct EnumDef<'a> {
     pub tag: Option<&'a str>,
-    /// The type of its values.
+    /// The selected integer storage representation.
     pub ty: Ty<'a>,
     pub values: Vec<(&'a str, i64)>,
 }

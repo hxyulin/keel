@@ -42,15 +42,14 @@ enum Sym {
     StackPointer,
     /// By index in the typedef table.
     Typedef(usize),
-    Enum(i64),
+    Enum(i64, IntKind),
 }
 
 #[derive(Default, Clone)]
 struct Scope<'a> {
     /// Names first bound in this scope, restored in reverse order on exit.
     names: Vec<&'a str>,
-    /// Struct, union and enum tags; enums are just `int`, so only their
-    /// existence is recorded.
+    /// Struct and union definitions, or `None` for an enum tag.
     tags: HashMap<&'a str, Option<usize>>,
     /// Enum tags, by index in the enum table, for debug info.
     enums: HashMap<&'a str, usize>,
@@ -1080,10 +1079,10 @@ impl<'a> Parser<'a> {
                 ty: ULONG,
                 loc,
             }),
-            Some(Sym::Enum(v)) => Ok(Expr {
+            Some(Sym::Enum(v, kind)) => Ok(Expr {
                 kind: ExprKind::Int(v),
                 sugar: Sugar::Plain,
-                ty: INT,
+                ty: Ty::Int(kind),
                 loc,
             }),
             Some(Sym::Typedef(_)) => Err(Error::new(loc, format!("`{name}` is a type"))),
@@ -3939,56 +3938,228 @@ impl<'a> Parser<'a> {
 
     /// An enum specifier: its values' type, and the enum for debug info.
     fn enum_spec(&mut self) -> R<(Ty<'a>, Sugar<'a>)> {
-        self.ignored_attributes()?;
-        let mut tag = None;
-        if let Tok::Ident(s) = self.peek()
-            && !is_keyword(s)
+        let loc = self.loc();
+        let mut attrs = Attrs::default();
+        self.attributes(&mut attrs)?;
+        let tag = if let Tok::Ident(name) = self.peek()
+            && !is_keyword(name)
         {
-            let s = s;
             self.advance();
-            self.scopes.last_mut().unwrap().tags.insert(s, None);
-            tag = Some(s);
-        }
-        // C23's fixed underlying type, `enum : uint32_t { .. }`, which
-        // Apple's headers use; otherwise the type is `int`.
-        let ty = if self.eat(":") {
-            self.type_name()?
+            Some(name)
         } else {
-            INT
+            None
+        };
+        self.attributes(&mut attrs)?;
+        let fixed = if self.eat(":") {
+            let ty = self.type_name()?;
+            if !ty.is_integer() || self.size_of(&ty) > 8 {
+                return Err(Error::new(
+                    loc,
+                    "enum underlying type must be an integer of at most 64 bits",
+                ));
+            }
+            Some(ty)
+        } else {
+            None
         };
         if !self.eat("{") {
-            let known = tag
-                .as_ref()
-                .and_then(|t| self.scopes.iter().rev().find_map(|s| s.enums.get(t)));
-            return Ok((ty, known.map_or(Sugar::Plain, |&i| Sugar::Enum(i))));
+            if attrs.packed {
+                return Err(Error::new(loc, "packed requires an enum definition"));
+            }
+            if let Some(tag) = tag {
+                for scope in self.scopes.iter().rev() {
+                    if let Some(kind) = scope.tags.get(tag) {
+                        if kind.is_some() {
+                            return Err(Error::new(loc, format!("`{tag}` is not an enum")));
+                        }
+                        if let Some(&id) = scope.enums.get(tag) {
+                            let ty = self.enums[id].ty;
+                            if fixed.is_some_and(|fixed| fixed != ty) {
+                                return Err(Error::new(loc, "conflicting enum underlying type"));
+                            }
+                            return Ok((ty, Sugar::Enum(id)));
+                        }
+                        break;
+                    }
+                }
+                // The frontend represents incomplete ordinary enum extensions as int.
+                // Do not let a later packed definition change already emitted types.
+                self.scopes.last_mut().unwrap().tags.insert(tag, None);
+            }
+            if fixed.is_some() {
+                return Err(Error::new(
+                    loc,
+                    "fixed enum forward declarations are not supported",
+                ));
+            }
+            return Ok((INT, Sugar::Plain));
+        }
+        let prior_incomplete = tag.is_some_and(|tag| {
+            self.scopes.last().unwrap().tags.get(tag) == Some(&None)
+                && !self.scopes.last().unwrap().enums.contains_key(tag)
+        });
+        if let Some(tag) = tag
+            && self.scopes.last().unwrap().tags.contains_key(tag)
+            && !prior_incomplete
+        {
+            return Err(Error::new(loc, "enum tag is already defined in this scope"));
         }
         let mut values = Vec::new();
-        let mut next: i64 = 0;
+        let mut next = 0_i128;
+        let mut next_kind = IntKind::Int;
+        let mut minimum = 0_i128;
+        let mut maximum = 0_i128;
         while !self.eat("}") {
             let name = self.ident()?;
             self.ignored_attributes()?;
             if self.eat("=") {
-                next = self.const_int()?;
+                let expr = self.conditional()?;
+                let value = crate::eval::eval_constant_with_layout(&expr, true, self.c_layout);
+                let Some(crate::eval::Const::Int(bits)) = value else {
+                    return Err(Error::new(
+                        expr.loc,
+                        "expected an integer constant enumerator",
+                    ));
+                };
+                if !expr.ty.is_integer() || self.size_of(&expr.ty) > 8 {
+                    return Err(Error::new(
+                        expr.loc,
+                        "enumerators require an integer of at most 64 bits",
+                    ));
+                }
+                next_kind = expr.ty.int_kind().expect("integer enumerator was checked");
+                next = if expr.ty.is_signed() {
+                    i128::from(bits)
+                } else {
+                    let width = self.size_of(&expr.ty) * 8;
+                    i128::from((bits as u64) & (u64::MAX >> (64 - width)))
+                };
             }
-            values.push((name, next));
-            self.bind(name, Sym::Enum(next));
-            next = next.wrapping_add(1);
+            if !(i128::from(i64::MIN)..=i128::from(u64::MAX)).contains(&next) {
+                return Err(Error::new(
+                    loc,
+                    "enumerator exceeds the supported 64-bit range",
+                ));
+            }
+            if values.is_empty() {
+                minimum = next;
+                maximum = next;
+            } else {
+                minimum = minimum.min(next);
+                maximum = maximum.max(next);
+            }
+            values.push((name, next as i64));
+            let bits = next_kind.size_with_layout(self.c_layout) * 8;
+            let fits_previous = if next_kind.signed() {
+                (-(1_i128 << (bits - 1))..(1_i128 << (bits - 1))).contains(&next)
+            } else {
+                (0..(1_i128 << bits)).contains(&next)
+            };
+            let kind = if let Some(ty) = fixed {
+                ty.int_kind()
+            } else if i32::try_from(next).is_ok() {
+                None
+            } else if fits_previous {
+                Some(next_kind)
+            } else if i64::try_from(next).is_ok() {
+                Some(if IntKind::Long.size_with_layout(self.c_layout) == 8 {
+                    IntKind::Long
+                } else {
+                    IntKind::LLong
+                })
+            } else {
+                Some(IntKind::ULLong)
+            };
+            next_kind = kind.unwrap_or(IntKind::Int);
+            self.bind(name, Sym::Enum(next as i64, next_kind));
+            next += 1;
             if !self.eat(",") {
                 self.expect("}")?;
                 break;
             }
         }
-        self.ignored_attributes()?;
-        self.enums.push(EnumDef {
-            tag: tag,
-            ty: ty,
-            values,
-        });
-        let i = self.enums.len() - 1;
-        if let Some(tag) = tag {
-            self.scopes.last_mut().unwrap().enums.insert(tag, i);
+        self.attributes(&mut attrs)?;
+        attrs.no_type_attrs()?;
+        attrs.no_symbol_attrs()?;
+        if attrs.aligned.is_some() {
+            return Err(Error::new(loc, "aligned enum types are not supported"));
         }
-        Ok((ty, Sugar::Enum(i)))
+        let ty = if let Some(ty) = fixed {
+            let bits = self.size_of(&ty) * 8;
+            let (low, high) = if ty.is_signed() {
+                (-(1_i128 << (bits - 1)), (1_i128 << (bits - 1)) - 1)
+            } else {
+                (0, (1_i128 << bits) - 1)
+            };
+            if minimum < low || maximum > high {
+                return Err(Error::new(
+                    loc,
+                    "enumerator does not fit the fixed underlying type",
+                ));
+            }
+            ty
+        } else {
+            let candidates = if minimum < 0 {
+                [
+                    IntKind::SChar,
+                    IntKind::Short,
+                    IntKind::Int,
+                    IntKind::Long,
+                    IntKind::LLong,
+                ]
+            } else {
+                [
+                    IntKind::UChar,
+                    IntKind::UShort,
+                    IntKind::UInt,
+                    IntKind::ULong,
+                    IntKind::ULLong,
+                ]
+            };
+            let kind = candidates
+                .into_iter()
+                .find(|kind| {
+                    let bits = kind.size_with_layout(self.c_layout) * 8;
+                    let (low, high) = if kind.signed() {
+                        (-(1_i128 << (bits - 1)), (1_i128 << (bits - 1)) - 1)
+                    } else {
+                        (0, (1_i128 << bits) - 1)
+                    };
+                    (attrs.packed || bits >= 32) && minimum >= low && maximum <= high
+                })
+                .ok_or_else(|| Error::new(loc, "enum range needs more than 64 bits"))?;
+            // Preserve the existing ordinary int representation for small enums.
+            if !attrs.packed && minimum >= i128::from(i32::MIN) && maximum <= i128::from(i32::MAX) {
+                INT
+            } else {
+                Ty::Int(kind)
+            }
+        };
+        if prior_incomplete && ty != INT {
+            return Err(Error::new(
+                loc,
+                "enum definition changes an incomplete enum representation",
+            ));
+        }
+        for &(name, value) in &values {
+            if fixed.is_some() || i32::try_from(value).is_err() || (minimum >= 0 && value < 0) {
+                self.bind(
+                    name,
+                    Sym::Enum(
+                        value,
+                        ty.int_kind().expect("enum representation is integer"),
+                    ),
+                );
+            }
+        }
+        self.enums.push(EnumDef { tag, ty, values });
+        let id = self.enums.len() - 1;
+        if let Some(tag) = tag {
+            let scope = self.scopes.last_mut().unwrap();
+            scope.tags.insert(tag, None);
+            scope.enums.insert(tag, id);
+        }
+        Ok((ty, Sugar::Enum(id)))
     }
 
     /// An integer constant expression.
@@ -4452,7 +4623,7 @@ mod tests {
                     let sym = if step % 3 == 0 {
                         Sym::Typedef(step)
                     } else {
-                        Sym::Enum(step as i64)
+                        Sym::Enum(step as i64, IntKind::Int)
                     };
                     p.bind_at(depth, name, sym);
                     model[depth].insert(name, sym);
@@ -4497,10 +4668,10 @@ mod tests {
         assert_eq!(p.globals.len(), 1);
         for depth in 0..6 {
             p.push_scope();
-            p.bind(object, Sym::Enum(depth));
+            p.bind(object, Sym::Enum(depth, IntKind::Int));
         }
         for depth in (0..6).rev() {
-            assert_eq!(p.lookup(object), Some(&Sym::Enum(depth)));
+            assert_eq!(p.lookup(object), Some(&Sym::Enum(depth, IntKind::Int)));
             p.pop_scope();
         }
         assert_eq!(p.lookup(object), Some(&Sym::Global(global)));

@@ -1092,3 +1092,38 @@ against both compilers.
 Logs: `/tmp/keel-offset-aggregate-tests.log`,
 `/tmp/keel-offset-aggregate-native-final.log` and
 `/tmp/keel-offset-aggregate-evidence.json`.
+
+## Packed enum layout
+
+GNU packed enum definitions now retain their selected integer representation
+through tag references, record layout, scalar operations and calls. The
+[implementation notes](../../docs/c-packed-enums.md) describe range selection
+and unsupported combinations. No IR, backend, intrinsic registry or ISA data
+changes are needed.
+
+The [follow-up audit](audit-packed-enums.json) clears the packed-enum assertion
+in all 293 previously affected C inputs. Those inputs now stop at asm names
+on local register variables in `include/linux/fs.h`. Acceptance remains
+118/484 C and 490/506 assembly under the original policy, or 122/484 C and
+506/506 assembly with the unchanged optional-feature permissions.
+
+All 608 previously accepted original-policy objects and all 628 optional-policy
+objects remain accepted and byte-identical. There are no crashes or timeouts.
+All 992 captured inputs, binary dependencies and reference artifacts rehash
+unchanged. The reference kernel was not rebuilt or rebooted, and no Keel object
+was linked into or run as the kernel.
+
+Five focused tests pass locally and on Linux. All 24 generated x86 objects pass
+with both GCC and Clang callers, for 48 native executions plus two compiler
+references. Four broken-store/promotion controls return their expected nonzero
+exits. These checks cover layout boundaries, signedness, initializers, narrow
+loads/stores, scalar and record calls, volatile access, field canaries and
+integer promotions.
+
+Full workspace validation passes 2,860 tests and one doctest, with 13 ignored.
+Workspace all-targets/all-features check, scoped Clippy and Rustdoc complete;
+Clippy retains existing warnings. The 99 generator tests, five audit tests,
+both generator freshness checks, scoped formatting and diff checks pass.
+Logs: `/tmp/keel-packed-enum-final-tests.log`,
+`/tmp/keel-packed-enum-final-remote.log` and
+`/tmp/keel-packed-enum-evidence.json`.
