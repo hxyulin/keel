@@ -26,6 +26,17 @@ fn selector_register_views_match_literal_bytes_and_external_assemblers() {
             "lar %r11d, %r10d",
             vec![0x45, 0x0f, 0x02, 0xd3],
         ),
+        ("lar eax, cx", "lar %cx, %eax", vec![0x0f, 0x02, 0xc1]),
+        (
+            "lar r10d, r11w",
+            "lar %r11w, %r10d",
+            vec![0x45, 0x0f, 0x02, 0xd3],
+        ),
+        (
+            "lar r10, r11w",
+            "lar %r11w, %r10",
+            vec![0x4d, 0x0f, 0x02, 0xd3],
+        ),
         (
             "lar r10, r11",
             "lar %r11, %r10",
@@ -40,6 +51,17 @@ fn selector_register_views_match_literal_bytes_and_external_assemblers() {
             "lsl r10d, r11d",
             "lsl %r11d, %r10d",
             vec![0x45, 0x0f, 0x03, 0xd3],
+        ),
+        ("lsl eax, cx", "lsl %cx, %eax", vec![0x0f, 0x03, 0xc1]),
+        (
+            "lsl r10d, r11w",
+            "lsl %r11w, %r10d",
+            vec![0x45, 0x0f, 0x03, 0xd3],
+        ),
+        (
+            "lsl r10, r11w",
+            "lsl %r11w, %r10",
+            vec![0x4d, 0x0f, 0x03, 0xd3],
         ),
         (
             "lsl r10, r11",
@@ -104,4 +126,35 @@ fn selector_register_views_match_literal_bytes_and_external_assemblers() {
         }
     }
     fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn selector_queries_reject_invalid_operand_widths_and_classes() {
+    for source in [
+        "lar eax, cl",
+        "lsl eax, cl",
+        "lar al, cx",
+        "lsl al, cx",
+        "lar ax, ecx",
+        "lsl ax, ecx",
+        "lar eax, rcx",
+        "lsl eax, rcx",
+        "lar rax, ecx",
+        "lar eax, xmm1",
+        "lsl eax, xmm1",
+        "lar eax, dword ptr [rcx]",
+        "lsl eax, qword ptr [rcx]",
+        "lar word ptr [rax], cx",
+        "lsl eax, 1",
+    ] {
+        assert!(
+            keel_asm::x86::assemble_object_with_syntax_and_features(
+                source,
+                Syntax::Intel,
+                Features::NONE,
+            )
+            .is_err(),
+            "accepted {source}"
+        );
+    }
 }

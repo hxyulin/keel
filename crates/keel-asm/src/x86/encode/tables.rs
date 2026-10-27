@@ -587,10 +587,15 @@ fn match_form<'a>(
             || matches!(d.name.as_str(), "fnstenv" | "fldenv" | "fnsave" | "frstor")
                 && spec.kind == "mem"
                 && matches!(i.operands.get(used),Some(M(m)) if matches!(m.width,0|16|32));
+        // Pinned Zydis/XED describe the decoded register view (GPRv for
+        // LAR, GPRz for LSL). GNU/Clang also accept a 16-bit selector
+        // spelling; only the destination selects the encoded operand size.
         let compatible = compatible
-            || d.name == "lsl"
+            || matches!(d.name.as_str(), "lar" | "lsl")
                 && index == 1
-                && matches!(i.operands.get(used),Some(R(r)) if r.class==RegisterClass::Gpr&&r.width==size);
+                && spec.encoding == "modrm_rm"
+                && matches!(spec.kind, "gpr16_32_64" | "gpr16_32_32")
+                && matches!(i.operands.get(used),Some(R(r)) if r.class==RegisterClass::Gpr && (r.width==16 || r.width==size));
         let compatible = compatible
             || d.name == "mov"
                 && form.byte == 0x8e

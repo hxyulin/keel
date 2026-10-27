@@ -199,3 +199,39 @@ fn system_exit_widths_format_and_reassemble_literal_bytes() {
         );
     }
 }
+
+#[test]
+fn selector_queries_keep_pinned_decoded_register_views() {
+    use object::{Object, ObjectSection};
+
+    // The accepted r16 source spelling does not change the pinned decoded
+    // view: LAR uses GPRv, while LSL uses GPRz (r32 with REX.W).
+    for (opcode, mnemonic, wide_source) in [(2, "lar", "r11"), (3, "lsl", "r11d")] {
+        for (prefix, size, destination, source) in [
+            (vec![0x66, 0x45], 16, "r10w", "r11w"),
+            (vec![0x45], 32, "r10d", "r11d"),
+            (vec![0x4d], 64, "r10", wide_source),
+        ] {
+            let mut bytes = prefix;
+            bytes.extend_from_slice(&[0x0f, opcode, 0xd3]);
+            let instruction = decode(&bytes, 0).unwrap();
+            assert_eq!(instruction.operand_size, size, "{mnemonic}");
+            assert_eq!(
+                instruction.operands,
+                vec![
+                    Operand::Register(destination.into()),
+                    Operand::Register(source.into()),
+                ],
+                "{mnemonic} {size}"
+            );
+            let encoded = keel_asm::x86::assemble_object(&instruction.assembly()).unwrap();
+            let object = object::File::parse(encoded.as_slice()).unwrap();
+            assert_eq!(
+                object.section_by_name(".text").unwrap().data().unwrap(),
+                bytes,
+                "{}",
+                instruction.assembly()
+            );
+        }
+    }
+}
