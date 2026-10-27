@@ -1106,6 +1106,7 @@ impl<'a> Parser<'a> {
         let align = self.type_alignment(&ty, &sugar);
         let fs = self.fs.as_mut().unwrap();
         fs.locals.push(Local {
+            asm_register: None,
             nonstring: false,
             name: name,
             ty,
@@ -1518,12 +1519,9 @@ impl<'a> Parser<'a> {
                     return Ok(());
                 }
             } else if !file_scope && spec.storage == Storage::None {
-                if label.is_some() {
-                    return Err(Error::new(
-                        name_loc,
-                        "asm labels on automatic locals/register variables are not supported",
-                    ));
-                }
+                let asm_register = label
+                    .map(|label| self.local_register_declaration(spec, &d, label))
+                    .transpose()?;
                 let cleanup = attrs.cleanup.take();
                 if let Some((_, loc)) = cleanup
                     && spec.thread_local
@@ -1558,6 +1556,7 @@ impl<'a> Parser<'a> {
                 // malloc(sizeof *p)` refers to itself.
                 self.check_nonstring(d.ty, attrs, name_loc)?;
                 let id = self.new_local(name, d.ty, d.sugar, is_volatile);
+                self.fs.as_mut().unwrap().locals[id].asm_register = asm_register;
                 self.fs.as_mut().unwrap().locals[id].nonstring = attrs.nonstring;
                 let align = self.object_alignment(&d.ty, &d.sugar, attrs, name_loc)?;
                 self.fs.as_mut().unwrap().locals[id].align = align;
@@ -3606,6 +3605,7 @@ impl<'a> Parser<'a> {
                 let fs = self.fs.as_mut().unwrap();
                 ids.push(fs.locals.len());
                 fs.locals.push(Local {
+                    asm_register: None,
                     nonstring: false,
                     name,
                     ty: INT,

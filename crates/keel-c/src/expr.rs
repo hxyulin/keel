@@ -1091,6 +1091,17 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn address_of(&mut self, e: Expr<'a>, loc: Loc) -> R<Expr<'a>> {
+        if let ExprKind::Local(id) = e.kind
+            && self
+                .fs
+                .as_ref()
+                .is_some_and(|fs| fs.locals[id].asm_register.is_some())
+        {
+            return Err(Error::new(
+                loc,
+                "cannot take the address of a named register variable",
+            ));
+        }
         if matches!(e.kind, ExprKind::VectorIndex(..)) {
             return Err(Error::new(
                 loc,

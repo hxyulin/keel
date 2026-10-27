@@ -1,8 +1,55 @@
-//! The bounded read-only x86 stack-register declaration.
+//! Named register declarations and their checked asm-operand bindings.
 
 use super::*;
 
 impl<'a> Parser<'a> {
+    pub(super) fn local_register_declaration(
+        &self,
+        spec: &DeclSpec<'a>,
+        d: &Declarator<'a>,
+        label: &str,
+    ) -> R<keel_ir::PhysReg> {
+        let loc = d.name.expect("register declarator has a name").1;
+        if !spec.register_storage || self.target != Target::X86_64LinuxGnu {
+            return Err(Error::new(
+                loc,
+                "asm labels on automatic locals/register variables require register storage on x86-64 Linux",
+            ));
+        }
+        let invalid = || {
+            Error::new(
+                loc,
+                "asm labels on automatic locals/register variables require a nonreserved x86 GPR (not rsp, rbp or high-byte aliases)",
+            )
+        };
+        let name = label.strip_prefix('%').unwrap_or(label);
+        let register = keel_ir::PhysReg::parse(name).map_err(|_| invalid())?;
+        if register.arch != keel_ir::AsmArch::X86
+            || register.float
+            || matches!(register.num, 4 | 5)
+            || ["ah", "ch", "dh", "bh"]
+                .iter()
+                .any(|alias| name.eq_ignore_ascii_case(alias))
+        {
+            return Err(invalid());
+        }
+        if !matches!(d.ty, Ty::Int(kind) if kind.size() <= 8) && !d.ty.is_ptr() {
+            return Err(Error::new(
+                loc,
+                "named register variable requires an integer of at most 64 bits or a pointer",
+            ));
+        }
+        Ok(register)
+    }
+
+    pub(super) fn asm_local_register(&self, expr: &Expr<'a>) -> Option<keel_ir::PhysReg> {
+        if let ExprKind::Local(id) = expr.kind {
+            self.fs.as_ref()?.locals[id].asm_register
+        } else {
+            None
+        }
+    }
+
     pub(super) fn stack_pointer_declaration(
         &mut self,
         spec: &DeclSpec<'a>,

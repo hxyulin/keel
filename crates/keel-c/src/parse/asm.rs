@@ -112,6 +112,7 @@ impl<'a> Parser<'a> {
                         self.expect("(")?;
                         let mut expr = self.expr()?;
                         self.expect(")")?;
+                        let bound_register = self.asm_local_register(&expr);
                         if section == 0 {
                             if matches!(expr.kind, ExprKind::Builtin(Builtin::StackPointer, _)) {
                                 if !x86 || constraint != "+r" {
@@ -171,6 +172,13 @@ impl<'a> Parser<'a> {
                                 } else {
                                     code
                                 };
+                                let bound_code;
+                                let code = if let Some(register) = bound_register {
+                                    bound_code = bound_asm_constraint(code, register, expr.loc)?;
+                                    bound_code.as_str()
+                                } else {
+                                    code
+                                };
                                 if x86 && code != "m" && !flag {
                                     expr = self.asm_aggregate_operand(expr, true)?;
                                 }
@@ -188,7 +196,10 @@ impl<'a> Parser<'a> {
                                         && matches!(
                                             code,
                                             "q" | "a" | "b" | "c" | "d" | "S" | "D" | "m"
-                                        ))
+                                        )
+                                    || x86
+                                        && bound_register.is_some()
+                                        && asm_fixed_register(code).is_some())
                                 {
                                     return Err(Error::new(
                                         loc,
@@ -301,6 +312,21 @@ impl<'a> Parser<'a> {
                                     })?;
                                 constraint = n.to_string();
                             }
+                            if let Some(register) = bound_register {
+                                if let Ok(n) = constraint.parse::<usize>() {
+                                    let output = constraints.get_mut(n).ok_or_else(|| {
+                                        Error::new(loc, "asm matching input must name an output")
+                                    })?;
+                                    let code =
+                                        output.trim_start_matches('=').trim_start_matches('&');
+                                    let fixed = bound_asm_constraint(code, register, expr.loc)?;
+                                    let early = if output.starts_with("=&") { "&" } else { "" };
+                                    *output = format!("={early}{fixed}");
+                                } else {
+                                    constraint =
+                                        bound_asm_constraint(&constraint, register, expr.loc)?;
+                                }
+                            }
                             if x86 && !matches!(constraint.as_str(), "m" | "i" | "n") {
                                 expr = self.asm_aggregate_operand(expr, false)?;
                             }
@@ -350,7 +376,13 @@ impl<'a> Parser<'a> {
                                     expr = self.rvalue(expr);
                                     asm_register_type(&constraint, expr.ty, loc)?;
                                 }
-                                "q" | "a" | "b" | "c" | "d" | "S" | "D" if x86 => {
+                                code if x86
+                                    && (matches!(
+                                        code,
+                                        "q" | "a" | "b" | "c" | "d" | "S" | "D"
+                                    ) || bound_register.is_some()
+                                        && asm_fixed_register(code).is_some()) =>
+                                {
                                     expr = self.rvalue(expr);
                                     asm_register_type(&constraint, expr.ty, loc)?;
                                     constraint = asm_constraint(&constraint, true).to_string();
@@ -778,6 +810,7 @@ fn asm_register_type(code: &str, ty: Ty<'_>, loc: Loc) -> R<()> {
     let ok = match code {
         "r" | "q" | "a" | "b" | "c" | "d" | "S" | "D" | "{rax}" | "{rbx}" | "{rcx}" | "{rdx}"
         | "{rsi}" | "{rdi}" => matches!(ty, Ty::Int(k) if k.size() <= 8) || ty.is_ptr(),
+        code if asm_fixed_register(code).is_some() => asm_gpr_type(ty),
         "w" => matches!(ty, Ty::Float | Ty::Double),
         _ => false,
     };
@@ -846,5 +879,30 @@ fn asm_constraint(code: &str, x86: bool) -> &str {
         "S" => "{rsi}",
         "D" => "{rdi}",
         _ => code,
+    }
+}
+
+/// Canonical fixed GPR constraints shared with the IR asm parser.
+fn asm_fixed_register(code: &str) -> Option<keel_ir::PhysReg> {
+    let name = code.strip_prefix('{')?.strip_suffix('}')?;
+    let register = keel_ir::PhysReg::parse(name).ok()?;
+    (register.arch == keel_ir::AsmArch::X86 && !register.float && !matches!(register.num, 4 | 5))
+        .then_some(register)
+}
+
+fn bound_asm_constraint(code: &str, register: keel_ir::PhysReg, loc: Loc) -> R<String> {
+    let normalized = asm_constraint(code, true);
+    if matches!(
+        normalized,
+        "r" | "ri" | "re" | "rI" | "rm" | "mr" | "qm" | "mq" | "g"
+    ) || asm_fixed_register(normalized) == Some(register)
+        || normalized == "Nd" && register.num == 2
+    {
+        Ok(format!("{{{register}}}"))
+    } else {
+        Err(Error::new(
+            loc,
+            format!("named register {register} conflicts with asm constraint `{code}`"),
+        ))
     }
 }

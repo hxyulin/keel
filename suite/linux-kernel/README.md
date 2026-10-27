@@ -1127,3 +1127,42 @@ both generator freshness checks, scoped formatting and diff checks pass.
 Logs: `/tmp/keel-packed-enum-final-tests.log`,
 `/tmp/keel-packed-enum-final-remote.log` and
 `/tmp/keel-packed-enum-evidence.json`.
+
+## Named local register operands
+
+[Local register declarations](../../docs/c-local-register-variables.md) now
+constrain direct x86 extended-asm operands through the existing fixed-register
+IR. Input, output, read/write, early-clobber and matching operands retain their
+binding. The declaration does not reserve a hardware register outside asm.
+No backend, ISA-table or IR schema changes are needed.
+
+The [follow-up audit](audit-local-registers.json) clears the declaration error
+in all 293 previously affected C inputs. They now reach different-width ties
+between RAX pointer inputs and EAX status outputs. Together with four earlier
+tie failures, this is the first error in 297 C inputs. Matching operands still
+require the same IR type; this checkpoint does not relax that contract.
+
+Acceptance remains 118/484 C and 490/506 assembly under the original policy,
+or 122/484 C and 506/506 assembly with unchanged optional-feature permissions.
+All 608 previously accepted original-policy objects and all 628 optional-policy
+objects remain accepted and byte-identical. There are no crashes or timeouts.
+All 992 inputs, binary dependencies and reference artifacts rehash unchanged.
+The reference kernel was not rebuilt or rebooted. No Keel object was linked
+into or run as the kernel.
+
+All 24 generated x86 variants pass with GCC and Clang callers, for 48 native
+executions. The fixture exercises all 14 nonreserved GPRs with hardcoded
+register reads/writes, plus pointers, aliases, narrow values, shadowing,
+volatile accesses, ties and a balanced hidden call. Two compiler references
+omit the Keel stack-call extension. The Clang reference additionally binds
+the tied output explicitly to account for an observed missing return-value
+transfer; GCC and Keel pass the input-bound case unchanged. Six broken output,
+read/write and call-result controls return the expected nonzero exits.
+
+Full workspace validation passes 2,863 tests and one doctest, with 13 ignored.
+Workspace all-targets/all-features check, scoped Clippy and Rustdoc complete;
+Clippy retains existing warnings. All 99 generator tests, five audit tests,
+both freshness checks, scoped formatting and diff checks pass.
+Logs: `/tmp/keel-local-register-final-tests.log`,
+`/tmp/keel-local-register-final-remote.log` and
+`/tmp/keel-local-register-evidence.json`.

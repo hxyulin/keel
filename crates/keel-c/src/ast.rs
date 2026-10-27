@@ -330,6 +330,8 @@ pub enum Stmt<'a> {
 
 #[derive(Clone, Debug)]
 pub struct Local<'a> {
+    /// Fixed register used when this local is a direct extended-asm operand.
+    pub asm_register: Option<keel_ir::PhysReg>,
     pub nonstring: bool,
     /// The source name; made-up ones, which are not identifiers, have a
     /// `.` (`compound literal.3`).
