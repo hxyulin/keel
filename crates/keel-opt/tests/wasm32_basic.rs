@@ -23,10 +23,9 @@ block1(v8: i64):
 "#,
     )
     .unwrap();
-    assert!(
-        keel_ir::verify_module(&module).is_err(),
-        "native layout must reject align-4 pointer data"
-    );
+    // Pointer relocations occupy byte storage on both layouts. Object
+    // alignment does not impose an alignment requirement on each fixup.
+    keel_ir::verify_module(&module).unwrap();
     let data = format!("{:?}", module.data);
     keel_opt::optimize_wasm32_basic(&mut module).unwrap();
     verify_module_with_layout(&module, DataLayout::WASM32).unwrap();
@@ -79,7 +78,7 @@ fn invalid_global_is_rejected_before_any_transformation() {
     let mut module = keel_ir::parse(
         r#"
 data @bytes = align 4 { i32 7 }
-data @record = align 2 { ptr @bytes }
+data @record = align 3 { ptr @bytes }
 func @f() -> i32 {
 block0:
     v0 = iconst.i32 20

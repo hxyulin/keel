@@ -112,11 +112,6 @@ fn invalid_or_unsupported_source_is_diagnosed() {
             "operand type",
         ),
         ("asm(\"\" : \"=r\"(x) : \"1\"(x));", "input constraint"),
-        ("asm(\"\" : \"+r\"(x) : \"0\"(x));", "more than one"),
-        (
-            "asm(\"\" : \"=r\"(x) : \"0\"(x), \"0\"(x));",
-            "more than one",
-        ),
         ("asm(\"\" : [a] \"=r\"(x) : [a] \"r\"(x));", "duplicate"),
         ("asm(\"%[absent]\" :: \"r\"(x));", "unknown asm operand"),
         ("asm(\"%1\" :: \"r\"(x));", "out of range"),
@@ -158,6 +153,14 @@ fn invalid_or_unsupported_source_is_diagnosed() {
 #[test]
 fn backend_restrictions_remain_errors() {
     for (source, expected) in [
+        (
+            "void f(int x){asm(\"\" : \"+r\"(x) : \"0\"(x));}",
+            "named by two inputs",
+        ),
+        (
+            "void f(int x){asm(\"\" : \"=r\"(x) : \"0\"(x), \"0\"(x));}",
+            "named by two inputs",
+        ),
         (
             "void f(int n){int a[n]; asm(\"\" ::: \"x19\");}",
             "base pointer",
