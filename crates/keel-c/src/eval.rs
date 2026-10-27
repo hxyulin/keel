@@ -20,6 +20,8 @@ pub enum Const {
     Complex(f64, f64),
     /// An address plus a byte offset.
     Addr(Base, i64),
+    /// Integer-derived symbol/addend, with unknown numeric bits and truth value.
+    Reloc(Base, i64),
 }
 
 // Native compatibility boundaries for lowering and proof callers. Recursive
@@ -87,6 +89,7 @@ fn truthy(c: Const, nonnull: &dyn Fn(usize) -> bool) -> Option<bool> {
         // make a global address null.
         Const::Addr(Base::Global(g), _) => nonnull(g).then_some(true),
         Const::Addr(Base::Str(_), _) => Some(true),
+        Const::Reloc(..) => None,
     }
 }
 
@@ -145,9 +148,41 @@ pub(crate) fn eval_constant_with_binding_and_layout(
             };
             eval_constant_with_binding_and_layout(selected, allow_comma, nonnull, layout)?;
         }
+        ExprKind::Builtin(Builtin::Bswap, args)
+            if !args
+                .iter()
+                .all(|arg| scalar_constant_tree(arg, allow_comma, layout, 64)) =>
+        {
+            return None;
+        }
         _ => {}
     }
     eval_with_binding_and_layout(e, nonnull, layout)
+}
+
+/// Byte-swap proofs exclude effects and intermediates wider than Const::Int.
+/// Keep comma policy even inside builtin arguments and bound the extra walk.
+fn scalar_constant_tree(e: &Expr<'_>, allow_comma: bool, layout: CDataLayout, depth: u8) -> bool {
+    if depth == 0
+        || !e
+            .ty
+            .int_kind()
+            .is_some_and(|k| k.size_with_layout(layout) <= 8)
+    {
+        return false;
+    }
+    let child = |e| scalar_constant_tree(e, allow_comma, layout, depth - 1);
+    match &e.kind {
+        ExprKind::Int(_) => true,
+        ExprKind::Cast(a) | ExprKind::Unary(_, a) => child(a),
+        ExprKind::Binary(_, a, b) | ExprKind::LogAnd(a, b) | ExprKind::LogOr(a, b) => {
+            child(a) && child(b)
+        }
+        ExprKind::Comma(a, b) => allow_comma && child(a) && child(b),
+        ExprKind::Cond(c, a, b) => child(c) && child(a) && child(b),
+        ExprKind::Builtin(Builtin::Bswap, args) => args.iter().all(child),
+        _ => false,
+    }
 }
 
 pub fn eval_with_layout(e: &Expr<'_>, layout: CDataLayout) -> Option<Const> {
@@ -164,6 +199,26 @@ pub fn eval_with_binding_and_layout(
     let value = match &e.kind {
         ExprKind::Int(v) => Const::Int(*v),
         ExprKind::Float(f) => Const::Float(*f),
+        ExprKind::Builtin(Builtin::Bswap, args) => {
+            // Existing builtin signatures are native LP64; do not infer a
+            // 64-bit swap from unsigned long on the private ILP32 profile.
+            if layout != CDataLayout::NATIVE_LP64 {
+                return None;
+            }
+            let [arg] = *args else { return None };
+            if !scalar_constant_tree(arg, true, layout, 64) {
+                return None;
+            }
+            let Const::Int(value) = eval_with_binding_and_layout(arg, nonnull, layout)? else {
+                return None;
+            };
+            Const::Int(match e.ty.int_kind()?.size_with_layout(layout) {
+                2 => i64::from((value as u16).swap_bytes()),
+                4 => i64::from((value as u32).swap_bytes()),
+                8 => (value as u64).swap_bytes() as i64,
+                _ => return None,
+            })
+        }
         ExprKind::Builtin(Builtin::Complex, args) => {
             let (Const::Float(r), Const::Float(i)) = (
                 eval_constant_with_binding_and_layout(&args[0], true, nonnull, layout)?,
@@ -296,6 +351,7 @@ pub fn eval_with_binding_and_layout(
                         off + delta
                     },
                 ),
+                Const::Reloc(base, off) => Const::Reloc(base, off.checked_add(delta)?),
                 Const::Int(v) => Const::Int(v.wrapping_add(delta)),
                 Const::Float(_) | Const::Complex(..) => return None,
             }
@@ -356,6 +412,10 @@ fn eval_addr(e: &Expr<'_>, nonnull: &dyn Fn(usize) -> bool, layout: CDataLayout)
                     off + *offset as i64
                 },
             )),
+            Const::Reloc(b, off) => Some(Const::Reloc(
+                b,
+                off.checked_add(i64::try_from(*offset).ok()?)?,
+            )),
             Const::Int(v) => Some(Const::Int(if layout.pointer_bytes() == 4 {
                 v.wrapping_add(*offset as i64)
             } else {
@@ -365,7 +425,7 @@ fn eval_addr(e: &Expr<'_>, nonnull: &dyn Fn(usize) -> bool, layout: CDataLayout)
         },
         ExprKind::Deref(p) => {
             match eval_constant_with_binding_and_layout(p, true, nonnull, layout)? {
-                c @ (Const::Addr(..) | Const::Int(_)) => Some(c),
+                c @ (Const::Addr(..) | Const::Reloc(..) | Const::Int(_)) => Some(c),
                 Const::Float(_) | Const::Complex(..) => None,
             }
         }
@@ -425,7 +485,7 @@ fn cast(
             };
             Const::Int(normalize_with_layout(v, to, layout))
         }
-        (Const::Addr(..), Ty::Int(k))
+        (Const::Addr(..) | Const::Reloc(..), Ty::Int(k))
             if layout == CDataLayout::NATIVE_LP64 && k.size_with_layout(layout) == 8 =>
         {
             c
@@ -451,7 +511,7 @@ fn cast(
         (Const::Float(f), Ty::Float) => Const::Float(f64::from(f as f32)),
         (Const::Float(f), Ty::Double) => Const::Float(f),
         (Const::Int(v), Ty::Ptr(_)) => Const::Int(normalize_with_layout(v, to, layout)),
-        (Const::Addr(..), Ty::Ptr(_)) => c,
+        (Const::Addr(..) | Const::Reloc(..), Ty::Ptr(_)) => c,
         _ => return None,
     })
 }
@@ -464,7 +524,27 @@ fn binary(
     b: Const,
     layout: CDataLayout,
 ) -> Option<Const> {
+    let integer_address = layout == CDataLayout::NATIVE_LP64
+        && [operand, result].into_iter().all(|ty| {
+            ty.int_kind()
+                .is_some_and(|k| k.size_with_layout(layout) == 8)
+        });
     match (a, b) {
+        (Const::Addr(base, offset) | Const::Reloc(base, offset), Const::Int(delta))
+            if integer_address =>
+        {
+            let offset = match op {
+                BinOp::Add => offset.checked_add(delta)?,
+                BinOp::Sub => offset.checked_sub(delta)?,
+                _ => return None,
+            };
+            Some(Const::Reloc(base, offset))
+        }
+        (Const::Int(delta), Const::Addr(base, offset) | Const::Reloc(base, offset))
+            if integer_address && op == BinOp::Add =>
+        {
+            Some(Const::Reloc(base, offset.checked_add(delta)?))
+        }
         (Const::Int(x), Const::Int(y)) => {
             let signed = operand.is_signed();
             let (ux, uy) = (x as u64, y as u64);

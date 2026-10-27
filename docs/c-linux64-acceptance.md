@@ -153,3 +153,44 @@ Full validation passes 2,891 tests and one doctest, with 13 tests skipped.
 Workspace check, scoped Clippy, documentation and generator freshness pass.
 Broad all-target Clippy stops at the unchanged `clippy::almost_swapped` error in
 `keel-ir/tests/call_operand_abi.rs:15`; that test is outside this change.
+
+## Native constant-expression follow-up
+
+The constant evaluator now handles `__builtin_bswap16/32/64` on native LP64
+integer expression trees. Arguments keep their converted widths before swapping.
+Enums, switch labels, static assertions, array bounds, bitfield widths and static
+initializers can use these results. Runtime builtin lowering is unchanged.
+The proof checks the full integer operand tree, preserves comma restrictions,
+and excludes effects, reads and intermediates wider than 64 bits. Its extra
+walk is bounded to 64 levels. Floating, runtime-bearing and deeper trees remain
+unproven; the private ILP32 profile does not acquire builtin support.
+
+Native pointer-width integer arithmetic can also preserve a single symbol plus
+an addend, including `(unsigned long)&init_stack + sizeof(init_stack)`. These
+values have an opaque relocation representation, not guessed numeric bits or
+nonnullness. Casts and pointer offsets preserve that distinction. Existing
+strong-pointer truth and final weak binding remain separate. Narrow integers,
+address masks, multiple-symbol arithmetic, address bitfield initializers and
+addends outside the existing nonnegative 32-bit range remain diagnosed. No IR
+format or backend change is required.
+
+All ten byte-swap first errors and the separate stack-address initializer error
+are removed. Under the unchanged optional policy, 426/484 C and 506/506 assembly
+inputs accept. The original policy accepts 416/484 C and 490/506 assembly inputs.
+Six more C inputs accept under the optional policy. Others expose cleanup-goto
+and const-qualified-member errors. The [constant-expression ledger](../suite/linux-kernel/audit-constant-expressions.json)
+records the new first diagnostics. All 926 prior optional-policy acceptances
+are retained and byte-identical. All captured inputs and reference artifacts
+were rehashed unchanged; no kernel link or boot was performed.
+
+Five tests cover static contexts, runtime equivalence, signed/truncating inputs,
+side effects and strict comma policy, wide/narrow value rejection, opaque-address
+truth, bitfield relocation rejection and weak metadata. Four debug/optimization
+variants run on the local Arm host with a Clang reference. The four x86 objects
+pass both GCC and Clang PIE callers, for eight generated executions and two
+compiler references. The native object code/data/unwind matches the local
+exports; debug paths differ by build directory.
+
+Full validation passes 2,896 tests and one doctest, with 13 tests skipped.
+Workspace check, C all-target/all-feature Clippy, documentation and generator
+freshness checks pass. Existing Clippy warnings remain.

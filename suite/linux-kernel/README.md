@@ -1280,3 +1280,23 @@ pass two generated executions and two references. Full validation passes 2,891
 tests plus one doctest; scoped Clippy and workspace check pass. Broad Clippy stops
 at an unchanged `almost_swapped` error in `keel-ir/tests/call_operand_abi.rs:15`.
 See [the section contract](../../docs/c-sections-retain.md) for retained limits.
+
+### Native constant-expression checkpoint
+
+[The constant-expression ledger](audit-constant-expressions.json) records native
+integer byte-swap folding and opaque integer symbol/addend initializers. It
+removes ten `htons` case-label errors and the `TOP_OF_INIT_STACK` initializer
+error. The optional policy accepts 426/484 C and 506/506 assembly inputs; the
+original policy accepts 416/484 C and 490/506 assembly inputs. Six more C inputs
+accept under unchanged optional permissions.
+
+All prior optional-policy acceptances are retained and byte-identical. Captured
+inputs and reference artifacts were rehashed unchanged. No kernel link or boot
+was performed. The remaining first errors include newly exposed const-member
+and cleanup-goto cases; these are not constant-expression failures.
+
+Full validation passes 2,896 tests and one doctest. Five focused tests preserve
+runtime effects, weak binding, opaque address truth and existing relocation
+limits. Native checks pass four local Arm executions plus a Clang reference,
+eight generated x86 PIE executions and two GCC/Clang references. A negative
+regression ensures symbolic addresses cannot overwrite bitfield storage.

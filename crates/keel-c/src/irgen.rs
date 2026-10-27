@@ -1256,7 +1256,13 @@ impl<'p> Gen<'p> {
                             };
                             write_le(&mut bytes[offset..offset + width], v);
                         }
-                        Const::Addr(base, addend) => {
+                        Const::Addr(base, addend) | Const::Reloc(base, addend) => {
+                            if bits.is_some() {
+                                return Err(Error::new(
+                                    expr.loc,
+                                    "address relocation in a bit-field initializer is not supported",
+                                ));
+                            }
                             if width != pointer_bytes
                                 || (pointer_bytes == 4 && !matches!(expr.ty, Ty::Ptr(_)))
                             {
