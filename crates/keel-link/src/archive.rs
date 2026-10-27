@@ -11,6 +11,48 @@ pub enum Target {
     Aarch64AppleDarwin,
 }
 
+/// Snapshot a GNU thin archive into a regular, indexed archive.
+///
+/// `read_member` resolves each stored UTF-8 member path. Filesystem callers
+/// resolve relative names against the thin archive's containing directory.
+/// Current member bytes replace the archive's possibly stale size metadata.
+/// Order and duplicate members are preserved. The library performs no I/O.
+///
+/// # Errors
+/// Returns an error for malformed archives, unreadable or invalid objects,
+/// non-UTF-8 paths, or payloads exceeding 512 MiB.
+pub fn materialize_thin(
+    bytes: &[u8],
+    target: Target,
+    mut read_member: impl FnMut(&str) -> Result<Vec<u8>>,
+) -> Result<Vec<u8>> {
+    let archive = object::read::archive::ArchiveFile::parse(bytes).map_err(|e| e.to_string())?;
+    if !archive.is_thin() {
+        return Err("expected a GNU thin archive".into());
+    }
+    let mut members = Vec::new();
+    let mut total = 0usize;
+    for member in archive.members() {
+        let member = member.map_err(|e| e.to_string())?;
+        let name = std::str::from_utf8(member.name())
+            .map_err(|_| "thin archive member path is not UTF-8")?;
+        if name.is_empty() || name.contains('\0') {
+            return Err("invalid thin archive member path".into());
+        }
+        let data = read_member(name).map_err(|e| format!("{name}: {e}"))?;
+        total = total
+            .checked_add(data.len())
+            .filter(|v| *v <= 512 * 1024 * 1024)
+            .ok_or("thin archive payloads exceed 512 MiB limit")?;
+        members.push((name, data));
+    }
+    let inputs = members
+        .iter()
+        .map(|(name, bytes)| Input { name, bytes })
+        .collect::<Vec<_>>();
+    build(&inputs, target)
+}
+
 /// Package relocatable objects in input order, retaining duplicate basenames.
 /// Names are UTF-8 paths; only their final component is stored in the archive.
 /// Metadata is always deterministic (zero timestamp/uid/gid, mode 0644).

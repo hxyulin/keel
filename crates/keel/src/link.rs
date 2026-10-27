@@ -35,6 +35,8 @@ fn system_selector(args: &[String]) -> Option<usize> {
                     a,
                     "--dead-strip"
                         | "-dead_strip"
+                        | "-r"
+                        | "--relocatable"
                         | "--gc-sections"
                         | "--no-gc-sections"
                         | "--static"
@@ -386,6 +388,7 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
         .any(|a| matches!(a.as_str(), "--static" | "-static"));
     let mut static_libraries = force_static;
     let mut group_depth = 0usize;
+    let mut relocatable = false;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -393,6 +396,7 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
             "-e" | "--entry" => {
                 options.entry = args.next().ok_or("--entry requires a symbol")?.clone()
             }
+            "-r" | "--relocatable" => relocatable = true,
             "--whole-archive" => requests.push(Request::Control(SelectionRequest::WholeArchive)),
             "--no-whole-archive" => {
                 requests.push(Request::Control(SelectionRequest::NoWholeArchive))
@@ -499,7 +503,7 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
             }
         })
         .collect::<Result<Vec<_>, String>>()?;
-    let owned = paths
+    let mut owned = paths
         .iter()
         .map(|path| {
             path.as_ref()
@@ -511,6 +515,31 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
                 .transpose()
         })
         .collect::<Result<Vec<_>, _>>()?;
+    for (path, input) in paths.iter().zip(&mut owned) {
+        let (Some(path), Some((_, source))) = (path, input) else {
+            continue;
+        };
+        if source.bytes().starts_with(b"!<thin>\n") {
+            let target = match machine {
+                keel_link::elf::Machine::X86_64 => keel_link::archive::Target::X86_64LinuxGnu,
+                keel_link::elf::Machine::Aarch64 => keel_link::archive::Target::Aarch64LinuxGnu,
+            };
+            let regular = keel_link::archive::materialize_thin(source.bytes(), target, |name| {
+                let member = path.parent().unwrap_or_else(|| Path::new(".")).join(name);
+                let metadata =
+                    std::fs::metadata(&member).map_err(|e| format!("{}: {e}", member.display()))?;
+                if metadata.len() > 512 * 1024 * 1024 {
+                    return Err("thin archive member exceeds 512 MiB limit".into());
+                }
+                std::fs::read(&member).map_err(|e| format!("{}: {e}", member.display()))
+            })
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+            *source = Source::Read(regular);
+        }
+    }
+    if relocatable && (options.gc_sections || !options.runpath.is_empty()) {
+        return Err("partial linking does not support --gc-sections or --rpath".into());
+    }
     if force_static
         && owned.iter().flatten().any(|(_, source)| {
             let b = source.bytes();
@@ -533,9 +562,13 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
             }
         })
         .collect::<Vec<_>>();
-    let selection = Selection::prepare(&requests, &options.entry)?;
+    let selection = Selection::prepare(&requests, if relocatable { "" } else { &options.entry })?;
     let inputs = selection.inputs();
-    let executable = keel_link::elf::link(&inputs, options)?;
+    let executable = if relocatable {
+        keel_link::elf::relocatable::link(&inputs, machine)?
+    } else {
+        keel_link::elf::link(&inputs, options)?
+    };
     for warning in &executable.warnings {
         eprintln!("keel link: warning: {warning}");
     }
@@ -557,7 +590,11 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            file.set_permissions(std::fs::Permissions::from_mode(0o755))?;
+            file.set_permissions(std::fs::Permissions::from_mode(if relocatable {
+                0o644
+            } else {
+                0o755
+            }))?;
         }
         drop(file);
         std::fs::rename(&temporary, &output)

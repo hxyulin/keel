@@ -217,3 +217,63 @@ fn gnu_final_link_matches_with_and_without_keel_partial_link() {
         payload(&indirect, "_start", 6)
     );
 }
+
+#[test]
+#[ignore = "requires KEEL_KERNEL_AGGREGATE, KEEL_KERNEL_SCRIPT and KEEL_GNU_LD"]
+fn pinned_kernel_partial_link_preserves_gnu_final_layout() {
+    let ld = std::env::var_os("KEEL_GNU_LD").expect("GNU ld path");
+    let aggregate = std::env::var_os("KEEL_KERNEL_AGGREGATE").expect("pinned aggregate path");
+    let script = std::env::var_os("KEEL_KERNEL_SCRIPT").expect("pinned expanded script path");
+    let bytes = std::fs::read(&aggregate).unwrap();
+    let combined = partial(&[bytes]).unwrap().bytes;
+    let scratch = Scratch::new();
+    std::fs::write(scratch.0.join("partial.o"), &combined).unwrap();
+    for (output, input) in [
+        ("direct", std::path::PathBuf::from(aggregate)),
+        ("indirect", scratch.0.join("partial.o")),
+    ] {
+        let result = std::process::Command::new(&ld)
+            .current_dir(&scratch.0)
+            .args([
+                "-m",
+                "elf_x86_64",
+                "-z",
+                "noexecstack",
+                "--no-warn-rwx-segments",
+                "-T",
+            ])
+            .arg(&script)
+            .args(["-o", output])
+            .arg(input)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+    let inspect = |bytes: &[u8]| {
+        let f = object::File::parse(bytes).unwrap();
+        let sections = f.sections().filter(|s| matches!(s.flags(), object::SectionFlags::Elf { sh_flags } if sh_flags & 2 != 0)).map(|s| (s.name().unwrap().to_owned(), (s.address(), s.size(), s.data().unwrap().to_vec()))).collect::<std::collections::BTreeMap<_, _>>();
+        let symbols = f
+            .symbols()
+            .filter(|s| s.is_global() || s.is_weak())
+            .map(|s| (s.name().unwrap().to_owned(), (s.address(), s.size())))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        (f.entry(), sections, symbols)
+    };
+    let direct = std::fs::read(scratch.0.join("direct")).unwrap();
+    let indirect = std::fs::read(scratch.0.join("indirect")).unwrap();
+    let (entry_a, sections_a, symbols_a) = inspect(&direct);
+    let (entry_b, sections_b, symbols_b) = inspect(&indirect);
+    assert_eq!(entry_a, entry_b);
+    assert_eq!(symbols_a, symbols_b);
+    assert_eq!(
+        sections_a.keys().collect::<Vec<_>>(),
+        sections_b.keys().collect::<Vec<_>>()
+    );
+    for (name, contents) in sections_a {
+        assert_eq!(contents, sections_b[&name], "section {name}");
+    }
+}

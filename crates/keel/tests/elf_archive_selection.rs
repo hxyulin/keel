@@ -264,3 +264,71 @@ fn gnu_ld_archive_selection_comparison() {
             .success()
     );
 }
+
+#[test]
+fn partial_link_groups_preserve_relocations_until_final_link() {
+    let fixture = Fixture::new("partial");
+    success(fixture.keel(&[
+        "-r",
+        "start.o",
+        "--start-group",
+        "liba.a",
+        "libb.a",
+        "--end-group",
+        "-o",
+        "partial.o",
+    ]));
+    let bytes = std::fs::read(fixture.0.join("partial.o")).unwrap();
+    let file = object::File::parse(bytes.as_slice()).unwrap();
+    assert_eq!(file.kind(), object::ObjectKind::Relocatable);
+    use object::ObjectSection;
+    assert_eq!(
+        file.sections()
+            .map(|s| s.relocations().count())
+            .sum::<usize>(),
+        3
+    );
+    success(fixture.keel(&["partial.o", "-o", "final"]));
+    assert!(symbols(&fixture.0.join("final")).contains(&"last".to_owned()));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(fixture.0.join("partial.o"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o111,
+            0
+        );
+    }
+}
+
+#[test]
+fn thin_archive_paths_are_relative_to_archive_and_missing_reads_are_atomic() {
+    let fixture = Fixture::new("thin");
+    std::fs::create_dir(fixture.0.join("sub")).unwrap();
+    let member =
+        keel_asm::x86::assemble_object(".text\n.globl thin_value\nthin_value: ret\n").unwrap();
+    std::fs::write(fixture.0.join("sub/member.o"), member).unwrap();
+    let mut thin = b"!<thin>\n".to_vec();
+    thin.extend_from_slice(
+        format!(
+            "{:<16}{:<12}{:<6}{:<6}{:<8}{:<10}`\n",
+            "member.o/", 0, 0, 0, "644", 1
+        )
+        .as_bytes(),
+    );
+    std::fs::write(fixture.0.join("sub/thin.a"), thin).unwrap();
+    success(fixture.keel(&["-r", "--whole-archive", "sub/thin.a", "-o", "partial.o"]));
+    assert!(symbols(&fixture.0.join("partial.o")).contains(&"thin_value".to_owned()));
+    std::fs::write(fixture.0.join("untouched"), b"keep existing output").unwrap();
+    std::fs::remove_file(fixture.0.join("sub/member.o")).unwrap();
+    let failed = fixture.keel(&["-r", "--whole-archive", "sub/thin.a", "-o", "untouched"]);
+    assert!(!failed.status.success());
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("member.o"));
+    assert_eq!(
+        std::fs::read(fixture.0.join("untouched")).unwrap(),
+        b"keep existing output"
+    );
+}

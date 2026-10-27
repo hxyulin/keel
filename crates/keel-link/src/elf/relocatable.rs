@@ -69,9 +69,6 @@ fn string(table: &mut Vec<u8>, value: &[u8]) -> Result<u32> {
 /// Returns an error for malformed input, conflicting strong definitions,
 /// unsupported ELF metadata, REL relocations, or output exceeding 512 MiB.
 pub fn link(inputs: &[Input<'_>], machine: Machine) -> Result<Executable> {
-    if inputs.is_empty() {
-        return Err("no input objects".into());
-    }
     let (inputs, libraries) = input::prepare(inputs, "")?;
     if !libraries.is_empty() {
         return Err("shared libraries cannot be partially linked".into());
@@ -103,6 +100,21 @@ pub fn link(inputs: &[Input<'_>], machine: Machine) -> Result<Executable> {
                 input.name
             ));
         }
+        let symbol_table = file.elf_symbol_table().section().0;
+        let symbol_strings = if symbol_table == 0 {
+            0
+        } else {
+            file.section_by_index(object::SectionIndex(symbol_table))
+                .map_err(|e| e.to_string())?
+                .elf_section_header()
+                .sh_link(file.endian()) as usize
+        };
+        let section_strings = usize::from(header.e_shstrndx(file.endian()));
+        if section_strings == usize::from(object::elf::SHN_XINDEX) {
+            return Err(
+                "extended input section-name indices are unsupported in partial links".into(),
+            );
+        }
         let mut map = BTreeMap::new();
         for section in file.sections() {
             let index = section.index().0;
@@ -121,12 +133,16 @@ pub fn link(inputs: &[Input<'_>], machine: Machine) -> Result<Executable> {
             if kind == object::elf::SHT_REL {
                 return Err("REL relocations are unsupported; use RELA".into());
             }
-            if matches!(kind, object::elf::SHT_SYMTAB | object::elf::SHT_STRTAB) {
+            if kind == object::elf::SHT_SYMTAB
+                || index == symbol_strings
+                || index == section_strings
+            {
                 continue;
             }
             if !matches!(
                 kind,
                 object::elf::SHT_PROGBITS
+                    | object::elf::SHT_STRTAB
                     | object::elf::SHT_NOBITS
                     | object::elf::SHT_NOTE
                     | object::elf::SHT_RELA
