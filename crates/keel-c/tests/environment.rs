@@ -316,3 +316,16 @@ fn native_pthread_headers_preserve_the_glibc_unwind_buffer_layout() {
     keel_ir::verify_module(&module).unwrap();
     keel_codegen::compile(&module, Target::X86_64LinuxGnu).unwrap();
 }
+
+#[test]
+fn identifier_queries_share_parser_keyword_classification() {
+    let source = "#if __is_identifier(__inline__) || __is_identifier(__restrict__) || __is_identifier(__volatile__) || __is_identifier(_Imaginary)\n#error reserved GNU keywords are not identifiers\n#endif\n#if !__is_identifier(ordinary_name) || !__is_identifier(__builtin_va_list) || !__is_identifier(__int128_t)\n#error ordinary and typedef-like spellings remain identifiers\n#endif\nint ok;\n";
+    for target in Target::NATIVE {
+        let opts = PreprocessOptions {
+            target,
+            ..PreprocessOptions::default()
+        };
+        let output = preprocess(source, "keywords.c", &opts).unwrap();
+        assert!(output.contains("ok"), "{target:?}: {output}");
+    }
+}

@@ -805,3 +805,41 @@ fn discarded_debug_payload_still_requires_valid_file_bounds() {
         assert!(error.contains("truncated Mach-O input"), "{error}");
     }
 }
+
+#[test]
+fn undersized_macho_commands_cannot_read_the_next_payload() {
+    let original = object(".globl _main\n_main:\nmov w0, #0\nret\n");
+    let ncmds = u32::from_le_bytes(original[16..20].try_into().unwrap());
+    let mut at = 32;
+    let mut version = None;
+    for _ in 0..ncmds {
+        let cmd = u32::from_le_bytes(original[at..at + 4].try_into().unwrap());
+        let size = u32::from_le_bytes(original[at + 4..at + 8].try_into().unwrap()) as usize;
+        if cmd == 0x32 {
+            version = Some((at, size));
+            break;
+        }
+        at += size;
+    }
+    let (at, size) = version.expect("assembler emits LC_BUILD_VERSION");
+    assert_eq!(size, 24);
+    for cmd in [0x24u32, 0x29] {
+        let mut bytes = original.clone();
+        bytes[16..20].copy_from_slice(&(ncmds + 1).to_le_bytes());
+        bytes[at..at + 24].fill(0);
+        bytes[at..at + 4].copy_from_slice(&cmd.to_le_bytes());
+        bytes[at + 4..at + 8].copy_from_slice(&8u32.to_le_bytes());
+        bytes[at + 8..at + 12].copy_from_slice(&0x2eu32.to_le_bytes());
+        bytes[at + 12..at + 16].copy_from_slice(&16u32.to_le_bytes());
+        let error = keel_link::link(
+            &[Input {
+                name: "undersized.o",
+                bytes: &bytes,
+            }],
+            options(),
+        )
+        .err()
+        .expect("undersized command must be rejected");
+        assert!(error.contains("load command size"), "cmd={cmd:#x}: {error}");
+    }
+}

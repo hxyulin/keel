@@ -176,13 +176,7 @@ impl Options {
             .as_ref()
             .map(|names| names.iter().map(String::as_str).collect())
             .unwrap_or_else(|| self.optimization.pipeline().to_vec());
-        keel_opt::run_passes_with_context_and_options(
-            module,
-            &names,
-            self.optimization_context(self.vector_target())?,
-            self.optimizer_options(),
-        )
-        .map_err(|e| e.to_string())
+        self.run_optimization(module, &names, self.vector_target())
     }
 
     fn optimization_context(
@@ -214,18 +208,6 @@ impl Options {
             target,
             capabilities,
         })
-    }
-
-    fn optimize_with_output(&self, module: &mut Module) -> Result<(), String> {
-        if self.opt_report.is_none() {
-            return self.optimize(module);
-        }
-        let names: Vec<_> = self
-            .passes
-            .as_ref()
-            .map(|names| names.iter().map(String::as_str).collect())
-            .unwrap_or_else(|| self.optimization.pipeline().to_vec());
-        self.run_optimization(module, &names, self.vector_target())
     }
 
     fn run_optimization(
@@ -652,6 +634,9 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
         }
         .into());
     }
+    if opts.emit_ir && opts.emit_object {
+        return Err("`--emit-ir` and `--emit-object` are mutually exclusive".into());
+    }
     if let Some(report) = &opts.opt_report {
         if opts.preprocess_only {
             return Err("`--opt-report` cannot be used with preprocessing only".into());
@@ -786,7 +771,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 return wasm::compile_ir(&opts);
             }
             let (input, mut module) = load(&opts)?;
-            opts.optimize_with_output(&mut module)
+            opts.optimize(&mut module)
                 .map_err(|e| format!("{input}: {e}"))?;
             emit_module(&opts, module).map_err(|e| format!("{input}: {e}"))
         }
@@ -903,11 +888,8 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     lines.join("\n")
                 ));
             }
-            opts.optimize_with_output(&mut module)
+            opts.optimize(&mut module)
                 .map_err(|e| format!("{input}: {e}"))?;
-            if opts.emit_ir && opts.emit_object {
-                return Err("`--emit-ir` and `--emit-object` are mutually exclusive".into());
-            }
             if opts.emit_ir {
                 return write_output(&opts, &module.to_string());
             }

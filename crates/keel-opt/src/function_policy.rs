@@ -148,7 +148,8 @@ pub(super) fn run(
             .map(|f| selected(f, defaults))
             .collect::<Result<Vec<_>, _>>()?;
         let mut positions = vec![0; schedules.len()];
-        let mut scoped = Vec::new();
+        let mut scoped: Vec<ScopedPass<'_>> = Vec::new();
+        let mut order = Vec::new();
         // Merge plan frontiers, never moving a pass ahead of an earlier pass in
         // that function's plan. All annotations share the same analysis cache,
         // canonical restoration, verification and reporting manager.
@@ -170,7 +171,18 @@ pub(super) fn run(
                     *position += 1;
                 }
             }
-            scoped.push(ScopedPass { pass, functions });
+            // Equivalent schedules share an instance so unchanged passes keep
+            // their cache entries across repeated rounds.
+            let index = scoped
+                .iter()
+                .position(|candidate| {
+                    std::ptr::eq(candidate.pass, pass) && candidate.functions == functions
+                })
+                .unwrap_or_else(|| {
+                    scoped.push(ScopedPass { pass, functions });
+                    scoped.len() - 1
+                });
+            order.push(index);
         }
         // A function whose plan ended earlier can become dead after another
         // plan's final rewrite. Only plans requesting GC participate; all other
@@ -183,12 +195,16 @@ pub(super) fn run(
             .map(|(function, _)| function.name.clone())
             .collect::<keel_ir::fxhash::FxHashSet<_>>();
         if !functions.is_empty() {
+            order.push(scoped.len());
             scoped.push(ScopedPass {
                 pass: crate::find_pass("unused-functions").expect("registered reachability pass"),
                 functions,
             });
         }
-        let passes: Vec<&dyn Pass> = scoped.iter().map(|pass| pass as &dyn Pass).collect();
+        let passes: Vec<&dyn Pass> = order
+            .iter()
+            .map(|&index| &scoped[index] as &dyn Pass)
+            .collect();
         match report.as_deref_mut() {
             Some(report) => crate::run_pipeline_with_context_and_report_raw(
                 module, &passes, context, report, options,

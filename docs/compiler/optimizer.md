@@ -654,7 +654,10 @@ The named `memory-forward` pass removes a same-type ordinary load when an
 ordinary load or store in the same block already established its value.
 The first potentially faulting access remains. Constant i64 `ptradd` chains
 share a canonical root and checked signed byte offset; unknown derivations
-remain opaque SSA addresses. Aliases are resolved before analysis.
+remain opaque SSA addresses. Aliases are resolved before analysis. A retained
+load with an aliased result is neither a forwarding fact nor a rewrite target.
+Functions with debugger-visible variable homes are excluded so debugger writes
+remain visible to subsequent reads.
 
 Stores invalidate overlapping byte footprints even when their types differ.
 Adjacent ranges on one unrestricted root can retain facts. Footprint comparison

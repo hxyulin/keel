@@ -88,9 +88,18 @@ fn report_errors_preserve_inputs_outputs_and_existing_evidence() {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("opt-report-errors");
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("in.keel"), IR).unwrap();
+    fs::write(dir.join("in.c"), "int f(void) { return 42; }").unwrap();
     fs::write(dir.join("old.json"), "evidence").unwrap();
     fs::write(dir.join("out"), "output evidence").unwrap();
     for args in [
+        vec![
+            "cc",
+            "in.c",
+            "--emit-ir",
+            "--emit-object",
+            "--opt-report",
+            "new.json",
+        ],
         vec!["opt", "in.keel", "--opt-report"],
         vec!["opt", "in.keel", "--opt-report", "-"],
         vec!["opt", "in.keel", "--opt-report", ""],

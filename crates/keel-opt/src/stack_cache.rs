@@ -10,7 +10,6 @@ use keel_ir::fxhash::FxHashMap;
 use keel_ir::loops::LoopDepth;
 use keel_ir::{
     BinaryOp, EntityRef, Function, InsertPoint, InstData as D, MemoryFlags, StackSlot, Type, Value,
-    ValueDef,
 };
 
 pub(crate) struct StackCache;
@@ -82,25 +81,13 @@ fn run_impl(f: &mut Function, promote: bool) -> bool {
         }
     }
     // Bound address discovery rather than chasing arbitrary pointer chains.
-    for _ in 0..8 {
-        let before = addresses.len();
-        for &(_, i) in &instructions {
-            if let D::Binary {
-                op: BinaryOp::Ptradd,
-                args,
-            } = *f.inst_data(i)
-                && let Some(&(slot, offset)) = addresses.get(&f.resolve(args[0]))
-                && let Some(n) = constant(f, args[1]).and_then(|n| usize::try_from(n).ok())
-                && let Some(end) = offset.checked_add(n).filter(|&n| n <= sizes[&slot])
-                && f.resolve(f.first_result(i)) == f.first_result(i)
-            {
-                addresses.insert(f.resolve(f.first_result(i)), (slot, end));
-            }
-        }
-        if addresses.len() == before {
-            break;
-        }
-    }
+    crate::stack_address::propagate(
+        f,
+        instructions.iter().map(|&(_, i)| i),
+        &sizes,
+        &mut addresses,
+        Some(8),
+    );
     let field = |addr: Value, ty: Type| -> Option<Field> {
         if !matches!(ty, Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Ptr) {
             return None;
@@ -338,13 +325,4 @@ fn run_impl(f: &mut Function, promote: bool) -> bool {
 
 fn width(ty: Type) -> usize {
     ty.bytes().unwrap_or(8) as usize
-}
-fn constant(f: &Function, v: Value) -> Option<i64> {
-    if let ValueDef::Result(i, _) = f.value_def(f.resolve(v))
-        && let D::Iconst { imm, .. } = *f.inst_data(i)
-    {
-        Some(imm)
-    } else {
-        None
-    }
 }

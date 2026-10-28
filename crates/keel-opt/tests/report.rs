@@ -204,7 +204,10 @@ fn signature_and_caller_restrictions_are_site_decisions() {
                 let InstData::Call { func, args } = f.inst_data(call).clone() else {
                     unreachable!()
                 };
-                *f.inst_data_mut(call) = InstData::ReturnCall { func, args: (args).into() };
+                *f.inst_data_mut(call) = InstData::ReturnCall {
+                    func,
+                    args: (args).into(),
+                };
             }
         }
         // Exercise decisions directly: a deliberately mismatched ABI or replaced
@@ -313,5 +316,90 @@ block2:
                 names.iter().filter(|&&name| name == "simplify-cfg").count()
             );
         }
+    }
+}
+
+// Configured instances share a display name, but not their no-change cache.
+#[test]
+fn deterministic_cache_distinguishes_configured_pass_instances() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct Rewrite {
+        from: i64,
+        to: i64,
+        calls: AtomicUsize,
+    }
+    impl Pass for Rewrite {
+        fn name(&self) -> &'static str {
+            "configured-rewrite"
+        }
+        fn description(&self) -> &'static str {
+            "rewrite a configured integer"
+        }
+        fn deterministic(&self) -> bool {
+            true
+        }
+        fn run(&self, f: &mut Function) -> bool {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            let insts: Vec<_> = f.layout_insts().map(|(_, i)| i).collect();
+            let mut changed = false;
+            for inst in insts {
+                if let InstData::Iconst { imm, .. } = f.inst_data_mut(inst)
+                    && *imm == self.from
+                {
+                    *imm = self.to;
+                    changed = true;
+                }
+            }
+            changed
+        }
+    }
+    for (observed, scoped) in [(false, false), (true, false), (false, true), (true, true)] {
+        let a = Rewrite {
+            from: 999,
+            to: 1000,
+            calls: AtomicUsize::new(0),
+        };
+        let b = Rewrite {
+            from: 42,
+            to: 43,
+            calls: AtomicUsize::new(0),
+        };
+        let mut module =
+            keel_ir::parse("func @f() -> i64 {\nblock0:\n v0 = iconst.i64 42\n return v0\n}\n")
+                .unwrap();
+        if scoped {
+            module.functions.push(
+                keel_ir::parse("func @off() optnone {\nblock0:\n return\n}\n")
+                    .unwrap()
+                    .functions
+                    .remove(0),
+            );
+        }
+        let passes: &[&dyn Pass] = &[&a, &a, &b];
+        if observed {
+            keel_opt::run_pipeline_for_target_with_report(
+                &mut module,
+                passes,
+                VectorTarget::Portable,
+                &mut OptimizationReport::default(),
+            )
+            .unwrap();
+        } else {
+            keel_opt::run_pipeline(&mut module, passes).unwrap();
+        }
+        assert!(
+            module.to_string().contains("iconst.i64 43"),
+            "observed={observed}: {module}"
+        );
+        assert_eq!(
+            a.calls.load(Ordering::Relaxed),
+            1,
+            "unchanged repeated instance should stay cached"
+        );
+        assert_eq!(
+            b.calls.load(Ordering::Relaxed),
+            1,
+            "different configuration must run"
+        );
     }
 }

@@ -244,6 +244,19 @@ fn native_oracle_extrema_tails_unaligned_guard_pages_and_first_faults() {
     };
     let dir = evidence();
     fs::write(dir.join("oracle.c"), include_str!("adjacent_diff/oracle.c")).unwrap();
+    let oracle = dir.join("oracle.o");
+    let out = Command::new("clang")
+        .args(["-O0", "-fno-lto", "-c"])
+        .arg(dir.join("oracle.c"))
+        .arg("-o")
+        .arg(&oracle)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     for optimize in [false, true] {
         let m = module(optimize);
         for selection in [SelectionTier::Baseline, SelectionTier::Full] {
@@ -266,7 +279,7 @@ fn native_oracle_extrema_tails_unaligned_guard_pages_and_first_faults() {
                     fs::write(&object, obj).unwrap();
                     let out = Command::new("clang")
                         .args(["-O0", "-fno-lto"])
-                        .arg(dir.join("oracle.c"))
+                        .arg(&oracle)
                         .arg(&object)
                         .arg("-o")
                         .arg(&binary)

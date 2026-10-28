@@ -192,6 +192,19 @@ fn native_constant_and_reused_quotients_match_oracle_and_trap_edges() {
     let dir = std::env::temp_dir().join(format!("keel-arm-div-{}", std::process::id()));
     fs::create_dir(&dir).unwrap();
     fs::write(dir.join("oracle.c"), c).unwrap();
+    let oracle = dir.join("oracle.o");
+    let out = Command::new("clang")
+        .args(["-O1", "-c"])
+        .arg(dir.join("oracle.c"))
+        .arg("-o")
+        .arg(&oracle)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     for tier in [
         keel_opt::OptimizationTier::None,
         keel_opt::OptimizationTier::Basic,
@@ -206,7 +219,7 @@ fn native_constant_and_reused_quotients_match_oracle_and_trap_edges() {
                 assert!(
                     Command::new("clang")
                         .arg("-O1")
-                        .arg(dir.join("oracle.c"))
+                        .arg(&oracle)
                         .arg(dir.join("test.o"))
                         .arg("-o")
                         .arg(dir.join("test"))

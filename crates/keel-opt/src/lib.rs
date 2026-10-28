@@ -77,6 +77,7 @@ mod scratch;
 mod sign_extend_idiom;
 mod simplify_cfg;
 mod small_memory;
+mod stack_address;
 mod stack_cache;
 mod stack_forward;
 mod stack_promote;
@@ -146,7 +147,8 @@ pub trait Pass: Sync {
     /// Whether this function pass depends only on the function and target.
     /// The manager then skips a run on a function that its previous run left
     /// unchanged and that nothing has changed since: by determinism and the
-    /// `run` contract, that run would change nothing either.
+    /// `run` contract, that run would change nothing either. Cache entries belong
+    /// to a pass instance; names do not identify configured instances.
     fn deterministic(&self) -> bool {
         false
     }
@@ -773,18 +775,18 @@ pub fn run_pipeline_for_target(
 /// Per-function change tracking. A function's version is renewed whenever
 /// a pass changes it; a deterministic pass that left a function unchanged
 /// records that version and is skipped while it still holds.
-struct Versions {
+struct Versions<'a> {
     version: Vec<u64>,
     next: u64,
-    /// Per pass name, the version each function was left clean at, or
+    /// Per pass instance, the version each function was left clean at, or
     /// [`NOT_CLEAN`]; dense, since most passes visit every function.
-    clean: Vec<(&'static str, Vec<u64>)>,
+    clean: Vec<(&'a dyn Pass, Vec<u64>)>,
     changed: Vec<bool>,
 }
 
 const NOT_CLEAN: u64 = u64::MAX;
 
-impl Versions {
+impl<'a> Versions<'a> {
     fn new(functions: usize) -> Self {
         Self {
             version: (0..functions as u64).collect(),
@@ -794,12 +796,16 @@ impl Versions {
         }
     }
 
-    /// The `clean` slot for passes named `name`.
-    fn slot(&mut self, name: &'static str) -> usize {
-        match self.clean.iter().position(|&(n, _)| n == name) {
+    /// Names describe passes; configured instances have independent cache entries.
+    fn slot(&mut self, pass: &'a dyn Pass) -> usize {
+        match self
+            .clean
+            .iter()
+            .position(|&(cached, _)| std::ptr::eq(cached, pass))
+        {
             Some(slot) => slot,
             None => {
-                self.clean.push((name, Vec::new()));
+                self.clean.push((pass, Vec::new()));
                 self.clean.len() - 1
             }
         }
@@ -904,7 +910,7 @@ fn run_pipeline_with_context_raw(
             }
             continue;
         }
-        let slot = versions.slot(pass.name());
+        let slot = versions.slot(pass);
         for (index, func) in module.functions.iter_mut().enumerate() {
             if !pass.enabled_for(func) {
                 continue;
@@ -1065,7 +1071,7 @@ fn run_pipeline_with_context_and_report_raw(
             result?;
             continue;
         }
-        let slot = versions.slot(pass.name());
+        let slot = versions.slot(pass);
         for (index, func) in module.functions.iter_mut().enumerate() {
             if !pass.enabled_for(func) {
                 continue;

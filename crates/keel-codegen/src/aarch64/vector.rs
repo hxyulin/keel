@@ -179,29 +179,6 @@ pub(super) fn lower(func: &Function) -> Cow<'_, Function> {
         }
     })
 }
-// Signed widening preserves zero/all-ones lanes. Unsigned widening does not:
-// e.g. an i32 true mask becomes 0x00000000ffffffff in an i64 lane.
-// Do not infer facts through bitcasts or block parameters, even if their
-// incoming values happen to be comparisons. Resolve ordinary SSA aliases.
-fn canonical_mask(func: &Function, mut value: Value) -> bool {
-    // Integer vector lanes can widen at most three times (8 -> 16 -> 32 -> 64).
-    for _ in 0..4 {
-        value = func.resolve(value);
-        let ValueDef::Result(inst, _) = func.value_def(value) else {
-            return false;
-        };
-        match *func.inst_data(inst) {
-            InstData::VectorIcmp { .. } => return true,
-            InstData::Convert {
-                op: ConvertOp::SwidenLow,
-                arg,
-                ..
-            } => value = arg,
-            _ => return false,
-        }
-    }
-    false
-}
 
 impl FunctionCompiler<'_> {
     pub(super) fn vector_absolute_difference(
@@ -1011,7 +988,7 @@ impl FunctionCompiler<'_> {
     }
     pub(super) fn vector_select(&mut self, args: [Value; 3], result: Option<Value>) {
         let shape = self.ty(args[0]).vector().unwrap();
-        let canonical = canonical_mask(self.func, args[0]);
+        let canonical = crate::vector::canonical_mask(self.func, args[0]);
         let mask = self.use_freg(args[0], FS0);
         self.move_vector(FS0, mask);
         if !canonical {

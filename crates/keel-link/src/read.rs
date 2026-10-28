@@ -132,6 +132,9 @@ impl Object {
             if size < 8 || !size.is_multiple_of(8) || at + size > end {
                 return fail("invalid load command bounds");
             }
+            if matches!(cmd, 0x24 | 0x29) && size != 16 {
+                return fail("invalid load command size");
+            }
             match cmd {
                 0x19 => {
                     let count = r.u32(at + 64)? as usize;

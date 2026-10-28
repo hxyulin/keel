@@ -99,25 +99,7 @@ pub fn run(func: &mut Function) -> bool {
         .stack_slots()
         .map(|(s, d)| (s, d.size as usize))
         .collect();
-    loop {
-        let before = addresses.len();
-        for &inst in &offsets {
-            if let InstData::Binary {
-                op: BinaryOp::Ptradd,
-                args,
-            } = *func.inst_data(inst)
-                && let Some(&(slot, offset)) = addresses.get(&func.resolve(args[0]))
-                && let Some(n) = constant(func, args[1]).and_then(|n| usize::try_from(n).ok())
-                && let Some(end) = offset.checked_add(n).filter(|&n| n <= sizes[&slot])
-                && func.resolve(func.first_result(inst)) == func.first_result(inst)
-            {
-                addresses.insert(func.first_result(inst), (slot, end));
-            }
-        }
-        if addresses.len() == before {
-            break;
-        }
-    }
+    crate::stack_address::propagate(func, offsets.iter().copied(), &sizes, &mut addresses, None);
     // Debugger-visible homes may be edited at a breakpoint. Their reads
     // must continue to observe memory even when the program never escapes
     // the address itself.
@@ -585,14 +567,6 @@ fn integer_width(ty: Type) -> Option<usize> {
         Type::I64 => Some(8),
         _ => None,
     }
-}
-fn constant(f: &Function, v: Value) -> Option<i64> {
-    if let ValueDef::Result(i, _) = f.value_def(f.resolve(v))
-        && let InstData::Iconst { imm, .. } = f.inst_data(i)
-    {
-        return Some(*imm);
-    }
-    None
 }
 fn reconstruct(f: &mut Function, at: Inst, ty: Type, parts: &[(Value, usize)]) -> Value {
     let mut start = 0;

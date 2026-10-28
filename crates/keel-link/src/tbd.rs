@@ -18,15 +18,18 @@ fn scalar(v: &Value, key: &str) -> Result<String> {
         .map(str::to_owned)
         .ok_or_else(|| format!("TBD missing string `{key}`"))
 }
-fn list<'a>(v: &'a Value, key: &str) -> Result<impl Iterator<Item = &'a str>> {
-    let values = if v[key].is_null() {
-        &[][..]
+fn sequence<'a>(v: &'a Value, key: &str) -> Result<&'a [Value]> {
+    if v[key].is_null() {
+        Ok(&[])
     } else {
         v[key]
             .as_sequence()
-            .ok_or_else(|| format!("TBD `{key}` must be a list"))?
-            .as_slice()
-    };
+            .map(Vec::as_slice)
+            .ok_or_else(|| format!("TBD `{key}` must be a list"))
+    }
+}
+fn list<'a>(v: &'a Value, key: &str) -> Result<impl Iterator<Item = &'a str>> {
+    let values = sequence(v, key)?;
     // Validate the entire list before iteration: a matching target must not
     // hide a malformed later entry through short-circuiting.
     if values.iter().any(|value| value.as_str().is_none()) {
@@ -90,26 +93,22 @@ impl Dylib {
                 return fail(format!("TBD `{install}` has no macOS arm64 interface"));
             }
             for key in ["exports", "reexports"] {
-                if let Some(groups) = v[key].as_sequence() {
-                    for group in groups {
-                        if compatible(group)? {
-                            exports.extend(list(group, "symbols")?.map(str::to_owned));
-                            let weak = list(group, "weak-symbols")?;
-                            for name in weak {
-                                exports.insert(name.to_owned());
-                                weak_exports.insert(name.to_owned());
-                            }
-                            exports.extend(list(group, "thread-local-symbols")?.map(str::to_owned));
-                            // TLV imports bind descriptor addresses; Objective-C synthesis remains unsupported.
+                for group in sequence(v, key)? {
+                    if compatible(group)? {
+                        exports.extend(list(group, "symbols")?.map(str::to_owned));
+                        let weak = list(group, "weak-symbols")?;
+                        for name in weak {
+                            exports.insert(name.to_owned());
+                            weak_exports.insert(name.to_owned());
                         }
+                        exports.extend(list(group, "thread-local-symbols")?.map(str::to_owned));
+                        // TLV imports bind descriptor addresses; Objective-C synthesis remains unsupported.
                     }
                 }
             }
-            if let Some(groups) = v["reexported-libraries"].as_sequence() {
-                for group in groups {
-                    if compatible(group)? {
-                        todo.extend(list(group, "libraries")?.map(str::to_owned));
-                    }
+            for group in sequence(v, "reexported-libraries")? {
+                if compatible(group)? {
+                    todo.extend(list(group, "libraries")?.map(str::to_owned));
                 }
             }
         }
@@ -132,6 +131,24 @@ mod tests {
             compatible(&value).unwrap_err(),
             "TBD `targets` contains a non-string"
         );
+    }
+
+    #[test]
+    fn malformed_interface_containers_are_rejected() {
+        let root = std::env::temp_dir().join(format!("keel-tbd-containers-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("lib.tbd");
+        for key in ["exports", "reexports", "reexported-libraries"] {
+            for invalid in ["42", "{ symbols: [_puts] }"] {
+                std::fs::write(&path, format!("--- !tapi-tbd\ntbd-version: 4\ntargets: [arm64-macos]\ninstall-name: /usr/lib/libtest.dylib\n{key}: {invalid}\n")).unwrap();
+                let error = Dylib::from_tbd(&path, &root).unwrap_err();
+                assert!(
+                    error.contains(&format!("`{key}` must be a list")),
+                    "{key}: {error}"
+                );
+            }
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

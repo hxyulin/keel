@@ -22,9 +22,11 @@ use keel_codegen::aarch64::{REGISTERS, compile_with_pipeline};
 #[cfg(target_arch = "x86_64")]
 use keel_codegen::x86_64::{REGISTERS, compile_with_pipeline};
 use keel_codegen::{Pools, regalloc::AllocationTier};
+use std::cell::OnceCell;
 use std::os::unix::process::ExitStatusExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 /// SIGTRAP, raised by `brk`.
@@ -131,15 +133,117 @@ const CONFIGS: [(
     ),
 ];
 
+/// Keep configuration-independent work outside the selector/allocator matrix.
+struct PreparedProgram {
+    path: PathBuf,
+    source: String,
+    raw: OnceCell<Result<keel_ir::Module, String>>,
+    optimized: OnceCell<Result<keel_ir::Module, String>>,
+    drivers: OnceCell<Result<Vec<PathBuf>, String>>,
+    dir: PathBuf,
+}
+
+impl PreparedProgram {
+    fn load(path: &Path) -> Self {
+        static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
+        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        Self {
+            path: path.to_owned(),
+            source: std::fs::read_to_string(path).unwrap(),
+            raw: OnceCell::new(),
+            optimized: OnceCell::new(),
+            drivers: OnceCell::new(),
+            // Separate preparations can run concurrently for the same fixture.
+            dir: Path::new(env!("CARGO_TARGET_TMPDIR"))
+                .join("programs")
+                .join(format!("{}-{id}", std::process::id())),
+        }
+    }
+
+    fn module(&self, optimize: bool) -> Result<&keel_ir::Module, String> {
+        let raw = self.raw.get_or_init(|| {
+            let module = keel_ir::parse(&self.source).map_err(|e| format!("parse error: {e}"))?;
+            keel_ir::verify_module(&module).map_err(|e| format!("verifier: {e:?}"))?;
+            Ok(module)
+        });
+        let raw = raw.as_ref().map_err(Clone::clone)?;
+        if !optimize {
+            return Ok(raw);
+        }
+        self.optimized
+            .get_or_init(|| {
+                let mut module = raw.clone();
+                if let Some(names) = self
+                    .source
+                    .lines()
+                    .find_map(|line| line.strip_prefix("; opt-passes:"))
+                {
+                    let names: Vec<_> = names.split(',').map(str::trim).collect();
+                    keel_opt::run_passes(&mut module, &names).map_err(|e| e.to_string())?;
+                } else {
+                    keel_opt::optimize(&mut module).map_err(|e| e.to_string())?;
+                }
+                Ok(module)
+            })
+            .as_ref()
+            .map_err(Clone::clone)
+    }
+
+    fn clang(&self) -> Command {
+        if self.path.with_extension("cpp").exists() {
+            let mut clang = Command::new("clang++");
+            clang.arg("-O2");
+            clang
+        } else {
+            Command::new("clang")
+        }
+    }
+
+    fn driver_objects(&self) -> Result<&[PathBuf], String> {
+        self.drivers
+            .get_or_init(|| {
+                let mut objects = Vec::new();
+                for extension in ["cpp", "c"] {
+                    let source = self.path.with_extension(extension);
+                    if !source.exists() {
+                        continue;
+                    }
+                    let object = self.dir.join(format!("driver-{extension}.o"));
+                    let out = self
+                        .clang()
+                        .arg("-c")
+                        .arg(&source)
+                        .arg("-o")
+                        .arg(&object)
+                        .output()
+                        .map_err(|e| format!("running clang: {e}"))?;
+                    if !out.status.success() {
+                        return Err(format!(
+                            "compiling {} failed:\n{}",
+                            source.display(),
+                            String::from_utf8_lossy(&out.stderr)
+                        ));
+                    }
+                    objects.push(object);
+                }
+                Ok(objects)
+            })
+            .as_ref()
+            .map(Vec::as_slice)
+            .map_err(Clone::clone)
+    }
+}
+
 fn run_program(
-    path: &Path,
+    program: &PreparedProgram,
     pools: &Pools,
     optimize: bool,
     suffix: &str,
     selection: keel_codegen::SelectionOptions,
     allocation: &dyn keel_codegen::regalloc::RegisterAllocator,
 ) -> Result<(), String> {
-    let src = std::fs::read_to_string(path).unwrap();
+    let path = &program.path;
+    let src = &program.source;
     let expect = src
         .lines()
         .find_map(|l| l.strip_prefix("; expect: "))
@@ -156,19 +260,7 @@ fn run_program(
     {
         return Ok(());
     }
-    let mut module = keel_ir::parse(&src).map_err(|e| format!("parse error: {e}"))?;
-    keel_ir::verify_module(&module).map_err(|e| format!("verifier: {e:?}"))?;
-    if optimize {
-        if let Some(names) = src
-            .lines()
-            .find_map(|line| line.strip_prefix("; opt-passes:"))
-        {
-            let names: Vec<_> = names.split(',').map(str::trim).collect();
-            keel_opt::run_passes(&mut module, &names).map_err(|e| e.to_string())?;
-        } else {
-            keel_opt::optimize(&mut module).map_err(|e| e.to_string())?;
-        }
-    }
+    let module = program.module(optimize)?;
     let selector = keel_codegen::OptionsSelector(selection);
     let features = std::env::var("KEEL_TEST_X86_FEATURES")
         .ok()
@@ -187,7 +279,7 @@ fn run_program(
         features,
     };
     let asm = compile_with_pipeline(
-        &module,
+        module,
         pools,
         &keel_codegen::CodegenPipeline {
             selector: &selector,
@@ -197,8 +289,8 @@ fn run_program(
     .map_err(|e| e.to_string())?;
 
     let stem = format!("{}{suffix}", path.file_stem().unwrap().to_string_lossy());
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("programs");
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = &program.dir;
+    std::fs::create_dir_all(dir).unwrap();
     let asm_path = dir.join(format!("{stem}.s"));
     let exe_path = dir.join(&stem);
     std::fs::write(&asm_path, &asm).unwrap();
@@ -215,19 +307,9 @@ fn run_program(
         asm_path.clone()
     };
 
-    let cpp_driver = path.with_extension("cpp");
-    let mut clang = if cpp_driver.exists() {
-        let mut clang = Command::new("clang++");
-        clang.arg("-O2").arg(&cpp_driver);
-        clang
-    } else {
-        Command::new("clang")
-    };
+    let mut clang = program.clang();
+    clang.args(program.driver_objects()?);
     clang.arg("-o").arg(&exe_path).arg(&link_input).arg("-lm");
-    let driver = path.with_extension("c");
-    if driver.exists() {
-        clang.arg(&driver);
-    }
     let out = clang.output().map_err(|e| format!("running clang: {e}"))?;
     if !out.status.success() {
         return Err(format!(
@@ -294,8 +376,9 @@ macro_rules! focused_programs {
                 for program in [$($program),+] {
                     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
                         .join(format!("tests/programs/{program}.keel"));
+                    let program = PreparedProgram::load(&path);
                     for (pools, optimize, suffix, selection, allocation) in CONFIGS {
-                        run_program(&path, &pools, optimize, suffix, selection, &allocation)
+                        run_program(&program, &pools, optimize, suffix, selection, &allocation)
                             .unwrap();
                     }
                 }
@@ -312,7 +395,9 @@ focused_programs! {
     option_switch_default_from_callee_preserves_none_and_some: ["option_switch_default"] {}
     compact_frame_storage: ["compact_frame", "dyn_alloca", "unwind", "exceptions", "setjmp"] {
         #[cfg(feature = "experimental-regalloc")]
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/compact_frame.keel");
+        let program = PreparedProgram::load(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/compact_frame.keel"),
+        );
         #[cfg(feature = "experimental-regalloc")]
         for allocation in [
             AllocationTier::Local,
@@ -320,7 +405,7 @@ focused_programs! {
             AllocationTier::Weighted,
         ] {
             run_program(
-                &path,
+                &program,
                 &TINY,
                 false,
                 &format!("-compact-{allocation:?}"),
@@ -339,7 +424,7 @@ focused_programs! {
                 null_pointers: false,
             };
             run_program(
-                &path,
+                &program,
                 &TINY,
                 false,
                 &format!("-compact-remat-{base:?}"),
@@ -369,6 +454,7 @@ fn optimized_regressions_spills() {
     ] {
         let path =
             Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/programs/{program}.keel"));
+        let program = PreparedProgram::load(&path);
         for (selection, selection_name) in [
             (keel_codegen::SelectionOptions::default(), "baseline"),
             (keel_codegen::SelectionOptions::ALL, "all"),
@@ -378,7 +464,7 @@ fn optimized_regressions_spills() {
                 (AllocationTier::Full, "full"),
             ] {
                 let suffix = format!("-opt-regression-tiny-{selection_name}-{allocation_name}");
-                run_program(&path, &TINY, true, &suffix, selection, &allocation).unwrap();
+                run_program(&program, &TINY, true, &suffix, selection, &allocation).unwrap();
             }
         }
     }
@@ -400,24 +486,18 @@ fn programs() {
     paths.sort();
     assert!(!paths.is_empty());
 
-    let failures: Vec<String> = paths
-        .iter()
-        .flat_map(|p| {
-            CONFIGS
-                .iter()
-                .map(move |(pools, optimize, suffix, selection, allocation)| {
-                    (p, pools, *optimize, suffix, *selection, *allocation)
-                })
-        })
-        .filter_map(|(p, pools, optimize, suffix, selection, allocation)| {
-            run_program(p, pools, optimize, suffix, selection, &allocation)
-                .err()
-                .map(|e| {
-                    let name = p.file_name().unwrap().to_string_lossy();
-                    format!("{name} (config{suffix}): {e}")
-                })
-        })
-        .collect();
+    let mut failures = Vec::new();
+    for path in &paths {
+        let program = PreparedProgram::load(path);
+        for (pools, optimize, suffix, selection, allocation) in CONFIGS {
+            if let Err(error) =
+                run_program(&program, &pools, optimize, suffix, selection, &allocation)
+            {
+                let name = path.file_name().unwrap().to_string_lossy();
+                failures.push(format!("{name} (config{suffix}): {error}"));
+            }
+        }
+    }
     assert!(
         failures.is_empty(),
         "{} program(s) failed:\n\n{}",
@@ -800,12 +880,13 @@ fn changing_allocation_locations() {
         "exceptions",
         "inline_asm",
     ] {
+        let program = PreparedProgram::load(&dir.join(format!("{name}.keel")));
         for (selection, suffix) in [
             (keel_codegen::SelectionOptions::default(), "-boundary"),
             (keel_codegen::SelectionOptions::ALL, "-boundary-selected"),
         ] {
             run_program(
-                &dir.join(format!("{name}.keel")),
+                &program,
                 &REGISTERS,
                 false,
                 suffix,
@@ -816,7 +897,7 @@ fn changing_allocation_locations() {
         }
     }
     run_program(
-        &dir.join("edge_locations.keel"),
+        &PreparedProgram::load(&dir.join("edge_locations.keel")),
         &REGISTERS,
         false,
         "-edge-locations",
@@ -875,6 +956,7 @@ fn null_rematerialization_programs() {
         for name in ["null_rematerialization", "null_invoke"] {
             let path =
                 Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/programs/{name}.keel"));
+            let program = PreparedProgram::load(&path);
             for pools in [
                 &REGISTERS,
                 &Pools {
@@ -885,7 +967,7 @@ fn null_rematerialization_programs() {
                 },
             ] {
                 run_program(
-                    &path,
+                    &program,
                     pools,
                     false,
                     &format!("-null-{base:?}"),
@@ -1006,7 +1088,7 @@ fn rematerialization_all_spilled() {
     };
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/rematerialization.keel");
     run_program(
-        &path,
+        &PreparedProgram::load(&path),
         &pools,
         false,
         "-all-spilled-remat",
@@ -1029,6 +1111,7 @@ fn experimental_allocator_programs(
     paths.sort();
     let mut failures = Vec::new();
     for path in &paths {
+        let program = PreparedProgram::load(path);
         for (pools, optimize, suffix, selection) in [
             (
                 REGISTERS,
@@ -1056,7 +1139,7 @@ fn experimental_allocator_programs(
             ),
         ] {
             let suffix = format!("-{name}{suffix}");
-            if let Err(error) = run_program(path, &pools, optimize, &suffix, selection, tier) {
+            if let Err(error) = run_program(&program, &pools, optimize, &suffix, selection, tier) {
                 eprintln!("{} ({suffix}): {error}", path.display());
                 failures.push(format!("{} ({suffix}): {error}", path.display()));
             }

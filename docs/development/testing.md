@@ -103,6 +103,13 @@ Existing ignored tests stay ignored. Guest qualification and external corpus
 campaigns remain separate.
 
 Test preparation reuses verified parsed modules and lazily optimized modules.
+The native `run` corpus prepares each fixture once per test: its parsed IR,
+optimized IR (including fixture-specific `opt-passes`) and C or C++ driver
+objects are shared across configurations. Every configuration still compiles,
+links and executes its own backend output. Preparations use separate temporary
+directories so tests selecting the same fixture can run concurrently.
+The `arm_division` and `adjacent_diff` matrices also compile their C oracle once
+and reuse its object across backend configurations.
 String port I/O checks literal bytes once per distinct instruction and object
 parity for every configuration. Boundary smoke tests do not write exhaustive
 export files. Add a target to the core list only for a shared backend contract

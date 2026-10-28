@@ -3,10 +3,9 @@
 //! No uninitialized SSA values are invented: a forward must analysis
 //! proves every load initialized on every path, including zero-trip loops.
 //! All frame observers and exception/nonlocal continuations are excluded.
+use crate::stack_address::constant;
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
-use keel_ir::{
-    BinaryOp, EntityRef, Function, InsertPoint, InstData, StackSlot, Type, Value, ValueDef,
-};
+use keel_ir::{BinaryOp, EntityRef, Function, InsertPoint, InstData, StackSlot, Type, Value};
 
 type Field = (StackSlot, usize, Type);
 
@@ -93,27 +92,13 @@ fn run_impl(f: &mut Function, large: bool) -> bool {
             }
         }
     }
-    let mut address_scans = 0;
-    loop {
-        address_scans += 1;
-        let before = addresses.len();
-        for &i in &insts {
-            if let InstData::Binary {
-                op: BinaryOp::Ptradd,
-                args,
-            } = *f.inst_data(i)
-                && let Some(&(slot, offset)) = addresses.get(&f.resolve(args[0]))
-                && let Some(n) = constant(f, args[1]).and_then(|n| usize::try_from(n).ok())
-                && let Some(end) = offset.checked_add(n).filter(|&n| n <= sizes[&slot])
-                && f.resolve(f.first_result(i)) == f.first_result(i)
-            {
-                addresses.insert(f.first_result(i), (slot, end));
-            }
-        }
-        if before == addresses.len() || (large && address_scans == 8) {
-            break;
-        }
-    }
+    crate::stack_address::propagate(
+        f,
+        insts.iter().copied(),
+        &sizes,
+        &mut addresses,
+        large.then_some(8),
+    );
     let mut escaped: FxHashSet<_> = f.debug_vars.iter().map(|v| v.slot).collect();
     // The ABI instruction writes this home without a StackAddr SSA operand.
     escaped.extend(f.layout_insts().filter_map(|(_, i)| match f.inst_data(i) {
@@ -408,16 +393,6 @@ fn run_impl(f: &mut Function, large: bool) -> bool {
     }
     changed
 }
-fn constant(f: &Function, v: Value) -> Option<i64> {
-    if let ValueDef::Result(i, _) = f.value_def(f.resolve(v))
-        && let InstData::Iconst { imm, .. } = f.inst_data(i)
-    {
-        Some(*imm)
-    } else {
-        None
-    }
-}
-
 fn width(ty: Type) -> usize {
     ty.bytes().unwrap_or(8) as usize
 }

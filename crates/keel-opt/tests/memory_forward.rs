@@ -64,6 +64,54 @@ block0(v0: ptr):
 }
 
 #[test]
+fn aliased_load_results_are_neither_memory_facts_nor_replacement_targets() {
+    for aliased_load in [0, 1] {
+        let mut module = keel_ir::parse(
+            "func @f(ptr, i64) -> i64 {
+block0(v0: ptr, v1: i64):
+    v2 = load.i64 v0
+    v3 = load.i64 v0
+    return v3
+}",
+        )
+        .unwrap();
+        let f = &mut module.functions[0];
+        let load = f
+            .layout_insts()
+            .filter_map(|(_, i)| matches!(f.inst_data(i), InstData::Load { .. }).then_some(i))
+            .nth(aliased_load)
+            .unwrap();
+        let unrelated = f.block_params(f.entry_block().unwrap())[1];
+        // The read remains observable, but its redirected result no longer
+        // describes memory and cannot be redirected again by this pass.
+        f.replace_all_uses(f.first_result(load), unrelated);
+        keel_ir::verify_module(&module).unwrap();
+        let before = module.to_string();
+        keel_opt::run_passes(&mut module, &["memory-forward"]).unwrap();
+        assert_eq!(loads(&module), 2, "aliased load {aliased_load}");
+        assert_eq!(module.to_string(), before, "aliased load {aliased_load}");
+    }
+}
+
+#[test]
+fn debugger_variable_home_reads_are_not_forwarded() {
+    let source = "dtype dt0 = base \"long\" signed 8
+func @f(i64) -> i64 {
+    ss0 = stack_slot 8, align 8
+    dvar \"x\" dt0 ss0
+block0(v0: i64):
+    v1 = stack_addr ss0
+    store v0, v1
+    v2 = load.i64 v1
+    v3 = load.i64 v1
+    return v3
+}";
+    let module = optimize(source);
+    assert_eq!(loads(&module), 2);
+    assert!(module.to_string().contains("return v3"));
+}
+
+#[test]
 fn unknown_aliases_and_partial_writes_invalidate_facts() {
     for store in ["store v2, v1", "store v2, v0", "store v3, v1"] {
         let source = format!(

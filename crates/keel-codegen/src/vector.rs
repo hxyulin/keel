@@ -1,9 +1,34 @@
-//! Target-independent vector lane legalization, before allocation.
+//! Target-independent vector lane legalization and canonical-mask proofs.
 use keel_ir::{
     BinaryOp, ConvertOp, Function, InsertPoint, Inst, InstData, IntCC, MemoryFlags, Type, Value,
-    VectorBinaryOp as V, VectorType,
+    ValueDef, VectorBinaryOp as V, VectorType,
 };
 use std::borrow::Cow;
+
+/// Whether each lane is provably zero or all ones, resolving SSA aliases.
+/// Signed widening preserves this property; unsigned widening does not:
+/// e.g. an i32 true mask becomes 0x00000000ffffffff in an i64 lane.
+/// Bitcasts and block parameters remain unproven, even when their inputs
+/// happen to be comparisons.
+pub(crate) fn canonical_mask(func: &Function, mut value: Value) -> bool {
+    // Integer vector lanes can widen at most three times (8 -> 16 -> 32 -> 64).
+    for _ in 0..4 {
+        value = func.resolve(value);
+        let ValueDef::Result(inst, _) = func.value_def(value) else {
+            return false;
+        };
+        match *func.inst_data(inst) {
+            InstData::VectorIcmp { .. } => return true,
+            InstData::Convert {
+                op: ConvertOp::SwidenLow,
+                arg,
+                ..
+            } => value = arg,
+            _ => return false,
+        }
+    }
+    false
+}
 
 fn needs_lowering(
     func: &Function,
