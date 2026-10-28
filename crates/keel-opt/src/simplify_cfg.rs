@@ -204,11 +204,8 @@ pub(crate) fn merge_small_blocks(func: &mut Function, max_insts: usize) -> bool 
     let mut blocks: Scratch<Block> = Scratch::new();
     blocks.extend(func.blocks());
     for &pred in &blocks {
-        loop {
-            // A block consumed from later in the snapshot has no instructions.
-            let Some(&term) = func.block_insts(pred).last() else {
-                break;
-            };
+        // A block consumed from later in the snapshot has no instructions.
+        while let Some(&term) = func.block_insts(pred).last() {
             let dest = match func.inst_data(term) {
                 InstData::Jump { dest }
                     if dest.block != pred

@@ -35,7 +35,7 @@ block3(v7: i64, v8: i64):
             }
         }
     }
-    let mut second = optimized.clone();
+    let mut second = optimized;
     assert!(
         !keel_opt::find_pass("simplify-cfg")
             .unwrap()

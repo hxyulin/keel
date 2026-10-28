@@ -43,7 +43,8 @@ pub fn optimize_wasm32_basic(module: &mut Module) -> Result<(), OptError> {
 }
 
 // Private immutable allowlist; additions require a Wasm semantics audit.
-const BASIC: &[(&str, fn(&mut keel_ir::Function) -> bool)] = &[
+type FunctionPass = fn(&mut keel_ir::Function) -> bool;
+const BASIC: &[(&str, FunctionPass)] = &[
     ("const-fold", crate::const_fold::run),
     ("simplify-cfg", crate::simplify_cfg::run),
     ("phi-simplify", crate::phi_simplify::run),

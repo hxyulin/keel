@@ -164,7 +164,7 @@ impl keel_codegen::regalloc::RegisterAllocator for SharedHome {
 }
 #[allow(dead_code)]
 #[path = "common/vector.rs"]
-mod common;
+pub mod common;
 
 #[test]
 fn independent_oracle_and_packet() {
@@ -173,9 +173,7 @@ fn independent_oracle_and_packet() {
     use object::{Object, ObjectSection};
     use std::{fs, path::PathBuf, process::Command};
     let export = std::env::var_os("KEEL_X87_NUMERICAL_EXPORT_DIR").map(PathBuf::from);
-    let d = export
-        .clone()
-        .unwrap_or_else(|| common::temp("x87-numerical"));
+    let d = export.unwrap_or_else(|| common::temp("x87-numerical"));
     fs::create_dir_all(&d).unwrap();
     for (name, data) in [
         ("test.c", include_str!("x86_x87_numerical/test.c")),

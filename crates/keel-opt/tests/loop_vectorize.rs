@@ -403,7 +403,7 @@ fn analyzes_later_loops_after_rejections_and_cfg_changes() {
     let m = optimize(&source, VectorTarget::Portable);
     assert_eq!(packed(&m), 2);
     let text = m.to_string();
-    let mut twice = m.clone();
+    let mut twice = m;
     keel_opt::run_passes(&mut twice, &["loop-vectorize"]).unwrap();
     assert_eq!(text, twice.to_string());
 }
@@ -676,7 +676,8 @@ fn mixed_width_load_reductions_are_full_native_only_exact_footprint_and_idempote
                         assert!(!ty.is_vector());
                     }
                 }
-                for target in [VectorTarget::Portable] {
+                {
+                    let target = VectorTarget::Portable;
                     assert_eq!(packed(&reduce_sum(&source, target)), 0);
                 }
                 let mut fast = keel_ir::parse(&source).unwrap();

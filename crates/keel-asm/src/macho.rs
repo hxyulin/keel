@@ -320,14 +320,12 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
             let index = if local.is_some() {
                 0
             } else {
-                source(target)
-                    .and_then(|i| indices[i])
-                    .ok_or_else(|| {
-                        Error::new(
-                            0,
-                            format!("relocation references missing symbol `{}`", r.symbol),
-                        )
-                    })?
+                source(target).and_then(|i| indices[i]).ok_or_else(|| {
+                    Error::new(
+                        0,
+                        format!("relocation references missing symbol `{}`", r.symbol),
+                    )
+                })?
             };
             if r.subtract_symbol.is_some() {
                 let index = source(subtract)

@@ -70,10 +70,14 @@ impl Output {
             Self::Text(out) => {
                 for item in program.items {
                     match item {
-                        keel_asm_ir::Item::Label(label) => { write_quoted(out, &label); out.push_str(":\n"); }
+                        keel_asm_ir::Item::Label(label) => {
+                            write_quoted(out, &label);
+                            out.push_str(":\n");
+                        }
                         keel_asm_ir::Item::X86Instruction(i) => {
                             out.push('\t');
-                            keel_asm_ir::x86::write_instruction(out, i.opcode, &i.operands, i.lock).unwrap();
+                            keel_asm_ir::x86::write_instruction(out, i.opcode, &i.operands, i.lock)
+                                .unwrap();
                             out.push('\n');
                         }
                         _ => unreachable!("resource checker excludes non-instruction region items"),

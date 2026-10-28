@@ -71,6 +71,7 @@ fn idoms(pool: &mut Pool) -> &mut Vec<Vec<Option<Block>>> {
 /// Edge lists are packed into two arrays (no allocation per block): block
 /// `b`'s successors are `succs[succ_range[b]]` and its predecessors
 /// `preds[pred_start[b]..pred_start[b + 1]]`.
+#[derive(Debug)]
 pub struct ControlFlowGraph {
     succ_range: Vec<(u32, u32)>,
     succs: Vec<Block>,
@@ -203,6 +204,7 @@ fn index_u32(index: usize) -> u32 {
     u32::try_from(index).expect("CFG edge count overflow")
 }
 
+#[derive(Debug)]
 pub struct DominatorTree {
     /// Reachable blocks in reverse postorder; the entry block comes first.
     rpo: Vec<Block>,
@@ -345,6 +347,7 @@ impl Drop for DominatorTree {
 }
 
 /// Dominator-tree children packed into one array; index by parent block.
+#[derive(Debug)]
 pub struct DominatorChildren {
     start: Vec<u32>,
     children: Vec<Block>,

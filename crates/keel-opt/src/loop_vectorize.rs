@@ -276,7 +276,7 @@ impl Analyze<'_> {
                                     ..
                                 })
                             ))
-                        && self.index(index)? == None
+                        && self.index(index)?.is_none()
                     {
                         self.allowed.insert(i);
                         return Some(Some(self.f.resolve(offset)));
@@ -509,16 +509,26 @@ impl Analyze<'_> {
         Some(())
     }
 }
+struct AnalysisOptions {
+    affine: bool,
+    casts: bool,
+    multi: bool,
+    conditional: bool,
+}
+
 fn analyze(
     f: &Function,
     header: Block,
     target: VectorTarget,
     analysis: &mut Option<std::rc::Rc<crate::analysis::Analysis>>,
-    affine: bool,
-    casts: bool,
-    multi: bool,
-    conditional: bool,
+    options: AnalysisOptions,
 ) -> Option<Candidate> {
+    let AnalysisOptions {
+        affine,
+        casts,
+        multi,
+        conditional,
+    } = options;
     let params = f.block_params(header);
     if !(1..=if multi { 5 } else { 2 }).contains(&params.len())
         || params.iter().any(|&v| f.resolve(v) != v)
@@ -1060,21 +1070,21 @@ fn reduce_body(
             },
         );
         invariants.insert(v, splat);
-        if narrow_selects && f.value_type(scalar) == Type::I64 {
-            if let Some(imm) = constant(f, scalar) {
-                if i32::try_from(imm).is_ok() || u32::try_from(imm).is_ok() {
-                    let bits = iconst(f, setup, Type::I32, imm as i32 as i64);
-                    let narrow = emit(
-                        f,
-                        setup,
-                        D::VectorSplat {
-                            ty: Type::Vector(VectorType::I32x4),
-                            arg: bits,
-                        },
-                    );
-                    narrow_constants.insert(splat, (imm, narrow));
-                }
-            }
+        if narrow_selects
+            && f.value_type(scalar) == Type::I64
+            && let Some(imm) = constant(f, scalar)
+            && (i32::try_from(imm).is_ok() || u32::try_from(imm).is_ok())
+        {
+            let bits = iconst(f, setup, Type::I32, imm as i32 as i64);
+            let narrow = emit(
+                f,
+                setup,
+                D::VectorSplat {
+                    ty: Type::Vector(VectorType::I32x4),
+                    arg: bits,
+                },
+            );
+            narrow_constants.insert(splat, (imm, narrow));
         }
     }
     let mut cast_masks = FxHashMap::default();
@@ -1710,10 +1720,12 @@ fn run_candidates_with_context(
             header,
             target,
             &mut analysis,
-            false,
-            false,
-            false,
-            reductions && !fast,
+            AnalysisOptions {
+                affine: false,
+                casts: false,
+                multi: false,
+                conditional: reductions && !fast,
+            },
         ) {
             if fast && (c.addresses.len() != 1 || c.vectors.len() > 8) {
                 continue;
@@ -1744,7 +1756,18 @@ fn run_extended(f: &mut Function, target: VectorTarget, casts: bool, multi: bool
         if !(2..=if multi { 5 } else { 2 }).contains(&f.block_params(header).len()) {
             continue;
         }
-        if let Some(c) = analyze(f, header, target, &mut analysis, true, casts, multi, true) {
+        if let Some(c) = analyze(
+            f,
+            header,
+            target,
+            &mut analysis,
+            AnalysisOptions {
+                affine: true,
+                casts,
+                multi,
+                conditional: true,
+            },
+        ) {
             transform(f, c, target);
             analysis = None;
             changed = true;

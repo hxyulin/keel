@@ -85,7 +85,9 @@ impl ValueSet {
 
     #[cfg(test)]
     pub(crate) fn iter(&self) -> impl Iterator<Item = Value> + '_ {
-        (self.members.iter().enumerate()).filter_map(|(i, &m)| m.then(|| Value::new(i)))
+        (self.members.iter().enumerate())
+            .filter(|&(_, &m)| m)
+            .map(|(i, _)| Value::new(i))
     }
 }
 
@@ -395,10 +397,8 @@ block0(v0: i64):
         );
         let constants: Vec<_> = func
             .layout_insts()
-            .filter_map(|(_, inst)| {
-                matches!(func.inst_data(inst), InstData::Iconst { .. })
-                    .then(|| func.inst_results(inst)[0])
-            })
+            .filter(|&(_, inst)| matches!(func.inst_data(inst), InstData::Iconst { .. }))
+            .map(|(_, inst)| func.inst_results(inst)[0])
             .collect();
         for alias in [false, true] {
             if alias {
@@ -550,10 +550,8 @@ block2:
         );
         let compares: Vec<_> = func
             .layout_insts()
-            .filter_map(|(_, inst)| {
-                matches!(func.inst_data(inst), InstData::Icmp { .. })
-                    .then(|| func.inst_results(inst)[0])
-            })
+            .filter(|&(_, inst)| matches!(func.inst_data(inst), InstData::Icmp { .. }))
+            .map(|(_, inst)| func.inst_results(inst)[0])
             .collect();
         assert_eq!(fused_compares(&func), HashSet::from_iter([compares[1]]));
         // The branch condition and its edge argument now resolve to the same

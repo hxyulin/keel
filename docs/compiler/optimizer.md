@@ -694,7 +694,10 @@ share a canonical root and checked signed byte offset; unknown derivations
 remain opaque SSA addresses. Aliases are resolved before analysis. A retained
 load with an aliased result is neither a forwarding fact nor a rewrite target.
 Functions with debugger-visible variable homes are excluded so debugger writes
-remain visible to subsequent reads.
+remain visible to subsequent reads. Mandatory C asm legalization separately
+resolves strict `i`/`n` operands to compile-time constants after required inlining,
+while retaining ordinary loads, their SSA results and debugger homes. It does
+not rewrite runtime register or memory asm operands.
 
 Stores invalidate overlapping byte footprints even when their types differ.
 Adjacent ranges on one unrestricted root can retain facts. Footprint comparison

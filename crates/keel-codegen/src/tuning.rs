@@ -53,6 +53,7 @@ struct Alternative {
     parallel_ratio: f64,
 }
 
+#[derive(Debug)]
 pub struct TunedSelector {
     pub options: SelectionOptions,
     pub cpu: TuningCpu,

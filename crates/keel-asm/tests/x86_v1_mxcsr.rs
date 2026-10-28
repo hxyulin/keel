@@ -5,7 +5,8 @@ use keel_asm_ir::{
 };
 use object::{Object, ObjectSection, ObjectSymbol};
 use std::process::Command;
-fn sections(bytes: &[u8]) -> (Vec<u8>, Vec<(u64, String, i64, String)>) {
+type RelocationRecord = (u64, String, i64, String);
+fn sections(bytes: &[u8]) -> (Vec<u8>, Vec<RelocationRecord>) {
     let o = object::File::parse(bytes).unwrap();
     let t = o.section_by_name(".text").unwrap();
     (

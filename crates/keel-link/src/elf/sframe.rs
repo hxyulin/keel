@@ -229,7 +229,7 @@ impl Table {
         if blocks.first().is_some_and(|&(off, _)| off != 0) {
             return Err(".sframe: gap before first FRE block".into());
         }
-        let fre = &data[fre_start as usize..];
+        let fre = &data[fre_start..];
         let mut total_rows = 0u64;
         // The budget used the header's row total. Bound all block declarations
         // by that total before reserving any owned rows; checking only

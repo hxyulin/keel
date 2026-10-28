@@ -404,7 +404,7 @@ impl Translation<'_> {
         if memory {
             if op != 45
                 || fty != l.global_get_value_type(callee)
-                || (ret.clone(), params.clone()) != self.signatures[&callee]
+                || (ret, params) != self.signatures[&callee]
                 || l.get_num_arg_operands(inst) != 4
             {
                 return Err("unsupported memory intrinsic call".into());

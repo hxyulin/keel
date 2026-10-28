@@ -196,10 +196,10 @@ pub fn analyze(plan: &Plan) -> Result<StructuralReport, PlanError> {
                             "raw observation/swap requires the active ownership token",
                         ));
                     }
-                    if let Operation::Swap { capture, .. } = op {
-                        if capture >= plan.captures.len() {
-                            return Err(fail("swap refers to an uncaptured input"));
-                        }
+                    if let Operation::Swap { capture, .. } = op
+                        && capture >= plan.captures.len()
+                    {
+                        return Err(fail("swap refers to an uncaptured input"));
                     }
                     if observation >= plan.observations {
                         return Err(fail("observation index out of range"));

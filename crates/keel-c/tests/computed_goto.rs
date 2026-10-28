@@ -57,8 +57,11 @@ fn immutable_dispatch_fuses_before_optimization_with_last_writes_and_zeros() {
                     }
                 }
                 let labels: Vec<_> = bytes
-                    .chunks_exact(8)
-                    .map(|b| u64::from_le_bytes(b.try_into().unwrap()))
+                    .as_chunks::<8>()
+                    .0
+                    .iter()
+                    .copied()
+                    .map(u64::from_le_bytes)
                     .collect();
                 assert_eq!(labels, [1, 3, 0, 1, 2, 3]);
                 if optimize {

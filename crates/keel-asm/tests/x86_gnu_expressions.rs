@@ -3,7 +3,9 @@ use keel_asm_ir::Program;
 use object::{Object, ObjectSection, ObjectSymbol, RelocationTarget};
 use std::process::Command;
 
-fn snapshot(bytes: &[u8]) -> Vec<(String, u64, u64, Vec<u8>, Vec<(u64, u32, String, i64)>)> {
+type RelocationRecord = (u64, u32, String, i64);
+type SectionSnapshot = (String, u64, u64, Vec<u8>, Vec<RelocationRecord>);
+fn snapshot(bytes: &[u8]) -> Vec<SectionSnapshot> {
     let file = object::File::parse(bytes).unwrap();
     let mut result = Vec::new();
     for section in file.sections() {

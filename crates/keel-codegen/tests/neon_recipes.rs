@@ -6,8 +6,7 @@ use keel_codegen::{
 use keel_ir::{Type, VectorType};
 use std::{fs, process::Command};
 #[path = "common/vector.rs"]
-#[allow(dead_code)]
-mod common;
+pub mod common;
 const SPILL: Pools = Pools {
     caller_saved: &[9, 10],
     callee_saved: &[19],
@@ -346,7 +345,7 @@ fn fixture() -> (String, String, usize, usize) {
                     } else if shll {
                         asm += &format!(",#{}", width * 8);
                     } else if bb > 0 {
-                        let r = if acc { 2 } else { 2 };
+                        let r = 2;
                         asm += &if source.is_vector() {
                             format!(",v{r}.{}", arr(source))
                         } else {

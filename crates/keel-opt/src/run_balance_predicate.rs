@@ -63,7 +63,7 @@ fn convert(f: &mut Function, head: Block, cfg: &mut Option<ControlFlowGraph>) ->
     {
         return false;
     }
-    if f.block_params(positive).len() != 0 || f.block_params(negative).len() != 0 {
+    if !f.block_params(positive).is_empty() || !f.block_params(negative).is_empty() {
         return false;
     }
     // Reject ordinary branches using local instruction checks before paying

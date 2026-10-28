@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 // The two constants are also used for controlled profiling ablations.
 const CACHE_HEADERS: bool = true;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct PreprocessOptions {
     /// Searched after the including file's directory, in order.
     pub include_dirs: Vec<PathBuf>,
@@ -668,7 +668,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 out.push(')');
             }
             out.push(' ');
-            out.push_str(&spelling(&m.body));
+            out.push_str(&spelling(m.body));
             out.push('\n');
         }
         out
@@ -717,7 +717,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         let Some(name) = ts.first() else {
             return Err(self.error("expected macro name"));
         };
-        if !ident(&name.text) {
+        if !ident(name.text) {
             return Err(name.error("expected macro name"));
         }
         let mut i = 1;
@@ -730,9 +730,9 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 let p = &ts[i];
                 if p.text == "..." {
                     variadic = true;
-                    names.push("__VA_ARGS__".into());
+                    names.push("__VA_ARGS__");
                     i += 1;
-                } else if ident(&p.text) && !names.contains(&p.text) {
+                } else if ident(p.text) && !names.contains(&p.text) {
                     names.push(p.text);
                     i += 1;
                     if ts.get(i).is_some_and(|t| t.text == "...") {
@@ -790,16 +790,16 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
             if t.text.is_empty() {
                 continue;
             }
-            if prev != Some((&t.file, t.line)) {
+            if prev != Some((t.file, t.line)) {
                 if prev.is_some() {
                     self.output.push('\n');
                 }
                 write!(self.output, "# {} ", t.line).unwrap();
                 quoted_to(&mut self.output, t.file);
                 self.output.push('\n');
-                prev = Some((&t.file, t.line));
+                prev = Some((t.file, t.line));
             }
-            self.output.push_str(&t.text);
+            self.output.push_str(t.text);
             self.output.push(' ');
             if t.text.contains('\n') {
                 prev = None;
@@ -874,7 +874,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
             }
             return Ok(());
         }
-        self.include_stack.push((path.into(), origin));
+        self.include_stack.push((path, origin));
         let ts = cached.tokens;
         let mut pending = Vec::new();
         let mut stack: Vec<Conditional> = Vec::new();
@@ -926,10 +926,10 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                     } else if directive.text == "if" {
                         self.condition(args)?
                     } else {
-                        if args.len() != 1 || !ident(&args[0].text) {
+                        if args.len() != 1 || !ident(args[0].text) {
                             return Err(directive.error("expected one macro name"));
                         }
-                        self.is_defined(&args[0].text) != (directive.text == "ifndef")
+                        self.is_defined(args[0].text) != (directive.text == "ifndef")
                     };
                     stack.push(Conditional {
                         parent: active,
@@ -965,7 +965,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 _ if !active => {}
                 "define" => self.define(args)?,
                 "undef" => {
-                    if args.len() != 1 || !ident(&args[0].text) {
+                    if args.len() != 1 || !ident(args[0].text) {
                         return Err(directive.error("expected one macro name"));
                     }
                     self.macros.remove(args[0].text);
@@ -1035,8 +1035,8 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         if TRACK {
             self.stats.token_bytes += std::mem::size_of_val(tokens.as_ref());
         }
-        let owned: &'a Box<[Token<'a>]> = self.token_buffers.alloc(tokens);
-        Ok(owned.as_ref())
+        let owned: &'a [Token<'a>] = self.token_buffers.alloc(tokens);
+        Ok(owned)
     }
     fn canonical_path(&mut self, path: &Path) -> PathBuf {
         if let Some(canonical) = self.canonical_paths.get(path) {
@@ -1247,7 +1247,7 @@ fn spelling<'a>(ts: &[Token<'a>]) -> String {
         if t.space && !s.is_empty() {
             s.push(' ');
         }
-        s.push_str(t.raw_spelling.unwrap_or(&t.text));
+        s.push_str(t.raw_spelling.unwrap_or(t.text));
     }
     s
 }
@@ -1262,7 +1262,7 @@ fn unquote(s: &str) -> Option<String> {
 }
 fn header<'a>(ts: &[Token<'a>]) -> Option<(String, bool)> {
     if ts.len() == 1 {
-        return unquote(&ts[0].text).map(|s| (s, true));
+        return unquote(ts[0].text).map(|s| (s, true));
     }
     if ts.first()?.text == "<" && ts.last()?.text == ">" {
         return Some((ts[1..ts.len() - 1].iter().map(|t| t.text).collect(), false));
@@ -1411,9 +1411,9 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 }
                 let operand = input
                     .get(end)
-                    .filter(|t| ident(&t.text))
+                    .filter(|t| ident(t.text))
                     .ok_or_else(|| t.error("expected identifier after defined"))?;
-                let value = self.is_defined(&operand.text);
+                let value = self.is_defined(operand.text);
                 end += 1;
                 if paren {
                     if !input.get(end).is_some_and(|t| t.text == ")") {
@@ -1433,8 +1433,8 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
             let builtin = if builtin_enabled {
                 match name {
                     "__LINE__" => Some(t.line.to_string()),
-                    "__FILE__" => Some(quote(&t.file)),
-                    "__BASE_FILE__" => Some(quote(&self.include_stack[0].0)),
+                    "__FILE__" => Some(quote(t.file)),
+                    "__BASE_FILE__" => Some(quote(self.include_stack[0].0)),
                     "__FILE_NAME__" => Some(quote(
                         Path::new(t.file)
                             .file_name()
@@ -1477,10 +1477,10 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                         .is_some() as u8)
                         .to_string()
                 } else {
-                    if args[0].len() != 1 || !ident(&args[0][0].text) {
+                    if args[0].len() != 1 || !ident(args[0][0].text) {
                         return Err(t.error("expected identifier in feature query"));
                     }
-                    crate::features::query(name, &args[0][0].text, self.options.target).to_string()
+                    crate::features::query(name, args[0][0].text, self.options.target).to_string()
                 };
                 input.replace(end, [t.with_text(self.arena, value)]);
                 out.push(input.pop().unwrap());
@@ -1496,7 +1496,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 }
                 let expanded = self.expand(args[0].clone(), depth + 1)?;
                 let value = if expanded.len() == 1 {
-                    unquote(&expanded[0].text)
+                    unquote(expanded[0].text)
                 } else {
                     None
                 }
@@ -1644,13 +1644,13 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                     .ok_or_else(|| t.error("missing right operand to ##"))?;
                 let text = format!(
                     "{}{}",
-                    left.raw_spelling.unwrap_or(&left.text),
-                    right.raw_spelling.unwrap_or(&right.text)
+                    left.raw_spelling.unwrap_or(left.text),
+                    right.raw_spelling.unwrap_or(right.text)
                 );
                 let mut result = left.with_text(self.arena, &text);
                 if !text.is_empty() {
                     let check = scan(self.arena.alloc_str(&text), t.file, self.arena)?;
-                    if check.len() != 1 || check[0].raw_spelling.unwrap_or(&check[0].text) != text {
+                    if check.len() != 1 || check[0].raw_spelling.unwrap_or(check[0].text) != text {
                         return Err(t.error(format!(
                             "token paste does not form one preprocessing token: {text}"
                         )));
@@ -1676,7 +1676,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         self.in_condition = false;
         let mut tokens = expanded?;
         for t in &mut tokens {
-            if ident(&t.text) {
+            if ident(t.text) {
                 t.text = "0";
             }
         }
@@ -1863,7 +1863,7 @@ fn integer(t: &Token<'_>) -> Result<Integer, Diagnostic> {
         let arena = Bump::new();
         let mut strings = crate::strings::Strings::new(&arena);
         let mut files = Vec::new();
-        let tokens = crate::lex::tokenize(&t.text, &t.file, &mut files, &mut strings)
+        let tokens = crate::lex::tokenize(t.text, t.file, &mut files, &mut strings)
             .map_err(|e| t.error(e.message))?;
         if let crate::lex::Tok::Char(value) = tokens[0].tok {
             return Ok(Integer {
@@ -2003,7 +2003,7 @@ mod scanner_tests {
         let tokens = scan(source, "punct.c", &arena).unwrap();
         let spelling: Vec<_> = tokens
             .iter()
-            .map(|t| t.raw_spelling.unwrap_or(&t.text))
+            .map(|t| t.raw_spelling.unwrap_or(t.text))
             .collect();
         assert_eq!(spelling, source.split_whitespace().collect::<Vec<_>>());
         assert_eq!(tokens[0].text, "##");
@@ -2017,7 +2017,7 @@ mod scanner_tests {
             assert_eq!(
                 tokens
                     .iter()
-                    .map(|t| t.raw_spelling.unwrap_or(&t.text))
+                    .map(|t| t.raw_spelling.unwrap_or(t.text))
                     .collect::<String>(),
                 source
             );

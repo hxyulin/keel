@@ -161,7 +161,8 @@ fn shared_volatile_atomic_nonadjacent_left_and_debug_loads_stay_materialized() {
         let text = compile(&m, SelectionTier::Full, AllocationTier::Full, &SPILLED);
         assert_eq!(memory_compares(&text), 0, "{negative}\n{text}");
     }
-    for ty in ["i128"] {
+    {
+        let ty = "i128";
         let src = format!(
             "func @f(ptr, {ty}) -> i64 {{\nblock0(v0: ptr, v1: {ty}):\n v2 = load.{ty} v0\n v3 = icmp.ult v1, v2\n v4 = uext.i64 v3\n return v4\n}}"
         );

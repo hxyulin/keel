@@ -165,10 +165,10 @@ fn mixed_consumers_duplicate_occurrences_and_aliases_keep_materialization() {
                     let func = &mut module.functions[0];
                     let constants: Vec<_> = func
                         .layout_insts()
-                        .filter_map(|(_, i)| {
+                        .filter(|&(_, i)| {
                             matches!(func.inst_data(i), keel_ir::InstData::Iconst { .. })
-                                .then(|| func.inst_results(i)[0])
                         })
+                        .map(|(_, i)| func.inst_results(i)[0])
                         .collect();
                     func.replace_all_uses(constants[1], constants[0]);
                 }

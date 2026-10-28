@@ -683,10 +683,10 @@ fn narrow_history_seed_chunk_edges_and_signed_tail_are_exact() {
             let insts = f.block_insts(b);
             let mut last = None;
             for (pos, &i) in insts.iter().enumerate() {
-                if let D::VectorSplat { ty, arg } = f.inst_data(i) {
-                    if *ty == narrow {
-                        assert_eq!(f.value_type(*arg), Type::I32);
-                    }
+                if let D::VectorSplat { ty, arg } = f.inst_data(i)
+                    && *ty == narrow
+                {
+                    assert_eq!(f.value_type(*arg), Type::I32);
                 }
                 if !matches!(f.inst_data(i), D::Load { ty: Type::I64, .. }) {
                     continue;

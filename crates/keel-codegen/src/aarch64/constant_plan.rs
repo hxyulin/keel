@@ -93,9 +93,9 @@ mod tests {
         // Independent lower bound: a zero/one seed can supply at most one
         // nonzero/non-FFFF target halfword; every other such half needs MOVK.
         let bytes = expected.to_le_bytes();
-        let halves = bytes[..if is64 { 8 } else { 4 }].chunks_exact(2);
-        let nonzero = halves.clone().filter(|h| *h != [0, 0]).count();
-        let nonones = halves.filter(|h| *h != [255, 255]).count();
+        let halves = bytes[..if is64 { 8 } else { 4 }].as_chunks::<2>().0.iter();
+        let nonzero = halves.clone().filter(|h| **h != [0, 0]).count();
+        let nonones = halves.filter(|h| **h != [255, 255]).count();
         let minimum = nonzero.min(nonones).max(1);
         assert_eq!(1 + plan.patches().count(), minimum, "{plan:?}");
     }

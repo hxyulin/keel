@@ -23,7 +23,7 @@ fn returned_assembly_object_and_errors_outlive_source_and_scratch() {
     for _ in 0..20 {
         assert_eq!(assemble_object(&source()).unwrap(), retained);
     }
-    assert_eq!(assembly.clone().to_macho().unwrap(), retained);
+    assert_eq!(assembly.to_macho().unwrap(), retained);
     assert_eq!(error.line, 4);
     assert_eq!(error.message, "undefined local branch target `Lmissing`");
     let file = object::File::parse(retained.as_slice()).unwrap();

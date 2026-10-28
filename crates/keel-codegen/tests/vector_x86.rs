@@ -6,7 +6,7 @@ use keel_codegen::{
 };
 use std::{fs, process::Command};
 #[path = "common/vector.rs"]
-mod vector_common;
+pub mod vector_common;
 use vector_common::{command, fixture, harness, temp};
 fn abi_fixture() -> (String, String) {
     vector_common::abi_fixture(false)

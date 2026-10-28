@@ -5,8 +5,7 @@ use keel_codegen::{
 use keel_ir::{NeonIntrinsic as N, Type, VectorType};
 use std::{fs, process::Command};
 #[path = "common/vector.rs"]
-#[allow(dead_code)]
-mod common;
+pub mod common;
 #[path = "common/matrix.rs"]
 mod matrix;
 const SPILL: Pools = Pools {

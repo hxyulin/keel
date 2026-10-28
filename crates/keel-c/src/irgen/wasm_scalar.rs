@@ -11,7 +11,7 @@ fn integer(ty: &Ty) -> bool {
 }
 
 fn signature(fty: &FuncTy, loc: Loc) -> R<()> {
-    if !fty.prototyped || fty.variadic {
+    if !fty.has_prototype() || fty.variadic {
         return Err(reject(loc, "unprototyped/variadic signatures"));
     }
     if std::iter::once(&fty.ret).chain(fty.params).any(|ty| {
@@ -170,7 +170,7 @@ impl Gen<'_> {
     fn private_storage(&self, ty: &Ty<'_>, seen: &mut Vec<usize>) -> R<()> {
         match ty {
             ty if integer(ty) => Ok(()),
-            Ty::Ptr(inner) if matches!(inner, Ty::Void) => Ok(()),
+            Ty::Ptr(Ty::Void) => Ok(()),
             Ty::Ptr(inner) => self.private_storage(inner, seen),
             Ty::Array(a) if a.vla.is_none() && a.len.is_some() => {
                 self.private_storage(&a.elem, seen)?;
@@ -334,10 +334,9 @@ impl Gen<'_> {
                 visit_stmt_exprs(stmt, &mut |e, _| {
                     if matches!(e.ty, Ty::Ptr(_))
                         && !matches!(e.kind, ExprKind::Addr(a) if matches!(a.ty, Ty::Func(_)))
+                        && let Err(err) = self.private_storage(&e.ty, &mut Vec::new())
                     {
-                        if let Err(err) = self.private_storage(&e.ty, &mut Vec::new()) {
-                            error = Some(err);
-                        }
+                        error = Some(err);
                     }
                     Some(())
                 });

@@ -10,7 +10,7 @@ use std::{fs, process::Command};
     allow(dead_code)
 )]
 #[path = "common/vector.rs"]
-mod vector_common;
+pub mod vector_common;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use vector_common::harness;
 use vector_common::{command, fixture, temp};

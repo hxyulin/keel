@@ -414,3 +414,33 @@ fn prepared_partial_links_match_raw_and_preserve_machine_checks() {
         .contains("AArch64")
     );
 }
+
+#[test]
+fn reverse_archive_dependencies_preserve_extraction_order() {
+    let start = object(".text\n.globl _start\n_start: call member0\nret\n");
+    let objects = (0..32)
+        .map(|i| {
+            let next = if i == 31 {
+                String::new()
+            } else {
+                format!("call member{}\n", i + 1)
+            };
+            (
+                format!("member{i}.o"),
+                object(&format!(".text\n.globl member{i}\nmember{i}: {next}ret\n")),
+            )
+        })
+        .collect::<Vec<_>>();
+    let members = objects
+        .iter()
+        .rev()
+        .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
+        .collect::<Vec<_>>();
+    let bytes = archive(&members);
+    let requests = [file("start.o", &start), file("reverse.a", &bytes)];
+    let expected = std::iter::once("start.o".to_owned())
+        .chain((0..32).map(|i| format!("reverse.a(member{i}.o)")))
+        .collect::<Vec<_>>();
+    assert_eq!(selected_names(&requests), expected);
+    link(&requests).unwrap();
+}

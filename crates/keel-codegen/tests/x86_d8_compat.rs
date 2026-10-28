@@ -9,7 +9,7 @@ use keel_codegen::{
 use std::{fs, path::PathBuf};
 #[allow(dead_code)]
 #[path = "common/vector.rs"]
-mod common;
+pub mod common;
 #[test]
 fn retained_qy_object_witness() {
     let shapes: Vec<_> = keel_ir::VectorType::ALL_128

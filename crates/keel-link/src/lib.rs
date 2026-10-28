@@ -28,11 +28,13 @@ pub(crate) fn align(n: usize, a: usize) -> usize {
 }
 
 /// Named input bytes. Accepted formats depend on the selected linker API.
+#[derive(Debug)]
 pub struct Input<'a> {
     pub name: &'a str,
     pub bytes: &'a [u8],
 }
 /// Explicit system interfaces. No implicit flat-namespace symbol lookup.
+#[derive(Debug)]
 pub struct Options {
     /// Collect unreachable input sections. Default off; symbols sharing an input
     /// section are indivisible, even with MH_SUBSECTIONS_VIA_SYMBOLS.
@@ -61,10 +63,12 @@ impl Default for Options {
         }
     }
 }
+#[derive(Debug)]
 pub struct DebugObject {
     pub path: std::path::PathBuf,
     pub bytes: Vec<u8>,
 }
+#[derive(Debug)]
 pub struct Executable {
     /// Exact object snapshots referenced by the native Darwin debug map.
     pub debug_objects: Vec<DebugObject>,
@@ -72,6 +76,7 @@ pub struct Executable {
     pub warnings: Vec<String>,
 }
 /// Artifacts returned when the unsigned image is written directly to a sink.
+#[derive(Debug)]
 pub struct LinkArtifacts {
     pub debug_objects: Vec<DebugObject>,
     pub warnings: Vec<String>,

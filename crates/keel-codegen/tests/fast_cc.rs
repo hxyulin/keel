@@ -157,7 +157,7 @@ fn frame_observers_calls_debug_spills_and_stack_arguments_retain_frames() {
     modules.push(
         keel_ir::parse(&format!(
             "func @stack({}) -> i64 cc(fast) local {{\nblock0({params}):\n return v9\n}}",
-            vec!["i64"; 10].join(", ")
+            ["i64"; 10].join(", ")
         ))
         .unwrap(),
     );

@@ -13,8 +13,8 @@ fn source() -> String {
     let mut s = String::new();
     for bits in [32, 64] {
         for order in [0, 1] {
-            let compare = format!(" v3 = icmp.slt v0,v2\n");
-            let negate = format!(" v4 = ineg v0\n");
+            let compare = " v3 = icmp.slt v0,v2\n".to_string();
+            let negate = " v4 = ineg v0\n".to_string();
             s += &format!(
                 "func @abs{bits}_{order}(i{bits},ptr)->i{bits} {{\nblock0(v0:i{bits},v1:ptr):\n v2 = iconst.i{bits} 0\n{}{} v5 = select v3,v4,v0\n store v0,v1\n return v5\n}}\n",
                 if order == 0 { &compare } else { &negate },

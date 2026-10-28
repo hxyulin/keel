@@ -141,10 +141,10 @@ pub fn run(args: &[String]) -> Result<(), String> {
             target = iter.next().ok_or("--target requires a target triple")?;
         } else {
             native_args.push(arg.clone());
-            if native_value_option(arg) {
-                if let Some(value) = iter.next() {
-                    native_args.push(value.clone());
-                }
+            if native_value_option(arg)
+                && let Some(value) = iter.next()
+            {
+                native_args.push(value.clone());
             }
         }
     }

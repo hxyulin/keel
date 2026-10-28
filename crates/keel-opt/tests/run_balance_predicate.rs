@@ -240,10 +240,8 @@ fn zero_odd_extreme_and_wraparound_recurrences_match() {
             for &x in &input {
                 balance = if x > 0 {
                     balance.wrapping_add(x as u32 as u64)
-                } else if balance > 17 {
-                    balance - 17
                 } else {
-                    0
+                    balance.saturating_sub(17)
                 };
                 sum = sum.wrapping_add(balance);
             }

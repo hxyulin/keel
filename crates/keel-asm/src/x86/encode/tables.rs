@@ -830,7 +830,8 @@ fn emit<'a>(
                     e.imm(
                         a,
                         spec.bytes(choice.size) as u8,
-                        spec.encoding.starts_with('s') && (spec.bytes(choice.size) * 8 < choice.size),
+                        spec.encoding.starts_with('s')
+                            && (spec.bytes(choice.size) * 8 < choice.size),
                     )?;
                 }
             } else {

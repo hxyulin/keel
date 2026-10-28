@@ -126,3 +126,14 @@ fn generated_helper_mappings_match_the_frozen_public_api() {
         }
     }
 }
+
+#[test]
+fn generated_x86_pattern_matches_independent_target_classification() {
+    for intrinsic in Intrinsic::ALL {
+        assert_eq!(
+            matches!(intrinsic, keel_ir::x86_intrinsics!()),
+            intrinsic.is_x86_target(),
+            "{intrinsic:?}"
+        );
+    }
+}

@@ -7,7 +7,7 @@ use keel_codegen::{
 fn compile(source: &str, features: Features) -> Result<String, keel_codegen::CodegenError> {
     let m = keel_ir::parse(source).unwrap();
     keel_ir::verify_module(&m).unwrap();
-    let n = keel_ir::parse(&m.clone().to_string()).unwrap();
+    let n = keel_ir::parse(&m.to_string()).unwrap();
     keel_ir::verify_module(&n).unwrap();
     let selector = FeatureSelector {
         inner: &SelectionTier::Baseline,

@@ -44,7 +44,7 @@ fn check(source: &str, expected: usize) -> keel_ir::Module {
 }
 #[test]
 fn eliminates_exact_leaf_result_copy() {
-    let m = check(&(CONSTRUCTOR.to_owned() + CALLER), 1);
+    let mut m = check(&(CONSTRUCTOR.to_owned() + CALLER), 1);
     assert_eq!(
         m.functions[1]
             .layout_insts()
@@ -52,7 +52,7 @@ fn eliminates_exact_leaf_result_copy() {
             .count(),
         1
     );
-    assert_eq!(aggregate_return::run(&mut m.clone()), 0);
+    assert_eq!(aggregate_return::run(&mut m), 0);
 }
 
 #[test]

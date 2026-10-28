@@ -650,23 +650,32 @@ impl LowBitCasts {
                     unreachable!()
                 };
                 let mut previous = *source;
-                let matches = chain.iter().zip(pattern).enumerate().all(
-                    |(n, (&i, &(want_op, want_ty)))| {
-                        let InstData::Convert { op, ty, arg } = ir.inst_data(i) else {
-                            return false;
-                        };
-                        let values = ir.inst_results(i);
-                        if *op != want_op || *ty != want_ty || *arg != previous || values.len() != 1 {
-                            return false;
-                        }
-                        let value = values[0];
-                        previous = value;
-                        n + 1 == pattern.len()
-                            || (!aliased[value.index()] && uses[value.index()] == 1)
-                    },
-                );
+                let matches =
+                    chain
+                        .iter()
+                        .zip(pattern)
+                        .enumerate()
+                        .all(|(n, (&i, &(want_op, want_ty)))| {
+                            let InstData::Convert { op, ty, arg } = ir.inst_data(i) else {
+                                return false;
+                            };
+                            let values = ir.inst_results(i);
+                            if *op != want_op
+                                || *ty != want_ty
+                                || *arg != previous
+                                || values.len() != 1
+                            {
+                                return false;
+                            }
+                            let value = values[0];
+                            previous = value;
+                            n + 1 == pattern.len()
+                                || (!aliased[value.index()] && uses[value.index()] == 1)
+                        });
                 if matches {
-                    result.skipped.extend(chain[..chain.len() - 1].iter().copied());
+                    result
+                        .skipped
+                        .extend(chain[..chain.len() - 1].iter().copied());
                     result.sources.insert(*chain.last().unwrap(), *source);
                 }
             }

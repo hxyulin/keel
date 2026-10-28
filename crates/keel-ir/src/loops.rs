@@ -8,6 +8,7 @@
 use crate::dominators::{ControlFlowGraph, DominatorTree};
 use crate::{Block, EntityRef, Function};
 
+#[derive(Debug)]
 pub struct LoopDepth {
     depth: Vec<u32>,
 }

@@ -51,13 +51,17 @@ fn tags(file: &object::File<'_>) -> BTreeMap<u64, u64> {
         .unwrap()
         .data()
         .unwrap()
-        .chunks_exact(16)
+        .as_chunks::<16>()
+        .0
+        .iter()
         .map(|c| (u64at(c, 0), u64at(c, 8)))
         .collect()
 }
 fn words(exe: &[u8], start: u64, size: u64) -> Vec<u64> {
     exe[(start - 0x400000) as usize..(start - 0x400000 + size) as usize]
-        .chunks_exact(8)
+        .as_chunks::<8>()
+        .0
+        .iter()
         .map(|c| u64at(c, 0))
         .collect()
 }
@@ -123,9 +127,7 @@ fn malformed_arrays_fail_instead_of_silently_skipping_initializers() {
         ".section .init_array,\"aw\",@init_array\n.p2align 3\n.byte 1\n",
     ] {
         let input = obj(source);
-        let err = link(&[obj(".text\n.globl _start\n_start: ret\n"), input])
-            .err()
-            .expect(source);
+        let err = link(&[obj(".text\n.globl _start\n_start: ret\n"), input]).expect_err(source);
         assert!(err.contains("array") || err.contains("priority"), "{err}");
     }
 }
@@ -144,8 +146,7 @@ fn explicit_wrong_array_type_entry_size_and_alignment_are_rejected() {
         let mut malformed = valid.clone();
         malformed[at + offset..at + offset + bytes.len()].copy_from_slice(&bytes);
         let err = link(&[obj(".text\n.globl _start\n_start: ret\n"), malformed])
-            .err()
-            .expect("invalid array accepted");
+            .expect_err("invalid array accepted");
         assert!(err.contains("array"), "{err}");
     }
 }

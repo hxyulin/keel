@@ -6,8 +6,7 @@ use keel_codegen::{
 use keel_ir::{NeonIntrinsic as N, Type, VectorType};
 use std::{fs, process::Command};
 #[path = "common/vector.rs"]
-#[allow(dead_code)]
-mod common;
+pub mod common;
 const SPILL: Pools = Pools {
     caller_saved: &[9, 10],
     callee_saved: &[19],
@@ -108,8 +107,11 @@ fn fixture() -> (String, String, usize, usize) {
                     | "UADDLP"
                     | "XTN"
             );
-        let reduce =
-            cls == "asimdall" && matches!(op, "ADDV" | "SMINV" | "SMAXV" | "UMINV" | "UMAXV" | "SADDLV" | "UADDLV");
+        let reduce = cls == "asimdall"
+            && matches!(
+                op,
+                "ADDV" | "SMINV" | "SMAXV" | "UMINV" | "UMAXV" | "SADDLV" | "UADDLV"
+            );
         let long = cls == "asimdshf" && matches!(op, "SSHLL" | "USHLL");
         let pair = record == "ADDP_asisdpair_only";
         if !binary && !unary && !reduce && !long && !pair {
@@ -160,7 +162,15 @@ fn fixture() -> (String, String, usize, usize) {
                         let ty = if pair {
                             Type::I64
                         } else if reduce {
-                            scalar(width * if op=="SADDLV"||op=="UADDLV" {2}else{1}, false)
+                            scalar(
+                                width
+                                    * if op == "SADDLV" || op == "UADDLV" {
+                                        2
+                                    } else {
+                                        1
+                                    },
+                                false,
+                            )
                         } else if long || pair_long {
                             vector(bytes, width * 2, false)
                         } else if narrow {
@@ -208,13 +218,19 @@ fn fixture() -> (String, String, usize, usize) {
                             let a0 = emit(format!("vextract {a},0"));
                             let a1 = emit(format!("vextract {a},1"));
                             emit(format!("iadd {a0},{a1}"))
-                        } else if reduce && (op=="SADDLV"||op=="UADDLV") {
-                            let n:N=format!("neon_{}",op.to_ascii_lowercase()).parse().unwrap();
-                            let expected=n.operand_types(ty).unwrap()[0];
-                            let mut value=a;
-                            if source!=expected {
-                                let lane=source.vector().unwrap().lane_type();let zero=emit(format!("iconst.{lane} 0"));let mut q=emit(format!("vsplat.{expected} {zero}"));
-                                for i in 0..source.vector().unwrap().lanes(){let v=emit(format!("vextract {value},{i}"));q=emit(format!("vinsert {q},{v},{i}"));}value=q;
+                        } else if reduce && (op == "SADDLV" || op == "UADDLV") {
+                            let n: N = format!("neon_{}", op.to_ascii_lowercase()).parse().unwrap();
+                            let expected = n.operand_types(ty).unwrap()[0];
+                            let mut value = a;
+                            if source != expected {
+                                let lane = source.vector().unwrap().lane_type();
+                                let zero = emit(format!("iconst.{lane} 0"));
+                                let mut q = emit(format!("vsplat.{expected} {zero}"));
+                                for i in 0..source.vector().unwrap().lanes() {
+                                    let v = emit(format!("vextract {value},{i}"));
+                                    q = emit(format!("vinsert {q},{v},{i}"));
+                                }
+                                value = q;
                             }
                             emit(format!("{n}.{ty}({value})"))
                         } else if reduce {

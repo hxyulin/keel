@@ -1,7 +1,7 @@
-#[path = "support/adjacent_tee.rs"]
-mod oracle;
 #[path = "support/combined_corpus.rs"]
 mod combined_corpus;
+#[path = "support/adjacent_tee.rs"]
+mod oracle;
 
 use keel_ir::{Module, parse};
 use keel_wasm::{
@@ -210,7 +210,11 @@ fn static_frozen_corpus_combined_exact_body_operator_and_local_delta() {
             pairs += count;
             bytes_saved += old.as_bytes().len() - new.as_bytes().len();
             let declaration_count = |body: &wasmparser::FunctionBody<'_>| -> u32 {
-                body.get_locals_reader().unwrap().into_iter().map(|l| l.unwrap().0).sum()
+                body.get_locals_reader()
+                    .unwrap()
+                    .into_iter()
+                    .map(|l| l.unwrap().0)
+                    .sum()
             };
             let removed = u32::from(profile == "basic" && index == 10);
             assert_eq!(declaration_count(old) - declaration_count(new), removed);

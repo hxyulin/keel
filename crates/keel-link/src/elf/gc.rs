@@ -218,16 +218,21 @@ impl ReferenceTargets {
     }
 }
 
+pub(super) struct Roots<'a> {
+    pub entry: &'a str,
+    pub dynamic: bool,
+}
+
 pub(super) fn collect(
     sections: &mut Vec<Section>,
     units: &mut [Unit],
     frames: &mut BTreeMap<usize, unwind::Frames>,
     globals: &mut BTreeMap<String, Key>,
-    entry: &str,
-    dynamic: bool,
+    roots: Roots<'_>,
     sframe: &mut Option<(usize, sframe::Table)>,
     sframe_targets: &mut Option<sframe::Bindings>,
 ) -> Result<Vec<Option<usize>>> {
+    let Roots { entry, dynamic } = roots;
     let (lookups, selected) = selected_symbols(units, globals);
     let canonical = |u: usize, s: usize| -> Result<usize> {
         let id = lookups[u].get(s).ok_or("invalid GC relocation symbol")?;
@@ -291,7 +296,13 @@ pub(super) fn collect(
     let mut owners = BTreeMap::new();
     for (&section, records) in frames.iter() {
         let mut list = Vec::new();
-        for (record, pc, range, fields) in records.owners(&sections[section].data)? {
+        for unwind::FrameOwner {
+            record,
+            pc,
+            range,
+            fields,
+        } in records.owners(&sections[section].data)?
+        {
             let (ui, ri) = relocations
                 .first(section, pc)
                 .ok_or("--gc-sections requires a relocation for every FDE initial location")?;
@@ -372,18 +383,17 @@ pub(super) fn collect(
                     pending_symbols.push(key);
                 }
                 let symbol = selected[key].symbol;
-                if symbol.section == SymbolSection::Undefined {
-                    if let Some(group) = symbol
+                if symbol.section == SymbolSection::Undefined
+                    && let Some(group) = symbol
                         .name
                         .strip_prefix("__start_")
                         .or_else(|| symbol.name.strip_prefix("__stop_"))
-                    {
-                        // GNU default: a live boundary reference retains every
-                        // selected ordinary contribution with this name.
-                        if let Some(members) = boundaries.remove(group) {
-                            for member in members {
-                                live.insert(member);
-                            }
+                {
+                    // GNU default: a live boundary reference retains every
+                    // selected ordinary contribution with this name.
+                    if let Some(members) = boundaries.remove(group) {
+                        for member in members {
+                            live.insert(member);
                         }
                     }
                 }
@@ -669,8 +679,10 @@ mod tests {
             &mut units,
             &mut BTreeMap::new(),
             &mut globals,
-            "_start",
-            false,
+            Roots {
+                entry: "_start",
+                dynamic: false,
+            },
             &mut None,
             &mut None,
         )
@@ -852,8 +864,10 @@ mod tests {
             &mut units,
             &mut frames,
             &mut globals,
-            "_start",
-            false,
+            Roots {
+                entry: "_start",
+                dynamic: false,
+            },
             &mut None,
             &mut None,
         )

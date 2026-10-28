@@ -22,6 +22,7 @@ mod generated_query;
 mod generated_registry;
 pub use generated_registry::Intrinsic;
 
+#[derive(Debug)]
 pub struct IntrinsicInfo {
     pub name: &'static str,
     pub params: &'static [Type],

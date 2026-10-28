@@ -1,6 +1,5 @@
 //! Driver regressions: fingerprints captured from the recursive lowerer at 6d974b4d.
-#[path = "../src/vector.rs"]
-mod vector;
+use crate::vector;
 
 use keel_ir::{EntityRef, Function, InstData, SourceFile, SourceLoc, Value};
 use std::{borrow::Cow, cell::RefCell, fmt::Write};
@@ -149,11 +148,11 @@ fn empty_scalar_and_native_functions_stay_borrowed() {
 
 #[test]
 fn compound_corpus_has_text_typed_chunked_object_parity() {
-    use keel_asm_ir::x86::{CpuLevel, Features};
-    use keel_codegen::{
+    use crate::{
         CodegenPipeline, SelectionTier, Target, regalloc::AllocationTier,
         x86_features::FeatureSelector,
     };
+    use keel_asm_ir::x86::{CpuLevel, Features};
     let module = compound();
     for target in [Target::X86_64LinuxGnu, Target::Aarch64AppleDarwin] {
         let levels: &[_] = if target == Target::X86_64LinuxGnu {
@@ -181,13 +180,11 @@ fn compound_corpus_has_text_typed_chunked_object_parity() {
                         selector: &selector,
                         allocator: &allocation,
                     };
-                    let text =
-                        keel_codegen::compile_with_pipeline(&module, target, &pipeline).unwrap();
+                    let text = crate::compile_with_pipeline(&module, target, &pipeline).unwrap();
                     let program =
-                        keel_codegen::compile_program_with_pipeline(&module, target, &pipeline)
-                            .unwrap();
+                        crate::compile_program_with_pipeline(&module, target, &pipeline).unwrap();
                     let mut chunks = keel_asm_ir::Program::default();
-                    keel_codegen::compile_program_chunks_with_pipeline(
+                    crate::compile_program_chunks_with_pipeline(
                         &module,
                         target,
                         &pipeline,

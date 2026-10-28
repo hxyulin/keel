@@ -41,15 +41,14 @@ fn packed_clamps_select_in_the_source_ring_and_extend_only_the_result() {
                     arg,
                     ..
                 } = *f.inst_data(i)
+                    && narrow
                 {
-                    if narrow {
-                        assert!(
-                            !matches!(f.value_def(f.resolve(arg)), keel_ir::ValueDef::Result(d, _)
+                    assert!(
+                        !matches!(f.value_def(f.resolve(arg)), keel_ir::ValueDef::Result(d, _)
                             if matches!(f.inst_data(d), D::VectorIcmp { .. })),
-                            "{}",
-                            f.name
-                        );
-                    }
+                        "{}",
+                        f.name
+                    );
                 }
                 if let D::Load { ty, .. } = *f.inst_data(i) {
                     assert!(matches!(ty, Type::I32 | Type::I64), "read footprint: {f}");

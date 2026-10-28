@@ -27,7 +27,8 @@ fn pointer(b: &[u8], at: usize) -> u64 {
 }
 // Read every referenced format extent, including sentinel/LSDA indexes and the
 // final regular page. Checking the last nonzero byte would miss unused entries.
-fn table(b: &[u8]) -> (Vec<(usize, usize)>, usize, Vec<(usize, usize)>, usize) {
+type ParsedTable = (Vec<(usize, usize)>, usize, Vec<(usize, usize)>, usize);
+fn table(b: &[u8]) -> ParsedTable {
     assert_eq!(word(b, 0), 1);
     assert_eq!(word(b, 8), 0);
     let index = word(b, 20);

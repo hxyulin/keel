@@ -74,12 +74,12 @@ fn system_register_tiers_parity_liveness_and_export() {
                         // Every unused third read must remain after optimization.
                         assert_eq!(count, if reg == "dr0" { 6 } else { 4 }, "{reg}: {text}");
                     }
-                    if level == CpuLevel::V1 {
-                        if let Some(dir) = &dir {
-                            let stem = format!("system-register-{s:?}-{a:?}-{spill}");
-                            std::fs::write(dir.join(format!("{stem}.o")), bytes).unwrap();
-                            std::fs::write(dir.join(format!("{stem}.s")), text).unwrap();
-                        }
+                    if level == CpuLevel::V1
+                        && let Some(dir) = &dir
+                    {
+                        let stem = format!("system-register-{s:?}-{a:?}-{spill}");
+                        std::fs::write(dir.join(format!("{stem}.o")), bytes).unwrap();
+                        std::fs::write(dir.join(format!("{stem}.s")), text).unwrap();
                     }
                 }
             }

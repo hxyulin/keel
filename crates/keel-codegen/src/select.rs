@@ -8,7 +8,7 @@ use keel_ir::{
     BinaryOp, ConvertOp, EntityRef, Function, Inst, InstData, IntCC, Type, Value, ValueDef,
 };
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Target {
     Aarch64,
     X86,
@@ -58,7 +58,7 @@ pub(crate) struct IndexedAddress {
 }
 /// Dense instruction indices, sparse operand lists. Fusion makes overrides
 /// common enough that hashing every instruction in each liveness pass is costly.
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct OperandTable {
     indices: Vec<u32>,
     lists: Vec<Vec<Value>>,
@@ -85,16 +85,16 @@ impl OperandTable {
         }
     }
     fn remove(&mut self, inst: &Inst) {
-        if let Some(index) = self.indices.get_mut(inst.index()) {
-            if *index != u32::MAX {
-                self.lists[*index as usize].clear();
-                *index = u32::MAX;
-            }
+        if let Some(index) = self.indices.get_mut(inst.index())
+            && *index != u32::MAX
+        {
+            self.lists[*index as usize].clear();
+            *index = u32::MAX;
         }
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Selection {
     constraints: HashMap<(Inst, ValuePart, OperandKind), Constraint>,
     /// Dense per-instruction "has any constraint" flags mirroring `constraints`.
@@ -131,7 +131,7 @@ pub struct Selection {
 
 /// The input each result would like to share a register with, if any,
 /// indexed by the result rather than hashed: most results have one.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Hints(Vec<Option<Value>>);
 impl Hints {
     pub fn insert(&mut self, result: Value, input: Value) {
@@ -394,13 +394,12 @@ impl Selection {
                 if func.inst_results(compare).first() != Some(&cond) || uses[cond.index()] != 1 {
                     continue;
                 }
-                if let Some(a) = func.inst_loc(compare) {
-                    if func
+                if let Some(a) = func.inst_loc(compare)
+                    && func
                         .inst_loc(select)
                         .is_none_or(|b| a.file != b.file || a.line != b.line)
-                    {
-                        continue;
-                    }
+                {
+                    continue;
                 }
                 pairs.push((cond, compare, select));
             }

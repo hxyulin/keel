@@ -442,7 +442,7 @@ fn elf_archive_members_require_strong_demand() {
         .bytes(),
     );
     archive.extend(&provider);
-    if provider.len() % 2 != 0 {
+    if !provider.len().is_multiple_of(2) {
         archive.push(b'\n');
     }
     let missing = object(MISSING, target, false);

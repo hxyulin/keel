@@ -192,7 +192,7 @@ fn selected_empty_archive_members_count_but_unselected_metadata_does_not() {
     let empty = obj(".globl demanded\n.set demanded,7\n");
     let ar = archive(&[unused, empty]);
     assert_eq!(
-        output(&link(&[start.clone(), ar.clone()]).unwrap()),
+        output(&link(&[start, ar.clone()]).unwrap()),
         BTreeMap::from([(AND, 2), (NEEDED, 8), (ISA_USED, 1)])
     );
     let demand = marked(
@@ -472,7 +472,7 @@ fn malformed_note_descriptors_and_unknown_contracts_fail_closed() {
         put32(&mut bad, at, v);
         cases.push(bad);
     }
-    let mut tail = valid.clone();
+    let mut tail = valid;
     tail.extend([0; 8]);
     cases.push(tail);
     for bad in cases {

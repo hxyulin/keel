@@ -202,9 +202,9 @@ fn native_chain_pressure_unknown_clobbers_recursion_shuffles_and_transfers() {
                         continue;
                     }
                     let text =
-                        keel_codegen::aarch64::compile_with_pipeline(&m, pools, &pipeline).unwrap();
+                        keel_codegen::aarch64::compile_with_pipeline(m, pools, &pipeline).unwrap();
                     let program =
-                        keel_codegen::aarch64::compile_program_with_pipeline(&m, pools, &pipeline)
+                        keel_codegen::aarch64::compile_program_with_pipeline(m, pools, &pipeline)
                             .unwrap();
                     for object in [
                         keel_asm::assemble_object(&text).unwrap(),

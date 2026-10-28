@@ -137,9 +137,7 @@ impl RegisterAllocator for Coalesced {
     }
     fn allocate(&self, input: &AllocationInput<'_>) -> Allocation {
         let mut a = AllocationTier::Full.allocate(input);
-        for loc in &mut a.locs[0] {
-            *loc = Some(Loc::Stack(0));
-        }
+        a.locs[0].fill(Some(Loc::Stack(0)));
         a.spill_slots = 8;
         let f = input.func;
         let v0 = ValuePart::low(Value::new(0));

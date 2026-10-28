@@ -280,7 +280,7 @@ fn round2_malformed_cases(elf: &[u8], macho: &[u8]) -> Vec<(&'static str, bool, 
         false,
         compressed_site_object(elf, true, 61),
     ));
-    let mut bad_pair_site = valid.clone();
+    let mut bad_pair_site = valid;
     put32(&mut bad_pair_site, at, 0xffffffff);
     put32(&mut bad_pair_site, at + 8, 0xffffffff);
     cases.push(("addend-pair-site-negative", true, bad_pair_site));

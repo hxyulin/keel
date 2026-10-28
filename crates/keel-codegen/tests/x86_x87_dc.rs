@@ -14,7 +14,7 @@ const EMPTY: Pools = Pools {
 };
 #[allow(dead_code)]
 #[path = "common/vector.rs"]
-mod common;
+pub mod common;
 
 #[test]
 fn independent_dc_encoding_and_all_live_output_combinations() {

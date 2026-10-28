@@ -720,7 +720,7 @@ fn high_input_addresses_preserve_section_relative_root_identity() {
     let mut high = original.clone();
     rebase_text(&mut high, u64::MAX - 0x1000);
     for gc in [false, true] {
-        let ordinary = link(&[original.clone()], options(gc)).unwrap();
+        let ordinary = link(std::slice::from_ref(&original), options(gc)).unwrap();
         let rebased = link(&[high.clone()], options(gc)).unwrap();
         assert_eq!(ordinary.bytes, rebased.bytes);
     }

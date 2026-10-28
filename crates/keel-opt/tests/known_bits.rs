@@ -319,7 +319,7 @@ block1(v7: i8):
         first.to_string().contains("icmp.ult"),
         "the join became constant only after CFG pruning"
     );
-    let mut second = first.clone();
+    let mut second = first;
     keel_opt::run_passes(
         &mut second,
         &["known-bits", "instcombine", "simplify-cfg", "dce"],

@@ -430,11 +430,10 @@ fn cheap_leaf_switch(f: &Function) -> bool {
             | InstData::Return { .. }
             | InstData::Jump { .. }
             | InstData::Brif { .. } => {}
-            InstData::Binary { op, .. }
-                if matches!(
-                    op,
-                    BinaryOp::Iadd | BinaryOp::Isub | BinaryOp::And | BinaryOp::Or | BinaryOp::Xor
-                ) => {}
+            InstData::Binary {
+                op: BinaryOp::Iadd | BinaryOp::Isub | BinaryOp::And | BinaryOp::Or | BinaryOp::Xor,
+                ..
+            } => {}
             InstData::Switch { .. } => switch = true,
             _ => return false,
         }
@@ -509,20 +508,20 @@ fn readonly_leaf(f: &Function) -> bool {
             | InstData::Jump { .. }
             | InstData::Brif { .. }
             | InstData::Switch { .. } => {}
-            InstData::Binary { op, .. }
-                if matches!(
-                    op,
+            InstData::Binary {
+                op:
                     BinaryOp::Iadd
-                        | BinaryOp::Isub
-                        | BinaryOp::Imul
-                        | BinaryOp::Shl
-                        | BinaryOp::Ushr
-                        | BinaryOp::Sshr
-                        | BinaryOp::Ptradd
-                        | BinaryOp::And
-                        | BinaryOp::Or
-                        | BinaryOp::Xor
-                ) => {}
+                    | BinaryOp::Isub
+                    | BinaryOp::Imul
+                    | BinaryOp::Shl
+                    | BinaryOp::Ushr
+                    | BinaryOp::Sshr
+                    | BinaryOp::Ptradd
+                    | BinaryOp::And
+                    | BinaryOp::Or
+                    | BinaryOp::Xor,
+                ..
+            } => {}
             _ => return false,
         }
         loads += usize::from(matches!(data, InstData::Load { .. }));
@@ -2041,6 +2040,9 @@ pub fn required_inline_asm_with_c_definitions(
             let mut changed = crate::phi_simplify::run(f);
             changed |= crate::gvn::run(f);
             changed |= crate::memory_forward::run(f);
+            if !f.debug_vars.is_empty() {
+                changed |= crate::memory_forward::finalize_asm_immediates(f);
+            }
             changed |= crate::const_fold::run(f);
             changed |= crate::instcombine::run(f);
             changed |= crate::simplify_cfg::run(f);

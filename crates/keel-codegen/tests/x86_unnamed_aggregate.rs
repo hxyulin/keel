@@ -19,7 +19,7 @@ fn small_source() -> &'static str {
 fn materialization_and_actual_named_prefix_roundtrip() {
     let m = keel_ir::parse(small_source()).unwrap();
     keel_ir::verify_module(&m).unwrap();
-    let text = m.clone().to_string();
+    let text = m.to_string();
     let n = keel_ir::parse(&text).unwrap();
     keel_ir::verify_module(&n).unwrap();
     assert_eq!(text, n.to_string());

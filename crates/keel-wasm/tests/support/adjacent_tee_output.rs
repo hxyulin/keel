@@ -76,7 +76,9 @@ fn matching_raw_indices_only_including_multibyte_and_repeated_pairs() {
 fn typed_nonempty_prefix_survives_i32_and_i64_tees() {
     use std::io::Write;
     use std::process::{Command, Stdio};
-    use wasm_encoder::{CodeSection, ExportKind, ExportSection, FunctionSection, Module, TypeSection};
+    use wasm_encoder::{
+        CodeSection, ExportKind, ExportSection, FunctionSection, Module, TypeSection,
+    };
 
     let mut output = InstructionOutput::new(vec![(1, ValType::I32), (1, ValType::I64)]);
     for op in [
@@ -104,8 +106,8 @@ fn typed_nonempty_prefix_survives_i32_and_i64_tees() {
     assert_eq!(
         function.clone().into_raw_body(),
         [
-            2, 1, 0x7f, 1, 0x7e, 0x42, 0xe4, 0, 0x41, 7, 0x22, 0, 0xad, 0x7c, 0x42, 9,
-            0x22, 1, 0x7c, 0x20, 0, 0xad, 0x7c, 0x20, 1, 0x7c, 0x0b,
+            2, 1, 0x7f, 1, 0x7e, 0x42, 0xe4, 0, 0x41, 7, 0x22, 0, 0xad, 0x7c, 0x42, 9, 0x22, 1,
+            0x7c, 0x20, 0, 0xad, 0x7c, 0x20, 1, 0x7c, 0x0b,
         ]
     );
     let mut module = Module::new();
@@ -127,13 +129,16 @@ fn typed_nonempty_prefix_survives_i32_and_i64_tees() {
         .validate_all(&bytes)
         .unwrap();
     let mut child = Command::new("node")
-        .args(["-e", r#"
+        .args([
+            "-e",
+            r#"
 const assert = require('assert/strict');
 const bytes = require('fs').readFileSync(0);
 assert(WebAssembly.validate(bytes));
 const e = new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports;
 for (let i = 0; i < 20; i++) assert.equal(e.value(), 132n);
-"#])
+"#,
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -166,6 +171,8 @@ fn consecutive_sets_flush_first_and_only_fold_last_immediate_read() {
     }
     assert_eq!(
         output.finish().into_raw_body(),
-        [1, 2, 0x7f, 0x21, 0, 0x22, 0, 0x20, 0, 0x21, 1, 0x22, 0, 0x22, 1, 0x21, 1]
+        [
+            1, 2, 0x7f, 0x21, 0, 0x22, 0, 0x20, 0, 0x21, 1, 0x22, 0, 0x22, 1, 0x21, 1
+        ]
     );
 }

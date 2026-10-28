@@ -8,7 +8,7 @@ use std::fs;
 use std::process::Command;
 #[allow(dead_code)]
 #[path = "common/vector.rs"]
-mod common;
+pub mod common;
 
 fn representative() -> String {
     let mut ir = String::new();

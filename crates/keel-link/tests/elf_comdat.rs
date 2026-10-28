@@ -412,7 +412,7 @@ fn different_signatures_do_not_suppress_strong_duplicates() {
 #[test]
 fn unnamed_section_signature_uses_section_name() {
     let original = group(1, "");
-    let mut input = original.clone();
+    let mut input = original;
     let f = object::File::parse(input.as_slice()).unwrap();
     let group = f
         .sections()
@@ -571,9 +571,7 @@ fn invalid_initial_location_encoding_is_not_hidden_by_fde_selection() {
         .0 as usize;
     // An absolute 64-bit relocation cannot identify this pcrel sdata4 field.
     put32(&mut second, at + 8, 1);
-    let error = link(&[object(START), first, second])
-        .err()
-        .expect("invalid FDE must diagnose");
+    let error = link(&[object(START), first, second]).expect_err("invalid FDE must diagnose");
     assert!(error.contains("pointer encoding"), "{error}");
 }
 

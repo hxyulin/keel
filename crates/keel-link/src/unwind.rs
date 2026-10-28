@@ -491,7 +491,7 @@ mod tests {
         let valid = s.relocs.iter().find(|r| r.offset == 16).unwrap().clone();
         let mut invalid = valid.clone();
         invalid.width = 4;
-        s.relocs = vec![valid.clone(), invalid.clone()];
+        s.relocs = vec![valid.clone(), invalid];
         let expected = l.unwind_entries(&BTreeMap::new()).unwrap();
         assert_eq!(expected.1, vec![0x1000]);
         l.objects[0].sections[si].relocs.reverse();
@@ -542,7 +542,7 @@ mod tests {
             .find(|r| r.kind == 1 && r.width == 8)
             .unwrap()
             .clone();
-        let mut foreign = valid.clone();
+        let mut foreign = valid;
         foreign.kind = 0;
         s.relocs.insert(0, foreign.clone());
         // This fixture's compact record needs a relocated address, but the FDE

@@ -9,7 +9,7 @@ use keel_ir::{Type, VectorType};
 use std::{fs, path::PathBuf, process::Command};
 #[allow(dead_code)]
 #[path = "common/vector.rs"]
-mod common;
+pub mod common;
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -138,7 +138,7 @@ fn explicit_fma_native_and_fallback_exports() {
             }
         }
     }
-    let m = keel_ir::parse(&source().split("func @numeric_f32x8").next().unwrap()).unwrap();
+    let m = keel_ir::parse(source().split("func @numeric_f32x8").next().unwrap()).unwrap();
     let arm = keel_codegen::aarch64::compile(&m).unwrap();
     assert!(arm.contains("fmadd"));
 }

@@ -31,7 +31,14 @@ fn mnemonic_groups_match_binary_search_for_known_names_and_near_misses() {
             check(&format!("{}{}", &name[..index], &name[index + 1..]));
         }
     }
-    for length in [0, min_length - 1, min_length, max_length, max_length + 1, 4096] {
+    for length in [
+        0,
+        min_length - 1,
+        min_length,
+        max_length,
+        max_length + 1,
+        4096,
+    ] {
         check(&"x".repeat(length));
     }
     for name in ["é", "变量", "🦀", "ｍｏｖ", "mové", "éret"] {

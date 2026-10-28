@@ -249,7 +249,7 @@ pub(super) fn lower(old: &Function) -> Option<Function> {
         match d {
             InstData::StackAddr { slot } => {
                 let size = old.stack_slots().find(|(s, _)| s == slot)?.1.size as usize;
-                if size == 0 || size > 64 || size % 8 != 0 {
+                if size == 0 || size > 64 || !size.is_multiple_of(8) {
                     return None;
                 }
                 let id = *slots.entry(*slot).or_insert_with(|| b.object(size / 8));
@@ -354,12 +354,7 @@ pub(super) fn lower(old: &Function) -> Option<Function> {
                     return None;
                 }
                 let result = b.packed(result_home, 0)?;
-                b.f.append_inst(
-                    block,
-                    InstData::Return {
-                        args: vec![result].into(),
-                    },
-                );
+                b.f.append_inst(block, InstData::Return { args: vec![result] });
                 returned = true;
             }
             _ => return None,
@@ -462,7 +457,7 @@ fn lower_branches(old: &Function, sig: Signature) -> Option<Function> {
     let mut slots = FxHashMap::default();
     for (slot, data) in old.stack_slots() {
         let size = data.size as usize;
-        if size == 0 || size > 64 || size % 8 != 0 {
+        if size == 0 || size > 64 || !size.is_multiple_of(8) {
             return None;
         }
         slots.insert(slot, b.object(size / 8));
@@ -549,12 +544,7 @@ fn lower_branches(old: &Function, sig: Signature) -> Option<Function> {
                 }
                 InstData::Return { args } if args.is_empty() => {
                     let result = b.packed(result_home, 0)?;
-                    b.f.append_inst(
-                        b.block,
-                        InstData::Return {
-                            args: vec![result].into(),
-                        },
-                    );
+                    b.f.append_inst(b.block, InstData::Return { args: vec![result] });
                 }
                 InstData::Load {
                     ty: Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Ptr,

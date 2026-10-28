@@ -67,7 +67,7 @@ impl Analysis {
                     let Some(marker) = visited.get_mut(dest.block.index()) else {
                         return false;
                     };
-                    std::mem::replace(marker, Some(block)) == Some(block)
+                    marker.replace(block) == Some(block)
                 } else {
                     succs[..seen].contains(&dest.block)
                 };

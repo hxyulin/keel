@@ -268,39 +268,54 @@ mod tests {
 
     #[test]
     fn coarse_lowering_stages_preserve_output_and_reconcile() {
-        let module = keel_ir::parse(
-            "func @f(i64) -> i64 {
-block0(v0: i64):
-    return v0
-}",
-        )
-        .unwrap();
-        let target = crate::Target::Aarch64AppleDarwin;
-        let plain = crate::compile(&module, target).unwrap();
-        let (profiled, report) = capture(|| crate::compile(&module, target).unwrap());
-        assert_eq!(plain, profiled);
-        for stage in [
-            Stage::Folding,
-            Stage::FoldValues,
-            Stage::CompareFusion,
-            Stage::Lowering,
-            Stage::LoweringEntry,
-            Stage::AllocationAnnotations,
-            Stage::LoweringBody,
-            Stage::LoweringFinish,
-            Stage::Relaxation,
+        for (source, compare_fusion_calls) in [
+            ("func @f(i64) -> i64 {\nblock0(v0: i64):\n return v0\n}", 0),
+            (
+                "func @f(i64) -> i64 {\nblock0(v0: i64):\n v1 = iconst.i64 0\n v2 = icmp.eq v0,v1\n brif v2,block1,block2\nblock1:\n return v0\nblock2:\n return v1\n}",
+                1,
+            ),
         ] {
-            assert_eq!(report.stages[stage as usize].calls, 1, "{}", stage.name());
+            let module = keel_ir::parse(source).unwrap();
+            keel_ir::verify_module(&module).unwrap();
+            let target = crate::Target::Aarch64AppleDarwin;
+            let plain = crate::compile(&module, target).unwrap();
+            let (profiled, report) = capture(|| crate::compile(&module, target).unwrap());
+            assert_eq!(plain, profiled);
+            for stage in [
+                Stage::Folding,
+                Stage::FoldValues,
+                Stage::Lowering,
+                Stage::LoweringEntry,
+                Stage::AllocationAnnotations,
+                Stage::LoweringBody,
+                Stage::LoweringFinish,
+                Stage::Relaxation,
+            ] {
+                assert_eq!(report.stages[stage as usize].calls, 1, "{}", stage.name());
+            }
+            assert_eq!(
+                report.stages[Stage::CompareFusion as usize].calls,
+                compare_fusion_calls
+            );
+            let total: Duration = report.stages.iter().map(|s| s.self_time).sum();
+            assert_eq!(total, report.stages[Stage::Module as usize].inclusive);
+            let (program, structured_report) =
+                capture(|| crate::compile_program(&module, target).unwrap());
+            assert_eq!(program, crate::compile_program(&module, target).unwrap());
+            assert_eq!(
+                structured_report.stages[Stage::AllocationAnnotations as usize].calls,
+                0
+            );
+            assert_eq!(
+                structured_report.stages[Stage::CompareFusion as usize].calls,
+                compare_fusion_calls
+            );
+            let total: Duration = structured_report.stages.iter().map(|s| s.self_time).sum();
+            assert_eq!(
+                total,
+                structured_report.stages[Stage::Module as usize].inclusive
+            );
         }
-        let total: Duration = report.stages.iter().map(|s| s.self_time).sum();
-        assert_eq!(total, report.stages[Stage::Module as usize].inclusive);
-        let (program, structured_report) =
-            capture(|| crate::compile_program(&module, target).unwrap());
-        assert_eq!(program, crate::compile_program(&module, target).unwrap());
-        assert_eq!(
-            structured_report.stages[Stage::AllocationAnnotations as usize].calls,
-            0
-        );
     }
 
     #[test]

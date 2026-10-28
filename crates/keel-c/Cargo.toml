@@ -10,7 +10,7 @@ license.workspace = true
 profile = []
 
 [[example]]
-name = "profile"
+name = "profile_frontend"
 required-features = ["profile"]
 
 [dependencies]
@@ -31,3 +31,6 @@ keel-codegen = { path = "../keel-codegen" }
 keel-asm = { path = "../keel-asm" }
 keel-link = { path = "../keel-link" }
 object = { version = "0.36", default-features = false, features = ["read", "std"] }
+
+[lints]
+workspace = true

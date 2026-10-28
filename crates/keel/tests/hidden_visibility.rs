@@ -165,11 +165,13 @@ fn native_hidden_symbols_link_across_objects_but_are_not_exported() {
         // x86-64 thread-locals are local-exec, so it cannot build a shared
         // library from this object.)
         let exe = format!("program-{optimize}");
-        command(
-            Command::new("clang")
-                .current_dir(&dir)
-                .args(["-rdynamic", "main.c", &obj, "-o", &exe]),
-        );
+        command(Command::new("clang").current_dir(&dir).args([
+            "-rdynamic",
+            "main.c",
+            &obj,
+            "-o",
+            &exe,
+        ]));
         let out = command(&mut Command::new(dir.join(&exe)));
         assert_eq!(out, "45 45 hidden\n");
         let bytes = fs::read(dir.join(&exe)).unwrap();

@@ -15,6 +15,7 @@ use keel_ir::{
 };
 
 /// Explicit named/custom-pipeline entry point; absent from default pipelines.
+#[derive(Debug)]
 pub struct PrivateAggregate;
 impl crate::Pass for PrivateAggregate {
     fn name(&self) -> &'static str {
@@ -33,6 +34,7 @@ impl crate::Pass for PrivateAggregate {
 
 /// Keep cleanup coupled to transport: modules without a rewritten signature
 /// must not acquire another, unrelated round of scalar/stack optimization.
+#[derive(Debug)]
 pub struct PrivateAggregateCleanup;
 impl crate::Pass for PrivateAggregateCleanup {
     fn name(&self) -> &'static str {
@@ -267,10 +269,10 @@ pub fn run(m: &mut Module) -> usize {
             if work > MAX_MODULE_WORK {
                 return 0;
             }
-            if let InstData::Call { func, args } = f.inst_data(i) {
-                if args.has_explicit_abi() {
-                    blocked.insert(f.callee(*func).name.clone());
-                }
+            if let InstData::Call { func, args } = f.inst_data(i)
+                && args.has_explicit_abi()
+            {
+                blocked.insert(f.callee(*func).name.clone());
             }
             match f.inst_data(i) {
                 // Textual symbols disable the module; intrinsic/frame facilities
@@ -323,10 +325,10 @@ pub fn run(m: &mut Module) -> usize {
             .get(&f.name)
             .map_or(0, |p| p.split.iter().filter(|&&b| b).count() * 5);
         for (_, i) in f.layout_insts() {
-            if let InstData::Call { func, .. } = f.inst_data(i) {
-                if let Some(p) = plans.get(&f.callee(*func).name) {
-                    added = added.saturating_add(p.split.iter().filter(|&&b| b).count() * 4);
-                }
+            if let InstData::Call { func, .. } = f.inst_data(i)
+                && let Some(p) = plans.get(&f.callee(*func).name)
+            {
+                added = added.saturating_add(p.split.iter().filter(|&&b| b).count() * 4);
             }
         }
         growth = growth.saturating_add(added);
@@ -464,18 +466,15 @@ pub fn run(m: &mut Module) -> usize {
                     op: BinaryOp::Ptradd,
                     args,
                 } => {
-                    if let Some(&(words, off)) = homes.get(&f.resolve(args[0])) {
-                        if let ValueDef::Result(k, _) = f.value_def(f.resolve(args[1])) {
-                            if let InstData::Iconst { imm, .. } = f.inst_data(k) {
-                                if let Ok(delta) = usize::try_from(*imm) {
-                                    if let Some(off) = off.checked_add(delta).filter(|&o| o <= 16) {
-                                        let result = f.first_result(i);
-                                        if f.resolve(result) == result {
-                                            homes.insert(result, (words, off));
-                                        }
-                                    }
-                                }
-                            }
+                    if let Some(&(words, off)) = homes.get(&f.resolve(args[0]))
+                        && let ValueDef::Result(k, _) = f.value_def(f.resolve(args[1]))
+                        && let InstData::Iconst { imm, .. } = f.inst_data(k)
+                        && let Ok(delta) = usize::try_from(*imm)
+                        && let Some(off) = off.checked_add(delta).filter(|&o| o <= 16)
+                    {
+                        let result = f.first_result(i);
+                        if f.resolve(result) == result {
+                            homes.insert(result, (words, off));
                         }
                     }
                 }

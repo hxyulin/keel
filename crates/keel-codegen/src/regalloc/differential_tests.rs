@@ -182,8 +182,7 @@ fn reference_linear_scan(
                 available(r)
                     && match r {
                         Loc::Reg(n) => {
-                            pools.caller_saved.contains(&n)
-                                || locs[0].iter().any(|&loc| loc == Some(r))
+                            pools.caller_saved.contains(&n) || locs[0].contains(&Some(r))
                         }
                         _ => false,
                     }
@@ -358,7 +357,7 @@ fn assert_reference_equivalence(
                 .then_some(func),
             );
             let expected_slots = reference_assign_spill_slots(&mut reference_spills, &mut expected);
-            let actual = allocate_tier(func, &pools, &is_call, &returns_twice, selection, tier);
+            let actual = allocate_tier(func, &pools, is_call, returns_twice, selection, tier);
             assert_eq!(actual.order, order);
             assert_eq!(
                 actual.locs, expected,
@@ -455,14 +454,7 @@ fn returns_twice_pins_both_i128_halves_and_spill_slots() {
         float_caller_saved: &[],
         float_callee_saved: &[],
     };
-    let alloc = allocate_tier(
-        &func,
-        &pools,
-        &call,
-        &call,
-        &selection,
-        AllocationTier::Fast,
-    );
+    let alloc = allocate_tier(&func, &pools, call, call, &selection, AllocationTier::Fast);
     let low = alloc.loc(Value::new(0)).unwrap();
     let high = alloc.hi_loc(Value::new(0)).unwrap();
     assert_ne!(low, high);

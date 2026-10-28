@@ -194,7 +194,7 @@ fn explicit_limits_accept_boundaries_and_reject_overflow() {
             .collect(),
     };
     assert_eq!(analyze(&p).unwrap().blocks, MAX_BLOCKS);
-    let mut bad = p.clone();
+    let mut bad = p;
     bad.blocks.push(block(vec![], Exit::Normal));
     rejects(&bad, "1..=64");
     // Fourteen branch nodes choose one of fifteen leaves; every leaf defines

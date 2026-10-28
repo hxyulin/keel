@@ -14,16 +14,15 @@ pub fn fold_body(raw: &[u8]) -> (Vec<u8>, usize) {
     let mut i = 0;
     let mut pairs = 0;
     while i < spans.len() {
-        if let Operator::LocalSet { local_index: set } = spans[i].0 {
-            if i + 1 < spans.len()
-                && matches!(spans[i + 1].0, Operator::LocalGet { local_index } if local_index == set)
-            {
-                result.push(0x22); // local.tee has the identical raw index LEB.
-                result.extend_from_slice(&raw[spans[i].1 + 1..spans[i].2]);
-                pairs += 1;
-                i += 2;
-                continue;
-            }
+        if let Operator::LocalSet { local_index: set } = spans[i].0
+            && i + 1 < spans.len()
+            && matches!(spans[i + 1].0, Operator::LocalGet { local_index } if local_index == set)
+        {
+            result.push(0x22); // local.tee has the identical raw index LEB.
+            result.extend_from_slice(&raw[spans[i].1 + 1..spans[i].2]);
+            pairs += 1;
+            i += 2;
+            continue;
         }
         result.extend_from_slice(&raw[spans[i].1..spans[i].2]);
         i += 1;

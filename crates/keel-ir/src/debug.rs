@@ -203,6 +203,7 @@ fn opt_type(f: &mut fmt::Formatter<'_>, ty: Option<DebugType>) -> fmt::Result {
 }
 
 /// `dtype dt3 = ...`, for the module's type at `index`.
+#[derive(Debug)]
 pub struct DebugTypeLine<'a>(pub usize, pub &'a DebugTypeData);
 
 impl fmt::Display for DebugTypeLine<'_> {

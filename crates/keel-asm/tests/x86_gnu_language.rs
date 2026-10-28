@@ -54,15 +54,15 @@ base: .byte 5
 
 // Normalize section-symbol relocations and named local relocations to the
 // same section + addend. Keep ELF relocation types and offsets independent.
-fn snapshot(
-    bytes: &[u8],
-) -> Vec<(
+type RelocationRecord = (u64, u32, String, i64);
+type SectionSnapshot = (
     String,
     u64,
     object::SectionFlags,
     Vec<u8>,
-    Vec<(u64, u32, String, i64)>,
-)> {
+    Vec<RelocationRecord>,
+);
+fn snapshot(bytes: &[u8]) -> Vec<SectionSnapshot> {
     let file = object::File::parse(bytes).unwrap();
     let mut out = Vec::new();
     for name in [".text", ".data", ".bss", "__ex_table"] {

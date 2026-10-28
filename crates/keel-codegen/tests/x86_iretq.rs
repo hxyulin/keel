@@ -85,12 +85,12 @@ fn terminal_callers_tiers_and_export() {
                     let (bytes, text) = userspace::compile(SOURCE, level, s, a, spill);
                     assert!(text.contains("__keel_x86_iretq"), "{text}");
                     assert!(text.contains("ud2"), "{text}");
-                    if level == CpuLevel::V1 {
-                        if let Some(dir) = &dir {
-                            let name = format!("iretq-{s:?}-{a:?}-{spill}");
-                            std::fs::write(dir.join(format!("{name}.o")), bytes).unwrap();
-                            std::fs::write(dir.join(format!("{name}.s")), text).unwrap();
-                        }
+                    if level == CpuLevel::V1
+                        && let Some(dir) = &dir
+                    {
+                        let name = format!("iretq-{s:?}-{a:?}-{spill}");
+                        std::fs::write(dir.join(format!("{name}.o")), bytes).unwrap();
+                        std::fs::write(dir.join(format!("{name}.s")), text).unwrap();
                     }
                 }
             }

@@ -37,6 +37,7 @@ pub enum Machine {
     Aarch64,
 }
 
+#[derive(Debug)]
 pub struct Options {
     /// Collect unreachable ELF input sections. Disabled by default.
     pub gc_sections: bool,
@@ -773,8 +774,10 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
             &mut units,
             &mut unwind_sections,
             &mut globals,
-            &options.entry,
-            !libraries.is_empty(),
+            gc::Roots {
+                entry: &options.entry,
+                dynamic: !libraries.is_empty(),
+            },
             &mut sframe_section,
             &mut sframe_targets,
         )?;

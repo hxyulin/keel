@@ -7,3 +7,6 @@ license.workspace = true
 
 [dependencies]
 keel-asm-ir = { path = "../keel-asm-ir" }
+
+[lints]
+workspace = true

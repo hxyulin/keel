@@ -56,12 +56,12 @@ fn swapgs_tiers_roundtrip_retention_and_export() {
                         .filter(|n| !n.is_empty())
                         .collect::<Vec<_>>();
                     assert_eq!(undefined, ["gs_observe"]);
-                    if level == CpuLevel::V1 {
-                        if let Some(dir) = &dir {
-                            let name = format!("swapgs-{s:?}-{a:?}-{spill}");
-                            std::fs::write(dir.join(format!("{name}.o")), bytes).unwrap();
-                            std::fs::write(dir.join(format!("{name}.s")), text).unwrap();
-                        }
+                    if level == CpuLevel::V1
+                        && let Some(dir) = &dir
+                    {
+                        let name = format!("swapgs-{s:?}-{a:?}-{spill}");
+                        std::fs::write(dir.join(format!("{name}.o")), bytes).unwrap();
+                        std::fs::write(dir.join(format!("{name}.s")), text).unwrap();
                     }
                 }
             }

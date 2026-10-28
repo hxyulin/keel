@@ -66,12 +66,12 @@ fn interrupt_control_tiers_adjacency_liveness_and_export() {
                     let lines = body.lines().map(str::trim).collect::<Vec<_>>();
                     let sti = lines.iter().position(|l| *l == "sti").unwrap();
                     assert_eq!(lines[sti + 1], "hlt", "{body}");
-                    if level == CpuLevel::V1 {
-                        if let Some(dir) = &dir {
-                            let name = format!("interrupt-{s:?}-{a:?}-{spill}");
-                            std::fs::write(dir.join(format!("{name}.o")), bytes).unwrap();
-                            std::fs::write(dir.join(format!("{name}.s")), text).unwrap();
-                        }
+                    if level == CpuLevel::V1
+                        && let Some(dir) = &dir
+                    {
+                        let name = format!("interrupt-{s:?}-{a:?}-{spill}");
+                        std::fs::write(dir.join(format!("{name}.o")), bytes).unwrap();
+                        std::fs::write(dir.join(format!("{name}.s")), text).unwrap();
                     }
                 }
             }

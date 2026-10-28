@@ -37,7 +37,8 @@ fn source_rings_and_predicate_widths_are_explicit_on_native_targets() {
                 }
             }
         }
-        for target in [VectorTarget::Portable] {
+        {
+            let target = VectorTarget::Portable;
             assert!(!packed(&optimize(&source, target, "loop-reduce")));
         }
         assert!(!packed(&optimize(&source, target, "fast-loop-reduce")));

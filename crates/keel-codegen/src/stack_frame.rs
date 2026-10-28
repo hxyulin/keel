@@ -17,7 +17,9 @@ impl SlotOffsets {
         for block in func.blocks() {
             for &inst in func.block_insts(block) {
                 match *func.inst_data(inst) {
-                    InstData::StackAddr { slot } | InstData::AggregateVaArg { home: slot, .. } => used[slot.index()] = true,
+                    InstData::StackAddr { slot } | InstData::AggregateVaArg { home: slot, .. } => {
+                        used[slot.index()] = true
+                    }
                     _ => {}
                 }
             }

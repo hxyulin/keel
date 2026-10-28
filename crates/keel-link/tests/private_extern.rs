@@ -61,12 +61,12 @@ fn exports(bytes: &[u8]) -> BTreeSet<String> {
             0x80000033 => Some((u32le(bytes, at + 8), u32le(bytes, at + 12))),
             _ => None,
         };
-        if let Some((offset, size)) = pair {
-            if size != 0 {
-                let mut out = BTreeSet::new();
-                visit(&bytes[offset..offset + size], 0, String::new(), &mut out, 0);
-                return out;
-            }
+        if let Some((offset, size)) = pair
+            && size != 0
+        {
+            let mut out = BTreeSet::new();
+            visit(&bytes[offset..offset + size], 0, String::new(), &mut out, 0);
+            return out;
         }
         at += u32le(bytes, at + 4);
     }

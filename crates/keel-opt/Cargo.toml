@@ -13,3 +13,6 @@ profile-with-tracy = ["profiling/profile-with-tracy"]
 [dependencies]
 profiling.workspace = true
 keel-ir = { path = "../keel-ir" }
+
+[lints]
+workspace = true

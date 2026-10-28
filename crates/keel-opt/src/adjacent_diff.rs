@@ -380,17 +380,22 @@ fn term(f: &mut Function, b: Block, d: D, loc: Option<keel_ir::SourceLoc>) {
     let i = f.append_inst(b, d);
     f.set_inst_loc(i, loc);
 }
+struct ChunkState {
+    previous: Value,
+    acc: Value,
+}
+
 // Keep each exact load/splat/bitcast/widen chain adjacent for packed-low selection.
 fn chunk(
     f: &mut Function,
     block: Block,
     addr: Value,
-    previous: Value,
-    acc: Value,
+    state: ChunkState,
     z: Value,
     c: &Candidate,
     history: History,
 ) -> (Value, Value) {
+    let ChunkState { previous, acc } = state;
     let e = |f: &mut Function, b, d| emit(f, b, d, c.math_loc);
     // Exactly 8 bytes, even though the arithmetic registers are 128 bits.
     let bits = emit(
@@ -657,7 +662,18 @@ fn transform(f: &mut Function, c: Candidate, history: History) {
             let delta = e(f, main, icon(8 * j as i64));
             e(f, main, ptr(address, delta))
         };
-        let (loaded, next_acc) = chunk(f, main, addr, current, acc, z, &c, history);
+        let (loaded, next_acc) = chunk(
+            f,
+            main,
+            addr,
+            ChunkState {
+                previous: current,
+                acc,
+            },
+            z,
+            &c,
+            history,
+        );
         current = loaded;
         next_accs.push(next_acc);
     }
@@ -720,7 +736,15 @@ fn transform(f: &mut Function, c: Candidate, history: History) {
         },
         loc,
     );
-    let (current, next_acc) = chunk(f, vector, address, previous, acc, z, &c, history);
+    let (current, next_acc) = chunk(
+        f,
+        vector,
+        address,
+        ChunkState { previous, acc },
+        z,
+        &c,
+        history,
+    );
     let next = e(f, vector, bin(B::Isub, remaining, two));
     let next_ptr = e(f, vector, ptr(address, eight));
     term(

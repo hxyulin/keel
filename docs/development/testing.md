@@ -19,6 +19,16 @@ python3 tools/test.py --dry-run                    # Print packages and commands
 python3 tools/test.py full                         # Merge-boundary workspace verification
 ```
 
+GNU assembler oracle tests require GNU binutils. On macOS, `as` is Apple's
+assembler, so set `KEEL_GNU_AS` to the absolute path of an x86-64 GNU
+cross-assembler before running the workspace suite. These tests retain both
+the Clang and GNU comparisons; they do not skip a missing oracle silently.
+
+All main-workspace crates inherit the lint policy in the root manifest. Run
+`cargo fmt --all --check` and
+`cargo clippy --workspace --all-targets --all-features -- -D warnings` to check
+formatting and the full lint configuration, including experimental features.
+
 Use component and test-target selections during development. Full workspace
 verification belongs at a merge/fast-forward boundary or an explicitly requested
 qualification/timing run. Shared IR, ABI or fixture changes may need focused
@@ -57,12 +67,25 @@ options or `--quick` include the component's integration tests and doctests.
 
 `--changed BASE` includes differences between BASE and the current working tree,
 including staged, unstaged and untracked files. A source change selects its
-package and consumers. A top-level integration test source selects its package.
-Shared test helpers and fixtures select the entire workspace because several
-crates include each other's test inputs without Cargo dependency edges. Root
+package and consumers. Test sources and indexed fixtures select their owner and
+packages that import them through literal `include!`, `include_str!`,
+`include_bytes!` or `#[path]` dependencies. Imports into library sources also
+select the importing package's Cargo consumers. Module path attributes use
+conservative suffix matching to cover inline module bases. Cross-package imports
+of a `src/` tree also count as package dependencies, covering edits to ordinary
+child modules without parsing Rust's full module tree.
+
+All three Rust macro delimiters are supported for literal includes. The index
+does not expand arbitrary procedural macros or execute generators.
+
+Unindexed fixtures, computed include paths, macro-supplied include names,
+identifier concatenation, conditional path attributes, root
 manifests, generator changes, unknown paths and deleted packages select the
-entire workspace. This is a conservative file/dependency selection,
-not execution coverage or proof that unselected code cannot be affected.
+entire workspace. Generated `OUT_DIR` includes are build outputs rather than
+Git changed-file inputs. Runtime-only fixture discovery is not inferred from
+filenames and retains the full-workspace fallback. This is a conservative
+file/dependency selection, not execution coverage or proof that unselected code
+cannot be affected.
 
 ## Development and qualification coverage
 

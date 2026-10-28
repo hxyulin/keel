@@ -365,10 +365,9 @@ impl Cache<'_> {
                     }
                     if let Some(Loc::Stack(slot)) =
                         self.alloc.locs[usize::from(op.part.high)][op.part.value.index()]
+                        && !retire.contains(&slot)
                     {
-                        if !retire.contains(&slot) {
-                            retire.push(slot);
-                        }
+                        retire.push(slot);
                     }
                 }
             }

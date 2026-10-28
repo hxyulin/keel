@@ -70,7 +70,8 @@ const e=new WebAssembly.Instance(mod).exports;
 
 fn conversions(bytes: &[u8]) -> Vec<(usize, usize)> {
     wasmparser::Validator::new_with_features(wasmparser::WasmFeatures::WASM1)
-        .validate_all(bytes).unwrap();
+        .validate_all(bytes)
+        .unwrap();
     let mut result = Vec::new();
     for payload in wasmparser::Parser::new(0).parse_all(bytes) {
         if let wasmparser::Payload::CodeSectionEntry(body) = payload.unwrap() {
@@ -151,12 +152,25 @@ block0(v0:i64):
 #[test]
 fn exact_patterns_calls_shared_uses_phi_and_unsigned_roundtrips() {
     let module = parse(CHAINS).unwrap();
-    let names = ["matched", "getter", "shared", "roundtrip", "phi", "shared_getter"];
+    let names = [
+        "matched",
+        "getter",
+        "shared",
+        "roundtrip",
+        "phi",
+        "shared_getter",
+    ];
     for profile in [1, 2] {
         // matched removes four conversions, getter removes exactly two.
-        assert_eq!(conversions(&emit(&module, &names, profile).unwrap()),
-            [(0,0), (0,1), (1,0), (2,3), (1,1), (2,2), (2,2)]);
-        execute(&module, &names, profile, r#"
+        assert_eq!(
+            conversions(&emit(&module, &names, profile).unwrap()),
+            [(0, 0), (0, 1), (1, 0), (2, 3), (1, 1), (2, 2), (2, 2)]
+        );
+        execute(
+            &module,
+            &names,
+            profile,
+            r#"
 const low=x=>BigInt.asUintN(32,x), signed=x=>BigInt.asIntN(32,x);
 for(const x of [0n,1n,-1n,-2147483648n,0x80000000n,0xffffffffn,0x100000000n,
  0x100000001n,-0x100000001n,0x7fffffffffffffffn,-0x8000000000000000n]) {
@@ -168,13 +182,15 @@ for(const x of [0n,1n,-1n,-2147483648n,0x80000000n,0xffffffffn,0x100000000n,
  assert.equal(e.shared_getter(a),2n*low(a));
  for(const c of [0,1]) assert.equal(e.phi(a,c),low(a));
 }
-"#);
+"#,
+        );
     }
 }
 
 #[test]
 fn raw_aliases_keep_conversions_and_destinations() {
-    let mut module = parse(r#"
+    let mut module = parse(
+        r#"
 func @alias(i32,i64)->i64 {
 block0(v0:i32,v1:i64):
  v2 = uext.i64 v0
@@ -185,24 +201,35 @@ block0(v0:i32,v1:i64):
  v7 = iadd v6,v2
  return v7
 }
-"#).unwrap();
+"#,
+    )
+    .unwrap();
     let f = &mut module.functions[0];
     let b = f.entry_block().unwrap();
     let first = f.block_insts(b)[0];
     f.replace_all_uses(f.first_result(first), f.block_params(b)[1]);
     for profile in [1, 2] {
-        assert_eq!(conversions(&emit(&module, &["alias"], profile).unwrap()), [(2,3)]);
-        execute(&module, &["alias"], profile, r#"
+        assert_eq!(
+            conversions(&emit(&module, &["alias"], profile).unwrap()),
+            [(2, 3)]
+        );
+        execute(
+            &module,
+            &["alias"],
+            profile,
+            r#"
 for(const x of [0n,-1n,0xffffffffn,0x100000000n,-0x8000000000000000n]) {
  assert.equal(e.alias(-37,x),BigInt.asIntN(64,BigInt.asUintN(32,x)+x));
 }
-"#);
+"#,
+        );
     }
 }
 
 #[test]
 fn exact_memory_wrap_canaries_oob_and_call_volatile_order() {
-    let module = parse(r#"
+    let module = parse(
+        r#"
 func @mark(i32)->i32 {
 block0(v0:i32):
  v1 = iconst.i64 32
@@ -238,9 +265,15 @@ block0(v0:i32,v1:i32):
  store volatile v9,v5
  return v8
 }
-"#).unwrap();
+"#,
+    )
+    .unwrap();
     for profile in [1, 2] {
-        execute(&module, &["write", "fault"], profile, r#"
+        execute(
+            &module,
+            &["write", "fault"],
+            profile,
+            r#"
 const u=new Uint8Array(e.memory.buffer);
 for(const [base,offset] of [[64n,0n],[0xffffffffn,66n],[0x80000000n,-0x7fffffbfn],
  [65n,0x100000000n],[65n,-0x100000000n],[0n,65532n]]) {
@@ -262,7 +295,8 @@ for(const addr of [72,65536]) {
  assert.throws(()=>t.fault(addr,0),WebAssembly.RuntimeError);
  assert.deepEqual(m,want,'first store, then division, then final store');
 }
-"#);
+"#,
+        );
     }
 }
 
@@ -273,13 +307,14 @@ fn unsupported_original_input_and_actual_wasm32_layout_still_gate() {
         "func @unused()->ptr {\nblock0:\n v0 = iconst.i64 0\n v1 = inttoptr.ptr v0\n return v1\n}",
     ] {
         let module = parse(&format!("{CHAINS}\n{bad}")).unwrap();
-        for profile in [1,2] {
+        for profile in [1, 2] {
             assert!(emit(&module, &["getter"], profile).is_err());
         }
     }
     // Ptr initializer occupies four bytes, not native eight: accepted by the
     // actual runtime WASM32 verifier, and getter still activates afterward.
-    let module = parse(r#"
+    let module = parse(
+        r#"
 data @target = align 4 { i32 7 }
 data @record = align 4 { ptr @target, i32 9 }
 func @getter()->i32 {
@@ -289,14 +324,20 @@ block0:
  v2 = trunc.i32 v1
  return v2
 }
-"#).unwrap();
-    assert_eq!(conversions(&emit(&module, &["getter"], 2).unwrap()), [(0,0)]);
+"#,
+    )
+    .unwrap();
+    assert_eq!(
+        conversions(&emit(&module, &["getter"], 2).unwrap()),
+        [(0, 0)]
+    );
     execute(&module, &["getter"], 2, "assert.equal(e.getter(),1028);");
 }
 
 #[test]
 fn unused_external_alias_and_cross_block_chain_stay_literal() {
-    let mut module = parse(r#"
+    let mut module = parse(
+        r#"
 func @external(i32)->i64 {
 block0(v0:i32):
  v1 = uext.i64 v0
@@ -318,26 +359,37 @@ block1(v2:i64):
  v6 = ptrtoint.i64 v5
  return v6
 }
-"#).unwrap();
+"#,
+    )
+    .unwrap();
     let f = &mut module.functions[0];
     let b = f.entry_block().unwrap();
     let first = f.first_result(f.block_insts(b)[0]);
     let external = f.first_result(f.block_insts(b)[5]);
     f.replace_all_uses(external, first);
-    for profile in [1,2] {
-        assert_eq!(conversions(&emit(&module, &["external", "cross"], profile).unwrap()), [(2,3), (2,3)]);
-        execute(&module, &["external", "cross"], profile, r#"
+    for profile in [1, 2] {
+        assert_eq!(
+            conversions(&emit(&module, &["external", "cross"], profile).unwrap()),
+            [(2, 3), (2, 3)]
+        );
+        execute(
+            &module,
+            &["external", "cross"],
+            profile,
+            r#"
 for(const x of [0n,-1n,0x80000000n,0xffffffffn]) {
  for(const name of ['external','cross'])
   assert.equal(e[name](Number(BigInt.asIntN(32,x))),BigInt.asUintN(32,x));
 }
-"#);
+"#,
+        );
     }
 }
 
 #[test]
 fn final_pointer_alias_and_shared_users_keep_the_raw_destination() {
-    let mut module = parse(r#"
+    let mut module = parse(
+        r#"
 func @final_alias(i32,i64)->i64 {
 block0(v0:i32,v1:i64):
  v2 = inttoptr.ptr v1
@@ -350,21 +402,30 @@ block0(v0:i32,v1:i64):
  v9 = iadd v7,v8
  return v9
 }
-"#).unwrap();
+"#,
+    )
+    .unwrap();
     let f = &mut module.functions[0];
     let b = f.entry_block().unwrap();
     let replacement = f.first_result(f.block_insts(b)[0]);
     let final_value = f.first_result(f.block_insts(b)[4]);
     f.replace_all_uses(final_value, replacement);
-    for profile in [1,2] {
-        assert_eq!(conversions(&emit(&module, &["final_alias"], profile).unwrap()), [(1,2)]);
-        execute(&module, &["final_alias"], profile, r#"
+    for profile in [1, 2] {
+        assert_eq!(
+            conversions(&emit(&module, &["final_alias"], profile).unwrap()),
+            [(1, 2)]
+        );
+        execute(
+            &module,
+            &["final_alias"],
+            profile,
+            r#"
 for(const x of [0n,-1n,0x80000000n,0x100000000n,-0x8000000000000000n])
  assert.equal(e.final_alias(123,x),2n*BigInt.asUintN(32,x));
-"#);
+"#,
+        );
     }
 }
-
 
 #[test]
 fn complete_chains_keep_intermediates_used_by_calls_edges_and_control() {
@@ -376,7 +437,8 @@ fn complete_chains_keep_intermediates_used_by_calls_edges_and_control() {
         "switch v2,block1(v2,v6),[1: block1(v2,v2)]\nblock1(v7:i64,v8:i64):\n v9 = iadd v7,v8\n return v9",
         "v7 = select v1,v2,v2\n v8 = iadd v7,v6\n return v8",
     ] {
-        let module = parse(&format!(r#"
+        let module = parse(&format!(
+            r#"
 func @sum(i64,i64)->i64 {{
 block0(v0:i64,v1:i64):
  v2 = iadd v0,v1
@@ -391,14 +453,24 @@ block0(v0:i32,v1:i32):
  v6 = ptrtoint.i64 v5
  {suffix}
 }}
-"#)).unwrap();
-        for profile in [1,2] {
-            assert_eq!(conversions(&emit(&module, &["probe"], profile).unwrap()), [(0,0),(2,3)]);
-            execute(&module, &["probe"], profile, r#"
+"#
+        ))
+        .unwrap();
+        for profile in [1, 2] {
+            assert_eq!(
+                conversions(&emit(&module, &["probe"], profile).unwrap()),
+                [(0, 0), (2, 3)]
+            );
+            execute(
+                &module,
+                &["probe"],
+                profile,
+                r#"
 for(const x of [0n,1n,-1n,-2147483648n,0x7fffffffn,0x80000000n,0xffffffffn])
  for(const c of [0,1])
   assert.equal(e.probe(Number(BigInt.asIntN(32,x)),c),2n*BigInt.asUintN(32,x));
-"#);
+"#,
+            );
         }
     }
 }
@@ -407,7 +479,8 @@ for(const x of [0n,1n,-1n,-2147483648n,0x7fffffffn,0x80000000n,0xffffffffn])
 fn saturated_occurrence_counts_cannot_turn_shared_values_into_single_use() {
     // A wrapping u8 counter would see 257 uses as one. The chain's first
     // intermediate must remain available to all 256 subsequent additions.
-    let mut source = String::from(r#"
+    let mut source = String::from(
+        r#"
 func @many(i32)->i64 {
 block0(v0:i32):
  v1 = uext.i64 v0
@@ -415,33 +488,49 @@ block0(v0:i32):
  v3 = uext.i64 v2
  v4 = inttoptr.ptr v3
  v5 = ptrtoint.i64 v4
-"#);
+"#,
+    );
     for n in 6..262 {
-        source.push_str(&format!(" v{n} = iadd v{},v1\n",n-1));
+        source.push_str(&format!(" v{n} = iadd v{},v1\n", n - 1));
     }
     source.push_str(" return v261\n}\n");
     let module = parse(&source).unwrap();
-    for profile in [1,2] {
-        assert_eq!(conversions(&emit(&module, &["many"], profile).unwrap()), [(2,3)]);
-        execute(&module, &["many"], profile, r#"
+    for profile in [1, 2] {
+        assert_eq!(
+            conversions(&emit(&module, &["many"], profile).unwrap()),
+            [(2, 3)]
+        );
+        execute(
+            &module,
+            &["many"],
+            profile,
+            r#"
 for(const x of [0,1,-1,-2147483648,2147483647])
  assert.equal(e.many(x),257n*BigInt.asUintN(32,BigInt(x)));
-"#);
+"#,
+        );
     }
 }
 
 #[test]
 fn signed_and_narrow_near_matches_and_effect_barriers_remain_literal() {
     for (first, second, barrier, counts, expected) in [
-        ("sext.i64", "uext.i64", "", (2,2), "low(x)"),
-        ("uext.i64", "sext.i64", "", (2,2), "low(x)"),
-        ("uext.i64", "uext.i64", "call @mark()", (2,3), "low(x)"),
+        ("sext.i64", "uext.i64", "", (2, 2), "low(x)"),
+        ("uext.i64", "sext.i64", "", (2, 2), "low(x)"),
+        ("uext.i64", "uext.i64", "call @mark()", (2, 3), "low(x)"),
         // Narrow truncation is semantically different at 0x10000 and -1.
-        ("uext.i64", "uext.i64", "narrow", (2,3), "BigInt.asUintN(16,x)"),
+        (
+            "uext.i64",
+            "uext.i64",
+            "narrow",
+            (2, 3),
+            "BigInt.asUintN(16,x)",
+        ),
     ] {
-        let trunc = if barrier == "narrow" {"i16"} else {"i32"};
-        let effect = if barrier == "narrow" {""} else {barrier};
-        let module = parse(&format!(r#"
+        let trunc = if barrier == "narrow" { "i16" } else { "i32" };
+        let effect = if barrier == "narrow" { "" } else { barrier };
+        let module = parse(&format!(
+            r#"
 func @mark() {{
 block0:
  return
@@ -456,14 +545,26 @@ block0(v0:i32):
  v5 = ptrtoint.i64 v4
  return v5
 }}
-"#)).unwrap();
-        for profile in [1,2] {
-            assert_eq!(conversions(&emit(&module, &["probe"], profile).unwrap()), [(0,0),counts]);
-            execute(&module, &["probe"], profile, &format!(r#"
+"#
+        ))
+        .unwrap();
+        for profile in [1, 2] {
+            assert_eq!(
+                conversions(&emit(&module, &["probe"], profile).unwrap()),
+                [(0, 0), counts]
+            );
+            execute(
+                &module,
+                &["probe"],
+                profile,
+                &format!(
+                    r#"
 const low=x=>BigInt.asUintN(32,x);
 for(const x of [0n,1n,-1n,65535n,65536n,0x7fffffffn,0x80000000n,0xffffffffn])
  assert.equal(e.probe(Number(BigInt.asIntN(32,x))),{expected});
-"#));
+"#
+                ),
+            );
         }
     }
 }
@@ -471,7 +572,8 @@ for(const x of [0n,1n,-1n,65535n,65536n,0x7fffffffn,0x80000000n,0xffffffffn])
 #[test]
 fn matched_chains_keep_retained_aliased_faulting_source_producers() {
     for producer in ["sdiv v0,v1", "load.i32 align 1 volatile v3"] {
-        let mut module = parse(&format!(r#"
+        let mut module = parse(&format!(
+            r#"
 func @probe(i32,i32,i64)->i64 {{
 block0(v0:i32,v1:i32,v2:i64):
  v3 = inttoptr.ptr v2
@@ -489,19 +591,29 @@ block0(v0:i32,v1:i32,v2:i64):
  store volatile v13,v5
  return v12
 }}
-"#)).unwrap();
+"#
+        ))
+        .unwrap();
         let f = &mut module.functions[0];
         let b = f.entry_block().unwrap();
         let value = f.first_result(f.block_insts(b)[5]);
         f.replace_all_uses(value, f.block_params(b)[0]);
-        for profile in [1,2] {
-            assert_eq!(conversions(&emit(&module, &["probe"], profile).unwrap()), [(2,1)]);
+        for profile in [1, 2] {
+            assert_eq!(
+                conversions(&emit(&module, &["probe"], profile).unwrap()),
+                [(2, 1)]
+            );
             let faults = if producer.starts_with("sdiv") {
                 "[[17,0,64n],[-2147483648,-1,64n]]"
             } else {
                 "[[17,3,65533n],[17,3,0xffffffffn]]"
             };
-            execute(&module, &["probe"], profile, &format!(r#"
+            execute(
+                &module,
+                &["probe"],
+                profile,
+                &format!(
+                    r#"
 const u=new Uint8Array(e.memory.buffer);
 for(const x of [0,1,-1,-2147483648,2147483647]) {{
  u.fill(0xa7); const want=u.slice(); want[40]=102;
@@ -514,7 +626,9 @@ for(const args of {faults}) {{
  assert.throws(()=>t.probe(...args),WebAssembly.RuntimeError);
  assert.deepEqual(m,want,'retained source faults before the final store');
 }}
-"#));
+"#
+                ),
+            );
         }
     }
 }
@@ -523,7 +637,8 @@ for(const args of {faults}) {{
 // retained aliased trap producer, and tees around shifted runtime frame locals.
 #[test]
 fn combined_terminal_cast_tees_preserve_mutation_traps_and_stack() {
-    let mut module = parse(r#"
+    let mut module = parse(
+        r#"
 func @choose(i32,i32,i32)->i32 {
  ss0=stack_slot 16, align 16
 block0(v0:i32,v1:i32,v2:i32):
@@ -564,23 +679,59 @@ block0:
  v2=trunc.i32 v1
  return v2
 }
-"#).unwrap();
+"#,
+    )
+    .unwrap();
     let f = &mut module.functions[0];
     let arm = f.blocks().nth(1).unwrap();
     let div = f.block_insts(arm)[1];
-    f.replace_all_uses(f.first_result(div), f.block_params(f.entry_block().unwrap())[1]);
+    f.replace_all_uses(
+        f.first_result(div),
+        f.block_params(f.entry_block().unwrap())[1],
+    );
     let bytes = emit(&module, &["choose", "address"], 2).unwrap();
-    assert_eq!(conversions(&bytes), [(0,0), (0,0)]);
-    let body = wasmparser::Parser::new(0).parse_all(&bytes).find_map(|p| {
-        if let wasmparser::Payload::CodeSectionEntry(b) = p.unwrap() { Some(b) } else { None }
-    }).unwrap();
-    let ops = body.get_operators_reader().unwrap().into_iter()
-        .collect::<Result<Vec<_>, _>>().unwrap();
-    assert!(!ops.iter().any(|o| matches!(o, wasmparser::Operator::Loop { .. })));
-    assert_eq!(ops.iter().filter(|o| matches!(o, wasmparser::Operator::Else)).count(), 1);
-    assert_eq!(ops.iter().filter(|o| matches!(o, wasmparser::Operator::I32DivS)).count(), 1);
-    assert!(ops.iter().any(|o| matches!(o, wasmparser::Operator::LocalTee { .. })));
-    execute(&module, &["choose", "address"], 2, r#"
+    assert_eq!(conversions(&bytes), [(0, 0), (0, 0)]);
+    let body = wasmparser::Parser::new(0)
+        .parse_all(&bytes)
+        .find_map(|p| {
+            if let wasmparser::Payload::CodeSectionEntry(b) = p.unwrap() {
+                Some(b)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    let ops = body
+        .get_operators_reader()
+        .unwrap()
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert!(
+        !ops.iter()
+            .any(|o| matches!(o, wasmparser::Operator::Loop { .. }))
+    );
+    assert_eq!(
+        ops.iter()
+            .filter(|o| matches!(o, wasmparser::Operator::Else))
+            .count(),
+        1
+    );
+    assert_eq!(
+        ops.iter()
+            .filter(|o| matches!(o, wasmparser::Operator::I32DivS))
+            .count(),
+        1
+    );
+    assert!(
+        ops.iter()
+            .any(|o| matches!(o, wasmparser::Operator::LocalTee { .. }))
+    );
+    execute(
+        &module,
+        &["choose", "address"],
+        2,
+        r#"
 function expected(m,addr,value) {
  const want=m.slice(), dv=new DataView(want.buffer);
  dv.setUint32(65520,7,true);
@@ -604,5 +755,6 @@ for(const [flag,addr,denom] of [[0,129,0],[0,129,-1],[0,65534,1],[1,65534,0]]) {
  assert.throws(()=>t.choose(flag,addr,denom),WebAssembly.RuntimeError);
  assert.deepEqual(u,want,'frame store precedes fault; OOB store writes no prefix');
 }
-"#);
+"#,
+    );
 }

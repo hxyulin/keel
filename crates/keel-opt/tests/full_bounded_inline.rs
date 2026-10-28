@@ -261,9 +261,9 @@ fn readonly_leaf_instruction_block_and_edge_caps_are_exact() {
             .map(|i| format!("{i}: block{}", i % arms + 1))
             .collect::<Vec<_>>()
             .join(", ");
-        let mut s = format!(
-            "func @leaf(ptr, i64) -> ptr local {{\nblock0(v0: ptr, v1: i64):\n v2 = load.ptr v0\n"
-        );
+        let mut s =
+            "func @leaf(ptr, i64) -> ptr local {\nblock0(v0: ptr, v1: i64):\n v2 = load.ptr v0\n"
+                .to_string();
         for i in 0..padding {
             s.push_str(&format!(" v{} = iconst.i64 0\n", i + 3));
         }

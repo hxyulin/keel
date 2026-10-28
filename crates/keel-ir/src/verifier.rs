@@ -1318,16 +1318,15 @@ impl Verifier<'_> {
                         "aggregate va_arg home is too small or under-aligned".into(),
                     );
                 }
-                if let Some((base, offset)) = local_aggregate_address(func, *list) {
-                    if base == *home
-                        && offset < layout_size as i64
-                        && offset.checked_add(24).is_some_and(|end| end > 0)
-                    {
-                        self.inst_error(
-                            inst,
-                            "aggregate va_arg home overlaps its va_list object".into(),
-                        );
-                    }
+                if let Some((base, offset)) = local_aggregate_address(func, *list)
+                    && base == *home
+                    && offset < layout_size as i64
+                    && offset.checked_add(24).is_some_and(|end| end > 0)
+                {
+                    self.inst_error(
+                        inst,
+                        "aggregate va_arg home overlaps its va_list object".into(),
+                    );
                 }
                 if ty(*list) != Type::Ptr || (layout_size == 0 && x86_vector_abi.is_none()) {
                     self.inst_error(
@@ -1335,11 +1334,11 @@ impl Verifier<'_> {
                         "aggregate va_arg requires a ptr list and nonempty layout".into(),
                     );
                 }
-                if let Some(abi) = x86_vector_abi {
-                    if !layout_contains_f64x1(layout) || !func.has_x86_va_arg_provenance(inst, *abi)
-                    {
-                        self.inst_error(inst, "tagged aggregate va_arg requires an f64x1 layout and matching local current-signature provenance".into());
-                    }
+                if let Some(abi) = x86_vector_abi
+                    && (!layout_contains_f64x1(layout)
+                        || !func.has_x86_va_arg_provenance(inst, *abi))
+                {
+                    self.inst_error(inst, "tagged aggregate va_arg requires an f64x1 layout and matching local current-signature provenance".into());
                 }
             }
             InstData::VaArg {

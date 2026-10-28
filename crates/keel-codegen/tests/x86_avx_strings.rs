@@ -9,7 +9,7 @@ use keel_ir::Intrinsic;
 use std::{fs, path::PathBuf, process::Command};
 #[allow(dead_code)]
 #[path = "common/vector.rs"]
-mod common;
+pub mod common;
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -429,14 +429,8 @@ fn check_string_exports(exhaustive: bool) {
                     {
                         continue;
                     }
-                    let (b, text) = object(
-                        s,
-                        a,
-                        empty,
-                        Features::for_level(if wide { CpuLevel::V3 } else { CpuLevel::V3 }),
-                        wide,
-                    )
-                    .unwrap();
+                    let (b, text) =
+                        object(s, a, empty, Features::for_level(CpuLevel::V3), wide).unwrap();
                     configurations += 1;
                     if let Some(e) = &export {
                         let n = format!("{name}-{s:?}-{a:?}-{empty}");
@@ -553,9 +547,7 @@ fn exact_oracle_instruction_bytes_gnu_and_clang() {
                 // encoding has no mnemonic; use the documented .insn directive.
                 let code = if gnu && w {
                     if op == "vpcmpistri" {
-                        format!(
-                            ".intel_syntax noprefix\n.text\n.insn VEX.128.66.0f3a.W1 0x63,xmm1,xmm2,3{{:u8}}\n"
-                        )
+                        ".intel_syntax noprefix\n.text\n.insn VEX.128.66.0f3a.W1 0x63,xmm1,xmm2,3{:u8}\n".to_string()
                     } else {
                         format!(".intel_syntax noprefix\n.text\n{op}q xmm1,xmm2,3\n")
                     }
@@ -600,14 +592,8 @@ fn exhaustive_native_avx_strings_all_controls_lengths_flags_aliases() {
         ] {
             for a in [AllocationTier::Fast, AllocationTier::Full] {
                 for empty in [false, true] {
-                    let (b, _) = object(
-                        s,
-                        a,
-                        empty,
-                        Features::for_level(if wide { CpuLevel::V3 } else { CpuLevel::V3 }),
-                        wide,
-                    )
-                    .unwrap();
+                    let (b, _) =
+                        object(s, a, empty, Features::for_level(CpuLevel::V3), wide).unwrap();
                     fs::write(d.join("strings.o"), b).unwrap();
                     common::command(
                         Command::new("clang")

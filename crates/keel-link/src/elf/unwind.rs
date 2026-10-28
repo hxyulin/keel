@@ -509,9 +509,16 @@ pub(super) fn filter(
         &relocs.keys().copied().collect(),
     )?))
 }
+pub(super) struct FrameOwner {
+    pub record: usize,
+    pub pc: u64,
+    pub range: u64,
+    pub fields: Vec<u64>,
+}
+
 impl Frames {
     /// FDE owner PC fields and all relocation fields in the FDE and its CIE.
-    pub(super) fn owners(&self, data: &[u8]) -> Result<Vec<(usize, u64, u64, Vec<u64>)>> {
+    pub(super) fn owners(&self, data: &[u8]) -> Result<Vec<FrameOwner>> {
         self.frames
             .iter()
             .map(|f| {
@@ -529,12 +536,12 @@ impl Frames {
                     .chain(self.fields.range(f.record as u64..end(f.record) as u64))
                     .map(|(&offset, _)| offset)
                     .collect();
-                Ok((
-                    f.record,
-                    f.pc.offset as u64,
-                    f.range.value(data, 0)?,
+                Ok(FrameOwner {
+                    record: f.record,
+                    pc: f.pc.offset as u64,
+                    range: f.range.value(data, 0)?,
                     fields,
-                ))
+                })
             })
             .collect()
     }

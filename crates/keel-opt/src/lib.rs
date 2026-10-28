@@ -823,10 +823,10 @@ impl<'a> Versions<'a> {
         canonical.resize(functions, false);
         let old = self.version.len();
         self.version.resize(functions, 0);
-        for index in 0..functions {
+        for (index, is_canonical) in canonical.iter_mut().enumerate() {
             if self.changed[index] || index >= old {
                 self.renew(index);
-                canonical[index] = false;
+                *is_canonical = false;
             }
         }
     }

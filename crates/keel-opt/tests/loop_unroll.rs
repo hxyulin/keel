@@ -443,7 +443,8 @@ block3:
 }}"
     );
     assert_eq!(loads(&optimize(&nested, &["loop-unroll"]).functions[0]), 3);
-    for src in [pressure] {
+    {
+        let src = pressure;
         let before = keel_ir::parse(&src).unwrap();
         keel_ir::verify_module(&before).unwrap();
         assert_eq!(

@@ -626,21 +626,21 @@ impl FunctionCompiler<'_> {
         self.def_done(result, d);
     }
     pub(super) fn vector_compare(&mut self, cond: IntCC, args: [Value; 2], result: Option<Value>) {
-        if result.is_some_and(|v| self.func.resolve(v) == v) {
-            if let Some((x, complement)) = sign_comparison(self.func, cond, args) {
-                self.vector_stage(x, FS0);
-                self.emit(
-                    Opcode::Pshufd,
-                    [asm_arg(xmm(FS0)), asm_arg(xmm(FS0)), asm_arg(0xf5i64)],
-                );
-                self.emit(Opcode::Psrad, [asm_arg(xmm(FS0)), asm_arg(31i64)]);
-                if complement {
-                    self.emit(Opcode::Pcmpeqd, [asm_arg(xmm(FS1)), asm_arg(xmm(FS1))]);
-                    self.emit(Opcode::Xorps, [asm_arg(xmm(FS0)), asm_arg(xmm(FS1))]);
-                }
-                self.vector_publish(result);
-                return;
+        if result.is_some_and(|v| self.func.resolve(v) == v)
+            && let Some((x, complement)) = sign_comparison(self.func, cond, args)
+        {
+            self.vector_stage(x, FS0);
+            self.emit(
+                Opcode::Pshufd,
+                [asm_arg(xmm(FS0)), asm_arg(xmm(FS0)), asm_arg(0xf5i64)],
+            );
+            self.emit(Opcode::Psrad, [asm_arg(xmm(FS0)), asm_arg(31i64)]);
+            if complement {
+                self.emit(Opcode::Pcmpeqd, [asm_arg(xmm(FS1)), asm_arg(xmm(FS1))]);
+                self.emit(Opcode::Xorps, [asm_arg(xmm(FS0)), asm_arg(xmm(FS1))]);
             }
+            self.vector_publish(result);
+            return;
         }
         let shape = self.ty(args[0]).vector().unwrap();
         let unsigned = matches!(cond, IntCC::Ult | IntCC::Ule | IntCC::Ugt | IntCC::Uge);

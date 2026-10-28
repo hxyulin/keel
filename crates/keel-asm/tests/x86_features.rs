@@ -130,7 +130,8 @@ fn matrix() -> Vec<String> {
     }
     cases
 }
-fn section(bytes: &[u8]) -> (Vec<u8>, Vec<(u64, String, i64, String)>) {
+type RelocationRecord = (u64, String, i64, String);
+fn section(bytes: &[u8]) -> (Vec<u8>, Vec<RelocationRecord>) {
     let file = object::File::parse(bytes).unwrap();
     let section = file.section_by_name(".text").unwrap();
     let rel = section

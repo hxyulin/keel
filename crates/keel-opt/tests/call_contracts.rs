@@ -38,7 +38,7 @@ block3(v4: i32):
         let f = &mut original.functions[0];
         let stop = f.layout_insts().find_map(|(_, i)| matches!(f.inst_data(i), InstData::Call { func, .. } if f.callee(*func).name == "stop").then_some(i)).unwrap();
         let loc = keel_ir::SourceLoc {
-            file: file,
+            file,
             line: 12,
             col: 3,
             scope: None,

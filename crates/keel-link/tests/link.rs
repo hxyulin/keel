@@ -838,8 +838,7 @@ fn undersized_macho_commands_cannot_read_the_next_payload() {
             }],
             options(),
         )
-        .err()
-        .expect("undersized command must be rejected");
+        .expect_err("undersized command must be rejected");
         assert!(error.contains("load command size"), "cmd={cmd:#x}: {error}");
     }
 }

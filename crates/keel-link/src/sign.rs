@@ -69,7 +69,7 @@ pub(crate) fn sign<W: Read + Write + Seek>(image: &mut W) -> Result<()> {
         }
         let kind = le32(&header, at);
         let size = le32(&header, at + 4) as usize;
-        if size < 8 || size % 8 != 0 || size > end - at {
+        if size < 8 || !size.is_multiple_of(8) || size > end - at {
             return fail("invalid Mach-O load command size");
         }
         if kind == 0x1d {
@@ -81,7 +81,7 @@ pub(crate) fn sign<W: Read + Write + Seek>(image: &mut W) -> Result<()> {
         if kind == 0x19 {
             if size < 72
                 || (size - 72) / 80 != le32(&header, at + 64) as usize
-                || (size - 72) % 80 != 0
+                || !(size - 72).is_multiple_of(80)
             {
                 return fail("invalid Mach-O segment command");
             }
@@ -97,18 +97,17 @@ pub(crate) fn sign<W: Read + Write + Seek>(image: &mut W) -> Result<()> {
                     return fail("Mach-O section overlaps reserved header page");
                 }
             }
-            if &header[at + 8..at + 24] == b"__TEXT\0\0\0\0\0\0\0\0\0\0" {
-                if text.replace((file, len)).is_some() || file != 0 || len < PAGE as u64 {
-                    return fail("invalid Mach-O text segment");
-                }
+            if &header[at + 8..at + 24] == b"__TEXT\0\0\0\0\0\0\0\0\0\0"
+                && (text.replace((file, len)).is_some() || file != 0 || len < PAGE as u64)
+            {
+                return fail("invalid Mach-O text segment");
             }
-            if &header[at + 8..at + 24] == b"__LINKEDIT\0\0\0\0\0\0" {
-                if linkedit.replace((at, file, len)).is_some()
+            if &header[at + 8..at + 24] == b"__LINKEDIT\0\0\0\0\0\0"
+                && (linkedit.replace((at, file, len)).is_some()
                     || file + len != code_limit
-                    || size != 72
-                {
-                    return fail("invalid Mach-O linkedit segment");
-                }
+                    || size != 72)
+            {
+                return fail("invalid Mach-O linkedit segment");
             }
         }
         at += size;
@@ -289,7 +288,10 @@ mod tests {
         let result = io.bytes.into_inner();
         let hashes = &result[end + HASH_START..];
         assert_eq!(hashes.len(), end / BLOCK * 32);
-        for (page, hash) in result[..end].chunks(BLOCK).zip(hashes.chunks_exact(32)) {
+        for (page, hash) in result[..end]
+            .chunks(BLOCK)
+            .zip(hashes.as_chunks::<32>().0.iter())
+        {
             assert_eq!(Sha256::digest(page).as_slice(), hash);
         }
         for (read_budget, write_budget, error) in [

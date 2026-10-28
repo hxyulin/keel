@@ -455,19 +455,58 @@ fn architectural_immediates_require_in_range_literal_i32_counts() {
 fn structured_neon_rejects_wrong_counts_shapes_and_lanes() {
     for shape in VectorType::ALL_64.into_iter().chain(VectorType::ALL_128) {
         for &op in keel_ir::NeonIntrinsic::ALL {
-            let Some(m) = op.memory() else { continue; };
+            let Some(m) = op.memory() else {
+                continue;
+            };
             let ty = Type::Vector(shape);
             let inputs = op.operand_types(ty).unwrap();
-            let params = inputs.iter().take(inputs.len()-usize::from(m.lane)).enumerate().map(|(i,t)|format!("v{i}: {t}")).collect::<Vec<_>>().join(",");
-            let sig = inputs.iter().take(inputs.len()-usize::from(m.lane)).map(Type::to_string).collect::<Vec<_>>().join(",");
-            let args = (0..inputs.len()-usize::from(m.lane)).map(|i|format!("v{i}")).chain(m.lane.then_some("v20".into())).collect::<Vec<_>>().join(",");
-            let results = (0..op.result_count()).map(|i|format!("v{}",30+i)).collect::<Vec<_>>().join(",");
-            for index in [-1, 0, i64::from(shape.lanes())-1, i64::from(shape.lanes())] {
-                let source = format!("func @f({sig}) {{\nblock0({params}):\n v20 = iconst.i32 {index}\n {}{op}.{shape}({args})\n return\n}}",if m.store {String::new()} else {format!("{results} = ")});
-                let module=keel_ir::parse(&source).unwrap();
-                assert_eq!(keel_ir::verify_module(&module).is_ok(),!m.lane || (0..i64::from(shape.lanes())).contains(&index),"{source}");
+            let params = inputs
+                .iter()
+                .take(inputs.len() - usize::from(m.lane))
+                .enumerate()
+                .map(|(i, t)| format!("v{i}: {t}"))
+                .collect::<Vec<_>>()
+                .join(",");
+            let sig = inputs
+                .iter()
+                .take(inputs.len() - usize::from(m.lane))
+                .map(Type::to_string)
+                .collect::<Vec<_>>()
+                .join(",");
+            let args = (0..inputs.len() - usize::from(m.lane))
+                .map(|i| format!("v{i}"))
+                .chain(m.lane.then_some("v20".into()))
+                .collect::<Vec<_>>()
+                .join(",");
+            let results = (0..op.result_count())
+                .map(|i| format!("v{}", 30 + i))
+                .collect::<Vec<_>>()
+                .join(",");
+            for index in [
+                -1,
+                0,
+                i64::from(shape.lanes()) - 1,
+                i64::from(shape.lanes()),
+            ] {
+                let source = format!(
+                    "func @f({sig}) {{\nblock0({params}):\n v20 = iconst.i32 {index}\n {}{op}.{shape}({args})\n return\n}}",
+                    if m.store {
+                        String::new()
+                    } else {
+                        format!("{results} = ")
+                    }
+                );
+                let module = keel_ir::parse(&source).unwrap();
+                assert_eq!(
+                    keel_ir::verify_module(&module).is_ok(),
+                    !m.lane || (0..i64::from(shape.lanes())).contains(&index),
+                    "{source}"
+                );
             }
         }
     }
-    assert!(keel_ir::parse("func @f(ptr) {\nblock0(v0: ptr):\n v1,v2 = neon_ld3.i8x8(v0)\n return\n}").is_err());
+    assert!(
+        keel_ir::parse("func @f(ptr) {\nblock0(v0: ptr):\n v1,v2 = neon_ld3.i8x8(v0)\n return\n}")
+            .is_err()
+    );
 }

@@ -272,7 +272,7 @@ fn native_all_cases_and_default_traps_match_independent_oracle() {
 
 fn fanout(sites: usize, cases: usize, stride: usize) -> String {
     let dispatch = sites + 1;
-    let mut src = format!("func @fanout(i32) -> i32 {{\nblock0(v0: i32):\n switch v0, block1, [");
+    let mut src = "func @fanout(i32) -> i32 {\nblock0(v0: i32):\n switch v0, block1, [".to_string();
     for i in 0..sites {
         if i != 0 {
             src += ", ";

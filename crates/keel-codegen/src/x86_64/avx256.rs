@@ -129,8 +129,8 @@ impl FunctionCompiler<'_> {
     /// Constants use memory operands, leaving all four SIMD scratch views usable.
     fn wc(&mut self, bytes: [u8; 32]) -> Memory {
         let at = self.copy_slot(self.copy_temp.expect("wide SIMD temporary"));
-        for (i, b) in bytes.chunks_exact(8).enumerate() {
-            let n = u64::from_le_bytes(b.try_into().unwrap());
+        for (i, b) in bytes.as_chunks::<8>().0.iter().enumerate() {
+            let n = u64::from_le_bytes(*b);
             self.emit(Opcode::Movabs, [asm_arg(r64(S0)), asm_arg(n)]);
             self.emit(
                 Opcode::Mov,

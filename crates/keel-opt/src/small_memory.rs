@@ -96,7 +96,7 @@ pub fn run(f: &mut Function) -> bool {
                                 at,
                                 InstData::Iconst {
                                     ty,
-                                    imm: (u64::MAX / 255 >> (64 - width * 8)) as i64,
+                                    imm: ((u64::MAX / 255) >> (64 - width * 8)) as i64,
                                 },
                             );
                             emit(
@@ -332,15 +332,14 @@ mod memcmp_tests {
                         assert_eq!(*flags, MemoryFlags::default());
                         let mut base = *addr;
                         let mut offset = 0;
-                        if let ValueDef::Result(ai, _) = f.value_def(base) {
-                            if let InstData::Binary {
+                        if let ValueDef::Result(ai, _) = f.value_def(base)
+                            && let InstData::Binary {
                                 op: BinaryOp::Ptradd,
                                 args,
                             } = f.inst_data(ai)
-                            {
-                                base = args[0];
-                                offset = integer(f, args[1]).unwrap();
-                            }
+                        {
+                            base = args[0];
+                            offset = integer(f, args[1]).unwrap();
                         }
                         let side = if base == f.block_params(f.entry_block().unwrap())[0] {
                             0

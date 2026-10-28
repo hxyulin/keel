@@ -96,17 +96,13 @@ impl<'a> Strings<'a> {
         let key = key(text);
         let mask = self.names.len() - 1;
         let mut i = slot(key.hash, self.names.len());
-        loop {
-            match self.names[i] {
-                Slot {
-                    key: stored,
-                    name: Some(name),
-                } => {
-                    if stored == key && (text.len() <= 8 || name.as_bytes() == text) {
-                        return name;
-                    }
-                }
-                Slot { name: None, .. } => break,
+        while let Slot {
+            key: stored,
+            name: Some(name),
+        } = self.names[i]
+        {
+            if stored == key && (text.len() <= 8 || name.as_bytes() == text) {
+                return name;
             }
             i = (i + 1) & mask;
         }

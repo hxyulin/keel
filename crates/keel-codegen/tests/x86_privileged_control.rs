@@ -86,13 +86,12 @@ fn privileged_controls_survive_optimization_with_parity_and_live_inputs() {
                         file.symbols()
                             .all(|s| !s.is_undefined() || s.name().unwrap().is_empty())
                     );
-                    if level == CpuLevel::V1 {
-                        if let Some(dir) = &export {
-                            let stem =
-                                format!("cpu-control-{selection:?}-{allocation:?}-{spilled}");
-                            std::fs::write(dir.join(format!("{stem}.o")), bytes).unwrap();
-                            std::fs::write(dir.join(format!("{stem}.s")), text).unwrap();
-                        }
+                    if level == CpuLevel::V1
+                        && let Some(dir) = &export
+                    {
+                        let stem = format!("cpu-control-{selection:?}-{allocation:?}-{spilled}");
+                        std::fs::write(dir.join(format!("{stem}.o")), bytes).unwrap();
+                        std::fs::write(dir.join(format!("{stem}.s")), text).unwrap();
                     }
                 }
             }

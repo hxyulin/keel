@@ -11,3 +11,6 @@ keel-ir = { path = "../keel-ir" }
 [dev-dependencies]
 keel-codegen = { path = "../keel-codegen" }
 
+
+[lints]
+workspace = true

@@ -288,7 +288,7 @@ fn rejects_incorrect_section_contract_even_when_nonallocated() {
         }
         error(b, ".sframe requires");
     }
-    let mut b = good.clone();
+    let mut b = good;
     // Type identifies SFrame even if its section name no longer does.
     put32(&mut b, sh, 0);
     error(b, ".sframe requires");
@@ -835,7 +835,7 @@ fn gc_weak_global_winner_and_local_addends_bind_before_pruning() {
     let winner = object(
         ".section .text.winner,\"axR\"\n.globl choice\nchoice: .zero 40\n.section .text.local,\"axR\"\n.globl local_code\nlocal_code: .zero 80\n",
     );
-    let exe = gc_link(&[metadata.clone(), loser.clone(), winner.clone()]).unwrap();
+    let exe = gc_link(&[metadata, loser, winner.clone()]).unwrap();
     let records = output_records(&exe);
     assert_eq!(records.len(), 3);
     assert_eq!(records[0].0, symbol_address(&exe, "choice").unwrap());
@@ -976,9 +976,7 @@ fn gc_retained_dwarf_references_into_sframe_reject_before_rewriting() {
                 assert!(link(&[metadata.clone(), code.clone()]).is_ok());
                 let result = gc_link(&[metadata, code]);
                 if mask != 0 {
-                    let error = result
-                        .err()
-                        .expect("retained DWARF reference was silently accepted");
+                    let error = result.expect_err("retained DWARF reference was silently accepted");
                     assert!(
                         error.contains("references into rewritten .sframe"),
                         "{directive}: {error}"

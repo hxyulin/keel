@@ -2,7 +2,8 @@ use keel_asm_ir::x86::Instruction;
 use object::{Object, ObjectSection, ObjectSymbol};
 use std::process::Command;
 
-fn normalized(bytes: &[u8]) -> (Vec<u8>, Vec<(u64, String, i64, String)>) {
+type RelocationRecord = (u64, String, i64, String);
+fn normalized(bytes: &[u8]) -> (Vec<u8>, Vec<RelocationRecord>) {
     let f = object::File::parse(bytes).unwrap();
     let text = f.section_by_name(".text").unwrap();
     let relocations = text

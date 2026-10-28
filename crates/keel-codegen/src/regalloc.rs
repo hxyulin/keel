@@ -127,6 +127,7 @@ pub struct Pools<'a> {
     pub float_callee_saved: &'a [u8],
 }
 
+#[derive(Debug)]
 pub struct Allocation {
     pub edits: AllocationEdits,
     /// The reachable blocks in the order the intervals were numbered, which
@@ -2375,8 +2376,8 @@ mod tests {
                         let alloc = allocate_tier(
                             func,
                             &pools,
-                            &is_call,
-                            &|_: &InstData| false,
+                            is_call,
+                            |_: &InstData| false,
                             &selection,
                             tier,
                         );

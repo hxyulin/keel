@@ -91,7 +91,7 @@ fn builtin_equality_native_guard_pages_and_both_target_objects() {
         )
         .unwrap();
         fs::write(
-            &assembly.with_extension("raw.s"),
+            assembly.with_extension("raw.s"),
             keel_codegen::compile(&raw, target).unwrap(),
         )
         .unwrap();

@@ -71,7 +71,13 @@ fn full_finalizes_private_transport_after_cleanup_and_fast_retains_its_schedule(
     use keel_opt::{OptimizationTier, optimize_with_tier};
     let pipeline = OptimizationTier::Full.pipeline();
     assert_eq!(pipeline.last(), Some(&"internal-fast-calls"));
-    assert_eq!(pipeline.iter().filter(|&&p| p == "internal-fast-calls").count(), 1);
+    assert_eq!(
+        pipeline
+            .iter()
+            .filter(|&&p| p == "internal-fast-calls")
+            .count(),
+        1
+    );
     assert_eq!(pipeline[pipeline.len() - 2], "private-aggregate-cleanup");
     assert_eq!(pipeline[pipeline.len() - 3], "dce");
     let source = SOURCE.replace("cc(c) local", "cc(c) noinline local");
@@ -79,10 +85,17 @@ fn full_finalizes_private_transport_after_cleanup_and_fast_retains_its_schedule(
         let mut m = parse(&source).unwrap();
         optimize_with_tier(&mut m, tier).unwrap();
         verify_module(&m).unwrap();
-        let expected = if tier == OptimizationTier::Full { CallConv::Fast } else { CallConv::C };
+        let expected = if tier == OptimizationTier::Full {
+            CallConv::Fast
+        } else {
+            CallConv::C
+        };
         assert_eq!(m.functions[0].sig.cc, expected);
         assert_eq!(m.functions[1].sig.cc, CallConv::C);
-        assert_eq!(m.functions[1].callees().next().unwrap().1.sig, m.functions[0].sig);
+        assert_eq!(
+            m.functions[1].callees().next().unwrap().1.sig,
+            m.functions[0].sig
+        );
         assert!(m.functions[1].to_string().contains("call @helper"));
     }
 }

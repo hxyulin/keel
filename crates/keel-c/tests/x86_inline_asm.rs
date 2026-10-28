@@ -337,6 +337,19 @@ static __attribute__((always_inline)) inline void *outer(void *p) { return rip(p
 void *address(void) { return outer(&global); }
 void *offset(void) { return rip((char *)&other + 7); }
 long constant(void) { return number(19 + 23); }
+static __attribute__((always_inline)) inline long plus(long n) {
+    long out;
+    asm("movq %1,%0" : "=r"(out) : "n"(n + 3));
+    return out;
+}
+static __attribute__((always_inline)) inline void *displaced(void *p) {
+    void *out;
+    asm("leaq %c1(%%rip), %0" : "=r"(out) : "i"((char *)p + 5));
+    return out;
+}
+long computed_constant(void) { return plus(39); }
+void *computed_address(void) { return displaced(&global); }
+
 static __attribute__((always_inline)) inline void unused(long x) { asm("" :: "i"(x)); }
 "#;
     for debug in [false, true] {
@@ -347,17 +360,20 @@ static __attribute__((always_inline)) inline void unused(long x) { asm("" :: "i"
                 .iter()
                 .any(|f| matches!(f.name.as_str(), "rip" | "outer" | "number" | "unused"))
         );
-        let text = keel_codegen::compile(&m, Target::X86_64LinuxGnu).unwrap();
+        let pipeline = CodegenPipeline {
+            selector: &SelectionTier::Full,
+            allocator: &AllocationTier::Full,
+        };
+        let text =
+            keel_codegen::compile_with_pipeline(&m, Target::X86_64LinuxGnu, &pipeline).unwrap();
         assert!(text.contains("global(%rip)"), "{text}");
         assert!(text.contains("other+7(%rip)"), "{text}");
+        assert!(text.contains("global+5(%rip)"), "{text}");
         assert!(text.contains("$42"), "{text}");
         let p = keel_codegen::x86_64::compile_program_with_pipeline(
             &m,
             &keel_codegen::x86_64::REGISTERS,
-            &CodegenPipeline {
-                selector: &SelectionTier::Full,
-                allocator: &AllocationTier::Full,
-            },
+            &pipeline,
         )
         .unwrap();
         let a = keel_asm::x86::assemble_object(&text).unwrap();

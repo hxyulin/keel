@@ -65,7 +65,7 @@ fn archive(member: Vec<u8>) -> Vec<u8> {
         .as_bytes(),
     );
     bytes.extend(member);
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         bytes.push(b'\n');
     }
     bytes

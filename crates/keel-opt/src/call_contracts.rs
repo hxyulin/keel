@@ -65,7 +65,7 @@ pub fn run(func: &mut Function) -> bool {
         };
         let data = InstData::Call {
             func: *callee,
-            args: (args.clone()).into(),
+            args: (args.clone()),
         };
         let loc = func.inst_loc(inst);
         *func.inst_data_mut(inst) = data;

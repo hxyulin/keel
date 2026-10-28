@@ -14,7 +14,7 @@ impl FunctionCompiler<'_> {
         let area = self.variadic_area.expect("variadic save area");
         let (gr, vr) = abi::named_registers(&param_kinds(&self.func.sig.params));
         // __stack, __gr_top and __vr_top.
-        self.address(Loc::Reg(S0), "x29", self.variadic_offset as usize);
+        self.address(Loc::Reg(S0), "x29", self.variadic_offset);
         self.mach("str", [Reg::x(S0).into(), Address::base(Reg::x(a)).into()]);
         for (field, offset) in [(8, area + 64), (16, area + 192)] {
             self.address(Loc::Reg(S0), self.base, offset);

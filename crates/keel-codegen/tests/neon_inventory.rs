@@ -59,8 +59,8 @@ fn enumerate_every_declared_neon_signature_and_immediate() {
                 let mut args = Vec::new();
                 for (i, &input) in inputs.iter().enumerate() {
                     let n = 10 + i;
-                    if i + 1 == inputs.len() && imm.is_some() {
-                        ir += &format!(" v{n} = iconst.i32 {}\n", imm.unwrap());
+                    if let Some(immediate) = imm.filter(|_| i + 1 == inputs.len()) {
+                        ir += &format!(" v{n} = iconst.i32 {immediate}\n");
                         args.push(format!("v{n}"));
                     } else if input == Type::Ptr {
                         args.push(format!("v{i}"));

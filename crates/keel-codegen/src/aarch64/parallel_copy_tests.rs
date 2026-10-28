@@ -5,7 +5,8 @@ use keel_asm::{TargetFeatures, assemble_object, assemble_program_object};
 const VREGS: [u8; 9] = [0, 1, 2, 3, 4, 5, 6, FS2, 31];
 const REMAT: u64 = 0x1234;
 
-fn cases() -> Vec<(&'static str, Vec<(Loc, Loc)>, bool)> {
+type CopyCase = (&'static str, Vec<(Loc, Loc)>, bool);
+fn cases() -> Vec<CopyCase> {
     use Loc::{FReg as F, Reg as R, Stack as S};
     vec![
         ("two", vec![(F(0), F(1)), (F(1), F(0))], true),

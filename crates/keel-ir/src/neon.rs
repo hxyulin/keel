@@ -389,9 +389,9 @@ impl NeonIntrinsic {
                 self.scalar_operands(shape.lane_type())
                     .into_iter()
                     .map(|t| {
-                        if t == Type::I32 && self.immediate_range(result).is_some() {
-                            t
-                        } else if t.is_vector() {
+                        if (t == Type::I32 && self.immediate_range(result).is_some())
+                            || t.is_vector()
+                        {
                             t
                         } else {
                             Type::Vector(

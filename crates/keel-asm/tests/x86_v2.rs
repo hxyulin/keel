@@ -179,7 +179,8 @@ fn gpr(n: usize, bits: u16) -> String {
     };
     names[n].into()
 }
-fn section(bytes: &[u8]) -> (Vec<u8>, Vec<(u64, String, i64, String)>) {
+type RelocationRecord = (u64, String, i64, String);
+fn section(bytes: &[u8]) -> (Vec<u8>, Vec<RelocationRecord>) {
     let f = object::File::parse(bytes).unwrap();
     let s = f.section_by_name(".text").unwrap();
     let rel = s

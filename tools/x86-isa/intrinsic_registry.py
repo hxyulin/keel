@@ -71,7 +71,14 @@ def generate(schema, families):
         lines += [f'    {row["variant"]} = {row["id"]},']
     lines += ['}', '', 'impl Intrinsic {', f'    pub const ALL: [Intrinsic; {len(rows)}] = [']
     lines += [f'        Intrinsic::{r["variant"]},' for r in sorted(rows, key=lambda r: r['inventory'])]
-    return '\n'.join(lines + ['    ];', '}', ''])
+    lines += ['    ];', '}', '',
+              '/// Generated x86-only patterns keep portable intrinsic matches exhaustive.',
+              '#[doc(hidden)]', '#[macro_export]', 'macro_rules! x86_intrinsics {',
+              '    () => {']
+    x86 = [row['variant'] for row in rows if row['variant'].startswith('X86')]
+    lines += [f'        {"" if index == 0 else "    | "}$crate::Intrinsic::{variant}'
+              for index, variant in enumerate(x86)]
+    return '\n'.join(lines + ['    };', '}', ''])
 
 
 def outputs(root):

@@ -4,6 +4,7 @@ import contextlib
 import io
 from pathlib import Path
 import unittest
+import tempfile
 
 SPEC = importlib.util.spec_from_file_location("test_runner", Path(__file__).parents[1] / "test.py")
 runner = importlib.util.module_from_spec(SPEC)
@@ -118,6 +119,132 @@ class SelectionTests(unittest.TestCase):
         for path in ["crates/ir/tests/fixtures/input.c", "crates/ir/tests/common/helper.rs"]:
             with self.subTest(path=path):
                 self.assertEqual(runner.changed_packages([path], self.packages), set(self.packages))
+
+    def test_static_fixture_edges_include_cross_crate_readers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_sources(root, {
+                "crates/codegen/tests/cross.rs": 'const INPUT: &str = include_str!("../../ir/tests/fixtures/input.c");',
+                "crates/unrelated/tests/cross.rs": 'const INPUT: &[u8] = include_bytes!(r#"../../ir/tests/fixtures/input.c"#);',
+            })
+            self.assertEqual(runner.changed_packages(["crates/ir/tests/fixtures/input.c"], self.packages, root),
+                             {"ir", "codegen", "unrelated"})
+
+    def test_include_macro_delimiters_index_literal_inputs(self):
+        for macro in ["include", "include_str", "include_bytes"]:
+            for opening, closing in [("(", ")"), ("{", "}"), ("[", "]")]:
+                with self.subTest(macro=macro, opening=opening), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    self.write_sources(root, {
+                        "crates/codegen/tests/cross.rs": f'{macro}!{opening}"../../ir/tests/fixtures/input.c"{closing};',
+                    })
+                    self.assertEqual(runner.changed_packages(["crates/ir/tests/fixtures/input.c"], self.packages, root),
+                                     {"ir", "codegen"})
+
+    def test_dynamic_include_macro_delimiters_keep_workspace_fallback(self):
+        for macro in ["include", "include_str", "include_bytes"]:
+            for opening, closing in [("(", ")"), ("{", "}"), ("[", "]")]:
+                with self.subTest(macro=macro, opening=opening), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    self.write_sources(root, {
+                        "crates/codegen/tests/static.rs": 'include_str!("../../ir/tests/fixtures/input.c");',
+                        "crates/unrelated/tests/dynamic.rs": f'{macro}!{opening}PATH{closing};',
+                    })
+                    self.assertEqual(runner.changed_packages(["crates/ir/tests/fixtures/input.c"], self.packages, root),
+                                     set(self.packages))
+
+    def test_library_inputs_include_transitive_cargo_consumers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_sources(root, {
+                "crates/codegen/src/lib.rs": '#[path = "../../ir/tests/common/helper.rs"] mod helper;',
+                "crates/ir/tests/common/helper.rs": 'const INPUT: &str = include_str!("../fixtures/input.c");',
+            })
+            self.assertEqual(runner.changed_packages(["crates/ir/tests/fixtures/input.c"], self.packages, root),
+                             {"ir", "codegen", "cli"})
+
+    def test_cross_package_source_modules_include_their_unindexed_children(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_sources(root, {
+                "crates/unrelated/src/lib.rs": '#[path = "../../ir/src/shared.rs"] mod shared;',
+                "crates/ir/src/shared.rs": 'mod child;',
+                "crates/ir/src/shared/child.rs": 'pub fn value() {}',
+            })
+            self.assertEqual(runner.changed_packages(["crates/ir/src/shared/child.rs"], self.packages, root),
+                             {"ir", "codegen", "cli", "unrelated"})
+
+    def test_path_attributes_cover_inline_module_bases_and_deleted_inputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_sources(root, {
+                "crates/codegen/tests/cross.rs": 'mod nested { #[path = "../../../ir/tests/common/helper.rs"] mod helper; }',
+            })
+            # The deleted helper need not exist to retain its consuming edge.
+            self.assertEqual(runner.changed_packages(["crates/ir/tests/common/helper.rs"], self.packages, root),
+                             {"ir", "codegen"})
+
+    def test_dynamic_inputs_keep_full_workspace_fallback(self):
+        for expression in ['include_str!(concat!("../../ir/tests/fixtures/", name))',
+                           'include_bytes!(PATH)', '#[path = module_path!()] mod helper;',
+                           '#[cfg_attr(feature = "x", path = "helper.rs")] mod helper;']:
+            with self.subTest(expression=expression), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.write_sources(root, {
+                    "crates/codegen/tests/cross.rs": expression,
+                    "crates/codegen/tests/static.rs": 'include_str!("../../ir/tests/fixtures/input.c");',
+                })
+                self.assertEqual(runner.changed_packages(["crates/ir/tests/fixtures/input.c"], self.packages, root),
+                                 set(self.packages))
+
+    def test_macro_generated_include_calls_keep_workspace_fallback(self):
+        expressions = [
+            'macro_rules! load { ($path:literal) => { include_str!{$path} }; }',
+            'macro_rules! load { ($reader:ident) => { $reader!("input.c") }; } load!(include_str);',
+            'macro_rules! load { ($reader:ident) => { $reader!("input.c") }; } load![include_str];',
+            'use std::include_bytes as load; load![PATH];',
+            'macro_rules! load { ($reader:ident) => { $reader!(PATH) }; } load!(\n include\n);',
+            'concat_idents!(include_, str)!(PATH);',
+            'macro_rules! load { () => { ${concat(include_, str)}!(PATH) }; }',
+        ]
+        for expression in expressions:
+            with self.subTest(expression=expression), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.write_sources(root, {
+                    "crates/codegen/tests/static.rs": 'include_str!("../../ir/tests/fixtures/input.c");',
+                    "crates/unrelated/tests/generated.rs": expression,
+                })
+                self.assertEqual(runner.changed_packages(["crates/ir/tests/fixtures/input.c"], self.packages, root),
+                                 set(self.packages))
+
+    def test_include_names_in_strings_comments_and_characters_are_not_dynamic_inputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_sources(root, {
+                "crates/codegen/tests/static.rs": 'include_str!("../../ir/tests/fixtures/input.c");',
+                "crates/unrelated/tests/strings.rs": "const QUOTE: char = '\"';\n"
+                    'const HELP: &str = r#"load!(include); use std::include_str as x;"#;\n'
+                    '// load!(include_str);\n',
+            })
+            self.assertEqual(runner.changed_packages(["crates/ir/tests/fixtures/input.c"], self.packages, root),
+                             {"ir", "codegen"})
+
+    def test_generated_output_does_not_hide_static_fixture_edges(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_sources(root, {
+                "crates/codegen/src/lib.rs": 'include!(concat!(env!("OUT_DIR"), "/generated.rs"));',
+                "crates/codegen/tests/cross.rs": 'include_str!("../../ir/tests/fixtures/input.c");',
+            })
+            self.assertEqual(runner.changed_packages(["crates/ir/tests/fixtures/input.c"], self.packages, root),
+                             {"ir", "codegen"})
+
+    @staticmethod
+    def write_sources(root, sources):
+        for name, text in sources.items():
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
 
     def test_unknown_and_deleted_paths_broaden(self):
         for path in ["Cargo.lock", "tools/generate.py", "crates/deleted/src/lib.rs"]:

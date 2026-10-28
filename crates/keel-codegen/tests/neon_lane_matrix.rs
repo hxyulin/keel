@@ -6,8 +6,7 @@ use keel_codegen::{
 use keel_ir::VectorType;
 use std::{fs, process::Command};
 #[path = "common/vector.rs"]
-#[allow(dead_code)]
-mod common;
+pub mod common;
 const SPILL: Pools = Pools {
     caller_saved: &[9, 10],
     callee_saved: &[19],

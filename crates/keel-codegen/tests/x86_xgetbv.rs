@@ -8,7 +8,7 @@ use keel_codegen::{
 use std::{fs, process::Command};
 #[allow(dead_code)]
 #[path = "common/vector.rs"]
-mod common;
+pub mod common;
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -71,7 +71,8 @@ int main(void){u32 a,b,c,d;__asm__ volatile("cpuid":"=a"(a),"=b"(b),"=c"(c),"=d"
 "#;
 #[test]
 fn xgetbv_features_unused_and_foreign() {
-    let bad = "func @bad(i32)->i64 {\nblock0(v0:i32):\n v1 = intrinsic x86_xgetbv0(v0)\n return v1\n}";
+    let bad =
+        "func @bad(i32)->i64 {\nblock0(v0:i32):\n v1 = intrinsic x86_xgetbv0(v0)\n return v1\n}";
     assert!(keel_ir::parse(bad).map_or(true, |m| keel_ir::verify_module(&m).is_err()));
     let m = keel_ir::parse(SOURCE).unwrap();
     assert!(keel_codegen::aarch64::compile(&m).is_err());

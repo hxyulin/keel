@@ -27,6 +27,9 @@ use smallvec::SmallVec;
 
 pub type R<T> = Result<T, Error>;
 
+/// Pointer/array qualifiers in const, volatile, atomic, restrict order.
+type TypeQualifiers = (bool, bool, bool, bool);
+
 /// A string literal: its bytes with the terminator, and whether it is wide.
 #[derive(Clone, Debug)]
 pub struct StrLit<'a> {
@@ -383,7 +386,7 @@ pub struct Parser<'a> {
     last_param_state: Option<FuncState<'a>>,
     last_param_ids: Vec<LocalId>,
     last_param_star: bool,
-    parameter_arrays: Vec<(&'a ArrayTy<'a>, (bool, bool, bool, bool))>,
+    parameter_arrays: Vec<(&'a ArrayTy<'a>, TypeQualifiers)>,
     parameter_star: bool,
     last_params: Vec<(Option<&'a str>, Ty<'a>, Sugar<'a>, Loc)>,
     /// Counts names made up for static locals and compound literals.
@@ -776,7 +779,7 @@ impl<'a> Parser<'a> {
             let member = |name: &'static str, ty: Ty<'a>, offset| Member {
                 nonstring: false,
                 align: Types::new(&self.structs, self.c_layout).align(&ty),
-                name: Some(name.into()),
+                name: Some(name),
                 ty,
                 sugar: Sugar::Plain,
                 offset,
@@ -785,7 +788,7 @@ impl<'a> Parser<'a> {
             let void_ptr = Ty::Ptr(&Ty::Void);
             self.structs.push(StructDef {
                 transparent_union: false,
-                tag: Some("__va_list_tag".into()),
+                tag: Some("__va_list_tag"),
                 is_union: false,
                 members: if self.target == Target::Aarch64LinuxGnu {
                     vec![
@@ -952,7 +955,6 @@ impl<'a> Parser<'a> {
     pub(crate) fn ident(&mut self) -> R<&'a str> {
         match self.peek() {
             Tok::Ident(s) if !is_keyword(s) => {
-                let s = s;
                 self.advance();
                 Ok(s)
             }
@@ -1227,7 +1229,7 @@ impl<'a> Parser<'a> {
         fs.locals.push(Local {
             asm_register: None,
             nonstring: false,
-            name: name,
+            name,
             ty,
             sugar,
             align,
@@ -1594,7 +1596,7 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 self.typedefs.push(TypedefDef {
-                    name: name,
+                    name,
                     ty: d.ty,
                     sugar: d.sugar,
                     align: attrs.aligned,
@@ -1607,19 +1609,19 @@ impl<'a> Parser<'a> {
                         "thread-local storage requires an object",
                     ));
                 }
-                if !fty.prototyped && !fty.old_style && file_scope && self.is("{") {
+                if fty.form == FunctionForm::Unspecified && file_scope && self.is("{") {
                     let direct = self
                         .last_param_function
                         .is_some_and(|f| std::ptr::eq(f, fty));
                     fty = self.arena.alloc(FuncTy {
-                        old_style: true,
+                        form: FunctionForm::OldStyleDefinition,
                         ..*fty
                     });
                     if direct {
                         self.last_param_function = Some(fty);
                     }
                 }
-                if fty.old_style {
+                if fty.form == FunctionForm::OldStyleDefinition {
                     if !file_scope
                         || !self
                             .last_param_function
@@ -1645,7 +1647,7 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 let g = self
-                    .declare_function(&name, label, fty, &spec, &attrs, file_scope)
+                    .declare_function(name, label, fty, spec, &attrs, file_scope)
                     .map_err(|message| Error::new(name_loc, message))?;
                 self.globals[g].sugar = d.sugar;
                 self.symbol_attrs(g, &attrs)?;
@@ -1747,7 +1749,7 @@ impl<'a> Parser<'a> {
                     let Ty::Func(fty) = self.globals[g].ty else {
                         unreachable!()
                     };
-                    if !fty.prototyped
+                    if !fty.has_prototype()
                         || fty.variadic
                         || fty.params.len() != 1
                         || !matches!(fty.params[0], Ty::Ptr(t) if *t == Ty::Void || t.compatible(&ty))
@@ -1781,7 +1783,7 @@ impl<'a> Parser<'a> {
                     None => Stmt::Declare(id),
                 });
             } else {
-                self.object_declaration(&spec, d, label, is_const, file_scope, inferred_init)?;
+                self.object_declaration(spec, d, label, is_const, file_scope, inferred_init)?;
             }
             if spec.infer && self.is(",") {
                 return Err(Error::new(
@@ -1852,7 +1854,7 @@ impl<'a> Parser<'a> {
                 gnu_inline: false,
                 gnu_inline_only: false,
                 nonstring: false,
-                name: name,
+                name,
                 symbol,
                 ty: d.ty,
                 sugar: d.sugar,
@@ -1880,7 +1882,7 @@ impl<'a> Parser<'a> {
         } else {
             let previous_count = self.globals.len();
             let g = self
-                .global(&name, label, d.ty)
+                .global(name, label, d.ty)
                 .map_err(|message| Error::new(d.name.as_ref().unwrap().1, message))?;
             let global = &mut self.globals[g];
             if g < previous_count && global.thread_local != spec.thread_local {
@@ -1979,7 +1981,7 @@ impl<'a> Parser<'a> {
                         Ty::Array(ArrayTy { len: Some(_), .. }),
                     ) => true,
                     (Ty::Func(old), Ty::Func(new)) => {
-                        !old.prototyped && (new.prototyped || new.old_style)
+                        !old.has_prototype() && new.form != FunctionForm::Unspecified
                     }
                     _ => false,
                 };
@@ -3029,7 +3031,7 @@ impl<'a> Parser<'a> {
                             Some(Ty::Int(IntKind::UInt128))
                         }
                         _ if counter == 0 && other.is_none() => {
-                            if let Some(Sym::Typedef(i)) = self.lookup(&word) {
+                            if let Some(Sym::Typedef(i)) = self.lookup(word) {
                                 let i = *i;
                                 self.advance();
                                 spec.sugar = Sugar::Typedef(i);
@@ -3413,11 +3415,11 @@ impl<'a> Parser<'a> {
     }
 
     /// Pointer qualifiers after a `*`. Returns (const, volatile, atomic, restrict).
-    fn qualifiers(&mut self, attrs: &mut Attrs) -> R<(bool, bool, bool, bool)> {
+    fn qualifiers(&mut self, attrs: &mut Attrs) -> R<TypeQualifiers> {
         let (mut c, mut v, mut a, mut r) = (false, false, false, false);
         loop {
             match self.peek() {
-                Tok::Ident(w) if w == "_Atomic" => a = true,
+                Tok::Ident("_Atomic") => a = true,
                 Tok::Ident("restrict" | "__restrict" | "__restrict__") => r = true,
                 Tok::Ident(w) if w == "const" || w == "__const" => c = true,
                 Tok::Ident(w) if w == "volatile" || w == "__volatile__" || w == "__volatile" => {
@@ -3522,7 +3524,6 @@ impl<'a> Parser<'a> {
         let name = match self.peek() {
             Tok::Ident(s) if !is_keyword(s) => {
                 let loc = self.loc();
-                let s = s;
                 self.advance();
                 Some((s, loc))
             }
@@ -3763,7 +3764,7 @@ impl<'a> Parser<'a> {
         let star = std::mem::replace(&mut self.parameter_star, false);
         self.push_scope();
         let result = self.params_inner(ret).and_then(|fty| {
-            if fty.old_style
+            if fty.form == FunctionForm::OldStyleDefinition
                 && (outer.is_some()
                     || !(self.is("{")
                         || self.is_typename()
@@ -3848,8 +3849,7 @@ impl<'a> Parser<'a> {
             params: &[],
             param_quals: &[],
             variadic: false,
-            prototyped: true,
-            old_style: false,
+            form: FunctionForm::Prototype,
         };
         let mut names = Vec::new();
         let mut ids = Vec::new();
@@ -3857,7 +3857,7 @@ impl<'a> Parser<'a> {
         let mut param_quals = Vec::new();
         self.last_param_ids.clear();
         if self.eat(")") {
-            fty.prototyped = false;
+            fty.form = FunctionForm::Unspecified;
             self.last_params = names;
             return Ok(fty);
         }
@@ -3870,8 +3870,7 @@ impl<'a> Parser<'a> {
         // A typedef-name starts a prototype, even if followed by a declaration
         // list. Never backtrack and reinterpret it as an identifier.
         if !self.is_typename() {
-            fty.prototyped = false;
-            fty.old_style = true;
+            fty.form = FunctionForm::OldStyleDefinition;
             loop {
                 let loc = self.loc();
                 if self.is_typename() {
@@ -3927,13 +3926,13 @@ impl<'a> Parser<'a> {
                 return Err(Error::new(loc, "`__auto_type` cannot declare a parameter"));
             }
             let mut d = self.declarator_sugar(spec.ty, spec.sugar)?;
-            if let Ty::Array(a) = d.ty {
-                if !self.complete_vm_element(&a.elem) {
-                    return Err(Error::new(
-                        loc,
-                        "parameter array element must be a complete object type",
-                    ));
-                }
+            if let Ty::Array(a) = d.ty
+                && !self.complete_vm_element(&a.elem)
+            {
+                return Err(Error::new(
+                    loc,
+                    "parameter array element must be a complete object type",
+                ));
             }
             let arrays = std::mem::take(&mut self.parameter_arrays);
             let mut array_quals = (false, false, false, false);
@@ -4043,7 +4042,6 @@ impl<'a> Parser<'a> {
         let loc = self.loc();
         let tag = match self.peek() {
             Tok::Ident(s) if !is_keyword(s) => {
-                let s = s;
                 self.advance();
                 Some(s)
             }
@@ -4773,7 +4771,7 @@ impl<'a> Parser<'a> {
                     self.require_native_layout(loc, "inline assembly")?;
                     return self.asm_statement();
                 }
-                _ if matches!(self.peek_at(1), Tok::Punct(":")) && !is_keyword(&word) => {
+                _ if matches!(self.peek_at(1), Tok::Punct(":")) && !is_keyword(word) => {
                     self.advance();
                     self.advance();
                     if self.is_fallthrough_attribute() {
@@ -4975,7 +4973,11 @@ mod tests {
                     model.pop();
                 }
                 _ => {
-                    let depth = if state % 5 == 0 { 0 } else { model.len() - 1 };
+                    let depth = if state.is_multiple_of(5) {
+                        0
+                    } else {
+                        model.len() - 1
+                    };
                     let sym = if step % 3 == 0 {
                         Sym::Typedef(step)
                     } else {

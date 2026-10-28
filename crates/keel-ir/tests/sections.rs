@@ -22,7 +22,8 @@ fn placement_metadata_roundtrips_and_invalid_storage_diagnoses() {
         assert_eq!(parse(&canonical).unwrap().to_string(), canonical);
         assert!(m.functions[0].attrs.retain);
         assert!(m.data[0].retain);
-        for storage in ["weak_odr"] {
+        {
+            let storage = "weak_odr";
             let text =
                 format!("data @x = {storage} retain section \"{section}\" align 4 {{ i32 1 }}\n");
             let m = parse(&text).unwrap();

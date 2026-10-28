@@ -4,7 +4,7 @@ use keel_asm_ir::x86::{CpuLevel, Features};
 use keel_codegen::{SelectionTier, regalloc::AllocationTier};
 use std::{fs, path::PathBuf, process::Command};
 #[path = "common/vector.rs"]
-mod common;
+pub mod common;
 #[path = "common/userspace.rs"]
 mod userspace;
 fn source() -> String {

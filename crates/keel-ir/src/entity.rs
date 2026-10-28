@@ -132,6 +132,7 @@ impl<K: EntityRef, V> Arena<K, V> {
     #[inline]
     pub(crate) unsafe fn get_unchecked(&self, key: K) -> &V {
         debug_assert!(key.index() < self.items.len());
+        // SAFETY: the caller guarantees that key indexes an existing item.
         unsafe { self.items.get_unchecked(key.index()) }
     }
 
@@ -558,6 +559,7 @@ mod tests {
         expected[1] = vec![Thing::new(7)];
         // Compaction keeps every list and drops abandoned rooms.
         let before = pool.items.len();
+        // SAFETY: lists contains every live list owned by this pool exactly once.
         unsafe { pool.compact(0, lists.iter_mut()) };
         assert!(pool.items.len() < before);
         assert_eq!(

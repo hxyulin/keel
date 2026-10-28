@@ -1,12 +1,12 @@
 //! Input ordering and demand-driven archive extraction. No filesystem access.
 use super::dynamic::Library;
-use super::groups::Plan;
+use super::groups::{Metadata, Plan};
 use crate::{
     Input, Result,
     elf_selection::{Request, Selection},
 };
 use bbtree::unsync::{BBTreeMap as BTreeMap, BBTreeSet as BTreeSet};
-use object::{Object, ObjectSymbol};
+use object::Object;
 
 pub(super) struct Named<'a> {
     pub name: String,
@@ -21,32 +21,34 @@ struct Symbols<'data> {
     defined: BTreeMap<&'data str, u8>,
     required: BTreeSet<&'data str>,
 }
-fn symbols<'a>(bytes: &'a [u8], selected: &BTreeSet<String>) -> Result<(Symbols<'a>, Plan)> {
-    let file = object::read::elf::ElfFile64::<object::Endianness>::parse(bytes)
-        .map_err(|e| e.to_string())?;
-    let plan = Plan::new(&file, selected)?;
+fn symbols<'a>(metadata: &Metadata<'a>, plan: &Plan) -> Result<Symbols<'a>> {
     let mut out = Symbols::default();
-    for s in file.symbols() {
-        if plan.dead_symbol(s.index().0, s.section()) {
-            if plan.live.contains(&s.index().0) && s.is_global() && !s.is_weak() {
-                out.required.insert(s.name().map_err(|e| e.to_string())?);
+    for symbol in &metadata.symbols {
+        if plan.dead_symbol(symbol.index, symbol.section) {
+            if plan.live.contains(&symbol.index) && symbol.global && !symbol.weak {
+                out.required.insert(
+                    symbol
+                        .name
+                        .as_ref()
+                        .map_err(Clone::clone)?
+                        .expect("global symbol name was decoded"),
+                );
             }
             continue;
         }
-        if !s.is_global() && !s.is_weak() {
+        let Some(name) = *symbol.name.as_ref().map_err(Clone::clone)? else {
             continue;
-        }
-        let name = s.name().map_err(|e| e.to_string())?;
-        if s.is_undefined() {
-            if !s.is_weak() && !super::linker_owned(name) {
+        };
+        if symbol.section == object::SymbolSection::Undefined {
+            if !symbol.weak && !super::linker_owned(name) {
                 out.required.insert(name);
             }
         } else {
             out.defined.insert(
                 name,
-                if s.is_weak() {
+                if symbol.weak {
                     1
-                } else if s.is_common() {
+                } else if symbol.common {
                     2
                 } else {
                     3
@@ -54,7 +56,72 @@ fn symbols<'a>(bytes: &'a [u8], selected: &BTreeSet<String>) -> Result<(Symbols<
             );
         }
     }
-    Ok((out, plan))
+    Ok(out)
+}
+
+struct Member<'a> {
+    name: String,
+    bytes: &'a [u8],
+    metadata: Option<Metadata<'a>>,
+    selection: Option<MemberSelection<'a>>,
+    #[cfg(test)]
+    preparations: usize,
+}
+struct MemberSelection<'a> {
+    conflicts: Vec<bool>,
+    symbols: Symbols<'a>,
+    groups: Plan,
+}
+impl<'a> Member<'a> {
+    fn new(name: String, bytes: &'a [u8]) -> Self {
+        Self {
+            name,
+            bytes,
+            metadata: None,
+            selection: None,
+            #[cfg(test)]
+            preparations: 0,
+        }
+    }
+    fn prepare(&mut self, signatures: &BTreeSet<String>) -> Result<&MemberSelection<'a>> {
+        if self.metadata.is_none() {
+            self.metadata = Some(Metadata::new(self.bytes)?);
+        }
+        let metadata = self.metadata.as_ref().expect("member metadata was decoded");
+        if self
+            .selection
+            .as_ref()
+            .is_none_or(|selection| !metadata.selection_matches(&selection.conflicts, signatures))
+        {
+            #[cfg(test)]
+            {
+                self.preparations += 1;
+            }
+            let conflicts = metadata.conflicts(signatures);
+            let groups = metadata.select(&conflicts)?;
+            let symbols = symbols(metadata, &groups)?;
+            self.selection = Some(MemberSelection {
+                conflicts,
+                symbols,
+                groups,
+            });
+        }
+        Ok(self
+            .selection
+            .as_ref()
+            .expect("member selection was prepared"))
+    }
+    fn select(self) -> (Named<'a>, Symbols<'a>) {
+        let selection = self.selection.expect("selected member was prepared");
+        (
+            Named {
+                name: self.name,
+                bytes: self.bytes,
+                groups: selection.groups,
+            },
+            selection.symbols,
+        )
+    }
 }
 /// Normal left-to-right archives, rescanned to a fixed point within each
 /// archive. Undefined weak references do not cause extraction. Thin archives
@@ -167,40 +234,47 @@ fn prepare_requests<'a>(requests: &[Request<'a>], entry: &str) -> Result<Prepare
                         let bytes = member.data(input.bytes).map_err(|e| e.to_string())?;
                         let name =
                             format!("{}({})", input.name, String::from_utf8_lossy(member.name()));
-                        members.push((name, bytes));
+                        members.push(Some(Member::new(name, bytes)));
                     }
                     remaining[index] = Some(members);
                 }
                 let members = remaining[index].as_mut().expect("archive was parsed");
                 loop {
-                    // Recompute against selected signatures: an unextracted
-                    // member must never reserve a COMDAT signature.
+                    // Stable slots preserve earliest-eligible archive order. Only
+                    // selection-dependent plans change when a relevant signature wins.
                     let mut candidate = None;
-                    for (index, (name, bytes)) in members.iter().enumerate() {
-                        let (summary, groups) =
-                            symbols(bytes, &signatures).map_err(|e| format!("{name}: {e}"))?;
+                    for (index, member) in members.iter_mut().enumerate() {
+                        let Some(member) = member else {
+                            continue;
+                        };
+                        if let Err(error) = member.prepare(&signatures) {
+                            return Err(format!("{}: {error}", member.name));
+                        }
+                        let summary = member
+                            .selection
+                            .as_ref()
+                            .expect("member selection was prepared");
                         if whole_archive
-                            || summary.defined.iter().any(|(n, rank)| {
+                            || summary.symbols.defined.iter().any(|(n, rank)| {
                                 (required.contains(n) && !defined.contains_key(n))
                                     || (defined.get(n) == Some(&2) && *rank == 3)
                             })
                         {
-                            candidate = Some((index, summary, groups));
+                            candidate = Some(index);
                             break;
                         }
                     }
-                    let Some((index, summary, groups)) = candidate else {
+                    let Some(index) = candidate else {
                         break;
                     };
-                    let (name, bytes) = members.remove(index);
-                    concrete.push((name.clone(), bytes));
-                    signatures.extend(groups.signatures.iter().cloned());
+                    let member = members[index]
+                        .take()
+                        .expect("candidate occupies its member slot");
+                    let (member, summary) = member.select();
+                    concrete.push((member.name.clone(), member.bytes));
+                    signatures.extend(member.groups.signatures.iter().cloned());
                     absorb(summary, &mut defined, &mut required);
-                    selected.push(Named {
-                        name,
-                        bytes,
-                        groups,
-                    });
+                    selected.push(member);
                 }
             } else {
                 if visited[index] {
@@ -238,15 +312,13 @@ fn prepare_requests<'a>(requests: &[Request<'a>], entry: &str) -> Result<Prepare
                     libraries.push(library);
                     concrete.push((input.name.into(), input.bytes));
                 } else {
-                    let (summary, groups) = symbols(input.bytes, &signatures)?;
-                    signatures.extend(groups.signatures.iter().cloned());
+                    let mut member = Member::new(input.name.into(), input.bytes);
+                    member.prepare(&signatures)?;
+                    let (member, summary) = member.select();
+                    signatures.extend(member.groups.signatures.iter().cloned());
                     absorb(summary, &mut defined, &mut required);
                     concrete.push((input.name.into(), input.bytes));
-                    selected.push(Named {
-                        name: input.name.into(),
-                        bytes: input.bytes,
-                        groups,
-                    });
+                    selected.push(member);
                 }
             }
             Ok(())
@@ -268,4 +340,55 @@ fn absorb<'a>(
             .or_insert(rank);
     }
     required.extend(summary.required);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn archive_member_reuses_metadata_until_its_comdat_selection_changes() {
+        let bytes = keel_asm::x86::assemble_object(
+            ".section .text.choice,\"axG\",@progbits,key,comdat\n.globl choice\nchoice: ret\n",
+        )
+        .unwrap();
+        let mut member = Member::new("choice.o".into(), &bytes);
+        let mut selected = BTreeSet::new();
+        member.prepare(&selected).unwrap();
+        assert_eq!(member.preparations, 1);
+        assert!(
+            member
+                .selection
+                .as_ref()
+                .unwrap()
+                .symbols
+                .defined
+                .contains_key("choice")
+        );
+        assert!(
+            selected.is_empty(),
+            "unselected members do not reserve signatures"
+        );
+        selected.insert("unrelated".into());
+        member.prepare(&selected).unwrap();
+        member.prepare(&selected).unwrap();
+        assert_eq!(
+            member.preparations, 1,
+            "unrelated selections retain the cached plan"
+        );
+        selected.insert("key".into());
+        member.prepare(&selected).unwrap();
+        assert_eq!(member.preparations, 2);
+        assert!(
+            !member
+                .selection
+                .as_ref()
+                .unwrap()
+                .symbols
+                .defined
+                .contains_key("choice")
+        );
+        member.prepare(&selected).unwrap();
+        assert_eq!(member.preparations, 2);
+    }
 }

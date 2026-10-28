@@ -1268,10 +1268,10 @@ impl<'a> Parser<'a> {
                             "volatile vector lane access is not supported",
                         ));
                     }
-                    if let Some(n) = crate::eval::eval_int_with_layout(&idx, self.c_layout) {
-                        if n < 0 || n >= i64::from(shape.lanes()) {
-                            return Err(Error::new(loc, "vector subscript is out of range"));
-                        }
+                    if let Some(n) = crate::eval::eval_int_with_layout(&idx, self.c_layout)
+                        && (n < 0 || n >= i64::from(shape.lanes()))
+                    {
+                        return Err(Error::new(loc, "vector subscript is out of range"));
                     }
                     self.mark_address_taken(&e);
                     let idx = self.cast(idx, LONG);
@@ -1317,7 +1317,7 @@ impl<'a> Parser<'a> {
         if !def.complete {
             return Err(Error::new(loc, "member of an incomplete struct"));
         }
-        let Some((offset, m)) = def.find(&name, &self.structs, &self.typedefs, self.arena) else {
+        let Some((offset, m)) = def.find(name, &self.structs, &self.typedefs, self.arena) else {
             return Err(Error::new(loc, format!("no member `{name}`")));
         };
         let mut sugar = m.sugar;
@@ -1359,17 +1359,16 @@ impl<'a> Parser<'a> {
         let Some(fty) = f.ty.pointee().and_then(Ty::func) else {
             return Err(Error::new(loc, "call of a non-function"));
         };
-        for i in 0..args.len() {
-            let arg = args[i];
-            args[i] = if let Some(param) = fty.params.get(i).filter(|_| fty.prototyped) {
-                self.convert_argument(arg, param)?
-            } else if fty.variadic || !fty.prototyped {
-                self.default_promote(arg)
+        for (i, arg) in args.iter_mut().enumerate() {
+            *arg = if let Some(param) = fty.params.get(i).filter(|_| fty.has_prototype()) {
+                self.convert_argument(*arg, param)?
+            } else if fty.variadic || !fty.has_prototype() {
+                self.default_promote(*arg)
             } else {
                 return Err(Error::new(arg.loc, "too many arguments"));
             };
         }
-        if fty.prototyped && args.len() < fty.params.len() {
+        if fty.has_prototype() && args.len() < fty.params.len() {
             return Err(Error::new(loc, "too few arguments"));
         }
         if let Ty::Struct(id) = fty.ret
@@ -1530,15 +1529,15 @@ impl<'a> Parser<'a> {
                     return self.generic(loc);
                 }
                 if name.starts_with("__builtin_") {
-                    return self.builtin(&name, loc);
+                    return self.builtin(name, loc);
                 }
                 if name.starts_with("__atomic_")
                     || name.starts_with("__sync_")
                     || name.starts_with("__c11_atomic_")
                 {
-                    return self.atomic(&name, loc);
+                    return self.atomic(name, loc);
                 }
-                self.lookup_value(&name, loc)
+                self.lookup_value(name, loc)
             }
             _ => unreachable!(),
         }
@@ -3288,7 +3287,7 @@ pub(crate) fn checked_memory_intrinsic(name: &str) -> Option<Intrinsic> {
 pub(crate) fn checked_memory_prototype(id: Intrinsic, ty: &Ty<'_>) -> bool {
     let Ty::Func(fty) = ty else { return false };
     let void_ptr = |ty: &Ty<'_>| matches!(ty, Ty::Ptr(pointee) if **pointee == Ty::Void);
-    fty.prototyped
+    fty.has_prototype()
         && !fty.variadic
         && void_ptr(&fty.ret)
         && fty.params.len() == 4

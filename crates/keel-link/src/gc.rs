@@ -147,10 +147,9 @@ impl Graph<'_> {
                     && anchor.kind & 0xe == 0xe
                     && anchor.kind & 1 == 0
                     && anchor.section == si + 1)
+                    && let Some(n) = self.target(oi, r, &s.data, false)?
                 {
-                    if let Some(n) = self.target(oi, r, &s.data, false)? {
-                        edges.push(n);
-                    }
+                    edges.push(n);
                 }
                 if let Some(n) = self.target(oi, positive, &s.data, false)? {
                     edges.push(n);

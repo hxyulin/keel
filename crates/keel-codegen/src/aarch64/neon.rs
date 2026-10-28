@@ -37,7 +37,9 @@ impl FunctionCompiler<'_> {
             self.def_done(result, d);
             return;
         }
-        if self.neon_float_zero(op, ty, args, result) { return; }
+        if self.neon_float_zero(op, ty, args, result) {
+            return;
+        }
         let scalar_ty = ty.vector().map_or(ty, |v| v.lane_type());
         if op.accepts_scalar(scalar_ty) && (!ty.is_vector() || ty.vector().unwrap().lanes() == 1) {
             self.neon_scalar(op, ty, args, result);
@@ -750,12 +752,20 @@ impl FunctionCompiler<'_> {
             self.native(
                 opcode,
                 [
-                    (FieldId::Q, u32::from(self.ty(*args.last().unwrap()).bytes() == Some(16))),
+                    (
+                        FieldId::Q,
+                        u32::from(self.ty(*args.last().unwrap()).bytes() == Some(16)),
+                    ),
                     (FieldId::Rd, FS2.into()),
                     (FieldId::Rn, table.into()),
                     (FieldId::Rm, index.into()),
                 ],
-                |out| write!(out, "{name}\tv{FS2}.{arr}, {{v{table}.16b}}, v{index}.{arr}"),
+                |out| {
+                    write!(
+                        out,
+                        "{name}\tv{FS2}.{arr}, {{v{table}.16b}}, v{index}.{arr}"
+                    )
+                },
             );
         }
         let d = self.def_freg(result);

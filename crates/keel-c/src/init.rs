@@ -477,7 +477,7 @@ impl<'a> Parser<'a> {
             .filter(|m| m.name.is_some() || m.bits.is_none())
             .collect();
         for (i, m) in named.iter().enumerate() {
-            if m.name.as_deref() == Some(name) {
+            if m.name == Some(name) {
                 let sub = Slot {
                     ty: *m.ty.unatomic(),
                     offset: slot.offset + m.offset,
@@ -488,7 +488,7 @@ impl<'a> Parser<'a> {
             if m.name.is_none()
                 && let Ty::Struct(inner) = m.ty
                 && let Some((off, found)) =
-                    self.structs[inner].find(&name, &self.structs, &self.typedefs, self.arena)
+                    self.structs[inner].find(name, &self.structs, &self.typedefs, self.arena)
             {
                 let sub = Slot {
                     ty: *found.ty.unatomic(),

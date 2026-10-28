@@ -82,7 +82,8 @@ fn bodies(bytes: &[u8]) -> Vec<wasmparser::FunctionBody<'_>> {
 // detached alias. The true arm must never execute this division.
 #[test]
 fn false_arm_retained_division_and_detached_arm_local_alias() {
-    let mut module = parse(r#"
+    let mut module = parse(
+        r#"
 func @choose(i32,i32)->i32 {
 block0(v0:i32,v1:i32):
  brif v0,block2,block1
@@ -94,7 +95,9 @@ block1:
 block2:
  return v1
 }
-"#).unwrap();
+"#,
+    )
+    .unwrap();
     let f = &mut module.functions[0];
     let arm = f.blocks().nth(1).unwrap();
     let insts = f.block_insts(arm).to_vec();
@@ -104,19 +107,34 @@ block2:
     for profile in 0..3 {
         let bytes = emit(&module, &["choose"], profile).unwrap();
         let body = &bodies(&bytes)[0];
-        let ops = body.get_operators_reader().unwrap().into_iter()
-            .collect::<Result<Vec<_>, _>>().unwrap();
+        let ops = body
+            .get_operators_reader()
+            .unwrap()
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
         assert!(!ops.iter().any(|o| matches!(o, Operator::Loop { .. })));
-        assert_eq!(ops.iter().filter(|o| matches!(o, Operator::I32DivS)).count(), 1);
-        execute(&bytes, r#"
+        assert_eq!(
+            ops.iter()
+                .filter(|o| matches!(o, Operator::I32DivS))
+                .count(),
+            1
+        );
+        execute(
+            &bytes,
+            r#"
 for (const d of [0,-1,1,2,2147483647,-2147483648]) {
  assert.equal(e.choose(1,d),d);
  assert.equal(e.choose(-1,d),d);
 }
 for (const d of [1,2,2147483647,-2147483648]) assert.equal(e.choose(0,d),-2147483648);
 assert.throws(()=>e.choose(0,0),WebAssembly.RuntimeError);
-"#);
-        execute(&bytes, "assert.throws(()=>e.choose(0,-1),WebAssembly.RuntimeError);");
+"#,
+        );
+        execute(
+            &bytes,
+            "assert.throws(()=>e.choose(0,-1),WebAssembly.RuntimeError);",
+        );
     }
 }
 
@@ -159,15 +177,30 @@ block0:
 }
 "#;
     for profile in 1..3 {
-        let fixed_source = source.split("func @address").next().unwrap()
+        let fixed_source = source
+            .split("func @address")
+            .next()
+            .unwrap()
             .replace(" ss0=stack_slot 16, align 16", "");
         let module = parse(if profile == 2 { source } else { &fixed_source }).unwrap();
-        let names = if profile == 2 { vec!["choose", "address"] } else { vec!["choose"] };
+        let names = if profile == 2 {
+            vec!["choose", "address"]
+        } else {
+            vec!["choose"]
+        };
         let bytes = emit(&module, &names, profile).unwrap();
         let bs = bodies(&bytes);
-        assert!(!bs[1].get_operators_reader().unwrap().into_iter()
-            .any(|o| matches!(o.unwrap(), Operator::Loop { .. })));
-        execute(&bytes, &format!(r#"
+        assert!(
+            !bs[1]
+                .get_operators_reader()
+                .unwrap()
+                .into_iter()
+                .any(|o| matches!(o.unwrap(), Operator::Loop { .. }))
+        );
+        execute(
+            &bytes,
+            &format!(
+                r#"
 const u=new Uint8Array(e.memory.buffer);u.fill(0xab);
 const check=mark=>assert(u.every((x,i)=>x===(i===7?mark:i>7&&i<11?0:0xab)));
 for(let n=0;n<100;n++) {{
@@ -177,19 +210,34 @@ for(let n=0;n<100;n++) {{
  {}
 }}
 assert.throws(()=>e.choose(0,0),WebAssembly.RuntimeError);check(3);
-"#, if profile==2 { "assert.equal(e.address(),65520n);" } else { "" },
-        if profile==2 { "assert.equal(e.address(),65520n);" } else { "" }));
-        execute(&bytes, r#"
+"#,
+                if profile == 2 {
+                    "assert.equal(e.address(),65520n);"
+                } else {
+                    ""
+                },
+                if profile == 2 {
+                    "assert.equal(e.address(),65520n);"
+                } else {
+                    ""
+                }
+            ),
+        );
+        execute(
+            &bytes,
+            r#"
 const u=new Uint8Array(e.memory.buffer);u.fill(0xab);
 assert.throws(()=>e.choose(0,-1),WebAssembly.RuntimeError);
 assert(u.every((x,i)=>x===(i===7?3:i>7&&i<11?0:0xab)));
-"#);
+"#,
+        );
     }
 }
 
 #[test]
 fn alias_from_entry_into_later_arm_is_rejected_before_emission() {
-    let mut module = parse(r#"
+    let mut module = parse(
+        r#"
 func @bad(i32)->i32 {
 block0(v0:i32):
  v1=iconst.i32 9
@@ -201,11 +249,16 @@ block1:
 block2:
  return v2
 }
-"#).unwrap();
+"#,
+    )
+    .unwrap();
     let f = &mut module.functions[0];
     let entry = f.entry_block().unwrap();
     let arm = f.blocks().nth(1).unwrap();
-    f.replace_all_uses(f.first_result(f.block_insts(entry)[0]), f.first_result(f.block_insts(arm)[0]));
+    f.replace_all_uses(
+        f.first_result(f.block_insts(entry)[0]),
+        f.first_result(f.block_insts(arm)[0]),
+    );
     for profile in 0..3 {
         let error = emit(&module, &[], profile).unwrap_err().to_string();
         assert!(error.contains("not dominated"), "{error}");

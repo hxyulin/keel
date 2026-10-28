@@ -338,12 +338,12 @@ pub fn validate_module(module: &crate::Module, target: crate::Target) -> Result<
                         crate::Target::X86_64LinuxGnu | crate::Target::Aarch64LinuxGnu
                     ) && retain,
                 );
-                if let Some(old) = seen.insert(key, properties) {
-                    if old != properties {
-                        return Err(format!(
-                            "@{name}: incompatible storage or retention in shared custom section"
-                        ));
-                    }
+                if let Some(old) = seen.insert(key, properties)
+                    && old != properties
+                {
+                    return Err(format!(
+                        "@{name}: incompatible storage or retention in shared custom section"
+                    ));
                 }
             }
             Ok(())

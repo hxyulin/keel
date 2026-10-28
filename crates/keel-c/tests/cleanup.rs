@@ -76,7 +76,7 @@ fn native_arm64_matches_clang_with_and_without_optimization() {
         let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
         std::fs::create_dir_all(&dir).unwrap();
         let c = dir.join("cleanup.c");
-        std::fs::write(&c, &src).unwrap();
+        std::fs::write(&c, src).unwrap();
         let reference = dir.join("clang");
         // Clang elides the return copy for named C struct locals by
         // default, letting their cleanup mutate the result. This milestone
@@ -102,7 +102,7 @@ fn native_arm64_matches_clang_with_and_without_optimization() {
                     debug_info,
                     ..Default::default()
                 };
-                let mut m = keel_c::compile(&src, "cleanup.c", opts).unwrap();
+                let mut m = keel_c::compile(src, "cleanup.c", opts).unwrap();
                 keel_ir::verify_module(&m).unwrap();
                 if optimize {
                     keel_opt::optimize(&mut m).unwrap();

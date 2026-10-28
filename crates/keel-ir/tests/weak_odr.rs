@@ -56,10 +56,7 @@ fn invalid_odr_linkage_is_rejected() {
     let mut m = keel_ir::parse("decl data @d\n").unwrap();
     m.data[0].weak_odr = true;
     assert!(keel_ir::verify_module(&m).is_err());
-    for src in [
-        "decl @f() weak_odr\n",
-        "decl data weak_odr @d\n",
-    ] {
+    for src in ["decl @f() weak_odr\n", "decl data weak_odr @d\n"] {
         assert!(keel_ir::parse(src).is_err());
     }
 }

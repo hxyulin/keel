@@ -52,6 +52,8 @@ def generate(schema):
              'use super::{Intrinsic, IntrinsicInfo};', 'use crate::Type;', '']
     lines += metadata(rows, 'system')
     lines += system_lowering.ir_helpers(rows)
+    while lines and not lines[-1]:
+        lines.pop()
     lines += ['}', '']
     return '\n'.join(lines)
 
@@ -64,7 +66,7 @@ def metadata(rows, family):
     for group, members in groups.items():
         if members:
             lines += [f'    ({group}) => {{']
-            lines += [('        ' if i == 0 else '        | ') + '$crate::Intrinsic::' + r['variant']
+            lines += [('        ' if i == 0 else '            | ') + '$crate::Intrinsic::' + r['variant']
                       for i, r in enumerate(members)]
             lines += ['    };']
     lines += ['}', '', 'impl Intrinsic {',

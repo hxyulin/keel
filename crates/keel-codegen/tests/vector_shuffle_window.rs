@@ -167,11 +167,7 @@ fn oracle(arm: bool, stem: &str, source: &str, c: &str, asm: &str, obj: &[u8]) {
         )
         .unwrap();
     }
-    let native = if arm {
-        cfg!(all(target_arch = "aarch64", target_os = "macos"))
-    } else {
-        cfg!(all(target_arch = "x86_64", target_os = "linux"))
-    };
+    let native = arm;
     if native {
         let exe = dir.join(format!("{stem}.native"));
         let mut cc = Command::new("clang");

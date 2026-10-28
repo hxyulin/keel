@@ -16,7 +16,7 @@ pub type FxHashSet<T> = HashSet<T, FxBuildHasher>;
 
 const SEED: u64 = 0x51_7c_c1_b7_27_22_0a_95;
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug)]
 pub struct FxHasher {
     hash: u64,
 }

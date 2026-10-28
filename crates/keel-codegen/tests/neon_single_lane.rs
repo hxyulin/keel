@@ -7,8 +7,7 @@ use keel_codegen::{
 use keel_ir::{NeonIntrinsic as N, Type, VectorType};
 use std::{fs, process::Command};
 #[path = "common/vector.rs"]
-#[allow(dead_code)]
-mod common;
+pub mod common;
 const SPILL: Pools = Pools {
     caller_saved: &[9, 10],
     callee_saved: &[19],
@@ -25,11 +24,16 @@ fn fixture() -> (String, String, usize) {
     for &op in N::ALL {
         for shape in [VectorType::I64x1, VectorType::F64x1] {
             let ty = Type::Vector(shape);
-            if op.memory().is_some() || matches!(op,N::Fmla|N::Fmls) || !op.accepts(ty) {
+            if op.memory().is_some() || matches!(op, N::Fmla | N::Fmls) || !op.accepts(ty) {
                 continue;
             }
             let inputs = op.operand_types(ty).unwrap();
-            if inputs.iter().any(|t| t.vector().is_some_and(|v| v.lanes() != 1)) { continue; }
+            if inputs
+                .iter()
+                .any(|t| t.vector().is_some_and(|v| v.lanes() != 1))
+            {
+                continue;
+            }
             let immediates: Vec<_> = op
                 .immediate_range(ty)
                 .map_or(vec![None], |r| r.map(Some).collect());

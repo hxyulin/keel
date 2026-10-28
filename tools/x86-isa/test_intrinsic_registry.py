@@ -32,6 +32,16 @@ class IntrinsicRegistryTests(unittest.TestCase):
         self.assertIn('X86Swapgs = 818,', source)
         self.assertEqual(len(re.findall(r'^    [A-Z][A-Za-z0-9]* = [0-9]+,$', source, re.M)), 821)
 
+    def test_x86_pattern_matches_frozen_inventory_and_excludes_portable_entries(self):
+        source = intrinsic_registry.generate(self.schema, self.families)
+        pattern = source.split('macro_rules! x86_intrinsics {', 1)[1]
+        fixture = ROOT.parents[1] / 'crates/keel-ir/tests/fixtures/intrinsic-inventory.txt'
+        expected = [line.split('|')[0] for line in fixture.read_text().splitlines()
+                    if not line.startswith('#') and line.startswith('X86')]
+        self.assertEqual(re.findall(r'\$crate::Intrinsic::(\w+)', pattern), expected)
+        self.assertNotIn('LifetimeStart', pattern)
+        self.assertNotIn('Memcpy', pattern)
+
     def test_invalid_global_ids_and_inventory_fail(self):
         for field, values in [('id', [-1, 1, True, '0']),
                               ('inventory', [-1, len(self.schema['intrinsics']), True, '0', self.schema['intrinsics'][1]['inventory']])]:

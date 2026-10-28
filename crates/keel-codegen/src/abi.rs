@@ -266,6 +266,26 @@ pub fn arg_locs_into_for<'a>(
     cursor.stack
 }
 
+/// Register cursors after placing a variadic function's named parameters.
+pub fn named_registers(args: &[ArgKind]) -> (u8, u8) {
+    let mut cursor = Cursor {
+        linux: true,
+        ..Default::default()
+    };
+    for arg in args {
+        match arg {
+            ArgKind::Value(t) => {
+                cursor.scalar(*t);
+            }
+            ArgKind::ByVal(l) => {
+                cursor.by_val(l);
+            }
+            ArgKind::Sret(_) => {}
+        }
+    }
+    (cursor.ints, cursor.floats)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -376,24 +396,4 @@ mod tests {
         let (locs, _) = arg_locs(&[ArgKind::Sret(&d2)], 1);
         assert_eq!(locs, [ArgLoc::SretRegs(vec![Loc::FReg(0), Loc::FReg(1)])]);
     }
-}
-
-/// Register cursors after placing a variadic function's named parameters.
-pub fn named_registers(args: &[ArgKind]) -> (u8, u8) {
-    let mut cursor = Cursor {
-        linux: true,
-        ..Default::default()
-    };
-    for arg in args {
-        match arg {
-            ArgKind::Value(t) => {
-                cursor.scalar(*t);
-            }
-            ArgKind::ByVal(l) => {
-                cursor.by_val(l);
-            }
-            ArgKind::Sret(_) => {}
-        }
-    }
-    (cursor.ints, cursor.floats)
 }

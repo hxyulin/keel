@@ -8,7 +8,7 @@ use keel_codegen::{
 use std::{fs, process::Command};
 #[allow(dead_code)]
 #[path = "common/vector.rs"]
-mod common;
+pub mod common;
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],

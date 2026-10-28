@@ -101,6 +101,7 @@ pub(crate) fn remat_recipe(func: &Function, value: Value) -> Option<RematRecipe>
 /// pressure. Both policies are opt-in; pressure preference is deliberately
 /// independent of the recipe-only experiment.
 #[cfg(feature = "experimental-regalloc")]
+#[derive(Debug)]
 pub struct RematerializingAllocator<'a> {
     pub base: &'a AllocationTier,
     /// Prefer eligible recipes as victims when a Fast/Full pool is exhausted.

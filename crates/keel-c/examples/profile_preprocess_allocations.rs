@@ -24,6 +24,7 @@ struct CountingAllocator;
 // System. The const-initialized TLS counter does not allocate or own memory.
 unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        // SAFETY: Forward the caller's allocation layout unchanged to System.
         let pointer = unsafe { System.alloc(layout) };
         COUNTS.with(|cell| {
             let mut c = cell.get();
@@ -36,6 +37,7 @@ unsafe impl GlobalAlloc for CountingAllocator {
         pointer
     }
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        // SAFETY: Forward the caller's allocation layout unchanged to System.
         let pointer = unsafe { System.alloc_zeroed(layout) };
         COUNTS.with(|cell| {
             let mut c = cell.get();
@@ -55,9 +57,11 @@ unsafe impl GlobalAlloc for CountingAllocator {
                 cell.set(c);
             }
         });
+        // SAFETY: The caller supplies a live System allocation and its original layout.
         unsafe { System.dealloc(pointer, layout) };
     }
     unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, size: usize) -> *mut u8 {
+        // SAFETY: Forward the live allocation, original layout and requested size unchanged.
         let pointer = unsafe { System.realloc(pointer, layout, size) };
         COUNTS.with(|cell| {
             let mut c = cell.get();

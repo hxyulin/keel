@@ -46,7 +46,7 @@ keel_ir::entity!(
 /// actually used. A short linear scan beats keeping them sorted, which
 /// moved entries on most insertions. Wide blocks use a map so lookups stay
 /// cheap. Neither representation allocates a variable-by-block matrix.
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct Definitions {
     /// Bit `var % 64` is set for each variable defined here, so most
     /// lookups of an undefined variable (the common case while a read
@@ -55,6 +55,7 @@ struct Definitions {
     entries: Entries,
 }
 
+#[derive(Debug)]
 enum Entries {
     Small(SmallVec<[(Variable, Value); 8]>),
     Large(HashMap<Variable, Value>),
@@ -116,7 +117,7 @@ impl Definitions {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct BlockState {
     /// None for blocks not yet registered with the SSA builder (including
     /// gaps created through raw Function access).
@@ -145,7 +146,7 @@ impl BlockState {
 /// each. [`FunctionBuilder::finalize_with_context`] returns it; pass it to
 /// [`FunctionBuilder::with_context`]. It carries no state between
 /// functions: the IR built is the same as with [`FunctionBuilder::new`].
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct FunctionBuilderContext {
     var_types: Vec<Type>,
     result_tys: Vec<Type>,
@@ -196,6 +197,7 @@ impl FunctionBuilderContext {
     }
 }
 
+#[derive(Debug)]
 pub struct FunctionBuilder<'f> {
     func: &'f mut Function,
     cfg_changed: bool,
@@ -916,12 +918,14 @@ mod tests {
         b.ins().jump(c, &[]);
         check_index(&mut b);
         b.switch_to_block(c);
-        let unused_builder = b.ins();
-        drop(unused_builder);
+        {
+            let _unused_builder = b.ins();
+        }
         check_index(&mut b);
         b.switch_to_block(a);
-        let unused_builder = b.ins();
-        drop(unused_builder);
+        {
+            let _unused_builder = b.ins();
+        }
         check_index(&mut b);
     }
 }

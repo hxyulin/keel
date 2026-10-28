@@ -170,6 +170,17 @@ pub struct ArrayTy<'a> {
     pub vla: Option<usize>,
 }
 
+/// Which parameter contract a function declaration or definition carries.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum FunctionForm {
+    /// An `f()` declaration with no parameter information.
+    Unspecified,
+    /// A prototype, including `f(void)`.
+    Prototype,
+    /// An identifier-list or empty old-style definition; parameters are promoted ABI types.
+    OldStyleDefinition,
+}
+
 #[derive(PartialEq, Debug)]
 pub struct FuncTy<'a> {
     /// Foreign ABI type metadata only; evaluated calls and definitions reject.
@@ -180,14 +191,15 @@ pub struct FuncTy<'a> {
     /// Top-level parameter qualifiers do not participate in compatibility.
     pub param_quals: &'a [&'a [u8]],
     pub variadic: bool,
-    /// False for `int f()` declarations and old-style definitions.
-    pub prototyped: bool,
-    /// Old-style definition (possibly empty); `params` are promoted ABI types,
-    /// not a prototype. An unspecified `f()` declaration has both flags false.
-    pub old_style: bool,
+    pub form: FunctionForm,
 }
 
 impl FuncTy<'_> {
+    /// Calls convert fixed arguments to parameter types instead of default promotions.
+    pub fn has_prototype(&self) -> bool {
+        self.form == FunctionForm::Prototype
+    }
+
     /// Compare parameter contracts without changing the parser's separate
     /// policy for unrelated return-type redeclarations.
     pub(crate) fn parameters_compatible(&self, other: &Self) -> bool {
@@ -195,14 +207,14 @@ impl FuncTy<'_> {
         if a.microsoft_x64 != b.microsoft_x64 {
             return false;
         }
-        if (a.prototyped || a.old_style) && (b.prototyped || b.old_style) {
+        if a.form != FunctionForm::Unspecified && b.form != FunctionForm::Unspecified {
             a.variadic == b.variadic
                 && a.params.len() == b.params.len()
                 && a.params.iter().zip(b.params).all(|(a, b)| a.compatible(b))
                 && a.param_quals == b.param_quals
         } else {
-            let known = if a.prototyped { a } else { b };
-            !known.prototyped
+            let known = if a.has_prototype() { a } else { b };
+            !known.has_prototype()
                 || (!known.variadic
                     && known
                         .params
@@ -492,8 +504,8 @@ impl<'a> Ty<'a> {
             (Ty::Array(a), Ty::Array(b)) => a.elem.numeric_redeclaration_conflict(&b.elem),
             (Ty::Func(a), Ty::Func(b)) => {
                 a.ret.numeric_redeclaration_conflict(&b.ret)
-                    || (a.prototyped
-                        && b.prototyped
+                    || (a.has_prototype()
+                        && b.has_prototype()
                         && a.params
                             .iter()
                             .zip(b.params)

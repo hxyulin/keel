@@ -79,10 +79,10 @@ pub(super) fn check(input: &AllocationInput<'_>, allocation: &Allocation, mut se
                 if op.kind == OperandKind::Def {
                     token += 1;
                     values[usize::from(op.part.high)][op.part.value.index()] = Some(token);
-                    if let Some(loc) = allocation.operand_loc(index, op.part, OperandKind::Def) {
-                        if !matches!(loc, Loc::Remat(_)) {
-                            state[location(loc)] = Some(token);
-                        }
+                    if let Some(loc) = allocation.operand_loc(index, op.part, OperandKind::Def)
+                        && !matches!(loc, Loc::Remat(_))
+                    {
+                        state[location(loc)] = Some(token);
                     }
                 }
             });
@@ -256,7 +256,7 @@ fn range_intersections_match_pairwise_inclusive_overlap() {
         preserved_gprs: 0,
         float: false,
         vector: false,
-                spill_units: 1,
+        spill_units: 1,
     };
     for a in 0..32 {
         for b in 0..64 {

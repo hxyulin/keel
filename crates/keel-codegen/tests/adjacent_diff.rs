@@ -2,7 +2,7 @@
 #[path = "../../keel-opt/src/adjacent_abs.rs"]
 mod adjacent_abs;
 #[path = "../../keel-opt/src/adjacent_diff.rs"]
-mod adjacent_diff;
+pub mod adjacent_diff;
 use keel_codegen::{CodegenPipeline, SelectionTier, Target, regalloc::AllocationTier};
 
 fn compile(

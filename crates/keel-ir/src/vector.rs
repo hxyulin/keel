@@ -210,6 +210,7 @@ impl VectorBinaryOp {
 /// - HADD/HSUB compute floor((a +/- b)/2) in W+1 bits, then keep W bits;
 /// - RHADD computes floor((a+b+1)/2) in W+1 bits, then keeps W bits;
 /// - *_sat clamps the exact mathematical result to the named W-bit range.
+///
 /// These portable operations do not read or update architectural FPSR.QC.
 impl VectorBinaryOp {
     pub fn is_saturating(self) -> bool {

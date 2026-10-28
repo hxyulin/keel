@@ -1,12 +1,15 @@
 use keel_asm::{TargetFeatures, assemble_object, assemble_program_object};
-use keel_codegen::{CodegenPipeline, SelectionTier, regalloc::{AllocationTier, Pools}};
+use keel_codegen::{
+    CodegenPipeline, SelectionTier,
+    regalloc::{AllocationTier, Pools},
+};
 use keel_ir::VectorType;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use std::{fs, process::Command};
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[allow(dead_code)]
 #[path = "common/vector.rs"]
-mod common;
+pub mod common;
 
 const TINY: Pools = Pools {
     caller_saved: &[9, 10],
@@ -64,10 +67,21 @@ fn source() -> String {
         }
     }
     for shape in VectorType::ALL_64 {
-        let types = std::iter::repeat_n(shape.to_string(), 10).collect::<Vec<_>>().join(",");
-        let params = (0..10).map(|i| format!("v{i}: {shape}")).collect::<Vec<_>>().join(",");
-        let args = (0..10).rev().map(|i| format!("v{i}")).collect::<Vec<_>>().join(",");
-        source += &format!("decl @external_{shape}({types}) -> {shape}\nfunc @forward_{shape}({types}) -> {shape} {{\nblock0({params}):\n v10 = call @external_{shape}({args})\n return v10\n}}\n");
+        let types = std::iter::repeat_n(shape.to_string(), 10)
+            .collect::<Vec<_>>()
+            .join(",");
+        let params = (0..10)
+            .map(|i| format!("v{i}: {shape}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let args = (0..10)
+            .rev()
+            .map(|i| format!("v{i}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        source += &format!(
+            "decl @external_{shape}({types}) -> {shape}\nfunc @forward_{shape}({types}) -> {shape} {{\nblock0({params}):\n v10 = call @external_{shape}({args})\n return v10\n}}\n"
+        );
     }
     source += "func @spill_i8x8(ptr,ptr) {\nblock0(v0: ptr,v1: ptr):\n";
     for i in 0..10 {
@@ -97,13 +111,26 @@ fn source() -> String {
 fn d_values_use_exact_width_memory_and_both_object_routes() {
     let module = keel_ir::parse(&source()).unwrap();
     keel_ir::verify_module(&module).unwrap();
-    for selection in [SelectionTier::Baseline, SelectionTier::Trees, SelectionTier::Full] {
+    for selection in [
+        SelectionTier::Baseline,
+        SelectionTier::Trees,
+        SelectionTier::Full,
+    ] {
         for allocator in [AllocationTier::Fast, AllocationTier::Full] {
-            let pipeline = CodegenPipeline { selector: &selection, allocator: &allocator };
-            let text = keel_codegen::aarch64::compile_with_pipeline(&module, &TINY, &pipeline).unwrap();
-            let program = keel_codegen::aarch64::compile_program_with_pipeline(&module, &TINY, &pipeline).unwrap();
+            let pipeline = CodegenPipeline {
+                selector: &selection,
+                allocator: &allocator,
+            };
+            let text =
+                keel_codegen::aarch64::compile_with_pipeline(&module, &TINY, &pipeline).unwrap();
+            let program =
+                keel_codegen::aarch64::compile_program_with_pipeline(&module, &TINY, &pipeline)
+                    .unwrap();
             assert_eq!(program.stats().text_bytes, 0);
-            assert_eq!(assemble_program_object(&program, TargetFeatures::default()).unwrap(), assemble_object(&text).unwrap());
+            assert_eq!(
+                assemble_program_object(&program, TargetFeatures::default()).unwrap(),
+                assemble_object(&text).unwrap()
+            );
             assert!(text.contains("ldr\td"), "{text}");
             assert!(text.contains("str\td"), "{text}");
             assert!(text.contains("add\tv") && text.contains(".8b"), "{text}");
@@ -207,15 +234,31 @@ int main(void) {
     let module = keel_ir::parse(&source()).unwrap();
     keel_ir::verify_module(&module).unwrap();
     for selector in [SelectionTier::Baseline, SelectionTier::Full] {
-      for allocator in [AllocationTier::Fast, AllocationTier::Full] {
-        let pipeline = CodegenPipeline { selector: &selector, allocator: &allocator };
-        let program = keel_codegen::aarch64::compile_program_with_pipeline(&module, &TINY, &pipeline).unwrap();
-        let object = dir.join("test.o");
-        fs::write(&object, assemble_program_object(&program, TargetFeatures::default()).unwrap()).unwrap();
-        let exe = dir.join("test");
-        common::command(Command::new("clang").args(["-O2", "-ffp-contract=off"]).arg(&c).arg(&object).arg("-o").arg(&exe));
-        common::command(&mut Command::new(&exe));
-      }
+        for allocator in [AllocationTier::Fast, AllocationTier::Full] {
+            let pipeline = CodegenPipeline {
+                selector: &selector,
+                allocator: &allocator,
+            };
+            let program =
+                keel_codegen::aarch64::compile_program_with_pipeline(&module, &TINY, &pipeline)
+                    .unwrap();
+            let object = dir.join("test.o");
+            fs::write(
+                &object,
+                assemble_program_object(&program, TargetFeatures::default()).unwrap(),
+            )
+            .unwrap();
+            let exe = dir.join("test");
+            common::command(
+                Command::new("clang")
+                    .args(["-O2", "-ffp-contract=off"])
+                    .arg(&c)
+                    .arg(&object)
+                    .arg("-o")
+                    .arg(&exe),
+            );
+            common::command(&mut Command::new(&exe));
+        }
     }
     fs::remove_dir_all(dir).unwrap();
 }
@@ -226,22 +269,32 @@ fn d_text_and_typed_instruction_bytes_match_clang() {
     use object::{Object, ObjectSection};
     let mut ir = source();
     for &op in keel_ir::NeonIntrinsic::ALL {
-        if op.memory().is_some() { continue; }
+        if op.memory().is_some() {
+            continue;
+        }
         for shape in VectorType::ALL_64 {
             let ty = keel_ir::Type::Vector(shape);
-            let Some(inputs) = op.operand_types(ty) else { continue; };
+            let Some(inputs) = op.operand_types(ty) else {
+                continue;
+            };
             let mut args = Vec::new();
             ir += &format!("func @{op}_{shape}(ptr,ptr) {{\nblock0(v0: ptr,v1: ptr):\n");
             for (i, input) in inputs.iter().enumerate() {
                 let n = 2 + i;
                 args.push(format!("v{n}"));
                 if *input == keel_ir::Type::I32 {
-                    ir += &format!(" v{n} = iconst.i32 {}\n", op.immediate_range(ty).unwrap().start());
+                    ir += &format!(
+                        " v{n} = iconst.i32 {}\n",
+                        op.immediate_range(ty).unwrap().start()
+                    );
                 } else {
                     ir += &format!(" v{n} = load.{input} v0\n");
                 }
             }
-            ir += &format!(" v20 = {op}.{shape}({})\n store v20,v1\n return\n}}\n", args.join(","));
+            ir += &format!(
+                " v20 = {op}.{shape}({})\n store v20,v1\n return\n}}\n",
+                args.join(",")
+            );
         }
     }
     let module = keel_ir::parse(&ir).unwrap();
@@ -251,15 +304,27 @@ fn d_text_and_typed_instruction_bytes_match_clang() {
         allocator: &AllocationTier::Full,
     };
     let text = keel_codegen::aarch64::compile_with_pipeline(&module, &TINY, &pipeline).unwrap();
-    let program = keel_codegen::aarch64::compile_program_with_pipeline(&module, &TINY, &pipeline).unwrap();
+    let program =
+        keel_codegen::aarch64::compile_program_with_pipeline(&module, &TINY, &pipeline).unwrap();
     let dir = common::temp("neon-d-clang");
     let input = dir.join("test.s");
     let output = dir.join("clang.o");
     fs::write(&input, text).unwrap();
-    common::command(Command::new("clang").args(["-target", "arm64-apple-macos11", "-c"]).arg(&input).arg("-o").arg(&output));
+    common::command(
+        Command::new("clang")
+            .args(["-target", "arm64-apple-macos11", "-c"])
+            .arg(&input)
+            .arg("-o")
+            .arg(&output),
+    );
     let bytes = fs::read(output).unwrap();
     let file = object::File::parse(&*bytes).unwrap();
     let clang = file.section_by_name("__text").unwrap().data().unwrap();
-    assert_eq!(keel_asm::assemble_program(&program, TargetFeatures::default()).unwrap().text, clang);
+    assert_eq!(
+        keel_asm::assemble_program(&program, TargetFeatures::default())
+            .unwrap()
+            .text,
+        clang
+    );
     fs::remove_dir_all(dir).unwrap();
 }

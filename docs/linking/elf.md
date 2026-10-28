@@ -117,6 +117,13 @@ controls include otherwise unused members. Explicit groups rescan their
 archives to a fixed point and may nest. Outside a group, repeat an archive
 after its users when dependencies cross archives.
 
+Each archive occurrence decodes a candidate's ELF, group, relocation and symbol
+metadata once. Extracted members leave stable empty slots, preserving scan order
+without shifting later members. Cached demand summaries and selection plans are
+recomputed only when a selected COMDAT signature changes that candidate's group
+retention. Unselected candidates never reserve signatures. Provider searches
+still follow the original scan order; there is no provider index.
+
 The CLI snapshots GNU thin archives by reading member paths relative to the
 archive. This materialization validates all member objects and regenerates an
 index. Library callers use `archive::materialize_thin` with an explicit reader,

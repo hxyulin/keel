@@ -254,24 +254,21 @@ pub(crate) fn emit_debug_info<T: Sink>(
                 [(begin, end)] => {
                     die(out, Abbrev::LexicalBlock);
 
-                    out.integer(8, Expression::symbol(format!("{}", begin)));
+                    out.integer(8, Expression::symbol(begin.to_string()));
                     out.integer(
                         4,
-                        Expression::difference(format!("{}", end), format!("{}", begin)),
+                        Expression::difference(end.to_string(), begin.to_string()),
                     );
                 }
                 _ => {
                     die(out, Abbrev::LexicalBlockRanges);
                     let list = format!("{l}debug_ranges{}", range_lists.len());
                     if elf {
-                        out.integer(4, Expression::symbol(format!("{}", list)));
+                        out.integer(4, Expression::symbol(list.to_string()));
                     } else {
                         out.integer(
                             4,
-                            Expression::difference(
-                                format!("{}", list),
-                                format!("{}debug_ranges", l),
-                            ),
+                            Expression::difference(list.to_string(), format!("{}debug_ranges", l)),
                         );
                     }
                     range_lists.push((format!("{l}{name}_begin"), scope_ranges.clone()));
@@ -328,7 +325,7 @@ pub(crate) fn emit_debug_info<T: Sink>(
             out.number(1, 0x0e);
             out.integer(
                 8,
-                Expression::symbol(format!("{}", format.symbol(&global.symbol))),
+                Expression::symbol(format.symbol(&global.symbol).to_string()),
             );
             out.number(1, 0x9b);
         } else {
@@ -338,7 +335,7 @@ pub(crate) fn emit_debug_info<T: Sink>(
             out.number(1, 0x03);
             out.integer(
                 8,
-                Expression::symbol(format!("{}", format.symbol(&global.symbol))),
+                Expression::symbol(format.symbol(&global.symbol).to_string()),
             );
         }
     }
@@ -541,17 +538,14 @@ pub(crate) fn emit_debug_info<T: Sink>(
         for (i, (base, ranges)) in range_lists.iter().enumerate() {
             out.label(format!("{}debug_ranges{}", l, i));
             out.number(8, -1);
-            out.integer(8, Expression::symbol(format!("{}", base)));
+            out.integer(8, Expression::symbol(base.to_string()));
 
             for (begin, end) in ranges {
                 out.integer(
                     8,
-                    Expression::difference(format!("{}", begin), format!("{}", base)),
+                    Expression::difference(begin.to_string(), base.to_string()),
                 );
-                out.integer(
-                    8,
-                    Expression::difference(format!("{}", end), format!("{}", base)),
-                );
+                out.integer(8, Expression::difference(end.to_string(), base.to_string()));
             }
 
             out.number(8, 0);

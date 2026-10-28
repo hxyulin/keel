@@ -92,12 +92,12 @@ fn msr_payload_parity_liveness_and_pinned_unused_reads() {
                         file.symbols()
                             .all(|s| !s.is_undefined() || s.name().unwrap().is_empty())
                     );
-                    if level == CpuLevel::V1 {
-                        if let Some(dir) = &export {
-                            let stem = format!("msr-{selection:?}-{allocation:?}-{spilled}");
-                            std::fs::write(dir.join(format!("{stem}.o")), &bytes).unwrap();
-                            std::fs::write(dir.join(format!("{stem}.s")), &text).unwrap();
-                        }
+                    if level == CpuLevel::V1
+                        && let Some(dir) = &export
+                    {
+                        let stem = format!("msr-{selection:?}-{allocation:?}-{spilled}");
+                        std::fs::write(dir.join(format!("{stem}.o")), &bytes).unwrap();
+                        std::fs::write(dir.join(format!("{stem}.s")), &text).unwrap();
                     }
                 }
             }

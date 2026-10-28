@@ -228,7 +228,8 @@ int main(void) {
 
 #[test]
 fn elf_rtti_tag_is_rejected_independently() {
-    for src in ["data @name = align 1 { i8 0 }\ndata @d = align 8 { rtti_name @name }\n"] {
+    {
+        let src = "data @name = align 1 { i8 0 }\ndata @d = align 8 { rtti_name @name }\n";
         let m = keel_ir::parse(src).unwrap();
         keel_ir::verify_module(&m).unwrap();
         assert!(compile(&m, Target::X86_64LinuxGnu).is_err());

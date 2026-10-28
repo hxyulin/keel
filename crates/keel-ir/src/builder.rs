@@ -13,6 +13,7 @@ use crate::{
     UnaryOp, Value, VectorBinaryOp,
 };
 
+#[derive(Debug)]
 pub struct InstBuilder<'f> {
     func: &'f mut Function,
     at: InsertPoint,

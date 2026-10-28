@@ -5,7 +5,7 @@ use keel_codegen::{SelectionTier, regalloc::AllocationTier};
 use std::fs;
 #[allow(dead_code)]
 #[path = "common/vector.rs"]
-mod common;
+pub mod common;
 #[path = "common/userspace.rs"]
 mod userspace;
 

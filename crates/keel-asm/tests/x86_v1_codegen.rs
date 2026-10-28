@@ -109,7 +109,8 @@ fn run(c: &mut Command) {
         String::from_utf8_lossy(&out.stderr)
     );
 }
-fn section(bytes: &[u8]) -> (Vec<u8>, Vec<(u64, String, i64, String)>) {
+type RelocationRecord = (u64, String, i64, String);
+fn section(bytes: &[u8]) -> (Vec<u8>, Vec<RelocationRecord>) {
     let obj = object::File::parse(bytes).unwrap();
     let text = obj.section_by_name(".text").unwrap();
     (

@@ -3,15 +3,30 @@ use super::*;
 use keel_ir::NeonIntrinsic;
 
 impl FunctionCompiler<'_> {
-    pub(super) fn neon_memory(&mut self, op: NeonIntrinsic, ty: Type, args: &[Value], results: &[Value]) {
+    pub(super) fn neon_memory(
+        &mut self,
+        op: NeonIntrinsic,
+        ty: Type,
+        args: &[Value],
+        results: &[Value],
+    ) {
         let m = op.memory().unwrap();
         let shape = ty.vector().unwrap();
         let size = shape.lane_type().bytes().unwrap().trailing_zeros();
         let lane = if m.lane {
-            let ValueDef::Result(i, _) = self.func.value_def(self.func.resolve(*args.last().unwrap())) else { unreachable!() };
-            let InstData::Iconst { imm, .. } = *self.func.inst_data(i) else { unreachable!() };
+            let ValueDef::Result(i, _) = self
+                .func
+                .value_def(self.func.resolve(*args.last().unwrap()))
+            else {
+                unreachable!()
+            };
+            let InstData::Iconst { imm, .. } = *self.func.inst_data(i) else {
+                unreachable!()
+            };
             imm as u32
-        } else { 0 };
+        } else {
+            0
+        };
         // v0-v7 are never allocated. Capture the complete register list before
         // touching any result, including spilled or aliased source operands.
         // Using ABI scratch registers here avoids constraining allocation to a
@@ -91,23 +106,60 @@ impl FunctionCompiler<'_> {
                 _ => unreachable!(),
             }
         };
-        let fields = [(FieldId::Q, if m.lane { (lane << size) >> 3 } else { u32::from(shape.bytes() == 16) }),
-                      (FieldId::Rn, address.into()), (FieldId::Rt, 0)];
+        let fields = [
+            (
+                FieldId::Q,
+                if m.lane {
+                    (lane << size) >> 3
+                } else {
+                    u32::from(shape.bytes() == 16)
+                },
+            ),
+            (FieldId::Rn, address.into()),
+            (FieldId::Rt, 0),
+        ];
         let element = ["b", "h", "s", "d"][size as usize];
-        let arrangement = if m.lane { element.to_string() } else { format!("{}{element}", shape.lanes()) };
-        let list = (0..m.count).map(|r| format!("v{r}.{arrangement}")).collect::<Vec<_>>().join(", ");
+        let arrangement = if m.lane {
+            element.to_string()
+        } else {
+            format!("{}{element}", shape.lanes())
+        };
+        let list = (0..m.count)
+            .map(|r| format!("v{r}.{arrangement}"))
+            .collect::<Vec<_>>()
+            .join(", ");
         let text = |out: &mut crate::text::Text| {
             write!(out, "{name}\t{{{list}}}")?;
-            if m.lane { write!(out, "[{lane}]")?; }
+            if m.lane {
+                write!(out, "[{lane}]")?;
+            }
             write!(out, ", [x{address}]")
         };
         if !m.lane {
-            self.native(opcode, [fields[0], fields[1], fields[2], (FieldId::size, size)], text);
+            self.native(
+                opcode,
+                [fields[0], fields[1], fields[2], (FieldId::size, size)],
+                text,
+            );
         } else if size < 2 {
             let offset = lane << size;
-            self.native(opcode, [fields[0], fields[1], fields[2], (FieldId::S, (offset >> 2) & 1), (FieldId::size, offset & 3)], text);
+            self.native(
+                opcode,
+                [
+                    fields[0],
+                    fields[1],
+                    fields[2],
+                    (FieldId::S, (offset >> 2) & 1),
+                    (FieldId::size, offset & 3),
+                ],
+                text,
+            );
         } else if size == 2 {
-            self.native(opcode, [fields[0], fields[1], fields[2], (FieldId::S, lane & 1)], text);
+            self.native(
+                opcode,
+                [fields[0], fields[1], fields[2], (FieldId::S, lane & 1)],
+                text,
+            );
         } else {
             self.native(opcode, fields, text);
         }

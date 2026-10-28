@@ -1,10 +1,12 @@
-//! Resident-input frontend profiling. Usage: profile staged|baseline|sample ROUNDS INPUT.i... [--debug].
+//! Resident-input frontend profiling. Usage: profile_frontend staged|baseline|sample ROUNDS INPUT.i... [--debug].
 use std::{hint::black_box, time::Instant};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().collect();
     if args.len() < 4 {
-        return Err("usage: profile staged|baseline|sample ROUNDS INPUT.i... [--debug]".into());
+        return Err(
+            "usage: profile_frontend staged|baseline|sample ROUNDS INPUT.i... [--debug]".into(),
+        );
     }
     let mode = &args[1];
     if !["staged", "baseline", "sample", "prepare"].contains(&mode.as_str()) {

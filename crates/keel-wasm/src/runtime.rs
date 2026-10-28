@@ -29,8 +29,8 @@ impl<'a> Placement<'a> {
             || options.data_floor > options.stack_bottom
             || options.stack_bottom > options.stack_top
             || u64::from(options.stack_top) > memory_bytes
-            || options.stack_bottom % 16 != 0
-            || options.stack_top % 16 != 0
+            || !options.stack_bottom.is_multiple_of(16)
+            || !options.stack_top.is_multiple_of(16)
         {
             return Err(reject(
                 "invalid runtime data floor or 16-aligned stack bounds",
@@ -93,17 +93,14 @@ impl<'a> Placement<'a> {
             for item in &init.items {
                 match item {
                     DataItem::Bytes(_) | DataItem::Zero(_) => (),
-                    DataItem::Int { ty, .. }
-                        if matches!(
-                            ty,
+                    DataItem::Int {
+                        ty:
                             keel_ir::Type::I8
-                                | keel_ir::Type::I16
-                                | keel_ir::Type::I32
-                                | keel_ir::Type::I64
-                        ) =>
-                    {
-                        ()
-                    }
+                            | keel_ir::Type::I16
+                            | keel_ir::Type::I32
+                            | keel_ir::Type::I64,
+                        ..
+                    } => (),
                     DataItem::Ptr { symbol, addend } => {
                         placement.fixup(symbol, *addend, memory_bytes)?;
                     }

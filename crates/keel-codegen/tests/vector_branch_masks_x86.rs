@@ -334,7 +334,7 @@ fn compare_masks_are_reused_but_arbitrary_and_reinterpreted_masks_are_normalized
                     ),
                 ),
                 "bitcast" => (
-                    format!("i8x16, i8x16"),
+                    "i8x16, i8x16".to_string(),
                     format!(
                         "block0(v0: i8x16, v1: i8x16):\n v2 = vicmp.ugt v0, v1\n v3 = bitcast.{shape} v2\n v4 = bitcast.{shape} v0\n v5 = bitcast.{shape} v1\n v6 = vselect v3, v4, v5\n return v6"
                     ),

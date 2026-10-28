@@ -63,6 +63,15 @@ pub struct AllocationInput<'a> {
     pub is_call: &'a dyn Fn(&InstData) -> bool,
     pub returns_twice: &'a dyn Fn(&InstData) -> bool,
 }
+impl std::fmt::Debug for AllocationInput<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AllocationInput")
+            .field("function", &self.func.name)
+            .field("pools", &self.pools)
+            .field("selection", &self.selection)
+            .finish_non_exhaustive()
+    }
+}
 impl AllocationInput<'_> {
     pub fn for_each_operand(&self, inst: Inst, mut visit: impl FnMut(Operand)) {
         if self.selection.covered(inst) {
@@ -450,10 +459,9 @@ impl Allocation {
                 for high in [false, true] {
                     if let Some(dst) =
                         self.param_loc(calls[successor].block, ValuePart { value: param, high })
+                        && moves.iter().any(|&(d, _)| d == dst)
                     {
-                        if moves.iter().any(|&(d, _)| d == dst) {
-                            return Err("edge transfer overwrites a block parameter copy".into());
-                        }
+                        return Err("edge transfer overwrites a block parameter copy".into());
                     }
                 }
             }

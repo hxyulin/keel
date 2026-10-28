@@ -9,3 +9,6 @@ license.workspace = true
 keel-ir = { path = "../keel-ir" }
 wasm-encoder = { version = "=0.245.1", default-features = false, features = ["std"] }
 wasmparser = { version = "=0.245.1", default-features = false, features = ["std", "validate", "features", "prefer-btree-collections"] }
+
+[lints]
+workspace = true

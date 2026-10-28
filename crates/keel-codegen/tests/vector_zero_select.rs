@@ -64,7 +64,7 @@ fn fixture() -> (String, String) {
                 main += &if canonical {
                     format!("m=sx<0?(uint{bits}_t)~(uint{bits}_t)0:0;")
                 } else {
-                    format!("memcpy(&m,b+l*sizeof(m),sizeof(m));")
+                    "memcpy(&m,b+l*sizeof(m),sizeof(m));".to_string()
                 };
                 main += &format!(
                     "t=m?{zero}:x;f=m?x:{zero};memcpy(expected+l*sizeof(t),&t,sizeof(t));memcpy(expected+16+l*sizeof(f),&f,sizeof(f));memcpy(expected+32+l*sizeof(m),&m,sizeof(m));}}for(unsigned alias=0;alias<3;alias++){{memcpy(aa+1,a,16);memcpy(bb+1,b,16);unsigned char *r=alias==1?aa+1:alias==2?bb+1:out+1;{name}(aa+1,bb+1,r);if(memcmp(r,expected,48)){{fprintf(stderr,\"{name} k=%u j=%u alias=%u\\n\",k,j,alias);return 1;}}}}}}\n"

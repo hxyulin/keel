@@ -292,9 +292,9 @@ impl<'p> Gen<'p> {
                 && global.symbol == "atexit"
             {
                 let ordinary_type = matches!(global.ty, Ty::Func(f)
-                    if f.ret == Ty::Int(IntKind::Int) && f.prototyped && !f.variadic
+                    if f.ret == Ty::Int(IntKind::Int) && f.has_prototype() && !f.variadic
                     && matches!(f.params, [Ty::Ptr(Ty::Func(cb))]
-                        if cb.ret == Ty::Void && cb.prototyped && !cb.variadic && cb.params.is_empty()));
+                        if cb.ret == Ty::Void && cb.has_prototype() && !cb.variadic && cb.params.is_empty()));
                 if !ordinary_type
                     || global.defined
                     || global.internal
@@ -310,16 +310,15 @@ impl<'p> Gen<'p> {
                 }
                 self.use_global(g);
             }
-            if let Some(loc) = global.weak {
-                if global.internal
+            if let Some(loc) = global.weak
+                && (global.internal
                     || global.thread_local
-                    || (!global.defined && global.visibility.is_some_and(|v| v.hidden()))
-                {
-                    return Err(Error::new(
-                        loc,
-                        "weak requires external linkage, non-TLS storage and default visibility for undefined references",
-                    ));
-                }
+                    || (!global.defined && global.visibility.is_some_and(|v| v.hidden())))
+            {
+                return Err(Error::new(
+                    loc,
+                    "weak requires external linkage, non-TLS storage and default visibility for undefined references",
+                ));
             }
             if global.retain.is_some() && !global.defined {
                 return Err(Error::new(
@@ -327,19 +326,18 @@ impl<'p> Gen<'p> {
                     "retain requires a definition in this translation unit",
                 ));
             }
-            if let Some(loc) = global.lifecycle {
-                if !matches!(global.ty, Ty::Func(f) if f.ret == Ty::Void && f.prototyped && f.params.is_empty() && !f.variadic)
+            if let Some(loc) = global.lifecycle
+                && (!matches!(global.ty, Ty::Func(f) if f.ret == Ty::Void && f.has_prototype() && f.params.is_empty() && !f.variadic)
                     || global.incompatible_return
                     || !global.defined
                     || global.func.is_none()
                     || global.returns_twice
-                    || global.function_attrs.noreturn
-                {
-                    return Err(Error::new(
-                        loc,
-                        "constructor/destructor requires a defined, normally returning void(void) function",
-                    ));
-                }
+                    || global.function_attrs.noreturn)
+            {
+                return Err(Error::new(
+                    loc,
+                    "constructor/destructor requires a defined, normally returning void(void) function",
+                ));
             }
             if global.defined
                 && (!global.internal
@@ -1133,7 +1131,7 @@ impl<'p> Gen<'p> {
         let global = &self.p.globals[g];
         let types = self.types();
         let nominal = types.size(&global.ty);
-        let items = global.init.as_ref().map_or(&[][..], |i| &i.items[..]);
+        let items = global.init.as_ref().map_or(&[][..], |i| i.items);
         fn flexible_start(defs: &[StructDef<'_>], ty: Ty<'_>) -> Option<u64> {
             let Ty::Struct(id) = ty else { return None };
             let def = defs.get(id)?;
@@ -3962,7 +3960,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 let symbol = if let Ty::Func(fty) = &global.ty {
                     Symbol::Func(self.import_global(*g, fty, None)?)
                 } else {
-                    Symbol::Data(self.b.import_data(&global.symbol))
+                    Symbol::Data(self.b.import_data(global.symbol))
                 };
                 self.b.ins().symbol_addr(symbol)
             }
@@ -3999,7 +3997,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         fty: &FuncTy,
         args: Option<&[Ty]>,
     ) -> R<keel_ir::FuncRef> {
-        let fixed = fty.prototyped || self.g.p.globals[g].func.is_some();
+        let fixed = fty.has_prototype() || self.g.p.globals[g].func.is_some();
         if fixed && let Some(&fref) = self.callees.get(&g) {
             return Ok(fref);
         }
@@ -4021,10 +4019,10 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
     fn callee_signature(&mut self, g: usize, fty: &FuncTy, args: Option<&[Ty]>) -> R<Signature> {
         let global = &self.g.p.globals[g];
         let final_ty = global.ty.func().unwrap();
-        if global.func.is_some() || final_ty.prototyped {
+        if global.func.is_some() || final_ty.has_prototype() {
             return self.g.signature(final_ty, g, &[]);
         }
-        if fty.prototyped {
+        if fty.has_prototype() {
             return self.g.signature(fty, g, &[]);
         }
         if let Some(sig) = self.g.unprototyped.get(&g) {
@@ -4098,7 +4096,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             }
         }
         for (index, arg) in args.iter().enumerate() {
-            if !fty.prototyped && arg.ty.is_pair_or_struct() {
+            if !fty.has_prototype() && arg.ty.is_pair_or_struct() {
                 return Err(Error::new(arg.loc, "struct argument without a prototype"));
             }
             if index >= fty.params.len()
@@ -4132,7 +4130,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             vals.push(value);
         }
         // Argument types decide the signature only without a prototype.
-        let extra: Vec<Ty> = if fty.prototyped {
+        let extra: Vec<Ty> = if fty.has_prototype() {
             Vec::new()
         } else {
             args.iter().map(|a| a.ty).collect()
@@ -4155,10 +4153,10 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     ));
                 }
                 self.g.use_global(g);
-                let fref = self.import_global(g, &fty, Some(&extra))?;
+                let fref = self.import_global(g, fty, Some(&extra))?;
                 let function = self.b.function();
                 let sig = &function.callee(fref).sig;
-                if !fty.prototyped
+                if !fty.has_prototype()
                     && (sig.params.len() != vals.len()
                         || sig
                             .params
@@ -4180,7 +4178,11 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     ..*fty
                 };
                 let sig = self.g.signature(
-                    if fty.prototyped { fty } else { &unprototyped },
+                    if fty.has_prototype() {
+                        fty
+                    } else {
+                        &unprototyped
+                    },
                     usize::MAX,
                     &extra,
                 )?;
@@ -5095,6 +5097,22 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
     }
 }
 
+// CAS IR has one ordering: the success order also supplies a legally stronger
+// failure order. Runtime orders conservatively select seq_cst.
+fn atomic_order(order: i64, load: bool, store: bool) -> Ordering {
+    match order {
+        0 => Ordering::Relaxed,
+        1 | 2 if store => Ordering::Relaxed,
+        1 | 2 => Ordering::Acquire,
+        3 if load => Ordering::Relaxed,
+        3 => Ordering::Release,
+        4 if load => Ordering::Acquire,
+        4 if store => Ordering::Release,
+        4 => Ordering::AcqRel,
+        _ => Ordering::SeqCst,
+    }
+}
+
 #[cfg(test)]
 mod alignment_tests {
     use super::*;
@@ -5381,21 +5399,5 @@ mod alignment_tests {
         assert_eq!(got[14], 32, "seeded value");
         assert_eq!(got[16], 1, "block parameter");
         assert_eq!(*got.last().unwrap(), 2, "alias resolves to its target");
-    }
-}
-
-// CAS IR has one ordering: the success order also supplies a legally stronger
-// failure order. Runtime orders conservatively select seq_cst.
-fn atomic_order(order: i64, load: bool, store: bool) -> Ordering {
-    match order {
-        0 => Ordering::Relaxed,
-        1 | 2 if store => Ordering::Relaxed,
-        1 | 2 => Ordering::Acquire,
-        3 if load => Ordering::Relaxed,
-        3 => Ordering::Release,
-        4 if load => Ordering::Acquire,
-        4 if store => Ordering::Release,
-        4 => Ordering::AcqRel,
-        _ => Ordering::SeqCst,
     }
 }

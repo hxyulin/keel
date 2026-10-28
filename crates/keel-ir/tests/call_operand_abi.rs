@@ -4,17 +4,14 @@ const SOURCE: &str = "decl @sink(i64, ...)\nfunc @caller(ptr) {\nentry(v0:ptr):\
 fn clone_remap_and_text_keep_layout_and_named_prefix() {
     let m = keel_ir::parse(SOURCE).unwrap();
     keel_ir::verify_module(&m).unwrap();
-    let mut n = m.clone();
+    let mut n = m;
     let f = &mut n.functions[0];
     let (_, i) = f
         .layout_insts()
         .find(|(_, i)| matches!(f.inst_data(*i), InstData::Call { .. }))
         .unwrap();
     let original = f.inst_data(i).call_args().unwrap().abi(1).unwrap().clone();
-    f.inst_data_mut(i).for_each_operand_mut(|v| {
-        let saved = *v;
-        *v = saved;
-    });
+    f.inst_data_mut(i).for_each_operand_mut(|_| {});
     assert_eq!(f.inst_data(i).call_args().unwrap().abi(1), Some(&original));
     assert!(matches!(original.purpose, Purpose::ByVal(_)));
     let text = n.to_string();

@@ -406,7 +406,7 @@ fn inactive_interference_blocks_an_otherwise_available_consensus_register() {
         preserved_gprs: 0,
         float: false,
         vector: false,
-                spill_units: 1,
+        spill_units: 1,
     };
     let intervals = [
         iv(0, vec![(1, 2)]),

@@ -9,7 +9,7 @@ use keel_ir::{Intrinsic, Type};
 use std::{fs, path::PathBuf, process::Command};
 #[allow(dead_code)]
 #[path = "common/vector.rs"]
-mod common;
+pub mod common;
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -218,7 +218,7 @@ fn masked_memory_feature_and_operand_validation() {
     assert!(
         keel_codegen::aarch64::compile(
             &keel_ir::parse(
-                &source()
+                source()
                     .split("func @masked_x86_avx_vmaskmovps_load256")
                     .next()
                     .unwrap()

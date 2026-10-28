@@ -43,6 +43,10 @@ pub const INT_ARGS: [u8; 6] = [RDI, RSI, RDX, RCX, 8, 9];
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Class {
     /// No occupied bytes: consumes no register and has no transported payload.
+    #[expect(
+        clippy::enum_variant_names,
+        reason = "NO_CLASS is the SysV ABI name and part of this public enum"
+    )]
     NoClass,
     Integer,
     Sse,
@@ -105,10 +109,16 @@ pub fn ambiguous_vector_wrapper(layout: &Layout) -> bool {
 #[cfg(test)]
 fn mixed_d8_fixed(layout: &Layout) -> bool {
     fn d8(layout: &Layout) -> bool {
-        matches!(layout, Layout::Scalar(Type::Vector(
-            VectorType::I8x8 | VectorType::I16x4 | VectorType::I32x2
-            | VectorType::I64x1 | VectorType::F32x2
-        )))
+        matches!(
+            layout,
+            Layout::Scalar(Type::Vector(
+                VectorType::I8x8
+                    | VectorType::I16x4
+                    | VectorType::I32x2
+                    | VectorType::I64x1
+                    | VectorType::F32x2
+            ))
+        )
     }
     fn scalar(layout: &Layout) -> bool {
         matches!(layout, Layout::Scalar(Type::I64 | Type::F64))
@@ -120,8 +130,16 @@ fn mixed_d8_fixed(layout: &Layout) -> bool {
 /// A vector occupying one independent SSE eightbyte under the common SysV
 /// extension contract. f64x1 deliberately remains producer-specific.
 fn common_d8(ty: Type) -> bool {
-    matches!(ty, Type::Vector(VectorType::I8x8 | VectorType::I16x4
-        | VectorType::I32x2 | VectorType::I64x1 | VectorType::F32x2))
+    matches!(
+        ty,
+        Type::Vector(
+            VectorType::I8x8
+                | VectorType::I16x4
+                | VectorType::I32x2
+                | VectorType::I64x1
+                | VectorType::F32x2
+        )
+    )
 }
 
 /// Natural recursive aggregates made from ordinary scalars and common D8
@@ -136,9 +154,9 @@ pub fn natural_d8_aggregate(layout: &Layout) -> bool {
             Layout::Scalar(ty) if common_d8(*ty) => Some(true),
             Layout::Scalar(ty) if !ty.is_vector() => Some(false),
             Layout::Scalar(_) => None,
-            Layout::Struct(fields) if !fields.is_empty() => {
-                fields.iter().try_fold(false, |found, field| Some(visit(field)? || found))
-            }
+            Layout::Struct(fields) if !fields.is_empty() => fields
+                .iter()
+                .try_fold(false, |found, field| Some(visit(field)? || found)),
             Layout::Array(elem, n) if *n > 0 => visit(elem),
             _ => None,
         }
@@ -169,10 +187,14 @@ fn classify_eightbytes(layout: &Layout, natural_d8: bool) -> Option<Vec<Class>> 
         // Scalar integer/ptr leaves dominate any floats sharing their half.
         let leaf = if ty.is_float() || (natural_d8 && common_d8(ty)) {
             Class::Sse
-        } else { Class::Integer };
+        } else {
+            Class::Integer
+        };
         let end = offset + Layout::Scalar(ty).size();
         for class in &mut classes[(offset / 8) as usize..end.div_ceil(8) as usize] {
-            if *class != Class::Integer { *class = leaf; }
+            if *class != Class::Integer {
+                *class = leaf;
+            }
         }
     }
     Some(classes)
@@ -190,7 +212,7 @@ pub enum ProducerAggregate {
 
 /// Same signed displacement/frame bound as the x86 frame planner. Admission
 /// checks the complete contract budget before any expanded leaf traversal.
-pub const MAX_AGGREGATE_ABI_BYTES:u64=i32::MAX as u64/2;
+pub const MAX_AGGREGATE_ABI_BYTES: u64 = i32::MAX as u64 / 2;
 
 pub fn producer_aggregate(layout: &Layout, producer: X86VectorAbi) -> Option<ProducerAggregate> {
     fn declares_f64x1(l: &Layout) -> bool {
@@ -208,30 +230,47 @@ pub fn producer_aggregate(layout: &Layout, producer: X86VectorAbi) -> Option<Pro
             _ => false,
         }
     }
-    if matches!(layout, Layout::Scalar(_)) || !declares_f64x1(layout) { return None; }
-    let size=layout.checked_size()?;
-    if size>MAX_AGGREGATE_ABI_BYTES { return None; }
-    fn occupied(l:&Layout)->bool {
+    if matches!(layout, Layout::Scalar(_)) || !declares_f64x1(layout) {
+        return None;
+    }
+    let size = layout.checked_size()?;
+    if size > MAX_AGGREGATE_ABI_BYTES {
+        return None;
+    }
+    fn occupied(l: &Layout) -> bool {
         match l {
-            Layout::Scalar(t)=>*t==Type::Vector(VectorType::F64x1),
-            Layout::Struct(fields)=>fields.iter().any(occupied),
-            Layout::Array(elem,n)=>*n!=0 && occupied(elem),
+            Layout::Scalar(t) => *t == Type::Vector(VectorType::F64x1),
+            Layout::Struct(fields) => fields.iter().any(occupied),
+            Layout::Array(elem, n) => *n != 0 && occupied(elem),
         }
     }
-    if occupied(layout) { return Some(ProducerAggregate::Memory); }
-    if size==0 { return Some(ProducerAggregate::Eightbytes(vec![])); }
+    if occupied(layout) {
+        return Some(ProducerAggregate::Memory);
+    }
+    if size == 0 {
+        return Some(ProducerAggregate::Eightbytes(vec![]));
+    }
     // Every currently representable vector is at most 32 bytes. Larger
     // objects cannot be single-register/SSEUP wrappers.
-    if size>32 { return Some(ProducerAggregate::Memory); }
+    if size > 32 {
+        return Some(ProducerAggregate::Memory);
+    }
     let leaves = layout.leaves();
     // Zero-count arrays retain alignment but have no occupied eightbytes.
     // Producer-sensitive empty siblings can change a wide vector wrapper.
-    if let [(0, ty)] = leaves.as_slice() {
-        if ty.is_vector() && ty.bytes().is_some_and(|n| u64::from(n) == layout.size() && u64::from(n) == layout.align()) {
-            return Some(if ty.bytes() == Some(32) && producer == X86VectorAbi::Clang && !single(layout) {
+    if let [(0, ty)] = leaves.as_slice()
+        && ty.is_vector()
+        && ty
+            .bytes()
+            .is_some_and(|n| u64::from(n) == layout.size() && u64::from(n) == layout.align())
+    {
+        return Some(
+            if ty.bytes() == Some(32) && producer == X86VectorAbi::Clang && !single(layout) {
                 ProducerAggregate::Memory
-            } else { ProducerAggregate::Vector(*ty) });
-        }
+            } else {
+                ProducerAggregate::Vector(*ty)
+            },
+        );
     }
     Some(match classify_eightbytes(layout, true) {
         Some(classes) => ProducerAggregate::Eightbytes(classes),
@@ -241,8 +280,12 @@ pub fn producer_aggregate(layout: &Layout, producer: X86VectorAbi) -> Option<Pro
 
 /// Common planner policy entry point, independent of ISA features.
 pub fn aggregate_policy(layout: &Layout, producer: Option<X86VectorAbi>) -> ProducerAggregate {
-    if let Some(policy) = producer.and_then(|p| producer_aggregate(layout, p)) { return policy; }
-    if let Some(ty) = vector_wrapper(layout) { return ProducerAggregate::Vector(ty); }
+    if let Some(policy) = producer.and_then(|p| producer_aggregate(layout, p)) {
+        return policy;
+    }
+    if let Some(ty) = vector_wrapper(layout) {
+        return ProducerAggregate::Vector(ty);
+    }
     classify(layout).map_or(ProducerAggregate::Memory, ProducerAggregate::Eightbytes)
 }
 
@@ -312,14 +355,18 @@ fn result_regs(classes: &[Class]) -> Vec<RegPiece> {
     let (mut ints, mut floats) = ([RAX, RDX].into_iter(), 0..);
     classes
         .iter()
-        .enumerate().filter_map(|(i, class)| {
+        .enumerate()
+        .filter_map(|(i, class)| {
             let loc = match class {
                 Class::NoClass => return None,
                 Class::Integer => Loc::Reg(ints.next().unwrap()),
                 Class::Sse => Loc::FReg(floats.next().unwrap()),
                 Class::X87 | Class::X87Up => unreachable!("x87 result is not a SIMD register"),
             };
-            Some(RegPiece { offset: i as u64 * 8, loc })
+            Some(RegPiece {
+                offset: i as u64 * 8,
+                loc,
+            })
         })
         .collect()
 }
@@ -347,7 +394,12 @@ impl Cursor {
 
     /// Registers for these eightbyte classes, if all fit.
     fn regs(&mut self, classes: &[Class]) -> Option<Vec<RegPiece>> {
-        if classes.iter().any(|c| matches!(c, Class::X87 | Class::X87Up)) { return None; }
+        if classes
+            .iter()
+            .any(|c| matches!(c, Class::X87 | Class::X87Up))
+        {
+            return None;
+        }
         let ints = classes.iter().filter(|&&c| c == Class::Integer).count();
         let floats = classes.iter().filter(|&&c| c == Class::Sse).count();
         if self.ints + ints > INT_ARGS.len() || usize::from(self.floats) + floats > 8 {
@@ -356,20 +408,24 @@ impl Cursor {
         Some(
             classes
                 .iter()
-                .enumerate().filter_map(|(i, class)| {
+                .enumerate()
+                .filter_map(|(i, class)| {
                     let loc = match class {
-                    Class::NoClass => return None,
-                    Class::Integer => {
-                        self.ints += 1;
-                        Loc::Reg(INT_ARGS[self.ints - 1])
-                    }
-                    Class::X87 | Class::X87Up => unreachable!("x87 arguments use MEMORY"),
-                    Class::Sse => {
-                        self.floats += 1;
-                        Loc::FReg(self.floats - 1)
-                    }
+                        Class::NoClass => return None,
+                        Class::Integer => {
+                            self.ints += 1;
+                            Loc::Reg(INT_ARGS[self.ints - 1])
+                        }
+                        Class::X87 | Class::X87Up => unreachable!("x87 arguments use MEMORY"),
+                        Class::Sse => {
+                            self.floats += 1;
+                            Loc::FReg(self.floats - 1)
+                        }
                     };
-                    Some(RegPiece { offset: i as u64 * 8, loc })
+                    Some(RegPiece {
+                        offset: i as u64 * 8,
+                        loc,
+                    })
                 })
                 .collect(),
         )
@@ -403,7 +459,10 @@ impl Cursor {
         match aggregate_policy(layout, producer) {
             ProducerAggregate::Vector(_) if self.floats < 8 => {
                 self.floats += 1;
-                ArgLoc::InRegs(vec![RegPiece { offset: 0, loc: Loc::FReg(self.floats - 1) }])
+                ArgLoc::InRegs(vec![RegPiece {
+                    offset: 0,
+                    loc: Loc::FReg(self.floats - 1),
+                }])
             }
             ProducerAggregate::Eightbytes(classes) => match self.regs(&classes) {
                 Some(regs) => ArgLoc::InRegs(regs),
@@ -415,13 +474,20 @@ impl Cursor {
 
     fn sret(&mut self, layout: &Layout, producer: Option<X86VectorAbi>) -> ArgLoc {
         match aggregate_policy(layout, producer) {
-            ProducerAggregate::Vector(_) => ArgLoc::SretRegs(vec![RegPiece { offset: 0, loc: Loc::FReg(0) }]),
-            ProducerAggregate::Eightbytes(classes) if classes == [Class::X87, Class::X87Up] => ArgLoc::SretX87,
+            ProducerAggregate::Vector(_) => ArgLoc::SretRegs(vec![RegPiece {
+                offset: 0,
+                loc: Loc::FReg(0),
+            }]),
+            ProducerAggregate::Eightbytes(classes) if classes == [Class::X87, Class::X87Up] => {
+                ArgLoc::SretX87
+            }
             ProducerAggregate::Eightbytes(classes) => ArgLoc::SretRegs(result_regs(&classes)),
-            ProducerAggregate::Memory => { self.ints += 1; ArgLoc::SretMemory }
+            ProducerAggregate::Memory => {
+                self.ints += 1;
+                ArgLoc::SretMemory
+            }
         }
     }
-
 }
 
 /// Where a call's arguments go.
@@ -440,11 +506,17 @@ pub struct Placement {
 }
 
 pub fn signature_param_kind<'a>(sig: &Signature, param: &'a keel_ir::AbiParam) -> ArgKind<'a> {
-    if sig.x86_vector_abi.is_some() {
+    if let Some(producer) = sig.x86_vector_abi {
         match &param.purpose {
-            Purpose::Normal if param.ty == Type::Vector(VectorType::F64x1) => return ArgKind::StackValue(param.ty),
-            Purpose::ByVal(layout) if producer_aggregate(layout, sig.x86_vector_abi.unwrap()).is_some() => return ArgKind::ProducerByVal(layout, sig.x86_vector_abi.unwrap()),
-            Purpose::Sret(layout) if producer_aggregate(layout, sig.x86_vector_abi.unwrap()).is_some() => return ArgKind::ProducerSret(layout, sig.x86_vector_abi.unwrap()),
+            Purpose::Normal if param.ty == Type::Vector(VectorType::F64x1) => {
+                return ArgKind::StackValue(param.ty);
+            }
+            Purpose::ByVal(layout) if producer_aggregate(layout, producer).is_some() => {
+                return ArgKind::ProducerByVal(layout, producer);
+            }
+            Purpose::Sret(layout) if producer_aggregate(layout, producer).is_some() => {
+                return ArgKind::ProducerSret(layout, producer);
+            }
             _ => {}
         }
     }
@@ -454,7 +526,10 @@ pub fn signature_param_kind<'a>(sig: &Signature, param: &'a keel_ir::AbiParam) -
 /// GNU scalar f64x1 returns consume an implicit first GP argument.
 pub fn scalar_memory_result(sig: &Signature) -> bool {
     sig.x86_vector_abi == Some(X86VectorAbi::Gnu)
-        && sig.returns.first().is_some_and(|p| p.ty == Type::Vector(VectorType::F64x1))
+        && sig
+            .returns
+            .first()
+            .is_some_and(|p| p.ty == Type::Vector(VectorType::F64x1))
 }
 
 pub fn signature_arg_locs(sig: &Signature, args: &[ArgKind]) -> Placement {
@@ -477,13 +552,19 @@ impl Placement {
         self.fill_reserved(args, false);
     }
 
-    pub fn fill_signature<'a>(&mut self, sig: &Signature, args: impl IntoIterator<Item = ArgKind<'a>>) {
+    pub fn fill_signature<'a>(
+        &mut self,
+        sig: &Signature,
+        args: impl IntoIterator<Item = ArgKind<'a>>,
+    ) {
         self.fill_reserved(args, scalar_memory_result(sig));
     }
 
     fn fill_reserved<'a>(&mut self, args: impl IntoIterator<Item = ArgKind<'a>>, hidden: bool) {
-        let mut cursor = Cursor::default();
-        cursor.ints = usize::from(hidden);
+        let mut cursor = Cursor {
+            ints: usize::from(hidden),
+            ..Default::default()
+        };
         self.locs.clear();
         self.locs.extend(args.into_iter().map(|arg| match arg {
             ArgKind::Value(ty) => ArgLoc::Value(cursor.scalar(ty)),
@@ -494,7 +575,9 @@ impl Placement {
             ArgKind::ByVal(layout) => cursor.by_val(layout, None),
             ArgKind::ProducerByVal(layout, producer) => cursor.by_val(layout, Some(producer)),
             ArgKind::ProducerSret(layout, producer) => cursor.sret(layout, Some(producer)),
-            ArgKind::MemoryByVal(layout) => ArgLoc::OnStack(cursor.stack(layout.size(), layout.align())),
+            ArgKind::MemoryByVal(layout) => {
+                ArgLoc::OnStack(cursor.stack(layout.size(), layout.align()))
+            }
             ArgKind::Sret(layout) => cursor.sret(layout, None),
         }));
         self.stack = cursor.stack;
@@ -507,7 +590,11 @@ impl Placement {
 /// Where a scalar result comes back: rax (and rdx for the high half of
 /// an `i128`), or xmm0.
 pub fn return_loc(ty: Type) -> Loc {
-    assert_ne!(ty, Type::F80, "F80 returns in ST0, outside the SSA register allocator");
+    assert_ne!(
+        ty,
+        Type::F80,
+        "F80 returns in ST0, outside the SSA register allocator"
+    );
     if ty.is_float() || ty.is_vector() {
         Loc::FReg(0)
     } else {
@@ -525,38 +612,80 @@ mod tests {
     }
 
     fn pieces(regs: Vec<Loc>) -> Vec<RegPiece> {
-        regs.into_iter().enumerate().map(|(i, loc)| RegPiece { offset: i as u64 * 8, loc }).collect()
+        regs.into_iter()
+            .enumerate()
+            .map(|(i, loc)| RegPiece {
+                offset: i as u64 * 8,
+                loc,
+            })
+            .collect()
     }
 
     #[test]
     fn no_class_padding_keeps_offsets_and_consumes_neither_bank() {
         for scalar in [Type::I8, Type::I64, Type::F64] {
-            let occupied = if scalar.is_float() { Class::Sse } else { Class::Integer };
+            let occupied = if scalar.is_float() {
+                Class::Sse
+            } else {
+                Class::Integer
+            };
             let mut layout = s(vec![t(scalar), Layout::Array(Box::new(t(Type::I128)), 0)]);
             for _ in 0..4 {
                 assert_eq!((layout.size(), layout.align()), (16, 16));
                 assert_eq!(classify(&layout), Some(vec![occupied, Class::NoClass]));
-                for gp in [0, 5, 6] { for fp in [0, 7, 8] {
-                    let mut cursor = Cursor { ints: gp, floats: fp, ..Cursor::default() };
-                    let fits = if occupied == Class::Integer { gp < 6 } else { fp < 8 };
-                    let loc = cursor.by_val(&layout, None);
-                    assert_eq!(matches!(loc, ArgLoc::InRegs(_)), fits);
-                    assert_eq!(cursor.ints, gp + usize::from(fits && occupied == Class::Integer));
-                    assert_eq!(cursor.floats, fp + u8::from(fits && occupied == Class::Sse));
-                }}
+                for gp in [0, 5, 6] {
+                    for fp in [0, 7, 8] {
+                        let mut cursor = Cursor {
+                            ints: gp,
+                            floats: fp,
+                            ..Cursor::default()
+                        };
+                        let fits = if occupied == Class::Integer {
+                            gp < 6
+                        } else {
+                            fp < 8
+                        };
+                        let loc = cursor.by_val(&layout, None);
+                        assert_eq!(matches!(loc, ArgLoc::InRegs(_)), fits);
+                        assert_eq!(
+                            cursor.ints,
+                            gp + usize::from(fits && occupied == Class::Integer)
+                        );
+                        assert_eq!(cursor.floats, fp + u8::from(fits && occupied == Class::Sse));
+                    }
+                }
                 layout = s(vec![Layout::Array(Box::new(layout), 1)]);
             }
         }
         // Synthetic leading/all-empty classes ensure offsets are never compacted.
         let mut cursor = Cursor::default();
-        assert_eq!(cursor.regs(&[Class::NoClass, Class::Integer]), Some(vec![RegPiece { offset: 8, loc: Loc::Reg(RDI) }]));
-        assert_eq!(result_regs(&[Class::NoClass, Class::Sse]), vec![RegPiece { offset: 8, loc: Loc::FReg(0) }]);
+        assert_eq!(
+            cursor.regs(&[Class::NoClass, Class::Integer]),
+            Some(vec![RegPiece {
+                offset: 8,
+                loc: Loc::Reg(RDI)
+            }])
+        );
+        assert_eq!(
+            result_regs(&[Class::NoClass, Class::Sse]),
+            vec![RegPiece {
+                offset: 8,
+                loc: Loc::FReg(0)
+            }]
+        );
         assert_eq!(cursor.regs(&[Class::NoClass, Class::NoClass]), Some(vec![]));
         assert_eq!((cursor.ints, cursor.floats), (1, 0));
         // Natural layouts cannot put a first nonempty leaf after leading padding.
-        for layout in [s(vec![]), Layout::Array(Box::new(t(Type::I128)), 0), s(vec![s(vec![]), Layout::Array(Box::new(t(Type::I128)), 0)])] {
+        for layout in [
+            s(vec![]),
+            Layout::Array(Box::new(t(Type::I128)), 0),
+            s(vec![s(vec![]), Layout::Array(Box::new(t(Type::I128)), 0)]),
+        ] {
             assert_eq!(classify(&layout), Some(vec![]));
-            assert_eq!(Cursor::default().by_val(&layout, None), ArgLoc::InRegs(vec![]));
+            assert_eq!(
+                Cursor::default().by_val(&layout, None),
+                ArgLoc::InRegs(vec![])
+            );
         }
     }
 
@@ -566,50 +695,104 @@ mod tests {
         for _depth in 0..8 {
             assert_eq!(classify(&layout), Some(vec![Class::Integer; 2]));
             let result = arg_locs(&[ArgKind::Sret(&layout)]);
-            assert_eq!(result.locs, [ArgLoc::SretRegs(pieces(vec![Loc::Reg(RAX), Loc::Reg(RDX)]))]);
+            assert_eq!(
+                result.locs,
+                [ArgLoc::SretRegs(pieces(vec![Loc::Reg(RAX), Loc::Reg(RDX)]))]
+            );
             for gp in [0, 4, 5, 6] {
                 for fp in [0, 7, 8] {
                     let mut args = vec![ArgKind::Value(Type::I64); gp];
                     args.extend(vec![ArgKind::Value(Type::F64); fp]);
-                    args.extend([ArgKind::ByVal(&layout), ArgKind::Value(Type::I64), ArgKind::Value(Type::F64)]);
+                    args.extend([
+                        ArgKind::ByVal(&layout),
+                        ArgKind::Value(Type::I64),
+                        ArgKind::Value(Type::F64),
+                    ]);
                     let plan = arg_locs(&args);
                     let used = if gp + 2 <= 6 { gp + 2 } else { gp };
-                    assert_eq!(plan.locs[gp + fp], if gp + 2 <= 6 {
-                        ArgLoc::InRegs(pieces(vec![Loc::Reg(INT_ARGS[gp]), Loc::Reg(INT_ARGS[gp + 1])]))
-                    } else { ArgLoc::OnStack(0) });
-                    assert_eq!(matches!(plan.locs[gp + fp + 1], ArgLoc::Value(Slot::Regs(_, _))), used < 6);
-                    assert_eq!(plan.locs[gp + fp + 2], if fp < 8 {
-                        ArgLoc::Value(Slot::Regs(Loc::FReg(fp as u8), None))
-                    } else { ArgLoc::Value(Slot::Stack(if gp + 2 <= 6 { if used < 6 { 0 } else { 8 } } else if gp < 6 { 16 } else { 24 })) });
+                    assert_eq!(
+                        plan.locs[gp + fp],
+                        if gp + 2 <= 6 {
+                            ArgLoc::InRegs(pieces(vec![
+                                Loc::Reg(INT_ARGS[gp]),
+                                Loc::Reg(INT_ARGS[gp + 1]),
+                            ]))
+                        } else {
+                            ArgLoc::OnStack(0)
+                        }
+                    );
+                    assert_eq!(
+                        matches!(plan.locs[gp + fp + 1], ArgLoc::Value(Slot::Regs(_, _))),
+                        used < 6
+                    );
+                    assert_eq!(
+                        plan.locs[gp + fp + 2],
+                        if fp < 8 {
+                            ArgLoc::Value(Slot::Regs(Loc::FReg(fp as u8), None))
+                        } else {
+                            ArgLoc::Value(Slot::Stack(if gp + 2 <= 6 {
+                                if used < 6 { 0 } else { 8 }
+                            } else if gp < 6 {
+                                16
+                            } else {
+                                24
+                            }))
+                        }
+                    );
                 }
             }
-            layout = if _depth % 2 == 0 { s(vec![layout]) } else { Layout::Array(Box::new(layout), 1) };
+            layout = if _depth % 2 == 0 {
+                s(vec![layout])
+            } else {
+                Layout::Array(Box::new(layout), 1)
+            };
         }
-        for layout in [s(vec![t(Type::I128), t(Type::I8)]), Layout::Array(Box::new(t(Type::I128)), 2)] {
+        for layout in [
+            s(vec![t(Type::I128), t(Type::I8)]),
+            Layout::Array(Box::new(t(Type::I128)), 2),
+        ] {
             assert_eq!(classify(&layout), None);
         }
     }
 
     #[test]
     fn mixed_d8_fixed_classes_and_atomic_bank_rollback() {
-        for vector in [VectorType::I8x8, VectorType::I16x4, VectorType::I32x2,
-            VectorType::I64x1, VectorType::F32x2] {
+        for vector in [
+            VectorType::I8x8,
+            VectorType::I16x4,
+            VectorType::I32x2,
+            VectorType::I64x1,
+            VectorType::F32x2,
+        ] {
             let d = t(Type::Vector(vector));
             for scalar in [Type::I64, Type::F64] {
                 for reverse in [false, true] {
-                    let fields = if reverse { vec![t(scalar), d.clone()] }
-                        else { vec![d.clone(), t(scalar)] };
+                    let fields = if reverse {
+                        vec![t(scalar), d.clone()]
+                    } else {
+                        vec![d.clone(), t(scalar)]
+                    };
                     let layout = s(fields);
                     assert!(mixed_d8_fixed(&layout));
                     assert_eq!((layout.size(), layout.align()), (16, 8));
-                    let mut classes = vec![Class::Sse, if scalar == Type::I64 {
-                        Class::Integer
-                    } else { Class::Sse }];
-                    if reverse { classes.reverse(); }
+                    let mut classes = vec![
+                        Class::Sse,
+                        if scalar == Type::I64 {
+                            Class::Integer
+                        } else {
+                            Class::Sse
+                        },
+                    ];
+                    if reverse {
+                        classes.reverse();
+                    }
                     assert_eq!(classify(&layout), Some(classes.clone()));
                     let result = arg_locs(&[ArgKind::Sret(&layout), ArgKind::Value(Type::I64)]);
                     assert_eq!(result.locs[0], ArgLoc::SretRegs(result_regs(&classes)));
-                    assert_eq!(result.locs[1], ArgLoc::Value(Slot::Regs(Loc::Reg(RDI), None)));
+                    assert_eq!(
+                        result.locs[1],
+                        ArgLoc::Value(Slot::Regs(Loc::Reg(RDI), None))
+                    );
                     for gp in [5, 6] {
                         for fp in [6, 7, 8] {
                             let mut args = vec![ArgKind::Value(Type::I64); gp];
@@ -624,8 +807,14 @@ mod tests {
                             assert_eq!(matches!(p.locs[gp + fp], ArgLoc::InRegs(_)), fits);
                             if !fits {
                                 assert_eq!(p.locs[gp + fp], ArgLoc::OnStack(0));
-                                assert_eq!(matches!(p.locs[gp + fp + 1], ArgLoc::Value(Slot::Regs(_, _))), gp < 6);
-                                assert_eq!(matches!(p.locs[gp + fp + 2], ArgLoc::Value(Slot::Regs(_, _))), fp < 8);
+                                assert_eq!(
+                                    matches!(p.locs[gp + fp + 1], ArgLoc::Value(Slot::Regs(_, _))),
+                                    gp < 6
+                                );
+                                assert_eq!(
+                                    matches!(p.locs[gp + fp + 2], ArgLoc::Value(Slot::Regs(_, _))),
+                                    fp < 8
+                                );
                             }
                         }
                     }
@@ -635,18 +824,40 @@ mod tests {
             }
             assert!(!mixed_d8_fixed(&s(vec![d.clone(), d])));
         }
-        assert!(!mixed_d8_fixed(&s(vec![t(Type::Vector(VectorType::F64x1)), t(Type::I64)])));
-        assert!(!mixed_d8_fixed(&s(vec![t(Type::Vector(VectorType::F32x2)), t(Type::I32)])));
+        assert!(!mixed_d8_fixed(&s(vec![
+            t(Type::Vector(VectorType::F64x1)),
+            t(Type::I64)
+        ])));
+        assert!(!mixed_d8_fixed(&s(vec![
+            t(Type::Vector(VectorType::F32x2)),
+            t(Type::I32)
+        ])));
     }
 
     #[test]
     fn recursive_d8_layout_offsets_classes_and_rollback() {
-        for vector in [VectorType::I8x8, VectorType::I16x4, VectorType::I32x2,
-            VectorType::I64x1, VectorType::F32x2] {
+        for vector in [
+            VectorType::I8x8,
+            VectorType::I16x4,
+            VectorType::I32x2,
+            VectorType::I64x1,
+            VectorType::F32x2,
+        ] {
             let d = t(Type::Vector(vector));
-            for scalar in [Type::I8, Type::I16, Type::I32, Type::I64,
-                Type::Ptr, Type::F32, Type::F64] {
-                let sc = if scalar.is_float() { Class::Sse } else { Class::Integer };
+            for scalar in [
+                Type::I8,
+                Type::I16,
+                Type::I32,
+                Type::I64,
+                Type::Ptr,
+                Type::F32,
+                Type::F64,
+            ] {
+                let sc = if scalar.is_float() {
+                    Class::Sse
+                } else {
+                    Class::Integer
+                };
                 for (mut layout, expected) in [
                     (s(vec![d.clone(), t(scalar)]), vec![Class::Sse, sc]),
                     (s(vec![t(scalar), d.clone()]), vec![sc, Class::Sse]),
@@ -663,15 +874,31 @@ mod tests {
                             for fp in [0, 6, 7, 8] {
                                 let mut args = vec![ArgKind::Value(Type::I64); gp];
                                 args.extend(vec![ArgKind::Value(Type::F64); fp]);
-                                args.extend([ArgKind::ByVal(&layout), ArgKind::Value(Type::I64), ArgKind::Value(Type::F64)]);
+                                args.extend([
+                                    ArgKind::ByVal(&layout),
+                                    ArgKind::Value(Type::I64),
+                                    ArgKind::Value(Type::F64),
+                                ]);
                                 let plan = arg_locs(&args);
                                 let ng = expected.iter().filter(|c| **c == Class::Integer).count();
                                 let fits = gp + ng <= 6 && fp + expected.len() - ng <= 8;
                                 assert_eq!(matches!(plan.locs[gp + fp], ArgLoc::InRegs(_)), fits);
                                 if !fits {
                                     assert_eq!(plan.locs[gp + fp], ArgLoc::OnStack(0));
-                                    assert_eq!(matches!(plan.locs[gp + fp + 1], ArgLoc::Value(Slot::Regs(_, _))), gp < 6);
-                                    assert_eq!(matches!(plan.locs[gp + fp + 2], ArgLoc::Value(Slot::Regs(_, _))), fp < 8);
+                                    assert_eq!(
+                                        matches!(
+                                            plan.locs[gp + fp + 1],
+                                            ArgLoc::Value(Slot::Regs(_, _))
+                                        ),
+                                        gp < 6
+                                    );
+                                    assert_eq!(
+                                        matches!(
+                                            plan.locs[gp + fp + 2],
+                                            ArgLoc::Value(Slot::Regs(_, _))
+                                        ),
+                                        fp < 8
+                                    );
                                 }
                             }
                         }
@@ -679,13 +906,19 @@ mod tests {
                     }
                 }
             }
-            for layout in [s(vec![d.clone(), d.clone()]), Layout::Array(Box::new(d.clone()), 2)] {
+            for layout in [
+                s(vec![d.clone(), d.clone()]),
+                Layout::Array(Box::new(d.clone()), 2),
+            ] {
                 assert!(natural_d8_aggregate(&layout));
                 assert_eq!(classify(&layout), Some(vec![Class::Sse, Class::Sse]));
             }
             // Mixed scalar leaves at offsets8 and12 share the second half;
             // INTEGER must dominate SSE in either order and under nesting.
-            for rest in [s(vec![t(Type::F32), t(Type::I8)]), s(vec![t(Type::I8), t(Type::F32)])] {
+            for rest in [
+                s(vec![t(Type::F32), t(Type::I8)]),
+                s(vec![t(Type::I8), t(Type::F32)]),
+            ] {
                 let layout = s(vec![d.clone(), rest]);
                 assert_eq!(layout.leaves()[1].0, 8);
                 assert_eq!(layout.leaves()[2].0, 12);
@@ -698,15 +931,23 @@ mod tests {
                     assert!(natural_d8_aggregate(&layout));
                     assert_eq!((layout.size(), layout.align()), (32, 16));
                     assert_eq!(classify(&layout), None);
-                    let plan = arg_locs(&[ArgKind::Sret(&layout), ArgKind::ByVal(&layout), ArgKind::Value(Type::I64)]);
+                    let plan = arg_locs(&[
+                        ArgKind::Sret(&layout),
+                        ArgKind::ByVal(&layout),
+                        ArgKind::Value(Type::I64),
+                    ]);
                     assert_eq!(plan.locs[1], ArgLoc::OnStack(0));
                 }
             }
             let big = s(vec![d.clone(), Layout::Array(Box::new(t(Type::I8)), 9)]);
             assert!(natural_d8_aggregate(&big));
             assert_eq!(classify(&big), None);
-            for other in [s(vec![]), Layout::Array(Box::new(t(Type::I8)), 0),
-                t(Type::Vector(VectorType::F64x1)), t(Type::Vector(VectorType::F32x4))] {
+            for other in [
+                s(vec![]),
+                Layout::Array(Box::new(t(Type::I8)), 0),
+                t(Type::Vector(VectorType::F64x1)),
+                t(Type::Vector(VectorType::F32x4)),
+            ] {
                 assert!(!natural_d8_aggregate(&s(vec![d.clone(), other])));
             }
         }
@@ -719,11 +960,38 @@ mod tests {
         let nested = s(vec![s(vec![t(Type::F80)])]);
         assert_eq!(classify(&nested), Some(vec![Class::X87, Class::X87Up]));
         assert_eq!(classify(&s(vec![t(Type::F80), t(Type::I8)])), None);
-        let placement = arg_locs(&[ArgKind::Value(Type::F80), ArgKind::ByVal(&wrapper), ArgKind::Value(Type::F64), ArgKind::Value(Type::I64)]);
-        assert_eq!(placement.locs, [ArgLoc::Value(Slot::Stack(0)), ArgLoc::OnStack(16), ArgLoc::Value(Slot::Regs(Loc::FReg(0), None)), ArgLoc::Value(Slot::Regs(Loc::Reg(RDI), None))]);
-        assert_eq!((placement.stack, placement.stack_align, placement.ints, placement.floats), (32, 16, 1, 1));
+        let placement = arg_locs(&[
+            ArgKind::Value(Type::F80),
+            ArgKind::ByVal(&wrapper),
+            ArgKind::Value(Type::F64),
+            ArgKind::Value(Type::I64),
+        ]);
+        assert_eq!(
+            placement.locs,
+            [
+                ArgLoc::Value(Slot::Stack(0)),
+                ArgLoc::OnStack(16),
+                ArgLoc::Value(Slot::Regs(Loc::FReg(0), None)),
+                ArgLoc::Value(Slot::Regs(Loc::Reg(RDI), None))
+            ]
+        );
+        assert_eq!(
+            (
+                placement.stack,
+                placement.stack_align,
+                placement.ints,
+                placement.floats
+            ),
+            (32, 16, 1, 1)
+        );
         let ret = arg_locs(&[ArgKind::Sret(&wrapper), ArgKind::Value(Type::I64)]);
-        assert_eq!(ret.locs, [ArgLoc::SretX87, ArgLoc::Value(Slot::Regs(Loc::Reg(RDI), None))]);
+        assert_eq!(
+            ret.locs,
+            [
+                ArgLoc::SretX87,
+                ArgLoc::Value(Slot::Regs(Loc::Reg(RDI), None))
+            ]
+        );
         assert_eq!(ret.ints, 1);
     }
 
@@ -790,7 +1058,10 @@ mod tests {
             ]
         );
         let locs = arg_locs(&[ArgKind::Sret(&dl)]).locs;
-        assert_eq!(locs, [ArgLoc::SretRegs(pieces(vec![Loc::FReg(0), Loc::Reg(RAX)]))]);
+        assert_eq!(
+            locs,
+            [ArgLoc::SretRegs(pieces(vec![Loc::FReg(0), Loc::Reg(RAX)]))]
+        );
     }
     #[test]
     fn wide_named_and_unnamed_vectors_have_distinct_placements() {
@@ -844,7 +1115,13 @@ mod tests {
             assert_eq!(p.locs[9], ArgLoc::Value(Slot::Regs(Loc::Reg(RDI), None)));
             assert_eq!(p.locs[10], ArgLoc::Value(Slot::Stack(ty.bytes().unwrap())));
             let p = arg_locs(&[ArgKind::Sret(&nested), ArgKind::Value(Type::I64)]);
-            assert_eq!(p.locs[0], ArgLoc::SretRegs(vec![RegPiece { offset: 0, loc: Loc::FReg(0) }]));
+            assert_eq!(
+                p.locs[0],
+                ArgLoc::SretRegs(vec![RegPiece {
+                    offset: 0,
+                    loc: Loc::FReg(0)
+                }])
+            );
             assert_eq!(p.ints, 1);
             assert_eq!(p.floats, 0);
         }
@@ -856,15 +1133,24 @@ mod producer_policy_tests {
     use super::*;
     #[test]
     fn producer_plans_reuse_memory_and_bank_rollback() {
-        for producer in [X86VectorAbi::Gnu,X86VectorAbi::Clang] {
-            let l=Layout::Struct(vec![Layout::Array(Box::new(Layout::Scalar(Type::Vector(VectorType::F64x1))),2),Layout::Scalar(Type::I8)]);
+        for producer in [X86VectorAbi::Gnu, X86VectorAbi::Clang] {
+            let l = Layout::Struct(vec![
+                Layout::Array(Box::new(Layout::Scalar(Type::Vector(VectorType::F64x1))), 2),
+                Layout::Scalar(Type::I8),
+            ]);
             for gp in 0..=7 {
-                let mut prepared=vec![ArgKind::ProducerSret(&l,producer)];
-                let mut proven=vec![ArgKind::Sret(&l)];
-                for _ in 0..gp { prepared.push(ArgKind::Value(Type::I64));proven.push(ArgKind::Value(Type::I64)); }
-                prepared.extend([ArgKind::ProducerByVal(&l,producer),ArgKind::Value(Type::F64)]);
-                proven.extend([ArgKind::MemoryByVal(&l),ArgKind::Value(Type::F64)]);
-                assert_eq!(arg_locs(&prepared),arg_locs(&proven));
+                let mut prepared = vec![ArgKind::ProducerSret(&l, producer)];
+                let mut proven = vec![ArgKind::Sret(&l)];
+                for _ in 0..gp {
+                    prepared.push(ArgKind::Value(Type::I64));
+                    proven.push(ArgKind::Value(Type::I64));
+                }
+                prepared.extend([
+                    ArgKind::ProducerByVal(&l, producer),
+                    ArgKind::Value(Type::F64),
+                ]);
+                proven.extend([ArgKind::MemoryByVal(&l), ArgKind::Value(Type::F64)]);
+                assert_eq!(arg_locs(&prepared), arg_locs(&proven));
             }
         }
     }
@@ -874,16 +1160,34 @@ mod producer_policy_tests {
         for producer in [X86VectorAbi::Gnu, X86VectorAbi::Clang] {
             let mut nested = v.clone();
             for _ in 0..8 {
-                nested = Layout::Struct(vec![Layout::Array(Box::new(nested), 2), Layout::Scalar(Type::I8)]);
-                assert_eq!(producer_aggregate(&nested, producer), Some(ProducerAggregate::Memory));
+                nested = Layout::Struct(vec![
+                    Layout::Array(Box::new(nested), 2),
+                    Layout::Scalar(Type::I8),
+                ]);
+                assert_eq!(
+                    producer_aggregate(&nested, producer),
+                    Some(ProducerAggregate::Memory)
+                );
             }
-            let padding = Layout::Struct(vec![Layout::Scalar(Type::I32),Layout::Array(Box::new(v.clone()),0)]);
-            assert_eq!(producer_aggregate(&padding,producer),Some(ProducerAggregate::Eightbytes(vec![Class::Integer])));
+            let padding = Layout::Struct(vec![
+                Layout::Scalar(Type::I32),
+                Layout::Array(Box::new(v.clone()), 0),
+            ]);
+            assert_eq!(
+                producer_aggregate(&padding, producer),
+                Some(ProducerAggregate::Eightbytes(vec![Class::Integer]))
+            );
         }
-        let empty = Layout::Array(Box::new(v),0);
-        let y = Layout::Struct(vec![empty,Layout::Scalar(Type::Vector(VectorType::I64x4))]);
-        assert_eq!(producer_aggregate(&y,X86VectorAbi::Gnu),Some(ProducerAggregate::Vector(Type::Vector(VectorType::I64x4))));
-        assert_eq!(producer_aggregate(&y,X86VectorAbi::Clang),Some(ProducerAggregate::Memory));
+        let empty = Layout::Array(Box::new(v), 0);
+        let y = Layout::Struct(vec![empty, Layout::Scalar(Type::Vector(VectorType::I64x4))]);
+        assert_eq!(
+            producer_aggregate(&y, X86VectorAbi::Gnu),
+            Some(ProducerAggregate::Vector(Type::Vector(VectorType::I64x4)))
+        );
+        assert_eq!(
+            producer_aggregate(&y, X86VectorAbi::Clang),
+            Some(ProducerAggregate::Memory)
+        );
     }
 }
 

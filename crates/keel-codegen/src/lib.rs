@@ -96,6 +96,15 @@ pub struct CodegenPipeline<'a> {
     pub allocator: &'a dyn regalloc::RegisterAllocator,
 }
 
+impl std::fmt::Debug for CodegenPipeline<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CodegenPipeline")
+            .field("selector", &self.selector.name())
+            .field("allocator", &self.allocator.name())
+            .finish()
+    }
+}
+
 impl CodegenPipeline<'_> {
     pub(crate) fn validate_target(&self, target: Target) -> Result<(), CodegenError> {
         require_native_target(target).map_err(|message| CodegenError {
@@ -161,6 +170,14 @@ pub trait InstructionSelector {
 #[cfg(feature = "experimental-dispatch")]
 pub struct ExperimentalDispatchTails<'a>(pub &'a dyn InstructionSelector);
 #[cfg(feature = "experimental-dispatch")]
+impl std::fmt::Debug for ExperimentalDispatchTails<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ExperimentalDispatchTails")
+            .field(&self.0.name())
+            .finish()
+    }
+}
+#[cfg(feature = "experimental-dispatch")]
 impl InstructionSelector for ExperimentalDispatchTails<'_> {
     fn experimental_aarch64_dispatch_tails(&self) -> bool {
         true
@@ -194,6 +211,7 @@ impl InstructionSelector for ExperimentalDispatchTails<'_> {
     }
 }
 
+#[derive(Debug)]
 pub struct OptionsSelector(pub SelectionOptions);
 impl InstructionSelector for OptionsSelector {
     fn name(&self) -> &'static str {
@@ -758,3 +776,6 @@ fn validate_function_entries(module: &keel_ir::Module) -> Result<(), CodegenErro
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod vector_owned_rounds;

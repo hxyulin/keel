@@ -187,7 +187,7 @@ fn aliases_locations_and_call_result_use_the_original_truth_width() {
     let func = &mut module.functions[0];
     let results: Vec<_> = func
         .layout_insts()
-        .filter_map(|(_, i)| {
+        .filter(|&(_, i)| {
             matches!(
                 func.inst_data(i),
                 keel_ir::InstData::Call { .. }
@@ -196,8 +196,8 @@ fn aliases_locations_and_call_result_use_the_original_truth_width() {
                         ..
                     }
             )
-            .then(|| func.inst_results(i)[0])
         })
+        .map(|(_, i)| func.inst_results(i)[0])
         .collect();
     func.replace_all_uses(results[1], results[0]);
     let (text, _) = compile_module(&module, SelectionTier::Full, AllocationTier::Full, &SPILLED);

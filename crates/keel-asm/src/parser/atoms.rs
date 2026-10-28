@@ -114,8 +114,13 @@ impl<'a> Atoms<'a> {
     /// The number of atoms starting at or before `key`.
     fn search(&self, key: (usize, u64)) -> usize {
         let hint = self.hint.get();
-        if hint.checked_sub(1).is_none_or(|i| self.boundaries[i].0 <= key)
-            && self.boundaries.get(hint).is_none_or(|&(start, _)| key < start)
+        if hint
+            .checked_sub(1)
+            .is_none_or(|i| self.boundaries[i].0 <= key)
+            && self
+                .boundaries
+                .get(hint)
+                .is_none_or(|&(start, _)| key < start)
         {
             return hint;
         }
@@ -153,8 +158,13 @@ impl<'a> Atoms<'a> {
         // A target strictly inside the point's atom, as most are, has its
         // owner without another search: no other atom starts there.
         let target_key = (target.1.section, target.1.offset);
-        if end.checked_sub(1).is_some_and(|i| self.boundaries[i].0 < target_key)
-            && self.boundaries.get(end).is_none_or(|&(start, _)| target_key < start)
+        if end
+            .checked_sub(1)
+            .is_some_and(|i| self.boundaries[i].0 < target_key)
+            && self
+                .boundaries
+                .get(end)
+                .is_none_or(|&(start, _)| target_key < start)
         {
             return true;
         }
@@ -212,11 +222,7 @@ impl<'a> Atoms<'a> {
                 continue;
             }
             let mut addend = i128::from(r.addend);
-            let target = |name: &str| {
-                name.starts_with('L')
-                    .then(|| targets.get(name))
-                    .flatten()
-            };
+            let target = |name: &str| name.starts_with('L').then(|| targets.get(name)).flatten();
             if let Some((name, delta)) = target(&r.symbol) {
                 r.symbol = name.to_string();
                 addend += delta;

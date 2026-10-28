@@ -393,7 +393,7 @@ fn native_arm64_matches_clang_with_and_without_optimization() {
         let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
         std::fs::create_dir_all(&dir).unwrap();
         let c = dir.join("vla.c");
-        std::fs::write(&c, &src).unwrap();
+        std::fs::write(&c, src).unwrap();
         let reference = dir.join("clang");
         run(Command::new("clang")
             .arg("-O0")
@@ -413,7 +413,7 @@ fn native_arm64_matches_clang_with_and_without_optimization() {
                     debug_info,
                     ..Default::default()
                 };
-                let mut m = keel_c::compile(&src, "vla.c", opts).unwrap();
+                let mut m = keel_c::compile(src, "vla.c", opts).unwrap();
                 keel_ir::verify_module(&m).unwrap();
                 if optimize {
                     keel_opt::optimize(&mut m).unwrap();

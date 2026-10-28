@@ -97,7 +97,7 @@ fn dynamic_anchor_is_nonpreemptible_and_static_weak_reference_stays_zero() {
     let source = obj(
         ".text\n.globl _start\n_start:\nmov rax,qword ptr [rip+_DYNAMIC@GOTPCREL]\nret\n.hidden _DYNAMIC\n.data\n.globl dynamic_pointer\ndynamic_pointer: .quad _DYNAMIC\n",
     );
-    let err = link(&[source.clone()]).unwrap_err();
+    let err = link(std::slice::from_ref(&source)).unwrap_err();
     assert!(err.contains("requires dynamically linked output"), "{err}");
     let exe = link(&[source, interface()]).unwrap();
     let f = object::File::parse(exe.bytes.as_slice()).unwrap();
@@ -105,8 +105,10 @@ fn dynamic_anchor_is_nonpreemptible_and_static_weak_reference_stays_zero() {
     let debug: Vec<_> = dynamic
         .data()
         .unwrap()
-        .chunks_exact(16)
-        .filter(|tag| word(tag, 0) == u64::from(object::elf::DT_DEBUG))
+        .as_chunks::<16>()
+        .0
+        .iter()
+        .filter(|tag| word(*tag, 0) == u64::from(object::elf::DT_DEBUG))
         .collect();
     assert_eq!(debug.len(), 1);
     assert_eq!(word(debug[0], 8), 0);

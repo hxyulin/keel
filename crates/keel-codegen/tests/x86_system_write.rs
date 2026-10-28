@@ -73,12 +73,12 @@ fn export(source: &str, prefix: &str, variable: &str, symbols: &[&str], ops: &[(
                         f.symbols()
                             .all(|s| !s.is_undefined() || s.name().unwrap().is_empty())
                     );
-                    if level == CpuLevel::V1 {
-                        if let Some(dir) = &dir {
-                            let stem = format!("{prefix}-{s:?}-{a:?}-{spill}");
-                            std::fs::write(dir.join(format!("{stem}.o")), bytes).unwrap();
-                            std::fs::write(dir.join(format!("{stem}.s")), text).unwrap();
-                        }
+                    if level == CpuLevel::V1
+                        && let Some(dir) = &dir
+                    {
+                        let stem = format!("{prefix}-{s:?}-{a:?}-{spill}");
+                        std::fs::write(dir.join(format!("{stem}.o")), bytes).unwrap();
+                        std::fs::write(dir.join(format!("{stem}.s")), text).unwrap();
                     }
                 }
             }

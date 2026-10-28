@@ -6,8 +6,7 @@ use keel_codegen::{
 use keel_ir::{NeonIntrinsic as N, Type, VectorType};
 use std::{fs, process::Command};
 #[path = "common/vector.rs"]
-#[allow(dead_code)]
-mod common;
+pub mod common;
 const SPILL: Pools = Pools {
     caller_saved: &[9, 10],
     callee_saved: &[19],
@@ -81,7 +80,7 @@ fn fixture() -> (String, String, usize, usize) {
                 } else {
                     vector(bytes, width * if long { 2 } else { 1 }, fp)
                 };
-                let inputs = op.map_or_else(||vec![ty;2],|op| op.operand_types(ty).unwrap());
+                let inputs = op.map_or_else(|| vec![ty; 2], |op| op.operand_types(ty).unwrap());
                 for high in 0..if long && !is_scalar { 2 } else { 1 } {
                     let source = if is_scalar {
                         scalar(width, fp)
@@ -151,7 +150,11 @@ fn fixture() -> (String, String, usize, usize) {
                         }
                         args.push(a);
                         args.push(b);
-                        let result = emit(if let Some(op)=op {format!("{op}.{ty}({})", args.join(","))} else {format!("vimul {},{}",args[0],args[1])});
+                        let result = emit(if let Some(op) = op {
+                            format!("{op}.{ty}({})", args.join(","))
+                        } else {
+                            format!("vimul {},{}", args[0], args[1])
+                        });
                         drop(emit);
                         ir += &format!(" store align 1 {result},v3\n return\n}}\n");
                         let class = |ty: Type| {

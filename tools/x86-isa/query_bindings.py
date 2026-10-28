@@ -115,6 +115,8 @@ def generate(schema, root):
                 value = f'({str(b["output"]).lower()}, {b["bits"]}, {str(b["immediate"]).lower()})'
             lines += [f'            Self::{row["variant"]} => {value},']
         lines += ['            _ => return None,', '        })', '    }', '']
+    while lines and not lines[-1]:
+        lines.pop()
     return '\n'.join(lines + ['}', ''])
 
 

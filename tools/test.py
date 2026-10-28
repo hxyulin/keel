@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import shlex
 import shutil
@@ -55,22 +56,142 @@ def consumers(seeds: set[str], packages: dict) -> set[str]:
         selected = expanded
 
 
-def changed_packages(paths: list[str], packages: dict) -> set[str]:
+# A dependency expression is narrow only when its whole argument is literal.
+_INCLUDE = re.compile(r"\binclude(?:_str|_bytes)?\s*!\s*(?P<opening>[({\[])")
+_PATH = re.compile(r"#\s*\[\s*path\s*=")
+# Passing a builtin's name to a macro or importing it under an alias hides the
+# invocation from the literal-call index. Identifier concatenation can too.
+_INDIRECT_INCLUDE = re.compile(r"(?:[\[({,=]|::)\s*include(?:_str|_bytes)\b(?!\s*!)|::\s*include\b(?!\s*!)")
+_CONCAT_IDENT = re.compile(r"\bconcat_idents\s*!|\$\s*\{\s*concat\s*\(")
+_LITERAL = re.compile(r'\s*(?:r(?P<hashes>\#{0,})"(?P<raw>.*?)"(?P=hashes)|(?P<quoted>"(?:[^"\\]|\\.)*"))', re.S)
+_NON_CODE = re.compile(r"//[^\n]*|/\*.*?\*/|'(?:\\.|[^'\\\n])'|" + _LITERAL.pattern, re.S)
+_GENERATED = re.compile(r'\s*concat!\s*\(\s*env!\s*\(\s*"OUT_DIR"\s*\)\s*,\s*"[^"\n]*"\s*,?\s*\)')
+
+
+def passed_include(tokens: str) -> bool:
+    """Recognize the bare include builtin passed within a macro token tree."""
+    if not re.search(r"\binclude\b", tokens):
+        return False
+    openings = {match.end() - 1 for match in re.finditer(r"\b\w+\s*!\s*[(\[{]", tokens)}
+    active = []
+    for token in re.finditer(r"[(){}\[\]]|\binclude\b", tokens):
+        if token[0] in {"(", "{", "["}:
+            active.append(token.start() in openings or bool(active and active[-1]))
+        elif token[0] in {")", "}", "]"}:
+            if active:
+                active.pop()
+        elif active and active[-1] and not re.match(r"\s*[!.:\w]", tokens[token.end():]):
+            return True
+    return False
+
+
+def static_inputs(packages: dict, root: Path) -> tuple[dict[str, set[str]], list[tuple[str, str]], bool]:
+    """Index source inputs; unresolved expressions require conservative selection."""
+    root = root.resolve()
+    edges: dict[str, set[str]] = {}
+    module_suffixes = []
+    sources = []
+    unresolved = False
+    for package in packages.values():
+        for source in (root / package["directory"]).rglob("*.rs"):
+            try:
+                text = source.read_text()
+            except (OSError, UnicodeError):
+                unresolved = True
+                continue
+            importer = source.relative_to(root).as_posix()
+            sources.append(importer)
+            tokens = _NON_CODE.sub(" ", text)
+            unresolved |= bool(_INDIRECT_INCLUDE.search(tokens) or passed_include(tokens) or _CONCAT_IDENT.search(tokens))
+            # Conditional path attributes need a Rust attribute parser.
+            unresolved |= bool(re.search(r"#\s*\[\s*cfg_attr\s*\([^]]*\bpath\s*=", text))
+            for pattern, closing in [(_INCLUDE, ")"), (_PATH, "]")]:
+                for expression in pattern.finditer(text):
+                    if pattern is _INCLUDE:
+                        closing = {"(": ")", "{": "}", "[": "]"}[expression["opening"]]
+                    argument = text[expression.end():]
+                    literal = _LITERAL.match(argument)
+                    if literal is None or not re.match(r"\s*,?\s*" + re.escape(closing), argument[literal.end():]):
+                        # Generated Rust outputs are not Git changed-file inputs.
+                        generated = _GENERATED.match(argument) if pattern is _INCLUDE else None
+                        if generated is None or not re.match(r"\s*,?\s*" + re.escape(closing), argument[generated.end():]):
+                            unresolved = True
+                        continue
+                    try:
+                        value = literal["raw"] if literal["raw"] is not None else json.loads(literal["quoted"])
+                        target = (source.parent / value).resolve().relative_to(root).as_posix()
+                    except (ValueError, OSError):
+                        unresolved = True
+                        continue
+                    edges.setdefault(target, set()).add(importer)
+                    if pattern is _PATH:
+                        # Inline modules change the relative attribute base. A
+                        # suffix match includes those possible readers as well.
+                        suffix = os.path.normpath(value).replace(os.sep, "/")
+                        while suffix.startswith("../"):
+                            suffix = suffix[3:]
+                        module_suffixes.append((suffix, importer))
+    for suffix, importer in module_suffixes:
+        for source in sources:
+            if source == suffix or source.endswith("/" + suffix):
+                edges.setdefault(source, set()).add(importer)
+    return edges, module_suffixes, unresolved
+
+
+def changed_packages(paths: list[str], packages: dict, root: Path = ROOT) -> set[str]:
     """Unknown paths broaden to the workspace rather than silently skipping tests."""
+    if not paths:
+        return set()
+    edges, module_suffixes, unresolved = static_inputs(packages, root)
+    if unresolved:
+        return set(packages)
+    # A source file can be included as a module and itself use ordinary `mod`
+    # children. Treat cross-package source imports as package dependencies too.
+    # This covers edits to those children without parsing Rust's module tree.
+    source_packages = {name: {**package, "dependencies": list(package["dependencies"])}
+                       for name, package in packages.items()}
+    for target, importers in edges.items():
+        dependency = next((name for name, package in packages.items()
+                           if target.startswith(package["directory"] + "/src/")), None)
+        if dependency is None:
+            continue
+        for importer in importers:
+            reader = next((name for name, package in packages.items()
+                           if importer.startswith(package["directory"] + "/")), None)
+            if reader is not None and reader != dependency:
+                source_packages[reader]["dependencies"].append({"name": dependency})
     selected = set()
     for path in paths:
         owner = next((name for name, p in packages.items()
                       if path.startswith(p["directory"] + "/")), None)
         if owner is None:
             return set(packages)
+        pending = [path]
+        reached = set()
+        indexed = False
+        while pending:
+            current = pending.pop()
+            if current in reached:
+                continue
+            reached.add(current)
+            readers = edges.get(current, set()) | {
+                importer for suffix, importer in module_suffixes
+                if current == suffix or current.endswith("/" + suffix)
+            }
+            indexed |= bool(readers)
+            pending.extend(readers - reached)
         relative = path[len(packages[owner]["directory"]) + 1:]
-        # Cross-crate include_str!/#[path] fixture edges are absent from Cargo metadata.
-        # Broaden shared inputs to the workspace rather than guessing their consumers.
-        if relative.startswith("tests/"):
-            standalone_test = Path(relative).parent == Path("tests") and relative.endswith(".rs")
-            selected |= {owner} if standalone_test else set(packages)
-        else:
-            selected |= consumers({owner}, packages)
+        fixture = relative.startswith("tests/") and not (
+            Path(relative).parent == Path("tests") and relative.endswith(".rs"))
+        if fixture and not indexed:
+            return set(packages)
+        for current in reached:
+            reader = next((name for name, p in packages.items()
+                           if current.startswith(p["directory"] + "/")), None)
+            if reader is None:
+                return set(packages)
+            relative = current[len(packages[reader]["directory"]) + 1:]
+            selected |= {reader} if relative.startswith("tests/") else consumers({reader}, source_packages)
     return selected
 
 

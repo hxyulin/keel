@@ -327,7 +327,7 @@ block0(v0:i64x2,v1:i32x4,v2:i32x4):
             );
         }
         for v in 5..=10 {
-            let src=SOURCE.replace("return v11", &format!("v12 = viadd v0,v0\n jump block1(v11,v12,v12)\nblock1(v13:i64x2,v14:i64x2,v15:i64x2):\n return v13"));
+            let src=SOURCE.replace("return v11", "v12 = viadd v0,v0\n jump block1(v11,v12,v12)\nblock1(v13:i64x2,v14:i64x2,v15:i64x2):\n return v13");
             let mut f = function(&src);
             f.replace_all_uses(Value::new(12), Value::new(v));
             reject(&f);

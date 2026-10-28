@@ -20,16 +20,48 @@ pub(super) struct Plan {
     pub live: BTreeSet<usize>,
     pub referenced: BTreeSet<usize>,
 }
-impl Plan {
-    pub fn new(file: &File<'_>, selected: &BTreeSet<String>) -> Result<Self> {
-        let mut plan = Self::default();
+/// Immutable input metadata. Selection never reserves signatures here.
+pub(super) struct Metadata<'a> {
+    file: File<'a>,
+    membership: BTreeMap<usize, usize>,
+    groups: Vec<Group<'a>>,
+    signature_symbols: BTreeSet<usize>,
+    metadata: BTreeSet<usize>,
+    references: Vec<Reference>,
+    section_names: Vec<Option<Result<&'a str>>>,
+    pub symbols: Vec<Symbol<'a>>,
+}
+struct Group<'a> {
+    name: &'a str,
+    members: Vec<usize>,
+}
+struct Reference {
+    section: usize,
+    offset: u64,
+    symbol: usize,
+    target_section: SymbolSection,
+}
+pub(super) struct Symbol<'a> {
+    pub index: usize,
+    pub section: SymbolSection,
+    pub name: Result<Option<&'a str>>,
+    pub global: bool,
+    pub weak: bool,
+    pub common: bool,
+}
+impl<'a> Metadata<'a> {
+    pub fn new(bytes: &'a [u8]) -> Result<Self> {
+        let file = File::parse(bytes).map_err(|e| e.to_string())?;
+        let mut signature_symbols = BTreeSet::new();
+        let mut metadata = BTreeSet::new();
+        let mut groups = Vec::new();
         let mut membership = BTreeMap::new();
         for section in file.sections() {
             let raw = section.elf_section_header();
             if raw.sh_type(file.endian()) != object::elf::SHT_GROUP {
                 continue;
             }
-            plan.metadata.insert(section.index().0);
+            metadata.insert(section.index().0);
             let malformed = || format!("malformed ELF group section {}", section.index().0);
             let data = section.data().map_err(|e| e.to_string())?;
             if raw.sh_flags(file.endian()) != 0
@@ -51,7 +83,7 @@ impl Plan {
             if index == 0 {
                 return Err(malformed());
             }
-            plan.signature_symbols.insert(index);
+            signature_symbols.insert(index);
             let signature = file
                 .symbol_by_index(object::SymbolIndex(index))
                 .map_err(|_| malformed())?;
@@ -71,9 +103,9 @@ impl Plan {
             if name.is_empty() {
                 return Err("empty ELF COMDAT signature is unsupported".into());
             }
-            let keep = !selected.contains(name) && plan.signatures.insert(name.to_owned());
-            for word in data[4..].chunks_exact(4) {
-                let member = u32::from_le_bytes(word.try_into().unwrap()) as usize;
+            let mut members = Vec::new();
+            for word in data[4..].as_chunks::<4>().0 {
+                let member = u32::from_le_bytes(*word) as usize;
                 let member_section = file
                     .section_by_index(object::SectionIndex(member))
                     .map_err(|_| malformed())?;
@@ -108,15 +140,13 @@ impl Plan {
                 if name == ".sframe" || name.starts_with(".note") {
                     return Err(format!("ELF group member {name} is unsupported"));
                 }
-                if !keep {
-                    plan.discarded.insert(member);
-                }
+                members.push(member);
             }
+            groups.push(Group { name, members });
         }
-        plan.membership = membership;
         for section in file.sections() {
             let raw = section.elf_section_header();
-            let group = plan.membership.get(&section.index().0);
+            let group = membership.get(&section.index().0);
             if raw.sh_flags(file.endian()) & u64::from(object::elf::SHF_GROUP) != 0
                 && group.is_none()
             {
@@ -129,7 +159,7 @@ impl Plan {
                 let target = raw.sh_info(file.endian()) as usize;
                 // RELA tables must accompany their target atomically, including
                 // tables that have incorrectly omitted SHF_GROUP.
-                if group != plan.membership.get(&target) {
+                if group != membership.get(&target) {
                     return Err(
                         "ELF group relocation table and target must belong to the same group"
                             .into(),
@@ -137,65 +167,158 @@ impl Plan {
                 }
             }
         }
-        if !plan.discarded.is_empty() {
-            for section in file.sections() {
-                if section.name().map_err(|e| e.to_string())? != ".eh_frame"
-                    || plan.discarded.contains(&section.index().0)
-                {
-                    continue;
-                }
-                let filtered = super::unwind::filter(&section, file, &plan.discarded)?;
-                if let Some(filtered) = filtered {
-                    plan.frames.insert(section.index().0, filtered);
-                }
-            }
-        }
+        let mut references = Vec::new();
+        let mut section_names = Vec::new();
         for section in file.sections() {
-            let allocated = section.elf_section_header().sh_flags(file.endian())
+            let name = section.name().map_err(|e| e.to_string());
+            section_names.resize_with(section.index().0 + 1, || None);
+            section_names[section.index().0] = Some(name.clone());
+            if section.elf_section_header().sh_flags(file.endian())
                 & u64::from(object::elf::SHF_ALLOC)
-                != 0;
-            for (offset, r) in section.relocations() {
-                if matches!(r.flags(), object::RelocationFlags::Elf { r_type: 0 }) {
+                == 0
+            {
+                continue;
+            }
+            for (offset, relocation) in section.relocations() {
+                if matches!(
+                    relocation.flags(),
+                    object::RelocationFlags::Elf { r_type: 0 }
+                ) {
                     continue;
                 }
-                let RelocationTarget::Symbol(i) = r.target() else {
+                let RelocationTarget::Symbol(symbol) = relocation.target() else {
                     continue;
                 };
-                if allocated
-                    && !plan.discarded.contains(&section.index().0)
-                    && section.name().map_err(|e| e.to_string())? == ".sframe"
-                    && matches!(file.symbol_by_index(i).map_err(|e| e.to_string())?.section(), SymbolSection::Section(i) if plan.discarded.contains(&i.0))
+                references.push(Reference {
+                    section: section.index().0,
+                    offset,
+                    symbol: symbol.0,
+                    target_section: if name.as_ref().is_ok_and(|name| *name == ".sframe") {
+                        file.symbol_by_index(symbol)
+                            .map_err(|e| e.to_string())?
+                            .section()
+                    } else {
+                        SymbolSection::None
+                    },
+                });
+            }
+        }
+        let mut symbols = Vec::new();
+        for symbol in file.symbols() {
+            let global = symbol.is_global();
+            let weak = symbol.is_weak();
+            symbols.push(Symbol {
+                index: symbol.index().0,
+                section: symbol.section(),
+                // Local symbol names do not participate in archive demand.
+                name: if global || weak {
+                    symbol.name().map(Some).map_err(|e| e.to_string())
+                } else {
+                    Ok(None)
+                },
+                global,
+                weak,
+                common: symbol.is_common(),
+            });
+        }
+        Ok(Self {
+            file,
+            membership,
+            groups,
+            signature_symbols,
+            metadata,
+            references,
+            section_names,
+            symbols,
+        })
+    }
+
+    pub fn conflicts(&self, selected: &BTreeSet<String>) -> Vec<bool> {
+        self.groups
+            .iter()
+            .map(|group| selected.contains(group.name))
+            .collect()
+    }
+
+    pub fn selection_matches(&self, conflicts: &[bool], selected: &BTreeSet<String>) -> bool {
+        self.groups
+            .iter()
+            .zip(conflicts)
+            .all(|(group, &discard)| selected.contains(group.name) == discard)
+    }
+
+    pub fn select(&self, conflicts: &[bool]) -> Result<Plan> {
+        let mut plan = Plan {
+            membership: self.membership.clone(),
+            signature_symbols: self.signature_symbols.clone(),
+            metadata: self.metadata.clone(),
+            ..Plan::default()
+        };
+        for (group, &conflict) in self.groups.iter().zip(conflicts) {
+            let keep = !conflict && plan.signatures.insert(group.name.to_owned());
+            if !keep {
+                plan.discarded.extend(group.members.iter().copied());
+            }
+        }
+        if !plan.discarded.is_empty() {
+            for (index, name) in self.section_names.iter().enumerate() {
+                let Some(name) = name else {
+                    continue;
+                };
+                if *name.as_ref().map_err(Clone::clone)? != ".eh_frame"
+                    || plan.discarded.contains(&index)
                 {
-                    return Err(".sframe: references discarded COMDAT code; COMDAT filtering is unsupported".into());
+                    continue;
                 }
-                if allocated {
-                    plan.referenced.insert(i.0);
-                }
-                if allocated
-                    && !plan.discarded.contains(&section.index().0)
-                    && plan.offset(section.index().0, offset).is_some()
+                let section = self
+                    .file
+                    .section_by_index(object::SectionIndex(index))
+                    .map_err(|e| e.to_string())?;
+                if let Some(filtered) =
+                    super::unwind::filter(&section, &self.file, &plan.discarded)?
                 {
-                    plan.live.insert(i.0);
+                    plan.frames.insert(index, filtered);
                 }
             }
         }
-        // Rewriting unwind contributions changes record offsets. References
-        // into those contributions require a richer mapping contract; diagnose
-        // rather than silently retargeting an address/addend.
-        for s in file.symbols() {
-            if matches!(s.section(), SymbolSection::Section(i) if plan.frames.contains_key(&i.0))
-                && (s.is_global() || s.is_weak())
+        for reference in &self.references {
+            if !plan.discarded.contains(&reference.section)
+                && *self.section_names[reference.section]
+                    .as_ref()
+                    .expect("section name was decoded")
+                    .as_ref()
+                    .map_err(Clone::clone)?
+                    == ".sframe"
+                && matches!(reference.target_section, SymbolSection::Section(i) if plan.discarded.contains(&i.0))
             {
-                return Err("global symbol in COMDAT-filtered .eh_frame is unsupported".into());
+                return Err(
+                    ".sframe: references discarded COMDAT code; COMDAT filtering is unsupported"
+                        .into(),
+                );
             }
-            if matches!(s.section(), SymbolSection::Section(i) if plan.frames.contains_key(&i.0))
-                && plan.live.contains(&s.index().0)
+            plan.referenced.insert(reference.symbol);
+            if !plan.discarded.contains(&reference.section)
+                && plan.offset(reference.section, reference.offset).is_some()
             {
-                return Err("reference into COMDAT-filtered .eh_frame is unsupported".into());
+                plan.live.insert(reference.symbol);
+            }
+        }
+        // Filtered unwind offsets must not silently retarget references.
+        for symbol in &self.symbols {
+            if matches!(symbol.section, SymbolSection::Section(i) if plan.frames.contains_key(&i.0))
+            {
+                if symbol.global || symbol.weak {
+                    return Err("global symbol in COMDAT-filtered .eh_frame is unsupported".into());
+                }
+                if plan.live.contains(&symbol.index) {
+                    return Err("reference into COMDAT-filtered .eh_frame is unsupported".into());
+                }
             }
         }
         Ok(plan)
     }
+}
+impl Plan {
     pub fn offset(&self, section: usize, offset: u64) -> Option<u64> {
         self.frames
             .get(&section)

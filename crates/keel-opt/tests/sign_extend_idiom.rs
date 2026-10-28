@@ -59,7 +59,7 @@ fn retained_actual_optimized_c_bridge_activates_and_preserves_recurrence() {
     let model_before = keel_ir::parse(&before.to_string().replace("ptr", "i64")).unwrap();
     let model_after = keel_ir::parse(&after.to_string().replace("ptr", "i64")).unwrap();
     for byte in 0..=255u64 {
-        for high in [0, 0x1234_5678_9abc_de00, u64::MAX & !255] {
+        for high in [0, 0x1234_5678_9abc_de00, !255] {
             let seed = high | byte;
             for n in [0, 1, 2, 17] {
                 let mut oracle = seed;
@@ -96,7 +96,7 @@ fn all_bytes_high_bits_polarity_and_commuted_mask() {
         let after = apply(&source);
         assert_eq!(conversions(&after).len(), 2);
         for byte in 0..=255u64 {
-            for high in [0, 0x8000_0000_0000_0000, u64::MAX & !255] {
+            for high in [0, 0x8000_0000_0000_0000, !255] {
                 let seed = high | byte;
                 assert_eq!(
                     support::execute(&after.functions[0], &[seed]),

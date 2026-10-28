@@ -94,9 +94,9 @@ fn emitted_constants_have_minimal_move_wide_counts_and_exact_x_width() {
             &keel_codegen::aarch64::REGISTERS,
         );
         let bytes = bits.to_le_bytes();
-        let halves = bytes.chunks_exact(2);
-        let zeros = halves.clone().filter(|h| *h == [0, 0]).count();
-        let ones = halves.filter(|h| *h == [255, 255]).count();
+        let halves = bytes.as_chunks::<2>().0.iter();
+        let zeros = halves.clone().filter(|h| **h == [0, 0]).count();
+        let ones = halves.filter(|h| **h == [255, 255]).count();
         let instructions = moves(&text);
         assert_eq!(instructions.len(), (4 - zeros.max(ones)).max(1), "{text}");
         assert!(
@@ -197,13 +197,12 @@ impl RegisterAllocator for RecipeAllocator {
     ) -> keel_codegen::regalloc::Allocation {
         let mut alloc = AllocationTier::Full.allocate(input);
         for (_, inst) in input.func.layout_insts() {
-            if let InstData::Iconst { imm, .. } = input.func.inst_data(inst) {
-                if *imm >= 0 {
-                    let value = input.func.inst_results(inst)[0];
-                    if alloc.loc(value).is_some() {
-                        alloc.locs[0][value.index()] =
-                            Some(keel_codegen::regalloc::Loc::Remat(value));
-                    }
+            if let InstData::Iconst { imm, .. } = input.func.inst_data(inst)
+                && *imm >= 0
+            {
+                let value = input.func.inst_results(inst)[0];
+                if alloc.loc(value).is_some() {
+                    alloc.locs[0][value.index()] = Some(keel_codegen::regalloc::Loc::Remat(value));
                 }
             }
         }

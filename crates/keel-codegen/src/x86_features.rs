@@ -17,6 +17,14 @@ pub struct FeatureSelector<'a> {
     pub inner: &'a dyn InstructionSelector,
     pub features: Features,
 }
+impl std::fmt::Debug for FeatureSelector<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FeatureSelector")
+            .field("inner", &self.inner.name())
+            .field("features", &self.features)
+            .finish()
+    }
+}
 impl InstructionSelector for FeatureSelector<'_> {
     fn name(&self) -> &'static str {
         self.inner.name()

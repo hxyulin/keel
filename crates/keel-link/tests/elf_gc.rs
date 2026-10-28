@@ -7,8 +7,7 @@ fn link(objects: &[Vec<u8>], gc: bool) -> Result<elf::Executable, String> {
     elf::link(
         &objects
             .iter()
-            .enumerate()
-            .map(|(_, bytes)| Input {
+            .map(|bytes| Input {
                 name: "gc.o",
                 bytes,
             })
@@ -33,7 +32,7 @@ fn unreachable_cycle_dead_undefined_and_default_compatibility() {
         "{START}.section .data.a,\"aw\"\na: .quad b\n.section .data.b,\"aw\"\nb: .quad a\n.quad missing\n"
     ));
     assert!(
-        link(&[o.clone()], false)
+        link(std::slice::from_ref(&o), false)
             .unwrap_err()
             .contains("undefined symbol")
     );
@@ -334,7 +333,10 @@ fn discarded_fdes_still_validate_original_code_ranges() {
              .long 12,0\n.byte 1,0,1,120,16,0,0,0\n\
              .long 20,20\n.quad {pc},{range}\n"
         ));
-        assert!(link(&[o.clone()], false).is_err(), "{pc} / {range}");
+        assert!(
+            link(std::slice::from_ref(&o), false).is_err(),
+            "{pc} / {range}"
+        );
         let err = link(&[o], true).unwrap_err();
         assert!(err.contains("unwind FDE range"), "{pc} / {range}: {err}");
     }

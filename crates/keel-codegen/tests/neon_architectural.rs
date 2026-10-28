@@ -6,8 +6,7 @@ use keel_codegen::{
 use keel_ir::{NeonIntrinsic as N, Type, VectorType};
 use std::{fs, process::Command};
 #[path = "common/vector.rs"]
-#[allow(dead_code)]
-mod common;
+pub mod common;
 #[path = "common/matrix.rs"]
 mod matrix;
 const SPILL: Pools = Pools {
@@ -195,8 +194,8 @@ fn fixture(bits: u32) -> (String, String) {
             ir += &format!(
                 "func @{name}(ptr,ptr,ptr,ptr) {{\nblock0(v0: ptr,v1: ptr,v2: ptr,v3: ptr):\n"
             );
-            for i in 0..op.arity() {
-                ir += &format!(" v{} = load.{} align 1 v{i}\n", 4 + i, inputs[i]);
+            for (i, input) in inputs[..op.arity()].iter().enumerate() {
+                ir += &format!(" v{} = load.{input} align 1 v{i}\n", 4 + i);
             }
             ir += &format!(" v8 = {op}.{shape}({args})\n store align 1 v8,v3\n return\n}}\n");
             c += &format!("extern void {name}(const void*,const void*,const void*,void*);\n");

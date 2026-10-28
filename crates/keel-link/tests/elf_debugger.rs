@@ -41,7 +41,7 @@ fn local_symbols_keep_identity_bounds_and_precede_globals() {
     let first_global = u32::from_le_bytes(exe.bytes[at..at + 4].try_into().unwrap()) as usize;
     let records = symtab.data().unwrap();
     assert!(first_global > 1);
-    for (i, record) in records.chunks_exact(24).enumerate() {
+    for (i, record) in records.as_chunks::<24>().0.iter().enumerate() {
         assert_eq!(record[4] >> 4 == 0, i < first_global);
     }
 }

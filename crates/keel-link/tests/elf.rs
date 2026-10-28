@@ -54,7 +54,7 @@ fn layout_relocations_got_bss_and_determinism() {
 fn common_merges_and_strong_overrides_weak_in_both_orders() {
     let a = object(".comm shared,16,16\n.text\n.weak answer\nanswer:\nret\n");
     let b = object(".comm shared,64,32\n.text\n.globl answer\nanswer:\nmov eax,42\nret\n");
-    for rest in [[a.clone(), b.clone()], [b.clone(), a.clone()]] {
+    for rest in [[a.clone(), b.clone()], [b, a]] {
         let exe = link(&[object(START), rest[0].clone(), rest[1].clone()]).unwrap();
         let file = object::File::parse(exe.bytes.as_slice()).unwrap();
         assert_eq!(value(&file, "shared") % 32, 0);
@@ -261,7 +261,7 @@ fn relocation_encoding_preserves_signed_wraps_boundaries_and_adjacent_bytes() {
 fn diagnostics_for_undefined_duplicate_missing_entry_and_overflow() {
     let start = object(START);
     assert!(
-        link(&[start.clone(), start.clone()])
+        link(&[start.clone(), start])
             .unwrap_err()
             .contains("duplicate")
     );
@@ -398,7 +398,7 @@ fn archives_extract_transitively_skip_unused_duplicates_and_respect_order() {
     let a = object(".text\n.globl answer\nanswer:\ncall helper\nret\n");
     let b = object(".text\n.globl helper\nhelper:\nret\n");
     let ar = archive(&[("b.o", b), ("unused.o", object(START)), ("a.o", a)]);
-    assert!(link(&[main.clone(), ar.clone()]).is_ok());
+    assert!(link(&[main.clone(), ar]).is_ok());
     let order_archive = archive(&[("answer.o", object(".text\n.globl answer\nanswer:\nret\n"))]);
     assert!(
         link(&[order_archive, main])

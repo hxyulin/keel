@@ -217,7 +217,7 @@ fn check_signature(bytes: &[u8]) {
     assert_eq!(be32(16) + be32(28) * 32, cd.len());
     for (page, hash) in bytes[..offset]
         .chunks(4096)
-        .zip(cd[be32(16)..].chunks_exact(32))
+        .zip(cd[be32(16)..].as_chunks::<32>().0.iter())
     {
         assert_eq!(Sha256::digest(page).as_slice(), hash);
     }

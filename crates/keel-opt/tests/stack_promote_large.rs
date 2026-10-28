@@ -393,7 +393,7 @@ fn analysis_exhaustion_preserves_completed_fields_and_leaves_suffix_untouched() 
         "must exhaust analysis after useful work, not hit field cap"
     );
     assert_eq!(params(f), 1, "parameter budget cannot explain the cutoff");
-    for (field, pair) in accesses.chunks_exact(2).enumerate() {
+    for (field, pair) in accesses.as_chunks::<2>().0.iter().enumerate() {
         for &i in pair {
             assert_eq!(f.is_removed(i), field < completed);
             if field >= completed {

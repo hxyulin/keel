@@ -244,11 +244,7 @@ fn check_forms(source: &str, oracle: &str, evidence: &str, shrinks: bool) {
                     !shrinks || sizes[1] < sizes[0],
                     "representative forms should shrink: {stem} {sizes:?}"
                 );
-                let native = if arm {
-                    cfg!(all(target_arch = "aarch64", target_os = "macos"))
-                } else {
-                    cfg!(all(target_arch = "x86_64", target_os = "linux"))
-                };
+                let native = arm;
                 if native {
                     let exe = root.join(format!("{stem}.native"));
                     command(
