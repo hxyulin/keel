@@ -432,6 +432,10 @@ pub enum OptimizationTier {
     /// Fixed CFG/local cleanup plus size-capped single-stream sum reductions.
     Fast,
     Basic,
+    /// One bounded inlining round and scalar/memory cleanup, without loop expansion.
+    Balanced,
+    /// Scalar cleanup without optional inlining, unrolling or vectorization.
+    Size,
     Full,
 }
 impl OptimizationTier {
@@ -453,10 +457,71 @@ impl OptimizationTier {
                 "simplify-cfg",
                 "dce",
             ],
+            Self::Balanced => BALANCED_PIPELINE,
+            Self::Size => SIZE_PIPELINE,
             Self::Full => DEFAULT_PIPELINE,
         }
     }
 }
+
+/// Balanced release pipeline. Loop expansion remains in Full. GCM is also
+/// omitted here: its placement after promotion regressed Lua dispatch in the
+/// balanced schedule; Full retains its separately measured pass ordering.
+pub const BALANCED_PIPELINE: &[&str] = &[
+    "private-aggregate-cleanup",
+    "inline-noninterposable",
+    "simplify-cfg",
+    "canonicalize",
+    "instcombine",
+    "call-contracts",
+    "simplify-cfg",
+    "gvn",
+    "small-memory",
+    "stack-forward",
+    "load-reuse",
+    "stack-promote",
+    "phi-simplify",
+    "dce",
+    "constant-args",
+    "known-bits",
+    "canonicalize",
+    "instcombine",
+    "simplify-cfg",
+    "dce",
+    "empty-calls",
+    "unused-functions",
+    "private-aggregate-cleanup",
+    "internal-fast-calls",
+];
+
+/// Initial size policy. Omits optional inlining and passes that expand memory
+/// operations, duplicate constants, unroll loops or introduce vector versions.
+/// Mandatory frontend inlining still runs to satisfy language/operand contracts.
+/// This is an IR growth policy, not a guarantee about final machine-code size.
+pub const SIZE_PIPELINE: &[&str] = &[
+    "private-aggregate-cleanup",
+    "simplify-cfg",
+    "canonicalize",
+    "instcombine",
+    "call-contracts",
+    "simplify-cfg",
+    "gvn",
+    "stack-forward",
+    "load-reuse",
+    "stack-promote",
+    "phi-simplify",
+    "dce",
+    "constant-args",
+    "known-bits",
+    "canonicalize",
+    "instcombine",
+    "simplify-cfg",
+    "dce",
+    "empty-calls",
+    "unused-functions",
+    "private-aggregate-cleanup",
+    "internal-fast-calls",
+];
 
 pub fn optimize_with_tier(module: &mut Module, tier: OptimizationTier) -> Result<(), OptError> {
     run_passes(module, tier.pipeline())

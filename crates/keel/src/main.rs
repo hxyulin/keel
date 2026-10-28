@@ -1,8 +1,8 @@
 //! The keel driver:
 //!
 //! ```text
-//! keel compile [--code-model pic|kernel] [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
-//! keel cc [-O] [-g] [--code-model pic|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]  C to assembly
+//! keel compile [--code-model pic|small|kernel] [-O0|-O1|-O2|-O3|-Os] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
+//! keel cc [-O0|-O1|-O2|-O3|-Os] [-g] [--code-model pic|small|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]  C to assembly
 //! keel opt [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
 //! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s> -o <output.o>                 assembly to native object
 //! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s>... --out-dir <directory>      batch assembly
@@ -35,12 +35,13 @@ mod asm;
 mod disasm;
 mod input;
 mod link;
+mod optimization;
 mod wasm;
 mod x86_options;
 
 const USAGE: &str = "usage:
-  keel compile [--code-model pic|kernel] [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
-  keel cc [-O] [-g] [--code-model pic|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]
+  keel compile [--code-model pic|small|kernel] [-O0|-O1|-O2|-O3|-Os] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
+  keel cc [-O0|-O1|-O2|-O3|-Os] [-g] [--code-model pic|small|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]
   keel opt [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
   keel compile|cc|opt [--verify-each | --no-verify-each] [--opt-report <new-report.json>] <input> [-o <output>]
   keel compile|cc [--emit-object] <input> -o <output.o>  (AArch64 Mach-O or AArch64/x86-64 ELF)
@@ -56,9 +57,12 @@ const USAGE: &str = "usage:
   keel passes
 
   --target also accepts aarch64-unknown-linux-gnu (Linux AAPCS64/ELF).
-  -O enables full IR optimization and all target selection passes.
-  --isel / --isel-tier override -O selection in either order; last selector wins.
-  --opt-tier none|fast|basic|full controls IR optimization; -p overrides its pipeline in either order.
+  -O0 disables optional IR optimization; -O1 favors compile time.
+  -O2 balances optimization effort; -O3 uses the full pipeline; -O retains -O3 behavior.
+  -Os favors size by avoiding optional inlining and loop/memory expansion.
+  --isel / --isel-tier and --regalloc override preset stages in either order.
+  Repeated explicit stage options use the last value.
+  --opt-tier none|fast|basic|balanced|full|size controls IR optimization; -p overrides its pipeline in either order.
   fast runs bounded local/CFG cleanup and small single-stream sum reductions; allocator/selection defaults are independent.
   Repeated verification defaults on with debug assertions or feature verify-each.
   --verify-each / --no-verify-each override this; contradictory flags are rejected.
@@ -92,6 +96,7 @@ struct Options {
     output: Option<String>,
     opt_report: Option<String>,
     optimization: keel_opt::OptimizationTier,
+    optimization_level: Option<optimization::Level>,
     verification: keel_opt::VerificationPolicy,
     allocation: keel_codegen::regalloc::AllocationTier,
     selection: keel_codegen::SelectionOptions,
@@ -120,6 +125,19 @@ struct Options {
 }
 
 impl Options {
+    fn preprocessing_defines(&self) -> Vec<(String, Option<String>)> {
+        let mut defines = Vec::new();
+        if self.optimization != keel_opt::OptimizationTier::None {
+            defines.push(("__OPTIMIZE__".into(), Some("1".into())));
+        }
+        if self.optimization == keel_opt::OptimizationTier::Size {
+            defines.push(("__OPTIMIZE_SIZE__".into(), Some("1".into())));
+        }
+        // Explicit -D/-U overrides compiler-provided optimization macros.
+        defines.extend(self.defines.iter().cloned());
+        defines
+    }
+
     fn c_function_binding(&self) -> keel_c::FunctionBinding {
         self.function_binding.unwrap_or_else(|| {
             if self.link_intent == Some(CLinkIntent::Executable) {
@@ -295,7 +313,8 @@ impl Options {
 
 fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
     let mut opts = Options::default();
-    let mut optimize_preset = false;
+    let mut optimize_preset = None;
+    let mut explicit_allocation = false;
     let mut explicit_selection = false;
     let mut supplied = Vec::new();
     let mut args = args.iter();
@@ -305,6 +324,10 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             "--sysroot"
         } else if raw.starts_with("-mmacosx-version-min=") {
             "-mmacosx-version-min"
+        } else if optimization::Level::parse(raw).is_some() {
+            "-O"
+        } else if raw.starts_with("--code-model=") || raw.starts_with("-mcmodel=") {
+            "--code-model"
         } else if raw.starts_with("-I") {
             "-I"
         } else if raw.starts_with("-D") {
@@ -412,8 +435,10 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                 }
             }
             "-O" => {
-                opts.optimization = keel_opt::OptimizationTier::Full;
-                optimize_preset = true;
+                let level = optimization::Level::parse(raw).expect("normalized optimization flag");
+                opts.optimization = level.optimization();
+                opts.optimization_level = Some(level);
+                optimize_preset = Some(level);
             }
             "--opt-tier" => {
                 opts.optimization = match args.next().map(String::as_str) {
@@ -421,7 +446,13 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                     Some("fast") => keel_opt::OptimizationTier::Fast,
                     Some("basic") => keel_opt::OptimizationTier::Basic,
                     Some("full") => keel_opt::OptimizationTier::Full,
-                    _ => return Err("`--opt-tier` needs none, fast, basic, or full".into()),
+                    Some("balanced") => keel_opt::OptimizationTier::Balanced,
+                    Some("size") => keel_opt::OptimizationTier::Size,
+                    _ => {
+                        return Err(
+                            "`--opt-tier` needs none, fast, basic, balanced, full, or size".into(),
+                        );
+                    }
                 };
             }
             "--remat" => {
@@ -444,6 +475,7 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                 }
             }
             "--regalloc" => {
+                explicit_allocation = true;
                 opts.allocation = match args.next().map(String::as_str) {
                     Some("fast") => keel_codegen::regalloc::AllocationTier::Fast,
                     #[cfg(feature = "experimental-regalloc")]
@@ -474,10 +506,16 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                 if opts.x86_code_model.is_some() {
                     return Err("`--code-model` may only be supplied once".into());
                 }
-                opts.x86_code_model = Some(match args.next().map(String::as_str) {
+                let name = raw
+                    .split_once('=')
+                    .map(|(_, name)| name)
+                    .or_else(|| args.next().map(String::as_str));
+                opts.x86_code_model = Some(match name {
                     Some("pic") => keel_codegen::x86_64::CodeModel::PositionIndependent,
+                    Some("small") => keel_codegen::x86_64::CodeModel::Small,
                     Some("kernel") => keel_codegen::x86_64::CodeModel::Kernel,
-                    _ => return Err("`--code-model` needs pic or kernel".into()),
+                    Some("medium" | "large") => return Err("medium and large code models are not implemented; use pic, small or kernel".into()),
+                    _ => return Err("`--code-model` needs pic, small or kernel".into()),
                 });
             }
             "--link-intent" => {
@@ -555,10 +593,12 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
     if opts.x86_code_model.is_some() && opts.target()? != Target::X86_64LinuxGnu {
         return Err("x86 code model requires x86_64-unknown-linux-gnu".into());
     }
-    if opts.x86_code_model == Some(keel_codegen::x86_64::CodeModel::Kernel)
-        && opts.link_intent == Some(CLinkIntent::Shared)
+    if matches!(
+        opts.x86_code_model,
+        Some(keel_codegen::x86_64::CodeModel::Small | keel_codegen::x86_64::CodeModel::Kernel)
+    ) && opts.link_intent == Some(CLinkIntent::Shared)
     {
-        return Err("kernel code model requires a statically linked executable image".into());
+        return Err("static code model requires a statically linked executable image".into());
     }
     wasm::validate_options(&opts, &supplied)?;
     if !opts.emit_wasm {
@@ -566,8 +606,13 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
     }
     // Explicit selectors override the convenience preset regardless of order.
     // IR tier changes and explicit pipelines do not reset selection.
-    if optimize_preset && !explicit_selection {
-        opts.selection = keel_codegen::SelectionOptions::ALL;
+    if let Some(level) = optimize_preset {
+        if !explicit_selection {
+            opts.selection = level.selection().options();
+        }
+        if !explicit_allocation {
+            opts.allocation = level.allocation();
+        }
     }
     #[cfg(feature = "experimental-regalloc")]
     if opts.remat != 0 && opts.allocation == keel_codegen::regalloc::AllocationTier::FullAffinity {
@@ -795,7 +840,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                                     .then(|| std::env::var("MACOSX_DEPLOYMENT_TARGET").ok())
                                     .flatten()
                             }),
-                            defines: opts.defines.clone(),
+                            defines: opts.preprocessing_defines(),
                             target,
                             dump_macros: opts.dump_macros,
                         },
@@ -868,7 +913,9 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     let names: Vec<&str> = names.iter().map(String::as_str).collect();
                     opts.run_optimization(&mut module, &names, target)
                 }
-                None if rest.iter().any(|arg| arg == "--opt-tier" || arg == "-O") => {
+                None if opts.optimization_level.is_some()
+                    || rest.iter().any(|arg| arg == "--opt-tier") =>
+                {
                     opts.run_optimization(&mut module, opts.optimization.pipeline(), target)
                 }
                 None => opts.run_optimization(&mut module, keel_opt::DEFAULT_PIPELINE, target),
@@ -940,12 +987,12 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
             Target::Aarch64AppleDarwin => &mut aarch64_sink,
             Target::X86_64LinuxGnu => &mut x86_sink,
         };
-        if opts.x86_code_model == Some(keel_codegen::x86_64::CodeModel::Kernel) {
+        if let Some(model) = opts.x86_code_model {
             keel_codegen::x86_64::compile_program_chunks_with_pipeline_and_code_model(
                 &module,
                 &keel_codegen::x86_64::REGISTERS,
                 &pipeline,
-                keel_codegen::x86_64::CodeModel::Kernel,
+                model,
                 sink,
             )
         } else {
@@ -965,12 +1012,12 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
         std::fs::write(output, object).map_err(|e| format!("{output}: {e}"))
     } else {
-        let source = if opts.x86_code_model == Some(keel_codegen::x86_64::CodeModel::Kernel) {
+        let source = if let Some(model) = opts.x86_code_model {
             keel_codegen::x86_64::compile_with_pipeline_and_code_model(
                 &module,
                 &keel_codegen::x86_64::REGISTERS,
                 &pipeline,
-                keel_codegen::x86_64::CodeModel::Kernel,
+                model,
             )
         } else {
             keel_codegen::compile_with_pipeline(&module, target, &pipeline)
@@ -1213,6 +1260,27 @@ mod tests {
         }
         #[cfg(not(feature = "experimental-regalloc"))]
         assert!(options(&["--regalloc", "full-affinity"]).is_err());
+    }
+
+    #[test]
+    fn level_presets_keep_explicit_backend_overrides_in_either_order() {
+        use keel_codegen::{SelectionOptions, regalloc::AllocationTier};
+        for level in ["-O0", "-O1", "-O2", "-O3", "-Os"] {
+            for flags in [
+                vec![level, "--isel-tier", "baseline", "--regalloc", "full"],
+                vec!["--isel-tier", "baseline", "--regalloc", "full", level],
+            ] {
+                let opts = options(&flags).unwrap();
+                assert_eq!(opts.selection, SelectionOptions::default(), "{flags:?}");
+                assert_eq!(opts.allocation, AllocationTier::Full, "{flags:?}");
+            }
+        }
+        let opts = options(&["-O1"]).unwrap();
+        assert_eq!(opts.allocation, AllocationTier::Fast);
+        assert_eq!(
+            options(&["-O1", "-O0"]).unwrap().allocation,
+            options(&[]).unwrap().allocation
+        );
     }
 
     #[test]

@@ -63,7 +63,7 @@ fn kernel_uses_absolute_relocations_in_text_typed_and_chunked_paths() {
                     .collect();
                 assert_eq!(
                     relocations,
-                    vec![(object::RelocationKind::Absolute, 64); 4],
+                    vec![(object::RelocationKind::Absolute, 32); 4],
                     "{source}"
                 );
                 let pic = x86_64::compile_with_pipeline(&module, pools, &pipeline).unwrap();

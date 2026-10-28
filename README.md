@@ -9,6 +9,10 @@ object file never invokes Clang.
 Every stage is also a standalone command, so you can start or stop anywhere in
 the pipeline.
 
+Optimization presets `-O0`, `-O1`, `-O2`, `-O3` and `-Os` select distinct
+compiler policies. See [optimization levels and measurements](docs/optimization-levels.md)
+for stage overrides, size-policy limits and x86-64 code models.
+
 ## Install
 
 ```sh

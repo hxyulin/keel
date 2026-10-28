@@ -20,6 +20,20 @@ class Preparation(unittest.TestCase):
                                    '-DNAME=two words', 'source.c', '-o', '/tmp/generated files/tool', '-lm'])
 
 
+class OptimizationMatrix(unittest.TestCase):
+    def test_ablation_keeps_optimizer_and_isa_fixed(self):
+        matrix = benchmark.optimization_configs('/compiler')
+        self.assertEqual(len(matrix), 11)
+        self.assertEqual(len(benchmark.optimization_configs('/compiler', True)), 23)
+        for name, (kind, compiler, flags) in matrix.items():
+            self.assertEqual((kind, compiler), ('keel', '/compiler'))
+            self.assertNotIn('--target-features', flags)
+            if name.count('-') > 1:
+                self.assertIn('-O2', flags)
+                self.assertIn('--isel-tier', flags)
+                self.assertIn('--regalloc', flags)
+
+
 @unittest.skipUnless(shutil.which('clang'), 'native Clang required')
 class NativeHarness(unittest.TestCase):
     def run_case(self, fail=False, reference_fail=False):
@@ -61,6 +75,10 @@ compare = "clang-O2"
             report = json.loads((output / 'report.json').read_text())
             self.assertEqual(report['complete'], not reference_fail)
             self.assertEqual(set(report['apps']), {'sample'})
+            sizes = report['apps']['sample']['builds']['clang-O2']
+            self.assertGreater(sizes['text_bytes'], 0)
+            self.assertGreaterEqual(sizes['allocated_bytes'], sizes['text_bytes'])
+            self.assertLess(sizes['text_bytes'], sizes['bytes'])
             self.assertFalse((root / 'target/suite/unselected').exists())
             self.assertEqual(report['apps']['sample']['compile'], {})
             self.assertEqual(report['apps']['sample']['runtime'], {})

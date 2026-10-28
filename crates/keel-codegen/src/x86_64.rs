@@ -203,7 +203,11 @@ pub enum CodeModel {
     /// RIP-relative definitions and GOT-bound external addresses for userspace.
     #[default]
     PositionIndependent,
-    /// Absolute 64-bit linked virtual addresses for a statically linked kernel image.
+    /// Static low-address image. Symbol addresses use zero-extended 32-bit relocations.
+    /// Code and directly referenced symbols must obey small-model address/reach limits.
+    Small,
+    /// Static image in the negative 2 GiB. Symbol addresses use sign-extended
+    /// 32-bit relocations; direct calls still require signed 32-bit reach.
     /// Does not establish a no-SIMD, unwind, red-zone or interrupt-safe ABI.
     Kernel,
 }
@@ -2364,11 +2368,16 @@ impl<'a> FunctionCompiler<'a> {
                 // Intel operand syntax reserves names such as `offset`, `ptr`
                 // and register names. Quoting keeps C symbols unambiguous.
                 let name = name.to_owned();
-                if self.code_model == CodeModel::Kernel {
+                if !thread_local && self.code_model != CodeModel::PositionIndependent {
+                    let destination = match self.code_model {
+                        CodeModel::Small => r32(d),
+                        CodeModel::Kernel => r64(d),
+                        CodeModel::PositionIndependent => unreachable!("static address branch"),
+                    };
                     self.emit(
-                        Opcode::Movabs,
+                        Opcode::Mov,
                         [
-                            asm_arg(r64(d)),
+                            asm_arg(destination),
                             asm_arg(symbol_address(&name, Modifier::None)),
                         ],
                     );

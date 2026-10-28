@@ -89,6 +89,54 @@ def noise(cpu):
     return out
 
 
+def optimization_configs(keel, experimental=False):
+    """Presets plus a fixed-O2 selector/allocator factorial, without ISA changes."""
+    common = ['--link-intent', 'executable']
+    result = {f'keel-{level}': ('keel', keel, common + ['-' + level])
+              for level in ['O0', 'O1', 'O2', 'O3', 'Os']}
+    allocators = ['fast', 'full']
+    if experimental:
+        allocators += ['local', 'split', 'weighted', 'full-affinity']
+    for selection in ['baseline', 'trees', 'full']:
+        for allocation in allocators:
+            result[f'keel-O2-{selection}-{allocation}'] = (
+                'keel', keel, common + ['-O2', '--isel-tier', selection,
+                                        '--regalloc', allocation])
+    return result
+
+
+def executable_sizes(path):
+    """Read ELF64/Mach-O64 section sizes independently of file/debug overhead."""
+    import struct
+    data = Path(path).read_bytes()
+    if data[:6] == b'\x7fELF\x02\x01':
+        offset = struct.unpack_from('<Q', data, 40)[0]
+        width, count = struct.unpack_from('<HH', data, 58)
+        sections = [struct.unpack_from('<IIQQQQIIQQ', data, offset + i * width)
+                    for i in range(count)]
+        return {'text_bytes': sum(s[5] for s in sections if s[2] & 4),
+                'allocated_bytes': sum(s[5] for s in sections if s[2] & 2)}
+    if data[:4] == b'\xcf\xfa\xed\xfe':
+        commands = struct.unpack_from('<I', data, 16)[0]
+        offset, text, allocated = 32, 0, 0
+        for _ in range(commands):
+            command, length = struct.unpack_from('<II', data, offset)
+            if command == 0x19:  # LC_SEGMENT_64
+                protection = struct.unpack_from('<I', data, offset + 60)[0]
+                count = struct.unpack_from('<I', data, offset + 64)[0]
+                for i in range(count):
+                    section = offset + 72 + i * 80
+                    size = struct.unpack_from('<Q', data, section + 40)[0]
+                    flags = struct.unpack_from('<I', data, section + 64)[0]
+                    if protection:
+                        allocated += size
+                    if flags & (0x80000000 | 0x400):
+                        text += size
+            offset += length
+        return {'text_bytes': text, 'allocated_bytes': allocated}
+    raise ValueError('size accounting requires little-endian ELF64 or Mach-O64')
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--root', type=Path, required=True)
@@ -100,6 +148,10 @@ def main():
     p.add_argument('--configs', nargs='+', help='selected named configurations; must include clang-O2')
     p.add_argument('--candidate-configs', type=Path,
                    help='additional named Keel compilers/flags as JSON; existing configurations cannot be replaced')
+    p.add_argument('--optimization-matrix', action='store_true',
+                   help='compare O0/O1/O2/O3/Os and all stable selector/allocator combinations at O2')
+    p.add_argument('--experimental-allocators', action='store_true',
+                   help='extend the matrix; requires a compiler built with experimental-regalloc')
     p.add_argument('--checks-only', action='store_true',
                    help='build and run correctness checks, without compile/runtime timing rounds')
     p.add_argument('--gcc-native-preprocess', action='store_true',
@@ -112,6 +164,8 @@ def main():
     p.add_argument('--compile-rounds', type=int, default=5)
     p.add_argument('--runtime-rounds', type=int, default=7)
     args = p.parse_args()
+    if args.experimental_allocators and not args.optimization_matrix:
+        p.error('--experimental-allocators requires --optimization-matrix')
     chosen_apps = args.apps or DEFAULT_APPS
     root, work = args.root.resolve(), args.work.resolve()
     unknown = set(chosen_apps) - set(discover_apps(root))
@@ -262,6 +316,10 @@ def main():
                    'keel-fast': ('keel', keel, ['--link-intent', 'executable', '--opt-tier', 'fast', '--isel-tier', 'full', '--regalloc', 'full']),
                    'keel-full': ('keel', keel, ['--link-intent', 'executable', '-O']),
                    'clang-O0': ('cc', clang, ['-O0']), 'clang-O2': ('cc', clang, ['-O2'])}
+        if args.optimization_matrix:
+            configs.update(optimization_configs(keel, args.experimental_allocators))
+            configs.update({f'clang-{level}': ('cc', clang, ['-' + level])
+                            for level in ['O1', 'O3', 'Os']})
         if gcc:
             configs.update({'gcc-O0': ('cc', gcc, ['-O0']), 'gcc-O2': ('cc', gcc, ['-O2'])})
         if args.candidate_configs:
@@ -321,7 +379,7 @@ def main():
                         compile_one(app, name, source, 'object', 'initial-build')
                     binary = dest / b['binary']
                     run([clang, *[dest / (s.stem + '.o') for s in all_sources[app]], '-o', binary, *['-l' + s for s in b.get('libs', [])]], 'common-link')
-                    report['apps'][app]['builds'][name] = {'status': 'built', 'binary': str(binary), 'sha256': sha(binary), 'bytes': binary.stat().st_size}
+                    report['apps'][app]['builds'][name] = {'status': 'built', 'binary': str(binary), 'sha256': sha(binary), 'bytes': binary.stat().st_size, **executable_sizes(binary)}
                 except Exception as e:
                     report['apps'][app]['builds'][name] = {'status': 'failed', 'error': str(e)}
                     report['errors'].append({'app': app, 'config': name, 'phase': 'build', 'error': str(e)})

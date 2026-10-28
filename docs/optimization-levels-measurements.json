@@ -1,0 +1,541 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-28",
+  "application": "Lua 5.4.7",
+  "host": {
+    "architecture": "x86_64",
+    "cpu": "AMD Ryzen 9 9950X3D 16-Core Processor",
+    "logical_cpus": 32,
+    "affinity": 2,
+    "smt_siblings": "2,18",
+    "isolation": "One logical CPU pinned; no exclusive CPU reservation or governor changes."
+  },
+  "scope": "One native x86-64 application, four workloads; not a kernel or universal compiler ranking.",
+  "rounds": {
+    "compile": 3,
+    "runtime": 5,
+    "compile_warmups": 1,
+    "runtime_warmups": 2
+  },
+  "compiler_versions": {
+    "clang": "clang version 23.1.4\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/bin\n"
+  },
+  "compiler_sha256": {
+    "keel": "3ccdcd88089f28aad4fe38f0517203d92a5df136cda9f89dee482f67ff09b995",
+    "clang": "b53890006355553d68159ddeafd47586f74d9bf8febee4132763fa0ec84e3b44"
+  },
+  "runner_sha256": "199afdc7f036278a346c515a958daabd2aab1683b1bc99bba0a8b1d7608c779d",
+  "manifest_sha256": "c35708f415a5b41bc6a68eb130f273852400f00cdd3163d3e88bda9ef36579b6",
+  "measured_source_sha256": {
+    "crates/keel/src/main.rs": "974fb58102f010ae991945461b44d37ec7244268797d06d917d32188f1259c54",
+    "crates/keel/src/optimization.rs": "291ee20ffa61a9ad92b708c3c6941d469ac11b199cad796641fea3ad8139b4be",
+    "crates/keel-opt/src/lib.rs": "539a1247b7265af0d67ceeafd286b34fc06cd284e5a70e703955a48a7d5d4272",
+    "crates/keel-codegen/src/x86_64.rs": "4f176f430ab6959ffcf9c64698cde34a2d8070c1afb18e78094b2c17398e9ea5",
+    "crates/keel/examples/profile_compile.rs": "50f5e61fbe1d7e6329456e436931fb8edcb165134673e87112e7e45a3a98e52b",
+    "suite/benchmark_platforms.py": "199afdc7f036278a346c515a958daabd2aab1683b1bc99bba0a8b1d7608c779d"
+  },
+  "source_scope": "Driver help and cfg(test) additions plus Rust formatting differ. Optimizer pipelines, Level policy, x86 emitter and benchmark runner are byte-identical.",
+  "source_inventory_sha256": "341fabc53fa7c3d79a099f7900081912f2aae7cad7e32e664e2a7671188d81ba",
+  "presets": {
+    "keel-O0": {
+      "object_compile_ms": 176.825,
+      "assembly_compile_ms": 103.395,
+      "text_bytes": 257984,
+      "runtime_geomean_over_clang_O2": 1.74109,
+      "workload_time_over_clang_O2": {
+        "fib": 1.729179,
+        "sort": 1.727888,
+        "string": 1.526125,
+        "float": 2.015298
+      }
+    },
+    "keel-O1": {
+      "object_compile_ms": 177.404,
+      "assembly_compile_ms": 110.67,
+      "text_bytes": 240231,
+      "runtime_geomean_over_clang_O2": 1.697924,
+      "workload_time_over_clang_O2": {
+        "fib": 1.65245,
+        "sort": 1.736062,
+        "string": 1.50258,
+        "float": 1.928155
+      }
+    },
+    "keel-O2": {
+      "object_compile_ms": 212.5,
+      "assembly_compile_ms": 140.393,
+      "text_bytes": 264464,
+      "runtime_geomean_over_clang_O2": 1.537512,
+      "workload_time_over_clang_O2": {
+        "fib": 1.551128,
+        "sort": 1.435175,
+        "string": 1.421837,
+        "float": 1.765515
+      }
+    },
+    "keel-O3": {
+      "object_compile_ms": 287.094,
+      "assembly_compile_ms": 196.952,
+      "text_bytes": 335092,
+      "runtime_geomean_over_clang_O2": 1.44987,
+      "workload_time_over_clang_O2": {
+        "fib": 1.51687,
+        "sort": 1.283317,
+        "string": 1.334146,
+        "float": 1.701493
+      }
+    },
+    "keel-Os": {
+      "object_compile_ms": 190.804,
+      "assembly_compile_ms": 126.463,
+      "text_bytes": 230368,
+      "runtime_geomean_over_clang_O2": 1.63348,
+      "workload_time_over_clang_O2": {
+        "fib": 1.678329,
+        "sort": 1.570204,
+        "string": 1.48916,
+        "float": 1.81418
+      }
+    },
+    "clang-O2": {
+      "object_compile_ms": 1400.632,
+      "assembly_compile_ms": 1409.061,
+      "text_bytes": 199724,
+      "runtime_geomean_over_clang_O2": 1.0,
+      "workload_time_over_clang_O2": {
+        "fib": 1.0,
+        "sort": 1.0,
+        "string": 1.0,
+        "float": 1.0
+      }
+    },
+    "clang-O3": {
+      "object_compile_ms": 1427.919,
+      "assembly_compile_ms": 1437.724,
+      "text_bytes": 208908,
+      "runtime_geomean_over_clang_O2": 0.977621,
+      "workload_time_over_clang_O2": {
+        "fib": 1.017305,
+        "sort": 1.004437,
+        "string": 0.912879,
+        "float": 0.979254
+      }
+    },
+    "clang-Os": {
+      "object_compile_ms": 1153.202,
+      "assembly_compile_ms": 1161.204,
+      "text_bytes": 147167,
+      "runtime_geomean_over_clang_O2": 1.108998,
+      "workload_time_over_clang_O2": {
+        "fib": 1.078835,
+        "sort": 1.300682,
+        "string": 1.017099,
+        "float": 1.059826
+      }
+    }
+  },
+  "backend_comparison": {
+    "keel-O2-baseline-fast": {
+      "object_compile_ms": 221.799,
+      "assembly_compile_ms": 138.183,
+      "text_bytes": 299339,
+      "runtime_geomean_over_clang_O2": 1.764923,
+      "workload_time_over_clang_O2": {
+        "fib": 1.747187,
+        "sort": 1.846263,
+        "string": 1.511878,
+        "float": 1.989544
+      }
+    },
+    "keel-O2-baseline-full": {
+      "object_compile_ms": 219.395,
+      "assembly_compile_ms": 137.387,
+      "text_bytes": 292619,
+      "runtime_geomean_over_clang_O2": 1.678945,
+      "workload_time_over_clang_O2": {
+        "fib": 1.657147,
+        "sort": 1.70761,
+        "string": 1.452052,
+        "float": 1.933809
+      }
+    },
+    "keel-O2-baseline-local": {
+      "object_compile_ms": 263.363,
+      "assembly_compile_ms": 149.79,
+      "text_bytes": 401190,
+      "runtime_geomean_over_clang_O2": 2.239771,
+      "workload_time_over_clang_O2": {
+        "fib": 2.365346,
+        "sort": 2.421648,
+        "string": 1.838853,
+        "float": 2.38925
+      }
+    },
+    "keel-O2-baseline-split": {
+      "object_compile_ms": 226.698,
+      "assembly_compile_ms": 143.196,
+      "text_bytes": 292411,
+      "runtime_geomean_over_clang_O2": 1.676474,
+      "workload_time_over_clang_O2": {
+        "fib": 1.659517,
+        "sort": 1.697715,
+        "string": 1.477209,
+        "float": 1.89801
+      }
+    },
+    "keel-O2-baseline-weighted": {
+      "object_compile_ms": 219.303,
+      "assembly_compile_ms": 137.917,
+      "text_bytes": 288075,
+      "runtime_geomean_over_clang_O2": 1.679974,
+      "workload_time_over_clang_O2": {
+        "fib": 1.63988,
+        "sort": 1.67645,
+        "string": 1.487977,
+        "float": 1.947202
+      }
+    },
+    "keel-O2-baseline-full-affinity": {
+      "object_compile_ms": 219.692,
+      "assembly_compile_ms": 137.957,
+      "text_bytes": 292283,
+      "runtime_geomean_over_clang_O2": 1.696865,
+      "workload_time_over_clang_O2": {
+        "fib": 1.678328,
+        "sort": 1.724787,
+        "string": 1.48574,
+        "float": 1.927674
+      }
+    },
+    "keel-O2-trees-fast": {
+      "object_compile_ms": 215.027,
+      "assembly_compile_ms": 139.307,
+      "text_bytes": 277657,
+      "runtime_geomean_over_clang_O2": 1.719738,
+      "workload_time_over_clang_O2": {
+        "fib": 1.66258,
+        "sort": 1.767547,
+        "string": 1.516629,
+        "float": 1.962529
+      }
+    },
+    "keel-O2-trees-full": {
+      "object_compile_ms": 212.866,
+      "assembly_compile_ms": 138.268,
+      "text_bytes": 271577,
+      "runtime_geomean_over_clang_O2": 1.612326,
+      "workload_time_over_clang_O2": {
+        "fib": 1.530887,
+        "sort": 1.626637,
+        "string": 1.454368,
+        "float": 1.865964
+      }
+    },
+    "keel-O2-trees-local": {
+      "object_compile_ms": 252.433,
+      "assembly_compile_ms": 149.615,
+      "text_bytes": 368611,
+      "runtime_geomean_over_clang_O2": 2.091029,
+      "workload_time_over_clang_O2": {
+        "fib": 2.116787,
+        "sort": 2.262321,
+        "string": 1.759989,
+        "float": 2.268293
+      }
+    },
+    "keel-O2-trees-split": {
+      "object_compile_ms": 219.684,
+      "assembly_compile_ms": 143.611,
+      "text_bytes": 271593,
+      "runtime_geomean_over_clang_O2": 1.600685,
+      "workload_time_over_clang_O2": {
+        "fib": 1.53664,
+        "sort": 1.611339,
+        "string": 1.417722,
+        "float": 1.870137
+      }
+    },
+    "keel-O2-trees-weighted": {
+      "object_compile_ms": 213.39,
+      "assembly_compile_ms": 138.837,
+      "text_bytes": 267929,
+      "runtime_geomean_over_clang_O2": 1.589335,
+      "workload_time_over_clang_O2": {
+        "fib": 1.530506,
+        "sort": 1.607465,
+        "string": 1.414747,
+        "float": 1.833187
+      }
+    },
+    "keel-O2-trees-full-affinity": {
+      "object_compile_ms": 213.743,
+      "assembly_compile_ms": 138.968,
+      "text_bytes": 271257,
+      "runtime_geomean_over_clang_O2": 1.625772,
+      "workload_time_over_clang_O2": {
+        "fib": 1.540615,
+        "sort": 1.622441,
+        "string": 1.467827,
+        "float": 1.904149
+      }
+    },
+    "keel-O2-full-fast": {
+      "object_compile_ms": 215.795,
+      "assembly_compile_ms": 140.921,
+      "text_bytes": 272963,
+      "runtime_geomean_over_clang_O2": 1.639533,
+      "workload_time_over_clang_O2": {
+        "fib": 1.633567,
+        "sort": 1.596566,
+        "string": 1.465334,
+        "float": 1.89069
+      }
+    },
+    "keel-O2-full-full": {
+      "object_compile_ms": 212.83,
+      "assembly_compile_ms": 140.091,
+      "text_bytes": 264464,
+      "runtime_geomean_over_clang_O2": 1.541896,
+      "workload_time_over_clang_O2": {
+        "fib": 1.551718,
+        "sort": 1.44266,
+        "string": 1.41541,
+        "float": 1.783865
+      }
+    },
+    "keel-O2-full-local": {
+      "object_compile_ms": 251.06,
+      "assembly_compile_ms": 150.389,
+      "text_bytes": 352115,
+      "runtime_geomean_over_clang_O2": 1.971318,
+      "workload_time_over_clang_O2": {
+        "fib": 1.882699,
+        "sort": 2.182568,
+        "string": 1.650125,
+        "float": 2.227209
+      }
+    },
+    "keel-O2-full-split": {
+      "object_compile_ms": 218.075,
+      "assembly_compile_ms": 144.569,
+      "text_bytes": 263824,
+      "runtime_geomean_over_clang_O2": 1.5105,
+      "workload_time_over_clang_O2": {
+        "fib": 1.489618,
+        "sort": 1.44177,
+        "string": 1.382302,
+        "float": 1.753512
+      }
+    },
+    "keel-O2-full-weighted": {
+      "object_compile_ms": 212.383,
+      "assembly_compile_ms": 141.16,
+      "text_bytes": 258560,
+      "runtime_geomean_over_clang_O2": 1.49674,
+      "workload_time_over_clang_O2": {
+        "fib": 1.487444,
+        "sort": 1.445704,
+        "string": 1.405037,
+        "float": 1.661031
+      }
+    },
+    "keel-O2-full-full-affinity": {
+      "object_compile_ms": 213.102,
+      "assembly_compile_ms": 140.577,
+      "text_bytes": 263936,
+      "runtime_geomean_over_clang_O2": 1.5321,
+      "workload_time_over_clang_O2": {
+        "fib": 1.534699,
+        "sort": 1.444229,
+        "string": 1.421612,
+        "float": 1.748673
+      }
+    }
+  },
+  "screening": {
+    "reason": "Initial balanced GCM placement after stack promotion regressed recursive Fibonacci across every allocator. Full retains its existing ordering.",
+    "selected": "balanced-no-gcm",
+    "cases": {
+      "balanced-no-gcm": {
+        "object_compile_ms": 213.081,
+        "assembly_compile_ms": 139.358,
+        "text_bytes": 264464,
+        "runtime_geomean_over_clang_O2": 1.54255,
+        "workload_time_over_clang_O2": {
+          "fib": 1.546834,
+          "sort": 1.421115,
+          "string": 1.4433,
+          "float": 1.784545
+        }
+      },
+      "balanced-no-inline": {
+        "object_compile_ms": 195.91,
+        "assembly_compile_ms": 130.561,
+        "text_bytes": 233840,
+        "runtime_geomean_over_clang_O2": 2.12248,
+        "workload_time_over_clang_O2": {
+          "fib": 4.078499,
+          "sort": 1.615565,
+          "string": 1.552544,
+          "float": 1.983837
+        }
+      },
+      "scalar-rounds-1": {
+        "object_compile_ms": 221.306,
+        "assembly_compile_ms": 148.401,
+        "text_bytes": 263748,
+        "runtime_geomean_over_clang_O2": 1.571778,
+        "workload_time_over_clang_O2": {
+          "fib": 1.52921,
+          "sort": 1.479479,
+          "string": 1.458393,
+          "float": 1.849755
+        }
+      },
+      "scalar-rounds-2": {
+        "object_compile_ms": 262.593,
+        "assembly_compile_ms": 175.017,
+        "text_bytes": 320164,
+        "runtime_geomean_over_clang_O2": 1.441715,
+        "workload_time_over_clang_O2": {
+          "fib": 1.523453,
+          "sort": 1.24245,
+          "string": 1.339642,
+          "float": 1.703809
+        }
+      },
+      "scalar-rounds-3": {
+        "object_compile_ms": 282.012,
+        "assembly_compile_ms": 190.797,
+        "text_bytes": 335028,
+        "runtime_geomean_over_clang_O2": 1.468289,
+        "workload_time_over_clang_O2": {
+          "fib": 1.527234,
+          "sort": 1.265102,
+          "string": 1.391515,
+          "float": 1.728729
+        }
+      }
+    }
+  },
+  "stage_medians_ms": {
+    "O0": {
+      "lvm.i": {
+        "frontend": 6.211234,
+        "verify": 0.370418,
+        "optimize": 0.00074,
+        "codegen": 3.114408,
+        "assemble": 12.435389,
+        "destroy": 0.26858600000000005
+      },
+      "lparser.i": {
+        "frontend": 2.481174,
+        "verify": 0.195024,
+        "optimize": 0.00047,
+        "codegen": 1.625985,
+        "assemble": 5.827065999999999,
+        "destroy": 0.207965
+      }
+    },
+    "O1": {
+      "lvm.i": {
+        "frontend": 4.971818,
+        "verify": 0.30260699999999996,
+        "optimize": 0.814708,
+        "codegen": 2.639157,
+        "assemble": 9.7047,
+        "destroy": 0.236605
+      },
+      "lparser.i": {
+        "frontend": 2.516235,
+        "verify": 0.19819499999999998,
+        "optimize": 0.42556,
+        "codegen": 1.704227,
+        "assemble": 5.027069,
+        "destroy": 0.20529399999999998
+      }
+    },
+    "O2": {
+      "lvm.i": {
+        "frontend": 4.971358,
+        "verify": 0.305186,
+        "optimize": 3.2416799999999997,
+        "codegen": 2.6401369999999997,
+        "assemble": 9.118708,
+        "destroy": 0.246875
+      },
+      "lparser.i": {
+        "frontend": 2.538795,
+        "verify": 0.199135,
+        "optimize": 2.947014,
+        "codegen": 2.046684,
+        "assemble": 5.892988,
+        "destroy": 0.242765
+      }
+    },
+    "O3": {
+      "lvm.i": {
+        "frontend": 5.07968,
+        "verify": 0.303317,
+        "optimize": 7.895031,
+        "codegen": 2.9586539999999997,
+        "assemble": 9.157528999999998,
+        "destroy": 0.30158700000000005
+      },
+      "lparser.i": {
+        "frontend": 2.529575,
+        "verify": 0.19953500000000002,
+        "optimize": 8.7687,
+        "codegen": 2.705378,
+        "assemble": 8.006924,
+        "destroy": 0.308817
+      }
+    },
+    "Os": {
+      "lvm.i": {
+        "frontend": 4.966938,
+        "verify": 0.303957,
+        "optimize": 2.78764,
+        "codegen": 2.5169849999999996,
+        "assemble": 8.921712999999999,
+        "destroy": 0.258685
+      },
+      "lparser.i": {
+        "frontend": 2.522704,
+        "verify": 0.199254,
+        "optimize": 1.613165,
+        "codegen": 1.7605279999999999,
+        "assemble": 4.927517,
+        "destroy": 0.20758500000000002
+      }
+    }
+  },
+  "validation": {
+    "workspace": {
+      "passed": 2997,
+      "failed": 0,
+      "ignored": 15,
+      "reported_groups": 568,
+      "scope": "Run started before the final Balanced GCM removal; final corrected policy also passed the focused CLI execution suite and the complete native application matrix."
+    },
+    "final_focused_tests": {
+      "passed": 4,
+      "failed": 0,
+      "scope": "Optimization levels and static code-model tests with experimental-regalloc enabled; includes execution of 30 stable preset/backend combinations."
+    },
+    "python_tests": 5,
+    "clippy": "Ordinary Clippy completed with existing warnings. Strict Clippy stopped on existing keel-ir and keel-link diagnostics.",
+    "formatting": "Scoped rustfmt check and git diff --check passed.",
+    "final_driver_unit_tests": 43
+  },
+  "limitations": [
+    "Prepared C is shared between compilers; preprocessing and linking are excluded from compile timings.",
+    "Three compile blocks and five runtime blocks are screening evidence, not a broad performance guarantee.",
+    "Experimental allocators remain opt-in.",
+    "Size has no target byte-cost model for optional inlining, instruction selection or allocation.",
+    "Unwind policy is unchanged.",
+    "Medium and large code models remain explicitly unsupported.",
+    "The changed kernel address model has focused relocation/link tests; the full kernel boot qualification was not repeated."
+  ],
+  "raw_evidence": "Local-only .git/optimization-policy/20261028: raw samples, bootstrap intervals, commands, full reports and logs. Reproduce with suite/benchmark_platforms.py."
+}

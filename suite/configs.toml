@@ -202,3 +202,36 @@ flags = ["--link-intent", "executable", "-g", "--emit-object"]
 name = "keel-O-select-native"
 compiler = "keel"
 flags = ["--link-intent", "executable", "-O", "--isel", "all", "--emit-object"]
+
+# Public optimization presets. Stage ablations belong in benchmark_platforms.py's
+# --optimization-matrix to keep optimizer effort fixed while comparing backends.
+
+[[config]]
+name = "keel-O0"
+compiler = "keel"
+flags = ["--link-intent", "executable", "-O0"]
+
+[[config]]
+name = "keel-O1"
+compiler = "keel"
+flags = ["--link-intent", "executable", "-O1"]
+
+[[config]]
+name = "keel-O2"
+compiler = "keel"
+flags = ["--link-intent", "executable", "-O2"]
+
+[[config]]
+name = "keel-O3"
+compiler = "keel"
+flags = ["--link-intent", "executable", "-O3"]
+
+[[config]]
+name = "keel-Os"
+compiler = "keel"
+flags = ["--link-intent", "executable", "-Os"]
+
+[[config]]
+name = "clang-Os"
+compiler = "clang"
+flags = ["-Os"]
