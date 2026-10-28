@@ -256,8 +256,16 @@ i8/i16/i32/i64 parameters and results, including direct and indirect call sites.
 Ranges without that definedness guarantee are omitted. Multiple simultaneous
 ranges are retained as a conjunction in Keel; LLVM export diagnoses those it
 cannot express with a single range attribute. No new optimizer consumes these
-facts. Instruction metadata, assume/guard facts, access alias scopes and TBAA
-remain deferred.
+facts. Assume/guard facts, access alias scopes and TBAA remain deferred.
+
+Scalar load-result metadata now maps to sparse instruction `ValueFacts`. Explicit
+`!noundef` is required before retaining one integer range, pointer alignment,
+non-nullness or readable/nullable-readable extents. Metadata without that boundary,
+multi-interval ranges and i1 load facts remain omitted. Export attaches the facts
+to the same scalar load and diagnoses facts on other instruction kinds. It does
+not convert result-pointer facts into memory access flags or function contracts.
+The [instruction-local contract](../../docs/llvm-contracts.md#instruction-local-result-facts)
+documents scope, mutation invalidation and remaining precision loss.
 
 LLVM parameter `noalias` maps to definition-only `restrict_params` for normal
 pointer parameters; declarations, calls, returns and aggregate ABI positions do

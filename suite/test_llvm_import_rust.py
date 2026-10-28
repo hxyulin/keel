@@ -35,8 +35,8 @@ def strip_contracts(line, header):
                     pos += 1
             out.append(line[start:pos])
             continue
-        prefix = next((p for p in (' contract(', ' restrict_params(')
-                       if line.startswith(p, pos) and (header or p == ' contract(')), None)
+        prefix = next((p for p in (' contract(', ' facts(', ' restrict_params(')
+                       if line.startswith(p, pos) and (header or p != ' restrict_params(')), None)
         if prefix:
             pos += len(prefix)
             depth = 1
@@ -63,6 +63,7 @@ def without_preserved_facts(text):
         elif re.match(r'\s+(?:v[0-9]+ = )?(?:call|call_indirect|invoke|return_call|return_call_indirect)\b', line):
             line = strip_contracts(line, False)
         elif re.match(r'\s+(?:v[0-9]+ = load\.[A-Za-z0-9]+|store) ', line):
+            line = strip_contracts(line, False)
             line = re.sub(r'\balign [0-9]+ ', '', line)
         lines.append(line)
     return ''.join(lines)

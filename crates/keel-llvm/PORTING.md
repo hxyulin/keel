@@ -125,8 +125,13 @@ The richer boundary slice adds address/nullness and read/write provenance captur
 with independent return and other escape locations, conditional readable extents,
 and allocation-like return noalias. Integer ranges with noundef at the same
 boundary are retained for i8/i16/i32/i64. No optimizer consumes these additions.
-Poison semantics, instruction-local facts, access alias scopes and TBAA remain
-unrepresented. See [scoped contracts](../../docs/llvm-contracts.md).
+Scalar load-result facts are also preserved with explicit noundef metadata:
+one integer interval, pointer alignment/non-nullness and readable extents.
+The CLI comparison runner strips only these newly retained load facts when
+comparing against Python. Rust scope/definedness tests and executable fixtures
+validate the facts themselves. Poison semantics, general instruction facts,
+access alias scopes and TBAA remain outside LLVM transport. See
+[scoped contracts](../../docs/llvm-contracts.md).
 
 ## Scalar deferred-value refinement
 

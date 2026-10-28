@@ -1,8 +1,8 @@
 # LLVM import contracts
 
-Status: memory, richer boundary pointer/capture contracts, defined integer ranges
-and fixed-stack lifetimes are represented. New fact consumers, instruction-local
-metadata and storage reuse remain deferred.
+Status: memory, richer boundary pointer/capture contracts, defined integer ranges,
+scalar load-result facts and fixed-stack lifetimes are represented. New fact
+consumers, broader metadata and storage reuse remain deferred.
 
 ## Implemented slice
 
@@ -22,6 +22,10 @@ metadata and storage reuse remain deferred.
 - Integer `parameter_ranges` and `return_ranges` apply at function/call boundaries
   only. LLVM import requires range and noundef at the same owner and position.
   Poisonable ranges are omitted. No new optimizer consumes these richer facts.
+- Sparse `ValueFacts` attach one integer interval or pointer facts to one
+  instruction result. LLVM load metadata is retained only with explicit noundef.
+  Result-pointer alignment is separate from access alignment; no access becomes
+  notrap. Mutating or moving instructions drops their result facts.
 - More detailed LLVM memory classes are conservatively coarsened: errno joins
   other accessible memory; target-private state joins inaccessible memory.
   LLVM export uses a widened default compatible with Clang 21, so some region
@@ -219,8 +223,9 @@ every constraint rather than approximating a disconnected intersection with one
 interval. The diagnostic LLVM exporter currently rejects multiple conjunctive
 intervals at a position; it does not silently drop one. Export of a single
 interval emits noundef plus range. Empty LLVM ranges are conservatively omitted;
-i1, i128, vectors, instruction metadata and assume/guard facts are outside this
-slice. Existing i1-to-i8 representation is unchanged.
+i1, i128, vectors and assume/guard facts are outside this boundary slice.
+Existing i1-to-i8 representation is unchanged. Load metadata is handled separately
+below.
 
 The [LLVM C API](https://github.com/llvm/llvm-project/blob/main/llvm/include/llvm-c/Core.h)
 has no ConstantRange-attribute getter. The importer reads only the
@@ -236,6 +241,54 @@ clears positional parameter facts, and byval splitting skips signatures with
 these facts until it can remap them. Cranelift export does not transport the new
 contracts. No alias/value consumer, pointer validity inference, speculation or
 dead-load elimination is added by this slice.
+
+### Instruction-local result facts
+
+`Function::inst_facts` and `set_inst_facts` store sparse `ValueFacts` for exactly
+one result of an inserted instruction. For example:
+
+```text
+v1 = load.ptr align 8 v0 facts(align 16, nonnull, readable 32)
+v2 = load.i64 v1 facts(range(0x0, 0x80))
+```
+
+The first alignment describes the cell address used by the load. The result
+alignment describes the loaded pointer. Neither the cell nor a subsequent read
+becomes non-faulting. Facts apply when the instruction executes. They do not
+establish that the instruction executes on another path, nor describe a sibling
+load or an input parameter. Readable extents hold at this result's production
+point; they are not permanent validity after calls or lifetime changes.
+
+LLVM import reads load metadata through the C API. Explicit `!noundef` is required
+for this first profile, including pointer extents. A single `!range` interval is
+retained for i8/i16/i32/i64. Pointer `!align`, `!nonnull`, `!dereferenceable` and
+`!dereferenceable_or_null` are retained within the existing alignment/extent
+bounds. Positive unconditional readability also establishes non-null in the
+supported LLVM address-space-zero profile. Poisonable metadata without explicit
+noundef is omitted, not asserted as a concrete fact. Multi-interval union ranges
+are omitted as a whole; keeping just one member would incorrectly strengthen
+the source promise. i1 result masking is not annotated as a raw i8 load fact.
+
+Export emits metadata on the same scalar load, including noundef, with module-wide
+metadata node interning. A native readable extent without a non-null promise is
+conservatively exported as a conditional extent, as with boundary facts. This
+loses unconditional readability precision and does not invent non-nullness.
+Facts on other instruction kinds diagnose instead of being silently dropped.
+Call attributes remain in their separate call contracts; call-result metadata,
+range unions, assume/guard and path-conditioned facts remain deferred.
+
+Whole-function clones retain the side table. Instruction-data clones start without
+facts. Instruction rewrites, removal, single/bulk instruction moves and block
+removal clear affected entries. Mutable direct-callee access also clears result
+facts on the affected calls. The verifier checks types, arity and bounds; the
+producer must justify each promise. Consumers must additionally track dominance,
+path conditions, memory changes and lifetime invalidation. No optimizer consumes
+these result facts yet, and this transport does not repair the LLVM fault gap.
+
+The load-fact harness fixture executes through original LLVM, native Keel,
+re-exported LLVM and the Cranelift backend. The LLVM round trip retains the
+fact. Completing the CLIF round trip is currently rejected by the scalar CLIF
+importer's existing lack of load support; Cranelift does not transport the fact.
 
 ## LLVM definedness
 

@@ -60,6 +60,60 @@ fn decode_memory(bits: u64) -> MemorySummary {
 }
 
 impl Translation<'_> {
+    /// Only explicit load definedness establishes the non-poison result facts
+    /// in this first metadata profile. Multi-interval ranges are not narrowed.
+    pub(super) fn load_facts(&self, inst: Ref) -> keel_ir::ValueFacts {
+        let l = self.l;
+        let mut facts = keel_ir::ValueFacts::default();
+        if l.metadata(inst, "noundef").is_none() {
+            return facts;
+        }
+        let ty = l.type_of(inst);
+        let width = self.width(inst);
+        if l.get_type_kind(ty) == 8 && matches!(width, 8 | 16 | 32 | 64) {
+            if let Some(operands) = l.metadata(inst, "range")
+                && let [lower, upper] = operands.as_slice()
+                && *lower != 0
+                && *upper != 0
+                && l.is_a_constant_int(*lower) != 0
+                && l.is_a_constant_int(*upper) != 0
+                && l.type_of(*lower) == ty
+                && l.type_of(*upper) == ty
+            {
+                let range = IntegerRange {
+                    lower: l.const_int_get_z_ext_value(*lower),
+                    upper: l.const_int_get_z_ext_value(*upper),
+                };
+                if range.lower != range.upper {
+                    facts.range = Some(range);
+                }
+            }
+        } else if l.get_type_kind(ty) == 12 && l.get_pointer_address_space(ty) == 0 {
+            let extent = |name| -> Option<u64> {
+                let operands = l.metadata(inst, name)?;
+                let [value] = operands.as_slice() else {
+                    return None;
+                };
+                if *value == 0 || l.is_a_constant_int(*value) == 0 || self.width(*value) != 64 {
+                    return None;
+                }
+                Some(l.const_int_get_z_ext_value(*value))
+            };
+            facts.align = extent("align")
+                .and_then(|n| u32::try_from(n).ok())
+                .filter(|n| n.is_power_of_two())
+                .unwrap_or(1);
+            facts.readable_bytes = extent("dereferenceable")
+                .filter(|&n| n <= i64::MAX as u64)
+                .unwrap_or(0);
+            facts.readable_or_null_bytes = extent("dereferenceable_or_null")
+                .filter(|&n| n <= i64::MAX as u64)
+                .unwrap_or(0);
+            facts.nonnull = facts.readable_bytes != 0 || l.metadata(inst, "nonnull").is_some();
+        }
+        facts
+    }
+
     fn enum_value(&self, owner: Ref, index: u32, name: &str, call: bool) -> Option<u64> {
         let attribute = self.l.attribute(owner, index, name, call);
         (attribute != 0).then(|| self.l.get_enum_attribute_value(attribute))

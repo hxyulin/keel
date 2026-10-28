@@ -49,6 +49,15 @@ class PreservedFactsNormalization(unittest.TestCase):
                   'block0:\n    v0 = symbol_addr @contract\n    return\n}\n')
         self.assertEqual(without_preserved_facts(source), source)
 
+    def test_strips_load_result_facts_without_changing_access_properties(self):
+        source = ('    v1 = load.ptr volatile align 8 notrap v0 facts(align 16, nonnull, readable 32)\n'
+                  '    v2 = load.i64 v1 facts(range(0x0, 0x8))\n'
+                  'func @f() optimize(" facts(range(0, 8))") {\n')
+        expected = ('    v1 = load.ptr volatile notrap v0\n'
+                    '    v2 = load.i64 v1\n'
+                    'func @f() optimize(" facts(range(0, 8))") {\n')
+        self.assertEqual(without_preserved_facts(source), expected)
+
 
 if __name__ == '__main__':
     unittest.main()

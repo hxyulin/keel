@@ -992,6 +992,16 @@ impl Verifier<'_> {
 
     fn check_types(&mut self, inst: Inst) {
         let func = self.func;
+        if let Some(facts) = func.inst_facts(inst) {
+            match func.inst_results(inst) {
+                [value] => {
+                    if let Err(message) = facts.validate(func.value_type(*value)) {
+                        self.inst_error(inst, message);
+                    }
+                }
+                _ => self.inst_error(inst, "result facts require exactly one result".into()),
+            }
+        }
         if let Some(contract) = func.call_contract(inst) {
             match func.call_signature(inst) {
                 Some(sig) => {

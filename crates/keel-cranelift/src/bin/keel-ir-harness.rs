@@ -267,7 +267,7 @@ fn run() -> Result<()> {
         "fatal":result.as_ref().err(), "loss_contracts":{
             "llvm_to_keel":"defined-input refinement; overflow, pointer, optimizer and debug facts may be dropped; see suite/llvm_import_README.md",
             "llvm_scalar_deferred_values":"poison/undef operands choose zero; freeze keeps the concretized operand; nondeterminism is discarded, not modeled",
-            "keel_to_clif_facts":"scoped memory, pointer, capture and integer-range contracts are not transported",
+            "keel_to_clif_facts":"scoped memory, pointer, capture, integer-range and instruction-result contracts are not transported",
             "keel_to_llvm":"notrap and Keel-only access-stability facts omitted; unsupported contracts rejected; see crates/keel-llvm/README.md",
             "clif_to_keel":"explicit external symbol; scalar single-function profile; source locations not retained",
             "measurement":"execution against fixture oracle; fact preservation is not automatically inferred"}});

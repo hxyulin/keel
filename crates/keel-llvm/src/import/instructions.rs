@@ -294,7 +294,8 @@ impl Translation<'_> {
                 if op == 27 {
                     let ty = self.ty(l.type_of(inst))?;
                     let addr = self.value(l.get_operand(inst, 0))?;
-                    let v = self.emit(format!("load.{ty} {flags}{addr}"));
+                    let facts = self.load_facts(inst);
+                    let v = self.emit(format!("load.{ty} {flags}{addr}{facts}"));
                     if self.width(inst) == 1 {
                         let one = self.emit("iconst.i8 1");
                         format!("and {v}, {one}")

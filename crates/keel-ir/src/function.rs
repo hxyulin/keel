@@ -560,6 +560,7 @@ pub struct Function {
     block_insts: ListPool<Inst>,
     insts: Arena<Inst, InstNode>,
     call_contracts: std::collections::BTreeMap<Inst, crate::CallContract>,
+    inst_facts: std::collections::BTreeMap<Inst, crate::ValueFacts>,
     values: Arena<Value, ValueData>,
     result_pool: Vec<Value>,
     /// Instruction locations, shared by runs of instructions with the same
@@ -662,6 +663,7 @@ impl fmt::Debug for Function {
             .field("blocks", &Blocks(self))
             .field("insts", &Nodes(self))
             .field("call_contracts", &self.call_contracts)
+            .field("inst_facts", &self.inst_facts)
             .field("values", &self.values)
             .field("stack_slots", &self.stack_slots)
             .field("callees", &self.callees)
@@ -692,6 +694,7 @@ impl Function {
             block_insts: ListPool::default(),
             insts: Arena::new(),
             call_contracts: Default::default(),
+            inst_facts: Default::default(),
             values: Arena::new(),
             result_pool: Vec::new(),
             locs: Vec::new(),
@@ -756,6 +759,8 @@ impl Function {
     pub fn callee_mut(&mut self, func_ref: FuncRef) -> &mut FuncDecl {
         // A mutable declaration may change the target or ABI positions.
         self.call_contracts.retain(|inst, _| !matches!(self.insts[*inst].data,
+            InstData::Call {func,..} | InstData::Invoke {func,..} | InstData::ReturnCall {func,..} if func == func_ref));
+        self.inst_facts.retain(|inst, _| !matches!(self.insts[*inst].data,
             InstData::Call {func,..} | InstData::Invoke {func,..} | InstData::ReturnCall {func,..} if func == func_ref));
         self.callees[func_ref].attrs.contract = crate::CallContract::default();
         self.callee_index
@@ -1075,6 +1080,7 @@ impl Function {
     /// replaced with [`Function::replace_all_uses`]) by then.
     pub fn remove_inst(&mut self, inst: Inst) {
         self.call_contracts.remove(&inst);
+        self.inst_facts.remove(&inst);
         let block = self.inst_block(inst);
         let index = self.position(inst);
         let data = &mut self.blocks[block];
@@ -1106,6 +1112,7 @@ impl Function {
         for i in start..source.len() {
             // Pushing only appends to the pool, so `source` stays valid.
             let inst = self.block_insts.get(source)[i];
+            self.inst_facts.remove(&inst);
             self.block_insts.push(&mut dest, inst);
             self.insts[inst].block = to.index() as u32;
         }
@@ -1135,6 +1142,7 @@ impl Function {
     #[inline]
     pub fn inst_data_mut(&mut self, inst: Inst) -> &mut InstData {
         self.call_contracts.remove(&inst);
+        self.inst_facts.remove(&inst);
         let block = self.insts[inst].block;
         if block != NO_BLOCK && self.block_insts(Block::new(block as usize)).last() == Some(&inst) {
             self.cfg_stamp = fresh_cfg_stamp();
@@ -1186,6 +1194,35 @@ impl Function {
     /// Drop a call-site contract after a rewrite or a change of scope.
     pub fn clear_call_contract(&mut self, inst: Inst) {
         self.call_contracts.remove(&inst);
+    }
+
+    /// Facts local to this instruction's single result at its production point.
+    pub fn inst_facts(&self, inst: Inst) -> Option<&crate::ValueFacts> {
+        self.inst_facts.get(&inst)
+    }
+
+    /// Attach trusted result facts. Empty facts use no side-table entry.
+    /// # Errors
+    /// Rejects detached or multi/no-result instructions and incompatible facts.
+    pub fn set_inst_facts(&mut self, inst: Inst, facts: crate::ValueFacts) -> Result<(), String> {
+        if self.is_removed(inst) {
+            return Err("result facts require an inserted instruction".into());
+        }
+        let [value] = self.inst_results(inst) else {
+            return Err("result facts require exactly one result".into());
+        };
+        facts.validate(self.value_type(*value))?;
+        if facts.is_unknown() {
+            self.inst_facts.remove(&inst);
+        } else {
+            self.inst_facts.insert(inst, facts);
+        }
+        Ok(())
+    }
+
+    /// Forget a result promise after a rewrite or a change of scope.
+    pub fn clear_inst_facts(&mut self, inst: Inst) {
+        self.inst_facts.remove(&inst);
     }
 
     /// Combine trusted declaration promises with this call's own promises.
@@ -1248,6 +1285,7 @@ impl Function {
         for &inst in self.block_insts.get(data.insts) {
             self.insts[inst].block = NO_BLOCK;
             self.call_contracts.remove(&inst);
+            self.inst_facts.remove(&inst);
         }
         let removed = data.insts.len();
         self.block_insts.free(&mut data.insts);
@@ -1277,6 +1315,7 @@ impl Function {
             for &inst in self.block_insts.get(data.insts) {
                 self.insts[inst].block = NO_BLOCK;
                 self.call_contracts.remove(&inst);
+                self.inst_facts.remove(&inst);
             }
             let removed = data.insts.len();
             self.block_insts.free(&mut data.insts);
@@ -2085,6 +2124,9 @@ impl Function {
         }?;
         if let Some(contract) = self.call_contract(inst) {
             write!(f, "{contract}")?;
+        }
+        if let Some(facts) = self.inst_facts(inst) {
+            write!(f, "{facts}")?;
         }
         Ok(())
     }

@@ -89,12 +89,115 @@ impl CaptureContract {
     }
 }
 
-/// A nonempty modular half-open integer interval, with width supplied by its ABI
-/// position. Lower greater than upper denotes a range that wraps through zero.
+/// A nonempty modular half-open integer interval, with width supplied by its
+/// result type or ABI position. Lower greater than upper wraps through zero.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct IntegerRange {
     pub lower: u64,
     pub upper: u64,
+}
+
+/// Producer facts about one instruction's single result, when it executes.
+/// Pointer extents hold at result production only, not after calls or lifetime
+/// changes. These facts neither prove execution nor authorize motion or deletion.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ValueFacts {
+    pub range: Option<IntegerRange>,
+    pub align: u32,
+    pub nonnull: bool,
+    pub readable_bytes: u64,
+    pub readable_or_null_bytes: u64,
+}
+impl Default for ValueFacts {
+    fn default() -> Self {
+        Self {
+            range: None,
+            align: 1,
+            nonnull: false,
+            readable_bytes: 0,
+            readable_or_null_bytes: 0,
+        }
+    }
+}
+impl ValueFacts {
+    pub fn is_unknown(&self) -> bool {
+        self == &Self::default()
+    }
+    /// Check result type and encodable bounds; the producer proves the promises.
+    /// # Errors
+    /// Rejects incompatible types, invalid alignment and out-of-bounds extents.
+    pub fn validate(&self, ty: Type) -> Result<(), String> {
+        if let Some(range) = self.range {
+            range.validate(ty)?;
+        }
+        if !self.align.is_power_of_two() {
+            return Err("result pointer alignment must be a nonzero power of two".into());
+        }
+        if (self.align != 1
+            || self.nonnull
+            || self.readable_bytes != 0
+            || self.readable_or_null_bytes != 0)
+            && ty != Type::Ptr
+        {
+            return Err("pointer result facts require a pointer result".into());
+        }
+        if self.readable_bytes > i64::MAX as u64 || self.readable_or_null_bytes > i64::MAX as u64 {
+            return Err("result readable extent must fit i64".into());
+        }
+        Ok(())
+    }
+}
+impl IntegerRange {
+    /// Validate nonempty endpoint bit patterns against a supported integer type.
+    /// # Errors
+    /// Rejects unsupported types, equal endpoints and endpoints wider than the type.
+    pub fn validate(self, ty: Type) -> Result<(), String> {
+        let width = match ty {
+            Type::I8 => 8,
+            Type::I16 => 16,
+            Type::I32 => 32,
+            Type::I64 => 64,
+            _ => return Err("integer ranges require i8/i16/i32/i64 values".into()),
+        };
+        if self.lower == self.upper {
+            return Err("integer range must be nonempty".into());
+        }
+        if width < 64 && (self.lower >> width != 0 || self.upper >> width != 0) {
+            return Err("integer range endpoint exceeds the value's bit width".into());
+        }
+        Ok(())
+    }
+}
+impl fmt::Display for ValueFacts {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_unknown() {
+            return Ok(());
+        }
+        f.write_str(" facts(")?;
+        let mut separator = "";
+        if let Some(range) = self.range {
+            write!(f, "range({:#x}, {:#x})", range.lower, range.upper)?;
+            separator = ", ";
+        }
+        if self.align != 1 {
+            write!(f, "{separator}align {}", self.align)?;
+            separator = ", ";
+        }
+        if self.nonnull {
+            write!(f, "{separator}nonnull")?;
+            separator = ", ";
+        }
+        for (name, bytes) in [
+            ("readable", self.readable_bytes),
+            ("readable_or_null", self.readable_or_null_bytes),
+        ] {
+            if bytes != 0 {
+                write!(f, "{separator}{name} {bytes}")?;
+                separator = ", ";
+            }
+        }
+        f.write_str(")")
+    }
 }
 
 /// Externally relevant reads and writes permitted in a memory region.
@@ -297,21 +400,10 @@ impl CallContract {
                 let Some(arg) = params.get(index as usize) else {
                     return Err("integer range position is outside the signature".into());
                 };
-                let width = match arg.ty {
-                    Type::I8 => 8,
-                    Type::I16 => 16,
-                    Type::I32 => 32,
-                    Type::I64 => 64,
-                    _ => return Err("integer ranges require i8/i16/i32/i64 positions".into()),
-                };
-                if arg.purpose != Purpose::Normal || range.lower == range.upper {
-                    return Err(
-                        "integer range must be nonempty at a normal-purpose position".into(),
-                    );
+                if arg.purpose != Purpose::Normal {
+                    return Err("integer range requires a normal-purpose position".into());
                 }
-                if width < 64 && (range.lower >> width != 0 || range.upper >> width != 0) {
-                    return Err("integer range endpoint exceeds the position's bit width".into());
-                }
+                range.validate(arg.ty)?;
             }
         }
         Ok(())

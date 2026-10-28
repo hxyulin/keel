@@ -238,6 +238,66 @@ fn richer_boundary_facts_preserve_defined_execution_and_masked_ranges() {
 }
 
 #[test]
+fn load_result_facts_preserve_masked_poison_and_independent_memory_reads() {
+    let Some(importer) = importer() else {
+        return;
+    };
+    let text = importer
+        .translate(
+            include_bytes!("fixtures/definedness/local_facts.ll"),
+            Default::default(),
+        )
+        .unwrap();
+    let module = keel_ir::parse(&text).unwrap();
+    let exported = keel_llvm::export(&module, keel_llvm::TargetProfile::AppleArm64).unwrap();
+    if !executable_host() {
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "keel-definedness-local-facts-{}",
+        std::process::id()
+    ));
+    fs::create_dir(&dir).unwrap();
+    let roundtrip = dir.join("roundtrip.ll");
+    fs::write(&roundtrip, exported).unwrap();
+    let driver = fixture("local_facts_driver.c");
+    execute_llvm(
+        &dir,
+        "source",
+        &fixture("local_facts.ll"),
+        &driver,
+        b"local-facts-ok\n",
+    );
+    execute_llvm(&dir, "roundtrip", &roundtrip, &driver, b"local-facts-ok\n");
+    if let Some(keel) = std::env::var_os("KEEL_TEST_KEEL") {
+        let imported = dir.join("local-facts.keel");
+        fs::write(&imported, text).unwrap();
+        for tier in ["none", "fast", "full"] {
+            let object = dir.join(format!("{tier}.o"));
+            run(Command::new(&keel)
+                .args(["compile", "--opt-tier", tier, "--emit-object"])
+                .arg(&imported)
+                .arg("-o")
+                .arg(&object));
+            let executable = dir.join(tier);
+            run(Command::new("clang")
+                .arg(&driver)
+                .arg(object)
+                .arg("-o")
+                .arg(&executable));
+            assert_eq!(
+                run(&mut Command::new(executable)).stdout,
+                b"local-facts-ok\n",
+                "native {tier}"
+            );
+        }
+    } else {
+        eprintln!("skipped native local-fact execution: set KEEL_TEST_KEEL");
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn masked_poison_selects_and_phi_edges_match_defined_c_oracle() {
     let Some(importer) = importer() else {
         return;

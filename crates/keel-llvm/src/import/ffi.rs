@@ -25,6 +25,10 @@ pub(super) struct Api {
     get_first_global_i_func: unsafe extern "C" fn(Raw) -> Raw,
     get_value_name2: unsafe extern "C" fn(Raw, *mut usize) -> Raw,
     get_named_metadata: unsafe extern "C" fn(Raw, *const c_char, usize) -> Raw,
+    get_md_kind_id_in_context: unsafe extern "C" fn(Raw, *const c_char, u32) -> u32,
+    get_metadata: unsafe extern "C" fn(Raw, u32) -> Raw,
+    get_md_node_num_operands: unsafe extern "C" fn(Raw) -> u32,
+    get_md_node_operands: unsafe extern "C" fn(Raw, *mut Raw) -> (),
     print_value_to_string: unsafe extern "C" fn(Raw) -> Raw,
     global_get_value_type: unsafe extern "C" fn(Raw) -> Raw,
     type_of: unsafe extern "C" fn(Raw) -> Raw,
@@ -283,6 +287,38 @@ impl Api {
                 unsafe {
                     *library
                         .get(b"LLVMGetNamedMetadata\0")
+                        .map_err(|e| e.to_string())?
+                }
+            },
+            get_md_kind_id_in_context: {
+                // SAFETY: this is the LLVM 23 C API signature; the library stays loaded.
+                unsafe {
+                    *library
+                        .get(b"LLVMGetMDKindIDInContext\0")
+                        .map_err(|e| e.to_string())?
+                }
+            },
+            get_metadata: {
+                // SAFETY: this is the LLVM 23 C API signature; the library stays loaded.
+                unsafe {
+                    *library
+                        .get(b"LLVMGetMetadata\0")
+                        .map_err(|e| e.to_string())?
+                }
+            },
+            get_md_node_num_operands: {
+                // SAFETY: this is the LLVM 23 C API signature; the library stays loaded.
+                unsafe {
+                    *library
+                        .get(b"LLVMGetMDNodeNumOperands\0")
+                        .map_err(|e| e.to_string())?
+                }
+            },
+            get_md_node_operands: {
+                // SAFETY: this is the LLVM 23 C API signature; the library stays loaded.
+                unsafe {
+                    *library
+                        .get(b"LLVMGetMDNodeOperands\0")
                         .map_err(|e| e.to_string())?
                 }
             },
@@ -1645,6 +1681,27 @@ impl Api {
             self.get_call_site_enum_attribute(value, index, kind)
         } else {
             self.get_enum_attribute_at_index(value, index, kind)
+        }
+    }
+    /// Read a verifier-checked metadata node on an instruction in this session.
+    pub(super) fn metadata(&self, inst: Ref, name: &str) -> Option<Vec<Ref>> {
+        let context = self.get_type_context(self.type_of(inst));
+        // SAFETY: inst/context belong to the verified live module; LLVM does not
+        // retain name. Recognized metadata kinds are verifier-checked MDNodes.
+        unsafe {
+            let kind = (self.get_md_kind_id_in_context)(
+                context as Raw,
+                name.as_ptr().cast(),
+                name.len() as u32,
+            );
+            let node = (self.get_metadata)(inst as Raw, kind);
+            if node.is_null() {
+                return None;
+            }
+            let count = (self.get_md_node_num_operands)(node) as usize;
+            let mut operands = vec![std::ptr::null_mut(); count];
+            (self.get_md_node_operands)(node, operands.as_mut_ptr());
+            Some(operands.into_iter().map(|value| value as Ref).collect())
         }
     }
     pub(super) fn text_property(&self, value: Ref, name: &str) -> String {

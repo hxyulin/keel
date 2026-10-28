@@ -33,6 +33,12 @@ allocation-like noalias returns. The driver stays inside retained range and
 pointer promises. Both LLVM O0/O2 paths and Keel none/fast/full must print the
 same verdict. Structural tests separately verify exact scope and transport.
 
+`local_facts.ll` checks load-result ranges and pointer facts, including separate
+cell/result alignments, nullable readable extents, masked poison without noundef,
+and a second load after a call overwrites the cell. Valid source and round-trip
+LLVM executables run at O0/O2; native Keel runs at none/fast/full. Result facts
+must not transfer to siblings or make later loads non-faulting.
+
 ```sh
 KEEL_TEST_LIBLLVM="$(rustc --print sysroot)/lib/libLLVM.dylib" \
 KEEL_TEST_KEEL="$PWD/target/debug/keel" \

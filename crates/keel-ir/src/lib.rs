@@ -37,7 +37,7 @@ pub use asm::{
 pub use builder::InstBuilder;
 pub use contracts::{
     AddressCapture, CallContract, CaptureComponents, CaptureContract, IntegerRange, MemoryAccess,
-    MemorySummary, PointerContract, ProvenanceCapture,
+    MemorySummary, PointerContract, ProvenanceCapture, ValueFacts,
 };
 pub use data::{DataInit, DataItem, DataObject, MAX_DATA_ALIGN};
 pub use data_layout::DataLayout;

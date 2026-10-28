@@ -423,11 +423,12 @@ pub fn export(module: &Module, target: TargetProfile) -> ExportResult<String> {
         .unwrap();
     }
     let mut intrinsics = BTreeSet::new();
+    let mut metadata = BTreeMap::new();
     for f in &module.functions {
         if f.name.starts_with("llvm.") {
             return Err("user symbols in LLVM's intrinsic namespace are unsupported".into());
         }
-        emit_function(f, &mut out, &mut intrinsics)
+        emit_function(f, &mut out, &mut intrinsics, &mut metadata)
             .map_err(|e| format!("function @{}: {e}", f.name))?;
     }
     // Keep compiler-emission roots through LLVM optimization without granting
@@ -449,6 +450,9 @@ pub fn export(module: &Module, target: TargetProfile) -> ExportResult<String> {
     }
     for decl in intrinsics {
         writeln!(out, "{decl}").unwrap();
+    }
+    for (contents, id) in metadata {
+        writeln!(out, "!{id} = !{{{contents}}}").unwrap();
     }
     Ok(out)
 }
@@ -523,6 +527,7 @@ fn emit_function(
     f: &Function,
     out: &mut String,
     intrinsics: &mut BTreeSet<String>,
+    metadata: &mut BTreeMap<String, usize>,
 ) -> ExportResult<()> {
     if f.personality.is_some()
         || f.debug_return.is_some()
@@ -566,7 +571,12 @@ fn emit_function(
                 .push((edge_name(i, n), e));
         }
     }
-    let mut emitter = Emitter { f, out, intrinsics };
+    let mut emitter = Emitter {
+        f,
+        out,
+        intrinsics,
+        metadata,
+    };
     for b in f.blocks() {
         writeln!(emitter.out, "{b}:").unwrap();
         if b == entry {
@@ -615,8 +625,65 @@ struct Emitter<'a> {
     f: &'a Function,
     out: &'a mut String,
     intrinsics: &'a mut BTreeSet<String>,
+    metadata: &'a mut BTreeMap<String, usize>,
 }
 impl Emitter<'_> {
+    fn metadata_node(&mut self, contents: String) -> usize {
+        let id = self.metadata.len();
+        *self.metadata.entry(contents).or_insert(id)
+    }
+    fn load_metadata(&mut self, inst: Inst) -> ExportResult<String> {
+        let Some(facts) = self.f.inst_facts(inst).copied() else {
+            return Ok(String::new());
+        };
+        let mut metadata = format!(", !noundef !{}", self.metadata_node(String::new()));
+        if let Some(range) = facts.range {
+            let result = self.f.inst_results(inst)[0];
+            let ty = ty(self.f.value_type(result))?;
+            let id = self.metadata_node(format!("{ty} {}, {ty} {}", range.lower, range.upper));
+            write!(metadata, ", !range !{id}").unwrap();
+        }
+        if facts.nonnull {
+            write!(
+                metadata,
+                ", !nonnull !{}",
+                self.metadata_node(String::new())
+            )
+            .unwrap();
+        }
+        for (name, bytes) in [
+            (
+                "align",
+                if facts.align > 1 {
+                    u64::from(facts.align)
+                } else {
+                    0
+                },
+            ),
+            (
+                "dereferenceable",
+                if facts.nonnull {
+                    facts.readable_bytes
+                } else {
+                    0
+                },
+            ),
+            (
+                "dereferenceable_or_null",
+                if facts.nonnull {
+                    facts.readable_or_null_bytes
+                } else {
+                    facts.readable_or_null_bytes.max(facts.readable_bytes)
+                },
+            ),
+        ] {
+            if bytes != 0 {
+                let id = self.metadata_node(format!("i64 {bytes}"));
+                write!(metadata, ", !{name} !{id}").unwrap();
+            }
+        }
+        Ok(metadata)
+    }
     fn v(&self, v: Value) -> String {
         format!("%{}", self.f.resolve(v))
     }
@@ -632,6 +699,9 @@ impl Emitter<'_> {
     }
     fn emit(&mut self, i: Inst) -> ExportResult<()> {
         let f = self.f;
+        if f.inst_facts(i).is_some() && !matches!(f.inst_data(i), InstData::Load { .. }) {
+            return Err("instruction-result facts currently export only on scalar loads".into());
+        }
         let results = f.inst_results(i);
         let dst = results.first().map(|v| format!("%{v}")).unwrap_or_default();
         let tmp = format!("%t{}", i.index());
@@ -823,13 +893,16 @@ impl Emitter<'_> {
                     self.typed(*b)?
                 ));
             }
-            InstData::Load { flags, ty: t, addr } => self.line(format!(
-                "{dst} = load {}{}, ptr {}, align {}",
-                if flags.volatile { "volatile " } else { "" },
-                ty(*t)?,
-                self.v(*addr),
-                flags.align
-            )),
+            InstData::Load { flags, ty: t, addr } => {
+                let metadata = self.load_metadata(i)?;
+                self.line(format!(
+                    "{dst} = load {}{}, ptr {}, align {}{metadata}",
+                    if flags.volatile { "volatile " } else { "" },
+                    ty(*t)?,
+                    self.v(*addr),
+                    flags.align
+                ));
+            }
             InstData::Store { flags, value, addr } => self.line(format!(
                 "store {}{}, ptr {}, align {}",
                 if flags.volatile { "volatile " } else { "" },

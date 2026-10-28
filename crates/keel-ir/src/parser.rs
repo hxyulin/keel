@@ -473,6 +473,7 @@ struct ParsedBlock {
 
 struct ParsedInst {
     contract: Option<crate::CallContract>,
+    facts: Option<crate::ValueFacts>,
     results: Vec<Value>,
     data: InstData,
     loc: Loc,
@@ -2172,6 +2173,11 @@ impl Parser {
         } else {
             None
         };
+        let facts = if self.eat(&Tok::Ident("facts".into())) {
+            Some(self.value_facts()?)
+        } else {
+            None
+        };
         let srcloc = if self.eat(&Tok::Punct('!')) {
             Some(self.srcloc()?)
         } else {
@@ -2237,11 +2243,55 @@ impl Parser {
             .collect::<Result<_, _>>()?;
         Ok(ParsedInst {
             contract,
+            facts,
             results,
             data,
             loc: op_loc,
             srcloc,
         })
+    }
+
+    /// The single result's facts, separate from call and memory-access contracts.
+    fn value_facts(&mut self) -> Result<crate::ValueFacts, ParseError> {
+        let mut facts = crate::ValueFacts::default();
+        let mut seen = std::collections::BTreeSet::new();
+        self.expect(Tok::Punct('('))?;
+        if self.eat(&Tok::Punct(')')) {
+            return Ok(facts);
+        }
+        loop {
+            let (name, loc) = self.ident("a result fact")?;
+            if !seen.insert(name.clone()) {
+                return Err(error(loc, "duplicate result fact".into()));
+            }
+            match name.as_str() {
+                "range" => {
+                    self.expect(Tok::Punct('('))?;
+                    let lower = self.int("a range endpoint bit pattern")? as u64;
+                    self.expect(Tok::Punct(','))?;
+                    let upper = self.int("a range endpoint bit pattern")? as u64;
+                    self.expect(Tok::Punct(')'))?;
+                    facts.range = Some(crate::IntegerRange { lower, upper });
+                }
+                "align" => facts.align = self.u32("a result pointer alignment")?,
+                "nonnull" => facts.nonnull = true,
+                "readable" | "readable_or_null" => {
+                    let extent = u64::try_from(self.int("a result readable extent")?)
+                        .map_err(|_| error(loc, "readable extent must be nonnegative".into()))?;
+                    if name == "readable" {
+                        facts.readable_bytes = extent;
+                    } else {
+                        facts.readable_or_null_bytes = extent;
+                    }
+                }
+                _ => return Err(error(loc, "unknown result fact".into())),
+            }
+            if self.eat(&Tok::Punct(')')) {
+                break;
+            }
+            self.expect(Tok::Punct(','))?;
+        }
+        Ok(facts)
     }
 
     /// `relaxed`, `acquire`, `release`, `acq_rel` or `seq_cst`.
@@ -2674,6 +2724,10 @@ fn build(
             let created = func.append_inst_with_results(block, data, &result_tys);
             if let Some(contract) = &inst.contract {
                 func.set_call_contract(created, contract.clone())
+                    .map_err(|message| error(inst.loc, message))?;
+            }
+            if let Some(facts) = &inst.facts {
+                func.set_inst_facts(created, *facts)
                     .map_err(|message| error(inst.loc, message))?;
             }
             let ir_loc = ir_file.map(|file| SourceLoc {
