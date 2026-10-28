@@ -125,7 +125,7 @@ fn remove_unused_functions(module: &mut Module) -> bool {
     let before = module.functions.len();
     for f in &module.functions {
         if !live.contains(&f.name) {
-            let mut attrs = f.attrs;
+            let mut attrs = f.attrs.clone();
             attrs.section = None;
             if let Some(decl) = module.decls.iter_mut().find(|d| d.name == f.name) {
                 decl.attrs = attrs;

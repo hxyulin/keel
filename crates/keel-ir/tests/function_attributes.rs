@@ -11,7 +11,7 @@ fn contracts_roundtrip_on_declarations_definitions_and_direct_callees() {
     assert_eq!(printed, again.to_string());
     let caller = &again.functions[1];
     for (_, decl) in caller.callees() {
-        assert_eq!(Some(decl.attrs), again.function_attrs(&decl.name));
+        assert_eq!(Some(&decl.attrs), again.function_attrs(&decl.name));
     }
     assert!(again.decls[0].attrs.noreturn);
     assert!(again.decls[0].attrs.nounwind);
@@ -124,7 +124,7 @@ fn semantic_interposition_contract_roundtrips_without_exact_binding() {
             .no_semantic_interposition
     );
     let mut attrs = FunctionAttrs::default();
-    attrs.merge(again.functions[0].attrs);
+    attrs.merge(again.functions[0].attrs.clone());
     assert_eq!(attrs, again.functions[0].attrs);
     assert!(parse("decl @f() no_semantic_interposition no_semantic_interposition\n").is_err());
 }

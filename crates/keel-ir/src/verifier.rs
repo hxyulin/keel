@@ -38,7 +38,7 @@ impl fmt::Display for VerifierError {
 /// `function_attrs` take the first `decl`, else the first function; and
 /// `data_object` takes the first data object.
 struct Names<'m> {
-    functions: FxHashMap<&'m str, (&'m Signature, FunctionAttrs)>,
+    functions: FxHashMap<&'m str, (&'m Signature, &'m FunctionAttrs)>,
     data: FxHashMap<&'m str, &'m DataObject>,
 }
 
@@ -51,12 +51,12 @@ impl<'m> Names<'m> {
         for decl in &module.decls {
             functions
                 .entry(decl.name.as_str())
-                .or_insert((&decl.sig, decl.attrs));
+                .or_insert((&decl.sig, &decl.attrs));
         }
         for func in &module.functions {
             functions
                 .entry(func.name.as_str())
-                .or_insert((&func.sig, func.attrs));
+                .or_insert((&func.sig, &func.attrs));
         }
         let mut data = FxHashMap::with_capacity_and_hasher(module.data.len(), Default::default());
         for object in &module.data {
@@ -69,7 +69,7 @@ impl<'m> Names<'m> {
         self.functions.get(name).map(|&(sig, _)| sig)
     }
 
-    fn function_attrs(&self, name: &str) -> Option<FunctionAttrs> {
+    fn function_attrs(&self, name: &str) -> Option<&FunctionAttrs> {
         self.functions.get(name).map(|&(_, attrs)| attrs)
     }
 
@@ -255,7 +255,7 @@ pub fn verify_module_with_layout(
         for (_, callee) in func.callees() {
             if lookup
                 .function_attrs(&callee.name)
-                .is_some_and(|a| a != callee.attrs)
+                .is_some_and(|a| a != &callee.attrs)
             {
                 errors.push(VerifierError {
                     location: format!("@{}", func.name),

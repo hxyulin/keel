@@ -371,7 +371,7 @@ impl<'p> Gen<'p> {
                             weak: global.weak.is_some(),
                             // Placement annotates definitions, not call contracts.
                             section: None,
-                            ..global.function_attrs
+                            ..global.function_attrs.clone()
                         },
                         sig,
                     });
@@ -457,7 +457,7 @@ impl<'p> Gen<'p> {
                         return None;
                     }
                     f.attrs.destructor = false;
-                    Some((f.name.clone(), f.sig.clone(), f.attrs))
+                    Some((f.name.clone(), f.sig.clone(), f.attrs.clone()))
                 })
                 .collect();
             if !callbacks.is_empty() {
@@ -926,7 +926,7 @@ impl<'p> Gen<'p> {
         }
         func.attrs = keel_ir::FunctionAttrs {
             weak: global.weak.is_some(),
-            ..global.function_attrs
+            ..global.function_attrs.clone()
         };
         func.local = global.internal;
         func.hidden = global.hidden();

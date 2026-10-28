@@ -38,16 +38,41 @@ impl Module {
         })
     }
 
-    pub fn function_attrs(&self, name: &str) -> Option<crate::FunctionAttrs> {
+    /// Borrow the attributes of the first declaration, or first definition, named `name`.
+    pub fn function_attrs(&self, name: &str) -> Option<&crate::FunctionAttrs> {
         self.decls
             .iter()
             .find(|d| d.name == name)
-            .map(|d| d.attrs)
+            .map(|d| &d.attrs)
             .or_else(|| {
                 self.functions
                     .iter()
                     .find(|f| f.name == name)
-                    .map(|f| f.attrs)
+                    .map(|f| &f.attrs)
+            })
+    }
+
+    /// First function whose entry/return contract needs specialized lowering.
+    /// Includes declarations and callee tables so an unsupported call cannot
+    /// silently use the ordinary ABI after metadata-only construction.
+    pub fn special_entry_contract(&self) -> Option<(&str, crate::FunctionEntryContract)> {
+        self.decls
+            .iter()
+            .map(|d| (d.name.as_str(), &d.attrs))
+            .chain(self.functions.iter().map(|f| (f.name.as_str(), &f.attrs)))
+            .chain(
+                self.functions
+                    .iter()
+                    .flat_map(|f| f.callees().map(|(_, d)| (d.name.as_str(), &d.attrs))),
+            )
+            .find_map(|(name, attrs)| {
+                if attrs.naked {
+                    Some((name, crate::FunctionEntryContract::Naked))
+                } else if attrs.interrupt {
+                    Some((name, crate::FunctionEntryContract::Interrupt))
+                } else {
+                    None
+                }
             })
     }
 
@@ -60,8 +85,8 @@ impl Module {
         for (name, a) in self
             .decls
             .iter()
-            .map(|d| (d.name.as_str(), d.attrs))
-            .chain(self.functions.iter().map(|f| (f.name.as_str(), f.attrs)))
+            .map(|d| (d.name.as_str(), &d.attrs))
+            .chain(self.functions.iter().map(|f| (f.name.as_str(), &f.attrs)))
         {
             attrs.insert(name, a);
         }
@@ -72,8 +97,9 @@ impl Module {
             .iter()
             .enumerate()
             .flat_map(|(i, f)| {
-                f.callees()
-                    .filter_map(move |(r, d)| attrs.get(d.name.as_str()).map(|&a| (i, r, a)))
+                f.callees().filter_map(move |(r, d)| {
+                    attrs.get(d.name.as_str()).map(|a| (i, r, (*a).clone()))
+                })
             })
             .collect();
         for (i, r, a) in updates {
@@ -182,7 +208,7 @@ mod tests {
         let stale = attrs(true, true);
         for name in ["both", "twice", "only_decl", "elsewhere", "caller"] {
             let r = caller.import_function(name, sig.clone());
-            caller.callee_mut(r).attrs = stale;
+            caller.callee_mut(r).attrs = stale.clone();
         }
         let mut both = Function::new("both", sig.clone());
         both.attrs = attrs(false, true);
@@ -199,7 +225,7 @@ mod tests {
         module.sync_function_attrs();
         let got: Vec<_> = module.functions[0]
             .callees()
-            .map(|(_, d)| (d.name.as_str(), d.attrs))
+            .map(|(_, d)| (d.name.as_str(), d.attrs.clone()))
             .collect();
         assert_eq!(
             got,

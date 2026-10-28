@@ -786,6 +786,11 @@ pub fn run_pipeline_with_context_and_options(
     context: OptimizationContext,
     options: OptimizeOptions,
 ) -> Result<(), OptError> {
+    // Preserve opaque entry/return bodies until target-specific lowering can
+    // establish their register, frame and control-flow contracts.
+    if module.special_entry_contract().is_some() {
+        return Ok(());
+    }
     let verification_enabled = options.verification.enabled();
     profiling::scope!("optimization");
     let _clear = ClearAnalyses;
@@ -903,6 +908,9 @@ pub fn run_pipeline_with_context_and_report_and_options(
     report: &mut OptimizationReport,
     options: OptimizeOptions,
 ) -> Result<(), OptError> {
+    if module.special_entry_contract().is_some() {
+        return Ok(());
+    }
     let target = context.target;
     let verification_enabled = options.verification.enabled();
     use std::time::Instant;

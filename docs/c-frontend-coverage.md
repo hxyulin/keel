@@ -64,11 +64,18 @@ GNU `__name__` spellings are accepted wherever the plain spelling is.
 | `nonstring` | Retained on character-array/pointer declarations and members for checked attribute queries. No string-warning analysis. | [Feature queries](#feature-queries) |
 | Function `alias` | X86-64 Linux only. Whole-unit checks require compatible function types/contracts and an ultimately defined target. Weak binding, visibility, chains, assembler names and target retention are preserved. Object aliases and lifecycle/retain/section attributes on aliases are rejected. `__has_attribute(alias)` remains conservatively false. | [Alias tests](../crates/keel-c/tests/function_aliases.rs) |
 
-### Accepted without semantic effect
+### Accepted without full semantic effect
 
 Diagnostic and advisory annotations are accepted and have no code-generation
 effect: `format`, `nonnull`, `deprecated`, `warn_unused_result`, `unused`,
 `malloc` and `alloc_size`.
+
+`hot`, `cold`, `optimize(...)`, `optnone`, `flatten`, `no_instrument_function`
+and `no_profile_instrument_function` now survive as typed IR metadata. Their
+optimization/instrumentation requests are not applied yet. `naked` and
+argument-free `interrupt` likewise survive frontend lowering, but all executable
+consumers reject their unimplemented entry/return contracts. See
+[function policy metadata](function-policy-metadata.md).
 
 Unknown attributes are also accepted silently. This permissive catch-all is
 a known gap: the frontend has not classified every GNU/Clang attribute, so an
@@ -83,7 +90,7 @@ unknown attribute whose semantics a program relies on may be ignored.
 | Conflicting explicit visibilities across declarations | Matches Clang. |
 | `weak` on static symbols, TLS, typedefs, members, parameters, locals | Unsupported or meaningless placements. Hidden/internal weak undefined references are also rejected. |
 | `constructor`/`destructor` with a non-default priority | Only priority 65535 is supported. |
-| `ms_abi`, `sysv_abi`, `stdcall`, `fastcall`, `regparm`, `naked`, `interrupt` and other calling-convention attributes | Would otherwise silently use the C calling convention. |
+| `ms_abi`, `sysv_abi`, `stdcall`, `fastcall`, `regparm` and other unimplemented calling-convention attributes | Would otherwise silently use the C calling convention. |
 | `ext_vector_type`, `transparent_union` | Distinct type and ABI semantics are not implemented. |
 | Lifecycle, cleanup, section or visibility attributes in inapplicable positions | Rejected even where GCC/Clang only warn and ignore them. |
 

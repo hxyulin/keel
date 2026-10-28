@@ -116,7 +116,7 @@ fn split(m: &keel_ir::Module, native_names: &[&str]) -> (keel_ir::Module, keel_i
     {
         assert!(!f.local, "cannot split local @{}", f.name);
         clif.decls.push(keel_ir::FuncDecl {
-            attrs: f.attrs,
+            attrs: f.attrs.clone(),
             name: f.name.clone(),
             sig: f.sig.clone(),
         });

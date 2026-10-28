@@ -35,14 +35,14 @@ fn late_contracts_reach_definitions_calls_and_inlined_calls() {
                         keel_opt::optimize_with_tier(&mut m, tier).unwrap();
                         keel_ir::verify_module(&m).unwrap();
                         let attrs = if definition {
-                            m.functions.iter().find(|f| f.name == "stop").unwrap().attrs
+                            &m.functions.iter().find(|f| f.name == "stop").unwrap().attrs
                         } else {
-                            m.decls.iter().find(|d| d.name == "stop").unwrap().attrs
+                            &m.decls.iter().find(|d| d.name == "stop").unwrap().attrs
                         };
                         assert!(attrs.noreturn && attrs.nounwind && attrs.noinline);
                         for f in &m.functions {
                             for (_, callee) in f.callees().filter(|(_, c)| c.name == "stop") {
-                                assert_eq!(callee.attrs, attrs);
+                                assert_eq!(&callee.attrs, attrs);
                             }
                         }
                         let f = m.functions.iter().find(|f| f.name == "f").unwrap();

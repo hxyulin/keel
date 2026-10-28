@@ -817,6 +817,29 @@ impl Parser {
                     Some(crate::SectionName::new(&name).map_err(|e| self.unexpected(e))?);
                 continue;
             }
+            if self.eat(&Tok::Ident("optimize".into())) {
+                self.expect(Tok::Punct('('))?;
+                let mut options = Vec::new();
+                if self.peek() == &Tok::Punct(')') {
+                    return Err(self.unexpected("an optimization option"));
+                }
+                loop {
+                    let option = if matches!(self.peek(), Tok::Str(_)) {
+                        crate::OptimizationOption::Options(self.string("an optimization option")?)
+                    } else {
+                        crate::OptimizationOption::Level(self.u32("an optimization level")?)
+                    };
+                    options.push(option);
+                    if self.eat(&Tok::Punct(')')) {
+                        break;
+                    }
+                    self.expect(Tok::Punct(','))?;
+                }
+                attrs
+                    .optimize
+                    .append(&crate::FunctionOptimization::new(options));
+                continue;
+            }
             let mut found = false;
             for name in [
                 "weak",
@@ -831,6 +854,14 @@ impl Parser {
                 "noinline",
                 "noreturn",
                 "nounwind",
+                "cold",
+                "hot",
+                "optnone",
+                "flatten",
+                "no_instrument_function",
+                "no_profile_instrument_function",
+                "naked",
+                "interrupt",
             ] {
                 if self.eat(&Tok::Ident(name.into())) {
                     let flag = match name {
@@ -845,7 +876,17 @@ impl Parser {
                         "alwaysinline" => &mut attrs.alwaysinline,
                         "noinline" => &mut attrs.noinline,
                         "noreturn" => &mut attrs.noreturn,
-                        _ => &mut attrs.nounwind,
+                        "nounwind" => &mut attrs.nounwind,
+                        "cold" => &mut attrs.cold,
+                        "hot" => &mut attrs.hot,
+                        "optnone" => &mut attrs.optnone,
+                        "flatten" => &mut attrs.flatten,
+                        "no_instrument_function" => &mut attrs.no_instrument_function,
+                        "no_profile_instrument_function" => {
+                            &mut attrs.no_profile_instrument_function
+                        }
+                        "naked" => &mut attrs.naked,
+                        _ => &mut attrs.interrupt,
                     };
                     if *flag {
                         return Err(self.unexpected("a non-duplicate function attribute"));
@@ -2283,7 +2324,7 @@ fn build(
     func.local = *local;
     func.weak_odr = *weak_odr;
     func.hidden = *hidden;
-    func.attrs = *attrs;
+    func.attrs = attrs.clone();
     // Slots and callees were numbered in declaration order, which is
     // creation order.
     for slot in slots {

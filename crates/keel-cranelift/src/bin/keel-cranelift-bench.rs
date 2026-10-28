@@ -311,7 +311,7 @@ fn subset(args: &[String]) -> Result<(), String> {
     {
         if !module.decls.iter().any(|d| d.name == f.name) {
             module.decls.push(keel_ir::FuncDecl {
-                attrs: f.attrs,
+                attrs: f.attrs.clone(),
                 name: f.name.clone(),
                 sig: f.sig.clone(),
             });

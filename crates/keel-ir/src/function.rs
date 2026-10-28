@@ -249,7 +249,7 @@ impl Signature {
 }
 
 /// Function symbol binding, promises and optimization policy, separate from ABI types.
-#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[derive(Clone, Default, PartialEq, Eq, Debug)]
 pub struct FunctionAttrs {
     /// Ordinary weak symbol binding (definition or optional external reference).
     /// This never permits substituting a local body for a call.
@@ -278,6 +278,24 @@ pub struct FunctionAttrs {
     pub noinline: bool,
     pub noreturn: bool,
     pub nounwind: bool,
+    /// Unlikely execution hint, retained without selecting optimization passes.
+    pub cold: bool,
+    /// Frequent execution hint, retained without selecting optimization passes.
+    pub hot: bool,
+    /// Function-local optimization arguments, retained in source order.
+    pub optimize: crate::FunctionOptimization,
+    /// Request to disable optional optimization; currently metadata only.
+    pub optnone: bool,
+    /// Request to inline calls within this function; currently metadata only.
+    pub flatten: bool,
+    /// Suppress function-entry instrumentation; currently metadata only.
+    pub no_instrument_function: bool,
+    /// Suppress profile instrumentation; currently metadata only.
+    pub no_profile_instrument_function: bool,
+    /// Requires a producer-owned prologue/epilogue; executable consumers reject it.
+    pub naked: bool,
+    /// Requires interrupt register/frame preservation and return; consumers reject it.
+    pub interrupt: bool,
 }
 
 impl FunctionAttrs {
@@ -296,14 +314,35 @@ impl FunctionAttrs {
         self.noinline |= other.noinline;
         self.noreturn |= other.noreturn;
         self.nounwind |= other.nounwind;
+        self.cold |= other.cold;
+        self.hot |= other.hot;
+        self.optimize.append(&other.optimize);
+        self.optnone |= other.optnone;
+        self.flatten |= other.flatten;
+        self.no_instrument_function |= other.no_instrument_function;
+        self.no_profile_instrument_function |= other.no_profile_instrument_function;
+        self.naked |= other.naked;
+        self.interrupt |= other.interrupt;
     }
 
-    pub fn validate(self, returns_twice: bool) -> Result<(), &'static str> {
+    pub fn validate(&self, returns_twice: bool) -> Result<(), &'static str> {
         if self
             .align
             .is_some_and(|a| !a.is_power_of_two() || a > crate::MAX_DATA_ALIGN)
         {
             return Err("function alignment must be a power of two up to 65536");
+        }
+        if self.cold && self.hot {
+            return Err("cold conflicts with hot");
+        }
+        if self.naked && self.interrupt {
+            return Err("naked conflicts with interrupt");
+        }
+        if (self.naked || self.interrupt) && self.alwaysinline {
+            return Err("special entry contracts conflict with alwaysinline");
+        }
+        if !self.optimize.is_valid() {
+            return Err("optimization options require printable ASCII strings");
         }
         if self.alwaysinline && self.noinline {
             return Err("alwaysinline conflicts with noinline");
@@ -330,10 +369,24 @@ impl fmt::Display for FunctionAttrs {
             (self.noinline, "noinline"),
             (self.noreturn, "noreturn"),
             (self.nounwind, "nounwind"),
+            (self.cold, "cold"),
+            (self.hot, "hot"),
+            (self.optnone, "optnone"),
+            (self.flatten, "flatten"),
+            (self.no_instrument_function, "no_instrument_function"),
+            (
+                self.no_profile_instrument_function,
+                "no_profile_instrument_function",
+            ),
+            (self.naked, "naked"),
+            (self.interrupt, "interrupt"),
         ] {
             if set {
                 write!(f, " {name}")?;
             }
+        }
+        if !self.optimize.is_empty() {
+            write!(f, " {}", self.optimize)?;
         }
         if let Some(section) = self.section {
             write!(f, " section {section}")?;

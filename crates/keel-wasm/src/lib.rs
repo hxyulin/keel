@@ -98,7 +98,7 @@ fn signature(sig: &Signature) -> Result<(), Diagnostic> {
     }
     Ok(())
 }
-fn attrs(a: FunctionAttrs) -> Result<(), Diagnostic> {
+fn attrs(a: &FunctionAttrs) -> Result<(), Diagnostic> {
     if a.align.is_some() {
         return Err(reject("native function alignment is unavailable on wasm32"));
     }
@@ -280,6 +280,11 @@ fn prepare<'a>(
     has_placement: bool,
     has_runtime: bool,
 ) -> Result<Prepared<'a>, Diagnostic> {
+    if let Some((name, contract)) = module.special_entry_contract() {
+        return Err(reject(format!(
+            "@{name}: {contract} function entry/return lowering is not implemented"
+        )));
+    }
     let verified = if has_placement {
         keel_ir::verify_module_with_layout(module, DataLayout::WASM32)
     } else {
@@ -308,7 +313,7 @@ fn prepare<'a>(
         .collect();
     let check_decl = |d: &keel_ir::FuncDecl| -> Result<(), Diagnostic> {
         signature(&d.sig)?;
-        attrs(d.attrs)?;
+        attrs(&d.attrs)?;
         let Some(&index) = indices.get(d.name.as_str()) else {
             return Err(reject(format!(
                 "undefined function @{}; imports are unsupported",
@@ -338,7 +343,7 @@ fn prepare<'a>(
     for f in &module.functions {
         let check = || -> Result<(), Diagnostic> {
             signature(&f.sig)?;
-            attrs(f.attrs)?;
+            attrs(&f.attrs)?;
             if f.weak_odr
                 || f.personality.is_some()
                 || (!has_runtime && f.num_stack_slots() != 0)

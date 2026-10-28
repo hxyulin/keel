@@ -1163,7 +1163,7 @@ fn inline_call(caller: &mut Function, call: Inst, callee: &Function) {
         .callees()
         .map(|(r, decl)| {
             let imported = caller.import_function(&decl.name, decl.sig.clone());
-            caller.callee_mut(imported).attrs.merge(decl.attrs);
+            caller.callee_mut(imported).attrs = decl.attrs.clone();
             (r, imported)
         })
         .collect();
@@ -1568,7 +1568,7 @@ pub fn required_inline_asm_with_c_definitions(
         }
         for f in &module.functions {
             if !live.contains(&f.name) {
-                let mut attrs = f.attrs;
+                let mut attrs = f.attrs.clone();
                 // Placement belongs to an emitted definition, not the ABI
                 // declaration retained after its unused body is discarded.
                 attrs.section = None;
@@ -1699,7 +1699,7 @@ pub fn required_inline_asm_with_c_definitions(
                     module.decls.push(keel_ir::FuncDecl {
                         name: (*name).to_owned(),
                         sig: function.sig.clone(),
-                        attrs: function.attrs,
+                        attrs: function.attrs.clone(),
                     });
                 }
             }
@@ -1756,4 +1756,26 @@ pub fn required_inline_asm_with_c_definitions(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod policy_tests {
+    use super::*;
+
+    #[test]
+    fn importing_an_existing_callee_preserves_its_ordered_policy_once() {
+        let mut module = keel_ir::parse("decl @work(i64) -> i64 cold optimize(\"Os\")\nfunc @helper(i64) -> i64 local {\nblock0(v0:i64):\n v1 = call @work(v0)\n return v1\n}\nfunc @caller(i64) -> i64 {\nblock0(v0:i64):\n v1 = call @work(v0)\n v2 = call @helper(v1)\n return v2\n}\n").unwrap();
+        let (caller, callee) = two_functions(&mut module.functions, 1, 0);
+        let call = caller
+            .layout_insts()
+            .find_map(|(_, inst)| match caller.inst_data(inst) {
+                InstData::Call { func, .. } if caller.callee(*func).name == "helper" => Some(inst),
+                _ => None,
+            })
+            .unwrap();
+        inline_call(caller, call, callee);
+        let work = caller.callees().find(|(_, d)| d.name == "work").unwrap().1;
+        assert_eq!(work.attrs.optimize.iter().count(), 1);
+        keel_ir::verify_module(&module).unwrap();
+    }
 }

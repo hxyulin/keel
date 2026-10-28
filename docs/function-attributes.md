@@ -185,7 +185,10 @@ discards this report; no main CLI change is made. Indirect calls have no explici
 request to report. Basic/none optimization tiers retain their existing pipelines:
 `alwaysinline` is acted on when the inliner runs, not by adding new tier passes.
 
-Deferred: assume, distinct unreachable, hot/cold and branch weights, memory/alias
+Hot/cold and per-function optimization requests now have
+[typed metadata](function-policy-metadata.md); their policy effects remain deferred.
+
+Deferred: assume, distinct unreachable, branch weights, memory/alias
 contracts, and public interposable inlining.
 
 ## Explicit non-interposable binding

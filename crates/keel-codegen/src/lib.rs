@@ -706,3 +706,14 @@ pub(crate) fn reject_f80(module: &Module, target: &str) -> Result<(), CodegenErr
     }
     Ok(())
 }
+
+/// Entry contracts remain representable before a target can lower them.
+fn validate_function_entries(module: &keel_ir::Module) -> Result<(), CodegenError> {
+    if let Some((name, contract)) = module.special_entry_contract() {
+        return Err(CodegenError {
+            func: name.into(),
+            message: format!("{contract} function entry/return lowering is not implemented"),
+        });
+    }
+    Ok(())
+}

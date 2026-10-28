@@ -71,7 +71,7 @@ fn signature(s: &Signature) -> ExportResult<(String, Vec<String>)> {
     };
     Ok((ret, s.params.iter().map(abi).collect::<ExportResult<_>>()?))
 }
-fn attrs(a: FunctionAttrs) -> String {
+fn attrs(a: &FunctionAttrs) -> String {
     // Ordinary Keel calls have no name-based libc contract. Declaration-level
     // nobuiltin also prevents LLVM21 InferFunctionAttrs from inferring one;
     // call-site-only protection would leave that module pass enabled.
@@ -97,6 +97,11 @@ fn attrs(a: FunctionAttrs) -> String {
 /// Verify and translate the complete module in memory. Errors never return
 /// partial LLVM text. The caller must not publish output until this succeeds.
 pub fn export(module: &Module, target: TargetProfile) -> ExportResult<String> {
+    if let Some((name, contract)) = module.special_entry_contract() {
+        return Err(format!(
+            "@{name}: {contract} function entry/return lowering is not implemented"
+        ));
+    }
     if !module.assembly.is_empty() {
         return Err("module assembly is unsupported by the LLVM bridge".into());
     }
@@ -244,7 +249,7 @@ pub fn export(module: &Module, target: TargetProfile) -> ExportResult<String> {
             "declare {r} {}({}){}",
             symbol(&d.name),
             p.join(", "),
-            attrs(d.attrs)
+            attrs(&d.attrs)
         )
         .unwrap();
     }
@@ -372,7 +377,7 @@ fn emit_function(
         "\ndefine {}{r} {}({params}){} {{",
         if f.local { "internal " } else { "" },
         symbol(&f.name),
-        attrs(f.attrs)
+        attrs(&f.attrs)
     )
     .unwrap();
     let mut incoming: BTreeMap<Block, Vec<(String, &BlockCall)>> = BTreeMap::new();

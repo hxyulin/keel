@@ -86,7 +86,7 @@ pub enum TypeMode {
     ComplexBinary128,
 }
 
-#[derive(Default, Clone, Copy, PartialEq)]
+#[derive(Default, Clone, PartialEq)]
 pub struct Attrs {
     pub nonstring: bool,
     pub alias: Option<(usize, Loc)>,
@@ -102,6 +102,7 @@ pub struct Attrs {
     pub returns_twice: bool,
     pub noreturn: bool,
     pub function_attrs: keel_ir::FunctionAttrs,
+    pub function_policy: Option<Loc>,
     /// `visibility(..)` and where it was written; see `Global::visibility`.
     pub visibility: Option<(Visibility, Loc)>,
     /// Where a different visibility than `visibility` was written.
@@ -162,6 +163,7 @@ impl Attrs {
         self.returns_twice |= other.returns_twice;
         self.noreturn |= other.noreturn;
         self.function_attrs.merge(other.function_attrs);
+        self.function_policy = self.function_policy.or(other.function_policy);
     }
     fn set_visibility(&mut self, visibility: Visibility, loc: Loc) {
         match self.visibility {
@@ -207,6 +209,12 @@ impl Attrs {
         Ok(())
     }
     fn no_symbol_attrs(&self) -> R<()> {
+        if let Some(loc) = self.function_policy {
+            return Err(Error::new(
+                loc,
+                "function policy attributes require a function declaration",
+            ));
+        }
         if let Some(loc) = self.microsoft_x64 {
             return Err(unsupported_attribute(loc, "ms_abi"));
         }
@@ -246,7 +254,7 @@ impl Attrs {
         }
         Ok(())
     }
-    fn alignment(self) -> Option<u64> {
+    fn alignment(&self) -> Option<u64> {
         self.aligned
             .into_iter()
             .chain(self.alignas.filter(|a| *a != 0))
@@ -1030,7 +1038,7 @@ impl<'a> Parser<'a> {
             .unwrap_or_else(|| self.align_of(ty))
     }
 
-    fn object_alignment(&self, ty: &Ty<'a>, sugar: &Sugar<'a>, attrs: Attrs, loc: Loc) -> R<u64> {
+    fn object_alignment(&self, ty: &Ty<'a>, sugar: &Sugar<'a>, attrs: &Attrs, loc: Loc) -> R<u64> {
         let natural = self.type_alignment(ty, sugar);
         if let Some(a) = attrs.alignas
             && a != 0
@@ -1363,11 +1371,11 @@ impl<'a> Parser<'a> {
                     loc,
                 ));
             }
-            let mut attrs = spec.attrs;
+            let mut attrs = spec.attrs.clone();
             attrs.merge(d.attrs);
             let label = self.asm_label_and_attrs(&mut attrs)?;
             d.ty = self.apply_type_attrs(d.ty, &mut attrs)?;
-            d.attrs = attrs;
+            d.attrs = attrs.clone();
             let Some((name, name_loc)) = d.name else {
                 return Err(Error::new(loc, "declaration needs a name"));
             };
@@ -1529,7 +1537,7 @@ impl<'a> Parser<'a> {
                         "parameter declaration list requires an identifier-list definition",
                     ));
                 }
-                self.check_nonstring(d.ty, attrs, name_loc)?;
+                self.check_nonstring(d.ty, &attrs, name_loc)?;
                 if attrs.alignas.is_some() {
                     return Err(Error::new(
                         name_loc,
@@ -1537,7 +1545,7 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 let g = self
-                    .declare_function(&name, label, fty, &spec, attrs, file_scope)
+                    .declare_function(&name, label, fty, &spec, &attrs, file_scope)
                     .map_err(|message| Error::new(name_loc, message))?;
                 self.globals[g].sugar = d.sugar;
                 self.symbol_attrs(g, &attrs)?;
@@ -1587,11 +1595,11 @@ impl<'a> Parser<'a> {
                 }
                 // In scope from the end of its declarator: `T *p =
                 // malloc(sizeof *p)` refers to itself.
-                self.check_nonstring(d.ty, attrs, name_loc)?;
+                self.check_nonstring(d.ty, &attrs, name_loc)?;
                 let id = self.new_local(name, d.ty, d.sugar, is_volatile);
                 self.fs.as_mut().unwrap().locals[id].asm_register = asm_register;
                 self.fs.as_mut().unwrap().locals[id].nonstring = attrs.nonstring;
-                let align = self.object_alignment(&d.ty, &d.sugar, attrs, name_loc)?;
+                let align = self.object_alignment(&d.ty, &d.sugar, &attrs, name_loc)?;
                 self.fs.as_mut().unwrap().locals[id].align = align;
                 let mut ty = d.ty;
                 let mut init = inferred_init;
@@ -1725,8 +1733,8 @@ impl<'a> Parser<'a> {
                 "alias requires a file-scope function declaration",
             ));
         }
-        self.check_nonstring(d.ty, d.attrs, name_loc)?;
-        let align = self.object_alignment(&d.ty, &d.sugar, d.attrs, name_loc)?;
+        self.check_nonstring(d.ty, &d.attrs, name_loc)?;
+        let align = self.object_alignment(&d.ty, &d.sugar, &d.attrs, name_loc)?;
         let local_static = !file_scope && spec.storage == Storage::Static;
         let g = if local_static {
             let func = &self.fs.as_ref().unwrap().name;
@@ -1926,7 +1934,7 @@ impl<'a> Parser<'a> {
         label: Option<&'a str>,
         fty: &'a FuncTy<'a>,
         spec: &DeclSpec<'a>,
-        attrs: Attrs,
+        attrs: &Attrs,
         file_scope: bool,
     ) -> Result<usize, &'static str> {
         let g = self.global(name, label, Ty::Func(fty))?;
@@ -1947,7 +1955,7 @@ impl<'a> Parser<'a> {
                 "setjmp" | "_setjmp" | "sigsetjmp" | "__sigsetjmp" | "savectx" | "vfork"
             );
         self.globals[g].returns_twice |= returns_twice;
-        let mut policies = attrs.function_attrs;
+        let mut policies = attrs.function_attrs.clone();
         policies.align = attrs.aligned.map(|a| a as u32);
         policies.inlinehint |= spec.inline;
         policies.noreturn |= attrs.noreturn;
@@ -1964,6 +1972,14 @@ impl<'a> Parser<'a> {
         attrs.no_cleanup()?;
         if let Some(loc) = attrs.visibility_conflict {
             return Err(Error::new(loc, "conflicting visibility attributes"));
+        }
+        if let Some(loc) = attrs.function_policy
+            && !matches!(self.globals[g].ty, Ty::Func(_))
+        {
+            return Err(Error::new(
+                loc,
+                "function policy attributes require a function declaration",
+            ));
         }
         let global = &mut self.globals[g];
         if let Some(loc) = attrs.lifecycle {
@@ -2118,7 +2134,7 @@ impl<'a> Parser<'a> {
                         "duplicate old-style parameter declaration",
                     ));
                 }
-                let mut attrs = spec.attrs;
+                let mut attrs = spec.attrs.clone();
                 attrs.merge(d.attrs);
                 self.attributes(&mut attrs)?;
                 d.ty = self.apply_type_attrs(d.ty, &mut attrs)?;
@@ -2153,7 +2169,7 @@ impl<'a> Parser<'a> {
                 if self.eat("=") {
                     return Err(Error::new(ploc, "parameter cannot have an initializer"));
                 }
-                self.check_nonstring(ty, attrs, ploc)?;
+                self.check_nonstring(ty, &attrs, ploc)?;
                 let align = self.type_alignment(&ty, &sugar);
                 let local = &mut self.fs.as_mut().unwrap().locals[ids[index]];
                 local.nonstring = attrs.nonstring;
@@ -2385,10 +2401,73 @@ impl<'a> Parser<'a> {
                     "weakref" | "weak_import" | "ifunc" | "ms_abi" | "sysv_abi" | "stdcall"
                     | "fastcall" | "thiscall" | "vectorcall" | "regcall" | "pcs"
                     | "aarch64_sve_pcs" | "aarch64_vector_pcs" | "preserve_most"
-                    | "preserve_all" | "cdecl" | "regparm" | "sseregparm" | "interrupt"
-                    | "naked" | "swiftcall" | "swiftasync" | "preserve_none"
-                    | "riscv_vector_cc" | "ext_vector_type" => {
+                    | "preserve_all" | "cdecl" | "regparm" | "sseregparm" | "swiftcall"
+                    | "swiftasync" | "preserve_none" | "riscv_vector_cc" | "ext_vector_type" => {
                         return Err(unsupported_attribute(loc, name));
+                    }
+                    "optimize" => {
+                        attrs.function_policy.get_or_insert(loc);
+                        self.expect("(")?;
+                        let mut options = Vec::new();
+                        if self.is(")") {
+                            return Err(self.unexpected("an optimization option"));
+                        }
+                        loop {
+                            let option = if matches!(self.peek(), Tok::Str { .. }) {
+                                keel_ir::OptimizationOption::Options(self.asm_string()?)
+                            } else {
+                                let expr = self.conditional()?;
+                                let Some(crate::eval::Const::Int(n)) =
+                                    crate::eval::eval_constant_with_layout(
+                                        &expr,
+                                        false,
+                                        self.c_layout,
+                                    )
+                                else {
+                                    return Err(Error::new(
+                                        loc,
+                                        "optimization level must be an integer constant",
+                                    ));
+                                };
+                                let n = u32::try_from(n).map_err(|_| {
+                                    Error::new(loc, "optimization level must fit u32")
+                                })?;
+                                keel_ir::OptimizationOption::Level(n)
+                            };
+                            options.push(option);
+                            if self.eat(")") {
+                                break;
+                            }
+                            self.expect(",")?;
+                        }
+                        attrs
+                            .function_attrs
+                            .optimize
+                            .append(&keel_ir::FunctionOptimization::new(options));
+                    }
+                    "cold"
+                    | "hot"
+                    | "optnone"
+                    | "flatten"
+                    | "naked"
+                    | "interrupt"
+                    | "no_instrument_function"
+                    | "no_profile_instrument_function" => {
+                        if self.is("(") {
+                            return Err(self.unexpected("an attribute without arguments"));
+                        }
+                        attrs.function_policy.get_or_insert(loc);
+                        let a = &mut attrs.function_attrs;
+                        match name {
+                            "cold" => a.cold = true,
+                            "hot" => a.hot = true,
+                            "optnone" => a.optnone = true,
+                            "flatten" => a.flatten = true,
+                            "naked" => a.naked = true,
+                            "interrupt" => a.interrupt = true,
+                            "no_instrument_function" => a.no_instrument_function = true,
+                            _ => a.no_profile_instrument_function = true,
+                        }
                     }
                     "gnu_inline" => attrs.gnu_inline = true,
                     "transparent_union" => {
@@ -2631,7 +2710,7 @@ impl<'a> Parser<'a> {
 
     // ---- types ----
 
-    fn check_nonstring(&self, ty: Ty<'a>, attrs: Attrs, loc: Loc) -> R<()> {
+    fn check_nonstring(&self, ty: Ty<'a>, attrs: &Attrs, loc: Loc) -> R<()> {
         if !attrs.nonstring {
             return Ok(());
         }
@@ -2751,7 +2830,7 @@ impl<'a> Parser<'a> {
                 "_Atomic" if !matches!(self.peek_at(1), Tok::Punct("(")) => is_atomic = true,
                 "_Complex" => is_complex = true,
                 "__attribute__" | "__attribute" => {
-                    let mut attrs = spec.attrs;
+                    let mut attrs = spec.attrs.clone();
                     self.attributes(&mut attrs)?;
                     spec.attrs = attrs;
                     continue;
@@ -3777,7 +3856,7 @@ impl<'a> Parser<'a> {
             {
                 return Err(Error::new(loc, "invalid parameter storage class"));
             }
-            let mut attrs = spec.attrs;
+            let mut attrs = spec.attrs.clone();
             attrs.merge(d.attrs);
             self.attributes(&mut attrs)?;
             d.ty = self.apply_type_attrs(d.ty, &mut attrs)?;
@@ -3841,7 +3920,7 @@ impl<'a> Parser<'a> {
                 .name
                 .map(|(n, _)| n)
                 .unwrap_or_else(|| self.unique_name(".parameter"));
-            self.check_nonstring(ty, attrs, loc)?;
+            self.check_nonstring(ty, &attrs, loc)?;
             let id = self.new_local(name, ty, sugar, array_quals.1);
             self.fs.as_mut().unwrap().locals[id].nonstring = attrs.nonstring;
             ids.push(id);
@@ -3934,7 +4013,7 @@ impl<'a> Parser<'a> {
                 // An anonymous struct or union member.
                 spec.attrs.no_symbol_attrs()?;
                 if matches!(spec.ty, Ty::Struct(_)) {
-                    self.object_alignment(&spec.ty, &spec.sugar, spec.attrs, floc)?;
+                    self.object_alignment(&spec.ty, &spec.sugar, &spec.attrs, floc)?;
                     fields.push((
                         None,
                         spec.ty,
@@ -3948,7 +4027,7 @@ impl<'a> Parser<'a> {
                 continue;
             }
             loop {
-                let mut member_attrs = spec.attrs;
+                let mut member_attrs = spec.attrs.clone();
                 let (name, mut ty, sugar) = if self.is(":") {
                     (None, spec.ty, spec.sugar)
                 } else {
@@ -3989,8 +4068,8 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 member_attrs.no_symbol_attrs()?;
-                self.check_nonstring(ty, member_attrs, floc)?;
-                self.object_alignment(&ty, &sugar, member_attrs, floc)?;
+                self.check_nonstring(ty, &member_attrs, floc)?;
+                self.object_alignment(&ty, &sugar, &member_attrs, floc)?;
                 if width.is_some() && member_attrs.alignas.is_some() {
                     return Err(Error::new(floc, "`_Alignas` cannot apply to a bit-field"));
                 }

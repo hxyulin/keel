@@ -207,7 +207,7 @@ pub fn function_support(module: &k::Module) -> Vec<(String, Result<()>)> {
         for g in &module.functions {
             if g.name != f.name && !single.decls.iter().any(|d| d.name == g.name) {
                 single.decls.push(k::FuncDecl {
-                    attrs: g.attrs,
+                    attrs: g.attrs.clone(),
                     name: g.name.clone(),
                     sig: g.sig.clone(),
                 });
@@ -324,6 +324,11 @@ impl Compiled {
 
 /// Module-level features this bridge rejects before translating any body.
 fn check_module(module: &k::Module) -> Result<()> {
+    if let Some((name, contract)) = module.special_entry_contract() {
+        return Err(format!(
+            "@{name}: {contract} function entry/return lowering is not implemented"
+        ));
+    }
     if !module.assembly.is_empty() {
         return Err("module assembly is unsupported by the Cranelift bridge".into());
     }

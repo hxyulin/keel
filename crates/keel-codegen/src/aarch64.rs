@@ -308,6 +308,7 @@ pub(crate) fn compile_output(
     linux: bool,
     emission: crate::EmissionOptions,
 ) -> Result<Output, CodegenError> {
+    crate::validate_function_entries(module)?;
     let target = if linux {
         crate::Target::Aarch64LinuxGnu
     } else {

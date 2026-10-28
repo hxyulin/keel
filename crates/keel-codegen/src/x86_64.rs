@@ -334,6 +334,7 @@ pub(crate) fn compile_output(
     structured: bool,
     mut sink: Option<&mut dyn FnMut(keel_asm_ir::Program)>,
 ) -> Result<Output, CodegenError> {
+    crate::validate_function_entries(module)?;
     let code_model = emission.x86_code_model.unwrap_or_default();
     if code_model == CodeModel::Kernel && module.data.iter().any(|d| d.thread_local) {
         return Err(CodegenError {

@@ -123,8 +123,6 @@ fn modes_and_calling_conventions_fail_closed() {
             "cdecl",
             "regparm(2)",
             "sseregparm",
-            "interrupt",
-            "naked",
         ] {
             for source in [
                 format!("int f(void) __attribute__(({attr})) {{return 0;}}"),
