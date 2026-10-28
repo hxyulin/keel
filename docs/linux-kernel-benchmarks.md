@@ -1,8 +1,8 @@
 # Pinned kernel size and runtime comparison
 
-A [newer compilation checkpoint](linux-kernel-policy-benchmark.md) measures
-object emission but fails kernel linking after function-policy changes. The
-runtime numbers below remain scoped to the older qualified image.
+The [newest repaired-snapshot measurements](linux-kernel-repaired-benchmarks.md)
+compare matched O2 and Os core builds after the function-policy repair. The
+runtime numbers below remain historical evidence for the older qualified image.
 
 The qualified Keel core image is 73.4% larger as a compressed `bzImage` and takes
 1.52–2.38 times as long on five checked kernel-heavy microbenchmarks as the

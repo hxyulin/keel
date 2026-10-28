@@ -44,7 +44,123 @@ impl Pass for Inline {
         let report = run_observed(module, sites);
         Some(report.changed_callers(module, changed))
     }
+    fn run_module_for_functions(
+        &self,
+        module: &mut Module,
+        enabled: &dyn Fn(&Function) -> bool,
+        sites: Option<&mut Vec<InlineSite>>,
+        changed: &mut Vec<bool>,
+    ) -> Option<bool> {
+        let callers = module
+            .functions
+            .iter()
+            .filter(|f| enabled(f))
+            .map(|f| f.name.clone())
+            .collect();
+        let report = run_observed_policy_scoped(
+            module,
+            sites,
+            InlinePolicy {
+                experimental: false,
+                admit_noninterposable: false,
+                cheap_reserve: false,
+                cost: InlineCost::Default,
+            },
+            Some(&callers),
+        );
+        Some(report.changed_callers(module, changed))
+    }
 }
+/// Inline bounded helpers to expose constants or eliminate a single local call.
+#[derive(Debug)]
+pub struct InlineSize;
+impl Pass for InlineSize {
+    fn name(&self) -> &'static str {
+        "inline-size"
+    }
+    fn description(&self) -> &'static str {
+        "inline bounded hinted, constant-argument or single-use local helpers"
+    }
+    fn run(&self, _: &mut Function) -> bool {
+        false
+    }
+    fn run_module_tracked(
+        &self,
+        module: &mut Module,
+        sites: Option<&mut Vec<InlineSite>>,
+        changed: &mut Vec<bool>,
+    ) -> Option<bool> {
+        let report = run_observed_policy_scoped(
+            module,
+            sites,
+            InlinePolicy {
+                experimental: false,
+                admit_noninterposable: true,
+                cheap_reserve: false,
+                cost: InlineCost::Size,
+            },
+            None,
+        );
+        Some(report.changed_callers(module, changed))
+    }
+    fn run_module(&self, module: &mut Module) -> Option<bool> {
+        Some(
+            run_observed_policy_scoped(
+                module,
+                None,
+                InlinePolicy {
+                    experimental: false,
+                    admit_noninterposable: true,
+                    cheap_reserve: false,
+                    cost: InlineCost::Size,
+                },
+                None,
+            )
+            .changed,
+        )
+    }
+    fn run_module_for_functions(
+        &self,
+        module: &mut Module,
+        enabled: &dyn Fn(&Function) -> bool,
+        sites: Option<&mut Vec<InlineSite>>,
+        changed: &mut Vec<bool>,
+    ) -> Option<bool> {
+        let callers = module
+            .functions
+            .iter()
+            .filter(|f| enabled(f))
+            .map(|f| f.name.clone())
+            .collect();
+        let report = run_observed_policy_scoped(
+            module,
+            sites,
+            InlinePolicy {
+                experimental: false,
+                admit_noninterposable: true,
+                cheap_reserve: false,
+                cost: InlineCost::Size,
+            },
+            Some(&callers),
+        );
+        Some(report.changed_callers(module, changed))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InlineCost {
+    Default,
+    Size,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct InlinePolicy {
+    experimental: bool,
+    admit_noninterposable: bool,
+    cheap_reserve: bool,
+    cost: InlineCost,
+}
+
 /// Explicit research pass. Never included in an optimization tier.
 /// Uses the ordinary clone implementation and legality checks; only a separate
 /// small aggregate-leaf instruction reserve differs. No cleanup or alias-map
@@ -77,6 +193,32 @@ impl Pass for InlineAggregateReserve {
         changed: &mut Vec<bool>,
     ) -> Option<bool> {
         let report = run_observed_policy(module, sites, true, false, false);
+        Some(report.changed_callers(module, changed))
+    }
+    fn run_module_for_functions(
+        &self,
+        module: &mut Module,
+        enabled: &dyn Fn(&Function) -> bool,
+        sites: Option<&mut Vec<InlineSite>>,
+        changed: &mut Vec<bool>,
+    ) -> Option<bool> {
+        let callers = module
+            .functions
+            .iter()
+            .filter(|f| enabled(f))
+            .map(|f| f.name.clone())
+            .collect();
+        let report = run_observed_policy_scoped(
+            module,
+            sites,
+            InlinePolicy {
+                experimental: true,
+                admit_noninterposable: false,
+                cheap_reserve: false,
+                cost: InlineCost::Default,
+            },
+            Some(&callers),
+        );
         Some(report.changed_callers(module, changed))
     }
 }
@@ -114,6 +256,32 @@ impl Pass for InlineNoninterposable {
         let report = run_observed_policy(module, sites, false, true, false);
         Some(report.changed_callers(module, changed))
     }
+    fn run_module_for_functions(
+        &self,
+        module: &mut Module,
+        enabled: &dyn Fn(&Function) -> bool,
+        sites: Option<&mut Vec<InlineSite>>,
+        changed: &mut Vec<bool>,
+    ) -> Option<bool> {
+        let callers = module
+            .functions
+            .iter()
+            .filter(|f| enabled(f))
+            .map(|f| f.name.clone())
+            .collect();
+        let report = run_observed_policy_scoped(
+            module,
+            sites,
+            InlinePolicy {
+                experimental: false,
+                admit_noninterposable: true,
+                cheap_reserve: false,
+                cost: InlineCost::Default,
+            },
+            Some(&callers),
+        );
+        Some(report.changed_callers(module, changed))
+    }
 }
 
 /// Full policy: keep ordinary scheduling and budgets, then
@@ -146,6 +314,32 @@ impl Pass for InlineCheapReserve {
         changed: &mut Vec<bool>,
     ) -> Option<bool> {
         let report = run_observed_policy(module, sites, false, true, true);
+        Some(report.changed_callers(module, changed))
+    }
+    fn run_module_for_functions(
+        &self,
+        module: &mut Module,
+        enabled: &dyn Fn(&Function) -> bool,
+        sites: Option<&mut Vec<InlineSite>>,
+        changed: &mut Vec<bool>,
+    ) -> Option<bool> {
+        let callers = module
+            .functions
+            .iter()
+            .filter(|f| enabled(f))
+            .map(|f| f.name.clone())
+            .collect();
+        let report = run_observed_policy_scoped(
+            module,
+            sites,
+            InlinePolicy {
+                experimental: false,
+                admit_noninterposable: true,
+                cheap_reserve: true,
+                cost: InlineCost::Default,
+            },
+            Some(&callers),
+        );
         Some(report.changed_callers(module, changed))
     }
 }
@@ -526,7 +720,8 @@ fn body_eligibility_reason(f: &Function, frames: FrameSemantics) -> Option<&'sta
         return Some("special_entry");
     }
     if !f.attrs.alwaysinline
-        && keel_ir::FunctionPolicy::resolve(&f.attrs).is_ok_and(|p| !p.permits_inlining())
+        && keel_ir::FunctionPolicy::resolve(&f.attrs)
+            .is_ok_and(|p| p.disabled() || p.inline == Some(false))
     {
         return Some("function_optimization_policy");
     }
@@ -707,57 +902,56 @@ fn run_observed_policy(
     run_observed_policy_scoped(
         module,
         sites,
-        experimental,
-        admit_noninterposable,
-        cheap_reserve,
+        InlinePolicy {
+            experimental,
+            admit_noninterposable,
+            cheap_reserve,
+            cost: InlineCost::Default,
+        },
         None,
     )
-}
-
-/// Inlining restricted to callers whose local schedule permits this round.
-pub(super) struct ScopedInline {
-    pub callers: FxHashSet<String>,
-}
-impl Pass for ScopedInline {
-    fn name(&self) -> &'static str {
-        "inline-function-policy"
-    }
-    fn description(&self) -> &'static str {
-        "inline into callers selected by function-local policies"
-    }
-    fn run(&self, _: &mut Function) -> bool {
-        false
-    }
-    fn run_module_tracked(
-        &self,
-        module: &mut Module,
-        sites: Option<&mut Vec<InlineSite>>,
-        changed: &mut Vec<bool>,
-    ) -> Option<bool> {
-        let report =
-            run_observed_policy_scoped(module, sites, false, true, false, Some(&self.callers));
-        Some(report.changed_callers(module, changed))
-    }
 }
 
 fn run_observed_policy_scoped(
     module: &mut Module,
     mut sites: Option<&mut Vec<InlineSite>>,
-    experimental: bool,
-    admit_noninterposable: bool,
-    cheap_reserve: bool,
+    policy: InlinePolicy,
     callers: Option<&FxHashSet<String>>,
 ) -> InlineReport {
+    let InlinePolicy {
+        experimental,
+        admit_noninterposable,
+        cheap_reserve,
+        cost: cost_policy,
+    } = policy;
     let flatten = module.functions.iter().any(|f| f.attrs.flatten);
+    let roots = if cost_policy == InlineCost::Size {
+        crate::assembly_symbols::roots(module)
+    } else {
+        FxHashSet::default()
+    };
+    let mut calls = FxHashMap::<String, usize>::default();
+    if cost_policy == InlineCost::Size {
+        for function in &module.functions {
+            for (_, instruction) in function.layout_insts() {
+                let reference = match function.inst_data(instruction) {
+                    InstData::Call { func, .. }
+                    | InstData::Invoke { func, .. }
+                    | InstData::ReturnCall { func, .. } => *func,
+                    _ => continue,
+                };
+                *calls
+                    .entry(function.callee(reference).name.clone())
+                    .or_default() += 1;
+            }
+        }
+    }
     // Freeze original sites and caller-size decisions before either phase.
     // The ledgers span both phases: priority changes order, never capacity.
     let original_sites: Vec<Vec<_>> = module
         .functions
         .iter()
         .map(|caller| {
-            if callers.is_some_and(|names| !names.contains(&caller.name)) {
-                return Vec::new();
-            }
             caller
                 .layout_insts()
                 .filter_map(|(_, i)| {
@@ -898,6 +1092,9 @@ fn run_observed_policy_scoped(
     let mut schedule = Vec::new();
     for phase in 0..if admit_noninterposable { 2 } else { 1 } {
         for (index, calls) in original_sites.iter().enumerate() {
+            if callers.is_some_and(|names| !names.contains(&module.functions[index].name)) {
+                continue;
+            }
             for &call in calls {
                 if !admit_noninterposable || priority_sites[index].contains(&call) == (phase == 0) {
                     schedule.push((index, call, false));
@@ -962,8 +1159,11 @@ fn run_observed_policy_scoped(
             ))
         } else if caller.attrs.optnone
             || keel_ir::FunctionPolicy::resolve(&caller.attrs).is_ok_and(|p| {
-                !p.permits_inlining()
-                    && !(caller.attrs.flatten && !p.disabled() && p.inline != Some(false))
+                p.disabled()
+                    || p.inline == Some(false)
+                    || (!p.permits_inlining()
+                        && !caller.attrs.flatten
+                        && cost_policy != InlineCost::Size)
             })
         {
             Some(("caller optimization policy", "caller_optimization_policy"))
@@ -982,14 +1182,30 @@ fn run_observed_policy_scoped(
                 Some(("ABI signature mismatch", "abi_signature_mismatch"))
             } else if callee.name == caller.name {
                 Some(("recursive callee", "recursive_callee"))
-            } else if !requested
-                && !caller.attrs.flatten
-                && caller.attrs.optimize != callee.attrs.optimize
-            {
-                Some(("different function options", "function_option_boundary"))
             } else if !requested && callee.attrs.cold && !caller.attrs.cold && !caller.attrs.flatten
             {
                 Some(("cold callee", "cold_callee"))
+            } else if cost_policy == InlineCost::Size && !requested && !caller.attrs.flatten && {
+                let constant = match caller.inst_data(call) {
+                    InstData::Call { args, .. } => args.iter().any(|&argument| {
+                        match caller.value_def(caller.resolve(argument)) {
+                            keel_ir::ValueDef::Result(instruction, _) => matches!(
+                                caller.inst_data(instruction),
+                                InstData::Iconst { .. } | InstData::Fconst { .. }
+                            ),
+                            _ => false,
+                        }
+                    }),
+                    _ => false,
+                };
+                callee.layout_insts().take(129).count() > 128
+                    || !(callee.attrs.inlinehint
+                        || constant
+                        || (callee.local
+                            && calls.get(&callee.name) == Some(&1)
+                            && !roots.contains(&callee.name)))
+            } {
+                Some(("size profitability", "size_profitability"))
             } else if !caller.attrs.flatten && flatten {
                 profitability_reason(callee, admit_noninterposable)
                     .map(|r| ("profitability threshold", r))

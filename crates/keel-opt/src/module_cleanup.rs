@@ -16,7 +16,19 @@ impl Pass for EmptyCalls {
         false
     }
     fn run_module(&self, module: &mut Module) -> Option<bool> {
-        Some(remove_empty_calls(module))
+        Some(remove_empty_calls(module, &|_| true))
+    }
+    fn run_module_for_functions(
+        &self,
+        module: &mut Module,
+        enabled: &dyn Fn(&Function) -> bool,
+        _sites: Option<&mut Vec<crate::InlineSite>>,
+        changed: &mut Vec<bool>,
+    ) -> Option<bool> {
+        let result = remove_empty_calls(module, enabled);
+        changed.clear();
+        changed.resize(module.functions.len(), result);
+        Some(result)
     }
 }
 
@@ -38,7 +50,7 @@ fn empty(f: &Function) -> bool {
     })
 }
 
-fn remove_empty_calls(module: &mut Module) -> bool {
+fn remove_empty_calls(module: &mut Module, enabled: &dyn Fn(&Function) -> bool) -> bool {
     let summaries: FxHashMap<_, _> = module
         .functions
         .iter()
@@ -47,6 +59,9 @@ fn remove_empty_calls(module: &mut Module) -> bool {
         .collect();
     let mut changed = false;
     for f in &mut module.functions {
+        if !enabled(f) {
+            continue;
+        }
         let dead: Vec<_> = f
             .layout_insts()
             .filter_map(|(_, i)| match f.inst_data(i) {
@@ -82,12 +97,31 @@ impl Pass for UnusedFunctions {
         false
     }
     fn run_module(&self, module: &mut Module) -> Option<bool> {
-        Some(remove_unused_functions(module))
+        Some(remove_unused_functions(module, &|_| true))
+    }
+    fn run_module_for_functions(
+        &self,
+        module: &mut Module,
+        enabled: &dyn Fn(&Function) -> bool,
+        _sites: Option<&mut Vec<crate::InlineSite>>,
+        changed: &mut Vec<bool>,
+    ) -> Option<bool> {
+        let result = remove_unused_functions(module, enabled);
+        changed.clear();
+        changed.resize(module.functions.len(), result);
+        Some(result)
     }
 }
 
-fn remove_unused_functions(module: &mut Module) -> bool {
+fn remove_unused_functions(module: &mut Module, enabled: &dyn Fn(&Function) -> bool) -> bool {
     let mut live = crate::assembly_symbols::roots(module);
+    live.extend(
+        module
+            .functions
+            .iter()
+            .filter(|f| !enabled(f))
+            .map(|f| f.name.clone()),
+    );
     // Fast declarations are invalid without their local definition. Keep
     // these bodies until callee-table compaction can remove stale imports.
     live.extend(

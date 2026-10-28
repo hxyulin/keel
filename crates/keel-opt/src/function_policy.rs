@@ -1,39 +1,54 @@
-//! Function-local schedules. Mixed presets conservatively avoid unscoped module rewrites.
+//! Ordered function-local schedules with guarded module passes.
 use crate::{
     OptError, OptimizationContext, OptimizationReport, OptimizationTier, OptimizeOptions, Pass,
 };
 use keel_ir::{Function, FunctionOptLevel, FunctionPolicy, Module};
 
-/// Hide module hooks while retaining the pass's target and canonical dispatch.
-struct LocalPass<'a>(&'a dyn Pass);
-impl Pass for LocalPass<'_> {
+/// Preserve pass behavior and ordering while limiting its mutation scope.
+struct ScopedPass<'a> {
+    pass: &'a dyn Pass,
+    functions: keel_ir::fxhash::FxHashSet<String>,
+}
+impl Pass for ScopedPass<'_> {
     fn name(&self) -> &'static str {
-        self.0.name()
+        self.pass.name()
     }
     fn description(&self) -> &'static str {
-        self.0.description()
+        self.pass.description()
+    }
+    fn enabled_for(&self, function: &Function) -> bool {
+        self.functions.contains(&function.name) && self.pass.enabled_for(function)
     }
     fn run(&self, function: &mut Function) -> bool {
-        self.0.run(function)
+        self.pass.run(function)
+    }
+    fn run_module_tracked(
+        &self,
+        module: &mut Module,
+        sites: Option<&mut Vec<crate::InlineSite>>,
+        changed: &mut Vec<bool>,
+    ) -> Option<bool> {
+        self.pass
+            .run_module_for_functions(module, &|f| self.enabled_for(f), sites, changed)
     }
     fn deterministic(&self) -> bool {
-        self.0.deterministic()
+        self.pass.deterministic()
     }
     fn requires_canonical_form(&self) -> bool {
-        self.0.requires_canonical_form()
+        self.pass.requires_canonical_form()
     }
     fn produces_canonical_form(&self) -> bool {
-        self.0.produces_canonical_form()
+        self.pass.produces_canonical_form()
     }
     fn run_with_context(&self, function: &mut Function, context: OptimizationContext) -> bool {
-        self.0.run_with_context(function, context)
+        self.pass.run_with_context(function, context)
     }
     fn run_canonical_with_context(
         &self,
         function: &mut Function,
         context: OptimizationContext,
     ) -> bool {
-        self.0.run_canonical_with_context(function, context)
+        self.pass.run_canonical_with_context(function, context)
     }
 }
 
@@ -57,35 +72,27 @@ fn selected<'a>(
             func: function.name.clone(),
             message,
         })?;
-    // A temperature hint must not turn an unoptimized invocation into an
-    // optimized one. An explicit optimize preset can do so.
-    let level = policy.level.or_else(|| {
-        (function.attrs.cold && !defaults.is_empty()).then_some(FunctionOptLevel::Size)
-    });
-    let names: Vec<_> = match level {
-        Some(level) => tier(level).pipeline().to_vec(),
-        None => defaults.iter().map(|pass| pass.name()).collect(),
-    };
-    let mut passes = Vec::new();
-    for name in names {
-        if (name.starts_with("inline") && policy.inline == Some(false))
-            || (name == "loop-unroll" && policy.unroll == Some(false))
-            || ((name == "loop-vectorize"
-                || name.starts_with("loop-reduce")
-                || name == "fast-loop-reduce")
-                && policy.vectorize == Some(false))
-        {
-            continue;
-        }
-        if let Some(pass) = defaults
+    let level = policy.level;
+    let planned = match level {
+        Some(level) => tier(level)
+            .pipeline()
             .iter()
-            .copied()
-            .find(|pass| pass.name() == name)
-            .or_else(|| crate::find_pass(name))
-        {
-            passes.push(pass);
-        }
-    }
+            .map(|name| crate::find_pass(name).expect("registered preset pass"))
+            .collect(),
+        None => defaults.to_vec(),
+    };
+    let mut passes: Vec<_> = planned
+        .into_iter()
+        .filter(|pass| {
+            let name = pass.name();
+            !((name.starts_with("inline") && policy.inline == Some(false))
+                || (name == "loop-unroll" && policy.unroll == Some(false))
+                || ((name == "loop-vectorize"
+                    || name.starts_with("loop-reduce")
+                    || name == "fast-loop-reduce")
+                    && policy.vectorize == Some(false)))
+        })
+        .collect();
     if !policy.disabled() {
         for (enabled, name) in [
             (policy.inline, "inline-noninterposable"),
@@ -96,6 +103,23 @@ fn selected<'a>(
                 passes.push(crate::find_pass(name).expect("registered function policy pass"));
             }
         }
+    }
+    if function.attrs.flatten && !policy.disabled() && policy.inline != Some(false) {
+        passes.retain(|pass| !pass.name().starts_with("inline"));
+        let mut flatten = Vec::new();
+        for _ in 0..8 {
+            for name in [
+                "inline-noninterposable",
+                "simplify-cfg",
+                "canonicalize",
+                "instcombine",
+                "dce",
+            ] {
+                flatten.push(crate::find_pass(name).expect("registered flatten pass"));
+            }
+        }
+        flatten.extend(passes);
+        passes = flatten;
     }
     Ok(passes)
 }
@@ -111,7 +135,7 @@ pub(super) fn run(
     if !module
         .functions
         .iter()
-        .any(|f| f.attrs.optnone || f.attrs.cold || f.attrs.flatten || !f.attrs.optimize.is_empty())
+        .any(|f| f.attrs.optnone || f.attrs.flatten || !f.attrs.optimize.is_empty())
     {
         return None;
     }
@@ -123,65 +147,53 @@ pub(super) fn run(
             .iter()
             .map(|f| selected(f, defaults))
             .collect::<Result<Vec<_>, _>>()?;
-        // Inlining is the only module rewrite with an explicit policy boundary.
-        // ABI changes, constant-argument propagation and deletion are withheld
-        // until those passes can account for independently optimized bodies.
-        let rounds: Vec<_> = module
+        let mut positions = vec![0; schedules.len()];
+        let mut scoped = Vec::new();
+        // Merge plan frontiers, never moving a pass ahead of an earlier pass in
+        // that function's plan. All annotations share the same analysis cache,
+        // canonical restoration, verification and reporting manager.
+        while let Some((first, _)) = schedules
+            .iter()
+            .enumerate()
+            .find(|(i, plan)| positions[*i] < plan.len())
+        {
+            let pass = schedules[first][positions[first]];
+            let mut functions = keel_ir::fxhash::FxHashSet::default();
+            for ((function, plan), position) in
+                module.functions.iter().zip(&schedules).zip(&mut positions)
+            {
+                if plan
+                    .get(*position)
+                    .is_some_and(|next| std::ptr::eq(*next, pass))
+                {
+                    functions.insert(function.name.clone());
+                    *position += 1;
+                }
+            }
+            scoped.push(ScopedPass { pass, functions });
+        }
+        // A function whose plan ended earlier can become dead after another
+        // plan's final rewrite. Only plans requesting GC participate; all other
+        // bodies remain roots, including explicit O0/optnone bodies.
+        let functions = module
             .functions
             .iter()
             .zip(&schedules)
-            .map(|(function, schedule)| {
-                if function.attrs.flatten {
-                    8
-                } else {
-                    schedule
-                        .iter()
-                        .filter(|pass| pass.name().starts_with("inline"))
-                        .count()
-                }
-            })
-            .collect();
-        for round in 0..rounds.iter().copied().max().unwrap_or(0) {
-            let inline = crate::inline::ScopedInline {
-                callers: module
-                    .functions
-                    .iter()
-                    .zip(&rounds)
-                    .filter(|(_, rounds)| round < **rounds)
-                    .map(|(function, _)| function.name.clone())
-                    .collect(),
-            };
-            if let Some(report) = report.as_deref_mut() {
-                crate::run_pipeline_with_context_and_report_raw(
-                    module,
-                    &[&inline],
-                    context,
-                    report,
-                    options,
-                )?;
-            } else {
-                crate::run_pipeline_with_context_raw(module, &[&inline], context, options)?;
-            }
+            .filter(|(_, plan)| plan.iter().any(|pass| pass.name() == "unused-functions"))
+            .map(|(function, _)| function.name.clone())
+            .collect::<keel_ir::fxhash::FxHashSet<_>>();
+        if !functions.is_empty() {
+            scoped.push(ScopedPass {
+                pass: crate::find_pass("unused-functions").expect("registered reachability pass"),
+                functions,
+            });
         }
-        for (function, schedule) in module.functions.iter_mut().zip(schedules) {
-            let locals: Vec<_> = schedule.iter().map(|&pass| LocalPass(pass)).collect();
-            let passes: Vec<&dyn Pass> = locals.iter().map(|pass| pass as &dyn Pass).collect();
-            // The isolated module has no module hooks, so references to other
-            // functions remain untouched. Move the body back even on error.
-            let mut local = Module::default();
-            let placeholder = Function::new("", function.sig.clone());
-            local
-                .functions
-                .push(std::mem::replace(function, placeholder));
-            let result = match report.as_deref_mut() {
-                Some(report) => crate::run_pipeline_with_context_and_report_raw(
-                    &mut local, &passes, context, report, options,
-                ),
-                None => crate::run_pipeline_with_context_raw(&mut local, &passes, context, options),
-            };
-            *function = local.functions.remove(0);
-            result?;
+        let passes: Vec<&dyn Pass> = scoped.iter().map(|pass| pass as &dyn Pass).collect();
+        match report.as_deref_mut() {
+            Some(report) => crate::run_pipeline_with_context_and_report_raw(
+                module, &passes, context, report, options,
+            ),
+            None => crate::run_pipeline_with_context_raw(module, &passes, context, options),
         }
-        Ok(())
     })())
 }

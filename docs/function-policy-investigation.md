@@ -1,5 +1,8 @@
 # Function policy scheduling investigation
 
+The [repair and new qualification](function-policy-fix.md) supersede the broken
+behavior below. This document preserves the original diagnosis.
+
 The failed kernel links are optimizer failures. The investigation isolates four
 problems in the function-policy implementation from `55f097ac`. No compiler
 behavior is changed by this checkpoint.

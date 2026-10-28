@@ -5,7 +5,7 @@ direct callee records. The optimizer and native backends consume these policies.
 
 | C attribute | Behavior |
 |---|---|
-| `cold` | Uses the Size IR pipeline when invocation optimization is enabled, and x86 size emission. ELF uses `.text.unlikely`. Optional inlining avoids pulling cold bodies into ordinary callers. |
+| `cold` | Retains the invocation IR pipeline and prefers x86 size emission. ELF uses `.text.unlikely`. Optional inlining avoids pulling cold bodies into ordinary callers. |
 | `hot` | Increases bounded inliner profitability thresholds. ELF uses `.text.hot`. It does not select a higher optimization level. |
 | `optimize(...)` | Selects a per-function preset and supported pass switches, described below. |
 | `optnone` | Disables optional IR transformations, inlining into/out of the function, and optional native instruction selection. |
@@ -64,19 +64,30 @@ Flatten runs at most eight inlining rounds. It does not bypass noinline,
 optnone, recursion, interposition, ABI restrictions, stack limits or instruction
 growth limits. Only available, legally bound direct-call definitions qualify.
 It is a bounded request, not a promise that every call disappears. Ordinary
-inlining avoids crossing different explicit option lists. Flatten may cross
-those lists when the callee otherwise permits inlining.
+inlining permits different supported optimization-effort presets. Raw option
+spellings are not an ABI or semantic incompatibility. Explicit noinline,
+optnone/O0 and disabled-inline boundaries remain protected.
 
-For modules with independently optimized definitions, the manager schedules
-local passes per function and runs the policy-aware inliner separately.
-Module-wide ABI changes, constant-argument propagation, unused-function deletion
-and other unscoped module hooks are conservatively withheld. This can leave
-additional functions and calls compared with a uniform invocation. Those passes
-need explicit policy boundaries before they can participate in mixed schedules.
-Modules without these overrides retain their original pipeline and module
-passes. Observed and ordinary execution share the same dispatch; reports list
-only function passes actually scheduled for that body. Pipeline indices are
-local to each scheduled sequence.
+For modules with independently optimized definitions, the manager merges plan
+frontiers while preserving each function's local pass order. Inlining remains
+interleaved with cleanup. The shared manager retains canonical-form restoration,
+verification, change tracking and reports. Disabled bodies are excluded before
+canonical restoration, not just before a pass's main callback.
+
+Inlining changes only enabled callers and reads the complete recursion graph.
+Constant-argument propagation changes only enabled callees, but inspects all
+callers, including protected ones. Empty-call elimination changes only enabled
+callers. Reachability cleanup treats unscheduled bodies and their references as
+roots; a final cleanup covers functions that become dead after another plan
+finishes. Existing assembly and escaping-address root rules still apply.
+
+Unscoped module hooks, including ABI-changing hooks, run only when every current
+body enables that pass. Custom passes can implement `run_module_for_functions`
+with explicit mutation guards. This still conservatively withholds some ABI
+optimizations in mixed modules, without disabling basic module cleanup.
+Modules with only temperature hints retain the ordinary invocation pipeline.
+Observed and ordinary execution use the same scoped plan. Report pipeline
+indices refer to the merged schedule.
 
 Mandatory frontend inlining needed for C language/asm contracts and backend
 legalization remain distinct from optional optimization. These policies do not
@@ -119,27 +130,19 @@ adapters remain separate.
 
 ## Validation
 
-Regressions cover mixed O0/O2/O3/optnone schedules, option ordering and errors,
-observed/unobserved parity, bounded nested flattening, preserved noinline/optnone
-callees, native selector overrides, ELF sections, explicit alignment, and
-text/typed object parity. Mixed-policy native host execution exercises 201
-inputs at two invocation settings and rejects an intentionally wrong result.
-No kernel rebuild, boot or performance comparison is claimed for this change.
+The repair passes 3,039 workspace tests (zero failures, 15 ignored), 14 Python
+tests, eight reduced checks and twelve focused optimizer-policy tests. O2/Os/O3
+captured kernels link and pass checked TCG boots. Forty KVM benchmark guests
+pass; four wrong-result controls fail normally and are rejected. See the
+[repair qualification](function-policy-fix.md) and
+[matched-preset measurements](linux-kernel-repaired-benchmarks.md) for the source,
+configuration and runtime limits. Strict Clippy remains blocked by existing
+workspace findings.
 
-The final workspace run passed 3,030 tests with zero failures and 15 ignored
-across 578 reported groups. Workspace all-target/all-feature checking,
-focused policy Clippy checks and documentation builds passed. Strict workspace
-Clippy remains blocked by existing keel-link/keel-ir diagnostics; documentation
-retains two existing codegen private-link warnings.
+## Kernel integration repair
 
-## Kernel integration regression
-
-The subsequent [kernel replay](linux-kernel-policy-benchmark.md) found that the
-new cold-function schedule retains a compile-time assertion reference that the
-ordinary full pipeline removes. Current Keel O2, Os and O3 kernel replay objects
-fail linking. Workspace test success above does not establish kernel link or
-runtime readiness after this policy change. Required optimization cleanup needs
-a repair and a kernel link regression before a new runtime comparison.
-
-The [follow-up investigation](function-policy-investigation.md) records the
-verified causes, reduced regression checks and proposed repair order.
+The [investigation](function-policy-investigation.md) preserves the failure at
+`55f097ac`. The [repair](function-policy-fix.md) restores ordered schedules,
+guarded module cleanup and useful helper inlining. Fresh pinned kernel cores
+link and pass the checked QEMU runtime fixture at O2, Os and O3. This is bounded
+minimal-kernel qualification, not a new runtime performance comparison.

@@ -120,6 +120,29 @@ pub trait Pass: Sync {
         Some(result)
     }
 
+    /// Whether the function is scheduled for this invocation. Checked before
+    /// canonical restoration so protected bodies remain unchanged.
+    fn enabled_for(&self, _function: &Function) -> bool {
+        true
+    }
+
+    /// Run a module pass for scheduled functions while inspecting the complete
+    /// module. The default admits unscoped hooks only when every body is enabled.
+    /// Overrides must preserve unscheduled bodies and any call/ABI contracts.
+    fn run_module_for_functions(
+        &self,
+        module: &mut Module,
+        enabled: &dyn Fn(&Function) -> bool,
+        sites: Option<&mut Vec<InlineSite>>,
+        changed: &mut Vec<bool>,
+    ) -> Option<bool> {
+        if module.functions.iter().all(enabled) {
+            self.run_module_tracked(module, sites, changed)
+        } else {
+            None
+        }
+    }
+
     /// Whether this function pass depends only on the function and target.
     /// The manager then skips a run on a function that its previous run left
     /// unchanged and that nothing has changed since: by determinism and the
@@ -372,6 +395,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &module_cleanup::UnusedFunctions,
     &private_aggregate::PrivateAggregate,
     &private_aggregate::PrivateAggregateCleanup,
+    &inline::InlineSize,
 ];
 
 /// Controls repeated checks after passes and canonical restoration only.
@@ -433,9 +457,9 @@ pub enum OptimizationTier {
     /// Fixed CFG/local cleanup plus size-capped single-stream sum reductions.
     Fast,
     Basic,
-    /// One bounded inlining round and scalar/memory cleanup, without loop expansion.
+    /// Three bounded inlining rounds and scalar/memory cleanup, without loop expansion.
     Balanced,
-    /// Scalar cleanup without optional inlining, unrolling or vectorization.
+    /// Scalar cleanup and bounded helper inlining, without unrolling or vectorization.
     Size,
     Full,
 }
@@ -483,24 +507,19 @@ pub const BALANCED_PIPELINE: &[&str] = &[
     "stack-promote",
     "phi-simplify",
     "dce",
-    "constant-args",
-    "known-bits",
+    "inline-noninterposable",
+    "simplify-cfg",
     "canonicalize",
     "instcombine",
+    "call-contracts",
     "simplify-cfg",
+    "gvn",
+    "stack-forward",
+    "load-reuse",
+    "stack-promote",
+    "phi-simplify",
     "dce",
-    "empty-calls",
-    "unused-functions",
-    "private-aggregate-cleanup",
-    "internal-fast-calls",
-];
-
-/// Initial size policy. Omits optional inlining and passes that expand memory
-/// operations, duplicate constants, unroll loops or introduce vector versions.
-/// Mandatory frontend inlining still runs to satisfy language/operand contracts.
-/// This is an IR growth policy, not a guarantee about final machine-code size.
-pub const SIZE_PIPELINE: &[&str] = &[
-    "private-aggregate-cleanup",
+    "inline-noninterposable",
     "simplify-cfg",
     "canonicalize",
     "instcombine",
@@ -519,6 +538,61 @@ pub const SIZE_PIPELINE: &[&str] = &[
     "simplify-cfg",
     "dce",
     "empty-calls",
+    "dce",
+    "unused-functions",
+    "private-aggregate-cleanup",
+    "internal-fast-calls",
+];
+
+/// Size policy. Bounded hinted, constant-argument and single-use helper inlining
+/// exposes dead branches. Omits memory expansion, code motion, unrolling and vectorization.
+/// Mandatory frontend inlining still runs to satisfy language/operand contracts.
+/// This is an IR growth policy, not a guarantee about final machine-code size.
+pub const SIZE_PIPELINE: &[&str] = &[
+    "private-aggregate-cleanup",
+    "simplify-cfg",
+    "canonicalize",
+    "instcombine",
+    "call-contracts",
+    "simplify-cfg",
+    "gvn",
+    "stack-forward",
+    "load-reuse",
+    "stack-promote",
+    "phi-simplify",
+    "dce",
+    "inline-size",
+    "simplify-cfg",
+    "canonicalize",
+    "instcombine",
+    "call-contracts",
+    "simplify-cfg",
+    "gvn",
+    "stack-forward",
+    "load-reuse",
+    "stack-promote",
+    "phi-simplify",
+    "dce",
+    "inline-size",
+    "simplify-cfg",
+    "canonicalize",
+    "instcombine",
+    "call-contracts",
+    "simplify-cfg",
+    "gvn",
+    "stack-forward",
+    "load-reuse",
+    "stack-promote",
+    "phi-simplify",
+    "dce",
+    "constant-args",
+    "known-bits",
+    "canonicalize",
+    "instcombine",
+    "simplify-cfg",
+    "dce",
+    "empty-calls",
+    "dce",
     "unused-functions",
     "private-aggregate-cleanup",
     "internal-fast-calls",
@@ -832,6 +906,9 @@ fn run_pipeline_with_context_raw(
         }
         let slot = versions.slot(pass.name());
         for (index, func) in module.functions.iter_mut().enumerate() {
+            if !pass.enabled_for(func) {
+                continue;
+            }
             // A skipped run's input was canonical when the pass required it.
             if versions.is_clean(pass, slot, index) {
                 canonical[index] |= pass.requires_canonical_form();
@@ -990,6 +1067,9 @@ fn run_pipeline_with_context_and_report_raw(
         }
         let slot = versions.slot(pass.name());
         for (index, func) in module.functions.iter_mut().enumerate() {
+            if !pass.enabled_for(func) {
+                continue;
+            }
             let before = IrCounts::function(func);
             if versions.is_clean(pass, slot, index) {
                 canonical[index] |= pass.requires_canonical_form();

@@ -128,10 +128,12 @@ block2:
     assert_eq!(m.functions[0].sig.params.len(), 4);
 }
 #[test]
-fn named_registration_is_appended_and_cleanup_is_full_only() {
-    assert_eq!(
-        keel_opt::PASSES.last().unwrap().name(),
-        "private-aggregate-cleanup"
+fn named_registration_order_and_cleanup_policy_remain_explicit() {
+    let names: Vec<_> = keel_opt::PASSES.iter().map(|pass| pass.name()).collect();
+    assert!(
+        names
+            .windows(2)
+            .any(|pair| pair == ["private-aggregate", "private-aggregate-cleanup"])
     );
     for tier in [
         keel_opt::OptimizationTier::None,

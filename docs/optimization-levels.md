@@ -9,9 +9,9 @@ Full default. `-Og`, `-Oz`, `-Ofast` and unknown levels are rejected.
 |---|---|---|---|---|
 | `-O0` | None | Baseline | Full | Inspect unoptimized IR and debug. |
 | `-O1` | Fast | Trees | Fast | Short builds with bounded cleanup. |
-| `-O2` | Balanced | Full | Full | One inlining round and scalar/memory optimization, without GCM. |
+| `-O2` | Balanced | Full | Full | Three bounded inlining rounds and scalar/memory optimization, without GCM. |
 | `-O3`, `-O` | Full | Full | Full | Three inlining rounds and guarded loop transformations. |
-| `-Os` | Size | Full | Full | Scalar cleanup without optional code expansion. |
+| `-Os` | Size | Full | Full | Scalar cleanup and bounded helper inlining, without loop expansion. |
 
 The balanced schedule omits GCM after stack promotion. Screening on Lua found
 a dispatch regression at that placement; Full retains its existing ordering.
@@ -56,9 +56,14 @@ still run at `-O0`.
 
 ## Size policy
 
-The Size pipeline omits optional inlining, small-memory expansion, GCM constant
-duplication, unrolling and automatic vectorization. It retains scalar, CFG,
-load, stack, constant-argument and unreachable-function cleanup. Required
+The Size pipeline runs two bounded helper-inlining rounds interleaved with
+scalar cleanup. It admits hinted helpers, constant-argument calls and single-use
+non-escaping local helpers, capped at 128 IR instructions for optional cases.
+Existing legality, recursion, stack and growth limits remain active. Shared
+unhinted helpers with variable arguments can remain calls. Size omits
+small-memory expansion, GCM, unrolling and automatic vectorization. It retains
+CFG, load, stack, constant-argument and unreachable-function cleanup, including
+DCE after empty-call elimination to remove unused symbol references. Required
 language/inline-assembly inlining remains active.
 
 The `-Os` preset also selects [size-oriented x86 emission](x86-size-codegen.md):
@@ -67,8 +72,8 @@ call-padding removal, smaller epilogues and profitable return sharing.
 `--opt-tier` and `-p` change IR passes without resetting the preset's codegen goal.
 
 This starts size optimization infrastructure; it does not guarantee the
-smallest machine code. In particular, Size does not yet have a target byte-cost
-model for tiny/single-use inlining, instruction selection or allocator decisions.
+smallest machine code. Size does not yet have a target byte-cost model for
+all inlining, selection or allocator decisions.
 Losing profitable inlining can make an individual program larger. The benchmark
 records executable section bytes separately from file bytes so debug, symbol,
 alignment and object-container overhead cannot masquerade as instruction size.
@@ -210,3 +215,8 @@ final GCM removal. After that correction, the focused execution/address-model
 tests and the complete native application matrix passed. Strict Clippy remains
 blocked by existing diagnostics outside this change. Kernel boot qualification
 was not repeated for the changed address emission.
+
+The [function-policy repair](function-policy-fix.md) changed Balanced from one to
+three bounded inline/cleanup rounds and added Size helper inlining. Earlier
+optimization-level measurements describe their recorded older source revisions;
+they do not measure these revised pipelines.

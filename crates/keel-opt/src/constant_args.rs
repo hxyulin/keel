@@ -16,17 +16,30 @@ impl Pass for ConstantArgs {
         false
     }
     fn run_module(&self, module: &mut Module) -> Option<bool> {
-        Some(run(module))
+        Some(run(module, &|_| true))
+    }
+    fn run_module_for_functions(
+        &self,
+        module: &mut Module,
+        enabled: &dyn Fn(&Function) -> bool,
+        _sites: Option<&mut Vec<crate::InlineSite>>,
+        changed: &mut Vec<bool>,
+    ) -> Option<bool> {
+        let result = run(module, enabled);
+        changed.clear();
+        changed.extend(module.functions.iter().map(|f| result && enabled(f)));
+        Some(result)
     }
 }
 
-fn run(module: &mut Module) -> bool {
+fn run(module: &mut Module, enabled: &dyn Fn(&Function) -> bool) -> bool {
     let roots = crate::assembly_symbols::roots(module);
     let candidates: FxHashMap<_, _> = module
         .functions
         .iter()
         .filter(|f| {
-            f.local
+            enabled(f)
+                && f.local
                 && !f.attrs.weak
                 && !f.weak_odr
                 && !f.sig.variadic

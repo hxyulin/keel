@@ -182,9 +182,8 @@ impl FunctionPolicy {
     /// Whether optional inlining can modify this function or consume its body.
     pub fn permits_inlining(self) -> bool {
         !self.disabled()
-            && self.inline.unwrap_or(!matches!(
-                self.level,
-                Some(FunctionOptLevel::Fast | FunctionOptLevel::Size)
-            ))
+            && self
+                .inline
+                .unwrap_or(!matches!(self.level, Some(FunctionOptLevel::Fast)))
     }
 }

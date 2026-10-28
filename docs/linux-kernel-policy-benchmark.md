@@ -1,5 +1,9 @@
 # Kernel compilation checkpoint
 
+The [subsequent repair](function-policy-fix.md) restores O2/Os/O3 kernel links
+and checked boot behavior. The timings and failures below remain scoped to
+`55f097ac`; they are not measurements of the repaired compiler.
+
 The captured-input compilation benchmark completed at compiler revision
 `55f097ac`. Fresh Keel O2, Os and O3 objects do not currently link into the pinned
 kernel, so there is **no current Keel runtime measurement** from this run.
