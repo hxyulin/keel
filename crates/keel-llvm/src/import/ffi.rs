@@ -74,6 +74,7 @@ pub(super) struct Api {
     get_call_site_attributes: unsafe extern "C" fn(Raw, u32, *mut Raw) -> (),
     is_string_attribute: unsafe extern "C" fn(Raw) -> i32,
     get_enum_attribute_kind: unsafe extern "C" fn(Raw) -> u32,
+    get_enum_attribute_value: unsafe extern "C" fn(Raw) -> u64,
     get_type_attribute_value: unsafe extern "C" fn(Raw) -> Raw,
     count_param_types: unsafe extern "C" fn(Raw) -> u32,
     get_param_types: unsafe extern "C" fn(Raw, *mut Raw) -> (),
@@ -636,6 +637,14 @@ impl Api {
                 unsafe {
                     *library
                         .get(b"LLVMIsStringAttribute\0")
+                        .map_err(|e| e.to_string())?
+                }
+            },
+            get_enum_attribute_value: {
+                // SAFETY: this is LLVM 23's enum attribute integer accessor.
+                unsafe {
+                    *library
+                        .get(b"LLVMGetEnumAttributeValue\0")
                         .map_err(|e| e.to_string())?
                 }
             },
@@ -1314,6 +1323,10 @@ impl Api {
     pub(super) fn is_string_attribute(&self, a0: Ref) -> i32 {
         // SAFETY: handles originate from the verified module owned by this import session.
         unsafe { (self.is_string_attribute)(a0 as Raw) }
+    }
+    pub(super) fn get_enum_attribute_value(&self, attribute: Ref) -> u64 {
+        // SAFETY: attribute was returned by LLVM's enum attribute lookup for the live module.
+        unsafe { (self.get_enum_attribute_value)(attribute as Raw) }
     }
     pub(super) fn get_enum_attribute_kind(&self, a0: Ref) -> u32 {
         // SAFETY: handles originate from the verified module owned by this import session.

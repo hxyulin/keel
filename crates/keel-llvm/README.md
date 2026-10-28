@@ -54,15 +54,15 @@ function, block and instruction for unsupported operations.
 * Fixed stack slots, dynamic allocation, stack save/restore; byte pointer
   arithmetic without `inbounds`; loads/stores retaining alignment and volatile.
   `notrap` is conservatively omitted. Memory remains untyped bytes.
-* Direct calls, function and data addresses, ordinary function attributes,
+* Direct and scalar indirect calls, function and data addresses, ordinary function attributes,
   internal function/global linkage, constant and writable globals, packed data
   initializers, byte arrays, zero fill, symbol relocations and byte addends.
   LLVM performs the Mach-O underscore prefixing. Symbol bytes are quoted and
   escaped; the exporter does not prepend an underscore itself.
 * Existing memcpy/memmove/memset intrinsics and debugtrap/trap. No alias,
   nonnull, alignment or fault-freedom contract is inferred from pointer values.
-  Definition-only restrict parameter facts added after the initial base may
-  be conservatively omitted; they are not translated to LLVM `noalias`.
+  Definition-only restrict parameter facts map to LLVM parameter `noalias`
+  on definitions only. They do not create call-site or allocation-return facts.
 
 Ordinary user function declarations, definitions and direct calls carry
 `nobuiltin`: Keel does not assign libc contracts from function names. Explicit
@@ -101,7 +101,7 @@ Integer division/remainder are rejected: Keel requires a trap for a zero
 divisor and signed division overflow, whereas naive LLVM instructions introduce
 undefined behavior/poison. Signed remainder MIN/-1 also needs deliberate
 handling. Rotates and high-half multiply are currently rejected. Other rejected
-features include vectors, atomics/fences, inline assembly, indirect/tail calls,
+features include vectors, atomics/fences, inline assembly, tail calls,
 exception handling, debug metadata/locations, TLS, varargs/va_arg/va_start,
 returns-twice, frame-address, multiple returns, aggregate parameters/returns,
 and user symbols in LLVM's reserved `llvm.` namespace. Invalid IR is rejected
@@ -217,3 +217,49 @@ verification step for compatibility and failure-injection checks.
 The three-input harness uses the Rust API directly. The Python implementation
 remains a reference for port parity tests. See [porting notes](PORTING.md) for
 the mapping, deliberate differences and validation commands.
+
+## Memory and pointer contract transport
+
+LLVM import retains typed function/declaration contracts and independent direct
+or indirect call-site contracts. Memory summaries distinguish argument-reachable,
+other accessible and inaccessible memory, with separate `nofree`, `nosync` and
+contextual `nocallback` promises. The instruction scheduler still treats calls
+as barriers. LLVM's `nocallback` means no reentry into the caller's module;
+import conservatively omits it for local definitions and unknown indirect sites.
+
+The LLVM 23 C API stores memory effects as two read/write bits per location,
+as defined by `llvm/Support/ModRef.h`. Parser-based tests check every mapped
+location. Errno effects widen the `other` bucket; target-state effects widen the
+`inaccessible` bucket. Unknown encoded classes produce an unknown summary.
+Export stays compatible with Apple Clang 21, which cannot name target-state
+locations. Its default access set is the union of `other` and `inaccessible`,
+with explicit argument/inaccessible overrides. This may lose precision but
+cannot create an unsupported no-access promise.
+
+Pointer alignment and non-null facts require `noundef` or a supported positive
+`dereferenceable` extent establishing definedness. Readable extents are bounded
+to i64. Only complete no-capture promises are retained. A poisonable `nonnull`
+argument alone supplies no concrete pointer fact. Export emits `noundef` for
+concrete pointer facts, keeps capture independent and uses
+`dereferenceable_or_null` when a native Keel readable extent lacks a separate
+non-null promise.
+
+LLVM parameter `noalias` maps to definition-only `restrict_params` for normal
+pointer parameters; declarations, calls, returns and aggregate ABI positions do
+not acquire that contract. The mapping preserves the modified-object access
+rule and permits legal read-only aliases and equal pointer values.
+
+Recognized direct fixed-slot lifetime markers survive as pinned `lifetime_start`
+and `lifetime_end` intrinsics. Export uses LLVM 21's size-plus-pointer form with
+size -1; LLVM 23 upgrades it to its one-pointer form. They emit no native
+instructions and remain barriers to memory facts. Derived/dynamic markers stay
+unsupported. These changes retain no overflow, poison, range or inbounds facts.
+
+The diagnostic exporter still has an observed memory-fault loss: LLVM may delete
+an unused ordinary load that Keel retains for its possible fault. Defined-memory
+execution tests do not establish memory-fault parity. See the
+[reproducer and boundary](../../docs/llvm-contracts.md#known-llvm-export-loss-ordinary-memory-faults).
+
+Keel's `preserves_access` call contract is not inferred from LLVM attributes or
+emitted as an LLVM attribute. It separately protects the native optimizer from
+assuming that no-freeing also excludes permission/mapping changes.

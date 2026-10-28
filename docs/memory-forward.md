@@ -33,3 +33,12 @@ after inlining, address simplification/GVN and stack forwarding, before final
 simplification and dead code cleanup. No performance claim is made for it.
 
 Tests: `cargo test -p keel-opt --test memory_forward`.
+
+The opt-in `call-load-reuse` pass also accepts explicit scoped call contracts.
+Contract-based reuse requires no accessible writes, no freeing of existing
+objects, no synchronization, contextual no-callback and explicit preservation
+of existing object accessibility. The latter excludes permission/mapping changes
+and is not inferred from LLVM nofree. Unknown and returns-twice
+calls remain barriers. The first read and the call remain pinned. Fixed-stack
+lifetime events invalidate all available reads, including across restarts at the
+same address. See [LLVM contract design and implementation](llvm-contracts.md).

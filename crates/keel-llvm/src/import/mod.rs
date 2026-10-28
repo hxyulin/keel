@@ -1,4 +1,5 @@
 //! LLVM 23 import through a dynamically loaded C API, without LLVM link dependencies.
+mod contracts;
 mod ffi;
 mod globals;
 mod instructions;
@@ -303,6 +304,7 @@ impl<'a> Translation<'a> {
             cold: cold && !hot,
             hot: hot && !cold,
             optnone: has("optnone"),
+            contract: self.contract(function, self.l.global_get_value_type(function), false),
             ..Default::default()
         }
     }
@@ -757,6 +759,24 @@ impl<'a> Translation<'a> {
         );
         let blocks = sequence(|| l.get_first_basic_block(f), |b| l.get_next_basic_block(b));
         let attrs = self.function_attrs(f);
+        let restricted: Vec<_> = l
+            .params(l.global_get_value_type(f))
+            .into_iter()
+            .enumerate()
+            .filter(|(index, ty)| {
+                l.get_type_kind(*ty) == 12
+                    && l.attribute(f, *index as u32 + 1, "noalias", false) != 0
+                    && l.attribute(f, *index as u32 + 1, "sret", false) == 0
+                    && l.attribute(f, *index as u32 + 1, "byval", false) == 0
+            })
+            .map(|(index, _)| index.to_string())
+            .collect();
+        let restriction = if blocks.is_empty() || restricted.is_empty() {
+            String::new()
+        } else {
+            format!(" restrict_params({})", restricted.join(", "))
+        };
+
         if blocks.is_empty() {
             return Ok(format!("decl {signature} cc(c){attrs}"));
         }
@@ -773,7 +793,7 @@ impl<'a> Translation<'a> {
             String::new()
         };
         self.lines = vec![format!(
-            "func {signature} cc({}){local_flag}{attrs}{personality} {{",
+            "func {signature} cc({}){local_flag}{attrs}{restriction}{personality} {{",
             if self.fast.contains(&f) { "fast" } else { "c" }
         )];
         self.values = (0..l.count_params(f))

@@ -1161,6 +1161,10 @@ impl<'a, 'b> FnTranslator<'a, 'b> {
                         let value = self.b.call_memcmp(self.config, a[0], a[1], a[2]);
                         self.def(inst, 0, value);
                     }
+                    // Prevent Cranelift memory optimization from crossing an object epoch.
+                    k::Intrinsic::LifetimeStart | k::Intrinsic::LifetimeEnd => {
+                        self.b.ins().sequence_point();
+                    }
                     k::Intrinsic::Debugtrap => {
                         self.b.ins().debugtrap();
                     }

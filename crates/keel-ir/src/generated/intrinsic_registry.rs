@@ -960,10 +960,14 @@ pub enum Intrinsic {
     X86StiHlt = 817,
     #[doc = "Raw GS-base exchange with caller-owned long-mode CPL0 state and asynchronous entry policy. See docs/x86-swapgs.md. Pinned compiler memory barrier; not a claim of hardware fencing."]
     X86Swapgs = 818,
+    #[doc = "`lifetime_start(ptr)`: starts or restarts accessibility of the whole fixed stack slot addressed by ptr. A pinned compiler lifetime barrier; emits no machine instructions."]
+    LifetimeStart = 819,
+    #[doc = "`lifetime_end(ptr)`: ends accessibility of the whole fixed stack slot addressed by ptr. A pinned compiler lifetime barrier; emits no machine instructions."]
+    LifetimeEnd = 820,
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 819] = [
+    pub const ALL: [Intrinsic; 821] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -1783,5 +1787,7 @@ impl Intrinsic {
         Intrinsic::X86Hlt,
         Intrinsic::X86StiHlt,
         Intrinsic::X86Swapgs,
+        Intrinsic::LifetimeStart,
+        Intrinsic::LifetimeEnd,
     ];
 }

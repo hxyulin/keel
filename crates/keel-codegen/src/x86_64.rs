@@ -78,27 +78,27 @@ mod cache_stream;
 mod constant_division;
 mod cpu_control;
 mod cx16;
+mod descriptor_queries;
 mod f80;
 mod flags_state;
 mod inline_asm;
+pub mod iretq;
 mod legacy_x87_images;
+pub mod linux_syscall;
 mod loop_align;
 mod owned_x87_stack;
-pub mod linux_syscall;
-pub mod iretq;
 mod packed_pair;
-mod pclmul;
 mod packed_search;
 mod packed_shift;
+mod pclmul;
+mod port_io;
 mod raw_div;
 mod raw_rflags;
 mod rflags_region;
-mod port_io;
+mod selector_queries;
+mod sign_blend;
 mod string_port_io;
 mod system_lowering;
-mod selector_queries;
-mod descriptor_queries;
-mod sign_blend;
 mod x87_basic;
 mod x87_bcd;
 mod x87_binary;
@@ -364,10 +364,12 @@ pub(crate) fn compile_output(
         } else {
             16
         },
-        |producer, layout, unnamed| producer.and_then(|p| sysv::producer_aggregate(layout,p)).is_some_and(|policy| {
+        |producer, layout, unnamed| {
+            producer.and_then(|p| sysv::producer_aggregate(layout,p)).is_some_and(|policy| {
             matches!(policy, sysv::ProducerAggregate::Memory)
                 || (unnamed && matches!(policy, sysv::ProducerAggregate::Vector(ty) if ty.bytes()==Some(32)))
-        }),
+        })
+        },
     )?;
 
     pipeline.validate_target(crate::Target::X86_64LinuxGnu)?;
@@ -491,38 +493,80 @@ fn validate_vector_abi(module: &Module) -> Result<(), CodegenError> {
         }
     }
     let check = |name: &str, sig: &keel_ir::Signature, extra: &[&AbiParam]| {
-        let params = || sig.params.iter().chain(&sig.returns).chain(extra.iter().copied());
-        let mut aggregate_bytes=0u64;
-        for layout in params().filter_map(|p|p.layout()) {
-            let Some(size)=layout.checked_size() else { return Err(CodegenError {func:name.into(),message:"aggregate ABI layout size overflows u64".into()}); };
-            aggregate_bytes=aggregate_bytes.checked_add(size).filter(|n|*n<=sysv::MAX_AGGREGATE_ABI_BYTES)
-                .ok_or_else(||CodegenError {func:name.into(),message:"aggregate ABI contract exceeds backend frame range".into()})?;
+        let params = || {
+            sig.params
+                .iter()
+                .chain(&sig.returns)
+                .chain(extra.iter().copied())
+        };
+        let mut aggregate_bytes = 0u64;
+        for layout in params().filter_map(|p| p.layout()) {
+            let Some(size) = layout.checked_size() else {
+                return Err(CodegenError {
+                    func: name.into(),
+                    message: "aggregate ABI layout size overflows u64".into(),
+                });
+            };
+            aggregate_bytes = aggregate_bytes
+                .checked_add(size)
+                .filter(|n| *n <= sysv::MAX_AGGREGATE_ABI_BYTES)
+                .ok_or_else(|| CodegenError {
+                    func: name.into(),
+                    message: "aggregate ABI contract exceeds backend frame range".into(),
+                })?;
         }
 
         if sig.x86_vector_abi.is_some() && sig.cc != CallConv::C {
-            return Err(CodegenError { func: name.into(), message: "x86_vector_abi requires cc(c), excluding private Fast".into() });
+            return Err(CodegenError {
+                func: name.into(),
+                message: "x86_vector_abi requires cc(c), excluding private Fast".into(),
+            });
         }
         // Untagged C f64x1 remains ambiguous. Tagged natural aggregate
         // layouts must satisfy the independently established producer policy.
-        if sig.cc == CallConv::C && params().any(|p| {
-            (p.ty == f64x1 && sig.x86_vector_abi.is_none())
-                || p.layout().is_some_and(|layout| contains_f64x1(layout) && (sig.x86_vector_abi.is_none() || sig.x86_vector_abi.and_then(|p| sysv::producer_aggregate(layout,p)).is_none()))
-        }) {
-            return Err(CodegenError { func: name.into(), message: F64X1_ABI.into() });
-        }
-        if params()
-            .any(|p| p.layout().is_some_and(|l| sig.x86_vector_abi.and_then(|p| sysv::producer_aggregate(l,p)).is_none() && sysv::ambiguous_vector_wrapper(l)))
+        if sig.cc == CallConv::C
+            && params().any(|p| {
+                (p.ty == f64x1 && sig.x86_vector_abi.is_none())
+                    || p.layout().is_some_and(|layout| {
+                        contains_f64x1(layout)
+                            && (sig.x86_vector_abi.is_none()
+                                || sig
+                                    .x86_vector_abi
+                                    .and_then(|p| sysv::producer_aggregate(layout, p))
+                                    .is_none())
+                    })
+            })
         {
+            return Err(CodegenError {
+                func: name.into(),
+                message: F64X1_ABI.into(),
+            });
+        }
+        if params().any(|p| {
+            p.layout().is_some_and(|l| {
+                sig.x86_vector_abi
+                    .and_then(|p| sysv::producer_aggregate(l, p))
+                    .is_none()
+                    && sysv::ambiguous_vector_wrapper(l)
+            })
+        }) {
             return Err(CodegenError {func:name.into(),message:"256-bit vector wrapper with empty aggregate members has compiler-dependent SysV ABI (Clang MEMORY versus GCC YMM); use a true single-member wrapper".into()});
         }
         // Independent 125-layout GCC/Clang/expected-register primary probes
         // establish recursive natural D8 fixed and named-variadic boundaries.
         // Unnamed operands carry the same classifier contract on CallArgs.
         if params().any(|p| {
-            p.layout()
-                .is_some_and(|l| l.size() <= 16 && contains(l)
+            p.layout().is_some_and(|l| {
+                l.size() <= 16
+                    && contains(l)
                     && sysv::vector_wrapper(l).is_none()
-                    && !(sig.cc == CallConv::C && (sysv::natural_d8_aggregate(l) || sig.x86_vector_abi.and_then(|p| sysv::producer_aggregate(l,p)).is_some())))
+                    && !(sig.cc == CallConv::C
+                        && (sysv::natural_d8_aggregate(l)
+                            || sig
+                                .x86_vector_abi
+                                .and_then(|p| sysv::producer_aggregate(l, p))
+                                .is_some()))
+            })
         }) {
             Err(CodegenError {func:name.into(),message:"SIMD vector fields in byval/sret aggregates require SSEUP ABI classification and are not supported yet".into()})
         } else {
@@ -542,17 +586,24 @@ fn validate_vector_abi(module: &Module) -> Result<(), CodegenError> {
         }
         for (_, inst) in f.layout_insts() {
             let call = match f.inst_data(inst) {
-                InstData::Call { func, args } | InstData::ReturnCall { func, args }
+                InstData::Call { func, args }
+                | InstData::ReturnCall { func, args }
                 | InstData::Invoke { func, args, .. } => Some((&f.callee(*func).sig, args)),
                 InstData::CallIndirect { sig, args, .. }
                 | InstData::ReturnCallIndirect { sig, args, .. } => Some((f.signature(*sig), args)),
-                InstData::VaArg { ty, x86_vector_abi, .. } => {
+                InstData::VaArg {
+                    ty, x86_vector_abi, ..
+                } => {
                     if *ty == f64x1 {
-                        if !x86_vector_abi.is_some_and(|abi| f.has_x86_va_arg_provenance(inst, abi)) {
+                        if !x86_vector_abi.is_some_and(|abi| f.has_x86_va_arg_provenance(inst, abi))
+                        {
                             return Err(CodegenError { func: f.name.clone(), message: "f64x1 va_arg requires explicit matching local variadic provenance".into() });
                         }
                     } else if x86_vector_abi.is_some() {
-                        return Err(CodegenError { func: f.name.clone(), message: "x86_vector_abi VaArg metadata requires f64x1".into() });
+                        return Err(CodegenError {
+                            func: f.name.clone(),
+                            message: "x86_vector_abi VaArg metadata requires f64x1".into(),
+                        });
                     }
                     None
                 }
@@ -561,25 +612,45 @@ fn validate_vector_abi(module: &Module) -> Result<(), CodegenError> {
             if let Some((sig, args)) = call {
                 let extra: Vec<_> = (0..args.len()).filter_map(|i| args.abi(i)).collect();
                 check(&f.name, sig, &extra)?;
-
             }
-            if let InstData::AggregateVaArg { layout, x86_vector_abi, .. } = f.inst_data(inst) {
-                let param = AbiParam { ty: Type::Ptr, ext: ArgExt::None, purpose: Purpose::ByVal(layout.clone()) };
+            if let InstData::AggregateVaArg {
+                layout,
+                x86_vector_abi,
+                ..
+            } = f.inst_data(inst)
+            {
+                let param = AbiParam {
+                    ty: Type::Ptr,
+                    ext: ArgExt::None,
+                    purpose: Purpose::ByVal(layout.clone()),
+                };
                 check(&f.name, &f.sig, &[&param])?;
                 if contains_f64x1(layout) {
-                    if !x86_vector_abi.is_some_and(|p| sysv::producer_aggregate(layout,p).is_some() && f.has_x86_va_arg_provenance(inst,p)) {
+                    if !x86_vector_abi.is_some_and(|p| {
+                        sysv::producer_aggregate(layout, p).is_some()
+                            && f.has_x86_va_arg_provenance(inst, p)
+                    }) {
                         return Err(CodegenError { func: f.name.clone(), message: "aggregate f64x1 va_arg requires explicit matching current-signature local provenance".into() });
                     }
                 } else if x86_vector_abi.is_some() {
-                    return Err(CodegenError { func: f.name.clone(), message: "aggregate producer metadata requires an f64x1 layout".into() });
+                    return Err(CodegenError {
+                        func: f.name.clone(),
+                        message: "aggregate producer metadata requires an f64x1 layout".into(),
+                    });
                 }
             }
             if let Some((sig, args)) = call
                 && sig.cc == CallConv::C
                 && sig.x86_vector_abi.is_none()
-                && args.iter().skip(sig.params.len()).any(|&v| f.value_type(f.resolve(v)) == f64x1)
+                && args
+                    .iter()
+                    .skip(sig.params.len())
+                    .any(|&v| f.value_type(f.resolve(v)) == f64x1)
             {
-                return Err(CodegenError { func: f.name.clone(), message: F64X1_ABI.into() });
+                return Err(CodegenError {
+                    func: f.name.clone(),
+                    message: F64X1_ABI.into(),
+                });
             }
         }
     }
@@ -626,9 +697,7 @@ fn is_call(func: &Function, data: &InstData, features: keel_asm_ir::x86::Feature
         // The reserved-stack dependency permits balanced template calls.
         // Treat those calls as ABI barriers even when a template's explicit
         // clobbers name only the GPRs used by a reduced kernel call sequence.
-        InstData::InlineAsm { asm, .. } => {
-            asm.inputs.contains(&keel_ir::AsmOperand::StackPointer)
-        }
+        InstData::InlineAsm { asm, .. } => asm.inputs.contains(&keel_ir::AsmOperand::StackPointer),
         InstData::Fma { args } => {
             func.value_type(func.resolve(args[0])) == Type::F80 || !(features.avx && features.fma)
         }
@@ -891,8 +960,16 @@ impl<'a> FunctionCompiler<'a> {
             .chain(func.layout_insts().flat_map(|(_, i)| {
                 let d = func.inst_data(i);
                 let mut align = Vec::new();
-                if let Some(args) = d.call_args() { align.extend((0..args.len()).filter_map(|i| args.abi(i).and_then(|p| p.layout()).map(|l| l.align() as usize))); }
-                if let InstData::AggregateVaArg { layout, .. } = d { align.push(layout.align() as usize); }
+                if let Some(args) = d.call_args() {
+                    align.extend((0..args.len()).filter_map(|i| {
+                        args.abi(i)
+                            .and_then(|p| p.layout())
+                            .map(|l| l.align() as usize)
+                    }));
+                }
+                if let InstData::AggregateVaArg { layout, .. } = d {
+                    align.push(layout.align() as usize);
+                }
                 align
             }))
             .max()
@@ -902,10 +979,12 @@ impl<'a> FunctionCompiler<'a> {
                 .iter()
                 .chain(&sig.returns)
                 .filter_map(|p| p.layout())
-                .filter_map(|layout| match sysv::aggregate_policy(layout, sig.x86_vector_abi) {
-                    sysv::ProducerAggregate::Vector(ty) => Some(ty),
-                    _ => None,
-                })
+                .filter_map(
+                    |layout| match sysv::aggregate_policy(layout, sig.x86_vector_abi) {
+                        sysv::ProducerAggregate::Vector(ty) => Some(ty),
+                        _ => None,
+                    },
+                )
                 .map(|t| t.bytes().unwrap())
                 .max()
                 .unwrap_or(0)
@@ -988,10 +1067,19 @@ impl<'a> FunctionCompiler<'a> {
         for (_, inst) in func.layout_insts() {
             if let InstData::X86RflagsRegion { plan, args } = func.inst_data(inst) {
                 keel_ir::rflags_region::analyze(plan).map_err(|e| err(e.to_string()))?;
-                if args.len() != plan.captures.len() || args.iter().any(|&v| func.value_type(func.resolve(v)) != Type::I64)
+                if args.len() != plan.captures.len()
+                    || args
+                        .iter()
+                        .any(|&v| func.value_type(func.resolve(v)) != Type::I64)
                     || func.inst_results(inst).len() != plan.observations
-                    || func.inst_results(inst).iter().any(|&v|func.value_type(v) != Type::I64) {
-                    return Err(err("FLAGS region exact I64 capture/result signature mismatch".into()));
+                    || func
+                        .inst_results(inst)
+                        .iter()
+                        .any(|&v| func.value_type(v) != Type::I64)
+                {
+                    return Err(err(
+                        "FLAGS region exact I64 capture/result signature mismatch".into(),
+                    ));
                 }
             }
             if let InstData::Intrinsic { id, args } = func.inst_data(inst) {
@@ -1004,15 +1092,22 @@ impl<'a> FunctionCompiler<'a> {
                 }
                 if let Some((_, _, immediate)) = id.x86_port_io() {
                     if args.len() != id.info().params.len()
-                        || args.iter().zip(id.info().params).any(|(&v, &ty)| func.value_type(v) != ty)
+                        || args
+                            .iter()
+                            .zip(id.info().params)
+                            .any(|(&v, &ty)| func.value_type(v) != ty)
                     {
                         return Err(err("port I/O operand types or arity mismatch".into()));
                     }
                     if immediate
-                        && !args.first().and_then(|&v| iconst(func, v))
+                        && !args
+                            .first()
+                            .and_then(|&v| iconst(func, v))
                             .is_some_and(|n| (0..=255).contains(&n))
                     {
-                        return Err(err("port I/O immediate requires iconst.i16 in0..=255".into()));
+                        return Err(err(
+                            "port I/O immediate requires iconst.i16 in0..=255".into()
+                        ));
                     }
                 }
                 if *id == Intrinsic::X86X87Region {
@@ -1092,9 +1187,10 @@ impl<'a> FunctionCompiler<'a> {
                     }
                     let params = id.info().params;
                     if args.len() != params.len()
-                        || args.iter().zip(params).any(|(&v, &ty)| {
-                            func.value_type(func.resolve(v)) != ty
-                        })
+                        || args
+                            .iter()
+                            .zip(params)
+                            .any(|(&v, &ty)| func.value_type(func.resolve(v)) != ty)
                     {
                         return Err(err(format!("{id} operand types or arity mismatch")));
                     }
@@ -1352,19 +1448,30 @@ impl<'a> FunctionCompiler<'a> {
             };
             let placement = sysv::signature_arg_locs(sig, &arg_kinds(func, sig, args));
             if placement.stack > named.stack {
-                return Err(err(format!("`{}`: guaranteed tail outgoing stack area grows from {} to {} bytes",
-                    func.display_inst(inst), named.stack, placement.stack)));
+                return Err(err(format!(
+                    "`{}`: guaranteed tail outgoing stack area grows from {} to {} bytes",
+                    func.display_inst(inst),
+                    named.stack,
+                    placement.stack
+                )));
             }
             if placement.stack_align > named.stack_align.max(16) {
-                return Err(err(format!("`{}`: guaranteed tail requires unsupported incoming stack alignment {} (received {})",
-                    func.display_inst(inst), placement.stack_align, named.stack_align.max(16))));
+                return Err(err(format!(
+                    "`{}`: guaranteed tail requires unsupported incoming stack alignment {} (received {})",
+                    func.display_inst(inst),
+                    placement.stack_align,
+                    named.stack_align.max(16)
+                )));
             }
             // Logical void is insufficient: aggregate results may use ST0,
             // GP/SIMD registers, or a hidden RDI pointer. Require the same
             // result layout and placement, and forward the original IR result
             // parameter (also needed when the physical result is in registers).
-            let result_param = |s: &keel_ir::Signature| s.params.iter()
-                .position(|p| matches!(p.purpose, Purpose::Sret(_)));
+            let result_param = |s: &keel_ir::Signature| {
+                s.params
+                    .iter()
+                    .position(|p| matches!(p.purpose, Purpose::Sret(_)))
+            };
             let incoming_result = result_param(&func.sig);
             let outgoing_result = result_param(sig);
             let matching_result = match (incoming_result, outgoing_result) {
@@ -1372,16 +1479,20 @@ impl<'a> FunctionCompiler<'a> {
                 (Some(a), Some(b)) => {
                     func.sig.params[a] == sig.params[b]
                         && named.locs[a] == placement.locs[b]
-                        && func.entry_block().is_some_and(|entry|
-                            func.resolve(args[b]) == func.resolve(func.block_params(entry)[a]))
+                        && func.entry_block().is_some_and(|entry| {
+                            func.resolve(args[b]) == func.resolve(func.block_params(entry)[a])
+                        })
                 }
                 _ => false,
             };
-            if !matching_result || func.sig.returns != sig.returns
+            if !matching_result
+                || func.sig.returns != sig.returns
                 || sysv::scalar_memory_result(&func.sig) != sysv::scalar_memory_result(sig)
             {
-                return Err(err(format!("`{}`: guaranteed tail return protocol mismatch or non-forwarded sret destination",
-                    func.display_inst(inst))));
+                return Err(err(format!(
+                    "`{}`: guaranteed tail return protocol mismatch or non-forwarded sret destination",
+                    func.display_inst(inst)
+                )));
             }
         }
 
@@ -1398,23 +1509,23 @@ impl<'a> FunctionCompiler<'a> {
             let (args, sig) = match func.inst_data(inst) {
                 InstData::Call { func: callee, args } => (args, &func.callee(*callee).sig),
                 InstData::CallIndirect { sig, args, .. }
-                | InstData::ReturnCallIndirect { sig, args, .. } => {
-                    (args, func.signature(*sig))
-                }
-                InstData::ReturnCall { func: callee, args } => {
-                    (args, &func.callee(*callee).sig)
-                }
+                | InstData::ReturnCallIndirect { sig, args, .. } => (args, func.signature(*sig)),
+                InstData::ReturnCall { func: callee, args } => (args, &func.callee(*callee).sig),
                 _ => continue,
             };
             let params = &sig.params;
             // Up to three scalars take at most six integer registers: they
             // need neither stack nor staging.
-            if !sysv::scalar_memory_result(sig) && args.len() <= 3
+            if !sysv::scalar_memory_result(sig)
+                && args.len() <= 3
                 && params.iter().all(|p| p.purpose == Purpose::Normal)
-                && !(sig.params.len()..args.len()).any(|i| args.abi(i).is_some_and(|p| p.purpose != Purpose::Normal))
+                && !(sig.params.len()..args.len())
+                    .any(|i| args.abi(i).is_some_and(|p| p.purpose != Purpose::Normal))
                 && !args.iter().any(|&v| {
-                    matches!(func.value_type(func.resolve(v)), Type::F80 | Type::Vector(keel_ir::VectorType::F64x1))
-                        || func.value_type(func.resolve(v)).bytes() == Some(32)
+                    matches!(
+                        func.value_type(func.resolve(v)),
+                        Type::F80 | Type::Vector(keel_ir::VectorType::F64x1)
+                    ) || func.value_type(func.resolve(v)).bytes() == Some(32)
                 })
             {
                 continue;
@@ -1425,7 +1536,9 @@ impl<'a> FunctionCompiler<'a> {
             for (i, loc) in placement.locs.iter().enumerate() {
                 match loc {
                     ArgLoc::InRegs(regs) => {
-                        halves += args.abi(i).or_else(|| params.get(i))
+                        halves += args
+                            .abi(i)
+                            .or_else(|| params.get(i))
                             .and_then(|p| p.layout())
                             .and_then(sysv::register_vector)
                             .map_or(regs.len(), |t| (t.bytes().unwrap() / 8) as usize)
@@ -1442,14 +1555,22 @@ impl<'a> FunctionCompiler<'a> {
             *offset += 8;
             *offset - 8
         };
-        let scalar_result = func.layout_insts().any(|(_, inst)| match func.inst_data(inst) {
-            InstData::Call { func: callee, .. } => sysv::scalar_memory_result(&func.callee(*callee).sig),
-            InstData::CallIndirect { sig, .. } => sysv::scalar_memory_result(func.signature(*sig)),
-            _ => false,
-        }).then(|| slot8(&mut offset));
-        let sret_save = needs_sret_save.then(|| slot8(&mut offset));
-        let sret_ptr = (named.locs.contains(&ArgLoc::SretMemory) || sysv::scalar_memory_result(&func.sig))
+        let scalar_result = func
+            .layout_insts()
+            .any(|(_, inst)| match func.inst_data(inst) {
+                InstData::Call { func: callee, .. } => {
+                    sysv::scalar_memory_result(&func.callee(*callee).sig)
+                }
+                InstData::CallIndirect { sig, .. } => {
+                    sysv::scalar_memory_result(func.signature(*sig))
+                }
+                _ => false,
+            })
             .then(|| slot8(&mut offset));
+        let sret_save = needs_sret_save.then(|| slot8(&mut offset));
+        let sret_ptr = (named.locs.contains(&ArgLoc::SretMemory)
+            || sysv::scalar_memory_result(&func.sig))
+        .then(|| slot8(&mut offset));
         let mut param_areas = Vec::new();
         for (loc, param) in named.locs.iter().zip(&func.sig.params) {
             param_areas.push(match loc {
@@ -1837,7 +1958,10 @@ impl<'a> FunctionCompiler<'a> {
 
     /// Appends the function's assembly to `out`; gives where its lexical
     /// scopes begin and end.
-    fn compile(mut self, out: &mut Output) -> Result<Vec<(String, Option<DebugScope>)>, CodegenError> {
+    fn compile(
+        mut self,
+        out: &mut Output,
+    ) -> Result<Vec<(String, Option<DebugScope>)>, CodegenError> {
         profiling::scope!("instruction-lowering");
         let func = self.func;
         let name = &func.name;
@@ -2276,7 +2400,10 @@ impl<'a> FunctionCompiler<'a> {
             let d = self.def_freg(result);
             let opcode = if matches!(
                 func.inst_data(inst),
-                InstData::Convert { op: ConvertOp::SwidenLow, .. }
+                InstData::Convert {
+                    op: ConvertOp::SwidenLow,
+                    ..
+                }
             ) {
                 Opcode::V2(keel_asm_ir::x86::V2Opcode::Pmovsxdq)
             } else {
@@ -2904,11 +3031,13 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Intrinsic { id, .. } if id.x86_owned_x87_stack().is_some() => {
                 self.native_owned_x87_stack(id)
             }
-            InstData::Intrinsic { id: Intrinsic::X86RflagsRead, .. } => {
-                self.native_rflags_read(result)
+            InstData::Intrinsic {
+                id: Intrinsic::X86RflagsRead,
+                ..
+            } => self.native_rflags_read(result),
+            InstData::Intrinsic { id, ref args } if id.x86_legacy_x87_image().is_some() => {
+                self.native_legacy_x87_image(id, args)
             }
-            InstData::Intrinsic { id, ref args }
-                if id.x86_legacy_x87_image().is_some() => self.native_legacy_x87_image(id, args),
             InstData::Intrinsic {
                 id: id @ (Intrinsic::X86Fxsave64 | Intrinsic::X86Fxrstor64),
                 ref args,
@@ -3220,6 +3349,8 @@ impl<'a> FunctionCompiler<'a> {
                     self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(4))]);
                     self.def_done(result, d);
                 }
+                // Lifetime markers constrain IR transformations but change no runtime state.
+                Intrinsic::LifetimeStart | Intrinsic::LifetimeEnd => {}
                 Intrinsic::StackRestore => {
                     let mark = self.use_reg(args[0], S0);
                     self.emit(Opcode::Mov, [asm_arg(r64(4)), asm_arg(r64(mark))]);
@@ -3946,7 +4077,10 @@ impl<'a> FunctionCompiler<'a> {
                         self.f80_push(value);
                     } else if sysv::scalar_memory_result(&func.sig) {
                         let r = self.use_freg(value, FS0);
-                        self.emit(Opcode::Movsd, [asm_arg(sized(memory(r64(RAX), 0), 64)), asm_arg(xmm(r))]);
+                        self.emit(
+                            Opcode::Movsd,
+                            [asm_arg(sized(memory(r64(RAX), 0), 64)), asm_arg(xmm(r))],
+                        );
                     } else {
                         self.emit_move(sysv::return_loc(ty), self.loc(value));
                     }
@@ -4020,7 +4154,10 @@ impl<'a> FunctionCompiler<'a> {
             }
             self.emit(
                 Opcode::Lea,
-                [asm_arg(r64(S1)), asm_arg(memory(r64(S0), i128::from(bytes)))],
+                [
+                    asm_arg(r64(S1)),
+                    asm_arg(memory(r64(S0), i128::from(bytes))),
+                ],
             );
             self.emit(
                 Opcode::Mov,
@@ -4638,7 +4775,11 @@ impl<'a> FunctionCompiler<'a> {
         let stack_bytes = placement.stack;
         for (i, (&arg, loc)) in args.iter().zip(placement.locs.drain(..)).enumerate() {
             let layout = match kind(i, arg) {
-                ArgKind::ByVal(layout) | ArgKind::Sret(layout) | ArgKind::MemoryByVal(layout) | ArgKind::ProducerByVal(layout, _) | ArgKind::ProducerSret(layout, _) => Some(layout),
+                ArgKind::ByVal(layout)
+                | ArgKind::Sret(layout)
+                | ArgKind::MemoryByVal(layout)
+                | ArgKind::ProducerByVal(layout, _)
+                | ArgKind::ProducerSret(layout, _) => Some(layout),
                 ArgKind::Value(_) | ArgKind::StackValue(_) => None,
             };
             match loc {
@@ -4648,7 +4789,8 @@ impl<'a> FunctionCompiler<'a> {
                         moves.push((high.expect("an i128 in two registers"), self.hi(arg)));
                     }
                     // Only an extension needs a register's argument again.
-                    if let (Some(param), Loc::Reg(r)) = (args.abi(i).or_else(|| sig.params.get(i)), lo)
+                    if let (Some(param), Loc::Reg(r)) =
+                        (args.abi(i).or_else(|| sig.params.get(i)), lo)
                         && param.ext != ArgExt::None
                     {
                         extend.push((r, param.ty, param.ext));
@@ -4742,18 +4884,28 @@ impl<'a> FunctionCompiler<'a> {
             // it here preserves RCX/RDX arguments and R10. The two areas are
             // disjoint, so this is safe for arbitrary incoming-source overlap.
             for offset in (0..stack_bytes).step_by(8) {
-                self.emit(Opcode::Mov, [asm_arg(r64(RAX)),
-                    asm_arg(sized(memory(r64(4), i128::from(offset)), 64))]);
-                self.emit(Opcode::Mov, [
-                    asm_arg(sized(memory(r64(5), 16 + i128::from(offset)), 64)),
-                    asm_arg(r64(RAX))]);
+                self.emit(
+                    Opcode::Mov,
+                    [
+                        asm_arg(r64(RAX)),
+                        asm_arg(sized(memory(r64(4), i128::from(offset)), 64)),
+                    ],
+                );
+                self.emit(
+                    Opcode::Mov,
+                    [
+                        asm_arg(sized(memory(r64(5), 16 + i128::from(offset)), 64)),
+                        asm_arg(r64(RAX)),
+                    ],
+                );
             }
         }
         if sysv::scalar_memory_result(sig) {
             if tail {
                 // A guaranteed GNU scalar tail forwards the original caller's
                 // result object. A local temporary would die with this frame.
-                let saved = self.frame(self.sret_ptr.expect("matching incoming GNU result pointer"));
+                let saved =
+                    self.frame(self.sret_ptr.expect("matching incoming GNU result pointer"));
                 self.emit(Opcode::Mov, [asm_arg(r64(RDI)), asm_arg(sized(saved, 64))]);
             } else {
                 let area = self.frame(self.scalar_result.expect("planned GNU scalar result"));
@@ -4778,7 +4930,9 @@ impl<'a> FunctionCompiler<'a> {
     /// `sret` address.
     fn call_result(&mut self, result: Option<Value>, sret: Option<AggregateResult<'_>>) {
         if matches!(sret, Some(AggregateResult::ScalarMemory)) {
-            if let Some(value) = result && let Some(loc) = self.defined(value) {
+            if let Some(value) = result
+                && let Some(loc) = self.defined(value)
+            {
                 let area = self.frame(self.scalar_result.expect("planned GNU scalar result"));
                 self.emit(Opcode::Movsd, [asm_arg(xmm(FS0)), asm_arg(sized(area, 64))]);
                 self.emit_move(loc, Loc::FReg(FS0));
@@ -6717,15 +6871,27 @@ fn param_kinds(sig: &keel_ir::Signature) -> Vec<ArgKind<'_>> {
 
 /// The convention's view of a call's arguments: the parameters `params`,
 /// then any variadic arguments by their types.
-fn arg_kinds<'s>(func: &Function, sig: &'s keel_ir::Signature, args: &'s keel_ir::CallArgs) -> Vec<ArgKind<'s>> {
+fn arg_kinds<'s>(
+    func: &Function,
+    sig: &'s keel_ir::Signature,
+    args: &'s keel_ir::CallArgs,
+) -> Vec<ArgKind<'s>> {
     (args.iter().enumerate())
         .map(|(i, &arg)| arg_kind(func, sig, args, i, arg))
         .collect()
 }
 
 /// How argument `i`, `arg`, of a call with `params` crosses it.
-fn arg_kind<'s>(func: &Function, sig: &'s keel_ir::Signature, args: &'s keel_ir::CallArgs, i: usize, arg: Value) -> ArgKind<'s> {
-    if sig.x86_vector_abi.is_some() && func.value_type(func.resolve(arg)) == Type::Vector(keel_ir::VectorType::F64x1) {
+fn arg_kind<'s>(
+    func: &Function,
+    sig: &'s keel_ir::Signature,
+    args: &'s keel_ir::CallArgs,
+    i: usize,
+    arg: Value,
+) -> ArgKind<'s> {
+    if sig.x86_vector_abi.is_some()
+        && func.value_type(func.resolve(arg)) == Type::Vector(keel_ir::VectorType::F64x1)
+    {
         return ArgKind::StackValue(Type::Vector(keel_ir::VectorType::F64x1));
     }
     if i >= sig.params.len() {
@@ -7013,7 +7179,11 @@ mod feature_guard_tests {
         let module = keel_ir::parse("func @f() {\nblock0:\n return\n}").unwrap();
         let symbols = crate::symbols::Symbols::new(&module);
         for (features, source, missing) in [
-            (Features::for_level(CpuLevel::V3), "pclmulqdq xmm0,xmm1,255", "pclmulqdq"),
+            (
+                Features::for_level(CpuLevel::V3),
+                "pclmulqdq xmm0,xmm1,255",
+                "pclmulqdq",
+            ),
             (Features::for_level(CpuLevel::V3), "aesenc xmm0,xmm1", "aes"),
             (
                 Features::for_level(CpuLevel::V1),

@@ -73,6 +73,92 @@ fn signature(s: &Signature) -> ExportResult<(String, Vec<String>)> {
     };
     Ok((ret, s.params.iter().map(abi).collect::<ExportResult<_>>()?))
 }
+fn pointer_attrs(p: &PointerContract) -> String {
+    let mut attrs = String::new();
+    if p.align > 1 || p.nonnull || p.readable_bytes != 0 {
+        attrs.push_str(" noundef");
+    }
+    if p.align > 1 {
+        write!(attrs, " align {}", p.align).unwrap();
+    }
+    if p.nonnull {
+        attrs.push_str(" nonnull");
+    }
+    if p.readable_bytes != 0 {
+        write!(
+            attrs,
+            " {}({})",
+            if p.nonnull {
+                "dereferenceable"
+            } else {
+                "dereferenceable_or_null"
+            },
+            p.readable_bytes
+        )
+        .unwrap();
+    }
+    if p.no_capture {
+        attrs.push_str(" captures(none)");
+    }
+    attrs
+}
+fn signature_contract(
+    s: &Signature,
+    contract: &CallContract,
+) -> ExportResult<(String, Vec<String>)> {
+    let (mut ret, mut params) = signature(s)?;
+    for (index, pointer) in &contract.parameters {
+        params[*index as usize].push_str(&pointer_attrs(pointer));
+    }
+    if let Some((_, pointer)) = contract.returns.first() {
+        ret = format!("{} {ret}", pointer_attrs(pointer).trim());
+    }
+    Ok((ret, params))
+}
+fn contract_attrs(contract: &CallContract) -> String {
+    let mut attrs = String::new();
+    if contract.memory != MemorySummary::default() {
+        fn name(access: MemoryAccess) -> &'static str {
+            match access {
+                MemoryAccess::None => "none",
+                MemoryAccess::Read => "read",
+                MemoryAccess::Write => "write",
+                MemoryAccess::ReadWrite => "readwrite",
+            }
+        }
+        // LLVM 21 lacks target_mem locations. A default covering both Keel's other
+        // and inaccessible regions avoids constraining unrepresentable target state.
+        let other = contract.memory.other;
+        let hidden = contract.memory.inaccessible;
+        let default = match (
+            other.may_read() || hidden.may_read(),
+            other.may_write() || hidden.may_write(),
+        ) {
+            (false, false) => MemoryAccess::None,
+            (true, false) => MemoryAccess::Read,
+            (false, true) => MemoryAccess::Write,
+            (true, true) => MemoryAccess::ReadWrite,
+        };
+        write!(
+            attrs,
+            " memory({}, argmem: {}, inaccessiblemem: {})",
+            name(default),
+            name(contract.memory.argmem),
+            name(hidden)
+        )
+        .unwrap();
+    }
+    for (set, name) in [
+        (contract.nofree, "nofree"),
+        (contract.nosync, "nosync"),
+        (contract.nocallback, "nocallback"),
+    ] {
+        if set {
+            write!(attrs, " {name}").unwrap();
+        }
+    }
+    attrs
+}
 fn attrs(a: &FunctionAttrs) -> String {
     // Ordinary Keel calls have no name-based libc contract. Declaration-level
     // nobuiltin also prevents LLVM21 InferFunctionAttrs from inferring one;
@@ -93,6 +179,7 @@ fn attrs(a: &FunctionAttrs) -> String {
     if let Some(align) = a.align {
         attributes.push_str(&format!(" align {align}"));
     }
+    attributes.push_str(&contract_attrs(&a.contract));
     attributes
 }
 
@@ -259,10 +346,28 @@ pub fn export(module: &Module, target: TargetProfile) -> ExportResult<String> {
         .values()
         .filter(|d| !module.functions.iter().any(|f| f.name == d.name))
     {
+        if matches!(
+            d.name.as_str(),
+            "llvm.lifetime.start.p0" | "llvm.lifetime.end.p0"
+        ) && d.sig == Signature::new(&[Type::Ptr], &[])
+            && !module.functions.iter().any(|f| {
+                f.layout_insts().any(|(_, inst)| match f.inst_data(inst) {
+                    InstData::Call { func, .. }
+                    | InstData::Invoke { func, .. }
+                    | InstData::ReturnCall { func, .. } => f.callee(*func).name == d.name,
+                    InstData::SymbolAddr { symbol } => f.symbol_name(*symbol) == d.name,
+                    _ => false,
+                })
+            })
+        {
+            // The imported LLVM23 prototype has no ordinary machine symbol.
+            // Lifetime intrinsics below declare the LLVM21-compatible signature.
+            continue;
+        }
         if d.name.starts_with("llvm.") {
             return Err("user symbols in LLVM's intrinsic namespace are unsupported".into());
         }
-        let (r, p) = signature(&d.sig)?;
+        let (r, p) = signature_contract(&d.sig, &d.attrs.contract)?;
         writeln!(
             out,
             "declare {r} {}({}){}",
@@ -383,7 +488,12 @@ fn emit_function(
     {
         return Err("exception handling/debug information is unsupported".into());
     }
-    let (r, p) = signature(&f.sig)?;
+    let (r, mut p) = signature_contract(&f.sig, &f.attrs.contract)?;
+    for &index in &f.restrict_params {
+        // The definition-only modified-object rule matches LLVM parameter noalias.
+        // It does not become a return/declaration/call-site allocation promise.
+        p[index as usize].push_str(" noalias");
+    }
     let entry = f.entry_block().ok_or("missing entry block")?;
     let params = p
         .iter()
@@ -691,7 +801,8 @@ impl Emitter<'_> {
             )),
             InstData::Call { func, args } => {
                 let d = f.callee(*func);
-                let (ret, params) = signature(&d.sig)?;
+                let contract = f.call_contract(i).cloned().unwrap_or_default();
+                let (ret, params) = signature_contract(&d.sig, &contract)?;
                 let args = args
                     .iter()
                     .zip(params)
@@ -699,13 +810,34 @@ impl Emitter<'_> {
                     .collect::<Vec<_>>()
                     .join(", ");
                 self.line(format!(
-                    "{}call {ret} {}({args}) nobuiltin",
+                    "{}call {ret} {}({args}) nobuiltin{}",
                     if results.is_empty() {
                         String::new()
                     } else {
                         format!("{dst} = ")
                     },
-                    symbol(&d.name)
+                    symbol(&d.name),
+                    contract_attrs(&contract)
+                ));
+            }
+            InstData::CallIndirect { sig, callee, args } => {
+                let contract = f.call_contract(i).cloned().unwrap_or_default();
+                let (ret, params) = signature_contract(f.signature(*sig), &contract)?;
+                let args = args
+                    .iter()
+                    .zip(params)
+                    .map(|(v, t)| format!("{t} {}", self.v(*v)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                self.line(format!(
+                    "{}call {ret} {}({args}) nobuiltin{}",
+                    if results.is_empty() {
+                        String::new()
+                    } else {
+                        format!("{dst} = ")
+                    },
+                    self.v(*callee),
+                    contract_attrs(&contract)
                 ));
             }
             InstData::Jump { .. } => self.line(format!("br label %{}", edge_name(i, 0))),
@@ -788,6 +920,15 @@ impl Emitter<'_> {
             .map(|v| self.typed(*v))
             .collect::<ExportResult<Vec<_>>>()?;
         match id {
+            Intrinsic::LifetimeStart | Intrinsic::LifetimeEnd => {
+                let name = if id == Intrinsic::LifetimeStart {
+                    "llvm.lifetime.start.p0"
+                } else {
+                    "llvm.lifetime.end.p0"
+                };
+                self.intrinsic(name, "void", "i64 immarg, ptr captures(none)");
+                self.line(format!("call void @{name}(i64 -1, {})", a[0]));
+            }
             Intrinsic::Memcmp => {
                 self.line(format!(
                     "{dst} = call i32 {}({})",

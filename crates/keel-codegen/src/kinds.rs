@@ -28,13 +28,16 @@ pub(crate) struct InstKinds {
 }
 
 impl InstKinds {
-    /// The kinds, and in the same walk the raw IR use counts of
+    /// The kinds, and in the same walk the machine-relevant IR use counts of
     /// [`crate::fold::use_counts`].
     pub(crate) fn with_uses(func: &Function) -> (Self, Vec<u8>) {
         let mut kinds = Self::default();
         let mut uses = vec![0u8; func.num_values()];
         for (_, inst) in func.layout_insts() {
             let data = func.inst_data(inst);
+            if data.is_lifetime_marker() {
+                continue;
+            }
             data.for_each_operand(|v| {
                 let count = &mut uses[func.resolve(v).index()];
                 *count = (*count + 1).min(2);
@@ -46,7 +49,9 @@ impl InstKinds {
                 InstData::ReturnCall { .. } | InstData::ReturnCallIndirect { .. } => {
                     kinds.return_call = true
                 }
-                InstData::Intrinsic { .. } | InstData::X86RflagsRegion { .. } => kinds.intrinsic = true,
+                InstData::Intrinsic { .. } | InstData::X86RflagsRegion { .. } => {
+                    kinds.intrinsic = true
+                }
                 InstData::SymbolAddr { .. } => kinds.symbol_addr = true,
                 InstData::Binary {
                     op: BinaryOp::Umulhi | BinaryOp::Smulhi,

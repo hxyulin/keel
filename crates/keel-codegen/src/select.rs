@@ -648,7 +648,7 @@ impl Selection {
         self.covered.get(inst.index()).copied().unwrap_or(false)
     }
     pub fn operands(&self, func: &Function, inst: Inst) -> Vec<Value> {
-        if self.covered(inst) {
+        if self.covered(inst) || func.inst_data(inst).is_lifetime_marker() {
             return vec![];
         }
         if let Some(args) = self.allocation_operands.get(&inst) {
@@ -663,7 +663,7 @@ impl Selection {
         args
     }
     pub fn for_each_operand(&self, func: &Function, inst: Inst, mut f: impl FnMut(Value)) {
-        if self.covered(inst) {
+        if self.covered(inst) || func.inst_data(inst).is_lifetime_marker() {
             return;
         }
         if let Some(args) = self.allocation_operands.get(&inst) {

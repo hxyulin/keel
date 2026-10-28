@@ -147,10 +147,16 @@ pub fn verify_module_with_layout(
             });
         }
     }
+    for decl in &module.decls {
+        if let Err(message) = decl.attrs.contract.validate(&decl.sig) {
+            errors.push(VerifierError {
+                location: format!("@{}", decl.name),
+                message,
+            });
+        }
+    }
     for data in &module.data {
-        if (data.retain || data.section.is_some())
-            && (data.weak_odr || data.init.is_none())
-        {
+        if (data.retain || data.section.is_some()) && (data.weak_odr || data.init.is_none()) {
             errors.push(VerifierError {
                 location: format!("@{}", data.name),
                 message: "section/retain requires a non-COMDAT definition".into(),
@@ -665,7 +671,13 @@ fn verify_with(func: &Function, scratch: &mut Scratch) -> Result<(), Vec<Verifie
     if let Err(message) = func.attrs.validate(func.sig.returns_twice) {
         v.error("attributes".into(), message.into());
     }
+    if let Err(message) = func.attrs.contract.validate(&func.sig) {
+        v.error("contract".into(), message);
+    }
     for (_, decl) in func.callees() {
+        if let Err(message) = decl.attrs.contract.validate(&decl.sig) {
+            v.error(format!("callee @{}", decl.name), message);
+        }
         if let Err(message) = decl.attrs.validate(decl.sig.returns_twice) {
             v.error(format!("callee @{}", decl.name), message.into());
         }
@@ -980,6 +992,19 @@ impl Verifier<'_> {
 
     fn check_types(&mut self, inst: Inst) {
         let func = self.func;
+        if let Some(contract) = func.call_contract(inst) {
+            match func.call_signature(inst) {
+                Some(sig) => {
+                    if let Err(message) = contract.validate(sig) {
+                        self.inst_error(inst, message);
+                    }
+                }
+                None => self.inst_error(
+                    inst,
+                    "call-site contract requires a call instruction".into(),
+                ),
+            }
+        }
         let ty = |v: Value| func.value_type(func.resolve(v));
         let mut expected = 0;
         let results = func.inst_results(inst);
@@ -1262,42 +1287,71 @@ impl Verifier<'_> {
                     self.inst_error(inst, format!("load address must be ptr, got {}", ty(*addr)));
                 }
             }
-            InstData::AggregateVaArg { layout, list, home, x86_vector_abi } => {
+            InstData::AggregateVaArg {
+                layout,
+                list,
+                home,
+                x86_vector_abi,
+            } => {
                 let Some(layout_size) = layout.checked_size() else {
                     self.inst_error(inst, "aggregate va_arg layout size overflows u64".into());
                     return;
                 };
-                let slot = func.stack_slots().nth(home.index()).expect("checked slot reference").1;
+                let slot = func
+                    .stack_slots()
+                    .nth(home.index())
+                    .expect("checked slot reference")
+                    .1;
                 if u64::from(slot.size) < layout_size || u64::from(slot.align) < layout.align() {
-                    self.inst_error(inst, "aggregate va_arg home is too small or under-aligned".into());
+                    self.inst_error(
+                        inst,
+                        "aggregate va_arg home is too small or under-aligned".into(),
+                    );
                 }
                 if let Some((base, offset)) = local_aggregate_address(func, *list) {
-                    if base == *home && offset < layout_size as i64
+                    if base == *home
+                        && offset < layout_size as i64
                         && offset.checked_add(24).is_some_and(|end| end > 0)
                     {
-                        self.inst_error(inst, "aggregate va_arg home overlaps its va_list object".into());
+                        self.inst_error(
+                            inst,
+                            "aggregate va_arg home overlaps its va_list object".into(),
+                        );
                     }
                 }
                 if ty(*list) != Type::Ptr || (layout_size == 0 && x86_vector_abi.is_none()) {
-                    self.inst_error(inst, "aggregate va_arg requires a ptr list and nonempty layout".into());
+                    self.inst_error(
+                        inst,
+                        "aggregate va_arg requires a ptr list and nonempty layout".into(),
+                    );
                 }
                 if let Some(abi) = x86_vector_abi {
-                    if !layout_contains_f64x1(layout) || !func.has_x86_va_arg_provenance(inst,*abi) {
+                    if !layout_contains_f64x1(layout) || !func.has_x86_va_arg_provenance(inst, *abi)
+                    {
                         self.inst_error(inst, "tagged aggregate va_arg requires an f64x1 layout and matching local current-signature provenance".into());
                     }
                 }
             }
-            InstData::VaArg { ty: t, list, x86_vector_abi } => {
+            InstData::VaArg {
+                ty: t,
+                list,
+                x86_vector_abi,
+            } => {
                 if let Some(abi) = x86_vector_abi {
                     if *t != Type::Vector(crate::VectorType::F64x1) {
-                        self.inst_error(inst, "x86 va_arg producer tag is only supported for f64x1".into());
+                        self.inst_error(
+                            inst,
+                            "x86 va_arg producer tag is only supported for f64x1".into(),
+                        );
                     }
                     if !func.has_x86_va_arg_provenance(inst, *abi) {
                         self.inst_error(inst, "tagged va_arg requires a matching variadic C signature and uninterrupted local va_start provenance".into());
                     }
                 }
-                if !matches!(t, Type::I32 | Type::I64 | Type::I128 | Type::Ptr | Type::F64 | Type::F80)
-                    && !t.is_vector()
+                if !matches!(
+                    t,
+                    Type::I32 | Type::I64 | Type::I128 | Type::Ptr | Type::F64 | Type::F80
+                ) && !t.is_vector()
                 {
                     self.inst_error(
                         inst,
@@ -1407,16 +1461,40 @@ impl Verifier<'_> {
             }
             InstData::SymbolAddr { .. } => {}
             InstData::Intrinsic { id, args } => {
+                if matches!(id, Intrinsic::LifetimeStart | Intrinsic::LifetimeEnd) {
+                    let fixed_slot =
+                        args.first()
+                            .is_some_and(|&arg| match func.value_def(func.resolve(arg)) {
+                                ValueDef::Result(owner, 0) => match func.inst_data(owner) {
+                                    InstData::StackAddr { slot } => {
+                                        slot.index() < func.num_stack_slots()
+                                    }
+                                    _ => false,
+                                },
+                                _ => false,
+                            });
+                    if !fixed_slot {
+                        self.inst_error(
+                            inst,
+                            "lifetime marker requires a direct fixed stack slot address".into(),
+                        );
+                    }
+                }
                 if id.x86_port_io().is_some_and(|(_, _, immediate)| immediate) {
-                    let port = args.first().and_then(|&v| match func.value_def(func.resolve(v)) {
-                        ValueDef::Result(i, _) => match func.inst_data(i) {
-                            InstData::Iconst { ty: Type::I16, imm } => Some(*imm),
+                    let port = args
+                        .first()
+                        .and_then(|&v| match func.value_def(func.resolve(v)) {
+                            ValueDef::Result(i, _) => match func.inst_data(i) {
+                                InstData::Iconst { ty: Type::I16, imm } => Some(*imm),
+                                _ => None,
+                            },
                             _ => None,
-                        },
-                        _ => None,
-                    });
+                        });
                     if !port.is_some_and(|n| (0..=255).contains(&n)) {
-                        self.inst_error(inst, "port I/O immediate requires iconst.i16 in0..=255".into());
+                        self.inst_error(
+                            inst,
+                            "port I/O immediate requires iconst.i16 in0..=255".into(),
+                        );
                     }
                 }
                 if *id == Intrinsic::VaStart && !func.sig.variadic {
@@ -1628,9 +1706,18 @@ impl Verifier<'_> {
                 }
             }
             InstData::X86RflagsRegion { plan, args } => {
-                if let Err(e) = crate::rflags_region::analyze(plan) { self.inst_error(inst, e.to_string()); }
-                if args.len() != plan.captures.len() || args.iter().any(|&v| func.value_type(func.resolve(v)) != Type::I64) {
-                    self.inst_error(inst, "FLAGS region capture arity/types must match exact I64 images".into());
+                if let Err(e) = crate::rflags_region::analyze(plan) {
+                    self.inst_error(inst, e.to_string());
+                }
+                if args.len() != plan.captures.len()
+                    || args
+                        .iter()
+                        .any(|&v| func.value_type(func.resolve(v)) != Type::I64)
+                {
+                    self.inst_error(
+                        inst,
+                        "FLAGS region capture arity/types must match exact I64 images".into(),
+                    );
                 }
             }
             InstData::InlineAsm { asm, args } => self.check_asm(inst, asm, args),
@@ -1926,25 +2013,43 @@ impl Verifier<'_> {
 
     fn call_abi(&mut self, inst: Inst, sig: &Signature, args: &crate::CallArgs) {
         for (i, &v) in args.iter().enumerate() {
-            let Some(p) = args.abi(i) else { continue; };
+            let Some(p) = args.abi(i) else {
+                continue;
+            };
             if p.ty != self.func.value_type(self.func.resolve(v)) {
                 self.inst_error(inst, format!("call operand {i} ABI type mismatch"));
             }
             if let Some(named) = sig.params.get(i) {
-                if named != p { self.inst_error(inst, format!("call operand {i} ABI differs from named parameter")); }
+                if named != p {
+                    self.inst_error(
+                        inst,
+                        format!("call operand {i} ABI differs from named parameter"),
+                    );
+                }
             } else {
                 if !sig.variadic || matches!(p.purpose, Purpose::Sret(_)) {
-                    self.inst_error(inst, "unnamed ABI descriptor requires variadic operand and cannot be sret".into());
+                    self.inst_error(
+                        inst,
+                        "unnamed ABI descriptor requires variadic operand and cannot be sret"
+                            .into(),
+                    );
                 }
-                if p.ext != crate::ArgExt::None || (p.purpose != Purpose::Normal && p.ty != Type::Ptr) {
+                if p.ext != crate::ArgExt::None
+                    || (p.purpose != Purpose::Normal && p.ty != Type::Ptr)
+                {
                     self.inst_error(inst, "invalid unnamed call operand ABI".into());
                 }
             }
             if let Some(l) = p.layout() {
                 match l.checked_size() {
-                    None => self.inst_error(inst, "call operand aggregate layout size overflows u64".into()),
-                    Some(0) if !(sig.x86_vector_abi.is_some() && layout_contains_f64x1(l)) => self.inst_error(inst, "invalid call operand aggregate layout".into()),
-                    _ => {},
+                    None => self.inst_error(
+                        inst,
+                        "call operand aggregate layout size overflows u64".into(),
+                    ),
+                    Some(0) if !(sig.x86_vector_abi.is_some() && layout_contains_f64x1(l)) => {
+                        self.inst_error(inst, "invalid call operand aggregate layout".into())
+                    }
+                    _ => {}
                 }
             }
         }
@@ -2084,8 +2189,10 @@ fn check_signature(sig: &Signature) -> Vec<String> {
             }
             match layout.checked_size() {
                 None => errors.push(format!("`{param}`: aggregate layout size overflows u64")),
-                Some(0) if !(sig.x86_vector_abi.is_some() && layout_contains_f64x1(layout)) => errors.push(format!("`{param}`: the struct is empty")),
-                _ => {},
+                Some(0) if !(sig.x86_vector_abi.is_some() && layout_contains_f64x1(layout)) => {
+                    errors.push(format!("`{param}`: the struct is empty"))
+                }
+                _ => {}
             }
         }
     }
@@ -2111,12 +2218,23 @@ fn check_signature(sig: &Signature) -> Vec<String> {
 fn local_aggregate_address(func: &Function, mut value: Value) -> Option<(crate::StackSlot, i64)> {
     let mut offset = 0i64;
     for _ in 0..32 {
-        let ValueDef::Result(inst, _) = func.value_def(func.resolve(value)) else { return None; };
+        let ValueDef::Result(inst, _) = func.value_def(func.resolve(value)) else {
+            return None;
+        };
         match func.inst_data(inst) {
-            InstData::StackAddr { slot } | InstData::AggregateVaArg { home: slot, .. } => return Some((*slot, offset)),
-            InstData::Binary { op: BinaryOp::Ptradd, args } => {
-                let ValueDef::Result(constant, _) = func.value_def(func.resolve(args[1])) else { return None; };
-                let InstData::Iconst { imm, .. } = func.inst_data(constant) else { return None; };
+            InstData::StackAddr { slot } | InstData::AggregateVaArg { home: slot, .. } => {
+                return Some((*slot, offset));
+            }
+            InstData::Binary {
+                op: BinaryOp::Ptradd,
+                args,
+            } => {
+                let ValueDef::Result(constant, _) = func.value_def(func.resolve(args[1])) else {
+                    return None;
+                };
+                let InstData::Iconst { imm, .. } = func.inst_data(constant) else {
+                    return None;
+                };
                 offset = offset.checked_add(*imm)?;
                 value = args[0];
             }

@@ -472,6 +472,7 @@ struct ParsedBlock {
 }
 
 struct ParsedInst {
+    contract: Option<crate::CallContract>,
     results: Vec<Value>,
     data: InstData,
     loc: Loc,
@@ -800,7 +801,16 @@ impl Parser {
 
     fn function_attrs(&mut self) -> Result<crate::FunctionAttrs, ParseError> {
         let mut attrs = crate::FunctionAttrs::default();
+        let mut contract_seen = false;
         loop {
+            if self.eat(&Tok::Ident("contract".into())) {
+                if contract_seen {
+                    return Err(self.unexpected("one function contract"));
+                }
+                contract_seen = true;
+                attrs.contract = self.call_contract()?;
+                continue;
+            }
             if self.eat(&Tok::Ident("align".into())) {
                 if attrs.align.is_some() {
                     return Err(self.unexpected("one function alignment attribute"));
@@ -901,6 +911,105 @@ impl Parser {
             }
         }
         Ok(attrs)
+    }
+
+    /// Contract contents after the `contract` keyword.
+    fn call_contract(&mut self) -> Result<crate::CallContract, ParseError> {
+        let mut contract = crate::CallContract::default();
+        let mut seen = std::collections::BTreeSet::new();
+        self.expect(Tok::Punct('('))?;
+        if self.eat(&Tok::Punct(')')) {
+            return Ok(contract);
+        }
+        loop {
+            let (property, loc) = self.ident("a contract property")?;
+            if !matches!(property.as_str(), "param" | "result") && !seen.insert(property.clone()) {
+                return Err(error(loc, "duplicate contract property".into()));
+            }
+            match property.as_str() {
+                "nofree" => contract.nofree = true,
+                "nosync" => contract.nosync = true,
+                "nocallback" => contract.nocallback = true,
+                "preserves_access" => contract.preserves_access = true,
+                "memory" => {
+                    self.expect(Tok::Punct('('))?;
+                    let mut regions = std::collections::BTreeSet::new();
+                    loop {
+                        let (region, loc) = self.ident("a memory region")?;
+                        if !regions.insert(region.clone()) {
+                            return Err(error(loc, "duplicate memory region".into()));
+                        }
+                        self.expect(Tok::Punct(':'))?;
+                        let (access, loc) = self.ident("none, read, write or readwrite")?;
+                        let access = match access.as_str() {
+                            "none" => crate::MemoryAccess::None,
+                            "read" => crate::MemoryAccess::Read,
+                            "write" => crate::MemoryAccess::Write,
+                            "readwrite" => crate::MemoryAccess::ReadWrite,
+                            _ => return Err(error(loc, "invalid memory access set".into())),
+                        };
+                        match region.as_str() {
+                            "argmem" => contract.memory.argmem = access,
+                            "other" => contract.memory.other = access,
+                            "inaccessible" => contract.memory.inaccessible = access,
+                            _ => return Err(error(loc, "invalid memory region".into())),
+                        }
+                        if self.eat(&Tok::Punct(')')) {
+                            break;
+                        }
+                        self.expect(Tok::Punct(','))?;
+                    }
+                }
+                "param" | "result" => {
+                    self.expect(Tok::Punct('('))?;
+                    let index = self.u32("a pointer contract position")?;
+                    let mut pointer = crate::PointerContract::default();
+                    let mut properties = std::collections::BTreeSet::new();
+                    while !self.eat(&Tok::Punct(')')) {
+                        self.expect(Tok::Punct(','))?;
+                        let (name, loc) = self.ident("a pointer contract property")?;
+                        if !properties.insert(name.clone()) {
+                            return Err(error(loc, "duplicate pointer contract property".into()));
+                        }
+                        match name.as_str() {
+                            "align" => pointer.align = self.u32("a pointer alignment")?,
+                            "nonnull" => pointer.nonnull = true,
+                            "nocapture" => pointer.no_capture = true,
+                            "readable" => {
+                                pointer.readable_bytes = u64::try_from(
+                                    self.int("a readable byte extent")?,
+                                )
+                                .map_err(|_| {
+                                    error(
+                                        loc,
+                                        "readable byte extent must be nonnegative and fit i64"
+                                            .into(),
+                                    )
+                                })?
+                            }
+                            _ => {
+                                return Err(error(loc, "unknown pointer contract property".into()));
+                            }
+                        }
+                    }
+                    let positions = if property == "param" {
+                        &mut contract.parameters
+                    } else {
+                        &mut contract.returns
+                    };
+                    if positions.iter().any(|&(i, _)| i == index) {
+                        return Err(error(loc, "duplicate pointer contract position".into()));
+                    }
+                    positions.push((index, pointer));
+                }
+                _ => return Err(error(loc, "unknown contract property".into())),
+            }
+            if self.eat(&Tok::Punct(')')) {
+                break;
+            }
+            self.expect(Tok::Punct(','))?;
+        }
+        Ok(contract)
     }
 
     /// Everything after `func`.
@@ -1339,7 +1448,10 @@ impl Parser {
             let next_is_header = matches!(self.peek(), Tok::Ident(_))
                 && (matches!(self.tokens[self.pos + 1].0, Tok::Punct(':'))
                     || matches!(self.tokens[self.pos + 1].0, Tok::Punct('('))
-                        && self.tokens.get(self.pos + 3).is_some_and(|t| t.0 == Tok::Punct(':')));
+                        && self
+                            .tokens
+                            .get(self.pos + 3)
+                            .is_some_and(|t| t.0 == Tok::Punct(':')));
             if next_is_header || self.at(&Tok::Punct('}')) || self.at(&Tok::Eof) {
                 break;
             }
@@ -1520,18 +1632,21 @@ impl Parser {
                         let sign_exp = u16::try_from(self.int("16-bit sign/exponent")?)
                             .map_err(|_| error(loc, "f80 sign/exponent is out of range".into()))?;
                         self.expect(Tok::Punct(','))?;
-                        InstData::F80const { sign_exp, significand: self.int("64-bit significand bits")? as u64 }
+                        InstData::F80const {
+                            sign_exp,
+                            significand: self.int("64-bit significand bits")? as u64,
+                        }
                     } else {
-                    if !matches!(ty, Type::F32 | Type::F64) {
-                        return Err(error(
-                            op_loc,
-                            format!("`fconst` makes f32 or f64, not {ty}"),
-                        ));
-                    }
-                    InstData::Fconst {
-                        ty,
-                        bits: self.float_bits(ty)?,
-                    }
+                        if !matches!(ty, Type::F32 | Type::F64) {
+                            return Err(error(
+                                op_loc,
+                                format!("`fconst` makes f32 or f64, not {ty}"),
+                            ));
+                        }
+                        InstData::Fconst {
+                            ty,
+                            bits: self.float_bits(ty)?,
+                        }
                     }
                 }
                 "call" | "return_call" => {
@@ -1671,12 +1786,20 @@ impl Parser {
                 "x86_rflags_region" => {
                     no_suffix()?;
                     let (contract, loc) = self.ident("terminal external monitor contract")?;
-                    if contract != "terminal" { return Err(error(loc, "FLAGS region requires explicit terminal contract".into())); }
+                    if contract != "terminal" {
+                        return Err(error(
+                            loc,
+                            "FLAGS region requires explicit terminal contract".into(),
+                        ));
+                    }
                     let text = self.string("a bounded FLAGS raw program")?;
                     let args = self.arg_list(names)?;
                     let plan = crate::rflags_region::Plan::parse(&text, args.len(), results.len())
                         .map_err(|message| error(op_loc, message))?;
-                    InstData::X86RflagsRegion { plan: Box::new(plan), args }
+                    InstData::X86RflagsRegion {
+                        plan: Box::new(plan),
+                        args,
+                    }
                 }
                 "asm" => {
                     no_suffix()?;
@@ -1781,19 +1904,31 @@ impl Parser {
                     let list = self.value(names)?;
                     self.expect(Tok::Punct(','))?;
                     let (slot, loc) = self.ident("an aggregate home stack slot")?;
-                    let home = *names.slots.get(&slot).ok_or_else(|| error(loc, format!("unknown stack slot `{slot}`")))?;
+                    let home = *names
+                        .slots
+                        .get(&slot)
+                        .ok_or_else(|| error(loc, format!("unknown stack slot `{slot}`")))?;
                     let x86_vector_abi = if self.eat(&Tok::Ident("x86_vector_abi".into())) {
                         self.expect(Tok::Punct('('))?;
                         let (name, loc) = self.ident("an x86 vector ABI")?;
                         let abi = match name.as_str() {
                             "gnu" => crate::X86VectorAbi::Gnu,
                             "clang" => crate::X86VectorAbi::Clang,
-                            _ => return Err(error(loc, format!("unknown x86 vector ABI `{name}`"))),
+                            _ => {
+                                return Err(error(loc, format!("unknown x86 vector ABI `{name}`")));
+                            }
                         };
                         self.expect(Tok::Punct(')'))?;
                         Some(abi)
-                    } else { None };
-                    InstData::AggregateVaArg { layout, list, home, x86_vector_abi }
+                    } else {
+                        None
+                    };
+                    InstData::AggregateVaArg {
+                        layout,
+                        list,
+                        home,
+                        x86_vector_abi,
+                    }
                 }
                 "va_arg" => {
                     let ty = suffix_type("type")?;
@@ -1805,12 +1940,18 @@ impl Parser {
                         x86_vector_abi = Some(match name.as_str() {
                             "gnu" => crate::X86VectorAbi::Gnu,
                             "clang" => crate::X86VectorAbi::Clang,
-                            _ => return Err(error(loc, format!("unknown x86 vector ABI `{name}`"))),
+                            _ => {
+                                return Err(error(loc, format!("unknown x86 vector ABI `{name}`")));
+                            }
                         });
                         self.expect(Tok::Punct(')'))?;
                     }
-                    InstData::VaArg { ty, list, x86_vector_abi }
-                },
+                    InstData::VaArg {
+                        ty,
+                        list,
+                        x86_vector_abi,
+                    }
+                }
                 "load" => InstData::Load {
                     flags: self.memory_flags()?,
                     ty: suffix_type("type")?,
@@ -1932,6 +2073,24 @@ impl Parser {
                 _ => return Err(error(op_loc, format!("unknown opcode `{opcode}`"))),
             }
         };
+        let contract = if self.eat(&Tok::Ident("contract".into())) {
+            if !matches!(
+                &data,
+                InstData::Call { .. }
+                    | InstData::CallIndirect { .. }
+                    | InstData::Invoke { .. }
+                    | InstData::ReturnCall { .. }
+                    | InstData::ReturnCallIndirect { .. }
+            ) {
+                return Err(error(
+                    op_loc,
+                    "call-site contract requires a call instruction".into(),
+                ));
+            }
+            Some(self.call_contract()?)
+        } else {
+            None
+        };
         let srcloc = if self.eat(&Tok::Punct('!')) {
             Some(self.srcloc()?)
         } else {
@@ -1996,6 +2155,7 @@ impl Parser {
             .map(|(name, loc)| names.define_value(&name, loc))
             .collect::<Result<_, _>>()?;
         Ok(ParsedInst {
+            contract,
             results,
             data,
             loc: op_loc,
@@ -2084,9 +2244,15 @@ impl Parser {
         if !self.eat(&Tok::Punct(')')) {
             loop {
                 let value = self.value(names)?;
-                let abi = if self.eat(&Tok::Punct(':')) { Some(self.abi_param()?) } else { None };
+                let abi = if self.eat(&Tok::Punct(':')) {
+                    Some(self.abi_param()?)
+                } else {
+                    None
+                };
                 args.push((value, abi));
-                if self.eat(&Tok::Punct(')')) { break; }
+                if self.eat(&Tok::Punct(')')) {
+                    break;
+                }
                 self.expect(Tok::Punct(','))?;
             }
         }
@@ -2223,7 +2389,9 @@ fn build(
             }
         }
         if let InstData::X86RflagsRegion { .. } = &inst.data {
-            for &v in &inst.results { types[v.index()] = Some(Type::I64); }
+            for &v in &inst.results {
+                types[v.index()] = Some(Type::I64);
+            }
         }
         if let InstData::InlineAsm { asm, .. } = &inst.data {
             for (&v, &(_, ty)) in inst.results.iter().zip(&asm.outputs) {
@@ -2268,7 +2436,10 @@ fn build(
             }
             if let InstData::Neon { ty, .. } = inst.data {
                 for result in &inst.results {
-                    if types[result.index()].is_none() { types[result.index()] = Some(ty); changed = true; }
+                    if types[result.index()].is_none() {
+                        types[result.index()] = Some(ty);
+                        changed = true;
+                    }
                 }
             }
             let [result] = inst.results[..] else { continue };
@@ -2287,7 +2458,9 @@ fn build(
                 InstData::AtomicRmw { args, .. } => types[args[1].index()],
                 InstData::AtomicCas { args, .. } => types[args[1].index()],
                 InstData::F80const { .. } => Some(Type::F80),
-                InstData::StackAddr { .. } | InstData::SymbolAddr { .. } | InstData::AggregateVaArg { .. } => Some(Type::Ptr),
+                InstData::StackAddr { .. }
+                | InstData::SymbolAddr { .. }
+                | InstData::AggregateVaArg { .. } => Some(Type::Ptr),
                 InstData::Icmp { .. } | InstData::Fcmp { .. } => Some(Type::I8),
                 InstData::VectorExtract { arg, .. } | InstData::VectorReduce { arg, .. } => {
                     types[arg.index()].map(|t| t.vector().map_or(Type::I8, |v| v.lane_type()))
@@ -2418,6 +2591,10 @@ fn build(
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let created = func.append_inst_with_results(block, data, &result_tys);
+            if let Some(contract) = &inst.contract {
+                func.set_call_contract(created, contract.clone())
+                    .map_err(|message| error(inst.loc, message))?;
+            }
             let ir_loc = ir_file.map(|file| SourceLoc {
                 file,
                 line: inst.loc.line,

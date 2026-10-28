@@ -22,18 +22,19 @@ class IntrinsicRegistryTests(unittest.TestCase):
         fixture = ROOT.parents[1] / 'crates/keel-ir/tests/fixtures/intrinsic-inventory.txt'
         expected = [line.split('|') for line in fixture.read_text().splitlines()
                     if not line.startswith('#')]
-        self.assertEqual([r['variant'] for r in rows], [r[0] for r in expected])
-        self.assertEqual([r['variant'] for r in sorted(rows, key=lambda r: r['inventory'])],
+        self.assertEqual([r['variant'] for r in rows[:len(expected)]], [r[0] for r in expected])
+        self.assertEqual([r['variant'] for r in rows[len(expected):]], ['LifetimeStart', 'LifetimeEnd'])
+        self.assertEqual([r['variant'] for r in sorted(rows, key=lambda r: r['inventory'])[:len(expected)]],
                          [r[1] for r in expected])
         source = intrinsic_registry.generate(self.schema, self.families)
-        self.assertIn('ALL: [Intrinsic; 819]', source)
+        self.assertIn('ALL: [Intrinsic; 821]', source)
         self.assertIn('X86Lgdt = 774,', source)
         self.assertIn('X86Swapgs = 818,', source)
-        self.assertEqual(len(re.findall(r'^    [A-Z][A-Za-z0-9]* = [0-9]+,$', source, re.M)), 819)
+        self.assertEqual(len(re.findall(r'^    [A-Z][A-Za-z0-9]* = [0-9]+,$', source, re.M)), 821)
 
     def test_invalid_global_ids_and_inventory_fail(self):
         for field, values in [('id', [-1, 1, True, '0']),
-                              ('inventory', [-1, 819, True, '0', self.schema['intrinsics'][1]['inventory']])]:
+                              ('inventory', [-1, len(self.schema['intrinsics']), True, '0', self.schema['intrinsics'][1]['inventory']])]:
             for value in values:
                 schema = copy.deepcopy(self.schema)
                 schema['intrinsics'][0][field] = value
@@ -86,10 +87,12 @@ class IntrinsicRegistryTests(unittest.TestCase):
 
     def test_interleaved_families_do_not_require_a_contiguous_tail(self):
         schema, families = copy.deepcopy(self.schema), copy.deepcopy(self.families)
-        for id_, family, template in [(819, 'handwritten', None),
-                                       (820, 'x86_system', self.families['x86_system'][-1]),
-                                       (821, 'x86_query', self.families['x86_query'][-1]),
-                                       (822, 'x86_system', self.families['x86_system'][-1])]:
+        start = len(schema['intrinsics'])
+        for offset, family, template in [(0, 'handwritten', None),
+                                          (1, 'x86_system', self.families['x86_system'][-1]),
+                                          (2, 'x86_query', self.families['x86_query'][-1]),
+                                          (3, 'x86_system', self.families['x86_system'][-1])]:
+            id_ = start + offset
             variant = f'X86Example{id_}'
             schema['intrinsics'].append(dict(id=id_, variant=variant, inventory=id_, metadata=family))
             if template:
@@ -97,10 +100,10 @@ class IntrinsicRegistryTests(unittest.TestCase):
         system_intrinsics.validate({'intrinsics': families['x86_system']})
         query_bindings.validate({'intrinsics': families['x86_query']}, ROOT)
         source = intrinsic_registry.generate(schema, families)
-        self.assertIn('ALL: [Intrinsic; 823]', source)
-        for id_ in range(819, 823):
+        self.assertIn(f'ALL: [Intrinsic; {start + 4}]', source)
+        for id_ in range(start, start + 4):
             self.assertIn(f'X86Example{id_} = {id_},', source)
-        self.assertIn('Self::X86Example822 => IntrinsicInfo',
+        self.assertIn(f'Self::X86Example{start + 3} => IntrinsicInfo',
                       system_intrinsics.generate({'intrinsics': families['x86_system']}))
 
 

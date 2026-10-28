@@ -783,6 +783,8 @@ fn is_call(func: &Function, data: &InstData) -> bool {
             | Intrinsic::StackAlloc
             | Intrinsic::StackSave
             | Intrinsic::StackRestore
+            | Intrinsic::LifetimeStart
+            | Intrinsic::LifetimeEnd
             | Intrinsic::FrameAddress
             | Intrinsic::X86F16cPhToPs128
             | Intrinsic::X86F16cPhToPs256
@@ -1208,30 +1210,30 @@ fn is_call(func: &Function, data: &InstData) -> bool {
             | Intrinsic::X86Lahf
             | Intrinsic::X86SahfExchange
             | Intrinsic::X86X87Region
-                | Intrinsic::X86Ins8
-                | Intrinsic::X86Ins16
-                | Intrinsic::X86Ins32
-                | Intrinsic::X86Outs8
-                | Intrinsic::X86Outs16
-                | Intrinsic::X86Outs32
-                | Intrinsic::X86RepIns8
-                | Intrinsic::X86RepIns16
-                | Intrinsic::X86RepIns32
-                | Intrinsic::X86RepOuts8
-                | Intrinsic::X86RepOuts16
-                | Intrinsic::X86RepOuts32
-                | Intrinsic::X86Ins8OwnedTerminal
-                | Intrinsic::X86Ins16OwnedTerminal
-                | Intrinsic::X86Ins32OwnedTerminal
-                | Intrinsic::X86Outs8OwnedTerminal
-                | Intrinsic::X86Outs16OwnedTerminal
-                | Intrinsic::X86Outs32OwnedTerminal
-                | Intrinsic::X86RepIns8OwnedTerminal
-                | Intrinsic::X86RepIns16OwnedTerminal
-                | Intrinsic::X86RepIns32OwnedTerminal
-                | Intrinsic::X86RepOuts8OwnedTerminal
-                | Intrinsic::X86RepOuts16OwnedTerminal
-                | Intrinsic::X86RepOuts32OwnedTerminal
+            | Intrinsic::X86Ins8
+            | Intrinsic::X86Ins16
+            | Intrinsic::X86Ins32
+            | Intrinsic::X86Outs8
+            | Intrinsic::X86Outs16
+            | Intrinsic::X86Outs32
+            | Intrinsic::X86RepIns8
+            | Intrinsic::X86RepIns16
+            | Intrinsic::X86RepIns32
+            | Intrinsic::X86RepOuts8
+            | Intrinsic::X86RepOuts16
+            | Intrinsic::X86RepOuts32
+            | Intrinsic::X86Ins8OwnedTerminal
+            | Intrinsic::X86Ins16OwnedTerminal
+            | Intrinsic::X86Ins32OwnedTerminal
+            | Intrinsic::X86Outs8OwnedTerminal
+            | Intrinsic::X86Outs16OwnedTerminal
+            | Intrinsic::X86Outs32OwnedTerminal
+            | Intrinsic::X86RepIns8OwnedTerminal
+            | Intrinsic::X86RepIns16OwnedTerminal
+            | Intrinsic::X86RepIns32OwnedTerminal
+            | Intrinsic::X86RepOuts8OwnedTerminal
+            | Intrinsic::X86RepOuts16OwnedTerminal
+            | Intrinsic::X86RepOuts32OwnedTerminal
             | Intrinsic::X86DivU8
             | Intrinsic::X86DivU16
             | Intrinsic::X86DivU32
@@ -1747,7 +1749,9 @@ impl<'a> FunctionCompiler<'a> {
         // use counts never change while selecting this function.
         let (present, uses) = crate::kinds::InstKinds::with_uses(func);
         for (_, inst) in func.layout_insts().filter(|_| present.intrinsic) {
-            if matches!(func.inst_data(inst), InstData::X86RflagsRegion { .. }) || matches!(func.inst_data(inst), InstData::Intrinsic { id,.. } if id.is_x86_target()) {
+            if matches!(func.inst_data(inst), InstData::X86RflagsRegion { .. })
+                || matches!(func.inst_data(inst), InstData::Intrinsic { id,.. } if id.is_x86_target())
+            {
                 return Err(err(
                     "x86 architectural intrinsic (including F16C) is not supported on AArch64"
                         .into(),
@@ -3610,6 +3614,8 @@ impl<'a> FunctionCompiler<'a> {
                     self.mach("mov", [(Reg::x(d)).into(), (Reg::SP).into()]);
                     self.def_done(result, d);
                 }
+                // Lifetime markers constrain IR transformations but change no runtime state.
+                Intrinsic::LifetimeStart | Intrinsic::LifetimeEnd => {}
                 Intrinsic::StackRestore => {
                     let mark = self.use_reg(args[0], S0);
                     self.mach("mov", [(Reg::SP).into(), (Reg::x(mark)).into()]);

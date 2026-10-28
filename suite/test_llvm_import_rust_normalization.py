@@ -33,6 +33,22 @@ class PreservedFactsNormalization(unittest.TestCase):
                   '}\n')
         self.assertEqual(without_preserved_facts(source), source)
 
+    def test_strips_only_new_contract_and_lifetime_transport(self):
+        source = ('func @f(ptr) contract(memory(argmem: read), param(0, nonnull)) restrict_params(0) {\n'
+                  'block0(v0: ptr):\n'
+                  '    intrinsic lifetime_start(v0)\n'
+                  '    call @external(v0) contract(nofree, param(0, align 8))\n'
+                  '    intrinsic lifetime_end(v0)\n'
+                  '    return\n}\n')
+        expected = ('func @f(ptr) {\nblock0(v0: ptr):\n'
+                    '    call @external(v0)\n    return\n}\n')
+        self.assertEqual(without_preserved_facts(source), expected)
+
+    def test_keeps_quoted_contracts_and_non_call_operands(self):
+        source = ('func @f() optimize(" contract(memory(none))") {\n'
+                  'block0:\n    v0 = symbol_addr @contract\n    return\n}\n')
+        self.assertEqual(without_preserved_facts(source), source)
+
 
 if __name__ == '__main__':
     unittest.main()

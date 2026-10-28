@@ -1,8 +1,45 @@
 # LLVM import contracts
 
-Status: design decision for the next IR work. Except for the existing IR fields
-and importer preservation fixes described below, the types and consumers in
-this document are not implemented.
+Status: the first contract and lifetime implementation is present. Later proof,
+metadata and storage-reuse work remains staged as described below.
+
+## Implemented slice
+
+- `FunctionAttrs.contract` and sparse call-site contracts represent three memory
+  regions, `nofree`, `nosync`, contextual `nocallback`, explicit accessibility
+  preservation, and bounded pointer facts.
+  Text, verification, composition and conservative mutation invalidation are
+  implemented. These contracts do not change ABI signatures.
+- LLVM 23 import transports supported contracts at their original scope.
+  Non-null/alignment facts need definedness; readable extents are boundary facts.
+  Definition-only normal-pointer noalias maps to `restrict_params`. Declaration,
+  call-site and return noalias are not promoted into that list.
+- More detailed LLVM memory classes are conservatively coarsened: errno joins
+  other accessible memory; target-private state joins inaccessible memory.
+  LLVM export uses a widened default compatible with Clang 21, so some region
+  precision may be lost. A native readable-without-nonnull fact exports through
+  `dereferenceable_or_null`; its unconditional readable extent is not recovered
+  by the initial importer.
+- LLVM `nocallback` has contextual module semantics. Initial import retains it
+  for external declarations and direct external call sites; local definitions
+  and unresolved indirect sites omit it. No all-callbacks prohibition is inferred.
+- The opt-in `call-load-reuse` pass now consumes scoped contracts alongside its
+  existing stable-body proofs. Contract-based reuse requires no accessible
+  writes plus `nofree`, `nosync`, `nocallback` and `preserves_access`, and excludes
+  returns-twice.
+  First reads and calls remain pinned. Default pipelines are unchanged.
+  `preserves_access` excludes permission/mapping changes to live objects. It is
+  not inferred from LLVM attributes; LLVM export drops this Keel-only promise.
+- Whole-fixed-stack `lifetime_start(ptr)` / `lifetime_end(ptr)` intrinsics survive
+  LLVM import/export and remain memory barriers. The verifier requires a direct
+  fixed-stack address. Native lowering emits no instructions; Cranelift uses
+  `sequence_point`. There is no stack-slot reuse or lifetime-based DCE yet.
+- Execution regressions cover masked overflow, non-null and oversized-shift
+  poison, PHI-edge masking and division overflow totalization. No imported
+  poison flag has become an unconditional arithmetic assumption.
+
+The remaining sections state the design and the conditions for further consumers;
+they do not claim all listed future analyses or debug/profile transport exist.
 
 ## Decision
 
@@ -93,6 +130,16 @@ both that the call cannot modify its bytes and that the object's lifetime stays
 valid. Unknown freeing, synchronization or callback behavior remains a barrier
 unless the relevant analysis proves the fact survives. Read-only annotations
 alone do not discharge every lifetime or control-effect obligation.
+
+For ordinary Keel reads, no freeing is not a complete access-validity proof.
+A single-threaded call can change page protections without changing bytes or
+freeing an allocation. Keel preserves the subsequent read fault. The initial
+consumer therefore also requires `preserves_access`: existing live objects keep
+their prior readable/writable accessibility on normal return. This is independent
+of content effects. It is unknown on LLVM import and has no direct LLVM export
+mapping. Stable body proofs remain another way to establish safety. A native
+permission-change regression checks that absent this promise, the second read
+remains and still faults. Do not silently strengthen LLVM's nofree annotation.
 
 The call stays pinned. This change does not authorize call elimination,
 common-subexpression elimination, duplication, speculation or motion. Each of
@@ -239,3 +286,49 @@ contract, a proved fact, a retained hint, a dropped annotation and a rejection.
 An execution match alone does not establish fact preservation. Add both a
 structural assertion and a defined-domain execution test, plus a case that
 would expose an unjustified stronger fact.
+
+## Known LLVM-export loss: ordinary memory faults
+
+The current LLVM exporter does not preserve every observable Keel memory fault.
+This is distinct from poison handling on LLVM import. For example:
+
+```text
+func @fault_probe(ptr) -> i64 {
+block0(v0: ptr):
+    v1 = load.i64 v0
+    v2 = iconst.i64 0
+    return v2
+}
+```
+
+A native Keel object retains the potentially faulting read. The exported LLVM
+module contains an ordinary unused load, which LLVM O2 removes. In the observed
+Apple arm64 run, a C caller passing null terminated with SIGSEGV through native
+Keel and returned 0 through optimized LLVM. This was reproduced during contract
+validation. The new native `preserves_access` consumer checks do not repair this
+independent bridge loss.
+
+Fault parity must therefore be reported separately from defined-memory execution
+parity. Do not label arbitrary Keel→LLVM→Keel round trips semantically exact.
+A follow-up needs an explicit fault-preserving export strategy or an enforced
+export profile that excludes observable memory faults. Adding memory attributes
+or quietly treating ordinary accesses as non-faulting is not a fix. Making all
+accesses volatile would need its own semantic and optimization tradeoff review;
+it is not part of this contract implementation.
+
+## Validation of the implemented slice
+
+The affected IR, optimizer, LLVM and native-codegen crate suites passed on Apple
+arm64 with LLVM 23 supplied through `KEEL_TEST_LIBLLVM` and a rebuilt Keel supplied
+through `KEEL_TEST_KEEL`. After adding access-stability handling, the full IR,
+optimizer and LLVM suites passed again, including the native page-protection
+case. The native lifetime no-instruction check also passed on the final model.
+The isolated Cranelift suite, intrinsic registry generation check, registry tests
+and parity normalization tests passed. The policy suite passed 94 Rust/Python
+comparisons; the base/flags/calls/memory validators passed 164 comparisons.
+
+Targeted LLVM Clippy passes with warnings denied. Broader Clippy is blocked by
+existing repository lints, including the existing `almost_swapped` test in
+`keel-ir/tests/call_operand_abi.rs`; no lint suppression was added. Documentation
+builds complete with existing warnings. These checks establish no runtime speedup
+claim and do not cover the memory-fault export gap described above.

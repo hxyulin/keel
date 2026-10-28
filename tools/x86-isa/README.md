@@ -257,7 +257,7 @@ See `LICENSE-ZYDIS` for production ISA data and `LICENSE-XED` for the pilot.
 
 ## Intrinsic registry and family declarations
 
-`intrinsic-registry.json` owns all 819 intrinsic variants, explicit numeric IDs,
+`intrinsic-registry.json` owns all 821 intrinsic variants, explicit numeric IDs,
 `ALL` positions and metadata ownership. It includes target-neutral intrinsics,
 not only x86 intrinsics. `intrinsic_registry.py` generates the public enum and
 inventory in `crates/keel-ir/src/generated/intrinsic_registry.rs`. The public

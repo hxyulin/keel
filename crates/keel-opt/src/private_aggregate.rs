@@ -123,6 +123,9 @@ fn plan(f: &Function) -> Option<Plan> {
         || f.num_values() > MAX_VALUES
         || !f.debug_vars.is_empty()
         || !f.restrict_params.is_empty()
+        // Splitting a byval parameter changes later argument positions. Until
+        // this pass remaps scoped pointer facts, leave those definitions alone.
+        || !f.attrs.contract.parameters.is_empty()
     {
         return None;
     }
@@ -264,7 +267,9 @@ pub fn run(m: &mut Module) -> usize {
                 return 0;
             }
             if let InstData::Call { func, args } = f.inst_data(i) {
-                if args.has_explicit_abi() { blocked.insert(f.callee(*func).name.clone()); }
+                if args.has_explicit_abi() {
+                    blocked.insert(f.callee(*func).name.clone());
+                }
             }
             match f.inst_data(i) {
                 // Textual symbols disable the module; intrinsic/frame facilities
@@ -301,7 +306,10 @@ pub fn run(m: &mut Module) -> usize {
     // before mutating anything. Unknown/mismatched callers block a definition.
     for f in &m.functions {
         for (_, d) in f.callees() {
-            if plans.get(&d.name).is_some_and(|p| p.old != d.sig) {
+            if plans
+                .get(&d.name)
+                .is_some_and(|p| p.old != d.sig || !d.attrs.contract.parameters.is_empty())
+            {
                 blocked.insert(d.name.clone());
             }
         }

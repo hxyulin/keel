@@ -103,7 +103,7 @@ impl Module {
             })
             .collect();
         for (i, r, a) in updates {
-            self.functions[i].callee_mut(r).attrs = a;
+            self.functions[i].set_callee_attrs(r, a);
         }
     }
 

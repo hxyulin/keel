@@ -437,6 +437,14 @@ impl Translation<'_> {
                     "lifetime marker requires a direct fixed entry-block stack slot".into(),
                 );
             }
+            let pointer = self.value(l.get_operand(inst, 0))?;
+            let operation = if name == "llvm.lifetime.start.p0" {
+                "lifetime_start"
+            } else {
+                "lifetime_end"
+            };
+            self.lines
+                .push(format!("    intrinsic {operation}({pointer})"));
             return Ok(None);
         }
         if direct
@@ -529,6 +537,7 @@ impl Translation<'_> {
                 }
             )
         };
+        let expr = format!("{expr}{}", self.contract(inst, fty, true));
         if ret == "void" {
             self.lines.push(format!("    {expr}"));
             Ok(None)

@@ -22,10 +22,10 @@ fn memcmp_builtin_fallback_merges_ordinary_import_and_rejects_conflicts() {
     );
 }
 #[test]
-fn definition_restrict_facts_are_conservatively_omitted() {
+fn definition_restrict_facts_become_parameter_noalias() {
     let ll = translate("func @read(ptr) -> i32 restrict_params(0) {\nblock0(v0: ptr):\n v1 = load.i32 v0\n return v1\n}\n").unwrap();
     assert!(ll.contains("define i32"));
-    assert!(!ll.contains("noalias"));
+    assert!(ll.contains("ptr noalias %v0"));
     assert!(!ll.contains("restrict_params"));
 }
 #[test]
@@ -79,18 +79,12 @@ fn reject_aggregate_signature() {
     );
 }
 #[test]
-fn reject_debug_atomic_and_indirect() {
+fn reject_debug_and_atomic() {
     let debug = "file f0 = \"x.c\"\n";
     assert!(translate(debug).unwrap_err().contains("debug information"));
     let atomic = "func @bad(ptr) -> i64 {\nblock0(v0: ptr):\n v1 = atomic_load.i64 seq_cst v0\n return v1\n}\n";
     assert!(
         translate(atomic)
-            .unwrap_err()
-            .contains("unsupported instruction")
-    );
-    let indirect = "func @bad(ptr) -> i64 {\nblock0(v0: ptr):\n v1 = call_indirect v0() : () -> i64\n return v1\n}\n";
-    assert!(
-        translate(indirect)
             .unwrap_err()
             .contains("unsupported instruction")
     );

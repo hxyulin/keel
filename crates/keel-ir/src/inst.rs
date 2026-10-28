@@ -213,7 +213,10 @@ pub enum InstData {
     /// monitor contract. Inputs are I64 images captured before ownership; all
     /// results are I64 observations published after normal image reapplication.
     /// Faults/traps produce no result, restoration, unwind or resumable ABI edge.
-    X86RflagsRegion { plan: Box<crate::rflags_region::Plan>, args: Vec<Value> },
+    X86RflagsRegion {
+        plan: Box<crate::rflags_region::Plan>,
+        args: Vec<Value>,
+    },
     /// Inline assembly: one result per output, one argument per input; see
     /// [`InlineAsm`]. Pinned and never removed, as the template may do
     /// anything.
@@ -327,8 +330,16 @@ impl Clone for InstData {
                 // copy is an independent, equal value.
                 unsafe { std::ptr::read(self) }
             }
-            Self::AggregateVaArg { layout, list, home, x86_vector_abi } => Self::AggregateVaArg {
-                layout: layout.clone(), list: *list, home: *home, x86_vector_abi: *x86_vector_abi,
+            Self::AggregateVaArg {
+                layout,
+                list,
+                home,
+                x86_vector_abi,
+            } => Self::AggregateVaArg {
+                layout: layout.clone(),
+                list: *list,
+                home: *home,
+                x86_vector_abi: *x86_vector_abi,
             },
             Self::Neon { op, ty, args } => Self::Neon {
                 op: *op,
@@ -352,7 +363,10 @@ impl Clone for InstData {
                 id: *id,
                 args: args.clone(),
             },
-            Self::X86RflagsRegion { plan, args } => Self::X86RflagsRegion { plan: plan.clone(), args: args.clone() },
+            Self::X86RflagsRegion { plan, args } => Self::X86RflagsRegion {
+                plan: plan.clone(),
+                args: args.clone(),
+            },
             Self::InlineAsm { asm, args } => Self::InlineAsm {
                 asm: asm.clone(),
                 args: args.clone(),
@@ -649,6 +663,18 @@ impl UnaryOp {
 }
 
 impl InstData {
+    /// A compile-time object-lifetime boundary with no machine operand uses.
+    #[inline]
+    pub fn is_lifetime_marker(&self) -> bool {
+        matches!(
+            self,
+            Self::Intrinsic {
+                id: Intrinsic::LifetimeStart | Intrinsic::LifetimeEnd,
+                ..
+            }
+        )
+    }
+
     #[inline]
     pub fn is_vector_instruction(&self) -> bool {
         matches!(
@@ -1501,6 +1527,8 @@ impl InstData {
                 Intrinsic::StackAlloc
                 | Intrinsic::StackSave
                 | Intrinsic::StackRestore
+                | Intrinsic::LifetimeStart
+                | Intrinsic::LifetimeEnd
                 | Intrinsic::Debugtrap
                 | Intrinsic::X86F16cPhToPs128
                 | Intrinsic::X86F16cPhToPs256
@@ -1580,7 +1608,13 @@ impl InstData {
                     || *id == Intrinsic::X86Pclmulqdq128
                     || id.is_x86_crc32()
                     || id.is_x86_string())
-                    && !matches!(id, Intrinsic::FrameAddress | Intrinsic::StackSave)
+                    && !matches!(
+                        id,
+                        Intrinsic::FrameAddress
+                            | Intrinsic::StackSave
+                            | Intrinsic::LifetimeStart
+                            | Intrinsic::LifetimeEnd
+                    )
             }
             Self::Iconst { .. }
             | Self::VectorSplat { .. }
@@ -1661,27 +1695,41 @@ impl InstData {
     /// byte copies rather than SIMD values. Call operand indices remain exact;
     /// None identifies the AggregateVaArg layout. Ordinary SSA types are always
     /// visited. The default visitor above includes every layout unchanged.
-    pub fn for_each_abi_type_filtered(&self, mut visit: impl FnMut(Type), mut include: impl FnMut(&crate::Layout, Option<usize>) -> bool) {
+    pub fn for_each_abi_type_filtered(
+        &self,
+        mut visit: impl FnMut(Type),
+        mut include: impl FnMut(&crate::Layout, Option<usize>) -> bool,
+    ) {
         if let Some(args) = self.call_args() {
             for i in 0..args.len() {
                 if let Some(p) = args.abi(i) {
                     visit(p.ty);
-                    if let Some(layout) = p.layout() && include(layout, Some(i)) {
-                        for (_, ty) in layout.leaves() { visit(ty); }
+                    if let Some(layout) = p.layout()
+                        && include(layout, Some(i))
+                    {
+                        for (_, ty) in layout.leaves() {
+                            visit(ty);
+                        }
                     }
                 }
             }
         }
-        if let Self::AggregateVaArg { layout, .. } = self && include(layout, None) {
-            for (_, ty) in layout.leaves() { visit(ty); }
+        if let Self::AggregateVaArg { layout, .. } = self
+            && include(layout, None)
+        {
+            for (_, ty) in layout.leaves() {
+                visit(ty);
+            }
         }
     }
 
     /// ABI-bearing operands for all call forms, including guaranteed tails.
     pub fn call_args(&self) -> Option<&crate::CallArgs> {
         match self {
-            Self::Call { args, .. } | Self::CallIndirect { args, .. }
-            | Self::Invoke { args, .. } | Self::ReturnCall { args, .. }
+            Self::Call { args, .. }
+            | Self::CallIndirect { args, .. }
+            | Self::Invoke { args, .. }
+            | Self::ReturnCall { args, .. }
             | Self::ReturnCallIndirect { args, .. } => Some(args),
             _ => None,
         }
@@ -1748,8 +1796,9 @@ impl InstData {
                 f(*arg);
                 dests.iter().flat_map(|d| &d.args).copied().for_each(f);
             }
-            InstData::Call { args, .. }
-            | InstData::ReturnCall { args, .. } => args.iter().copied().for_each(f),
+            InstData::Call { args, .. } | InstData::ReturnCall { args, .. } => {
+                args.iter().copied().for_each(f)
+            }
             InstData::Return { args }
             | InstData::X86RflagsRegion { args, .. }
             | InstData::InlineAsm { args, .. }
@@ -1818,8 +1867,9 @@ impl InstData {
                 f(arg);
                 dests.iter_mut().flat_map(|d| &mut d.args).for_each(f);
             }
-            InstData::Call { args, .. }
-            | InstData::ReturnCall { args, .. } => args.iter_mut().for_each(f),
+            InstData::Call { args, .. } | InstData::ReturnCall { args, .. } => {
+                args.iter_mut().for_each(f)
+            }
             InstData::Return { args }
             | InstData::X86RflagsRegion { args, .. }
             | InstData::InlineAsm { args, .. }

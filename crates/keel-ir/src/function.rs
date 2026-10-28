@@ -135,26 +135,37 @@ impl CallArgs {
 
 impl From<Vec<Value>> for CallArgs {
     fn from(values: Vec<Value>) -> Self {
-        Self { abi: vec![None; values.len()], values }
+        Self {
+            abi: vec![None; values.len()],
+            values,
+        }
     }
 }
 
 impl std::ops::Deref for CallArgs {
     type Target = [Value];
-    fn deref(&self) -> &[Value] { &self.values }
+    fn deref(&self) -> &[Value] {
+        &self.values
+    }
 }
 impl std::ops::DerefMut for CallArgs {
-    fn deref_mut(&mut self) -> &mut [Value] { &mut self.values }
+    fn deref_mut(&mut self) -> &mut [Value] {
+        &mut self.values
+    }
 }
 impl<'a> IntoIterator for &'a CallArgs {
     type Item = &'a Value;
     type IntoIter = std::slice::Iter<'a, Value>;
-    fn into_iter(self) -> Self::IntoIter { self.values.iter() }
+    fn into_iter(self) -> Self::IntoIter {
+        self.values.iter()
+    }
 }
 impl<'a> IntoIterator for &'a mut CallArgs {
     type Item = &'a mut Value;
     type IntoIter = std::slice::IterMut<'a, Value>;
-    fn into_iter(self) -> Self::IntoIter { self.values.iter_mut() }
+    fn into_iter(self) -> Self::IntoIter {
+        self.values.iter_mut()
+    }
 }
 
 /// Explicit producer extension ABI for x86 SysV short-vector boundaries.
@@ -251,6 +262,8 @@ impl Signature {
 /// Function symbol binding, promises and optimization policy, separate from ABI types.
 #[derive(Clone, Default, PartialEq, Eq, Debug)]
 pub struct FunctionAttrs {
+    /// Scoped semantic promises, independent of the ABI signature.
+    pub contract: crate::CallContract,
     /// Ordinary weak symbol binding (definition or optional external reference).
     /// This never permits substituting a local body for a call.
     pub weak: bool,
@@ -300,6 +313,7 @@ pub struct FunctionAttrs {
 
 impl FunctionAttrs {
     pub fn merge(&mut self, other: Self) {
+        self.contract = self.contract.intersect(&other.contract);
         self.weak |= other.weak;
         self.constructor |= other.constructor;
         self.used |= other.used;
@@ -397,7 +411,7 @@ impl fmt::Display for FunctionAttrs {
         if let Some(align) = self.align {
             write!(f, " align {align}")?;
         }
-        Ok(())
+        write!(f, "{}", self.contract)
     }
 }
 
@@ -532,8 +546,9 @@ pub struct Function {
     /// this invocation, all accesses must be based on that parameter. Read-only
     /// aliasing is permitted. This implies neither unequal pointer values nor
     /// nonnull, alignment, dereferenceability, or immutable memory. Indices must
-    /// be unique, normal-purpose pointer parameters. C pointee eligibility is a
-    /// frontend obligation: opaque IR pointers cannot express it. Cloning the
+    /// be unique, normal-purpose pointer parameters. A C frontend must establish
+    /// C pointee eligibility; an LLVM producer can assert the same access rule
+    /// directly from parameter noalias, without inventing C types. Cloning the
     /// whole function preserves scope; inlining must drop callee contracts.
     pub restrict_params: Vec<u32>,
     pub attrs: FunctionAttrs,
@@ -544,6 +559,7 @@ pub struct Function {
     block_values: ListPool<Value>,
     block_insts: ListPool<Inst>,
     insts: Arena<Inst, InstNode>,
+    call_contracts: std::collections::BTreeMap<Inst, crate::CallContract>,
     values: Arena<Value, ValueData>,
     result_pool: Vec<Value>,
     /// Instruction locations, shared by runs of instructions with the same
@@ -645,6 +661,7 @@ impl fmt::Debug for Function {
             .field("sig", &self.sig)
             .field("blocks", &Blocks(self))
             .field("insts", &Nodes(self))
+            .field("call_contracts", &self.call_contracts)
             .field("values", &self.values)
             .field("stack_slots", &self.stack_slots)
             .field("callees", &self.callees)
@@ -674,6 +691,7 @@ impl Function {
             block_values: ListPool::default(),
             block_insts: ListPool::default(),
             insts: Arena::new(),
+            call_contracts: Default::default(),
             values: Arena::new(),
             result_pool: Vec::new(),
             locs: Vec::new(),
@@ -736,9 +754,19 @@ impl Function {
 
     #[inline]
     pub fn callee_mut(&mut self, func_ref: FuncRef) -> &mut FuncDecl {
+        // A mutable declaration may change the target or ABI positions.
+        self.call_contracts.retain(|inst, _| !matches!(self.insts[*inst].data,
+            InstData::Call {func,..} | InstData::Invoke {func,..} | InstData::ReturnCall {func,..} if func == func_ref));
+        self.callees[func_ref].attrs.contract = crate::CallContract::default();
         self.callee_index
             .touch(func_ref.index(), self.callees.len());
         &mut self.callees[func_ref]
+    }
+
+    /// Refresh declaration attributes without changing target or signature scope.
+    /// Unlike mutable declaration access, this preserves independent call-site facts.
+    pub fn set_callee_attrs(&mut self, func_ref: FuncRef, attrs: FunctionAttrs) {
+        self.callees[func_ref].attrs = attrs;
     }
 
     #[inline]
@@ -844,7 +872,9 @@ impl Function {
             InstData::AtomicCas { args, .. } | InstData::Select { args } => {
                 visit(self.value_type(args[1]))
             }
-            InstData::StackAddr { .. } | InstData::SymbolAddr { .. } | InstData::AggregateVaArg { .. } => visit(Type::Ptr),
+            InstData::StackAddr { .. }
+            | InstData::SymbolAddr { .. }
+            | InstData::AggregateVaArg { .. } => visit(Type::Ptr),
             InstData::Neon { op, ty, .. } => {
                 for _ in 0..op.result_count() {
                     visit(*ty);
@@ -894,7 +924,11 @@ impl Function {
                     visit(ty);
                 }
             }
-            InstData::X86RflagsRegion { plan, .. } => { for _ in 0..plan.observations { visit(Type::I64); } }
+            InstData::X86RflagsRegion { plan, .. } => {
+                for _ in 0..plan.observations {
+                    visit(Type::I64);
+                }
+            }
             InstData::InlineAsm { asm, .. } => {
                 for &(_, ty) in &asm.outputs {
                     visit(ty);
@@ -1040,6 +1074,7 @@ impl Function {
     /// Takes `inst` out of the layout. Its results must be unused (or
     /// replaced with [`Function::replace_all_uses`]) by then.
     pub fn remove_inst(&mut self, inst: Inst) {
+        self.call_contracts.remove(&inst);
         let block = self.inst_block(inst);
         let index = self.position(inst);
         let data = &mut self.blocks[block];
@@ -1099,11 +1134,76 @@ impl Function {
     /// remove the old one. The verifier checks this contract after passes.
     #[inline]
     pub fn inst_data_mut(&mut self, inst: Inst) -> &mut InstData {
+        self.call_contracts.remove(&inst);
         let block = self.insts[inst].block;
         if block != NO_BLOCK && self.block_insts(Block::new(block as usize)).last() == Some(&inst) {
             self.cfg_stamp = fresh_cfg_stamp();
         }
         &mut self.insts[inst].data
+    }
+
+    /// Signature used by a direct or indirect call, including invoke and tail calls.
+    pub fn call_signature(&self, inst: Inst) -> Option<&Signature> {
+        match self.inst_data(inst) {
+            InstData::Call { func, .. }
+            | InstData::Invoke { func, .. }
+            | InstData::ReturnCall { func, .. } => Some(&self.callee(*func).sig),
+            InstData::CallIndirect { sig, .. } | InstData::ReturnCallIndirect { sig, .. } => {
+                Some(self.signature(*sig))
+            }
+            _ => None,
+        }
+    }
+
+    /// The promises attached to this call alone. Absence means unknown.
+    pub fn call_contract(&self, inst: Inst) -> Option<&crate::CallContract> {
+        self.call_contracts.get(&inst)
+    }
+
+    /// Attach a contract after constructing a call. Unknown contracts use no storage.
+    /// # Errors
+    /// Rejects non-calls, detached calls and facts incompatible with their signature.
+    pub fn set_call_contract(
+        &mut self,
+        inst: Inst,
+        contract: crate::CallContract,
+    ) -> Result<(), String> {
+        if self.is_removed(inst) {
+            return Err("call contract requires an inserted instruction".into());
+        }
+        let signature = self
+            .call_signature(inst)
+            .ok_or("call contract requires a call instruction")?;
+        contract.validate(signature)?;
+        if contract.is_unknown() {
+            self.call_contracts.remove(&inst);
+        } else {
+            self.call_contracts.insert(inst, contract);
+        }
+        Ok(())
+    }
+
+    /// Drop a call-site contract after a rewrite or a change of scope.
+    pub fn clear_call_contract(&mut self, inst: Inst) {
+        self.call_contracts.remove(&inst);
+    }
+
+    /// Combine trusted declaration promises with this call's own promises.
+    /// This does not infer body effects or permit call motion, removal or duplication.
+    pub fn effective_call_contract(&self, inst: Inst) -> Option<crate::CallContract> {
+        let declared = match self.inst_data(inst) {
+            InstData::Call { func, .. }
+            | InstData::Invoke { func, .. }
+            | InstData::ReturnCall { func, .. } => self.callee(*func).attrs.contract.clone(),
+            InstData::CallIndirect { .. } | InstData::ReturnCallIndirect { .. } => {
+                crate::CallContract::default()
+            }
+            _ => return None,
+        };
+        Some(match self.call_contract(inst) {
+            Some(site) => declared.intersect(site),
+            None => declared,
+        })
     }
 
     /// The source location `inst` was compiled from, if known.
@@ -1147,6 +1247,7 @@ impl Function {
         let data = &mut self.blocks[block];
         for &inst in self.block_insts.get(data.insts) {
             self.insts[inst].block = NO_BLOCK;
+            self.call_contracts.remove(&inst);
         }
         let removed = data.insts.len();
         self.block_insts.free(&mut data.insts);
@@ -1175,6 +1276,7 @@ impl Function {
             let data = &mut self.blocks[block];
             for &inst in self.block_insts.get(data.insts) {
                 self.insts[inst].block = NO_BLOCK;
+                self.call_contracts.remove(&inst);
             }
             let removed = data.insts.len();
             self.block_insts.free(&mut data.insts);
@@ -1207,6 +1309,9 @@ impl Function {
     /// must be unused (or replaced). Branches to `block` still pass the
     /// argument; the caller removes it from each of them.
     pub fn remove_block_param(&mut self, block: Block, index: usize) -> Value {
+        if self.entry_block() == Some(block) {
+            self.attrs.contract.parameters.clear();
+        }
         let value = self
             .block_values
             .remove(&mut self.blocks[block].params, index);
@@ -1286,32 +1391,69 @@ impl Function {
     /// bounded write wholly inside a distinct local slot is disjoint, including
     /// private spills inserted by vector legalization.
     pub fn has_x86_va_arg_provenance(&self, inst: Inst, abi: X86VectorAbi) -> bool {
-        if self.sig.cc != CallConv::C || !self.sig.variadic || self.sig.x86_vector_abi != Some(abi) {
+        if self.sig.cc != CallConv::C || !self.sig.variadic || self.sig.x86_vector_abi != Some(abi)
+        {
             return false;
         }
-        let (InstData::VaArg { list, .. } | InstData::AggregateVaArg { list, .. }) = self.inst_data(inst) else { return false; };
+        let (InstData::VaArg { list, .. } | InstData::AggregateVaArg { list, .. }) =
+            self.inst_data(inst)
+        else {
+            return false;
+        };
         let list = self.resolve(*list);
-        let ValueDef::Result(address, _) = self.value_def(list) else { return false; };
-        let InstData::StackAddr { slot } = self.inst_data(address) else { return false; };
-        if !self.stack_slots().any(|(s,d)| s == *slot && d.size >= 24 && d.align >= 8) { return false; }
-        if matches!(self.inst_data(inst), InstData::AggregateVaArg { home, .. } if home == slot) { return false; }
+        let ValueDef::Result(address, _) = self.value_def(list) else {
+            return false;
+        };
+        let InstData::StackAddr { slot } = self.inst_data(address) else {
+            return false;
+        };
+        if !self
+            .stack_slots()
+            .any(|(s, d)| s == *slot && d.size >= 24 && d.align >= 8)
+        {
+            return false;
+        }
+        if matches!(self.inst_data(inst), InstData::AggregateVaArg { home, .. } if home == slot) {
+            return false;
+        }
         // Follow only constant in-bounds offsets from an actual local slot.
         // Unknown pointers, negative offsets, oversized writes and long chains
         // remain unproven. This also keeps backend-inserted private lane spills
         // from invalidating an otherwise verified current-signature va_list.
         let disjoint_store = |value: Value, mut addr: Value| {
-            let Some(width) = self.value_type(self.resolve(value)).bytes() else { return false; };
+            let Some(width) = self.value_type(self.resolve(value)).bytes() else {
+                return false;
+            };
             let mut offset = 0i64;
             for _ in 0..32 {
-                let ValueDef::Result(at, _) = self.value_def(self.resolve(addr)) else { return false; };
+                let ValueDef::Result(at, _) = self.value_def(self.resolve(addr)) else {
+                    return false;
+                };
                 match self.inst_data(at) {
-                    InstData::StackAddr { slot: other } => return *other != *slot && offset >= 0
-                        && self.stack_slots().any(|(s,d)| s == *other
-                            && offset.checked_add(i64::from(width)).is_some_and(|end| end <= i64::from(d.size))),
-                    InstData::Binary { op: crate::BinaryOp::Ptradd, args } => {
-                        let ValueDef::Result(constant, _) = self.value_def(self.resolve(args[1])) else { return false; };
-                        let InstData::Iconst { imm, .. } = self.inst_data(constant) else { return false; };
-                        let Some(sum) = offset.checked_add(*imm) else { return false; };
+                    InstData::StackAddr { slot: other } => {
+                        return *other != *slot
+                            && offset >= 0
+                            && self.stack_slots().any(|(s, d)| {
+                                s == *other
+                                    && offset
+                                        .checked_add(i64::from(width))
+                                        .is_some_and(|end| end <= i64::from(d.size))
+                            });
+                    }
+                    InstData::Binary {
+                        op: crate::BinaryOp::Ptradd,
+                        args,
+                    } => {
+                        let ValueDef::Result(constant, _) = self.value_def(self.resolve(args[1]))
+                        else {
+                            return false;
+                        };
+                        let InstData::Iconst { imm, .. } = self.inst_data(constant) else {
+                            return false;
+                        };
+                        let Some(sum) = offset.checked_add(*imm) else {
+                            return false;
+                        };
                         offset = sum;
                         addr = args[0];
                     }
@@ -1322,15 +1464,24 @@ impl Function {
         };
         let mut initialized = false;
         for &before in self.block_insts(self.inst_block(inst)) {
-            if before == inst { return initialized; }
+            if before == inst {
+                return initialized;
+            }
             let data = self.inst_data(before);
             match data {
-                InstData::Intrinsic { id: crate::Intrinsic::VaStart, args } if args.first().is_some_and(|&v| self.resolve(v) == list) => initialized = true,
-                InstData::AggregateVaArg { list: other, home, .. } if self.resolve(*other) == list && home == slot => initialized = false,
-                InstData::VaArg { list: other, .. } | InstData::AggregateVaArg { list: other, .. } if self.resolve(*other) == list => {},
-                InstData::Store { value, addr, .. } if disjoint_store(*value, *addr) => {},
+                InstData::Intrinsic {
+                    id: crate::Intrinsic::VaStart,
+                    args,
+                } if args.first().is_some_and(|&v| self.resolve(v) == list) => initialized = true,
+                InstData::AggregateVaArg {
+                    list: other, home, ..
+                } if self.resolve(*other) == list && home == slot => initialized = false,
+                InstData::VaArg { list: other, .. }
+                | InstData::AggregateVaArg { list: other, .. }
+                    if self.resolve(*other) == list => {}
+                InstData::Store { value, addr, .. } if disjoint_store(*value, *addr) => {}
                 _ if data.memory_effects().may_write() => initialized = false,
-                _ => {},
+                _ => {}
             }
         }
         false
@@ -1595,7 +1746,10 @@ impl Function {
                 f.write_str(" ")?;
                 write_decimal(f, "", imm.is_negative(), imm.unsigned_abs())
             }
-            InstData::F80const { significand, sign_exp } => {
+            InstData::F80const {
+                significand,
+                sign_exp,
+            } => {
                 write!(f, "fconst.f80 {sign_exp:#06x}, {significand:#018x}")
             }
             InstData::Fconst { ty, bits } => {
@@ -1681,7 +1835,11 @@ impl Function {
                 f.write_str(")")
             }
             InstData::X86RflagsRegion { plan, args: a } => {
-                write!(f, "x86_rflags_region terminal {}(", Quoted(plan.to_string().as_bytes()))?;
+                write!(
+                    f,
+                    "x86_rflags_region terminal {}(",
+                    Quoted(plan.to_string().as_bytes())
+                )?;
                 self.write_args(f, a)?;
                 f.write_str(")")
             }
@@ -1816,21 +1974,46 @@ impl Function {
                 write_flags(f, flags)?;
                 write_value(f, v(*addr))
             }
-            InstData::AggregateVaArg { layout, list, home, x86_vector_abi } => {
+            InstData::AggregateVaArg {
+                layout,
+                list,
+                home,
+                x86_vector_abi,
+            } => {
                 write!(f, "va_arg_aggregate {layout}, ")?;
                 write_value(f, v(*list))?;
                 write!(f, ", {home}")?;
                 if let Some(abi) = x86_vector_abi {
-                    write!(f, " x86_vector_abi({})", match abi { X86VectorAbi::Gnu => "gnu", X86VectorAbi::Clang => "clang" })?;
+                    write!(
+                        f,
+                        " x86_vector_abi({})",
+                        match abi {
+                            X86VectorAbi::Gnu => "gnu",
+                            X86VectorAbi::Clang => "clang",
+                        }
+                    )?;
                 }
                 Ok(())
             }
-            InstData::VaArg { ty, list, x86_vector_abi } => {
+            InstData::VaArg {
+                ty,
+                list,
+                x86_vector_abi,
+            } => {
                 f.write_str("va_arg.")?;
                 write_name(f, Name::Type(*ty))?;
                 f.write_str(" ")?;
                 write_value(f, v(*list))?;
-                if let Some(abi) = x86_vector_abi { write!(f, " x86_vector_abi({})", match abi { X86VectorAbi::Gnu => "gnu", X86VectorAbi::Clang => "clang" })?; }
+                if let Some(abi) = x86_vector_abi {
+                    write!(
+                        f,
+                        " x86_vector_abi({})",
+                        match abi {
+                            X86VectorAbi::Gnu => "gnu",
+                            X86VectorAbi::Clang => "clang",
+                        }
+                    )?;
+                }
                 Ok(())
             }
             InstData::Store { value, addr, flags } => {
@@ -1898,14 +2081,22 @@ impl Function {
                 }
                 Ok(())
             }
+        }?;
+        if let Some(contract) = self.call_contract(inst) {
+            write!(f, "{contract}")?;
         }
+        Ok(())
     }
 
     fn write_call_args<W: fmt::Write + ?Sized>(&self, f: &mut W, args: &CallArgs) -> fmt::Result {
         for (i, &value) in args.iter().enumerate() {
-            if i != 0 { f.write_str(", ")?; }
+            if i != 0 {
+                f.write_str(", ")?;
+            }
             write_value(f, self.resolve(value))?;
-            if let Some(abi) = args.abi(i) { write!(f, " : {abi}")?; }
+            if let Some(abi) = args.abi(i) {
+                write!(f, " : {abi}")?;
+            }
         }
         Ok(())
     }

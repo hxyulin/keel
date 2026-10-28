@@ -232,12 +232,16 @@ pub(crate) fn fused_compares(func: &Function) -> HashSet<Value> {
         .collect()
 }
 
-/// Raw IR operand occurrences of every resolved value, saturated at 2: the
-/// selection passes only distinguish a single use from none or several.
+/// Machine-relevant IR operand occurrences, saturated at 2: selection only
+/// distinguishes a single use from none or several. Lifetime-marker addresses
+/// require no machine value and do not prevent address folding.
 /// Targets count them while finding [`crate::kinds::InstKinds`].
 pub(crate) fn use_counts(func: &Function) -> Vec<u8> {
     let mut uses = vec![0u8; func.num_values()];
     for (_, inst) in func.layout_insts() {
+        if func.inst_data(inst).is_lifetime_marker() {
+            continue;
+        }
         func.inst_data(inst).for_each_operand(|v| {
             let count = &mut uses[func.resolve(v).index()];
             *count = (*count + 1).min(2);

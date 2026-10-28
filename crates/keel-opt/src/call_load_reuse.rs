@@ -1,4 +1,4 @@
-//! Bounded transitive no-memory summaries and successful-load availability.
+//! Bounded body summaries, scoped call contracts and successful-load availability.
 //!
 //! The summary is deliberately not a general capture analysis: accepted bodies
 //! cannot persist any operand, but may return it (or a value derived from it).
@@ -17,7 +17,7 @@ impl crate::Pass for CallLoadReuse {
         "call-load-reuse"
     }
     fn description(&self) -> &'static str {
-        "reuse successful loads across bounded no-memory direct call chains (opt-in)"
+        "reuse successful loads across proven lifetime-preserving calls (opt-in)"
     }
     fn run(&self, _: &mut Function) -> bool {
         false
@@ -127,6 +127,30 @@ fn summary_candidate(f: &Function) -> bool {
 }
 
 type Facts = FxHashMap<(Value, Type), Value>;
+
+// A memory summary alone cannot establish that the previously read object is
+// still alive. Keep every call pinned and require independent lifetime and
+// synchronization promises before retaining an availability fact on its normal
+// continuation. This does not authorize moving or deleting the call.
+fn contract_keeps_reads(f: &Function, inst: keel_ir::Inst) -> bool {
+    let signature = match f.inst_data(inst) {
+        InstData::Call { func, .. } => &f.callee(*func).sig,
+        InstData::CallIndirect { sig, .. } => f.signature(*sig),
+        _ => return false,
+    };
+    if signature.returns_twice {
+        return false;
+    }
+    f.effective_call_contract(inst).is_some_and(|contract| {
+        contract.nofree
+            && contract.nosync
+            && contract.nocallback
+            && contract.preserves_access
+            && !contract.memory.argmem.may_write()
+            && !contract.memory.other.may_write()
+    })
+}
+
 fn run(module: &mut Module) -> bool {
     // Names must resolve uniquely even for callers that bypass module verification.
     let mut counts = FxHashMap::default();
@@ -223,6 +247,8 @@ fn run(module: &mut Module) -> bool {
                             facts.insert(key, result);
                         }
                     }
+                    InstData::Call { .. } | InstData::CallIndirect { .. }
+                        if contract_keeps_reads(f, i) => {}
                     InstData::Call { func, .. }
                         if {
                             let decl = f.callee(*func);

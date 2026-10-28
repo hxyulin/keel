@@ -22,9 +22,12 @@ C restrict also constrains restricted-pointer assignments; the initial consumer
 uses no such assignment to infer aliasing facts.
 
 The verifier checks unique in-range normal-purpose pointer indices; existing
-entry/signature verification checks matching entry parameters. Opaque IR
-pointers cannot express C pointee eligibility, so a producer must establish
-that condition. Text preserves contract order deterministically. Whole-function
+entry/signature verification checks matching entry parameters. A C frontend must establish C pointee eligibility because opaque IR pointers
+cannot express it. An LLVM producer may assert the same modified-object access
+rule directly from a definition's normal-pointer `noalias` parameter, without
+recovering C types. This mapping does not transport declaration, call-site or
+return-value noalias, and it adds no pointer inequality, nonnull or readability
+promise. Text preserves contract order deterministically. Whole-function
 clones retain the contract. Inlining copies instructions and blocks, not the
 callee's definition contracts, so callee entry remapping does not give caller
 arguments new facts. Existing caller contracts retain their entry indices.

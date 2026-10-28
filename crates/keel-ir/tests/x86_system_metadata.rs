@@ -13,8 +13,16 @@ fn all_numeric_ids_and_inventory_order_stay_stable() {
         .map(|id| (format!("{id:?}"), *id as usize))
         .collect();
     let expected: Vec<_> = fixture(include_str!("fixtures/intrinsic-inventory.txt")).collect();
-    assert_eq!(Intrinsic::ALL.len(), expected.len());
-    assert_eq!(actual.len(), expected.len(), "duplicate inventory entry");
+    assert_eq!(Intrinsic::ALL.len(), expected.len() + 2);
+    assert_eq!(
+        &Intrinsic::ALL[expected.len()..],
+        &[Intrinsic::LifetimeStart, Intrinsic::LifetimeEnd]
+    );
+    assert_eq!(
+        actual.len(),
+        Intrinsic::ALL.len(),
+        "duplicate inventory entry"
+    );
     let mut names = std::collections::HashSet::new();
     for intrinsic in Intrinsic::ALL {
         assert!(

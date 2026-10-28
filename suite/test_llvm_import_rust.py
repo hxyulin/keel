@@ -16,14 +16,50 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
+def strip_contracts(line, header):
+    """Strip typed contract clauses outside strings; retain all other text."""
+    out, pos = [], 0
+    while pos < len(line):
+        if line[pos] == '"':
+            start = pos
+            pos += 1
+            while pos < len(line):
+                if line[pos] == '\\':
+                    pos += 2
+                elif line[pos] == '"':
+                    pos += 1
+                    break
+                else:
+                    pos += 1
+            out.append(line[start:pos])
+            continue
+        prefix = next((p for p in (' contract(', ' restrict_params(')
+                       if line.startswith(p, pos) and (header or p == ' contract(')), None)
+        if prefix:
+            pos += len(prefix)
+            depth = 1
+            while pos < len(line) and depth:
+                depth += (line[pos] == '(') - (line[pos] == ')')
+                pos += 1
+            continue
+        out.append(line[pos])
+        pos += 1
+    return ''.join(out)
+
+
 def without_preserved_facts(text):
     """Remove only facts newly retained by Rust beyond the Python baseline."""
     lines = []
     for line in text.splitlines(keepends=True):
+        if re.match(r'\s+intrinsic lifetime_(?:start|end)\(', line):
+            continue
         if line.startswith(('func ', 'decl ')) and not line.startswith('decl data '):
+            line = strip_contracts(line, True)
             line = re.sub(
                 r'"(?:[^"\\]|\\.)*"| (?P<fact>inlinehint|alwaysinline|noinline|noreturn|nounwind|cold|hot|optnone)(?=\s|$)',
                 lambda match: '' if match.group('fact') else match.group(), line)
+        elif re.match(r'\s+(?:v[0-9]+ = )?(?:call|call_indirect|invoke|return_call|return_call_indirect)\b', line):
+            line = strip_contracts(line, False)
         elif re.match(r'\s+(?:v[0-9]+ = load\.[A-Za-z0-9]+|store) ', line):
             line = re.sub(r'\balign [0-9]+ ', '', line)
         lines.append(line)

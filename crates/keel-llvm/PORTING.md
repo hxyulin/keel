@@ -85,7 +85,7 @@ Overflow flags, GEP constraints and optimizer metadata are omitted rather than
 invented as Keel facts. Signed division guards MIN/-1 for masked poison paths.
 Boolean i1 values become canonical i8 values. FP constants retain raw bits.
 Memcpy becomes memmove to preserve LLVM's identical-pointer case. Fixed-slot
-lifetime markers are omitted. ODR copies, hidden RTTI, aggregate parameters and
+lifetime markers are now retained as explicit pinned intrinsics. ODR copies, hidden RTTI, aggregate parameters and
 sret retain the original bounded acceptance checks.
 
 ## Original port verification
@@ -112,3 +112,29 @@ promises, call-site isolation and alignment retained through LLVM re-export.
 Targeted Clippy with warnings denied, formatting and documentation passed.
 The base validator passed 53 Rust/Python comparisons and 18 native builds using
 the bounded fact normalization. Both normalization tests passed.
+
+## Contract-preservation follow-up
+
+The Rust importer now retains typed memory summaries, nofree/nosync, bounded
+pointer facts and independently scoped call contracts. It preserves contextual
+nocallback only for known external targets; LLVM treats the hint as ineffective
+on local definitions. Pointer promises that can produce poison without an
+established definedness boundary remain omitted. Definition-only parameter
+noalias maps to Keel restrict contracts and back to definition parameters.
+Full capture components, fresh-allocation return noalias and poison semantics
+remain unrepresented.
+
+The parity runner strips only the newly transported contract clauses,
+definition restrict clauses and direct fixed-slot lifetime intrinsic statements
+when comparing against the earlier Python baseline. It leaves stack/global
+alignment, ordinary memory accesses, volatile/notrap properties, symbols and
+quoted strings intact. Focused Rust tests assert the retained fields, scope,
+conservative region widening, masked-value boundaries and re-export behavior.
+The existing native contract fixture checks legal read-only aliases, disjoint
+writes, pointer equality and masked overflow/non-null inputs.
+
+The native contract consumer additionally requires Keel-only `preserves_access`;
+LLVM import leaves it unknown. A native page-permission regression confirms that
+without this promise the later potentially faulting read remains. LLVM export
+still has a separately reproduced ordinary-load fault loss, documented in
+`docs/llvm-contracts.md`; this port does not establish arbitrary fault parity.

@@ -3,6 +3,7 @@
 
 pub mod asm;
 pub mod builder;
+pub mod contracts;
 pub mod data;
 pub mod data_layout;
 pub mod debug;
@@ -34,6 +35,7 @@ pub use asm::{
     symbolic_immediate,
 };
 pub use builder::InstBuilder;
+pub use contracts::{CallContract, MemoryAccess, MemorySummary, PointerContract};
 pub use data::{DataInit, DataItem, DataObject, MAX_DATA_ALIGN};
 pub use data_layout::DataLayout;
 pub use debug::{
