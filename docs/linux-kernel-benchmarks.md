@@ -1,6 +1,6 @@
 # Pinned kernel size and runtime comparison
 
-The [newest repaired-snapshot measurements](linux-kernel-repaired-benchmarks.md)
+The newest repaired-snapshot measurements
 compare matched O2 and Os core builds after the function-policy repair. The
 runtime numbers below remain historical evidence for the older qualified image.
 
@@ -9,9 +9,9 @@ The qualified Keel core image is 73.4% larger as a compressed `bzImage` and take
 pinned GCC image. Guest init-entry timing is similar. These measurements are
 for the minimal Linux v6.12 captured core, not a general Linux performance claim.
 
-The [ledger](../suite/linux-kernel/audit-kernel-bench.json) includes image and
+The ledger includes image and
 fixture hashes, every measured sample, ranges, paired ratios and failure controls.
-The existing [qualification scope](linux-kernel-code-model.md) still applies.
+The existing [qualification scope](linux-kernel.md) still applies.
 
 ## Method
 
@@ -120,6 +120,6 @@ The next performance investigation should profile syscall dispatch, VFS lookup,
 fault handling and scheduler/pipe paths before choosing optimizer changes.
 Dead register moves, call-argument shuffles, safe address folding, unwind
 retention and a size-oriented code-generation policy are candidates. The
-[native linker gaps](linux-kernel-native-linker-audit.md) are independent of
+[native linker gaps](linux-kernel.md) are independent of
 these throughput issues. No compiler or linker implementation was changed in
 this benchmark increment, and no Rust workspace rerun is claimed.

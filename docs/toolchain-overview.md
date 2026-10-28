@@ -75,8 +75,8 @@ Each stage has its own effort setting:
 
 - **IR tiers.** `fast` runs local and CFG cleanup plus simple reductions.
   `basic` adds CFG simplification, instruction combining and DCE. `full` runs
-  rounds of inlining, GVN, [small-memory expansion](small-memory.md) and GCM,
-  then memory reuse, [stack promotion](stack-promote.md) and bounded loop
+  rounds of inlining, GVN, [small-memory expansion](optimizer.md) and GCM,
+  then memory reuse, [stack promotion](optimizer.md) and bounded loop
   transforms.
 - **Instruction selection.** `trees` enables generated tree patterns; `full`
   adds folded operands and register hints. `--isel trees,folds,hints|all|none`
@@ -97,7 +97,7 @@ keel opt -p sccp,instcombine,dce input.keel
 Opt-in passes include `sccp`, `if-convert` and `stack-forward-cfg`.
 `--verify-each` / `--no-verify-each` control IR verification after every pass
 (on by default in debug builds); `--opt-report file.json` writes an
-[optimization report](optimization-report.md).
+optimization report.
 
 ## Targets
 
@@ -190,31 +190,29 @@ let object = keel_asm::assemble_program_object(&program, keel_asm::TargetFeature
   allocation and lowering. Instrumentation is compiled out otherwise.
 - `keel asm-metrics input.s` and
   [`tools/instruction_metrics.py`](../tools/instruction_metrics.py) report
-  instruction sizes and modeled costs; see [instruction costs](instruction-costs.md).
-- `suite/measure_assembler.py`, `suite/profile_backend.py` and
-  `suite/measure_pipeline_stages.py` benchmark the assembler and backend.
+  instruction sizes and modeled costs; see [instruction costs](optimizer.md).
 
 ## Language support at a glance
 
 The C frontend targets C11 with common GNU extensions. Highlights, each with
 its own reference:
 
-- [GNU vectors and integer modes](gnu-vector-mode.md), [VLAs and complex
-  numbers](c-language-implementation-plan.md), K&R definitions,
+- [GNU vectors and integer modes](c-extensions.md), VLAs and complex
+  numbers, K&R definitions,
   `__attribute__((cleanup))`
-- [Overflow builtins](generic-overflow-builtins.md) up to 128 bits,
-  [memory builtins](memory-builtins.md), atomics including floating-point
-- [Function attributes](function-attributes.md), [weak symbols](c-weak-symbols.md),
-  [constructors/destructors](c-lifecycle.md), [sections](c-sections-retain.md)
+- [Overflow builtins](c-extensions.md) up to 128 bits,
+  [memory builtins](optimizer.md), atomics including floating-point
+- [Function attributes](function-attributes.md), [weak symbols](c-extensions.md),
+  [constructors/destructors](c-extensions.md), [sections](c-extensions.md)
 - [AArch64 inline assembly](c-inline-asm.md) (checked subset)
-- [x86 intrinsics](c-x86-intrinsics.md) and [SIMD](userspace-isa-status.md):
+- [x86 intrinsics](x86-intrinsics.md) and [SIMD](userspace-isa-status.md):
   NEON, SSE, AVX/AVX2, FMA, F16C (no AVX-512)
 
 Many attributes are parsed but ignored; unsupported ones are diagnosed. Keel
 does not claim full GCC or Clang compatibility. See
 [C frontend coverage](c-frontend-coverage.md) for the full list.
 
-The [LLVM IR importer](../suite/llvm_import_README.md) and
+The [LLVM IR importer](../suite/README.md) and
 [Cranelift bridge](../crates/keel-cranelift/README.md) are diagnostic tools,
 not alternative production paths.
 

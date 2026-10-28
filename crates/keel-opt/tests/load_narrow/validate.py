@@ -72,7 +72,7 @@ def main():
         report["clang_version"] = run([clang, "--version"])
         assert platform.system() == "Darwin" and platform.machine() == "arm64"
         inputs = [source / name for name in ["cases.keel", "oracle.c", "driver.c", "validate.py"]]
-        bridge = repo / "suite/pattern-lab/compiler-cases/recurrences.c"
+        bridge = repo / "crates/keel-opt/tests/load_narrow/recurrences.c"
         inputs.append(bridge)
         for path in inputs:
             report["inputs"][str(path.relative_to(repo))] = digest(path)

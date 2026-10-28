@@ -66,7 +66,7 @@ CFG, load, stack, constant-argument and unreachable-function cleanup, including
 DCE after empty-call elimination to remove unused symbol references. Required
 language/inline-assembly inlining remains active.
 
-The `-Os` preset also selects [size-oriented x86 emission](x86-size-codegen.md):
+The `-Os` preset also selects [size-oriented x86 emission](x86-codegen.md):
 less alignment padding, eligible scalar leaf-frame removal, unused leaf
 call-padding removal, smaller epilogues and profitable return sharing.
 `--opt-tier` and `-p` change IR passes without resetting the preset's codegen goal.
@@ -81,7 +81,7 @@ Unwind emission is independent of `-Os`; see [unwind metadata](unwind-metadata.m
 for explicit enable/disable flags.
 
 Per-function `optimize(...)`, `hot`, `cold`, `optnone` and `flatten`
-[override function policies](function-policy-metadata.md). Supported explicit
+override function policies. Supported explicit
 presets override the invocation pipeline and optional native selection.
 
 ## x86-64 address models
@@ -206,7 +206,7 @@ Full-order rounds. Removing GCM restored the intended balance; the final matrix
 above was rerun after that correction. This is a schedule-sensitive observation,
 not a correctness failure or a reason to remove GCM from Full.
 
-The [machine-readable summary](optimization-levels-measurements.json) records
+The historical machine-readable summary, retained in Git history, records
 per-workload ratios, every allocator combination, source/compiler hashes,
 screening results and stage medians for Lua's parser and interpreter. Generated
 reports, raw samples, intervals and command logs remain local under
@@ -216,7 +216,7 @@ tests and the complete native application matrix passed. Strict Clippy remains
 blocked by existing diagnostics outside this change. Kernel boot qualification
 was not repeated for the changed address emission.
 
-The [function-policy repair](function-policy-fix.md) changed Balanced from one to
+The function-policy repair changed Balanced from one to
 three bounded inline/cleanup rounds and added Size helper inlining. Earlier
 optimization-level measurements describe their recorded older source revisions;
 they do not measure these revised pipelines.

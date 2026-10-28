@@ -16,7 +16,7 @@ A valid target-independent type does not guarantee target ABI support.
 Parsing, verification, builders, printing and generic rewriting support the
 shapes. Codegen combines packed instructions with scalar lane legalization.
 The C frontend's bounded `vector_size(16)` surface is documented separately in
-[GNU C modes and vectors](gnu-vector-mode.md). General frontend intrinsic
+[GNU C modes and vectors](c-extensions.md). General frontend intrinsic
 coverage is separate from explicit IR construction.
 
 ```text
@@ -94,7 +94,7 @@ lane appears once and every intermediate extract/add is unshared. Inspection
 has a fixed depth of three below the root and rejects conversions, mixed
 sources, other widths, partial/repeated lanes and FP arithmetic. Fast retains
 the scalar tree because it has no use proof. No memory operation is inspected
-or rewritten. See [the C lane reduction evidence](c-lane-reduction-pilot.md).
+or rewritten. See the C lane reduction evidence.
 
 Identity shuffles become their selected input. Shuffles selecting only one
 splatted scalar become a splat. Unnested equal-input and other single-source
@@ -226,7 +226,7 @@ suppression; the byte-mask non-temporal store instead requires a fully writable
 16-byte destination and emits `SFENCE`. These operations require their declared
 features and reject foreign backends. Legacy architectural SSE equivalents are
 being staged separately; AVX support does not prove strict-v1/v2 exposure. The
-[unmasked FP audit and proof](x86-unmasked-fp.md) records the existing raw
+[unmasked FP audit and proof](x86-intrinsics.md) records the existing raw
 barrier/trap contract, export-only native packet and separate masked-CW x87 gap;
 its local checks do not establish native acceptance or fullprofile completion.
 
@@ -346,9 +346,8 @@ Validation: `cargo test -p keel-opt --test loop_vectorize` and
 compile both object formats, and execute on native AArch64 macOS or x86-64 Linux
 under three codegen configurations. Runtime cases cover overlapping streams in
 both directions, exact aliases, disjoint streams, zero/short inputs, signed
-negative bounds, tails, and protected page boundaries. The reproducible
-`suite/scripts/bench_vectorize.py` compares the same compiler pipeline with and
-without the vectorizer, plus Clang, reporting compilation and runtime separately.
+negative bounds, tails, and protected page boundaries. Use optimizer ablations in the [suite runner](../suite/README.md) to compare
+the same pipeline with and without vectorization.
 Additional cases cover sequential loops after rejected candidates, overlapping
 byte/short copies, signed 32-bit indices, and bit-preserving floating copies.
 Use `--pattern range`, `--pattern inverted`, or `--pattern fixed-start` with

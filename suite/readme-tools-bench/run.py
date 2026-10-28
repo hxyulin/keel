@@ -58,7 +58,7 @@ def main():
               'sdk': str(sdk), 'sdk_version': run(['xcrun', '--sdk', 'macosx', '--show-sdk-version']).strip(),
               'tools': {n: {'path': str(p), 'sha256': sha(p)} for n, p in [('keel', keel), ('clang', clang), ('ld', ld), ('selected_clang', selected_clang)]},
               'correctness_only': a.correctness_only,
-              'dependencies': {str(p): sha(ROOT / p) for p in ('suite/audit_clang_assembler.py', 'suite/runtime-kernels/oracle.py', 'suite/fast_opt_locked.py')},
+              'dependencies': {str(p): sha(ROOT / p) for p in ('suite/audit_clang_assembler.py', 'suite/readme-tools-bench/fixtures/oracle.py', 'suite/fast_opt_locked.py')},
               'harness_sha256': sha(__file__), 'warmups': 2, 'rounds': 7, 'seed': 20261024,
               'load_before': os.getloadavg(), 'preparation_commands': [], 'sources': [],
               'assembly': {}, 'link': {}, 'correctness': {}}
@@ -67,7 +67,7 @@ def main():
         return run(cmd, quiet=quiet)
     # Clang generation is preparation only; every assembler consumes identical text.
     for name in ('kernels', 'driver'):
-        src = ROOT / 'suite/runtime-kernels' / (name + '.c')
+        src = (ROOT / 'crates/keel/tests/fixtures/runtime-kernels.c' if name == 'kernels' else ROOT / 'suite/readme-tools-bench/fixtures/driver.c')
         asm = out / (name + '.s')
         prepare([clang, '-S', '-O0', '-target', triple, '-mcpu=apple-m1', '-isysroot', sdk, src, '-o', asm])
         report['sources'].append({'path': str(src.relative_to(ROOT)), 'sha256': sha(src),
@@ -109,7 +109,7 @@ def main():
         'clang-driver': [clang, '-target', triple, '-isysroot', sdk, *objects, '-o', exe],
     }
     link_commands = {k: list(map(str, v)) for k, v in link_commands.items()}
-    spec = importlib.util.spec_from_file_location('oracle', ROOT / 'suite/runtime-kernels/oracle.py')
+    spec = importlib.util.spec_from_file_location('oracle', ROOT / 'suite/readme-tools-bench/fixtures/oracle.py')
     oracle = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(oracle)
     answers = [(n, oracle.reference(*oracle.inputs(n, 20261024))) for n in (0, 1, 33, 257)]
@@ -133,7 +133,7 @@ def main():
         link_outputs[mode] = {'path': str(checked_exe), 'bytes': checked_exe.stat().st_size, 'sha256': sha(checked_exe)}
     report['correctness']['oracle'] = {'cases': list(oracle.CASES), 'lengths': [n for n, _ in answers],
         'seed': 20261024, 'checks_per_executable': 48, 'assembly_executables': 3, 'link_executables': 3,
-        'all_passed': True, 'strict_signatures_passed': True, 'oracle_sha256': sha(ROOT / 'suite/runtime-kernels/oracle.py')}
+        'all_passed': True, 'strict_signatures_passed': True, 'oracle_sha256': sha(ROOT / 'suite/readme-tools-bench/fixtures/oracle.py')}
     rng = random.Random(20261024)
     frozen_inputs = {p: sha(p) for p in [*objects, *[out / (n + '.s') for n in ('kernels', 'driver')]]}
     stages = [('assembly', asm_commands), ('link', {k: [v] for k, v in link_commands.items()})]

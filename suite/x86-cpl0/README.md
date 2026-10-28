@@ -156,7 +156,7 @@ The bridge calls the generated `descriptor_load` with known GDTR/IDTR images
 instead of loading them itself. Trusted SGDT/SIDT observations then check both
 bases and limits. Negative controls omit the loads or swap the table images.
 Both must return FAIL with exit 35. Normal exports must return PASS with exit
-33. See [system support](../../docs/x86-system-support.md) for API contracts.
+33. See [system support](../../docs/userspace-isa-status.md) for API contracts.
 
 All twelve load variants pass under QEMU 11.1.2 TCG on macOS ARM64. Both
 negative controls return the exact READY/FAIL transcript and exit 35. This is

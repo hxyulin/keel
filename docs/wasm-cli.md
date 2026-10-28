@@ -123,7 +123,7 @@ are equal (no growth), plus a checked software stack.
   page or separate objects within linear memory.
 
 Discard an instance after any trap: the saved stack pointer is restored only on
-normal returns. See the [runtime contract](wasm-memory-backend.md) and the
+normal returns. See the [runtime contract](wasm-backend.md) and the
 [`keel-wasm` README](../crates/keel-wasm/README.md) for exact access widths,
 pointer normalization, data placement and stack behavior.
 
@@ -152,7 +152,7 @@ pinned effects keep their order and exact access widths. DCE may remove an unuse
 nonvolatile `notrap` load, relying on the producer's promise that it cannot trap.
 The optimizer never adds `notrap`; raw IR producers are responsible for that
 promise. The design rationale is in the
-[basic optimization audit](wasm-basic-optimization-audit.md).
+basic optimization audit.
 
 ## Output publication
 
@@ -182,8 +182,6 @@ cargo test -p keel --bin keel \
 cargo test -p keel-opt --test wasm32_basic
 ```
 
-Add `--release` for release builds. The C and raw-IR corpus for the basic profile
-is in `suite/wasm-basic`; `python3 suite/wasm-basic/measure.py target/release/keel <new-dir>`
-records module sizes, instruction counts and small timing samples for plain versus
-basic output on that corpus. The results describe that corpus only and are not
-performance claims.
+Add `--release` for release builds. The basic-profile fixtures live in
+`crates/keel/tests/fixtures/wasm-basic.c` and `wasm-basic.keel`, exercised by
+`cargo test -p keel --test wasm_output`.

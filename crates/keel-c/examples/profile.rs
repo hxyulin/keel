@@ -1,4 +1,4 @@
-//! Resident-input frontend profiling. See suite/profile_c_frontend.py.
+//! Resident-input frontend profiling. Usage: profile staged|baseline|sample ROUNDS INPUT.i... [--debug].
 use std::{hint::black_box, time::Instant};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

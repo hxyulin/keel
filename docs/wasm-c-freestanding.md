@@ -4,12 +4,12 @@
 `wasm32-unknown-unknown`. The result is unoptimized IR with the WASM32 storage
 layout, intended for the `keel-wasm` runtime emitter. Most users reach this through
 the [CLI](wasm-cli.md); this page is the contract for the C library APIs. It builds
-on the [target foundation](wasm-target-foundation.md) and the earlier
-[integer lowering](wasm-c-scalar-lowering.md) and
-[pointer/data](wasm-c-pointer-data.md) work.
+on the target foundation and the earlier
+integer lowering and
+pointer/data work.
 
 Native ABI, FP, memory, [ISA](userspace-isa-status.md),
-[intrinsic](c-x86-intrinsics.md) and [GNU vector/mode](gnu-vector-mode.md) contracts
+[intrinsic](x86-intrinsics.md) and [GNU vector/mode](c-extensions.md) contracts
 are unaffected.
 
 ## Compile contract
@@ -34,7 +34,7 @@ validation.
 - Integer, pointer, array and record storage within the existing size, alignment
   and bounds limits, and defined static data with pointer initializers.
 - Pointer arithmetic using i64 IR offsets with wasm32 normalization (see the
-  [memory backend](wasm-memory-backend.md)).
+  [memory backend](wasm-backend.md)).
 
 Every function needs a prototype and a definition in the translation unit. A
 forward prototype followed by a definition is fine. Unresolved functions and data
@@ -66,7 +66,7 @@ Declaration support never authorizes FP execution or extended values.
 
 A raw `Module` carries no target. Keep the target/layout pairing yourself, use
 `keel_wasm::emit_wasm32_runtime_module` (optionally after the WASM32
-[basic optimization profile](wasm-basic-optimization-audit.md)), and never pass the
+basic optimization profile), and never pass the
 module to native code generation or other optimizer pipelines. Memory placement,
 exports, stack limits and trap behavior follow the
 [runtime contract](../crates/keel-wasm/README.md).

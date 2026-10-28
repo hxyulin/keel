@@ -105,5 +105,5 @@ Linux decompressor. The API equivalent is `Options::max_page_size`.
 The initial aggregate-only result above has since been extended to native
 archive selection, thin archives and ET_REL output. Both native link routes
 pass boot and checked runtime workloads. See the
-[native kernel qualification](linux-kernel-native-linker-audit.md) for evidence,
+[native kernel qualification](linux-kernel.md) for evidence,
 commands and the external boot-stage boundary.

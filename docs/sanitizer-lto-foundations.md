@@ -1,10 +1,10 @@
-# Sanitizer and LTO implementation stages
+# Instrumentation and IR transport support
 
 `keel-toolchain` is an experimental library with two independently usable
 foundations: memory-access instrumentation and a target-tagged IR transport.
 It is included in the workspace but does not change ordinary compilation,
 optimization, linking, or the CLI flag surface. Neither ASan nor an LTO link
-is implemented by this milestone.
+is implemented by these APIs.
 
 ## Implemented instrumentation boundary
 
@@ -47,34 +47,6 @@ the instrumented module; native execution links a small C oracle runtime with
 Clang. Other tests cover atomic/volatile flags, pointer widths, dynamic bulk
 ranges, reinstrumentation rejection and transactional failure.
 
-## Sanitizer next stages
-
-1. Choose the first runtime contract: a Keel bounds-checking runtime or a
-   documented compiler-rt ASan ABI subset. Make symbol versions and platform
-   runtime selection explicit. Add feature-specific exclusion metadata rather
-   than depending only on reserved runtime symbol names.
-2. Implement heap allocation/free/reallocation interception with an allocation
-   registry or shadow memory, overflow-safe range checks, diagnostics and
-   termination policy. Validate valid accesses, OOB, zero-length ranges and
-   use-after-free on both native targets. Callback insertion alone cannot
-   identify allocation bounds.
-3. Add stack/global descriptions, red zones, lifetime events and registration.
-   Integrate VLA/alloca and stack restoration, early returns and nonlocal exits.
-   Add constructor/retention support before relying on implicit registration.
-4. For UBSan, preserve source signedness, arithmetic width, alignment and source
-   locations at frontend lowering time. Generic IR integer arithmetic wraps;
-   signed C overflow intent cannot reliably be recovered after optimization.
-   Start with explicit trap checks, then a versioned diagnostic runtime ABI.
-5. Implement sanitizer driver options only when complete checks and runtime
-   selection exist. Measure code size/runtime impact and test optimized code,
-   library boundaries, threads, TLS and debug reports. TSan and MSan require
-   separate designs; these callbacks are not sufficient for either.
-
-The [ASan documentation](https://clang.llvm.org/docs/AddressSanitizer.html)
-describes its compiler instrumentation/runtime split, and
-[UBSan documentation](https://clang.llvm.org/docs/UndefinedBehaviorSanitizer.html)
-enumerates checks that require source semantic information.
-
 ## Implemented IR transport boundary
 
 `artifact::encode` writes verified textual Keel IR inside a versioned envelope (currently `KEEL-IR-UNIT 4`)
@@ -88,7 +60,7 @@ Version 2 added ordinary weak symbol syntax, version 3 added executable
 lifecycle and compiler-used function flags, and version 4 adds typed custom
 section placement and linker-retention metadata. Older versions are rejected;
 weak declarations and definitions survive encode/decode. Native symbol binding
-is documented in [C weak symbols](c-weak-symbols.md).
+is documented in [C weak symbols](c-extensions.md).
 
 The envelope version covers the IR dialect as well as its header and must be
 bumped for incompatible IR changes. It records neither CPU feature requirements
@@ -104,37 +76,9 @@ cargo run -p keel-toolchain --example prepare -- \
   aarch64-apple-darwin input.keel output.kir --memory-checks
 ```
 
-## LTO next stages
+## Support limits
 
-1. Implement a typed module merger with deterministic private-symbol renaming,
-   remapping of all function/data/relocation references and source/debug IDs,
-   declaration/definition ABI checks, and transactional errors. Begin with
-   strong definitions and reject unsupported weak/COMDAT/tentative merging;
-   do not guess at their semantics. Test same-named static helpers and globals,
-   address-taken functions, recursive calls and aggregate signatures.
-2. Add an explicit symbol-resolution/export decision layer between native
-   objects/archives and IR. Preserve interposition, visibility, retention,
-   dynamic exports and assembly references. Internalize only symbols proven
-   private by this layer, then run existing module inlining and optimization.
-   Existing private-only inlining cannot automatically inline public definitions
-   just because two units are loaded into memory.
-3. Add artifact/IR archive discovery and lazy member selection, followed by
-   native object generation and the existing native linker. Test mixed IR/native
-   inputs and dead archive members on each platform before adding `-flto`.
-4. Add versioned manifest/cache keys, diagnostics and whole-program debug tests.
-   Begin with full LTO; summaries/importing/parallel partitions for ThinLTO are
-   a separate milestone. Measure compile time and peak memory on real workloads.
-
-LLVM's [LTO design](https://llvm.org/docs/LinkTimeOptimization.html) explains
-the importance of linker symbol-resolution information before internalization.
-Keel should retain that separation even though its IR and backends are native.
-
-## Validation
-
-```sh
-cargo test -p keel-toolchain
-cargo clippy -p keel-toolchain --all-targets --no-deps -- -D warnings
-```
-
-These checks validate foundations, not complete sanitizer coverage or successful
-cross-translation-unit optimization.
+Memory-check insertion is available as a library API, with a consumer-supplied
+runtime. The versioned IR envelope supports checked transport. Neither is a
+complete ASan/UBSan runtime or production LTO link pipeline. Ordinary compilation
+and linking do not enable them implicitly.

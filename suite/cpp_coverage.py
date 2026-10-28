@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Clang C++ -> untouched LLVM IR -> llvm_import -> native differential checks.
 
-Run under suite/fast_opt_locked.py; see cpp_coverage_README.md. No timing claims.
+Run under suite/fast_opt_locked.py; see README.md. No timing claims.
 """
 import argparse
 from collections import Counter

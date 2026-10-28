@@ -215,12 +215,10 @@ fn compact_lsda_and_dwarf_exception_frames_work_after_a_regular_page_boundary() 
     }
     // Force only the throwing frame to DWARF without changing its machine
     // instructions. The catch frame retains compact register rules and LSDA.
-    source.push_str(
-        &include_str!("../../../suite/native-linker/compact.s").replace(
-            "_compact_throw:\n.cfi_startproc",
-            "_compact_throw:\n.cfi_startproc\n.cfi_remember_state\n.cfi_restore_state",
-        ),
-    );
+    source.push_str(&include_str!("fixtures/compact.s").replace(
+        "_compact_throw:\n.cfi_startproc",
+        "_compact_throw:\n.cfi_startproc\n.cfi_remember_state\n.cfi_restore_state",
+    ));
     let bytes = keel_asm::assemble_object(&source).unwrap();
     let obj = temp.join("mixed.o");
     std::fs::write(&obj, &bytes).unwrap();
@@ -228,10 +226,7 @@ fn compact_lsda_and_dwarf_exception_frames_work_after_a_regular_page_boundary() 
     checked(
         Command::new("clang++")
             .args(["-O2", "-c"])
-            .arg(
-                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("../../suite/native-linker/compact.cpp"),
-            )
+            .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/compact.cpp"))
             .arg("-o")
             .arg(&driver),
     );

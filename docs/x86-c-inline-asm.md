@@ -2,7 +2,7 @@
 
 Keel supports scalar GNU C inline assembly on `x86_64-unknown-linux-gnu`.
 This implements scalar fallthrough asm and deferred immediate validation from
-the [design](x86-c-inline-asm-design.md).
+the [design](x86-c-inline-asm.md).
 Explicit memory operands, bounded constraint choices and integer flag outputs
 are supported. Asm goto supports these outputs through restoration trampolines
 and ordinary IR control flow. Comma-separated alternatives remain unsupported.
@@ -128,7 +128,7 @@ objects, returned values, evaluation count, memory fallback and the kernel's
 `WRITE_ONCE` switch.
 
 Read-only global `rsp` bindings have a separate
-[C observer contract](c-stack-observers.md). Their exact `+r` operand supports
+[C observer contract](c-extensions.md). Their exact `+r` operand supports
 Linux's `ASM_CALL_CONSTRAINT` through the balanced stack contract below.
 
 All asm remains pinned, even without `volatile`. Memory clobbers and reserved-stack
@@ -270,10 +270,7 @@ adds a forced constant-rematerialization configuration.
 The original 22-function fixture covers ties, fixed-register shuffles, early clobbers,
 multiple outputs, narrow register views, constants, pointers, output-address
 side effects, flags, memory barriers, local labels, shared macros, live values,
-clobbers and aligned frames. The separate
-[native runner](../suite/x86-inline-asm/README.md) checks the actual exported
-objects against independently compiled GCC and Clang references, with broken
-controls. AArch64's existing inline-asm suite remains a separate regression.
+clobbers and aligned frames. The crate tests own inline-assembly regressions. AArch64's existing inline-asm suite remains a separate regression.
 
 The full workspace run completed with 2,754 passed, three failed and 13 ignored
 across 506 groups. The failures were the retired x86-asm rejection assertion,
@@ -319,7 +316,7 @@ calls, numeric arguments, symbolic offsets and unique labels. The historical
 145 fresh native executions against GCC 13.3.0 on Linux x86-64, with five broken
 controls rejected normally. The harness includes both new functions in all
 512-input cases. Clang/GNU byte-and-relocation comparisons also passed.
-A subsequent [unchanged-input audit](../suite/linux-kernel/audit-deferred-immediates.json)
+A subsequent unchanged-input audit
 on a reproduced corpus removes all 450 earlier immediate first errors. Accepted
 C inputs remain four of 484 because unsupported constraints and section
 placement become the next errors. Assembly stays at 326 of 506. No crashes or
@@ -380,7 +377,7 @@ across 507 reported groups at checkpoint `7572b6ef`. Workspace and profiling
 feature checks, 98 generator tests, both freshness checks and scoped formatting
 also passed. All 145 fresh native objects passed against GCC 13.3.0 with eight
 normally rejected controls. The
-[unchanged kernel-corpus audit](../suite/linux-kernel/audit-memory-operands.json)
+unchanged kernel-corpus audit
 accepts 402 assembly inputs and four C inputs. All 330 previously accepted
 objects remain byte-for-byte identical. Later constraint failures still prevent
 further C acceptance; these tests do not qualify kernel code generation.
@@ -408,7 +405,7 @@ checkpoints.
 
 All 145 fresh objects passed native GCC 13.3.0 comparison for this 39-function
 fixture, with all ten broken controls rejected normally. The
-[unchanged-input kernel audit](../suite/linux-kernel/audit-q-registers.json)
+unchanged-input kernel audit
 removes all 254 prior `=q` first errors. Those files now stop at the `%a`
 template modifier. Acceptance remains four C and 402 assembly inputs, and all
 406 previously accepted objects remain byte-for-byte identical. There are no

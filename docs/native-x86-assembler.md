@@ -23,7 +23,7 @@ Optional ISA features are explicit: pass `--target-features avx,bmi1,bmi2` to
 `compile`, `cc`, or `asm`. The default stays baseline x86-64. API callers use
 `x86::Features` with the `_with_features` assembler APIs and wrap their codegen
 selector in `keel_codegen::x86_features::FeatureSelector`. BMI gates are independent
-of AVX even where their instructions use VEX prefixes. See the [AVX subset](x86-avx-subset.md)
+of AVX even where their instructions use VEX prefixes. See the [AVX subset](x86-codegen.md)
 and [BMI coverage](x86-bmi.md) for instruction forms, lowering choices and limits.
 
 The assembler also accepts ADX (`adx`), SHA (`sha`), XMM VAES
@@ -188,13 +188,6 @@ On x86-64 Linux, two scripts run the codegen fixtures, the C fixtures and the
 Lua, QuickJS and SQLite application builds, and check ELF/DWARF metadata with
 GNU readelf, GDB (source breakpoints, locals, backtraces) and libgcc unwinding:
 
-```sh
-python3 suite/validate_native_x86.py --compiler target/release/keel \
-  --prepared /path/to/prepared/target/suite --work-dir /path/to/validation
-python3 suite/validate_native_x86_metadata.py --compiler target/release/keel \
-  --work-dir /path/to/metadata
-```
-
 Native suite configurations are opt-in: `keel-native`, `keel-O-native`,
 `keel-g-native` and `keel-O-select-native`.
 
@@ -215,24 +208,8 @@ Branch relaxation brings aggregate `.text` to within about 0.1% of Clang's
 assembly of the same source. Runtime of the resulting executables is neutral
 compared with Clang-assembled objects; no runtime speedup is claimed.
 
-Measurement scripts (run on an otherwise idle host; where supported, `--cpu N`
-pins the process and its children):
-
-```sh
-# Compile + assemble, Keel vs Keel text followed by Clang:
-python3 suite/measure_native_x86.py --compiler target/release/keel \
-  --prepared /path/to/prepared/target/suite --work-dir /path/to/benchmark
-# Standalone assembler, two prebuilt compilers:
-python3 suite/measure_x86_relaxation.py --before /path/to/keel-before \
-  --after /path/to/keel-after --prepared /path/to/prepared/target/suite \
-  --out /path/to/benchmark --cpu 2 \
-  --before-revision BEFORE_COMMIT --after-revision AFTER_COMMIT
-# Full preprocessed-C-to-object pipeline, including object identity checks:
-python3 suite/measure_x86_structured.py --before /path/to/keel-before \
-  --after /path/to/keel-after --prepared /path/to/prepared/target/suite \
-  --out /path/to/benchmark --pairs 7 \
-  --before-revision BEFORE_COMMIT --after-revision AFTER_COMMIT
-```
+Use the [suite measurement runners](../suite/README.md#measurements) for
+controlled compiler comparisons.
 
 To profile assembler stages (parse, per-pass layout, branch checks, ELF
 finalization) without instrumenting normal assembly:

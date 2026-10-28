@@ -104,7 +104,7 @@ static spelling with `Opcode::parse` and the tracked compiler names/IDs with
 `Intrinsic::from_name`. These are structural checks, not per-form byte or runtime
 qualification.
 
-Existing semantic evidence stays in [system support](../../docs/x86-system-support.md)
+Existing semantic evidence stays in [system support](../../docs/userspace-isa-status.md)
 and [transition contracts](../../docs/x86-system-transitions.md). A future result
 import should attach explicit witness/campaign scope and artifact digests to
 form IDs. It must distinguish encoding comparisons, actual decode witnesses,

@@ -20,3 +20,7 @@
 /artifacts.lock.json
 /docs/*202610*.json
 /docs/*202610*.html
+
+# Kernel audit runs are evidence, not pinned fixture inputs.
+/suite/linux-kernel/audit-*.json
+/docs/benchmarks/bbtree-*.json

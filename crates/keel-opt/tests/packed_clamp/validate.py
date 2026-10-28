@@ -84,7 +84,7 @@ def main():
         for target in TARGETS:
             front = output / f"{target}-frontend.keel"
             run([keel, "cc", "--verify-each", "--opt-tier", "full", "--target", target,
-                 "--emit-ir", ROOT / "suite/runtime-kernels/kernels.c", "-o", front])
+                 "--emit-ir", ROOT / "crates/keel/tests/fixtures/runtime-kernels.c", "-o", front])
             source = front.read_text()
             clamp = source.split("func @rk_clamped(", 1)[1].split("\nfunc @", 1)[0]
             assert "vselect" in clamp and clamp.count("swiden_low.i64x2") == 2, clamp

@@ -764,7 +764,7 @@ analyses they need; there is no analysis cache yet.
 | Pass | What it does |
 |---|---|
 | `inline` | module-level bounded private direct-call expansion, including fresh by-value snapshots and remapped CFG/SSA/stack slots |
-| `small-memory` | expand ordinary constant memory intrinsics of 0–32 bytes with exact accesses; preload memmove sources before stores; see [bounded memory expansion](small-memory.md) |
+| `small-memory` | expand ordinary constant memory intrinsics of 0–32 bytes with exact accesses; preload memmove sources before stores; see [bounded memory expansion](optimizer.md) |
 | `stack-forward-cfg` | opt-in stack forwarding followed by CFG fixed-point cleanup only when forwarding directly makes a previously nonconstant `brif`/`switch` operand constant; absent from every default pipeline |
 | `stack-forward` | block-local byte forwarding for nonescaping fixed stack objects, including partial integer writes; remove private stores only after every load from the object disappears |
 | `canonicalize` | resolve operand aliases, place integer literals on the right, order other interchangeable integer operand pairs by value ID, reverse integer comparison predicates when swapping |
@@ -1239,7 +1239,7 @@ supported for selected scalar operations, with the limits below. A `__builtin_` 
 with a declared library equivalent can also resolve to that function;
 this is not blanket support for every builtin.
 
-Explicit [`__builtin_memcpy`, `__builtin_memmove`, and `__builtin_memset`](memory-builtins.md)
+Explicit [`__builtin_memcpy`, `__builtin_memmove`, and `__builtin_memset`](optimizer.md)
 lower to existing memory intrinsics without needing libc declarations.
 Ordinary library names retain ordinary call semantics.
 
@@ -1298,14 +1298,14 @@ Some accepted extensions have deliberately limited behavior:
   GNU function-pointer `noreturn` attributes are not represented.
   Selected unsupported linkage attributes, including `alias`, are diagnosed;
   default-priority `constructor`/`destructor` and `used` have a
-  [bounded lifecycle implementation](c-lifecycle.md). Automatic-local `cleanup` has a
-  [bounded scope-exit implementation](c-language-implementation-plan.md#3-reusable-scope-exit-actions-and-cleanup--bounded-milestone-implemented).
+  [bounded lifecycle implementation](c-extensions.md). Automatic-local `cleanup` has a
+  bounded scope-exit implementation.
   Ordinary external weak definitions
   and references preserve their binding on both native targets; unsupported weak
-  forms remain diagnosed (see [weak symbol support](c-weak-symbols.md)). Hidden and internal
+  forms remain diagnosed (see [weak symbol support](c-extensions.md)). Hidden and internal
   visibility emit hidden symbols; protected visibility is diagnosed. Other
   attributes may still be ignored, while `vector_size`/integer `mode` have
-  [bounded type/ABI support](gnu-vector-mode.md);
+  [bounded type/ABI support](c-extensions.md);
   see the [C compatibility audit](c-frontend-coverage.md) for the exact boundary.
 - `inline` affects emission and supplies `inlinehint` to the bounded
   private-only [inliner](#bounded-function-inlining). Block-pointer declarators (`^`) are
@@ -1401,7 +1401,7 @@ compared against Clang.
   unused. Generic `__builtin_add_overflow`, `__builtin_sub_overflow` and
   `__builtin_mul_overflow` support mixed operand/destination integer types
   through 128 bits; `_overflow_p` remains deferred. See
-  [generic overflow](generic-overflow-builtins.md) for conversions, side effects
+  [generic overflow](c-extensions.md) for conversions, side effects
   and validation. The largest 128-bit multiply fixture has a measured assembly
   size cost; no runtime speedup was measured.
 - **Computed goto** without an indirect branch in the IR: `&&label` is
@@ -1468,22 +1468,22 @@ runtime `sizeof` and lexical stack restoration. Block VM typedefs, VM pointers
 and runtime type names are supported. Dependent function parameter bounds,
 definition-entry captures and prototype-only `[*]` have a bounded implementation.
 Selected type/control-flow contexts, including goto/switch/alloca combinations, remain
-diagnosed. See [the staged C implementation plan](c-language-implementation-plan.md).
+diagnosed. See the staged C implementation plan.
 
 Float/double complex values support a bounded arithmetic and ABI subset; see
-[the complex implementation stage](c-language-implementation-plan.md#6-complex-arithmetic--first-floatdouble-subset-implemented).
+the complex implementation stage.
 Multiplication/division call the target's compiler-runtime helpers; extended
 complex types and complex varargs remain diagnosed.
 
 Explicitly typed old-style (K&R) definitions support fixed-size integer,
 float/double and pointer parameters, array/function adjustment and promoted ABI
 entry conversions. Implicit types, VM declaration lists and other limits are
-listed in [the implementation plan](c-language-implementation-plan.md#8-kr-definitions--explicit-fixed-size-parameter-milestone-implemented).
+listed in the implementation plan.
 
 Not supported: full variably modified types, nested functions, `_Atomic` structs, generic atomics outside the
 native size/alignment subset, vector features beyond the
-[bounded GNU subset](gnu-vector-mode.md), and x86 intrinsic headers beyond the
-[bounded subset](c-x86-intrinsics.md).
+[bounded GNU subset](c-extensions.md), and x86 intrinsic headers beyond the
+[bounded subset](x86-intrinsics.md).
 C inline assembly has a [bounded AArch64 frontend subset](c-inline-asm.md);
 asm-goto, memory outputs, broader constraints and x86 inline assembly remain
 unsupported and diagnosed.
@@ -1597,7 +1597,7 @@ intermediate assembly files. Existing assembly output remains the default;
 `--emit-ir` is incompatible with `--emit-object`. The x86 Linux path also emits
 typed instructions and metadata directly, with no intermediate assembly text.
 Its standalone syntax remains Intel, and its compiler rejects inline assembly.
-[Packed AVX arithmetic](x86-avx-subset.md#packed-arithmetic-extension) is opt-in
+[Packed AVX arithmetic](x86-codegen.md#x86-avx-subset-packed-arithmetic-extension) is opt-in
 with the existing `--target-features avx`, supporting 128-bit `f32x4`/`f64x2`
 arithmetic. It adds no AVX2, AVX-512 or wider-vector support.
 The owned program retains its items through assembly;
@@ -2241,7 +2241,6 @@ references, and signed addends. Negative addends are also checked with an
 independent object reader and linked programs; some installed Apple clang
 versions emit malformed flags for negative ADDEND records.
 
-
 Data tests compare section bytes, sizes, symbols, and normalized relocations
 against clang, including file-backed/zero-fill layout and TLS descriptors.
 Linked programs check absolute-pointer tables and cross-section differences.
@@ -2252,7 +2251,6 @@ Native subsection tests reorder functions/data with an order file, enable
 `-dead_strip`, verify unused code is removed, and check pointers/differences
 after layout changes. C++ catches and cleanup also execute after reordering
 and dead stripping.
-
 
 **Unwind and debug metadata.** `.cfi_startproc`/`.cfi_endproc` collect
 address-indexed CFA and saved-register rules. Supported rules include
@@ -2354,7 +2352,6 @@ with `dwarfdump`, verify a linked dSYM, and execute a backtrace crossing an
 assembled frame. Cross-atom conditional branches and ADR remain errors;
 unrepresentable layouts retain their DWARF unwind records.
 
-
 **Compiler-output coverage.** The assembler suite checks every backend
 fixture with normal/reduced register pools and after optimization, and every
 C fixture with/without optimization and debug information. These checks use
@@ -2368,7 +2365,6 @@ arrangements. The initial end-to-end coverage audit assembled, linked, and ran 1
 configurations, with DWARF verification for the 22 C debug configurations;
 the automated assembly checks discover newly added fixtures as the suite grows. Fixture coverage
 does not imply complete A64 ISA or GNU assembler syntax coverage.
-
 
 **M5 compatibility additions.** The nine confirmed probes
 now assemble, with useful families around each: the classic PAC/AUT/XPAC
@@ -2445,13 +2441,9 @@ excluded from this raw-byte audit because equivalent representations can differ;
 focused Rust tests exercise the object metadata and call-frame paths. This is
 an inventory of those exact sources/options, not every compiler mode or syntax.
 
-
 All nine original M5 probes match Clang; all 51 unchanged sources pass the
 byte/relocation/metadata audit, and the 33 linked Lua objects pass guarded
 sorting, arithmetic, string, error-handling and coroutine checks on an Apple M5
 Max. The added coverage costs a few percent of assembler parse time on large
 inputs; coverage was not removed to improve those numbers.
-`suite/generate_m5_compat_inputs.py` reconstructs feature inputs from
-checked-in correctness seeds, and `suite/compare_assembler_builds.py` provides
-paired old/new assembler measurements once a Clang reference run has
-established correctness.
+Use the [suite runners](../suite/README.md) for reproducible comparisons.

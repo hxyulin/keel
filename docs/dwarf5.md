@@ -181,6 +181,3 @@ explicit `.debug_line`/`.debug_line_str` contents is an error.
   program that is linked, run and `dsymutil`-verified, negative cases, and
   x86-64 ELF directive handling. Run it with
   `cargo test -p keel-asm --test dwarf5`.
-- `suite/dwarf5_differential.py` covers Lua (`-O0`/`-O2`), SQLite and
-  QuickJS from unchanged Clang `-gdwarf-5` output, with a Lua link and dSYM
-  comparison.

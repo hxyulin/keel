@@ -15,7 +15,7 @@ long add(long a, long b) {
 }
 ```
 
-The [x86-64 design](x86-c-inline-asm-design.md) also records the remaining
+The [x86-64 design](x86-c-inline-asm.md) also records the remaining
 memory contracts, file-scope asm and asm-goto milestones.
 
 ## Syntax and constraints

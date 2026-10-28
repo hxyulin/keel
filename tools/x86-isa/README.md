@@ -20,7 +20,7 @@ The generated legacy/VEX and EVEX catalogues share repeated operand lists
 within each table. Imported operand-size rules use an exhaustive Rust enum;
 unknown rules stop generation. The `isa_table_layout` Cargo example reports
 record sizes and distinct operand-slice storage.
-See the [Rust refactor review](../../docs/rust-refactor-review.md) for measured
+See the Rust refactor review for measured
 source-size changes and remaining representation work.
 
 The input is a subset of the MIT-licensed
@@ -284,7 +284,7 @@ it no longer declares variants or computes global inventory length.
 existing descriptor/status, selector and scalar port-I/O APIs.
 `query_bindings.py` generates their tables and const-checks their IDs.
 Shared emitters remain handwritten. The four wide LAR/LSL compilation gaps
-found during migration are fixed; see [the query binding notes](../../docs/x86-query-bindings.md).
+found during migration are fixed; see [the query binding notes](../../docs/x86-intrinsics.md).
 
 The other 732 intrinsics retain handwritten metadata and lowering. Their
 existing enum documentation lives in the registry; generated-family contract

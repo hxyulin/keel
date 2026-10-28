@@ -624,10 +624,7 @@ fn atomic_publication_replaces_aliases_without_truncating_their_targets() {
 #[test]
 fn basic_profile_preserves_c_layout_calls_recursion_and_memory() {
     let t = Temp::new();
-    let c = t.write(
-        "basic.c",
-        include_str!("../../../suite/wasm-basic/corpus.c"),
-    );
+    let c = t.write("basic.c", include_str!("fixtures/wasm-basic.c"));
     for basic in [false, true] {
         let out = t.0.join(if basic { "basic.wasm" } else { "plain.wasm" });
         let mut flags = EXPORTS.to_vec();
@@ -640,7 +637,7 @@ fn basic_profile_preserves_c_layout_calls_recursion_and_memory() {
     t.no_temporary();
 }
 
-const BASIC_IR: &str = include_str!("../../../suite/wasm-basic/corpus.keel");
+const BASIC_IR: &str = include_str!("fixtures/wasm-basic.keel");
 #[test]
 fn basic_and_plain_ir_preserve_bigint_wrapping_traps_and_volatile_order() {
     let t = Temp::new();

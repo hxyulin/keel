@@ -130,75 +130,12 @@ wall time and exit codes. It does not infer test counts. Build time is included;
 compare warm execution separately before attributing a change to test code.
 A full runner exit succeeds only when all commands, including doctests, succeed.
 
-## Component measurements
+## Component coverage
 
-Independent component runs passed on the same macOS ARM64 host. These execution
-times exclude compilation; selecting a new dependency/feature combination can
-require a build even when a full-workspace run has already been built.
+The runner separates assembler, decoder, linker, IR, optimizer, frontend and
+codegen tests. Use component selections and `--consumers` for focused changes;
+run the full workspace before treating an integration as validated. Optional
+external-tool and platform tests remain subject to their prerequisites.
 
-| Selection | Passed tests | Test execution |
-| --- | ---: | ---: |
-| `assembler --unit --quick` | 27 | 0.09 s |
-| `assembler --quick` | 471 | 13.56 s |
-| `linker --unit --quick` | 35 | 0.13 s |
-| `linker --quick` | 259 | 1.76 s |
-| `decoder --quick` | 21 | 0.12 s |
-| `ir --quick` | 154 | 0.25 s |
-| `optimizer --quick` | 611 | 2.02 s |
-| `frontend --quick` | 369 | 34.28 s |
-| `codegen --unit --quick` | 125 | 4.21 s |
-| `linker --test archive --quick --runner cargo` | 8 | 0.02 s |
-
-With artifacts built, the entire assembler and linker unit-only commands took
-0.28 and 0.32 seconds respectively, including runner/Cargo startup. The single
-archive target took 0.13 seconds end to end. Existing ignored tests remain
-ignored. These selections validate their components, not downstream consumers.
-
-The runner's 14 selection/parser tests passed. All tooling Python tests passed
-(21 passed, one optional integration skipped). Rust test sources and production
-code were unchanged in this follow-up; the full-workspace suite was not rerun.
-
-## Full-suite measurements at checkpoint 82405d36
-
-Measured on the same macOS ARM64 host. Execution times exclude Cargo compilation.
-The five-binary comparison uses the preceding full-run log as its baseline;
-string port I/O was also rerun immediately before this change.
-
-| Check | Unoptimized/original | Optimized/refactored |
-| --- | ---: | ---: |
-| Exhaustive string port I/O, 144 configurations | 189.84 s | 16.60 s |
-| Five slowest binaries, ordinary Cargo | 650.00 s | 114.45 s |
-| Python tooling tests | 154.61 s, 16 tests | 0.18 s, 17 tests |
-
-The five Rust binaries include five additional smoke tests after the change.
-Python tooling retains all samples and adds a check against catalogue reloads.
-Its instruction-metrics helper now derives a sample from the already loaded
-instruction instead of reloading all 1,670 ISA records per sample. Catalogue
-rows, provenance and hashes match the previous implementation exactly.
-
-These are elapsed observations, not isolated microbenchmarks. Optimization,
-fixture reuse and repeated-work removal contribute together. External Clang,
-linker and native-oracle work remains. Cold-build costs were not compared;
-the optimized profile uses separate artifacts and may increase first-build time.
-
-The full nextest run after this change passed 2,796 tests across 500 binaries in
-258.04 seconds, with 13 existing ignored tests. The separate doctest also passed.
-The preceding full run spent 1,472.69 seconds executing tests. The combined
-changes reduced observed test execution time by about 5.7 times. Including the
-79-second build and doctests, the new invocation took 339.19 seconds.
-
-Validation also passed the workspace all-targets/all-features check, both
-Cargo and nextest quick decoder invocations, generator freshness, 99 x86
-Python tests, four AArch64 Python tests and 17 tooling Python tests (one optional
-CLI integration skipped). Scoped Clippy completed with existing warnings in
-untouched compiler code and two unchanged expressions in the AVX string test;
-the new preparation helper produced no diagnostics.
-
-Generator checks remain separate from the Rust runner:
-
-```sh
-python3 -m unittest discover -s tools/x86-isa
-python3 -m unittest discover -s crates/keel-asm/tools -p test_generate.py
-python3 tools/x86-isa/generate.py --check
-python3 crates/keel-asm/tools/generate.py --check
-```
+Historical timings and per-checkpoint test counts are not maintained here.
+Record new measurements in ignored report directories.

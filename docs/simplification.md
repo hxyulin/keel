@@ -80,7 +80,7 @@ form conservatively unless `produces_canonical_form()` promises it on exit.
 A pass reporting no change must not mutate the function. Restoration always
 runs when required, including in explicit/custom pipelines. It is profiled as
 canonicalization and verified according to the repeated-verification policy
-(see [optimization observations](optimization-report.md#repeated-verification)). `instcombine` is the first consumer and also uses the same payload
+(see optimization observations). `instcombine` is the first consumer and also uses the same payload
 normalizer within its worklist as new facts appear during its execution.
 Direct calls to `Pass::run` bypass manager prerequisites; callers needing the
 entry contract should use `run_pipeline` or `run_passes`.
@@ -203,7 +203,6 @@ machine code: CFG/layout, placement and allocation still affect the output.
 The cause of the text growth has not been isolated. Known-bit reasoning and
 these recipes remain opt-in. This sweep predates the canonicalization changes,
 which are measured separately below.
-
 
 ## Integer operand canonicalization
 
@@ -387,13 +386,6 @@ Benchmark stdout matches for every pair.
 | New Full / previous Full | 0.99583 [0.99277, 0.99881] | 0.96736 [0.95304, 0.98630] | −3,988 bytes |
 | Full / None | 0.94882 [0.94550, 0.95142] | 1.35481 [1.34436, 1.35813] | −240,292 bytes |
 | Combined facts / None | 0.94862 [0.94575, 0.95331] | 1.55566 [1.54473, 1.57398] | −229,928 bytes |
-
-Ratios are geometric means of each workload's median paired time ratios.
-Runtime weights the eight fixed workloads equally; compile time weights the
-three suite totals equally. `suite/summarize_passes.py` bootstraps paired ratios
-independently within each workload (20,000 samples). Its intervals describe
-measurement uncertainty on this corpus, not generalization to other programs
-or systematic machine-state bias.
 
 The complete default change measures 0.42% less runtime (interval 0.12–0.72%
 less), 3.26% less compile time, and 3,988 fewer text bytes. This supports a small

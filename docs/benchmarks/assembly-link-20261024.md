@@ -9,7 +9,7 @@ hashes and every sample are in [assembly-link-20261024.json](assembly-link-20261
 | Keel | `2cd51766`, release build, Rust 1.99.1 |
 | References | Apple Clang 21.0.0, Apple `ld-27037.1` |
 | Protocol | 2 warmups, 7 measured runs, median; shuffled order per round |
-| Input | [`suite/runtime-kernels`](../../suite/runtime-kernels/README.md): `kernels.c` + `driver.c` |
+| Input | `suite/runtime-kernels`: `kernels.c` + `driver.c` |
 
 ## Results
 

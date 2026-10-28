@@ -265,7 +265,7 @@ fn run() -> Result<()> {
     let result = h.run();
     let report = json!({"schema":1, "target":TARGET, "arguments":h.args, "steps":h.steps, "commands":h.commands,
         "fatal":result.as_ref().err(), "loss_contracts":{
-            "llvm_to_keel":"defined-input refinement; overflow, pointer, optimizer and debug facts may be dropped; see suite/llvm_import_README.md",
+            "llvm_to_keel":"defined-input refinement; overflow, pointer, optimizer and debug facts may be dropped; see suite/README.md",
             "llvm_scalar_deferred_values":"poison/undef operands choose zero; freeze keeps the concretized operand; nondeterminism is discarded, not modeled",
             "keel_to_clif_facts":"scoped memory, pointer, capture, integer-range and instruction-result contracts are not transported",
             "keel_to_llvm":"notrap and Keel-only access-stability facts omitted; unsupported contracts rejected; see crates/keel-llvm/README.md",

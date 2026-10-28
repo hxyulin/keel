@@ -163,7 +163,7 @@ keel link --target x86_64-unknown-linux-gnu start.o program.o \
 libc calls (`puts`, `memcpy` including glibc IFUNC, `exit`) are tested with
 custom startup; this does not establish support for arbitrary libc APIs. The C
 frontend emits ordinary weak definitions and references; see
-[C weak symbols](c-weak-symbols.md).
+[C weak symbols](c-extensions.md).
 
 ## Opt-in section garbage collection
 
@@ -299,11 +299,11 @@ Supported allocated custom code/data/read-only/NOBITS sections, including
 `SHF_GNU_RETAIN`, are accepted; the flag and GNU OSABI are preserved in the
 output. With `--gc-sections`, retained contributions are roots; otherwise all
 selected supported sections survive. Retention does not extract archive
-members. See [C sections and retain](c-sections-retain.md).
+members. See [C sections and retain](c-extensions.md).
 
 ## Executable initialization and termination
 
-The [C frontend lifecycle subset](c-lifecycle.md) emits default-priority typed
+The [C frontend lifecycle subset](c-extensions.md) emits default-priority typed
 init/fini arrays.
 
 Dynamically linked output advertises `.preinit_array`, `.init_array` and
@@ -322,12 +322,6 @@ The dynamic loader and libc startup perform the dispatch; a syscall-only
 `_start` does not. Static output keeps the sections but startup must invoke
 them. Legacy `.ctors`/`.dtors` conversion and linker-defined array boundary
 symbols are not implemented.
-
-`suite/validate_elf_lifecycle.py --keel <keel> --out <dir>` (x86-64 Linux) uses
-an explicit `__libc_start_main` adapter to compare Clang O0/O2 inputs against
-GNU ld, checking preinit, legacy init, prioritized constructors, main, reverse
-destructors and legacy fini ordering, with individual tags disabled as
-negative controls.
 
 ## Linker-owned anchors and CRT clone-table bounds
 
@@ -382,12 +376,6 @@ into CFI instructions or structural fields are unsupported. Input
 `.eh_frame_hdr`, DWARF64, variable-width encodings and text/data/function-relative
 or aligned pointers are unsupported. CFI instructions are copied verbatim.
 
-When merging, zero terminators and alignment gaps are absorbed into the
-preceding record as `DW_CFA_nop` (a leading empty contribution gets a synthetic
-CIE). `suite/validate_elf_unwind.py` tests `_Unwind_Backtrace` through
-frame-pointer-less assembly functions with Keel/Clang C callers against GNU ld.
-This does not establish arbitrary C++ exception or static-libgcc support.
-
 ### Bounded SFrame v3 metadata
 
 The linker keeps one selected `.sframe` input (`SHT_GNU_SFRAME`, `SHF_ALLOC`
@@ -424,15 +412,6 @@ format and image limits; this is a working-set estimate, not a process RSS
 bound. Block row declarations are checked against the header total before any
 rows are allocated.
 
-```sh
-cargo test -p keel-link --test elf_sframe
-# Cross-host structural comparison with GNU binutils (no execution):
-python3 suite/validate_elf_sframe.py --keel target/release/keel --structural-gc \
-  --as x86_64-elf-as --ld x86_64-elf-ld --readelf x86_64-elf-readelf --out target/elf-sframe-gc
-# On x86-64 Linux, with installed libc and libsframe (add --gc-sections for GC):
-python3 suite/validate_elf_sframe.py --keel target/release/keel --out target/elf-sframe
-```
-
 The Linux validator uses installed libsframe and `dl_iterate_phdr` to check
 function and row boundaries, RA-undefined rows, LOAD backing, header sizes,
 negative discovery/sorted controls, second-producer rejection and unused
@@ -454,26 +433,14 @@ avoid installed GNU libc INPUT/GROUP scripts, which remain unsupported.
 Arbitrary C++ exceptions, PIE and drop-in Clang-driver compatibility are out of scope.
 Explicit static GNU layout scripts are covered separately above.
 
-```sh
-python3 suite/validate_elf_crt.py --keel target/release/keel --out target/elf-crt
-```
-
 To cross-link, run it with `--prepare-only` on Linux (keeps objects, libraries
 and `cases.json`), link each case with Keel elsewhere, place each
 `<name>.keel` beside its `<name>.gnu`, then run `--verify-only` on Linux.
 Rejection tests must run on the linking host. Results on x86-64 Linux with GC
 disabled and enabled are in the
-[Linux SFrame, GC and CRT runtime validation](validation/linux-sframe-gc/report.md).
+Linux SFrame, GC and CRT runtime validation.
 
 ## Validation
-
-```sh
-cargo test -p keel-link -p keel
-# On x86-64 Linux, with clang, GNU ld, readelf and Python 3:
-python3 suite/validate_elf_linker.py --keel target/release/keel --out target/elf-validation
-python3 suite/validate_elf_libraries.py --keel target/release/keel --out target/elf-libraries
-python3 suite/validate_elf_unwind.py --keel target/release/keel --out target/elf-unwind
-```
 
 The Rust tests cover deterministic images, symbol resolution, absolute
 pointers, GOT entries, BSS alignment, alternate entry points, relocation

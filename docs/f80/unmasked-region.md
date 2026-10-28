@@ -79,5 +79,5 @@ instruction; exact RIP/opcode and saved FIP/FOP determine fault attribution.
 
 Compilation, assembly parity and retention checks do not establish native fault
 delivery semantics; native validation with GCC and Clang on x86-64 Linux has not
-been completed. See [x86-unmasked-fp.md](../x86-unmasked-fp.md) for the related
+been completed. See [x86-unmasked-fp.md](../x86-intrinsics.md) for the related
 SSE/AVX contract.

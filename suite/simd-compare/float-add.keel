@@ -1,8 +1,0 @@
-func @kernel(ptr, ptr, ptr) {
-block0(v0: ptr, v1: ptr, v2: ptr):
-    v3 = load.f32x4 align 1 v1
-    v4 = load.f32x4 align 1 v2
-    v5 = vfadd v3, v4
-    store align 1 v5, v0
-    return
-}

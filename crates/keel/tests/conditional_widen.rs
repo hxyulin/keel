@@ -26,7 +26,7 @@ fn full_frontend_conditional_widening_preserves_corpus_shapes_and_object_routes(
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("kernels.c"),
-        include_str!("../../../suite/runtime-kernels/kernels.c"),
+        include_str!("fixtures/runtime-kernels.c"),
     )
     .unwrap();
     for target in ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"] {

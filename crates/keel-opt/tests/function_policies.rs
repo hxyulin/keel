@@ -135,9 +135,9 @@ fn cold_alone_does_not_enable_optimization_at_o0() {
 
 #[test]
 fn kernel_link_readiness_reducers_preserve_unannotated_controls_and_report_parity() {
-    let cold = include_str!("../../../suite/linux-kernel/policy-regressions/cold.keel");
-    let rounds = include_str!("../../../suite/linux-kernel/policy-regressions/rounds.keel");
-    let dead = include_str!("../../../suite/linux-kernel/policy-regressions/dead-local.keel");
+    let cold = include_str!("fixtures/function-policies/cold.keel");
+    let rounds = include_str!("fixtures/function-policies/rounds.keel");
+    let dead = include_str!("fixtures/function-policies/dead-local.keel");
     let cases = [
         cold.to_owned(),
         cold.replace(" cold", ""),
@@ -226,7 +226,7 @@ fn scoped_constant_arguments_inspect_protected_callers_without_rewriting_them() 
 
 #[test]
 fn size_and_balanced_presets_remove_constant_guard_calls() {
-    let source = include_str!("../../../suite/linux-kernel/policy-regressions/cold.keel");
+    let source = include_str!("fixtures/function-policies/cold.keel");
     for tier in [OptimizationTier::Balanced, OptimizationTier::Size] {
         let mut module = keel_ir::parse(source).unwrap();
         keel_opt::optimize_with_tier(&mut module, tier).unwrap();

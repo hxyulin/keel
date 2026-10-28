@@ -18,8 +18,8 @@ mutating it and returns either complete, independently validated bytes or a
 
 | Function | Adds |
 | --- | --- |
-| `emit_module(&Module, &Options)` | Scalar integer code, no memory ([scalar backend](../../docs/wasm-scalar-backend.md)) |
-| `emit_wasm32_memory_module(&Module, &Wasm32MemoryOptions)` | One fixed, exported linear memory; loads, stores and pointers ([memory backend](../../docs/wasm-memory-backend.md)) |
+| `emit_module(&Module, &Options)` | Scalar integer code, no memory ([scalar backend](../../docs/wasm-backend.md)) |
+| `emit_wasm32_memory_module(&Module, &Wasm32MemoryOptions)` | One fixed, exported linear memory; loads, stores and pointers ([memory backend](../../docs/wasm-backend.md)) |
 | `emit_wasm32_runtime_module(&Module, &Wasm32RuntimeOptions)` | Static data, pointer fixups and a checked software stack for address-taken locals |
 
 `validate_wasm32_runtime_module(&Module, &Wasm32RuntimeOptions)` runs the same
@@ -134,11 +134,11 @@ Some shapes are emitted more directly:
 - A function with exactly one block ending in `Return` is emitted straight-line,
   without the dispatcher.
 - A function with an entry `brif` to two distinct `Return` blocks becomes an MVP
-  `if/else` ([terminal-if](../../docs/wasm-terminal-if-pilot.md)).
+  `if/else` (terminal-if).
 - Adjacent `local.set L; local.get L` pairs become `local.tee L`
-  ([adjacent tee](../../docs/wasm-adjacent-tee-pilot.md)).
+  (adjacent tee).
 - Pure i32/pointer conversion chains that round-trip the low 32 bits are skipped
-  ([low-bit casts](../../docs/wasm-low-bit-casts-pilot.md)).
+  (low-bit casts).
 
 None of these change instruction order, access widths, pointer normalization or
 stack checks. Every memory access uses a zero memarg offset so that wrapping

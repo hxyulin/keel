@@ -8,14 +8,8 @@ fn full_recovers_vector_literals_as_splats_and_shuffles() {
         keel_codegen::Target::Aarch64AppleDarwin,
     ] {
         for (case, expected) in [
-            (
-                include_str!("../../../suite/simd-compare/reduce.c"),
-                "vsplat",
-            ),
-            (
-                include_str!("../../../suite/simd-compare/shuffle.c"),
-                "vshuffle",
-            ),
+            (include_str!("fixtures/simd-reduce.c"), "vsplat"),
+            (include_str!("fixtures/simd-shuffle.c"), "vshuffle"),
         ] {
             let mut m = keel_c::compile(
                 case,

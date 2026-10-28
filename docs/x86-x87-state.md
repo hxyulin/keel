@@ -27,7 +27,7 @@ The caller supplies architecturally valid CW bits, balances the environment at
 foreign ABI boundaries, and accepts hardware exceptions. Masked exception
 controls are the supported environment for ordinary F80 execution; unmasked
 delivery and signal contexts are not validated (see
-[x86-unmasked-fp.md](x86-unmasked-fp.md)). FNINIT resets CW/SW/tags/pointers and
+[x86-unmasked-fp.md](x86-intrinsics.md)). FNINIT resets CW/SW/tags/pointers and
 discards physical stack state; FNCLEX clears exception status without resetting
 CW/TOP/tags. Built-in F80 lowering keeps values in memory and balances each
 temporary x87 stack sequence. These APIs observe the compiler's instruction
