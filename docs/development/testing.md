@@ -11,6 +11,7 @@ python3 tools/test.py assembler --quick            # Assembler packages only
 python3 tools/test.py linker --quick               # Linker package only
 python3 tools/test.py assembler linker --quick     # Both components
 python3 tools/test.py frontend --consumers --quick # Frontend and downstream tests
+python3 tools/test.py codegen --quick              # Core codegen development check
 python3 tools/test.py codegen --unit --quick       # Library unit tests only
 python3 tools/test.py linker --test archive        # One integration-test target
 python3 tools/test.py --changed main --quick       # Changed packages and affected consumers
@@ -63,34 +64,49 @@ manifests, generator changes, unknown paths and deleted packages select the
 entire workspace. This is a conservative file/dependency selection,
 not execution coverage or proof that unselected code cannot be affected.
 
-## Quick and exhaustive coverage
+## Development and qualification coverage
 
-`--quick` skips test names containing `exhaustive_` and skips doctests. The five largest
-codegen matrices have separate boundary smoke tests:
+`--quick` excludes `exhaustive_` tests and doctests. For codegen it also selects
+all library unit tests plus the core integration targets listed in
+`CODEGEN_CORE_TARGETS` in [the runner](../../tools/test.py). These cover backend
+selection/allocation contracts, stack frames, addressing, narrow values,
+feature gates, ABI boundaries, vector IR and typed/text object routes. Cargo
+only builds the selected test targets.
 
-- String port I/O: all 288 recipes, both raw and optimized modules, baseline with
-  normal registers and full selection/allocation with empty pools, at V1.
-- Legacy and AVX strings: both narrow and wide fixtures, baseline/fast with
-  registers and full/full with empty pools.
-- D8 ABI: every fixture and feature policy, baseline/fast with normal registers
-  and full/full with empty pools, each checked against Clang.
-- NEON modified immediates: every record and shape, immediate values
-  0, 1, 127, 128 and 255 across all selectors, allocators and normal/spill pools, including
-  Clang byte comparisons and native execution on macOS ARM64.
+```sh
+python3 tools/test.py codegen --quick                         # Core development regressions
+python3 tools/test.py codegen --unit --quick                  # Library unit tests only
+python3 tools/test.py codegen --test arm_constant_division --quick
+python3 tools/test.py codegen --test x86_legacy_strings --quick
+python3 tools/test.py codegen                                 # Full component qualification
+```
 
-Full runs retain exhaustive string and D8 ABI matrices, independent assembler
-comparisons and host-conditional native execution. For NEON modified immediates,
-all 256 values run on baseline/fast with normal registers and full/full with
-spills; boundary values run on all twelve backend configurations.
-Exhaustive native string tests are also excluded by `--quick`. Other tests
-remain selected; quick is a coverage selection, not a fixed time budget.
-Existing ignored tests stay ignored. Privileged guest qualification and external
-corpus/native campaigns remain separate from this Rust runner.
+An explicit `--test` always selects that target, including targets outside the
+core list. `--quick` then only skips its exhaustive-named cases. Feature work
+must run its owning target; the core profile does not cover every implemented
+instruction, native oracle or ABI combination. Other components keep their
+ordinary quick selection. Mixed selections still run the other packages' tests
+and apply the core profile only to codegen.
 
-Test preparation reuses verified parsed modules and lazily optimized modules
-across allocator/pool combinations. String port I/O checks literal bytes once
-per distinct instruction and checks whole-object parity for every configuration.
-Smoke tests do not write the exhaustive export files.
+The broad component run remains available without `--quick`, as does ordinary
+`cargo test -p keel-codegen`. No tests are deleted or newly ignored by this
+selection. Use broad qualification at merge boundaries; do not use it as the
+normal edit/test loop.
+
+The large string, D8 ABI and modified-immediate targets retain separate boundary
+and exhaustive tests. Naming an individual target with `--quick` runs its
+boundaries; full qualification retains the complete matrices. For modified
+immediates, all 256 values run on baseline/fast with normal registers and
+full/full with spills; boundary values run on all twelve configurations.
+Independent assembler comparisons and host-conditional execution remain intact.
+Existing ignored tests stay ignored. Guest qualification and external corpus
+campaigns remain separate.
+
+Test preparation reuses verified parsed modules and lazily optimized modules.
+String port I/O checks literal bytes once per distinct instruction and object
+parity for every configuration. Boundary smoke tests do not write exhaustive
+export files. Add a target to the core list only for a shared backend contract
+with bounded cost, not to track feature completion.
 
 ## Parallel execution
 
@@ -98,7 +114,7 @@ Install `cargo-nextest` to run test binaries in parallel:
 
 ```sh
 cargo install cargo-nextest --locked
-python3 tools/test.py --runner nextest
+python3 tools/test.py codegen --quick --runner nextest
 ```
 
 The runner selects nextest when available and otherwise uses Cargo. Override
@@ -111,7 +127,7 @@ regular test failed. Nextest writes JUnit results under `target/nextest/default/
 Both runners use the same Cargo profile. To compare with unoptimized tests:
 
 ```sh
-python3 tools/test.py codegen --runner cargo --profile test
+python3 tools/test.py codegen --quick --runner cargo --profile test
 ```
 
 For a single test target, Cargo remains sufficient:

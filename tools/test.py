@@ -28,6 +28,19 @@ SCOPES = {
 }
 
 
+# Core backend contracts, not a feature-completion inventory. Feature work should
+# name its integration target explicitly; merge qualification runs every target.
+CODEGEN_CORE_TARGETS = (
+    "allocation_contract", "commutative_two_address", "function_policies",
+    "narrow_extensions", "scalar_address", "selection", "stack_frame",
+    "switch_edges", "tiers", "unwind_tables", "fast_cc", "special_entries",
+    "arm_constants", "arm_indexed_memory", "arm_zero_branches",
+    "neon_d_vectors", "vector_ir", "vector_mask_proofs", "vector_x86_256",
+    "x86_features", "x86_aggregate_boundary", "x86_asm_clobbers",
+    "x86_generated_binding_smoke", "f80_allocation",
+)
+
+
 def consumers(seeds: set[str], packages: dict) -> set[str]:
     """Include transitive workspace consumers, including test dependencies."""
     selected = set(seeds)
@@ -71,20 +84,28 @@ def component_packages(scopes: list[str], packages: dict, include_consumers: boo
 def commands(cargo: str, runner: str, profile: str, packages: list[str], quick: bool,
              unit: bool = False, targets: list[str] | None = None,
              doctest_packages: list[str] | None = None) -> list[list[str]]:
-    selection = [arg for package in packages for arg in ("-p", package)]
     target_args = ["--lib"] if unit else [arg for target in targets or [] for arg in ("--test", target)]
-    if runner == "nextest":
-        tests = [cargo, "nextest", "run", "--cargo-profile", profile,
-                 "--no-fail-fast", *selection, *target_args]
-        if quick:
-            tests += ["-E", "not test(exhaustive_)"]
-    else:
-        tests = [cargo, "test", "--profile", profile, "--no-fail-fast", *selection, *target_args]
-        if quick:
-            if not target_args:
-                tests += ["--lib", "--bins", "--tests"]
-            tests += ["--", "--skip", "exhaustive_"]
-    result = [tests]
+    batches = [(packages, target_args)]
+    if quick and "keel-codegen" in packages and not unit and not targets:
+        others = [package for package in packages if package != "keel-codegen"]
+        batches = [(others, [])] if others else []
+        core_targets = ["--lib", *[arg for target in CODEGEN_CORE_TARGETS for arg in ("--test", target)]]
+        batches.append((["keel-codegen"], core_targets))
+    result = []
+    for batch_packages, batch_targets in batches:
+        selection = [arg for package in batch_packages for arg in ("-p", package)]
+        if runner == "nextest":
+            tests = [cargo, "nextest", "run", "--cargo-profile", profile,
+                     "--no-fail-fast", *selection, *batch_targets]
+            if quick:
+                tests += ["-E", "not test(exhaustive_)"]
+        else:
+            tests = [cargo, "test", "--profile", profile, "--no-fail-fast", *selection, *batch_targets]
+            if quick:
+                if not batch_targets:
+                    tests += ["--lib", "--bins", "--tests"]
+                tests += ["--", "--skip", "exhaustive_"]
+        result.append(tests)
     # nextest does not run doctests. Only libraries with doctests need this phase.
     docs = packages if doctest_packages is None else doctest_packages
     if runner == "nextest" and not quick and not target_args and docs:
@@ -103,7 +124,7 @@ def arguments(argv: list[str] | None = None) -> argparse.Namespace:
     targets = parser.add_mutually_exclusive_group()
     targets.add_argument("--unit", action="store_true", help="library unit tests only; no integration tests or doctests")
     targets.add_argument("--test", action="append", default=[], metavar="TARGET", help="specific integration-test target; repeat to select several")
-    parser.add_argument("--quick", action="store_true", help="exclude exhaustive_ matrices and doctests")
+    parser.add_argument("--quick", action="store_true", help="core codegen regressions; elsewhere exclude exhaustive_ matrices and doctests")
     parser.add_argument("--runner", choices=["auto", "cargo", "nextest"], default="auto")
     parser.add_argument("--profile", default="test-fast", help="Cargo build profile (default: test-fast)")
     parser.add_argument("--cargo", default="cargo", help="Cargo command or local scheduler executable")
@@ -159,6 +180,9 @@ def main() -> int:
         coverage = "integration targets: " + ", ".join(args.test)
     else:
         coverage = "selected Rust tests" + (" and doctests" if not args.quick and doctest_packages else "")
+    core_codegen = args.quick and "keel-codegen" in selected and not args.unit and not args.test
+    if core_codegen:
+        coverage += " (codegen library and core integration targets only)"
     if args.quick:
         coverage += " (exhaustive tests and doctests excluded)"
     print("Coverage: " + coverage, flush=True)
@@ -175,6 +199,7 @@ def main() -> int:
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(json.dumps({"packages": sorted(selected), "quick": args.quick,
                                           "unit": args.unit, "targets": args.test,
+                                          "codegen_core_targets": list(CODEGEN_CORE_TARGETS) if core_codegen else [],
                                           "runner": runner, "commands": records}, indent=2) + "\n")
     return int(any(r["returncode"] for r in records))
 

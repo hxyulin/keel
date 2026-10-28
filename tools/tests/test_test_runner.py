@@ -67,6 +67,46 @@ class SelectionTests(unittest.TestCase):
                 self.assertNotIn("--tests", targets[0])
                 self.assertNotIn("--lib", targets[0])
 
+    def test_codegen_quick_runs_units_and_core_contracts_in_both_runners(self):
+        for backend in ["cargo", "nextest"]:
+            with self.subTest(backend=backend):
+                plan = runner.commands("cargo", backend, "test-fast", ["keel-codegen"], True)
+                self.assertEqual(len(plan), 1)
+                command = plan[0]
+                self.assertIn("--lib", command)
+                targets = [command[i + 1] for i, arg in enumerate(command) if arg == "--test"]
+                self.assertIn("selection", targets)
+                self.assertIn("x86_features", targets)
+                self.assertNotIn("arm_constant_division", targets)
+                self.assertNotIn("run", targets)
+
+    def test_codegen_quick_does_not_narrow_an_explicit_target(self):
+        for backend in ["cargo", "nextest"]:
+            command = runner.commands("cargo", backend, "test-fast", ["keel-codegen"], True,
+                                      targets=["arm_constant_division"])[0]
+            self.assertNotIn("--lib", command)
+            self.assertEqual(command.count("--test"), 1)
+            self.assertIn("arm_constant_division", command)
+
+    def test_mixed_quick_selection_preserves_other_packages_without_duplication(self):
+        for backend in ["cargo", "nextest"]:
+            plan = runner.commands("cargo", backend, "test-fast",
+                                   ["keel-codegen", "keel-ir"], True)
+            self.assertEqual(len(plan), 2)
+            selected = [[command[i + 1] for i, arg in enumerate(command) if arg == "-p"]
+                        for command in plan]
+            self.assertEqual(selected, [["keel-ir"], ["keel-codegen"]])
+            self.assertNotIn("--test", plan[0])
+            self.assertIn("--test", plan[1])
+
+    def test_full_codegen_still_includes_all_integration_targets_and_doctests(self):
+        for backend in ["cargo", "nextest"]:
+            plan = runner.commands("cargo", backend, "test-fast", ["keel-codegen"], False)
+            self.assertNotIn("--test", plan[0])
+            self.assertNotIn("--lib", plan[0])
+            if backend == "nextest":
+                self.assertIn("--doc", plan[1])
+
     def test_source_change_includes_transitive_consumers(self):
         self.assertEqual(runner.changed_packages(["crates/ir/src/lib.rs"], self.packages),
                          {"ir", "codegen", "cli"})

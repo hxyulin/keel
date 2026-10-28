@@ -11,6 +11,9 @@
 - During development, run the changed test targets and the relevant component's
   unit/integration tests. Prefer `tools/test.py <component> --quick`, `--unit`
   or `--test <target>` over a workspace-wide command.
+- For codegen, `tools/test.py codegen --quick` is the core regression check.
+  Also name the changed feature's target with `--test <target> --quick`; the core
+  list is not complete feature coverage. Unfiltered codegen is qualification.
 - Include focused consumer tests when shared IR, ABI, instruction metadata,
   linker contracts or shared fixtures change. If automatic change selection
   expands a small change to the entire workspace, choose explicit relevant

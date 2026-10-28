@@ -219,11 +219,15 @@ not alternative production paths.
 ## Development
 
 ```sh
-cargo test --workspace
-cargo test --workspace -- --skip debugger --skip debug_info   # no debugger sessions
-cargo test -p keel-asm                                        # encodings vs Clang
-cargo suite test                                              # Lua, SQLite, QuickJS
+python3 tools/test.py codegen --quick                    # Core backend regressions
+python3 tools/test.py codegen --test stack_frame --quick # Changed feature target
+python3 tools/test.py assembler --quick                  # Assembler component
+cargo suite test lua                                    # Explicit application check
 ```
+
+Use `python3 tools/test.py full` for merge-boundary workspace verification.
+Unfiltered codegen runs include broad qualification matrices; they are not the
+normal development check. See [test selection](development/testing.md).
 
 End-to-end tests need `clang` (and `clang++` for C++ drivers); ARM64 debug
 tests need `lldb`. Tests run on macOS arm64 and x86-64 Linux.
@@ -234,7 +238,7 @@ tests need `lldb`. Tests run on macOS arm64 and x86-64 Linux.
 | Optimizer passes | `crates/keel-opt/tests/golden/` | first line `; passes: a, b` |
 | Codegen programs | `crates/keel-codegen/tests/programs/` | `; expect: exit N` or `; expect: trap`; optional same-named `.c` driver; built in 8 allocator/selection configurations |
 | C programs | `crates/keel-c/tests/programs/` | output must match Clang, with and without `-O` |
-| Applications | `suite/` | see the [suite guide](../suite/README.md) |
+| Applications | `suite/c/` | see the [suite guide](../suite/README.md) |
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/),
 scoped by area: `feat(ir): ...`, `fix(codegen): ...`, `docs: ...`.

@@ -128,11 +128,12 @@ Charts are generated from the benchmark data by
 
 ```sh
 cargo build
-python3 tools/test.py
+python3 tools/test.py codegen --quick  # Example: core codegen regressions
 ```
 
-See [targeted and full tests](docs/development/testing.md) for component selections, quick
-checks and the optimized test profile.
+Select the component and feature target you changed. Reserve full workspace
+verification for integration boundaries. See [targeted and full tests](docs/development/testing.md)
+for selections, qualification coverage and the optimized test profile.
 
 End-to-end tests need `clang` (and `clang++` for C++ drivers). See the
 [development section](docs/toolchain.md#development) for test layout.
