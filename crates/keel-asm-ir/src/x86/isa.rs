@@ -4,6 +4,7 @@ mod features;
 pub use condition_codes::{condition_code_name, isa_condition_code_name, parse_condition_code};
 mod evex_forms;
 mod generated;
+mod mnemonic_index;
 pub use evex_forms::EVEX_FORMS;
 mod register_names;
 pub(super) use features::{feature_policy, opcode_features};
@@ -140,9 +141,7 @@ impl IsaForm {
 }
 
 pub fn forms(mnemonic: &str) -> &'static [IsaForm] {
-    let start = FORMS.partition_point(|f| f.mnemonic < mnemonic);
-    let end = start + FORMS[start..].partition_point(|f| f.mnemonic == mnemonic);
-    &FORMS[start..end]
+    mnemonic_index::forms(mnemonic)
 }
 
 pub fn decode_forms(vex: bool, map: u8, byte: u8) -> impl Iterator<Item = &'static IsaForm> {

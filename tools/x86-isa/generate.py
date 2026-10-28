@@ -19,6 +19,7 @@ import coverage_ledger
 import evex
 import assembly_smoke
 import table_support
+import mnemonic_lookup
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT.parents[1] / 'crates/keel-asm-ir/src/x86/isa/generated.rs'
@@ -441,6 +442,8 @@ def main():
     outputs.update(evex.outputs(ROOT, OUTPUT, opcode_identities))
     outputs.update(assembly_smoke.outputs(ROOT))
     outputs.update(core_mappings.outputs(ROOT, OUTPUT))
+    outputs.update(mnemonic_lookup.outputs(ROOT, OUTPUT, [row for row in data if enabled(row)],
+                                          adapters, identities))
     outputs.update(att_rules.outputs(ROOT, OUTPUT))
     outputs.update(intrinsic_registry.outputs(ROOT))
     outputs.update(system_intrinsics.outputs(ROOT, OUTPUT))

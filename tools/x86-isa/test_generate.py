@@ -3,9 +3,46 @@ import json
 import unittest
 
 import generate
+import mnemonic_lookup
 
 
 class GeneratorTests(unittest.TestCase):
+    def test_mnemonic_groups_follow_catalogue_order(self):
+        self.assertEqual(mnemonic_lookup.groups([
+            {'mnemonic': 'mov'}, {'mnemonic': 'add'}, {'mnemonic': 'add'},
+        ]), [('add', 0, 2), ('mov', 2, 1)])
+        with self.assertRaisesRegex(ValueError, 'empty mnemonic'):
+            mnemonic_lookup.groups([])
+        with self.assertRaisesRegex(ValueError, 'u16 form indices'):
+            mnemonic_lookup.groups([{'mnemonic': 'add'}] * 65536)
+
+    def test_mnemonic_hash_has_one_verified_range_per_name(self):
+        data = [row for row in self.data if generate.enabled(row)]
+        entries = mnemonic_lookup.groups(data)
+        displacements, slots = mnemonic_lookup.perfect_hash(entries)
+        bits = len(displacements).bit_length() - 1
+        targets = set()
+        for name, start, count in entries:
+            value = mnemonic_lookup.name_hash(name)
+            displacement = displacements[value & (len(displacements) - 1)]
+            target = ((displacement & 32767) if displacement & 32768 else
+                      ((value >> 32) + displacement * ((value >> bits) | 1)) & (len(slots) - 1))
+            self.assertNotIn(target, targets, name)
+            targets.add(target)
+            self.assertEqual(slots[target], (start, count), name)
+
+    def test_opcode_groups_keep_operand_dependent_int_on_fallback(self):
+        identities, _, _ = generate.extension_adapters(self.data, self.adapters['extensions'])
+        data = self.data + json.loads((generate.ROOT / 'keel-extensions.json').read_text())
+        mapping = mnemonic_lookup.opcode_groups(
+            mnemonic_lookup.groups([row for row in data if generate.enabled(row)]),
+            json.loads((generate.ROOT / 'api-identities.json').read_text()),
+            json.loads((generate.ROOT / 'core-identities.json').read_text()),
+            self.adapters, identities,
+            json.loads((generate.ROOT / 'condition-codes.json').read_text()))
+        self.assertNotIn('Opcode::Core(CoreOpcode::Int)', mapping)
+        self.assertEqual(mapping['Opcode::Mov'], mapping['Opcode::Movabs'])
+
     def test_fixed_width_names_reject_ambiguous_source_size(self):
         rows = [copy.deepcopy(next(r for r in self.adapters['fixed']
                                    if r['variant'] == 'Sysexitq'))]

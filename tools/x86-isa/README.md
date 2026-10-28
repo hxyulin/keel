@@ -81,6 +81,14 @@ catalogue, decoding index, 93 v2 metadata entries, 1,226 VEX form adapters,
 `ALL` lists, parse aliases and mnemonic mappings are also generated from the
 explicit identity policy. Existing enum order and spellings are preserved.
 
+Mnemonic lookup uses generated displacement hashing with exact spelling
+verification. The encoder dispatches static opcode identities to generated
+form-group IDs and selects the slice once. Payload-dependent and
+operand-dependent identities use mnemonic lookup. The generator derives both
+indices from the same ordered catalogue and API schemas. Rust tests compare
+every generated opcode case with the encoder's dialect normalization, and
+compare mnemonic lookup with the original binary-search result.
+
 Fixed adapters also generate their source mnemonic, operand-size selection and
 leading-FWAIT normalization. The decoder uses generated width-specific names
 for canonical formatting. [SYSEXIT/RSM support](../../docs/targets/x86_64/system/exits.md)

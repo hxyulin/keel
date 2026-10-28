@@ -1,4 +1,5 @@
 mod evex;
+mod mnemonics;
 mod tables;
 
 use Operand::{Immediate as I, Memory as M, Register as R};

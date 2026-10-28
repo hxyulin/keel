@@ -2,7 +2,7 @@
 use super::*;
 use keel_asm_ir::x86::{
     CoreOpcode, Repeat,
-    isa::{self, IsaForm, IsaOperand, OperandSizeRule},
+    isa::{IsaForm, IsaOperand, OperandSizeRule},
 };
 use smallvec::SmallVec;
 
@@ -949,7 +949,7 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding<'_>, Strin
     if i.operands.iter().any(|o|matches!(o,I(a) if constant(a).is_some_and(|n|n<0)))
         && (i.opcode.required_features().avx||i.opcode.required_features().bmi2||matches!(i.opcode,V2(_)|Core(CoreOpcode::RetFar{..}|CoreOpcode::Rcl|CoreOpcode::Rcr|CoreOpcode::RclImm|CoreOpcode::RcrImm|CoreOpcode::Enter{..}|CoreOpcode::Int|CoreOpcode::IntImm|CoreOpcode::In|CoreOpcode::Out))
             || i.operands.iter().any(|o|matches!(o,R(r) if matches!(r.class,RegisterClass::Xmm|RegisterClass::Mmx|RegisterClass::Ymm)))){return Err("control requires an unsigned immediate".into());}
-    for f in isa::forms(&d.name) {
+    for f in mnemonics::forms(i.opcode, &d.name) {
         for p66 in [false, true] {
             for w in [false, true] {
                 if p66 && !has16 && f.sizes != 1 {
@@ -1008,7 +1008,7 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding<'_>, Strin
 
 pub(super) fn vector_or_state(i: &Instruction) -> bool {
     let d = dialect(i);
-    isa::forms(&d.name).iter().any(|f| {
+    mnemonics::forms(i.opcode, &d.name).iter().any(|f| {
         f.operands
             .iter()
             .any(|o| matches!(o.kind, "xmm" | "ymm" | "mmx"))
@@ -1016,4 +1016,71 @@ pub(super) fn vector_or_state(i: &Instruction) -> bool {
             || f.mnemonic.starts_with("fxsave")
             || f.mnemonic.starts_with("fxrstor")
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use keel_asm_ir::x86::isa;
+
+    fn check_group(instruction: &Instruction) {
+        let dialect = dialect(instruction);
+        let actual = mnemonics::forms(instruction.opcode, &dialect.name);
+        let expected = isa::forms(&dialect.name);
+        assert_eq!(actual.len(), expected.len(), "{:?}", instruction.opcode);
+        assert_eq!(
+            actual.as_ptr(),
+            expected.as_ptr(),
+            "{:?}",
+            instruction.opcode
+        );
+    }
+
+    #[test]
+    fn generated_opcode_groups_match_dialect_normalization() {
+        for &opcode in mnemonics::CASES {
+            check_group(&Instruction {
+                opcode,
+                operands: Vec::new(),
+                lock: false,
+            });
+        }
+    }
+
+    #[test]
+    fn payload_and_operand_dependent_groups_use_name_lookup() {
+        use keel_asm_ir::x86::{LoopKind, StringKind};
+        for opcode in [
+            Core(CoreOpcode::String {
+                kind: StringKind::Movs,
+                width: 64,
+                repeat: Repeat::Rep,
+                address32: false,
+                segment: None,
+            }),
+            Core(CoreOpcode::Loop {
+                kind: LoopKind::Zero,
+                address32: true,
+            }),
+            Core(CoreOpcode::RetFar { width: 64 }),
+        ] {
+            check_group(&Instruction {
+                opcode,
+                operands: Vec::new(),
+                lock: false,
+            });
+        }
+        for (value, name) in [(3, "int3"), (128, "int")] {
+            let instruction = Instruction {
+                opcode: Core(CoreOpcode::Int),
+                operands: vec![I(Address {
+                    expression: keel_asm_ir::Expression::constant(value),
+                    ..Default::default()
+                })],
+                lock: false,
+            };
+            assert_eq!(dialect(&instruction).name, name);
+            check_group(&instruction);
+        }
+    }
 }

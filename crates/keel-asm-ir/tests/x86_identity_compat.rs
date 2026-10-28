@@ -3,6 +3,43 @@ use keel_asm_ir::x86::{FixedOpcode, Instruction, Opcode, V2Opcode, V3Opcode, X87
 use std::fmt::Write;
 
 #[test]
+fn mnemonic_groups_match_binary_search_for_known_names_and_near_misses() {
+    use keel_asm_ir::x86::isa::{self, FORMS};
+    let check = |name: &str| {
+        let start = FORMS.partition_point(|form| form.mnemonic < name);
+        let end = start + FORMS[start..].partition_point(|form| form.mnemonic == name);
+        let actual = isa::forms(name);
+        assert_eq!(actual.len(), end - start, "{name:?}");
+        if start != end {
+            assert_eq!(actual.as_ptr(), FORMS[start..end].as_ptr(), "{name:?}");
+        }
+    };
+    let names: std::collections::BTreeSet<_> = FORMS.iter().map(|form| form.mnemonic).collect();
+    let min_length = names.iter().map(|name| name.len()).min().unwrap();
+    let max_length = names.iter().map(|name| name.len()).max().unwrap();
+    for name in names {
+        check(name);
+        check(&format!("{name}_"));
+        check(&format!("_{name}"));
+        check(&name.to_uppercase());
+        for index in 0..name.len() {
+            for byte in 0..=127 {
+                let mut candidate = name.as_bytes().to_vec();
+                candidate[index] = byte;
+                check(std::str::from_utf8(&candidate).unwrap());
+            }
+            check(&format!("{}{}", &name[..index], &name[index + 1..]));
+        }
+    }
+    for length in [0, min_length - 1, min_length, max_length, max_length + 1, 4096] {
+        check(&"x".repeat(length));
+    }
+    for name in ["é", "变量", "🦀", "ｍｏｖ", "mové", "éret"] {
+        check(name);
+    }
+}
+
+#[test]
 fn original_static_spellings_identities_and_formatting() {
     for line in include_str!("fixtures/x86-static-identities.txt").lines() {
         if line.starts_with('#') {
