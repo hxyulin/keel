@@ -181,3 +181,28 @@ Each harness invocation needs a fresh `--out` directory (default
 `manifest.json` records every command and output, compiler and exporter hashes,
 source revision and tool versions, and every produced artifact hash.
 This is a correctness exercise, not a performance campaign or speed claim.
+
+## Native LLVM import
+
+`keel_llvm::import::Importer` loads a trusted LLVM 23 shared library once and
+imports LLVM text in-process. Each translation creates its own LLVM context,
+parses and verifies the original module through LLVM's C API, then parses and
+verifies the complete Keel output. It has no build-time LLVM installation or
+linker requirement. No Python process or external Keel executable is required.
+
+```sh
+cargo build -p keel-llvm --bins
+./target/debug/keel-llvm-import \
+  --libllvm "$(rustc --print sysroot)/lib/libLLVM.dylib" input.ll -o output.keel
+```
+
+The supported operations and rejection policies match the diagnostic Python
+importer described in [the import contract](../../suite/llvm_import_README.md).
+`--localize-odr-functions` retains its explicit no-outside-TU-reference
+assertion. The CLI buffers output and atomically replaces destinations only
+after verification succeeds. An optional `--keel PATH` adds the old external
+verification step for compatibility and failure-injection checks.
+
+The three-input harness uses the Rust API directly. The Python implementation
+remains a reference for port parity tests. See [porting notes](PORTING.md) for
+the mapping, deliberate differences and validation commands.

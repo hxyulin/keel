@@ -66,6 +66,7 @@ fn native(m: &keel_ir::Module) -> Result<Vec<u8>> {
         .map_err(|e| e.to_string())
 }
 struct Harness {
+    importer: Option<keel_llvm::import::Importer>,
     args: BTreeMap<String, String>,
     out: PathBuf,
     commands: Vec<Value>,
@@ -80,18 +81,23 @@ impl Harness {
             .ok_or_else(|| format!("missing --{key}"))
     }
     fn import_llvm(&mut self, path: &Path) -> Result<String> {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../suite/llvm_import.py");
-        let mut cmd = Command::new("python3");
-        cmd.arg(root)
-            .args([
-                "--libllvm",
-                self.arg("libllvm")?,
-                "--keel",
-                self.arg("keel")?,
-            ])
-            .arg(path);
-        String::from_utf8(command(&mut cmd, &mut self.commands)?).map_err(|e| e.to_string())
+        if self.importer.is_none() {
+            self.importer = Some(
+                // SAFETY: --libllvm explicitly selects the trusted LLVM 23 runtime.
+                unsafe { keel_llvm::import::Importer::load(Path::new(self.arg("libllvm")?)) }
+                    .map_err(|e| e.to_string())?,
+            );
+        }
+        self.importer
+            .as_ref()
+            .ok_or("LLVM importer was not initialized")?
+            .translate(
+                &fs::read(path).map_err(|e| e.to_string())?,
+                Default::default(),
+            )
+            .map_err(|e| e.to_string())
     }
+
     fn execute(&mut self, label: &str, bytes: Vec<u8>) -> Result<()> {
         let object = self.out.join(format!("{label}.o"));
         let executable = self.out.join(format!("{label}.exe"));
@@ -211,7 +217,7 @@ fn run() -> Result<()> {
     while let Some(key) = iter.next() {
         if key == "--help" {
             println!(
-                "keel-ir-harness --target {TARGET} --format keel|llvm|clif --input FILE --name SYMBOL --driver FILE.c --expected FILE --out NEW_DIR --libllvm FILE --keel BIN --clif-import BIN [--clang BIN]"
+                "keel-ir-harness --target {TARGET} --format keel|llvm|clif --input FILE --name SYMBOL --driver FILE.c --expected FILE --out NEW_DIR --libllvm FILE --clif-import BIN [--clang BIN]"
             );
             return Ok(());
         }
@@ -249,6 +255,7 @@ fn run() -> Result<()> {
         fs::read(args.get("expected").ok_or("--expected required")?).map_err(|e| e.to_string())?;
     fs::create_dir(&out).map_err(|e| format!("fresh output directory required: {e}"))?;
     let mut h = Harness {
+        importer: None,
         args,
         out,
         commands: Vec::new(),

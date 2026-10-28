@@ -12,7 +12,8 @@ fn unsupported_odr_linkage_fails_whole_module_export() {
     ] {
         let m = keel_ir::parse(src).unwrap();
         keel_ir::verify_module(&m).unwrap();
-        for target in [keel_llvm::TargetProfile::AppleArm64] {
+        {
+            let target = keel_llvm::TargetProfile::AppleArm64;
             assert!(
                 keel_llvm::export(&m, target)
                     .unwrap_err()

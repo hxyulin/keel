@@ -7,3 +7,5 @@ license.workspace = true
 
 [dependencies]
 keel-ir = { path = "../keel-ir" }
+libloading = "0.9"
+regex = "1"

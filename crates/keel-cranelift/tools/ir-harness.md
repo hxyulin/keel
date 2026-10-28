@@ -32,7 +32,6 @@ crates/keel-cranelift/target/debug/keel-ir-harness \
   --expected crates/keel-cranelift/tools/ir-fixtures/scalar.expected \
   --out target/ir-harness-clif \
   --libllvm "$(rustc --print sysroot)/lib/libLLVM.dylib" \
-  --keel target/debug/keel \
   --clif-import crates/keel-cranelift/target/debug/keel-clif-import
 ```
 
@@ -55,9 +54,9 @@ is recorded as `fatal`, with no invented downstream results.
 Timings describe the diagnostic run. They include compilation, linking and
 process startup, and are not throughput benchmarks. Keel parsing, verification,
 LLVM export, CLIF import/export and native/Cranelift compilation run in Rust.
-LLVM import uses the existing Python adapter and its LLVM parser/verifier.
-Its process time is recorded among commands. Moving that importer into Rust
-is separate work before high-volume LLVM differential testing.
+LLVM import uses `keel_llvm::import::Importer` in-process. The loaded LLVM 23
+library is reused across conversions; each translation owns an independent
+LLVM context. Python and the external Keel executable are not used for import.
 
 ## CLIF import contract
 

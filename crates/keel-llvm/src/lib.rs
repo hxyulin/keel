@@ -1,5 +1,7 @@
-//! Diagnostic exporter, deliberately independent of LLVM libraries.
-//! See the crate README for its supported subset and semantic boundaries.
+//! Diagnostic Keel ↔ LLVM conversion. Export needs no LLVM library; import loads LLVM 23.
+//! See the crate README for supported subsets and semantic boundaries.
+pub mod import;
+
 use keel_ir::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
@@ -106,15 +108,32 @@ pub fn export(module: &Module, target: TargetProfile) -> ExportResult<String> {
         return Err("module assembly is unsupported by the LLVM bridge".into());
     }
 
-    if module.functions.iter().any(|f| f.layout_insts().any(|(_, i)| matches!(f.inst_data(i), keel_ir::InstData::AggregateVaArg { .. }) || f.inst_data(i).call_args().is_some_and(|a| a.has_explicit_abi()))) {
-        return Err("explicit call operand ABI and aggregate va_arg homes are unsupported by LLVM".into());
+    if module.functions.iter().any(|f| {
+        f.layout_insts().any(|(_, i)| {
+            matches!(f.inst_data(i), keel_ir::InstData::AggregateVaArg { .. })
+                || f.inst_data(i)
+                    .call_args()
+                    .is_some_and(|a| a.has_explicit_abi())
+        })
+    }) {
+        return Err(
+            "explicit call operand ABI and aggregate va_arg homes are unsupported by LLVM".into(),
+        );
     }
     if module.decls.iter().any(|d| d.sig.x86_vector_abi.is_some())
         || module.functions.iter().any(|f| {
             f.sig.x86_vector_abi.is_some()
                 || f.callees().any(|(_, d)| d.sig.x86_vector_abi.is_some())
                 || f.signatures().any(|(_, s)| s.x86_vector_abi.is_some())
-                || f.layout_insts().any(|(_,i)| matches!(f.inst_data(i), keel_ir::InstData::VaArg { x86_vector_abi: Some(_), .. }))
+                || f.layout_insts().any(|(_, i)| {
+                    matches!(
+                        f.inst_data(i),
+                        keel_ir::InstData::VaArg {
+                            x86_vector_abi: Some(_),
+                            ..
+                        }
+                    )
+                })
         })
     {
         return Err("explicit x86 vector ABI is unsupported by LLVM".into());
@@ -176,10 +195,10 @@ pub fn export(module: &Module, target: TargetProfile) -> ExportResult<String> {
             .flat_map(|f| f.callees().map(|(_, d)| d)),
     ) {
         signature(&d.sig).map_err(|e| format!("@{}: {e}", d.name))?;
-        if let Some(old) = decls.insert(d.name.clone(), d.clone()) {
-            if old.sig != d.sig || old.attrs != d.attrs {
-                return Err(format!("@{}: conflicting declarations", d.name));
-            }
+        if let Some(old) = decls.insert(d.name.clone(), d.clone())
+            && (old.sig != d.sig || old.attrs != d.attrs)
+        {
+            return Err(format!("@{}: conflicting declarations", d.name));
         }
     }
     let mut names = BTreeSet::new();
@@ -192,10 +211,10 @@ pub fn export(module: &Module, target: TargetProfile) -> ExportResult<String> {
         if !names.insert(f.name.clone()) {
             return Err(format!("@{}: duplicate symbol", f.name));
         }
-        if let Some(d) = decls.get(&f.name) {
-            if d.sig != f.sig {
-                return Err(format!("@{}: conflicting definition signature", f.name));
-            }
+        if let Some(d) = decls.get(&f.name)
+            && d.sig != f.sig
+        {
+            return Err(format!("@{}: conflicting definition signature", f.name));
         }
     }
     // Standard comparison intrinsics use the same ABI as libc when not
