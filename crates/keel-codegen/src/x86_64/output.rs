@@ -6,7 +6,7 @@ use keel_asm_ir::x86::{
 use keel_asm_ir::{Directive, Program};
 use std::fmt::{self, Write};
 
-pub(super) enum Output {
+pub(crate) enum Output {
     Text(crate::text::Text),
     Structured(Program),
 }

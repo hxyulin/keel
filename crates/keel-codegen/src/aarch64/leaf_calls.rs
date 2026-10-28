@@ -37,15 +37,38 @@ pub(super) fn prepare(
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
     structured: bool,
+    unwind_tables: crate::UnwindTables,
 ) -> Result<(Summaries, Prepared), CodegenError> {
-    prepare_with_chain_output_limits(
+    let (summaries, mut prepared) = prepare_with_chain_output_limits(
         symbols,
         pools,
         pipeline,
         structured,
         8 * 1024 * 1024,
         65_536,
-    )
+    )?;
+    // Charge the existing output budgets with CFI present. Metadata policy must
+    // not admit extra call-chain proofs and thereby change register allocation.
+    // Eligibility excludes user assembly and personalities, so every CFI line
+    // in these cached bodies belongs to the compiler.
+    if unwind_tables == crate::UnwindTables::RequiredOnly {
+        for (body, _) in prepared.values_mut() {
+            match body {
+                Output::Text(text) | Output::ElfText(text) => {
+                    let filtered: String = text
+                        .split_inclusive('\n')
+                        .filter(|line| !line.trim_start().starts_with(".cfi_"))
+                        .collect();
+                    text.clear();
+                    text.push_str(&filtered);
+                }
+                Output::Structured(program) => program.items.retain(|item| {
+                    !matches!(item, keel_asm_ir::Item::Directive(Directive::Cfi(_)))
+                }),
+            }
+        }
+    }
+    Ok((summaries, prepared))
 }
 
 // Leaves retain their original IR allowance; only newly admitted chains spend
@@ -219,6 +242,7 @@ mod tests {
                 allocator: &crate::regalloc::AllocationTier::Full,
             },
             false,
+            crate::UnwindTables::All,
         )
         .unwrap()
     }
@@ -248,6 +272,7 @@ mod tests {
                     allocator: &crate::regalloc::AllocationTier::Full,
                 },
                 false,
+                crate::UnwindTables::All,
             )
             .unwrap()
             .0
@@ -390,8 +415,14 @@ block0(v0:i64):
             allocator: &crate::regalloc::AllocationTier::Full,
         };
         for structured in [false, true] {
-            let (all_summaries, all_prepared) =
-                prepare(&symbols, &REGISTERS, &pipeline, structured).unwrap();
+            let (all_summaries, all_prepared) = prepare(
+                &symbols,
+                &REGISTERS,
+                &pipeline,
+                structured,
+                crate::UnwindTables::All,
+            )
+            .unwrap();
             assert_eq!(all_summaries.len(), 6);
             let size = |body: &Output| match body {
                 Output::Text(text) | Output::ElfText(text) => text.len(),
@@ -495,6 +526,7 @@ block0(v0:i64):
                 allocator: &crate::regalloc::AllocationTier::Full,
             },
             false,
+            crate::UnwindTables::All,
         )
         .unwrap()
         .0;

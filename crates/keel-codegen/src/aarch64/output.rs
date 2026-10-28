@@ -42,7 +42,7 @@ const CONDITIONS: [&str; 16] = [
 
 /// Compiler instructions and metadata have typed emission paths. Only explicit
 /// user inline assembly is permitted to enter a structured program as text.
-pub(super) enum Output {
+pub(crate) enum Output {
     Text(crate::text::Text),
     ElfText(crate::text::Text),
     Structured(Program),

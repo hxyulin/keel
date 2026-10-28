@@ -67,7 +67,8 @@ model for tiny/single-use inlining, instruction selection or allocator decisions
 Losing profitable inlining can make an individual program larger. The benchmark
 records executable section bytes separately from file bytes so debug, symbol,
 alignment and object-container overhead cannot masquerade as instruction size.
-Unwind policy remains unchanged and independent of `-Os`.
+Unwind emission is independent of `-Os`; see [unwind metadata](unwind-metadata.md)
+for explicit enable/disable flags.
 
 ## x86-64 address models
 

@@ -139,6 +139,7 @@ mod packed_sign;
 mod raw_fma;
 mod strings;
 mod vector;
+pub(crate) use output::Output;
 use output::*;
 
 /// The registers values are allocated to.
@@ -231,7 +232,17 @@ pub fn compile_with_pipeline_and_code_model(
     pipeline: &crate::CodegenPipeline<'_>,
     code_model: CodeModel,
 ) -> Result<String, CodegenError> {
-    let Output::Text(text) = compile_output(module, pools, pipeline, code_model, false, None)?
+    let Output::Text(text) = compile_output(
+        module,
+        pools,
+        pipeline,
+        crate::EmissionOptions {
+            x86_code_model: Some(code_model),
+            ..Default::default()
+        },
+        false,
+        None,
+    )?
     else {
         unreachable!()
     };
@@ -255,8 +266,17 @@ pub fn compile_program_with_pipeline_and_code_model(
     pipeline: &crate::CodegenPipeline<'_>,
     code_model: CodeModel,
 ) -> Result<keel_asm_ir::Program, CodegenError> {
-    let Output::Structured(program) =
-        compile_output(module, pools, pipeline, code_model, true, None)?
+    let Output::Structured(program) = compile_output(
+        module,
+        pools,
+        pipeline,
+        crate::EmissionOptions {
+            x86_code_model: Some(code_model),
+            ..Default::default()
+        },
+        true,
+        None,
+    )?
     else {
         unreachable!()
     };
@@ -289,22 +309,32 @@ pub fn compile_program_chunks_with_pipeline_and_code_model(
     code_model: CodeModel,
     sink: &mut dyn FnMut(keel_asm_ir::Program),
 ) -> Result<(), CodegenError> {
-    let Output::Structured(program) =
-        compile_output(module, pools, pipeline, code_model, true, Some(&mut *sink))?
+    let Output::Structured(program) = compile_output(
+        module,
+        pools,
+        pipeline,
+        crate::EmissionOptions {
+            x86_code_model: Some(code_model),
+            ..Default::default()
+        },
+        true,
+        Some(&mut *sink),
+    )?
     else {
         unreachable!()
     };
     sink(program);
     Ok(())
 }
-fn compile_output(
+pub(crate) fn compile_output(
     module: &Module,
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
-    code_model: CodeModel,
+    emission: crate::EmissionOptions,
     structured: bool,
     mut sink: Option<&mut dyn FnMut(keel_asm_ir::Program)>,
 ) -> Result<Output, CodegenError> {
+    let code_model = emission.x86_code_model.unwrap_or_default();
     if code_model == CodeModel::Kernel && module.data.iter().any(|d| d.thread_local) {
         return Err(CodegenError {
             func: String::new(),
@@ -370,6 +400,7 @@ fn compile_output(
         let mut compiler = FunctionCompiler::new(&func, &symbols, pools, pipeline, structured)?;
         compiler.debug = debug;
         compiler.code_model = code_model;
+        compiler.unwind_tables = emission.unwind_tables;
         let slots = if debug {
             compiler.slot_frame_offsets()
         } else {
@@ -778,6 +809,7 @@ struct FunctionCompiler<'a> {
     uses_trap: bool,
     /// Whether to emit `.loc` directives.
     debug: bool,
+    unwind_tables: crate::UnwindTables,
     /// The location of the last `.loc`.
     srcloc: Option<SourceLoc>,
     /// Whether the next `.loc` ends the prologue.
@@ -796,6 +828,12 @@ struct FunctionCompiler<'a> {
 }
 
 impl<'a> FunctionCompiler<'a> {
+    fn cfi(&mut self, directive: Cfi) {
+        if self.unwind_tables == crate::UnwindTables::All || self.func.personality.is_some() {
+            self.out.directive(Directive::Cfi(directive));
+        }
+    }
+
     /// The offset of each stack slot from rbp, where debuggers find the
     /// variables in them: rbp stays put while `rsp` may move.
     fn slot_frame_offsets(&self) -> Vec<i64> {
@@ -1737,6 +1775,7 @@ impl<'a> FunctionCompiler<'a> {
             out: Output::new(structured),
             uses_trap: false,
             debug: false,
+            unwind_tables: crate::UnwindTables::All,
             srcloc: None,
             prologue_end: false,
             scope: None,
@@ -1815,30 +1854,30 @@ impl<'a> FunctionCompiler<'a> {
             }));
             self.prologue_end = true;
         }
-        self.out.directive(Directive::Cfi(Cfi::Start));
+        self.cfi(Cfi::Start);
         if self.frameless {
             // The return address remains at rsp; the caller's rbp is untouched.
-            self.out.directive(Directive::Cfi(Cfi::DefCfa {
+            self.cfi(Cfi::DefCfa {
                 register: 7,
                 offset: 8,
-            }));
+            });
         } else {
             self.emit(Opcode::Push, [asm_arg(r64(5))]);
-            self.out.directive(Directive::Cfi(Cfi::DefCfaOffset(16)));
-            self.out.directive(Directive::Cfi(Cfi::Offset {
+            self.cfi(Cfi::DefCfaOffset(16));
+            self.cfi(Cfi::Offset {
                 register: 6,
                 offset: -16,
-            }));
+            });
             self.emit(Opcode::Mov, [asm_arg(r64(5)), asm_arg(r64(4))]);
-            self.out.directive(Directive::Cfi(Cfi::DefCfaRegister(6)));
+            self.cfi(Cfi::DefCfaRegister(6));
         }
         // Each push is 8 bytes further from the CFA, which is rbp + 16.
         for (k, r) in self.saved.clone().into_iter().enumerate() {
             self.emit(Opcode::Push, [asm_arg(r64(r))]);
-            self.out.directive(Directive::Cfi(Cfi::Offset {
+            self.cfi(Cfi::Offset {
                 register: dwarf_register(r),
                 offset: -((24 + 8 * k) as i64),
-            }));
+            });
         }
         if self.frame_size > 0 {
             self.emit(Opcode::Sub, [asm_arg(r64(4)), asm_arg(self.frame_size)]);
@@ -1875,7 +1914,7 @@ impl<'a> FunctionCompiler<'a> {
             self.emit(Opcode::Ud2, []);
         }
         self.out.label(format!(".L{name}_end"));
-        self.out.directive(Directive::Cfi(Cfi::End));
+        self.cfi(Cfi::End);
         self.out.directive(Directive::Size {
             name: symbol.clone(),
             expression: Expression::difference(".", symbol),

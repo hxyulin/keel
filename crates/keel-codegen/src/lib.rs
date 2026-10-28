@@ -15,6 +15,8 @@ pub mod aarch64;
 mod abi;
 mod data;
 mod dwarf;
+mod emission;
+pub use emission::{EmissionOptions, UnwindTables};
 mod fold;
 mod integer_division;
 mod kinds;
@@ -341,21 +343,23 @@ pub fn compile_with_pipeline(
     target: Target,
     pipeline: &CodegenPipeline<'_>,
 ) -> Result<String, CodegenError> {
+    compile_with_pipeline_and_emission(module, target, pipeline, EmissionOptions::default())
+}
+
+/// Compile source assembly with explicit address and unwind emission policies.
+///
+/// # Errors
+/// Returns target, operand or IR validation errors.
+pub fn compile_with_pipeline_and_emission(
+    module: &Module,
+    target: Target,
+    pipeline: &CodegenPipeline<'_>,
+    options: EmissionOptions,
+) -> Result<String, CodegenError> {
     profiling::scope!("codegen", target.triple());
-    match target {
-        Target::Wasm32UnknownUnknown => Err(CodegenError {
-            func: "<target>".into(),
-            message:
-                "unsupported target wasm32-unknown-unknown: native code generation is unavailable"
-                    .into(),
-        }),
-        Target::Aarch64LinuxGnu => aarch64::compile_linux(module, pipeline),
-        Target::Aarch64AppleDarwin => {
-            aarch64::compile_with_pipeline(module, &aarch64::REGISTERS, pipeline)
-        }
-        Target::X86_64LinuxGnu => {
-            x86_64::compile_with_pipeline(module, &x86_64::REGISTERS, pipeline)
-        }
+    match emission::compile(module, target, pipeline, options, false, None)? {
+        emission::Output::Text(text) => Ok(text),
+        _ => unreachable!("text emission requested"),
     }
 }
 
@@ -381,20 +385,22 @@ pub fn compile_program_with_pipeline(
     target: Target,
     pipeline: &CodegenPipeline<'_>,
 ) -> Result<keel_asm_ir::Program, CodegenError> {
-    match target {
-        Target::Wasm32UnknownUnknown => Err(CodegenError {
-            func: "<target>".into(),
-            message:
-                "unsupported target wasm32-unknown-unknown: native code generation is unavailable"
-                    .into(),
-        }),
-        Target::Aarch64LinuxGnu => aarch64::compile_linux_program(module, pipeline, None),
-        Target::Aarch64AppleDarwin => {
-            aarch64::compile_program_with_pipeline(module, &aarch64::REGISTERS, pipeline)
-        }
-        Target::X86_64LinuxGnu => {
-            x86_64::compile_program_with_pipeline(module, &x86_64::REGISTERS, pipeline)
-        }
+    compile_program_with_pipeline_and_emission(module, target, pipeline, EmissionOptions::default())
+}
+
+/// Compile typed assembly with explicit address and unwind emission policies.
+///
+/// # Errors
+/// Returns target, operand or IR validation errors.
+pub fn compile_program_with_pipeline_and_emission(
+    module: &Module,
+    target: Target,
+    pipeline: &CodegenPipeline<'_>,
+    options: EmissionOptions,
+) -> Result<keel_asm_ir::Program, CodegenError> {
+    match emission::compile(module, target, pipeline, options, true, None)? {
+        emission::Output::Program(program) => Ok(program),
+        _ => unreachable!("structured emission requested"),
     }
 }
 
@@ -407,28 +413,32 @@ pub fn compile_program_chunks_with_pipeline(
     pipeline: &CodegenPipeline<'_>,
     sink: &mut dyn FnMut(keel_asm_ir::Program),
 ) -> Result<(), CodegenError> {
-    match target {
-        Target::Wasm32UnknownUnknown => Err(CodegenError {
-            func: "<target>".into(),
-            message:
-                "unsupported target wasm32-unknown-unknown: native code generation is unavailable"
-                    .into(),
-        }),
-        Target::Aarch64LinuxGnu => {
-            let p = aarch64::compile_linux_program(module, pipeline, Some(&mut *sink))?;
-            sink(p);
-            Ok(())
-        }
-        Target::Aarch64AppleDarwin => aarch64::compile_program_chunks_with_pipeline(
-            module,
-            &aarch64::REGISTERS,
-            pipeline,
-            sink,
-        ),
-        Target::X86_64LinuxGnu => {
-            x86_64::compile_program_chunks_with_pipeline(module, &x86_64::REGISTERS, pipeline, sink)
-        }
+    compile_program_chunks_with_pipeline_and_emission(
+        module,
+        target,
+        pipeline,
+        EmissionOptions::default(),
+        sink,
+    )
+}
+
+/// Stream typed assembly with explicit address and unwind emission policies.
+/// Compiler-created CFI is controlled before chunks reach the assembler.
+///
+/// # Errors
+/// Returns target, operand or IR validation errors.
+pub fn compile_program_chunks_with_pipeline_and_emission(
+    module: &Module,
+    target: Target,
+    pipeline: &CodegenPipeline<'_>,
+    options: EmissionOptions,
+    sink: &mut dyn FnMut(keel_asm_ir::Program),
+) -> Result<(), CodegenError> {
+    match emission::compile(module, target, pipeline, options, true, Some(&mut *sink))? {
+        emission::Output::Program(program) => sink(program),
+        _ => unreachable!("structured emission requested"),
     }
+    Ok(())
 }
 
 use std::fmt;

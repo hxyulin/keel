@@ -79,7 +79,7 @@
 //!
 //! # Debug info
 //!
-//! Every function has call frame information (`.cfi_*`), which unwinders
+//! By default, every function has call frame information (`.cfi_*`), which unwinders
 //! and debuggers need to walk through its frame. The frame is addressed
 //! from x29, so the CFA is `x29 + 16` from the end of `mov x29, sp` on,
 //! and the saved registers sit at fixed offsets from it.
@@ -135,7 +135,8 @@ use keel_asm_ir::{FieldId, Opcode};
 use keel_asm_ir::{PageKind, SymbolicInstruction as Symbolic};
 use native::Piece::{Class, Hex, Number, Reg as R, Text};
 use native::{Address, Arg, Reg};
-use output::{Name, Output};
+use output::Name;
+pub(crate) use output::Output;
 
 /// The registers values are allocated to.
 pub const REGISTERS: Pools = Pools {
@@ -201,7 +202,15 @@ pub fn compile_with_pipeline(
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
 ) -> Result<String, CodegenError> {
-    match compile_output(module, pools, pipeline, false, None, false)? {
+    match compile_output(
+        module,
+        pools,
+        pipeline,
+        false,
+        None,
+        false,
+        Default::default(),
+    )? {
         Output::Text(text) => Ok(text.into_string()),
         _ => unreachable!(),
     }
@@ -214,7 +223,15 @@ pub fn compile_program_with_pipeline(
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
 ) -> Result<keel_asm_ir::Program, CodegenError> {
-    match compile_output(module, pools, pipeline, true, None, false)? {
+    match compile_output(
+        module,
+        pools,
+        pipeline,
+        true,
+        None,
+        false,
+        Default::default(),
+    )? {
         Output::Structured(program) => Ok(program),
         _ => unreachable!(),
     }
@@ -227,7 +244,15 @@ pub fn compile_program_chunks_with_pipeline(
     pipeline: &crate::CodegenPipeline<'_>,
     sink: &mut dyn FnMut(keel_asm_ir::Program),
 ) -> Result<(), CodegenError> {
-    match compile_output(module, pools, pipeline, true, Some(&mut *sink), false)? {
+    match compile_output(
+        module,
+        pools,
+        pipeline,
+        true,
+        Some(&mut *sink),
+        false,
+        Default::default(),
+    )? {
         Output::Structured(program) => sink(program),
         _ => unreachable!(),
     }
@@ -240,7 +265,15 @@ pub fn compile_linux_with_pipeline(
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
 ) -> Result<String, CodegenError> {
-    match compile_output(module, pools, pipeline, false, None, true)? {
+    match compile_output(
+        module,
+        pools,
+        pipeline,
+        false,
+        None,
+        true,
+        Default::default(),
+    )? {
         Output::ElfText(s) => Ok(s.into_string()),
         _ => unreachable!(),
     }
@@ -252,36 +285,28 @@ pub fn compile_linux_program_with_pipeline(
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
 ) -> Result<keel_asm_ir::Program, CodegenError> {
-    match compile_output(module, pools, pipeline, true, None, true)? {
+    match compile_output(
+        module,
+        pools,
+        pipeline,
+        true,
+        None,
+        true,
+        Default::default(),
+    )? {
         Output::Structured(p) => Ok(p),
         _ => unreachable!(),
     }
 }
 
-pub(crate) fn compile_linux(
-    module: &Module,
-    pipeline: &crate::CodegenPipeline<'_>,
-) -> Result<String, CodegenError> {
-    compile_linux_with_pipeline(module, &REGISTERS, pipeline)
-}
-pub(crate) fn compile_linux_program(
-    module: &Module,
-    pipeline: &crate::CodegenPipeline<'_>,
-    sink: Option<&mut dyn FnMut(keel_asm_ir::Program)>,
-) -> Result<keel_asm_ir::Program, CodegenError> {
-    match compile_output(module, &REGISTERS, pipeline, true, sink, true)? {
-        Output::Structured(p) => Ok(p),
-        _ => unreachable!(),
-    }
-}
-
-fn compile_output(
+pub(crate) fn compile_output(
     module: &Module,
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
     structured: bool,
     mut sink: Option<&mut dyn FnMut(keel_asm_ir::Program)>,
     linux: bool,
+    emission: crate::EmissionOptions,
 ) -> Result<Output, CodegenError> {
     let target = if linux {
         crate::Target::Aarch64LinuxGnu
@@ -346,7 +371,13 @@ fn compile_output(
             leaf_calls::Prepared::default(),
         )
     } else {
-        leaf_calls::prepare(&symbols, pools, pipeline, structured)?
+        leaf_calls::prepare(
+            &symbols,
+            pools,
+            pipeline,
+            structured,
+            emission.unwind_tables,
+        )?
     };
     let mut frames = Vec::new();
     for (index, original) in module.functions.iter().enumerate() {
@@ -373,6 +404,7 @@ fn compile_output(
             linux,
         )?;
         compiler.debug = debug;
+        compiler.unwind_tables = emission.unwind_tables;
         let slots = if debug {
             compiler.slot_frame_offsets()
         } else {
@@ -1578,6 +1610,7 @@ struct FunctionCompiler<'a> {
     eh: ExceptionTable,
     /// Whether to emit `.loc` directives.
     debug: bool,
+    unwind_tables: crate::UnwindTables,
     /// The location of the last `.loc`.
     srcloc: Option<SourceLoc>,
     /// Whether the next `.loc` ends the prologue.
@@ -1593,6 +1626,12 @@ struct FunctionCompiler<'a> {
 }
 
 impl<'a> FunctionCompiler<'a> {
+    fn cfi(&mut self, directive: Cfi) {
+        if self.unwind_tables == crate::UnwindTables::All || self.func.personality.is_some() {
+            self.out.directive(Directive::Cfi(directive));
+        }
+    }
+
     /// The offset of each stack slot from `x29`, the frame pointer. The
     /// prologue sets `x29` to `sp` on entry, less the 16 bytes of its own
     /// pair, and then lowers `sp` by 16 per pair of saved registers and
@@ -2175,6 +2214,7 @@ impl<'a> FunctionCompiler<'a> {
             uses_trap: false,
             eh,
             debug: false,
+            unwind_tables: crate::UnwindTables::All,
             srcloc: None,
             prologue_end: false,
             scope: None,
@@ -2271,20 +2311,17 @@ impl<'a> FunctionCompiler<'a> {
             }));
             self.prologue_end = true;
         }
-        self.out.directive(Directive::Cfi(Cfi::Start));
+        self.cfi(Cfi::Start);
         // 155 is an indirect, pc-relative 4-byte pointer (through the GOT,
         // as the personality may be in a dylib), 16 a pc-relative one.
         if let Some(personality) = &func.personality {
-            self.out.directive(Directive::Cfi(Cfi::Personality(
-                ["_", personality.as_str()].concat(),
-            )));
-            self.out
-                .directive(Directive::Cfi(Cfi::Lsda(["L", name, "_lsda"].concat())));
+            self.cfi(Cfi::Personality(["_", personality.as_str()].concat()));
+            self.cfi(Cfi::Lsda(["L", name, "_lsda"].concat()));
         }
         if self.frameless {
             // The AArch64 CIE starts at CFA = sp. Keep LR and FP untouched;
             // offset zero also has the standard frameless compact encoding.
-            self.out.directive(Directive::Cfi(Cfi::DefCfaOffset(0)));
+            self.cfi(Cfi::DefCfaOffset(0));
         } else {
             self.native(
                 Opcode::STP_64_ldstpair_pre,
@@ -2306,18 +2343,18 @@ impl<'a> FunctionCompiler<'a> {
                 ],
                 |out| out.write_str("mov\tx29, sp"),
             );
-            self.out.directive(Directive::Cfi(Cfi::DefCfa {
+            self.cfi(Cfi::DefCfa {
                 register: 29,
                 offset: 16,
-            }));
-            self.out.directive(Directive::Cfi(Cfi::Offset {
+            });
+            self.cfi(Cfi::Offset {
                 register: 30,
                 offset: -8,
-            }));
-            self.out.directive(Directive::Cfi(Cfi::Offset {
+            });
+            self.cfi(Cfi::Offset {
                 register: 29,
                 offset: -16,
-            }));
+            });
         }
         // Push the callee-saved registers in pairs, keeping `sp` 16-byte
         // aligned; an odd one out still takes 16 bytes. Pair `k` is at
@@ -2355,14 +2392,14 @@ impl<'a> FunctionCompiler<'a> {
                             )
                         },
                     );
-                    self.out.directive(Directive::Cfi(Cfi::Offset {
+                    self.cfi(Cfi::Offset {
                         register: *a + if class == 'd' { 64 } else { 0 },
                         offset: -(offset as i64),
-                    }));
-                    self.out.directive(Directive::Cfi(Cfi::Offset {
+                    });
+                    self.cfi(Cfi::Offset {
                         register: *b + if class == 'd' { 64 } else { 0 },
                         offset: -((offset - 8) as i64),
-                    }));
+                    });
                 }
                 [a] => {
                     self.native(
@@ -2383,10 +2420,10 @@ impl<'a> FunctionCompiler<'a> {
                             )
                         },
                     );
-                    self.out.directive(Directive::Cfi(Cfi::Offset {
+                    self.cfi(Cfi::Offset {
                         register: *a + if class == 'd' { 64 } else { 0 },
                         offset: -(offset as i64),
-                    }));
+                    });
                 }
                 _ => unreachable!(),
             }
@@ -2517,7 +2554,7 @@ impl<'a> FunctionCompiler<'a> {
                 backend_scope!(Relaxation);
                 self.out.relax(name, start);
             }
-            self.out.directive(Directive::Cfi(Cfi::End));
+            self.cfi(Cfi::End);
             if func.personality.is_some() {
                 self.eh.emit(&mut self.out, name);
             }

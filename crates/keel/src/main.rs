@@ -36,6 +36,7 @@ mod disasm;
 mod input;
 mod link;
 mod optimization;
+mod unwind_options;
 mod wasm;
 mod x86_options;
 
@@ -64,6 +65,9 @@ const USAGE: &str = "usage:
   Repeated explicit stage options use the last value.
   --opt-tier none|fast|basic|balanced|full|size controls IR optimization; -p overrides its pipeline in either order.
   fast runs bounded local/CFG cleanup and small single-stream sum reductions; allocator/selection defaults are independent.
+  -fno-asynchronous-unwind-tables omits optional compiler-generated CFI.
+  -funwind-tables requests tables independently; disable both to suppress both requests.
+  Unwind flags do not change stack frames, debug info or explicit user assembly CFI.
   Repeated verification defaults on with debug assertions or feature verify-each.
   --verify-each / --no-verify-each override this; contradictory flags are rejected.
   Initial input verification and canonical restoration always run.
@@ -110,6 +114,7 @@ struct Options {
     function_binding: Option<keel_c::FunctionBinding>,
     link_intent: Option<CLinkIntent>,
     x86_code_model: Option<keel_codegen::x86_64::CodeModel>,
+    unwind: unwind_options::UnwindOptions,
     emit_object: bool,
     emit_wasm: bool,
     wasm: wasm::Options,
@@ -500,6 +505,10 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                 opts.selection = tier.options();
                 explicit_selection = true;
             }
+            "-funwind-tables"
+            | "-fno-unwind-tables"
+            | "-fasynchronous-unwind-tables"
+            | "-fno-asynchronous-unwind-tables" => opts.unwind.set(flag),
             "-g" => opts.ir_lines = true,
             "--emit-ir" => opts.emit_ir = true,
             "--code-model" => {
@@ -736,6 +745,10 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "-O",
                     "-p",
                     "-g",
+                    "-funwind-tables",
+                    "-fno-unwind-tables",
+                    "-fasynchronous-unwind-tables",
+                    "-fno-asynchronous-unwind-tables",
                     "--target",
                     "--code-model",
                     "--emit-object",
@@ -775,6 +788,10 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "-O",
                     "-p",
                     "-g",
+                    "-funwind-tables",
+                    "-fno-unwind-tables",
+                    "-fasynchronous-unwind-tables",
+                    "-fno-asynchronous-unwind-tables",
                     "--emit-ir",
                     "-fsemantic-interposition",
                     "-fno-semantic-interposition",
@@ -987,17 +1004,12 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
             Target::Aarch64AppleDarwin => &mut aarch64_sink,
             Target::X86_64LinuxGnu => &mut x86_sink,
         };
-        if let Some(model) = opts.x86_code_model {
-            keel_codegen::x86_64::compile_program_chunks_with_pipeline_and_code_model(
-                &module,
-                &keel_codegen::x86_64::REGISTERS,
-                &pipeline,
-                model,
-                sink,
-            )
-        } else {
-            keel_codegen::compile_program_chunks_with_pipeline(&module, target, &pipeline, sink)
-        }
+        let mut emission = keel_codegen::EmissionOptions::default();
+        emission.unwind_tables = opts.unwind.policy();
+        emission.x86_code_model = opts.x86_code_model;
+        keel_codegen::compile_program_chunks_with_pipeline_and_emission(
+            &module, target, &pipeline, emission, sink,
+        )
         .map_err(|e| e.to_string())?;
         drop(module);
         let object = match target {
@@ -1012,17 +1024,12 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
         std::fs::write(output, object).map_err(|e| format!("{output}: {e}"))
     } else {
-        let source = if let Some(model) = opts.x86_code_model {
-            keel_codegen::x86_64::compile_with_pipeline_and_code_model(
-                &module,
-                &keel_codegen::x86_64::REGISTERS,
-                &pipeline,
-                model,
-            )
-        } else {
-            keel_codegen::compile_with_pipeline(&module, target, &pipeline)
-        }
-        .map_err(|e| e.to_string())?;
+        let mut emission = keel_codegen::EmissionOptions::default();
+        emission.unwind_tables = opts.unwind.policy();
+        emission.x86_code_model = opts.x86_code_model;
+        let source =
+            keel_codegen::compile_with_pipeline_and_emission(&module, target, &pipeline, emission)
+                .map_err(|e| e.to_string())?;
         // The process exits once the text is written, and the system takes
         // the module's memory back faster than freeing its every allocation.
         std::mem::forget(module);
