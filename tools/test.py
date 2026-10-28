@@ -69,7 +69,8 @@ def component_packages(scopes: list[str], packages: dict, include_consumers: boo
 
 
 def commands(cargo: str, runner: str, profile: str, packages: list[str], quick: bool,
-             unit: bool = False, targets: list[str] | None = None) -> list[list[str]]:
+             unit: bool = False, targets: list[str] | None = None,
+             doctest_packages: list[str] | None = None) -> list[list[str]]:
     selection = [arg for package in packages for arg in ("-p", package)]
     target_args = ["--lib"] if unit else [arg for target in targets or [] for arg in ("--test", target)]
     if runner == "nextest":
@@ -84,9 +85,11 @@ def commands(cargo: str, runner: str, profile: str, packages: list[str], quick: 
                 tests += ["--lib", "--bins", "--tests"]
             tests += ["--", "--skip", "exhaustive_"]
     result = [tests]
-    # nextest does not run doctests. A full selection must run them separately.
-    if runner == "nextest" and not quick and not target_args:
-        result.append([cargo, "test", "--profile", profile, "--doc", "--no-fail-fast", *selection])
+    # nextest does not run doctests. Only libraries with doctests need this phase.
+    docs = packages if doctest_packages is None else doctest_packages
+    if runner == "nextest" and not quick and not target_args and docs:
+        doc_selection = [arg for package in docs for arg in ("-p", package)]
+        result.append([cargo, "test", "--profile", profile, "--doc", "--no-fail-fast", *doc_selection])
     return result
 
 
@@ -145,14 +148,17 @@ def main() -> int:
     if runner == "nextest" and not shutil.which("cargo-nextest"):
         print("cargo-nextest is missing; install it or select --runner cargo", file=sys.stderr)
         return 2
-    plan = commands(args.cargo, runner, args.profile, sorted(selected), args.quick, args.unit, args.test)
+    doctest_packages = sorted(name for name in selected
+                              if any(target["doctest"] for target in packages[name]["targets"]))
+    plan = commands(args.cargo, runner, args.profile, sorted(selected), args.quick,
+                    args.unit, args.test, doctest_packages)
     print("Packages: " + ", ".join(sorted(selected)), flush=True)
     if args.unit:
         coverage = "library unit tests"
     elif args.test:
         coverage = "integration targets: " + ", ".join(args.test)
     else:
-        coverage = "selected Rust tests" + ("" if args.quick else " and doctests")
+        coverage = "selected Rust tests" + (" and doctests" if not args.quick and doctest_packages else "")
     if args.quick:
         coverage += " (exhaustive tests and doctests excluded)"
     print("Coverage: " + coverage, flush=True)

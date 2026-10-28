@@ -91,13 +91,23 @@ class SelectionTests(unittest.TestCase):
         self.packages["ir"]["dependencies"] = [{"name": "cli"}]
         self.assertEqual(runner.consumers({"ir"}, self.packages), {"ir", "codegen", "cli"})
 
-    def test_full_nextest_always_adds_doctests(self):
+    def test_full_nextest_adds_applicable_doctests(self):
         tests, docs = runner.commands("cargo", "nextest", "test-fast", ["ir"], False)
         self.assertIn("--cargo-profile", tests)
         self.assertIn("--doc", docs)
         self.assertNotIn("-E", tests)
         quick = runner.commands("cargo", "nextest", "test-fast", ["ir"], True)[0]
         self.assertIn("not test(exhaustive_)", quick)
+
+    def test_binary_only_and_mixed_selections_do_not_request_binary_doctests(self):
+        binary = runner.commands("cargo", "nextest", "test-fast", ["cli"], False,
+                                 doctest_packages=[])
+        self.assertEqual(len(binary), 1)
+        tests, docs = runner.commands("cargo", "nextest", "test-fast", ["cli", "ir"], False,
+                                      doctest_packages=["ir"])
+        self.assertIn("cli", tests)
+        self.assertNotIn("cli", docs)
+        self.assertEqual(docs[-2:], ["-p", "ir"])
 
     def test_quick_is_explicit_for_both_runners(self):
         for backend in ["cargo", "nextest"]:
