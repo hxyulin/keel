@@ -7,6 +7,8 @@ use std::{fs, process::Command};
 #[path = "common/vector.rs"]
 #[allow(dead_code)]
 mod common;
+#[path = "common/matrix.rs"]
+mod matrix;
 const SPILL: Pools = Pools {
     caller_saved: &[9, 10],
     callee_saved: &[19],
@@ -19,43 +21,47 @@ fn fixture() -> (String, String) {
         "#include <stdint.h>\n#include <string.h>\n#include <stdio.h>\n#include <assert.h>\n#include <sys/mman.h>\n#include <unistd.h>\nstruct Case{void(*f)(const void*,const void*,const void*,void*);unsigned tables,extend,bytes;const char *name;};\n",
     );
     let mut cases = String::from("static const struct Case cases[]={\n");
-    for bytes in [8,16] {
-    for &op in N::ALL.iter().filter(|o| o.is_table()) {
-        let shape = if bytes == 8 { "i8x8" } else { "i8x16" };
-        let name = format!("{op}_{shape}");
-        let extension = matches!(op, N::Tbx1 | N::Tbx2 | N::Tbx3 | N::Tbx4);
-        let tables = op.arity() - 1 - usize::from(extension);
-        ir +=
-            &format!("func @{name}(ptr,ptr,ptr,ptr) {{\nblock0(v0: ptr,v1: ptr,v2: ptr,v3: ptr):\n");
-        for i in 0..tables {
+    for bytes in [8, 16] {
+        for &op in N::ALL.iter().filter(|o| o.is_table()) {
+            let shape = if bytes == 8 { "i8x8" } else { "i8x16" };
+            let name = format!("{op}_{shape}");
+            let extension = matches!(op, N::Tbx1 | N::Tbx2 | N::Tbx3 | N::Tbx4);
+            let tables = op.arity() - 1 - usize::from(extension);
             ir += &format!(
-                " v{} = iconst.i64 {}\n v{} = ptradd v0,v{}\n v{} = load.i8x16 align 1 v{}\n",
-                4 + 3 * i,
-                16 * i,
-                5 + 3 * i,
-                4 + 3 * i,
-                6 + 3 * i,
-                5 + 3 * i
+                "func @{name}(ptr,ptr,ptr,ptr) {{\nblock0(v0: ptr,v1: ptr,v2: ptr,v3: ptr):\n"
+            );
+            for i in 0..tables {
+                ir += &format!(
+                    " v{} = iconst.i64 {}\n v{} = ptradd v0,v{}\n v{} = load.i8x16 align 1 v{}\n",
+                    4 + 3 * i,
+                    16 * i,
+                    5 + 3 * i,
+                    4 + 3 * i,
+                    6 + 3 * i,
+                    5 + 3 * i
+                );
+            }
+            ir += &format!(" v20 = load.{shape} align 1 v1\n");
+            if extension {
+                ir += &format!(" v21 = load.{shape} align 1 v2\n");
+            }
+            let mut args = if extension {
+                vec!["v21".to_string()]
+            } else {
+                vec![]
+            };
+            args.extend((0..tables).map(|i| format!("v{}", 6 + 3 * i)));
+            args.push("v20".to_string());
+            ir += &format!(
+                " v22 = {op}.{shape}({})\n store align 1 v22,v3\n return\n}}\n",
+                args.join(",")
+            );
+            c += &format!("extern void {name}(const void*,const void*,const void*,void*);\n");
+            cases += &format!(
+                "{{{name},{tables},{},{bytes},\"{name}\"}},\n",
+                u8::from(extension)
             );
         }
-        ir += &format!(" v20 = load.{shape} align 1 v1\n");
-        if extension {
-            ir += &format!(" v21 = load.{shape} align 1 v2\n");
-        }
-        let mut args = if extension {
-            vec!["v21".to_string()]
-        } else {
-            vec![]
-        };
-        args.extend((0..tables).map(|i| format!("v{}", 6 + 3 * i)));
-        args.push("v20".to_string());
-        ir += &format!(
-            " v22 = {op}.{shape}({})\n store align 1 v22,v3\n return\n}}\n",
-            args.join(",")
-        );
-        c += &format!("extern void {name}(const void*,const void*,const void*,void*);\n");
-        cases += &format!("{{{name},{tables},{},{bytes},\"{name}\"}},\n", u8::from(extension));
-    }
     }
     c += &cases;
     c += "};\n";
@@ -88,8 +94,8 @@ unsigned char*te=edge(),*ie=edge(),*fe=edge(),*oe=edge();
 fn table_lookup_extension_all_indices_aliases_and_exact_reads() {
     use object::{Object, ObjectSection};
     let (source, c) = fixture();
-    let m = keel_ir::parse(&source).unwrap();
-    keel_ir::verify_module(&m).unwrap();
+    let prepared = matrix::PreparedModule::parse(&source);
+    let m = prepared.for_selector(SelectionTier::Baseline);
     assert_eq!(
         keel_ir::parse(&m.to_string()).unwrap().to_string(),
         m.to_string()
@@ -110,20 +116,17 @@ fn table_lookup_extension_all_indices_aliases_and_exact_reads() {
         SelectionTier::Full,
     ] {
         for allocator in [AllocationTier::Fast, AllocationTier::Full] {
-            let mut m = m.clone();
-            if matches!(selector, SelectionTier::Full) {
-                keel_opt::optimize(&mut m).unwrap();
-            }
+            let m = prepared.for_selector(selector);
             let pipeline = CodegenPipeline {
                 selector: &selector,
                 allocator: &allocator,
             };
             for pools in [&keel_codegen::aarch64::REGISTERS, &SPILL] {
                 let text =
-                    keel_codegen::aarch64::compile_with_pipeline(&m, pools, &pipeline).unwrap();
+                    keel_codegen::aarch64::compile_with_pipeline(m, pools, &pipeline).unwrap();
                 assert!(!text.contains(" = stack_addr"));
                 let program =
-                    keel_codegen::aarch64::compile_program_with_pipeline(&m, pools, &pipeline)
+                    keel_codegen::aarch64::compile_program_with_pipeline(m, pools, &pipeline)
                         .unwrap();
                 assert_eq!(program.stats().text_bytes, 0);
                 let direct =
@@ -147,16 +150,17 @@ fn table_lookup_extension_all_indices_aliases_and_exact_reads() {
                     file.section_by_name("__text").unwrap().data().unwrap()
                 );
                 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-                for (route, bytes) in [("direct", direct), ("parsed", parsed)] {
-                    fs::write(dir.join("test.o"), bytes).unwrap();
+                {
+                    // Object parity is checked above; execute the identical image once.
+                    fs::write(dir.join("test.o"), direct).unwrap();
                     common::command(
                         Command::new("clang")
                             .arg(dir.join("oracle.o"))
                             .arg(dir.join("test.o"))
                             .arg("-o")
-                            .arg(dir.join(route)),
+                            .arg(dir.join("direct")),
                     );
-                    common::command(&mut Command::new(dir.join(route)));
+                    common::command(&mut Command::new(dir.join("direct")));
                 }
             }
         }
@@ -165,6 +169,9 @@ fn table_lookup_extension_all_indices_aliases_and_exact_reads() {
     // Bad shape and arity are verifier errors rather than emitter assumptions.
     for shape in VectorType::ALL {
         let accepted = N::Tbl1.accepts(Type::Vector(shape));
-        assert_eq!(accepted, matches!(shape, VectorType::I8x8 | VectorType::I8x16));
+        assert_eq!(
+            accepted,
+            matches!(shape, VectorType::I8x8 | VectorType::I8x16)
+        );
     }
 }

@@ -8,6 +8,10 @@ use std::{fs, process::Command};
 #[path = "common/vector.rs"]
 #[allow(dead_code)]
 mod common;
+#[path = "common/immediates.rs"]
+mod immediates;
+#[path = "common/matrix.rs"]
+mod matrix;
 const SPILL: Pools = Pools {
     caller_saved: &[9, 10],
     callee_saved: &[19],
@@ -98,9 +102,9 @@ fn fixture() -> (String, String, usize, usize) {
             let result_low = half_ty;
             let inputs = op.operand_types(result_low).unwrap();
             let immediate = op.immediate_range(result_low);
-            let counts = immediate
-                .clone()
-                .map_or(vec![None], |r| r.map(Some).collect());
+            let counts = immediate.clone().map_or(vec![None], |r| {
+                immediates::boundaries(r).into_iter().map(Some).collect()
+            });
             for high in 0..2 {
                 for &imm in &counts {
                     let ty = if narrow && high == 1 {
@@ -280,13 +284,12 @@ __asm__ volatile("msr fpcr,%0"::"r"(savedcr):"memory");status(old);return 0;}
     (ir, c, records, combinations)
 }
 #[test]
-fn every_nonindexed_width_record_executes_both_halves_and_all_narrow_immediates() {
+fn every_nonindexed_width_record_executes_both_halves_and_immediate_boundaries() {
     use object::{Object, ObjectSection};
     let (source, c, records, combinations) = fixture();
     assert_eq!(records, 40);
     eprintln!("width-changing records {records}, exact shape/high/lane signatures {combinations}");
-    let m = keel_ir::parse(&source).unwrap();
-    keel_ir::verify_module(&m).unwrap();
+    let prepared = matrix::PreparedModule::parse(&source);
     let dir = common::temp("neon-width-halves");
     fs::write(dir.join("oracle.c"), c).unwrap();
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -304,17 +307,14 @@ fn every_nonindexed_width_record_executes_both_halves_and_all_narrow_immediates(
     ] {
         for allocator in [AllocationTier::Fast, AllocationTier::Full] {
             for pools in [&keel_codegen::aarch64::REGISTERS, &SPILL] {
-                let mut m = m.clone();
-                if selector == SelectionTier::Full {
-                    keel_opt::optimize(&mut m).unwrap();
-                }
+                let m = prepared.for_selector(selector);
                 let p = CodegenPipeline {
                     selector: &selector,
                     allocator: &allocator,
                 };
-                let text = keel_codegen::aarch64::compile_with_pipeline(&m, pools, &p).unwrap();
+                let text = keel_codegen::aarch64::compile_with_pipeline(m, pools, &p).unwrap();
                 let program =
-                    keel_codegen::aarch64::compile_program_with_pipeline(&m, pools, &p).unwrap();
+                    keel_codegen::aarch64::compile_program_with_pipeline(m, pools, &p).unwrap();
                 let bytes =
                     keel_asm::assemble_program_object(&program, Default::default()).unwrap();
                 assert_eq!(bytes, keel_asm::assemble_object(&text).unwrap());

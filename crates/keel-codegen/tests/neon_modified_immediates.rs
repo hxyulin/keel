@@ -262,12 +262,18 @@ fn check_modified_immediates(exhaustive: bool) {
     ] {
         let m = prepared.for_selector(selector);
         for allocator in [AllocationTier::Fast, AllocationTier::Full] {
-            if !exhaustive
-                && (selector == SelectionTier::Trees || allocator == AllocationTier::Full)
-            {
-                continue;
-            }
-            for pools in [&keel_codegen::aarch64::REGISTERS, &SPILL] {
+            for (spilled, pools) in [(false, &keel_codegen::aarch64::REGISTERS), (true, &SPILL)] {
+                // Sweep every value on both raw/register and optimized/spill paths.
+                // The smaller boundary fixture covers every backend combination.
+                if exhaustive
+                    && !matches!(
+                        (selector, allocator, spilled),
+                        (SelectionTier::Baseline, AllocationTier::Fast, false)
+                            | (SelectionTier::Full, AllocationTier::Full, true)
+                    )
+                {
+                    continue;
+                }
                 let p = CodegenPipeline {
                     selector: &selector,
                     allocator: &allocator,
@@ -310,6 +316,6 @@ fn check_modified_immediates(exhaustive: bool) {
             }
         }
     }
-    assert_eq!(configurations, if exhaustive { 12 } else { 4 });
+    assert_eq!(configurations, if exhaustive { 2 } else { 12 });
     fs::remove_dir_all(dir).unwrap();
 }

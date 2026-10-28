@@ -7,6 +7,10 @@ use std::{fs, process::Command};
 #[path = "common/vector.rs"]
 #[allow(dead_code)]
 mod common;
+#[path = "common/immediates.rs"]
+mod immediates;
+#[path = "common/matrix.rs"]
+mod matrix;
 const SPILL: Pools = Pools {
     caller_saved: &[9, 10],
     callee_saved: &[19],
@@ -28,7 +32,10 @@ fn fixture() -> (String, String) {
         "#include <arm_neon.h>\n#include <stdint.h>\n#include <string.h>\n#include <stdio.h>\n#include <assert.h>\n#include <sys/mman.h>\n#include <unistd.h>\nstruct Case{void(*f)(const void*,const void*,void*);void(*ref)(const void*,const void*,void*);const char *name;unsigned bytes,sourcebytes,resultbytes;};\n",
     );
     let mut cases = String::from("static const struct Case cases[]={\n");
-    for &op in N::ALL.iter().filter(|o| !o.is_conversion() && o.memory().is_none()) {
+    for &op in N::ALL
+        .iter()
+        .filter(|o| !o.is_conversion() && o.memory().is_none())
+    {
         for shape in VectorType::ALL_64.into_iter().chain(VectorType::ALL_128) {
             let ty = Type::Vector(shape);
             let Some(range) = op.immediate_range(ty) else {
@@ -62,11 +69,15 @@ fn fixture() -> (String, String) {
                 N::Ursra => ("vrsraq_n", false),
                 _ => unreachable!(),
             };
-            let stem = if shape.bytes() == 8 { stem.replace("q_", "_") } else { stem.to_string() };
+            let stem = if shape.bytes() == 8 {
+                stem.replace("q_", "_")
+            } else {
+                stem.to_string()
+            };
             let source = vectors[0].vector().unwrap();
             let width = source.lane_type().bytes().unwrap() * 8;
             let destwidth = shape.lane_type().bytes().unwrap() * 8;
-            for n in range {
+            for n in immediates::boundaries(range) {
                 let name = format!("{op}_{shape}_{n}");
                 ir += &format!("func @{name}(ptr,ptr,ptr) {{\nblock0(v0: ptr,v1: ptr,v2: ptr):\n");
                 for (i, t) in vectors.iter().enumerate() {
@@ -78,7 +89,8 @@ fn fixture() -> (String, String) {
                 );
                 c += &format!(
                     "extern void {name}(const void*,const void*,void*);\n__attribute__((noinline)) static void ref_{name}(const void*a,const void*b,void*out){{{} x,y;memcpy(&x,a,{1});memcpy(&y,b,{1});",
-                    vector(vectors[0], signed),vectors[0].bytes().unwrap()
+                    vector(vectors[0], signed),
+                    vectors[0].bytes().unwrap()
                 );
                 let letter = if signed { "s" } else { "u" };
                 let call = format!(
@@ -96,9 +108,15 @@ fn fixture() -> (String, String) {
                 };
                 c += &format!(
                     "{} r={expression};memcpy(out,&r,{});}}\n",
-                    vector(ty, outsigned),shape.bytes()
+                    vector(ty, outsigned),
+                    shape.bytes()
                 );
-                cases += &format!("{{{name},ref_{name},\"{name}\",{},{},{}}},\n", width / 8, vectors[0].bytes().unwrap(),shape.bytes());
+                cases += &format!(
+                    "{{{name},ref_{name},\"{name}\",{},{},{}}},\n",
+                    width / 8,
+                    vectors[0].bytes().unwrap(),
+                    shape.bytes()
+                );
             }
         }
     }
@@ -127,11 +145,11 @@ int main(void){unsigned char *ae=edge(),*be=edge(),*oe=edge();unsigned char a[17
     (ir, c)
 }
 #[test]
-fn every_immediate_shift_matches_acle_and_qc() {
+fn immediate_shift_boundaries_match_acle_and_qc() {
     use object::{Object, ObjectSection};
     let (source, c) = fixture();
-    let m = keel_ir::parse(&source).unwrap();
-    keel_ir::verify_module(&m).unwrap();
+    let prepared = matrix::PreparedModule::parse(&source);
+    let m = prepared.for_selector(SelectionTier::Baseline);
     assert_eq!(
         keel_ir::parse(&m.to_string()).unwrap().to_string(),
         m.to_string()
@@ -152,20 +170,17 @@ fn every_immediate_shift_matches_acle_and_qc() {
         SelectionTier::Full,
     ] {
         for allocator in [AllocationTier::Fast, AllocationTier::Full] {
-            let mut m = m.clone();
-            if matches!(selector, SelectionTier::Full) {
-                keel_opt::optimize(&mut m).unwrap();
-            }
+            let m = prepared.for_selector(selector);
             let pipeline = CodegenPipeline {
                 selector: &selector,
                 allocator: &allocator,
             };
             for pools in [&keel_codegen::aarch64::REGISTERS, &SPILL] {
                 let text =
-                    keel_codegen::aarch64::compile_with_pipeline(&m, pools, &pipeline).unwrap();
+                    keel_codegen::aarch64::compile_with_pipeline(m, pools, &pipeline).unwrap();
                 assert!(!text.contains(" = stack_addr"));
                 let program =
-                    keel_codegen::aarch64::compile_program_with_pipeline(&m, pools, &pipeline)
+                    keel_codegen::aarch64::compile_program_with_pipeline(m, pools, &pipeline)
                         .unwrap();
                 assert_eq!(program.stats().text_bytes, 0);
                 let direct =
@@ -189,16 +204,17 @@ fn every_immediate_shift_matches_acle_and_qc() {
                     file.section_by_name("__text").unwrap().data().unwrap()
                 );
                 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-                for (route, bytes) in [("direct", direct), ("parsed", parsed)] {
-                    fs::write(dir.join("test.o"), bytes).unwrap();
+                {
+                    // Object parity is checked above; execute the identical image once.
+                    fs::write(dir.join("test.o"), direct).unwrap();
                     common::command(
                         Command::new("clang")
                             .arg(dir.join("oracle.o"))
                             .arg(dir.join("test.o"))
                             .arg("-o")
-                            .arg(dir.join(route)),
+                            .arg(dir.join("direct")),
                     );
-                    common::command(&mut Command::new(dir.join(route)));
+                    common::command(&mut Command::new(dir.join("direct")));
                 }
             }
         }

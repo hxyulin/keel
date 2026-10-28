@@ -171,16 +171,17 @@ fn width_changes_match_extended_oracle_and_preserve_qc() {
                     file.section_by_name("__text").unwrap().data().unwrap()
                 );
                 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-                for (route, bytes) in [("direct", direct), ("parsed", parsed)] {
-                    fs::write(dir.join("test.o"), bytes).unwrap();
+                {
+                    // Object parity is checked above; execute the identical image once.
+                    fs::write(dir.join("test.o"), direct).unwrap();
                     common::command(
                         Command::new("clang")
                             .arg(dir.join("oracle.o"))
                             .arg(dir.join("test.o"))
                             .arg("-o")
-                            .arg(dir.join(route)),
+                            .arg(dir.join("direct")),
                     );
-                    common::command(&mut Command::new(dir.join(route)));
+                    common::command(&mut Command::new(dir.join("direct")));
                 }
             }
         }

@@ -6,7 +6,6 @@ debug assertions and overflow checks. Plain `cargo test` retains its original
 unoptimized profile and includes every nonignored matrix.
 
 ```sh
-python3 tools/test.py                              # All workspace Rust tests and doctests
 python3 tools/test.py assembler --unit --quick     # Assembler library unit tests
 python3 tools/test.py assembler --quick            # Assembler packages only
 python3 tools/test.py linker --quick               # Linker package only
@@ -16,7 +15,14 @@ python3 tools/test.py codegen --unit --quick       # Library unit tests only
 python3 tools/test.py linker --test archive        # One integration-test target
 python3 tools/test.py --changed main --quick       # Changed packages and affected consumers
 python3 tools/test.py --dry-run                    # Print packages and commands without building
+python3 tools/test.py full                         # Merge-boundary workspace verification
 ```
+
+Use component and test-target selections during development. Full workspace
+verification belongs at a merge/fast-forward boundary or an explicitly requested
+qualification/timing run. Shared IR, ABI or fixture changes may need focused
+consumer coverage. Invoking the runner without a component still selects the
+whole workspace; that is not the default development check.
 
 Named components run only their own packages by default. Building their test
 binaries still builds required dependencies, but does not run those dependencies'
@@ -69,11 +75,13 @@ codegen matrices have separate boundary smoke tests:
 - D8 ABI: every fixture and feature policy, baseline/fast with normal registers
   and full/full with empty pools, each checked against Clang.
 - NEON modified immediates: every record and shape, immediate values
-  0, 1, 127, 128 and 255, baseline/full selectors and normal/spill pools, including
+  0, 1, 127, 128 and 255 across all selectors, allocators and normal/spill pools, including
   Clang byte comparisons and native execution on macOS ARM64.
 
-Full runs retain all original cases, selector/allocator/pool combinations,
-independent assembler comparisons and host-conditional native execution.
+Full runs retain exhaustive string and D8 ABI matrices, independent assembler
+comparisons and host-conditional native execution. For NEON modified immediates,
+all 256 values run on baseline/fast with normal registers and full/full with
+spills; boundary values run on all twelve backend configurations.
 Exhaustive native string tests are also excluded by `--quick`. Other tests
 remain selected; quick is a coverage selection, not a fixed time budget.
 Existing ignored tests stay ignored. Privileged guest qualification and external
@@ -147,3 +155,22 @@ benchmarks. Select components with `cargo suite check c ir` or
 `cargo suite check asm linker integration`. These are infrastructure checks;
 use `cargo suite test` for applications and `cargo suite test-frontends` for
 native frontend/import validation. See the [suite index](../../suite/README.md).
+
+## Regression scope
+
+Keep tests that distinguish failure modes: valid and rejected inputs, immediate
+boundaries, target/ABI differences, register pressure, flags and memory effects.
+For stable linear immediate lowering, use endpoints, adjacent values and a
+midpoint instead of expanding every count into a separate native function.
+NEON opcode and shape coverage remains complete in those fixtures; the immediate
+sampling is a regression subset, not exhaustive encoding qualification.
+
+Object routes still need parity checks. Once complete object bytes agree, link
+and execute one image against the independent oracle. Reuse the existing
+immutable module preparation cache when selector/allocator combinations use
+the same raw or optimized IR. Keep exhaustive numerical algorithms and unique
+negative controls where sampling would hide different behavior.
+
+The Python suite checks exercise runner failure handling and fixture protocols;
+they are separate from native integration campaigns. Do not prune inexpensive
+protocol checks to compensate for repeated native compiler or linker invocations.

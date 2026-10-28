@@ -7,6 +7,8 @@ use std::{fs, process::Command};
 #[path = "common/vector.rs"]
 #[allow(dead_code)]
 mod common;
+#[path = "common/matrix.rs"]
+mod matrix;
 const SPILL: Pools = Pools {
     caller_saved: &[9, 10],
     callee_saved: &[19],
@@ -48,13 +50,15 @@ fn fixture() -> (String, String) {
         .iter()
         .filter(|o| o.is_conversion() || o.is_reduction())
     {
-        for ty in VectorType::ALL_64.into_iter().chain(VectorType::ALL_128).map(Type::Vector).chain([
-            Type::I16,
-            Type::I32,
-            Type::I64,
-            Type::F32,
-        ]) {
-            if !ty.is_vector() && op.is_conversion() { continue; }
+        for ty in VectorType::ALL_64
+            .into_iter()
+            .chain(VectorType::ALL_128)
+            .map(Type::Vector)
+            .chain([Type::I16, Type::I32, Type::I64, Type::F32])
+        {
+            if !ty.is_vector() && op.is_conversion() {
+                continue;
+            }
             let Some(inputs) = op.operand_types(ty) else {
                 continue;
             };
@@ -93,7 +97,8 @@ fn fixture() -> (String, String) {
                 );
                 c += &format!(
                     "extern void {name}(const void*,void*);\n__attribute__((noinline)) static void ref_{name}(const void*a,void*out){{{} x;memcpy(&x,a,{});",
-                    ctype(inputs[0], signed), inputs[0].bytes().unwrap()
+                    ctype(inputs[0], signed),
+                    inputs[0].bytes().unwrap()
                 );
                 let resultwidth = ty.vector().map_or(ty, |s| s.lane_type()).bytes().unwrap() * 8;
                 let call = match op {
@@ -154,7 +159,9 @@ fn fixture() -> (String, String) {
                         N::Fcvthn => "vreinterpret_u16_f16(vcvt_f16_f32(x))".to_string(),
                         _ => call.replacen("q_", "_", 1),
                     }
-                } else { call };
+                } else {
+                    call
+                };
                 let bytes = ty.bytes().unwrap();
                 c += &format!("{} r={call};memcpy(out,&r,{bytes});}}\n", ctype(ty, signed));
                 let kind = if op == N::Fcvthl {
@@ -164,7 +171,10 @@ fn fixture() -> (String, String) {
                 } else {
                     0
                 };
-                cases += &format!("{{{name},ref_{name},\"{name}\",{width},{kind},{bytes},{}}},\n",inputs[0].bytes().unwrap());
+                cases += &format!(
+                    "{{{name},ref_{name},\"{name}\",{width},{kind},{bytes},{}}},\n",
+                    inputs[0].bytes().unwrap()
+                );
             }
         }
     }
@@ -199,8 +209,8 @@ int main(void){unsigned char *ae=edge(),*oe=edge();unsigned char a[17],actual[18
 fn conversions_and_reductions_match_acle_all_modes_and_fractional_bits() {
     use object::{Object, ObjectSection};
     let (source, c) = fixture();
-    let m = keel_ir::parse(&source).unwrap();
-    keel_ir::verify_module(&m).unwrap();
+    let prepared = matrix::PreparedModule::parse(&source);
+    let m = prepared.for_selector(SelectionTier::Baseline);
     assert_eq!(
         keel_ir::parse(&m.to_string()).unwrap().to_string(),
         m.to_string()
@@ -221,20 +231,17 @@ fn conversions_and_reductions_match_acle_all_modes_and_fractional_bits() {
         SelectionTier::Full,
     ] {
         for allocator in [AllocationTier::Fast, AllocationTier::Full] {
-            let mut m = m.clone();
-            if matches!(selector, SelectionTier::Full) {
-                keel_opt::optimize(&mut m).unwrap();
-            }
+            let m = prepared.for_selector(selector);
             let pipeline = CodegenPipeline {
                 selector: &selector,
                 allocator: &allocator,
             };
             for pools in [&keel_codegen::aarch64::REGISTERS, &SPILL] {
                 let text =
-                    keel_codegen::aarch64::compile_with_pipeline(&m, pools, &pipeline).unwrap();
+                    keel_codegen::aarch64::compile_with_pipeline(m, pools, &pipeline).unwrap();
                 assert!(!text.contains(" = stack_addr"));
                 let program =
-                    keel_codegen::aarch64::compile_program_with_pipeline(&m, pools, &pipeline)
+                    keel_codegen::aarch64::compile_program_with_pipeline(m, pools, &pipeline)
                         .unwrap();
                 assert_eq!(program.stats().text_bytes, 0);
                 let direct =
@@ -258,16 +265,17 @@ fn conversions_and_reductions_match_acle_all_modes_and_fractional_bits() {
                     file.section_by_name("__text").unwrap().data().unwrap()
                 );
                 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-                for (route, bytes) in [("direct", direct), ("parsed", parsed)] {
-                    fs::write(dir.join("test.o"), bytes).unwrap();
+                {
+                    // Object parity is checked above; execute the identical image once.
+                    fs::write(dir.join("test.o"), direct).unwrap();
                     common::command(
                         Command::new("clang")
                             .arg(dir.join("oracle.o"))
                             .arg(dir.join("test.o"))
                             .arg("-o")
-                            .arg(dir.join(route)),
+                            .arg(dir.join("direct")),
                     );
-                    common::command(&mut Command::new(dir.join(route)));
+                    common::command(&mut Command::new(dir.join("direct")));
                 }
             }
         }

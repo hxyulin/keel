@@ -8,6 +8,8 @@ use std::{fs, process::Command};
 #[path = "common/vector.rs"]
 #[allow(dead_code)]
 mod common;
+#[path = "common/matrix.rs"]
+mod matrix;
 const SPILL: Pools = Pools {
     caller_saved: &[9, 10],
     callee_saved: &[19],
@@ -146,7 +148,18 @@ fn acle(op: N, width: u32, bits: u32) -> (String, String, String) {
     } else {
         first.clone()
     };
-    (format!("{}_{suffix}", if bits == 64 { stem.strip_suffix('q').unwrap() } else { stem }), first, second)
+    (
+        format!(
+            "{}_{suffix}",
+            if bits == 64 {
+                stem.strip_suffix('q').unwrap()
+            } else {
+                stem
+            }
+        ),
+        first,
+        second,
+    )
 }
 fn fixture(bits: u32) -> (String, String) {
     let mut ir = String::new();
@@ -155,14 +168,20 @@ fn fixture(bits: u32) -> (String, String) {
     );
     let mut cases = String::from("static const struct Case cases[]={\n");
     for &op in N::ALL.iter().filter(|o| {
-        !o.is_integer_misc() && !o.is_status() && o.memory().is_none()
+        !o.is_integer_misc()
+            && !o.is_status()
+            && o.memory().is_none()
             && !o.is_table()
             && !o.is_conversion()
             && !o.is_reduction()
             && !o.changes_width()
             && o.immediate_range(Type::Vector(VectorType::I32x4)).is_none()
     }) {
-        for shape in if bits == 64 { VectorType::ALL_64 } else { VectorType::ALL_128 } {
+        for shape in if bits == 64 {
+            VectorType::ALL_64
+        } else {
+            VectorType::ALL_128
+        } {
             if shape.lanes() == 1 || !op.accepts(Type::Vector(shape)) {
                 continue;
             }
@@ -193,9 +212,27 @@ fn fixture(bits: u32) -> (String, String) {
                 // and payload preference. This intrinsic specifies written ARM order.
                 format!(
                     "__asm__ volatile(\"fmls %0.{}, %1.{}, %2.{}\":\"+w\"(x):\"w\"(y),\"w\"(z));r=x;",
-                    if bits == 64 { "2s" } else if width == 32 { "4s" } else { "2d" },
-                    if bits == 64 { "2s" } else if width == 32 { "4s" } else { "2d" },
-                    if bits == 64 { "2s" } else if width == 32 { "4s" } else { "2d" }
+                    if bits == 64 {
+                        "2s"
+                    } else if width == 32 {
+                        "4s"
+                    } else {
+                        "2d"
+                    },
+                    if bits == 64 {
+                        "2s"
+                    } else if width == 32 {
+                        "4s"
+                    } else {
+                        "2d"
+                    },
+                    if bits == 64 {
+                        "2s"
+                    } else if width == 32 {
+                        "4s"
+                    } else {
+                        "2d"
+                    }
                 )
             } else {
                 format!("r={acle}({operands});")
@@ -255,12 +292,16 @@ int main(void){
 }
 "#;
     if bits == 64 {
-        c = c.replace("memcpy(&x,a,16)", "memcpy(&x,a,8)")
+        c = c
+            .replace("memcpy(&x,a,16)", "memcpy(&x,a,8)")
             .replace("memcpy(&y,b,16)", "memcpy(&y,b,8)")
             .replace("memcpy(&z,c,16)", "memcpy(&z,c,8)")
             .replace("memcpy(out,&r,16)", "memcpy(out,&r,8)")
             .replace("i<16/bytes", "i<8/bytes")
-            .replace("memcmp(expected,actual+1,16)", "memcmp(expected,actual+1,8)")
+            .replace(
+                "memcmp(expected,actual+1,16)",
+                "memcmp(expected,actual+1,8)",
+            )
             .replace("actual[17]!=0xcd", "actual[9]!=0xcd");
     }
     (ir, c)
@@ -269,87 +310,85 @@ int main(void){
 fn architectural_neon_matches_acle_values_status_and_rounding() {
     use object::{Object, ObjectSection};
     for bits in [64, 128] {
-    let (source, c) = fixture(bits);
-    let m = keel_ir::parse(&source).unwrap();
-    keel_ir::verify_module(&m).unwrap();
-    assert_eq!(
-        keel_ir::parse(&m.to_string()).unwrap().to_string(),
-        m.to_string()
-    );
-    assert!(keel_codegen::x86_64::compile(&m).is_err());
-    let dir = common::temp("neon-architectural");
-    fs::write(dir.join("oracle.c"), c).unwrap();
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    common::command(
-        Command::new("clang")
-            .args(["-O2", "-ffp-contract=off", "-c"])
-            .arg(dir.join("oracle.c"))
-            .arg("-o")
-            .arg(dir.join("oracle.o")),
-    );
-    for selector in [
-        SelectionTier::Baseline,
-        SelectionTier::Trees,
-        SelectionTier::Full,
-    ] {
-        for allocator in [AllocationTier::Fast, AllocationTier::Full] {
-            let mut m = m.clone();
-            if matches!(selector, SelectionTier::Full) {
-                keel_opt::optimize(&mut m).unwrap();
-            }
-            let pipeline = CodegenPipeline {
-                selector: &selector,
-                allocator: &allocator,
-            };
-            for pools in [&keel_codegen::aarch64::REGISTERS, &SPILL] {
-                let text =
-                    keel_codegen::aarch64::compile_with_pipeline(&m, pools, &pipeline).unwrap();
-                assert!(!text.contains(" = stack_addr"));
-                assert!(
-                    text.contains("sqadd\t")
-                        && text.contains("fmla\t")
-                        && text.contains("mrs\t")
-                        && text.contains("msr\t")
-                );
-                let program =
-                    keel_codegen::aarch64::compile_program_with_pipeline(&m, pools, &pipeline)
-                        .unwrap();
-                assert_eq!(program.stats().text_bytes, 0);
-                let direct =
-                    keel_asm::assemble_program_object(&program, Default::default()).unwrap();
-                let parsed = keel_asm::assemble_object(&text).unwrap();
-                assert_eq!(direct, parsed);
-                fs::write(dir.join("test.s"), &text).unwrap();
-                common::command(
-                    Command::new("clang")
-                        .args(["-target", "arm64-apple-macos11", "-c"])
-                        .arg(dir.join("test.s"))
-                        .arg("-o")
-                        .arg(dir.join("clang.o")),
-                );
-                let reference = fs::read(dir.join("clang.o")).unwrap();
-                let file = object::File::parse(&*reference).unwrap();
-                assert_eq!(
-                    keel_asm::assemble_program(&program, Default::default())
-                        .unwrap()
-                        .text,
-                    file.section_by_name("__text").unwrap().data().unwrap()
-                );
-                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-                for (route, bytes) in [("direct", direct), ("parsed", parsed)] {
-                    fs::write(dir.join("test.o"), bytes).unwrap();
+        let (source, c) = fixture(bits);
+        let prepared = matrix::PreparedModule::parse(&source);
+        let m = prepared.for_selector(SelectionTier::Baseline);
+        assert_eq!(
+            keel_ir::parse(&m.to_string()).unwrap().to_string(),
+            m.to_string()
+        );
+        assert!(keel_codegen::x86_64::compile(m).is_err());
+        let dir = common::temp("neon-architectural");
+        fs::write(dir.join("oracle.c"), c).unwrap();
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        common::command(
+            Command::new("clang")
+                .args(["-O2", "-ffp-contract=off", "-c"])
+                .arg(dir.join("oracle.c"))
+                .arg("-o")
+                .arg(dir.join("oracle.o")),
+        );
+        for selector in [
+            SelectionTier::Baseline,
+            SelectionTier::Trees,
+            SelectionTier::Full,
+        ] {
+            for allocator in [AllocationTier::Fast, AllocationTier::Full] {
+                let m = prepared.for_selector(selector);
+                let pipeline = CodegenPipeline {
+                    selector: &selector,
+                    allocator: &allocator,
+                };
+                for pools in [&keel_codegen::aarch64::REGISTERS, &SPILL] {
+                    let text =
+                        keel_codegen::aarch64::compile_with_pipeline(m, pools, &pipeline).unwrap();
+                    assert!(!text.contains(" = stack_addr"));
+                    assert!(
+                        text.contains("sqadd\t")
+                            && text.contains("fmla\t")
+                            && text.contains("mrs\t")
+                            && text.contains("msr\t")
+                    );
+                    let program =
+                        keel_codegen::aarch64::compile_program_with_pipeline(m, pools, &pipeline)
+                            .unwrap();
+                    assert_eq!(program.stats().text_bytes, 0);
+                    let direct =
+                        keel_asm::assemble_program_object(&program, Default::default()).unwrap();
+                    let parsed = keel_asm::assemble_object(&text).unwrap();
+                    assert_eq!(direct, parsed);
+                    fs::write(dir.join("test.s"), &text).unwrap();
                     common::command(
                         Command::new("clang")
-                            .arg(dir.join("oracle.o"))
-                            .arg(dir.join("test.o"))
+                            .args(["-target", "arm64-apple-macos11", "-c"])
+                            .arg(dir.join("test.s"))
                             .arg("-o")
-                            .arg(dir.join(route)),
+                            .arg(dir.join("clang.o")),
                     );
-                    common::command(&mut Command::new(dir.join(route)));
+                    let reference = fs::read(dir.join("clang.o")).unwrap();
+                    let file = object::File::parse(&*reference).unwrap();
+                    assert_eq!(
+                        keel_asm::assemble_program(&program, Default::default())
+                            .unwrap()
+                            .text,
+                        file.section_by_name("__text").unwrap().data().unwrap()
+                    );
+                    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                    {
+                        // Object parity is checked above; execute the identical image once.
+                        fs::write(dir.join("test.o"), direct).unwrap();
+                        common::command(
+                            Command::new("clang")
+                                .arg(dir.join("oracle.o"))
+                                .arg(dir.join("test.o"))
+                                .arg("-o")
+                                .arg(dir.join("direct")),
+                        );
+                        common::command(&mut Command::new(dir.join("direct")));
+                    }
                 }
             }
         }
-    }
-    fs::remove_dir_all(dir).unwrap();
+        fs::remove_dir_all(dir).unwrap();
     }
 }

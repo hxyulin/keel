@@ -6,6 +6,22 @@
 - Write a short, imperative description. Mark breaking changes with `!` and
   explain them in a `BREAKING CHANGE:` footer.
 
+# Validation scope
+
+- During development, run the changed test targets and the relevant component's
+  unit/integration tests. Prefer `tools/test.py <component> --quick`, `--unit`
+  or `--test <target>` over a workspace-wide command.
+- Include focused consumer tests when shared IR, ABI, instruction metadata,
+  linker contracts or shared fixtures change. If automatic change selection
+  expands a small change to the entire workspace, choose explicit relevant
+  components and explain the coverage instead of blindly running everything.
+- Reserve full workspace verification for merge/fast-forward boundaries,
+  broad shared-contract changes that cannot be checked narrowly, or an explicit
+  request for qualification or timing. Run it once at that boundary; do not
+  repeat it after unrelated edits or a successful targeted check.
+- Report the scope actually run, failures and skips. A component pass does not
+  establish that the entire workspace is green.
+
 # Documentation and suites
 
 - Maintain current references, not a diary of implementation progress. Update the
@@ -28,3 +44,11 @@
 - Keep fixtures, source pins, policies, generator inputs and reviewed data needed
   to reproduce public benchmark claims. These are maintained inputs, not run
   artifacts. Remove temporary scripts after incorporating their regression.
+
+- After a feature stabilizes, keep regressions for distinct failure modes rather
+  than every development experiment. Prefer boundary cases over dense sweeps
+  when interior values follow the same lowering. Keep independent oracles,
+  negative controls and genuinely different ABI/allocation paths.
+- If two output routes are asserted byte-identical, execute one image rather
+  than linking and running both. Reuse immutable fixture preparation across
+  matrix configurations. Do not reduce tests just to lower a test count.

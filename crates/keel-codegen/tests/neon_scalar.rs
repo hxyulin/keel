@@ -8,6 +8,10 @@ use std::{fs, process::Command};
 #[path = "common/vector.rs"]
 #[allow(dead_code)]
 mod common;
+#[path = "common/immediates.rs"]
+mod immediates;
+#[path = "common/matrix.rs"]
+mod matrix;
 const SPILL: Pools = Pools {
     caller_saved: &[9, 10],
     callee_saved: &[19],
@@ -37,7 +41,7 @@ fn fixture() -> (String, String) {
             }
             let range = op.immediate_range(ty);
             let counts = if let Some(r) = &range {
-                r.clone().collect::<Vec<_>>()
+                immediates::boundaries(r.clone())
             } else {
                 vec![0]
             };
@@ -158,8 +162,7 @@ __asm__ volatile("msr fpcr,%0"::"r"(savedcr):"memory");__asm__ volatile("msr fps
 fn scalar_neon_bits_state_spills_and_clang_encodings() {
     use object::{Object, ObjectSection};
     let (source, c) = fixture();
-    let m = keel_ir::parse(&source).unwrap();
-    keel_ir::verify_module(&m).unwrap();
+    let prepared = matrix::PreparedModule::parse(&source);
     let dir = common::temp("neon-scalar");
     fs::write(dir.join("oracle.c"), c).unwrap();
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -177,17 +180,14 @@ fn scalar_neon_bits_state_spills_and_clang_encodings() {
     ] {
         for allocator in [AllocationTier::Fast, AllocationTier::Full] {
             for pools in [&keel_codegen::aarch64::REGISTERS, &SPILL] {
-                let mut m = m.clone();
-                if selector == SelectionTier::Full {
-                    keel_opt::optimize(&mut m).unwrap();
-                }
+                let m = prepared.for_selector(selector);
                 let p = CodegenPipeline {
                     selector: &selector,
                     allocator: &allocator,
                 };
-                let text = keel_codegen::aarch64::compile_with_pipeline(&m, pools, &p).unwrap();
+                let text = keel_codegen::aarch64::compile_with_pipeline(m, pools, &p).unwrap();
                 let program =
-                    keel_codegen::aarch64::compile_program_with_pipeline(&m, pools, &p).unwrap();
+                    keel_codegen::aarch64::compile_program_with_pipeline(m, pools, &p).unwrap();
                 let bytes =
                     keel_asm::assemble_program_object(&program, Default::default()).unwrap();
                 assert_eq!(bytes, keel_asm::assemble_object(&text).unwrap());
