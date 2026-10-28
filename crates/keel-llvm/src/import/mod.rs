@@ -77,6 +77,10 @@ impl Importer {
         Ok(Self { api })
     }
     /// Parse and verify LLVM IR, translate it, and verify the complete Keel result.
+    ///
+    /// Supported scalar `undef` and `poison` operands are refined to zero.
+    /// Scalar `freeze` preserves the concretized operand. This discards source
+    /// nondeterminism; it does not represent LLVM's full deferred UB semantics.
     /// # Errors
     /// Returns a diagnostic without partial output for invalid or unsupported input.
     pub fn translate(
@@ -555,6 +559,20 @@ impl<'a> Translation<'a> {
             return Ok(text.clone());
         }
         let l = self.l;
+        if l.is_undef(v) || l.is_poison(v) {
+            // Choosing a concrete value refines deferred UB, rather than making
+            // its producer trap. Do not cache emitted constants: LLVM reuses
+            // constant handles across blocks that need not dominate each other.
+            let ty = self.ty(l.type_of(v))?;
+            return Ok(match ty.as_str() {
+                "f32" | "f64" => self.emit(format!("fconst.{ty} 0x0")),
+                "ptr" => {
+                    let zero = self.emit("iconst.i64 0");
+                    self.emit(format!("inttoptr.ptr {zero}"))
+                }
+                _ => self.emit(format!("iconst.{ty} 0")),
+            });
+        }
         if l.is_a_constant_fp(v) != 0 {
             let t = self.ty(l.type_of(v))?;
             let width = if t == "f32" { 32 } else { 64 };
@@ -592,7 +610,7 @@ impl<'a> Translation<'a> {
             return Ok(addr);
         }
         Err(format!(
-            "unsupported operand (including undef, poison or constant expressions): {}",
+            "unsupported operand or constant expression: {}",
             l.printed(v).chars().take(160).collect::<String>()
         ))
     }
@@ -793,7 +811,7 @@ impl<'a> Translation<'a> {
             String::new()
         };
         self.lines = vec![format!(
-            "func {signature} cc({}){local_flag}{attrs}{restriction}{personality} {{",
+            "func {signature} cc({}){attrs}{restriction}{local_flag}{personality} {{",
             if self.fast.contains(&f) { "fast" } else { "c" }
         )];
         self.values = (0..l.count_params(f))

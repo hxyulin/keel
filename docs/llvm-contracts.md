@@ -194,8 +194,11 @@ LLVM metadata and re-emit it as if it remained authoritative.
 ## LLVM definedness
 
 Keep the current conservative refinement policy for supported LLVM input:
-Keel must preserve allowed observations on LLVM-defined executions. Unsupported
-explicit `undef`, `poison` and `freeze` remain rejected. Accepting a source flag
+Keel must preserve allowed observations on LLVM-defined executions. Supported
+scalar `undef` and `poison` operands choose zero; scalar `freeze` keeps the
+concretized operand. This is a deterministic refinement, not full poison or
+nondeterminism transport. Aggregates and globals retain their existing
+restrictions. Accepting a source flag
 while omitting it is a recorded information loss, not proof that the value is
 always defined.
 
@@ -233,6 +236,11 @@ success edge, not on all executions of the arithmetic instruction.
 Do not implement runtime validity shadows, automatic guards or a generic LLVM
 `assume` import in the first memory-contract change. They would add runtime work
 or new semantic obligations without being needed for the initial memory wins.
+The scalar refinement does not preserve the set of all possible source results.
+Differential drivers must check allowed outcomes and freeze consistency instead
+of comparing arbitrary LLVM choices byte for byte. Concrete inputs to freeze
+retain their original bits, including floating-point signed zero and NaN payloads.
+
 If later coverage requires full poison transport, design it as explicit IR
 semantics and audit every transform before enabling it. Do not encode it as a
 metadata bit that arithmetic passes can ignore.
@@ -315,6 +323,11 @@ export profile that excludes observable memory faults. Adding memory attributes
 or quietly treating ordinary accesses as non-faulting is not a fix. Making all
 accesses volatile would need its own semantic and optimization tradeoff review;
 it is not part of this contract implementation.
+
+The [fault and dead-code investigation](llvm-faults-and-dead-code.md) reproduces
+the loss at LLVM O0 as well as O2, distinguishes instruction deletion from
+function/section collection, and shows why volatile access preservation alone
+does not preserve the memory state before a fault.
 
 ## Validation of the implemented slice
 

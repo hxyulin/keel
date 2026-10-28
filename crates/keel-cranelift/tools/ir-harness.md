@@ -42,6 +42,13 @@ objects requires an Apple arm64 host and Clang. The target is always explicit.
 The driver must exercise defined source behavior. A successful run cannot
 establish equivalence on LLVM poison or undefined executions.
 
+The Rust LLVM importer concretizes supported scalar poison/undef operands to
+zero and aliases scalar freeze to its concretized operand. LLVM can choose a
+different permitted result. A driver exercising nondeterminism must check its
+allowed outcomes and print a stable verdict instead of printing raw choices.
+The harness still compares stdout exactly; it has no general set-valued oracle.
+`report.json` records this policy as a static loss contract.
+
 ## Evidence and failure behavior
 
 `report.json` records arguments, path outcomes, diagnostics, command outputs,

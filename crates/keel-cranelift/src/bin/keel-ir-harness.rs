@@ -266,6 +266,7 @@ fn run() -> Result<()> {
     let report = json!({"schema":1, "target":TARGET, "arguments":h.args, "steps":h.steps, "commands":h.commands,
         "fatal":result.as_ref().err(), "loss_contracts":{
             "llvm_to_keel":"defined-input refinement; overflow, pointer, optimizer and debug facts may be dropped; see suite/llvm_import_README.md",
+            "llvm_scalar_deferred_values":"poison/undef operands choose zero; freeze keeps the concretized operand; nondeterminism is discarded, not modeled",
             "keel_to_llvm":"notrap and restrict facts omitted; see crates/keel-llvm/README.md",
             "clif_to_keel":"explicit external symbol; scalar single-function profile; source locations not retained",
             "measurement":"execution against fixture oracle; fact preservation is not automatically inferred"}});

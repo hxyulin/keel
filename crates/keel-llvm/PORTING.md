@@ -124,6 +124,26 @@ noalias maps to Keel restrict contracts and back to definition parameters.
 Full capture components, fresh-allocation return noalias and poison semantics
 remain unrepresented.
 
+## Scalar deferred-value refinement
+
+The Rust importer extends the Python baseline to accept explicit `undef` and
+`poison` operands of its supported scalar types: i1/i8/i16/i32/i64, f32/f64 and
+address-space-zero pointers. It chooses integer zero, positive floating-point
+zero, or null, respectively. Constants are materialized at each use so LLVM's
+shared constant handles cannot introduce cross-block dominance errors.
+
+Scalar `freeze` becomes an alias of the concretized operand. Concrete inputs
+keep their bits; deferred inputs choose one permitted value, stable for all
+uses of that freeze result. No poison tag, runtime shadow state, new trap or
+unreachable assumption is introduced. Existing arithmetic refinement and signed
+division totalization still apply. Aggregate/global restrictions are unchanged.
+
+`tests/definedness.rs` and its refinement fixtures check masked operands, PHIs,
+loop uses, frozen-value stability, pointer identity and raw floating-point bits.
+Drivers check permitted outcomes rather than equality of nondeterministic
+choices. Python remains the earlier reference; shared validators cover their
+common domain and Rust tests cover this intentional acceptance expansion.
+
 The parity runner strips only the newly transported contract clauses,
 definition restrict clauses and direct fixed-slot lifetime intrinsic statements
 when comparing against the earlier Python baseline. It leaves stack/global

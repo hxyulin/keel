@@ -380,7 +380,7 @@ define ptr @constructor(ptr returned %object) {
             self.assertNotIn(b'returned', dest.read_bytes())
             self.assertNotIn(b'inrange', dest.read_bytes())
             bodies = [('unsupported', '@g = weak global i64 0', False),
-                      ('late', 'define weak_odr i64 @f(i64 %x) { %r = freeze i64 %x\nret i64 %r }', False),
+                      ('late', 'define weak_odr i64 @f(i64 %x) { %r = freeze i128 poison\nret i64 %x }', False),
                       ('odr', RTTI + EH, ARGS.verify_weak_odr),
                       ('tagged-odr', HIDDEN_RTTI + EH.replace('@derived', '@_ZTI1D'), ARGS.verify_weak_odr)]
             for name, body, success in bodies:

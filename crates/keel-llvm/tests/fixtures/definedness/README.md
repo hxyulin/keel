@@ -19,6 +19,14 @@ are not correctness inputs here. Division export is still unsupported, so its
 round trip stops at verified Keel; an optional native Keel executable tests the
 three optimization tiers.
 
+`refinement.ll` checks explicit scalar poison and undef, masked selects/PHIs,
+freeze of concrete integers/pointers/FP bits, propagated undef, flagged overflow,
+and repeated uses of freeze results in loops. Its driver checks stable outcomes
+and permitted ranges, not equality of arbitrary source and imported choices.
+Original LLVM and re-exported LLVM run at O0/O2; optional native Keel runs at
+none/fast/full. Raw scalar acceptance and the remaining aggregate/global
+rejections are tested separately in `definedness.rs`.
+
 ```sh
 KEEL_TEST_LIBLLVM="$(rustc --print sysroot)/lib/libLLVM.dylib" \
 KEEL_TEST_KEEL="$PWD/target/debug/keel" \

@@ -276,6 +276,12 @@ impl Translation<'_> {
                 let a = self.args(inst)?;
                 format!("select {}, {}, {}", a[0], a[1], a[2])
             }
+            68 => {
+                // All supported producers have concrete Keel results. Keeping
+                // that result chooses one legal freeze outcome, preserves
+                // non-poison inputs, and gives every use the same SSA value.
+                return Ok(Some(self.value(l.get_operand(inst, 0))?));
+            }
             27 | 28 => {
                 if l.get_ordering(inst) != 0 {
                     return Err("atomic memory access".into());

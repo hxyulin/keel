@@ -207,16 +207,13 @@ def main():
             checks.append(dict(kind='source-and-all-functions-preserved', case=name,
                                sha256=hashlib.sha256(original).hexdigest()))
         cases = {
-            'poison': 'define i64 @f() { ret i64 poison }',
-            'undef': 'define i64 @f() { ret i64 undef }',
-            'freeze': 'define i64 @f(i64 %x) { %v = freeze i64 %x\nret i64 %v }',
             'i1-arithmetic': 'define void @f() { %v = add nsw i1 true, false\nret void }',
             'i1-ordered': 'define void @f(i64 %x) { %a = trunc i64 %x to i1\n%v = icmp samesign slt i1 %a, true\nret void }',
             'pointer-samesign': 'define void @f(ptr %x) { %v = icmp samesign eq ptr %x, null\nret void }',
             'vector': 'define <2 x i64> @f(<2 x i64> %x) { %v = add nsw <2 x i64> %x, %x\nret <2 x i64> %v }',
             'fp-nneg': 'define double @f(i64 %x) { %v = uitofp nneg i64 %x to double\nret double %v }',
             'unknown-flag': 'define i64 @f(i64 %x) { %v = add imaginary i64 %x, 1\nret i64 %v }',
-            'late-rejection': 'define i64 @good(i64 %x) { %r = add nsw i64 %x, 1\nret i64 %r }\ndefine i64 @bad() { ret i64 poison }',
+            'late-rejection': 'define i64 @good(i64 %x) { %r = add nsw i64 %x, 1\nret i64 %r }\ndefine i128 @bad() { ret i128 0 }',
             'unsupported-abi': 'declare void @g(ptr byval(i64))',
             'malformed': 'define i64 @f( {',
         }

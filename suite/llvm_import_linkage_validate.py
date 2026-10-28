@@ -69,7 +69,7 @@ def main():
         candidates = re.findall(rb'^define (?:linkonce_odr|available_externally)\b[^@\n]*@([\w.$]+)\(', original, re.M)
         for symbol in candidates:
             line = next(line for line in dest.read_text().splitlines() if line.startswith('func @' + symbol.decode() + '('))
-            assert line.endswith(' cc(c)' + (' local {' if opt else ' weak_odr {')), line
+            assert ' cc(c)' in line and line.endswith(' local {' if opt else ' weak_odr {'), line
         checks.append(dict(kind='retained-all-functions-local-copies', case=name,
                            sha256=hashlib.sha256(original).hexdigest()))
         return dest
@@ -128,7 +128,7 @@ def main():
             'external-call': 'declare i64 @external(i64)\ndefine linkonce_odr i64 @h(i64 %x) { %v = call i64 @external(i64 %x)\nret i64 %v }',
             'indirect-call': 'define linkonce_odr i64 @h(ptr %p) { %v = call i64 %p()\nret i64 %v }',
             'hidden': 'define linkonce_odr hidden i64 @h(i64 %x) { ret i64 %x }',
-            'late-semantics': 'define linkonce_odr i64 @h(i64 %x) { %v = freeze i64 %x\nret i64 %v }',
+            'late-semantics': 'define linkonce_odr i64 @h(i64 %x) { %v = freeze i128 poison\nret i64 %x }',
             'malformed': 'define linkonce_odr i64 @h( {',
         }
         for selection in ['any', 'exactmatch', 'largest', 'noduplicates', 'samesize']:

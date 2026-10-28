@@ -126,8 +126,11 @@ LLVM's undefined division inputs need not retain a particular outcome; defined
 division inputs have the same result. Keel masks shift counts; LLVM's defined
 shift counts produce the same result, while oversized LLVM shifts produce
 poison. This importer does not claim identical behavior for LLVM-undefined or
-poison-producing executions. Explicit poison/undef operands and `freeze` are
-rejected. GEP `inbounds`, `nuw` and `nusw` constraints do not become Keel facts:
+poison-producing executions. The Python reference rejects explicit poison/undef
+operands and `freeze`. The Rust importer refines supported scalar poison/undef
+operands to zero and keeps the concretized operand for scalar `freeze`;
+see [its refinement policy](../crates/keel-llvm/PORTING.md#scalar-deferred-value-refinement).
+GEP `inbounds`, `nuw` and `nusw` constraints do not become Keel facts:
 address arithmetic agrees on defined LLVM executions, with no promise for
 executions violating those constraints. `inrange` constraints are likewise
 omitted without changing computed addresses or weakening relocation bounds. Supported
@@ -135,8 +138,8 @@ integer `nsw`/`nuw`, `exact`, `or disjoint`, flagged truncation, `zext nneg` and
 integer `icmp samesign` refine to ordinary operations, without supplying Keel
 optimizer facts. Signed division guards `INT_MIN/-1` so refining a poison
 dividend cannot introduce an overflow trap on a select-masked path. Zero-divisor
-traps remain. Explicit poison/undef/freeze, unsupported widths, i1 arithmetic
-and ordered i1 comparisons remain rejected. See the
+traps remain. Unsupported widths, i1 arithmetic and ordered i1 comparisons
+remain rejected. See the
 [integer flag contract](llvm_import_flags_fixtures/README.md) for defined-input
 and poison-masking test domains. FP fast-math restrictions are unchanged.
 

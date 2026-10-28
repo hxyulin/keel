@@ -255,6 +255,15 @@ size -1; LLVM 23 upgrades it to its one-pointer form. They emit no native
 instructions and remain barriers to memory facts. Derived/dynamic markers stay
 unsupported. These changes retain no overflow, poison, range or inbounds facts.
 
+The Rust importer accepts supported scalar `undef` and `poison` operands by
+choosing zero (positive zero for floating point, null for pointers). Scalar
+`freeze` keeps the concretized operand, preserving concrete input bits and
+consistent uses of the frozen result. This discards nondeterminism without
+introducing traps or unreachable assumptions. It does not implement full LLVM
+poison semantics or extend aggregate/global support. Differential tests must
+check permitted outcomes rather than require LLVM to make the same arbitrary
+choice. See [the refinement policy](PORTING.md#scalar-deferred-value-refinement).
+
 The diagnostic exporter still has an observed memory-fault loss: LLVM may delete
 an unused ordinary load that Keel retains for its possible fault. Defined-memory
 execution tests do not establish memory-fault parity. See the

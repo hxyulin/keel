@@ -20,18 +20,38 @@ fn scalar_flags_and_boolean_refinement() {
     let text = i.translate(src.as_bytes(), Default::default()).unwrap();
     assert!(text.contains("iadd"));
     assert!(!text.contains("nsw"));
-    for body in [
-        "define i64 @f() { ret i64 poison }",
-        "define i64 @f() { %r = freeze i64 poison\nret i64 %r }",
-        "define void @f(i64 %n) { %p = alloca i64, i64 %n\nret void }",
-    ] {
-        assert!(
-            i.translate(format!("{HEADER}{body}").as_bytes(), Default::default())
-                .is_err(),
-            "{body}"
+    let dynamic_alloca = "define void @f(i64 %n) { %p = alloca i64, i64 %n\nret void }";
+    assert!(
+        i.translate(
+            format!("{HEADER}{dynamic_alloca}").as_bytes(),
+            Default::default()
+        )
+        .is_err(),
+        "dynamic alloca remains unsupported"
+    );
+}
+#[test]
+fn local_and_odr_freeze_definitions_keep_attributes_and_contracts() {
+    let Some(importer) = importer() else {
+        return;
+    };
+    for linkage in ["internal", "linkonce_odr"] {
+        let source = format!(
+            "{HEADER}define {linkage} ptr @f(ptr noalias noundef nonnull %p) noinline nounwind {{ %r = freeze ptr %p\nret ptr %r }}"
         );
+        let text = importer
+            .translate(source.as_bytes(), Default::default())
+            .unwrap();
+        let module = keel_ir::parse(&text).unwrap();
+        let function = &module.functions[0];
+        assert!(function.attrs.noinline && function.attrs.nounwind, "{text}");
+        assert_eq!(function.local, linkage == "internal", "{text}");
+        assert_eq!(function.weak_odr, linkage == "linkonce_odr", "{text}");
+        assert_eq!(function.restrict_params, [0], "{text}");
+        assert!(function.attrs.contract.parameters[0].1.nonnull, "{text}");
     }
 }
+
 #[test]
 fn fixture_output_matches_python_reference() {
     let Some(i) = importer() else {

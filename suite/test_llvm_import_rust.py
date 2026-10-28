@@ -5,6 +5,8 @@ Every importer CLI invocation runs both implementations and compares acceptance
 and successful output, excluding alignment and function flags newly retained by
 Rust. The validator receives the Rust result and executes its
 usual native interoperability and rejection checks. Artifacts stay in --out.
+Scalar poison/undef/freeze acceptance extends the Python baseline and is tested
+in crates/keel-llvm/tests/definedness.rs, outside this common-domain comparison.
 """
 import argparse
 import pathlib

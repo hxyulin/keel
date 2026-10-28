@@ -46,9 +46,6 @@ def main():
         spec.loader.exec_module(module)
         llvm = module.LLVM(args.libllvm)
         cases = {
-            'poison': 'define i32 @f() { ret i32 poison }',
-            'undef': 'define i32 @f() { ret i32 undef }',
-            'freeze': 'define i32 @f() { %v = freeze i32 poison\nret i32 %v }',
             'dynamic-alloca': 'define void @f(i64 %n) { %p = alloca i32, i64 %n\nret void }',
             'loop-alloca': 'define void @f() { br label %b\nb: %p = alloca i32\nret void }',
             'zero-alloca': 'define void @f() { %p = alloca i32, i64 0\nret void }',
@@ -59,10 +56,9 @@ def main():
             'address-space': 'define ptr addrspace(1) @f(ptr addrspace(1) %p) { ret ptr addrspace(1) %p }',
             'gep-wide-index': 'define ptr @f(ptr %p, i128 %i) { %q = getelementptr i64, ptr %p, i128 %i\nret ptr %q }',
             'gep-i1': 'define ptr @f(ptr %p) { %q = getelementptr i8, ptr %p, i1 true\nret ptr %q }',
-            'phi-undef': 'define i32 @f(i32 %x) { br label %b\nb: %p = phi i32 [ undef, %0 ]\nret i32 %p }',
             'bad-phi': 'define i32 @f(i32 %x) { br label %b\nb: %p = phi i32 [ %x, %b ]\nret i32 %p }',
             'duplicate-phi': 'define i32 @f(i32 %x) { %c = icmp eq i32 %x, 0\nbr i1 %c, label %b, label %b\nb: %p = phi i32 [ 1, %0 ], [ 2, %0 ]\nret i32 %p }',
-            'late-failure': 'define i32 @good() { ret i32 7 }\ndefine i32 @bad() { ret i32 poison }',
+            'late-failure': 'define i32 @good() { ret i32 7 }\ndefine i128 @bad() { ret i128 0 }',
             'weak-global': '@g = weak global i32 0\ndefine void @f() { ret void }',
             'atomic': 'define i32 @f(ptr %p) { %v = load atomic i32, ptr %p monotonic, align 4\nret i32 %v }',
             'abi-byval': 'define void @f(ptr byval(i32) %p) { ret void }',

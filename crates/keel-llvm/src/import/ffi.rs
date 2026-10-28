@@ -33,6 +33,8 @@ pub(super) struct Api {
     get_type_context: unsafe extern "C" fn(Raw) -> Raw,
     int_type_in_context: unsafe extern "C" fn(Raw, u32) -> Raw,
     is_a_constant_fp: unsafe extern "C" fn(Raw) -> Raw,
+    is_undef: unsafe extern "C" fn(Raw) -> i32,
+    is_poison: unsafe extern "C" fn(Raw) -> i32,
     is_a_insert_value_inst: unsafe extern "C" fn(Raw) -> Raw,
     const_bit_cast: unsafe extern "C" fn(Raw, Raw) -> Raw,
     get_f_cmp_predicate: unsafe extern "C" fn(Raw) -> u32,
@@ -343,6 +345,14 @@ impl Api {
                         .get(b"LLVMIsAConstantFP\0")
                         .map_err(|e| e.to_string())?
                 }
+            },
+            is_undef: {
+                // SAFETY: the symbol uses its LLVM 23 C API signature and the library stays loaded.
+                unsafe { *library.get(b"LLVMIsUndef\0").map_err(|e| e.to_string())? }
+            },
+            is_poison: {
+                // SAFETY: the symbol uses its LLVM 23 C API signature and the library stays loaded.
+                unsafe { *library.get(b"LLVMIsPoison\0").map_err(|e| e.to_string())? }
             },
             is_a_insert_value_inst: {
                 // SAFETY: the symbol uses its LLVM 23 C API signature and the library stays loaded.
@@ -1187,6 +1197,14 @@ impl Api {
     pub(super) fn is_a_constant_fp(&self, a0: Ref) -> Ref {
         // SAFETY: handles originate from the verified module owned by this import session.
         unsafe { (self.is_a_constant_fp)(a0 as Raw) as Ref }
+    }
+    pub(super) fn is_undef(&self, value: Ref) -> bool {
+        // SAFETY: the value belongs to the verified module owned by this import session.
+        unsafe { (self.is_undef)(value as Raw) != 0 }
+    }
+    pub(super) fn is_poison(&self, value: Ref) -> bool {
+        // SAFETY: the value belongs to the verified module owned by this import session.
+        unsafe { (self.is_poison)(value as Raw) != 0 }
     }
     pub(super) fn is_a_insert_value_inst(&self, a0: Ref) -> Ref {
         // SAFETY: handles originate from the verified module owned by this import session.
