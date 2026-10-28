@@ -72,7 +72,8 @@ impl Analysis {
 }
 
 impl Analysis {
-    /// Debug check: the cached analyses equal freshly computed ones.
+    /// Audit the cached analyses against independent fresh computations.
+    #[cfg(any(test, feature = "audit-analysis"))]
     fn same_as_fresh(&self, func: &Function) -> bool {
         let cfg = ControlFlowGraph::compute(func);
         let dom = DominatorTree::compute(func, &cfg);
@@ -81,6 +82,12 @@ impl Analysis {
                 && cfg.succs(b) == self.cfg.succs(b)
                 && dom.idom(b) == self.dom.idom(b)
         }) && dom.rpo() == self.dom.rpo()
+            && self.loops.get().is_none_or(|cached| {
+                let fresh = LoopDepth::compute(func, &cfg, &dom);
+                (0..func.num_blocks())
+                    .map(Block::new)
+                    .all(|block| cached.depth(block) == fresh.depth(block))
+            })
     }
 }
 
@@ -94,7 +101,15 @@ pub(crate) fn get(func: &Function) -> Rc<Analysis> {
     let cached = CACHE.with(|cache| cache.borrow().get(&key).cloned());
     if let Some(analysis) = cached {
         if analysis.stamp.get() == func.cfg_stamp() || analysis.matches(func) {
-            debug_assert!(analysis.matches(func) && analysis.same_as_fresh(func));
+            debug_assert!(
+                analysis.matches(func),
+                "cached CFG inputs changed without a new stamp"
+            );
+            #[cfg(feature = "audit-analysis")]
+            assert!(
+                analysis.same_as_fresh(func),
+                "cached analyses differ from fresh computations"
+            );
             analysis.stamp.set(func.cfg_stamp());
             return analysis;
         }
@@ -149,6 +164,93 @@ mod tests {
         let after = get(&function);
         assert_eq!(after.cfg.succs(entry), &[exit]);
         assert_eq!(after.cfg.preds(exit), &[entry]);
+        clear();
+    }
+    fn loop_function() -> Function {
+        keel_ir::parse("func @loop(i32, i32) {\nentry(v0:i32,v1:i32):\n jump body(v0)\nbody(v2:i32):\n brif v0,body(v2),exit\nexit:\n return\n}")
+            .unwrap().functions.remove(0)
+    }
+
+    #[test]
+    fn unchanged_and_argument_only_edits_reuse_cfg_and_lazy_loops() {
+        clear();
+        let mut function = loop_function();
+        let before = get(&function);
+        let body = function.blocks().nth(1).unwrap();
+        assert_eq!(before.loops(&function).depth(body), 1);
+        assert!(Rc::ptr_eq(&before, &get(&function)));
+        assert!(before.same_as_fresh(&function));
+        let entry = function.entry_block().unwrap();
+        let jump = function.block_insts(entry)[0];
+        let other = function.block_params(entry)[1];
+        let old_stamp = function.cfg_stamp();
+        let InstData::Jump { dest } = function.inst_data_mut(jump) else {
+            unreachable!()
+        };
+        dest.args[0] = other;
+        assert_ne!(old_stamp, function.cfg_stamp());
+        let after = get(&function);
+        assert!(Rc::ptr_eq(&before, &after));
+        assert!(std::ptr::eq(
+            before.loops(&function),
+            after.loops(&function)
+        ));
+        assert!(after.same_as_fresh(&function));
+        clear();
+    }
+
+    #[test]
+    fn successor_and_layout_edits_replace_cached_analyses() {
+        clear();
+        let mut function = loop_function();
+        let before = get(&function);
+        let body = function.blocks().nth(1).unwrap();
+        let exit = function.blocks().nth(2).unwrap();
+        assert_eq!(before.loops(&function).depth(body), 1);
+        let branch = function.block_insts(body)[0];
+        *function.inst_data_mut(branch) = InstData::Jump {
+            dest: BlockCall {
+                block: exit,
+                args: vec![],
+            },
+        };
+        let after = get(&function);
+        assert!(!Rc::ptr_eq(&before, &after));
+        assert_eq!(after.loops(&function).depth(body), 0);
+        assert!(after.same_as_fresh(&function));
+        let entry = function.entry_block().unwrap();
+        let jump = function.block_insts(entry)[0];
+        *function.inst_data_mut(jump) = InstData::Jump {
+            dest: BlockCall {
+                block: exit,
+                args: vec![],
+            },
+        };
+        function.remove_block(body);
+        let removed = get(&function);
+        assert!(!Rc::ptr_eq(&after, &removed));
+        assert!(removed.same_as_fresh(&function));
+        clear();
+    }
+
+    #[test]
+    fn replacement_at_same_address_only_reuses_equivalent_cfg() {
+        clear();
+        let mut slot = Box::new(loop_function());
+        let before = get(&slot);
+        before.loops(&slot);
+        // Unchanged clones share a stamp, which promises the same CFG inputs.
+        *slot = slot.as_ref().clone();
+        assert!(Rc::ptr_eq(&before, &get(&slot)));
+        assert!(before.same_as_fresh(&slot));
+        *slot = keel_ir::parse("func @replacement() {\nentry:\n return\n}")
+            .unwrap()
+            .functions
+            .remove(0);
+        let after = get(&slot);
+        assert!(!Rc::ptr_eq(&before, &after));
+        after.loops(&slot);
+        assert!(after.same_as_fresh(&slot));
         clear();
     }
 }

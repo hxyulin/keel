@@ -2,23 +2,15 @@
 use super::*;
 
 pub(super) fn select(
-    func: &Function,
+    facts: &crate::kinds::FunctionFacts<'_>,
     selection: &mut crate::select::Selection,
 ) -> HashMap<Inst, Value> {
+    let func = facts.func;
     // Every chain contains a vector splat; skip the use counts without one.
-    if !func
-        .layout_insts()
-        .any(|(_, i)| matches!(func.inst_data(i), InstData::VectorSplat { .. }))
-    {
+    if !facts.kinds.vector_splat {
         return HashMap::default();
     }
-    let mut uses = vec![0u8; func.num_values()];
-    for (_, inst) in func.layout_insts() {
-        func.inst_data(inst).for_each_operand(|v| {
-            let count = &mut uses[func.resolve(v).index()];
-            *count = count.saturating_add(1);
-        });
-    }
+    let uses = facts.raw_uses();
     let mut selected = HashMap::default();
     for block in func.blocks() {
         for chain in func.block_insts(block).windows(4) {

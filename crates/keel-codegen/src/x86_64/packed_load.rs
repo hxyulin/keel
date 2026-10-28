@@ -5,21 +5,16 @@ use keel_ir::fxhash::FxHashMap as HashMap;
 /// A closed native m128 -> YMM signed widening. Retain the load's selected
 /// address leaves until the root, so allocation sees their extended lifetime.
 pub(super) fn select_wide(
-    func: &Function,
+    facts: &crate::kinds::FunctionFacts<'_>,
     selection: &mut crate::select::Selection,
     features: keel_asm_ir::x86::Features,
 ) -> HashMap<Inst, Value> {
+    let func = facts.func;
     let mut selected = HashMap::default();
-    if !features.avx || !features.avx2 {
+    if !features.avx || !features.avx2 || !facts.kinds.widen_low {
         return selected;
     }
-    let mut uses = vec![0u8; func.num_values()];
-    for (_, inst) in func.layout_insts() {
-        func.inst_data(inst).for_each_operand(|v| {
-            let count = &mut uses[func.resolve(v).index()];
-            *count = count.saturating_add(1);
-        });
-    }
+    let uses = facts.raw_uses();
     for block in func.blocks() {
         for pair in func.block_insts(block).windows(2) {
             let (load, widen) = (pair[0], pair[1]);
@@ -63,24 +58,16 @@ pub(super) fn select_wide(
 }
 
 pub(super) fn select(
-    func: &Function,
+    facts: &crate::kinds::FunctionFacts<'_>,
     selection: &mut crate::select::Selection,
     sse41: bool,
 ) -> HashMap<Inst, Value> {
+    let func = facts.func;
     // Every chain contains a vector splat; skip the use counts without one.
-    if !func
-        .layout_insts()
-        .any(|(_, i)| matches!(func.inst_data(i), InstData::VectorSplat { .. }))
-    {
+    if !facts.kinds.vector_splat {
         return HashMap::default();
     }
-    let mut uses = vec![0u8; func.num_values()];
-    for (_, inst) in func.layout_insts() {
-        func.inst_data(inst).for_each_operand(|v| {
-            let count = &mut uses[func.resolve(v).index()];
-            *count = count.saturating_add(1);
-        });
-    }
+    let uses = facts.raw_uses();
     let mut selected = HashMap::default();
     for block in func.blocks() {
         for chain in func.block_insts(block).windows(4) {
@@ -233,7 +220,7 @@ mod tests {
                         f.replace_all_uses(f.first_result(chain[at]), replacement);
                     }
                 }
-                let selected = select(f, &mut selection, true);
+                let selected = select(&crate::kinds::FunctionFacts::new(f), &mut selection, true);
                 assert!(
                     !selected.contains_key(&chain[3]),
                     "node {at}, boundary {boundary}"
@@ -251,7 +238,7 @@ mod tests {
         // A selected address can expose more leaves than the raw load operand.
         let leaves = vec![Value::new(0), Value::new(1)];
         selection.set_operands(chain[0], leaves.clone());
-        let selected = select(f, &mut selection, true);
+        let selected = select(&crate::kinds::FunctionFacts::new(f), &mut selection, true);
         assert_eq!(selected.get(&chain[3]), Some(&Value::new(0)));
         assert_eq!(selection.operands(f, chain[3]), leaves);
         assert!(chain[..3].iter().all(|&i| selection.covered(i)));
@@ -276,7 +263,11 @@ mod wide_tests {
                 avx2,
                 ..Features::for_level(CpuLevel::V3)
             };
-            let selected = select_wide(f, &mut crate::select::Selection::default(), features);
+            let selected = select_wide(
+                &crate::kinds::FunctionFacts::new(f),
+                &mut crate::select::Selection::default(),
+                features,
+            );
             assert_eq!(selected.len(), usize::from(avx && avx2));
         }
     }
@@ -310,7 +301,7 @@ mod wide_tests {
                     }
                 }
                 let selected = select_wide(
-                    f,
+                    &crate::kinds::FunctionFacts::new(f),
                     &mut selection,
                     keel_asm_ir::x86::Features::for_level(keel_asm_ir::x86::CpuLevel::V3),
                 );
@@ -332,7 +323,7 @@ mod wide_tests {
         let leaves = vec![Value::new(0), Value::new(1)];
         selection.set_operands(chain[0], leaves.clone());
         let selected = select_wide(
-            f,
+            &crate::kinds::FunctionFacts::new(f),
             &mut selection,
             keel_asm_ir::x86::Features::for_level(keel_asm_ir::x86::CpuLevel::V3),
         );
@@ -358,7 +349,7 @@ mod wide_tests {
         assert!(selection.covered(chain[1]));
         assert_eq!(selection.operands(f, chain[2]), vec![Value::new(0)]);
         let selected = select_wide(
-            f,
+            &crate::kinds::FunctionFacts::new(f),
             &mut selection,
             keel_asm_ir::x86::Features::for_level(keel_asm_ir::x86::CpuLevel::V3),
         );
@@ -405,7 +396,7 @@ mod wide_tests {
             }
             assert!(
                 select_wide(
-                    f,
+                    &crate::kinds::FunctionFacts::new(f),
                     &mut selection,
                     keel_asm_ir::x86::Features::for_level(keel_asm_ir::x86::CpuLevel::V3)
                 )

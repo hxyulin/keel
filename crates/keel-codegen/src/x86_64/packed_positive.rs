@@ -3,27 +3,17 @@ use super::*;
 use keel_ir::fxhash::FxHashMap as HashMap;
 use keel_ir::{VectorBinaryOp, VectorType};
 
-pub(super) fn select(func: &Function, plan: &mut crate::select::Selection) -> HashMap<Inst, Value> {
+pub(super) fn select(
+    facts: &crate::kinds::FunctionFacts<'_>,
+    plan: &mut crate::select::Selection,
+) -> HashMap<Inst, Value> {
+    let func = facts.func;
     // Inline assembly can carry target-specific register and memory contracts.
     // Every chain contains a vector splat; skip the use counts without one.
-    let mut candidate = false;
-    for (_, i) in func.layout_insts() {
-        match func.inst_data(i) {
-            InstData::InlineAsm { .. } => return HashMap::default(),
-            InstData::VectorSplat { .. } => candidate = true,
-            _ => {}
-        }
-    }
-    if !candidate {
+    if facts.kinds.inline_asm || !facts.kinds.vector_splat {
         return HashMap::default();
     }
-    let mut uses = vec![0u8; func.num_values()];
-    for (_, i) in func.layout_insts() {
-        func.inst_data(i).for_each_operand(|v| {
-            let n = &mut uses[func.resolve(v).index()];
-            *n = n.saturating_add(1);
-        });
-    }
+    let uses = facts.raw_uses();
     let mut result = HashMap::default();
     for block in func.blocks() {
         for chain in func.block_insts(block).windows(6) {
@@ -171,7 +161,14 @@ mod tests {
             .take(6)
             .map(|(_, i)| i)
             .collect();
-        assert_eq!(select(&original, &mut Selection::default()).len(), 1);
+        assert_eq!(
+            select(
+                &crate::kinds::FunctionFacts::new(&original),
+                &mut Selection::default()
+            )
+            .len(),
+            1
+        );
         let params = original.block_params(original.entry_block().unwrap());
         for (&inst, param) in chain.iter().zip([
             params[3], params[4], params[2], params[2], params[2], params[4],
@@ -180,7 +177,11 @@ mod tests {
             let value = f.first_result(inst);
             f.replace_all_uses(value, param);
             assert!(
-                select(&f, &mut Selection::default()).is_empty(),
+                select(
+                    &crate::kinds::FunctionFacts::new(&f),
+                    &mut Selection::default()
+                )
+                .is_empty(),
                 "aliased {inst:?}"
             );
         }
@@ -189,7 +190,13 @@ mod tests {
     fn inline_assembly_is_a_boundary() {
         let source = SOURCE.replace(" return", " v30 = asm \"\", \"=r\"() -> i32\n return");
         let m = keel_ir::parse(&source).unwrap();
-        assert!(select(&m.functions[0], &mut Selection::default()).is_empty());
+        assert!(
+            select(
+                &crate::kinds::FunctionFacts::new(&m.functions[0]),
+                &mut Selection::default()
+            )
+            .is_empty()
+        );
     }
     #[test]
     fn closed_operands_alias_resolution_and_existing_covers() {
@@ -198,7 +205,7 @@ mod tests {
         let chain: Vec<_> = f.layout_insts().skip(2).take(6).map(|(_, i)| i).collect();
         let mut plan = Selection::default();
         let address = plan.operands(f, chain[0]);
-        let matches = select(f, &mut plan);
+        let matches = select(&crate::kinds::FunctionFacts::new(f), &mut plan);
         assert_eq!(matches.len(), 1);
         assert_eq!(plan.operands(f, chain[5]), address);
         for &i in &chain[..5] {
@@ -209,7 +216,7 @@ mod tests {
         for &i in &chain {
             let mut plan = Selection::default();
             plan.cover(i);
-            assert!(select(f, &mut plan).is_empty());
+            assert!(select(&crate::kinds::FunctionFacts::new(f), &mut plan).is_empty());
         }
         // Columns and lexical scopes are source boundaries too.
         let location = keel_ir::SourceLoc {
@@ -222,7 +229,14 @@ mod tests {
         for &i in &chain {
             debug.set_inst_loc(i, Some(location));
         }
-        assert_eq!(select(&debug, &mut Selection::default()).len(), 1);
+        assert_eq!(
+            select(
+                &crate::kinds::FunctionFacts::new(&debug),
+                &mut Selection::default()
+            )
+            .len(),
+            1
+        );
         for &i in &chain {
             for changed in [
                 keel_ir::SourceLoc { col: 2, ..location },
@@ -233,7 +247,13 @@ mod tests {
             ] {
                 let mut different = debug.clone();
                 different.set_inst_loc(i, Some(changed));
-                assert!(select(&different, &mut Selection::default()).is_empty());
+                assert!(
+                    select(
+                        &crate::kinds::FunctionFacts::new(&different),
+                        &mut Selection::default()
+                    )
+                    .is_empty()
+                );
             }
         }
         // An aliased compare operand resolves to X and counts as one occurrence.
@@ -243,7 +263,14 @@ mod tests {
             .remove(0);
         let alias = f.block_params(f.entry_block().unwrap())[2];
         f.replace_all_uses(alias, f.first_result(chain[2]));
-        assert_eq!(select(&f, &mut Selection::default()).len(), 1);
+        assert_eq!(
+            select(
+                &crate::kinds::FunctionFacts::new(&f),
+                &mut Selection::default()
+            )
+            .len(),
+            1
+        );
         // An external observation through that same alias closes the opportunity.
         let mut f = keel_ir::parse(&SOURCE.replace(" return", " store v20,v1\n return"))
             .unwrap()
@@ -251,6 +278,12 @@ mod tests {
             .remove(0);
         let alias = f.block_params(f.entry_block().unwrap())[2];
         f.replace_all_uses(alias, f.first_result(chain[2]));
-        assert!(select(&f, &mut Selection::default()).is_empty());
+        assert!(
+            select(
+                &crate::kinds::FunctionFacts::new(&f),
+                &mut Selection::default()
+            )
+            .is_empty()
+        );
     }
 }

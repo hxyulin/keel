@@ -29,11 +29,11 @@
 //! b.finalize();
 //! ```
 
+use keel_ir::fxhash::FxHashMap as HashMap;
 use keel_ir::{
     Block, ConvertOp, EntityRef, Function, InsertPoint, Inst, InstBuilder, SourceLoc, Type, Value,
 };
 use smallvec::SmallVec;
-use keel_ir::fxhash::FxHashMap as HashMap;
 
 keel_ir::entity!(
     /// A mutable variable of the source program.
@@ -149,12 +149,25 @@ impl BlockState {
 pub struct FunctionBuilderContext {
     var_types: Vec<Type>,
     result_tys: Vec<Type>,
+    /// SSA state indexed directly by block, with sparse variable definitions.
+    /// Entries from `blocks_used` on are unregistered (cleared, possibly
+    /// left over from an earlier function).
     blocks: Vec<BlockState>,
     blocks_used: usize,
+    /// Every parameter the builder added, for the final trivial-parameter
+    /// cleanup, in the order it was requested. A join that turned out not
+    /// to need its parameter keeps an empty slot, so the order of the rest
+    /// (which the cleanup depends on) is unchanged.
     added_params: Vec<(Block, Option<Value>)>,
+    /// Incoming edges built so far, indexed by destination block. Sealing
+    /// moves a sorted bucket into `preds`, preserving source-layout order.
+    /// Buckets from `incoming_used` on are empty.
     incoming: Vec<Vec<(Inst, usize)>>,
     incoming_used: usize,
+    /// The branch terminator already indexed for each source block.
     indexed_terms: Vec<Option<Inst>>,
+    /// The only predecessor of each sealed block that has one: reads
+    /// follow these chains without looking at the edges.
     chains: Vec<Option<Block>>,
 }
 
@@ -189,28 +202,7 @@ pub struct FunctionBuilder<'f> {
     current: Option<Block>,
     /// The location instructions built from now on get.
     srcloc: Option<SourceLoc>,
-    var_types: Vec<Type>,
-    result_tys: Vec<Type>,
-    /// SSA state indexed directly by block, with sparse variable definitions.
-    /// Entries from `blocks_used` on are unregistered (cleared, possibly
-    /// left over from an earlier function).
-    blocks: Vec<BlockState>,
-    blocks_used: usize,
-    /// Every parameter the builder added, for the final trivial-parameter
-    /// cleanup, in the order it was requested. A join that turned out not
-    /// to need its parameter keeps an empty slot, so the order of the rest
-    /// (which the cleanup depends on) is unchanged.
-    added_params: Vec<(Block, Option<Value>)>,
-    /// Incoming edges built so far, indexed by destination block. Sealing
-    /// moves a sorted bucket into `preds`, preserving source-layout order.
-    /// Buckets from `incoming_used` on are empty.
-    incoming: Vec<Vec<(Inst, usize)>>,
-    incoming_used: usize,
-    /// The branch terminator already indexed for each source block.
-    indexed_terms: Vec<Option<Inst>>,
-    /// The only predecessor of each sealed block that has one: reads
-    /// follow these chains without looking at the edges.
-    chains: Vec<Option<Block>>,
+    context: FunctionBuilderContext,
     /// `ins()` lends out a builder; its insertion is observed on the next
     /// source change or seal, once that mutable borrow has ended.
     pending: Option<Block>,
@@ -222,34 +214,15 @@ impl<'f> FunctionBuilder<'f> {
     }
 
     /// Like [`FunctionBuilder::new`], reusing the allocations in `context`
-    /// (returned by an earlier builder's [`FunctionBuilder::finalize`]).
+    /// (returned by an earlier builder's [`FunctionBuilder::finalize_with_context`]).
     pub fn with_context(func: &'f mut Function, mut context: FunctionBuilderContext) -> Self {
         context.clear();
-        let FunctionBuilderContext {
-            var_types,
-            result_tys,
-            blocks,
-            blocks_used,
-            added_params,
-            incoming,
-            incoming_used,
-            indexed_terms,
-            chains,
-        } = context;
         Self {
             func,
             cfg_changed: true,
             current: None,
             srcloc: None,
-            var_types,
-            result_tys,
-            blocks,
-            blocks_used,
-            added_params,
-            incoming,
-            incoming_used,
-            indexed_terms,
-            chains,
+            context,
             pending: None,
         }
     }
@@ -316,18 +289,21 @@ impl<'f> FunctionBuilder<'f> {
             self.pending = Some(block);
         }
         self.func
-            .ins_with_scratch(InsertPoint::End(block), &mut self.result_tys)
+            .ins_with_scratch(InsertPoint::End(block), &mut self.context.result_tys)
             .loc(self.srcloc)
     }
 
     pub fn declare_var(&mut self, ty: Type) -> Variable {
-        self.var_types.push(ty);
-        Variable::new(self.var_types.len() - 1)
+        self.context.var_types.push(ty);
+        Variable::new(self.context.var_types.len() - 1)
     }
 
     /// Assigns `value` to `var` in the current block.
     pub fn def_var(&mut self, var: Variable, value: Value) {
-        let (want, got) = (self.var_types[var.index()], self.func.value_type(value));
+        let (want, got) = (
+            self.context.var_types[var.index()],
+            self.func.value_type(value),
+        );
         assert_eq!(want, got, "{var} has type {want}, assigned a {got}");
         let block = self.current_block();
         self.block_state(block).defs.insert(var, value);
@@ -346,8 +322,12 @@ impl<'f> FunctionBuilder<'f> {
             return;
         }
         self.sync_preds();
-        let edges = bucket(&mut self.incoming, &mut self.incoming_used, block);
-        let state = &mut self.blocks[block.index()];
+        let edges = bucket(
+            &mut self.context.incoming,
+            &mut self.context.incoming_used,
+            block,
+        );
+        let state = &mut self.context.blocks[block.index()];
         // Swap rather than take, so both buckets keep their allocations.
         state.preds.clear();
         std::mem::swap(&mut state.preds, edges);
@@ -358,19 +338,19 @@ impl<'f> FunctionBuilder<'f> {
             .preds
             .sort_unstable_by_key(|&(inst, dest)| (func.inst_block(inst), dest));
         if let &[(branch, _)] = state.preds.as_slice() {
-            if self.chains.len() <= block.index() {
-                self.chains.resize(block.index() + 1, None);
+            if self.context.chains.len() <= block.index() {
+                self.context.chains.resize(block.index() + 1, None);
             }
-            self.chains[block.index()] = Some(func.inst_block(branch));
+            self.context.chains[block.index()] = Some(func.inst_block(branch));
         }
-        let incomplete = std::mem::take(&mut self.blocks[block.index()].incomplete);
+        let incomplete = std::mem::take(&mut self.context.blocks[block.index()].incomplete);
         for &(var, param) in &incomplete {
             self.add_param_args(var, block, param);
         }
         // Nothing reads an incomplete list once sealed; recycle it.
         let mut incomplete = incomplete;
         incomplete.clear();
-        self.blocks[block.index()].incomplete = incomplete;
+        self.context.blocks[block.index()].incomplete = incomplete;
     }
 
     pub fn seal_all_blocks(&mut self) {
@@ -390,12 +370,12 @@ impl<'f> FunctionBuilder<'f> {
     /// reuse by the next function's builder. Every block must be sealed.
     pub fn finalize_with_context(mut self) -> FunctionBuilderContext {
         assert!(
-            self.blocks[..self.blocks_used]
+            self.context.blocks[..self.context.blocks_used]
                 .iter()
                 .all(|s| s.sealed != Some(false)),
             "finalize needs every block sealed"
         );
-        let mut params = std::mem::take(&mut self.added_params);
+        let mut params = std::mem::take(&mut self.context.added_params);
         loop {
             let mut changed = false;
             // Keep the parameters that are still there and not trivial, in
@@ -419,28 +399,19 @@ impl<'f> FunctionBuilder<'f> {
                 break;
             }
         }
-        FunctionBuilderContext {
-            var_types: self.var_types,
-            result_tys: self.result_tys,
-            blocks: self.blocks,
-            blocks_used: self.blocks_used,
-            added_params: params,
-            incoming: self.incoming,
-            incoming_used: self.incoming_used,
-            indexed_terms: self.indexed_terms,
-            chains: self.chains,
-        }
+        self.context.added_params = params;
+        self.context
     }
 
     fn block_state(&mut self, block: Block) -> &mut BlockState {
         let i = block.index();
-        if self.blocks_used <= i {
-            if self.blocks.len() <= i {
-                self.blocks.resize_with(i + 1, BlockState::default);
+        if self.context.blocks_used <= i {
+            if self.context.blocks.len() <= i {
+                self.context.blocks.resize_with(i + 1, BlockState::default);
             }
-            self.blocks_used = i + 1;
+            self.context.blocks_used = i + 1;
         }
-        &mut self.blocks[i]
+        &mut self.context.blocks[i]
     }
 
     /// The value of `var` at the end of `block`. Along a chain of sealed
@@ -450,21 +421,26 @@ impl<'f> FunctionBuilder<'f> {
     /// where the next reads look, but not in the blocks between: they
     /// would only memoize the same walk.
     fn read(&mut self, var: Variable, block: Block) -> Value {
-        if let Some(value) = self.blocks.get(block.index()).and_then(|s| s.defs.get(var)) {
+        if let Some(value) = self
+            .context
+            .blocks
+            .get(block.index())
+            .and_then(|s| s.defs.get(var))
+        {
             return self.func.resolve(value);
         }
         let mut at = block;
-        while let Some(&Some(pred)) = self.chains.get(at.index()) {
+        while let Some(&Some(pred)) = self.context.chains.get(at.index()) {
             at = pred;
-            if let Some(value) = self.blocks[at.index()].defs.get(var) {
+            if let Some(value) = self.context.blocks[at.index()].defs.get(var) {
                 let value = self.func.resolve(value);
-                self.blocks[block.index()].defs.insert(var, value);
+                self.context.blocks[block.index()].defs.insert(var, value);
                 return value;
             }
         }
         let value = self.read_here(var, at);
         if at != block {
-            self.blocks[block.index()].defs.insert(var, value);
+            self.context.blocks[block.index()].defs.insert(var, value);
         }
         value
     }
@@ -472,11 +448,13 @@ impl<'f> FunctionBuilder<'f> {
     /// The value of `var` at the end of `block`, which does not define it
     /// and is not a sealed block with one predecessor.
     fn read_here(&mut self, var: Variable, block: Block) -> Value {
-        let ty = self.var_types[var.index()];
-        let state = &self.blocks[block.index()];
+        let ty = self.context.var_types[var.index()];
+        let state = &self.context.blocks[block.index()];
         let value = if !state.sealed.expect("unregistered SSA block") {
             let param = self.add_param(block, ty);
-            self.blocks[block.index()].incomplete.push((var, param));
+            self.context.blocks[block.index()]
+                .incomplete
+                .push((var, param));
             param
         } else if state.visiting {
             // A loop led back here: the parameter is needed after all.
@@ -505,23 +483,23 @@ impl<'f> FunctionBuilder<'f> {
     /// no value number is spent on it.
     fn read_join(&mut self, var: Variable, block: Block, ty: Type) -> Value {
         // Reserve the parameter's place in the cleanup order.
-        let slot = self.added_params.len();
-        self.added_params.push((block, None));
-        self.blocks[block.index()].visiting = true;
+        let slot = self.context.added_params.len();
+        self.context.added_params.push((block, None));
+        self.context.blocks[block.index()].visiting = true;
         let values = self.read_preds(var, block);
-        self.blocks[block.index()].visiting = false;
-        match self.blocks[block.index()].defs.get(var) {
+        self.context.blocks[block.index()].visiting = false;
+        match self.context.blocks[block.index()].defs.get(var) {
             // Created by a read around a loop: finish it as an ordinary
             // parameter. Its cleanup slot is the one reserved here.
             Some(param) => {
-                self.added_params[slot].1 = Some(param);
+                self.context.added_params[slot].1 = Some(param);
                 self.finish_param(block, param, values)
             }
             None => match self.trivial_value(None, values.iter().copied()) {
                 Some(same) => same.expect("a join has predecessors"),
                 None => {
                     let param = self.func.append_block_param(block, ty);
-                    self.added_params[slot].1 = Some(param);
+                    self.context.added_params[slot].1 = Some(param);
                     let index = self.func.block_params(block).len() - 1;
                     self.write_args(block, index, values);
                     param
@@ -552,7 +530,7 @@ impl<'f> FunctionBuilder<'f> {
 
     fn add_param(&mut self, block: Block, ty: Type) -> Value {
         let param = self.func.append_block_param(block, ty);
-        self.added_params.push((block, Some(param)));
+        self.context.added_params.push((block, Some(param)));
         param
     }
 
@@ -570,10 +548,10 @@ impl<'f> FunctionBuilder<'f> {
     /// arguments. Every edge is read before any argument is written, so
     /// a trivial parameter needs none.
     fn read_preds(&mut self, var: Variable, block: Block) -> SmallVec<[Value; 8]> {
-        let edges = self.blocks[block.index()].preds.len();
+        let edges = self.context.blocks[block.index()].preds.len();
         let mut values = SmallVec::with_capacity(edges);
         for edge in 0..edges {
-            let (branch, _) = self.blocks[block.index()].preds[edge];
+            let (branch, _) = self.context.blocks[block.index()].preds[edge];
             let pred = self.func.inst_block(branch);
             values.push(self.read(var, pred));
         }
@@ -597,7 +575,7 @@ impl<'f> FunctionBuilder<'f> {
     /// `index` of `block`.
     fn write_args(&mut self, block: Block, index: usize, values: SmallVec<[Value; 8]>) {
         for (edge, value) in values.into_iter().enumerate() {
-            let (branch, i) = self.blocks[block.index()].preds[edge];
+            let (branch, i) = self.context.blocks[block.index()].preds[edge];
             let args = &mut self.func.inst_data_mut(branch).branch_dests_mut()[i].args;
             debug_assert_eq!(args.len(), index, "arguments are added in parameter order");
             args.push(value);
@@ -638,7 +616,7 @@ impl<'f> FunctionBuilder<'f> {
     /// itself, passed around a loop), removes it and returns that value.
     fn try_remove_trivial(&mut self, block: Block, param: Value) -> Value {
         let index = self.param_index(block, param);
-        let preds = &self.blocks[block.index()].preds;
+        let preds = &self.context.blocks[block.index()].preds;
         let args = preds
             .iter()
             .map(|&(branch, i)| self.func.inst_data(branch).branch_dests()[i].args[index]);
@@ -663,7 +641,7 @@ impl<'f> FunctionBuilder<'f> {
         let same = same.unwrap_or_else(|| self.zero(block, ty));
         self.func.remove_block_param(block, index);
         if written {
-            for &(branch, i) in &self.blocks[block.index()].preds {
+            for &(branch, i) in &self.context.blocks[block.index()].preds {
                 self.func.inst_data_mut(branch).branch_dests_mut()[i]
                     .args
                     .remove(index);
@@ -680,10 +658,10 @@ impl<'f> FunctionBuilder<'f> {
             self.rebuild_preds();
         } else if let Some(block) = self.pending.take() {
             let term = self.branch_terminator(block);
-            if self.indexed_terms.len() <= block.index() {
-                self.indexed_terms.resize(block.index() + 1, None);
+            if self.context.indexed_terms.len() <= block.index() {
+                self.context.indexed_terms.resize(block.index() + 1, None);
             }
-            match (self.indexed_terms[block.index()], term) {
+            match (self.context.indexed_terms[block.index()], term) {
                 (old, new) if old == new => {}
                 (None, Some(term)) => self.index_term(block, term),
                 // Appending after an indexed branch can temporarily hide
@@ -699,20 +677,25 @@ impl<'f> FunctionBuilder<'f> {
     }
 
     fn index_term(&mut self, block: Block, term: Inst) {
-        if self.indexed_terms.len() <= block.index() {
-            self.indexed_terms.resize(block.index() + 1, None);
+        if self.context.indexed_terms.len() <= block.index() {
+            self.context.indexed_terms.resize(block.index() + 1, None);
         }
-        self.indexed_terms[block.index()] = Some(term);
+        self.context.indexed_terms[block.index()] = Some(term);
         for (i, dest) in self.func.inst_data(term).branch_dests().iter().enumerate() {
-            bucket(&mut self.incoming, &mut self.incoming_used, dest.block).push((term, i));
+            bucket(
+                &mut self.context.incoming,
+                &mut self.context.incoming_used,
+                dest.block,
+            )
+            .push((term, i));
         }
     }
 
     fn rebuild_preds(&mut self) {
-        for edges in &mut self.incoming[..self.incoming_used] {
+        for edges in &mut self.context.incoming[..self.context.incoming_used] {
             edges.clear();
         }
-        self.indexed_terms.fill(None);
+        self.context.indexed_terms.fill(None);
         let blocks: Vec<_> = self.func.blocks().collect();
         for block in blocks {
             if let Some(term) = self.branch_terminator(block) {
@@ -821,7 +804,7 @@ mod tests {
         b.seal_block(block);
         let result = b.use_var(var);
         b.ins().return_(&[result]);
-        assert_eq!(b.blocks[raw_entry.index()].sealed, None);
+        assert_eq!(b.context.blocks[raw_entry.index()].sealed, None);
         b.finalize();
         keel_ir::verify(&func).unwrap();
     }
@@ -841,7 +824,12 @@ mod tests {
                     }
                 }
             }
-            let mut got = b.incoming.get(dest.index()).cloned().unwrap_or_default();
+            let mut got = b
+                .context
+                .incoming
+                .get(dest.index())
+                .cloned()
+                .unwrap_or_default();
             got.sort_unstable_by_key(|&(inst, i)| (b.func.inst_block(inst), i));
             assert_eq!(got, expected, "incoming edges of {dest}");
         }

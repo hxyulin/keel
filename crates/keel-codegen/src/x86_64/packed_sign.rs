@@ -9,26 +9,16 @@ pub(super) enum Plan {
     Select { x: Value, otherwise: Value },
 }
 
-pub(super) fn select(func: &Function, plan: &mut crate::select::Selection) -> HashMap<Inst, Plan> {
+pub(super) fn select(
+    facts: &crate::kinds::FunctionFacts<'_>,
+    plan: &mut crate::select::Selection,
+) -> HashMap<Inst, Plan> {
+    let func = facts.func;
     // Every cover starts at a vector compare; skip the use counts without one.
-    let mut candidate = false;
-    for (_, i) in func.layout_insts() {
-        match func.inst_data(i) {
-            InstData::InlineAsm { .. } => return HashMap::default(),
-            InstData::VectorIcmp { .. } => candidate = true,
-            _ => {}
-        }
-    }
-    if !candidate {
+    if facts.kinds.inline_asm || !facts.kinds.vector_icmp {
         return HashMap::default();
     }
-    let mut uses = vec![0u8; func.num_values()];
-    for (_, i) in func.layout_insts() {
-        func.inst_data(i).for_each_operand(|v| {
-            let count = &mut uses[func.resolve(v).index()];
-            *count = count.saturating_add(1);
-        });
-    }
+    let uses = facts.raw_uses();
     let mut result = HashMap::default();
     for block in func.blocks() {
         for pair in func.block_insts(block).windows(2) {

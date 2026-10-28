@@ -86,3 +86,27 @@ fn initializer_diagnostics_keep_designator_locations() {
         }
     }
 }
+
+#[test]
+fn sparse_and_empty_large_array_initializers_do_not_enumerate_children() {
+    // The objects are unevaluated, so neither parsing nor IR generation needs
+    // storage proportional to their declared bounds.
+    let source = r#"
+        _Static_assert(sizeof((int[2000000000]){}) == 8000000000UL, "empty");
+        _Static_assert(sizeof((int[2000000000]){[1999999999] = 7}) == 8000000000UL, "sparse");
+        _Static_assert(sizeof((int[2][1000000000]){1, 2}) == 8000000000UL, "elided");
+        int value(void) { return 7; }
+    "#;
+    for target in Target::NATIVE {
+        let module = keel_c::compile(
+            source,
+            "large-initializers.c",
+            keel_c::Options {
+                target,
+                debug_info: false,
+            },
+        )
+        .unwrap();
+        keel_ir::verify_module(&module).unwrap();
+    }
+}

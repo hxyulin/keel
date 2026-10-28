@@ -22,6 +22,35 @@ struct Slot<'a> {
     bits: Option<BitField>,
 }
 
+/// Arrays derive child positions on demand; record children retain member order.
+enum SubSlots<'a> {
+    Array {
+        elem: Ty<'a>,
+        offset: u64,
+        size: u64,
+        len: u64,
+    },
+    Members(Vec<Slot<'a>>),
+}
+
+impl<'a> SubSlots<'a> {
+    fn get(&self, index: usize) -> Option<Slot<'a>> {
+        match self {
+            Self::Array {
+                elem,
+                offset,
+                size,
+                len,
+            } => ((index as u64) < *len).then(|| Slot {
+                ty: *elem,
+                offset: offset + index as u64 * size,
+                bits: None,
+            }),
+            Self::Members(slots) => slots.get(index).copied(),
+        }
+    }
+}
+
 impl<'a> Parser<'a> {
     /// The initializer after `=` for an object of type `ty`. Returns the
     /// items and the type, completed if it was an array of unknown length.
@@ -234,27 +263,25 @@ impl<'a> Parser<'a> {
     }
 
     /// The sub-objects of an aggregate, in initialization order.
-    fn sub_slots(&self, slot: &Slot<'a>) -> Vec<Slot<'a>> {
+    fn sub_slots(&self, slot: &Slot<'a>) -> SubSlots<'a> {
         match slot.ty {
             Ty::Array(&ArrayTy {
                 elem, len: Some(n), ..
-            }) => {
-                let size = self.size_of(&elem);
-                (0..n)
+            }) => SubSlots::Array {
+                elem: *elem.unatomic(),
+                offset: slot.offset,
+                size: self.size_of(&elem),
+                len: n,
+            },
+            Ty::Vector(elem, shape) => SubSlots::Members(
+                (0..shape.lanes())
                     .map(|i| Slot {
-                        ty: *elem.unatomic(),
-                        offset: slot.offset + i * size,
+                        ty: *elem,
+                        offset: slot.offset + u64::from(i) * self.size_of(elem),
                         bits: None,
                     })
-                    .collect()
-            }
-            Ty::Vector(elem, shape) => (0..shape.lanes())
-                .map(|i| Slot {
-                    ty: *elem,
-                    offset: slot.offset + u64::from(i) * self.size_of(elem),
-                    bits: None,
-                })
-                .collect(),
+                    .collect(),
+            ),
             Ty::Struct(id) => {
                 let def = &self.structs[id];
                 let named = def
@@ -266,13 +293,13 @@ impl<'a> Parser<'a> {
                         offset: slot.offset + m.offset,
                         bits: m.bits,
                     });
-                if def.is_union {
+                SubSlots::Members(if def.is_union {
                     named.take(1).collect()
                 } else {
                     named.collect()
-                }
+                })
             }
-            _ => Vec::new(),
+            _ => SubSlots::Members(Vec::new()),
         }
     }
 
@@ -285,7 +312,9 @@ impl<'a> Parser<'a> {
         items: &mut Vec<InitItem<'a>>,
     ) -> R<()> {
         let mut first = first;
-        for (i, sub) in self.sub_slots(slot).into_iter().enumerate() {
+        let subs = self.sub_slots(slot);
+        let mut i = 0;
+        while let Some(sub) = subs.get(i) {
             if i > 0 {
                 // Continue only with another undesignated item of this list.
                 let more = self.is(",")
@@ -299,6 +328,7 @@ impl<'a> Parser<'a> {
                 self.advance();
             }
             self.init_item(&sub, first.take(), items)?;
+            i += 1;
         }
         Ok(())
     }
@@ -336,11 +366,7 @@ impl<'a> Parser<'a> {
             return Ok(1);
         }
         let unbounded = matches!(slot.ty, Ty::Array(ArrayTy { len: None, .. }));
-        let subs = if unbounded {
-            Vec::new()
-        } else {
-            self.sub_slots(slot)
-        };
+        let subs = self.sub_slots(slot);
         let mut next = 0usize;
         let mut count = 0u64;
         while !self.eat("}") {
@@ -367,7 +393,7 @@ impl<'a> Parser<'a> {
                 }
             } else {
                 match subs.get(next) {
-                    Some(s) => *s,
+                    Some(s) => s,
                     None => return Err(Error::new(loc, "too many initializers")),
                 }
             };

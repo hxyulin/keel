@@ -1445,7 +1445,8 @@ impl<'a> FunctionCompiler<'a> {
         // they must fit there. Register-only single-vector wrappers also fit.
         // One walk finds which (mostly rare) instruction kinds occur, so the
         // checks and covers below only scan functions that can match.
-        let (present, uses) = crate::kinds::InstKinds::with_uses(func);
+        let facts = crate::kinds::FunctionFacts::new(func);
+        let (present, uses) = (facts.kinds, &facts.machine_uses);
         for (_, inst) in func.layout_insts().filter(|_| present.return_call) {
             let (args, sig) = match func.inst_data(inst) {
                 InstData::ReturnCall { func: callee, args } => (args, &func.callee(*callee).sig),
@@ -1600,50 +1601,54 @@ impl<'a> FunctionCompiler<'a> {
             func,
             crate::select::Target::X86,
             &|data| folds(func, data),
-            &uses,
+            uses,
         );
         if present.compare {
-            selection.fold_x86_mask_tests(func, &uses);
+            selection.fold_x86_mask_tests(func, uses);
         }
         // Each cover is anchored at an instruction kind; without one it
         // selects nothing and leaves the selection untouched.
         let fused_compares = if present.compare && present.brif {
             backend_scope!(CompareFusion);
-            selection.fuse_compares(func, |data| folds(func, data), &uses)
+            selection.fuse_compares(func, |data| folds(func, data), uses)
         } else {
             HashSet::default()
         };
         if present.select {
-            selection.fuse_x86_selects(func, |data| folds(func, data), &uses);
+            selection.fuse_x86_selects(func, |data| folds(func, data), uses);
         }
         let packed_absolute_values = if present.vector_select {
-            crate::packed_absolute::select(func, &mut selection)
+            crate::packed_absolute::select(&facts, &mut selection)
         } else {
             HashMap::default()
         };
         let packed_positive_values = if present.vector_splat {
-            packed_positive::select(func, &mut selection)
+            packed_positive::select(&facts, &mut selection)
         } else {
             HashMap::default()
         };
         let packed_sign_values = if present.vector_icmp {
-            packed_sign::select(func, &mut selection)
+            packed_sign::select(&facts, &mut selection)
         } else {
             HashMap::default()
         };
         let mut packed_low_loads = if present.vector_splat {
-            packed_load::select(func, &mut selection, pipeline.selector.x86_features().sse41)
+            packed_load::select(
+                &facts,
+                &mut selection,
+                pipeline.selector.x86_features().sse41,
+            )
         } else {
             HashMap::default()
         };
         if present.widen_low {
             packed_low_loads.extend(packed_load::select_wide(
-                func,
+                &facts,
                 &mut selection,
                 pipeline.selector.x86_features(),
             ));
         }
-        selection.fold_signed_byte_loads(func, &uses);
+        selection.fold_signed_byte_loads(func, uses);
         let is_call = |data: &InstData| is_call(func, data, pipeline.selector.x86_features());
         let returns_twice = |data: &InstData| returns_twice(func, data);
         let input = crate::regalloc::AllocationInput {

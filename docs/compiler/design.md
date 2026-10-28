@@ -716,6 +716,14 @@ and add/ptradd with a scaled shift (`lea`) on x86. Narrow integer and float
 patterns retain their original semantics; floating multiply/add is never
 implicitly fused because that changes rounding.
 
+Target selection prepares immutable instruction-kind and operand-use facts once
+per function. Machine-use counts omit lifetime markers and saturate at two.
+Vector covers share a separate raw count table that includes lifetime operands
+and saturates at 255, preserving exact small multiplicities. That table is
+computed only when a candidate cover requests it. Both policies resolve aliases
+and count repeated operands, including branch arguments, separately. Cover
+selection retains its target, feature, source-location and constraint checks.
+
 Aarch64 scalar loads and stores can also consume a single-use, same-block
 `ptradd` with an i64 register offset. A single-use i64 shift can be absorbed
 when its masked count is zero or log2(access bytes), producing a register-offset

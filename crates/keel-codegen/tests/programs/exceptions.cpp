@@ -28,6 +28,20 @@ static void check(const char *what, int got, int want) {
     }
 }
 
+struct InvokeBig { long a, b, c; };
+struct InvokePair { long a, b; };
+extern "C" long k_invoke_storage(InvokePair *, InvokeBig *, int);
+extern "C" InvokePair c_invoke_storage(long a, long b, long c, long d,
+    long e, long f, long g, long h, InvokeBig copy, int mode, long *guard) {
+    long sum = a + b + c + d + e + f + g + h + copy.a + copy.b + copy.c;
+    check("invoke guard", *guard, 1234);
+    volatile long *private_copy = &copy.a;
+    *private_copy = 999;
+    clobber();
+    if (mode) throw 42;
+    return {sum, *guard};
+}
+
 int main() {
     check("k_catch(5)", k_catch(5), 11);
     check("k_catch(-3)", k_catch(-3), 3 + 1000 + (-3 + 7));
@@ -51,6 +65,13 @@ int main() {
     } catch (int e) {
         check("k_two(1, -2, 3) threw", e, 2);
     }
+    InvokeBig input{10, 20, 30};
+    InvokePair output{0, 0};
+    check("invoke storage normal", k_invoke_storage(&output, &input, 0), 1234);
+    check("invoke aggregate result", output.a, 96);
+    check("invoke aggregate guard", output.b, 1234);
+    check("invoke storage throws", k_invoke_storage(&output, &input, 1), 1234);
+    check("invoke private copy", input.a, 10);
     /* An exit status is taken mod 256. */
     return failures != 0;
 }

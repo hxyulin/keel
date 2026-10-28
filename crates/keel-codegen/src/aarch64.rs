@@ -1005,7 +1005,8 @@ impl<'a> FunctionCompiler<'a> {
         // One walk finds which (mostly rare) instruction kinds occur, so the
         // checks and covers below only scan functions that can match. Raw IR
         // use counts never change while selecting this function.
-        let (present, uses) = crate::kinds::InstKinds::with_uses(func);
+        let facts = crate::kinds::FunctionFacts::new(func);
+        let (present, uses) = (facts.kinds, &facts.machine_uses);
         for (_, inst) in func.layout_insts().filter(|_| present.intrinsic) {
             if matches!(func.inst_data(inst), InstData::X86RflagsRegion { .. })
                 || matches!(func.inst_data(inst), InstData::Intrinsic { id,.. } if id.is_x86_target())
@@ -1081,7 +1082,10 @@ impl<'a> FunctionCompiler<'a> {
         let (mut outgoing, mut copies, mut needs_sret_save) = (0, 0u64, false);
         for (_, inst) in func.layout_insts().filter(|_| present.call) {
             let (args, params) = match func.inst_data(inst) {
-                InstData::Call { func: callee, args } => (args, &func.callee(*callee).sig.params),
+                InstData::Call { func: callee, args }
+                | InstData::Invoke {
+                    func: callee, args, ..
+                } => (args, &func.callee(*callee).sig.params),
                 InstData::CallIndirect { sig, args, .. } => (args, &func.signature(*sig).params),
                 _ => continue,
             };
@@ -1267,13 +1271,13 @@ impl<'a> FunctionCompiler<'a> {
                         .chain(folded_divisor(func, data))
                         .collect()
                 },
-                &uses,
+                uses,
             )
         };
         // Each cover is anchored at an instruction kind; without one it
         // selects nothing and leaves the selection untouched.
         let absolute_values = if present.select {
-            absolute::select(func, &mut selection, &uses)
+            absolute::select(func, &mut selection, uses)
         } else {
             HashMap::default()
         };
@@ -1283,7 +1287,7 @@ impl<'a> FunctionCompiler<'a> {
             HashMap::default()
         };
         let packed_absolute_values = if present.vector_select {
-            crate::packed_absolute::select(func, &mut selection)
+            crate::packed_absolute::select(&facts, &mut selection)
         } else {
             HashMap::default()
         };
@@ -1294,7 +1298,7 @@ impl<'a> FunctionCompiler<'a> {
         };
         // Inline assembly may observe the leaves; such functions keep them.
         let extended_adds = if present.ptradd && !present.inline_asm {
-            extended_add::select(func, &mut selection, &uses)
+            extended_add::select(func, &mut selection, uses)
         } else {
             HashMap::default()
         };
@@ -1302,19 +1306,19 @@ impl<'a> FunctionCompiler<'a> {
             selection.fuse_aarch64_selects(
                 func,
                 |data| folded_imm(func, data).map(|(v, _)| v).into_iter().collect(),
-                &uses,
+                uses,
             );
         }
         let (packed_low_loads, replicate_loads) = if present.vector_splat {
             (
-                packed_load::select(func, &mut selection),
-                vector::select_replicate_loads(func, &mut selection),
+                packed_load::select(&facts, &mut selection),
+                vector::select_replicate_loads(&facts, &mut selection),
             )
         } else {
             (HashMap::default(), HashMap::default())
         };
         let widening_adds = if present.widen_low {
-            vector::select_widening_adds(func, &mut selection)
+            vector::select_widening_adds(&facts, &mut selection)
         } else {
             HashMap::default()
         };
@@ -1323,7 +1327,7 @@ impl<'a> FunctionCompiler<'a> {
             selection.fuse_aarch64_compares(
                 func,
                 |data| folded_imm(func, data).map(|(v, _)| v).into_iter().collect(),
-                &uses,
+                uses,
             )
         } else {
             HashSet::default()

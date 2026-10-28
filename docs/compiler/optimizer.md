@@ -21,6 +21,22 @@ fails. Failed canonical restoration stops before the requested pass and adds no
 completed invocation for it. Skipped invocations preserve pipeline order and use
 exact zero timings. All exits release analysis and scratch caches.
 
+## Analysis reuse and auditing
+
+A thread-local cache reuses CFG, dominator and lazy loop-depth analyses when the
+function's CFG stamp is unchanged. A changed stamp can still reuse an entry after
+checking block count, layout and ordered unique successors. Function stamps are
+globally fresh, so replacing a function at the same address cannot match an old
+stamp unless it is an unchanged clone with the same CFG. Pipelines clear the
+cache on exit.
+
+Debug builds check the cached CFG inputs on every hit. The optional
+`keel-opt/audit-analysis` feature also recomputes CFG, dominators and initialized
+loop depths and asserts equality on each hit, in debug and release profiles.
+Use `cargo test -p keel-opt --features audit-analysis` when changing CFG mutation
+or analysis code. Ordinary debug builds retain other debug assertions without
+paying for fresh dominator computations on every reused analysis.
+
 <a id="aggregate-call-boundaries-two-word-x86-aggregate-wrappers"></a>
 ## Two-word x86 aggregate wrappers
 

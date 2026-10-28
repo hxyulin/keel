@@ -1,6 +1,9 @@
 use super::*;
 use crate::regalloc::{Constraint, OperandKind, ValuePart};
 use crate::select::{Machine, Match, Selection};
+fn select(func: &Function, plan: &mut Selection) -> HashMap<Inst, Plan> {
+    super::select(&crate::kinds::FunctionFacts::new(func), plan)
+}
 const SOURCE: &str = "func @clamp(ptr,ptr,i64,i64x2) {\nblock0(v0:ptr,v1:ptr,v20:i64,v21:i64x2):\n v2 = iconst.i64 0\n v3 = vsplat.i64x2 v2\n v4 = load.i64x2 align 1 v0\n v5 = vicmp.sgt v4,v3\n v6 = vand v5,v4\n store align 1 v6,v1\n return\n}\n";
 fn function(src: &str) -> Function {
     keel_ir::parse(src).unwrap().functions.remove(0)

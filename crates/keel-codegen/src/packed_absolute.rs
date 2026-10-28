@@ -5,26 +5,16 @@ use keel_ir::{
     EntityRef, Function, Inst, InstData, IntCC, Type, UnaryOp, Value, ValueDef, VectorType,
 };
 
-pub(super) fn select(func: &Function, plan: &mut Selection) -> HashMap<Inst, Value> {
+pub(super) fn select(
+    facts: &crate::kinds::FunctionFacts<'_>,
+    plan: &mut Selection,
+) -> HashMap<Inst, Value> {
+    let func = facts.func;
     // Every cover ends at a vector select; skip the use counts without one.
-    let mut candidate = false;
-    for (_, i) in func.layout_insts() {
-        match func.inst_data(i) {
-            InstData::InlineAsm { .. } => return HashMap::default(),
-            InstData::VectorSelect { .. } => candidate = true,
-            _ => {}
-        }
-    }
-    if !candidate {
+    if facts.kinds.inline_asm || !facts.kinds.vector_select {
         return HashMap::default();
     }
-    let mut uses = vec![0u8; func.num_values()];
-    for (_, i) in func.layout_insts() {
-        func.inst_data(i).for_each_operand(|v| {
-            let n = &mut uses[func.resolve(v).index()];
-            *n = n.saturating_add(1);
-        });
-    }
+    let uses = facts.raw_uses();
     let mut result = HashMap::default();
     for block in func.blocks() {
         for chain in func.block_insts(block).windows(3) {
@@ -120,7 +110,7 @@ mod tests {
         let m = keel_ir::parse(SOURCE).unwrap();
         let f = &m.functions[0];
         let mut s = Selection::default();
-        let matches = select(f, &mut s);
+        let matches = select(&crate::kinds::FunctionFacts::new(f), &mut s);
         assert_eq!(matches.len(), 1);
         let (&root, &x) = matches.iter().next().unwrap();
         assert_eq!(s.operands(f, root), vec![x]);
@@ -155,7 +145,11 @@ mod tests {
             let m = keel_ir::parse(&source).unwrap();
             keel_ir::verify_module(&m).unwrap();
             assert!(
-                select(&m.functions[0], &mut Selection::default()).is_empty(),
+                select(
+                    &crate::kinds::FunctionFacts::new(&m.functions[0]),
+                    &mut Selection::default()
+                )
+                .is_empty(),
                 "{source}"
             );
         }
@@ -184,7 +178,7 @@ mod tests {
                 OperandKind::Def,
                 Constraint::Register,
             );
-            assert!(select(f, &mut plan).is_empty());
+            assert!(select(&crate::kinds::FunctionFacts::new(f), &mut plan).is_empty());
             assert!(!chain.iter().any(|&i| plan.covered(i)));
             let mut debug = f.clone();
             debug.set_inst_loc(
@@ -196,7 +190,13 @@ mod tests {
                     scope: None,
                 }),
             );
-            assert!(select(&debug, &mut Selection::default()).is_empty());
+            assert!(
+                select(
+                    &crate::kinds::FunctionFacts::new(&debug),
+                    &mut Selection::default()
+                )
+                .is_empty()
+            );
         }
     }
 }

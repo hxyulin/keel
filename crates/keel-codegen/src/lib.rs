@@ -608,28 +608,12 @@ pub(crate) fn validate_vector_width_with_memory_policy(
                 });
             }
         }
-        // Removed instructions retain their value-table entries. Only values
-        // still present in the function constrain its machine representation.
         let mut bad = None;
-        let mut check_value = |value| {
-            let ty = f.value_type(f.resolve(value));
+        for_each_current_value_type(f, |ty| {
             if unsupported(ty) {
                 bad = Some(ty);
             }
-        };
-        for block in f.blocks() {
-            f.block_params(block)
-                .iter()
-                .copied()
-                .for_each(&mut check_value);
-        }
-        for (_, inst) in f.layout_insts() {
-            f.inst_data(inst).for_each_operand(&mut check_value);
-            f.inst_results(inst)
-                .iter()
-                .copied()
-                .for_each(&mut check_value);
-        }
+        });
         if let Some(ty) = bad {
             return Err(CodegenError {
                 func: f.name.clone(),
@@ -641,6 +625,25 @@ pub(crate) fn validate_vector_width_with_memory_policy(
         }
     }
     Ok(())
+}
+
+/// Removed instructions retain their value-table entries. Only values still
+/// present in the function constrain its machine representation.
+fn for_each_current_value_type(f: &keel_ir::Function, mut visit: impl FnMut(keel_ir::Type)) {
+    let mut check_value = |value| visit(f.value_type(f.resolve(value)));
+    for block in f.blocks() {
+        f.block_params(block)
+            .iter()
+            .copied()
+            .for_each(&mut check_value);
+    }
+    for (_, inst) in f.layout_insts() {
+        f.inst_data(inst).for_each_operand(&mut check_value);
+        f.inst_results(inst)
+            .iter()
+            .copied()
+            .for_each(&mut check_value);
+    }
 }
 
 /// Until the matching target transport is implemented, never silently discard
@@ -691,7 +694,7 @@ pub(crate) fn reject_x86_vector_abi(module: &Module, target: &str) -> Result<(),
 
 /// Reject extended values before reaching scalar SIMD lowering on unsupported targets.
 pub(crate) fn reject_f80(module: &Module, target: &str) -> Result<(), CodegenError> {
-    use keel_ir::{EntityRef, Type, Value};
+    use keel_ir::Type;
     let signature_has_f80 = |sig: &keel_ir::Signature| {
         sig.params.iter().chain(&sig.returns).any(|p| {
             p.ty == Type::F80
@@ -709,10 +712,12 @@ pub(crate) fn reject_f80(module: &Module, target: &str) -> Result<(), CodegenErr
         }
     }
     for f in &module.functions {
+        let mut value_has_f80 = false;
+        for_each_current_value_type(f, |ty| value_has_f80 |= ty == Type::F80);
         if signature_has_f80(&f.sig)
             || f.callees().any(|(_, d)| signature_has_f80(&d.sig))
             || f.signatures().any(|(_, s)| signature_has_f80(s))
-            || (0..f.num_values()).any(|n| f.value_type(Value::new(n)) == Type::F80)
+            || value_has_f80
             || f.layout_insts().any(|(_, i)| {
                 let mut found = false;
                 f.inst_data(i)

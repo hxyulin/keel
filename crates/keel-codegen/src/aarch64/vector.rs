@@ -69,7 +69,11 @@ fn binary(op: V, shape: VectorType) -> Option<Packed> {
     Some(Packed {
         opcode,
         mnemonic,
-        arrangement: if bitwise { if shape.bytes() == 8 { "8b" } else { "16b" } } else { arrangement(shape) },
+        arrangement: if bitwise {
+            if shape.bytes() == 8 { "8b" } else { "16b" }
+        } else {
+            arrangement(shape)
+        },
         field: if bitwise {
             None
         } else if op.is_float() {
@@ -83,7 +87,8 @@ fn binary(op: V, shape: VectorType) -> Option<Packed> {
     })
 }
 fn unary(op: UnaryOp, shape: VectorType) -> Option<Packed> {
-    if shape.bytes() == 8 && shape.lane_type().bytes() == Some(8)
+    if shape.bytes() == 8
+        && shape.lane_type().bytes() == Some(8)
         && !matches!(op, UnaryOp::Bnot | UnaryOp::Bswap)
     {
         return None;
@@ -93,7 +98,9 @@ fn unary(op: UnaryOp, shape: VectorType) -> Option<Packed> {
         UnaryOp::Ineg => (Opcode::NEG_asimdmisc_R, "neg"),
         UnaryOp::Bnot => (Opcode::NOT_asimdmisc_R, "mvn"),
         UnaryOp::Clz if shape != VectorType::I64x2 => (Opcode::CLZ_asimdmisc_R, "clz"),
-        UnaryOp::Popcnt if matches!(shape, VectorType::I8x8 | VectorType::I8x16) => (Opcode::CNT_asimdmisc_R, "cnt"),
+        UnaryOp::Popcnt if matches!(shape, VectorType::I8x8 | VectorType::I8x16) => {
+            (Opcode::CNT_asimdmisc_R, "cnt")
+        }
         UnaryOp::Bswap => match size {
             1 => (Opcode::REV16_asimdmisc_R, "rev16"),
             2 => (Opcode::REV32_asimdmisc_R, "rev32"),
@@ -120,7 +127,11 @@ fn unary(op: UnaryOp, shape: VectorType) -> Option<Packed> {
     Some(Packed {
         opcode,
         mnemonic,
-        arrangement: if bytes { if shape.bytes() == 8 { "8b" } else { "16b" } } else { arrangement(shape) },
+        arrangement: if bytes {
+            if shape.bytes() == 8 { "8b" } else { "16b" }
+        } else {
+            arrangement(shape)
+        },
         field,
     })
 }
@@ -138,44 +149,48 @@ pub(super) fn lower(func: &Function) -> Cow<'_, Function> {
         });
         if narrow {
             return match data {
-                InstData::VectorBinary { op, args } => binary(*op, f.value_type(args[0]).vector().unwrap()).is_some(),
-                InstData::VectorUnary { op, arg } => unary(*op, f.value_type(*arg).vector().unwrap()).is_some(),
+                InstData::VectorBinary { op, args } => {
+                    binary(*op, f.value_type(args[0]).vector().unwrap()).is_some()
+                }
+                InstData::VectorUnary { op, arg } => {
+                    unary(*op, f.value_type(*arg).vector().unwrap()).is_some()
+                }
                 InstData::VectorShuffle { .. } => true,
                 _ => false,
             };
         }
         match data {
-        InstData::VectorReduce { .. }
-        | InstData::VectorShuffle { .. }
-        | InstData::VectorExtract { .. }
-        | InstData::VectorInsert { .. } => true,
-        InstData::VectorBinary { op, args } => {
-            matches!(op, V::Shl | V::Ushr | V::Sshr)
-                || binary(*op, f.value_type(args[0]).vector().unwrap()).is_some()
-        }
-        InstData::VectorUnary { op, arg } => {
-            *op == UnaryOp::Popcnt || unary(*op, f.value_type(*arg).vector().unwrap()).is_some()
-        }
-        InstData::Convert {
-            op:
-                ConvertOp::SwidenLow
-                | ConvertOp::UwidenLow
-                | ConvertOp::SwidenHigh
-                | ConvertOp::UwidenHigh
-                | ConvertOp::NarrowLow
-                | ConvertOp::SpairwiseAddLong
-                | ConvertOp::UpairwiseAddLong,
-            ..
-        } => true,
-        InstData::Convert {
-            op: ConvertOp::Bitcast,
-            ty,
-            arg,
-        } => ty.is_vector() && f.value_type(*arg).is_vector(),
-        InstData::VectorSplat { .. }
-        | InstData::VectorSelect { .. }
-        | InstData::VectorIcmp { .. } => true,
-        _ => false,
+            InstData::VectorReduce { .. }
+            | InstData::VectorShuffle { .. }
+            | InstData::VectorExtract { .. }
+            | InstData::VectorInsert { .. } => true,
+            InstData::VectorBinary { op, args } => {
+                matches!(op, V::Shl | V::Ushr | V::Sshr)
+                    || binary(*op, f.value_type(args[0]).vector().unwrap()).is_some()
+            }
+            InstData::VectorUnary { op, arg } => {
+                *op == UnaryOp::Popcnt || unary(*op, f.value_type(*arg).vector().unwrap()).is_some()
+            }
+            InstData::Convert {
+                op:
+                    ConvertOp::SwidenLow
+                    | ConvertOp::UwidenLow
+                    | ConvertOp::SwidenHigh
+                    | ConvertOp::UwidenHigh
+                    | ConvertOp::NarrowLow
+                    | ConvertOp::SpairwiseAddLong
+                    | ConvertOp::UpairwiseAddLong,
+                ..
+            } => true,
+            InstData::Convert {
+                op: ConvertOp::Bitcast,
+                ty,
+                arg,
+            } => ty.is_vector() && f.value_type(*arg).is_vector(),
+            InstData::VectorSplat { .. }
+            | InstData::VectorSelect { .. }
+            | InstData::VectorIcmp { .. } => true,
+            _ => false,
         }
     })
 }
@@ -228,26 +243,39 @@ impl FunctionCompiler<'_> {
         // producers remain in place; all sources are captured before d writes.
         let n = shape.lanes();
         if n >= 2 {
-            for (opcode,name,kind) in [
-                (Opcode::ZIP1_asimdperm_only,"zip1",0), (Opcode::ZIP2_asimdperm_only,"zip2",1),
-                (Opcode::UZP1_asimdperm_only,"uzp1",2), (Opcode::UZP2_asimdperm_only,"uzp2",3),
-                (Opcode::TRN1_asimdperm_only,"trn1",4), (Opcode::TRN2_asimdperm_only,"trn2",5),
+            for (opcode, name, kind) in [
+                (Opcode::ZIP1_asimdperm_only, "zip1", 0),
+                (Opcode::ZIP2_asimdperm_only, "zip2", 1),
+                (Opcode::UZP1_asimdperm_only, "uzp1", 2),
+                (Opcode::UZP2_asimdperm_only, "uzp2", 3),
+                (Opcode::TRN1_asimdperm_only, "trn1", 4),
+                (Opcode::TRN2_asimdperm_only, "trn2", 5),
             ] {
-                if lanes.iter().copied().enumerate().all(|(i,lane)| {
-                    let i=i as u8;
-                    let expected=match kind {
-                        0|1 => (kind as u8)*(n/2)+i/2+(i%2)*n,
-                        2|3 => (i/(n/2))*n+2*(i%(n/2))+(kind as u8-2),
-                        _ => (i/2)*2+(kind as u8-4)+(i%2)*n,
+                if lanes.iter().copied().enumerate().all(|(i, lane)| {
+                    let i = i as u8;
+                    let expected = match kind {
+                        0 | 1 => (kind as u8) * (n / 2) + i / 2 + (i % 2) * n,
+                        2 | 3 => (i / (n / 2)) * n + 2 * (i % (n / 2)) + (kind as u8 - 2),
+                        _ => (i / 2) * 2 + (kind as u8 - 4) + (i % 2) * n,
                     };
-                    lane==expected
+                    lane == expected
                 }) {
-                    let arr=arrangement(shape);
-                    self.native(opcode,[(FieldId::Q,u32::from(shape.bytes()==16)),
-                        (FieldId::size,shape.lane_type().bytes().unwrap().trailing_zeros()),
-                        (FieldId::Rd,d.into()),(FieldId::Rn,a.into()),(FieldId::Rm,b.into())],
-                        |out|write!(out,"{name}\tv{d}.{arr}, v{a}.{arr}, v{b}.{arr}"));
-                    self.def_done(result,d);
+                    let arr = arrangement(shape);
+                    self.native(
+                        opcode,
+                        [
+                            (FieldId::Q, u32::from(shape.bytes() == 16)),
+                            (
+                                FieldId::size,
+                                shape.lane_type().bytes().unwrap().trailing_zeros(),
+                            ),
+                            (FieldId::Rd, d.into()),
+                            (FieldId::Rn, a.into()),
+                            (FieldId::Rm, b.into()),
+                        ],
+                        |out| write!(out, "{name}\tv{d}.{arr}, v{a}.{arr}, v{b}.{arr}"),
+                    );
+                    self.def_done(result, d);
                     return;
                 }
             }
@@ -273,13 +301,16 @@ impl FunctionCompiler<'_> {
         self.native(
             Opcode::EXT_asimdext_only,
             [
-                (FieldId::Q, u32::from(shape.bytes()==16)),
+                (FieldId::Q, u32::from(shape.bytes() == 16)),
                 (FieldId::imm4, offset),
                 (FieldId::Rd, d.into()),
                 (FieldId::Rn, a.into()),
                 (FieldId::Rm, b.into()),
             ],
-            |out| {let arr=if shape.bytes()==16 {"16b"} else {"8b"};write!(out, "ext\tv{d}.{arr}, v{a}.{arr}, v{b}.{arr}, #{offset}")},
+            |out| {
+                let arr = if shape.bytes() == 16 { "16b" } else { "8b" };
+                write!(out, "ext\tv{d}.{arr}, v{a}.{arr}, v{b}.{arr}, #{offset}")
+            },
         );
         self.def_done(result, d);
     }
@@ -935,7 +966,9 @@ impl FunctionCompiler<'_> {
         self.def_done(result, d);
     }
     pub(super) fn vector_compare(&mut self, cond: IntCC, args: [Value; 2], result: Option<Value>) {
-        if self.vector_compare_zero(cond, args, result) { return; }
+        if self.vector_compare_zero(cond, args, result) {
+            return;
+        }
         let (op, name, swap) = match cond {
             IntCC::Eq | IntCC::Ne => (Opcode::CMEQ_asimdsame_only, "cmeq", false),
             IntCC::Sgt => (Opcode::CMGT_asimdsame_only, "cmgt", false),
@@ -1070,7 +1103,15 @@ impl FunctionCompiler<'_> {
         };
         self.mach(
             if store { "str" } else { "ldr" },
-            [if bytes == 16 { Reg::q(register) } else { Reg::d(register) }.into(), at.into()],
+            [
+                if bytes == 16 {
+                    Reg::q(register)
+                } else {
+                    Reg::d(register)
+                }
+                .into(),
+                at.into(),
+            ],
         );
     }
 }
@@ -1100,28 +1141,15 @@ fn preserves_fusion_boundaries(
 /// addition as this adjacent pair. Only a single doubling is covered: chained
 /// extensions and shared widened values keep their original materialization.
 pub(super) fn select_widening_adds(
-    func: &Function,
+    facts: &crate::kinds::FunctionFacts<'_>,
     selection: &mut crate::select::Selection,
 ) -> HashMap<Inst, WideningAdd> {
+    let func = facts.func;
     // Every pair is rooted at a low-lane widening.
-    if !func.layout_insts().any(|(_, i)| {
-        matches!(
-            func.inst_data(i),
-            InstData::Convert {
-                op: ConvertOp::SwidenLow | ConvertOp::UwidenLow,
-                ..
-            }
-        )
-    }) {
+    if !facts.kinds.widen_low {
         return HashMap::default();
     }
-    let mut uses = vec![0u8; func.num_values()];
-    for (_, inst) in func.layout_insts() {
-        func.inst_data(inst).for_each_operand(|v| {
-            let count = &mut uses[func.resolve(v).index()];
-            *count = count.saturating_add(1);
-        });
-    }
+    let uses = facts.raw_uses();
     let mut selected = HashMap::default();
     let mut previous = None;
     for (block, inst) in func.layout_insts() {
@@ -1179,23 +1207,15 @@ pub(super) fn select_widening_adds(
 /// ordinary load across its immediately following pure splat preserves the
 /// first fault and memory order. Shared scalar results remain materialized.
 pub(super) fn select_replicate_loads(
-    func: &Function,
+    facts: &crate::kinds::FunctionFacts<'_>,
     selection: &mut crate::select::Selection,
 ) -> HashMap<Inst, Value> {
+    let func = facts.func;
     // Every pair is rooted at a vector splat.
-    if !func
-        .layout_insts()
-        .any(|(_, i)| matches!(func.inst_data(i), InstData::VectorSplat { .. }))
-    {
+    if !facts.kinds.vector_splat {
         return HashMap::default();
     }
-    let mut uses = vec![0u8; func.num_values()];
-    for (_, inst) in func.layout_insts() {
-        func.inst_data(inst).for_each_operand(|v| {
-            let count = &mut uses[func.resolve(v).index()];
-            *count = count.saturating_add(1);
-        });
-    }
+    let uses = facts.raw_uses();
     let mut selected = HashMap::default();
     let mut previous = None;
     for (block, inst) in func.layout_insts() {

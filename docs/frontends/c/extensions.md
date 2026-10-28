@@ -815,6 +815,10 @@ for over-aligned locals. Uses exceeding one of these limits return a diagnostic;
 a representable type does not authorize a truncated ABI layout or allocation.
 Wasm32 retains its stricter object-size bounds.
 
+Bounded array initializers derive element positions as items are parsed. Empty
+and sparse initializers do not allocate a child table for the declared bound,
+including compound literals used only in unevaluated layout queries.
+
 `DataItem::Ptr` occupies the target pointer width at the current byte cursor.
 It adds no padding and needs no storage alignment beyond one byte. `DataInit.align`
 controls the containing object, not each relocation. Native assembly emits an

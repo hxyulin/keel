@@ -90,3 +90,32 @@ block4:
     v15 = iconst.i32 200
     return v15
 }
+
+; Invoke-only outgoing storage must reserve stack arguments, a private large
+; aggregate copy and the saved address of a register-returned aggregate.
+decl @c_invoke_storage(ptr sret {i64, i64}, i64, i64, i64, i64, i64, i64, i64, i64, ptr byval {i64, i64, i64}, i32, ptr)
+func @k_invoke_storage(ptr, ptr, i32) -> i64 personality @__gxx_personality_v0 {
+    ss0 = stack_slot 8, align 8
+block0(v0: ptr, v1: ptr, v2: i32):
+    v3 = stack_addr ss0
+    v4 = iconst.i64 1234
+    store v4, v3
+    v5 = iconst.i64 1
+    v6 = iconst.i64 2
+    v7 = iconst.i64 3
+    v8 = iconst.i64 4
+    v9 = iconst.i64 5
+    v10 = iconst.i64 6
+    v11 = iconst.i64 7
+    v12 = iconst.i64 8
+    invoke @c_invoke_storage(v0, v5, v6, v7, v8, v9, v10, v11, v12, v1, v2, v3), block1, block2
+block1:
+    v13 = load.i64 v3
+    return v13
+block2:
+    v14, v15 = landingpad catch null
+    v16 = call @__cxa_begin_catch(v14)
+    call @__cxa_end_catch()
+    v17 = load.i64 v3
+    return v17
+}

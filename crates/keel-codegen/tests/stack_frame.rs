@@ -230,3 +230,24 @@ block0({params}):
         assert!(!object.is_empty());
     }
 }
+
+#[test]
+fn invoke_without_plain_calls_reserves_aggregate_storage() {
+    let module = keel_ir::parse(
+        "decl @personality()
+ decl @callee(ptr sret {i64, i64}, ptr byval {i64, i64, i64})
+ func @invoke_only(ptr, ptr) personality @personality {
+ block0(v0: ptr, v1: ptr):
+     invoke @callee(v0, v1), block1, block2
+ block1:
+     return
+ block2:
+     v2, v3 = landingpad cleanup
+     trap
+ }",
+    )
+    .unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let asm = keel_codegen::compile(&module, Target::Aarch64AppleDarwin).unwrap();
+    assert!(!keel_asm::assemble_object(&asm).unwrap().is_empty());
+}

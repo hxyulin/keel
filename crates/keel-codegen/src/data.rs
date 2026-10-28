@@ -51,7 +51,7 @@ pub(crate) fn emit_macho(
             if init.is_zero() {
                 out.directive(Directive::Space(init.size()));
             } else {
-                emit_macho_items(out, init);
+                emit_items(out, init, Format::MachO);
             }
         } else if init.is_zero() {
             out.directive(Directive::ZeroFill {
@@ -64,7 +64,7 @@ pub(crate) fn emit_macho(
             out.section("__DATA", "__thread_data", SectionKind::ThreadData);
             out.align(alignment);
             out.label(initial.clone());
-            emit_macho_items(out, init);
+            emit_items(out, init, Format::MachO);
         }
         out.section("__DATA", "__thread_vars", SectionKind::ThreadVariables);
         if !data.local {
@@ -111,9 +111,9 @@ pub(crate) fn emit_macho(
     out.section(segment, section, SectionKind::Data);
     out.align(alignment);
     out.label(name);
-    emit_macho_items(out, init);
+    emit_items(out, init, Format::MachO);
 }
-fn emit_macho_items(out: &mut impl Sink, init: &DataInit) {
+fn emit_items(out: &mut impl Sink, init: &DataInit, format: Format) {
     for item in &init.items {
         match item {
             DataItem::Bytes(bytes) => out.bytes(bytes),
@@ -122,17 +122,20 @@ fn emit_macho_items(out: &mut impl Sink, init: &DataInit) {
                 let bits = 8 * width;
                 out.number(width as u8, (*value as u64) & (u64::MAX >> (64 - bits)));
             }
-            DataItem::Zero(0) => {}
+            DataItem::Zero(0) if format == Format::MachO => {}
             DataItem::Zero(n) => out.directive(Directive::Space(u64::from(*n))),
             DataItem::Ptr { symbol, addend } => out.integer(
                 8,
-                Expression::symbol(Format::MachO.symbol(symbol)).with_addend(i128::from(*addend)),
+                Expression::symbol(format.symbol(symbol)).with_addend(i128::from(*addend)),
             ),
-            DataItem::RttiName { symbol } => out.integer(
-                8,
-                // Signed spelling encodes exactly the same modulo-2^64 addition.
-                Expression::symbol(Format::MachO.symbol(symbol)).with_addend(i128::from(i64::MIN)),
-            ),
+            DataItem::RttiName { symbol } => match format {
+                Format::MachO => out.integer(
+                    8,
+                    // Signed spelling encodes exactly the same modulo-2^64 addition.
+                    Expression::symbol(format.symbol(symbol)).with_addend(i128::from(i64::MIN)),
+                ),
+                Format::Elf => unreachable!("RTTI tagging is rejected for ELF"),
+            },
         }
     }
 }
@@ -223,25 +226,49 @@ pub(crate) fn emit_elf(out: &mut impl Sink, data: &DataObject, init: &DataInit) 
     if nobits {
         out.directive(Directive::Space(init.size()));
     } else {
-        emit_elf_items(out, init);
+        emit_items(out, init, Format::Elf);
     }
 }
 
-fn emit_elf_items(out: &mut impl Sink, init: &DataInit) {
-    for item in &init.items {
-        match item {
-            DataItem::Bytes(b) => out.bytes(b),
-            DataItem::Int { ty, value } => {
-                let width = ty.bytes().unwrap_or(8);
-                let bits = 8 * width;
-                out.number(width as u8, (*value as u64) & (u64::MAX >> (64 - bits)));
-            }
-            DataItem::Zero(n) => out.directive(Directive::Space(u64::from(*n))),
-            DataItem::Ptr { symbol, addend } => out.integer(
-                8,
-                Expression::symbol(symbol).with_addend(i128::from(*addend)),
-            ),
-            DataItem::RttiName { .. } => unreachable!("RTTI tagging is rejected for ELF"),
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use keel_ir::Type;
+
+    #[test]
+    fn item_directives_preserve_format_specific_zero_and_symbol_spelling() {
+        let init = DataInit {
+            constant: true,
+            align: 1,
+            items: vec![
+                DataItem::Bytes(vec![0, 255]),
+                DataItem::Int {
+                    ty: Type::I8,
+                    value: -1,
+                },
+                DataItem::Int {
+                    ty: Type::I16,
+                    value: -2,
+                },
+                DataItem::Zero(0),
+                DataItem::Zero(3),
+                DataItem::Ptr {
+                    symbol: "value".into(),
+                    addend: 7,
+                },
+            ],
+        };
+        let mut macho = String::new();
+        emit_items(&mut macho, &init, Format::MachO);
+        assert_eq!(
+            macho,
+            "\t.byte\t0, 255\n\t.byte\t255\n\t.short\t65534\n\t.space\t3\n\t.quad\t_value+7\n"
+        );
+        let mut elf = String::new();
+        emit_items(&mut elf, &init, Format::Elf);
+        assert_eq!(
+            elf,
+            "\t.byte\t0, 255\n\t.byte\t255\n\t.short\t65534\n\t.space\t0\n\t.space\t3\n\t.quad\tvalue+7\n"
+        );
     }
 }

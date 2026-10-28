@@ -134,3 +134,29 @@ fn values_matrix_and_export() {
         }
     }
 }
+
+#[test]
+fn removed_f80_values_do_not_restrict_aarch64() {
+    let mut module = keel_ir::parse(
+        "func @scalar() -> i32 {\nentry:\n v0 = fconst.f80 0x3fff, 0x8000000000000001\n v1 = iconst.i32 7\n return v1\n}",
+    ).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    assert!(keel_codegen::aarch64::compile(&module).is_err());
+    let allocated = module.functions[0].num_values();
+    keel_opt::run_passes(&mut module, &["dce"]).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    assert_eq!(module.functions[0].num_values(), allocated);
+    keel_codegen::aarch64::compile(&module).unwrap();
+
+    for source in [
+        "func @parameter(f80) {\nentry(v0:f80):\n return\n}",
+        "func @store(ptr) {\nentry(v0:ptr):\n v1 = fconst.f80 0x3fff, 0x8000000000000001\n store v1,v0\n return\n}",
+        "decl @sink(...)\nfunc @send(ptr) {\nentry(v0:ptr):\n call @sink(v0 : ptr byval {f80})\n return\n}",
+    ] {
+        let mut module = keel_ir::parse(source).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        keel_opt::run_passes(&mut module, &["dce"]).unwrap();
+        let error = keel_codegen::aarch64::compile(&module).unwrap_err();
+        assert!(error.message.contains("unsupported"), "{source}: {error}");
+    }
+}
