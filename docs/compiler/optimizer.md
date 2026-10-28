@@ -28,7 +28,10 @@ function's CFG stamp is unchanged. A changed stamp can still reuse an entry afte
 checking block count, layout and ordered unique successors. Function stamps are
 globally fresh, so replacing a function at the same address cannot match an old
 stamp unless it is an unchanged clone with the same CFG. Pipelines clear the
-cache on exit.
+cache on exit. Successor matching uses bounded linear scans for small branches
+and a per-destination marker table for wide branches. The marker table is local
+to one check and allocated only when needed; duplicate edges preserve their
+first-occurrence order without repeated searches through a growing prefix.
 
 Debug builds check the cached CFG inputs on every hit. The optional
 `keel-opt/audit-analysis` feature also recomputes CFG, dominators and initialized

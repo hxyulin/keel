@@ -43,6 +43,10 @@ impl Analysis {
             return false;
         }
         let mut layout = self.layout.iter();
+        // Linear scans stay bounded for ordinary branches. Only wide switches
+        // need a per-destination marker table, shared across this check's blocks.
+        const SMALL_SUCCESSOR_LIMIT: usize = 8;
+        let mut visited = Vec::new();
         for block in func.blocks() {
             if layout.next() != Some(&block) {
                 return false;
@@ -53,9 +57,21 @@ impl Analysis {
                 None => &[],
             };
             // `succs` lists each destination block once, in branch order.
+            let wide = succs.len() > SMALL_SUCCESSOR_LIMIT;
+            if wide && visited.is_empty() {
+                visited.resize(self.num_blocks, None);
+            }
             let mut seen = 0;
             for dest in dests {
-                if succs[..seen].contains(&dest.block) {
+                let duplicate = if wide {
+                    let Some(marker) = visited.get_mut(dest.block.index()) else {
+                        return false;
+                    };
+                    std::mem::replace(marker, Some(block)) == Some(block)
+                } else {
+                    succs[..seen].contains(&dest.block)
+                };
+                if duplicate {
                     continue;
                 }
                 if succs.get(seen) != Some(&dest.block) {
@@ -166,6 +182,73 @@ mod tests {
         assert_eq!(after.cfg.preds(exit), &[entry]);
         clear();
     }
+    fn switch_function(width: usize) -> Function {
+        let cases = (0..width * 2)
+            .map(|i| format!("{i}: case{}", 1 + i % width))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut source = format!(
+            "func @switches(i64) {{\nentry(v0:i64):\n brif v0,left,right\nleft:\n switch v0,case1,[{cases}]\nright:\n switch v0,case{width},[{cases}]\n"
+        );
+        for i in 1..=width {
+            source.push_str(&format!("case{i}:\n return\n"));
+        }
+        source.push_str("}\n");
+        let mut module = keel_ir::parse(&source).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        module.functions.remove(0)
+    }
+
+    #[test]
+    fn duplicate_switch_targets_preserve_order_and_cache_validity() {
+        for width in [2, 8, 9, 256] {
+            clear();
+            let mut function = switch_function(width);
+            let left = function.blocks().nth(1).unwrap();
+            let term = *function.block_insts(left).last().unwrap();
+            let before = get(&function);
+            assert!(before.matches(&function));
+            assert!(before.same_as_fresh(&function));
+
+            // Changing a duplicate occurrence leaves the ordered CFG intact.
+            let dests = function.inst_data_mut(term).branch_dests_mut();
+            dests[width + 1].block = dests[width].block;
+            keel_ir::verify(&function).unwrap();
+            assert!(before.matches(&function));
+            assert!(Rc::ptr_eq(&before, &get(&function)));
+            assert!(before.same_as_fresh(&function));
+
+            // The destination set is unchanged, but first-occurrence order moves.
+            function.inst_data_mut(term).branch_dests_mut().swap(0, 2);
+            assert!(!before.matches(&function));
+            let reordered = get(&function);
+            assert!(!Rc::ptr_eq(&before, &reordered));
+            assert!(reordered.same_as_fresh(&function));
+
+            // Removing the final unique destination must also invalidate reuse.
+            let dests = function.inst_data_mut(term).branch_dests_mut();
+            let removed = *reordered.cfg.succs(left).last().unwrap();
+            let replacement = reordered.cfg.succs(left)[0];
+            for dest in dests {
+                if dest.block == removed {
+                    dest.block = replacement;
+                }
+            }
+            assert!(!reordered.matches(&function));
+            let reduced = get(&function);
+            assert!(!Rc::ptr_eq(&reordered, &reduced));
+            assert!(reduced.same_as_fresh(&function));
+
+            // Reintroducing a target must reject the smaller cached successor set.
+            function.inst_data_mut(term).branch_dests_mut()[width + 1].block = removed;
+            assert!(!reduced.matches(&function));
+            let expanded = get(&function);
+            assert!(!Rc::ptr_eq(&reduced, &expanded));
+            assert!(expanded.same_as_fresh(&function));
+            clear();
+        }
+    }
+
     fn loop_function() -> Function {
         keel_ir::parse("func @loop(i32, i32) {\nentry(v0:i32,v1:i32):\n jump body(v0)\nbody(v2:i32):\n brif v0,body(v2),exit\nexit:\n return\n}")
             .unwrap().functions.remove(0)
