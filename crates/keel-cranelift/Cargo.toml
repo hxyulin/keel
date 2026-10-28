@@ -18,7 +18,10 @@ cranelift-codegen = { version = "=0.136.3", default-features = false, features =
 cranelift-frontend = { version = "=0.136.3", default-features = false, features = ["std"] }
 cranelift-module = { version = "=0.136.3", default-features = false, features = ["std"] }
 cranelift-object = { version = "=0.136.3", default-features = false }
+cranelift-reader = "=0.136.3"
 target-lexicon = "0.13"
+keel-llvm = { path = "../keel-llvm" }
+serde_json = "1"
 
 # The comparison harness links the native backend from the same source tree.
 keel-codegen = { path = "../keel-codegen" }

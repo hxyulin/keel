@@ -21,6 +21,8 @@ use keel_ir::{self as k, EntityRef};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+pub mod import;
+
 pub type Result<T> = std::result::Result<T, String>;
 
 /// The only validated target: Apple arm64, Mach-O, Apple's AAPCS64 variant.
@@ -332,8 +334,18 @@ fn check_module(module: &k::Module) -> Result<()> {
     if !module.assembly.is_empty() {
         return Err("module assembly is unsupported by the Cranelift bridge".into());
     }
-    if module.functions.iter().any(|f| f.layout_insts().any(|(_, i)| matches!(f.inst_data(i), k::InstData::AggregateVaArg { .. }) || f.inst_data(i).call_args().is_some_and(|a| a.has_explicit_abi()))) {
-        return Err("explicit call operand ABI and aggregate va_arg homes are unsupported by Cranelift".into());
+    if module.functions.iter().any(|f| {
+        f.layout_insts().any(|(_, i)| {
+            matches!(f.inst_data(i), k::InstData::AggregateVaArg { .. })
+                || f.inst_data(i)
+                    .call_args()
+                    .is_some_and(|a| a.has_explicit_abi())
+        })
+    }) {
+        return Err(
+            "explicit call operand ABI and aggregate va_arg homes are unsupported by Cranelift"
+                .into(),
+        );
     }
 
     if module.decls.iter().any(|d| d.sig.x86_vector_abi.is_some())
@@ -341,7 +353,15 @@ fn check_module(module: &k::Module) -> Result<()> {
             f.sig.x86_vector_abi.is_some()
                 || f.callees().any(|(_, d)| d.sig.x86_vector_abi.is_some())
                 || f.signatures().any(|(_, s)| s.x86_vector_abi.is_some())
-                || f.layout_insts().any(|(_,i)| matches!(f.inst_data(i), k::InstData::VaArg { x86_vector_abi: Some(_), .. }))
+                || f.layout_insts().any(|(_, i)| {
+                    matches!(
+                        f.inst_data(i),
+                        k::InstData::VaArg {
+                            x86_vector_abi: Some(_),
+                            ..
+                        }
+                    )
+                })
         })
     {
         return Err("explicit x86 vector ABI is unsupported by Cranelift".into());
@@ -368,9 +388,13 @@ fn check_module(module: &k::Module) -> Result<()> {
         return Err("Cranelift export does not support lifecycle registration".into());
     }
     if module.decls.iter().any(|d| d.attrs.weak)
-        || module.functions.iter().any(|f| f.attrs.weak || f.weak_odr || f.hidden)
+        || module
+            .functions
+            .iter()
+            .any(|f| f.attrs.weak || f.weak_odr || f.hidden)
         || module.data.iter().any(|d| {
-            d.weak || d.weak_odr
+            d.weak
+                || d.weak_odr
                 || d.hidden
                 || d.init.as_ref().is_some_and(|i| {
                     i.items
@@ -1167,7 +1191,26 @@ impl<'a, 'b> FnTranslator<'a, 'b> {
                 self.def(inst, 0, v);
             }
             I::Neon { op, .. } => return unsupported(format!("ARM intrinsic {op}")),
-            I::VectorReduce { op, .. } => return unsupported(format!("vector reduction {op}")),
+            I::VectorReduce { op, arg } => {
+                let x = self.v(*arg)?;
+                let lanes = self.b.func.dfg.value_type(x).lane_count();
+                let mut result = self.b.ins().extractlane(x, 0);
+                for lane in 1..lanes as u8 {
+                    let next = self.b.ins().extractlane(x, lane);
+                    let ins = self.b.ins();
+                    result = match op {
+                        k::VectorReduceOp::Add => ins.iadd(result, next),
+                        k::VectorReduceOp::And => ins.band(result, next),
+                        k::VectorReduceOp::Or => ins.bor(result, next),
+                        k::VectorReduceOp::Xor => ins.bxor(result, next),
+                        k::VectorReduceOp::Smin => ins.smin(result, next),
+                        k::VectorReduceOp::Smax => ins.smax(result, next),
+                        k::VectorReduceOp::Umin => ins.umin(result, next),
+                        k::VectorReduceOp::Umax => ins.umax(result, next),
+                    };
+                }
+                self.def(inst, 0, result);
+            }
             I::VectorUnary { op, arg } => {
                 let x = self.v(*arg)?;
                 let ins = self.b.ins();
@@ -1280,7 +1323,9 @@ impl<'a, 'b> FnTranslator<'a, 'b> {
             | I::AtomicRmw { .. }
             | I::AtomicCas { .. }
             | I::Fence { .. } => return unsupported("atomics and fences"),
-            I::VaArg { .. } | I::AggregateVaArg { .. } => return unsupported("va_arg, including aggregate homes"),
+            I::VaArg { .. } | I::AggregateVaArg { .. } => {
+                return unsupported("va_arg, including aggregate homes");
+            }
             I::InlineAsm { .. } => return unsupported("inline assembly"),
             I::X86RflagsRegion { .. } => return unsupported("x86 FLAGS owned region"),
             I::ReturnCall { .. } | I::ReturnCallIndirect { .. } => {

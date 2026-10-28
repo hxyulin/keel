@@ -137,6 +137,8 @@ Sources: Keel's `docs/design.md`, `docs/simd-ir.md` and
   - `vshuffle` becomes a byte shuffle on `i8x16`.
   - `vselect` first normalizes any nonzero mask lane to all ones, then uses
     `bitselect`.
+  - Integer vector reductions (add, and/or/xor, signed/unsigned min/max)
+    extract lanes and fold at the lane width.
   - Keel's per-lane shift amounts have no CLIF equivalent. Vector shifts
     are split into lanes; this is correct but slow.
 - `trap` becomes CLIF `trap` (`udf`, SIGILL), while the native backend uses
@@ -234,3 +236,11 @@ comparable:
 modulo 2^64 for the driver's full-range signed inputs; the input sign still chooses
 the accumulator. Earlier signed accumulators overflowed on those inputs. Rebuild
 both compilers' objects when comparing results across this source change.
+
+## Three-input conversion harness
+
+The Rust `keel-ir-harness` accepts Keel, LLVM and CLIF input and exercises
+round trips with execution checks. `keel-clif-import` adds a verified scalar
+CLIF importer and an independent CLIF execution oracle. See
+[the harness contract and commands](tools/ir-harness.md) for the initial subset,
+evidence format and remaining feature-loss work.
