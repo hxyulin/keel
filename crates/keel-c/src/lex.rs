@@ -70,9 +70,12 @@ const PUNCTS: [&str; 48] = [
 // token never walks unrelated spellings or calls a general string comparator.
 #[inline(always)]
 fn punctuation(bytes: &[u8]) -> Option<&'static str> {
-    let a = *bytes.first()?;
-    let b = bytes.get(1).copied().unwrap_or(0);
-    let c = bytes.get(2).copied().unwrap_or(0);
+    let (a, b, c) = match bytes {
+        [a, b, c, ..] => (*a, *b, *c),
+        [a, b] => (*a, *b, 0),
+        [a] => (*a, 0, 0),
+        [] => return None,
+    };
     Some(match a {
         b'.' if b == b'.' && c == b'.' => "...",
         b'<' if b == b'<' => {
@@ -159,6 +162,7 @@ enum Start {
     /// The end of the input.
     Nul,
     Other,
+    Single,
 }
 
 const START: [Start; 256] = {
@@ -177,6 +181,7 @@ const START: [Start; 256] = {
                 b'.' => Start::Dot,
                 b'"' | b'\'' => Start::Quote,
                 0 => Start::Nul,
+                _ if !SINGLE[i].is_empty() => Start::Single,
                 _ => Start::Other,
             }
         };
@@ -185,6 +190,21 @@ const START: [Start; 256] = {
     table
 };
 
+const SINGLE: [&str; 256] = {
+    let mut t = [""; 256];
+    t[b'[' as usize] = "[";
+    t[b']' as usize] = "]";
+    t[b'(' as usize] = "(";
+    t[b')' as usize] = ")";
+    t[b'{' as usize] = "{";
+    t[b'}' as usize] = "}";
+    t[b'~' as usize] = "~";
+    t[b'?' as usize] = "?";
+    t[b':' as usize] = ":";
+    t[b';' as usize] = ";";
+    t[b',' as usize] = ",";
+    t
+};
 /// Bytes that may start whitespace, a comment or a directive.
 const SPACE: [bool; 256] = {
     let mut table = [false; 256];
@@ -267,14 +287,7 @@ impl<'a> Lexer<'a> {
 
     /// The next token. After `Eof`, `Eof` again.
     pub fn token(&mut self, text: &mut Strings<'a>) -> Result<Token<'a>, Error> {
-        loop {
-            let tok = self.next(text)?;
-            // GNU's `__extension__` only silences pedantic warnings, and may
-            // come before a declaration or any expression.
-            if !matches!(&tok.tok, Tok::Ident(s) if *s == "__extension__") {
-                return Ok(tok);
-            }
-        }
+        self.next(text)
     }
 
     /// Appends at least `n` more tokens to `out`, or fewer ending with
@@ -290,9 +303,6 @@ impl<'a> Lexer<'a> {
         let mut left = n;
         while left > 0 {
             let tok = self.next(text)?;
-            if matches!(&tok.tok, Tok::Ident(s) if *s == "__extension__") {
-                continue;
-            }
             out.push(tok);
             if tok.tok == Tok::Eof {
                 return Ok(true);
@@ -327,7 +337,7 @@ impl<'a> Lexer<'a> {
     /// Skips whitespace, comments (in case the preprocessor kept them) and
     /// `#` lines, applying line markers.
     #[inline]
-    fn skip_space(&mut self, text: &mut Strings<'a>) -> Result<(), Error> {
+    fn skip_space(&mut self, text: &mut Strings<'a>) -> Result<u8, Error> {
         // Most tokens follow the last directly, after one blank, or at the
         // start of the next line after its indentation.
         let mut pos = self.pos;
@@ -343,10 +353,12 @@ impl<'a> Lexer<'a> {
             }
         }
         self.pos = pos;
-        if !self.src.get(pos).is_some_and(|&c| SPACE[c as usize]) {
-            return Ok(());
+        let c = self.src.get(pos).copied().unwrap_or(0);
+        if !SPACE[c as usize] {
+            return Ok(c);
         }
-        self.skip_space_slow(text)
+        self.skip_space_slow(text)?;
+        Ok(self.peek(0))
     }
 
     #[inline(never)]
@@ -461,43 +473,53 @@ impl<'a> Lexer<'a> {
 
     #[inline(always)]
     fn next(&mut self, text: &mut Strings<'a>) -> Result<Token<'a>, Error> {
-        self.skip_space(text)?;
-        let loc = self.loc();
-        let c = self.peek(0);
-        let tok = match START[c as usize] {
-            Start::Prefix if matches!(self.peek(1), b'"' | b'\'') => {
-                // `u` and `U` literals are treated like `L` (32-bit units).
-                self.pos += 1;
-                self.quoted(true, text)?
-            }
-            Start::Prefix if c == b'u' && self.peek(1) == b'8' && self.peek(2) == b'"' => {
-                self.pos += 2;
-                self.quoted(false, text)?
-            }
-            Start::Ident | Start::Prefix => {
-                let start = self.pos;
-                let rest = &self.src[start..];
-                self.pos += rest
-                    .iter()
-                    .position(|&c| !IDENT[c as usize])
-                    .unwrap_or(rest.len());
-                Tok::Ident(text.intern_utf8(&self.src[start..self.pos]))
-            }
-            Start::Digit => self.number(text)?,
-            Start::Dot if self.peek(1).is_ascii_digit() => self.number(text)?,
-            Start::Quote => self.quoted(false, text)?,
-            Start::Nul => Tok::Eof,
-            Start::Dot | Start::Other => {
-                let rest = &self.src[self.pos..];
-                let Some(p) = punctuation(rest) else {
-                    return Err(self.error(format!("unexpected character `{}`", c as char)));
-                };
-                self.pos += p.len();
-                Tok::Punct(p)
-            }
-        };
-        let pack = self.pack_limits.len() as u32 - 1;
-        Ok(Token { tok, loc, pack })
+        loop {
+            let c = self.skip_space(text)?;
+            let loc = self.loc();
+            let tok = match START[c as usize] {
+                Start::Prefix if matches!(self.peek(1), b'"' | b'\'') => {
+                    // `u` and `U` literals are treated like `L` (32-bit units).
+                    self.pos += 1;
+                    self.quoted(true, text)?
+                }
+                Start::Prefix if c == b'u' && self.peek(1) == b'8' && self.peek(2) == b'"' => {
+                    self.pos += 2;
+                    self.quoted(false, text)?
+                }
+                Start::Ident | Start::Prefix => {
+                    let start = self.pos;
+                    let rest = &self.src[start..];
+                    self.pos += rest
+                        .iter()
+                        .position(|&c| !IDENT[c as usize])
+                        .unwrap_or(rest.len());
+                    let spelling = &self.source[start..self.pos];
+                    // GNU extension markers have no semantics; skip them before interning.
+                    if spelling == "__extension__" {
+                        continue;
+                    }
+                    Tok::Ident(text.intern_source(spelling))
+                }
+                Start::Digit => self.number(text)?,
+                Start::Dot if self.peek(1).is_ascii_digit() => self.number(text)?,
+                Start::Quote => self.quoted(false, text)?,
+                Start::Nul => Tok::Eof,
+                Start::Single => {
+                    self.pos += 1;
+                    Tok::Punct(SINGLE[c as usize])
+                }
+                Start::Dot | Start::Other => {
+                    let rest = &self.src[self.pos..];
+                    let Some(p) = punctuation(rest) else {
+                        return Err(self.error(format!("unexpected character `{}`", c as char)));
+                    };
+                    self.pos += p.len();
+                    Tok::Punct(p)
+                }
+            };
+            let pack = self.pack_limits.len() as u32 - 1;
+            return Ok(Token { tok, loc, pack });
+        }
     }
 
     /// A preprocessing number, then its value.
@@ -537,6 +559,21 @@ impl<'a> Lexer<'a> {
         let quote = self.peek(0);
         self.pos += 1;
         let string = quote == b'"';
+        if string && !wide {
+            let rest = &self.src[self.pos..];
+            let n = memchr::memchr3(b'"', b'\\', b'\n', rest).unwrap_or(rest.len());
+            if rest.get(n) == Some(&b'"') {
+                if let Some(at) = memchr::memchr(0, &rest[..n]) {
+                    self.pos += at;
+                    return Err(self.error("unterminated literal"));
+                }
+                self.pos += n + 1;
+                return Ok(Tok::Str {
+                    bytes: text.bytes_source(&rest[..n]),
+                    wide: false,
+                });
+            }
+        }
         let mut bytes = std::mem::take(&mut self.scratch);
         bytes.clear();
         let (mut count, mut first, mut packed) = (0usize, 0u32, 0u32);
@@ -945,6 +982,72 @@ mod tests {
         for (spelling, token) in text.split(' ').zip(&tokens) {
             let expected = parse_number(spelling).unwrap_or(Tok::BadNumber(spelling));
             assert_eq!(token.tok, expected, "{spelling}");
+        }
+    }
+
+    #[test]
+    fn extension_markers_preserve_batch_counts_locations_and_partial_errors() {
+        let source = "# 40 \"markers.c\"\n__extension__ int __extension__ x; __extension__suffix \"__extension__\" __extension__";
+        for size in [1, 2, 7, 256] {
+            let arena = bumpalo::Bump::new();
+            let mut strings = Strings::new(&arena);
+            let mut lexer = Lexer::new(source, "test.i", &mut strings);
+            let mut tokens = Vec::new();
+            assert!(!lexer.tokens(&mut strings, &mut tokens, 0).unwrap());
+            assert!(tokens.is_empty());
+            while !lexer.tokens(&mut strings, &mut tokens, size).unwrap() {}
+            let kinds: Vec<_> = tokens.iter().map(|t| t.tok).collect();
+            assert_eq!(
+                kinds,
+                [
+                    Tok::Ident("int"),
+                    Tok::Ident("x"),
+                    Tok::Punct(";"),
+                    Tok::Ident("__extension__suffix"),
+                    Tok::Str {
+                        bytes: b"__extension__",
+                        wide: false
+                    },
+                    Tok::Eof,
+                ]
+            );
+            assert_eq!(
+                tokens[0].loc,
+                Loc {
+                    file: 1,
+                    line: 40,
+                    col: 15
+                }
+            );
+            assert_eq!(lexer.files, ["test.i", "markers.c"]);
+        }
+        let arena = bumpalo::Bump::new();
+        let mut strings = Strings::new(&arena);
+        let mut lexer = Lexer::new("__extension__ x @", "bad.i", &mut strings);
+        let mut tokens = Vec::new();
+        let error = lexer.tokens(&mut strings, &mut tokens, 256).unwrap_err();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].tok, Tok::Ident("x"));
+        assert_eq!(error.loc.col, 17);
+    }
+
+    #[test]
+    fn raw_and_escaped_literal_spellings_share_bytes_in_either_order() {
+        for source in [r#""ab" "a\x62" "ab""#, r#""a\x62" "ab" "a\x62""#] {
+            let arena = bumpalo::Bump::new();
+            let mut strings = Strings::new(&arena);
+            let mut files = Vec::new();
+            let tokens = tokenize(source, "strings.i", &mut files, &mut strings).unwrap();
+            let bytes: Vec<_> = tokens
+                .iter()
+                .filter_map(|t| match t.tok {
+                    Tok::Str { bytes, wide: false } => Some(bytes),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(bytes.len(), 3);
+            assert_eq!(bytes[0], b"ab");
+            assert!(bytes.iter().all(|b| std::ptr::eq(*b, bytes[0])));
         }
     }
 

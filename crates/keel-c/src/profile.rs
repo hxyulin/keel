@@ -1,6 +1,7 @@
 //! Optional stage measurements. Input reading and IR destruction are separate
 //! from `compile`'s boundary. Parsing includes lexing, name resolution and
-//! type checking; `lex_ms` times a separate lexing pass.
+//! type checking; `lex_ms` times a separate streaming lexing pass, using
+//! the parser's 256-token batch size. It excludes lexer destruction.
 use crate::{Diagnostic, Options, irgen, lex, parse};
 use std::time::Instant;
 
@@ -34,17 +35,24 @@ pub fn compile(
     // with its own strings.
     let start = Instant::now();
     let lex_arena = bumpalo::Bump::new();
-    let mut files = Vec::new();
-    let toks = lex::tokenize(
-        src,
-        path,
-        &mut files,
-        &mut crate::strings::Strings::new(&lex_arena),
-    )
-    .map_err(|e| diagnostic(&files, e))?;
-    let tokens = toks.len();
+    let mut lex_text = crate::strings::Strings::new(&lex_arena);
+    let mut lexer = lex::Lexer::new(src, path, &mut lex_text);
+    let mut chunk = Vec::new();
+    let mut tokens = 0;
+    loop {
+        chunk.clear();
+        let end = lexer
+            .tokens(&mut lex_text, &mut chunk, 256)
+            .map_err(|e| diagnostic(&lexer.files, e))?;
+        tokens += chunk.len();
+        if end {
+            break;
+        }
+    }
     let lex_ms = start.elapsed().as_secs_f64() * 1000.;
-    drop(toks);
+    drop(chunk);
+    drop(lexer);
+    drop(lex_text);
     drop(lex_arena);
     let start = Instant::now();
     let mut parser = parse::Parser::new(src, path, opts.target, text);
