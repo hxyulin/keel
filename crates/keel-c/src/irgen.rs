@@ -56,8 +56,14 @@ struct CAbiMapping {
     result: ResultMapping,
 }
 
+struct FunctionContext<'p> {
+    global_alignments: Option<HashMap<&'p str, u32>>,
+    volatile_members: Vec<std::cell::Cell<Option<bool>>>,
+    ssa: FunctionBuilderContext,
+}
+
 pub struct Gen<'p> {
-    p: &'p Parser<'p>,
+    p: crate::unit::Unit<'p>,
     /// The parser's function definitions, each dropped once emitted.
     funcs: Vec<Option<FuncDef<'p>>>,
     files: &'p [&'p str],
@@ -74,17 +80,10 @@ pub struct Gen<'p> {
     /// Data made up for local initializers: bytes to symbol.
     anon: HashMap<Vec<u8>, String>,
     dtypes: DebugTypes,
-    /// Borrow immutable declaration spellings. Build once, on the first
-    /// alignment query; aliases retain the first declaration's alignment.
-    global_alignments: Option<HashMap<&'p str, u32>>,
-    /// Non-declaration objects emitted while functions are built. The
-    /// first module object wins, matching Module::data_object.
+    /// Alignment facts for objects emitted into this module.
     generated_alignments: HashMap<String, u32>,
-    /// Whether each struct has a volatile member at any depth, once asked.
-    /// Struct definitions no longer change after parsing.
-    volatile_members: Vec<std::cell::Cell<Option<bool>>>,
-    /// The SSA builder's tables, handed from one function to the next.
-    ssa: FunctionBuilderContext,
+    /// Worker-owned caches and reusable SSA tables; never shared between jobs.
+    context: FunctionContext<'p>,
 }
 
 impl<'p> Gen<'p> {
@@ -95,7 +94,7 @@ impl<'p> Gen<'p> {
         debug: bool,
     ) -> Self {
         Self {
-            p,
+            p: crate::unit::Unit::new(p),
             funcs: funcs.into_iter().map(Some).collect(),
             files,
             module: Module::default(),
@@ -107,28 +106,30 @@ impl<'p> Gen<'p> {
             unprototyped: HashMap::default(),
             anon: HashMap::default(),
             dtypes: DebugTypes::default(),
-            global_alignments: None,
             generated_alignments: HashMap::default(),
-            volatile_members: vec![std::cell::Cell::new(None); p.structs.len()],
-            ssa: FunctionBuilderContext::new(),
+            context: FunctionContext {
+                global_alignments: None,
+                volatile_members: vec![std::cell::Cell::new(None); p.structs.len()],
+                ssa: FunctionBuilderContext::new(),
+            },
         }
     }
 
     /// Whether an object of type `ty` is or contains anything volatile.
     /// Pointer pointee qualifiers do not qualify the pointer object itself.
     fn object_volatile(&self, ty: &Ty, sugar: &Sugar) -> bool {
-        sugar.is_volatile(&self.p.typedefs)
+        sugar.is_volatile(self.p.typedefs)
             || match ty {
-                Ty::Array(a) => self.object_volatile(&a.elem, &sugar.pointee(&self.p.typedefs)),
+                Ty::Array(a) => self.object_volatile(&a.elem, &sugar.pointee(self.p.typedefs)),
                 Ty::Struct(id) => {
-                    if let Some(volatile) = self.volatile_members[*id].get() {
+                    if let Some(volatile) = self.context.volatile_members[*id].get() {
                         return volatile;
                     }
                     let volatile = self.p.structs[*id]
                         .members
                         .iter()
                         .any(|m| self.object_volatile(&m.ty, &m.sugar));
-                    self.volatile_members[*id].set(Some(volatile));
+                    self.context.volatile_members[*id].set(Some(volatile));
                     volatile
                 }
                 _ => false,
@@ -136,7 +137,7 @@ impl<'p> Gen<'p> {
     }
 
     pub fn run(mut self) -> R<Module> {
-        self.module.assembly = self.p.assembly.clone();
+        self.module.assembly = self.p.assembly.to_vec();
         if self.p.c_layout != CDataLayout::NATIVE_LP64 {
             self.check_private_scalar_profile()?;
         }
@@ -186,7 +187,7 @@ impl<'p> Gen<'p> {
                 }
             }
         }
-        for global in &self.p.globals {
+        for global in self.p.globals {
             if global.defined && !global.compound_literal && !matches!(global.ty, Ty::Func(_)) {
                 self.check_value_type(&global.ty, Loc::default())?;
                 if let Some(init) = &global.init {
@@ -526,10 +527,10 @@ impl<'p> Gen<'p> {
     }
 
     fn symbol_alignment(&mut self, name: &str) -> u32 {
-        let globals = self.global_alignments.get_or_insert_with(|| {
+        let globals = self.context.global_alignments.get_or_insert_with(|| {
             let mut alignments =
                 HashMap::with_capacity_and_hasher(self.p.globals.len(), Default::default());
-            for global in &self.p.globals {
+            for global in self.p.globals {
                 alignments
                     .entry(global.symbol)
                     .or_insert(global.align as u32);
@@ -627,7 +628,7 @@ impl<'p> Gen<'p> {
     }
 
     fn debug_type(&mut self, ty: &Ty, sugar: &Sugar) -> Option<DebugType> {
-        self.dtypes.get(&mut self.module, self.p, ty, sugar)
+        self.dtypes.get(&mut self.module, &self.p, ty, sugar)
     }
 
     fn check_value_expr(&self, e: &Expr<'_>, use_: ExprUse) -> R<()> {
@@ -918,7 +919,7 @@ impl<'p> Gen<'p> {
         for (index, &id) in def.params.iter().enumerate() {
             let local = &def.locals[id];
             if matches!(&local.ty, Ty::Ptr(t) if !matches!(t, Ty::Func(_) | Ty::Void))
-                && local.sugar.is_restrict(&self.p.typedefs)
+                && local.sugar.is_restrict(self.p.typedefs)
                 && let ParamMapping::Operand(operand) = mapping.params[index]
             {
                 func.restrict_params.push(operand as u32);
@@ -930,7 +931,7 @@ impl<'p> Gen<'p> {
         };
         func.local = global.internal;
         func.hidden = global.hidden();
-        let mut b = FunctionBuilder::with_context(&mut func, std::mem::take(&mut self.ssa));
+        let mut b = FunctionBuilder::with_context(&mut func, std::mem::take(&mut self.context.ssa));
         let entry = b.create_block();
         b.seal_block(entry);
         b.switch_to_block(entry);
@@ -939,7 +940,7 @@ impl<'p> Gen<'p> {
             .iter()
             .map(|p| b.append_block_param(entry, p.ty))
             .collect();
-        let dispatch_table = DispatchTable::for_function(self.p, def);
+        let dispatch_table = DispatchTable::for_function(&self.p, def);
         let mut fg = FnGen {
             g: self,
             b,
@@ -1124,7 +1125,7 @@ impl<'p> Gen<'p> {
         fg.emit_dispatch();
         fg.b.seal_all_blocks();
         let alignments = std::mem::take(&mut fg.alignments);
-        fg.g.ssa = fg.b.finalize_with_context();
+        fg.g.context.ssa = fg.b.finalize_with_context();
         self.preserve_access_alignment(&mut func, alignments);
         Ok(func)
     }
@@ -1147,7 +1148,7 @@ impl<'p> Gen<'p> {
                 ty => flexible_start(defs, ty)?.checked_add(member.offset),
             }
         }
-        let flexible = flexible_start(&self.p.structs, global.ty);
+        let flexible = flexible_start(self.p.structs, global.ty);
         let mut extent = nominal;
         for item in items {
             let (offset, width) = match item {
@@ -1692,7 +1693,7 @@ fn constant_elements(sugar: &Sugar, defs: &[TypedefDef<'_>]) -> bool {
 }
 
 impl DispatchTable {
-    fn for_function(p: &Parser<'_>, def: &FuncDef<'_>) -> Option<Self> {
+    fn for_function(p: &crate::unit::Unit<'_>, def: &FuncDef<'_>) -> Option<Self> {
         if def.label_addrs.is_empty() {
             return None;
         }
@@ -1703,7 +1704,7 @@ impl DispatchTable {
                     return Some(());
                 }
                 let (global, _) = dispatch_index(target)?;
-                if target.sugar.is_volatile(&p.typedefs) {
+                if target.sugar.is_volatile(p.typedefs) {
                     return None;
                 }
                 if selected.is_some_and(|previous| previous != global) {
@@ -1717,9 +1718,9 @@ impl DispatchTable {
         let object = &p.globals[global];
         if !object.internal
             || !object.defined
-            || !constant_elements(&object.sugar, &p.typedefs)
+            || !constant_elements(&object.sugar, p.typedefs)
             || object.thread_local
-            || object.sugar.is_volatile(&p.typedefs)
+            || object.sugar.is_volatile(p.typedefs)
         {
             return None;
         }
@@ -3457,7 +3458,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         let ty = Ty::Complex(elem);
         // These reserved runtime names must never acquire an incompatible
         // source-selected ABI or weak/internal binding.
-        for global in &self.g.p.globals {
+        for global in self.g.p.globals {
             if global.name == name || global.symbol == name {
                 return Err(Error::new(
                     loc,
@@ -4337,7 +4338,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         let negated = self.b.ins().ineg(magnitude);
         let wrapped = self.b.ins().select(negative, negated, magnitude);
         let value = self.convert(wrapped, &wide_ty, result_ty, loc)?;
-        let flags = self.object_flags(result_ty, &args[2].sugar.pointee(&self.g.p.typedefs));
+        let flags = self.object_flags(result_ty, &args[2].sugar.pointee(self.g.p.typedefs));
         self.b.ins().store_with_flags(value, vals[2], flags);
         Ok(overflow)
     }
@@ -4520,7 +4521,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             let flags = |i: usize| MemoryFlags {
                 volatile: self.g.object_volatile(
                     args[i].ty.pointee().unwrap(),
-                    &args[i].sugar.pointee(&self.g.p.typedefs),
+                    &args[i].sugar.pointee(self.g.p.typedefs),
                 ),
                 ..MemoryFlags::default()
             };
@@ -4550,7 +4551,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     let flags = MemoryFlags {
                         volatile: self.g.object_volatile(
                             args[2].ty.pointee().unwrap(),
-                            &args[2].sugar.pointee(&self.g.p.typedefs),
+                            &args[2].sugar.pointee(self.g.p.typedefs),
                         ),
                         ..MemoryFlags::default()
                     };
@@ -4667,7 +4668,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 let (value, overflow) = ins.overflow(op, vals[0], vals[1]);
                 let flags = self.object_flags(
                     args[2].ty.pointee().unwrap(),
-                    &args[2].sugar.pointee(&self.g.p.typedefs),
+                    &args[2].sugar.pointee(self.g.p.typedefs),
                 );
                 self.b.ins().store_with_flags(value, vals[2], flags);
                 overflow
@@ -4912,8 +4913,8 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                         let flags = MemoryFlags {
                             volatile: args[1]
                                 .sugar
-                                .pointee(&self.g.p.typedefs)
-                                .is_volatile(&self.g.p.typedefs),
+                                .pointee(self.g.p.typedefs)
+                                .is_volatile(self.g.p.typedefs),
                             ..MemoryFlags::default()
                         };
                         let expected = ins.load_with_flags(ty, vals[1], flags);
@@ -5162,7 +5163,7 @@ mod alignment_tests {
         let arena = bumpalo::Bump::new();
         let p = parser(&arena);
         let mut g = Gen::new(&p, Vec::new(), &[], false);
-        assert!(g.global_alignments.is_none());
+        assert!(g.context.global_alignments.is_none());
         assert_eq!(g.symbol_alignment("unknown"), 1);
         assert_eq!(g.symbol_alignment("shared"), 8);
         // These objects are emitted after the declaration index is built.

@@ -274,7 +274,7 @@ impl Gen<'_> {
         if self.debug {
             return Err(reject(Loc::default(), "debug output"));
         }
-        for g in &self.p.globals {
+        for g in self.p.globals {
             if g.compound_literal {
                 return Err(reject(Loc::default(), "file-scope compound literals"));
             }

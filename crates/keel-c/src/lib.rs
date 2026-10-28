@@ -31,6 +31,7 @@
 
 mod arena;
 mod ast;
+mod batch;
 mod cleanup_jumps;
 mod complex_eval;
 mod debug;
@@ -46,6 +47,9 @@ mod predefined;
 mod preprocess;
 mod strings;
 mod types;
+mod unit;
+
+pub use batch::{BatchCompiler, BatchCompilerError, Input};
 
 pub use predefined::predefined_macros;
 pub use preprocess::{PreprocessOptions, preprocess};
@@ -102,7 +106,7 @@ impl fmt::Display for Diagnostic {
 
 impl std::error::Error for Diagnostic {}
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Options {
     /// Debug info: source locations for instructions, and types and
     /// variables. Named locals then live in memory, as without

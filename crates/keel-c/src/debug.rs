@@ -1,8 +1,8 @@
 //! C types as debug types, for `-g`: a [`Ty`] with its [`Sugar`], which
 //! adds the typedef names, enums and qualifiers.
 
-use crate::parse::Parser;
 use crate::types::*;
+use crate::unit::Unit;
 use keel_ir::fxhash::FxHashMap as HashMap;
 use keel_ir::{DebugMember, DebugType, DebugTypeData, Encoding, EntityRef, MemberLocation, Module};
 
@@ -30,7 +30,7 @@ impl DebugTypes {
     pub fn get(
         &mut self,
         module: &mut Module,
-        p: &Parser<'_>,
+        p: &Unit<'_>,
         ty: &Ty,
         sugar: &Sugar,
     ) -> Option<DebugType> {
@@ -110,7 +110,7 @@ impl DebugTypes {
     }
 
     /// `ty` with nothing more known.
-    fn plain(&mut self, module: &mut Module, p: &Parser<'_>, ty: &Ty) -> Option<DebugType> {
+    fn plain(&mut self, module: &mut Module, p: &Unit<'_>, ty: &Ty) -> Option<DebugType> {
         Some(match ty {
             Ty::Void => return None,
             Ty::Int(_) | Ty::Float | Ty::Double | Ty::Half => {
