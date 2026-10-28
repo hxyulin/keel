@@ -17,11 +17,26 @@ block0(v0: i64):
     v6 = and {operands}
     return v6
 }}"
-    )).unwrap();
+    ))
+    .unwrap();
     let file = module.add_file("load-narrow.c");
     let func = &mut module.functions[0];
-    for (n, inst) in func.layout_insts().map(|(_, i)| i).collect::<Vec<_>>().into_iter().enumerate() {
-        func.set_inst_loc(inst, Some(SourceLoc { file, line: n as u32 + 1, col: 1, scope: None }));
+    for (n, inst) in func
+        .layout_insts()
+        .map(|(_, i)| i)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .enumerate()
+    {
+        func.set_inst_loc(
+            inst,
+            Some(SourceLoc {
+                file,
+                line: n as u32 + 1,
+                col: 1,
+                scope: None,
+            }),
+        );
     }
     keel_ir::verify_module(&module).unwrap();
     module
@@ -41,9 +56,27 @@ fn same_address_offset_flags_locations_order_and_existing_uext() {
                 let mut module = fixture(offset, "align 1 notrap", reversed);
                 let func = &mut module.functions[0];
                 let old_layout: Vec<_> = func.layout_insts().map(|(_, i)| i).collect();
-                let load = old_layout.iter().copied().find(|&i| matches!(func.inst_data(i), InstData::Load { .. })).unwrap();
-                let mask = old_layout.iter().copied().find(|&i| matches!(func.inst_data(i), InstData::Binary { op: BinaryOp::And, .. })).unwrap();
-                let InstData::Load { flags, addr, .. } = *func.inst_data(load) else { unreachable!() };
+                let load = old_layout
+                    .iter()
+                    .copied()
+                    .find(|&i| matches!(func.inst_data(i), InstData::Load { .. }))
+                    .unwrap();
+                let mask = old_layout
+                    .iter()
+                    .copied()
+                    .find(|&i| {
+                        matches!(
+                            func.inst_data(i),
+                            InstData::Binary {
+                                op: BinaryOp::And,
+                                ..
+                            }
+                        )
+                    })
+                    .unwrap();
+                let InstData::Load { flags, addr, .. } = *func.inst_data(load) else {
+                    unreachable!()
+                };
                 let load_loc = func.inst_loc(load);
                 let mask_loc = func.inst_loc(mask);
                 let load_pos = old_layout.iter().position(|&i| i == load).unwrap();
@@ -51,12 +84,28 @@ fn same_address_offset_flags_locations_order_and_existing_uext() {
                 let layout: Vec<_> = func.layout_insts().map(|(_, i)| i).collect();
                 assert_eq!(layout.len(), old_layout.len());
                 let narrow = layout[load_pos];
-                assert_eq!(*func.inst_data(narrow), InstData::Load { flags, addr, ty: Type::I8 });
+                assert_eq!(
+                    *func.inst_data(narrow),
+                    InstData::Load {
+                        flags,
+                        addr,
+                        ty: Type::I8
+                    }
+                );
                 assert_eq!(func.inst_loc(narrow), load_loc);
                 assert_eq!(func.inst_loc(mask), mask_loc);
-                assert_eq!(*func.inst_data(mask), InstData::Convert { op: ConvertOp::Uext, ty: Type::I64, arg: func.first_result(narrow) });
+                assert_eq!(
+                    *func.inst_data(mask),
+                    InstData::Convert {
+                        op: ConvertOp::Uext,
+                        ty: Type::I64,
+                        arg: func.first_result(narrow)
+                    }
+                );
                 for (n, &inst) in old_layout.iter().enumerate() {
-                    if n != load_pos { assert_eq!(layout[n], inst); }
+                    if n != load_pos {
+                        assert_eq!(layout[n], inst);
+                    }
                 }
                 assert!(!LoadNarrow.run_for_target(func, target));
                 keel_ir::verify_module(&module).unwrap();
@@ -94,7 +143,10 @@ fn multiple_uses_and_wrong_mask_or_width_are_unchanged() {
     for source in [
         original.replace("return v6", "v7 = iadd v4, v6\n    return v7"),
         original.replace("iconst.i64 255", "iconst.i64 511"),
-        original.replace("load.i64", "load.i32").replace("v6 = and", "v8 = uext.i64 v4\n    v6 = and").replace("and v4, v5", "and v8, v5"),
+        original
+            .replace("load.i64", "load.i32")
+            .replace("v6 = and", "v8 = uext.i64 v4\n    v6 = and")
+            .replace("and v4, v5", "and v8, v5"),
     ] {
         let mut module = keel_ir::parse(&source).unwrap();
         keel_ir::verify_module(&module).unwrap();
@@ -113,7 +165,9 @@ fn unknown_pointers_atomic_access_and_escaped_stack_are_unchanged() {
         keel_ir::verify_module(&module).unwrap();
         unchanged(&mut module);
     }
-    let source = fixture(0, "notrap", false).to_string().replace("return v6", "v7 = ptrtoint.i64 v1\n    return v6");
+    let source = fixture(0, "notrap", false)
+        .to_string()
+        .replace("return v6", "v7 = ptrtoint.i64 v1\n    return v6");
     let mut module = keel_ir::parse(&source).unwrap();
     keel_ir::verify_module(&module).unwrap();
     unchanged(&mut module);
@@ -124,7 +178,14 @@ fn debugger_homes_are_excluded() {
     let mut module = fixture(0, "notrap", false);
     let func = &mut module.functions[0];
     let slot = func.stack_slots().next().unwrap().0;
-    func.debug_vars.push(DebugVar { name: "home".into(), ty: DebugType::new(0), slot, indirect: false, param: false, scope: None });
+    func.debug_vars.push(DebugVar {
+        name: "home".into(),
+        ty: DebugType::new(0),
+        slot,
+        indirect: false,
+        param: false,
+        scope: None,
+    });
     unchanged(&mut module);
 }
 
@@ -137,7 +198,9 @@ fn atomic_lifetime_volatile_and_unknown_memory_elsewhere_reject_the_function() {
         "v7 = intrinsic stack_save()",
         "v7 = ptrtoint.i64 v1",
     ] {
-        let mut module = keel_ir::parse(&source.replace("return v6", &format!("{extra}\n    return v6"))).unwrap();
+        let mut module =
+            keel_ir::parse(&source.replace("return v6", &format!("{extra}\n    return v6")))
+                .unwrap();
         keel_ir::verify_module(&module).unwrap();
         unchanged(&mut module);
     }
@@ -153,21 +216,56 @@ fn named_registration_is_opt_in() {
 fn resolved_constant_alias_and_intervening_store_keep_the_original_read_position() {
     let mut module = fixture(8, "notrap", false);
     let func = &mut module.functions[0];
-    let mask = func.layout_insts().find_map(|(_, i)| {
-        matches!(func.inst_data(i), InstData::Binary { op: BinaryOp::And, .. }).then_some(i)
-    }).unwrap();
-    let InstData::Binary { args, .. } = *func.inst_data(mask) else { unreachable!() };
-    let ValueDef::Result(load, _) = func.value_def(args[0]) else { unreachable!() };
-    let InstData::Load { addr, flags, .. } = *func.inst_data(load) else { unreachable!() };
-    let alias = func.insert_inst(InsertPoint::Before(mask), InstData::Iconst { ty: Type::I64, imm: 255 });
+    let mask = func
+        .layout_insts()
+        .find_map(|(_, i)| {
+            matches!(
+                func.inst_data(i),
+                InstData::Binary {
+                    op: BinaryOp::And,
+                    ..
+                }
+            )
+            .then_some(i)
+        })
+        .unwrap();
+    let InstData::Binary { args, .. } = *func.inst_data(mask) else {
+        unreachable!()
+    };
+    let ValueDef::Result(load, _) = func.value_def(args[0]) else {
+        unreachable!()
+    };
+    let InstData::Load { addr, flags, .. } = *func.inst_data(load) else {
+        unreachable!()
+    };
+    let alias = func.insert_inst(
+        InsertPoint::Before(mask),
+        InstData::Iconst {
+            ty: Type::I64,
+            imm: 255,
+        },
+    );
     func.replace_all_uses(args[1], func.first_result(alias));
     let stored = func.block_params(func.entry_block().unwrap())[0];
-    let store = func.insert_inst(InsertPoint::Before(mask), InstData::Store { addr, flags, value: stored });
+    let store = func.insert_inst(
+        InsertPoint::Before(mask),
+        InstData::Store {
+            addr,
+            flags,
+            value: stored,
+        },
+    );
     assert!(LoadNarrow.run_for_target(func, VectorTarget::X86Sse2));
     let layout: Vec<_> = func.layout_insts().map(|(_, i)| i).collect();
-    let narrow_pos = layout.iter().position(|&i| matches!(func.inst_data(i), InstData::Load { ty: Type::I8, .. })).unwrap();
+    let narrow_pos = layout
+        .iter()
+        .position(|&i| matches!(func.inst_data(i), InstData::Load { ty: Type::I8, .. }))
+        .unwrap();
     assert!(narrow_pos < layout.iter().position(|&i| i == store).unwrap());
-    assert!(layout.iter().position(|&i| i == store).unwrap() < layout.iter().position(|&i| i == mask).unwrap());
+    assert!(
+        layout.iter().position(|&i| i == store).unwrap()
+            < layout.iter().position(|&i| i == mask).unwrap()
+    );
     keel_ir::verify_module(&module).unwrap();
 }
 
@@ -175,7 +273,8 @@ fn resolved_constant_alias_and_intervening_store_keep_the_original_read_position
 fn real_bridge_shape_is_deliberately_unsupported() {
     // Retained optimized IR: compiler bridge capture-001, both targets. The
     // caller's allocation bounds are not present in this function's contract.
-    let mut module = keel_ir::parse("func @bridge_narrow_load(i64, i64, ptr, i64) -> i64 cc(c) {
+    let mut module = keel_ir::parse(
+        "func @bridge_narrow_load(i64, i64, ptr, i64) -> i64 cc(c) {
 block0(v0: i64, v1: i64, v2: ptr, v3: i64):
     jump block1(v0, v1)
 block1(v4: i64, v7: i64):
@@ -197,7 +296,9 @@ block2:
     jump block1(v20, v18)
 block3:
     return v7
-}").unwrap();
+}",
+    )
+    .unwrap();
     keel_ir::verify_module(&module).unwrap();
     let before = module.to_string();
     for target in [VectorTarget::X86Sse2, VectorTarget::Aarch64Neon] {
@@ -211,14 +312,23 @@ fn direct_in_memory_aliases_never_resurrect_dead_load_or_mask() {
     for alias_mask in [false, true] {
         let mut module = fixture(0, "notrap", false);
         let func = &mut module.functions[0];
-        let inst = func.layout_insts().find_map(|(_, i)| {
-            let matches = if alias_mask {
-                matches!(func.inst_data(i), InstData::Binary { op: BinaryOp::And, .. })
-            } else {
-                matches!(func.inst_data(i), InstData::Load { .. })
-            };
-            matches.then_some(i)
-        }).unwrap();
+        let inst = func
+            .layout_insts()
+            .find_map(|(_, i)| {
+                let matches = if alias_mask {
+                    matches!(
+                        func.inst_data(i),
+                        InstData::Binary {
+                            op: BinaryOp::And,
+                            ..
+                        }
+                    )
+                } else {
+                    matches!(func.inst_data(i), InstData::Load { .. })
+                };
+                matches.then_some(i)
+            })
+            .unwrap();
         let original = func.first_result(inst);
         let replacement = func.block_params(func.entry_block().unwrap())[0];
         func.replace_all_uses(original, replacement);

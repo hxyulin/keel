@@ -13,7 +13,10 @@
   checkpoint, investigation, validation run or handoff.
 - Put API contracts beside the API when practical. Keep shared architecture,
   user-facing behavior and limitations in the maintained references indexed by
-  `docs/README.md`. Consolidate overlapping material rather than duplicating it.
+  `docs/README.md`. Put target-specific contracts under `docs/targets/<target>/`
+  and shared material in the owning compiler, frontend or linker section. Update
+  the section navigation instead of adding flat feature pages. Consolidate
+  overlapping material rather than duplicating it.
 - Do not commit progress ledgers, per-run audit JSON, logs, object dumps, timing
   samples or report renderers. Store temporary experiments and their outputs in
   ignored `target/` or `suite/reports/`; use Git history for historical evidence.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only structural inventory for docs/x86-system-audit.md.
+"""Read-only structural inventory for docs/targets/x86_64/system/README.md.
 
 The roster is an audit boundary, not a machine-derived baseline definition.
 Candidate links are not assembler, compiler or execution support verdicts.
@@ -34,7 +34,7 @@ SWEEP_CATEGORIES = {'SYSTEM', 'SYSRET', 'SYSCALL', 'INTERRUPT', 'SEGOP',
 
 
 def inventory():
-    ledger_path = ROOT / 'docs/x86-coverage/coverage.json'
+    ledger_path = ROOT / 'docs/targets/x86_64/coverage/coverage.json'
     ledger_bytes = ledger_path.read_bytes()
     ledger = json.loads(ledger_bytes)
     sources = {

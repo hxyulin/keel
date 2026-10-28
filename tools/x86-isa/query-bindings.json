@@ -11,7 +11,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/targets/x86_64/system/descriptor-queries.md.",
       "binding": {
         "kind": "descriptor_query",
         "mnemonic": "sgdt",
@@ -30,7 +30,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/targets/x86_64/system/descriptor-queries.md.",
       "binding": {
         "kind": "descriptor_query",
         "mnemonic": "sidt",
@@ -49,7 +49,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/targets/x86_64/system/descriptor-queries.md.",
       "binding": {
         "kind": "descriptor_query",
         "mnemonic": "sldt",
@@ -70,7 +70,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/targets/x86_64/system/descriptor-queries.md.",
       "binding": {
         "kind": "descriptor_query",
         "mnemonic": "sldt",
@@ -91,7 +91,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/targets/x86_64/system/descriptor-queries.md.",
       "binding": {
         "kind": "descriptor_query",
         "mnemonic": "sldt",
@@ -112,7 +112,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/targets/x86_64/system/descriptor-queries.md.",
       "binding": {
         "kind": "descriptor_query",
         "mnemonic": "sldt",
@@ -131,7 +131,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/targets/x86_64/system/descriptor-queries.md.",
       "binding": {
         "kind": "descriptor_query",
         "mnemonic": "str",
@@ -152,7 +152,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/targets/x86_64/system/descriptor-queries.md.",
       "binding": {
         "kind": "descriptor_query",
         "mnemonic": "str",
@@ -173,7 +173,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/targets/x86_64/system/descriptor-queries.md.",
       "binding": {
         "kind": "descriptor_query",
         "mnemonic": "str",
@@ -194,7 +194,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/targets/x86_64/system/descriptor-queries.md.",
       "binding": {
         "kind": "descriptor_query",
         "mnemonic": "str",
@@ -213,7 +213,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/targets/x86_64/system/descriptor-queries.md.",
       "binding": {
         "kind": "descriptor_query",
         "mnemonic": "smsw",
@@ -234,7 +234,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/targets/x86_64/system/descriptor-queries.md.",
       "binding": {
         "kind": "descriptor_query",
         "mnemonic": "smsw",
@@ -255,7 +255,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/targets/x86_64/system/descriptor-queries.md.",
       "binding": {
         "kind": "descriptor_query",
         "mnemonic": "smsw",
@@ -276,7 +276,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/x86-descriptor-queries.md.",
+      "doc": "Raw long-mode descriptor/status observation. Caller owns privilege, implicit state and output memory; old register containers retain the documented width behavior. See docs/targets/x86_64/system/descriptor-queries.md.",
       "binding": {
         "kind": "descriptor_query",
         "mnemonic": "smsw",
@@ -657,7 +657,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/x86-port-io.md.",
+      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/targets/x86_64/system/port-io.md.",
       "binding": {
         "kind": "port_io",
         "output": false,
@@ -678,7 +678,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/x86-port-io.md.",
+      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/targets/x86_64/system/port-io.md.",
       "binding": {
         "kind": "port_io",
         "output": false,
@@ -699,7 +699,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/x86-port-io.md.",
+      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/targets/x86_64/system/port-io.md.",
       "binding": {
         "kind": "port_io",
         "output": false,
@@ -719,7 +719,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/x86-port-io.md.",
+      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/targets/x86_64/system/port-io.md.",
       "binding": {
         "kind": "port_io",
         "output": true,
@@ -739,7 +739,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/x86-port-io.md.",
+      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/targets/x86_64/system/port-io.md.",
       "binding": {
         "kind": "port_io",
         "output": true,
@@ -759,7 +759,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/x86-port-io.md.",
+      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/targets/x86_64/system/port-io.md.",
       "binding": {
         "kind": "port_io",
         "output": true,
@@ -780,7 +780,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/x86-port-io.md.",
+      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/targets/x86_64/system/port-io.md.",
       "binding": {
         "kind": "port_io",
         "output": false,
@@ -801,7 +801,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/x86-port-io.md.",
+      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/targets/x86_64/system/port-io.md.",
       "binding": {
         "kind": "port_io",
         "output": false,
@@ -822,7 +822,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/x86-port-io.md.",
+      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/targets/x86_64/system/port-io.md.",
       "binding": {
         "kind": "port_io",
         "output": false,
@@ -842,7 +842,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/x86-port-io.md.",
+      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/targets/x86_64/system/port-io.md.",
       "binding": {
         "kind": "port_io",
         "output": true,
@@ -862,7 +862,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/x86-port-io.md.",
+      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/targets/x86_64/system/port-io.md.",
       "binding": {
         "kind": "port_io",
         "output": true,
@@ -882,7 +882,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/x86-port-io.md.",
+      "doc": "Pinned scalar port I/O with caller-owned permissions and device contract. Immediate ports retain an i16 signature but require a verified constant in 0..255. See docs/targets/x86_64/system/port-io.md.",
       "binding": {
         "kind": "port_io",
         "output": true,

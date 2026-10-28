@@ -1,5 +1,5 @@
 //! Stack-resident extended values. Only an ABI result is live on the x87 stack
-//! between IR instructions. See docs/f80/stages.md for the FP environment contract.
+//! between IR instructions. See docs/targets/x86_64/f80/README.md for the FP environment contract.
 use super::*;
 
 fn op(name: &str) -> Opcode {

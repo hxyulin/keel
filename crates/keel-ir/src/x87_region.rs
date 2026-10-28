@@ -1,5 +1,5 @@
 //! Bounded x87 region controls. Stable operation numbers, independent of Intrinsic discriminants.
-//! See docs/f80/unmasked-region.md. Existing raw APIs keep their masked-CW preconditions.
+//! See docs/targets/x86_64/f80/unmasked-region.md. Existing raw APIs keep their masked-CW preconditions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum X87RegionOperand {
     None,

@@ -156,7 +156,7 @@ The bridge calls the generated `descriptor_load` with known GDTR/IDTR images
 instead of loading them itself. Trusted SGDT/SIDT observations then check both
 bases and limits. Negative controls omit the loads or swap the table images.
 Both must return FAIL with exit 35. Normal exports must return PASS with exit
-33. See [system support](../../docs/userspace-isa-status.md) for API contracts.
+33. See [system support](../../docs/targets/README.md) for API contracts.
 
 All twelve load variants pass under QEMU 11.1.2 TCG on macOS ARM64. Both
 negative controls return the exact READY/FAIL transcript and exit 35. This is
@@ -182,7 +182,7 @@ value must return FAIL and exit 35 normally. Faults and timeouts fail the
 campaign. `--status` and `--table-loads` are mutually exclusive.
 
 All eighteen verdicts match under QEMU 11.1.2 TCG on macOS ARM64. See
-[descriptor/status observations](../../docs/x86-descriptor-queries.md#cpl0-selectorstatus-fixture)
+[descriptor/status observations](../../docs/targets/x86_64/system/descriptor-queries.md#cpl0-selectorstatus-fixture)
 for constants, memory layout and the limits of this emulated evidence.
 
 ## MSR campaign
@@ -208,7 +208,7 @@ under QEMU 11.1.2 TCG on macOS ARM64. Five broken controls must return the
 exact READY/FAIL transcript and exit 35: omitted write, narrow read, wrong
 index, clobbered live value and no observations. All five fail as expected.
 The other campaign modes are mutually exclusive with `--msr`. See
-[raw MSR access](../../docs/x86-msr.md) for the API contract and evidence limits.
+[raw MSR access](../../docs/targets/x86_64/system/msr.md) for the API contract and evidence limits.
 
 ## CLTS and cache-control campaign
 
@@ -232,7 +232,7 @@ checks do not prove physical cache writeback or invalidation. All eighteen
 verdicts match. Faults and timeouts fail the campaign.
 
 `--cpu-control` is mutually exclusive with the other campaign modes. See
-[privileged CPU/cache control](../../docs/x86-privileged-control.md) for the
+[privileged CPU/cache control](../../docs/targets/x86_64/system/privileged-control.md) for the
 contracts and remaining evidence limits.
 
 ## LLDT/LTR/LMSW and INVLPG campaigns
@@ -261,7 +261,7 @@ expected verdicts. Mapping changes are restored on normal success or mismatch.
 Both campaigns pass under QEMU 11.1.2 TCG on macOS ARM64. They provide bounded
 emulated evidence, with no native hardware, multicore or exception-resumption
 claim. The modes are mutually exclusive with all other campaign modes. See
-[system mutation/invalidation](../../docs/x86-system-write.md) for seeds,
+[system mutation/invalidation](../../docs/targets/x86_64/system/write.md) for seeds,
 contracts and limits.
 
 ## Control and debug registers
@@ -271,7 +271,7 @@ assembly reference and five normally returning broken controls. The fixture
 covers CR0/2/3/4/8 and DR0–7, including DR4/5 aliases with DE clear. It checks
 actual hardware state and output values separately, switches CR3 between two
 copies of the same page map, and restores the original state. No breakpoint
-is enabled. See [contracts and finite evidence](../../docs/x86-system-registers.md).
+is enabled. See [contracts and finite evidence](../../docs/targets/x86_64/system/registers.md).
 
 ## Interrupt control and HLT resumption
 
@@ -289,7 +289,7 @@ return normally with exact READY/FAIL and exit 35, or with a well-formed
 success report whose HLT evidence is rejected. Faults, malformed transcripts,
 tool errors and timeouts never satisfy a negative. Existing modes keep their
 previous exact transcript and exit checks. See
-[contracts, observation rules and limits](../../docs/x86-interrupt-control.md).
+[contracts, observation rules and limits](../../docs/targets/x86_64/system/interrupt-control.md).
 
 ## GS exchange
 
@@ -298,7 +298,7 @@ normally returning broken controls. It checks both base MSRs, selector zero
 and 16, independent GS-relative reads, round trips, wide canonical bases,
 eight live SSA values and canaries. The bridge restores the original selector
 and both base MSRs. IF stays clear. See
-[contracts and finite evidence](../../docs/x86-swapgs.md).
+[contracts and finite evidence](../../docs/targets/x86_64/system/swapgs.md).
 
 ## Owned IRETQ return
 
@@ -309,4 +309,4 @@ controls check registers, selectors, flags, stack installation, image guards
 and caller liveness. A private DPL3 gate/TSS returns to the trusted verifier.
 The fixture temporarily grants user access to its shared low/high mappings;
 it observes privilege changes without claiming isolation. See the
-[public image and terminal call contract](../../docs/x86-iretq.md).
+[public image and terminal call contract](../../docs/targets/x86_64/system/iretq.md).

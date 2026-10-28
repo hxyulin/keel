@@ -131,7 +131,7 @@ The CLI comparison runner strips only these newly retained load facts when
 comparing against Python. Rust scope/definedness tests and executable fixtures
 validate the facts themselves. Poison semantics, general instruction facts,
 access alias scopes and TBAA remain outside LLVM transport. See
-[scoped contracts](../../docs/llvm-semantics.md).
+[scoped contracts](../../docs/frontends/llvm.md).
 
 ## Scalar deferred-value refinement
 
@@ -166,4 +166,4 @@ The native contract consumer additionally requires Keel-only `preserves_access`;
 LLVM import leaves it unknown. A native page-permission regression confirms that
 without this promise the later potentially faulting read remains. LLVM export
 still has a separately reproduced ordinary-load fault loss, documented in
-`docs/llvm-semantics.md`; this port does not establish arbitrary fault parity.
+`docs/frontends/llvm.md`; this port does not establish arbitrary fault parity.

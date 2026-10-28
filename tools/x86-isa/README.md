@@ -83,14 +83,14 @@ explicit identity policy. Existing enum order and spellings are preserved.
 
 Fixed adapters also generate their source mnemonic, operand-size selection and
 leading-FWAIT normalization. The decoder uses generated width-specific names
-for canonical formatting. [SYSEXIT/RSM support](../../docs/x86-system-exits.md)
+for canonical formatting. [SYSEXIT/RSM support](../../docs/targets/x86_64/system/exits.md)
 adds public adapters without another instruction-specific encoder or compiler
 terminal API.
 The baseline formatting macro expands into an exhaustive match with handwritten
 dynamic arms. Compatibility tests pin the original API schema and exercise an
 independent spelling/format fixture captured from `db6129d3`.
 The generator also reconciles
-encoding fields in `docs/v2-coverage/inventory.json`, retaining its operand and
+encoding fields in `docs/targets/x86_64/coverage/v2-inventory.json`, retaining its operand and
 validation prose. AES entries are optional and are not implied by psABI v2.
 
 The assembler keeps stable public opcode identities and syntax adapters. Handwritten
@@ -284,7 +284,7 @@ it no longer declares variants or computes global inventory length.
 existing descriptor/status, selector and scalar port-I/O APIs.
 `query_bindings.py` generates their tables and const-checks their IDs.
 Shared emitters remain handwritten. The four wide LAR/LSL compilation gaps
-found during migration are fixed; see [the query binding notes](../../docs/x86-intrinsics.md).
+found during migration are fixed; see [the query binding notes](../../docs/targets/x86_64/intrinsics.md).
 
 The other 732 intrinsics retain handwritten metadata and lowering. Their
 existing enum documentation lives in the registry; generated-family contract
@@ -325,7 +325,7 @@ transfer boundaries.
 
 ## Generated structural coverage ledger
 
-`coverage_ledger.py` emits [the x86 coverage ledger](../../docs/x86-coverage/README.md)
+`coverage_ledger.py` emits [the x86 coverage ledger](../../docs/targets/x86_64/coverage/README.md)
 and its per-source-form JSON through the same generator and freshness check.
 It joins import/exclusion facts, decoder registration, declarative assembler
 candidates, the 45 tracked compiler recipes and feature/profile policy.

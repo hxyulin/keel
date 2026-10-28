@@ -1,9 +1,9 @@
 # Minimal Linux x86-64 compiler target
 
 Keel compiles and natively links the captured 64-bit core of the pinned minimal
-Linux v6.12 configuration. See the [code-model contract](../../docs/linux-kernel.md),
-[native linking guide](../../docs/linux-kernel.md) and
-[benchmark methodology](../../docs/linux-kernel-benchmarks.md) for scope and limits.
+Linux v6.12 configuration. See the [code-model contract](../../docs/integrations/linux-kernel.md),
+[native linking guide](../../docs/integrations/linux-kernel.md) and
+[benchmark methodology](../../docs/benchmarks/linux-kernel.md) for scope and limits.
 This is not a complete Kbuild replacement.
 
 This fixture targets the **64-bit parts** of Linux v6.12. Host programs,

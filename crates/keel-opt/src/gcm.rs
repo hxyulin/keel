@@ -49,7 +49,8 @@ pub fn run(func: &mut Function) -> bool {
     // function-wide until IR has explicit machine-FLAGS resource dependencies.
     // It does not promise continuity through other arithmetic/lowering passes.
     if func.layout_insts().any(|(_, i)| {
-        matches!(func.inst_data(i), InstData::X86RflagsRegion { .. }) || matches!(func.inst_data(i), InstData::Intrinsic { id, .. }
+        matches!(func.inst_data(i), InstData::X86RflagsRegion { .. })
+            || matches!(func.inst_data(i), InstData::Intrinsic { id, .. }
             if matches!(id, keel_ir::Intrinsic::X86RflagsRead | keel_ir::Intrinsic::X86RflagsSwap)
                 || id.x86_string_port_io().is_some_and(|(_, _, _, owned)| owned))
     }) {

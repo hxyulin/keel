@@ -38,7 +38,10 @@ fn run(module: &mut Module) -> bool {
         for (_, i) in f.layout_insts() {
             match f.inst_data(i) {
                 InstData::Call { func, args } | InstData::Invoke { func, args, .. }
-                    if args.has_explicit_abi() => { blocked.insert(f.callee(*func).name.clone()); }
+                    if args.has_explicit_abi() =>
+                {
+                    blocked.insert(f.callee(*func).name.clone());
+                }
                 _ => {}
             }
             match f.inst_data(i) {

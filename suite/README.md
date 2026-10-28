@@ -25,7 +25,7 @@ evidence belong in the ignored `suite/reports/` directory or under `target/`;
 they are not stored in Git.
 
 For small timing differences on Linux, see the
-[controlled userspace timing procedure](../docs/linux-userspace-timing.md).
+[controlled userspace timing procedure](../docs/benchmarks/linux-timing.md).
 It covers resident inputs, executable backing, identical-image controls and
 balanced run order; ordinary suite runs do not automatically apply these controls.
 
@@ -221,7 +221,7 @@ Apple AArch64, which additionally needs Clang++, rustc and an LLVM 23 shared
 library; missing prerequisites there are failures. Other hosts run the C checks
 and report the LLVM stages as skipped (`passed_with_skips`) with reasons.
 
-See [C compatibility](../docs/c-frontend-coverage.md),
+See [C compatibility](../docs/frontends/c/README.md),
 [LLVM import](README.md) and C++ compatibility profiles
 for semantic boundaries and standalone runner commands. This command does not
 replace the full workspace tests or application suites.
@@ -234,7 +234,7 @@ with the required C API. Other hosts skip unsupported LLVM stages unless
 `--require-llvm` is set. Use `--libllvm PATH` to select the library explicitly.
 Run `cargo suite test-frontends --out target/frontend-check-1` rather than
 invoking the individual stage scripts. Crate regressions own the detailed
-contracts; see [LLVM semantics](../docs/llvm-semantics.md).
+contracts; see [LLVM semantics](../docs/frontends/llvm.md).
 
 ## Measurements
 
@@ -245,7 +245,7 @@ Use each runner's `--help` for options.
 Freeze binaries before timing, check outputs before measuring, alternate
 baseline/candidate order and retain flags and input hashes. Write results in
 new ignored `target/` or `suite/reports/` directories. The
-[controlled timing procedure](../docs/linux-userspace-timing.md) describes the
+[controlled timing procedure](../docs/benchmarks/linux-timing.md) describes the
 retained page-backing harness and the limits of small Linux timing differences.
 
 ## Integration harnesses

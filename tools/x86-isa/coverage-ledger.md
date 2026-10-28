@@ -1,7 +1,7 @@
 # x86 coverage ledger definitions
 
-The [generated ledger](../../docs/x86-coverage/README.md) and
-[JSON records](../../docs/x86-coverage/coverage.json) track structural facts
+The [generated ledger](../../docs/targets/x86_64/coverage/README.md) and
+[JSON records](../../docs/targets/x86_64/coverage/coverage.json) track structural facts
 from the pinned import, public identity/adapter schemas, feature policy,
 profiles and system-intrinsic recipes. Regenerate them with the existing
 `python3 tools/x86-isa/generate.py` command. Its `--check` mode checks both
@@ -84,7 +84,7 @@ For example, inspect imported RSM records without guessing their support:
 python3 - <<'PY'
 import json
 from pathlib import Path
-ledger = json.loads(Path('docs/x86-coverage/coverage.json').read_text())
+ledger = json.loads(Path('docs/targets/x86_64/coverage/coverage.json').read_text())
 print(json.dumps([f for f in ledger['forms'] if f['mnemonic'] == 'rsm'], indent=2))
 PY
 ```
@@ -104,14 +104,14 @@ static spelling with `Opcode::parse` and the tracked compiler names/IDs with
 `Intrinsic::from_name`. These are structural checks, not per-form byte or runtime
 qualification.
 
-Existing semantic evidence stays in [system support](../../docs/userspace-isa-status.md)
-and [transition contracts](../../docs/x86-system-transitions.md). A future result
+Existing semantic evidence stays in [system support](../../docs/targets/README.md)
+and [transition contracts](../../docs/targets/x86_64/system/transitions.md). A future result
 import should attach explicit witness/campaign scope and artifact digests to
 form IDs. It must distinguish encoding comparisons, actual decode witnesses,
 emulated execution and native execution, including expected negative controls.
 No such results are inferred from prose or file names here.
 
-The [remaining system instruction audit](../../docs/x86-system-audit.md) uses
+The [remaining system instruction audit](../../docs/targets/x86_64/system/README.md) uses
 `python3 tools/x86-isa/audit_system.py` to join a manual system roster and a
 category/CPL sweep to this ledger. That read-only report keeps the original
 candidate/validation distinctions; handwritten API and contract findings live

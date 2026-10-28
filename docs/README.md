@@ -1,7 +1,7 @@
 # Documentation
 
-Start with the [toolchain reference](toolchain-overview.md),
-[architecture](design.md) and [testing guide](testing.md).
+Start with the [toolchain reference](toolchain.md),
+[architecture](compiler/design.md) and [testing guide](development/testing.md).
 
 ## Supported components
 
@@ -25,20 +25,34 @@ completion ledgers or per-feature progress pages.
 
 | Area | Reference |
 | --- | --- |
-| Commands, architecture and tests | [Toolchain](toolchain-overview.md), [design](design.md), [testing](testing.md) |
-| C | [Coverage](c-frontend-coverage.md), [extensions](c-extensions.md), [attributes](function-attributes.md), [inline assembly](c-inline-asm.md) |
-| Optimization | [Levels](optimization-levels.md), [optimizer contracts](optimizer.md), [SIMD IR](simd-ir.md), [x86 code generation](x86-codegen.md) |
-| LLVM import | [Semantics](llvm-semantics.md), [frontend runner](../suite/README.md) |
-| Native linking | [ELF](elf-linker.md), [GNU scripts](gnu-linker-scripts.md), [macOS](macos-linker.md), [archives](static-archives.md) |
-| Assembly and intrinsics | [x86 assembler](native-x86-assembler.md), [GNU syntax](x86-gnu-assembly-language.md), [intrinsic selection](x86-intrinsics.md), [ISA status](userspace-isa-status.md) |
-| Other targets | [ARM Linux](arm-linux.md), [Wasm commands](wasm-cli.md), [Wasm backend](wasm-backend.md) |
-| Linux kernel | [Integration](linux-kernel.md), [fixture](../suite/linux-kernel/README.md), [benchmarks](linux-kernel-benchmarks.md) |
-| Runtime and debug metadata | [Unwind](unwind-metadata.md), [DWARF](dwarf5.md) |
-| Benchmarks and workload validation | [Suite](../suite/README.md), [controlled timing](linux-userspace-timing.md) |
+| Commands, architecture and tests | [Toolchain](toolchain.md), [design](compiler/design.md), [testing](development/testing.md) |
+| C | [Coverage](frontends/c/README.md), [extensions](frontends/c/extensions.md), [attributes](compiler/function-attributes.md), [inline assembly](frontends/c/inline-asm.md) |
+| Optimization | [Levels](compiler/optimization-levels.md), [optimizer contracts](compiler/optimizer.md), [SIMD IR](compiler/simd-ir.md), [x86 code generation](targets/x86_64/codegen.md) |
+| LLVM import | [Semantics](frontends/llvm.md), [frontend runner](../suite/README.md) |
+| Native linking | [ELF](linking/elf.md), [GNU scripts](linking/gnu-scripts.md), [macOS](linking/macho.md), [archives](linking/archives.md) |
+| Assembly and intrinsics | [x86 assembler](targets/x86_64/assembler.md), [GNU syntax](targets/x86_64/gnu-assembly-language.md), [intrinsic selection](targets/x86_64/intrinsics.md), [ISA status](targets/README.md) |
+| Target entry points | [All targets](targets/README.md), [x86-64](targets/x86_64/README.md), [AArch64](targets/aarch64/README.md), [WebAssembly](targets/wasm/README.md) |
+| Linux kernel | [Integration](integrations/linux-kernel.md), [fixture](../suite/linux-kernel/README.md), [benchmarks](benchmarks/linux-kernel.md) |
+| Runtime and debug metadata | [Unwind](linking/unwind.md), [DWARF](linking/dwarf5.md) |
+| Benchmarks and workload validation | [Suite](../suite/README.md), [controlled timing](benchmarks/linux-timing.md) |
 
 Detailed safety contracts linked from implementation code remain separate where
 they define a specific API's preconditions. Generated coverage inventories remain
 owned by their generators. Historical progress logs are not maintained references.
+
+## Where to put a change
+
+- `compiler/`: shared IR, optimization and function policies.
+- `frontends/`: C and LLVM input semantics.
+- `linking/`: objects, archives, linking and runtime/debug metadata.
+- `targets/`: target-specific assembly, lowering and machine-state contracts.
+- `integrations/`: complete workloads such as the pinned Linux kernel.
+- `development/`: contributor workflows and testing.
+- `benchmarks/`: reviewed methodology and public measurement summaries.
+
+Keep target-specific details under their target entry point. Update the owning
+reference and navigation when moving or adding a topic; do not add a parallel
+flat document or a progress log.
 
 ## What belongs in Git
 

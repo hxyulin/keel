@@ -27,7 +27,12 @@ pub enum VectorType {
 }
 impl VectorType {
     pub const ALL_64: [Self; 6] = [
-        Self::I8x8, Self::I16x4, Self::I32x2, Self::I64x1, Self::F32x2, Self::F64x1,
+        Self::I8x8,
+        Self::I16x4,
+        Self::I32x2,
+        Self::I64x1,
+        Self::F32x2,
+        Self::F64x1,
     ];
     pub const ALL_128: [Self; 6] = [
         Self::I8x16,
@@ -46,7 +51,12 @@ impl VectorType {
         Self::F64x4,
     ];
     pub const ALL: [Self; 18] = [
-        Self::I8x8, Self::I16x4, Self::I32x2, Self::I64x1, Self::F32x2, Self::F64x1,
+        Self::I8x8,
+        Self::I16x4,
+        Self::I32x2,
+        Self::I64x1,
+        Self::F32x2,
+        Self::F64x1,
         Self::I8x16,
         Self::I16x8,
         Self::I32x4,

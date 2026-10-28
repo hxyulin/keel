@@ -264,7 +264,7 @@ non-nullness or readable/nullable-readable extents. Metadata without that bounda
 multi-interval ranges and i1 load facts remain omitted. Export attaches the facts
 to the same scalar load and diagnoses facts on other instruction kinds. It does
 not convert result-pointer facts into memory access flags or function contracts.
-The [instruction-local contract](../../docs/llvm-semantics.md#llvm-contracts-instruction-local-result-facts)
+The [instruction-local contract](../../docs/frontends/llvm.md#llvm-contracts-instruction-local-result-facts)
 documents scope, mutation invalidation and remaining precision loss.
 
 LLVM parameter `noalias` maps to definition-only `restrict_params` for normal
@@ -290,7 +290,7 @@ choice. See [the refinement policy](PORTING.md#scalar-deferred-value-refinement)
 The diagnostic exporter still has an observed memory-fault loss: LLVM may delete
 an unused ordinary load that Keel retains for its possible fault. Defined-memory
 execution tests do not establish memory-fault parity. See the
-[reproducer and boundary](../../docs/llvm-semantics.md#llvm-contracts-known-llvm-export-loss-ordinary-memory-faults).
+[reproducer and boundary](../../docs/frontends/llvm.md#llvm-contracts-known-llvm-export-loss-ordinary-memory-faults).
 
 Keel's `preserves_access` call contract is not inferred from LLVM attributes or
 emitted as an LLVM attribute. It separately protects the native optimizer from

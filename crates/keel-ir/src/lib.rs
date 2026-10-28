@@ -1,5 +1,5 @@
 //! Keel IR: a CFG of blocks with block arguments, pinned side-effecting
-//! instructions and floating pure ones. See `docs/design.md`.
+//! instructions and floating pure ones. See `docs/compiler/design.md`.
 
 pub mod asm;
 pub mod builder;

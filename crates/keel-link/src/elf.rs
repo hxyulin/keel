@@ -1,5 +1,5 @@
 //! Host-independent ELF64 executable linker for x86-64 and AArch64 Linux.
-//! See docs/elf-linker.md for the supported input and execution contract.
+//! See docs/linking/elf.md for the supported input and execution contract.
 pub(crate) mod aarch64;
 mod bounds;
 mod dynamic;

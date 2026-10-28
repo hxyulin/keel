@@ -180,10 +180,22 @@ operations! {
 impl NeonIntrinsic {
     pub fn arity(self) -> usize {
         if self.is_integer_misc() {
-            return match self { Self::Cls | Self::Rbit => 1, Self::Sadalp | Self::Uadalp => 2, _ => 3 };
+            return match self {
+                Self::Cls | Self::Rbit => 1,
+                Self::Sadalp | Self::Uadalp => 2,
+                _ => 3,
+            };
         }
         use NeonIntrinsic::*;
-        if let Some(m) = self.memory() { return 1 + if m.store || m.lane { m.count as usize } else { 0 } + usize::from(m.lane); }
+        if let Some(m) = self.memory() {
+            return 1
+                + if m.store || m.lane {
+                    m.count as usize
+                } else {
+                    0
+                }
+                + usize::from(m.lane);
+        }
         match self {
             Shrn | Rshrn | Sqshrn | Uqshrn | Sqrshrn | Uqrshrn | Sqshrun | Sqrshrun | SshrImm
             | UshrImm | SrshrImm | UrshrImm | ShlImm | SqshlImm | UqshlImm | Sqshlu | Sshl
@@ -225,12 +237,22 @@ impl NeonIntrinsic {
     pub fn accepts(self, ty: Type) -> bool {
         use NeonIntrinsic::*;
         if self.is_integer_misc() {
-            let Some(v) = ty.vector() else { return false; };
-            if !matches!(v.bytes(), 8 | 16) || !v.lane_type().is_int() { return false; }
+            let Some(v) = ty.vector() else {
+                return false;
+            };
+            if !matches!(v.bytes(), 8 | 16) || !v.lane_type().is_int() {
+                return false;
+            }
             let bytes = v.lane_type().bytes().unwrap();
-            return match self { Self::Rbit => bytes == 1, Self::Sadalp | Self::Uadalp => bytes >= 2, _ => bytes <= 4 };
+            return match self {
+                Self::Rbit => bytes == 1,
+                Self::Sadalp | Self::Uadalp => bytes >= 2,
+                _ => bytes <= 4,
+            };
         }
-        if self.memory().is_some() { return ty.vector().is_some_and(|v| matches!(v.bytes(), 8 | 16)); }
+        if self.memory().is_some() {
+            return ty.vector().is_some_and(|v| matches!(v.bytes(), 8 | 16));
+        }
         if self.is_status() {
             return ty == Type::I64;
         }
@@ -247,16 +269,39 @@ impl NeonIntrinsic {
             if shape.lane_type().bytes() == Some(8) {
                 return self.accepts_scalar(shape.lane_type());
             }
-            let q = VectorType::ALL_128.into_iter()
-                .find(|v| v.lane_type() == shape.lane_type()).unwrap();
+            let q = VectorType::ALL_128
+                .into_iter()
+                .find(|v| v.lane_type() == shape.lane_type())
+                .unwrap();
             // Widening always produces Q; narrowing may return the exact D half.
-            let narrow = matches!(self, Sqxtn | Uqxtn | Sqxtun | Addhn | Raddhn | Subhn | Rsubhn
-                | Shrn | Rshrn | Sqshrn | Uqshrn | Sqrshrn | Uqrshrn | Sqshrun | Sqrshrun
-                | Fcvtn | Fcvtxn | Fcvthn);
+            let narrow = matches!(
+                self,
+                Sqxtn
+                    | Uqxtn
+                    | Sqxtun
+                    | Addhn
+                    | Raddhn
+                    | Subhn
+                    | Rsubhn
+                    | Shrn
+                    | Rshrn
+                    | Sqshrn
+                    | Uqshrn
+                    | Sqrshrn
+                    | Uqrshrn
+                    | Sqshrun
+                    | Sqrshrun
+                    | Fcvtn
+                    | Fcvtxn
+                    | Fcvthn
+            );
             return !matches!(self, Fcvtl | Fcvthl)
-                && (!self.changes_width() || narrow) && self.accepts(Type::Vector(q));
+                && (!self.changes_width() || narrow)
+                && self.accepts(Type::Vector(q));
         }
-        if shape.bytes() != 16 { return false; }
+        if shape.bytes() != 16 {
+            return false;
+        }
         match self {
             Frecpx => false,
             Sqadd | Uqadd | Sqsub | Uqsub | Suqadd | Usqadd | Sqabs | Sqneg | Sqshl | Uqshl
@@ -319,44 +364,92 @@ impl NeonIntrinsic {
         if self.is_integer_misc() {
             let v = result.vector().unwrap();
             return Some(if matches!(self, Self::Sadalp | Self::Uadalp) {
-                let source = VectorType::ALL_64.into_iter().chain(VectorType::ALL_128)
-                    .find(|s| s.bytes() == v.bytes() && s.lane_type().is_int() && s.lane_type().bytes().unwrap()*2 == v.lane_type().bytes().unwrap()).unwrap();
+                let source = VectorType::ALL_64
+                    .into_iter()
+                    .chain(VectorType::ALL_128)
+                    .find(|s| {
+                        s.bytes() == v.bytes()
+                            && s.lane_type().is_int()
+                            && s.lane_type().bytes().unwrap() * 2 == v.lane_type().bytes().unwrap()
+                    })
+                    .unwrap();
                 vec![result, Type::Vector(source)]
-            } else { vec![result; self.arity()] });
+            } else {
+                vec![result; self.arity()]
+            });
         }
         if !self.is_status() && self.accepts_scalar(result) {
             return Some(self.scalar_operands(result));
         }
-        if let Some(shape) = result.vector() && shape.lanes() == 1 && self.accepts_scalar(shape.lane_type()) {
-            return Some(self.scalar_operands(shape.lane_type()).into_iter().map(|t| {
-                if t == Type::I32 && self.immediate_range(result).is_some() { t }
-                else if t.is_vector() { t }
-                else { Type::Vector(VectorType::ALL_64.into_iter().find(|v| v.lane_type() == t).unwrap()) }
-            }).collect());
+        if let Some(shape) = result.vector()
+            && shape.lanes() == 1
+            && self.accepts_scalar(shape.lane_type())
+        {
+            return Some(
+                self.scalar_operands(shape.lane_type())
+                    .into_iter()
+                    .map(|t| {
+                        if t == Type::I32 && self.immediate_range(result).is_some() {
+                            t
+                        } else if t.is_vector() {
+                            t
+                        } else {
+                            Type::Vector(
+                                VectorType::ALL_64
+                                    .into_iter()
+                                    .find(|v| v.lane_type() == t)
+                                    .unwrap(),
+                            )
+                        }
+                    })
+                    .collect(),
+            );
         }
         if let Some(m) = self.memory() {
             let mut types = vec![Type::Ptr];
-            if m.store || m.lane { types.extend(std::iter::repeat_n(result, m.count as usize)); }
-            if m.lane { types.push(Type::I32); }
+            if m.store || m.lane {
+                types.extend(std::iter::repeat_n(result, m.count as usize));
+            }
+            if m.lane {
+                types.push(Type::I32);
+            }
             return Some(types);
         }
-        if let Some(shape) = result.vector() && shape.bytes() == 8 {
-            let q = VectorType::ALL_128.into_iter()
-                .find(|v| v.lane_type() == shape.lane_type()).unwrap();
+        if let Some(shape) = result.vector()
+            && shape.bytes() == 8
+        {
+            let q = VectorType::ALL_128
+                .into_iter()
+                .find(|v| v.lane_type() == shape.lane_type())
+                .unwrap();
             let inputs = self.operand_types(Type::Vector(q))?;
             // Narrowing consumes Q. Table registers are always 16 bytes even
             // when indices, fallback and result have only eight lanes.
-            return Some(inputs.into_iter().enumerate().map(|(i, t)| {
-                if self.changes_width() || matches!(self, Fcvtn | Fcvtxn | Fcvthn) {
-                    return t;
-                }
-                let table_start = usize::from(matches!(self, Tbx1 | Tbx2 | Tbx3 | Tbx4));
-                if self.is_table() && i >= table_start && i + 1 < self.arity() { return t; }
-                if let Some(v) = t.vector() {
-                    Type::Vector(VectorType::ALL_64.into_iter()
-                        .find(|d| d.lane_type() == v.lane_type()).unwrap())
-                } else { t }
-            }).collect());
+            return Some(
+                inputs
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, t)| {
+                        if self.changes_width() || matches!(self, Fcvtn | Fcvtxn | Fcvthn) {
+                            return t;
+                        }
+                        let table_start = usize::from(matches!(self, Tbx1 | Tbx2 | Tbx3 | Tbx4));
+                        if self.is_table() && i >= table_start && i + 1 < self.arity() {
+                            return t;
+                        }
+                        if let Some(v) = t.vector() {
+                            Type::Vector(
+                                VectorType::ALL_64
+                                    .into_iter()
+                                    .find(|d| d.lane_type() == v.lane_type())
+                                    .unwrap(),
+                            )
+                        } else {
+                            t
+                        }
+                    })
+                    .collect(),
+            );
         }
         let relative = |factor: u32, divide: bool| {
             let bytes = result.vector().unwrap().lane_type().bytes().unwrap();
@@ -434,8 +527,8 @@ impl NeonIntrinsic {
             Addhn | Raddhn | Subhn | Rsubhn => vec![relative(2, false); 2],
             Sqadd | Uqadd | Sqsub | Uqsub | Suqadd | Usqadd | Sqabs | Sqneg | Sqshl | Uqshl
             | Sqrshl | Uqrshl | Srshl | Urshl | Sqdmulh | Sqrdmulh | Fmla | Fmls | Fmulx | Fabd
-            | Frecpx | Frecpe | Frsqrte | Frecps | Frsqrts | Urecpe | Ursqrte | Frinta | Frintx | Frinti
-            | Fminnm | Fmaxnm | Pmul | ReadFpsr | SwapFpsr | ReadFpcr | SwapFpcr => {
+            | Frecpx | Frecpe | Frsqrte | Frecps | Frsqrts | Urecpe | Ursqrte | Frinta | Frintx
+            | Frinti | Fminnm | Fmaxnm | Pmul | ReadFpsr | SwapFpsr | ReadFpcr | SwapFpcr => {
                 vec![result; self.arity()]
             }
             _ => unreachable!("memory handled above"),
@@ -493,7 +586,9 @@ impl NeonIntrinsic {
         if !self.accepts(result) {
             return None;
         }
-        if self.memory().is_some_and(|m| m.lane) { return Some(0..=i64::from(result.vector()?.lanes() - 1)); }
+        if self.memory().is_some_and(|m| m.lane) {
+            return Some(0..=i64::from(result.vector()?.lanes() - 1));
+        }
         let width = i64::from(result.vector().map_or(result, |v| v.lane_type()).bytes()? * 8);
         match self {
             ScvtfFixed | UcvtfFixed | FcvtzsFixed | FcvtzuFixed => Some(1..=width),
@@ -605,15 +700,29 @@ impl NeonIntrinsic {
             St1x4 => (4, true, false, false, false),
             _ => return None,
         };
-        Some(NeonMemory { count, store, lane, replicate, interleaved })
+        Some(NeonMemory {
+            count,
+            store,
+            lane,
+            replicate,
+            interleaved,
+        })
     }
     pub fn arity_for(self, ty: Type) -> usize {
-        if self.accepts_scalar(ty) || ty.vector().is_some_and(|v| v.lanes() == 1 && self.accepts_scalar(v.lane_type())) {
-            self.scalar_operands(ty.vector().map_or(ty, |v| v.lane_type())).len()
-        } else { self.arity() }
+        if self.accepts_scalar(ty)
+            || ty
+                .vector()
+                .is_some_and(|v| v.lanes() == 1 && self.accepts_scalar(v.lane_type()))
+        {
+            self.scalar_operands(ty.vector().map_or(ty, |v| v.lane_type()))
+                .len()
+        } else {
+            self.arity()
+        }
     }
     pub fn result_count(self) -> usize {
-        self.memory().map_or(1, |m| if m.store { 0 } else { m.count as usize })
+        self.memory()
+            .map_or(1, |m| if m.store { 0 } else { m.count as usize })
     }
 }
 
@@ -625,47 +734,71 @@ impl NeonIntrinsic {
         let int = matches!(ty, Type::I8 | Type::I16 | Type::I32 | Type::I64);
         let fp = matches!(ty, Type::F32 | Type::F64);
         match self {
-            Sqadd | Uqadd | Sqsub | Uqsub | Suqadd | Usqadd | Sqabs | Sqneg
-            | Sqshl | Uqshl | Sqrshl | Uqrshl | SqshlImm | UqshlImm | Sqshlu => int,
-            Sshl | Ushl | Srshl | Urshl | SshrImm | UshrImm | SrshrImm | UrshrImm
-            | ShlImm | Sli | Sri | Ssra | Usra | Srsra | Ursra => ty == Type::I64,
+            Sqadd | Uqadd | Sqsub | Uqsub | Suqadd | Usqadd | Sqabs | Sqneg | Sqshl | Uqshl
+            | Sqrshl | Uqrshl | SqshlImm | UqshlImm | Sqshlu => int,
+            Sshl | Ushl | Srshl | Urshl | SshrImm | UshrImm | SrshrImm | UrshrImm | ShlImm
+            | Sli | Sri | Ssra | Usra | Srsra | Ursra => ty == Type::I64,
             Sqdmulh | Sqrdmulh => matches!(ty, Type::I16 | Type::I32),
             Sqdmull | Sqdmlal | Sqdmlsl => matches!(ty, Type::I32 | Type::I64),
-            Sqxtn | Uqxtn | Sqxtun | Sqshrn | Uqshrn | Sqrshrn | Uqrshrn | Sqshrun | Sqrshrun
-                => matches!(ty, Type::I8 | Type::I16 | Type::I32),
-            Fmla | Fmls | Fmulx | Fabd | Frecpx | Frecpe | Frsqrte | Frecps | Frsqrts
-            | Fabs | Fneg | Fsqrt | Frintn | Frintp | Frintm | Frintz | Frinta | Frintx
-            | Fadd | Fsub | Fmul | Fdiv | Fmin | Fmax | Fminnm | Fmaxnm
-            | Faddp | Fminp | Fmaxp | Fminnmp | Fmaxnmp
-            | Scvtf | Ucvtf | ScvtfFixed | UcvtfFixed => fp,
-            Fcmeq | Fcmge | Fcmgt | Facge | Facgt
-            | Fcvtas | Fcvtau | Fcvtms | Fcvtmu | Fcvtns | Fcvtnu | Fcvtps | Fcvtpu
-            | Fcvtzs | Fcvtzu | FcvtzsFixed | FcvtzuFixed => matches!(ty, Type::I32 | Type::I64),
+            Sqxtn | Uqxtn | Sqxtun | Sqshrn | Uqshrn | Sqrshrn | Uqrshrn | Sqshrun | Sqrshrun => {
+                matches!(ty, Type::I8 | Type::I16 | Type::I32)
+            }
+            Fmla | Fmls | Fmulx | Fabd | Frecpx | Frecpe | Frsqrte | Frecps | Frsqrts | Fabs
+            | Fneg | Fsqrt | Frintn | Frintp | Frintm | Frintz | Frinta | Frintx | Fadd | Fsub
+            | Fmul | Fdiv | Fmin | Fmax | Fminnm | Fmaxnm | Faddp | Fminp | Fmaxp | Fminnmp
+            | Fmaxnmp | Scvtf | Ucvtf | ScvtfFixed | UcvtfFixed => fp,
+            Fcmeq | Fcmge | Fcmgt | Facge | Facgt | Fcvtas | Fcvtau | Fcvtms | Fcvtmu | Fcvtns
+            | Fcvtnu | Fcvtps | Fcvtpu | Fcvtzs | Fcvtzu | FcvtzsFixed | FcvtzuFixed => {
+                matches!(ty, Type::I32 | Type::I64)
+            }
             Fcvtxn => ty == Type::F32,
             _ => false,
         }
     }
     pub fn scalar_operands(self, ty: Type) -> Vec<Type> {
         use NeonIntrinsic::*;
-        let int = if ty == Type::F32 { Type::I32 } else { Type::I64 };
-        let float = if ty == Type::I32 { Type::F32 } else { Type::F64 };
-        let wide = match ty { Type::I8 => Type::I16, Type::I16 => Type::I32, _ => Type::I64 };
-        let narrow = if ty == Type::I32 { Type::I16 } else { Type::I32 };
+        let int = if ty == Type::F32 {
+            Type::I32
+        } else {
+            Type::I64
+        };
+        let float = if ty == Type::I32 {
+            Type::F32
+        } else {
+            Type::F64
+        };
+        let wide = match ty {
+            Type::I8 => Type::I16,
+            Type::I16 => Type::I32,
+            _ => Type::I64,
+        };
+        let narrow = if ty == Type::I32 {
+            Type::I16
+        } else {
+            Type::I32
+        };
         match self {
             Scvtf | Ucvtf => vec![int],
             ScvtfFixed | UcvtfFixed => vec![int, Type::I32],
-            Fcvtas | Fcvtau | Fcvtms | Fcvtmu | Fcvtns | Fcvtnu | Fcvtps | Fcvtpu | Fcvtzs | Fcvtzu => vec![float],
+            Fcvtas | Fcvtau | Fcvtms | Fcvtmu | Fcvtns | Fcvtnu | Fcvtps | Fcvtpu | Fcvtzs
+            | Fcvtzu => vec![float],
             FcvtzsFixed | FcvtzuFixed => vec![float, Type::I32],
-            Fcmeq | Fcmge | Fcmgt | Facge | Facgt => vec![float;2],
+            Fcmeq | Fcmge | Fcmgt | Facge | Facgt => vec![float; 2],
             Fcvtxn => vec![Type::F64],
-            Faddp | Fminp | Fmaxp | Fminnmp | Fmaxnmp => vec![Type::Vector(if ty==Type::F32 {VectorType::F32x2}else{VectorType::F64x2})],
+            Faddp | Fminp | Fmaxp | Fminnmp | Fmaxnmp => vec![Type::Vector(if ty == Type::F32 {
+                VectorType::F32x2
+            } else {
+                VectorType::F64x2
+            })],
             Sqxtn | Uqxtn | Sqxtun => vec![wide],
             Sqshrn | Uqshrn | Sqrshrn | Uqrshrn | Sqshrun | Sqrshrun => vec![wide, Type::I32],
-            Sqdmull => vec![narrow;2],
-            Sqdmlal | Sqdmlsl => vec![ty,narrow,narrow],
-            Ssra | Usra | Srsra | Ursra | Sli | Sri => vec![ty,ty,Type::I32],
-            SshrImm | UshrImm | SrshrImm | UrshrImm | ShlImm | SqshlImm | UqshlImm | Sqshlu => vec![ty,Type::I32],
-            _ => vec![ty;self.arity()],
+            Sqdmull => vec![narrow; 2],
+            Sqdmlal | Sqdmlsl => vec![ty, narrow, narrow],
+            Ssra | Usra | Srsra | Ursra | Sli | Sri => vec![ty, ty, Type::I32],
+            SshrImm | UshrImm | SrshrImm | UrshrImm | ShlImm | SqshlImm | UqshlImm | Sqshlu => {
+                vec![ty, Type::I32]
+            }
+            _ => vec![ty; self.arity()],
         }
     }
 }
@@ -673,6 +806,16 @@ impl NeonIntrinsic {
 impl NeonIntrinsic {
     /// Additional baseline integer lane and accumulator families.
     pub fn is_integer_misc(self) -> bool {
-        matches!(self, Self::Cls | Self::Rbit | Self::Mla | Self::Mls | Self::Saba | Self::Uaba | Self::Sadalp | Self::Uadalp)
+        matches!(
+            self,
+            Self::Cls
+                | Self::Rbit
+                | Self::Mla
+                | Self::Mls
+                | Self::Saba
+                | Self::Uaba
+                | Self::Sadalp
+                | Self::Uadalp
+        )
     }
 }

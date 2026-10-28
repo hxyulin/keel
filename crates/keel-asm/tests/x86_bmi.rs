@@ -1,4 +1,4 @@
-//! Intel SDM Vol. 2 instruction tables are the encoding authority (docs/x86-bmi.md).
+//! Intel SDM Vol. 2 instruction tables are the encoding authority (docs/targets/x86_64/bmi.md).
 use keel_asm::x86::{
     assemble_object, assemble_object_with_features, assemble_program_object_with_features,
 };

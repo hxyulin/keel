@@ -307,7 +307,7 @@ ret
 /// Unchanged `clang -gdwarf-5 -S` output: every section other than the
 /// generated line program is byte-identical, the line tables and
 /// `__debug_line_str` match, and the linked program's dSYM verifies.
-/// `-O0` avoids cross-function LEB128 range offsets (see docs/dwarf5.md).
+/// `-O0` avoids cross-function LEB128 range offsets (see docs/linking/dwarf5.md).
 #[test]
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn unchanged_clang_dwarf5_output_matches_and_links() {

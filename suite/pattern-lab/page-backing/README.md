@@ -1,7 +1,7 @@
 # Fixed code-backing application comparison
 
 This Linux/x86-64 research harness implements a controlled comparison motivated
-by [the executable-backing investigation](../../../docs/executable-page-backing.md).
+by [the executable-backing investigation](../../../docs/benchmarks/page-backing.md).
 It does not change compiler behavior or provide a general-purpose ELF loader.
 Run on an otherwise available benchmark host. No automatic remote access,
 installation, governor changes or global ASLR changes occur.

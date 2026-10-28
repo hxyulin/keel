@@ -1305,10 +1305,17 @@ impl<'a> Parser<'a> {
         for f in &self.funcs {
             if self.globals[f.global].gnu_inline_only {
                 let global = &self.globals[f.global];
-                if global.internal || global.weak.is_some() || global.visibility.is_some_and(Visibility::hidden)
-                    || global.used || global.retain.is_some() || global.lifecycle.is_some()
+                if global.internal
+                    || global.weak.is_some()
+                    || global.visibility.is_some_and(Visibility::hidden)
+                    || global.used
+                    || global.retain.is_some()
+                    || global.lifecycle.is_some()
                 {
-                    return Err(Error::new(f.loc, "GNU extern-inline bodies with binding or retention attributes are not supported"));
+                    return Err(Error::new(
+                        f.loc,
+                        "GNU extern-inline bodies with binding or retention attributes are not supported",
+                    ));
                 }
                 self.globals[f.global].internal = true;
             } else if !self.external_def.contains(&f.global) {
@@ -1623,10 +1630,14 @@ impl<'a> Parser<'a> {
                 self.function_alias(g, attrs, file_scope)?;
                 if file_scope && self.is("{") {
                     if fty.microsoft_x64 {
-                        return Err(Error::new(name_loc, "ms_abi definitions require unsupported Microsoft x64 ABI lowering"));
+                        return Err(Error::new(
+                            name_loc,
+                            "ms_abi definitions require unsupported Microsoft x64 ABI lowering",
+                        ));
                     }
                     self.globals[g].gnu_inline_only = self.globals[g].gnu_inline
-                        && spec.inline && spec.storage == Storage::Extern;
+                        && spec.inline
+                        && spec.storage == Storage::Extern;
                     self.function_body(g, fty, name_loc)?;
                     return Ok(());
                 }

@@ -2,7 +2,7 @@
 
 `keel-wasm` turns a `keel_ir::Module` into a complete core WebAssembly 1.0 (MVP)
 binary. It is the backend behind `keel cc/compile --target wasm32-unknown-unknown
---emit-wasm` (see [docs/wasm-cli.md](../../docs/wasm-cli.md)), and can also be used
+--emit-wasm` (see [docs/targets/wasm/README.md](../../docs/targets/wasm/README.md)), and can also be used
 directly as a library.
 
 It does not run an optimizer, does not use the native backend, and produces no
@@ -18,8 +18,8 @@ mutating it and returns either complete, independently validated bytes or a
 
 | Function | Adds |
 | --- | --- |
-| `emit_module(&Module, &Options)` | Scalar integer code, no memory ([scalar backend](../../docs/wasm-backend.md)) |
-| `emit_wasm32_memory_module(&Module, &Wasm32MemoryOptions)` | One fixed, exported linear memory; loads, stores and pointers ([memory backend](../../docs/wasm-backend.md)) |
+| `emit_module(&Module, &Options)` | Scalar integer code, no memory ([scalar backend](../../docs/targets/wasm/backend.md)) |
+| `emit_wasm32_memory_module(&Module, &Wasm32MemoryOptions)` | One fixed, exported linear memory; loads, stores and pointers ([memory backend](../../docs/targets/wasm/backend.md)) |
 | `emit_wasm32_runtime_module(&Module, &Wasm32RuntimeOptions)` | Static data, pointer fixups and a checked software stack for address-taken locals |
 
 `validate_wasm32_runtime_module(&Module, &Wasm32RuntimeOptions)` runs the same

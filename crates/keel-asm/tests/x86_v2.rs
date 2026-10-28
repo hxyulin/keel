@@ -336,8 +336,10 @@ fn every_inventory_form_matches_clang_gnu_and_typed_text() {
     let dir = root
         .clone()
         .unwrap_or_else(|| std::env::temp_dir().join(format!("keel-v2-{}", std::process::id())));
-    let inventory: serde_json::Value =
-        serde_json::from_str(include_str!("../../../docs/v2-coverage/inventory.json")).unwrap();
+    let inventory: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../docs/targets/x86_64/coverage/v2-inventory.json"
+    ))
+    .unwrap();
     assert_eq!(
         inventory["instructions"].as_array().unwrap().len(),
         V2Opcode::ALL.len()
@@ -675,8 +677,10 @@ fn ssse3_mmx_inventory_matches_clang_gnu_and_typed_text() {
     let dir = root.clone().unwrap_or_else(|| {
         std::env::temp_dir().join(format!("keel-v2-mmx-{}", std::process::id()))
     });
-    let inventory: serde_json::Value =
-        serde_json::from_str(include_str!("../../../docs/v2-coverage/inventory.json")).unwrap();
+    let inventory: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../docs/targets/x86_64/coverage/v2-inventory.json"
+    ))
+    .unwrap();
     let mut report = Vec::new();
     for &op in V2Opcode::ALL.iter().filter(|op| op.supports_mmx()) {
         let s = op.spec();

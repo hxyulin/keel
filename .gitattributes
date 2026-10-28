@@ -11,7 +11,7 @@
 /crates/keel-codegen/tests/**/corpus.ir linguist-generated=true
 /crates/keel-codegen/tests/**/cases.json linguist-generated=true
 /crates/keel-codegen/tests/f64x1_recursive/layouts.txt linguist-generated=true
-/docs/v2-coverage/inventory.json linguist-generated=true
+/docs/targets/x86_64/coverage/v2-inventory.json linguist-generated=true
 
 # Generated CPU-profile membership documentation.
 /tools/x86-isa/cpu-profile-table.md linguist-generated=true
@@ -23,8 +23,8 @@
 /crates/keel-codegen/src/x86_64/generated/*.rs linguist-generated=true
 
 # Generated structural x86 coverage reports.
-/docs/x86-coverage/coverage.json linguist-generated=true
-/docs/x86-coverage/README.md linguist-generated=true
+/docs/targets/x86_64/coverage/coverage.json linguist-generated=true
+/docs/targets/x86_64/coverage/README.md linguist-generated=true
 
 # AVX-512 source data and generated assembly smoke fixtures.
 /tools/x86-isa/evex.json linguist-vendored=true

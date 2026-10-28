@@ -1,6 +1,6 @@
 //! A C frontend for keel: preprocessing and compilation to keel IR.
 //! `Wasm32UnknownUnknown` selects a bounded freestanding ILP32 profile;
-//! see `docs/wasm-c-freestanding.md` for accepted storage and call contracts.
+//! see `docs/targets/wasm/c-frontend.md` for accepted storage and call contracts.
 //! `preprocess` accepts raw C; `compile` accepts its output or `clang -E` text.
 //!
 //! The pipeline is lexer (`lex.rs`) → parser, which resolves names and
@@ -26,8 +26,8 @@
 //! placement and distinct linker `retain` are supported;
 //! Darwin finalization requires libSystem atexit, ELF requires runtime array dispatch.
 //! Other unimplemented linkage
-//! and lifetime attributes are diagnosed; see `docs/c-frontend-coverage.md` and
-//! `docs/design.md`'s C frontend section for compatibility limits.
+//! and lifetime attributes are diagnosed; see `docs/frontends/c/README.md` and
+//! `docs/compiler/design.md`'s C frontend section for compatibility limits.
 
 mod arena;
 mod ast;

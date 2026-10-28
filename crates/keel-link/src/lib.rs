@@ -1,5 +1,5 @@
 //! Native executable linkers: arm64 Mach-O (`link`) and x86-64/AArch64 ELF (`elf::link`).
-//! See docs/macos-linker.md and docs/elf-linker.md.
+//! See docs/linking/macho.md and docs/linking/elf.md.
 //! `link` returns an unsigned executable image. `write_signed` and `link_signed`
 //! produce linker ad-hoc signatures in process on any host and install atomically.
 pub mod archive;

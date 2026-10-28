@@ -10,7 +10,7 @@ Every stage is also a standalone command, so you can start or stop anywhere in
 the pipeline.
 
 Optimization presets `-O0`, `-O1`, `-O2`, `-O3` and `-Os` select distinct
-compiler policies. See [optimization levels and measurements](docs/optimization-levels.md)
+compiler policies. See [optimization levels and measurements](docs/compiler/optimization-levels.md)
 for stage overrides, size-policy limits and x86-64 code models.
 
 ## Install
@@ -66,26 +66,26 @@ keel cc --target wasm32-unknown-unknown --emit-wasm --export add add.c -o add.wa
 links hosted programs through the system driver.
 
 C support targets C11 with common GNU extensions (vectors, VLAs, attributes,
-complex numbers, AArch64 inline assembly). See [C coverage](docs/c-frontend-coverage.md)
-and [ISA status](docs/userspace-isa-status.md) for the details and limits.
+complex numbers, AArch64 inline assembly). See [C coverage](docs/frontends/c/README.md)
+and [ISA status](docs/targets/README.md) for the details and limits.
 
 ## Linux kernel milestone
 
 Keel compiles and assembles the core of a pinned minimal x86-64 Linux v6.12
 kernel. The resulting kernel boots and passes checked filesystem, memory,
 fork/COW and pipe workloads. No replacement GCC C objects or manual IR patches
-are needed. Keel also performs [native core linking](docs/linux-kernel.md),
+are needed. Keel also performs [native core linking](docs/integrations/linux-kernel.md),
 including GNU script layout, regular/thin archives and relocatable aggregation.
 The build uses captured preprocessed inputs and reference boot, decompressor
 and vDSO stages. Full raw-source Kbuild remains work in progress.
-[Build and boot evidence](docs/linux-kernel.md).
+[Build and boot evidence](docs/integrations/linux-kernel.md).
 
 The earlier GNU-linked benchmark image is **1.61 MB versus GCC's 0.93 MB**, 73% larger. Guest
 init-entry timing is similar, about 257 ms versus 259 ms. Five checked
 kernel-heavy workloads take **1.52–2.38× as long** as GCC 14.4's size-optimized
 kernel. These measurements use nine alternating pairs on an AMD Ryzen 9
 9950X3D with native KVM execution, one vCPU and identical userspace.
-[Methodology, samples and limits](docs/linux-kernel-benchmarks.md).
+[Methodology, samples and limits](docs/benchmarks/linux-kernel.md).
 
 <p align="center"><img src="docs/assets/readme-kernel-runtime.svg" alt="Pinned Linux v6.12 kernel workload time, Keel relative to GCC 14.4 -Os: getpid 1.52x, open/read/close 2.38x, page faults and protection 2.17x, fork/COW/wait 2.06x, pipe ping-pong 1.74x. Native KVM, one vCPU, median of nine paired runs; lower is better." width="720"></p>
 
@@ -115,13 +115,13 @@ Charts are generated from the benchmark data by
 ## Documentation
 
 - [Documentation index and retention policy](docs/README.md)
-- [Toolchain reference](docs/toolchain-overview.md): commands, flags, optimization tiers
-- [Design](docs/design.md): IR, optimizer and backend architecture
-- [C frontend](docs/c-frontend-coverage.md) · [SIMD IR](docs/simd-ir.md)
-- [macOS linker](docs/macos-linker.md) · [ELF linker](docs/elf-linker.md) · [Static archives](docs/static-archives.md)
-- [x86 assembler](docs/native-x86-assembler.md) · [ARM Linux](docs/arm-linux.md)
+- [Toolchain reference](docs/toolchain.md): commands, flags, optimization tiers
+- [Design](docs/compiler/design.md): IR, optimizer and backend architecture
+- [C frontend](docs/frontends/c/README.md) · [SIMD IR](docs/compiler/simd-ir.md)
+- [macOS linker](docs/linking/macho.md) · [ELF linker](docs/linking/elf.md) · [Static archives](docs/linking/archives.md)
+- [x86 assembler](docs/targets/x86_64/assembler.md) · [ARM Linux](docs/targets/aarch64/README.md)
 - [Disassembler](crates/keel-disasm/README.md) · [Shared x86 tables](tools/x86-isa/README.md)
-- [WebAssembly](docs/wasm-cli.md)
+- [WebAssembly](docs/targets/wasm/README.md)
 - [Benchmark and application suite](suite/README.md)
 
 ## Development
@@ -131,9 +131,9 @@ cargo build
 python3 tools/test.py
 ```
 
-See [targeted and full tests](docs/testing.md) for component selections, quick
+See [targeted and full tests](docs/development/testing.md) for component selections, quick
 checks and the optimized test profile.
 
 End-to-end tests need `clang` (and `clang++` for C++ drivers). See the
-[development section](docs/toolchain-overview.md#development) for test layout.
+[development section](docs/toolchain.md#development) for test layout.
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/).

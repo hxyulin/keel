@@ -112,7 +112,11 @@ impl InstBuilder<'_> {
     /// Query the returned instruction with `Function::inst_results`.
     pub fn neon_memory(self, op: crate::NeonIntrinsic, ty: Type, args: &[Value]) -> Inst {
         assert!(op.memory().is_some());
-        self.build(InstData::Neon { op, ty, args: args.to_vec() })
+        self.build(InstData::Neon {
+            op,
+            ty,
+            args: args.to_vec(),
+        })
     }
     pub fn vector_reduce(self, op: crate::VectorReduceOp, arg: Value) -> Value {
         self.value(InstData::VectorReduce { op, arg })
@@ -198,7 +202,10 @@ impl InstBuilder<'_> {
     }
 
     pub fn f80const(self, significand: u64, sign_exp: u16) -> Value {
-        self.value(InstData::F80const { significand, sign_exp })
+        self.value(InstData::F80const {
+            significand,
+            sign_exp,
+        })
     }
 
     pub fn f64const(self, x: f64) -> Value {
@@ -251,8 +258,22 @@ impl InstBuilder<'_> {
     }
 
     pub fn aggregate_va_arg(self, layout: crate::Layout, list: Value) -> Value {
-        let home = self.func.create_stack_slot(layout.size().try_into().expect("aggregate home size fits u32"), layout.align().try_into().expect("aggregate home alignment fits u32"));
-        self.value(InstData::AggregateVaArg { layout, list, home, x86_vector_abi: None })
+        let home = self.func.create_stack_slot(
+            layout
+                .size()
+                .try_into()
+                .expect("aggregate home size fits u32"),
+            layout
+                .align()
+                .try_into()
+                .expect("aggregate home alignment fits u32"),
+        );
+        self.value(InstData::AggregateVaArg {
+            layout,
+            list,
+            home,
+            x86_vector_abi: None,
+        })
     }
 
     pub fn call_abi(self, func: FuncRef, args: crate::CallArgs) -> Inst {
@@ -264,11 +285,24 @@ impl InstBuilder<'_> {
     }
 
     pub fn va_arg(self, ty: Type, list: Value) -> Value {
-        self.value(InstData::VaArg { ty, list, x86_vector_abi: None })
+        self.value(InstData::VaArg {
+            ty,
+            list,
+            x86_vector_abi: None,
+        })
     }
 
-    pub fn va_arg_with_x86_vector_abi(self, ty: Type, list: Value, abi: crate::X86VectorAbi) -> Value {
-        self.value(InstData::VaArg { ty, list, x86_vector_abi: Some(abi) })
+    pub fn va_arg_with_x86_vector_abi(
+        self,
+        ty: Type,
+        list: Value,
+        abi: crate::X86VectorAbi,
+    ) -> Value {
+        self.value(InstData::VaArg {
+            ty,
+            list,
+            x86_vector_abi: Some(abi),
+        })
     }
 
     pub fn atomic_load(self, ty: Type, ordering: Ordering, addr: Value) -> Value {

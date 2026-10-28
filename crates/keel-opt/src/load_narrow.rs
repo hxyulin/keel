@@ -1,11 +1,11 @@
 //! Opt-in, explicitly little-endian narrowing of fault-free private stack reads.
 //!
 //! Generic pointer loads are deliberately unsupported: an ordinary load may
-//! fault, and reducing its width can suppress that fault. See docs/load-narrow.md.
+//! fault, and reducing its width can suppress that fault. See docs/compiler/load-narrow.md.
 
 use crate::{Pass, VectorTarget};
-use keel_ir::{BinaryOp, ConvertOp, Function, InsertPoint, InstData, Type, Value, ValueDef};
 use keel_ir::fxhash::FxHashMap;
+use keel_ir::{BinaryOp, ConvertOp, Function, InsertPoint, InstData, Type, Value, ValueDef};
 
 pub(crate) struct LoadNarrow;
 
@@ -80,7 +80,10 @@ fn run_little_endian(func: &mut Function) -> bool {
     loop {
         let before = addresses.len();
         for &inst in &instructions {
-            if let InstData::Binary { op: BinaryOp::Ptradd, args } = *func.inst_data(inst)
+            if let InstData::Binary {
+                op: BinaryOp::Ptradd,
+                args,
+            } = *func.inst_data(inst)
                 && let Some(&remaining) = addresses.get(&func.resolve(args[0]))
                 && let Some(offset) = constant(func, args[1]).and_then(|n| u32::try_from(n).ok())
                 && let Some(remaining) = remaining.checked_sub(offset)
@@ -122,10 +125,15 @@ fn run_little_endian(func: &mut Function) -> bool {
             }
             let allowed = match data {
                 InstData::Load { addr, .. } => func.resolve(*addr) == value,
-                InstData::Store { addr, value: stored, .. } => {
-                    func.resolve(*addr) == value && func.resolve(*stored) != value
-                }
-                InstData::Binary { op: BinaryOp::Ptradd, args } => {
+                InstData::Store {
+                    addr,
+                    value: stored,
+                    ..
+                } => func.resolve(*addr) == value && func.resolve(*stored) != value,
+                InstData::Binary {
+                    op: BinaryOp::Ptradd,
+                    args,
+                } => {
                     func.resolve(args[0]) == value
                         && addresses.contains_key(&func.first_result(inst))
                 }
@@ -148,7 +156,11 @@ fn run_little_endian(func: &mut Function) -> bool {
     }
     let mut changed = false;
     for inst in instructions {
-        let InstData::Binary { op: BinaryOp::And, args } = *func.inst_data(inst) else {
+        let InstData::Binary {
+            op: BinaryOp::And,
+            args,
+        } = *func.inst_data(inst)
+        else {
             continue;
         };
         let result = func.first_result(inst);
@@ -165,13 +177,16 @@ fn run_little_endian(func: &mut Function) -> bool {
         let ValueDef::Result(load, 0) = func.value_def(value) else {
             continue;
         };
-        if func.is_removed(load)
-            || func.first_result(load) != value
-            || uses.get(&value) != Some(&1)
+        if func.is_removed(load) || func.first_result(load) != value || uses.get(&value) != Some(&1)
         {
             continue;
         }
-        let InstData::Load { flags, ty: Type::I64, addr } = *func.inst_data(load) else {
+        let InstData::Load {
+            flags,
+            ty: Type::I64,
+            addr,
+        } = *func.inst_data(load)
+        else {
             continue;
         };
         if flags.volatile || !flags.notrap {
@@ -179,12 +194,19 @@ fn run_little_endian(func: &mut Function) -> bool {
         }
         // Same address, same alignment/flags, same execution position/location.
         // Do not mutate Load's result type in place: Function forbids that.
-        let narrow = func.insert_inst(InsertPoint::Before(load), InstData::Load {
-            flags, ty: Type::I8, addr,
-        });
+        let narrow = func.insert_inst(
+            InsertPoint::Before(load),
+            InstData::Load {
+                flags,
+                ty: Type::I8,
+                addr,
+            },
+        );
         func.set_inst_loc(narrow, func.inst_loc(load));
         *func.inst_data_mut(inst) = InstData::Convert {
-            op: ConvertOp::Uext, ty: Type::I64, arg: func.first_result(narrow),
+            op: ConvertOp::Uext,
+            ty: Type::I64,
+            arg: func.first_result(narrow),
         };
         func.remove_inst(load);
         changed = true;

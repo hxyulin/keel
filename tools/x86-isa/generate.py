@@ -366,7 +366,7 @@ def feature_adapters(data, adapters, policy):
 
 
 def documentation_inventory(v2_source, adapters):
-    target = ROOT.parents[1] / 'docs/v2-coverage/inventory.json'
+    target = ROOT.parents[1] / 'docs/targets/x86_64/coverage/v2-inventory.json'
     inventory = json.loads(target.read_text())
     old = {row['mnemonic']: row for row in inventory['instructions']}
     rows = []

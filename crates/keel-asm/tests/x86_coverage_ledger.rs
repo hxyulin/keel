@@ -6,7 +6,10 @@ use serde_json::Value;
 use std::collections::HashSet;
 
 fn ledger() -> Value {
-    serde_json::from_str(include_str!("../../../docs/x86-coverage/coverage.json")).unwrap()
+    serde_json::from_str(include_str!(
+        "../../../docs/targets/x86_64/coverage/coverage.json"
+    ))
+    .unwrap()
 }
 
 #[test]

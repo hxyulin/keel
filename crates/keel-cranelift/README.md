@@ -64,7 +64,7 @@ order is: correctness gate, then compile timing, then exploratory runtime.
 
 ## Semantic mapping (checked against Keel's spec and CLIF's definitions)
 
-Sources: Keel's `docs/design.md`, `docs/simd-ir.md` and
+Sources: Keel's `docs/compiler/design.md`, `docs/compiler/simd-ir.md` and
 `keel-ir/src/inst.rs`, and Cranelift's instruction definitions in
 `cranelift-codegen-meta-0.136.3/src/shared/instructions.rs`.
 
@@ -230,7 +230,7 @@ comparable:
   random interleaving, and no core pinning or physical-page control.
 - Clang `-O2` runtimes are a C→object reference, not a same-IR result.
 - Publication-quality runtime claims need the fixed-page protocol on x86-64
-  Linux (see `docs/executable-page-backing.md`), which was not run.
+  Linux (see `docs/benchmarks/page-backing.md`), which was not run.
 
 `k_stackobj` accumulates and returns unsigned 64-bit values. Its arithmetic wraps
 modulo 2^64 for the driver's full-range signed inputs; the input sign still chooses

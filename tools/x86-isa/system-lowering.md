@@ -90,7 +90,7 @@ reviewed ordering, clobber and result-packing rules; register names alone are
 insufficient.
 
 The older descriptor/status, selector and scalar port-I/O families now have
-[generated metadata and public helper tables](../../docs/x86-intrinsics.md)
+[generated metadata and public helper tables](../../docs/targets/x86_64/intrinsics.md)
 for 42 existing IDs. Their shared emission code has not migrated into
 this recipe engine. The four wide LAR/LSL register
 operand gaps found during that migration are now fixed.
