@@ -19,7 +19,7 @@ def main():
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[4]
     out = args.out.resolve()
-    out.relative_to(root / 'suite' / 'reports')  # Generated evidence must be ignored.
+    out.relative_to(root / 'suite/reports')  # Generated evidence must be ignored.
     out.mkdir(parents=True, exist_ok=False)
     keel = args.keel.resolve()
     fixture = Path(__file__).resolve().parent

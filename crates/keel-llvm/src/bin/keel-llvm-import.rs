@@ -1,4 +1,4 @@
-//! Native replacement for suite/llvm_import.py.
+//! Native replacement for suite/ir/llvm_import.py.
 use keel_llvm::import::{Importer, Options};
 use std::{
     io::{Read, Write},

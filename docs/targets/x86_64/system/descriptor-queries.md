@@ -60,7 +60,7 @@ with bounded seed values.
 
 ## CPL0 table-observation fixture
 
-`suite/x86-cpl0/cases/descriptor.keel` exports one SysV AMD64 function:
+`suite/integration/x86-cpl0/cases/descriptor.keel` exports one SysV AMD64 function:
 `void descriptor_observe(unsigned char out[32])`. RDI points to 32 writable
 bytes initially filled with `0xa5`; the caller provides normal SysV stack
 alignment. SGDT writes offsets 1-10 and SIDT writes offsets 17-26 (both
@@ -90,8 +90,8 @@ never values read by the generated queries. The addresses below are example
 inputs, not an assumed boot layout:
 
 ```sh
-python3 suite/x86-cpl0/cases/descriptor_expected.py --self-test
-python3 suite/x86-cpl0/cases/descriptor_expected.py \
+python3 suite/integration/x86-cpl0/cases/descriptor_expected.py --self-test
+python3 suite/integration/x86-cpl0/cases/descriptor_expected.py \
   --gdt-base 0x1000 --gdt-limit 0x27 \
   --idt-base 0x2000 --idt-limit 0xfff > descriptor-expected.bin
 KEEL_DESCRIPTOR_EXPORT_DIR="$PWD/descriptor-exports" \
@@ -108,9 +108,9 @@ their results are unused. Literal encoding tests cover operand widths. SMSW
 wide-container semantics and `old`-value liveness are not covered by the guest
 fixture.
 
-Run the guest campaign with `suite/x86-cpl0/descriptor_campaign.py --exports DIR`,
+Run the guest campaign with `suite/integration/x86-cpl0/descriptor_campaign.py --exports DIR`,
 with optional `--qemu`, `--as`, `--ld`, `--objcopy`, and `--timeout` overrides.
-See `suite/x86-cpl0/README.md` for the complete commands. All twelve explicit V1
+See `suite/integration/x86-cpl0/README.md` for the complete commands. All twelve explicit V1
 variants, including Full optimization and forced spills, pass the 32-byte
 comparison under QEMU 11.1.1 TCG on x86-64 Linux (READY/PASS, exit 33).
 Negative controls (an observation-free function, or a correct observation
@@ -149,7 +149,7 @@ above CR0 bit 15 distinguish wide SMSW from a zero-extended memory result.
 KEEL_DESCRIPTOR_STATUS_EXPORT_DIR="$PWD/target/descriptor-status-exports" \
   cargo test -p keel-codegen --test x86_descriptor_cpl0 \
   --test x86_descriptor_queries_encoding
-python3 suite/x86-cpl0/descriptor_campaign.py --status \
+python3 suite/integration/x86-cpl0/descriptor_campaign.py --status \
   --exports target/descriptor-status-exports --timeout 5
 ```
 

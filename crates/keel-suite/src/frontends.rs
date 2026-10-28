@@ -26,7 +26,7 @@ pub fn run(root: &Path, options: Options, jobs: usize) -> Result<bool> {
     let mut command = Command::new(options.python);
     command
         .current_dir(root)
-        .arg(root.join("suite/frontend_validate.py"))
+        .arg(root.join("suite/integration/frontend_validate.py"))
         .arg("--out")
         .arg(options.out)
         .arg("--jobs")

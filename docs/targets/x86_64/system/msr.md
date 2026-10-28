@@ -73,7 +73,7 @@ against literal expectations. It installs no exception recovery.
 ```sh
 KEEL_MSR_EXPORT_DIR="$PWD/target/msr-exports" \
   cargo test -p keel-codegen --test x86_msr
-python3 suite/x86-cpl0/descriptor_campaign.py --msr \
+python3 suite/integration/x86-cpl0/descriptor_campaign.py --msr \
   --exports target/msr-exports --timeout 5
 ```
 
@@ -98,5 +98,5 @@ MSR protocol or fault resumption.
 
 The operand and privilege contracts follow Intel's
 [instruction reference](https://cdrdv2-public.intel.com/774492/325383-sdm-vol-2abcd.pdf).
-See the [guest runner](../../../../suite/x86-cpl0/README.md) for isolation and tool-path
+See the [guest runner](../../../../suite/integration/x86-cpl0/README.md) for isolation and tool-path
 overrides.

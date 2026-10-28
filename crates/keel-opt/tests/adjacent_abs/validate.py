@@ -14,7 +14,7 @@ ROOT = pathlib.Path.cwd()
 OUT = ROOT / 'target/clang-gap-round2-20261021'
 FIX = ROOT / 'crates/keel-opt/tests/adjacent_abs'
 KEEL = ROOT / 'target/adjacent-cargo/debug/keel'
-LOCK = ['python3', 'suite/fast_opt_locked.py', str(OUT / 'lock.jsonl')]
+LOCK = ['python3', 'suite/common/fast_opt_locked.py', str(OUT / 'lock.jsonl')]
 
 
 def locked(*args):

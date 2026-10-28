@@ -132,7 +132,7 @@ fn malformed_linkage_is_rejected_even_without_verification() {
     }
 }
 
-// The test runner must hold suite/fast_opt_locked.py's host lease. This test
+// The test runner must hold suite/common/fast_opt_locked.py's host lease. This test
 // does not acquire another lease, matching the other native codegen tests.
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[test]

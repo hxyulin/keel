@@ -40,7 +40,7 @@ On Apple arm64 macOS:
 
 ```sh
 cargo build --release -p keel
-python3 suite/readme-tools-bench/run.py --keel "$PWD/target/release/keel" --out bench-out
+python3 suite/linker/run.py --keel "$PWD/target/release/keel" --out bench-out
 ```
 
 `--out` must be a new directory. Add `--correctness-only` to run the gate

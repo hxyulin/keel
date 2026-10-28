@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Cross-assemble every exported .s using Clang and compare sign recipe bytes.
-Run this entire script under suite/fast_opt_locked.py; no native execution.
+Run this entire script under suite/common/fast_opt_locked.py; no native execution.
 """
 import hashlib
 import json

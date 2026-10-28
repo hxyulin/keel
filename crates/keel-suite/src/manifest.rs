@@ -1,4 +1,4 @@
-//! The suite registry: `suite/configs.toml` and one `suite/<name>/suite.toml`
+//! The suite registry: `suite/configs.toml` and one `suite/c/<name>/suite.toml`
 //! per program. `suite/README.md` describes the format.
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -64,7 +64,7 @@ impl Configs {
     }
 }
 
-/// One program: `suite/<name>/suite.toml`.
+/// One program: `suite/c/<name>/suite.toml`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
@@ -194,17 +194,17 @@ pub struct Bench {
 
 pub struct Suite {
     pub name: String,
-    /// `suite/<name>`, where the manifest and its data files are.
+    /// `suite/c/<name>`, where the manifest and its data files are.
     pub dir: PathBuf,
     pub manifest: Manifest,
     /// The manifest's text, part of what decides if a cached build is stale.
     pub text: String,
 }
 
-/// Every `suite/*/suite.toml`, by name.
+/// Every `suite/c/*/suite.toml`, by name.
 pub fn load_suites(root: &Path) -> Result<Vec<Suite>> {
     let mut suites = Vec::new();
-    for entry in fs::read_dir(root.join("suite"))? {
+    for entry in fs::read_dir(root.join("suite/c"))? {
         let dir = entry?.path();
         let path = dir.join("suite.toml");
         if !path.is_file() {

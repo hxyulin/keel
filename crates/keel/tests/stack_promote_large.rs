@@ -1,5 +1,5 @@
 //! Large private-field promotion through the CLI, both object routes and an
-//! independent unsigned C oracle. Run Cargo under suite/fast_opt_locked.py;
+//! independent unsigned C oracle. Run Cargo under suite/common/fast_opt_locked.py;
 //! its lease covers all sequential compiler and native child commands here.
 use object::{Object, ObjectSection};
 use std::{fs, io::Write, path::Path, process::Command};

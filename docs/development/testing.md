@@ -139,3 +139,11 @@ external-tool and platform tests remain subject to their prerequisites.
 
 Historical timings and per-checkpoint test counts are not maintained here.
 Record new measurements in ignored report directories.
+
+## Suite runner checks
+
+`cargo suite check` runs the Python runner tests without application builds or
+benchmarks. Select components with `cargo suite check c ir` or
+`cargo suite check asm linker integration`. These are infrastructure checks;
+use `cargo suite test` for applications and `cargo suite test-frontends` for
+native frontend/import validation. See the [suite index](../../suite/README.md).

@@ -66,7 +66,7 @@ report = {
     "native_results": results,
     "sources_sha256": {f: hashlib.sha256((root/f).read_bytes()).hexdigest() for f in files},
     "artifacts": str(a.artifacts.resolve()),
-    "linux_reproduction": "python3 suite/fast_opt_locked.py target/clang-gap-round3-20261021/lock.jsonl env CARGO_TARGET_DIR=/absolute/private/adjacent-diff-cargo KEEL_ADJACENT_DIFF_EVIDENCE_DIR=/absolute/private/adjacent-diff cargo test --offline --locked -j2 -p keel-opt -p keel-codegen --test adjacent_diff",
+    "linux_reproduction": "python3 suite/common/fast_opt_locked.py target/clang-gap-round3-20261021/lock.jsonl env CARGO_TARGET_DIR=/absolute/private/adjacent-diff-cargo KEEL_ADJACENT_DIFF_EVIDENCE_DIR=/absolute/private/adjacent-diff cargo test --offline --locked -j2 -p keel-opt -p keel-codegen --test adjacent_diff",
 }
 a.output.mkdir(parents=True, exist_ok=True)
 (a.output / "evidence.json").write_text(json.dumps(report, indent=2) + "\n")

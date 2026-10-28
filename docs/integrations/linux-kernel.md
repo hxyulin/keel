@@ -12,7 +12,7 @@ The final GNU link uses 481 Keel C objects and 20 Keel assembly objects. The
 independent initramfs smoke test passes under QEMU TCG.
 
 Historical audit ledgers with hashes and controls remain in Git history.
-Regenerate results with the [kernel fixture](../../suite/linux-kernel/README.md).
+Regenerate results with the [kernel fixture](../../suite/integration/linux-kernel/README.md).
 
 <a id="linux-kernel-code-model-kernel-address-model"></a>
 ### Kernel address model
@@ -122,7 +122,7 @@ addresses and emits separate physical load addresses. The physical entry is
 undefined-symbol suppression are used.
 
 Historical qualification and probe ledgers remain in Git history. Use the
-[kernel fixture](../../suite/linux-kernel/README.md) to regenerate results.
+[kernel fixture](../../suite/integration/linux-kernel/README.md) to regenerate results.
 
 <a id="linux-kernel-native-linker-audit-native-link-paths"></a>
 ### Native link paths
@@ -180,9 +180,9 @@ its existing target page size.
 Package and test with the reference boot build and external tools on PATH:
 
 ```sh
-python3 suite/linux-kernel/package.py --reference-build reference/build \
+python3 suite/integration/linux-kernel/package.py --reference-build reference/build \
   --vmlinux vmlinux --out packaged
-python3 suite/linux-kernel/runtime.py \
+python3 suite/integration/linux-kernel/runtime.py \
   --kernel packaged/arch/x86/boot/bzImage --out runtime
 ```
 

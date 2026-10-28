@@ -37,7 +37,7 @@ crates/keel-cranelift/target/debug/keel-ir-harness \
 
 For the other inputs, change `--format` and `--input` to `keel`/`scalar.keel`
 or `llvm`/`scalar.ll`. Use a fresh output directory for each run. LLVM import
-requires the LLVM 23 library accepted by `suite/llvm_import.py`. Executing the
+requires the LLVM 23 library accepted by `suite/ir/llvm_import.py`. Executing the
 objects requires an Apple arm64 host and Clang. The target is always explicit.
 The driver must exercise defined source behavior. A successful run cannot
 establish equivalence on LLVM poison or undefined executions.

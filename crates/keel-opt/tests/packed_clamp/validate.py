@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static routes and native correctness; invoke under suite/fast_opt_locked.py.
+"""Static routes and native correctness; invoke under suite/common/fast_opt_locked.py.
 
 Build Keel in a checkout-exclusive CARGO_TARGET_DIR first. This script never
 benchmarks and does not self-lock: its enclosing lock covers every subprocess.

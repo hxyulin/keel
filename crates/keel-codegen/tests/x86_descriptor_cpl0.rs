@@ -7,8 +7,9 @@ use object::{Object, ObjectSymbol};
 #[path = "common/userspace.rs"]
 mod userspace;
 
-const SOURCE: &str = include_str!("../../../suite/x86-cpl0/cases/descriptor.keel");
-const LOAD_SOURCE: &str = include_str!("../../../suite/x86-cpl0/cases/descriptor_load.keel");
+const SOURCE: &str = include_str!("../../../suite/integration/x86-cpl0/cases/descriptor.keel");
+const LOAD_SOURCE: &str =
+    include_str!("../../../suite/integration/x86-cpl0/cases/descriptor_load.keel");
 
 #[test]
 fn descriptor_observation_payload_export_and_parity() {
@@ -56,7 +57,7 @@ fn descriptor_load_payload_export_and_parity() {
 
 #[test]
 fn descriptor_status_payload_export_and_parity() {
-    let source = include_str!("../../../suite/x86-cpl0/cases/descriptor_status.keel");
+    let source = include_str!("../../../suite/integration/x86-cpl0/cases/descriptor_status.keel");
     export_payload(
         source,
         "KEEL_DESCRIPTOR_STATUS_EXPORT_DIR",

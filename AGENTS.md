@@ -22,7 +22,9 @@
   ignored `target/` or `suite/reports/`; use Git history for historical evidence.
 - Prefer focused regressions in existing test targets and workloads in existing
   suite runners. Add a standalone harness only for a reusable test boundary the
-  existing infrastructure cannot exercise. Do not add suites to track progress.
+  existing infrastructure cannot exercise. Place it under the owning `suite/c`,
+  `suite/ir`, `suite/asm`, `suite/linker` or `suite/integration` group. Use
+  `cargo suite check <group>` for runner tests. Do not add suites to track progress.
 - Keep fixtures, source pins, policies, generator inputs and reviewed data needed
   to reproduce public benchmark claims. These are maintained inputs, not run
   artifacts. Remove temporary scripts after incorporating their regression.

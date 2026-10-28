@@ -5,8 +5,8 @@ use keel_ir::{InstData, Intrinsic, MemoryEffects, Type};
 use object::{Object, ObjectSymbol};
 #[path = "common/userspace.rs"]
 mod userspace;
-const LOADS: &str = include_str!("../../../suite/x86-cpl0/cases/system_load.keel");
-const INVALIDATE: &str = include_str!("../../../suite/x86-cpl0/cases/invlpg.keel");
+const LOADS: &str = include_str!("../../../suite/integration/x86-cpl0/cases/system_load.keel");
+const INVALIDATE: &str = include_str!("../../../suite/integration/x86-cpl0/cases/invlpg.keel");
 #[test]
 fn system_write_signatures_effects_and_foreign_rejection() {
     for (n, id, name, ty) in [

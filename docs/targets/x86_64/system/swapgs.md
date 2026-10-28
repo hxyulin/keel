@@ -41,7 +41,7 @@ IF remains clear throughout the fixture.
 ```sh
 KEEL_SWAPGS_EXPORT_DIR="$PWD/target/swapgs-exports" \
   cargo test -p keel-codegen --test x86_swapgs
-python3 suite/x86-cpl0/descriptor_campaign.py --swapgs \
+python3 suite/integration/x86-cpl0/descriptor_campaign.py --swapgs \
   --exports target/swapgs-exports --timeout 5
 ```
 

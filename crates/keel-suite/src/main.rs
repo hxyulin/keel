@@ -1,5 +1,5 @@
 //! keel-suite: builds real programs with keel and clang, runs their test
-//! suites, and times them. Each program is a directory under `suite/`
+//! suites, and times them. Each program is a directory under `suite/c/`
 //! with a `suite.toml`; `suite/README.md` describes the format.
 //!
 //! ```text
@@ -10,6 +10,7 @@
 //! ```
 
 mod build;
+mod checks;
 mod frontends;
 mod manifest;
 mod report;
@@ -51,6 +52,15 @@ enum Color {
 enum Command {
     /// List the suites, their benchmarks and the configurations.
     List,
+    /// Test suite runners by component, without application builds or timings.
+    Check {
+        /// Components to check (default: all).
+        #[arg(value_enum)]
+        groups: Vec<checks::Group>,
+        /// Python interpreter for the runner tests.
+        #[arg(long, default_value = "python3")]
+        python: PathBuf,
+    },
     /// Check C frontend compatibility and LLVM-imported C++/Rust correctness.
     TestFrontends(frontends::Options),
     /// Build suites with keel and run their test suites.
@@ -125,6 +135,7 @@ fn run(cli: Cli) -> Result<bool> {
         .jobs
         .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, |n| n.get()));
     match cli.command {
+        Command::Check { groups, python } => checks::run(&root, &groups, &python),
         Command::TestFrontends(options) => frontends::run(&root, options, cli.jobs.unwrap_or(2)),
         Command::List => {
             list(&root)?;

@@ -107,11 +107,11 @@ The C fixture also builds with `-Wall -Wextra -Werror`.
 On an x86-64 Linux host with accessible `/dev/kvm`, GCC and QEMU:
 
 ```sh
-python3 suite/linux-kernel/bench.py \
+python3 suite/integration/linux-kernel/bench.py \
   --gcc-kernel /path/to/reference/bzImage \
   --keel-kernel /path/to/qualified/bzImage \
   --cpu 2 --repeats 9 --out /path/to/new-results
-python3 -m unittest discover -s suite/linux-kernel -p 'test_*.py'
+python3 -m unittest discover -s suite/integration/linux-kernel -p 'test_*.py'
 size reference-vmlinux keel-vmlinux
 size -A reference-vmlinux keel-vmlinux
 ```

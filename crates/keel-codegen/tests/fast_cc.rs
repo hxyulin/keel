@@ -1,7 +1,7 @@
 use keel_codegen::regalloc::{AllocationTier, Pools};
 use keel_codegen::{CodegenPipeline, SelectionTier};
 
-const SOURCE: &str = include_str!("../../../suite/llvm_import_fast_fixtures/fast.keel");
+const SOURCE: &str = include_str!("../../../suite/ir/llvm_import_fast_fixtures/fast.keel");
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],

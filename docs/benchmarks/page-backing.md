@@ -64,7 +64,7 @@ investigation does not authorize enabling an optimization by default.
 
 ## Controlled retest
 
-The fixed-backing harness in `suite/pattern-lab/page-backing/` passed all eight
+The fixed-backing harness in `suite/integration/page-backing/` passed all eight
 workloads' predefined identical-byte control tolerances on x86-64 Linux. The full run
 used eight disjoint retained physical frame sets, both sorted and shuffled
 assignments, and six balanced measured blocks: 3,456 correct launches including

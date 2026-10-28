@@ -46,7 +46,7 @@ privileged kernel templates. Raw kernel preprocessed units are not included.
 The matrix covers optimization off/on, three selection tiers, fast/full/forced
 rematerialization allocation, and normal/empty register pools. Text, typed and
 chunked objects must agree. Exported `.o` files can each run as `--payload` through
-`suite/x86-cpl0/run.py`. The exported `wrong-wide-initializer.control` is an ELF
+`suite/integration/x86-cpl0/run.py`. The exported `wrong-wide-initializer.control` is an ELF
 object that deliberately discards required upper bits. The harness must reject it.
 Clang rejects repeated explicit matching constraints, so an external reference
 must first collapse redundant matching and fixed inputs to the widest initializer.

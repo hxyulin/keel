@@ -95,7 +95,7 @@ exit. Both landings keep IF clear, and no asynchronous event is injected.
 ```sh
 KEEL_IRETQ_EXPORT_DIR="$PWD/target/iretq-exports" \
   cargo test -p keel-codegen --test x86_iretq
-python3 suite/x86-cpl0/descriptor_campaign.py --iretq \
+python3 suite/integration/x86-cpl0/descriptor_campaign.py --iretq \
   --exports target/iretq-exports --timeout 5
 ```
 

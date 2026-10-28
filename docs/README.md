@@ -32,7 +32,7 @@ completion ledgers or per-feature progress pages.
 | Native linking | [ELF](linking/elf.md), [GNU scripts](linking/gnu-scripts.md), [macOS](linking/macho.md), [archives](linking/archives.md) |
 | Assembly and intrinsics | [x86 assembler](targets/x86_64/assembler.md), [GNU syntax](targets/x86_64/gnu-assembly-language.md), [intrinsic selection](targets/x86_64/intrinsics.md), [ISA status](targets/README.md) |
 | Target entry points | [All targets](targets/README.md), [x86-64](targets/x86_64/README.md), [AArch64](targets/aarch64/README.md), [WebAssembly](targets/wasm/README.md) |
-| Linux kernel | [Integration](integrations/linux-kernel.md), [fixture](../suite/linux-kernel/README.md), [benchmarks](benchmarks/linux-kernel.md) |
+| Linux kernel | [Integration](integrations/linux-kernel.md), [fixture](../suite/integration/linux-kernel/README.md), [benchmarks](benchmarks/linux-kernel.md) |
 | Runtime and debug metadata | [Unwind](linking/unwind.md), [DWARF](linking/dwarf5.md) |
 | Benchmarks and workload validation | [Suite](../suite/README.md), [controlled timing](benchmarks/linux-timing.md) |
 

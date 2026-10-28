@@ -2,7 +2,7 @@
 """Run exported ELF+C oracles on Linux x86_64; write native-results.json.
 
 Serialize the entire invocation through the investigation lock:
-python3 suite/fast_opt_locked.py target/positive32-cover-20261021/lock.jsonl \
+python3 suite/common/fast_opt_locked.py target/positive32-cover-20261021/lock.jsonl \
     python3 ARTIFACT_DIR/run_native.py
 No remote access, Cargo, or Keel compiler is needed by this runner.
 """

@@ -5,7 +5,7 @@ use keel_ir::{InstData, Intrinsic, MemoryEffects};
 use object::{Object, ObjectSymbol};
 #[path = "common/userspace.rs"]
 mod userspace;
-const SOURCE: &str = include_str!("../../../suite/x86-cpl0/cases/swapgs.keel");
+const SOURCE: &str = include_str!("../../../suite/integration/x86-cpl0/cases/swapgs.keel");
 #[test]
 fn swapgs_registry_effects_and_foreign_rejection() {
     let id = Intrinsic::X86Swapgs;

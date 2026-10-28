@@ -5,7 +5,7 @@ use object::{Object, ObjectSection};
 #[path = "common/userspace.rs"]
 mod userspace;
 
-const SOURCE: &str = include_str!("../../../suite/x86-cpl0/cases/iretq.keel");
+const SOURCE: &str = include_str!("../../../suite/integration/x86-cpl0/cases/iretq.keel");
 
 #[test]
 fn image_contract_and_transport_bytes() {

@@ -58,7 +58,7 @@ restores the saved control/debug register values before returning.
 ```sh
 KEEL_SYSTEM_REGISTER_EXPORT_DIR="$PWD/target/system-register-exports" \
   cargo test -p keel-codegen --test x86_system_registers
-python3 suite/x86-cpl0/descriptor_campaign.py --system-registers \
+python3 suite/integration/x86-cpl0/descriptor_campaign.py --system-registers \
   --exports target/system-register-exports --timeout 5
 ```
 

@@ -5,7 +5,7 @@ passes the program's own tests, and times benchmark workloads. It is driven by
 the `keel-suite` tool (`crates/keel-suite`), available through the `cargo suite`
 alias.
 
-Each directory under `suite/` that contains a `suite.toml` is one workload.
+Each directory under `suite/c/` that contains a `suite.toml` is one workload.
 The native-C registry currently contains:
 
 | Workload | What runs |
@@ -13,14 +13,14 @@ The native-C registry currently contains:
 | `lua` | Lua 5.4.7 interpreter, its portable test suite and benchmarks |
 | `quickjs` | QuickJS interpreter, its tests and benchmarks |
 | `sqlite` | SQLite shell, query checks and benchmarks |
-| [`yyjson`](README.md) | JSON parsing, traversal and round trips |
-| [`lz4`](README.md) | LZ4 block compression and decompression |
+| `yyjson` | JSON parsing, traversal and round trips |
+| `lz4` | LZ4 block compression and decompression |
 
 These use unmodified, pinned upstream library code with deterministic drivers.
 They are not exhaustive upstream test suites or full application builds.
 
 The other directories hold opt-in harnesses for narrower questions (see
-[Companion harnesses](#companion-harnesses)). Generated reports and raw
+[component groups](#components-and-commands)). Generated reports and raw
 evidence belong in the ignored `suite/reports/` directory or under `target/`;
 they are not stored in Git.
 
@@ -105,7 +105,7 @@ schedule, not an unbounded fixed-point loop. Fast retains its own bounded pipeli
 
 ## Adding a workload
 
-1. Create `suite/<name>/suite.toml` (format below). Put any driver programs,
+1. Create `suite/c/<name>/suite.toml` (format below). Put any driver programs,
    inputs or benchmark scripts in the same directory and refer to them as
    `{suite}/...`.
 2. Run `cargo suite list` to check that the manifest parses.
@@ -114,7 +114,7 @@ schedule, not an unbounded fixed-point loop. Fast retains its own bounded pipeli
 4. Run `cargo suite run <name>` to check that benchmark outputs agree and to
    take a first timing.
 
-`benchmark_platforms.py` discovers native-C manifests too; a new workload is
+`suite/c/benchmark_platforms.py` discovers native-C manifests too; a new workload is
 only measured there when selected explicitly with `--apps`.
 
 ### `suite.toml` format
@@ -165,7 +165,7 @@ Commands are split at whitespace and run without a shell. Available variables:
 | Variable    | Value                                                  |
 |-------------|--------------------------------------------------------|
 | `{bin}`     | the executable built in the configuration under test   |
-| `{suite}`   | this directory, `suite/<name>`                         |
+| `{suite}`   | this directory, `suite/c/<name>`                         |
 | `{work}`    | the work directory, `target/suite/<name>`              |
 | `{gen}`     | `{work}/gen`, for what `prepare` generates             |
 | `{defines}` | the `-D` flags, one argument each                      |
@@ -188,7 +188,7 @@ compare with another machine, copy its `results/<target>` directory over.
 cargo suite test-frontends --out target/frontend-check-1
 ```
 
-This runs `suite/frontend_validate.py`, which covers:
+This runs `suite/integration/frontend_validate.py`, which covers:
 
 - the C attribute and preprocessing regression tests and a representative C CLI
   compatibility check;
@@ -222,7 +222,7 @@ library; missing prerequisites there are failures. Other hosts run the C checks
 and report the LLVM stages as skipped (`passed_with_skips`) with reasons.
 
 See [C compatibility](../docs/frontends/c/README.md),
-[LLVM import](README.md) and C++ compatibility profiles
+[LLVM import](../docs/frontends/llvm.md) and C++ compatibility profiles
 for semantic boundaries and standalone runner commands. This command does not
 replace the full workspace tests or application suites.
 
@@ -236,36 +236,53 @@ Run `cargo suite test-frontends --out target/frontend-check-1` rather than
 invoking the individual stage scripts. Crate regressions own the detailed
 contracts; see [LLVM semantics](../docs/frontends/llvm.md).
 
+## Components and commands
+
+| Directory | Responsibility | Entry point |
+| --- | --- | --- |
+| `c/` | Native C application manifests, drivers and paired benchmarks | `cargo suite test lua`, `cargo suite run lua/fib` |
+| `ir/` | LLVM import fixtures, ABI checks and C++/Rust importer comparisons | `cargo suite test-frontends --out target/frontend-check-1` |
+| `asm/` | Compiler-generated assembly and independent object inspection | `python3 suite/asm/compiler_asm_compat/run.py --help` |
+| `linker/` | Assembly/link benchmark and independent runtime oracle | `python3 suite/linker/run.py --help` |
+| `integration/` | Kernel build/boot, privileged guests, frontend orchestration and compiler benchmarks | Each runner's `--help` |
+| `common/` | Shared artifact storage and execution locking | Used by the component runners |
+
+Run only the runner tests for a component, without application builds, downloads
+or timings:
+
+```sh
+cargo suite check                         # All runner tests
+cargo suite check c ir                    # C and IR runner tests
+cargo suite check asm linker integration  # Other component runner tests
+```
+
+These check runner protocols and fixtures. They do not qualify native compiler,
+linker or kernel behavior. Native LLVM cases that need explicit library/tool
+arguments run through `test-frontends`, not ordinary test discovery. Use
+[the Rust test runner](../docs/development/testing.md) for crate regressions.
+
 ## Measurements
 
-Use `benchmark_platforms.py` for paired application compile/runtime comparisons.
-`readme-bench/` and `readme-tools-bench/` own public README measurements.
-Use each runner's `--help` for options.
+Use `python3 suite/c/benchmark_platforms.py --help` for paired application
+compile/runtime comparisons. `integration/compiler-bench/` and `linker/` own
+public README measurements. Workload names such as `lua` remain unchanged;
+prepared sources and build caches remain under `target/suite/<name>/`.
 
 Freeze binaries before timing, check outputs before measuring, alternate
 baseline/candidate order and retain flags and input hashes. Write results in
-new ignored `target/` or `suite/reports/` directories. The
-[controlled timing procedure](../docs/benchmarks/linux-timing.md) describes the
-retained page-backing harness and the limits of small Linux timing differences.
+new ignored `target/` or `suite/reports/` directories. See the
+[controlled timing procedure](../docs/benchmarks/linux-timing.md) for the
+page-backing harness and the limits of small Linux timing differences.
 
 ## Integration harnesses
 
-| Harness | Boundary |
-| --- | --- |
-| `linux-kernel/` | Pinned minimal 64-bit kernel build, link and boot |
-| `x86-cpl0/` | Privileged instructions in a disposable guest |
-| `compiler_asm_compat/` | Real compiler-generated assembly and object comparison |
-| LLVM import fixtures and `llvm_import_*validate.py` | Import semantics and ABI correctness |
-| `frontend_validate.py`, `cpp_coverage.py` | Frontend compatibility checks used by `cargo suite test-frontends` |
-| `pattern-lab/page-backing/` | Controlled executable-backing comparisons |
+- [Linux kernel](integration/linux-kernel/README.md): pinned 64-bit build, link and boot.
+- [CPL0 guest](integration/x86-cpl0/README.md): privileged operations and owned-state contracts.
+- [Page backing](integration/page-backing/README.md): controlled executable-backing comparisons.
+- `integration/frontend_validate.py`: C/LLVM/C++ orchestration behind `test-frontends`.
+- `integration/compiler-bench/`: whole compiler and IR backend comparisons.
 
-The application workloads are Lua, QuickJS, SQLite, yyjson and LZ4. Synthetic
-compiler fixtures belong beside their crate tests. Standalone historical
-microbenchmark and feature-progress harnesses are no longer maintained.
-
-## Maintenance
-
-Extend these runners when adding integration coverage. Put compiler regressions
-in the owning crate's test target. Add a standalone harness only for a reusable
-boundary that this infrastructure cannot test. Temporary probes and report
-renderers belong in ignored directories. Git history retains old experiments.
+Synthetic compiler regressions belong beside their crate tests. Add a standalone
+harness only for a reusable boundary this infrastructure cannot exercise.
+Temporary probes, progress tracking and report renderers belong in ignored
+directories. Git history retains retired experiments.

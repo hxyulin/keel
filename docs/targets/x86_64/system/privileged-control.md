@@ -64,7 +64,7 @@ store. Only the twelve v1 variants are exported for the guest campaign.
 ```sh
 KEEL_CPU_CONTROL_EXPORT_DIR="$PWD/target/cpu-control-exports" \
   cargo test -p keel-codegen --test x86_privileged_control
-python3 suite/x86-cpl0/descriptor_campaign.py --cpu-control \
+python3 suite/integration/x86-cpl0/descriptor_campaign.py --cpu-control \
   --exports target/cpu-control-exports --timeout 5
 ```
 
@@ -85,5 +85,5 @@ unqualified. The campaign checks eighteen verdicts in total.
 The instruction contracts follow Intel's
 [instruction reference](https://cdrdv2-public.intel.com/874240/325462-090-sdm-vol-1-2abcd-3abcd-4.pdf)
 and [system programming guide](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-3a-part-1-manual.pdf).
-See the [guest runner](../../../../suite/x86-cpl0/README.md) for tool-path overrides and
+See the [guest runner](../../../../suite/integration/x86-cpl0/README.md) for tool-path overrides and
 isolation.

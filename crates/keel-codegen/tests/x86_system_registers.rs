@@ -7,7 +7,8 @@ use keel_codegen::{
 use keel_ir::{EntityRef, InstData, Intrinsic, MemoryEffects, Type, Value};
 #[path = "common/userspace.rs"]
 mod userspace;
-const SOURCE: &str = include_str!("../../../suite/x86-cpl0/cases/system_registers.keel");
+const SOURCE: &str =
+    include_str!("../../../suite/integration/x86-cpl0/cases/system_registers.keel");
 const REGISTERS: [&str; 13] = [
     "cr0", "cr2", "cr3", "cr4", "cr8", "dr0", "dr1", "dr2", "dr3", "dr4", "dr5", "dr6", "dr7",
 ];

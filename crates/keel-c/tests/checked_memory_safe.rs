@@ -121,7 +121,7 @@ fn zero_checked_keeps_argument_effects_and_volatile_reads() {
     }
 }
 
-// The enclosing cargo invocation must hold suite/fast_opt_locked.py's lease.
+// The enclosing cargo invocation must hold suite/common/fast_opt_locked.py's lease.
 #[test]
 fn native_checked_exact_footprints_and_both_target_objects() {
     use std::{fs, process::Command};

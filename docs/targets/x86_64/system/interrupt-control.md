@@ -63,7 +63,7 @@ byte alone would not establish execution of a HLT instruction.
 ```sh
 KEEL_INTERRUPT_EXPORT_DIR="$PWD/target/interrupt-exports" \
   cargo test -p keel-codegen --test x86_interrupt_control
-python3 suite/x86-cpl0/descriptor_campaign.py --interrupt-control \
+python3 suite/integration/x86-cpl0/descriptor_campaign.py --interrupt-control \
   --exports target/interrupt-exports --objdump x86_64-elf-objdump --timeout 5
 ```
 

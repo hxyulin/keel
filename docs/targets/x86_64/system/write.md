@@ -85,7 +85,7 @@ uses no FP/SIMD, task switching or exception recovery.
 ```sh
 KEEL_SYSTEM_LOAD_EXPORT_DIR="$PWD/target/system-load-exports" \
   cargo test -p keel-codegen --test x86_system_write
-python3 suite/x86-cpl0/descriptor_campaign.py --system-loads \
+python3 suite/integration/x86-cpl0/descriptor_campaign.py --system-loads \
   --exports target/system-load-exports --timeout 5
 ```
 
@@ -112,7 +112,7 @@ original page-directory entry and CR3 context on normal success or mismatch.
 ```sh
 KEEL_INVLPG_EXPORT_DIR="$PWD/target/invlpg-exports" \
   cargo test -p keel-codegen --test x86_system_write
-python3 suite/x86-cpl0/descriptor_campaign.py --invlpg \
+python3 suite/integration/x86-cpl0/descriptor_campaign.py --invlpg \
   --exports target/invlpg-exports --timeout 5
 ```
 
@@ -132,4 +132,4 @@ unqualified. A timeout or fault cannot satisfy a negative control.
 
 The contracts follow Intel's [instruction reference](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-2a-manual.pdf)
 and [paging interactions reference](https://cdrdv2-public.intel.com/671368/architecture-instruction-set-extensions-programming-reference.pdf).
-See the [guest runner](../../../../suite/x86-cpl0/README.md) for isolation and tool paths.
+See the [guest runner](../../../../suite/integration/x86-cpl0/README.md) for isolation and tool paths.

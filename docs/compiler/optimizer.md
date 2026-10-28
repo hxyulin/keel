@@ -356,7 +356,7 @@ elapsed time in dependency chains and neutral to slightly faster independent
 streams. Results are nanoseconds per operation, not inferred cycles; cores and
 clock frequencies are not pinned.
 
-`suite/generate_m5_tuning.py` emits the compact Rust cost table from this report.
+`tools/generate_m5_tuning.py` emits the compact Rust cost table from this report.
 The rule requires the chain ratio's upper 95% bootstrap endpoint below 1.0 and
 a parallel-stream median ratio no greater than 1.0. It applies only to the six
 measured width/constant combinations and saves constant materialization where

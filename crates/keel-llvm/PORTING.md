@@ -45,7 +45,7 @@ Use a fresh output directory for each validator:
 ```sh
 KEEL_TEST_LIBLLVM="$(rustc --print sysroot)/lib/libLLVM.dylib" \
   cargo test -p keel-llvm
-python3 suite/test_llvm_import_rust.py \
+python3 suite/ir/test_llvm_import_rust.py \
   --importer target/debug/keel-llvm-import --validator flags \
   --libllvm "$(rustc --print sysroot)/lib/libLLVM.dylib" \
   --keel target/debug/keel --out target/llvm-rust-flags

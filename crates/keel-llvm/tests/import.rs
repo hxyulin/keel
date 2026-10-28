@@ -61,7 +61,7 @@ fn fixture_output_matches_python_reference() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let paths = [
         "crates/keel-cranelift/tools/ir-fixtures/scalar.ll",
-        "suite/llvm_import_linkage_fixtures/available.ll",
+        "suite/ir/llvm_import_linkage_fixtures/available.ll",
     ];
     for path in paths {
         let source = std::fs::read(root.join(path)).unwrap();

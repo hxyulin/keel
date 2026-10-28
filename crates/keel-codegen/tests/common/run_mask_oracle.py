@@ -3,7 +3,7 @@
 
 python3 crates/keel-codegen/tests/common/run_mask_oracle.py EVIDENCE_DIR
 Export objects with KEEL_MASK_EVIDENCE and the vector_mask_proofs cargo test first.
-On Linux x86, copy this script, the evidence directory and suite/fast_opt_locked.py.
+On Linux x86, copy this script, the evidence directory and suite/common/fast_opt_locked.py.
 """
 import json
 import pathlib
@@ -18,7 +18,7 @@ def main():
         (platform.system(), platform.machine()))
     if not arch:
         raise SystemExit("supported native oracle hosts: macOS ARM64 or Linux x86_64")
-    wrapper = pathlib.Path("suite/fast_opt_locked.py").resolve()
+    wrapper = pathlib.Path("suite/common/fast_opt_locked.py").resolve()
     log = pathlib.Path("target/clang-gap-round2-20261021/lock.jsonl").resolve()
     log.parent.mkdir(parents=True, exist_ok=True)
     records = []

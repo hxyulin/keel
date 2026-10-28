@@ -2433,7 +2433,7 @@ expressions follow LLVM's logical 64-bit right-shift semantics; unresolved
 shifted relocations remain errors. `.cfi_negate_ra_state` emits the AArch64
 DWARF opcode and forces DWARF unwind retention so signed-RA state is preserved.
 
-`suite/audit_clang_assembler.py` compiles sources unchanged with Clang -S -O2,
+`suite/asm/audit_clang_assembler.py` compiles sources unchanged with Clang -S -O2,
 assembles with both tools, and compares code/data bytes, normalized relocations,
 section type/size/alignment, build version and linker hints. The source audit
 covers all 18 repository C fixtures and 33 Lua translation units. DWARF and compact-unwind bytes are

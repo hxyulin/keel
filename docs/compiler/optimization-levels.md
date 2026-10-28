@@ -117,7 +117,7 @@ selector/allocator comparison with the IR pipeline held at `-O2`:
 
 ```sh
 cargo build --release -p keel
-python3 suite/benchmark_platforms.py --root . --work /tmp/keel-levels \
+python3 suite/c/benchmark_platforms.py --root . --work /tmp/keel-levels \
   --keel target/release/keel --apps lua --optimization-matrix \
   --compile-rounds 5 --runtime-rounds 7
 ```
