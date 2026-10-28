@@ -5,6 +5,13 @@ change of a few percent matters. State the measured boundary first. A compiler
 scan, a C-to-IR call, process startup and a complete build are different
 measurements. Use separate experiments for cold inputs or startup costs.
 
+The [fixed code-backing application harness](../suite/pattern-lab/page-backing/README.md)
+implements a separate experiment with explicit RX page assignment, several
+physical frame sets, and sorted/shuffled placements. Its interval runs from a
+preload-helper barrier to process completion. Use its documented ELF constraints
+and analysis when studying placement sensitivity; that interval differs from
+the gated in-process scan or compile timers described here.
+
 ## Freeze the experiment
 
 - Record the source revision, overlays, toolchain, build flags, target, CPU,

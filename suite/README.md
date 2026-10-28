@@ -24,6 +24,11 @@ The other directories hold opt-in harnesses for narrower questions (see
 evidence belong in the ignored `suite/reports/` directory or under `target/`;
 they are not stored in Git.
 
+For small timing differences on Linux, see the
+[controlled userspace timing procedure](../docs/linux-userspace-timing.md).
+It covers resident inputs, executable backing, identical-image controls and
+balanced run order; ordinary suite runs do not automatically apply these controls.
+
 ## Quick start
 
 ```sh
