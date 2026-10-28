@@ -61,6 +61,11 @@ duplication, unrolling and automatic vectorization. It retains scalar, CFG,
 load, stack, constant-argument and unreachable-function cleanup. Required
 language/inline-assembly inlining remains active.
 
+The `-Os` preset also selects [size-oriented x86 emission](x86-size-codegen.md):
+less alignment padding, eligible scalar leaf-frame removal, unused leaf
+call-padding removal, smaller epilogues and profitable return sharing.
+`--opt-tier` and `-p` change IR passes without resetting the preset's codegen goal.
+
 This starts size optimization infrastructure; it does not guarantee the
 smallest machine code. In particular, Size does not yet have a target byte-cost
 model for tiny/single-use inlining, instruction selection or allocator decisions.

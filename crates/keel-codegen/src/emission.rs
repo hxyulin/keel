@@ -1,4 +1,4 @@
-//! Per-invocation address and unwind metadata policies.
+//! Per-invocation code layout, address and unwind metadata policies.
 use crate::{CodegenError, CodegenPipeline, Target, aarch64, x86_64};
 use keel_ir::Module;
 
@@ -14,10 +14,23 @@ pub enum UnwindTables {
     RequiredOnly,
 }
 
+/// Preference for target-specific code layout and instruction sequences.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CodegenGoal {
+    /// Preserve the existing performance-oriented layout and frame decisions.
+    #[default]
+    Speed,
+    /// Prefer smaller code, including removal of optional x86 alignment padding.
+    Size,
+}
+
 /// Emission policies independent of optimization, selection and allocation.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct EmissionOptions {
+    /// Target code-size policy, independent of the IR pass pipeline.
+    pub goal: CodegenGoal,
     /// Compiler-generated unwind metadata. Defaults to all functions.
     pub unwind_tables: UnwindTables,
     /// Explicit x86-64 address model; other targets reject an explicit value.

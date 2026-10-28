@@ -60,7 +60,7 @@ const USAGE: &str = "usage:
   --target also accepts aarch64-unknown-linux-gnu (Linux AAPCS64/ELF).
   -O0 disables optional IR optimization; -O1 favors compile time.
   -O2 balances optimization effort; -O3 uses the full pipeline; -O retains -O3 behavior.
-  -Os favors size by avoiding optional inlining and loop/memory expansion.
+  -Os favors size: less optional inlining/expansion and smaller x86 layout/frames.
   --isel / --isel-tier and --regalloc override preset stages in either order.
   Repeated explicit stage options use the last value.
   --opt-tier none|fast|basic|balanced|full|size controls IR optimization; -p overrides its pipeline in either order.
@@ -151,6 +151,16 @@ impl Options {
                 keel_c::FunctionBinding::SemanticInterposition
             }
         })
+    }
+
+    fn emission_options(&self) -> keel_codegen::EmissionOptions {
+        let mut emission = keel_codegen::EmissionOptions::default();
+        if self.optimization_level == Some(optimization::Level::Size) {
+            emission.goal = keel_codegen::CodegenGoal::Size;
+        }
+        emission.unwind_tables = self.unwind.policy();
+        emission.x86_code_model = self.x86_code_model;
+        emission
     }
 
     fn optimizer_options(&self) -> keel_opt::OptimizeOptions {
@@ -1004,9 +1014,7 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
             Target::Aarch64AppleDarwin => &mut aarch64_sink,
             Target::X86_64LinuxGnu => &mut x86_sink,
         };
-        let mut emission = keel_codegen::EmissionOptions::default();
-        emission.unwind_tables = opts.unwind.policy();
-        emission.x86_code_model = opts.x86_code_model;
+        let emission = opts.emission_options();
         keel_codegen::compile_program_chunks_with_pipeline_and_emission(
             &module, target, &pipeline, emission, sink,
         )
@@ -1024,9 +1032,7 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
         std::fs::write(output, object).map_err(|e| format!("{output}: {e}"))
     } else {
-        let mut emission = keel_codegen::EmissionOptions::default();
-        emission.unwind_tables = opts.unwind.policy();
-        emission.x86_code_model = opts.x86_code_model;
+        let emission = opts.emission_options();
         let source =
             keel_codegen::compile_with_pipeline_and_emission(&module, target, &pipeline, emission)
                 .map_err(|e| e.to_string())?;

@@ -397,7 +397,8 @@ pub(crate) fn compile_output(
             boundary.as_ref().unwrap_or(original),
             pipeline.selector.x86_features(),
         );
-        let mut compiler = FunctionCompiler::new(&func, &symbols, pools, pipeline, structured)?;
+        let mut compiler =
+            FunctionCompiler::new(&func, &symbols, pools, pipeline, structured, emission.goal)?;
         compiler.debug = debug;
         compiler.code_model = code_model;
         compiler.unwind_tables = emission.unwind_tables;
@@ -735,6 +736,9 @@ enum AggregateResult<'a> {
 }
 
 struct FunctionCompiler<'a> {
+    goal: crate::CodegenGoal,
+    /// One return site owns the epilogue when sharing beats even near jumps.
+    shared_return: Option<Inst>,
     code_model: CodeModel,
     features: keel_asm_ir::x86::Features,
     feature_error: Option<String>,
@@ -857,6 +861,7 @@ impl<'a> FunctionCompiler<'a> {
         pools: &Pools,
         pipeline: &crate::CodegenPipeline<'_>,
         structured: bool,
+        goal: crate::CodegenGoal,
     ) -> Result<Self, CodegenError> {
         let module = symbols.module;
         let abi_align = |sig: &keel_ir::Signature| {
@@ -1662,8 +1667,8 @@ impl<'a> FunctionCompiler<'a> {
         let offset = inline_asm_home.map_or(offset, |home| home + asm_bytes);
         let (stack_slot_offsets, offset) =
             crate::stack_frame::SlotOffsets::layout(func, offset, !module.files.is_empty());
-        // rsp is 16-byte aligned after `push rbp`; the pushes and the frame
-        // together keep it so.
+        // RSP is 16-byte aligned after PUSH RBP. Reserve call-site
+        // alignment after accounting for the saved-register pushes.
         let mut saved = alloc.callee_saved_used.clone();
         // A fault can interrupt CX16 while RBX holds desired.low. The normal
         // prologue save/CFI must describe the original caller value even when
@@ -1683,15 +1688,6 @@ impl<'a> FunctionCompiler<'a> {
                 saved.push(r);
             }
         }
-        let frame_size = (offset + 8 * saved.len()).next_multiple_of(16) - 8 * saved.len()
-            + if frame_register.is_some() {
-                frame_align - 1
-            } else {
-                0
-            };
-        if frame_size > i32::MAX as usize / 2 {
-            return Err(err(format!("frame of {frame_size} bytes is too large")));
-        }
         let has_tls_address = present.symbol_addr
             && symbols.has_thread_locals()
             && func.layout_insts().any(|(_, i)| match func.inst_data(i) {
@@ -1700,18 +1696,12 @@ impl<'a> FunctionCompiler<'a> {
                     .is_some_and(|data| data.thread_local),
                 _ => false,
             });
-        // Apply the C leaf extension only to SIMD functions. Removing scalar
-        // C frames also moves unrelated hot loops and can regress applications.
-        // Keep frames for stack observers and functions needing frame storage.
-        let frameless = (func.sig.cc == CallConv::Fast
-            || (func.sig.cc == CallConv::C && has_vectors))
-            && !has_tls_address
+        // No call boundary, implicit helper, stack observer or local storage
+        // needs RSP alignment in this leaf. Saved-register pushes need only
+        // eight-byte slots; keep the incoming/outgoing SysV call contract.
+        let simple_leaf = !has_tls_address
             && module.files.is_empty()
             && func.personality.is_none()
-            && frame_size == 0
-            && named.stack == 0
-            && saved.is_empty()
-            && func.sig.params.iter().all(|p| p.purpose == Purpose::Normal)
             && !func.layout_insts().any(|(_, i)| {
                 let d = func.inst_data(i);
                 is_call(d)
@@ -1726,7 +1716,51 @@ impl<'a> FunctionCompiler<'a> {
                             | InstData::LandingPad { .. }
                     )
             });
+        let frame_size = if goal == crate::CodegenGoal::Size
+            && simple_leaf
+            && offset == 0
+            && frame_register.is_none()
+        {
+            0
+        } else {
+            (offset + 8 * saved.len()).next_multiple_of(16) - 8 * saved.len()
+                + if frame_register.is_some() {
+                    frame_align - 1
+                } else {
+                    0
+                }
+        };
+        if frame_size > i32::MAX as usize / 2 {
+            return Err(err(format!("frame of {frame_size} bytes is too large")));
+        }
+        // Size mode also omits eligible scalar C leaf frames. Speed mode
+        // keeps its existing layout, which was measured with scalar frames.
+        // Keep frames for stack observers and functions needing frame storage.
+        let frameless = (func.sig.cc == CallConv::Fast
+            || (func.sig.cc == CallConv::C && (has_vectors || goal == crate::CodegenGoal::Size)))
+            && simple_leaf
+            && frame_size == 0
+            && named.stack == 0
+            && saved.is_empty()
+            && func.sig.params.iter().all(|p| p.purpose == Purpose::Normal);
+        // With saved registers, the epilogue is at least a four-byte LEA,
+        // one byte per POP, POP RBP and RET. A near JMP costs at most five
+        // bytes. Keeping one existing return site avoids any extra copy or
+        // fall-through branch, so each redirected return strictly saves bytes.
+        let shared_return = if goal == crate::CodegenGoal::Size && !saved.is_empty() {
+            let mut returns = alloc
+                .order
+                .iter()
+                .flat_map(|&block| func.block_insts(block))
+                .copied()
+                .filter(|&inst| matches!(func.inst_data(inst), InstData::Return { .. }));
+            returns.next().and_then(|_| returns.next_back())
+        } else {
+            None
+        };
         let mut compiler = Self {
+            goal,
+            shared_return,
             code_model: CodeModel::default(),
             func,
             symbols,
@@ -1830,7 +1864,18 @@ impl<'a> FunctionCompiler<'a> {
         if func.hidden {
             out.directive(Directive::ElfHidden(symbol.clone()));
         }
-        out.align(func.attrs.align.unwrap_or(16).max(16).trailing_zeros());
+        let minimum_align = if self.goal == crate::CodegenGoal::Size {
+            1
+        } else {
+            16
+        };
+        out.align(
+            func.attrs
+                .align
+                .unwrap_or(minimum_align)
+                .max(minimum_align)
+                .trailing_zeros(),
+        );
         out.directive(Directive::ElfType {
             name: symbol.clone(),
             function: true,
@@ -1893,7 +1938,11 @@ impl<'a> FunctionCompiler<'a> {
 
         // Only reachable blocks, in the order the allocator numbered them.
         let order = self.alloc.order.clone();
-        let aligned = loop_align::headers(func);
+        let aligned = if self.goal == crate::CodegenGoal::Size {
+            HashSet::default()
+        } else {
+            loop_align::headers(func)
+        };
         for (i, &block) in order.iter().enumerate() {
             self.next_block = order.get(i + 1).copied();
             if aligned.contains(&block) {
@@ -3905,8 +3954,19 @@ impl<'a> FunctionCompiler<'a> {
                 {
                     self.emit(Opcode::Vzeroupper, []);
                 }
-                self.epilogue();
-                self.emit(Opcode::Ret, []);
+                if let Some(shared) = self.shared_return {
+                    let label = format!(".L{}_return", self.func.name);
+                    if shared == inst {
+                        self.out.label(label);
+                        self.epilogue();
+                        self.emit(Opcode::Ret, []);
+                    } else {
+                        self.emit(Opcode::Jmp, [asm_arg(label)]);
+                    }
+                } else {
+                    self.epilogue();
+                    self.emit(Opcode::Ret, []);
+                }
             }
             InstData::InlineAsm { ref args, .. } => self.native_inline_asm(inst, args),
             InstData::X86RflagsRegion { ref args, .. } => self.native_rflags_region(inst, args),
@@ -4944,6 +5004,10 @@ impl<'a> FunctionCompiler<'a> {
             return;
         }
         if self.saved.is_empty() {
+            if self.goal == crate::CodegenGoal::Size {
+                self.emit(Opcode::Leave, []);
+                return;
+            }
             self.emit(Opcode::Mov, [asm_arg(r64(4)), asm_arg(r64(5))]);
         } else {
             self.emit(
@@ -7010,6 +7074,7 @@ mod feature_guard_tests {
                     &REGISTERS,
                     &pipeline,
                     structured,
+                    crate::CodegenGoal::default(),
                 )
                 .unwrap();
                 let i = Instruction::parse_intel(source).unwrap();

@@ -160,3 +160,36 @@ fn native_presets_and_stable_backends_execute_the_same_program() {
     }
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn size_preset_controls_codegen_independently_of_pass_and_stage_overrides() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("size-emission-preset");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("input.c"), "long leaf(long x) { return x + 3; }\n").unwrap();
+    for (flags, size) in [
+        (vec!["-Os"], true),
+        (vec!["-Os", "--opt-tier", "none"], true),
+        (
+            vec![
+                "-Os",
+                "-p",
+                "dce",
+                "--isel-tier",
+                "baseline",
+                "--regalloc",
+                "fast",
+            ],
+            true,
+        ),
+        (vec!["-O2", "-Os"], true),
+        (vec!["-Os", "-O2"], false),
+        (vec!["--opt-tier", "size"], false),
+    ] {
+        let mut args = vec!["cc", "input.c", "--target", "x86_64-unknown-linux-gnu"];
+        args.extend(flags);
+        let text = String::from_utf8(successful(&dir, &args)).unwrap();
+        assert_eq!(text.contains(".p2align\t4"), !size, "{args:?}: {text}");
+        assert_eq!(text.contains("push\trbp"), !size, "{args:?}: {text}");
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
