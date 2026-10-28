@@ -198,6 +198,17 @@ cargo build -p keel-llvm --bins
 
 The supported operations and rejection policies match the diagnostic Python
 importer described in [the import contract](../../suite/llvm_import_README.md).
+The Rust importer also retains scalar load/store alignment and function or
+declaration `inlinehint`, `alwaysinline`, `noinline`, `noreturn`, `nounwind`,
+`cold`, `hot` and `optnone` attributes. It keeps LLVM's ABI-default access
+alignment when source IR omits an explicit alignment. Alignment never implies
+`notrap`. Call-site-only attributes remain omitted because Keel has no matching
+per-call representation; they are not promoted to callee or caller promises.
+`optnone` preserves the request to suppress optional optimization, together with
+LLVM's required `noinline` companion. It does not promise identical optimizer
+pipelines or instruction selection across compilers.
+LLVM permits simultaneous `cold` and `hot` hints; both are omitted when they
+conflict, because Keel requires mutually exclusive frequency hints.
 `--localize-odr-functions` retains its explicit no-outside-TU-reference
 assertion. The CLI buffers output and atomically replaces destinations only
 after verification succeeds. An optional `--keel PATH` adds the old external

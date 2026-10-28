@@ -84,3 +84,145 @@ fn fixture_output_matches_python_reference() {
         }
     }
 }
+
+#[test]
+fn memory_alignment_and_volatility_survive_import() {
+    let Some(i) = importer() else {
+        eprintln!("skipped: set KEEL_TEST_LIBLLVM to LLVM 23");
+        return;
+    };
+    let source = format!(
+        "{HEADER}define i32 @aligned(ptr %p) {{\n\
+         %a = load i32, ptr %p, align 32\n\
+         store volatile i32 %a, ptr %p, align 16\n\
+         %b = load volatile i32, ptr %p, align 1\n\
+         store i32 %b, ptr %p, align 1\n\
+         %c = load i32, ptr %p\n\
+         ret i32 %c\n}}"
+    );
+    let text = i.translate(source.as_bytes(), Default::default()).unwrap();
+    let module = keel_ir::parse(&text).unwrap();
+    let f = &module.functions[0];
+    let flags = f
+        .layout_insts()
+        .filter_map(|(_, inst)| match f.inst_data(inst) {
+            keel_ir::InstData::Load { flags, .. } | keel_ir::InstData::Store { flags, .. } => {
+                Some((flags.align, flags.volatile, flags.notrap))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        flags,
+        [
+            (32, false, false),
+            (16, true, false),
+            (1, true, false),
+            (1, false, false),
+            (4, false, false)
+        ],
+        "explicit alignment, LLVM's ABI-default alignment and volatility must survive independently"
+    );
+    let llvm = keel_llvm::export(&module, keel_llvm::TargetProfile::AppleArm64).unwrap();
+    assert!(llvm.contains("load i32, ptr %v0, align 32"), "{llvm}");
+    assert!(llvm.contains("store volatile i32"), "{llvm}");
+    assert!(llvm.contains("align 16"), "{llvm}");
+}
+
+#[test]
+fn function_and_declaration_attributes_survive_import() {
+    let Some(i) = importer() else {
+        eprintln!("skipped: set KEEL_TEST_LIBLLVM to LLVM 23");
+        return;
+    };
+    let source = format!(
+        "{HEADER}\
+         declare void @external() noinline nounwind cold\n\
+         define i32 @preferred() #0 {{ ret i32 3 }}\n\
+         define void @never() noreturn nounwind {{ unreachable }}\n\
+         define i32 @plain() {{ ret i32 4 }}\n\
+         define i32 @unoptimized(i32 %x) noinline optnone {{ ret i32 %x }}\n\
+         attributes #0 = {{ alwaysinline inlinehint nounwind hot }}\n"
+    );
+    let text = i.translate(source.as_bytes(), Default::default()).unwrap();
+    let module = keel_ir::parse(&text).unwrap();
+    let external = &module
+        .decls
+        .iter()
+        .find(|d| d.name == "external")
+        .unwrap()
+        .attrs;
+    assert!(
+        external.noinline && external.nounwind && external.cold,
+        "{external:?}"
+    );
+    let preferred = &module
+        .functions
+        .iter()
+        .find(|f| f.name == "preferred")
+        .unwrap()
+        .attrs;
+    assert!(
+        preferred.alwaysinline && preferred.inlinehint && preferred.nounwind && preferred.hot,
+        "{preferred:?}"
+    );
+    let never = &module
+        .functions
+        .iter()
+        .find(|f| f.name == "never")
+        .unwrap()
+        .attrs;
+    assert!(never.noreturn && never.nounwind, "{never:?}");
+    let plain = &module
+        .functions
+        .iter()
+        .find(|f| f.name == "plain")
+        .unwrap()
+        .attrs;
+    assert_eq!(*plain, keel_ir::FunctionAttrs::default());
+    let unoptimized = &module
+        .functions
+        .iter()
+        .find(|f| f.name == "unoptimized")
+        .unwrap()
+        .attrs;
+    assert!(
+        unoptimized.optnone && unoptimized.noinline,
+        "{unoptimized:?}"
+    );
+}
+
+#[test]
+fn call_site_attributes_do_not_become_callee_promises() {
+    let Some(i) = importer() else {
+        eprintln!("skipped: set KEEL_TEST_LIBLLVM to LLVM 23");
+        return;
+    };
+    let source = format!(
+        "{HEADER}declare void @callee()\n\
+         define void @caller() {{ call void @callee() nounwind\n ret void }}"
+    );
+    let text = i.translate(source.as_bytes(), Default::default()).unwrap();
+    let module = keel_ir::parse(&text).unwrap();
+    let callee = module.decls.iter().find(|d| d.name == "callee").unwrap();
+    assert!(
+        !callee.attrs.nounwind,
+        "call-site nounwind must not strengthen other calls"
+    );
+    assert!(
+        !module.functions[0].attrs.nounwind,
+        "call-site nounwind must not become a caller promise"
+    );
+}
+
+#[test]
+fn contradictory_frequency_hints_do_not_reject_valid_llvm() {
+    let Some(i) = importer() else {
+        eprintln!("skipped: set KEEL_TEST_LIBLLVM to LLVM 23");
+        return;
+    };
+    let source = format!("{HEADER}define void @mixed() cold hot {{ ret void }}");
+    let text = i.translate(source.as_bytes(), Default::default()).unwrap();
+    let module = keel_ir::parse(&text).unwrap();
+    assert!(!module.functions[0].attrs.cold && !module.functions[0].attrs.hot);
+}

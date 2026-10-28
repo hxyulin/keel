@@ -2,16 +2,36 @@
 """Run an existing LLVM import validator against Rust and its Python reference.
 
 Every importer CLI invocation runs both implementations and compares acceptance
-and successful output. The validator receives the Rust result and executes its
+and successful output, excluding alignment and function flags newly retained by
+Rust. The validator receives the Rust result and executes its
 usual native interoperability and rejection checks. Artifacts stay in --out.
 """
 import argparse
 import pathlib
+import re
 import runpy
 import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+
+def without_preserved_facts(text):
+    """Remove only facts newly retained by Rust beyond the Python baseline."""
+    lines = []
+    for line in text.splitlines(keepends=True):
+        if line.startswith(('func ', 'decl ')) and not line.startswith('decl data '):
+            line = re.sub(
+                r'"(?:[^"\\]|\\.)*"| (?P<fact>inlinehint|alwaysinline|noinline|noreturn|nounwind|cold|hot|optnone)(?=\s|$)',
+                lambda match: '' if match.group('fact') else match.group(), line)
+        elif re.match(r'\s+(?:v[0-9]+ = load\.[A-Za-z0-9]+|store) ', line):
+            line = re.sub(r'\balign [0-9]+ ', '', line)
+        lines.append(line)
+    return ''.join(lines)
+
+
+def same_translation(reference, actual):
+    return without_preserved_facts(reference.decode()) == without_preserved_facts(actual.decode())
 
 
 def main():
@@ -51,9 +71,11 @@ def main():
         assert (python.returncode == 0) == (rust.returncode == 0), (
             argv, python.returncode, python.stderr, rust.returncode, rust.stderr)
         if python.returncode == 0:
-            assert python.stdout == rust.stdout, (argv, 'stdout differs')
+            assert same_translation(python.stdout, rust.stdout), (argv, 'stdout differs')
             actual = dest.read_bytes() if dest is not None and dest.exists() else None
-            assert reference == actual, (argv, 'Keel output differs')
+            assert ((reference is None and actual is None)
+                    or (reference is not None and actual is not None
+                        and same_translation(reference, actual))), (argv, 'Keel output differs')
         elif dest is not None:
             actual = dest.read_bytes() if dest.exists() else None
             assert actual == before, (argv, 'Rust failure changed destination')
@@ -77,7 +99,7 @@ def main():
                 count += 1
                 raise
             assert rust.returncode == 0, (source, rust.stderr)
-            assert python.encode() == rust.stdout, ('Keel output differs', source, python, rust.stdout)
+            assert same_translation(python.encode(), rust.stdout), ('Keel output differs', source, python, rust.stdout)
             count += 1
             return rust.stdout.decode()
 

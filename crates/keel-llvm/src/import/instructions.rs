@@ -280,15 +280,15 @@ impl Translation<'_> {
                 if l.get_ordering(inst) != 0 {
                     return Err("atomic memory access".into());
                 }
-                let flags = if l.get_volatile(inst) != 0 {
-                    " volatile"
-                } else {
-                    ""
+                let flags = keel_ir::MemoryFlags {
+                    volatile: l.get_volatile(inst) != 0,
+                    align: l.get_alignment(inst).max(1),
+                    notrap: false,
                 };
                 if op == 27 {
                     let ty = self.ty(l.type_of(inst))?;
                     let addr = self.value(l.get_operand(inst, 0))?;
-                    let v = self.emit(format!("load.{ty}{flags} {addr}"));
+                    let v = self.emit(format!("load.{ty} {flags}{addr}"));
                     if self.width(inst) == 1 {
                         let one = self.emit("iconst.i8 1");
                         format!("and {v}, {one}")
@@ -298,7 +298,7 @@ impl Translation<'_> {
                 } else {
                     let a = self.args(inst)?;
                     self.lines
-                        .push(format!("    store{flags} {}, {}", a[0], a[1]));
+                        .push(format!("    store {flags}{}, {}", a[0], a[1]));
                     return Ok(None);
                 }
             }

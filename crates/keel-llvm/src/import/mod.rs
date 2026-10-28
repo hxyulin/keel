@@ -289,6 +289,23 @@ impl<'a> Translation<'a> {
         }
         Ok(())
     }
+    fn function_attrs(&self, function: Ref) -> keel_ir::FunctionAttrs {
+        let has = |name| self.l.attribute(function, u32::MAX, name, false) != 0;
+        let cold = has("cold");
+        let hot = has("hot");
+        keel_ir::FunctionAttrs {
+            inlinehint: has("inlinehint"),
+            alwaysinline: has("alwaysinline"),
+            noinline: has("noinline"),
+            noreturn: has("noreturn"),
+            nounwind: has("nounwind"),
+            // LLVM permits both hints; Keel requires them to be exclusive.
+            cold: cold && !hot,
+            hot: hot && !cold,
+            optnone: has("optnone"),
+            ..Default::default()
+        }
+    }
     fn memory_name(&self, v: Ref) -> Option<&'static str> {
         match self.l.name(v).as_str() {
             "llvm.memcpy.p0.p0.i64" => Some("memcpy"),
@@ -739,8 +756,9 @@ impl<'a> Translation<'a> {
             }
         );
         let blocks = sequence(|| l.get_first_basic_block(f), |b| l.get_next_basic_block(b));
+        let attrs = self.function_attrs(f);
         if blocks.is_empty() {
-            return Ok(format!("decl {signature} cc(c)"));
+            return Ok(format!("decl {signature} cc(c){attrs}"));
         }
         let local_flag = if local(l.get_linkage(f)) || self.copies.contains(&f) {
             " local"
@@ -755,7 +773,7 @@ impl<'a> Translation<'a> {
             String::new()
         };
         self.lines = vec![format!(
-            "func {signature} cc({}){local_flag}{personality} {{",
+            "func {signature} cc({}){local_flag}{attrs}{personality} {{",
             if self.fast.contains(&f) { "fast" } else { "c" }
         )];
         self.values = (0..l.count_params(f))

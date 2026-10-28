@@ -33,8 +33,11 @@ implementation. The library remains loaded for the importer's lifetime.
 | Linkage, ODR and hidden/tagged RTTI | Existing linkage and odr validators, plus all 15 `test_llvm_import_odr.py` tests through `--validator policy` |
 | CLI buffering, atomic publication and external-verifier failure | Existing validator rejection/preservation tests run against both CLIs |
 
-The parity runner compares success/failure and successful Keel output byte for
-byte, then returns the Rust result to the original validator. Thus the original
+The parity runner compares success/failure and successful Keel output after
+removing the function attributes and load/store alignment newly retained by
+Rust. It leaves global and stack alignment, volatility and all other text
+unchanged. Focused Rust tests check the exact retained facts, and Python tests
+bound the normalization. The runner returns the Rust result to the original validator. Thus the original
 native execution checks exercise Rust-imported output. The policy tests compare
 in-process Python translation with the Rust CLI and keep the original assertions.
 Use a fresh output directory for each validator:
@@ -64,6 +67,17 @@ Other validator names are `base`, `fp`, `globals`, `calls`, `bool`, `memory`,
   checked in u128/i128 before narrowing. LLVM's u32 object/addend bounds remain.
 - Diagnostic strings use lossy UTF-8 decoding. Supported symbols still require
   ASCII letters, digits, `_`, `.` or `$`, matching the Python symbol policy.
+- Rust now preserves load/store alignment and existing function/declaration
+  `inlinehint`, `alwaysinline`, `noinline`, `noreturn`, `nounwind`, `cold`, `hot`
+  and `optnone` flags. Python remains the earlier baseline without these facts.
+  Alignment is independent of volatility and does not infer `notrap`.
+  Call-site-only attributes are still omitted, rather than strengthened into
+  function-wide promises. LLVM requires `optnone` functions to be `noinline`;
+  both flags map to Keel's corresponding optimization policy. Neither this map
+  nor hot/cold hints promise the same optimization decisions in both compilers.
+  LLVM accepts simultaneous hot/cold hints, while Keel requires them to be
+  exclusive. Both contradictory hints are omitted rather than rejecting a
+  previously accepted LLVM module.
 
 ## Preserved quirks
 
@@ -74,7 +88,7 @@ Memcpy becomes memmove to preserve LLVM's identical-pointer case. Fixed-slot
 lifetime markers are omitted. ODR copies, hidden RTTI, aggregate parameters and
 sret retain the original bounded acceptance checks.
 
-## Verification
+## Original port verification
 
 The 12 existing validator suites passed against Rust with 605 CLI comparisons
 to Python. The 15 policy tests passed with 94 additional import comparisons.
@@ -88,3 +102,13 @@ Clippy with `--no-deps --all-targets --all-features -- -D warnings` passed for
 both affected crates. The Clippy run including workspace dependencies stopped
 on six existing warnings in `keel-ir` (neon, sections, vector docs, aggregate
 va_arg verification and rflags regions); those files were not changed.
+
+## Fact preservation validation
+
+The full `keel-llvm` test suite passed with `KEEL_TEST_LIBLLVM` set to LLVM 23.
+The focused import tests also passed after adding the simultaneous cold/hot
+case. They check exact alignment and attribute values, default absence of
+promises, call-site isolation and alignment retained through LLVM re-export.
+Targeted Clippy with warnings denied, formatting and documentation passed.
+The base validator passed 53 Rust/Python comparisons and 18 native builds using
+the bounded fact normalization. Both normalization tests passed.
