@@ -309,6 +309,11 @@ pub(crate) fn compile_output(
     emission: crate::EmissionOptions,
 ) -> Result<Output, CodegenError> {
     crate::validate_function_entries(module)?;
+    let selector = crate::emission::FunctionSelector(pipeline.selector);
+    let pipeline = &crate::CodegenPipeline {
+        selector: &selector,
+        allocator: pipeline.allocator,
+    };
     let target = if linux {
         crate::Target::Aarch64LinuxGnu
     } else {
@@ -2241,6 +2246,10 @@ impl<'a> FunctionCompiler<'a> {
                     .unwrap_or_else(|| {
                         if func.attrs.retain {
                             format!(".text.keel.retain.{}", name)
+                        } else if func.attrs.cold {
+                            ".text.unlikely".into()
+                        } else if func.attrs.hot {
+                            ".text.hot".into()
                         } else {
                             ".text".into()
                         }

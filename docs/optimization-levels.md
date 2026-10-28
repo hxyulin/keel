@@ -75,9 +75,9 @@ alignment and object-container overhead cannot masquerade as instruction size.
 Unwind emission is independent of `-Os`; see [unwind metadata](unwind-metadata.md)
 for explicit enable/disable flags.
 
-Per-function `optimize(...)`, `hot`, `cold`, `optnone` and `flatten` are currently
-[retained as IR metadata](function-policy-metadata.md). They do not override
-these command-line policies yet.
+Per-function `optimize(...)`, `hot`, `cold`, `optnone` and `flatten`
+[override function policies](function-policy-metadata.md). Supported explicit
+presets override the invocation pipeline and optional native selection.
 
 ## x86-64 address models
 

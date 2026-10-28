@@ -71,8 +71,8 @@ effect: `format`, `nonnull`, `deprecated`, `warn_unused_result`, `unused`,
 `malloc` and `alloc_size`.
 
 `hot`, `cold`, `optimize(...)`, `optnone`, `flatten`, `no_instrument_function`
-and `no_profile_instrument_function` now survive as typed IR metadata. Their
-optimization/instrumentation requests are not applied yet. `naked` and
+and `no_profile_instrument_function` survive as typed IR metadata. The optimizer
+and native code generator honor the supported function policies. `naked` and
 argument-free `interrupt` likewise survive frontend lowering, but all executable
 consumers reject their unimplemented entry/return contracts. See
 [function policy metadata](function-policy-metadata.md).

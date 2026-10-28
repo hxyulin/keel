@@ -44,3 +44,26 @@ fn conflicting_policies_and_stale_callee_metadata_are_rejected() {
     module.sync_function_attrs();
     verify_module(&module).unwrap();
 }
+
+#[test]
+fn ordered_policy_resolution_preserves_switches_and_optnone_wins() {
+    use keel_ir::{FunctionOptLevel, FunctionPolicy};
+    let module = parse("decl @a() cold optimize(1, \"no-unroll-loops,O3\", \"-ftree-vectorize\", \"no-tree-loop-vectorize\")\ndecl @b() optnone optimize(3, \"inline-functions,unroll-loops\")\n").unwrap();
+    let a = FunctionPolicy::resolve(&module.decls[0].attrs).unwrap();
+    assert_eq!(a.level, Some(FunctionOptLevel::Full));
+    assert_eq!(a.unroll, Some(false));
+    assert_eq!(a.vectorize, Some(false));
+    let b = FunctionPolicy::resolve(&module.decls[1].attrs).unwrap();
+    assert!(b.disabled() && !b.permits_inlining());
+    assert_eq!(b.unroll, Some(false));
+    for options in ["O4", "Ofast", "no-unknown-pass", "", "tree-slp-vectorize"] {
+        let attrs = keel_ir::FunctionAttrs {
+            optimize: keel_ir::FunctionOptimization::new([keel_ir::OptimizationOption::Options(
+                options.into(),
+            )]),
+            ..Default::default()
+        };
+        assert!(FunctionPolicy::resolve(&attrs).is_err(), "{options}");
+    }
+    assert!(verify_module(&parse("decl @bad() optnone alwaysinline\n").unwrap()).is_err());
+}

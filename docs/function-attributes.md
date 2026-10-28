@@ -185,8 +185,10 @@ discards this report; no main CLI change is made. Indirect calls have no explici
 request to report. Basic/none optimization tiers retain their existing pipelines:
 `alwaysinline` is acted on when the inliner runs, not by adding new tier passes.
 
-Hot/cold and per-function optimization requests now have
-[typed metadata](function-policy-metadata.md); their policy effects remain deferred.
+Hot/cold and per-function optimization requests have
+[typed metadata and native policy consumers](function-policy-metadata.md).
+Supported presets select local pipelines and optional selection; flatten requests
+bounded nested inlining.
 
 Deferred: assume, distinct unreachable, branch weights, memory/alias
 contracts, and public interposable inlining.

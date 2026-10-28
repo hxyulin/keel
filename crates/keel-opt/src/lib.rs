@@ -28,6 +28,7 @@ mod wasm32;
 pub use wasm32::optimize_wasm32_basic;
 mod dce;
 mod fast;
+mod function_policy;
 mod gcm;
 mod gvn;
 mod if_convert;
@@ -620,6 +621,11 @@ pub fn find_pass(name: &str) -> Option<&'static dyn Pass> {
 #[derive(Debug)]
 pub enum OptError {
     UnknownPass(String),
+    /// A function requested an optimization policy that cannot be implemented.
+    FunctionPolicy {
+        func: String,
+        message: String,
+    },
     /// A pass left a function the verifier rejects: a bug in the pass.
     Verifier {
         pass: &'static str,
@@ -631,6 +637,7 @@ pub enum OptError {
 impl fmt::Display for OptError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            OptError::FunctionPolicy { func, message } => write!(f, "@{func}: {message}"),
             OptError::UnknownPass(name) => {
                 let names: Vec<&str> = PASSES.iter().map(|p| p.name()).collect();
                 write!(f, "unknown pass `{name}`; passes are: {}", names.join(", "))
@@ -786,6 +793,21 @@ pub fn run_pipeline_with_context_and_options(
     context: OptimizationContext,
     options: OptimizeOptions,
 ) -> Result<(), OptError> {
+    if module.special_entry_contract().is_some() {
+        return Ok(());
+    }
+    if let Some(result) = function_policy::run(module, passes, context, None, options) {
+        return result;
+    }
+    run_pipeline_with_context_raw(module, passes, context, options)
+}
+
+fn run_pipeline_with_context_raw(
+    module: &mut Module,
+    passes: &[&dyn Pass],
+    context: OptimizationContext,
+    options: OptimizeOptions,
+) -> Result<(), OptError> {
     // Preserve opaque entry/return bodies until target-specific lowering can
     // establish their register, frame and control-flow contracts.
     if module.special_entry_contract().is_some() {
@@ -911,6 +933,19 @@ pub fn run_pipeline_with_context_and_report_and_options(
     if module.special_entry_contract().is_some() {
         return Ok(());
     }
+    if let Some(result) = function_policy::run(module, passes, context, Some(report), options) {
+        return result;
+    }
+    run_pipeline_with_context_and_report_raw(module, passes, context, report, options)
+}
+
+fn run_pipeline_with_context_and_report_raw(
+    module: &mut Module,
+    passes: &[&dyn Pass],
+    context: OptimizationContext,
+    report: &mut OptimizationReport,
+    options: OptimizeOptions,
+) -> Result<(), OptError> {
     let target = context.target;
     let verification_enabled = options.verification.enabled();
     use std::time::Instant;

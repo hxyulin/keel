@@ -36,6 +36,13 @@ pub fn query(name: &str, argument: &str, target: Target) -> u64 {
                 | "keel_noninterposable"
                 | "always_inline"
                 | "noinline"
+                | "hot"
+                | "cold"
+                | "optimize"
+                | "optnone"
+                | "flatten"
+                | "no_instrument_function"
+                | "no_profile_instrument_function"
                 | "nothrow"
         ),
         "__has_c_attribute" | "__has_declspec_attribute" | "__building_module" => false,

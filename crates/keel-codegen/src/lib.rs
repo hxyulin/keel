@@ -715,5 +715,22 @@ fn validate_function_entries(module: &keel_ir::Module) -> Result<(), CodegenErro
             message: format!("{contract} function entry/return lowering is not implemented"),
         });
     }
+    for (name, attrs) in module
+        .functions
+        .iter()
+        .map(|f| (&f.name, &f.attrs))
+        .chain(module.decls.iter().map(|d| (&d.name, &d.attrs)))
+        .chain(
+            module
+                .functions
+                .iter()
+                .flat_map(|f| f.callees().map(|(_, d)| (&d.name, &d.attrs))),
+        )
+    {
+        keel_ir::FunctionPolicy::resolve(attrs).map_err(|message| CodegenError {
+            func: name.clone(),
+            message,
+        })?;
+    }
     Ok(())
 }

@@ -45,7 +45,10 @@ pub use function::{
     AbiParam, ArgExt, CallArgs, CallConv, FuncDecl, Function, FunctionAttrs, InsertPoint, Purpose,
     Signature, SourceLoc, StackSlotData, ValueData, ValueDef, X86VectorAbi,
 };
-pub use function_policy::{FunctionEntryContract, FunctionOptimization, OptimizationOption};
+pub use function_policy::{
+    FunctionEntryContract, FunctionOptLevel, FunctionOptimization, FunctionPolicy,
+    OptimizationOption,
+};
 pub use inst::{
     BinaryOp, BlockCall, Clause, ConvertOp, FloatCC, InstData, IntCC, Ordering, OverflowOp, RmwOp,
     Symbol, UnaryOp,

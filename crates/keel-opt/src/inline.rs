@@ -471,7 +471,11 @@ pub struct InlineSkip {
 }
 
 fn profitability_reason(f: &Function, full: bool) -> Option<&'static str> {
-    let scale = if f.attrs.inlinehint { 2 } else { 1 };
+    let scale = if f.attrs.inlinehint || f.attrs.hot {
+        2
+    } else {
+        1
+    };
     if f.attrs.alwaysinline || (full && readonly_leaf(f)) {
         return None;
     }
@@ -515,8 +519,16 @@ fn eligibility_reason_with_frames(
 }
 
 fn body_eligibility_reason(f: &Function, frames: FrameSemantics) -> Option<&'static str> {
-    if f.attrs.noinline {
+    if f.attrs.noinline || f.attrs.optnone {
         return Some("noinline");
+    }
+    if f.attrs.naked || f.attrs.interrupt {
+        return Some("special_entry");
+    }
+    if !f.attrs.alwaysinline
+        && keel_ir::FunctionPolicy::resolve(&f.attrs).is_ok_and(|p| !p.permits_inlining())
+    {
+        return Some("function_optimization_policy");
     }
     if f.sig.variadic {
         return Some("variadic_callee");
@@ -687,17 +699,65 @@ fn run_observed(module: &mut Module, sites: Option<&mut Vec<InlineSite>>) -> Inl
 
 fn run_observed_policy(
     module: &mut Module,
-    mut sites: Option<&mut Vec<InlineSite>>,
+    sites: Option<&mut Vec<InlineSite>>,
     experimental: bool,
     admit_noninterposable: bool,
     cheap_reserve: bool,
 ) -> InlineReport {
+    run_observed_policy_scoped(
+        module,
+        sites,
+        experimental,
+        admit_noninterposable,
+        cheap_reserve,
+        None,
+    )
+}
+
+/// Inlining restricted to callers whose local schedule permits this round.
+pub(super) struct ScopedInline {
+    pub callers: FxHashSet<String>,
+}
+impl Pass for ScopedInline {
+    fn name(&self) -> &'static str {
+        "inline-function-policy"
+    }
+    fn description(&self) -> &'static str {
+        "inline into callers selected by function-local policies"
+    }
+    fn run(&self, _: &mut Function) -> bool {
+        false
+    }
+    fn run_module_tracked(
+        &self,
+        module: &mut Module,
+        sites: Option<&mut Vec<InlineSite>>,
+        changed: &mut Vec<bool>,
+    ) -> Option<bool> {
+        let report =
+            run_observed_policy_scoped(module, sites, false, true, false, Some(&self.callers));
+        Some(report.changed_callers(module, changed))
+    }
+}
+
+fn run_observed_policy_scoped(
+    module: &mut Module,
+    mut sites: Option<&mut Vec<InlineSite>>,
+    experimental: bool,
+    admit_noninterposable: bool,
+    cheap_reserve: bool,
+    callers: Option<&FxHashSet<String>>,
+) -> InlineReport {
+    let flatten = module.functions.iter().any(|f| f.attrs.flatten);
     // Freeze original sites and caller-size decisions before either phase.
     // The ledgers span both phases: priority changes order, never capacity.
     let original_sites: Vec<Vec<_>> = module
         .functions
         .iter()
         .map(|caller| {
+            if callers.is_some_and(|names| !names.contains(&caller.name)) {
+                return Vec::new();
+            }
             caller
                 .layout_insts()
                 .filter_map(|(_, i)| {
@@ -759,7 +819,7 @@ fn run_observed_policy(
     let mut rejected = FxHashMap::default();
     for (index, f) in module.functions.iter().enumerate() {
         let legality = eligibility_reason(f, admit_noninterposable);
-        let profitability = if legality.is_none() {
+        let profitability = if legality.is_none() && !flatten {
             profitability_reason(f, admit_noninterposable)
         } else {
             None
@@ -900,7 +960,14 @@ fn run_observed_policy(
                 "unsupported call instruction",
                 "unsupported_call_instruction",
             ))
-        } else if decl.attrs.noinline {
+        } else if caller.attrs.optnone
+            || keel_ir::FunctionPolicy::resolve(&caller.attrs).is_ok_and(|p| {
+                !p.permits_inlining()
+                    && !(caller.attrs.flatten && !p.disabled() && p.inline != Some(false))
+            })
+        {
+            Some(("caller optimization policy", "caller_optimization_policy"))
+        } else if decl.attrs.noinline || decl.attrs.optnone {
             Some(("noinline policy", "noinline"))
         } else if recursive_bodies.contains(&caller.name) {
             Some(("frozen recursive wrapper body", "recursive_wrapper_body"))
@@ -915,6 +982,17 @@ fn run_observed_policy(
                 Some(("ABI signature mismatch", "abi_signature_mismatch"))
             } else if callee.name == caller.name {
                 Some(("recursive callee", "recursive_callee"))
+            } else if !requested
+                && !caller.attrs.flatten
+                && caller.attrs.optimize != callee.attrs.optimize
+            {
+                Some(("different function options", "function_option_boundary"))
+            } else if !requested && callee.attrs.cold && !caller.attrs.cold && !caller.attrs.flatten
+            {
+                Some(("cold callee", "cold_callee"))
+            } else if !caller.attrs.flatten && flatten {
+                profitability_reason(callee, admit_noninterposable)
+                    .map(|r| ("profitability threshold", r))
             } else {
                 None
             }

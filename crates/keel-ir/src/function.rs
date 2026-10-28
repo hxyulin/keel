@@ -278,19 +278,19 @@ pub struct FunctionAttrs {
     pub noinline: bool,
     pub noreturn: bool,
     pub nounwind: bool,
-    /// Unlikely execution hint, retained without selecting optimization passes.
+    /// Unlikely execution hint; defaults to size optimization and cold ELF placement.
     pub cold: bool,
-    /// Frequent execution hint, retained without selecting optimization passes.
+    /// Frequent execution hint for inlining profitability and hot ELF placement.
     pub hot: bool,
     /// Function-local optimization arguments, retained in source order.
     pub optimize: crate::FunctionOptimization,
-    /// Request to disable optional optimization; currently metadata only.
+    /// Disable optional IR transformations and native instruction selection.
     pub optnone: bool,
-    /// Request to inline calls within this function; currently metadata only.
+    /// Request bounded nested inlining of calls within this function.
     pub flatten: bool,
-    /// Suppress function-entry instrumentation; currently metadata only.
+    /// Suppress function-entry instrumentation; no instrumentation is currently emitted.
     pub no_instrument_function: bool,
-    /// Suppress profile instrumentation; currently metadata only.
+    /// Suppress profile instrumentation; no profile instrumentation is currently emitted.
     pub no_profile_instrument_function: bool,
     /// Requires a producer-owned prologue/epilogue; executable consumers reject it.
     pub naked: bool,
@@ -343,6 +343,9 @@ impl FunctionAttrs {
         }
         if !self.optimize.is_valid() {
             return Err("optimization options require printable ASCII strings");
+        }
+        if self.optnone && self.alwaysinline {
+            return Err("optnone conflicts with alwaysinline");
         }
         if self.alwaysinline && self.noinline {
             return Err("alwaysinline conflicts with noinline");

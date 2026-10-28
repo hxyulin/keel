@@ -335,6 +335,11 @@ pub(crate) fn compile_output(
     mut sink: Option<&mut dyn FnMut(keel_asm_ir::Program)>,
 ) -> Result<Output, CodegenError> {
     crate::validate_function_entries(module)?;
+    let selector = crate::emission::FunctionSelector(pipeline.selector);
+    let pipeline = &crate::CodegenPipeline {
+        selector: &selector,
+        allocator: pipeline.allocator,
+    };
     let code_model = emission.x86_code_model.unwrap_or_default();
     if code_model == CodeModel::Kernel && module.data.iter().any(|d| d.thread_local) {
         return Err(CodegenError {
@@ -398,8 +403,14 @@ pub(crate) fn compile_output(
             boundary.as_ref().unwrap_or(original),
             pipeline.selector.x86_features(),
         );
-        let mut compiler =
-            FunctionCompiler::new(&func, &symbols, pools, pipeline, structured, emission.goal)?;
+        let mut compiler = FunctionCompiler::new(
+            &func,
+            &symbols,
+            pools,
+            pipeline,
+            structured,
+            crate::emission::function_goal(&func.attrs, emission.goal),
+        )?;
         compiler.debug = debug;
         compiler.code_model = code_model;
         compiler.unwind_tables = emission.unwind_tables;
@@ -1848,6 +1859,10 @@ impl<'a> FunctionCompiler<'a> {
                     .unwrap_or_else(|| {
                         if func.attrs.retain {
                             format!(".text.keel.retain.{}", func.name)
+                        } else if func.attrs.cold {
+                            ".text.unlikely".into()
+                        } else if func.attrs.hot {
+                            ".text.hot".into()
                         } else {
                             ".text".into()
                         }

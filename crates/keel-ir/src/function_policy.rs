@@ -1,4 +1,4 @@
-//! Source function optimization requests retained for later policy consumers.
+//! Ordered function optimization requests and their supported policy resolution.
 use std::{fmt, sync::Arc};
 
 /// A nonstandard function entry/return contract awaiting target lowering.
@@ -81,5 +81,110 @@ impl fmt::Display for FunctionOptimization {
             }
         }
         f.write_str(")")
+    }
+}
+
+/// Function-local optimization preset, independent of target instruction selection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FunctionOptLevel {
+    /// Disable optional IR optimization.
+    None,
+    /// Fast local optimization (`O1`).
+    Fast,
+    /// Balanced release optimization (`O2`).
+    Balanced,
+    /// Full optimization (`O3`).
+    Full,
+    /// Size-oriented optimization (`Os`).
+    Size,
+}
+
+/// Resolved overrides. Missing fields inherit the invocation's policy.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct FunctionPolicy {
+    /// Explicit optimization preset, with the last preset taking precedence.
+    pub level: Option<FunctionOptLevel>,
+    /// Optional direct-call inlining.
+    pub inline: Option<bool>,
+    /// Bounded loop unrolling.
+    pub unroll: Option<bool>,
+    /// Loop vectorization.
+    pub vectorize: Option<bool>,
+}
+impl FunctionPolicy {
+    /// Resolve supported GNU options in source order; reject unknown options.
+    ///
+    /// `optnone` wins over optimization presets and individual pass switches.
+    /// This does not disable language-required inlining or target legalization.
+    ///
+    /// # Errors
+    /// Returns the unsupported option rather than silently ignoring it.
+    pub fn resolve(attrs: &crate::FunctionAttrs) -> Result<Self, String> {
+        let mut result = Self::default();
+        for argument in attrs.optimize.iter() {
+            match argument {
+                OptimizationOption::Level(n) => result.set_option(&format!("O{n}"))?,
+                OptimizationOption::Options(options) => {
+                    for option in options.split(',') {
+                        result.set_option(option.trim())?;
+                    }
+                }
+            }
+        }
+        if attrs.optnone {
+            result.level = Some(FunctionOptLevel::None);
+            result.inline = Some(false);
+            result.unroll = Some(false);
+            result.vectorize = Some(false);
+        }
+        Ok(result)
+    }
+
+    fn set_option(&mut self, option: &str) -> Result<(), String> {
+        let option = option.strip_prefix('-').unwrap_or(option);
+        let level = match option {
+            "O0" | "0" => Some(FunctionOptLevel::None),
+            "O1" | "1" => Some(FunctionOptLevel::Fast),
+            "O2" | "2" => Some(FunctionOptLevel::Balanced),
+            "O3" | "3" => Some(FunctionOptLevel::Full),
+            "Os" | "s" => Some(FunctionOptLevel::Size),
+            _ => None,
+        };
+        if let Some(level) = level {
+            self.level = Some(level);
+            return Ok(());
+        }
+        let option = option.strip_prefix('f').unwrap_or(option);
+        let (enabled, option) = match option.strip_prefix("no-") {
+            Some(option) => (false, option),
+            None => (true, option),
+        };
+        match option {
+            "inline" | "inline-functions" => self.inline = Some(enabled),
+            "unroll-loops" => self.unroll = Some(enabled),
+            "tree-vectorize" | "tree-loop-vectorize" => self.vectorize = Some(enabled),
+            _ => {
+                return Err(format!(
+                    "unsupported function optimization option `{option}`"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether optional transformations must leave the function body unchanged.
+    pub fn disabled(self) -> bool {
+        self.level == Some(FunctionOptLevel::None)
+    }
+
+    /// Whether optional inlining can modify this function or consume its body.
+    pub fn permits_inlining(self) -> bool {
+        !self.disabled()
+            && self.inline.unwrap_or(!matches!(
+                self.level,
+                Some(FunctionOptLevel::Fast | FunctionOptLevel::Size)
+            ))
     }
 }
