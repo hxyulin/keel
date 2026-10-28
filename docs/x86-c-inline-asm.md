@@ -131,27 +131,31 @@ Read-only global `rsp` bindings have a separate
 [C observer contract](c-stack-observers.md). Their exact `+r` operand supports
 Linux's `ASM_CALL_CONSTRAINT` through the balanced stack contract below.
 
-All asm is pinned and conservatively invalidates memory knowledge, even without
-`volatile` or a `memory` clobber. This retains more code than GCC; it does not
-emit a hardware memory fence. Function-scope basic asm preserves literal text,
+All asm remains pinned, even without `volatile`. Memory clobbers and reserved-stack
+templates are compiler memory barriers, not hardware fences. Explicit memory
+operands describe reads and writes; register-only templates without a memory
+clobber retain load facts for `memory-forward` and `load-reuse`.
+Function-scope basic asm preserves literal text,
 assumes GPR preservation and models memory and flags conservatively.
 `inline` has no size-hint effect.
 
 ## Lowering and boundaries
 
-The backend snapshots GPR homes and stages every register input in frame slots
+The backend snapshots GPR homes overwritten by declared clobbers, operand
+registers or staging scratch use, and stages every register input in frame slots
 before filling operand registers. Flag result slots are zeroed before the
 template, then `SETcc` writes their low bytes immediately after it. These
 captures preserve flags and require no GPR operands. It captures every output before restoring
 old homes, then installs SSA results. This handles fixed-register cycles,
 rematerialized inputs and values live across arbitrary declared GPR clobbers
-without changing the general allocator. Functions with asm also save the
-callee-saved GPRs in their normal prologue/CFI. Frame slots and stable frame-base
+without changing the general allocator. Only affected callee-saved GPRs are added
+to the normal prologue/CFI. Operand-free templates with no GPR clobbers allocate
+no staging frame. Frame slots and stable frame-base
 registers remain outside operand allocation.
 
-This conservative implementation emits many saves/loads and grows stack frames.
-It establishes correctness before reducing saves using liveness and precise
-instruction-boundary constraints. It does not use SIMD scratch registers for
+Preservation still includes affected homes even when no live SSA value uses them.
+Further reductions need liveness and precise instruction-boundary constraints.
+It does not use SIMD scratch registers for
 asm staging. This alone does not establish a kernel code-generation mode.
 
 Substituted text remains an explicit fragment in the enclosing object program.

@@ -1688,9 +1688,9 @@ impl<'a> FunctionCompiler<'a> {
         if cx16_save.is_some() && !saved.contains(&3) {
             saved.push(3);
         }
-        if inline_asm_home.is_some() {
+        for plan in inline_asm_plans.values() {
             for r in [3, 12, 13, 14, 15] {
-                if !saved.contains(&r) {
+                if plan.saved_regs.contains(&r) && !saved.contains(&r) {
                     saved.push(r);
                 }
             }

@@ -41,7 +41,7 @@ impl fmt::Display for MemoryFlags {
 }
 
 /// Conservative memory interaction. A barrier invalidates all memory facts,
-/// including object lifetime: calls, atomics, inline asm and stack restore
+/// including object lifetime: calls, atomics, memory-clobber asm and stack restore
 /// cannot be crossed merely because an address is unchanged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MemoryEffects {

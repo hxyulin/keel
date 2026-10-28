@@ -8,6 +8,8 @@ pub(super) struct Plan {
     flags: Vec<(usize, u8)>,
     initializers: [Option<usize>; 16],
     text: String,
+    /// Registers overwritten by operand staging or the template, in slot order.
+    pub saved_regs: Vec<u8>,
     pub bytes: usize,
 }
 
@@ -202,6 +204,26 @@ pub(super) fn plan(
         }
     }
     let text = substitute(func, asm, args, &regs, unique)?;
+    // Staging uses RAX, while operand initialization and template outputs can
+    // overwrite their assigned homes. A memory/flags clobber changes no GPR.
+    let mut overwritten = [false; 16];
+    for c in &asm.clobbers {
+        if let AsmClobber::Reg(r) = c {
+            overwritten[r.num as usize] = true;
+        }
+    }
+    for &r in regs.iter().flatten() {
+        overwritten[r as usize] = true;
+    }
+    if regs.iter().any(Option::is_some) || n != 0 {
+        overwritten[S0 as usize] = true;
+    }
+    let saved_regs: Vec<_> = (0..16).filter(|&r| overwritten[r as usize]).collect();
+    let bytes = if saved_regs.is_empty() && n == 0 {
+        0
+    } else {
+        8 * (saved_regs.len() + args.len() + n)
+    };
     // The shared object assembler owns instruction/directive validation and
     // feature checks. Parsing fragments here would bypass GNU preprocessing
     // (numeric local labels and macros in particular).
@@ -218,7 +240,8 @@ pub(super) fn plan(
             })
             .collect(),
         text,
-        bytes: 8 * (16 + args.len() + n),
+        saved_regs,
+        bytes,
     })
 }
 
@@ -374,33 +397,43 @@ fn substitute(
 
 impl FunctionCompiler<'_> {
     pub(super) fn native_inline_asm(&mut self, inst: Inst, args: &[Value]) {
-        let home = self.inline_asm_home.expect("asm frame prepared");
         let plan = self
             .inline_asm_plans
             .remove(&inst)
             .expect("asm checked before emission");
+        if plan.bytes == 0 {
+            self.out.inline_assembly(&plan.text);
+            return;
+        }
+        let home = self.inline_asm_home.expect("asm frame prepared");
         let n = plan.regs.len() - args.len();
+        let inputs_at = plan.saved_regs.len();
+        let outputs_at = inputs_at + args.len();
         let memory_at = |this: &Self, slot| sized(this.frame(home + 8 * slot), 64);
-        // Preserve every GPR home, including scratch registers. This runs before
+        // Preserve overwritten GPR homes, including scratch registers, before
         // any input rematerialization or memory-to-memory copy uses RAX.
-        for r in 0..16 {
-            if available(r, self.frame_register) {
-                self.emit(
-                    Opcode::Mov,
-                    [asm_arg(memory_at(self, r as usize)), asm_arg(r64(r))],
-                );
-            }
+        for (slot, &r) in plan.saved_regs.iter().enumerate() {
+            self.emit(
+                Opcode::Mov,
+                [asm_arg(memory_at(self, slot)), asm_arg(r64(r))],
+            );
         }
         for (i, &arg) in args.iter().enumerate() {
             if plan.regs[n + i].is_none() {
                 continue;
             }
-            let dst = memory_at(self, 16 + i);
+            let dst = memory_at(self, inputs_at + i);
             match self.loc(arg) {
-                Loc::Reg(r) => self.emit(
-                    Opcode::Mov,
-                    [asm_arg(r64(S0)), asm_arg(memory_at(self, r as usize))],
-                ),
+                Loc::Reg(r) => {
+                    if let Ok(slot) = plan.saved_regs.binary_search(&r) {
+                        self.emit(
+                            Opcode::Mov,
+                            [asm_arg(r64(S0)), asm_arg(memory_at(self, slot))],
+                        );
+                    } else {
+                        self.emit_move(Loc::Reg(S0), Loc::Reg(r));
+                    }
+                }
                 src => self.emit_move(Loc::Reg(S0), src),
             }
             self.emit(Opcode::Mov, [asm_arg(dst), asm_arg(r64(S0))]);
@@ -411,7 +444,10 @@ impl FunctionCompiler<'_> {
             if let Some(i) = *initializer {
                 self.emit(
                     Opcode::Mov,
-                    [asm_arg(r64(r as u8)), asm_arg(memory_at(self, 16 + i))],
+                    [
+                        asm_arg(r64(r as u8)),
+                        asm_arg(memory_at(self, inputs_at + i)),
+                    ],
                 );
             }
         }
@@ -420,46 +456,35 @@ impl FunctionCompiler<'_> {
         for &(i, _) in &plan.flags {
             self.emit(
                 Opcode::Mov,
-                [asm_arg(memory_at(self, 16 + args.len() + i)), asm_arg(0i64)],
+                [asm_arg(memory_at(self, outputs_at + i)), asm_arg(0i64)],
             );
         }
         self.out.inline_assembly(&plan.text);
         for &(i, cc) in &plan.flags {
             self.emit(
                 Opcode::Setcc(cc),
-                [asm_arg(sized(
-                    self.frame(home + 8 * (16 + args.len() + i)),
-                    8,
-                ))],
+                [asm_arg(sized(self.frame(home + 8 * (outputs_at + i)), 8))],
             );
         }
         for i in 0..n {
             let Some(r) = plan.regs[i] else { continue };
             self.emit(
                 Opcode::Mov,
-                [
-                    asm_arg(memory_at(self, 16 + args.len() + i)),
-                    asm_arg(r64(r)),
-                ],
+                [asm_arg(memory_at(self, outputs_at + i)), asm_arg(r64(r))],
             );
         }
-        for r in 0..16 {
-            if available(r, self.frame_register) {
-                self.emit(
-                    Opcode::Mov,
-                    [asm_arg(r64(r)), asm_arg(memory_at(self, r as usize))],
-                );
-            }
+        for (slot, &r) in plan.saved_regs.iter().enumerate() {
+            self.emit(
+                Opcode::Mov,
+                [asm_arg(r64(r)), asm_arg(memory_at(self, slot))],
+            );
         }
         for (i, &value) in self.func.inst_results(inst).iter().enumerate() {
             if let Some(dst) = self.defined(value) {
                 // Restore all old homes first, then install SSA result homes.
                 self.emit(
                     Opcode::Mov,
-                    [
-                        asm_arg(r64(S0)),
-                        asm_arg(memory_at(self, 16 + args.len() + i)),
-                    ],
+                    [asm_arg(r64(S0)), asm_arg(memory_at(self, outputs_at + i))],
                 );
                 self.emit_move(dst, Loc::Reg(S0));
             }

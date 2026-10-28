@@ -47,6 +47,13 @@ and nine alternating measured pairs. Every syscall result, data check and
 operation count is validated. Ratios below are medians of paired Keel/GCC
 elapsed times, not necessarily quotients of independently computed medians.
 
+These cohorts do not establish whether Os is faster than O2. Both compilers'
+Os samples shift sharply after pair 3, including host startup times; the cause
+was not established. A smaller Os Keel/GCC ratio is not an Os/O2 speedup.
+Use a new interleaved four-image run with clock diagnostics for that comparison.
+The [syscall code-generation audit](linux-kernel-syscall-codegen-gaps.md)
+identifies concrete instruction-size gaps separately from these timing limits.
+
 | Workload | GCC O2 ms | Keel O2 ms | O2 ratio | GCC Os ms | Keel Os ms | Os ratio |
 |---|---:|---:|---:|---:|---:|---:|
 | 5,000,000 getpid calls | 154.967 | 248.826 | 1.606 | 332.021 | 492.031 | 1.571 |

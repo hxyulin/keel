@@ -756,8 +756,30 @@ impl InstData {
             | Self::ReturnCall { .. }
             | Self::ReturnCallIndirect { .. }
             | Self::X86RflagsRegion { .. }
-            | Self::InlineAsm { .. }
             | Self::Neon { .. } => Barrier,
+            Self::InlineAsm { asm, .. } => {
+                use crate::{AsmClobber, AsmOperand};
+                if asm.clobbers.contains(&AsmClobber::Memory)
+                    || asm.inputs.contains(&AsmOperand::StackPointer)
+                {
+                    Barrier
+                } else {
+                    let read = asm
+                        .inputs
+                        .iter()
+                        .any(|op| matches!(op, AsmOperand::Mem | AsmOperand::MemReadWrite));
+                    let write = asm
+                        .inputs
+                        .iter()
+                        .any(|op| matches!(op, AsmOperand::MemWrite | AsmOperand::MemReadWrite));
+                    match (read, write) {
+                        (false, false) => None,
+                        (true, false) => Read,
+                        (false, true) => Write,
+                        (true, true) => ReadWrite,
+                    }
+                }
+            }
             Self::VaArg { .. } | Self::AggregateVaArg { .. } => ReadWrite,
             Self::Intrinsic { id, .. } => match id {
                 crate::x86_system_intrinsics!(all) => id.generated_system_memory_effects(),

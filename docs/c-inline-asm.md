@@ -60,7 +60,8 @@ memory contracts, file-scope asm and asm-goto milestones.
   `v0`–`v31` (also `q`, `d`, `s`, `h`, `b` views and `fp`/`lr` aliases).
   x18 and x29/fp are rejected. x19 is rejected by codegen in functions using
   dynamic stack allocation. Unknown names diagnose. `memory` and `cc` remain
-  explicit IR clobbers; all asm conservatively invalidates memory knowledge.
+  explicit IR clobbers. Memory clobbers invalidate memory knowledge; otherwise
+  explicit memory operands determine the IR read/write effects. All asm remains pinned.
 
 ## Backend contract and boundaries
 

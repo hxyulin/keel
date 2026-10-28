@@ -1,0 +1,69 @@
+{
+  "scope": "Two pinned preprocessed Linux v6.12 units, same flags and input hashes; function sizes, not runtime or whole-kernel qualification",
+  "compiler_parent": "5c4c632dc621452e8da25b42b4538febd58c4270",
+  "source_sha256": {
+    "crates/keel-codegen/src/x86_64.rs": "3dd627fc5a191d21e05d6c943faa489890481bd18f3acc81e71d3ecde24b4786",
+    "crates/keel-codegen/src/x86_64/inline_asm.rs": "0596fde9fbeb643ebb176879d12dada6aca80baba39d14b56c993c069117a6d5",
+    "crates/keel-ir/src/inst.rs": "734551f6c9fba9fe9a713d3f2cdeeb485b5e59ac40dca259851099a686064fe3"
+  },
+  "cases": [
+    {
+      "function": "do_syscall_64",
+      "preset": "O2",
+      "before_bytes": 711,
+      "after_bytes": 412,
+      "object_sha256": "e6ae2946a33e46675cbd413e6b954df0b41f94de46fd75fabbcd0d342b76e889"
+    },
+    {
+      "function": "__x64_sys_getpid",
+      "preset": "O2",
+      "before_bytes": 50,
+      "after_bytes": 50,
+      "object_sha256": "3c232dac4926182f47c79610934218408d71258627e388bfed4ec9e00e3a6ce0"
+    },
+    {
+      "function": "do_syscall_64",
+      "preset": "Os",
+      "before_bytes": 651,
+      "after_bytes": 360,
+      "object_sha256": "d366473dde3fe51f539e1ff96774f76c3bb0374398c759f672cf7d4404343a89"
+    },
+    {
+      "function": "__x64_sys_getpid",
+      "preset": "Os",
+      "before_bytes": 53,
+      "after_bytes": 53,
+      "object_sha256": "465d4470d9872b94758dab8fd414973e72f62fc65107c59c2121f70daab6a57c"
+    }
+  ],
+  "validation": {
+    "native_ir_variants": 18,
+    "native_ir_negative_controls": 1,
+    "native_c_variants": 145,
+    "native_c_negative_controls": 17,
+    "kernel_boot_repeated": false,
+    "workspace_passed": 3046,
+    "workspace_failed": 0,
+    "workspace_ignored": 15,
+    "workspace_groups": 581,
+    "workspace_check": "passed all targets/features",
+    "focused_clippy": "passed with pre-existing library warnings",
+    "all_target_clippy": "blocked by pre-existing keel-ir/tests/call_operand_abi.rs almost_swapped diagnostic",
+    "strict_clippy": "blocked by pre-existing library diagnostics",
+    "documentation": "passed with pre-existing warnings"
+  },
+  "input_sha256": {
+    "entry-common": "04b2957dfa687dae7c624ee2af004737382c00fa872626d12c94265cc5c81641",
+    "sys": "ca19c28cb94dcec29b6fa7fabf9e9bc70df78304faeaefd78bc34d383dc41f16"
+  },
+  "baseline_objects_match_prior_qualified_hashes": true,
+  "flags": [
+    "--target=x86_64-unknown-linux-gnu",
+    "--cpu-level=v1",
+    "--code-model=kernel",
+    "--link-intent=executable",
+    "-fno-asynchronous-unwind-tables",
+    "-fno-unwind-tables",
+    "--target-features=<suite/linux-kernel/kernel-audit-policy.json c_target_features>"
+  ]
+}
