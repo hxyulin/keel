@@ -50,6 +50,21 @@ const TINY: Pools = Pools {
     float_callee_saved: &[],
 };
 
+// Also exercised by the focused optimized spill regressions below.
+const OPTIMIZED_SPILL_CONFIG: (
+    Pools,
+    bool,
+    &str,
+    keel_codegen::SelectionOptions,
+    AllocationTier,
+) = (
+    TINY,
+    true,
+    "-fast-select-tiny",
+    keel_codegen::SelectionOptions::ALL,
+    AllocationTier::Fast,
+);
+
 /// Register sets to compile with, whether to optimize first, and a suffix
 /// for the output files.
 const CONFIGS: [(
@@ -124,13 +139,7 @@ const CONFIGS: [(
         },
         AllocationTier::Fast,
     ),
-    (
-        TINY,
-        true,
-        "-fast-select-tiny",
-        keel_codegen::SelectionOptions::ALL,
-        AllocationTier::Fast,
-    ),
+    OPTIMIZED_SPILL_CONFIG,
 ];
 
 /// Keep configuration-independent work outside the selector/allocator matrix.
@@ -436,22 +445,24 @@ focused_programs! {
     }
 }
 
+const OPTIMIZED_SPILL_PROGRAMS: &[&str] = &[
+    "constant_loop",
+    "cfg_forwarding",
+    "gvn_compare",
+    "strength_reduce",
+    "phi_loop",
+    "checked_fold",
+    "memory_flags",
+    "memory_forward",
+    "known_bits",
+    "canonical_constants",
+    "scalar_simplify",
+    "branch_ranges",
+];
+
 #[test]
 fn optimized_regressions_spills() {
-    for program in [
-        "constant_loop",
-        "cfg_forwarding",
-        "gvn_compare",
-        "strength_reduce",
-        "phi_loop",
-        "checked_fold",
-        "memory_flags",
-        "memory_forward",
-        "known_bits",
-        "canonical_constants",
-        "scalar_simplify",
-        "branch_ranges",
-    ] {
+    for program in OPTIMIZED_SPILL_PROGRAMS {
         let path =
             Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/programs/{program}.keel"));
         let program = PreparedProgram::load(&path);
@@ -490,6 +501,15 @@ fn programs() {
     for path in &paths {
         let program = PreparedProgram::load(path);
         for (pools, optimize, suffix, selection, allocation) in CONFIGS {
+            // The focused regression executes this exact configuration already.
+            if suffix == OPTIMIZED_SPILL_CONFIG.2
+                && path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .is_some_and(|stem| OPTIMIZED_SPILL_PROGRAMS.contains(&stem))
+            {
+                continue;
+            }
             if let Err(error) =
                 run_program(&program, &pools, optimize, suffix, selection, &allocation)
             {

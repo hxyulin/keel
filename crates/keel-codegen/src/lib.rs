@@ -529,7 +529,7 @@ pub(crate) fn validate_vector_width_with_memory_policy(
     maximum: u32,
     byte_copy: impl Fn(Option<keel_ir::X86VectorAbi>, &keel_ir::Layout, bool) -> bool,
 ) -> Result<(), CodegenError> {
-    use keel_ir::{EntityRef, InstData, Value};
+    use keel_ir::InstData;
     let unsupported = |ty: keel_ir::Type| {
         ty.vector()
             .is_some_and(|v| v.bytes() < minimum || v.bytes() > maximum)
@@ -608,17 +608,36 @@ pub(crate) fn validate_vector_width_with_memory_policy(
                 });
             }
         }
-        for n in 0..f.num_values() {
-            let ty = f.value_type(Value::new(n));
+        // Removed instructions retain their value-table entries. Only values
+        // still present in the function constrain its machine representation.
+        let mut bad = None;
+        let mut check_value = |value| {
+            let ty = f.value_type(f.resolve(value));
             if unsupported(ty) {
-                return Err(CodegenError {
-                    func: f.name.clone(),
-                    message: format!(
-                        "{ty} requires a backend with {}-bit SIMD value support and exact-width memory transport",
-                        ty.bytes().unwrap() * 8
-                    ),
-                });
+                bad = Some(ty);
             }
+        };
+        for block in f.blocks() {
+            f.block_params(block)
+                .iter()
+                .copied()
+                .for_each(&mut check_value);
+        }
+        for (_, inst) in f.layout_insts() {
+            f.inst_data(inst).for_each_operand(&mut check_value);
+            f.inst_results(inst)
+                .iter()
+                .copied()
+                .for_each(&mut check_value);
+        }
+        if let Some(ty) = bad {
+            return Err(CodegenError {
+                func: f.name.clone(),
+                message: format!(
+                    "{ty} requires a backend with {}-bit SIMD value support and exact-width memory transport",
+                    ty.bytes().unwrap() * 8
+                ),
+            });
         }
     }
     Ok(())

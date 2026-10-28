@@ -802,12 +802,6 @@ const MAX_SLOT_OFFSET: usize = 4095 * 8;
 /// The largest frame `sub sp` can allocate in two instructions (24 bits).
 const MAX_FRAME_SIZE: usize = (1 << 24) - 16;
 
-/// The most bytes of stack arguments a call may pass or a function take.
-/// Stack arguments are addressed with scaled 12-bit offsets (from `sp` by
-/// the caller, from `x29 + 16` by the callee), which a byte-sized argument
-/// beyond this could not reach.
-const MAX_STACK_ARGS: u32 = 4080;
-
 /// The predicate for taking a Brif's false edge. Keep fused comparisons on
 /// NZCV; ordinary full-width integer truth tests can branch on the register.
 enum BrifTest {
@@ -872,7 +866,7 @@ struct FunctionCompiler<'a> {
     base: &'static str,
     /// Offset from x29 of the first variadic argument: the next 8-byte slot
     /// after the named stack parameters.
-    variadic_offset: u32,
+    variadic_offset: usize,
     /// Outgoing arguments, spill slots and IR stack slots; the
     /// callee-saved area is separate.
     frame_size: usize,
@@ -972,11 +966,6 @@ impl<'a> FunctionCompiler<'a> {
         let (CallConv::C | CallConv::Fast) = func.sig.cc;
         let param_kinds = param_kinds(&func.sig.params);
         let (param_locs, incoming) = abi::arg_locs_for(&param_kinds, param_kinds.len(), linux);
-        if incoming > MAX_STACK_ARGS {
-            return Err(err(format!(
-                "{incoming} bytes of stack parameters is more than the {MAX_STACK_ARGS} supported"
-            )));
-        }
         match func.sig.returns.as_slice() {
             [] => {}
             // The C ABI has the callee extend these to 32 bits. Private
@@ -1128,11 +1117,6 @@ impl<'a> FunctionCompiler<'a> {
                 }
             }
             copies = copies.max(bytes);
-        }
-        if outgoing > MAX_STACK_ARGS {
-            return Err(err(format!(
-                "a call passes {outgoing} bytes of stack arguments, more than the {MAX_STACK_ARGS} supported"
-            )));
         }
         let copy_base = (outgoing as usize).next_multiple_of(16);
         let mut offset = copy_base + copies as usize;
@@ -1481,7 +1465,7 @@ impl<'a> FunctionCompiler<'a> {
             vector_spills,
             copy_temp,
             base: if moves_sp { "x19" } else { "sp" },
-            variadic_offset: 16 + incoming.next_multiple_of(8),
+            variadic_offset: 16 + (incoming as usize).next_multiple_of(8),
             frame_size,
             frameless,
             next_block: None,
@@ -1768,10 +1752,10 @@ impl<'a> FunctionCompiler<'a> {
                     }
                     ArgLoc::Value(Slot::Stack(offset)) | ArgLoc::Copy(Slot::Stack(offset)) => {
                         if let Some(hi) = hi {
-                            self.load_stack_param(dst, Type::I64, 16 + offset);
-                            self.load_stack_param(hi, Type::I64, 24 + offset);
+                            self.load_stack_param(dst, Type::I64, 16 + offset as usize);
+                            self.load_stack_param(hi, Type::I64, 24 + offset as usize);
                         } else {
-                            self.load_stack_param(dst, abi_param.ty, 16 + offset)
+                            self.load_stack_param(dst, abi_param.ty, 16 + offset as usize)
                         }
                     }
                     ArgLoc::SretMemory => moves.push((dst, Loc::Reg(8))),
@@ -2838,14 +2822,7 @@ impl<'a> FunctionCompiler<'a> {
                 Intrinsic::VaStart if self.linux => self.linux_va_start(args[0]),
                 Intrinsic::VaStart => {
                     let list = self.use_reg(args[0], S1);
-                    self.mach(
-                        "add",
-                        [
-                            (Reg::x(S0)).into(),
-                            (Reg::x(29)).into(),
-                            Arg::imm(self.variadic_offset),
-                        ],
-                    );
+                    self.address(Loc::Reg(S0), "x29", self.variadic_offset);
                     self.mach(
                         "str",
                         [(Reg::x(S0)).into(), Address::base(Reg::x(list)).into()],
@@ -3747,10 +3724,8 @@ impl<'a> FunctionCompiler<'a> {
                         Slot::Reg(dst) => late.push(Late::Address(dst, at)),
                         Slot::Stack(offset) => {
                             self.address(Loc::Reg(S0), self.base, at);
-                            self.mach(
-                                "str",
-                                [(Reg::x(S0)).into(), Address::offset(Reg::SP, offset).into()],
-                            );
+                            let address = self.stack_arg_address(Reg::SP, offset as usize, 8, S1);
+                            self.mach("str", [(Reg::x(S0)).into(), address.into()]);
                         }
                     }
                 }
@@ -3810,31 +3785,45 @@ impl<'a> FunctionCompiler<'a> {
         debug_assert_eq!(extended, r);
     }
 
+    /// Uses a scaled immediate when it fits, otherwise forms the address in
+    /// the caller-selected scratch register. The scratch must not hold data
+    /// or an argument whose parallel move is still pending.
+    fn stack_arg_address(
+        &mut self,
+        base: Reg,
+        offset: usize,
+        width: usize,
+        scratch: u8,
+    ) -> Address {
+        if offset.is_multiple_of(width) && offset / width <= 4095 {
+            return Address::offset(base, offset);
+        }
+        self.materialize(scratch, offset as u64, true);
+        self.mach(
+            "add",
+            [Reg::x(scratch).into(), base.into(), Reg::x(scratch).into()],
+        );
+        Address::base(Reg::x(scratch))
+    }
+
     /// Stores `arg` at `[sp, #offset]` with its own width.
     fn store_stack_arg(&mut self, arg: Value, ty: Type, offset: u32) {
         if ty == Type::I128 {
             let lo = self.use_reg(arg, S1);
-            self.mach(
-                "str",
-                [(Reg::x(lo)).into(), Address::offset(Reg::SP, offset).into()],
-            );
+            let address = self.stack_arg_address(Reg::SP, offset as usize, 8, S0);
+            self.mach("str", [(Reg::x(lo)).into(), address.into()]);
             let hi = self.use_reg_hi(arg, S1);
-            self.mach(
-                "str",
-                [
-                    (Reg::x(hi)).into(),
-                    Address::offset(Reg::SP, offset + 8).into(),
-                ],
-            );
+            let address = self.stack_arg_address(Reg::SP, offset as usize + 8, 8, S0);
+            self.mach("str", [(Reg::x(hi)).into(), address.into()]);
         } else if ty.is_float() || ty.is_vector() {
             let r = self.use_freg(arg, FS1);
-            self.mach(
-                "str",
-                [
-                    (freg(r, ty)).into(),
-                    Address::offset(Reg::SP, offset).into(),
-                ],
+            let address = self.stack_arg_address(
+                Reg::SP,
+                offset as usize,
+                ty.bytes().unwrap_or(8) as usize,
+                S0,
             );
+            self.mach("str", [(freg(r, ty)).into(), address.into()]);
         } else {
             let r = self.use_reg(arg, S1);
             let op = match ty {
@@ -3842,15 +3831,18 @@ impl<'a> FunctionCompiler<'a> {
                 Type::I16 => "strh",
                 _ => "str",
             };
-            self.mach(
-                op,
-                [(reg(r, ty)).into(), Address::offset(Reg::SP, offset).into()],
+            let address = self.stack_arg_address(
+                Reg::SP,
+                offset as usize,
+                ty.bytes().unwrap_or(8) as usize,
+                S0,
             );
+            self.mach(op, [(reg(r, ty)).into(), address.into()]);
         }
     }
 
     /// Loads a stack parameter at `[x29, #offset]` into `dst`.
-    fn load_stack_param(&mut self, dst: Loc, ty: Type, offset: u32) {
+    fn load_stack_param(&mut self, dst: Loc, ty: Type, offset: usize) {
         let (r, scratch) = match dst {
             Loc::Reg(r) | Loc::FReg(r) => (r, None),
             Loc::Stack(s) => (
@@ -3873,10 +3865,10 @@ impl<'a> FunctionCompiler<'a> {
         } else {
             reg(r, ty)
         };
-        self.mach(
-            op,
-            [(rd).into(), Address::offset(Reg::x(29), offset).into()],
-        );
+        // x8 may still hold an incoming sret pointer; x17 is never allocated.
+        let address =
+            self.stack_arg_address(Reg::x(29), offset, ty.bytes().unwrap_or(8) as usize, S1);
+        self.mach(op, [(rd).into(), address.into()]);
         if let Some(s) = scratch {
             if ty.is_vector() {
                 self.vector_spill(true, r, s, ty.bytes().unwrap());
@@ -4618,20 +4610,10 @@ impl<'a> FunctionCompiler<'a> {
         for (at, n) in pieces(size) {
             let (load, store) = piece_ops(n);
             let wide = if n == 8 { 'x' } else { 'w' };
-            self.mach(
-                load,
-                [
-                    (Reg::scalar(wide, S1)).into(),
-                    Address::offset(Reg::x(src), at).into(),
-                ],
-            );
-            self.mach(
-                store,
-                [
-                    (Reg::scalar(wide, S1)).into(),
-                    Address::offset(base, to + at as usize).into(),
-                ],
-            );
+            let address = self.stack_arg_address(Reg::x(src), at as usize, n as usize, S2);
+            self.mach(load, [Reg::scalar(wide, S1).into(), address.into()]);
+            let address = self.stack_arg_address(Reg::from(base), to + at as usize, n as usize, S2);
+            self.mach(store, [(Reg::scalar(wide, S1)).into(), address.into()]);
         }
     }
 
@@ -4651,13 +4633,16 @@ impl<'a> FunctionCompiler<'a> {
                 Arg::imm(offset & 0xfff),
             ],
         );
-        if offset >> 12 != 0 {
+        let mut high = offset >> 12;
+        while high != 0 {
+            let chunk = high.min(4095);
+            high -= chunk;
             self.mach(
                 "add",
                 [
                     (Reg::x(r)).into(),
                     (Reg::x(r)).into(),
-                    Arg::imm(offset >> 12),
+                    Arg::imm(chunk),
                     Arg::shift("lsl", 12),
                 ],
             );
@@ -6938,8 +6923,13 @@ mod tests {
         x << unused >> unused
     }
 
+    /// Prepare the multiply sequence once per divisor; powers of two only shift.
+    fn signed_plan(width: u32, d: i64) -> Option<(u64, u32)> {
+        (!d.unsigned_abs().is_power_of_two()).then(|| signed_reciprocal(width, d))
+    }
+
     /// The emitted signed sequence in `width`-bit arithmetic.
-    fn signed_quotient(width: u32, n: i128, d: i64) -> i128 {
+    fn signed_quotient(width: u32, n: i128, d: i64, plan: Option<(u64, u32)>) -> i128 {
         let ad = d.unsigned_abs();
         if ad.is_power_of_two() {
             let k = ad.trailing_zeros();
@@ -6950,7 +6940,7 @@ mod tests {
             let q = t >> k;
             return if d > 0 { q } else { wrap(width, -q) };
         }
-        let (m, shift) = signed_reciprocal(width, d);
+        let (m, shift) = plan.expect("non-power-of-two divisor has a reciprocal plan");
         let m = wrap(width, i128::from(m));
         let mut hi = (n * m) >> width;
         if d > 0 && m < 0 {
@@ -6964,8 +6954,11 @@ mod tests {
 
     /// The emitted unsigned sequence, both the 64-bit averaging and the
     /// 32-bit wide-sum forms.
-    fn unsigned_quotient(width: u32, n: u128, d: u64) -> u128 {
-        let r = unsigned_reciprocal(width, d);
+    fn unsigned_quotient(
+        width: u32,
+        n: u128,
+        r: &crate::integer_division::UnsignedReciprocal,
+    ) -> u128 {
         let hi = (n * u128::from(r.multiplier)) >> width;
         if !r.add {
             return hi >> r.shift;
@@ -6985,9 +6978,10 @@ mod tests {
         for width in 3..=10 {
             let half = 1i128 << (width - 1);
             for d in signed_divisors(width) {
+                let plan = signed_plan(width, d);
                 for n in -half..half {
                     assert_eq!(
-                        signed_quotient(width, n, d),
+                        signed_quotient(width, n, d, plan),
                         n / i128::from(d),
                         "w={width} n={n} d={d}"
                     );
@@ -7003,8 +6997,9 @@ mod tests {
                 if d.is_power_of_two() {
                     continue;
                 }
+                let plan = unsigned_reciprocal(width, d);
                 for n in 0..1u128 << width {
-                    assert_eq!(unsigned_quotient(width, n, d), n / u128::from(d));
+                    assert_eq!(unsigned_quotient(width, n, &plan), n / u128::from(d));
                 }
             }
         }
@@ -7026,14 +7021,19 @@ mod tests {
                     .collect()
             };
             for d in signed_divisors(width) {
+                let plan = signed_plan(32, d);
+                let ud = (d as u64) & ((1 << width) - 1);
+                let unsigned_plan =
+                    (ud > 2 && !ud.is_power_of_two()).then(|| unsigned_reciprocal(32, ud));
                 for &n in &dividends {
-                    assert_eq!(signed_quotient(32, n, d), n / i128::from(d), "n={n} d={d}");
-                    let (un, ud) = (
-                        (n as u128) & ((1 << width) - 1),
-                        (d as u64) & ((1 << width) - 1),
+                    assert_eq!(
+                        signed_quotient(32, n, d, plan),
+                        n / i128::from(d),
+                        "n={n} d={d}"
                     );
-                    if ud > 2 && !ud.is_power_of_two() {
-                        assert_eq!(unsigned_quotient(32, un, ud), un / u128::from(ud));
+                    let un = (n as u128) & ((1 << width) - 1);
+                    if let Some(plan) = &unsigned_plan {
+                        assert_eq!(unsigned_quotient(32, un, plan), un / u128::from(ud));
                     }
                 }
             }
@@ -7066,6 +7066,7 @@ mod tests {
                 let ad = i128::from(d.unsigned_abs());
                 let boundary = (half - 1) / ad * ad;
                 let r = wrap(width, i128::from(random.rotate_left(17)));
+                let plan = signed_plan(width, d);
                 for n in [
                     -half,
                     -half + 1,
@@ -7083,7 +7084,7 @@ mod tests {
                 ] {
                     let n = wrap(width, n);
                     assert_eq!(
-                        signed_quotient(width, n, d),
+                        signed_quotient(width, n, d, plan),
                         n / i128::from(d),
                         "w={width} n={n} d={d}"
                     );
@@ -7091,6 +7092,7 @@ mod tests {
                 let ud = (d as u64) & mask as u64;
                 if ud > 2 && !ud.is_power_of_two() {
                     let ubound = mask / u128::from(ud) * u128::from(ud);
+                    let plan = unsigned_reciprocal(width, ud);
                     for n in [
                         0,
                         1,
@@ -7102,7 +7104,7 @@ mod tests {
                         r as u128 & mask,
                     ] {
                         assert_eq!(
-                            unsigned_quotient(width, n, ud),
+                            unsigned_quotient(width, n, &plan),
                             n / u128::from(ud),
                             "w={width} n={n} d={ud}"
                         );

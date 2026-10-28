@@ -18,6 +18,16 @@ host, `cc`, `compile`, `opt`, `asm`, `archive` and `link` select it by default.
 | Debug info | CFI and DWARF line/type/variable info in assembly and objects |
 | Exception handling, `long double` arithmetic, SVE operations | Diagnosed as unsupported |
 
+## Stack argument addressing
+
+Darwin and Linux AArch64 support argument areas larger than 4,080 bytes for
+incoming parameters and direct or indirect calls. Loads and stores use scaled
+immediate offsets when they fit and form a scratch address otherwise. Aggregate
+copies follow the same rule for their final narrow pieces. Outgoing argument
+areas still count toward the allocator's 32,760-byte spill-area bound and the
+function's frame-size bound; guaranteed tail calls still require register-only
+arguments.
+
 ## ARM development container
 
 From the repository root:

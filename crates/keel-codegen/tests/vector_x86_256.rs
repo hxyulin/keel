@@ -52,3 +52,32 @@ fn exact_width_transport_and_spills_use_one_simd_bank_and_aligned_frame() {
         assert!(keel_codegen::aarch64::compile(&module).is_err());
     }
 }
+
+#[test]
+fn removed_wide_values_do_not_require_simd_but_current_values_and_abi_do() {
+    let mut module = keel_ir::parse(
+        "func @scalar() -> i32 {\nblock0:\n v0 = iconst.i32 7\n v1 = vsplat.i32x8 v0\n return v0\n}",
+    )
+    .unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    assert!(keel_codegen::x86_64::compile(&module).is_err());
+    assert!(keel_codegen::aarch64::compile(&module).is_err());
+    let allocated = module.functions[0].num_values();
+    keel_opt::run_passes(&mut module, &["dce"]).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    assert_eq!(module.functions[0].num_values(), allocated);
+    keel_codegen::x86_64::compile(&module).unwrap();
+    keel_codegen::aarch64::compile(&module).unwrap();
+
+    for source in [
+        "func @live(ptr) {\nblock0(v0:ptr):\n v1 = iconst.i32 7\n v2 = vsplat.i32x8 v1\n store v2,v0\n return\n}",
+        "func @wide(i32x8) {\nblock0(v0:i32x8):\n return\n}",
+        "decl @wide(ptr byval {i32x8})",
+    ] {
+        let mut module = keel_ir::parse(source).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        keel_opt::run_passes(&mut module, &["dce"]).unwrap();
+        assert!(keel_codegen::x86_64::compile(&module).is_err(), "{source}");
+        assert!(keel_codegen::aarch64::compile(&module).is_err(), "{source}");
+    }
+}

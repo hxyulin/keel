@@ -994,8 +994,14 @@ impl<'a> FunctionCompiler<'a> {
             .chain(func.signatures().map(|(_, s)| wrappers(s)))
             .max()
             .unwrap_or(0);
-        let wide_vectors = (0..func.num_values())
-            .any(|i| func.value_type(Value::new(i)).bytes() == Some(32))
+        let wide_vectors = func
+            .blocks()
+            .flat_map(|block| func.block_params(block))
+            .chain(
+                func.layout_insts()
+                    .flat_map(|(_, inst)| func.inst_results(inst)),
+            )
+            .any(|&value| func.value_type(func.resolve(value)).bytes() == Some(32))
             || wrapper_bytes == 32;
         let frame_align = func
             .stack_slots()
