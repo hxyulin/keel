@@ -1,0 +1,100 @@
+decl @absent()
+func @entry() {
+block0:
+ v0 = iconst.i8 0
+ call @helper(v0)
+ return
+}
+func @helper(i8) local {
+block0(v0:i8):
+ v1 = iconst.i64 1
+ v2 = iconst.i64 2
+ v3 = iconst.i64 3
+ v4 = iconst.i64 4
+ v5 = iconst.i64 5
+ v6 = iconst.i64 6
+ v7 = iconst.i64 7
+ v8 = iconst.i64 8
+ v9 = iconst.i64 9
+ v10 = iconst.i64 10
+ v11 = iconst.i64 11
+ v12 = iconst.i64 12
+ v13 = iconst.i64 13
+ v14 = iconst.i64 14
+ v15 = iconst.i64 15
+ v16 = iconst.i64 16
+ v17 = iconst.i64 17
+ v18 = iconst.i64 18
+ v19 = iconst.i64 19
+ v20 = iconst.i64 20
+ v21 = iconst.i64 21
+ v22 = iconst.i64 22
+ v23 = iconst.i64 23
+ v24 = iconst.i64 24
+ v25 = iconst.i64 25
+ v26 = iconst.i64 26
+ v27 = iconst.i64 27
+ v28 = iconst.i64 28
+ v29 = iconst.i64 29
+ v30 = iconst.i64 30
+ v31 = iconst.i64 31
+ v32 = iconst.i64 32
+ v33 = iconst.i64 33
+ v34 = iconst.i64 34
+ v35 = iconst.i64 35
+ v36 = iconst.i64 36
+ v37 = iconst.i64 37
+ v38 = iconst.i64 38
+ v39 = iconst.i64 39
+ v40 = iconst.i64 40
+ v41 = iconst.i64 41
+ v42 = iconst.i64 42
+ v43 = iconst.i64 43
+ v44 = iconst.i64 44
+ v45 = iconst.i64 45
+ v46 = iconst.i64 46
+ v47 = iconst.i64 47
+ v48 = iconst.i64 48
+ v49 = iconst.i64 49
+ v50 = iconst.i64 50
+ v51 = iconst.i64 51
+ v52 = iconst.i64 52
+ v53 = iconst.i64 53
+ v54 = iconst.i64 54
+ v55 = iconst.i64 55
+ v56 = iconst.i64 56
+ v57 = iconst.i64 57
+ v58 = iconst.i64 58
+ v59 = iconst.i64 59
+ v60 = iconst.i64 60
+ v61 = iconst.i64 61
+ v62 = iconst.i64 62
+ v63 = iconst.i64 63
+ v64 = iconst.i64 64
+ v65 = iconst.i64 65
+ v66 = iconst.i64 66
+ v67 = iconst.i64 67
+ v68 = iconst.i64 68
+ v69 = iconst.i64 69
+ v70 = iconst.i64 70
+ v71 = iconst.i64 71
+ v72 = iconst.i64 72
+ v73 = iconst.i64 73
+ v74 = iconst.i64 74
+ v75 = iconst.i64 75
+ v76 = iconst.i64 76
+ v77 = iconst.i64 77
+ v78 = iconst.i64 78
+ v79 = iconst.i64 79
+ v80 = iconst.i64 80
+ brif v0, block1, block2
+block1:
+ call @absent()
+ return
+block2:
+ return
+}
+func @opaque() optnone {
+block0:
+ return
+}

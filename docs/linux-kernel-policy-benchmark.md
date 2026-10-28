@@ -78,6 +78,10 @@ The successful workspace tests did not cover this integration requirement.
 Repairing it should include a kernel link regression, followed by fresh object
 compilation, packaging, boot checks and then the paired KVM workload suite.
 
+The [follow-up investigation](function-policy-investigation.md) isolates the
+scheduling, inlining-boundary and module-cleanup failures with reduced probes
+and accounts for all 21 O3 undefined names in diagnostic unit controls.
+
 ## Reproduction
 
 Prepare the pinned reference build and captured manifest as described in the

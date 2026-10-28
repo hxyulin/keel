@@ -140,3 +140,6 @@ ordinary full pipeline removes. Current Keel O2, Os and O3 kernel replay objects
 fail linking. Workspace test success above does not establish kernel link or
 runtime readiness after this policy change. Required optimization cleanup needs
 a repair and a kernel link regression before a new runtime comparison.
+
+The [follow-up investigation](function-policy-investigation.md) records the
+verified causes, reduced regression checks and proposed repair order.

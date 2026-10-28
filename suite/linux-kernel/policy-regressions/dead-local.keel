@@ -1,0 +1,14 @@
+decl @absent()
+func @entry() {
+block0:
+ return
+}
+func @unused_helper() local {
+block0:
+ call @absent()
+ return
+}
+func @opaque() optnone {
+block0:
+ return
+}
