@@ -16,6 +16,21 @@ the gated in-process scan or compile timers described here.
 
 - Record the source revision, overlays, toolchain, build flags, target, CPU,
   kernel, binary SHA256 and input SHA256. Build every image before timing.
+- Capture the effective compiler invocation as well as the Cargo command.
+  A build scheduler can add flags after Cargo prints its command. In the
+  keyword experiment, the first baseline used conventional code generation,
+  while later builds added `-Cincremental` and used finer compilation units.
+  An unchanged-source rebuild then changed unrelated functions and execution
+  time. The original matcher comparison therefore mixed build modes. The
+  [rustc codegen-unit documentation](https://doc.rust-lang.org/rustc/codegen-options/index.html#codegen-units)
+  describes different defaults for incremental and non-incremental compilation.
+- Include an unchanged-source rebuild control, for example an A-to-B-to-A
+  build cycle. Check effective optimization, incremental and codegen-unit
+  settings, dependencies and representative generated functions before comparing
+  images. Inspect linked compilation units when those settings are uncertain.
+  An identical-binary timing control cannot detect a build-mode mismatch.
+  Normalize the build paths without deleting caches or changing shared scheduler
+  configuration, then repeat an affected comparison.
 - Keep the harness and target options identical. Compile instrumentation into
   separate diagnostic images. Keep diagnostic counters out of timed code.
 - Give each input snapshot an immutable filename. Generated headers can change
@@ -68,6 +83,16 @@ An identical-image control is necessary even with these controls.
 The fixed file-backed mapping keeps executable placement comparable across
 images. It does not make corresponding functions have identical virtual
 addresses: changing code can change function sizes and layout.
+
+A result from one backing placement is conditional on that placement. For small
+effects, repeat across independently retained frame pools, balance pool/workload
+order, and report every placement with its identical-image control. Holding
+inactive pools mapped and locked prevents their frames from being recycled into
+the active pool. Verify distinct frame sets and stable executable/input virtual
+addresses. Do not select each image's fastest placement. In the keyword follow-up,
+the same matched images changed sign across three pools despite quiet null
+controls. That establishes placement sensitivity, not a benefit from physical
+adjacency or a diagnosis of one particular cache level.
 
 ## Check backing pages around the timed region
 
