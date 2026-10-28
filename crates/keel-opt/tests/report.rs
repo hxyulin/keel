@@ -377,13 +377,22 @@ fn deterministic_cache_distinguishes_configured_pass_instances() {
         }
         let passes: &[&dyn Pass] = &[&a, &a, &b];
         if observed {
+            let mut report = OptimizationReport::default();
             keel_opt::run_pipeline_for_target_with_report(
                 &mut module,
                 passes,
                 VectorTarget::Portable,
-                &mut OptimizationReport::default(),
+                &mut report,
             )
             .unwrap();
+            let skipped = &report.invocations[1];
+            assert!(!skipped.changed);
+            assert_eq!(skipped.before, skipped.after);
+            assert_eq!(skipped.pass_ns, 0);
+            assert_eq!(skipped.verification_ns, 0);
+            assert_eq!(skipped.restoration_ns, 0);
+            assert_eq!(skipped.restoration_verification_ns, 0);
+            assert_eq!(skipped.restoration_changed, None);
         } else {
             keel_opt::run_pipeline(&mut module, passes).unwrap();
         }
@@ -402,4 +411,127 @@ fn deterministic_cache_distinguishes_configured_pass_instances() {
             "different configuration must run"
         );
     }
+}
+
+#[test]
+fn module_changes_and_verification_failures_preserve_plain_report_parity() {
+    struct ChangeModule {
+        invalidate: bool,
+    }
+    impl Pass for ChangeModule {
+        fn name(&self) -> &'static str {
+            "change-module"
+        }
+        fn description(&self) -> &'static str {
+            "test module mutation boundary"
+        }
+        fn run(&self, _: &mut Function) -> bool {
+            unreachable!("module hook handles the pass")
+        }
+        fn run_module(&self, module: &mut Module) -> Option<bool> {
+            if self.invalidate {
+                let f = &mut module.functions[0];
+                let terminator = f.layout_insts().last().unwrap().1;
+                f.remove_inst(terminator);
+            } else {
+                module.functions.push(
+                    keel_ir::parse("func @added() {\nblock0:\n return\n}\n")
+                        .unwrap()
+                        .functions
+                        .remove(0),
+                );
+            }
+            Some(true)
+        }
+    }
+    for invalidate in [false, true] {
+        let pass = ChangeModule { invalidate };
+        let mut plain = keel_ir::parse("func @f() {\nblock0:\n return\n}\n").unwrap();
+        let mut observed = plain.clone();
+        let mut report = OptimizationReport::default();
+        let options = keel_opt::OptimizeOptions {
+            verification: keel_opt::VerificationPolicy::Enabled,
+        };
+        let a = keel_opt::run_pipeline_for_target_with_options(
+            &mut plain,
+            &[&pass, &Noop],
+            VectorTarget::Portable,
+            options,
+        );
+        let b = keel_opt::run_pipeline_for_target_with_report_and_options(
+            &mut observed,
+            &[&pass, &Noop],
+            VectorTarget::Portable,
+            &mut report,
+            options,
+        );
+        assert_eq!(
+            a.as_ref().err().map(ToString::to_string),
+            b.as_ref().err().map(ToString::to_string)
+        );
+        assert_eq!(plain.to_string(), observed.to_string());
+        let module_event = &report.invocations[0];
+        assert_eq!(module_event.function, None);
+        assert!(module_event.changed);
+        assert_eq!(module_event.before.functions, 1);
+        if invalidate {
+            assert!(a.is_err());
+            assert_eq!(report.invocations.len(), 1);
+            assert_eq!(module_event.after.instructions, 0);
+        } else {
+            a.unwrap();
+            assert_eq!(module_event.after.functions, 2);
+            assert_eq!(report.invocations.len(), 3);
+            assert_eq!(report.invocations[1].function.as_deref(), Some("f"));
+            assert_eq!(report.invocations[2].function.as_deref(), Some("added"));
+        }
+    }
+}
+
+#[test]
+fn failed_canonical_restoration_does_not_execute_or_report_the_requested_pass() {
+    struct MustNotRun;
+    impl Pass for MustNotRun {
+        fn name(&self) -> &'static str {
+            "must-not-run"
+        }
+        fn description(&self) -> &'static str {
+            "restoration must fail first"
+        }
+        fn requires_canonical_form(&self) -> bool {
+            true
+        }
+        fn run(&self, _: &mut Function) -> bool {
+            panic!("requested pass ran after failed restoration")
+        }
+    }
+    // Deliberately bypass input verification to exercise a failing restoration boundary.
+    let mut plain = keel_ir::parse("func @f() {\nblock0:\n return\n}\n").unwrap();
+    let f = &mut plain.functions[0];
+    let terminator = f.layout_insts().last().unwrap().1;
+    f.remove_inst(terminator);
+    let mut observed = plain.clone();
+    let mut report = OptimizationReport::default();
+    let options = keel_opt::OptimizeOptions {
+        verification: keel_opt::VerificationPolicy::Enabled,
+    };
+    let a = keel_opt::run_pipeline_for_target_with_options(
+        &mut plain,
+        &[&MustNotRun],
+        VectorTarget::Portable,
+        options,
+    )
+    .unwrap_err();
+    let b = keel_opt::run_pipeline_for_target_with_report_and_options(
+        &mut observed,
+        &[&MustNotRun],
+        VectorTarget::Portable,
+        &mut report,
+        options,
+    )
+    .unwrap_err();
+    assert_eq!(a.to_string(), b.to_string());
+    assert!(a.to_string().contains("canonicalize"));
+    assert!(report.invocations.is_empty());
+    assert_eq!(plain.to_string(), observed.to_string());
 }

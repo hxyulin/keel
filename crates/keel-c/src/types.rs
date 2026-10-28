@@ -693,22 +693,35 @@ impl<'a> Types<'a> {
     pub fn new(structs: &'a [StructDef<'a>], layout: CDataLayout) -> Self {
         Self { structs, layout }
     }
+    /// Size queries after completed-type validation cannot overflow.
     pub fn size(&self, ty: &Ty) -> u64 {
-        match ty {
+        self.checked_size(ty)
+            .expect("completed type size was validated")
+    }
+
+    /// Storage size before a completed array or record enters the type table.
+    pub fn checked_size(&self, ty: &Ty) -> Result<u64, &'static str> {
+        Ok(match ty {
             Ty::Void => 1,
             Ty::Int(k) => k.size_with_layout(self.layout),
             Ty::Vector(_, shape) => u64::from(shape.bytes()),
-            Ty::Complex(t) => 2 * self.size(t),
+            Ty::Complex(t) => self
+                .checked_size(t)?
+                .checked_mul(2)
+                .ok_or("type size overflow")?,
             Ty::Float => 4,
             Ty::Double => 8,
             Ty::Ptr(_) => self.layout.pointer_bytes(),
             Ty::Half => 2,
             Ty::Opaque(o) => o.size,
-            Ty::Array(a) => self.size(&a.elem) * a.len.unwrap_or(0),
+            Ty::Array(a) => self
+                .checked_size(&a.elem)?
+                .checked_mul(a.len.unwrap_or(0))
+                .ok_or("type size overflow")?,
             Ty::Func(_) => 1,
             Ty::Struct(id) => self.structs[*id].size,
-            Ty::Atomic(t) => self.size(t),
-        }
+            Ty::Atomic(t) => self.checked_size(t)?,
+        })
     }
 
     /// Native atomic representations shared by the two supported targets.
@@ -746,7 +759,7 @@ impl<'a> Types<'a> {
     /// aggregate (one to four floats of one type). So an HFA is an array
     /// of its float, and anything else an array of integers as wide as
     /// its alignment, which has the same size and alignment.
-    pub fn abi_layout(&self, ty: &Ty) -> Layout {
+    pub fn abi_layout(&self, ty: &Ty) -> Result<Layout, &'static str> {
         assert_eq!(
             self.layout,
             CDataLayout::NATIVE_LP64,
@@ -757,7 +770,7 @@ impl<'a> Types<'a> {
 
     /// AAPCS64 ignores an aggregate's top-level over-alignment when
     /// allocating argument registers, while retaining member alignment.
-    pub fn aapcs_layout(&self, ty: &Ty) -> Layout {
+    pub fn aapcs_layout(&self, ty: &Ty) -> Result<Layout, &'static str> {
         assert_eq!(
             self.layout,
             CDataLayout::NATIVE_LP64,
@@ -775,11 +788,11 @@ impl<'a> Types<'a> {
         self.abi_layout_with_alignment(ty, alignment)
     }
 
-    fn abi_layout_with_alignment(&self, ty: &Ty, align: u64) -> Layout {
+    fn abi_layout_with_alignment(&self, ty: &Ty, align: u64) -> Result<Layout, &'static str> {
         if let Some((float, n)) = self.hfa(ty)
             && n <= 4
         {
-            return Layout::Array(Box::new(Layout::Scalar(float)), n as u32);
+            return Ok(Layout::Array(Box::new(Layout::Scalar(float)), n as u32));
         }
         let unit = match align {
             1 => Type::I8,
@@ -788,8 +801,10 @@ impl<'a> Types<'a> {
             8 => Type::I64,
             _ => Type::I128,
         };
-        let n = self.size(ty) / align;
-        Layout::Array(Box::new(Layout::Scalar(unit)), n as u32)
+        let n = self.checked_size(ty)? / align;
+        let n = u32::try_from(n)
+            .map_err(|_| "aggregate ABI layout element count exceeds the IR limit")?;
+        Ok(Layout::Array(Box::new(Layout::Scalar(unit)), n))
     }
 
     /// SysV classifies aggregates with unaligned scalar fields as MEMORY.
@@ -932,14 +947,16 @@ impl<'a> Types<'a> {
             Ty::Double => Some((Type::F64, 1)),
             Ty::Array(ArrayTy {
                 elem, len: Some(n), ..
-            }) => self.hfa(elem).map(|(t, k)| (t, k * n)),
+            }) => self
+                .hfa(elem)
+                .and_then(|(t, k)| Some((t, k.checked_mul(*n)?))),
             Ty::Struct(id) => {
                 let def = &self.structs[*id];
                 if def.is_union {
                     return None;
                 }
                 let mut float = None;
-                let mut count = 0;
+                let mut count: u64 = 0;
                 for m in &def.members {
                     if m.bits.is_some() {
                         return None;
@@ -951,15 +968,23 @@ impl<'a> Types<'a> {
                         return None;
                     }
                     float = Some(t);
-                    count += k;
+                    count = count.checked_add(k)?;
                 }
                 // No padding: the floats must be all there is.
                 let float = float?;
-                (count * u64::from(float.bytes().unwrap()) == def.size).then_some((float, count))
+                (count.checked_mul(u64::from(float.bytes().unwrap()))? == def.size)
+                    .then_some((float, count))
             }
             _ => None,
         }
     }
+}
+
+pub(crate) fn stack_storage_size(size: u64, padding: u64) -> Result<u32, &'static str> {
+    size.max(1)
+        .checked_add(padding)
+        .and_then(|n| u32::try_from(n).ok())
+        .ok_or("object exceeds the IR stack-slot size limit (including alignment padding)")
 }
 
 pub type StructField<'a> = (
@@ -989,18 +1014,9 @@ pub fn layout_struct<'a>(
     {
         return Err("non-native packed records and bit-fields are not supported");
     }
-    // Record layout precedes the private lowering gate, including for unused
-    // definitions. Bound array multiplication here before Types::size can wrap
-    // or panic. Pointer pointees do not contribute to a member's storage size.
-    fn bounded_field_size(types: &Types, ty: &Ty) -> Option<u64> {
-        let size = match ty {
-            Ty::Array(a) => bounded_field_size(types, &a.elem)?.checked_mul(a.len.unwrap_or(0))?,
-            _ => types.size(ty),
-        };
-        (size <= u32::MAX as u64).then_some(size)
-    }
     let mut members = Vec::new();
-    let mut bit: u64 = 0;
+    // A representable u64 byte size can require more than u64 bits.
+    let mut bit: u128 = 0;
     let mut size: u64 = 0;
     let mut align: u64 = 1;
     for (name, ty, sugar, width, requested_align, packed, nonstring) in fields {
@@ -1016,38 +1032,41 @@ pub fn layout_struct<'a>(
             if falign > u32::MAX as u64 {
                 return Err("non-native record alignment exceeds wasm32 bounds");
             }
-            bounded_field_size(types, &ty)
-                .ok_or("non-native record member storage exceeds wasm32 bounds")?
+            let size = types.checked_size(&ty)?;
+            if size > u32::MAX as u64 {
+                return Err("non-native record member storage exceeds wasm32 bounds");
+            }
+            size
         } else {
-            types.size(&ty)
+            types.checked_size(&ty)?
         };
         if is_union {
             bit = 0;
         }
         match width {
             Some(0) => {
-                bit = bit.next_multiple_of(natural * 8);
+                bit = bit.next_multiple_of(u128::from(natural) * 8);
             }
             Some(w) => {
                 if requested_align.is_some() {
-                    bit = bit.next_multiple_of(falign * 8);
+                    bit = bit.next_multiple_of(u128::from(falign) * 8);
                 }
-                let unit_bits = fsize * 8;
+                let unit_bits = u128::from(fsize) * 8;
                 let bytewise = packed || max_align.is_some();
-                if !bytewise && bit / unit_bits != (bit + u64::from(w) - 1) / unit_bits {
+                if !bytewise && bit / unit_bits != (bit + u128::from(w) - 1) / unit_bits {
                     bit = bit.next_multiple_of(unit_bits);
                 }
                 let offset = if bytewise {
                     bit / 8
                 } else {
-                    bit / unit_bits * fsize
+                    bit / unit_bits * u128::from(fsize)
                 };
                 members.push(Member {
                     nonstring,
                     name,
                     ty,
                     sugar,
-                    offset,
+                    offset: u64::try_from(offset).map_err(|_| "record size overflow")?,
                     align: falign,
                     bits: Some(BitField {
                         shift: (bit - offset * 8) as u32,
@@ -1055,30 +1074,32 @@ pub fn layout_struct<'a>(
                         bytewise,
                     }),
                 });
-                bit += u64::from(w);
+                bit += u128::from(w);
                 align = align.max(falign);
             }
             None => {
-                bit = bit.next_multiple_of(falign * 8);
+                bit = bit.next_multiple_of(u128::from(falign) * 8);
                 members.push(Member {
                     nonstring,
                     name,
                     ty,
                     sugar,
-                    offset: bit / 8,
+                    offset: u64::try_from(bit / 8).map_err(|_| "record size overflow")?,
                     align: falign,
                     bits: None,
                 });
-                bit += fsize * 8;
+                bit += u128::from(fsize) * 8;
                 align = align.max(falign);
             }
         }
-        size = size.max(bit.div_ceil(8));
+        size = size.max(u64::try_from(bit.div_ceil(8)).map_err(|_| "record size overflow")?);
         if types.layout != CDataLayout::NATIVE_LP64 && size > u32::MAX as u64 {
             return Err("non-native record storage exceeds wasm32 bounds");
         }
     }
-    let size = size.next_multiple_of(align);
+    let size = size
+        .checked_next_multiple_of(align)
+        .ok_or("record size overflow")?;
     if types.layout != CDataLayout::NATIVE_LP64 && size > u32::MAX as u64 {
         return Err("non-native record storage exceeds wasm32 bounds");
     }
@@ -1353,12 +1374,12 @@ mod layout_tests {
     #[test]
     #[should_panic(expected = "native ABI layout only")]
     fn wasm_cannot_use_native_abi_classifier() {
-        Types::new(&[], CDataLayout::WASM32).abi_layout(&LONG);
+        let _ = Types::new(&[], CDataLayout::WASM32).abi_layout(&LONG);
     }
 
     #[test]
     #[should_panic(expected = "native ABI layout only")]
     fn wasm_cannot_use_aapcs_classifier() {
-        Types::new(&[], CDataLayout::WASM32).aapcs_layout(&LONG);
+        let _ = Types::new(&[], CDataLayout::WASM32).aapcs_layout(&LONG);
     }
 }

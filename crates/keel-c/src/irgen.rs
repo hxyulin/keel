@@ -749,11 +749,11 @@ impl<'p> Gen<'p> {
                 "complex-containing by-value aggregate with union, bit-field or non-natural layout",
             );
         }
-        Ok(if self.p.target == keel_ir::Target::Aarch64LinuxGnu {
+        if self.p.target == keel_ir::Target::Aarch64LinuxGnu {
             self.types().aapcs_layout(ty)
         } else {
             self.types().abi_layout(ty)
-        })
+        }
     }
 
     /// Qualify omission independently of the IR's nonempty aggregate layouts.
@@ -987,10 +987,8 @@ impl<'p> Gen<'p> {
                 } else {
                     local.align
                 };
-                let reserve = size
-                    .checked_add(if align > 16 { align - 1 } else { 0 })
-                    .and_then(|n| u32::try_from(n).ok())
-                    .ok_or_else(|| Error::new(def.loc, "local object exceeds the IR stack-slot size limit (including alignment padding)"))?;
+                let reserve = stack_storage_size(size, if align > 16 { align - 1 } else { 0 })
+                    .map_err(|message| Error::new(def.loc, message))?;
                 let slot = fg.b.create_stack_slot(reserve, align.min(16) as u32);
                 if align <= 16 {
                     Storage::Slot(slot)
@@ -2018,6 +2016,18 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         self.g.types().size(ty)
     }
 
+    fn temporary_slot(&mut self, ty: &Ty, loc: Loc) -> R<StackSlot> {
+        let size = self
+            .g
+            .types()
+            .checked_size(ty)
+            .and_then(|size| stack_storage_size(size, 0))
+            .map_err(|message| Error::new(loc, message))?;
+        let align = u32::try_from(self.g.types().align(ty))
+            .map_err(|_| Error::new(loc, "temporary alignment exceeds the IR limit"))?;
+        Ok(self.b.create_stack_slot(size, align))
+    }
+
     fn label_block(&mut self, name: &'p str) -> Block {
         if let Some(&b) = self.labels.get(name) {
             return b;
@@ -2115,9 +2125,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     // require the normal hidden result address.
                     let mapping = self.g.abi_mapping(fty, g, &[])?;
                     if matches!(mapping.result, ResultMapping::Indirect) {
-                        let size = self.size(&fty.ret);
-                        let align = self.g.types().align(&fty.ret);
-                        let slot = self.b.create_stack_slot(size.max(1) as u32, align as u32);
+                        let slot = self.temporary_slot(&fty.ret, loc)?;
                         args.push(self.b.ins().stack_addr(slot));
                     }
                     args.push(addr);
@@ -2696,9 +2704,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             Some(v) if e.ty.is_complex() => {
                 // Complex is a C scalar: capture its value now, even when a
                 // later operand overwrites the source object.
-                let slot = self
-                    .b
-                    .create_stack_slot(self.size(&e.ty) as u32, self.g.types().align(&e.ty) as u32);
+                let slot = self.temporary_slot(&e.ty, e.loc)?;
                 let addr = self.b.ins().stack_addr(slot);
                 self.copy(addr, v, &e.ty);
                 Ok(addr)
@@ -3485,9 +3491,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 sig: sig.clone(),
             });
         }
-        let slot = self
-            .b
-            .create_stack_slot(self.size(&ty) as u32, self.g.types().align(&ty) as u32);
+        let slot = self.temporary_slot(&ty, loc)?;
         let result = self.b.ins().stack_addr(slot);
         let callee = self.b.import_function(name, sig);
         self.b
@@ -4073,8 +4077,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         self.set_loc(e.loc);
         let mut vals = Vec::new();
         let ret_slot = if fty.ret.is_pair_or_struct() {
-            let (size, align) = (self.size(&fty.ret), self.g.types().align(&fty.ret));
-            let slot = self.b.create_stack_slot(size.max(1) as u32, align as u32);
+            let slot = self.temporary_slot(&fty.ret, e.loc)?;
             if matches!(mapping.result, ResultMapping::Indirect) {
                 vals.push(self.b.ins().stack_addr(slot));
             }

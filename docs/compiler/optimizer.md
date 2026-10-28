@@ -3,6 +3,24 @@
 This reference describes current implementation contracts and limits. Use
 [testing](../development/testing.md) for validation commands; per-run results belong outside Git.
 
+## Pipeline execution and observations
+
+Ordinary and reported optimization use one execution loop. It owns module-pass
+tracking, per-function scheduling, deterministic-pass caching, canonical restoration
+and verification. Reporting only measures those execution boundaries. Without a
+report, the loop creates no timers, IR counts, inline-site vectors or observation
+records. Repeated verification still follows the selected verification policy.
+
+Clean-cache entries belong to pass instances rather than display names. Repeated
+configured instances remain independent; an unchanged repeated instance stays
+skipped until its function changes. Equivalent scoped schedules reuse their pass
+wrapper so this rule also applies to function-local policies.
+
+Completed pass invocations remain in a partial report when their verification
+fails. Failed canonical restoration stops before the requested pass and adds no
+completed invocation for it. Skipped invocations preserve pipeline order and use
+exact zero timings. All exits release analysis and scratch caches.
+
 <a id="aggregate-call-boundaries-two-word-x86-aggregate-wrappers"></a>
 ## Two-word x86 aggregate wrappers
 

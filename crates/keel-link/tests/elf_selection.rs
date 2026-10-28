@@ -36,7 +36,7 @@ fn selected_names(requests: &[Request<'_>]) -> Vec<String> {
 
 fn link(requests: &[Request<'_>]) -> keel_link::Result<keel_link::elf::Executable> {
     let selected = Selection::prepare(requests, "_start")?;
-    elf::link(&selected.inputs(), Default::default())
+    elf::link_selected(&selected, Default::default())
 }
 
 #[test]
@@ -285,4 +285,132 @@ fn group_dso_demands_trigger_rescans_and_keep_library_order_and_deduplication() 
         ["start.o", "one.so", "two.so", "deps.a(needed.o)"]
     );
     link(&requests).unwrap();
+    let selection = Selection::prepare(&requests, "_start").unwrap();
+    assert!(
+        elf::link_selected(
+            &selection,
+            elf::Options {
+                machine: elf::Machine::Aarch64,
+                ..Default::default()
+            }
+        )
+        .unwrap_err()
+        .contains("freestanding static")
+    );
+    assert!(
+        elf::link_selected(
+            &selection,
+            elf::Options {
+                script: Some("SECTIONS { .text 4096 : { *(.text) } }".into()),
+                ..Default::default()
+            }
+        )
+        .unwrap_err()
+        .contains("scripts currently require static")
+    );
+    let partial = Selection::prepare(&requests, "").unwrap();
+    assert!(
+        elf::relocatable::link_selected(&partial, elf::Machine::X86_64)
+            .unwrap_err()
+            .contains("shared libraries cannot be partially linked")
+    );
+}
+
+#[test]
+fn prepared_links_reuse_metadata_and_check_effective_entry_provenance() {
+    let start = object(".text\n.globl _start\n_start: ret\n");
+    let alternate = object(".text\n.globl alternate\nalternate: ret\n");
+    let archive = archive(&[("start.o", &start), ("alternate.o", &alternate)]);
+    let requests = [file("entries.a", &archive)];
+    let options = || elf::Options {
+        script: Some("ENTRY(alternate) SECTIONS { .text 4096 : { *(.text) } }".into()),
+        ..Default::default()
+    };
+    let entry = options().effective_entry().unwrap();
+    let selection = Selection::prepare(&requests, &entry).unwrap();
+    assert_eq!(selection.inputs()[0].name, "entries.a(alternate.o)");
+    let expected = elf::link(
+        &[Input {
+            name: "entries.a",
+            bytes: &archive,
+        }],
+        options(),
+    )
+    .unwrap();
+    for _ in 0..2 {
+        let linked = elf::link_selected(&selection, options()).unwrap();
+        assert_eq!(linked.bytes, expected.bytes);
+        assert_eq!(linked.warnings, expected.warnings);
+    }
+    let overridden = elf::Options {
+        script: Some("ENTRY(_start) SECTIONS { .text 4096 : { *(.text) } }".into()),
+        entry_override: Some("alternate".into()),
+        ..Default::default()
+    };
+    assert_eq!(
+        elf::link_selected(&selection, overridden).unwrap().bytes,
+        expected.bytes
+    );
+    assert!(
+        elf::link_selected(&selection, Default::default())
+            .unwrap_err()
+            .contains("selection entry")
+    );
+    let other = Selection::prepare(&requests, "_start").unwrap();
+    assert!(
+        elf::link_selected(&other, options())
+            .unwrap_err()
+            .contains("selection entry")
+    );
+    assert!(
+        elf::relocatable::link_selected(&selection, elf::Machine::X86_64)
+            .unwrap_err()
+            .contains("without an entry")
+    );
+}
+
+#[test]
+fn prepared_partial_links_match_raw_and_preserve_machine_checks() {
+    let start = object(".text\n.globl _start\n_start: call needed\nret\n");
+    let helper = object(".text\n.globl needed\nneeded: ret\n");
+    let archive = archive(&[("helper.o", &helper)]);
+    let selection =
+        Selection::prepare(&[file("start.o", &start), file("helpers.a", &archive)], "").unwrap();
+    let raw = [
+        Input {
+            name: "start.o",
+            bytes: &start,
+        },
+        Input {
+            name: "helpers.a",
+            bytes: &archive,
+        },
+    ];
+    let expected = elf::relocatable::link(&raw, elf::Machine::X86_64).unwrap();
+    for _ in 0..2 {
+        let partial = elf::relocatable::link_selected(&selection, elf::Machine::X86_64).unwrap();
+        assert_eq!(partial.bytes, expected.bytes);
+        assert_eq!(partial.warnings, expected.warnings);
+    }
+    assert!(
+        elf::relocatable::link_selected(&selection, elf::Machine::Aarch64)
+            .unwrap_err()
+            .contains("Aarch64")
+    );
+    let executable = Selection::prepare(
+        &[file("start.o", &start), file("helpers.a", &archive)],
+        "_start",
+    )
+    .unwrap();
+    assert!(
+        elf::link_selected(
+            &executable,
+            elf::Options {
+                machine: elf::Machine::Aarch64,
+                ..Default::default()
+            }
+        )
+        .unwrap_err()
+        .contains("AArch64")
+    );
 }

@@ -440,14 +440,15 @@ fn verify_after(func: &Function, pass: &'static str, enabled: bool) -> Result<()
 // Disabled checks return exact zero without starting a verification timer.
 fn observe_verification(
     enabled: bool,
+    reporting: bool,
     check: impl FnOnce() -> Result<(), OptError>,
 ) -> (Result<(), OptError>, u128) {
     if !enabled {
         return (Ok(()), 0);
     }
-    let start = std::time::Instant::now();
+    let start = reporting.then(std::time::Instant::now);
     let result = check();
-    (result, start.elapsed().as_nanos())
+    (result, start.map_or(0, |start| start.elapsed().as_nanos()))
 }
 
 /// Independent optimizer effort; Full runs three bounded rounds of direct-call
@@ -888,26 +889,66 @@ fn run_pipeline_with_context_raw(
     context: OptimizationContext,
     options: OptimizeOptions,
 ) -> Result<(), OptError> {
+    execute_pipeline(module, passes, context, None, options)
+}
+
+/// One mutation/verification state machine; observation only measures its boundaries.
+fn execute_pipeline(
+    module: &mut Module,
+    passes: &[&dyn Pass],
+    context: OptimizationContext,
+    mut report: Option<&mut OptimizationReport>,
+    options: OptimizeOptions,
+) -> Result<(), OptError> {
     // Preserve opaque entry/return bodies until target-specific lowering can
     // establish their register, frame and control-flow contracts.
     if module.special_entry_contract().is_some() {
         return Ok(());
     }
+    use std::time::Instant;
+    let target = context.target;
+    let reporting = report.is_some();
     let verification_enabled = options.verification.enabled();
     profiling::scope!("optimization");
     let _clear = ClearAnalyses;
     let mut canonical = vec![false; module.functions.len()];
     let mut versions = Versions::new(module.functions.len());
-    for &pass in passes {
+    for (pipeline_index, &pass) in passes.iter().enumerate() {
         profiling::scope!("pass", pass.name());
-        if pass
-            .run_module_tracked(module, None, &mut versions.changed)
-            .is_some()
-        {
+        let before = reporting.then(|| IrCounts::module(module));
+        let mut inline_sites = reporting.then(Vec::new);
+        let start = reporting.then(Instant::now);
+        let module_changed =
+            pass.run_module_tracked(module, inline_sites.as_mut(), &mut versions.changed);
+        let pass_ns = start.map_or(0, |start| start.elapsed().as_nanos());
+        if let Some(changed) = module_changed {
             versions.module_changed(&mut canonical);
-            for func in &module.functions {
-                verify_after(func, pass.name(), verification_enabled)?;
+            let (result, verification_ns) =
+                observe_verification(verification_enabled, reporting, || {
+                    module
+                        .functions
+                        .iter()
+                        .try_for_each(|func| verify_after(func, pass.name(), verification_enabled))
+                });
+            if let Some(report) = report.as_deref_mut() {
+                report.invocations.push(PassObservation {
+                    pipeline_index,
+                    pass: pass.name(),
+                    target,
+                    function: None,
+                    changed,
+                    pass_ns,
+                    verification_enabled,
+                    verification_ns,
+                    restoration_ns: 0,
+                    restoration_verification_ns: 0,
+                    restoration_changed: None,
+                    before: before.expect("reporting captured module counts"),
+                    after: IrCounts::module(module),
+                    inline_sites: inline_sites.expect("reporting enabled module observations"),
+                });
             }
+            result?;
             continue;
         }
         let slot = versions.slot(pass);
@@ -915,27 +956,84 @@ fn run_pipeline_with_context_raw(
             if !pass.enabled_for(func) {
                 continue;
             }
-            // A skipped run's input was canonical when the pass required it.
+            let before = reporting.then(|| IrCounts::function(func));
             if versions.is_clean(pass, slot, index) {
+                // A skipped run's input was canonical when the pass required it.
                 canonical[index] |= pass.requires_canonical_form();
                 canonical[index] |= pass.produces_canonical_form();
+                if let Some(report) = report.as_deref_mut() {
+                    let before = before.expect("reporting captured function counts");
+                    report.invocations.push(PassObservation {
+                        pipeline_index,
+                        pass: pass.name(),
+                        target,
+                        function: Some(func.name.clone()),
+                        changed: false,
+                        pass_ns: 0,
+                        verification_enabled,
+                        verification_ns: 0,
+                        restoration_ns: 0,
+                        restoration_verification_ns: 0,
+                        restoration_changed: None,
+                        after: before.clone(),
+                        before,
+                        inline_sites: Vec::new(),
+                    });
+                }
                 continue;
             }
+            let mut restoration_ns = 0;
+            let mut restoration_verification_ns = 0;
+            let mut restoration_changed = None;
             if pass.requires_canonical_form() && !canonical[index] {
-                if canonicalize::run(func) {
+                let start = reporting.then(Instant::now);
+                let restored = canonicalize::run(func);
+                if restored {
                     versions.renew(index);
                 }
-                verify_after(func, "canonicalize", verification_enabled)?;
+                restoration_changed = Some(restored);
+                restoration_ns = start.map_or(0, |start| start.elapsed().as_nanos());
+                let (result, ns) = observe_verification(verification_enabled, reporting, || {
+                    verify_after(func, "canonicalize", verification_enabled)
+                });
+                restoration_verification_ns = ns;
+                // Failed restoration stops before the requested pass; it has no
+                // completed invocation to append to the report.
+                result?;
                 canonical[index] = true;
             }
+            let start = reporting.then(Instant::now);
             let changed = if pass.requires_canonical_form() {
                 pass.run_canonical_with_context(func, context)
             } else {
                 pass.run_with_context(func, context)
             };
+            let pass_ns = start.map_or(0, |start| start.elapsed().as_nanos());
             canonical[index] = pass.produces_canonical_form() || (canonical[index] && !changed);
             versions.record(pass, slot, index, changed);
-            verify_after(func, pass.name(), verification_enabled)?;
+            let (result, verification_ns) =
+                observe_verification(verification_enabled, reporting, || {
+                    verify_after(func, pass.name(), verification_enabled)
+                });
+            if let Some(report) = report.as_deref_mut() {
+                report.invocations.push(PassObservation {
+                    pipeline_index,
+                    pass: pass.name(),
+                    target,
+                    function: Some(func.name.clone()),
+                    changed,
+                    pass_ns,
+                    verification_enabled,
+                    verification_ns,
+                    restoration_ns,
+                    restoration_verification_ns,
+                    restoration_changed,
+                    before: before.expect("reporting captured function counts"),
+                    after: IrCounts::function(func),
+                    inline_sites: Vec::new(),
+                });
+            }
+            result?;
         }
     }
     Ok(())
@@ -1029,127 +1127,7 @@ fn run_pipeline_with_context_and_report_raw(
     report: &mut OptimizationReport,
     options: OptimizeOptions,
 ) -> Result<(), OptError> {
-    let target = context.target;
-    let verification_enabled = options.verification.enabled();
-    use std::time::Instant;
-    profiling::scope!("optimization");
-    let _clear = ClearAnalyses;
-    let mut canonical = vec![false; module.functions.len()];
-    let mut versions = Versions::new(module.functions.len());
-    for (pipeline_index, &pass) in passes.iter().enumerate() {
-        profiling::scope!("pass", pass.name());
-        let before = IrCounts::module(module);
-        let mut inline_sites = Vec::new();
-        let start = Instant::now();
-        let module_changed =
-            pass.run_module_tracked(module, Some(&mut inline_sites), &mut versions.changed);
-        let pass_ns = start.elapsed().as_nanos();
-        if let Some(changed) = module_changed {
-            versions.module_changed(&mut canonical);
-            let (result, verification_ns) = observe_verification(verification_enabled, || {
-                module
-                    .functions
-                    .iter()
-                    .try_for_each(|func| verify_after(func, pass.name(), verification_enabled))
-            });
-            report.invocations.push(PassObservation {
-                pipeline_index,
-                pass: pass.name(),
-                target,
-                function: None,
-                changed,
-                pass_ns,
-                verification_enabled,
-                verification_ns,
-                restoration_ns: 0,
-                restoration_verification_ns: 0,
-                restoration_changed: None,
-                before,
-                after: IrCounts::module(module),
-                inline_sites,
-            });
-            result?;
-            continue;
-        }
-        let slot = versions.slot(pass);
-        for (index, func) in module.functions.iter_mut().enumerate() {
-            if !pass.enabled_for(func) {
-                continue;
-            }
-            let before = IrCounts::function(func);
-            if versions.is_clean(pass, slot, index) {
-                canonical[index] |= pass.requires_canonical_form();
-                canonical[index] |= pass.produces_canonical_form();
-                report.invocations.push(PassObservation {
-                    pipeline_index,
-                    pass: pass.name(),
-                    target,
-                    function: Some(func.name.clone()),
-                    changed: false,
-                    pass_ns: 0,
-                    verification_enabled,
-                    verification_ns: 0,
-                    restoration_ns: 0,
-                    restoration_verification_ns: 0,
-                    restoration_changed: None,
-                    after: before.clone(),
-                    before,
-                    inline_sites: Vec::new(),
-                });
-                continue;
-            }
-            let mut restoration_ns = 0;
-            let mut restoration_verification_ns = 0;
-            let mut restoration_changed = None;
-            if pass.requires_canonical_form() && !canonical[index] {
-                let start = Instant::now();
-                let restored = canonicalize::run(func);
-                if restored {
-                    versions.renew(index);
-                }
-                restoration_changed = Some(restored);
-                restoration_ns = start.elapsed().as_nanos();
-                let (result, ns) = observe_verification(verification_enabled, || {
-                    verify_after(func, "canonicalize", verification_enabled)
-                });
-                restoration_verification_ns = ns;
-                // As in the ordinary runner, a failed restoration stops before
-                // the requested pass. No completed invocation is fabricated.
-                result?;
-                canonical[index] = true;
-            }
-            let start = Instant::now();
-            let changed = if pass.requires_canonical_form() {
-                pass.run_canonical_with_context(func, context)
-            } else {
-                pass.run_with_context(func, context)
-            };
-            let pass_ns = start.elapsed().as_nanos();
-            canonical[index] = pass.produces_canonical_form() || (canonical[index] && !changed);
-            versions.record(pass, slot, index, changed);
-            let (result, verification_ns) = observe_verification(verification_enabled, || {
-                verify_after(func, pass.name(), verification_enabled)
-            });
-            report.invocations.push(PassObservation {
-                pipeline_index,
-                pass: pass.name(),
-                target,
-                function: Some(func.name.clone()),
-                changed,
-                pass_ns,
-                verification_enabled,
-                verification_ns,
-                restoration_ns,
-                restoration_verification_ns,
-                restoration_changed,
-                before,
-                after: IrCounts::function(func),
-                inline_sites: Vec::new(),
-            });
-            result?;
-        }
-    }
-    Ok(())
+    execute_pipeline(module, passes, context, Some(report), options)
 }
 
 /// Named pipeline using an explicit capability context.

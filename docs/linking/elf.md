@@ -122,6 +122,19 @@ archive. This materialization validates all member objects and regenerates an
 index. Library callers use `archive::materialize_thin` with an explicit reader,
 then pass the resulting regular bytes to the selection API.
 
+Library callers can retain an `elf_selection::Selection` and pass it to
+`elf::link_selected` or `elf::relocatable::link_selected`. Selection retains
+COMDAT plans and parsed shared-library interfaces while borrowing the original
+bytes, so linking does not repeat archive selection or interface preparation.
+The CLI uses this route. `Selection::inputs()` and the raw-input link APIs remain
+available. A selection may be linked repeatedly without cloning its plans.
+
+Final linking requires the same effective entry used for preparation. Resolve
+`Options::effective_entry()` before selecting; it includes script `ENTRY` and
+explicit overrides. A mismatch returns an error before image emission. Partial
+linking requires a selection prepared with an empty entry root. Target, DSO and
+output-mode validation still runs when linking a prepared selection.
+
 ```sh
 keel link --target x86_64-unknown-linux-gnu start.o libhelpers.a -o program
 keel link --target x86_64-unknown-linux-gnu start.o -L target-libs -lhelpers -o program

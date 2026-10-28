@@ -13,7 +13,7 @@ mod script;
 mod selected;
 mod sframe;
 mod unwind;
-use crate::{Input, Result};
+use crate::{Input, Result, elf_selection::Selection};
 use bbtree::unsync::{BBTreeMap as BTreeMap, BBTreeSet as BTreeSet};
 use object::read::elf::{ElfFile64, FileHeader, SectionHeader};
 use object::{
@@ -185,10 +185,19 @@ fn end(n: u64, size: u64) -> Result<u64> {
         .ok_or("ELF image exceeds 512 MiB limit".into())
 }
 
-pub fn link(inputs: &[Input<'_>], mut options: Options) -> Result<Executable> {
-    if inputs.is_empty() {
-        return Err("no input objects".into());
-    }
+/// Selection metadata retained independently of the caller-owned object bytes.
+pub(crate) struct Prepared<'a> {
+    inputs: Vec<input::Named<'a>>,
+    libraries: Vec<dynamic::Library<'a>>,
+}
+
+struct ResolvedOptions {
+    options: Options,
+    script: Option<script::Script>,
+    page: u64,
+}
+
+fn resolve_options(mut options: Options) -> Result<ResolvedOptions> {
     let script = options
         .script
         .as_deref()
@@ -214,7 +223,49 @@ pub fn link(inputs: &[Input<'_>], mut options: Options) -> Result<Executable> {
     if script.is_none() && !BASE.is_multiple_of(page) {
         return Err("maximum page size is incompatible with the default ELF base address".into());
     }
-    let (inputs, libraries) = input::prepare(inputs, &options.entry)?;
+    Ok(ResolvedOptions {
+        options,
+        script,
+        page,
+    })
+}
+
+pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
+    if inputs.is_empty() {
+        return Err("no input objects".into());
+    }
+    let resolved = resolve_options(options)?;
+    let prepared = input::prepare(inputs, &resolved.options.entry)?;
+    link_prepared(&prepared, resolved)
+}
+
+/// Link an ordered selection without repeating archive and interface preparation.
+/// The same immutable selection may be linked repeatedly with layout options.
+///
+/// # Errors
+/// Returns the ordinary link errors, or an error when the effective entry differs
+/// from the entry used to prepare the selection. Script and explicit entry
+/// overrides are resolved before checking that contract.
+pub fn link_selected(selection: &Selection<'_>, options: Options) -> Result<Executable> {
+    if selection.inputs.is_empty() {
+        return Err("no input objects".into());
+    }
+    let resolved = resolve_options(options)?;
+    if selection.entry != resolved.options.entry {
+        return Err("prepared ELF selection entry does not match effective link entry".into());
+    }
+    link_prepared(&selection.prepared, resolved)
+}
+
+fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<Executable> {
+    let ResolvedOptions {
+        options,
+        script,
+        page,
+    } = resolved;
+    let arm = options.machine == Machine::Aarch64;
+    let inputs = &prepared.inputs;
+    let libraries = &prepared.libraries;
     if arm && (!libraries.is_empty() || !options.runpath.is_empty()) {
         return Err("native AArch64 ELF linking currently supports freestanding static executables; use `keel link --system` for shared libraries/libc".into());
     }
@@ -228,7 +279,7 @@ pub fn link(inputs: &[Input<'_>], mut options: Options) -> Result<Executable> {
     let mut warnings = Vec::new();
     let mut note_plan = notes::Plan::default();
     let mut object_properties = Vec::new();
-    for input in &inputs {
+    for input in inputs {
         let mut properties = notes::Properties::new();
         let mut parse = || -> Result<Unit> {
             let file =
@@ -851,7 +902,7 @@ pub fn link(inputs: &[Input<'_>], mut options: Options) -> Result<Executable> {
     // including preemptible defined symbols, against the selected executable
     // definitions used by native references and dynamic exports. A discarded
     // weak property definition or a same-named local is not the provider.
-    for library in &libraries {
+    for library in libraries {
         for name in &library.references {
             if let Some(&(ui, si)) = globals.get(*name) {
                 let target = &units[ui].symbols[&si];
@@ -940,7 +991,7 @@ pub fn link(inputs: &[Input<'_>], mut options: Options) -> Result<Executable> {
             &mut sections,
             imports.clone(),
             definitions,
-            &libraries,
+            libraries,
             &options,
             absolute,
             lifecycle,

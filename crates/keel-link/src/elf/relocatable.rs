@@ -69,15 +69,36 @@ fn string(table: &mut Vec<u8>, value: &[u8]) -> Result<u32> {
 /// Returns an error for malformed input, conflicting strong definitions,
 /// unsupported ELF metadata, REL relocations, or output exceeding 512 MiB.
 pub fn link(inputs: &[Input<'_>], machine: Machine) -> Result<Executable> {
-    let (inputs, libraries) = input::prepare(inputs, "")?;
-    if !libraries.is_empty() {
+    let prepared = input::prepare(inputs, "")?;
+    link_prepared(&prepared, machine)
+}
+
+/// Partially link an ordered selection prepared without an executable entry.
+/// The same immutable selection can be reused without repeating preparation.
+///
+/// # Errors
+/// Returns ordinary partial-link errors, or an error when the selection was
+/// prepared with an executable entry root.
+pub fn link_selected(
+    selection: &crate::elf_selection::Selection<'_>,
+    machine: Machine,
+) -> Result<Executable> {
+    if !selection.entry.is_empty() {
+        return Err("partial linking requires an ELF selection prepared without an entry".into());
+    }
+    link_prepared(&selection.prepared, machine)
+}
+
+fn link_prepared(prepared: &super::Prepared<'_>, machine: Machine) -> Result<Executable> {
+    let inputs = &prepared.inputs;
+    if !prepared.libraries.is_empty() {
         return Err("shared libraries cannot be partially linked".into());
     }
     let mut sections = Vec::<Section>::new();
     let mut section_maps = Vec::new();
     let mut files = Vec::new();
     let mut total_data = 0u64;
-    for input in &inputs {
+    for input in inputs {
         let file =
             ElfFile64::<object::Endianness>::parse(input.bytes).map_err(|e| e.to_string())?;
         let architecture = match machine {

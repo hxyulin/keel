@@ -266,3 +266,98 @@ fn late_completion_cycles_atomics_and_shadowing() {
         }
     }
 }
+
+#[test]
+fn native_type_size_overflow_is_a_diagnostic() {
+    for target in Target::NATIVE {
+        for source in [
+            "unsigned long f(void) { return sizeof(int[4611686018427387904]); }",
+            "unsigned long f(void) { return sizeof(char[4294967296][4294967296]); }",
+            "struct S { char a[9223372036854775807]; char b[9223372036854775807]; char c[2]; };",
+            "struct __attribute__((aligned(16))) S { char a[9223372036854775807]; char b[9223372036854775807]; };",
+        ] {
+            let error = compile(source, target, false).unwrap_err().to_string();
+            assert!(
+                error.contains("size") && error.contains("overflow"),
+                "{target:?}: {source}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn aggregate_abi_counts_and_temporary_storage_are_checked_separately() {
+    for target in Target::NATIVE {
+        for (field, expected) in [
+            ("char a[4294967297]", "ABI"),
+            ("long a[536870912]", "stack-slot size limit"),
+        ] {
+            let source = format!(
+                "struct S {{ {field}; }}; extern struct S g(void); void f(void) {{ g(); }}"
+            );
+            let error = compile(&source, target, false).unwrap_err().to_string();
+            assert!(error.contains(expected), "{target:?}: {error}");
+        }
+    }
+}
+
+#[test]
+fn representable_large_types_do_not_require_ir_storage() {
+    let source = "struct S { char a[4294967297]; }; extern struct S object; extern struct S g(void); _Static_assert(sizeof(struct S) == 4294967297UL, \"large type\"); unsigned long f(void) { return sizeof(object); }";
+    for target in Target::NATIVE {
+        let module = compile(source, target, false).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        assert!(
+            module.to_string().contains("4294967297"),
+            "{target:?}: {module}"
+        );
+        compile("struct ByteWide { char a[9223372036854775807]; char tail; }; _Static_assert(sizeof(struct ByteWide) == 9223372036854775808ULL, \"byte size exceeds u64 bit count\");", target, false).unwrap();
+    }
+}
+
+#[test]
+fn inferred_array_dimensions_are_checked_before_initializer_offsets() {
+    for target in Target::NATIVE {
+        for source in [
+            "struct S { char bytes[4294967296]; }; extern struct S object; void f(void) { struct S array[] = {[4294967296] = object}; }",
+            "int array[] = {[4611686018427387904] = 1};",
+        ] {
+            let error = compile(source, target, false).unwrap_err().to_string();
+            assert!(
+                error.contains("size") && error.contains("overflow"),
+                "{target:?}: {source}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn overaligned_local_padding_is_included_in_storage_limit() {
+    let source =
+        "void f(void) { char object[4294967295] __attribute__((aligned(64))); (void)&object; }";
+    for target in Target::NATIVE {
+        let error = compile(source, target, false).unwrap_err().to_string();
+        assert!(
+            error.contains("stack-slot size limit") && error.contains("padding"),
+            "{target:?}: {error}"
+        );
+    }
+}
+
+#[test]
+fn arrays_require_complete_elements_before_late_record_completion() {
+    for target in Target::NATIVE {
+        for source in [
+            "typedef struct S A[4611686018427387904]; struct S { int x; }; unsigned long f(void) { return sizeof(A); }",
+            "extern struct S array[4611686018427387904]; struct S { int x; }; unsigned long f(void) { return sizeof(array); }",
+        ] {
+            let error = compile(source, target, false).unwrap_err().to_string();
+            assert!(
+                error.contains("complete object type"),
+                "{target:?}: {source}: {error}"
+            );
+        }
+        let module = compile("struct S; extern struct S object; struct S { int x; }; int f(void) { return object.x; }", target, false).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+    }
+}

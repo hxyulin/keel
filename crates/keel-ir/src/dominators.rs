@@ -88,13 +88,17 @@ impl ControlFlowGraph {
         let mut succs = take(blocks);
         succs.reserve(2 * n);
         let mut pred_count = filled(words, n + 1, 0u32);
+        let mut seen = filled(idoms, n, None);
         for block in func.blocks() {
             let start = succs.len();
             if let Some(&term) = func.block_insts(block).last() {
                 for dest in func.inst_data(term).branch_dests() {
                     // A block reached twice (e.g. both arms of a `brif`) is
                     // still one predecessor.
-                    if !succs[start..].contains(&dest.block) {
+                    // Tag each destination with its source instead of searching
+                    // earlier successors for every case of a large switch.
+                    if seen[dest.block.index()] != Some(block) {
+                        seen[dest.block.index()] = Some(block);
                         succs.push(dest.block);
                         pred_count[dest.block.index()] += 1;
                     }
@@ -102,6 +106,7 @@ impl ControlFlowGraph {
             }
             succ_range[block.index()] = (index_u32(start), index_u32(succs.len()));
         }
+        give(idoms, seen);
         // Predecessors in the same order as before: sources in layout
         // order, each source's successors in branch order.
         let mut pred_start = pred_count;
@@ -439,6 +444,37 @@ mod tests {
         check(&func);
         func.remove_block(Block::new(6));
         check(&func);
+    }
+
+    #[test]
+    fn wide_switches_deduplicate_per_source_in_first_occurrence_order() {
+        use std::fmt::Write;
+        let cases = (0..512)
+            .map(|i| format!("{i}: block{}", 256 - i % 256))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut source = format!(
+            "func @f(i64) {{\nblock0(v0: i64):\n switch v0, block256, [{cases}]\nblock257:\n switch v0, block128, [{cases}]\n"
+        );
+        for i in 1..=256 {
+            writeln!(source, "block{i}:\n return").unwrap();
+        }
+        source.push_str("}\n");
+        let module = crate::parse(&source).unwrap();
+        let f = &module.functions[0];
+        let cfg = ControlFlowGraph::compute(f);
+        let blocks: Vec<_> = f.blocks().collect();
+        let targets = &blocks[2..];
+        let expected: Vec<_> = targets.iter().copied().rev().collect();
+        assert_eq!(cfg.succs(blocks[0]), expected);
+        let default = targets[127];
+        let second: Vec<_> = std::iter::once(default)
+            .chain(expected.iter().copied().filter(|b| *b != default))
+            .collect();
+        assert_eq!(cfg.succs(blocks[1]), second);
+        for &dest in targets {
+            assert_eq!(cfg.preds(dest), &blocks[..2], "{dest}");
+        }
     }
 
     #[test]

@@ -36,7 +36,10 @@ impl<'a> Parser<'a> {
         let ty = match ty {
             Ty::Array(ArrayTy {
                 elem, len: None, ..
-            }) => self.array_type(*elem, Some(count)),
+            }) => {
+                self.checked_array_size(elem, count, self.loc())?;
+                self.array_type(*elem, Some(count))
+            }
             _ => *ty,
         };
         Ok((
@@ -353,9 +356,13 @@ impl<'a> Parser<'a> {
                 let Ty::Array(&ArrayTy { elem, .. }) = slot.ty else {
                     unreachable!()
                 };
+                self.checked_array_size(&elem, next as u64 + 1, loc)?;
                 Slot {
                     ty: *elem.unatomic(),
-                    offset: slot.offset + next as u64 * self.size_of(&elem),
+                    offset: slot
+                        .offset
+                        .checked_add(next as u64 * self.size_of(&elem))
+                        .ok_or_else(|| Error::new(loc, "initializer size overflow"))?,
                     bits: None,
                 }
             } else {
@@ -419,12 +426,16 @@ impl<'a> Parser<'a> {
             if i < 0 || last < i || len.is_some_and(|n| last as u64 >= n) {
                 return Err(Error::new(loc, "array designator out of range"));
             }
+            self.checked_array_size(&elem, last as u64 + 1, loc)?;
             let sub = Slot {
                 ty: *elem.unatomic(),
-                offset: slot.offset + i as u64 * self.size_of(&elem),
+                offset: slot
+                    .offset
+                    .checked_add(i as u64 * self.size_of(&elem))
+                    .ok_or_else(|| Error::new(loc, "initializer size overflow"))?,
                 bits: None,
             };
-            return Ok((i as usize, sub, (last - i + 1) as usize));
+            return Ok((i as usize, sub, (last as u64 - i as u64 + 1) as usize));
         }
         self.expect(".")?;
         let name = self.ident()?;

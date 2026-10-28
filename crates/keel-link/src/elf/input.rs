@@ -59,10 +59,7 @@ fn symbols<'a>(bytes: &'a [u8], selected: &BTreeSet<String>) -> Result<(Symbols<
 /// Normal left-to-right archives, rescanned to a fixed point within each
 /// archive. Undefined weak references do not cause extraction. Thin archives
 /// would require filesystem access and are deliberately rejected.
-pub(super) fn prepare<'a>(
-    inputs: &[Input<'a>],
-    entry: &str,
-) -> Result<(Vec<Named<'a>>, Vec<Library<'a>>)> {
+pub(super) fn prepare<'a>(inputs: &[Input<'a>], entry: &str) -> Result<super::Prepared<'a>> {
     let requests = inputs
         .iter()
         .map(|input| Request::File {
@@ -71,7 +68,10 @@ pub(super) fn prepare<'a>(
         })
         .collect::<Vec<_>>();
     let (selected, libraries, _) = prepare_requests(&requests, entry)?;
-    Ok((selected, libraries))
+    Ok(super::Prepared {
+        inputs: selected,
+        libraries,
+    })
 }
 
 impl<'a> Selection<'a> {
@@ -88,8 +88,15 @@ impl<'a> Selection<'a> {
     /// or conflicting shared-library interfaces. This does not perform ET_REL
     /// output or resolve final link errors such as duplicate strong definitions.
     pub fn prepare(requests: &[Request<'a>], entry: &str) -> Result<Self> {
-        let (_, _, inputs) = prepare_requests(requests, entry)?;
-        Ok(Self { inputs })
+        let (objects, libraries, inputs) = prepare_requests(requests, entry)?;
+        Ok(Self {
+            inputs,
+            prepared: super::Prepared {
+                inputs: objects,
+                libraries,
+            },
+            entry: entry.into(),
+        })
     }
 }
 

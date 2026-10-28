@@ -19,11 +19,21 @@ pub enum Request<'a> {
 
 /// Selected objects and shared libraries, borrowing the original input storage.
 ///
-/// Pass [`Self::inputs`] to [`crate::elf::link`]. Archives have already been
-/// expanded; shared libraries retain their first encounter order.
-#[derive(Debug)]
+/// Pass this to [`crate::elf::link_selected`] or
+/// [`crate::elf::relocatable::link_selected`] to reuse preparation. Archives have
+/// already been expanded; shared libraries retain their first encounter order.
 pub struct Selection<'a> {
     pub(crate) inputs: Vec<(String, &'a [u8])>,
+    pub(crate) prepared: crate::elf::Prepared<'a>,
+    pub(crate) entry: String,
+}
+
+impl std::fmt::Debug for Selection<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Selection")
+            .field("inputs", &self.inputs)
+            .finish()
+    }
 }
 
 impl Selection<'_> {

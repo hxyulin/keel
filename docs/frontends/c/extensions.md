@@ -803,6 +803,18 @@ intrinsics. No public intrinsic IDs or backend encoders change.
 <a id="c-storage-metadata-c-storage-and-function-metadata"></a>
 ## C storage and function metadata
 
+Array elements must be complete object types when their array is declared; a
+record completed later cannot change an already-admitted array size. Scalar
+extern declarations and pointers to incomplete records remain supported.
+Native array and record sizes use checked byte arithmetic before enclosing types
+or initializer offsets consume them. Declaration-only types and `sizeof` queries
+may exceed the IR storage limit when their byte size remains representable.
+Aggregate ABI layouts separately check their u32 element counts. Local and
+temporary stack slots check their u32 byte capacity, including padding reserved
+for over-aligned locals. Uses exceeding one of these limits return a diagnostic;
+a representable type does not authorize a truncated ABI layout or allocation.
+Wasm32 retains its stricter object-size bounds.
+
 `DataItem::Ptr` occupies the target pointer width at the current byte cursor.
 It adds no padding and needs no storage alignment beyond one byte. `DataInit.align`
 controls the containing object, not each relocation. Native assembly emits an

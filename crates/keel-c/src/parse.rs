@@ -1100,6 +1100,27 @@ impl<'a> Parser<'a> {
         self.types().size(ty)
     }
 
+    /// Check completed dimensions before layout or initializer offsets use them.
+    pub(crate) fn checked_array_size(&self, elem: &Ty<'a>, len: u64, loc: Loc) -> R<u64> {
+        let overflow = if self.c_layout.pointer_bytes() == 4 {
+            "non-native array storage exceeds wasm32 bounds"
+        } else {
+            "type size overflow"
+        };
+        let size = self
+            .types()
+            .checked_size(elem)
+            .and_then(|size| size.checked_mul(len).ok_or(overflow))
+            .map_err(|_| Error::new(loc, overflow))?;
+        if self.c_layout.pointer_bytes() == 4 && size > u32::MAX as u64 {
+            return Err(Error::new(
+                loc,
+                "non-native array storage exceeds wasm32 bounds",
+            ));
+        }
+        Ok(size)
+    }
+
     pub(crate) fn align_of(&self, ty: &Ty<'a>) -> u64 {
         self.types().align(ty)
     }
@@ -3688,25 +3709,18 @@ impl<'a> Parser<'a> {
             }
             self.expect("]")?;
             let (elem, sugar) = self.type_suffix(ty, sugar, attrs)?;
-            if (vla.is_some() || elem.runtime_sized()) && !self.complete_vm_element(&elem) {
-                return Err(Error::new(
-                    loc,
-                    "variable-length array element type must be a complete object type",
-                ));
+            if !self.complete_vm_element(&elem) {
+                let message = if vla.is_some() || elem.runtime_sized() {
+                    "variable-length array element type must be a complete object type"
+                } else {
+                    "array element type must be a complete object type"
+                };
+                return Err(Error::new(loc, message));
             }
             // Bound each completed dimension before an enclosing dimension,
             // record layout or sizeof query can multiply through Types::size.
-            if self.c_layout.pointer_bytes() == 4
-                && let Some(len) = len
-                && self
-                    .size_of(&elem)
-                    .checked_mul(len)
-                    .is_none_or(|size| size > u32::MAX as u64)
-            {
-                return Err(Error::new(
-                    loc,
-                    "non-native array storage exceeds wasm32 bounds",
-                ));
+            if let Some(len) = len {
+                self.checked_array_size(&elem, len, loc)?;
             }
             if !self
                 .size_of(&elem)
@@ -4198,7 +4212,9 @@ impl<'a> Parser<'a> {
             layout_struct(&self.types(), &self.typedefs, is_union, fields, pack)
                 .map_err(|message| Error::new(loc, message))?;
         align = align.max(zero_width_align).max(attrs.aligned.unwrap_or(1));
-        size = size.next_multiple_of(align);
+        size = size
+            .checked_next_multiple_of(align)
+            .ok_or_else(|| Error::new(loc, "record size overflow"))?;
         let def = &mut self.structs[id];
         def.members = members;
         def.size = size;

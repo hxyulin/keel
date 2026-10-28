@@ -624,11 +624,10 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
         options.effective_entry()?
     };
     let selection = Selection::prepare(&requests, &entry)?;
-    let inputs = selection.inputs();
     let executable = if relocatable {
-        keel_link::elf::relocatable::link(&inputs, machine)?
+        keel_link::elf::relocatable::link_selected(&selection, machine)?
     } else {
-        keel_link::elf::link(&inputs, options)?
+        keel_link::elf::link_selected(&selection, options)?
     };
     for warning in &executable.warnings {
         eprintln!("keel link: warning: {warning}");
