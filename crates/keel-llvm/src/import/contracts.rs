@@ -1,6 +1,39 @@
 //! LLVM contracts whose guarantees hold at an explicit function/call boundary.
 use super::*;
-use keel_ir::{CallContract, MemoryAccess, MemorySummary, PointerContract};
+use keel_ir::{
+    AddressCapture, CallContract, CaptureComponents, CaptureContract, IntegerRange, MemoryAccess,
+    MemorySummary, PointerContract, ProvenanceCapture,
+};
+
+// LLVM CaptureInfo::toIntValue uses the upper nibble for other locations,
+// lower nibble for the returned copy. Component bits encode nested capabilities.
+fn decode_capture(bits: u64) -> CaptureContract {
+    fn components(bits: u64) -> Option<CaptureComponents> {
+        let address = match bits & 3 {
+            0 => AddressCapture::None,
+            1 => AddressCapture::Nullness,
+            3 => AddressCapture::Address,
+            _ => return None,
+        };
+        let provenance = match bits & 12 {
+            0 => ProvenanceCapture::None,
+            4 => ProvenanceCapture::Read,
+            12 => ProvenanceCapture::ReadWrite,
+            _ => return None,
+        };
+        Some(CaptureComponents {
+            address,
+            provenance,
+        })
+    }
+    if bits > 255 {
+        return CaptureContract::default();
+    }
+    match (components(bits >> 4), components(bits & 15)) {
+        (Some(other), Some(returned)) => CaptureContract { other, returned },
+        _ => CaptureContract::default(),
+    }
+}
 
 /// LLVM 23's IRMemLocation is encoded as two ModRefInfo bits per location:
 /// ArgMem=0, InaccessibleMem=1, ErrnoMem=2, Other=3, TargetMem0=4, TargetMem1=5.
@@ -55,7 +88,27 @@ impl Translation<'_> {
         };
         let mut types = vec![l.get_return_type(fty)];
         types.extend(l.params(fty));
+        let mut printed_ranges = None;
         for (index, ty) in types.into_iter().enumerate() {
+            if l.get_type_kind(ty) == 8
+                && matches!(l.get_int_type_width(ty), 8 | 16 | 32 | 64)
+                && l.attribute(owner, index as u32, "noundef", call) != 0
+                && l.attribute(owner, index as u32, "range", call) != 0
+            {
+                // LLVM's C API exposes construction but no getter for ConstantRange
+                // attributes. Read only this position in the verified canonical
+                // signature. Never use LLVMGetEnumAttributeValue on a range.
+                let ranges =
+                    printed_ranges.get_or_insert_with(|| boundary_ranges(&l.printed(owner)));
+                if let Some(Some(range)) = ranges.get(index) {
+                    let positions = if index == 0 {
+                        &mut contract.return_ranges
+                    } else {
+                        &mut contract.parameter_ranges
+                    };
+                    positions.push((if index == 0 { 0 } else { index as u32 - 1 }, *range));
+                }
+            }
             if l.get_type_kind(ty) != 12 || l.get_pointer_address_space(ty) != 0 {
                 continue;
             }
@@ -84,9 +137,23 @@ impl Translation<'_> {
                 nonnull: defined
                     && (readable != 0 || l.attribute(owner, index, "nonnull", call) != 0),
                 readable_bytes: readable,
-                no_capture: index != 0
-                    && (self.enum_value(owner, index, "captures", call) == Some(0)
-                        || l.attribute(owner, index, "nocapture", call) != 0),
+                readable_or_null_bytes: if defined {
+                    self.enum_value(owner, index, "dereferenceable_or_null", call)
+                        .filter(|&n| n <= i64::MAX as u64)
+                        .unwrap_or(0)
+                } else {
+                    0
+                },
+                capture: if index == 0 {
+                    CaptureContract::default()
+                } else if let Some(bits) = self.enum_value(owner, index, "captures", call) {
+                    decode_capture(bits)
+                } else if l.attribute(owner, index, "nocapture", call) != 0 {
+                    CaptureContract::NONE
+                } else {
+                    CaptureContract::default()
+                },
+                return_noalias: index == 0 && l.attribute(owner, index, "noalias", call) != 0,
             };
             if pointer == PointerContract::default() {
                 continue;
@@ -99,4 +166,97 @@ impl Translation<'_> {
         }
         contract
     }
+}
+
+/// Return and argument ranges from one verified, canonically printed signature.
+/// Missing/unsupported syntax is unknown; body text and quoted names are ignored.
+fn boundary_ranges(text: &str) -> Vec<Option<IntegerRange>> {
+    fn quoted_end(bytes: &[u8], mut i: usize) -> usize {
+        i += 1;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'\\' => i += 2,
+                b'"' => return i + 1,
+                _ => i += 1,
+            }
+        }
+        bytes.len()
+    }
+    fn range(text: &str) -> Option<IntegerRange> {
+        static RANGE: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r"\brange\(i(8|16|32|64) (-?[0-9]+), (-?[0-9]+)\)").unwrap()
+        });
+        let mut unquoted = text.as_bytes().to_vec();
+        let mut i = 0;
+        while i < unquoted.len() {
+            if unquoted[i] == b'"' {
+                let end = quoted_end(&unquoted, i);
+                unquoted[i..end].fill(b' ');
+                i = end;
+            } else {
+                i += 1;
+            }
+        }
+        let unquoted = std::str::from_utf8(&unquoted).ok()?;
+        let matched = RANGE.captures(unquoted)?;
+        let width: u32 = matched[1].parse().ok()?;
+        let mask = u64::MAX >> (64 - width);
+        let lower = matched[2].parse::<i128>().ok()? as u64 & mask;
+        let upper = matched[3].parse::<i128>().ok()? as u64 & mask;
+        (lower != upper).then_some(IntegerRange { lower, upper })
+    }
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'"' {
+            i = quoted_end(bytes, i);
+            continue;
+        }
+        if !matches!(bytes[i], b'@' | b'%') {
+            i += 1;
+            continue;
+        }
+        let symbol = i;
+        i += 1;
+        if bytes.get(i) == Some(&b'"') {
+            i = quoted_end(bytes, i);
+        } else {
+            while i < bytes.len()
+                && (bytes[i].is_ascii_alphanumeric() || b"-._$".contains(&bytes[i]))
+            {
+                i += 1;
+            }
+        }
+        if bytes.get(i) != Some(&b'(') {
+            continue;
+        }
+        let mut out = vec![range(&text[..symbol])];
+        i += 1;
+        let mut start = i;
+        let mut depth = 0;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'"' => {
+                    i = quoted_end(bytes, i);
+                    continue;
+                }
+                b')' if depth == 0 => {
+                    if !text[start..i].trim().is_empty() {
+                        out.push(range(&text[start..i]));
+                    }
+                    return out;
+                }
+                b',' if depth == 0 => {
+                    out.push(range(&text[start..i]));
+                    start = i + 1;
+                }
+                b'(' | b'[' | b'{' | b'<' => depth += 1,
+                b')' | b']' | b'}' | b'>' => depth -= 1,
+                _ => {}
+            }
+            i += 1;
+        }
+        return Vec::new();
+    }
+    Vec::new()
 }

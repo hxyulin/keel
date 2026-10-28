@@ -178,6 +178,66 @@ fn scalar_refinement_matches_allowed_outcomes_and_freeze_stability() {
 }
 
 #[test]
+fn richer_boundary_facts_preserve_defined_execution_and_masked_ranges() {
+    let Some(importer) = importer() else {
+        return;
+    };
+    let text = importer
+        .translate(
+            include_bytes!("fixtures/definedness/richer_facts.ll"),
+            Default::default(),
+        )
+        .unwrap();
+    let module = keel_ir::parse(&text).unwrap();
+    let exported = keel_llvm::export(&module, keel_llvm::TargetProfile::AppleArm64).unwrap();
+    if !executable_host() {
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "keel-definedness-richer-facts-{}",
+        std::process::id()
+    ));
+    fs::create_dir(&dir).unwrap();
+    let roundtrip = dir.join("roundtrip.ll");
+    fs::write(&roundtrip, exported).unwrap();
+    let driver = fixture("richer_facts_driver.c");
+    execute_llvm(
+        &dir,
+        "source",
+        &fixture("richer_facts.ll"),
+        &driver,
+        b"richer-facts-ok\n",
+    );
+    execute_llvm(&dir, "roundtrip", &roundtrip, &driver, b"richer-facts-ok\n");
+    if let Some(keel) = std::env::var_os("KEEL_TEST_KEEL") {
+        let imported = dir.join("richer-facts.keel");
+        fs::write(&imported, text).unwrap();
+        for tier in ["none", "fast", "full"] {
+            let object = dir.join(format!("{tier}.o"));
+            run(Command::new(&keel)
+                .args(["compile", "--opt-tier", tier, "--emit-object"])
+                .arg(&imported)
+                .arg("-o")
+                .arg(&object));
+            let executable = dir.join(tier);
+            run(Command::new("clang")
+                .arg(&driver)
+                .arg(object)
+                .arg("-o")
+                .arg(&executable));
+            assert_eq!(
+                run(&mut Command::new(executable)).stdout,
+                b"richer-facts-ok\n",
+                "native {tier}"
+            );
+        }
+    } else {
+        eprintln!("skipped native richer-fact execution: set KEEL_TEST_KEEL");
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn masked_poison_selects_and_phi_edges_match_defined_c_oracle() {
     let Some(importer) = importer() else {
         return;

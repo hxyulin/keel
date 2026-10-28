@@ -143,8 +143,10 @@ remain rejected. See the
 [integer flag contract](llvm_import_flags_fixtures/README.md) for defined-input
 and poison-masking test domains. FP fast-math restrictions are unchanged.
 
-Optimization and analysis contracts such as `noundef`, ranges, captures,
-read-only effects and target CPU tuning are not imported as Keel facts. Debug
+The Python reference omits optimization contracts such as ranges, captures and
+read-only effects. The Rust importer retains the bounded memory, pointer/capture,
+return-noalias and defined integer-range contracts described in its README.
+Target CPU tuning is not imported as Keel facts. Debug
 metadata and locations are not reproduced. This is not an equal-debug/unwind,
 security-hardening, or source-level tooling replacement for LLVM.
 

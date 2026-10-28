@@ -75,7 +75,7 @@ fn signature(s: &Signature) -> ExportResult<(String, Vec<String>)> {
 }
 fn pointer_attrs(p: &PointerContract) -> String {
     let mut attrs = String::new();
-    if p.align > 1 || p.nonnull || p.readable_bytes != 0 {
+    if p.align > 1 || p.nonnull || p.readable_bytes != 0 || p.readable_or_null_bytes != 0 {
         attrs.push_str(" noundef");
     }
     if p.align > 1 {
@@ -97,8 +97,29 @@ fn pointer_attrs(p: &PointerContract) -> String {
         )
         .unwrap();
     }
-    if p.no_capture {
+    if p.readable_or_null_bytes != 0 {
+        write!(
+            attrs,
+            " dereferenceable_or_null({})",
+            p.readable_or_null_bytes
+        )
+        .unwrap();
+    }
+    if p.return_noalias {
+        attrs.push_str(" noalias");
+    }
+    if p.capture == CaptureContract::NONE {
         attrs.push_str(" captures(none)");
+    } else if p.capture != CaptureContract::default() {
+        if p.capture.other == p.capture.returned {
+            write!(attrs, " captures({})", p.capture.other).unwrap();
+        } else {
+            attrs.push_str(" captures(");
+            if p.capture.other != CaptureComponents::NONE {
+                write!(attrs, "{}, ", p.capture.other).unwrap();
+            }
+            write!(attrs, "ret: {})", p.capture.returned).unwrap();
+        }
     }
     attrs
 }
@@ -112,6 +133,30 @@ fn signature_contract(
     }
     if let Some((_, pointer)) = contract.returns.first() {
         ret = format!("{} {ret}", pointer_attrs(pointer).trim());
+    }
+    for (ranges, abi, is_return) in [
+        (&contract.parameter_ranges, &s.params, false),
+        (&contract.return_ranges, &s.returns, true),
+    ] {
+        let mut seen = BTreeSet::new();
+        for &(index, range) in ranges {
+            if !seen.insert(index) {
+                return Err(
+                    "LLVM export cannot encode multiple conjunctive ranges at one position".into(),
+                );
+            }
+            let fact = format!(
+                "noundef range({} {}, {})",
+                ty(abi[index as usize].ty)?,
+                range.lower,
+                range.upper
+            );
+            if is_return {
+                ret = format!("{fact} {ret}");
+            } else {
+                write!(params[index as usize], " {fact}").unwrap();
+            }
+        }
     }
     Ok((ret, params))
 }

@@ -27,6 +27,12 @@ Original LLVM and re-exported LLVM run at O0/O2; optional native Keel runs at
 none/fast/full. Raw scalar acceptance and the remaining aggregate/global
 rejections are tested separately in `definedness.rs`.
 
+`richer_facts.ll` checks return/parameter/indirect-call ranges, poisonable ranges
+masked before observation, return-only capture, nullable readable extents and
+allocation-like noalias returns. The driver stays inside retained range and
+pointer promises. Both LLVM O0/O2 paths and Keel none/fast/full must print the
+same verdict. Structural tests separately verify exact scope and transport.
+
 ```sh
 KEEL_TEST_LIBLLVM="$(rustc --print sysroot)/lib/libLLVM.dylib" \
 KEEL_TEST_KEEL="$PWD/target/debug/keel" \

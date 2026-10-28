@@ -923,7 +923,11 @@ impl Parser {
         }
         loop {
             let (property, loc) = self.ident("a contract property")?;
-            if !matches!(property.as_str(), "param" | "result") && !seen.insert(property.clone()) {
+            if !matches!(
+                property.as_str(),
+                "param" | "result" | "range_param" | "range_result"
+            ) && !seen.insert(property.clone())
+            {
                 return Err(error(loc, "duplicate contract property".into()));
             }
             match property.as_str() {
@@ -931,6 +935,21 @@ impl Parser {
                 "nosync" => contract.nosync = true,
                 "nocallback" => contract.nocallback = true,
                 "preserves_access" => contract.preserves_access = true,
+                "range_param" | "range_result" => {
+                    self.expect(Tok::Punct('('))?;
+                    let index = self.u32("an integer contract position")?;
+                    self.expect(Tok::Punct(','))?;
+                    let lower = self.int("a range endpoint bit pattern")? as u64;
+                    self.expect(Tok::Punct(','))?;
+                    let upper = self.int("a range endpoint bit pattern")? as u64;
+                    self.expect(Tok::Punct(')'))?;
+                    let ranges = if property == "range_param" {
+                        &mut contract.parameter_ranges
+                    } else {
+                        &mut contract.return_ranges
+                    };
+                    ranges.push((index, crate::IntegerRange { lower, upper }));
+                }
                 "memory" => {
                     self.expect(Tok::Punct('('))?;
                     let mut regions = std::collections::BTreeSet::new();
@@ -974,7 +993,29 @@ impl Parser {
                         match name.as_str() {
                             "align" => pointer.align = self.u32("a pointer alignment")?,
                             "nonnull" => pointer.nonnull = true,
-                            "nocapture" => pointer.no_capture = true,
+                            "nocapture" => pointer.capture = crate::CaptureContract::NONE,
+                            "noalias" => pointer.return_noalias = true,
+                            "captures" => {
+                                self.expect(Tok::Punct('('))?;
+                                self.expect(Tok::Ident("other".into()))?;
+                                let other = self.capture_components()?;
+                                self.expect(Tok::Punct(','))?;
+                                self.expect(Tok::Ident("ret".into()))?;
+                                let returned = self.capture_components()?;
+                                self.expect(Tok::Punct(')'))?;
+                                pointer.capture = crate::CaptureContract { other, returned };
+                            }
+                            "readable_or_null" => {
+                                pointer.readable_or_null_bytes =
+                                    u64::try_from(self.int("a conditional readable extent")?)
+                                        .map_err(|_| {
+                                            error(
+                                                loc,
+                                                "conditional readable extent must be nonnegative"
+                                                    .into(),
+                                            )
+                                        })?;
+                            }
                             "readable" => {
                                 pointer.readable_bytes = u64::try_from(
                                     self.int("a readable byte extent")?,
@@ -991,6 +1032,9 @@ impl Parser {
                                 return Err(error(loc, "unknown pointer contract property".into()));
                             }
                         }
+                    }
+                    if properties.contains("captures") && properties.contains("nocapture") {
+                        return Err(self.unexpected("one capture contract spelling"));
                     }
                     let positions = if property == "param" {
                         &mut contract.parameters
@@ -1010,6 +1054,43 @@ impl Parser {
             self.expect(Tok::Punct(','))?;
         }
         Ok(contract)
+    }
+
+    fn capture_components(&mut self) -> Result<crate::CaptureComponents, ParseError> {
+        use crate::{AddressCapture as A, CaptureComponents, ProvenanceCapture as P};
+        self.expect(Tok::Punct('('))?;
+        let mut components = CaptureComponents::NONE;
+        let mut address = false;
+        let mut provenance = false;
+        let mut none = false;
+        loop {
+            let (name, loc) = self.ident("a capture component")?;
+            match name.as_str() {
+                "none" if !none && !address && !provenance => none = true,
+                "address" | "address_is_null" if !address && !none => {
+                    components.address = if name == "address" {
+                        A::Address
+                    } else {
+                        A::Nullness
+                    };
+                    address = true;
+                }
+                "provenance" | "read_provenance" if !provenance && !none => {
+                    components.provenance = if name == "provenance" {
+                        P::ReadWrite
+                    } else {
+                        P::Read
+                    };
+                    provenance = true;
+                }
+                _ => return Err(error(loc, "invalid or duplicate capture component".into())),
+            }
+            if self.eat(&Tok::Punct(')')) {
+                break;
+            }
+            self.expect(Tok::Punct(','))?;
+        }
+        Ok(components)
     }
 
     /// Everything after `func`.

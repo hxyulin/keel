@@ -1311,6 +1311,7 @@ impl Function {
     pub fn remove_block_param(&mut self, block: Block, index: usize) -> Value {
         if self.entry_block() == Some(block) {
             self.attrs.contract.parameters.clear();
+            self.attrs.contract.parameter_ranges.clear();
         }
         let value = self
             .block_values

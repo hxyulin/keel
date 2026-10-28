@@ -121,8 +121,12 @@ nocallback only for known external targets; LLVM treats the hint as ineffective
 on local definitions. Pointer promises that can produce poison without an
 established definedness boundary remain omitted. Definition-only parameter
 noalias maps to Keel restrict contracts and back to definition parameters.
-Full capture components, fresh-allocation return noalias and poison semantics
-remain unrepresented.
+The richer boundary slice adds address/nullness and read/write provenance capture,
+with independent return and other escape locations, conditional readable extents,
+and allocation-like return noalias. Integer ranges with noundef at the same
+boundary are retained for i8/i16/i32/i64. No optimizer consumes these additions.
+Poison semantics, instruction-local facts, access alias scopes and TBAA remain
+unrepresented. See [scoped contracts](../../docs/llvm-contracts.md).
 
 ## Scalar deferred-value refinement
 

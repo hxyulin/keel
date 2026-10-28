@@ -1,7 +1,8 @@
 # LLVM import contracts
 
-Status: the first contract and lifetime implementation is present. Later proof,
-metadata and storage-reuse work remains staged as described below.
+Status: memory, richer boundary pointer/capture contracts, defined integer ranges
+and fixed-stack lifetimes are represented. New fact consumers, instruction-local
+metadata and storage reuse remain deferred.
 
 ## Implemented slice
 
@@ -14,6 +15,13 @@ metadata and storage-reuse work remains staged as described below.
   Non-null/alignment facts need definedness; readable extents are boundary facts.
   Definition-only normal-pointer noalias maps to `restrict_params`. Declaration,
   call-site and return noalias are not promoted into that list.
+- Pointer contracts also carry conditional readable extents, independent address
+  and provenance capture permissions at return/other escape locations, and
+  allocation-like return noalias. No non-null address, size, writable bytes or
+  access stability follows from return noalias.
+- Integer `parameter_ranges` and `return_ranges` apply at function/call boundaries
+  only. LLVM import requires range and noundef at the same owner and position.
+  Poisonable ranges are omitted. No new optimizer consumes these richer facts.
 - More detailed LLVM memory classes are conservatively coarsened: errno joins
   other accessible memory; target-private state joins inaccessible memory.
   LLVM export uses a widened default compatible with Clang 21, so some region
@@ -166,8 +174,13 @@ The first import subset is:
   establishes that they hold on every defined call.
 - Positive, bounded readable extents from a supported dereferenceability contract,
   at entry or the call return point. No inferred function-wide `notrap` flag.
-- The complete no-capture case. More detailed capture components remain unknown
-  until the representation can distinguish address capture from access capability.
+- Address/nullness capture and read/write provenance capture, independently for
+  returned copies and other escapes. These constrain the particular passed copy,
+  not every alias of the original pointer. The existing `nocapture` spelling is
+  retained as shorthand for no components captured anywhere.
+- Conditional readable extents from `dereferenceable_or_null` with independently
+  established definedness. They do not imply a non-null address or unconditional
+  readable bytes.
 
 For offset pointers, a consumer must prove the byte range is inside the extent,
 check arithmetic without overflow and retain the required alignment. It must
@@ -179,8 +192,8 @@ by `restrict_params`, only where the LLVM definition contract implies it for
 normal pointer parameters. Prove this bounded mapping with overlapping read-only
 and disjoint writable examples before enabling it. Do not copy declaration or
 call-site facts into a definition-only list. Return-value noalias needs a
-separate fresh-allocation relation; it is not a restrict parameter and does not
-imply non-null or a known allocation size.
+separate allocation-like relation, now represented as `return_noalias`; it is not
+a restrict parameter and does not imply non-null or a known allocation size.
 
 Keep these initial contracts at function/call scope. Inlining must drop
 callee-scoped alias promises until there is a scoped remapping mechanism.
@@ -190,6 +203,39 @@ pointer inequality comparisons.
 Defer access-specific alias scopes and TBAA until Keel can remap scopes and
 maintain byte-range/type validity through transformations. Do not stash opaque
 LLVM metadata and re-emit it as if it remained authoritative.
+
+### Scoped integer ranges
+
+`range_param(index, lower, upper)` and `range_result(index, lower, upper)` describe
+nonempty modular half-open intervals at i8/i16/i32/i64 ABI positions. Endpoints
+are unsigned bit patterns; text uses hex so wrapped intervals are unambiguous.
+For example `[0xfffffff8, 8)` includes negative eight through positive seven for
+i32. These do not become facts about the argument on paths that bypass a call,
+or about unrelated SSA values. Poison-producing ranges without noundef cannot
+be promoted, including on returns later masked by select or freeze.
+
+Simultaneous intervals at one position are a conjunction. Composition retains
+every constraint rather than approximating a disconnected intersection with one
+interval. The diagnostic LLVM exporter currently rejects multiple conjunctive
+intervals at a position; it does not silently drop one. Export of a single
+interval emits noundef plus range. Empty LLVM ranges are conservatively omitted;
+i1, i128, vectors, instruction metadata and assume/guard facts are outside this
+slice. Existing i1-to-i8 representation is unchanged.
+
+The [LLVM C API](https://github.com/llvm/llvm-project/blob/main/llvm/include/llvm-c/Core.h)
+has no ConstantRange-attribute getter. The importer reads only the
+eligible position from LLVM's verified canonical signature, skipping quoted
+names and nested argument attributes. It never calls the integer-attribute API
+on a ConstantRange attribute. The [capture bit encoding](https://github.com/llvm/llvm-project/blob/main/llvm/include/llvm/Support/ModRef.h)
+is checked against LLVM 23
+using every combination of supported components and locations.
+
+Whole-function clones retain contracts; instruction clones drop call-site facts.
+Mutation invalidation applies to the complete contract. Entry-parameter removal
+clears positional parameter facts, and byval splitting skips signatures with
+these facts until it can remap them. Cranelift export does not transport the new
+contracts. No alias/value consumer, pointer validity inference, speculation or
+dead-load elimination is added by this slice.
 
 ## LLVM definedness
 

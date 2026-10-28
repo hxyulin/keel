@@ -2,6 +2,101 @@
 use crate::{Purpose, Signature, Type};
 use std::fmt;
 
+/// Which aspects of an address may escape a passed pointer copy.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum AddressCapture {
+    None,
+    Nullness,
+    #[default]
+    Address,
+}
+
+/// Access capability that may survive the invocation through a passed copy.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ProvenanceCapture {
+    None,
+    Read,
+    #[default]
+    ReadWrite,
+}
+
+/// Allowed capture components at one escape location.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct CaptureComponents {
+    pub address: AddressCapture,
+    pub provenance: ProvenanceCapture,
+}
+impl CaptureComponents {
+    pub const NONE: Self = Self {
+        address: AddressCapture::None,
+        provenance: ProvenanceCapture::None,
+    };
+    fn intersect(self, other: Self) -> Self {
+        use AddressCapture as A;
+        use ProvenanceCapture as P;
+        Self {
+            address: match (self.address, other.address) {
+                (A::None, _) | (_, A::None) => A::None,
+                (A::Nullness, _) | (_, A::Nullness) => A::Nullness,
+                _ => A::Address,
+            },
+            provenance: match (self.provenance, other.provenance) {
+                (P::None, _) | (_, P::None) => P::None,
+                (P::Read, _) | (_, P::Read) => P::Read,
+                _ => P::ReadWrite,
+            },
+        }
+    }
+}
+impl fmt::Display for CaptureComponents {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let address = match self.address {
+            AddressCapture::None => "",
+            AddressCapture::Nullness => "address_is_null",
+            AddressCapture::Address => "address",
+        };
+        let provenance = match self.provenance {
+            ProvenanceCapture::None => "",
+            ProvenanceCapture::Read => "read_provenance",
+            ProvenanceCapture::ReadWrite => "provenance",
+        };
+        match (address, provenance) {
+            ("", "") => f.write_str("none"),
+            ("", p) => f.write_str(p),
+            (a, "") => f.write_str(a),
+            (a, p) => write!(f, "{a}, {p}"),
+        }
+    }
+}
+
+/// Parameter-copy capture permissions, separated by return and other escapes.
+/// These do not restrict other copies of the pointer or prove fault freedom.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct CaptureContract {
+    pub other: CaptureComponents,
+    pub returned: CaptureComponents,
+}
+impl CaptureContract {
+    pub const NONE: Self = Self {
+        other: CaptureComponents::NONE,
+        returned: CaptureComponents::NONE,
+    };
+    pub fn intersect(self, other: Self) -> Self {
+        Self {
+            other: self.other.intersect(other.other),
+            returned: self.returned.intersect(other.returned),
+        }
+    }
+}
+
+/// A nonempty modular half-open integer interval, with width supplied by its ABI
+/// position. Lower greater than upper denotes a range that wraps through zero.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct IntegerRange {
+    pub lower: u64,
+    pub upper: u64,
+}
+
 /// Externally relevant reads and writes permitted in a memory region.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum MemoryAccess {
@@ -70,9 +165,14 @@ pub struct PointerContract {
     pub align: u32,
     pub nonnull: bool,
     pub readable_bytes: u64,
-    /// The passed pointer's address and access capability are not captured.
-    /// This parameter-only property is invalid on return values.
-    pub no_capture: bool,
+    /// Readable extent only if the pointer is non-null, at this boundary.
+    pub readable_or_null_bytes: u64,
+    /// Parameter-only permissions on capture of the passed pointer copy.
+    pub capture: CaptureContract,
+    /// Return-only allocation-like relation: returned storage is disjoint from
+    /// other objects accessible to the caller. This implies neither non-null,
+    /// an allocation size, nor permission to access any bytes.
+    pub return_noalias: bool,
 }
 impl Default for PointerContract {
     fn default() -> Self {
@@ -80,7 +180,9 @@ impl Default for PointerContract {
             align: 1,
             nonnull: false,
             readable_bytes: 0,
-            no_capture: false,
+            readable_or_null_bytes: 0,
+            capture: CaptureContract::default(),
+            return_noalias: false,
         }
     }
 }
@@ -90,7 +192,11 @@ impl PointerContract {
             align: self.align.max(other.align),
             nonnull: self.nonnull || other.nonnull,
             readable_bytes: self.readable_bytes.max(other.readable_bytes),
-            no_capture: self.no_capture || other.no_capture,
+            readable_or_null_bytes: self
+                .readable_or_null_bytes
+                .max(other.readable_or_null_bytes),
+            capture: self.capture.intersect(other.capture),
+            return_noalias: self.return_noalias || other.return_noalias,
         }
     }
 }
@@ -113,6 +219,10 @@ pub struct CallContract {
     pub parameters: Vec<(u32, PointerContract)>,
     /// Sparse pointer facts indexed by return position.
     pub returns: Vec<(u32, PointerContract)>,
+    /// Scoped conjunctions of integer facts. Several intervals at one position
+    /// all apply; they are not a union or facts about unrelated SSA values.
+    pub parameter_ranges: Vec<(u32, IntegerRange)>,
+    pub return_ranges: Vec<(u32, IntegerRange)>,
 }
 impl CallContract {
     pub fn is_unknown(&self) -> bool {
@@ -143,6 +253,8 @@ impl CallContract {
             preserves_access: self.preserves_access || other.preserves_access,
             parameters: pointers(&self.parameters, &other.parameters),
             returns: pointers(&self.returns, &other.returns),
+            parameter_ranges: ranges(&self.parameter_ranges, &other.parameter_ranges),
+            return_ranges: ranges(&self.return_ranges, &other.return_ranges),
         }
     }
     /// Validate structure and ABI positions; the producer must prove the promises.
@@ -165,11 +277,40 @@ impl CallContract {
                 if !p.align.is_power_of_two() {
                     return Err("pointer contract alignment must be a nonzero power of two".into());
                 }
-                if p.readable_bytes > i64::MAX as u64 {
+                if p.readable_bytes > i64::MAX as u64 || p.readable_or_null_bytes > i64::MAX as u64
+                {
                     return Err("readable byte extent must fit i64".into());
                 }
-                if is_return && p.no_capture {
-                    return Err("nocapture is a parameter-only contract".into());
+                if is_return && p.capture != CaptureContract::default() {
+                    return Err("capture permissions are parameter-only contracts".into());
+                }
+                if !is_return && p.return_noalias {
+                    return Err("allocation-like noalias is a return-only contract".into());
+                }
+            }
+        }
+        for (facts, params) in [
+            (&self.parameter_ranges, &sig.params),
+            (&self.return_ranges, &sig.returns),
+        ] {
+            for &(index, range) in facts {
+                let Some(arg) = params.get(index as usize) else {
+                    return Err("integer range position is outside the signature".into());
+                };
+                let width = match arg.ty {
+                    Type::I8 => 8,
+                    Type::I16 => 16,
+                    Type::I32 => 32,
+                    Type::I64 => 64,
+                    _ => return Err("integer ranges require i8/i16/i32/i64 positions".into()),
+                };
+                if arg.purpose != Purpose::Normal || range.lower == range.upper {
+                    return Err(
+                        "integer range must be nonempty at a normal-purpose position".into(),
+                    );
+                }
+                if width < 64 && (range.lower >> width != 0 || range.upper >> width != 0) {
+                    return Err("integer range endpoint exceeds the position's bit width".into());
                 }
             }
         }
@@ -214,13 +355,49 @@ impl fmt::Display for CallContract {
                 if p.readable_bytes != 0 {
                     write!(f, ", readable {}", p.readable_bytes)?;
                 }
-                if p.no_capture {
+                if p.readable_or_null_bytes != 0 {
+                    write!(f, ", readable_or_null {}", p.readable_or_null_bytes)?;
+                }
+                if p.capture == CaptureContract::NONE {
                     f.write_str(", nocapture")?;
+                } else if p.capture != CaptureContract::default() {
+                    write!(
+                        f,
+                        ", captures(other({}), ret({}))",
+                        p.capture.other, p.capture.returned
+                    )?;
+                }
+                if p.return_noalias {
+                    f.write_str(", noalias")?;
                 }
                 f.write_str(")")?;
                 separator = ", ";
             }
         }
+        for (name, positions) in [
+            ("range_param", &self.parameter_ranges),
+            ("range_result", &self.return_ranges),
+        ] {
+            for (index, range) in positions {
+                write!(
+                    f,
+                    "{separator}{name}({index}, {:#x}, {:#x})",
+                    range.lower, range.upper
+                )?;
+                separator = ", ";
+            }
+        }
         f.write_str(")")
     }
+}
+
+fn ranges(a: &[(u32, IntegerRange)], b: &[(u32, IntegerRange)]) -> Vec<(u32, IntegerRange)> {
+    let mut out = a.to_vec();
+    for &range in b {
+        if !out.contains(&range) {
+            out.push(range);
+        }
+    }
+    out.sort_by_key(|(index, range)| (*index, range.lower, range.upper));
+    out
 }

@@ -35,7 +35,10 @@ pub use asm::{
     symbolic_immediate,
 };
 pub use builder::InstBuilder;
-pub use contracts::{CallContract, MemoryAccess, MemorySummary, PointerContract};
+pub use contracts::{
+    AddressCapture, CallContract, CaptureComponents, CaptureContract, IntegerRange, MemoryAccess,
+    MemorySummary, PointerContract, ProvenanceCapture,
+};
 pub use data::{DataInit, DataItem, DataObject, MAX_DATA_ALIGN};
 pub use data_layout::DataLayout;
 pub use debug::{

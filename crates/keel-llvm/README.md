@@ -238,11 +238,26 @@ cannot create an unsupported no-access promise.
 
 Pointer alignment and non-null facts require `noundef` or a supported positive
 `dereferenceable` extent establishing definedness. Readable extents are bounded
-to i64. Only complete no-capture promises are retained. A poisonable `nonnull`
+to i64. Address/nullness and read/write provenance capture permissions are
+retained separately for returned copies and other escapes. A poisonable `nonnull`
 argument alone supplies no concrete pointer fact. Export emits `noundef` for
 concrete pointer facts, keeps capture independent and uses
 `dereferenceable_or_null` when a native Keel readable extent lacks a separate
 non-null promise.
+
+With definedness established, `dereferenceable_or_null` also has its own
+conditional extent field. It implies neither a non-null address nor unconditional
+readability. Allocation-like return `noalias` survives at declaration, definition
+and call scopes independently of parameter restrict facts. It supplies no size,
+non-null or writable-byte promise.
+
+Integer range attributes paired with noundef at the same boundary survive for
+i8/i16/i32/i64 parameters and results, including direct and indirect call sites.
+Ranges without that definedness guarantee are omitted. Multiple simultaneous
+ranges are retained as a conjunction in Keel; LLVM export diagnoses those it
+cannot express with a single range attribute. No new optimizer consumes these
+facts. Instruction metadata, assume/guard facts, access alias scopes and TBAA
+remain deferred.
 
 LLVM parameter `noalias` maps to definition-only `restrict_params` for normal
 pointer parameters; declarations, calls, returns and aggregate ABI positions do
@@ -253,7 +268,7 @@ Recognized direct fixed-slot lifetime markers survive as pinned `lifetime_start`
 and `lifetime_end` intrinsics. Export uses LLVM 21's size-plus-pointer form with
 size -1; LLVM 23 upgrades it to its one-pointer form. They emit no native
 instructions and remain barriers to memory facts. Derived/dynamic markers stay
-unsupported. These changes retain no overflow, poison, range or inbounds facts.
+unsupported. These changes retain no overflow, poison or inbounds facts.
 
 The Rust importer accepts supported scalar `undef` and `poison` operands by
 choosing zero (positive zero for floating point, null for pointers). Scalar

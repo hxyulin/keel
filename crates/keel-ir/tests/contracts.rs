@@ -12,6 +12,69 @@ fn parsed(source: &str) -> keel_ir::Module {
 const SOURCE: &str = "decl @callee(ptr) -> ptr contract(memory(argmem: read, other: none, inaccessible: readwrite), nofree, param(0, align 8, nonnull, readable 16, nocapture))\nfunc @f(ptr) -> ptr contract(nosync, param(0, align 4)) {\nblock0(v0: ptr):\n v1 = call @callee(v0) contract(memory(argmem: readwrite, other: none, inaccessible: none), nosync, nocallback, result(0, align 16, nonnull))\n return v1\n}\n";
 
 #[test]
+fn richer_pointer_and_integer_contracts_roundtrip_at_their_scopes() {
+    let module = parsed(
+        "decl @callee(ptr, i32) -> ptr contract(param(0, captures(other(address_is_null), ret(address, read_provenance)), readable_or_null 32), range_param(1, 0xfffffff8, 0x8), result(0, noalias))\nfunc @f(ptr, i32) -> ptr {\nblock0(v0: ptr, v1: i32):\n v2 = call @callee(v0, v1) contract(param(0, nocapture), range_param(1, 0x0, 0x4))\n return v2\n}\n",
+    );
+    let output = module.to_string();
+    assert_eq!(parsed(&output).to_string(), output);
+    let mut function = module.functions[0].clone();
+    let call = function.layout_insts().next().unwrap().1;
+    let effective = function.effective_call_contract(call).unwrap();
+    assert_eq!(
+        effective.parameters[0].1.capture,
+        keel_ir::CaptureContract::NONE
+    );
+    assert_eq!(effective.parameters[0].1.readable_or_null_bytes, 32);
+    assert!(effective.returns[0].1.return_noalias);
+    assert_eq!(
+        effective.parameter_ranges.len(),
+        2,
+        "both simultaneous range constraints remain"
+    );
+    let cloned = function.clone();
+    assert_eq!(cloned.call_contract(call), function.call_contract(call));
+    let data = function.inst_data(call).clone();
+    *function.inst_data_mut(call) = data;
+    assert!(
+        function.call_contract(call).is_none(),
+        "mutation invalidates every site fact"
+    );
+    let mut removable = parsed(
+        "func @drop(i32, i32) contract(range_param(1, 0, 8)) {\nblock0(v0: i32, v1: i32):\n return\n}\n",
+    );
+    let function = &mut removable.functions[0];
+    function.remove_block_param(function.entry_block().unwrap(), 1);
+    function.sig.params.pop();
+    assert!(function.attrs.contract.parameter_ranges.is_empty());
+    keel_ir::verify_module(&removable).unwrap();
+}
+
+#[test]
+fn richer_contracts_reject_wrong_types_scopes_and_malformed_components() {
+    for contract in [
+        "param(0, noalias)",
+        "result(0, captures(other(none), ret(address)))",
+        "param(0, nocapture, captures(other(none), ret(none)))",
+        "param(0, captures(other(none, address), ret(none)))",
+        "param(0, captures(other(address, address_is_null), ret(none)))",
+        "range_param(0, 0, 8)",
+        "range_result(0, 0, 8)",
+        "range_param(1, 8, 8)",
+        "range_param(1, 0, 0x100000000)",
+        "range_param(2, 0, 8)",
+        "param(0, readable_or_null -1)",
+    ] {
+        let source = format!("decl @f(ptr, i32) -> ptr contract({contract})\n");
+        let invalid = match keel_ir::parse(&source) {
+            Err(_) => true,
+            Ok(module) => keel_ir::verify_module(&module).is_err(),
+        };
+        assert!(invalid, "{source}");
+    }
+}
+
+#[test]
 fn separate_definition_declaration_and_call_scopes_roundtrip() {
     let module = parsed(SOURCE);
     let function = &module.functions[0];

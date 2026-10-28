@@ -126,6 +126,7 @@ fn plan(f: &Function) -> Option<Plan> {
         // Splitting a byval parameter changes later argument positions. Until
         // this pass remaps scoped pointer facts, leave those definitions alone.
         || !f.attrs.contract.parameters.is_empty()
+        || !f.attrs.contract.parameter_ranges.is_empty()
     {
         return None;
     }
@@ -306,10 +307,11 @@ pub fn run(m: &mut Module) -> usize {
     // before mutating anything. Unknown/mismatched callers block a definition.
     for f in &m.functions {
         for (_, d) in f.callees() {
-            if plans
-                .get(&d.name)
-                .is_some_and(|p| p.old != d.sig || !d.attrs.contract.parameters.is_empty())
-            {
+            if plans.get(&d.name).is_some_and(|p| {
+                p.old != d.sig
+                    || !d.attrs.contract.parameters.is_empty()
+                    || !d.attrs.contract.parameter_ranges.is_empty()
+            }) {
                 blocked.insert(d.name.clone());
             }
         }
