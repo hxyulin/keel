@@ -131,3 +131,12 @@ across 578 reported groups. Workspace all-target/all-feature checking,
 focused policy Clippy checks and documentation builds passed. Strict workspace
 Clippy remains blocked by existing keel-link/keel-ir diagnostics; documentation
 retains two existing codegen private-link warnings.
+
+## Kernel integration regression
+
+The subsequent [kernel replay](linux-kernel-policy-benchmark.md) found that the
+new cold-function schedule retains a compile-time assertion reference that the
+ordinary full pipeline removes. Current Keel O2, Os and O3 kernel replay objects
+fail linking. Workspace test success above does not establish kernel link or
+runtime readiness after this policy change. Required optimization cleanup needs
+a repair and a kernel link regression before a new runtime comparison.
