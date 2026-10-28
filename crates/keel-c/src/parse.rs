@@ -483,22 +483,98 @@ const KEYWORDS: [(&str, u8); 78] = [
     ("__asm__", RESERVED),
 ];
 
-/// Where a word's keyword search starts: its length and three of its bytes.
+// BEGIN GENERATED KEYWORD ASSOCIATIONS
+// Regenerate with: python3 tools/gen_c_keywords.py
+const MIN_KEYWORD_LEN: usize = 2;
+const MAX_KEYWORD_LEN: usize = 17;
+#[rustfmt::skip]
+const ASSO0: [u8; 256] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 233,
+    0, 73, 196, 30, 115, 4, 207, 24, 0, 64, 0, 0, 75, 0, 0, 0,
+    0, 0, 237, 82, 100, 58, 2, 15, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
+#[rustfmt::skip]
+const ASSO1: [u8; 256] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 231, 0, 6, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 158,
+    0, 0, 0, 79, 80, 236, 137, 217, 172, 0, 0, 118, 254, 41, 71, 76,
+    0, 0, 236, 160, 165, 0, 0, 0, 155, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
+#[rustfmt::skip]
+const ASSO2: [u8; 256] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 126, 47, 0, 154, 0, 0, 0, 200, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 253, 52, 213, 103, 144, 94, 0, 250, 136, 0, 0, 102, 79, 188, 201,
+    0, 0, 165, 0, 126, 10, 0, 0, 0, 216, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
+// END GENERATED KEYWORD ASSOCIATIONS
+
+/// A collision-free slot for known keywords. Other words still need comparison.
 const fn keyword_slot(word: &[u8]) -> usize {
     let n = word.len();
-    (n * 61 + word[0] as usize * 7 + word[n - 1] as usize * 13 + word[n / 2] as usize * 3) & 255
+    (n + ASSO0[word[0] as usize] as usize
+        + ASSO1[word[n - 1] as usize] as usize
+        + ASSO2[word[n.saturating_sub(3)] as usize] as usize)
+        & 255
 }
 
-/// `KEYWORDS` by open addressing: an index plus one, 0 for none.
+/// A keyword index plus one, or zero for an empty slot.
 const KEYWORD_SLOTS: [u8; 256] = {
+    assert!(
+        KEYWORDS.len() <= u8::MAX as usize,
+        "too many keyword indices"
+    );
     let mut slots = [0u8; 256];
     let mut k = 0;
     while k < KEYWORDS.len() {
-        let mut i = keyword_slot(KEYWORDS[k].0.as_bytes());
-        while slots[i] != 0 {
-            i = (i + 1) & 255;
-        }
-        slots[i] = k as u8 + 1;
+        let word = KEYWORDS[k].0.as_bytes();
+        assert!(
+            word.len() >= MIN_KEYWORD_LEN && word.len() <= MAX_KEYWORD_LEN,
+            "keyword length changed; regenerate keyword associations"
+        );
+        let slot = keyword_slot(word);
+        assert!(
+            slots[slot] == 0,
+            "keyword collision; regenerate keyword associations"
+        );
+        slots[slot] = k as u8 + 1;
         k += 1;
     }
     slots
@@ -507,20 +583,15 @@ const KEYWORD_SLOTS: [u8; 256] = {
 /// What `s` is as a keyword: `TYPE_WORD` and `RESERVED` bits.
 #[inline]
 fn keyword_class(s: &str) -> u8 {
-    if s.is_empty() {
+    if !(MIN_KEYWORD_LEN..=MAX_KEYWORD_LEN).contains(&s.len()) {
         return 0;
     }
-    let mut i = keyword_slot(s.as_bytes());
-    loop {
-        let (word, class) = match KEYWORD_SLOTS[i] {
-            0 => return 0,
-            k => KEYWORDS[k as usize - 1],
-        };
-        if word == s {
-            return class;
-        }
-        i = (i + 1) & 255;
+    let k = KEYWORD_SLOTS[keyword_slot(s.as_bytes())];
+    if k == 0 {
+        return 0;
     }
+    let (word, class) = KEYWORDS[k as usize - 1];
+    if word == s { class } else { 0 }
 }
 
 fn is_type_keyword(s: &str) -> bool {
@@ -4762,6 +4833,41 @@ pub(crate) fn is_keyword(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keyword_dispatch_rejects_collisions_and_near_misses() {
+        let check = |candidate: &str| {
+            let expected = KEYWORDS
+                .iter()
+                .find(|(word, _)| *word == candidate)
+                .map_or(0, |(_, class)| *class);
+            assert_eq!(keyword_class(candidate), expected, "{candidate:?}");
+        };
+        for (word, _) in KEYWORDS {
+            check(word);
+            for index in 0..word.len() {
+                for byte in 0..=127 {
+                    let mut candidate = word.as_bytes().to_vec();
+                    candidate[index] = byte;
+                    check(std::str::from_utf8(&candidate).unwrap());
+                }
+                check(&format!("{}{}", &word[..index], &word[index + 1..]));
+            }
+            check(&format!("{word}_"));
+            check(&format!("_{word}"));
+        }
+        for first in 0..=127 {
+            for last in 0..=127 {
+                check(std::str::from_utf8(&[first, last]).unwrap());
+            }
+        }
+        for length in 0..=128 {
+            check(&"x".repeat(length));
+        }
+        for candidate in ["é", "变量", "ｉｆ", "🦀", "inté", "éint"] {
+            check(candidate);
+        }
+    }
 
     #[test]
     fn keyword_dispatch_preserves_membership_and_identifier_exceptions() {
