@@ -774,6 +774,8 @@ impl<'p> Gen<'p> {
         }
         if self.p.target == keel_ir::Target::Aarch64LinuxGnu {
             self.types().aapcs_layout(ty)
+        } else if self.p.target == keel_ir::Target::X86_64LinuxGnu {
+            self.types().sysv_layout(ty)
         } else {
             self.types().abi_layout(ty)
         }

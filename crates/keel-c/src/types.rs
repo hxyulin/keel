@@ -819,6 +819,97 @@ impl<'a> Types<'a> {
         Ok(Layout::Array(Box::new(Layout::Scalar(unit)), n))
     }
 
+    /// The layout the SysV x86-64 convention classifies a struct by. The
+    /// backend classes each eightbyte by the leaves in it, so a register
+    /// struct becomes one leaf group per eightbyte: `f64`/`f32` units where
+    /// the C object holds only floats (SSE), integers otherwise. This keeps
+    /// unions and bit-fields, which a natural IR layout cannot express.
+    /// Integer-only structs, HFAs and MEMORY structs keep [`Self::abi_layout`].
+    pub fn sysv_layout(&self, ty: &Ty) -> Result<Layout, &'static str> {
+        let layout = self.abi_layout(ty)?;
+        let (size, align) = (self.size(ty), self.align(ty));
+        if size > 16 || self.hfa(ty).is_some_and(|(_, n)| n <= 4) {
+            return Ok(layout);
+        }
+        // Per eightbyte: whether any byte holds data, and whether any holds
+        // an integer.
+        let mut classes = [(false, false); 2];
+        self.sysv_mark(ty, 0, &mut classes);
+        let n = size.div_ceil(8) as usize;
+        if classes[..n].iter().all(|&(used, int)| used && int) {
+            return Ok(layout);
+        }
+        let unit = align.min(8);
+        let mut fields = Vec::new();
+        if align == 16 {
+            // Keep the alignment without adding a leaf.
+            fields.push(Layout::Array(Box::new(Layout::Scalar(Type::I128)), 0));
+        }
+        for (i, &(used, int)) in classes[..n].iter().enumerate() {
+            let bytes = (size - 8 * i as u64).min(8);
+            let scalar = match (used, int, unit) {
+                // Only trailing padding: alignment and size supply it.
+                (false, _, _) if i + 1 == n => continue,
+                (false, ..) => return Err("SysV aggregate with an empty leading eightbyte"),
+                (_, true, 1) => Type::I8,
+                (_, true, 2) => Type::I16,
+                (_, true, 4) => Type::I32,
+                (_, true, _) => Type::I64,
+                (_, false, 4) => Type::F32,
+                (_, false, 8) => Type::F64,
+                _ => return Err("SysV aggregate with floats under 4-byte alignment"),
+            };
+            let count = (bytes / unit) as u32;
+            fields.push(if count == 1 {
+                Layout::Scalar(scalar)
+            } else {
+                Layout::Array(Box::new(Layout::Scalar(scalar)), count)
+            });
+        }
+        let layout = Layout::Struct(fields);
+        if layout.size() != size || layout.align() != align {
+            return Err("SysV aggregate layout does not match its C layout");
+        }
+        Ok(layout)
+    }
+
+    /// Marks the eightbytes `ty` at `base` occupies, and those holding an
+    /// integer, following union members and bit-fields.
+    fn sysv_mark(&self, ty: &Ty, base: u64, classes: &mut [(bool, bool); 2]) {
+        fn mark(classes: &mut [(bool, bool); 2], start: u64, end: u64, int: bool) {
+            for eightbyte in &mut classes[(start / 8) as usize..end.div_ceil(8) as usize] {
+                eightbyte.0 = true;
+                eightbyte.1 |= int;
+            }
+        }
+        match ty {
+            Ty::Struct(id) => {
+                for m in &self.structs[*id].members {
+                    let at = base + m.offset;
+                    match m.bits {
+                        Some(b) if b.width == 0 => {}
+                        Some(b) => mark(
+                            classes,
+                            at + u64::from(b.shift / 8),
+                            at + u64::from((b.shift + b.width).div_ceil(8)),
+                            true,
+                        ),
+                        None => self.sysv_mark(&m.ty, at, classes),
+                    }
+                }
+            }
+            Ty::Array(a) => {
+                let stride = self.size(&a.elem);
+                for i in 0..a.len.filter(|_| stride > 0).unwrap_or(0) {
+                    self.sysv_mark(&a.elem, base + i * stride, classes);
+                }
+            }
+            Ty::Atomic(t) => self.sysv_mark(t, base, classes),
+            Ty::Float | Ty::Double => mark(classes, base, base + self.size(ty), false),
+            _ => mark(classes, base, base + self.size(ty), true),
+        }
+    }
+
     /// SysV classifies aggregates with unaligned scalar fields as MEMORY.
     /// The current IR layouts cannot express those explicit field offsets.
     pub fn has_unaligned_fields(&self, ty: &Ty, base: u64) -> bool {
