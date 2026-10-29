@@ -1,5 +1,6 @@
-//! Experimental spill density: weighted operand traffic per live program point.
-//! Uses the existing Full scan and introduces no allocation transfers.
+//! Full's spill priority: operand traffic per live program point, with each
+//! use and definition weighted by its block's loop depth (x8 per loop, capped
+//! at 4096). The scan keeps the denser of two values in a register.
 use super::*;
 use keel_ir::dominators::DominatorTree;
 
@@ -58,50 +59,36 @@ fn block_weights(func: &Function, cfg: &ControlFlowGraph, order: &[Block]) -> Ve
     weights
 }
 
-pub(super) fn allocate(input: &AllocationInput<'_>) -> Allocation {
-    profiling::scope!("weighted-register-allocation");
-    backend_scope!(Allocation);
-    let func = input.func;
-    let cfg = ControlFlowGraph::compute(func);
-    let order = cfg.reverse_postorder(func);
-    let intervals = build_intervals(
-        func,
-        &cfg,
-        &order,
-        input.is_call,
-        input.returns_twice,
-        input.selection,
-    );
+pub(super) fn linear_scan<'a>(
+    func: &Function,
+    selection: &crate::select::Selection,
+    cfg: &ControlFlowGraph,
+    order: &[Block],
+    intervals: &'a [Interval],
+    pools: &Pools,
+    locs: &mut [Vec<Option<Loc>>; 2],
+) -> Vec<&'a Interval> {
     // Most functions never exhaust their pools. Build loop weights and operand
     // costs only when the scan must choose between spilling two values.
     let costs = std::cell::OnceCell::new();
-    let mut locs = [vec![None; func.num_values()], vec![None; func.num_values()]];
-    let mut spilled = linear_scan_with_priority(
-        &intervals,
-        input.pools,
-        &mut locs,
-        &input.selection.hints,
-        |a, b| {
-            let (costs, lengths) =
-                costs.get_or_init(|| spill_costs(input, &cfg, &order, &intervals));
-            // Products can exceed u64 for very large functions. Keep comparisons
-            // exact and deterministic without floating point or truncating ratios.
-            let score_a = u128::from(costs[a.value.index()]) * u128::from(lengths[b.value.index()]);
-            let score_b = u128::from(costs[b.value.index()]) * u128::from(lengths[a.value.index()]);
-            score_a.cmp(&score_b).then_with(|| b.end().cmp(&a.end()))
-        },
-    );
-    let slots = assign_spill_slots(&mut spilled, &mut locs);
-    baseline_allocation(order, locs, slots, input.pools)
+    linear_scan_with_priority(intervals, pools, locs, &selection.hints, |a, b| {
+        let (costs, lengths) =
+            costs.get_or_init(|| spill_costs(func, selection, cfg, order, intervals));
+        // Products can exceed u64 for very large functions. Keep comparisons
+        // exact and deterministic without floating point or truncating ratios.
+        let score_a = u128::from(costs[a.value.index()]) * u128::from(lengths[b.value.index()]);
+        let score_b = u128::from(costs[b.value.index()]) * u128::from(lengths[a.value.index()]);
+        score_a.cmp(&score_b).then_with(|| b.end().cmp(&a.end()))
+    })
 }
 
-fn spill_costs(
-    input: &AllocationInput<'_>,
+pub(super) fn spill_costs(
+    func: &Function,
+    selection: &crate::select::Selection,
     cfg: &ControlFlowGraph,
     order: &[Block],
     intervals: &[Interval],
 ) -> (Vec<u64>, Vec<u64>) {
-    let func = input.func;
     let weights = block_weights(func, cfg, order);
     let mut costs = vec![0u64; func.num_values()];
     for &block in order {
@@ -110,12 +97,10 @@ fn spill_costs(
             costs[param.index()] += weight;
         }
         for &inst in func.block_insts(block) {
-            if input.selection.covered(inst) {
+            if selection.covered(inst) {
                 continue;
             }
-            input
-                .selection
-                .for_each_operand(func, inst, |v| costs[v.index()] += weight);
+            selection.for_each_operand(func, inst, |v| costs[v.index()] += weight);
             for &v in func.inst_results(inst) {
                 costs[v.index()] += weight;
             }

@@ -5,8 +5,8 @@ substitutes an immutable zero pointer recipe for eligible existing scalar spill
 homes after the ordinary allocator runs. The library switch is
 `RematerializingAllocator::null_pointers`. Set constants, stack_addresses and
 prefer_spilling to false. Combining any of those switches with null_pointers,
-or using Local/Split/Weighted through the wrapper, returns the original base
-allocation. The CLI rejects those three allocator tiers for null mode.
+or using Local/Split through the wrapper, returns the original base
+allocation. The CLI rejects those two allocator tiers for null mode.
 
 This accepts only a live canonical result0 of `inttoptr.ptr` whose input is a
 live result0 of `iconst.i64 0`, with at most eight input aliases, all typed I64.

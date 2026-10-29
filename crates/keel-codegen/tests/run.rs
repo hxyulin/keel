@@ -427,11 +427,7 @@ focused_programs! {
             &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/compact_frame.keel"),
         );
         #[cfg(feature = "experimental-regalloc")]
-        for allocation in [
-            AllocationTier::Local,
-            AllocationTier::Split,
-            AllocationTier::Weighted,
-        ] {
+        for allocation in [AllocationTier::Local, AllocationTier::Split] {
             run_program(
                 &program,
                 &TINY,
@@ -554,11 +550,7 @@ fn debug_info() {
     #[cfg(feature = "experimental-regalloc")]
     let tiers = {
         let mut tiers = tiers;
-        tiers.extend([
-            AllocationTier::Local,
-            AllocationTier::Split,
-            AllocationTier::Weighted,
-        ]);
+        tiers.extend([AllocationTier::Local, AllocationTier::Split]);
         tiers
     };
     let mut checked = HashSet::new();
@@ -1016,11 +1008,6 @@ fn local_allocator_programs() {
 #[cfg(feature = "experimental-regalloc")]
 fn split_allocator_programs() {
     experimental_allocator_programs(&AllocationTier::Split, "split");
-}
-#[test]
-#[cfg(feature = "experimental-regalloc")]
-fn weighted_allocator_programs() {
-    experimental_allocator_programs(&AllocationTier::Weighted, "weighted");
 }
 #[test]
 #[cfg(feature = "experimental-regalloc")]

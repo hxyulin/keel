@@ -176,7 +176,6 @@ fn selected_corpus_transfers_preserve_values_across_calls_and_edges() {
                     tiers.extend([
                         AllocationTier::Local,
                         AllocationTier::Split,
-                        AllocationTier::Weighted,
                         AllocationTier::FullAffinity,
                     ]);
                     tiers

@@ -66,6 +66,7 @@ fn reference_linear_scan(
     locs: &mut [Vec<Option<Loc>>; 2],
     hints: &crate::select::Hints,
     affinity_func: Option<&Function>,
+    priority: &dyn Fn(&Interval, &Interval) -> std::cmp::Ordering,
 ) -> Vec<Interval> {
     let mut sorted: Vec<&Interval> = intervals.iter().collect();
     sorted.sort_by_key(|iv| (iv.start(), iv.value, iv.half));
@@ -198,17 +199,17 @@ fn reference_linear_scan(
         }
 
         // Out of registers. Of the active intervals whose register `cur`
-        // could use (once they are evicted), find the one that ends last.
-        // If it outlives `cur`, take its register and spill it; otherwise
-        // spill `cur`.
+        // could use (once they are evicted), find the one with the lowest
+        // priority. If `cur` ranks above it, take its register and spill it;
+        // otherwise spill `cur`.
         let victim = active
             .iter()
             .enumerate()
             .filter(|(_, (_, reg))| allowed.contains(reg) && !blocked_by_inactive(*reg))
-            .max_by_key(|(_, (iv, _))| iv.end())
+            .max_by(|(_, (a, _)), (_, (b, _))| priority(b, a))
             .map(|(i, _)| i);
         match victim {
-            Some(i) if active[i].0.end() > cur.end() => {
+            Some(i) if priority(cur, active[i].0).is_gt() => {
                 let (evicted, reg) = active.swap_remove(i);
                 locs[evicted.half][evicted.value.index()] = None;
                 spilled.push(evicted.clone());
@@ -284,6 +285,16 @@ fn assert_reference_equivalence(
     };
     let returns_twice = |d: &InstData| twice && is_call(d);
     let full = build_intervals(func, &cfg, &order, &is_call, &returns_twice, selection);
+    // Full keeps the denser value: loop-weighted uses per live point, the
+    // later end losing ties. The cost inputs come from `weighted`, whose
+    // loop weights have their own test; the other tiers keep the earlier end.
+    let (costs, lengths) = weighted::spill_costs(func, selection, &cfg, &order, &full);
+    let density = |a: &Interval, b: &Interval| {
+        (u128::from(costs[a.value.index()]) * u128::from(lengths[b.value.index()]))
+            .cmp(&(u128::from(costs[b.value.index()]) * u128::from(lengths[a.value.index()])))
+            .then_with(|| b.end().cmp(&a.end()))
+    };
+    let endpoint = |a: &Interval, b: &Interval| b.end().cmp(&a.end());
     let fast = build_fast_intervals(func, &cfg, &order, &is_call, &returns_twice, selection);
     let mut collapsed = full.clone();
     for iv in &mut collapsed {
@@ -355,6 +366,11 @@ fn assert_reference_equivalence(
                             .any(|&i| returns_twice(func.inst_data(i)))
                     }))
                 .then_some(func),
+                if tier == AllocationTier::Full {
+                    &density
+                } else {
+                    &endpoint
+                },
             );
             let expected_slots = reference_assign_spill_slots(&mut reference_spills, &mut expected);
             let actual = allocate_tier(func, &pools, is_call, returns_twice, selection, tier);

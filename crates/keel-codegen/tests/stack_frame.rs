@@ -16,8 +16,6 @@ fn sparse_escaping_slots_assemble_on_both_targets() {
             AllocationTier::Local,
             #[cfg(feature = "experimental-regalloc")]
             AllocationTier::Split,
-            #[cfg(feature = "experimental-regalloc")]
-            AllocationTier::Weighted,
         ] {
             for selector in [SelectionTier::Baseline, SelectionTier::Full] {
                 let asm = keel_codegen::compile_with_pipeline(
@@ -77,8 +75,6 @@ fn unused_slots_do_not_consume_frames_or_frame_limits() {
         AllocationTier::Local,
         #[cfg(feature = "experimental-regalloc")]
         AllocationTier::Split,
-        #[cfg(feature = "experimental-regalloc")]
-        AllocationTier::Weighted,
     ];
     for target in Target::NATIVE {
         for allocator in tiers {

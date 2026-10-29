@@ -279,11 +279,7 @@ fn native_wrapped_values_with_controlled_and_real_allocators() {
     #[allow(unused_mut)]
     let mut tiers = vec![AllocationTier::Fast, AllocationTier::Full];
     #[cfg(feature = "experimental-regalloc")]
-    tiers.extend([
-        AllocationTier::Local,
-        AllocationTier::Split,
-        AllocationTier::Weighted,
-    ]);
+    tiers.extend([AllocationTier::Local, AllocationTier::Split]);
     let mut allocators: Vec<&dyn RegisterAllocator> = vec![&Controlled];
     allocators.extend(tiers.iter().map(|a| a as &dyn RegisterAllocator));
     let mut runs = 0;

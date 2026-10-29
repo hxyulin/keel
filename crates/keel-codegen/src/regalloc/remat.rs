@@ -444,7 +444,6 @@ block0(v0: ptr):
             AllocationTier::Full,
             AllocationTier::Local,
             AllocationTier::Split,
-            AllocationTier::Weighted,
         ] {
             for pools in [&EMPTY, &crate::x86_64::REGISTERS] {
                 let input = AllocationInput {

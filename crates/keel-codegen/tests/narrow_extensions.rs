@@ -5,11 +5,7 @@ fn allocators() -> Vec<AllocationTier> {
     #[allow(unused_mut)]
     let mut tiers = vec![AllocationTier::Fast, AllocationTier::Full];
     #[cfg(feature = "experimental-regalloc")]
-    tiers.extend([
-        AllocationTier::Local,
-        AllocationTier::Split,
-        AllocationTier::Weighted,
-    ]);
+    tiers.extend([AllocationTier::Local, AllocationTier::Split]);
     tiers
 }
 

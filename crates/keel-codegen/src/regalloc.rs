@@ -30,9 +30,12 @@
 //!    ones (live at the current point, holding a register) and the
 //!    *inactive* ones (holding a register, but in a hole). An inactive
 //!    interval's register is free for a new interval that fits in the hole,
-//!    that is, that does not intersect it. When no register is free, spill
-//!    whichever interval ends furthest away: it would hold its register the
-//!    longest, so evicting it helps the most intervals that come after.
+//!    that is, that does not intersect it. When no register is free, Fast
+//!    spills whichever interval ends furthest away: it would hold its
+//!    register the longest, so evicting it helps the most intervals that
+//!    come after. Full spills the interval with the fewest loop-weighted uses
+//!    per live program point, so a value used in a loop keeps its register
+//!    over one that is only live across it; ties go to the furthest end.
 //!    This is the scan of Wimmer & Franz, "Linear Scan Register Allocation
 //!    on SSA Form" (CGO 2010), without its interval splitting.
 //!
@@ -93,7 +96,6 @@ pub use remat::RematerializingAllocator;
 pub(crate) use remat::{RematRecipe, remat_recipe};
 #[cfg(feature = "experimental-regalloc")]
 mod split;
-#[cfg(feature = "experimental-regalloc")]
 mod weighted;
 pub use program::*;
 
@@ -185,9 +187,6 @@ pub enum AllocationTier {
     /// Experimental splitting of spilled ranges into available registers.
     #[cfg(feature = "experimental-regalloc")]
     Split,
-    /// Experimental loop-weighted spill density over Full intervals.
-    #[cfg(feature = "experimental-regalloc")]
-    Weighted,
     /// Experimental Full intervals with unanimous incoming scalar GPR preferences.
     #[cfg(feature = "experimental-regalloc")]
     FullAffinity,
@@ -203,17 +202,11 @@ impl RegisterAllocator for AllocationTier {
             #[cfg(feature = "experimental-regalloc")]
             Self::Split => "split",
             #[cfg(feature = "experimental-regalloc")]
-            Self::Weighted => "weighted",
-            #[cfg(feature = "experimental-regalloc")]
             Self::FullAffinity => "full-affinity",
             Self::Full => "full",
         }
     }
     fn allocate(&self, input: &AllocationInput<'_>) -> Allocation {
-        #[cfg(feature = "experimental-regalloc")]
-        if *self == Self::Weighted {
-            return weighted::allocate(input);
-        }
         #[cfg(feature = "experimental-regalloc")]
         if *self == Self::Split {
             return split::allocate(input);
@@ -296,7 +289,7 @@ fn allocate_tier_inner(
     let mut locs = [vec![None; func.num_values()], vec![None; func.num_values()]];
     let spill_slots = match tier {
         #[cfg(feature = "experimental-regalloc")]
-        AllocationTier::Local | AllocationTier::Split | AllocationTier::Weighted => {
+        AllocationTier::Local | AllocationTier::Split => {
             unreachable!("experimental allocators have their own entry points")
         }
         AllocationTier::Fast => {
@@ -308,7 +301,8 @@ fn allocate_tier_inner(
         AllocationTier::Full => {
             let intervals =
                 build_intervals(func, &cfg, &order, &is_call, &returns_twice, selection);
-            let mut spilled = linear_scan(&intervals, pools, &mut locs, &selection.hints);
+            let mut spilled =
+                weighted::linear_scan(func, selection, &cfg, &order, &intervals, pools, &mut locs);
             assign_spill_slots(&mut spilled, &mut locs)
         }
         #[cfg(feature = "experimental-regalloc")]
@@ -1521,8 +1515,10 @@ impl IncomingAffinities {
     }
 }
 
-/// Gives each interval a register from `pools` or spills it. Fills in the
-/// register locations and returns the spilled intervals.
+/// Gives each interval a register from `pools` or spills it, evicting the
+/// latest endpoint. Fills in the register locations and returns the spilled
+/// intervals.
+#[cfg(feature = "experimental-regalloc")]
 fn linear_scan<'a>(
     intervals: &'a [Interval],
     pools: &Pools,
@@ -1532,8 +1528,8 @@ fn linear_scan<'a>(
     linear_scan_with_priority(intervals, pools, locs, hints, |a, b| b.end().cmp(&a.end()))
 }
 
-/// A higher priority keeps a value in a register. The default policy prefers
-/// the earliest endpoint; experimental policies can compare spill costs.
+/// A higher priority keeps a value in a register. Full compares spill costs
+/// (see `weighted`); the other scans prefer the earliest endpoint.
 fn linear_scan_with_priority<'a>(
     intervals: &'a [Interval],
     pools: &Pools,
@@ -1765,7 +1761,6 @@ fn linear_scan_with_preference<'a>(
 
         // Out of registers. Choose the lowest-priority eligible active
         // interval. Replace it only if keeping `cur` is more valuable.
-        // The default policy evicts the interval whose endpoint is latest.
         let victim = active
             .iter()
             .enumerate()
