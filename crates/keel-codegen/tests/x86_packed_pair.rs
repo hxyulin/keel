@@ -106,9 +106,21 @@ fn compile(
     p: &Pools,
     f: Features,
 ) -> Result<(Vec<u8>, String), keel_codegen::CodegenError> {
+    compile_module(&optimized(src), s, a, p, f)
+}
+fn optimized(src: &str) -> keel_ir::Module {
     let mut m = keel_ir::parse(src).unwrap();
     keel_ir::verify_module(&m).unwrap();
     keel_opt::optimize(&mut m).unwrap();
+    m
+}
+fn compile_module(
+    m: &keel_ir::Module,
+    s: SelectionTier,
+    a: AllocationTier,
+    p: &Pools,
+    f: Features,
+) -> Result<(Vec<u8>, String), keel_codegen::CodegenError> {
     let selector = FeatureSelector {
         inner: &s,
         features: f,
@@ -117,8 +129,8 @@ fn compile(
         selector: &selector,
         allocator: &a,
     };
-    let text = keel_codegen::x86_64::compile_with_pipeline(&m, p, &pipeline)?;
-    let program = keel_codegen::x86_64::compile_program_with_pipeline(&m, p, &pipeline)?;
+    let text = keel_codegen::x86_64::compile_with_pipeline(m, p, &pipeline)?;
+    let program = keel_codegen::x86_64::compile_program_with_pipeline(m, p, &pipeline)?;
     let obj = keel_asm::x86::assemble_program_object_with_features(&program, f).unwrap();
     assert_eq!(
         obj,
@@ -232,7 +244,7 @@ fn packed_pair_features_types_and_encodings() {
             .arg(d.join("test.c")),
     );
     for (label, f, indices) in feature_sets() {
-        let src = source(&indices);
+        let m = optimized(&source(&indices));
         for s in [
             SelectionTier::Baseline,
             SelectionTier::Trees,
@@ -240,7 +252,7 @@ fn packed_pair_features_types_and_encodings() {
         ] {
             for a in [AllocationTier::Fast, AllocationTier::Full] {
                 for (spill, p) in [(false, &keel_codegen::x86_64::REGISTERS), (true, &EMPTY)] {
-                    let (o, t) = compile(&src, s, a, p, f).unwrap();
+                    let (o, t) = compile_module(&m, s, a, p, f).unwrap();
                     fs::write(d.join(format!("{label}-{s:?}-{a:?}-{spill}.o")), o).unwrap();
                     fs::write(d.join(format!("{label}-{s:?}-{a:?}-{spill}.s")), t).unwrap();
                 }
@@ -302,7 +314,7 @@ fn native_packed_pair_integer_reference_and_guards() {
     fs::create_dir_all(&d).unwrap();
     let mut runs = 0;
     for (label, f, indices) in feature_sets() {
-        let src = source(&indices);
+        let m = optimized(&source(&indices));
         fs::write(d.join("test.c"), harness(&indices)).unwrap();
         for s in [
             SelectionTier::Baseline,
@@ -311,7 +323,7 @@ fn native_packed_pair_integer_reference_and_guards() {
         ] {
             for a in [AllocationTier::Fast, AllocationTier::Full] {
                 for p in [&keel_codegen::x86_64::REGISTERS, &EMPTY] {
-                    let (o, _) = compile(&src, s, a, p, f).unwrap();
+                    let (o, _) = compile_module(&m, s, a, p, f).unwrap();
                     fs::write(d.join("test.o"), o).unwrap();
                     common::command(
                         Command::new("clang")
@@ -404,12 +416,9 @@ fn controlled_pair(
     s: SelectionTier,
     a: AllocationTier,
     mode: u8,
-    src: &str,
+    m: &keel_ir::Module,
     f: Features,
 ) -> (Vec<u8>, String) {
-    let mut m = keel_ir::parse(src).unwrap();
-    keel_ir::verify_module(&m).unwrap();
-    keel_opt::optimize(&mut m).unwrap();
     let selector = FeatureSelector {
         inner: &s,
         features: f,
@@ -419,14 +428,11 @@ fn controlled_pair(
         selector: &selector,
         allocator: &allocator,
     };
-    let text = keel_codegen::x86_64::compile_with_pipeline(
-        &m,
-        &keel_codegen::x86_64::REGISTERS,
-        &pipeline,
-    )
-    .unwrap();
+    let text =
+        keel_codegen::x86_64::compile_with_pipeline(m, &keel_codegen::x86_64::REGISTERS, &pipeline)
+            .unwrap();
     let program = keel_codegen::x86_64::compile_program_with_pipeline(
-        &m,
+        m,
         &keel_codegen::x86_64::REGISTERS,
         &pipeline,
     )
@@ -457,6 +463,7 @@ fn packed_pair_controlled_destination_and_mixed_spill_exports() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("test.c"), dying_harness(&all)).unwrap();
     fs::write(dir.join("test.ir"), &src).unwrap();
+    let m = optimized(&src);
     common::command(
         Command::new("clang")
             .args(["-target", "x86_64-unknown-linux-gnu", "-fsyntax-only"])
@@ -469,7 +476,7 @@ fn packed_pair_controlled_destination_and_mixed_spill_exports() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for mode in 0..6 {
-                let (o, t) = controlled_pair(s, a, mode, &src, Features::for_level(CpuLevel::V3));
+                let (o, t) = controlled_pair(s, a, mode, &m, Features::for_level(CpuLevel::V3));
                 let stem = format!("{s:?}-{a:?}-{mode}");
                 fs::write(dir.join(format!("{stem}.o")), o).unwrap();
                 fs::write(dir.join(format!("{stem}.s")), t).unwrap();
@@ -487,7 +494,7 @@ fn native_packed_pair_controlled_register_reuse_and_mixed_spills() {
     fs::create_dir_all(&dir).unwrap();
     let mut runs = 0;
     for (_, f, indices) in feature_sets() {
-        let src = dying_source(&indices);
+        let m = optimized(&dying_source(&indices));
         fs::write(dir.join("test.c"), dying_harness(&indices)).unwrap();
         for s in [
             SelectionTier::Baseline,
@@ -496,7 +503,7 @@ fn native_packed_pair_controlled_register_reuse_and_mixed_spills() {
         ] {
             for a in [AllocationTier::Fast, AllocationTier::Full] {
                 for mode in 0..6 {
-                    let (o, _) = controlled_pair(s, a, mode, &src, f);
+                    let (o, _) = controlled_pair(s, a, mode, &m, f);
                     fs::write(dir.join("test.o"), o).unwrap();
                     common::command(
                         Command::new("clang")

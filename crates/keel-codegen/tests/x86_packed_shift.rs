@@ -106,9 +106,21 @@ fn compile(
     p: &Pools,
     f: Features,
 ) -> Result<(Vec<u8>, String), keel_codegen::CodegenError> {
+    compile_module(&optimized(src), s, a, p, f)
+}
+fn optimized(src: &str) -> keel_ir::Module {
     let mut m = keel_ir::parse(src).unwrap();
     keel_ir::verify_module(&m).unwrap();
     keel_opt::optimize(&mut m).unwrap();
+    m
+}
+fn compile_module(
+    m: &keel_ir::Module,
+    s: SelectionTier,
+    a: AllocationTier,
+    p: &Pools,
+    f: Features,
+) -> Result<(Vec<u8>, String), keel_codegen::CodegenError> {
     let selector = FeatureSelector {
         inner: &s,
         features: f,
@@ -117,8 +129,8 @@ fn compile(
         selector: &selector,
         allocator: &a,
     };
-    let text = keel_codegen::x86_64::compile_with_pipeline(&m, p, &pipeline)?;
-    let program = keel_codegen::x86_64::compile_program_with_pipeline(&m, p, &pipeline)?;
+    let text = keel_codegen::x86_64::compile_with_pipeline(m, p, &pipeline)?;
+    let program = keel_codegen::x86_64::compile_program_with_pipeline(m, p, &pipeline)?;
     let o = keel_asm::x86::assemble_program_object_with_features(&program, f).unwrap();
     assert_eq!(
         o,
@@ -242,6 +254,7 @@ fn packed_shift_features_semantics_and_encodings() {
             .args(["-target", "x86_64-unknown-linux-gnu", "-fsyntax-only"])
             .arg(d.join("test.c")),
     );
+    let m = optimized(&source(&all));
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -250,7 +263,7 @@ fn packed_shift_features_semantics_and_encodings() {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for (spill, p) in [(false, &keel_codegen::x86_64::REGISTERS), (true, &EMPTY)] {
                 let (o, text) =
-                    compile(&source(&all), s, a, p, Features::for_level(CpuLevel::V3)).unwrap();
+                    compile_module(&m, s, a, p, Features::for_level(CpuLevel::V3)).unwrap();
                 fs::write(d.join(format!("{s:?}-{a:?}-{spill}.o")), o).unwrap();
                 fs::write(d.join(format!("{s:?}-{a:?}-{spill}.s")), text).unwrap();
             }
@@ -351,7 +364,7 @@ fn strict_feature_matrices_and_each_foreign_operation() {
         assert!(keel_ir::Intrinsic::from_name(name).unwrap().is_x86_target());
     }
     for (label, f, indices) in feature_sets() {
-        let src = source(&indices);
+        let m = optimized(&source(&indices));
         for s in [
             SelectionTier::Baseline,
             SelectionTier::Trees,
@@ -359,7 +372,7 @@ fn strict_feature_matrices_and_each_foreign_operation() {
         ] {
             for a in [AllocationTier::Fast, AllocationTier::Full] {
                 for p in [&keel_codegen::x86_64::REGISTERS, &EMPTY] {
-                    compile(&src, s, a, p, f).unwrap_or_else(|e| panic!("{label}:{e:?}"));
+                    compile_module(&m, s, a, p, f).unwrap_or_else(|e| panic!("{label}:{e:?}"));
                 }
             }
         }
@@ -372,7 +385,7 @@ fn native_packed_shift_counts_aliases_and_guard_pages() {
     fs::create_dir_all(&d).unwrap();
     let mut runs = 0;
     for (label, f, indices) in feature_sets() {
-        let src = source(&indices);
+        let m = optimized(&source(&indices));
         fs::write(d.join("test.c"), harness(&indices)).unwrap();
         for s in [
             SelectionTier::Baseline,
@@ -381,7 +394,7 @@ fn native_packed_shift_counts_aliases_and_guard_pages() {
         ] {
             for a in [AllocationTier::Fast, AllocationTier::Full] {
                 for p in [&keel_codegen::x86_64::REGISTERS, &EMPTY] {
-                    let (o, _) = compile(&src, s, a, p, f).unwrap();
+                    let (o, _) = compile_module(&m, s, a, p, f).unwrap();
                     fs::write(d.join("test.o"), o).unwrap();
                     common::command(
                         Command::new("clang")
