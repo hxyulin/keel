@@ -78,9 +78,9 @@ Run focused tests with GNU ld available on the host or through Nix:
 
 ```sh
 KEEL_GNU_LD=/path/to/x86_64-unknown-linux-gnu-ld \
-  cargo test -p keel-link --test elf_script
+  cargo test -p keel-link --test elf elf_script::
 cargo test -p keel-link --lib elf::script
-cargo test -p keel-link --test elf_script pinned_kernel_aggregate -- --ignored --nocapture
+cargo test -p keel-link --test elf elf_script::pinned_kernel_aggregate -- --ignored --nocapture
 ```
 
 The ignored test reads `/tmp/keel-linux64-vmlinux.lds` and

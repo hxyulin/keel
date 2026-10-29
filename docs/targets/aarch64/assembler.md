@@ -234,8 +234,7 @@ products and lookup operations, SME2.1 and ordinary SVE2 are not implemented.
 ```sh
 python3 crates/keel-asm/tools/sme_cases.py --check
 python3 crates/keel-asm/tools/streaming_cases.py --check
-cargo test -p keel-asm --test sme --test scalable
-cargo test -p keel-asm --test streaming --test sme_kernels
+cargo test -p keel-asm --test sme
 ```
 
 `tests/fixtures/sme-kernels/{fp32,bf16,int8}.s` are correctness fixtures for

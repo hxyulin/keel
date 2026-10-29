@@ -105,7 +105,7 @@ to execute the resulting static ARM binaries too:
 
 ```sh
 KEEL_AARCH64_RUNNER=/absolute/path/to/qemu-aarch64-static \
-  cargo test -p keel --test aarch64_elf
+  cargo test -p keel --test aarch64_linux_compiler aarch64_elf::
 ```
 
 QEMU is only the execution environment; it does not compile, assemble or link.
@@ -311,9 +311,10 @@ Run these inside the container:
 ```sh
 cargo test -p keel-c --test environment --test run
 cargo test -p keel-codegen --test run programs -- --exact
-cargo test -p keel --test aarch64_linux_compiler --test aarch64_elf
-cargo test -p keel-asm --lib --test structured --test aarch64_elf
-cargo test -p keel-link --test aarch64_elf
+cargo test -p keel --test aarch64_linux_compiler
+cargo test -p keel-asm --lib --test structured
+cargo test -p keel-asm --test assembler aarch64_elf::
+cargo test -p keel-link --test elf aarch64_elf::
 ```
 
 Native execution cases run only on Linux AArch64. Coverage includes:

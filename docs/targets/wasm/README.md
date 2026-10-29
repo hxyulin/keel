@@ -169,7 +169,7 @@ IR inputs and runs the results under Node, which must be on `PATH`.
 
 ```sh
 cargo test -p keel --bin keel \
-  --test wasm_output --test wasm_target_unavailable --test system_link_args
+  --test wasm_output --test system_link_args
 cargo test -p keel-opt --test wasm32_basic
 ```
 

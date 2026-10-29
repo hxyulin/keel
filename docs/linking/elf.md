@@ -251,7 +251,7 @@ objects whose code is collected.
 
 ```sh
 keel link --target x86_64-unknown-linux-gnu --gc-sections start.o -o program
-cargo test -p keel-link --test elf_gc --test elf_sframe
+cargo test -p keel-link --test elf -- elf_gc:: elf_sframe::
 ```
 
 ## COMDAT selection before native garbage collection
@@ -291,7 +291,7 @@ Without `--gc-sections`, selected sections stay even when a selected weak symbol
 is overridden; with it, groups follow the GC rules above.
 
 ```sh
-cargo test -p keel-link --test elf_comdat
+cargo test -p keel-link --test elf elf_comdat::
 cargo test -p keel-codegen --test weak_odr
 ```
 
@@ -320,7 +320,7 @@ strong references fail and weak references are zero. Bounds never select
 archive members. With `--gc-sections`, live boundary references root matching
 sections. Rules follow [GNU ld](https://sourceware.org/binutils/docs/ld/Orphan-Sections.html)
 and [LLD](https://github.com/llvm/llvm-project/blob/main/lld/ELF/Writer.cpp);
-`cargo test -p keel-link --test section_bounds` compares Clang objects linked
+`cargo test -p keel-link --test link section_bounds::` compares Clang objects linked
 by Keel and LLD (or GNU ld via `KEEL_TEST_ELF_LD`).
 
 ## C custom sections and retention

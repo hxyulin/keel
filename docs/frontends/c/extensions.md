@@ -282,7 +282,7 @@ and enum representations wider than 64 bits reject. Existing ordinary
 incomplete-enum extensions use `int`; a later definition that would change
 that representation rejects rather than changing previously emitted types.
 
-`packed_enums.rs` checks width boundaries and signedness on native targets and
+`packed_bitfields/packed_enums.rs` checks width boundaries and signedness on native targets and
 the private Wasm32 layout.
 
 ## restrict
@@ -672,7 +672,7 @@ Darwin's default chained dyld fixups cannot encode an unaligned pointer location
 Executable runtime tests use `-Wl,-no_fixup_chains` to select classic fixups.
 This is a linker format constraint and applies to Clang's equivalent object too.
 
-`crates/keel-c/tests/storage_metadata.rs` compares relocations, note sections
+`crates/keel-c/tests/sections/storage_metadata.rs` compares relocations, note sections
 and function entry alignment with Clang.
 
 ## Extended floating types

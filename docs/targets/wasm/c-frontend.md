@@ -114,8 +114,7 @@ overrides. `preprocess_with_stats` (with the `profile` feature) uses the same pa
   queries, sysroot/deployment settings, ordered overrides and ambient host paths.
 
 ```sh
-cargo test -p keel-c --features profile \
-  --test wasm_profile --test wasm_freestanding --test wasm_target_unavailable
+cargo test -p keel-c --features profile --test wasm_freestanding
 ```
 
 The full `cargo test -p keel-c --features profile` run includes the native

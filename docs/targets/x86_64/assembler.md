@@ -156,7 +156,7 @@ Absolute ELF64 aliases keep negative values in the symbol table. Resolved
 symbol differences keep signed range checks. An external symbol minus a local
 symbol in the current section can use a PC-relative 32-bit relocation.
 Differences that ELF cannot represent are errors.
-`crates/keel-asm/tests/x86_signed_immediates.rs` compares bytes and
+`crates/keel-asm/tests/x86_att/x86_signed_immediates.rs` compares bytes and
 relocations with GNU and Clang objects and links all three producers with GNU
 ld at the signed-range boundaries.
 

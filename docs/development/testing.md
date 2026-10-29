@@ -119,10 +119,19 @@ normal edit/test loop.
 Large matrices keep separate boundary and exhaustive tests: naming a target
 with `--quick` runs its boundaries, and full qualification runs the complete
 matrix. Test preparation parses and optimizes each fixture once per test and
-shares it across configurations, while every configuration still compiles,
-links and runs its own output. The `arm_division` and `adjacent_diff` matrices also compile their C oracle once
-and reuse its object across backend configurations. Add a target to the core
-list only for a shared backend contract with bounded cost.
+shares it across configurations. Every configuration still compiles its own
+output, but a configuration whose assembly or object is byte-identical to one
+already run is not linked and run again. Native C oracles compile once per test
+and link against each configuration's object.
+
+Independent assembler comparisons run where the encoding can differ. The NEON
+matrices compare bytes with Clang in 4 of their 12 configurations and execute
+all 12. The x86 string, dot-product and compare-predicate tests sweep every
+immediate only in the native x86-64 Linux configuration and use boundary values
+elsewhere, because codegen copies the immediate into the instruction unchanged.
+
+Add a target to the core list only for a shared backend contract with bounded
+cost.
 
 ## Parallel execution
 

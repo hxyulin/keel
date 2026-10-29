@@ -164,7 +164,7 @@ their binding to a generic register output or must agree with an existing
 output binding. Taking a bound local's address, explicit memory operands,
 pure immediate constraints and incompatible classes are rejected. A cast or
 other expression that is not the local itself does not carry the binding.
-`x86_local_register.rs` checks inputs, outputs and read/write operands for all
+`x86_inline_asm/x86_local_register.rs` checks inputs, outputs and read/write operands for all
 14 nonreserved GPRs.
 
 ### Aggregate register operands
@@ -324,7 +324,7 @@ locals or variably modified types reject asm goto under the existing scope-exit
 rules.
 AArch64 asm goto is unsupported.
 
-`cargo test -p keel-c --test x86_asm_goto` checks diagnostics, ordinary CFG
+`cargo test -p keel-c --test x86_inline_asm x86_asm_goto::` checks diagnostics, ordinary CFG
 edges, IR round trips and text/typed/chunked object parity across selectors,
 allocators, normal/empty pools and optimization on/off.
 

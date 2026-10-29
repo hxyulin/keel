@@ -86,7 +86,7 @@ functions and objects with static storage retain their existing behavior.
 
 ## Validation
 
-`cargo test -p keel-c --test inline_asm` checks source diagnostics and backend
+`cargo test -p keel-c --test x86_inline_asm inline_asm::` checks source diagnostics and backend
 legality errors, verifies IR before/after optimization, checks pinned contracts
 and emits actual Mach-O objects. On native Apple AArch64 it links and executes
 those objects against a Clang `-O2` oracle in all four combinations of debug
