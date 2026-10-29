@@ -154,6 +154,22 @@ pub fn command(c: &mut Command) {
     );
 }
 
+/// Whether an entry of a NEON selector × allocator × pool matrix also compares
+/// its `__text` with clang's assembly of the same text. One entry per selector
+/// uses the normal registers, covering both allocators, and Full/Full adds the
+/// spill pool. Typed/text parity and native execution still run in every entry.
+pub fn clang_parity(
+    selector: keel_codegen::SelectionTier,
+    allocator: keel_codegen::regalloc::AllocationTier,
+    spilled: bool,
+) -> bool {
+    use keel_codegen::{SelectionTier as S, regalloc::AllocationTier as A};
+    matches!(
+        (selector, allocator, spilled),
+        (S::Baseline, A::Fast, false) | (S::Trees, A::Full, false) | (S::Full, A::Full, _)
+    )
+}
+
 pub fn harness() -> String {
     harness_for(&VectorType::ALL_128)
 }

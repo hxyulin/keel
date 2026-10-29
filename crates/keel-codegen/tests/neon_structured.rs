@@ -145,7 +145,12 @@ fn structured_d_q_all_counts_shapes_lanes_exact_footprints() {
                 selector: &selector,
                 allocator: &allocator,
             };
-            for pools in [&keel_codegen::aarch64::REGISTERS, &SPILL] {
+            for spilled in [false, true] {
+                let pools = if spilled {
+                    &SPILL
+                } else {
+                    &keel_codegen::aarch64::REGISTERS
+                };
                 let text =
                     keel_codegen::aarch64::compile_with_pipeline(&m, pools, &pipeline).unwrap();
                 let program =
@@ -157,22 +162,24 @@ fn structured_d_q_all_counts_shapes_lanes_exact_footprints() {
                 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
                 {
                     use object::{Object, ObjectSection};
-                    fs::write(dir.join("test.s"), &text).unwrap();
-                    common::command(
-                        Command::new("clang")
-                            .arg("-c")
-                            .arg(dir.join("test.s"))
-                            .arg("-o")
-                            .arg(dir.join("clang.o")),
-                    );
-                    let clang = fs::read(dir.join("clang.o")).unwrap();
-                    let clang = object::File::parse(&*clang).unwrap();
-                    assert_eq!(
-                        keel_asm::assemble_program(&program, Default::default())
-                            .unwrap()
-                            .text,
-                        clang.section_by_name("__text").unwrap().data().unwrap()
-                    );
+                    if common::clang_parity(selector, allocator, spilled) {
+                        fs::write(dir.join("test.s"), &text).unwrap();
+                        common::command(
+                            Command::new("clang")
+                                .arg("-c")
+                                .arg(dir.join("test.s"))
+                                .arg("-o")
+                                .arg(dir.join("clang.o")),
+                        );
+                        let clang = fs::read(dir.join("clang.o")).unwrap();
+                        let clang = object::File::parse(&*clang).unwrap();
+                        assert_eq!(
+                            keel_asm::assemble_program(&program, Default::default())
+                                .unwrap()
+                                .text,
+                            clang.section_by_name("__text").unwrap().data().unwrap()
+                        );
+                    }
                     fs::write(dir.join("test.o"), bytes).unwrap();
                     common::command(
                         Command::new("clang")

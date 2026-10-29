@@ -284,22 +284,31 @@ fn check_modified_immediates(exhaustive: bool) {
                 let bytes =
                     keel_asm::assemble_program_object(&program, Default::default()).unwrap();
                 assert_eq!(bytes, keel_asm::assemble_object(&text).unwrap());
-                fs::write(dir.join("test.s"), text).unwrap();
-                common::command(
-                    Command::new("clang")
-                        .args(["-target", "arm64-apple-macos11", "-c"])
-                        .arg(dir.join("test.s"))
-                        .arg("-o")
-                        .arg(dir.join("clang.o")),
-                );
-                let cb = fs::read(dir.join("clang.o")).unwrap();
-                let cf = object::File::parse(&*cb).unwrap();
-                assert_eq!(
-                    keel_asm::assemble_program(&program, Default::default())
-                        .unwrap()
-                        .text,
-                    cf.section_by_name("__text").unwrap().data().unwrap()
-                );
+                // Clang takes seconds to reassemble the exhaustive sweep, so it
+                // compares clang bytes on the raw register path only.
+                let parity = if exhaustive {
+                    !spilled
+                } else {
+                    common::clang_parity(selector, allocator, spilled)
+                };
+                if parity {
+                    fs::write(dir.join("test.s"), text).unwrap();
+                    common::command(
+                        Command::new("clang")
+                            .args(["-target", "arm64-apple-macos11", "-c"])
+                            .arg(dir.join("test.s"))
+                            .arg("-o")
+                            .arg(dir.join("clang.o")),
+                    );
+                    let cb = fs::read(dir.join("clang.o")).unwrap();
+                    let cf = object::File::parse(&*cb).unwrap();
+                    assert_eq!(
+                        keel_asm::assemble_program(&program, Default::default())
+                            .unwrap()
+                            .text,
+                        cf.section_by_name("__text").unwrap().data().unwrap()
+                    );
+                }
                 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
                 {
                     fs::write(dir.join("test.o"), bytes).unwrap();

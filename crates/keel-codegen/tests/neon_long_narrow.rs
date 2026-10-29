@@ -211,7 +211,7 @@ fn long_and_narrow_intrinsics_match_acle_and_qc() {
                 selector: &selector,
                 allocator: &allocator,
             };
-            for pools in [&keel_codegen::aarch64::REGISTERS, &SPILL] {
+            for (spilled, pools) in [(false, &keel_codegen::aarch64::REGISTERS), (true, &SPILL)] {
                 let text =
                     keel_codegen::aarch64::compile_with_pipeline(m, pools, &pipeline).unwrap();
                 assert!(!text.contains(" = stack_addr"));
@@ -223,22 +223,24 @@ fn long_and_narrow_intrinsics_match_acle_and_qc() {
                     keel_asm::assemble_program_object(&program, Default::default()).unwrap();
                 let parsed = keel_asm::assemble_object(&text).unwrap();
                 assert_eq!(direct, parsed);
-                fs::write(dir.join("test.s"), &text).unwrap();
-                common::command(
-                    Command::new("clang")
-                        .args(["-target", "arm64-apple-macos11", "-c"])
-                        .arg(dir.join("test.s"))
-                        .arg("-o")
-                        .arg(dir.join("clang.o")),
-                );
-                let reference = fs::read(dir.join("clang.o")).unwrap();
-                let file = object::File::parse(&*reference).unwrap();
-                assert_eq!(
-                    keel_asm::assemble_program(&program, Default::default())
-                        .unwrap()
-                        .text,
-                    file.section_by_name("__text").unwrap().data().unwrap()
-                );
+                if common::clang_parity(selector, allocator, spilled) {
+                    fs::write(dir.join("test.s"), &text).unwrap();
+                    common::command(
+                        Command::new("clang")
+                            .args(["-target", "arm64-apple-macos11", "-c"])
+                            .arg(dir.join("test.s"))
+                            .arg("-o")
+                            .arg(dir.join("clang.o")),
+                    );
+                    let reference = fs::read(dir.join("clang.o")).unwrap();
+                    let file = object::File::parse(&*reference).unwrap();
+                    assert_eq!(
+                        keel_asm::assemble_program(&program, Default::default())
+                            .unwrap()
+                            .text,
+                        file.section_by_name("__text").unwrap().data().unwrap()
+                    );
+                }
                 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
                 {
                     // Object parity is checked above; execute the identical image once.

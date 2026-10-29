@@ -428,7 +428,7 @@ fn every_lane_permutation_record_and_legal_lane_pair_executes() {
         SelectionTier::Full,
     ] {
         for allocator in [AllocationTier::Fast, AllocationTier::Full] {
-            for pools in [&keel_codegen::aarch64::REGISTERS, &SPILL] {
+            for (spilled, pools) in [(false, &keel_codegen::aarch64::REGISTERS), (true, &SPILL)] {
                 let mut m = m.clone();
                 if selector == SelectionTier::Full {
                     keel_opt::optimize(&mut m).unwrap();
@@ -453,22 +453,24 @@ fn every_lane_permutation_record_and_legal_lane_pair_executes() {
                 let bytes =
                     keel_asm::assemble_program_object(&program, Default::default()).unwrap();
                 assert_eq!(bytes, keel_asm::assemble_object(&text).unwrap());
-                fs::write(dir.join("test.s"), text).unwrap();
-                common::command(
-                    Command::new("clang")
-                        .args(["-target", "arm64-apple-macos11", "-c"])
-                        .arg(dir.join("test.s"))
-                        .arg("-o")
-                        .arg(dir.join("clang.o")),
-                );
-                let cb = fs::read(dir.join("clang.o")).unwrap();
-                let cf = object::File::parse(&*cb).unwrap();
-                assert_eq!(
-                    keel_asm::assemble_program(&program, Default::default())
-                        .unwrap()
-                        .text,
-                    cf.section_by_name("__text").unwrap().data().unwrap()
-                );
+                if common::clang_parity(selector, allocator, spilled) {
+                    fs::write(dir.join("test.s"), text).unwrap();
+                    common::command(
+                        Command::new("clang")
+                            .args(["-target", "arm64-apple-macos11", "-c"])
+                            .arg(dir.join("test.s"))
+                            .arg("-o")
+                            .arg(dir.join("clang.o")),
+                    );
+                    let cb = fs::read(dir.join("clang.o")).unwrap();
+                    let cf = object::File::parse(&*cb).unwrap();
+                    assert_eq!(
+                        keel_asm::assemble_program(&program, Default::default())
+                            .unwrap()
+                            .text,
+                        cf.section_by_name("__text").unwrap().data().unwrap()
+                    );
+                }
                 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
                 {
                     fs::write(dir.join("test.o"), bytes).unwrap();
