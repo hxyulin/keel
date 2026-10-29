@@ -413,7 +413,7 @@ GNU as and Keel emit the REP word prefixes as `66 F3`; Clang's mnemonic emits
 REP dword mnemonic, which gives the same bytes.
 
 ```sh
-cargo test -p keel-codegen --test x86_string_port_io
+cargo test -p keel-codegen --test x86_system x86_string_port_io::
 ```
 
 ## Performance-counter read

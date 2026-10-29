@@ -100,7 +100,7 @@ only builds the selected test targets.
 python3 tools/test.py codegen --quick                         # Core development regressions
 python3 tools/test.py codegen --unit --quick                  # Library unit tests only
 python3 tools/test.py codegen --test arm_constant_division --quick
-python3 tools/test.py codegen --test x86_legacy_strings --quick
+python3 tools/test.py codegen --test x86_strings --quick
 python3 tools/test.py codegen                                 # Full component qualification
 ```
 
@@ -158,8 +158,8 @@ python3 tools/test.py codegen --quick --runner cargo --profile test
 For a single test target, Cargo remains sufficient:
 
 ```sh
-cargo test --profile test-fast -p keel-codegen --test x86_string_port_io
-cargo test --profile test-fast -p keel-codegen --test x86_string_port_io source_matrix_boundary_smoke
+cargo test --profile test-fast -p keel-codegen --test x86_system x86_string_port_io::
+cargo test --profile test-fast -p keel-codegen --test x86_system x86_string_port_io::source_matrix_boundary_smoke
 ```
 
 Tool availability and host architecture determine which native checks run.

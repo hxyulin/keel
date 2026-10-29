@@ -610,7 +610,7 @@ crypto library, and no constant-time or security claim.
 ### Tests
 
 ```sh
-cargo test -p keel-codegen --test x86_aes
+cargo test -p keel-codegen --test x86_scalar_intrinsics x86_aes::
 cargo test -p keel-c --test x86_intrinsics
 cargo test -p keel --test x86_aes
 cargo test -p keel-codegen --release --lib feature_guard_tests
@@ -705,7 +705,7 @@ automatic polynomial recognition are unsupported.
 
 ```sh
 cargo test -p keel-asm --test x86_extensions x86_pclmul::
-cargo test -p keel-codegen --test x86_pclmul
+cargo test -p keel-codegen --test x86_scalar_intrinsics x86_pclmul::
 cargo test -p keel-c --test x86_intrinsics pclmul::
 cargo test -p keel --test x86_cpu_level
 cargo test -p keel-codegen --lib feature_guard_tests

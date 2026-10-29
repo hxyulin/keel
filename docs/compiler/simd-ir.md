@@ -132,7 +132,7 @@ vectorization are unchanged.
 
 ```sh
 cargo test -p keel-opt --test vector_canonicalize
-cargo test -p keel-codegen --lib --test vector_ir --test vector_widen_aarch64 \
+cargo test -p keel-codegen --lib --test vector_ir --test vector_aarch64 \
   --test vector_widen_x86 --test vector_mask_proofs --test vector_canonicalize \
   --test vector_shuffle_window --test vector_x86 --test vector_aarch64
 ```

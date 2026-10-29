@@ -151,7 +151,7 @@ memory-operand form: operand widths, load exceptions, source order and NaN
 selection differ.
 
 ```sh
-cargo test -p keel-codegen --test x86_x87_dc
+cargo test -p keel-codegen --test f80 x86_x87_dc::
 ```
 
 ### Comparisons
@@ -204,7 +204,7 @@ differs from FILD followed by portable arithmetic in operand order, rounding
 and exception behavior.
 
 ```sh
-cargo test -p keel-codegen --test x86_x87_numerical
+cargo test -p keel-codegen --test f80 x86_x87_numerical::
 ```
 
 `crates/keel-codegen/tests/x86_x87_numerical/` contains an assembly probe and

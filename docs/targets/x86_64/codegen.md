@@ -266,6 +266,7 @@ goal-specific emission.
 ## Tests
 
 ```sh
-cargo test -p keel-codegen --test x86_c_leaf --test fast_cc
-cargo test -p keel-codegen --test x86_unsigned_byte_compare
+cargo test -p keel-codegen --test x86_scalar_selection x86_c_leaf::
+cargo test -p keel-codegen --test fast_cc
+cargo test -p keel-codegen --test vector_x86 x86_unsigned_byte_compare::
 ```
