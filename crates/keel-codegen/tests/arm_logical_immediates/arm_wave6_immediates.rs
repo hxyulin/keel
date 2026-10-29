@@ -44,6 +44,21 @@ fn arithmetic_signed_and_shifted_immediates_use_execution_width() {
             }
         }
     }
+    // A pointer offset takes the same 64-bit immediates.
+    for (k, immediate) in [(-5i64, "#5"), (-4096, "#1, lsl #12"), (8192, "#2, lsl #12")] {
+        let mnemonic = if k < 0 { "sub" } else { "add" };
+        let output = asm(
+            "ptr",
+            &format!("v1 = iconst.i64 {k}\nv2 = ptradd v0, v1\nreturn v2"),
+            "ptr",
+        );
+        assert!(output.contains(&format!("\t{mnemonic}\tx")), "{output}");
+        assert!(output.contains(immediate), "{output}");
+        assert!(
+            !output.contains("\tmovn\t") && !output.contains("\tmovz\t"),
+            "{output}"
+        );
+    }
     // The i32 bit pattern is +1, despite its signed i64 spelling.
     let output = asm(
         "i32",

@@ -636,7 +636,8 @@ fn fmov_imm8(value: f64) -> Option<u32> {
 }
 
 /// One checked plan shared by preallocation folding and emission. Only exact
-/// execution-width integers participate; pointer/narrow lowering stays unchanged.
+/// execution-width integers and pointer offsets participate; narrow lowering
+/// stays unchanged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct AddSubImmediate {
     constant: Value,
@@ -656,6 +657,10 @@ fn addsub_immediate(func: &Function, data: &InstData) -> Option<AddSubImmediate>
             op: BinaryOp::Isub,
             args,
         } => (args, true, false, false),
+        InstData::Binary {
+            op: BinaryOp::Ptradd,
+            args,
+        } => (args, false, false, false),
         InstData::Icmp { cond, args } => {
             // Replacing subtraction by addition preserves the result and Z,
             // but not every NZCV bit. Only EQ/NE can use a negative constant.
@@ -664,7 +669,14 @@ fn addsub_immediate(func: &Function, data: &InstData) -> Option<AddSubImmediate>
         _ => return None,
     };
     let ty = func.value_type(func.resolve(args[0]));
-    if !matches!(ty, Type::I32 | Type::I64) {
+    let offset = matches!(
+        data,
+        InstData::Binary {
+            op: BinaryOp::Ptradd,
+            ..
+        }
+    );
+    if !(matches!(ty, Type::I32 | Type::I64) || offset && ty == Type::Ptr) {
         return None;
     }
     for side in if commute { &[1, 0][..] } else { &[1][..] } {
