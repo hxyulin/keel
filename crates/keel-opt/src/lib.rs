@@ -928,18 +928,27 @@ fn execute_pipeline(
             pass.run_module_tracked(module, inline_sites.as_mut(), &mut versions.changed);
         let pass_ns = start.map_or(0, |start| start.elapsed().as_nanos());
         if let Some(changed) = module_changed {
+            let old_len = versions.version.len();
             versions.module_changed(&mut canonical);
             #[cfg(debug_assertions)]
             module
                 .functions
                 .iter()
                 .for_each(analysis::debug_check_stamp);
+            // A body the pass reported unchanged is the one verified after
+            // its last change, as the version cache also assumes.
             let (result, verification_ns) =
                 observe_verification(verification_enabled, reporting, || {
                     module
                         .functions
                         .iter()
-                        .try_for_each(|func| verify_after(func, pass.name(), verification_enabled))
+                        .enumerate()
+                        .filter(|&(index, _)| {
+                            index >= old_len || versions.changed.get(index) != Some(&false)
+                        })
+                        .try_for_each(|(_, func)| {
+                            verify_after(func, pass.name(), verification_enabled)
+                        })
                 });
             if let Some(report) = report.as_deref_mut() {
                 report.invocations.push(PassObservation {
@@ -1038,8 +1047,9 @@ fn execute_pipeline(
             analysis::debug_check_stamp(func);
             canonical[index] = pass.produces_canonical_form() || (canonical[index] && !changed);
             versions.record(pass, slot, index, changed);
+            // An unchanged body is the one verified after its last change.
             let (result, verification_ns) =
-                observe_verification(verification_enabled, reporting, || {
+                observe_verification(verification_enabled && changed, reporting, || {
                     verify_after(func, pass.name(), verification_enabled)
                 });
             if let Some(report) = report.as_deref_mut() {

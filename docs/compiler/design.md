@@ -768,7 +768,8 @@ existing flag lowering.
 
 `keel-opt` runs function passes (`fn(&mut Function) -> bool`) and module
 passes through the `Pass::run_module` hook. The manager runs each pass over
-the module before moving to the next and **verifies after every pass**: the IR is valid between passes,
+the module before moving to the next and **verifies after every pass** each function the pass
+reports changed: the IR is valid between passes,
 always, so a broken pass is caught where it broke things. Passes compute the
 analyses they need; there is no analysis cache yet.
 

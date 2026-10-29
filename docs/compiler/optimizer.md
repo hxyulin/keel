@@ -10,6 +10,9 @@ tracking, per-function scheduling, deterministic-pass caching, canonical restora
 and verification. Reporting only measures those execution boundaries. Without a
 report, the loop creates no timers, IR counts, inline-site vectors or observation
 records. Repeated verification still follows the selected verification policy.
+After a pass runs, the loop verifies only the functions the pass reports changed,
+plus any function a module pass added. The deterministic-pass cache trusts the
+same flag, so a pass that edits a body must report the change.
 
 Clean-cache entries belong to pass instances rather than display names. Repeated
 configured instances remain independent; an unchanged repeated instance stays

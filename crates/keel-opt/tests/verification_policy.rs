@@ -160,3 +160,63 @@ fn disabled_verification_still_restores_canonical_form_and_resolves_api_aliases(
         }
     }
 }
+
+/// Reports `target` changed and every other function unchanged.
+struct Touch {
+    target: &'static str,
+    module: bool,
+}
+impl Pass for Touch {
+    fn name(&self) -> &'static str {
+        "touch"
+    }
+    fn description(&self) -> &'static str {
+        "report one function changed"
+    }
+    fn run(&self, f: &mut Function) -> bool {
+        f.name == self.target
+    }
+    fn run_module_tracked(
+        &self,
+        m: &mut Module,
+        _: Option<&mut Vec<keel_opt::InlineSite>>,
+        changed: &mut Vec<bool>,
+    ) -> Option<bool> {
+        self.module.then(|| {
+            changed.clear();
+            changed.extend(m.functions.iter().map(|f| f.name == self.target));
+            true
+        })
+    }
+}
+
+#[test]
+fn verification_checks_only_functions_reported_changed() {
+    let ir = "func @f() {\nblock0:\n return\n}\nfunc @g() {\nblock0:\n return\n}";
+    for module in [false, true] {
+        for fails in [false, true] {
+            let mut m = keel_ir::parse(ir).unwrap();
+            // No pass edits @f, so its broken body is reported only when the
+            // pass claims to have changed it.
+            let f = &mut m.functions[0];
+            let ret = f.layout_insts().last().unwrap().1;
+            f.remove_inst(ret);
+            let result = keel_opt::run_pipeline_for_target_with_options(
+                &mut m,
+                &[&Touch {
+                    target: if fails { "f" } else { "g" },
+                    module,
+                }],
+                VectorTarget::Portable,
+                OptimizeOptions {
+                    verification: VerificationPolicy::Enabled,
+                },
+            );
+            match result {
+                Err(keel_opt::OptError::Verifier { func, .. }) if fails => assert_eq!(func, "f"),
+                Ok(()) if !fails => {}
+                other => panic!("module={module} fails={fails}: {other:?}"),
+            }
+        }
+    }
+}
