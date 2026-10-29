@@ -4,6 +4,10 @@
 //! the same as the program built by clang alone, so the programs print
 //! what they compute rather than spelling out expected values. When both
 //! preprocessors give byte-identical assembly, one image is linked and run.
+#[path = "run/computed_goto.rs"]
+mod computed_goto;
+#[path = "run/generic_overflow.rs"]
+mod generic_overflow;
 
 use std::path::Path;
 use std::process::{Command, Output};
