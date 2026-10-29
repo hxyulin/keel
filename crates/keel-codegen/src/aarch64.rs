@@ -2852,14 +2852,7 @@ impl<'a> FunctionCompiler<'a> {
                         [(Reg::SP).into(), (Reg::SP).into(), (Reg::x(S0)).into()],
                     );
                     let d = self.def_reg(result);
-                    self.mach(
-                        "add",
-                        [
-                            (Reg::x(d)).into(),
-                            (Reg::SP).into(),
-                            Arg::imm(self.copy_base),
-                        ],
-                    );
+                    self.address(Loc::Reg(d), "sp", self.copy_base);
                     self.def_done(result, d);
                 }
                 Intrinsic::StackSave => {

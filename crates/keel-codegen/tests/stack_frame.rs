@@ -251,3 +251,34 @@ fn invoke_without_plain_calls_reserves_aggregate_storage() {
     let asm = keel_codegen::compile(&module, Target::Aarch64AppleDarwin).unwrap();
     assert!(!keel_asm::assemble_object(&asm).unwrap().is_empty());
 }
+
+fn assemble_aarch64(source: &str) {
+    let module = keel_ir::parse(source).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    for target in [Target::Aarch64AppleDarwin, Target::Aarch64LinuxGnu] {
+        let asm = keel_codegen::compile(&module, target).unwrap();
+        let object = match target {
+            Target::Aarch64AppleDarwin => keel_asm::assemble_object(&asm),
+            _ => keel_asm::assemble_elf_object(&asm),
+        }
+        .unwrap_or_else(|error| panic!("{target:?}: {error}\n{asm}"));
+        assert!(!object.is_empty());
+    }
+}
+
+#[test]
+fn aarch64_stack_alloc_above_large_outgoing_arguments_assembles() {
+    let count = 530;
+    let types = vec!["i64"; count].join(", ");
+    let args = vec!["v0"; count].join(", ");
+    assemble_aarch64(&format!(
+        "decl @many({types}) -> i64
+func @f(i64) -> i64 {{
+block0(v0: i64):
+ v1 = intrinsic stack_alloc(v0)
+ v2 = call @many({args})
+ store v2, v1
+ return v2
+}}"
+    ));
+}
