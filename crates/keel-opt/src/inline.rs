@@ -710,8 +710,10 @@ fn eligibility_reason_with_frames(
     admit_noninterposable: bool,
     frames: FrameSemantics,
 ) -> Option<&'static str> {
+    // Every copy of a weak-ODR definition has an equivalent body, so with a
+    // binding promise it is admitted like a strong one. Only the caller
+    // changes; the definition keeps its linkage, signature and body.
     if f.attrs.weak
-        || f.weak_odr
         || (!f.local
             && !(admit_noninterposable
                 && (f.attrs.noninterposable || f.attrs.no_semantic_interposition)))

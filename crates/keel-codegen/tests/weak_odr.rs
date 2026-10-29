@@ -16,7 +16,7 @@ fn source(tu: &str) -> String {
          data @shared = weak_odr align 8 {{ i64 11 }}\n\
          data @zero = weak_odr align 8 {{ i64 0 }}\n\
          data @vtable = weak_odr const align 8 {{ ptr @method, ptr @shared, ptr @zero }}\n\
-         func @method() -> i64 noninterposable weak_odr {{\nblock0:\n v0 = iconst.i64 7\n return v0\n}}\n\
+         func @method() -> i64 noinline weak_odr {{\nblock0:\n v0 = iconst.i64 7\n return v0\n}}\n\
          func @method_{tu}() -> ptr {{\nblock0:\n v0 = symbol_addr @method\n return v0\n}}\n\
          func @shared_{tu}() -> ptr {{\nblock0:\n v0 = symbol_addr @shared\n return v0\n}}\n\
          func @zero_{tu}() -> ptr {{\nblock0:\n v0 = symbol_addr @zero\n return v0\n}}\n\
@@ -39,6 +39,8 @@ fn module(tu: &str) -> Module {
             .unwrap()
             .weak_odr
     );
+    // `call_*` observes which definition the link binds, including a strong
+    // one that breaks the ODR promise, so `@method` stays out of line.
     let caller = m
         .functions
         .iter()

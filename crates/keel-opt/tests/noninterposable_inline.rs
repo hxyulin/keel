@@ -250,13 +250,12 @@ fn exported_binding_keeps_soft_limits_hard_stack_and_exact_abi_checks() {
 
 #[test]
 fn semantic_body_contract_cannot_override_weak_binding() {
-    for binding in ["weak", "weak_odr"] {
-        let source = scalar(
-            &format!("no_semantic_interposition alwaysinline {binding}"),
-            "(i8 uext) -> i8 sext",
-            "return v0",
-        );
-        let (m, _) = optimize(&source, "inline-noninterposable");
-        assert_eq!(calls(&m, "caller"), 1);
-    }
+    // Weak-ODR copies have equivalent bodies; see inline/weak_odr.rs.
+    let source = scalar(
+        "no_semantic_interposition alwaysinline weak",
+        "(i8 uext) -> i8 sext",
+        "return v0",
+    );
+    let (m, _) = optimize(&source, "inline-noninterposable");
+    assert_eq!(calls(&m, "caller"), 1);
 }

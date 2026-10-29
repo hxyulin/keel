@@ -18,6 +18,46 @@ fn weak_definition_body_cannot_prove_calls_preserve_memory() {
 }
 
 #[test]
+fn weak_odr_body_with_a_binding_promise_is_inlined_into_callers_only() {
+    let src = "func @helper(i8 uext) -> i8 sext PROMISE POLICY weak_odr hidden {\nblock0(v0: i8):\n return v0\n}\nfunc @caller(i8 uext) -> i8 sext noninterposable hidden {\nblock0(v0: i8):\n v1 = call @helper(v0)\n return v1\n}\n";
+    for binding in ["weak_odr ", ""] {
+        for promise in ["no_semantic_interposition", "noninterposable", ""] {
+            for policy in ["alwaysinline", "noinline"] {
+                let src = src
+                    .replace("weak_odr ", binding)
+                    .replace("PROMISE", promise)
+                    .replace("POLICY", policy);
+                for (passes, inlined) in [
+                    (&["inline"][..], false),
+                    (
+                        &["inline-noninterposable", "internal-fast-calls"],
+                        policy == "alwaysinline" && !promise.is_empty(),
+                    ),
+                ] {
+                    let mut m = keel_ir::parse(&src).unwrap();
+                    keel_ir::verify_module(&m).unwrap();
+                    let helper = m.functions[0].clone();
+                    keel_opt::run_passes(&mut m, passes).unwrap();
+                    keel_ir::verify_module(&m).unwrap();
+                    let caller = &m.functions[1];
+                    let calls = caller
+                        .layout_insts()
+                        .filter(|(_, i)| matches!(caller.inst_data(*i), InstData::Call { .. }))
+                        .count();
+                    assert_eq!(calls, usize::from(!inlined), "{passes:?}\n{src}");
+                    // Other objects call their own copy with this contract.
+                    let kept = &m.functions[0];
+                    assert_eq!(kept.name, "helper");
+                    assert_eq!(kept.weak_odr, !binding.is_empty());
+                    assert!(!kept.local);
+                    assert_eq!(kept.sig, helper.sig, "{passes:?}\n{src}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn ordinary_weak_body_cannot_be_inlined_even_with_noninterposable_promise() {
     let src = "func @leaf(i32)->i32 weak noninterposable alwaysinline {\nblock0(v0:i32):\n return v0\n}\nfunc @f(i32)->i32 {\nblock0(v0:i32):\n v1 = call @leaf(v0)\n return v1\n}\n";
     let mut m = keel_ir::parse(src).unwrap();

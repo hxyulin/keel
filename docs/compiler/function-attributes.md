@@ -300,8 +300,12 @@ visibility, function addresses, unexpanded direct calls and indirect calls retai
 normal emission and binding. No local aliases or relocation changes are requested.
 The binding-aware inliners consume either promise, preserving the existing ABI,
 legality, recursion, `noinline` and growth checks. The private-only `inline` pass
-remains private-only. Weak and weak-ODR bodies remain ineligible even if IR carries
-the attribute. The attribute round-trips through IR and synchronizes with named
+remains private-only. Weak bodies remain ineligible even if IR carries the
+attribute. A weak-ODR body with either promise is eligible, because every copy
+has an equivalent body. Only the caller changes: the definition keeps its
+linkage, signature and calling convention, and no memory, capture or return
+facts are derived from it, since the linker may keep another object's copy.
+The attribute round-trips through IR and synchronizes with named
 callee declarations. It does not enable exact-binding call summaries, ABI
 privatization or inference of alias, capture or memory contracts.
 
