@@ -173,17 +173,18 @@ _mm_setcsr(saved);return 0;}
 "#;
     c
 }
+#[path = "common/matrix.rs"]
+mod matrix;
 fn object(
     s: SelectionTier,
     a: AllocationTier,
     empty: bool,
     f: Features,
 ) -> Result<(Vec<u8>, String), keel_codegen::CodegenError> {
-    let mut m = keel_ir::parse(&source()).unwrap();
-    keel_ir::verify_module(&m).unwrap();
-    if s == SelectionTier::Full {
-        keel_opt::optimize(&mut m).unwrap();
-    }
+    static PREPARED: std::sync::OnceLock<matrix::PreparedModule> = std::sync::OnceLock::new();
+    let m = PREPARED
+        .get_or_init(|| matrix::PreparedModule::parse(&source()))
+        .for_selector(s);
     let selector = FeatureSelector {
         inner: &s,
         features: f,
@@ -197,8 +198,8 @@ fn object(
     } else {
         &keel_codegen::x86_64::REGISTERS
     };
-    let text = keel_codegen::x86_64::compile_with_pipeline(&m, pools, &pipeline)?;
-    let p = keel_codegen::x86_64::compile_program_with_pipeline(&m, pools, &pipeline)?;
+    let text = keel_codegen::x86_64::compile_with_pipeline(m, pools, &pipeline)?;
+    let p = keel_codegen::x86_64::compile_program_with_pipeline(m, pools, &pipeline)?;
     assert_eq!(p.stats().text_bytes, 0);
     let b = keel_asm::x86::assemble_program_object_with_features(&p, f).unwrap();
     assert_eq!(
