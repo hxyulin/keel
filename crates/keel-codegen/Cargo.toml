@@ -21,5 +21,10 @@ keel-asm = { path = "../keel-asm" }
 keel-opt = { path = "../keel-opt" }
 object = { version = "0.36", default-features = false, features = ["read", "std"] }
 
+# Default builds skip this binary instead of linking an empty one.
+[[test]]
+name = "arm_dispatch_tail"
+required-features = ["experimental-dispatch"]
+
 [lints]
 workspace = true
