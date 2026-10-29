@@ -59,6 +59,36 @@ the same four-dword control select `vpshufd ymm, ymm, imm8`; for example
 controls, distinct sources and other element widths use the general `vpshufb`
 path. AVX without AVX2 uses the lane fallback.
 
+## Vector lowering and calling convention
+
+128-bit values use packed SSE/SSE2 operations or exact scalar lane expansion.
+With AVX, 256-bit values use packed operations, conversions, integer
+reductions and lane recipes, with scalar legalization where needed. XMM and
+YMM views share physical registers. Spill homes and copies keep exact widths.
+Functions that need 32-byte local alignment realign the frame and use a
+reserved stable base; incoming arguments and unwind state keep the original
+frame reference. SysV has no callee-saved SIMD registers, so values live
+across calls are preserved by the caller.
+
+Named 128- and 256-bit arguments share SIMD0–7 with scalar floating
+arguments; overflow slots are 16- or 32-byte aligned, and results use SIMD0.
+Unnamed 128-bit variadic values use the SIMD save area when available, then
+16-byte aligned overflow storage; unnamed 256-bit values always use 32-byte
+aligned overflow storage. 64-bit vectors are rejected in `va_arg`.
+Single-vector aggregate wrappers use the SSE/SSEUP class, MEMORY aggregates
+use byval/sret, and GNU empty-member 256-bit layouts that Clang and GCC
+classify differently are rejected.
+
+Gather and sign-masked memory operations keep inactive-lane fault
+suppression. The byte-mask non-temporal store needs a fully writable 16-byte
+destination and emits `SFENCE`. Architectural intrinsics require their
+declared features; see [x86 intrinsics](intrinsics.md).
+
+A select with a canonical comparison mask and an exact all-zero splat on
+either arm emits AND or ANDNOT, reading operands before defining an aliased or
+spilled result. Loaded arbitrary masks keep lane-truth normalization, and
+floating negative zero keeps the general bit-preserving select.
+
 ## SIMD arithmetic and comparisons
 
 The unsigned `i8x16` compare builds its sign-bit bias with

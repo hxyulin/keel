@@ -829,6 +829,15 @@ const MAX_FRAME_SIZE: usize = (1 << 24) - 16;
 
 /// The predicate for taking a Brif's false edge. Keep fused comparisons on
 /// NZCV; ordinary full-width integer truth tests can branch on the register.
+///
+/// `Zero` drops the `cmp reg, #0` that would set NZCV. That is sound because no
+/// generated sequence reads flags set outside itself: every NZCV consumer here
+/// (fused branches, CSET, CSEL/FCSEL, the i128 compare, arithmetic and shift
+/// helpers, overflow results, division guards and switch) is preceded by its own
+/// defining instruction on every path through its lowering, and
+/// `aarch64/vector.rs` has no NZCV consumers. A new flag-consuming lowering must
+/// keep that property. Inline assembly can read NZCV without declaring it, so a
+/// function containing any `InlineAsm` keeps CMP and B.cond for every Brif.
 enum BrifTest {
     Flags(&'static str),
     Zero(Reg),

@@ -1,6 +1,7 @@
 # AArch64
 
-This page covers the Linux toolchain and AArch64 branch-lowering contract.
+This page covers the AArch64 Linux toolchain, NEON lowering and intrinsics, and
+branch lowering.
 For shared compiler behavior see [architecture](../../compiler/design.md) and
 [SIMD IR](../../compiler/simd-ir.md). The [assembler](assembler.md) and
 [C inline assembly](c-inline-asm.md) have their own pages.
@@ -148,6 +149,123 @@ handling on this target is explicitly diagnosed. Existing frontend restrictions
 (such as weak attributes) still apply; this is a new target for Keel's supported
 C/IR language, not a claim of complete ISO C or Clang compatibility.
 
+## NEON lowering and calling convention
+
+D and Q values use exact-width 8- and 16-byte memory, copies and spill homes.
+Packed operations cover arithmetic, comparisons, lane selection, widening and
+narrowing, reductions and common permutations; shared legalization supplies
+other portable recipes. Exact static ZIP, UZP, TRN and window permutations
+select native forms.
+
+Named vectors share v0–v7 with scalar floating arguments; overflow arguments
+keep each value's size and alignment, and results use v0. Apple variadic D/Q
+values use exact 8/16-byte stack slots, and vector `va_arg` aligns and advances
+them accordingly. Homogeneous vector aggregates of up to four members use one
+SIMD register per member when the bank has room, and the stack otherwise.
+Other aggregates use the indirect-copy and x8-result ABI. Upper SIMD halves are
+not assumed preserved across calls.
+
+## NEON intrinsics
+
+`neon_<operation>.RESULT(args...)` is a typed ARM intrinsic. Every operation has
+an explicit accepted result type, operand types and arity in
+`NeonIntrinsic::operand_types`; x86 rejects these target-specific operations.
+Examples include `neon_sqadd.i8x16(a,b)`,
+`neon_smlal.i64x2(accumulator,low_i32_vector_a,low_i32_vector_b)`, and
+`neon_fcvtzs.i32x4(float_vector)`. Long operands use their low half; narrow
+results zero all unused upper lanes. Architecture-defined rounding, doubling,
+intermediate saturation, NaN handling and accumulation are those of the named
+baseline ARM instruction. FMLA/FMLS take accumulator first, then multiplicands
+in written instruction order. They round once; generic multiply/add remains
+unfused. Immediate shift and fixed-point forms take a final literal `i32` SSA
+constant whose range is verified. Dynamic counts use the separate variable
+shift intrinsics, which interpret the signed low byte of each count lane;
+portable shifts continue to mask counts modulo lane width.
+
+Explicit intrinsics execute with the current FPCR and update FPSR, including
+sticky QC and exception flags, according to the named ARM instruction. They are
+pinned barriers, conservatively may trap, and retain status effects when their
+value result is unused. `neon_read_fpsr.i64()` and `neon_read_fpcr.i64()` read
+state. `neon_swap_fpsr.i64(value)` and `neon_swap_fpcr.i64(value)` return the
+previous register value and then write the supplied value, following ARM rules
+for reserved register bits.
+
+**Portable floating operations retain their pre-existing numerical contract;
+their interaction with FPSR is unspecified.** In particular, mixing `vfadd`,
+scalar floating arithmetic, or other portable FP operations with an explicit
+FPSR read/swap does not make their intermediate exception flags observable IR
+semantics. Their scalar or packed implementation and optimization can change
+those incidental flags. Clients requiring architectural FPCR/FPSR behavior must
+use explicit architectural intrinsics for the operations they observe. Portable
+integer saturation remains independently specified to preserve QC.
+
+Baseline half-storage conversions use `i16x8` to carry IEEE binary16 bit patterns;
+this does not add optional FP16 arithmetic types or instructions. Numeric/crypto
+extensions, SVE and SME remain outside the baseline inventory.
+
+### D transport and structured memory
+
+The six D shapes have 8-byte size and alignment. ARM ordinary memory,
+spills, stack arguments, and homogeneous vector aggregate members transfer
+exactly eight bytes. Named arguments and results use the low SIMD register
+bits. Packed architectural D forms use explicit Q=0 encodings; single-lane
+64-bit architectural forms use the corresponding scalar encoding.
+
+Structured memory operations use the existing `neon_` instruction syntax,
+with a vector shape suffix. `neon_ld2`, `neon_ld3`, and `neon_ld4` return
+2–4 vectors in structure order; `neon_ld1` returns one. `neon_ld1x2`,
+`neon_ld1x3`, and `neon_ld1x4` read contiguous vector lists. Stores take the
+address followed by the vectors and have no results. `neon_ldNr` reads one
+lane per structure and replicates it. `neon_ldN_lane` takes an address,
+N original vectors, and a literal i32 lane index, returning N updated vectors;
+`neon_stN_lane` takes the same inputs and returns nothing. N ranges from 1
+through 4. All six D and six Q shapes are supported; lane indices are checked
+against the shape. Address writeback is an explicit `ptradd` in SSA.
+
+For example:
+
+```text
+v2, v3 = neon_ld2.i16x4(v0)
+neon_st2.i16x4(v1, v2, v3)
+```
+
+These instructions remain pinned memory barriers. They make no alignment or
+fault-freedom promise and are not atomic. Full transfers access exactly N
+vector widths; lane and replicate transfers access exactly N element widths.
+The backend selects native list, interleaved, lane and replicate structure
+instructions where their arrangements are legal, retaining exact scalar
+legalization for arrangements without a native structure encoding. Post-index recipes
+perform the pinned memory access before computing the next SSA pointer with
+`ptradd`.
+
+### Scalar architectural forms
+
+Explicit NEON saturation accepts scalar i8/i16/i32/i64 where the scalar
+instruction defines that size. Plain variable/immediate shifts accept i64;
+saturating scalar shifts accept all four widths. Doubling multiply-high
+accepts i16/i32, doubling long multiply/accumulate i32/i64 results, and
+saturating narrowing i8/i16/i32 results with twice-width inputs. Raw scalar
+FP operations and conversions use f32/f64 and i32/i64 as appropriate. Scalar
+pairwise FP results consume f32x2 or f64x2. One-lane D64 forms use these scalar
+encodings rather than reserved Q=0,size=64 vector encodings.
+
+Integer SSA values are transferred into and out of low SIMD lanes without
+arithmetic conversion. All explicit operations retain pinned FPCR/FPSR
+semantics, including when the numeric result is dead. Scalar `neon_fmla` and
+`neon_fmls` use architectural fused instructions with accumulator first and
+written multiplicand order. Indexed recipes extract a lane then invoke these
+pinned operations. Portable FMA does not supply this architectural-status
+contract. `neon_frecpx` accepts f32/f64 and one-lane f64 vectors.
+
+`neon_cls` and `neon_rbit` expose the baseline sign-count and per-byte bit
+reversal operations. `neon_mla`, `neon_mls`, `neon_saba`, and `neon_uaba` take
+the accumulator first; `neon_sadalp` and `neon_uadalp` consume a same-size
+vector of half-width source lanes after the accumulator. Accepted D/Q lane
+widths are checked per operation. These architectural intrinsics preserve
+FPSR for the integer operations whose instruction definitions leave it alone.
+
+Optional FP16 arithmetic, crypto, SVE and SME are separate from baseline NEON.
+
 ## Assembly, archives and native linking
 
 The assembler uses the existing A64 encoder with GNU ELF names and relocation
@@ -216,115 +334,19 @@ The Clang overflow reference fixture (`__muloti4`) needs the compiler-rt package
 and selects `--rtlib=compiler-rt`. The full linker test suite also contains
 x86-only execution cases, so use the focused ARM commands above.
 
-<a id="arm-zero-branches-aarch64-ordinary-zero-branches"></a>
-## AArch64 ordinary zero branches
+## Ordinary zero branches
 
-For an ordinary i32/i64 `brif` truth test, the AArch64 backend emits a single
-CBZ instead of `cmp reg, #0` followed by a B.cond. This saves one instruction
-(four bytes before layout effects). No runtime speedup is claimed. No new pass,
-selector rule, IR operation, ISA feature, assembler API or tuning option is
-involved.
-
-<a id="arm-zero-branches-eligibility-and-edges"></a>
-### Eligibility and edges
-
-`FunctionCompiler` tries compare fusion first: a fused integer or floating
-comparison still uses `compare` and `Symbolic::Conditional`. Otherwise, an
-i32/i64 condition in a function without inline assembly uses `use_reg` and
-`Symbolic::Compare` through the existing `compare_branch` helper. The branch is
-CBZ to the **same false destination** (or false-edge argument landing pad). The
-true edge, allocator edge copies and `branch_unless_next` are unchanged. Far
-branch relaxation may still invert CBZ to CBNZ over an unconditional branch.
-EQ/NE expressions and fallthrough selection are not specially optimized.
-
-Width semantics:
-
-- **i32:** CBZ on the W register tests exactly the same 32 bits as the old
-  `cmp wN, #0`, ignoring undefined bits 63:32.
-- **i64:** both test all 64 bits.
-- Zero is false; every nonzero pattern (including 2, the sign bit and all ones)
-  is true. No bit-zero or normalized-boolean assumption is made.
-
-`use_reg` loads or rematerializes the operand at the same point as before, ahead
-of any edge copies that could overwrite it. Allocation inputs, scratch
-registers, frame layout and calling convention are unchanged.
-
-Not affected:
-
-- **i8/i16** keep masked TST because their upper register bits are undefined.
-  Scalar comparisons produce i8 and therefore stay on this path, even when a
-  CSET producer would make the upper bits zero. There is no i1/bool IR type.
-- **i128** keeps ORR of both halves followed by CMP; testing one half would be
-  wrong.
-- Floating and pointer `brif` operands are rejected by the verifier. Floating
-  comparison results go through comparison fusion or i8 materialization,
-  preserving ordered/unordered semantics and negative zero.
-
-<a id="arm-zero-branches-nzcv-proof-boundary"></a>
-### NZCV proof boundary
-
-CMP writes NZCV and CBZ does not, so dropping the CMP is only safe if no later
-instruction (including across joins and loops) reads the flags it used to set.
-There is no IR flag SSA value or flag block argument, and in compiler-generated
-AArch64 code flag use is local to a single lowering sequence:
-
-| Consumers | Defining sequence in `aarch64.rs` |
-| --- | --- |
-| Fused Brif / materialized Icmp and Fcmp | `compare` emits CMP/CMN/FCMP before B.cond/CSET |
-| Scalar, float, vector and wide Select | `test_value`/`test_nonzero` or explicit CMP before conditional branch/CSEL/FCSEL |
-| i128 Icmp | low CMP before CCMP/SBCS, then CSET |
-| i128 add/sub/negate and overflow | ADDS/SUBS/NEGS before ADC/SBC/NGC or ADCS/SBCS and CSET |
-| i128 shifts/counts | TST/CMP before CSEL, all in the same helper invocation |
-| Narrow/full-width overflow | ADDS/SUBS/CMP/TST before CSET |
-| Signed division guards | CMN then CCMP/B.cond, or CMN/CMP before B.cond |
-| Switch | CMP before conditional table/range/case decisions |
-
-`aarch64/vector.rs` has no NZCV consumers. Allocator copies, address
-construction, reloads, rematerialization, prologue and epilogue do not consume
-flags. Every generated consumer is preceded by its own defining instruction on
-every path through its sequence, and no sequence reads predecessor flags. That
-property holds under concatenation, block edges, joins and backedges, so
-differing incoming flags are never read. Calls and returns carry no NZCV value
-under the ABI.
-
-This is an argument over the current lowering inventory, not a machine flag
-liveness analysis. Any future flag-consuming lowering must keep the same
-boundary or extend the fallback below.
-
-**Inline assembly fallback.** `AsmClobber::Flags` describes writes, but
-constraints do not describe reads: a template can read NZCV in another block
-without `~{cc}`. If **any laid-out instruction** in a function is InlineAsm
-(even in an unreachable block), every ordinary Brif in that function keeps the
-CMP + B.cond form. Template contents and clobbers are not inspected.
-
-<a id="arm-zero-branches-layout-faults-and-debug-information"></a>
-### Layout, faults and debug information
-
-B.cond and CBZ/CBNZ both use a signed imm19 word-scaled displacement, and text
-and structured relaxation handle both, including inversion over B. Output is
-not byte-for-byte identical to the old form: removing instructions can change
-PC-relative offsets, alignment, branch relaxation, unwind ranges, line-table
-addresses and executable metadata.
-
-The removed CMP is nonfaulting; no load, store, call, trap or volatile effect
-moves. IR source locations and the location-emission boundary around
-`allocated_inst` are unchanged, and CBZ is emitted at the Brif's location. CFI
-directives, stack layout and unwind rules are unchanged. Debugger-visible NZCV
-contents and breakpoint PC addresses may differ.
-
-<a id="arm-zero-branches-testing"></a>
-### Testing
+For an ordinary i32 or i64 `brif` truth test that compare fusion does not
+cover, the backend emits CBZ to the false destination instead of
+`cmp reg, #0` and B.cond. On i32, CBZ on the W register tests the same 32 bits;
+on i64 it tests all 64. Zero is false and every nonzero pattern is true. Far
+branch relaxation may invert CBZ to CBNZ over B. i8 and i16 keep a masked TST
+because their upper bits are undefined, and i128 keeps ORR of both halves and
+CMP. A function containing inline assembly keeps CMP and B.cond for every
+`brif`, because a template can read NZCV without declaring it. The proof that
+no other generated sequence reads the removed flags is documented on
+`BrifTest` in `crates/keel-codegen/src/aarch64.rs`.
 
 ```sh
 cargo test -p keel-codegen --test arm_zero_branches
 ```
-
-The test and its header-free C oracle (`tests/fixtures/arm_zero_branches.c`)
-cover all three selection tiers and both allocators with normal and empty
-register pools: 32/64-bit truth, reversed targets, edge arguments, spills, raw
-aliases, call results, locations/CFI, i8/i16/i128 fallbacks, comparison and
-float paths, and an inline-assembly flags witness in a successor block. Each
-compilation checks that structured and text objects match. On Apple ARM64, a
-native test compares all 16 width/layout/edge combinations against Clang C
-conditionals for zero, high-bit, nonboolean and negative patterns, W/X width
-counterexamples and all 256 byte values.
