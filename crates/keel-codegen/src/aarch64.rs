@@ -611,7 +611,11 @@ fn folded_offset(
         return None;
     };
     let offset = offsets[slot.index()];
-    let size = ty.bytes()? as usize;
+    let size = if ty == Type::Ptr {
+        8
+    } else {
+        ty.bytes()? as usize
+    };
     ((size <= 8 || ty.is_vector()) && offset.is_multiple_of(size) && offset / size < 4096)
         .then_some(offset)
 }

@@ -286,3 +286,29 @@ block0(v0: ptr, v1: ptr):
         assert_eq!(selection.operands(&f, insts[2]), vec![params[0]]);
     }
 }
+
+#[test]
+fn aarch64_pointer_stack_slots_fold_their_offset() {
+    let src = "decl @use(ptr)
+func @f(ptr) -> ptr {
+    ss0 = stack_slot 8, align 8
+    ss1 = stack_slot 8, align 8
+block0(v0: ptr):
+    v1 = stack_addr ss0
+    v2 = stack_addr ss1
+    store v0, v1
+    store v0, v2
+    call @use(v1)
+    v3 = load.ptr v1
+    v4 = load.ptr v2
+    v5 = ptrtoint.i64 v3
+    v6 = ptrtoint.i64 v4
+    v7 = iadd v5, v6
+    v8 = inttoptr.ptr v7
+    return v8
+}";
+    let asm = output(src, Target::Aarch64AppleDarwin, SelectionOptions::default());
+    assert_eq!(instruction_count(&asm, "add"), 2, "{asm}");
+    assert!(asm.contains("\tstr\tx9, [sp, #8]\n"), "{asm}");
+    assert!(asm.contains("\tldr\tx10, [sp, #8]\n"), "{asm}");
+}
