@@ -226,7 +226,7 @@ suppression; the byte-mask non-temporal store instead requires a fully writable
 16-byte destination and emits `SFENCE`. These operations require their declared
 features and reject foreign backends. Legacy architectural SSE equivalents are
 being staged separately; AVX support does not prove strict-v1/v2 exposure. The
-[unmasked FP audit and proof](../targets/x86_64/intrinsics.md) records the existing raw
+[unmasked FP contract](../targets/x86_64/intrinsics.md#unmasked-sse-and-avx-exceptions) records the existing raw
 barrier/trap contract, export-only native packet and separate masked-CW x87 gap;
 its local checks do not establish native acceptance or fullprofile completion.
 

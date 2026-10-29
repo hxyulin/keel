@@ -300,7 +300,7 @@ it no longer declares variants or computes global inventory length.
 existing descriptor/status, selector and scalar port-I/O APIs.
 `query_bindings.py` generates their tables and const-checks their IDs.
 Shared emitters remain handwritten. The four wide LAR/LSL compilation gaps
-found during migration are fixed; see [the query binding notes](../../docs/targets/x86_64/intrinsics.md).
+found during migration are fixed; see [the selector query contract](../../docs/targets/x86_64/system/README.md#selector-queries).
 
 The other 732 intrinsics retain handwritten metadata and lowering. Their
 existing enum documentation lives in the registry; generated-family contract

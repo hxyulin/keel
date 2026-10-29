@@ -1363,7 +1363,7 @@ Supported expressions:
 - Explicit equal-width casts between supported vectors, and between a 16-byte
   vector and signed or unsigned `__int128`, preserving all bytes. These are bit casts,
   not numeric lane conversions. The separate
-  [three SSE2 conversion wrappers](../../targets/x86_64/intrinsics.md#c-x86-intrinsics-bounded-sse2-numeric-conversions)
+  [SSE2 conversion wrappers](../../targets/x86_64/intrinsics.md#numeric-conversion-expansion)
   preserve architectural rounding/invalid/status behavior through dedicated IR.
 - Bounded `__builtin_shufflevector` permutations with matching input/result
   shapes and constant in-range indices; see the

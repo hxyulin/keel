@@ -1,4 +1,4 @@
-/* Bounded Keel intrinsic subset; see docs/c-x86-intrinsics.md. */
+/* Bounded Keel intrinsic subset; see docs/targets/x86_64/intrinsics.md. */
 #ifndef _KEEL_AVXINTRIN_H
 #define _KEEL_AVXINTRIN_H
 #ifndef __x86_64__

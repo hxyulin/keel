@@ -5305,7 +5305,7 @@ impl Intrinsic {
         })
     }
 
-    /// Raw 2w/w architectural division, quotient then remainder. See docs/targets/x86_64/raw-div.md.
+    /// Raw 2w/w architectural division, quotient then remainder. See docs/targets/x86_64/intrinsics.md.
     pub fn x86_raw_div(self) -> Option<(u16, bool)> {
         match self {
             Self::X86DivU8 => Some((8, false)),

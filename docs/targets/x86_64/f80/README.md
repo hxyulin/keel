@@ -413,7 +413,7 @@ marker before an instruction; the RIP and the saved FIP and FOP attribute a
 fault.
 
 Native fault delivery with GCC and Clang on x86-64 Linux has not been
-validated. The [SSE/AVX unmasked contract](../intrinsics.md)
+validated. The [SSE/AVX unmasked contract](../intrinsics.md#unmasked-sse-and-avx-exceptions)
 covers the raw SSE and AVX intrinsics.
 
 ## References

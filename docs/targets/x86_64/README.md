@@ -8,7 +8,7 @@ compiler operations and runtime qualification are separate boundaries.
 | --- | --- |
 | Feature levels and runtime requirements | [Target support](../README.md), [CPU profiles](../../../tools/x86-isa/cpu-profiles.md) |
 | Assembly | [Assembler](assembler.md), [GNU language rules](gnu-assembly-language.md) |
-| Compiler | [Code generation](codegen.md), [intrinsics](intrinsics.md), [raw division](raw-div.md) |
+| Compiler | [Code generation](codegen.md), [intrinsics](intrinsics.md) |
 | C inline assembly | [x86 constraints](c-inline-asm.md) |
 | Extended floating point | [F80 and x87](f80/README.md) |
 | Privileged and machine state | [System APIs](system/README.md) |
