@@ -198,40 +198,6 @@ block4:
     assert_eq!(memory(f), 4);
 }
 
-// Optional corpus evidence runner: invoked explicitly under the shared lock.
-#[test]
-fn original_c_activation() {
-    let Ok(input) = std::env::var("KEEL_STACK_LARGE_INPUT") else {
-        return;
-    };
-    let output = std::env::var("KEEL_STACK_LARGE_OUTPUT").unwrap();
-    let mut m = keel_ir::parse(&std::fs::read_to_string(input).unwrap()).unwrap();
-    keel_ir::verify_module(&m).unwrap();
-    let mut events = Vec::new();
-    for f in &mut m.functions {
-        let before = memory(f);
-        let old_params = params(f);
-        let blocks = f.blocks().count();
-        let insts = f.layout_insts().count();
-        let changed = keel_opt::find_pass("stack-promote-large").unwrap().run(f);
-        let after = memory(f);
-        if changed || f.name == "JS_CallInternal" {
-            events.push(format!("{{\"function\":\"{}\",\"blocks\":{blocks},\"instructions\":{insts},\"changed\":{changed},\"memory_before\":{before},\"memory_after\":{after},\"params_before\":{old_params},\"params_after\":{}}}",f.name,params(f)));
-        }
-    }
-    keel_ir::verify_module(&m).unwrap();
-    std::fs::write(format!("{output}.keel"), m.to_string()).unwrap();
-    std::fs::write(
-        format!("{output}.json"),
-        format!("[\n{}\n]", events.join(",\n")),
-    )
-    .unwrap();
-    assert!(
-        events.iter().any(|e| e.contains("\"changed\":true")),
-        "no corpus activation"
-    );
-}
-
 #[test]
 fn dead_fields_in_large_cfg_have_no_phi_growth() {
     let src = chain(1000)

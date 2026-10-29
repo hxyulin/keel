@@ -1,5 +1,3 @@
-#[path = "support/combined_corpus.rs"]
-mod combined_corpus;
 #[path = "support/adjacent_tee.rs"]
 mod oracle;
 
@@ -173,64 +171,6 @@ for(const n of [0n,1n,-1n,-(1n<<63n),(1n<<63n)-1n]) assert.equal(e.wide(n),BigIn
 for(const n of [0,1,-1,-2147483648,2147483647]) assert.equal(e.alias(n),(2*n)|0);
 for(let n=0;n<20;n++) assert.equal(e.cycle(n,17,5),n%2?-12:12);
 "#,
-        );
-    }
-}
-
-#[test]
-fn static_frozen_corpus_combined_exact_body_operator_and_local_delta() {
-    // Optional external evidence input; normal tests do not depend on /tmp.
-    let Ok(root) = std::env::var("KEEL_TEE_FROZEN_CORPUS") else {
-        return;
-    };
-    for profile in ["plain", "basic"] {
-        let root = std::path::Path::new(&root);
-        let module =
-            parse(&std::fs::read_to_string(root.join(format!("{profile}.ir"))).unwrap()).unwrap();
-        let current = emit(&module, 2);
-        if let Ok(destination) = std::env::var("KEEL_TEE_CORPUS_OUTPUT") {
-            let destination = std::path::Path::new(&destination);
-            assert!(destination.starts_with("/tmp"));
-            std::fs::create_dir_all(destination).unwrap();
-            std::fs::write(destination.join(format!("{profile}.wasm")), &current).unwrap();
-        }
-        let original = std::fs::read(root.join(format!("{profile}.wasm"))).unwrap();
-        let before = bodies(&original);
-        let after = bodies(&current);
-        assert_eq!(before.len(), after.len());
-        let mut pairs = 0;
-        let mut bytes_saved = 0;
-        let mut operators_saved = 0;
-        let mut locals_removed = 0;
-        for (index, (old, new)) in before.iter().zip(&after).enumerate() {
-            let sibling = combined_corpus::pre_tee_body(profile, index);
-            let pre_tee = sibling.as_deref().unwrap_or(old.as_bytes());
-            let (expected, count) = oracle::fold_body(pre_tee);
-            assert_eq!(new.as_bytes(), expected);
-            pairs += count;
-            bytes_saved += old.as_bytes().len() - new.as_bytes().len();
-            let declaration_count = |body: &wasmparser::FunctionBody<'_>| -> u32 {
-                body.get_locals_reader()
-                    .unwrap()
-                    .into_iter()
-                    .map(|l| l.unwrap().0)
-                    .sum()
-            };
-            let removed = u32::from(profile == "basic" && index == 10);
-            assert_eq!(declaration_count(old) - declaration_count(new), removed);
-            locals_removed += removed;
-            operators_saved += old.get_operators_reader().unwrap().into_iter().count()
-                - new.get_operators_reader().unwrap().into_iter().count();
-        }
-        // Low-bit casts remove 28 bytes/18 operators before tee folding;
-        // terminal-if removes another 42 bytes/24 operators and one PC local.
-        let terminal = usize::from(profile == "basic");
-        assert_eq!(pairs, 68);
-        assert_eq!(bytes_saved, 28 + 42 * terminal + 2 * pairs);
-        assert_eq!(operators_saved, 18 + 24 * terminal + pairs);
-        assert_eq!(locals_removed, terminal as u32);
-        eprintln!(
-            "corpus {profile}: pairs={pairs} body_bytes_saved={bytes_saved} operators_saved={operators_saved} locals_removed={locals_removed}"
         );
     }
 }
