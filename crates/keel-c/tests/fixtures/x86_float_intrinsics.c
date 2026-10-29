@@ -59,3 +59,44 @@ void FN(ps128)(const void *a,void *out) { __m128i x; __m128 r;__builtin_memcpy(&
 void FN(ps256)(const void *a,void *out) { __m128i x; __m256 r;__builtin_memcpy(&x,a,16);r=_mm256_cvtph_ps(x);__builtin_memcpy(out,&r,32); }
 float FN(scalar_ps)(unsigned short h) { return _cvtsh_ss(h); }
 unsigned short FN(scalar_ph)(float f) { return _cvtss_sh(f,255); }
+
+void FN(lane_hadd_ps128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128 x,y,r;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);r=_mm_hadd_ps(x,y);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_hadd_ps128(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m128 x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);(void)_mm_hadd_ps(x,y);}
+#endif
+void FN(lane_hsub_ps128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128 x,y,r;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);r=_mm_hsub_ps(x,y);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_hsub_ps128(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m128 x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);(void)_mm_hsub_ps(x,y);}
+#endif
+void FN(lane_hadd_pd128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128d x,y,r;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);r=_mm_hadd_pd(x,y);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_hadd_pd128(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m128d x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);(void)_mm_hadd_pd(x,y);}
+#endif
+void FN(lane_hsub_pd128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128d x,y,r;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);r=_mm_hsub_pd(x,y);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_hsub_pd128(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m128d x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);(void)_mm_hsub_pd(x,y);}
+#endif
+void FN(lane_unpacklo_ps128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128 x,y,r;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);r=_mm_unpacklo_ps(x,y);__builtin_memcpy(out,&r,16);}
+void FN(lane_unpackhi_ps128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128 x,y,r;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);r=_mm_unpackhi_ps(x,y);__builtin_memcpy(out,&r,16);}
+void FN(lane_unpacklo_pd128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128d x,y,r;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);r=_mm_unpacklo_pd(x,y);__builtin_memcpy(out,&r,16);}
+void FN(lane_unpackhi_pd128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128d x,y,r;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);r=_mm_unpackhi_pd(x,y);__builtin_memcpy(out,&r,16);}
+void FN(lane_hadd_ps256)(const void*a,const void*b,const void*c,void*out){(void)c;__m256 x,y,r;__builtin_memcpy(&x,a,32);__builtin_memcpy(&y,b,32);r=_mm256_hadd_ps(x,y);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_hadd_ps256(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m256 x,y;__builtin_memcpy(&x,a,32);__builtin_memcpy(&y,b,32);(void)_mm256_hadd_ps(x,y);}
+#endif
+void FN(lane_hsub_ps256)(const void*a,const void*b,const void*c,void*out){(void)c;__m256 x,y,r;__builtin_memcpy(&x,a,32);__builtin_memcpy(&y,b,32);r=_mm256_hsub_ps(x,y);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_hsub_ps256(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m256 x,y;__builtin_memcpy(&x,a,32);__builtin_memcpy(&y,b,32);(void)_mm256_hsub_ps(x,y);}
+#endif
+void FN(lane_hadd_pd256)(const void*a,const void*b,const void*c,void*out){(void)c;__m256d x,y,r;__builtin_memcpy(&x,a,32);__builtin_memcpy(&y,b,32);r=_mm256_hadd_pd(x,y);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_hadd_pd256(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m256d x,y;__builtin_memcpy(&x,a,32);__builtin_memcpy(&y,b,32);(void)_mm256_hadd_pd(x,y);}
+#endif
+void FN(lane_hsub_pd256)(const void*a,const void*b,const void*c,void*out){(void)c;__m256d x,y,r;__builtin_memcpy(&x,a,32);__builtin_memcpy(&y,b,32);r=_mm256_hsub_pd(x,y);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_hsub_pd256(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m256d x,y;__builtin_memcpy(&x,a,32);__builtin_memcpy(&y,b,32);(void)_mm256_hsub_pd(x,y);}
+#endif
+void FN(lane_unpacklo_ps256)(const void*a,const void*b,const void*c,void*out){(void)c;__m256 x,y,r;__builtin_memcpy(&x,a,32);__builtin_memcpy(&y,b,32);r=_mm256_unpacklo_ps(x,y);__builtin_memcpy(out,&r,32);}
+void FN(lane_unpackhi_ps256)(const void*a,const void*b,const void*c,void*out){(void)c;__m256 x,y,r;__builtin_memcpy(&x,a,32);__builtin_memcpy(&y,b,32);r=_mm256_unpackhi_ps(x,y);__builtin_memcpy(out,&r,32);}
+void FN(lane_unpacklo_pd256)(const void*a,const void*b,const void*c,void*out){(void)c;__m256d x,y,r;__builtin_memcpy(&x,a,32);__builtin_memcpy(&y,b,32);r=_mm256_unpacklo_pd(x,y);__builtin_memcpy(out,&r,32);}
+void FN(lane_unpackhi_pd256)(const void*a,const void*b,const void*c,void*out){(void)c;__m256d x,y,r;__builtin_memcpy(&x,a,32);__builtin_memcpy(&y,b,32);r=_mm256_unpackhi_pd(x,y);__builtin_memcpy(out,&r,32);}

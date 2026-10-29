@@ -2274,6 +2274,366 @@
       ],
       "ownership": "keel",
       "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_ssse3_phaddw128",
+      "intrinsic": "X86Ssse3Phaddw128",
+      "intrinsic_id": 577,
+      "family": "value",
+      "header": "tmmintrin.h",
+      "params": [
+        "i16x8",
+        "i16x8"
+      ],
+      "result": "i16x8",
+      "control": "none",
+      "features": [
+        "ssse3"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_ssse3_phaddd128",
+      "intrinsic": "X86Ssse3Phaddd128",
+      "intrinsic_id": 578,
+      "family": "value",
+      "header": "tmmintrin.h",
+      "params": [
+        "i32x4",
+        "i32x4"
+      ],
+      "result": "i32x4",
+      "control": "none",
+      "features": [
+        "ssse3"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_ssse3_phaddsw128",
+      "intrinsic": "X86Ssse3Phaddsw128",
+      "intrinsic_id": 579,
+      "family": "value",
+      "header": "tmmintrin.h",
+      "params": [
+        "i16x8",
+        "i16x8"
+      ],
+      "result": "i16x8",
+      "control": "none",
+      "features": [
+        "ssse3"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_ssse3_phsubw128",
+      "intrinsic": "X86Ssse3Phsubw128",
+      "intrinsic_id": 580,
+      "family": "value",
+      "header": "tmmintrin.h",
+      "params": [
+        "i16x8",
+        "i16x8"
+      ],
+      "result": "i16x8",
+      "control": "none",
+      "features": [
+        "ssse3"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_ssse3_phsubd128",
+      "intrinsic": "X86Ssse3Phsubd128",
+      "intrinsic_id": 581,
+      "family": "value",
+      "header": "tmmintrin.h",
+      "params": [
+        "i32x4",
+        "i32x4"
+      ],
+      "result": "i32x4",
+      "control": "none",
+      "features": [
+        "ssse3"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_ssse3_phsubsw128",
+      "intrinsic": "X86Ssse3Phsubsw128",
+      "intrinsic_id": 582,
+      "family": "value",
+      "header": "tmmintrin.h",
+      "params": [
+        "i16x8",
+        "i16x8"
+      ],
+      "result": "i16x8",
+      "control": "none",
+      "features": [
+        "ssse3"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_sse3_haddps",
+      "intrinsic": "X86Sse3Haddps",
+      "intrinsic_id": 390,
+      "family": "value",
+      "header": "pmmintrin.h",
+      "params": [
+        "f32x4",
+        "f32x4"
+      ],
+      "result": "f32x4",
+      "control": "none",
+      "features": [
+        "sse3"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_sse3_hsubps",
+      "intrinsic": "X86Sse3Hsubps",
+      "intrinsic_id": 392,
+      "family": "value",
+      "header": "pmmintrin.h",
+      "params": [
+        "f32x4",
+        "f32x4"
+      ],
+      "result": "f32x4",
+      "control": "none",
+      "features": [
+        "sse3"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_sse3_haddpd",
+      "intrinsic": "X86Sse3Haddpd",
+      "intrinsic_id": 391,
+      "family": "value",
+      "header": "pmmintrin.h",
+      "params": [
+        "f64x2",
+        "f64x2"
+      ],
+      "result": "f64x2",
+      "control": "none",
+      "features": [
+        "sse3"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_sse3_hsubpd",
+      "intrinsic": "X86Sse3Hsubpd",
+      "intrinsic_id": 393,
+      "family": "value",
+      "header": "pmmintrin.h",
+      "params": [
+        "f64x2",
+        "f64x2"
+      ],
+      "result": "f64x2",
+      "control": "none",
+      "features": [
+        "sse3"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_avx2_vphaddw256",
+      "intrinsic": "X86Avx2Vphaddw256",
+      "intrinsic_id": 621,
+      "family": "value",
+      "header": "avx2intrin.h",
+      "params": [
+        "i16x16",
+        "i16x16"
+      ],
+      "result": "i16x16",
+      "control": "none",
+      "features": [
+        "avx2"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_avx2_vphaddd256",
+      "intrinsic": "X86Avx2Vphaddd256",
+      "intrinsic_id": 622,
+      "family": "value",
+      "header": "avx2intrin.h",
+      "params": [
+        "i32x8",
+        "i32x8"
+      ],
+      "result": "i32x8",
+      "control": "none",
+      "features": [
+        "avx2"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_avx2_vphaddsw256",
+      "intrinsic": "X86Avx2Vphaddsw256",
+      "intrinsic_id": 623,
+      "family": "value",
+      "header": "avx2intrin.h",
+      "params": [
+        "i16x16",
+        "i16x16"
+      ],
+      "result": "i16x16",
+      "control": "none",
+      "features": [
+        "avx2"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_avx2_vphsubw256",
+      "intrinsic": "X86Avx2Vphsubw256",
+      "intrinsic_id": 624,
+      "family": "value",
+      "header": "avx2intrin.h",
+      "params": [
+        "i16x16",
+        "i16x16"
+      ],
+      "result": "i16x16",
+      "control": "none",
+      "features": [
+        "avx2"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_avx2_vphsubd256",
+      "intrinsic": "X86Avx2Vphsubd256",
+      "intrinsic_id": 625,
+      "family": "value",
+      "header": "avx2intrin.h",
+      "params": [
+        "i32x8",
+        "i32x8"
+      ],
+      "result": "i32x8",
+      "control": "none",
+      "features": [
+        "avx2"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_avx2_vphsubsw256",
+      "intrinsic": "X86Avx2Vphsubsw256",
+      "intrinsic_id": 626,
+      "family": "value",
+      "header": "avx2intrin.h",
+      "params": [
+        "i16x16",
+        "i16x16"
+      ],
+      "result": "i16x16",
+      "control": "none",
+      "features": [
+        "avx2"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_avx_vhaddps256",
+      "intrinsic": "X86AvxVhaddps256",
+      "intrinsic_id": 563,
+      "family": "value",
+      "header": "avxintrin.h",
+      "params": [
+        "f32x8",
+        "f32x8"
+      ],
+      "result": "f32x8",
+      "control": "none",
+      "features": [
+        "avx"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_avx_vhsubps256",
+      "intrinsic": "X86AvxVhsubps256",
+      "intrinsic_id": 567,
+      "family": "value",
+      "header": "avxintrin.h",
+      "params": [
+        "f32x8",
+        "f32x8"
+      ],
+      "result": "f32x8",
+      "control": "none",
+      "features": [
+        "avx"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_avx_vhaddpd256",
+      "intrinsic": "X86AvxVhaddpd256",
+      "intrinsic_id": 565,
+      "family": "value",
+      "header": "avxintrin.h",
+      "params": [
+        "f64x4",
+        "f64x4"
+      ],
+      "result": "f64x4",
+      "control": "none",
+      "features": [
+        "avx"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_avx_vhsubpd256",
+      "intrinsic": "X86AvxVhsubpd256",
+      "intrinsic_id": 569,
+      "family": "value",
+      "header": "avxintrin.h",
+      "params": [
+        "f64x4",
+        "f64x4"
+      ],
+      "result": "f64x4",
+      "control": "none",
+      "features": [
+        "avx"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
     }
   ],
   "reference_file": "vendor-references.json"

@@ -1,4 +1,4 @@
-//! Vendor FMA/F16C wrappers preserve rounding, status flags and scalar lanes.
+//! Floating intrinsic wrappers preserve rounding, status flags and lane layout.
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools},
@@ -36,7 +36,7 @@ fn frontend(source: &str) -> Result<keel_ir::Module, String> {
     .map_err(|e| e.to_string())
 }
 fn features() -> Features {
-    Features::parse("fma,f16c").unwrap()
+    Features::parse("sse3,fma,f16c").unwrap()
 }
 fn pipeline<'a>(
     selector: &'a FeatureSelector<'a>,
@@ -149,7 +149,7 @@ fn vendor_float_wrappers_keep_effects_and_validate_controls() {
 }
 
 #[test]
-fn floating_vendor_oracles_cover_rounding_lanes_and_half_payloads() {
+fn floating_vendor_oracles_cover_rounding_status_and_lane_layouts() {
     let directory = std::env::var_os("KEEL_FLOAT_INTRINSICS_EXPORT_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("x86-float-intrinsics"));
@@ -166,6 +166,7 @@ fn floating_vendor_oracles_cover_rounding_lanes_and_half_payloads() {
                 "-O2",
                 "-mfma",
                 "-mf16c",
+                "-msse3",
                 "-DREFERENCE",
                 "-c",
             ])
@@ -237,11 +238,112 @@ fn floating_vendor_oracles_cover_rounding_lanes_and_half_payloads() {
 
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 fn native_supported() -> bool {
-    std::is_x86_feature_detected!("avx")
+    std::is_x86_feature_detected!("sse3")
+        && std::is_x86_feature_detected!("avx")
         && std::is_x86_feature_detected!("fma")
         && std::is_x86_feature_detected!("f16c")
 }
 #[cfg(not(all(target_arch = "x86_64", target_os = "linux")))]
 fn native_supported() -> bool {
     false
+}
+
+#[test]
+fn horizontal_arithmetic_keeps_status_effects_and_unpack_keeps_bits() {
+    for width in [128, 256] {
+        let prefix = if width == 128 { "_mm" } else { "_mm256" };
+        for suffix in ["ps", "pd"] {
+            let ty = format!("__m{width}{}", if suffix == "pd" { "d" } else { "" });
+            for op in ["hadd", "hsub", "unpacklo", "unpackhi"] {
+                let call = format!("{prefix}_{op}_{suffix}");
+                let mut module=frontend(&format!("#include <immintrin.h>\n{ty} f({ty} a,{ty} b){{return {call}(a,b);}}\nvoid dead({ty} a,{ty} b){{(void){call}(a,b);}}")).unwrap();
+                keel_ir::verify_module(&module).unwrap();
+                let horizontal = op.starts_with('h');
+                let ir = if horizontal {
+                    if width == 128 {
+                        format!("x86_sse3_{op}{suffix}")
+                    } else {
+                        format!("x86_avx_v{op}{suffix}256")
+                    }
+                } else {
+                    "vshuffle".to_string()
+                };
+                assert!(module.to_string().contains(&ir), "{call}");
+                keel_opt::optimize(&mut module).unwrap();
+                if horizontal {
+                    let dead = module
+                        .functions
+                        .iter()
+                        .find(|function| function.name == "dead")
+                        .unwrap();
+                    let text = dead.to_string();
+                    assert!(
+                        text.contains("call @") || text.contains(&ir),
+                        "{call}: {text}"
+                    );
+                }
+                let allowed = if width == 128 {
+                    Features::parse(if horizontal { "sse3" } else { "none" }).unwrap()
+                } else {
+                    Features::parse("avx").unwrap()
+                };
+                let selector = FeatureSelector {
+                    inner: &SelectionTier::Baseline,
+                    features: allowed,
+                };
+                let program = keel_codegen::compile_program_with_pipeline(
+                    &module,
+                    Target::X86_64LinuxGnu,
+                    &pipeline(&selector, &AllocationTier::Full),
+                )
+                .unwrap();
+                keel_asm::x86::assemble_program_object_with_features(&program, allowed).unwrap();
+                if horizontal {
+                    let mut missing = allowed;
+                    if width == 128 {
+                        missing.sse3 = false;
+                    } else {
+                        missing.avx = false;
+                    }
+                    let selector = FeatureSelector {
+                        inner: &SelectionTier::Baseline,
+                        features: missing,
+                    };
+                    assert!(
+                        keel_codegen::compile_program_with_pipeline(
+                            &module,
+                            Target::X86_64LinuxGnu,
+                            &pipeline(&selector, &AllocationTier::Full)
+                        )
+                        .is_err(),
+                        "{call}"
+                    );
+                }
+                let once=frontend(&format!("#include <immintrin.h>\nextern {ty} next(void);{ty} f(void){{return {call}(next(),next());}}")).unwrap();
+                assert_eq!(
+                    once.to_string().matches("call @next()").count(),
+                    2,
+                    "{call}"
+                );
+            }
+        }
+    }
+    for source in [
+        "#include <pmmintrin.h>\n__m128 f(__m128d a){return _mm_hadd_ps(a,a);}",
+        "typedef float V __attribute__((vector_size(16)));V f(V a){return __builtin_keel_sse3_haddps(a);}",
+        "typedef float V __attribute__((vector_size(16)));V f(V a){return __builtin_keel_avx_vhaddps256(a,a);}",
+    ] {
+        assert!(frontend(source).is_err(), "{source}");
+    }
+    let module = frontend("#include <pmmintrin.h>\nint f(void){return 0;}").unwrap();
+    let selector = FeatureSelector {
+        inner: &SelectionTier::Baseline,
+        features: Features::NONE,
+    };
+    keel_codegen::compile_program_with_pipeline(
+        &module,
+        Target::X86_64LinuxGnu,
+        &pipeline(&selector, &AllocationTier::Full),
+    )
+    .unwrap();
 }

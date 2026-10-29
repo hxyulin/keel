@@ -4,7 +4,7 @@
 #ifndef __x86_64__
 #error "Keel x86 intrinsic headers require x86-64"
 #endif
-#include <emmintrin.h>
+#include <pmmintrin.h>
 
 /* Unsigned negation retains the minimum signed lane bit pattern. */
 static __inline__ __m128i _mm_abs_epi8(__m128i a) {
@@ -51,6 +51,25 @@ static __inline__ __m128i _mm_mulhrs_epi16(__m128i a, __m128i b) {
 }
 static __inline__ __m128i _mm_shuffle_epi8(__m128i a, __m128i b) {
   return (__m128i)__builtin_keel_ssse3_pshufb128((__keel_i8_128)a, (__keel_i8_128)b);
+}
+
+static __inline__ __m128i _mm_hadd_epi16(__m128i a, __m128i b) {
+  return (__m128i)__builtin_keel_ssse3_phaddw128((__keel_i16_128)a, (__keel_i16_128)b);
+}
+static __inline__ __m128i _mm_hadd_epi32(__m128i a, __m128i b) {
+  return (__m128i)__builtin_keel_ssse3_phaddd128((__keel_i32_128)a, (__keel_i32_128)b);
+}
+static __inline__ __m128i _mm_hadds_epi16(__m128i a, __m128i b) {
+  return (__m128i)__builtin_keel_ssse3_phaddsw128((__keel_i16_128)a, (__keel_i16_128)b);
+}
+static __inline__ __m128i _mm_hsub_epi16(__m128i a, __m128i b) {
+  return (__m128i)__builtin_keel_ssse3_phsubw128((__keel_i16_128)a, (__keel_i16_128)b);
+}
+static __inline__ __m128i _mm_hsub_epi32(__m128i a, __m128i b) {
+  return (__m128i)__builtin_keel_ssse3_phsubd128((__keel_i32_128)a, (__keel_i32_128)b);
+}
+static __inline__ __m128i _mm_hsubs_epi16(__m128i a, __m128i b) {
+  return (__m128i)__builtin_keel_ssse3_phsubsw128((__keel_i16_128)a, (__keel_i16_128)b);
 }
 
 #endif /* _KEEL_TMMINTRIN_H */

@@ -68,4 +68,11 @@ static __inline__ __m128 _mm_andnot_ps(__m128 a, __m128 b) {
   return (__m128)(~(__keel_ps_bits)a & (__keel_ps_bits)b);
 }
 
+static __inline__ __m128 _mm_unpacklo_ps(__m128 a, __m128 b) {
+  return (__m128)__builtin_shufflevector(a, b, 0, 4, 1, 5);
+}
+static __inline__ __m128 _mm_unpackhi_ps(__m128 a, __m128 b) {
+  return (__m128)__builtin_shufflevector(a, b, 2, 6, 3, 7);
+}
+
 #endif /* _KEEL_XMMINTRIN_H */

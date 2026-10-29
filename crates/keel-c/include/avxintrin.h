@@ -148,4 +148,29 @@ static __inline__ __m256d _mm256_andnot_pd(__m256d a, __m256d b) {
   return (__m256d)(~(__m256i)a & (__m256i)b);
 }
 
+static __inline__ __m256 _mm256_hadd_ps(__m256 a, __m256 b) {
+  return __builtin_keel_avx_vhaddps256(a, b);
+}
+static __inline__ __m256 _mm256_hsub_ps(__m256 a, __m256 b) {
+  return __builtin_keel_avx_vhsubps256(a, b);
+}
+static __inline__ __m256d _mm256_hadd_pd(__m256d a, __m256d b) {
+  return __builtin_keel_avx_vhaddpd256(a, b);
+}
+static __inline__ __m256d _mm256_hsub_pd(__m256d a, __m256d b) {
+  return __builtin_keel_avx_vhsubpd256(a, b);
+}
+static __inline__ __m256 _mm256_unpacklo_ps(__m256 a, __m256 b) {
+  return (__m256)__builtin_shufflevector(a, b, 0, 8, 1, 9, 4, 12, 5, 13);
+}
+static __inline__ __m256 _mm256_unpackhi_ps(__m256 a, __m256 b) {
+  return (__m256)__builtin_shufflevector(a, b, 2, 10, 3, 11, 6, 14, 7, 15);
+}
+static __inline__ __m256d _mm256_unpacklo_pd(__m256d a, __m256d b) {
+  return (__m256d)__builtin_shufflevector(a, b, 0, 4, 2, 6);
+}
+static __inline__ __m256d _mm256_unpackhi_pd(__m256d a, __m256d b) {
+  return (__m256d)__builtin_shufflevector(a, b, 1, 5, 3, 7);
+}
+
 #endif /* _KEEL_AVXINTRIN_H */

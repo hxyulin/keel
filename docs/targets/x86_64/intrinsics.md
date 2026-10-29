@@ -8,7 +8,7 @@ defines the proposed expansion beyond the implemented bounded headers.
 <a id="c-x86-intrinsics-bounded-c-x86-intrinsic-subset"></a>
 ## Bounded C x86 intrinsic subset
 
-Keel owns small `xmmintrin.h`, `emmintrin.h`, `smmintrin.h`, `avxintrin.h`,
+Keel owns small `xmmintrin.h`, `emmintrin.h`, `pmmintrin.h`, `smmintrin.h`, `avxintrin.h`,
 `avx2intrin.h`, `tmmintrin.h`, `fmaintrin.h`, `f16cintrin.h`,
 `wmmintrin.h` and `immintrin.h` headers. They are embedded in the compiler;
 no Clang resource directory is needed. These headers are for the
@@ -99,6 +99,12 @@ separate names, not arbitrary suffix combinations.
   `_mm{,256}_mulhi_epu16`. Byte shuffles: `_mm{,256}_shuffle_epi8`.
   Sign masks: `_mm{,256}_movemask_epi8`. Their architectural contracts and
   feature permissions are described below.
+- Horizontal integer arithmetic: `_mm{,256}_{hadd,hsub}_epi{16,32}` and
+  `_mm{,256}_{hadds,hsubs}_epi16`. Horizontal floating arithmetic:
+  `_mm{,256}_{hadd,hsub}_{ps,pd}`. Unpacks:
+  `_mm{,256}_unpack{lo,hi}_epi{8,16,32,64}` and
+  `_mm{,256}_unpack{lo,hi}_{ps,pd}`. Each 256-bit operation works separately
+  inside its two 128-bit halves; see the horizontal/unpack contract below.
 - All six same-width bit casts among `ps`, `pd`, and `si128` under `_mm_cast`,
   and among `ps`, `pd`, and `si256` under `_mm256_cast`.
   `_mm256_castps256_ps128`, `_mm256_castpd256_pd128`, and
@@ -173,8 +179,9 @@ not grant CPU features or require the host to support the instructions.
 ### Reviewed builtin inventory
 
 [`vendor-bindings.json`](../../../tools/x86-isa/vendor-bindings.json) owns the
-129 reviewed frontend bindings for AES, packed integer operations and shifts,
-SSE2 numeric conversions, FMA and F16C. Its generated module supplies both parser lookup and
+149 reviewed frontend bindings for AES, packed integer operations and shifts,
+horizontal floating arithmetic, SSE2 numeric conversions, FMA and F16C.
+Its generated module supplies both parser lookup and
 `__has_builtin` recognition. The metadata records current semantic intrinsic
 IDs, types, controls, required features and ownership. Generated assertions
 preserve IDs and check reviewed signatures against the existing IR. Semantic
@@ -182,7 +189,7 @@ lowering and CPU legality remain with the existing typed operations.
 
 [`vendor-references.json`](../../../tools/x86-isa/vendor-references.json) pins
 the existing Keel contracts and LLVM/Clang 21.1.0 reference commit, licence and
-six header hashes. The new wrappers are independently implemented against
+nine header hashes. The new wrappers are independently implemented against
 those references. Keel-private bridge names are marked separately from vendor
 builtin spellings. This is a bounded inventory, not complete Intel/GNU/Clang
 builtin or vendor-header compatibility. See the [generator reference](../../../tools/x86-isa/README.md)
@@ -214,7 +221,7 @@ bitwise operations and comparisons, including compound assignments; see
 and remaining scalar-shift/cross-domain limits. Constructor functions remain
 available for explicit element conversions.
 Masked/gather/scatter memory, streaming memory/fences, scalar-lane FP intrinsics
-beyond FMA, horizontal operations,
+beyond the reviewed fused and horizontal operations,
 shifts beyond the reviewed SSE2/AVX2 subset, conversions beyond the reviewed SSE2
 and F16C forms, AVX-512,
 full vendor header coverage and strict FP-environment compatibility are outside
@@ -379,6 +386,37 @@ shape, even for operations that interpret input bits as unsigned. These names
 are Keel bridges, not GNU builtin compatibility claims. The 34 wrappers are
 checked against independent scalar and vendor-header oracles, including upper
 halves, signed extrema, packing boundaries, aliases and forced spills.
+
+### Horizontal arithmetic and unpacking
+
+The twelve integer horizontal wrappers use the existing SSSE3/AVX2 packed-pair
+intrinsics. Each input contributes adjacent lane pairs, with the first input's
+results before the second's within each 128-bit half. `_hadd_` and `_hsub_`
+wrap at the 16/32-bit lane width. `_hadds_` and `_hsubs_` clamp to signed
+16-bit range. The 128-bit forms require SSSE3; the 256-bit forms require AVX2.
+
+The eight floating horizontal wrappers use architectural SSE3/AVX operations,
+not reassociated vector expressions. They follow the same lane-pair layout,
+require SSE3 at 128 bits or AVX at 256 bits, and retain MXCSR rounding and
+status effects even when the result is unused. Definitions of the 128-bit forms
+live in `pmmintrin.h`, which is also included through the higher-level headers.
+Inclusion alone remains legal at baseline.
+
+The 24 integer/floating unpack wrappers interleave the selected low or high
+half of their inputs inside each 128-bit block. They use typed shuffles and
+copy bits, including signed zeros and signaling-NaN payloads, without evaluating
+floating-point arithmetic or changing MXCSR status. Each input expression is
+evaluated once. Narrow unpacks remain legal at baseline; wide unpacks require
+AVX transport and may use narrower/scalar operations without AVX2. They do not
+promise one matching instruction or vendor feature-diagnostic parity.
+
+Validation reuses the existing integer and floating intrinsic packets. Integer
+horizontal operations and unpacks have independent scalar lane oracles. Floating
+horizontal arithmetic compares results and masked status effects with vendor
+instructions, plus scalar SSE pair operations for finite inputs. Floating
+unpacks have byte-exact oracles for finite and nonfinite inputs. The packet
+covers rounding modes, DAZ/FTZ, seeded flags, dead arithmetic results, aliases,
+upper halves, selection/allocation routes and forced spills.
 
 <a id="x86-aes-ni-legacy-128-bit-aes-ni"></a>
 ## Legacy 128-bit AES-NI

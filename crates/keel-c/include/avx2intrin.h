@@ -402,4 +402,47 @@ static __inline__ int _mm256_movemask_epi8(__m256i a) {
   return __builtin_keel_avx2_vpmovmskb256((__keel_i8_256)a);
 }
 
+static __inline__ __m256i _mm256_hadd_epi16(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vphaddw256((__keel_i16_256)a, (__keel_i16_256)b);
+}
+static __inline__ __m256i _mm256_hadd_epi32(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vphaddd256((__keel_i32_256)a, (__keel_i32_256)b);
+}
+static __inline__ __m256i _mm256_hadds_epi16(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vphaddsw256((__keel_i16_256)a, (__keel_i16_256)b);
+}
+static __inline__ __m256i _mm256_hsub_epi16(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vphsubw256((__keel_i16_256)a, (__keel_i16_256)b);
+}
+static __inline__ __m256i _mm256_hsub_epi32(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vphsubd256((__keel_i32_256)a, (__keel_i32_256)b);
+}
+static __inline__ __m256i _mm256_hsubs_epi16(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vphsubsw256((__keel_i16_256)a, (__keel_i16_256)b);
+}
+static __inline__ __m256i _mm256_unpacklo_epi8(__m256i a, __m256i b) {
+  return (__m256i)__builtin_shufflevector((__keel_i8_256)a, (__keel_i8_256)b, 0, 32, 1, 33, 2, 34, 3, 35, 4, 36, 5, 37, 6, 38, 7, 39, 16, 48, 17, 49, 18, 50, 19, 51, 20, 52, 21, 53, 22, 54, 23, 55);
+}
+static __inline__ __m256i _mm256_unpackhi_epi8(__m256i a, __m256i b) {
+  return (__m256i)__builtin_shufflevector((__keel_i8_256)a, (__keel_i8_256)b, 8, 40, 9, 41, 10, 42, 11, 43, 12, 44, 13, 45, 14, 46, 15, 47, 24, 56, 25, 57, 26, 58, 27, 59, 28, 60, 29, 61, 30, 62, 31, 63);
+}
+static __inline__ __m256i _mm256_unpacklo_epi16(__m256i a, __m256i b) {
+  return (__m256i)__builtin_shufflevector((__keel_i16_256)a, (__keel_i16_256)b, 0, 16, 1, 17, 2, 18, 3, 19, 8, 24, 9, 25, 10, 26, 11, 27);
+}
+static __inline__ __m256i _mm256_unpackhi_epi16(__m256i a, __m256i b) {
+  return (__m256i)__builtin_shufflevector((__keel_i16_256)a, (__keel_i16_256)b, 4, 20, 5, 21, 6, 22, 7, 23, 12, 28, 13, 29, 14, 30, 15, 31);
+}
+static __inline__ __m256i _mm256_unpacklo_epi32(__m256i a, __m256i b) {
+  return (__m256i)__builtin_shufflevector((__keel_i32_256)a, (__keel_i32_256)b, 0, 8, 1, 9, 4, 12, 5, 13);
+}
+static __inline__ __m256i _mm256_unpackhi_epi32(__m256i a, __m256i b) {
+  return (__m256i)__builtin_shufflevector((__keel_i32_256)a, (__keel_i32_256)b, 2, 10, 3, 11, 6, 14, 7, 15);
+}
+static __inline__ __m256i _mm256_unpacklo_epi64(__m256i a, __m256i b) {
+  return (__m256i)__builtin_shufflevector((__keel_i64_256)a, (__keel_i64_256)b, 0, 4, 2, 6);
+}
+static __inline__ __m256i _mm256_unpackhi_epi64(__m256i a, __m256i b) {
+  return (__m256i)__builtin_shufflevector((__keel_i64_256)a, (__keel_i64_256)b, 1, 5, 3, 7);
+}
+
 #endif /* _KEEL_AVX2INTRIN_H */

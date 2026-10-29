@@ -26,6 +26,7 @@ pub fn get(name: &Path) -> Option<&'static str> {
         "xmmintrin.h" => include_str!("../include/xmmintrin.h"),
         "wmmintrin.h" => include_str!("../include/wmmintrin.h"),
         "emmintrin.h" => include_str!("../include/emmintrin.h"),
+        "pmmintrin.h" => include_str!("../include/pmmintrin.h"),
         "tmmintrin.h" => include_str!("../include/tmmintrin.h"),
         "smmintrin.h" => include_str!("../include/smmintrin.h"),
         "avxintrin.h" => include_str!("../include/avxintrin.h"),

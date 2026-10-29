@@ -17,6 +17,28 @@ static void packed_reference(const struct PackedCase*t,const unsigned char*a,
     for(unsigned i=0;i<t->bytes;i++)out[i]=b[i]&128?0:a[(i&~15u)+(b[i]&15)];
     return;
   }
+  if(t->operation>=14) {
+    for(unsigned block=0;block<t->bytes;block+=16) {
+      if(t->operation>=18) {
+        unsigned half=t->operation==19?8:0;
+        for(unsigned lane=0;lane<8/in;lane++) {
+          memcpy(out+block+2*lane*in,a+block+half+lane*in,in);
+          memcpy(out+block+(2*lane+1)*in,b+block+half+lane*in,in);
+        }
+      } else {
+        for(unsigned source=0;source<2;source++)
+          for(unsigned lane=0;lane<8/in;lane++) {
+            const unsigned char*p=(source?b:a)+block+2*lane*in;
+            int64_t x=signed_lane(read_lane(p,in),t->input_bits);
+            int64_t y=signed_lane(read_lane(p+in,in),t->input_bits);
+            int64_t value=(t->operation==15||t->operation==17)?x-y:x+y;
+            if(t->operation>=16)value=clamp_lane(value,t->output_bits,1);
+            write_lane(out+block+source*8+lane*in,in,(uint64_t)value);
+          }
+      }
+    }
+    return;
+  }
   if(t->operation==10||t->operation==11) {
     /* PACK instructions concatenate independently inside each 128-bit half. */
     for(unsigned block=0;block<t->bytes;block+=16)
@@ -78,6 +100,10 @@ int main(void) {
       for(unsigned lane=0;lane<t->bytes/input_bytes;lane++) {
         uint64_t x=test<edge_count*edge_count?(uint64_t)edges[test/edge_count]:random_word();
         uint64_t y=test<edge_count*edge_count?(uint64_t)edges[test%edge_count]:random_word();
+        if(test>=edge_count*edge_count && input_bytes==8) {
+          x|=(uint64_t)random_word()<<32;
+          y|=(uint64_t)random_word()<<32;
+        }
         write_lane(a+1+lane*input_bytes,input_bytes,x);
         write_lane(b+1+lane*input_bytes,input_bytes,y);
       }
@@ -98,6 +124,6 @@ int main(void) {
       if(memcmp(alias+1,expected+1,t->result_bytes))return 4;
     }
   }
-  printf("PASS: packed saturation, averages, products, packs, byte shuffles and sign masks\n");
+  printf("PASS: packed integer arithmetic, selection, horizontal operations and unpacks\n");
   return 0;
 }
