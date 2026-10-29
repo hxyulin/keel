@@ -242,4 +242,100 @@ static __inline__ __m256i _mm256_blendv_epi8(__m256i a, __m256i b, __m256i selec
   return (a & ~mask) | (b & mask);
 }
 
+/* Packed counts use the low unsigned 64 bits; per-lane counts use all bits. */
+#define _mm256_slli_epi16(a, n) \
+  __extension__({ \
+    __m256i __keel_shift_a = (a); \
+    (__m256i)__builtin_keel_avx2_imm_psllw((__keel_i16_256)__keel_shift_a, (n)); \
+  })
+static __inline__ __m256i _mm256_sll_epi16(__m256i a, __m128i count) {
+  return (__m256i)__builtin_keel_avx2_count_psllw((__keel_i16_256)a, ((__keel_u64_128)count)[0]);
+}
+#define _mm256_slli_epi32(a, n) \
+  __extension__({ \
+    __m256i __keel_shift_a = (a); \
+    (__m256i)__builtin_keel_avx2_imm_pslld((__keel_i32_256)__keel_shift_a, (n)); \
+  })
+static __inline__ __m256i _mm256_sll_epi32(__m256i a, __m128i count) {
+  return (__m256i)__builtin_keel_avx2_count_pslld((__keel_i32_256)a, ((__keel_u64_128)count)[0]);
+}
+#define _mm256_slli_epi64(a, n) \
+  __extension__({ \
+    __m256i __keel_shift_a = (a); \
+    (__m256i)__builtin_keel_avx2_imm_psllq((__keel_i64_256)__keel_shift_a, (n)); \
+  })
+static __inline__ __m256i _mm256_sll_epi64(__m256i a, __m128i count) {
+  return (__m256i)__builtin_keel_avx2_count_psllq((__keel_i64_256)a, ((__keel_u64_128)count)[0]);
+}
+#define _mm256_srli_epi16(a, n) \
+  __extension__({ \
+    __m256i __keel_shift_a = (a); \
+    (__m256i)__builtin_keel_avx2_imm_psrlw((__keel_i16_256)__keel_shift_a, (n)); \
+  })
+static __inline__ __m256i _mm256_srl_epi16(__m256i a, __m128i count) {
+  return (__m256i)__builtin_keel_avx2_count_psrlw((__keel_i16_256)a, ((__keel_u64_128)count)[0]);
+}
+#define _mm256_srli_epi32(a, n) \
+  __extension__({ \
+    __m256i __keel_shift_a = (a); \
+    (__m256i)__builtin_keel_avx2_imm_psrld((__keel_i32_256)__keel_shift_a, (n)); \
+  })
+static __inline__ __m256i _mm256_srl_epi32(__m256i a, __m128i count) {
+  return (__m256i)__builtin_keel_avx2_count_psrld((__keel_i32_256)a, ((__keel_u64_128)count)[0]);
+}
+#define _mm256_srli_epi64(a, n) \
+  __extension__({ \
+    __m256i __keel_shift_a = (a); \
+    (__m256i)__builtin_keel_avx2_imm_psrlq((__keel_i64_256)__keel_shift_a, (n)); \
+  })
+static __inline__ __m256i _mm256_srl_epi64(__m256i a, __m128i count) {
+  return (__m256i)__builtin_keel_avx2_count_psrlq((__keel_i64_256)a, ((__keel_u64_128)count)[0]);
+}
+#define _mm256_srai_epi16(a, n) \
+  __extension__({ \
+    __m256i __keel_shift_a = (a); \
+    (__m256i)__builtin_keel_avx2_imm_psraw((__keel_i16_256)__keel_shift_a, (n)); \
+  })
+static __inline__ __m256i _mm256_sra_epi16(__m256i a, __m128i count) {
+  return (__m256i)__builtin_keel_avx2_count_psraw((__keel_i16_256)a, ((__keel_u64_128)count)[0]);
+}
+#define _mm256_srai_epi32(a, n) \
+  __extension__({ \
+    __m256i __keel_shift_a = (a); \
+    (__m256i)__builtin_keel_avx2_imm_psrad((__keel_i32_256)__keel_shift_a, (n)); \
+  })
+static __inline__ __m256i _mm256_sra_epi32(__m256i a, __m128i count) {
+  return (__m256i)__builtin_keel_avx2_count_psrad((__keel_i32_256)a, ((__keel_u64_128)count)[0]);
+}
+static __inline__ __m128i _mm_sllv_epi32(__m128i a, __m128i count) {
+  return (__m128i)__builtin_keel_avx2_psllvd128((__keel_i32_128)a, (__keel_i32_128)count);
+}
+static __inline__ __m128i _mm_sllv_epi64(__m128i a, __m128i count) {
+  return (__m128i)__builtin_keel_avx2_psllvq128((__keel_i64_128)a, (__keel_i64_128)count);
+}
+static __inline__ __m128i _mm_srlv_epi32(__m128i a, __m128i count) {
+  return (__m128i)__builtin_keel_avx2_psrlvd128((__keel_i32_128)a, (__keel_i32_128)count);
+}
+static __inline__ __m128i _mm_srlv_epi64(__m128i a, __m128i count) {
+  return (__m128i)__builtin_keel_avx2_psrlvq128((__keel_i64_128)a, (__keel_i64_128)count);
+}
+static __inline__ __m128i _mm_srav_epi32(__m128i a, __m128i count) {
+  return (__m128i)__builtin_keel_avx2_psravd128((__keel_i32_128)a, (__keel_i32_128)count);
+}
+static __inline__ __m256i _mm256_sllv_epi32(__m256i a, __m256i count) {
+  return (__m256i)__builtin_keel_avx2_psllvd256((__keel_i32_256)a, (__keel_i32_256)count);
+}
+static __inline__ __m256i _mm256_sllv_epi64(__m256i a, __m256i count) {
+  return (__m256i)__builtin_keel_avx2_psllvq256((__keel_i64_256)a, (__keel_i64_256)count);
+}
+static __inline__ __m256i _mm256_srlv_epi32(__m256i a, __m256i count) {
+  return (__m256i)__builtin_keel_avx2_psrlvd256((__keel_i32_256)a, (__keel_i32_256)count);
+}
+static __inline__ __m256i _mm256_srlv_epi64(__m256i a, __m256i count) {
+  return (__m256i)__builtin_keel_avx2_psrlvq256((__keel_i64_256)a, (__keel_i64_256)count);
+}
+static __inline__ __m256i _mm256_srav_epi32(__m256i a, __m256i count) {
+  return (__m256i)__builtin_keel_avx2_psravd256((__keel_i32_256)a, (__keel_i32_256)count);
+}
+
 #endif /* _KEEL_AVX2INTRIN_H */

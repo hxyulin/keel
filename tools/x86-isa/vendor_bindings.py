@@ -93,7 +93,7 @@ def validate(schema, root):
         family, control = row['family'], row['control']
         if family == 'aes' and (params not in [['i64x2'], ['i64x2', 'i64x2'], ['i64x2', 'i32']] or row['result'] != 'i64x2' or control not in {'none', 'imm8'}):
             raise ValueError('invalid AES signature')
-        if family == 'packed_shift' and (params[0] not in {'int_i16x8', 'int_i32x4', 'int_i64x2'} or params[1:] != ['u64'] or row['result'] != 'same_as_input' or control not in {'imm8', 'u64_count'}):
+        if family == 'packed_shift' and (params[0] not in {'int_i16x8', 'int_i32x4', 'int_i64x2', 'int_i16x16', 'int_i32x8', 'int_i64x4'} or params[1:] != ['u64'] or row['result'] != 'same_as_input' or control not in {'imm8', 'u64_count'}):
             raise ValueError('invalid packed shift signature')
         if family == 'saturating' and (params[0] not in {'i8x16', 'u8x16', 'i16x8', 'u16x8'} or params != [params[0], params[0]] or row['result'] != params[0] or control != 'none'):
             raise ValueError('invalid saturation signature')

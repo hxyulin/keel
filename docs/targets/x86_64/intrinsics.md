@@ -15,6 +15,10 @@ no Clang resource directory is needed. These headers are for the
 `x86_64-unknown-linux-gnu` target. This is a useful, finite source-compatibility
 subset, **not complete `immintrin.h` compatibility** or general C
 auto-vectorization. Other vendor headers and intrinsics remain unsupported.
+The names describe x86 operations, not a CPU vendor restriction. The supported
+subset also runs on AMD CPUs when the required CPU features and OS vector state
+are available. AMD-specific extensions such as XOP and FMA4 are outside this
+header contract.
 
 Use `--target x86_64-unknown-linux-gnu --cpu-level v3` for AVX2 programs.
 SSE-only programs can use `--cpu-level v1`. Including the umbrella header does
@@ -77,6 +81,10 @@ separate names, not arbitrary suffix combinations.
   `_mm_srai_epi{16,32}` with immediate controls, plus
   `_mm_{sll,srl}_epi{16,32,64}` and `_mm_sra_epi{16,32}` with vector counts.
   These are 128-bit operations; see the bounded shift contract below.
+- AVX2 packed shifts: the sixteen `_mm256_` equivalents of those immediate and
+  shared-count shifts, plus `_mm{,256}_{sllv,srlv}_epi{32,64}` and
+  `_mm{,256}_srav_epi32`. Shared counts use an `__m128i` even for 256-bit data;
+  per-lane counts have the same width as the data. See the shift contract below.
 - SSE2 numeric conversions: `_mm_cvtepi32_ps`, `_mm_cvttps_epi32` and
   `_mm_cvtps_epi32`; see the bounded architectural conversion contract below.
 - Integer bit operations: `_mm_{and,or,xor,andnot}_si128` and
@@ -159,7 +167,7 @@ not grant CPU features or require the host to support the instructions.
 ### Reviewed builtin inventory
 
 [`vendor-bindings.json`](../../../tools/x86-isa/vendor-bindings.json) owns the
-69 reviewed frontend bindings for AES, packed shifts, saturation, SSE2 numeric
+95 reviewed frontend bindings for AES, packed shifts, saturation, SSE2 numeric
 conversions, FMA and F16C. Its generated module supplies both parser lookup and
 `__has_builtin` recognition. The metadata records current semantic intrinsic
 IDs, types, controls, required features and ownership. Generated assertions
@@ -201,7 +209,7 @@ and remaining scalar-shift/cross-domain limits. Constructor functions remain
 available for explicit element conversions.
 Masked/gather/scatter memory, streaming memory/fences, scalar-lane FP intrinsics
 beyond FMA, saturation beyond the bounded SSE2 subset, horizontal operations,
-shifts beyond the bounded SSE2 subset, conversions beyond the reviewed SSE2
+shifts beyond the reviewed SSE2/AVX2 subset, conversions beyond the reviewed SSE2
 and F16C forms, AVX-512,
 full vendor header coverage and strict FP-environment compatibility are outside
 this header contract even where the backend already implements such operations.
@@ -209,7 +217,7 @@ The existing C restrictions on vector varargs, unions and by-value x86 aggregate
 remain in force; see [GNU vector mode](../../frontends/c/extensions.md).
 
 <a id="c-x86-intrinsics-bounded-sse2-packed-shifts"></a>
-### Bounded SSE2 packed shifts
+### Bounded SSE2 and AVX2 packed shifts
 
 The sixteen shift wrappers above use the existing architectural
 `x86_sse2_ps{ll,rl,ra}{w,d,q}128` intrinsics (arithmetic right shift has no
@@ -241,6 +249,28 @@ of CPU selection. This does not add general vendor shift builtin compatibility.
 Strict v1 already includes SSE2; the existing backend preflight and release
 emission guard remain authoritative. ARM inclusion and direct builtin use are
 diagnosed. No backend, optimizer, FP policy or ABI changes accompany this surface.
+
+AVX2 adds sixteen `_mm256_` immediate/shared-count wrappers through the existing
+`x86_avx2_vps{ll,rl,ra}{w,d,q}256` intrinsics. Data and results are 32 bytes;
+the shared count is still an `__m128i` and only its unsigned low 64 bits matter.
+Immediate controls use the same 0..255 proof and diagnostic contract as SSE2.
+The private `__builtin_keel_avx2_{imm,count}_{psllw,pslld,psllq,psrlw,psrld,psrlq,psraw,psrad}`
+bridges require the matching 256-bit lane shape and an unsigned scalar count.
+
+The ten per-lane wrappers `_mm{,256}_{sllv,srlv}_epi{32,64}` and
+`_mm{,256}_srav_epi32` use the existing AVX2 variable-shift intrinsics. Each
+32/64-bit count lane is an unsigned count for its corresponding data lane.
+All count bits matter; counts at or above the lane width zero or sign-fill the
+result. No 16-bit per-lane or 64-bit arithmetic-right form is admitted here.
+Their private `__builtin_keel_avx2_{psllvd,psllvq,psrlvd,psrlvq,psravd}{128,256}`
+bridges require two matching signed C vector types. Public wrappers cast their
+integer containers to those types and evaluate each operand once.
+
+All these AVX2 shifts require explicit AVX2 permission, including 128-bit
+per-lane forms. They do not use the software fallback policy of generic integer
+header expressions. The existing 16/32-byte vector ABI and load/store footprints
+apply. Validation covers vector calls, forced spills, large counts, independent
+scalar/vendor oracles, unaligned protected-page boundaries and aliased outputs.
 
 <a id="c-x86-intrinsics-bounded-sse2-numeric-conversions"></a>
 ### Bounded SSE2 numeric conversions

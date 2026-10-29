@@ -1,16 +1,9 @@
 /* Independent unsigned lane oracle: never shifts by an out-of-range count. */
 static void reference(int op, const unsigned char *a, uint64_t count, unsigned char *out) {
   int bits = (int[]){16,32,64,16,32,64,16,32}[op];
-  uint64_t mask = UINT64_MAX >> (64-bits);
   for(int lane=0;lane<128/bits;lane++) {
-    uint64_t x=0,r; memcpy(&x,a+lane*bits/8,bits/8);
-    if(op<3) r=count>=(unsigned)bits?0:(x<<count)&mask;
-    else if(op<6) r=count>=(unsigned)bits?0:x>>count;
-    else {
-      int negative=(x>>(bits-1))&1;
-      if(count>=(unsigned)bits) r=negative?mask:0;
-      else {r=x>>count;if(negative&&count)r|=mask^(mask>>count);}
-    }
+    uint64_t x=0; memcpy(&x,a+lane*bits/8,bits/8);
+    uint64_t r=shift_lane(op<3?0:op<6?1:2,bits,x,count);
     memcpy(out+lane*bits/8,&r,bits/8);
   }
 }

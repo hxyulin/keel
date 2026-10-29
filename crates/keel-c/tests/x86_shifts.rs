@@ -281,6 +281,7 @@ fn native_vendor_reference_abi_and_footprints() {
         }
     }
     h += "static V(*shifts[])(V,V)={shift0,shift1,shift2,shift3,shift4,shift5,shift6,shift7};static V(*vendors[])(V,V)={vendor0,vendor1,vendor2,vendor3,vendor4,vendor5,vendor6,vendor7};static void(*memories[])(void*,const void*,const void*)={memory0,memory1,memory2,memory3,memory4,memory5,memory6,memory7};\n";
+    h += include_str!("fixtures/x86_shifts_oracle.h");
     h += include_str!("fixtures/x86_shifts_harness.c");
     h += "int main(void){int rc=run();if(rc)return rc;V a=_mm_set_epi32(-1,0x80000000,0x7fffffff,1);V z;\n";
     for (i, (_, _, bits)) in OPS.iter().enumerate() {
@@ -353,4 +354,371 @@ fn native_vendor_reference_abi_and_footprints() {
         }
     }
     eprintln!("native artifacts: {}", dir.display());
+}
+
+struct Avx2Shift {
+    width: u32,
+    bits: u32,
+    op: &'static str,
+    // None uses a vector count. Some(n) uses the checked immediate spelling.
+    immediate: Option<u32>,
+    per_lane: bool,
+}
+
+fn avx2_shifts() -> Vec<Avx2Shift> {
+    let mut cases = Vec::new();
+    for (op, _, bits) in OPS {
+        for immediate in [
+            None,
+            Some(0),
+            Some(bits - 1),
+            Some(bits),
+            Some(bits + 1),
+            Some(255),
+        ] {
+            cases.push(Avx2Shift {
+                width: 256,
+                bits,
+                op,
+                immediate,
+                per_lane: false,
+            });
+        }
+    }
+    for width in [128, 256] {
+        for (op, _, bits) in OPS {
+            if bits == 16 {
+                continue;
+            }
+            cases.push(Avx2Shift {
+                width,
+                bits,
+                op,
+                immediate: None,
+                per_lane: true,
+            });
+        }
+    }
+    cases
+}
+
+// Both compilers see the same public calls. The harness also checks an unsigned
+// scalar oracle, so a shared header or reference-compiler bug is not the oracle.
+fn avx2_shift_sources() -> (String, String) {
+    let mut source = String::from("#include <immintrin.h>\nint kshift_evaluations;\n");
+    for width in [128, 256] {
+        let prefix = if width == 128 { "_mm" } else { "_mm256" };
+        source += &format!(
+            "static __m{width}i kshift_read{width}(const void*p){{kshift_evaluations++;return {prefix}_loadu_si{width}(p);}}\n"
+        );
+    }
+    let mut harness = String::from(
+        "#include <immintrin.h>\n#include <stdint.h>\n#include <stdio.h>\n#include <string.h>\n#include <sys/mman.h>\n#include <unistd.h>\nextern int kshift_evaluations;\n",
+    );
+    let mut table = String::new();
+    for (i, case) in avx2_shifts().iter().enumerate() {
+        let Avx2Shift {
+            width,
+            bits,
+            op,
+            immediate,
+            per_lane,
+        } = case;
+        let prefix = if *width == 128 { "_mm" } else { "_mm256" };
+        let suffix = if immediate.is_some() {
+            "i"
+        } else if *per_lane {
+            "v"
+        } else {
+            ""
+        };
+        let name = format!("{prefix}_{op}{suffix}_epi{bits}");
+        let count_width = if *per_lane { *width } else { 128 };
+        let ty = format!("__m{width}i");
+        let count_ty = format!("__m{count_width}i");
+        let args = immediate.map_or_else(|| "a,n".to_string(), |n| format!("a,{n}"));
+        let memory_args = immediate.map_or_else(
+            || format!("kshift_read{width}(a),kshift_read{count_width}(n)"),
+            |n| format!("kshift_read{width}(a),{n}"),
+        );
+        source += &format!(
+            "{ty} kshift{i}({ty} a,{count_ty} n){{(void)n;return {name}({args});}}\nvoid kshift_mem{i}(void*out,const void*a,const void*n){{(void)n;{prefix}_storeu_si{width}(out,{name}({memory_args}));}}\n"
+        );
+        harness += &format!(
+            "extern {ty} kshift{i}({ty},{count_ty});extern {ty} cshift{i}({ty},{count_ty});extern void kshift_mem{i}(void*,const void*,const void*);\n"
+        );
+        for compiler in ['k', 'c'] {
+            harness += &format!(
+                "static void {compiler}abi{i}(void*out,const void*a,const void*n){{{ty} x,z;{count_ty} count;memcpy(&x,a,{});memcpy(&count,n,{});z={compiler}shift{i}(x,count);memcpy(out,&z,{});}}\n",
+                width / 8,
+                count_width / 8,
+                width / 8
+            );
+        }
+        let kind = match *op {
+            "sll" => 0,
+            "srl" => 1,
+            "sra" => 2,
+            _ => unreachable!(),
+        };
+        table += &format!(
+            "{{\"{name}\",{},{bits},{kind},{},{},{},kabi{i},cabi{i},kshift_mem{i}}},\n",
+            width / 8,
+            count_width / 8,
+            u8::from(*per_lane),
+            immediate.map_or(-1, |n| n as i32)
+        );
+    }
+    harness += include_str!("fixtures/x86_shifts_oracle.h");
+    harness += "typedef void (*Kernel)(void*,const void*,const void*);\nstruct ShiftCase {const char*name;int bytes,bits,op,count_bytes,per_lane,immediate;Kernel keel,vendor,memory;};\nstatic const struct ShiftCase cases[]={\n";
+    harness += &table;
+    harness += "};\n";
+    harness += include_str!("fixtures/x86_avx2_shifts_harness.c");
+    (source, harness)
+}
+
+#[test]
+fn avx2_shift_controls_shapes_and_feature_permissions() {
+    let target = Target::X86_64LinuxGnu;
+    let (source, _) = avx2_shift_sources();
+    let module = compile(&source, target).unwrap();
+    let text = module.to_string();
+    for (_, op, _) in OPS {
+        assert!(text.contains(&format!("x86_avx2_v{op}256")), "{op}");
+    }
+    let features = Features::for_level(CpuLevel::V3);
+    for allowed in [true, false] {
+        let mut features = features;
+        features.avx2 = allowed;
+        let selector = FeatureSelector {
+            inner: &SelectionTier::Baseline,
+            features,
+        };
+        let result = keel_codegen::compile_program_with_pipeline(
+            &module,
+            target,
+            &CodegenPipeline {
+                selector: &selector,
+                allocator: &AllocationTier::Full,
+            },
+        );
+        if allowed {
+            keel_asm::x86::assemble_program_object_with_features(&result.unwrap(), features)
+                .unwrap();
+        } else {
+            let error = result.unwrap_err();
+            assert!(error.message.contains("avx2"), "{error:?}");
+        }
+    }
+    // Even the narrow per-lane form needs AVX2, independently of wide transport.
+    let narrow = compile(
+        "#include <immintrin.h>\n__m128i f(__m128i a,__m128i n){return _mm_sllv_epi32(a,n);}",
+        target,
+    )
+    .unwrap();
+    let selector = FeatureSelector {
+        inner: &SelectionTier::Baseline,
+        features: features.with_features("-avx2").unwrap(),
+    };
+    assert!(
+        keel_codegen::compile_program_with_pipeline(
+            &narrow,
+            target,
+            &CodegenPipeline {
+                selector: &selector,
+                allocator: &AllocationTier::Full
+            }
+        )
+        .unwrap_err()
+        .message
+        .contains("avx2")
+    );
+    for (op, _, bits) in OPS {
+        for control in ["n", "-1", "256", "(n++,1)", "(1/0)", "(1ULL<<64)"] {
+            let error = compile(&format!("#include <immintrin.h>\n__m256i f(__m256i a,int n){{return _mm256_{op}i_epi{bits}(a,{control});}}"),target).unwrap_err();
+            assert!(
+                error.contains("integer constant expression"),
+                "{control}: {error}"
+            );
+        }
+    }
+    for call in [
+        "__builtin_keel_avx2_count_psllw(a,1ULL)", // Wrong lane shape.
+        "__builtin_keel_avx2_imm_pslld(a,1,2)",
+        "__builtin_keel_avx2_count_pslld(a,1)", // Requires unsigned 64-bit count.
+        "__builtin_keel_avx2_psllvd256(a,1)",
+        "__builtin_keel_avx2_psllvd128(a,a)", // Wrong width.
+    ] {
+        assert!(
+            compile(
+                &format!(
+                    "typedef int V __attribute__((vector_size(32)));V f(V a){{return {call};}}"
+                ),
+                target
+            )
+            .is_err(),
+            "{call}"
+        );
+    }
+    for foreign in [Target::Aarch64AppleDarwin, Target::Aarch64LinuxGnu] {
+        assert!(compile("typedef int V __attribute__((vector_size(16)));V f(V a){return __builtin_keel_avx2_psllvd128(a,a);}",foreign).is_err());
+        compile("#if __has_builtin(__builtin_keel_avx2_count_pslld) || __has_builtin(__builtin_keel_avx2_psllvd128)\n#error foreign builtin\n#endif\nint f(void){return 0;}",foreign).unwrap();
+    }
+    compile("#if !__has_builtin(__builtin_keel_avx2_count_pslld) || !__has_builtin(__builtin_keel_avx2_psllvd128)\n#error missing builtin\n#endif\nint f(void){return 0;}",target).unwrap();
+}
+
+#[test]
+fn avx2_shifts_match_vendor_scalar_and_object_routes() {
+    use std::{fs, path::PathBuf, process::Command};
+    let directory = std::env::var_os("KEEL_C_AVX2_SHIFT_EXPORT_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("c-avx2-shifts"));
+    fs::create_dir_all(&directory).unwrap();
+    let (source, harness) = avx2_shift_sources();
+    fs::write(directory.join("kernels.c"), &source).unwrap();
+    fs::write(
+        directory.join("oracle.c"),
+        source.replace("kshift", "cshift"),
+    )
+    .unwrap();
+    fs::write(directory.join("harness.c"), harness).unwrap();
+    let module = compile(&source, Target::X86_64LinuxGnu).unwrap();
+    let mut optimized = module.clone();
+    keel_opt::optimize(&mut optimized).unwrap();
+    keel_ir::verify_module(&optimized).unwrap();
+    let features = Features::for_level(CpuLevel::V3);
+    let empty = keel_codegen::regalloc::Pools {
+        caller_saved: &[],
+        callee_saved: &[],
+        float_caller_saved: &[],
+        float_callee_saved: &[],
+    };
+    for (name, tier, allocator, spill, module) in [
+        (
+            "baseline",
+            SelectionTier::Baseline,
+            AllocationTier::Fast,
+            false,
+            &module,
+        ),
+        (
+            "trees",
+            SelectionTier::Trees,
+            AllocationTier::Full,
+            false,
+            &module,
+        ),
+        (
+            "optimized-spill",
+            SelectionTier::Full,
+            AllocationTier::Full,
+            true,
+            &optimized,
+        ),
+    ] {
+        let selector = FeatureSelector {
+            inner: &tier,
+            features,
+        };
+        let pipeline = CodegenPipeline {
+            selector: &selector,
+            allocator: &allocator,
+        };
+        let pools = if spill {
+            &empty
+        } else {
+            &keel_codegen::x86_64::REGISTERS
+        };
+        let program =
+            keel_codegen::x86_64::compile_program_with_pipeline(module, pools, &pipeline).unwrap();
+        let object =
+            keel_asm::x86::assemble_program_object_with_features(&program, features).unwrap();
+        let text = keel_codegen::x86_64::compile_with_pipeline(module, pools, &pipeline).unwrap();
+        assert_eq!(
+            object,
+            keel_asm::x86::assemble_object_with_features(&text, features).unwrap()
+        );
+        let mut chunks = keel_asm::x86::ProgramAssembler::new(features);
+        keel_codegen::x86_64::compile_program_chunks_with_pipeline(
+            module,
+            pools,
+            &pipeline,
+            &mut |chunk| chunks.push(chunk),
+        )
+        .unwrap();
+        assert_eq!(object, chunks.finish().unwrap());
+        fs::write(directory.join(format!("{name}.o")), object).unwrap();
+    }
+    // The oracle is freestanding; the protected-page harness needs Linux libc
+    // and is compiled natively below or by the remote native runner.
+    let output = Command::new("clang")
+        .current_dir(&directory)
+        .args([
+            "-target",
+            "x86_64-unknown-linux-gnu",
+            "-ffreestanding",
+            "-mavx2",
+            "-O2",
+            "-c",
+            "oracle.c",
+            "-o",
+            "oracle.o",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    if std::is_x86_feature_detected!("avx2") {
+        for compiler in ["clang", "gcc"] {
+            let output = Command::new(compiler)
+                .current_dir(&directory)
+                .args(["-mavx2", "-O2", "-c", "harness.c", "-o", "harness.o"])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let output = Command::new(compiler)
+                .current_dir(&directory)
+                .args(["-mavx2", "-O2", "-c", "oracle.c", "-o", "native-oracle.o"])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            for name in ["baseline", "trees", "optimized-spill"] {
+                let output = Command::new(compiler)
+                    .current_dir(&directory)
+                    .args([
+                        "harness.o",
+                        "native-oracle.o",
+                        &format!("{name}.o"),
+                        "-o",
+                        "run",
+                    ])
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                let output = Command::new(directory.join("run")).output().unwrap();
+                assert!(output.status.success(), "{compiler} {name}: {output:?}");
+            }
+        }
+    } else {
+        eprintln!("native AVX2 execution skipped: host lacks AVX2");
+    }
+    #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+    eprintln!("native AVX2 execution skipped: requires an x86-64 Linux host");
+    eprintln!("AVX2 shift artifacts: {}", directory.display());
 }

@@ -1661,7 +1661,10 @@ impl<'a> Parser<'a> {
 
     fn builtin(&mut self, name: &str, loc: Loc) -> R<Expr<'a>> {
         let base = &name["__builtin_".len()..];
-        if base.starts_with("ia32_") || base.starts_with("keel_sse2_") {
+        if base.starts_with("ia32_")
+            || base.starts_with("keel_sse2_")
+            || base.starts_with("keel_avx2_")
+        {
             self.require_native_layout(loc, "x86 builtins")?;
         }
         if let Some(id) = crate::x86_builtins::semantic_builtin(base) {
@@ -1732,7 +1735,7 @@ impl<'a> Parser<'a> {
             {
                 return Err(Error::new(
                     loc,
-                    "SSE2 packed shift requires its matching 128-bit integer lane shape on x86-64",
+                    "x86 packed shift requires its matching integer lane shape on x86-64",
                 ));
             }
             if immediate {
@@ -1742,14 +1745,14 @@ impl<'a> Parser<'a> {
                 else {
                     return Err(Error::new(
                         loc,
-                        "SSE2 packed shift control must be an integer constant expression in 0..255",
+                        "x86 packed shift control must be an integer constant expression in 0..255",
                     ));
                 };
                 args[1] = mk(ExprKind::Int(n), Ty::Int(IntKind::ULLong), args[1].loc);
             } else if args[1].ty != Ty::Int(IntKind::ULLong) {
                 return Err(Error::new(
                     loc,
-                    "SSE2 packed shift count must be unsigned long long",
+                    "x86 packed shift count must be unsigned long long",
                 ));
             }
             let ty = args[0].ty;

@@ -24,8 +24,8 @@ class VendorBindingTests(unittest.TestCase):
         self.assertEqual(len(names), len(set(names)))
         self.assertEqual({family: sum(row['family'] == family for row in rows)
                           for family in vendor_bindings.FAMILIES},
-                         {'aes': 6, 'packed_shift': 16, 'saturating': 8,
-                          'packed_conversion': 3, 'value': 36})
+                         {'aes': 6, 'packed_shift': 32, 'saturating': 8,
+                          'packed_conversion': 3, 'value': 46})
         source = vendor_bindings.generate(self.schema, generate.ROOT)
         self.assertEqual(source.count(' => Binding::'), len(names))
         self.assertIn('pub(crate) fn recognized(', source)
