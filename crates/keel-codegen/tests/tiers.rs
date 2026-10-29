@@ -1,4 +1,7 @@
 //! Exercise independent stage choices and custom implementations on both targets.
+#[path = "tiers/wasm_target_unavailable.rs"]
+mod wasm_target_unavailable;
+
 use keel_codegen::regalloc::{Allocation, AllocationInput, AllocationTier, RegisterAllocator};
 use keel_codegen::select::{Selection, Target as SelectionTarget};
 use keel_codegen::{CodegenPipeline, InstructionSelector, SelectionTier, Target};

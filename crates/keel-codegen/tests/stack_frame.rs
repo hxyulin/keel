@@ -1,4 +1,7 @@
 //! Frame storage is independent of declared slot identity and allocation tier.
+#[path = "stack_frame/lifetime.rs"]
+mod lifetime;
+
 use keel_codegen::{CodegenPipeline, SelectionTier, Target, regalloc::AllocationTier};
 
 #[test]

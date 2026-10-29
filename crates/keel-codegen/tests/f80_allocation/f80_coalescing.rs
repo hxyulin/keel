@@ -173,7 +173,7 @@ fn coalesced_binary_and_temporal_homes_export_both_transports() {
     if let Some(dir) = &export {
         std::fs::create_dir_all(dir).unwrap();
     }
-    let module = keel_ir::parse(include_str!("f80/coalescing.keel")).unwrap();
+    let module = keel_ir::parse(include_str!("../f80/coalescing.keel")).unwrap();
     keel_ir::verify_module(&module).unwrap();
     for (cpu, level) in [("v1", CpuLevel::V1), ("v3", CpuLevel::V3)] {
         let features = Features::for_level(level);

@@ -1,3 +1,6 @@
+#[path = "f80_allocation/f80_coalescing.rs"]
+mod f80_coalescing;
+
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{Allocation, AllocationInput, AllocationTier, Loc, RegisterAllocator, ValuePart},

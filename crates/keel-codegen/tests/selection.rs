@@ -1,4 +1,7 @@
 //! Cross-target code-shape checks complement the host execution/spill tests.
+#[path = "selection/tuning.rs"]
+mod tuning;
+
 use keel_codegen::{SelectionOptions, Target, compile_with_options};
 
 fn asm(src: &str, target: Target) -> String {
