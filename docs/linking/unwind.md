@@ -6,8 +6,7 @@ stack and saved registers. They are metadata directives, not executed unwind
 instructions. On Linux, the assembler turns them into `.eh_frame` records and
 relocations. On Darwin, it can also produce compact-unwind records.
 
-This used to be unconditional. Neither `-O0` nor `-Os` selected an unwind policy.
-The default remains unchanged; `cc` and `compile` now accept explicit controls:
+`cc` and `compile` accept explicit controls:
 
 ```sh
 keel cc --target x86_64-unknown-linux-gnu -Os \
@@ -15,21 +14,10 @@ keel cc --target x86_64-unknown-linux-gnu -Os \
 ```
 
 The compiler has independent synchronous and asynchronous table requests.
-Synchronous tables default off; asynchronous tables default on. Repeating a flag
-changes only its own request, with the last value winning. Either enabled
-request emits Keel's existing CFI. This does not introduce a new unwind format
-or change the existing precision of the generated frame rules.
-
-| Flags | Optional compiler-generated CFI |
-|---|---|
-| None | Emitted. |
-| `-fno-asynchronous-unwind-tables` | Omitted. |
-| `-fno-unwind-tables` | Emitted because the asynchronous request remains enabled. |
-| `-fno-asynchronous-unwind-tables -funwind-tables` | Emitted. |
-| `-funwind-tables -fno-asynchronous-unwind-tables` | Emitted. |
-| `-fno-unwind-tables -fno-asynchronous-unwind-tables` | Omitted. |
-
-This distinction agrees with the local Clang x86-64 Linux oracle. GCC documents
+Synchronous tables default off and asynchronous tables default on; the last
+flag for each request wins. Optional CFI is emitted while either request is
+enabled, so `-fno-asynchronous-unwind-tables` omits it unless
+`-funwind-tables` is also given, as in Clang. GCC documents
 both requests in its [code generation options](https://gcc.gnu.org/onlinedocs/gcc/Code-Gen-Options.html).
 For a build that wants neither request, pass both negative options. They are
 independent of optimization level, CPU features, address models and `-g`.
@@ -39,8 +27,8 @@ Wasm retains its separate output contract and rejects these native flags.
 
 The flag gates compiler-created CFI during emission. It leaves instruction
 selection, allocation, stack frames, callee-saved preservation and function
-alignment unchanged. Tests compare identical `.text` bytes with tables on and
-off. Debug line and variable information remain available with `-g`.
+alignment unchanged, so `.text` bytes are identical with tables on and off.
+Debug line and variable information remain available with `-g`.
 
 CFI written explicitly in inline/file-scope assembly is preserved. The assembler
 still processes that CFI normally, so a file can still contain `.eh_frame` even
@@ -67,14 +55,6 @@ Use `compile_with_pipeline_and_emission`,
 previous defaults. Cached AArch64 leaf bodies use the same policy as ordinary
 functions. The policy is scoped to one call; it uses no process-global state.
 
-Tests cover source/typed/chunked object parity on both Linux targets and Darwin,
-all stable selectors/allocators, explicit assembly CFI, independent flag ordering,
-`-g`, kernel-address relocations, and native C++ exception execution through
-required Darwin frames. The full pinned kernel build/boot qualification has not
-been repeated with these flags.
-
-Validation on 2026-10-28: the full workspace run passed 3,001 tests with zero
-failures and 15 ignored tests. The experimental-allocator configuration checked
-successfully. Scoped formatting and documentation generation passed. Ordinary
-Clippy completed with existing warnings; warnings-denied Clippy remains blocked
-by existing linker diagnostics.
+Tests cover source, typed and chunked object parity on both Linux targets and
+Darwin, explicit assembly CFI, flag ordering, `-g`, kernel-address relocations
+and native C++ exceptions through required Darwin frames.

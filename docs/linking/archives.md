@@ -116,19 +116,13 @@ cargo test -p keel --test archive
 ```
 
 `crates/keel-link/tests/archive.rs` checks both dialects independently of the
-host: exact payloads and order, repeated bytes, duplicate basenames and symbols,
-long/UTF-8/special names, odd payloads, index offsets, empty indexes,
-weak/common/absolute/undefined/local symbols, the malformed-table cases above,
-wrong targets, atomic replacement and transitive extraction by Keel with unused
-conflicting members. `crates/keel/tests/archive.rs` checks native CLI
-interoperability: `ar t`, `nm`, Keel and system Clang linking of executables
-that exit 42, compiler-produced weak/common definitions, and preservation of
-existing archives on errors.
+host, including the malformed-table cases above. `crates/keel/tests/archive.rs`
+checks native CLI interoperability with `ar`, `nm`, Keel and system linkers.
 
 The writer does not change linker resolution policy. In particular, the
 native Darwin linker extracts members for section definitions but not for
 common-only providers; system linkers do consume common/weak definitions from
 these archives.
 
-Thin archives, universal/fat archives, 64-bit indexes, append/delete/update
-operations, partial linking and shared-library creation are not supported.
+`keel archive` does not write thin or universal archives or 64-bit indexes,
+and does not append, delete or update members.

@@ -88,22 +88,12 @@ The ignored test reads `/tmp/keel-linux64-vmlinux.lds` and
 `KEEL_KERNEL_AGGREGATE` to probe another input. Set `KEEL_KERNEL_OUTPUT` to save
 an output; by default the image stays in memory.
 
-On 2026-10-28 the unchanged pinned aggregate completed native final linking.
-The output had RX, RW and RWX LOADs plus the requested NOTE, with physical entry
-`0x1000000`. All 6,869 global symbol names matched GNU ld 2.46. Of these, 33
-values between `.eh_frame` and the next large alignment differed because GNU
-compacted CIEs. No reference symbol values were injected. Boot, Linux sorttable,
-packaging and removal of the GNU partial-link stage were not tested here.
+## Command line
 
-## CLI and kernel qualification
-
-Use `-T path`, `-Tpath`, `--script path` or `--script=path`. Multiple script
-files are concatenated in argument order within the 1 MiB total limit.
-`-z max-page-size=0x200000` sets the 2 MiB LOAD alignment required by the pinned
-Linux decompressor. The API equivalent is `Options::max_page_size`.
-
-The initial aggregate-only result above has since been extended to native
-archive selection, thin archives and ET_REL output. Both native link routes
-pass boot and checked runtime workloads. See the
-[native kernel qualification](../integrations/linux-kernel.md) for evidence,
-commands and the external boot-stage boundary.
+Use `-T path`, `-Tpath`, `--script path` or `--script=path`; the
+[ELF linker](elf.md) describes the other options. Multiple script files are
+concatenated in argument order within the 1 MiB total limit.
+`-z max-page-size=0x200000` sets the 2 MiB LOAD alignment that the pinned Linux
+decompressor needs; the API equivalent is `Options::max_page_size`. See
+[Linux kernel integration](../integrations/linux-kernel.md) for the kernel link
+commands.

@@ -350,21 +350,6 @@ rules. Portable tests run on any host; runtime and `codesign --verify --strict`
 assertions run only on macOS arm64, where tampered fresh inodes are also checked
 to fail verification and be killed at launch.
 
-Native validation scripts compare Keel-linked and Apple-linked executables built
-from **identical object files**:
-
-`--cached-root` points at the suite cache populated by the ordinary suite
-runner (read only). Omit `--compile` to assemble the cache's Keel `.s` files
-instead. The fixtures cover mutable/BSS data, local and imported pointers, libc
-calls, `dlsym`, archive extraction, addends, backtraces, C++
-catch/cleanup/resume, compact exception handling restoring integer and FP
-registers, initializers and ASLR. The compatibility script covers TLS (main
-thread plus pthreads, alignment, archive and dylib TLS, C++ dynamic TLS init),
-weak symbols against competing dylibs and LLDB debug maps/dSYMs. With these, Lua
-5.4.7 `all.lua`, the nine configured QuickJS tests and the repository's SQLite
-query suite pass for both plain and `-O` objects, with SQLite output identical
-to Apple's link.
-
 ## Format references
 
 The implementation follows the SDK's `mach-o/loader.h`, `nlist.h`,

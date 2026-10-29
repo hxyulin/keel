@@ -84,7 +84,7 @@ For bounded GNU script final linking through the library API, see
   duplicate and unresolved definitions are errors. Same-named locals in
   different objects keep distinct identities.
 - RELA relocations: `R_X86_64_NONE`, `64`, `PC32`, `PLT32`, `GOTPCREL`, `32`,
-  `32S`, `PC64`, `GOTPCRELX` and `REX_GOTPCRELX`. Static calls bind directly;
+  `32S`, `PC8`, `PC64`, `GOTPCRELX` and `REX_GOTPCRELX`. Static calls bind directly;
   GOT loads keep their original instructions and use resolved read-only GOT
   slots. Narrow relocations are overflow-checked; 64-bit absolute arithmetic
   wraps.
@@ -107,6 +107,12 @@ relaxation and source debugging. Runtime-loader IFUNC resolution and
 constructors inside input shared libraries do work. Unsupported sections,
 flags, relocations and options are errors. This is not a general GNU ld
 replacement.
+
+`-r` output keeps contribution identities and relocations instead of applying
+GNU ld's default coalescing and unwind compaction, so intermediate files and
+some final addresses differ from GNU. It preserves COMDAT groups, common and
+weak selection and linked section indices. It rejects REL relocations and
+extended section-index output, and scripted partial links are unsupported.
 
 ## Static archives and shared libraries
 
@@ -436,13 +442,8 @@ format and image limits; this is a working-set estimate, not a process RSS
 bound. Block row declarations are checked against the header total before any
 rows are allocated.
 
-The Linux validator uses installed libsframe and `dl_iterate_phdr` to check
-function and row boundaries, RA-undefined rows, LOAD backing, header sizes,
-negative discovery/sorted controls, second-producer rejection and unused
-archive selection against GNU ld. It establishes bounded metadata lookup, not
-arbitrary CFI unwinding, PIE or general CRT compatibility. Some distributions
-ship a binutils 2.47 package whose tool banners report 2.46; the installed
-SFrame header is what matters.
+SFrame support is bounded metadata lookup, not arbitrary CFI unwinding, PIE
+or general CRT compatibility.
 
 ## Installed CRT objects
 
@@ -457,13 +458,6 @@ avoid installed GNU libc INPUT/GROUP scripts, which remain unsupported.
 Arbitrary C++ exceptions, PIE and drop-in Clang-driver compatibility are out of scope.
 Explicit static GNU layout scripts are covered separately above.
 
-To cross-link, run it with `--prepare-only` on Linux (keeps objects, libraries
-and `cases.json`), link each case with Keel elsewhere, place each
-`<name>.keel` beside its `<name>.gnu`, then run `--verify-only` on Linux.
-Rejection tests must run on the linking host. Results on x86-64 Linux with GC
-disabled and enabled are in the
-Linux SFrame, GC and CRT runtime validation.
-
 ## Validation
 
 The Rust tests cover deterministic images, symbol resolution, absolute
@@ -471,18 +465,6 @@ pointers, GOT entries, BSS alignment, alternate entry points, relocation
 overflow, malformed inputs, GC, COMDAT, notes, SFrame and diagnostics. A CLI
 test links with an empty `PATH`, checks end-of-options handling and that a
 failed link preserves the destination, and on Linux executes the result.
-
-The Linux validators link identical objects with Keel and GNU ld and compare
-exit status and output: Clang O0/O2 with and without PIC, plain and optimized
-Keel C, commons, strong-over-weak resolution in both orders, same-named locals,
-absent weak references, argc/argv, globals, BSS and syscall code; plus archive
-and shared-library search, mixed static/dynamic search, shared libraries pulling
-executable definitions from archives, default-over-legacy symbol versions, and
-versioned libc/IFUNC calls. These pass on two x86-64 Linux distributions
-(Ubuntu 24.04 with Clang 18 and GNU ld 2.42; CachyOS with Clang 23 and GNU ld
-2.47). Static-archive, shared-library and dynamic libc programs cross-linked on
-macOS arm64 (against Ubuntu's glibc 2.39 interfaces) run unchanged on both. No
-link-speed claim is made.
 
 Format references: [System V ELF ABI](https://gabi.xinuos.com/elf/) and
 [x86-64 psABI](https://gitlab.com/x86-psABIs/x86-64-ABI).
