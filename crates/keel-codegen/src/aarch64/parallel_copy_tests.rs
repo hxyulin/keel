@@ -285,7 +285,8 @@ fn parallel_copy_native_raw_bits_live_values_and_pending_flags() {
             Loc::Remat(_) => unreachable!(),
         }
     }
-    let (_, typed, parsed) = objects();
+    // objects() asserts that both routes give the same bytes, so one run covers both.
+    let (_, object, _) = objects();
     let dir = std::env::temp_dir().join(format!("keel-arm-copy-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     let mut c = String::from("#include <stdint.h>\n#include <string.h>\n");
@@ -345,27 +346,24 @@ fn parallel_copy_native_raw_bits_live_values_and_pending_flags() {
     }
     c += "return 0;}\n";
     fs::write(dir.join("test.c"), c).unwrap();
-    for (route, bytes) in [("typed", typed), ("parsed", parsed)] {
-        let object = dir.join(format!("{route}.o"));
-        let exe = dir.join(route);
-        fs::write(&object, bytes).unwrap();
-        let result = Command::new("clang")
-            .args(["-O2", "-ffp-contract=off"])
-            .arg(dir.join("test.c"))
-            .arg(object)
-            .arg("-o")
-            .arg(&exe)
-            .output()
-            .unwrap();
-        assert!(
-            result.status.success(),
-            "{}",
-            String::from_utf8_lossy(&result.stderr)
-        );
-        assert!(
-            Command::new(exe).status().unwrap().success(),
-            "{route} raw-bit/flags harness failed"
-        );
-    }
+    let exe = dir.join("copies");
+    fs::write(dir.join("copies.o"), object).unwrap();
+    let result = Command::new("clang")
+        .args(["-O2", "-ffp-contract=off"])
+        .arg(dir.join("test.c"))
+        .arg(dir.join("copies.o"))
+        .arg("-o")
+        .arg(&exe)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(
+        Command::new(exe).status().unwrap().success(),
+        "raw-bit/flags harness failed"
+    );
     fs::remove_dir_all(dir).unwrap();
 }
