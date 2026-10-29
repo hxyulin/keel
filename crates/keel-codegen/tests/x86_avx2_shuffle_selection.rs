@@ -290,66 +290,6 @@ fn shuffle_immediate_encodings_match_clang() {
     }
 }
 
-/// Diagnostic comparison on an unchanged corpus; includes all function overhead.
-#[test]
-#[ignore = "code-generation measurement; run at both revisions with --nocapture"]
-fn measure_avx2_shuffle_codegen() {
-    let (source, _) = fixture();
-    let dir = directory("measure").join("measure");
-    fs::create_dir_all(&dir).unwrap();
-    let reverse = "func @halfreverse32(i32x8)->i32x8 {\nentry(v0:i32x8):\n v1 = vshuffle v0,v0,[3,2,1,0,7,6,5,4]\n return v1\n}\n";
-    let (text, program, object) = compile(
-        reverse,
-        SelectionTier::Full,
-        &AllocationTier::Full,
-        &keel_codegen::x86_64::REGISTERS,
-        Features::for_level(CpuLevel::V3),
-    );
-    println!(
-        "halfreverse32: instructions={} bytes={}",
-        program.stats().instructions,
-        text_bytes(&object).len()
-    );
-    fs::write(dir.join("halfreverse32.s"), text).unwrap();
-    fs::write(dir.join("halfreverse32.o"), object).unwrap();
-    fs::write(dir.join("corpus.keel"), &source).unwrap();
-    for level in [CpuLevel::V3] {
-        for a in [AllocationTier::Fast, AllocationTier::Full] {
-            for (pool, p) in [
-                ("normal", &keel_codegen::x86_64::REGISTERS),
-                ("spilled", &EMPTY),
-            ] {
-                let (text, program, object) = compile(
-                    &source,
-                    SelectionTier::Full,
-                    &a,
-                    p,
-                    Features::for_level(level),
-                );
-                // Count emitted instructions touching spill/frame memory, separately
-                // from explicit [rdi]/[rsi]/[rdx] application memory operations.
-                let stack_accesses = text
-                    .lines()
-                    .filter(|l| {
-                        l.contains("ptr [rbp") || l.contains("ptr [rsp") || l.contains("ptr [r15")
-                    })
-                    .count();
-                let stem = format!("{level:?}-{a:?}-{pool}");
-                println!(
-                    "{stem}: instructions={} bytes={} stack_accesses={stack_accesses}",
-                    program.stats().instructions,
-                    text_bytes(&object).len()
-                );
-                fs::write(dir.join(format!("{stem}.s")), text).unwrap();
-                fs::write(dir.join(format!("{stem}.o")), object).unwrap();
-            }
-        }
-    }
-    if std::env::var_os("KEEL_AVX2_SHUFFLE_EVIDENCE").is_none() {
-        fs::remove_dir_all(dir).unwrap();
-    }
-}
-
 #[test]
 fn shuffle_feature_boundaries_and_exact_selection() {
     let reverse = "func @reverse(ptr,ptr) {\nblock0(v0:ptr,v1:ptr):\n v2 = load.i32x8 align 1 v0\n v3 = vshuffle v2,v2,[3,2,1,0,7,6,5,4]\n store align 1 v3,v1\n return\n}\n";
