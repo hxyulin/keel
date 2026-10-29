@@ -2,8 +2,8 @@
 
 This page covers the Linux toolchain and AArch64 branch-lowering contract.
 For shared compiler behavior see [architecture](../../compiler/design.md) and
-[SIMD IR](../../compiler/simd-ir.md); assembler APIs live in the
-[assembler crate](../../../crates/keel-asm/src/lib.rs).
+[SIMD IR](../../compiler/simd-ir.md). The [assembler](assembler.md) and
+[C inline assembly](c-inline-asm.md) have their own pages.
 
 Keel supports **64-bit, little-endian AArch64 Linux** as
 `--target aarch64-unknown-linux-gnu` (alias `aarch64-linux-gnu`). On an ARM Linux

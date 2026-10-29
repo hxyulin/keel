@@ -52,6 +52,48 @@ recognized square root computes `fsqrt` for `x >= 0` and calls the library for
 negative and NaN inputs. This matches Clang's default `-fmath-errno` code. Keel
 has no `-fno-math-errno`.
 
+### Other builtins
+
+Supported builtins include `offsetof`, `types_compatible_p`, `choose_expr`,
+`constant_p`, variadic access, `bswap16/32/64`, `clz/ctz/popcount` and their
+`l`/`ll` forms, floating-point classification, `fabs`, `alloca`,
+`frame_address(0)`, `debugtrap` and the overflow builtins below. A
+`__builtin_` name with a declared library equivalent can also resolve to that
+function; this is not blanket support for every builtin. Some builtins have
+deliberately limited behavior:
+
+- `__builtin_expect` and `__builtin_expect_with_probability` return their
+  first operand converted to `long` and evaluate each runtime operand once.
+  The probability must be a finite constant in [0, 1]. No branch-likelihood
+  information is kept.
+- `__builtin_assume_aligned` returns its pointer as `void *` without changing
+  or checking it. The alignment must be a nonzero power-of-two constant, and
+  the optional offset is evaluated once. Later loads and stores through that
+  SSA pointer carry the alignment; a constant offset reduces it and an unknown
+  offset removes it, as in
+  [GCC's documentation](https://gcc.gnu.org/onlinedocs/gcc/Other-Builtins.html).
+- `__builtin_constant_p` recognizes integer expressions the frontend can
+  evaluate; it does not ask the optimizer.
+- `__builtin_object_size` and `__builtin_dynamic_object_size` return the
+  unknown-size value. Fortified `memcpy`, `memmove` and `memset` builtins call
+  the checked external runtime functions with all four arguments; linking needs
+  those symbols. Other fortified `__builtin___*_chk` calls become plain library
+  calls and lose the bounds check.
+- `__builtin_unreachable` lowers to a trap, like `__builtin_trap`, and adds no
+  optimizer assumption.
+
+GNU `packed` and `aligned` control aggregate and member layout. `aligned` and
+C11 `_Alignas` also set local, static, global and thread-local object
+alignment, with power-of-two requests up to 4096. `_Alignas(0)` has no effect,
+and nonzero `_Alignas` cannot weaken natural alignment. Explicit member
+alignment overrides packing, and `#pragma pack` caps member alignment.
+Alignment-changing typedef attributes, alignment attributes on functions,
+parameters and type names, and by-value aggregates aligned above 16 bytes are
+diagnosed. On x86-64, by-value aggregates with unaligned fields are also
+diagnosed. Native packed integer bit-fields access only the bytes that contain
+the field, keep neighboring bits and keep volatile flags on each byte access.
+Zero-width fields raise record alignment on AArch64 Linux, following its ABI.
+
 <a id="c-cleanup-jumps-cleanup-aware-jumps"></a>
 ## Cleanup-aware jumps
 

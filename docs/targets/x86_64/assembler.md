@@ -265,6 +265,14 @@ compiler retains its relocations; the assembler generates DWARF 4 line tables
 and `.eh_frame` CIE/FDE records. CFI register numbers in shared directives use
 x86 DWARF numbering. Source CFI accepts x86 register names too.
 
+`.file 0` selects a DWARF 5 `.debug_line` table with a `.debug_line_str`
+section; otherwise the table is DWARF 4. The directive rules match the
+[AArch64 assembler](../aarch64/assembler.md#dwarf-5). ELF `line_strp` offsets
+carry `R_X86_64_32` relocations against `.debug_line_str`. `md5` and `source`
+operands require a `.file 0` root, and a generated table or string section that
+conflicts with explicit `.debug_line` or `.debug_line_str` contents is an
+error.
+
 ELF section declarations accept `a`, `w`, `x`, `T`, `M`, `S`, and `G` flags.
 For example, `.section .rodata.cst8,"aM",@progbits,8` sets `sh_entsize` to 8;
 `.section .rodata.str1.1,"aMS",@progbits,1` describes byte strings.

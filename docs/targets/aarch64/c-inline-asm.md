@@ -1,8 +1,8 @@
-# GNU C inline assembly: first frontend milestone
+# AArch64 C inline assembly
 
-C assembly statements lower to the existing `InlineAsm` IR on
-`aarch64-apple-darwin`. The [x86-64 scalar implementation](../../targets/x86_64/c-inline-asm.md)
-is documented separately. This is a bounded GNU C subset, not general GCC constraint compatibility.
+C assembly statements lower to `InlineAsm` IR on AArch64. This is a bounded GNU
+C subset, not general GCC constraint compatibility. x86-64 has a
+[broader subset](../x86_64/c-inline-asm.md).
 
 ```c
 long add(long a, long b) {
@@ -15,17 +15,14 @@ long add(long a, long b) {
 }
 ```
 
-The [x86-64 design](../../targets/x86_64/c-inline-asm.md) also records the remaining
-memory contracts, file-scope asm and asm-goto milestones.
-
 ## Syntax and constraints
 
 - `asm`, `__asm`, and `__asm__` statements accept narrow string literals,
   including adjacent literals. `volatile` and `inline` and their GNU spellings
   are accepted. All assembly is pinned, including non-volatile assembly:
-  dead outputs do not remove it. `inline` currently has no size-hint effect.
+  dead outputs do not remove it. `inline` has no size-hint effect.
 - Basic assembly supports an empty template or `nop` only. Other basic templates
-  diagnose: this stage requires extended assembly to declare register effects.
+  are diagnosed; use extended assembly to declare register effects.
 - Extended assembly accepts optional output, input and clobber lists, including
   empty lists: `asm("" ::: "memory")` is a pinned compiler memory barrier.
   It does not emit a hardware memory fence.
@@ -65,7 +62,7 @@ memory contracts, file-scope asm and asm-goto milestones.
 
 ## Backend contract and boundaries
 
-The AArch64 backend places operands in its reserved operand pools: x0–x8,
+The backend places operands in its reserved operand pools: x0–x8,
 x16–x17, v0–v7 and v16–v18, excluding declared clobbers. Distinct outputs and
 untied inputs use distinct registers, so early clobbers are respected.
 Tied inputs initialize their output registers. Register exhaustion and invalid
@@ -74,8 +71,8 @@ Caller-saved allocatable register clobbers induce allocator call barriers;
 callee-saved clobbers are excluded from allocation and saved/restored.
 
 The programmer must declare every register/memory/flag effect, initialize
-outputs, and preserve the stack and normal fallthrough control flow. This stage
-does not model calls or transfers to C labels inside templates. Template
+outputs, and preserve the stack and normal fallthrough control flow. Calls and
+transfers to C labels inside templates are not modeled. Template
 instructions must also be supported by the AArch64 assembler; successful C
 parsing alone does not guarantee object assembly. Use `\n` to separate
 instructions on Darwin, where `;` starts a comment.
@@ -86,10 +83,6 @@ constraints and local register-variable asm labels, flag outputs, vector or
 128-bit register values, symbolic immediates, and unimplemented template escapes
 such as `%=` and label substitutions. Symbol asm-label declarations for
 functions and objects with static storage retain their existing behavior.
-
-Next stages are memory-output IR contracts, more target constraints and local
-register variables, unique-label/template features, asm-goto with explicit CFG
-edges and scope handling, and a separate x86 constraint/allocation/backend stage.
 
 ## Validation
 

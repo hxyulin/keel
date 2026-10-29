@@ -132,7 +132,7 @@ and load/store instructions the compiler uses, plus selected SVE/SME forms
 (`--cpu apple-m5` enables M5 extensions). It supports data and TLS sections,
 CFI and compact unwind, DWARF line tables, exception tables, `.macro`, `.rept`
 and `.if`. Unsupported syntax is an error; this is a subset, not a GNU `as`
-replacement. Details: [design](compiler/design.md#assembler),
+replacement. Details: [AArch64 assembler](targets/aarch64/assembler.md),
 [x86 assembler](targets/x86_64/assembler.md).
 
 `keel cc` and `keel compile` do not go through assembly text: the backend
@@ -204,7 +204,7 @@ its own reference:
   [memory builtins](compiler/optimizer.md), atomics including floating-point
 - [Function attributes](compiler/function-attributes.md), [weak symbols](frontends/c/extensions.md),
   [constructors/destructors](frontends/c/extensions.md), [sections](frontends/c/extensions.md)
-- [AArch64 inline assembly](frontends/c/inline-asm.md) (checked subset)
+- [AArch64 inline assembly](targets/aarch64/c-inline-asm.md) (checked subset)
 - [x86 intrinsics](targets/x86_64/intrinsics.md) and [SIMD](targets/README.md):
   NEON, SSE, AVX/AVX2, FMA, F16C (no AVX-512)
 

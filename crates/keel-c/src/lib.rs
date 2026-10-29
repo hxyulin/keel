@@ -26,8 +26,8 @@
 //! placement and distinct linker `retain` are supported;
 //! Darwin finalization requires libSystem atexit, ELF requires runtime array dispatch.
 //! Other unimplemented linkage
-//! and lifetime attributes are diagnosed; see `docs/frontends/c/README.md` and
-//! `docs/compiler/design.md`'s C frontend section for compatibility limits.
+//! and lifetime attributes are diagnosed; see `docs/frontends/c/README.md`
+//! for compatibility limits.
 
 mod arena;
 mod ast;
