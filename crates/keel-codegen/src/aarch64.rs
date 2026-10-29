@@ -1179,7 +1179,7 @@ impl<'a> FunctionCompiler<'a> {
                     return Err(at("different-width asm ties require the x86 backend".into()));
                 }
             }
-            let regs = asm_regs(asm).map_err(at)?;
+            let regs = asm_regs(func, asm, args).map_err(at)?;
             asm_text(func, asm, args, &regs).map_err(at)?;
             for clobber in &asm.clobbers {
                 let AsmClobber::Reg(r) = *clobber else {
@@ -2880,22 +2880,38 @@ impl<'a> FunctionCompiler<'a> {
             },
             InstData::X86RflagsRegion { .. } => unreachable!("rejected x86 FLAGS region"),
             InstData::InlineAsm { ref asm, ref args } => {
-                let regs = asm_regs(asm).expect("checked when the compiler was made");
+                let regs = asm_regs(func, asm, args).expect("checked when the compiler was made");
                 let n_out = asm.outputs.len();
-                // Inputs into their registers. No value is allocated to
-                // those, so no move overwrites another's source and they
-                // can go in any order (x16 included, which the parallel
-                // copy would need for itself).
-                for (i, &arg) in args.iter().enumerate() {
-                    if let Some(r) = regs[n_out + i] {
-                        self.emit_move(asm_loc(r), self.loc(arg));
+                // Vector spill addresses use x17. Finish them before staging
+                // GPR inputs, and capture GPR outputs before vector writeback.
+                for float in [true, false] {
+                    for (i, &arg) in args.iter().enumerate() {
+                        if let Some(r) = regs[n_out + i]
+                            && r.float == float
+                        {
+                            let width = |v| func.value_type(func.resolve(v)).bytes().unwrap_or(8);
+                            // Equivalent initializers share one copy. The widest
+                            // owns the register, including mixed-width GPR views.
+                            let shadowed = args.iter().enumerate().any(|(j, &other)| {
+                                regs[n_out + j] == Some(r)
+                                    && (width(other) > width(arg)
+                                        || (width(other) == width(arg) && j < i))
+                            });
+                            if !shadowed {
+                                self.emit_move(asm_loc(r), self.loc(arg));
+                            }
+                        }
                     }
                 }
                 let text = asm_text(func, asm, args, &regs).expect("checked");
                 self.out.inline_assembly(&text);
-                for (k, &output) in func.inst_results(inst).iter().enumerate() {
-                    if let (Some(dst), Some(r)) = (self.defined(output), regs[k]) {
-                        self.emit_move(dst, asm_loc(r));
+                for float in [false, true] {
+                    for (k, &output) in func.inst_results(inst).iter().enumerate() {
+                        if let (Some(dst), Some(r)) = (self.defined(output), regs[k])
+                            && r.float == float
+                        {
+                            self.emit_move(dst, asm_loc(r));
+                        }
                     }
                 }
             }
@@ -5911,7 +5927,11 @@ fn arg_kind<'s>(func: &Function, params: &'s [AbiParam], i: usize, arg: Value) -
 /// for each other operand, so no two operands share a register unless
 /// tied (or an input names an output's register: it is read before the
 /// output is written). A constant gets none.
-fn asm_regs(asm: &InlineAsm) -> Result<Vec<Option<PhysReg>>, String> {
+fn asm_regs(
+    func: &Function,
+    asm: &InlineAsm,
+    args: &[Value],
+) -> Result<Vec<Option<PhysReg>>, String> {
     if asm
         .outputs
         .iter()
@@ -5987,10 +6007,19 @@ fn asm_regs(asm: &InlineAsm) -> Result<Vec<Option<PhysReg>>, String> {
         regs[i] = Some(r);
         taken.push(r);
     }
-    // Two inputs in one register would need two values there at once.
-    for (i, r) in regs.iter().enumerate().skip(n_out) {
-        if r.is_some() && regs[n_out..i].contains(r) {
-            return Err(format!("{} is named by two inputs", r.unwrap()));
+    for (i, &r) in regs.iter().enumerate().skip(n_out) {
+        let Some(r) = r else { continue };
+        for &out in &asm.early_clobbers {
+            if regs[out as usize] == Some(r) && asm.inputs[i - n_out] != AsmOperand::Tied(out) {
+                return Err(format!("{r} input overlaps an early-clobber output"));
+            }
+        }
+        for j in n_out..i {
+            if regs[j] == Some(r)
+                && !keel_ir::asm::same_register_input(func, args[j - n_out], args[i - n_out])
+            {
+                return Err(format!("{r} has conflicting or unproven inputs"));
+            }
         }
     }
     Ok(regs)

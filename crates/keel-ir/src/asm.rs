@@ -75,7 +75,7 @@ pub enum AsmOperand {
     /// Multiple inputs may initialize one output only when their common low
     /// bits are proven equal by `same_register_input`. The widest input owns
     /// initialization. An explicit tie may initialize an early-clobber output;
-    /// an independent fixed input may overlap only a non-early output on x86.
+    /// an independent fixed input may overlap only a non-early output.
     Tied(u16),
 }
 

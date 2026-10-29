@@ -301,9 +301,10 @@ and an input `0` tied to it, and named operands become numbers.
   a vector tie requires the same lane type and width. Then clobbers:
   `~{x9}`, `~{d8}`, `~{lr}`, `~{memory}`, `~{cc}`.
 - An `asm` is pinned and never removed: every asm is treated as C's `asm
-  volatile`. Memory is never cached in registers across one, so
-  `~{memory}` changes nothing yet; nor does `~{cc}`, as no value lives in
-  the flags between instructions.
+  volatile`. Memory effects follow the declared operands: `m` reads memory,
+  `mwrite` writes it, and `mreadwrite` does both. `~{memory}` is a barrier
+  for memory not named by operands. Register-only asm without that clobber
+  does not invalidate memory facts. `~{cc}` declares changed condition flags.
 - On aarch64 operands go in registers no value is allocated to: x0–x8,
   x16, x17, v0–v7 and v16–v18. Inputs are moved in before the template
   and outputs out after it, like a call's arguments and results. That
