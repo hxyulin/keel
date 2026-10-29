@@ -253,6 +253,26 @@ fn parallel_copy_scalar_functions_keep_original_temporary() {
     assert!(!text.contains("v18"));
 }
 
+#[test]
+fn parallel_copy_scalar_cycles_in_vector_functions_use_x16() {
+    use Loc::{Reg as R, Stack as S};
+    let module = module();
+    let mut c = compiler(&module, false);
+    c.parallel_copy(&[(R(9), R(10)), (R(10), R(9))]);
+    c.parallel_copy(&[(R(11), S(6)), (S(6), R(11))]);
+    // A vector stack slot still needs the full-width stack temporary.
+    c.parallel_copy(&[(R(12), S(0)), (S(0), R(12))]);
+    let Output::Text(text) = c.out else {
+        unreachable!()
+    };
+    let text = text.into_string();
+    let (scalar, vector) = text.split_once("x12").unwrap();
+    assert!(scalar.contains("mov\tx16, x9"), "{text}");
+    assert!(scalar.contains("x16, [sp, #48]"), "{text}");
+    assert!(!scalar.contains("[sp, #32]"), "{text}");
+    assert!(vector.contains("[sp, #32]"), "{text}");
+}
+
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[test]
 fn parallel_copy_native_raw_bits_live_values_and_pending_flags() {

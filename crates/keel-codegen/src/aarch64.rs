@@ -5108,7 +5108,8 @@ impl<'a> FunctionCompiler<'a> {
 
     /// Emits `moves`, each `(dst, src)`, as if they all happened at once.
     /// Pure FP-register copies in vector functions can use reserved v18 for
-    /// full-width cycles. Other vector copies need the 16-byte stack temporary;
+    /// full-width cycles. Other copies that touch an FP register or a vector
+    /// stack slot in a vector function need the 16-byte stack temporary;
     /// otherwise x16 suffices for either register class.
     fn parallel_copy(&mut self, moves: &[(Loc, Loc)]) {
         // FS2 is outside the supported allocation pools. Check even self-copies
@@ -5121,8 +5122,19 @@ impl<'a> FunctionCompiler<'a> {
                     && src != Loc::FReg(FS2)
                     && (dst == src || matches!((dst, src), (Loc::FReg(_), Loc::FReg(_))))
             });
+        // In a vector function an FP register may hold a full vector, which
+        // a 64-bit x16 round trip would truncate.
+        let scalar_only = moves.iter().all(|&(dst, src)| {
+            [dst, src].iter().all(|loc| match *loc {
+                Loc::FReg(_) => false,
+                Loc::Stack(slot) => !self.vector_spills.contains_key(&slot),
+                _ => true,
+            })
+        });
         let temp = if register_only {
             Loc::FReg(FS2)
+        } else if scalar_only {
+            Loc::Reg(S0)
         } else {
             self.copy_temp.map_or(Loc::Reg(S0), Loc::Stack)
         };
