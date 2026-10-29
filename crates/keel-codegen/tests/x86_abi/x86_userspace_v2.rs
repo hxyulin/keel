@@ -1,14 +1,12 @@
 //! Strict v2 joins cumulative vector/ABI coverage and representative v2 operations.
 //! Native execution is finite userspace evidence, not physical FLAGS certification.
+use crate::common;
 use keel_asm_ir::x86::{CpuLevel, Features};
 use keel_codegen::{SelectionTier, regalloc::AllocationTier};
 use object::{Object, ObjectSymbol};
 use std::fs;
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use std::process::Command;
-#[allow(dead_code)]
-#[path = "common/vector.rs"]
-pub mod common;
 
 fn representative() -> String {
     let mut ir = String::new();
@@ -31,8 +29,7 @@ fn representative() -> String {
     ir
 }
 
-#[path = "common/userspace.rs"]
-mod userspace;
+use crate::userspace;
 fn compile(source: &str, s: SelectionTier, a: AllocationTier, spilled: bool) -> (Vec<u8>, String) {
     userspace::compile(source, CpuLevel::V2, s, a, spilled)
 }

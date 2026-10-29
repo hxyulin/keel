@@ -1,4 +1,5 @@
 //! Numerical D8 vectors use the XMM bank, never the GNU physical MMX tag.
+use crate::common;
 use keel_asm_ir::x86::{CpuLevel, Features};
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
@@ -7,9 +8,6 @@ use keel_codegen::{
 };
 use keel_ir::VectorType;
 use std::{fs, path::PathBuf, process::Command};
-#[allow(dead_code)]
-#[path = "common/vector.rs"]
-pub mod common;
 
 // f64x1 remains in every pointer-based numerical corpus. Its C value ABI
 // is an explicit rejection roster, not an interchangeable sixth C shape.
@@ -65,7 +63,7 @@ fn fixtures() -> Vec<(&'static str, String, String)> {
         (
             "boundaries",
             boundary_ir(true),
-            include_str!("x86_d8/boundaries.c").into(),
+            include_str!("../x86_d8/boundaries.c").into(),
         ),
     ]
 }
@@ -227,8 +225,7 @@ fn boundary_ir(wide: bool) -> String {
     s
 }
 
-#[path = "common/matrix.rs"]
-mod matrix;
+use crate::matrix;
 
 fn compile(
     source: &str,

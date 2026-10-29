@@ -43,7 +43,7 @@ fn compile(source: &str, features: Features) -> Result<String, keel_codegen::Cod
 #[test]
 fn all_primary_layouts_named_unnamed_returns_and_compatible_tails() {
     let mut count = 0;
-    for row in include_str!("f64x1_recursive/layouts.txt").lines() {
+    for row in include_str!("../f64x1_recursive/layouts.txt").lines() {
         let fields: Vec<_> = row.split('|').collect();
         let layout = fields[1];
         let size = fields[2];

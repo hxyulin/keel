@@ -4,7 +4,7 @@ Export all 24 selector, allocator, register-pool and CPU-level combinations.
 The packet covers V1 and V3; V2 emits the same text as V1.
 
 ```sh
-KEEL_SYSV_TAIL_EXPORT="$PWD/target/sysv-tail" cargo test -p keel-codegen --test x86_sysv_tail
+KEEL_SYSV_TAIL_EXPORT="$PWD/target/sysv-tail" cargo test -p keel-codegen --test x86_abi -- x86_sysv_tail::
 ```
 
 On an x86-64 Linux host that supports x86-64-v3, run:

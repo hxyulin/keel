@@ -1,13 +1,11 @@
 //! Bounded strict-v3 join: mixed-width SysV transport through the shared SIMD bank.
 //! Architectural FP/mask/gather semantics stay in their existing finite suites.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+use crate::common;
+use crate::userspace;
 use keel_asm_ir::x86::CpuLevel;
 use keel_codegen::{SelectionTier, regalloc::AllocationTier};
 use std::fs;
-#[allow(dead_code)]
-#[path = "common/vector.rs"]
-pub mod common;
-#[path = "common/userspace.rs"]
-mod userspace;
 
 fn mixed() -> (String, String) {
     // Eight shared SIMD argument registers, then a narrow and a wide stack

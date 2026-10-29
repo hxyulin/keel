@@ -188,11 +188,11 @@ fn helpers_are_explicit_link_requirements_and_fma_preserves_fusion() {
 #[test]
 fn scalar_sse2_and_ordinary_abi_corpus_obeys_explicit_levels() {
     for source in [
-        include_str!("programs/arith.keel"),
-        include_str!("programs/floats.keel"),
-        include_str!("programs/call_args.keel"),
-        include_str!("programs/abi_ext.keel"),
-        include_str!("programs/atomics.keel"),
+        include_str!("../programs/arith.keel"),
+        include_str!("../programs/floats.keel"),
+        include_str!("../programs/call_args.keel"),
+        include_str!("../programs/abi_ext.keel"),
+        include_str!("../programs/atomics.keel"),
     ] {
         for s in [
             SelectionTier::Baseline,

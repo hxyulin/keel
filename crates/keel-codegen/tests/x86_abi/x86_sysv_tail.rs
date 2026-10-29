@@ -21,7 +21,7 @@ const TINY: Pools = Pools {
 };
 #[test]
 fn compatible_tail_packet() {
-    let module = keel_ir::parse(include_str!("sysv_tail/corpus.ir")).unwrap();
+    let module = keel_ir::parse(include_str!("../sysv_tail/corpus.ir")).unwrap();
     keel_ir::verify_module(&module).unwrap();
     let export = std::env::var_os("KEEL_SYSV_TAIL_EXPORT").map(PathBuf::from);
     let dir = export.clone().unwrap_or_else(|| {
@@ -199,7 +199,7 @@ fn incompatible_tails_reject() {
 fn witness_assembly_syntax() {
     let dir = std::env::temp_dir().join(format!("keel-tail-witness-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join("depth.S"), include_str!("sysv_tail/depth.S")).unwrap();
+    fs::write(dir.join("depth.S"), include_str!("../sysv_tail/depth.S")).unwrap();
     let output = Command::new("clang")
         .args(["-target", "x86_64-unknown-linux-gnu", "-c"])
         .arg(dir.join("depth.S"))
