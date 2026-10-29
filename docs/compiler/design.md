@@ -854,9 +854,10 @@ explicit invocation, so function order cannot cause recursive expansion.
 Ordinary profitability limits are 64 instructions, 8 blocks and 512 bytes of
 fixed stack storage. `inlinehint` doubles these limits; `alwaysinline` bypasses
 only these soft limits and `noinline` prohibits expansion. Each caller accepts
-at most 128 sites and 2,048 added IR instructions, with a module limit of 16,384
-added instructions and hard stack budgets (including by-value snapshots).
-These admission budgets reset on each invocation; Full uses three invocations.
+at most 128 sites and 2,048 added IR instructions. The module limit is 16,384
+added instructions, or 65,536 in Full's `inline-cheap-reserve` policy, with hard
+stack budgets (including by-value snapshots). These admission budgets reset on
+each invocation; Full uses three invocations.
 They bound each round's pre-cleanup growth, not total final module or frame size.
 See [function attributes](function-attributes.md#inliner-policy-and-hard-boundaries)
 for exact limits and skip reports through `inline_with_report`. Normal CLI

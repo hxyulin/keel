@@ -284,8 +284,9 @@ impl Pass for InlineNoninterposable {
     }
 }
 
-/// Full policy: keep ordinary scheduling and budgets, then
-/// fairly retry cheap helper sites denied only by module growth.
+/// Full policy: allow a larger module growth budget, then fairly retry cheap
+/// helper sites denied only by module growth. Caller and legality limits match
+/// the ordinary policy.
 pub struct InlineCheapReserve;
 impl Pass for InlineCheapReserve {
     fn name(&self) -> &'static str {
@@ -405,6 +406,7 @@ const MAX_STACK: u64 = 512;
 const MAX_GROWTH: usize = 2048;
 const MAX_CALLS: usize = 128;
 const MAX_MODULE_GROWTH: usize = 16_384;
+const FULL_MAX_MODULE_GROWTH: usize = 65_536;
 const HARD_STACK: u64 = 65_536;
 
 // Switches spend blocks on cheap returns. Admit only a small, acyclic integer
@@ -923,6 +925,11 @@ fn run_observed_policy_scoped(
         cheap_reserve,
         cost: cost_policy,
     } = policy;
+    let module_growth_limit = if cheap_reserve {
+        FULL_MAX_MODULE_GROWTH
+    } else {
+        MAX_MODULE_GROWTH
+    };
     let flatten = module.functions.iter().any(|f| f.attrs.flatten);
     let roots = if cost_policy == InlineCost::Size {
         crate::assembly_symbols::roots(module)
@@ -1259,7 +1266,7 @@ fn run_observed_policy_scoped(
             Some("caller_call_count_budget")
         } else if growth + cost > MAX_GROWTH {
             Some("caller_instruction_growth_budget")
-        } else if module_growth + cost > MAX_MODULE_GROWTH {
+        } else if module_growth + cost > module_growth_limit {
             Some("module_instruction_growth_budget")
         } else if stack_growth + stack_cost > HARD_STACK {
             Some("caller_stack_growth_budget")

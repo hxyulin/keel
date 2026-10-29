@@ -35,7 +35,7 @@ fn caller(name: &str, callee: &str, count: usize) -> String {
 }
 fn saturated() -> String {
     let mut s = leaf("constructor", 16, "alwaysinline local", false);
-    for i in 0..8 {
+    for i in 0..32 {
         s += &caller(&format!("budget{i}"), "constructor", 128);
     }
     s
@@ -70,7 +70,7 @@ fn module_growth_is_exactly_bounded_and_late_callers_get_a_turn() {
             .all(|s| s.experimental_net_growth == Some(32))
     );
     assert_eq!(count(&baseline) - count(&before), 16_384);
-    assert_eq!(count(&m) - count(&baseline), 4096);
+    assert_eq!(count(&m) - count(&before), 65_536 + 4096);
     assert_eq!(
         sites
             .iter()
@@ -271,7 +271,7 @@ fn guarded_hinted_leaves_precede_ordinary_growth_without_expanding_budgets() {
     let (m, sites) = run(&source, PASS);
     assert_eq!(sites.first().unwrap().caller, "late");
     assert_eq!(sites.first().unwrap().outcome, "inlined");
-    assert!(count(&m) - count(&before) <= 16_384);
+    assert!(count(&m) - count(&before) <= 65_536);
     assert!(admitted(&sites).is_empty());
     let source = helper.to_owned()
         + &late.replace(

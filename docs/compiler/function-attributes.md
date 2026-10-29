@@ -165,7 +165,8 @@ these three soft thresholds, but cannot bypass legality or the hard safeguards:
 
 - At most 128 expanded original call sites per caller per invocation.
 - At most 2,048 estimated added IR instructions per caller per invocation.
-- At most 16,384 estimated added IR instructions across the module per invocation.
+- At most 16,384 estimated added IR instructions across the module per invocation,
+  or 65,536 in Full's `inline-cheap-reserve` policy.
 - At most 65,536 bytes of callee stack slots, and at most 65,536 bytes of added
   summed slot/snapshot sizes per caller per invocation (excluding backend frame
   alignment and spills).
