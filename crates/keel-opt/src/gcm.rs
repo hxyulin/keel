@@ -75,6 +75,27 @@ pub fn run(func: &mut Function) -> bool {
         let idom = domtree.idom(block).expect("reachable non-entry block");
         dom_depth[block.index()] = dom_depth[idom.index()] + 1;
     }
+    // Preorder interval of each dominator subtree: `a` dominates `b` when
+    // `pre[a] <= pre[b] < end[a]`. `common_dominator` walks one idom at a
+    // time, so test dominance first; a value used in each block of a long
+    // dominator chain would otherwise cost a walk per use. Users come in RPO,
+    // so a later user's block never strictly dominates the earlier ones.
+    let children = domtree.children();
+    let mut pre = Scratch::filled(func.num_blocks(), 0u32);
+    let mut end = Scratch::filled(func.num_blocks(), 0u32);
+    let mut next = 0;
+    let mut stack = vec![(domtree.rpo()[0], false)];
+    while let Some((block, done)) = stack.pop() {
+        if done {
+            end[block.index()] = next;
+            continue;
+        }
+        pre[block.index()] = next;
+        next += 1;
+        stack.push((block, true));
+        stack.extend(children[block].iter().map(|&child| (child, false)));
+    }
+    let dominates = |a: Block, b: Block| (pre[a.index()]..end[a.index()]).contains(&pre[b.index()]);
 
     let layout: usize = func.blocks().map(|b| func.block_insts(b).len()).sum();
     let mut floating: Scratch<Inst> = Scratch::new();
@@ -187,6 +208,7 @@ pub fn run(func: &mut Function) -> bool {
             let b = func.inst_block(user);
             late = Some(match late {
                 None => b,
+                Some(l) if dominates(l, b) => l,
                 Some(l) => domtree.common_dominator(l, b),
             });
         }
@@ -202,7 +224,9 @@ pub fn run(func: &mut Function) -> bool {
         let mut best = late;
         let mut block = late;
         let mut cheap_address = None;
-        while block != early {
+        // Only a strictly shallower block replaces `best`, so the walk can
+        // stop once `best` is outside every loop.
+        while block != early && loops.depth(best) != 0 {
             block = domtree.idom(block).expect("early dominates late");
             // An address of a fixed object plus a constant is cheap to
             // recompute. Hoisting it keeps a separate pointer live across

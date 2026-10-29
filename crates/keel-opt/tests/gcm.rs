@@ -109,3 +109,72 @@ block2(v10: i64):
         }
     }
 }
+
+#[test]
+fn late_placement_and_loop_exit_follow_the_dominator_tree() {
+    // The first product has users in both arms, so it stays at their common
+    // dominator. The sum's second user is dominated by its first, so the sum
+    // sinks into block1. The product in block5 is invariant in the loop.
+    let source = "func @f(i64, i8, i64) -> i64 {
+block0(v0: i64, v1: i8, v20: i64):
+    v2 = imul v0, v0
+    v3 = iadd v0, v0
+    brif v1, block1, block2
+block1:
+    v4 = iadd v2, v3
+    jump block3(v4)
+block2:
+    v5 = isub v2, v0
+    return v5
+block3(v6: i64):
+    v7 = iadd v6, v3
+    v9 = iconst.i64 0
+    jump block4(v9, v7)
+block4(v10: i64, v11: i64):
+    v12 = icmp.ult v10, v20
+    brif v12, block5, block6
+block5:
+    v8 = imul v0, v20
+    v13 = iadd v11, v8
+    v14 = iconst.i64 1
+    v15 = iadd v10, v14
+    jump block4(v15, v13)
+block6:
+    return v11
+}
+";
+    let mut module = keel_ir::parse(source).unwrap();
+    let func = &mut module.functions[0];
+    assert!(keel_opt::find_pass("gcm").unwrap().run(func));
+    keel_ir::verify(func).unwrap();
+    // The invariant product goes to block3, the latest block outside the loop.
+    let expected = "func @f(i64, i8, i64) -> i64 cc(c) {
+block0(v0: i64, v1: i8, v2: i64):
+    v3 = imul v0, v0
+    brif v1, block1, block2
+block1:
+    v4 = iadd v0, v0
+    v5 = iadd v3, v4
+    jump block3(v5)
+block2:
+    v6 = isub v3, v0
+    return v6
+block3(v7: i64):
+    v8 = iadd v7, v4
+    v9 = iconst.i64 0
+    v13 = imul v0, v2
+    jump block4(v9, v8)
+block4(v10: i64, v11: i64):
+    v12 = icmp.ult v10, v2
+    brif v12, block5, block6
+block5:
+    v14 = iadd v11, v13
+    v15 = iconst.i64 1
+    v16 = iadd v10, v15
+    jump block4(v16, v14)
+block6:
+    return v11
+}
+";
+    assert_eq!(func.to_string(), expected);
+}
