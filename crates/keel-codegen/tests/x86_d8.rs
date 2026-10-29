@@ -293,6 +293,9 @@ fn check_d_matrix(exhaustive: bool) {
         .map(PathBuf::from);
     let dir = common::temp(if exhaustive { "x86-d8" } else { "x86-d8-smoke" });
     let mut configurations = 0;
+    // Clang assembles each distinct text once. Every configuration still
+    // compares its own typed object with that oracle.
+    let mut oracles = std::collections::HashMap::<String, Vec<u8>>::new();
     for (kind, source, c) in fixtures() {
         fs::write(dir.join("reference.c"), &c).unwrap();
         let target = if cfg!(target_os = "macos") {
@@ -316,9 +319,9 @@ fn check_d_matrix(exhaustive: bool) {
             fs::write(d.join(format!("{kind}.ir")), &source).unwrap();
             fs::write(d.join(format!("{kind}.c")), &c).unwrap();
         }
+        // Features::default() emits the same text as NONE in every configuration.
         for (feature, features) in [
             ("none", Features::NONE),
-            ("default", Features::default()),
             ("avx2", Features::for_level(CpuLevel::V3)),
         ] {
             let narrow;
@@ -359,19 +362,27 @@ fn check_d_matrix(exhaustive: bool) {
                             fs::write(d.join(format!("{name}.text.o")), parsed).unwrap();
                         }
                         // Independent assembler oracle for every emitted function.
-                        fs::write(dir.join("test.s"), &text).unwrap();
-                        common::command(
-                            Command::new("clang")
-                                .args(["-target", "x86_64-unknown-linux-gnu", "-c"])
-                                .arg(dir.join("test.s"))
-                                .arg("-o")
-                                .arg(dir.join("clang.o")),
-                        );
-                        let clang_bytes = fs::read(dir.join("clang.o")).unwrap();
-                        let clang = object::File::parse(&*clang_bytes).unwrap();
+                        let clang = oracles.entry(text.clone()).or_insert_with(|| {
+                            fs::write(dir.join("test.s"), &text).unwrap();
+                            common::command(
+                                Command::new("clang")
+                                    .args(["-target", "x86_64-unknown-linux-gnu", "-c"])
+                                    .arg(dir.join("test.s"))
+                                    .arg("-o")
+                                    .arg(dir.join("clang.o")),
+                            );
+                            let bytes = fs::read(dir.join("clang.o")).unwrap();
+                            let clang = object::File::parse(&*bytes).unwrap();
+                            clang
+                                .section_by_name(".text")
+                                .unwrap()
+                                .data()
+                                .unwrap()
+                                .to_vec()
+                        });
                         let keel = object::File::parse(&*typed).unwrap();
                         assert_eq!(
-                            clang.section_by_name(".text").unwrap().data().unwrap(),
+                            clang.as_slice(),
                             keel.section_by_name(".text").unwrap().data().unwrap(),
                             "{name}"
                         );
@@ -380,7 +391,7 @@ fn check_d_matrix(exhaustive: bool) {
             }
         }
     }
-    assert_eq!(configurations, if exhaustive { 162 } else { 18 });
+    assert_eq!(configurations, if exhaustive { 108 } else { 12 });
     fs::remove_dir_all(dir).unwrap();
 }
 
