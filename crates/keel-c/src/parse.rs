@@ -329,6 +329,8 @@ pub(crate) struct FuncState<'a> {
     pub scopes: Vec<Option<usize>>,
     pub scope: Option<usize>,
     pub label_addrs: Vec<&'a str>,
+    /// Each `label_addrs` entry's number, from 1.
+    pub label_addr_numbers: HashMap<&'a str, usize>,
     pub ret: Ty<'a>,
     pub name: &'a str,
     pub switches: Vec<SwitchCtx<'a>>,
@@ -3821,6 +3823,7 @@ impl<'a> Parser<'a> {
             scopes: Vec::new(),
             scope: None,
             label_addrs: Vec::new(),
+            label_addr_numbers: HashMap::default(),
             ret,
             name: "",
             switches: Vec::new(),

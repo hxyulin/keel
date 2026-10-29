@@ -113,3 +113,36 @@ fn unsupported_sites_keep_the_whole_function_on_numeric_dispatch() {
         }
     }
 }
+
+#[test]
+fn many_label_addresses_keep_first_use_numbers() {
+    let n = 3000;
+    let mut entries: Vec<String> = (0..n).map(|i| format!("&&l{i}")).collect();
+    entries.extend(["&&l0".into(), "&&l1500".into(), format!("&&l{}", n - 1)]);
+    let bodies: String = (0..n).map(|i| format!("l{i}: return {i};")).collect();
+    let src = format!(
+        "int run(long i) {{ static void *const table[] = {{{}}}; goto *table[i]; {bodies} }}",
+        entries.join(",")
+    );
+    let m = module(&src, false, Target::Aarch64AppleDarwin);
+    keel_ir::verify_module(&m).unwrap();
+    let init = m.data_object("run.table").unwrap().init.as_ref().unwrap();
+    let mut bytes = Vec::new();
+    for item in &init.items {
+        match item {
+            keel_ir::DataItem::Bytes(part) => bytes.extend(part),
+            keel_ir::DataItem::Zero(n) => bytes.resize(bytes.len() + *n as usize, 0),
+            _ => panic!("numeric table data"),
+        }
+    }
+    let labels: Vec<u64> = bytes
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .copied()
+        .map(u64::from_le_bytes)
+        .collect();
+    let mut expected: Vec<u64> = (1..=n).collect();
+    expected.extend([1, 1501, n]);
+    assert_eq!(labels, expected);
+}

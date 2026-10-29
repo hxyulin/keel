@@ -1124,13 +1124,11 @@ impl<'a> Parser<'a> {
                 let Some(fs) = self.fs.as_mut() else {
                     return Err(Error::new(loc, "`&&label` outside a function"));
                 };
-                let n = match fs.label_addrs.iter().position(|l| *l == name) {
-                    Some(i) => i + 1,
-                    None => {
-                        fs.label_addrs.push(name);
-                        fs.label_addrs.len()
-                    }
-                };
+                let next = fs.label_addrs.len() + 1;
+                let n = *fs.label_addr_numbers.entry(name).or_insert(next);
+                if n == next {
+                    fs.label_addrs.push(name);
+                }
                 Ok(mk(ExprKind::LabelAddr(n), self.ptr_type(Ty::Void), loc))
             }
             "*" => {
