@@ -151,6 +151,37 @@ the separate load. Baseline selection and AArch64 are unchanged.
   `load.i64; vsplat.i64x2; bitcast.i32x4; swiden_low.i64x2` with single-use
   intermediates becomes `pmovsxdq xmm, m64`.
 
+## Code models
+
+`--code-model MODEL`, `--code-model=MODEL` and `-mcmodel=MODEL` select how
+symbol addresses are materialized on `x86_64-unknown-linux-gnu`. They do not
+change C layout, the ABI, CPU features, optimization or unwind emission.
+
+| Model | Symbol address materialization | Contract |
+|---|---|---|
+| `pic` (default) | RIP-relative definitions; GOT-bound external addresses | Position-independent userspace. Relative references must fit their encoded reach. |
+| `small` | Zero-extended 32-bit absolute addresses (`R_X86_64_32`) | Static low-address image; addresses fit unsigned 32 bits and direct calls stay reachable. |
+| `kernel` | Sign-extended 32-bit absolute addresses (`R_X86_64_32S`) | Static image in the top 2 GiB; direct calls stay reachable. |
+
+`small` and `kernel` reject `--link-intent shared`, and `kernel` rejects
+userspace TLS. `medium` and `large` are rejected; a large model would also need
+distant calls, constants and tables. Linkers diagnose relocation overflow
+rather than truncating.
+
+## Two-word aggregate wrappers
+
+The backend keeps small straight-line wrappers in SSA when their System V ABI
+is identical to a pair of integer words, which removes argument snapshots and
+return-buffer copies. Admission requires a single block, one direct call and a
+complete two-i64 result in rax and rdx. Byval layouts must be exactly
+`[2 x i64]` or `{i64, i64}`, and every original argument location must equal
+the proposed i128 location, including register-pair rollback, stack offsets
+and stack alignment. Only private stack homes and incoming byval copies may be
+accessed, and every observed word must be initialized. External memory
+accesses, captured addresses, several or indirect calls, variadic calls, frame
+observers and debugger-visible functions use ordinary lowering. The temporary
+i128 function never replaces the public module function.
+
 ## Frames
 
 The SysV backend omits the frame for `cc(c)` SIMD leaves and `cc(fast)`

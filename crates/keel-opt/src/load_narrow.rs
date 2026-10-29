@@ -1,7 +1,27 @@
 //! Opt-in, explicitly little-endian narrowing of fault-free private stack reads.
 //!
+//! Rewrites `and.i64(load.i64 notrap addr, 255)`, in either operand order, into
+//! `uext.i64(load.i8 addr)`. No optimization tier runs this pass.
+//!
+//! The function must have no debug homes, volatile accesses, calls, atomics,
+//! inline assembly, intrinsics or memory effects other than plain loads and
+//! stores. Every address must be a fixed stack address or a checked constant
+//! nonnegative `ptradd` chain inside that allocation, every access must fit in
+//! it, and no address may be converted, passed, stored or returned. The load
+//! must already carry `notrap` and have exactly one resolved use, the mask; the
+//! pass never infers or adds `notrap`.
+//!
+//! The byte load replaces the wide load at the same position with the same
+//! address, flags, alignment and source location, and the mask becomes the
+//! extension. Only byte zero is read, so little-endian low-byte equality gives
+//! `zext(load8(addr)) == load64(addr) & 255`. `run` and the Portable target
+//! return false; the X86Sse2 and Aarch64Neon targets denote the little-endian
+//! implementations, and a big-endian target must not reuse them.
+//!
 //! Generic pointer loads are deliberately unsupported: an ordinary load may
-//! fault, and reducing its width can suppress that fault. See docs/compiler/load-narrow.md.
+//! fault, and reducing its width can suppress that fault. C frontend IR for a
+//! generic pointer carries neither `notrap` nor a fixed allocation, so it stays
+//! unchanged.
 
 use crate::{Pass, VectorTarget};
 use keel_ir::fxhash::FxHashMap;

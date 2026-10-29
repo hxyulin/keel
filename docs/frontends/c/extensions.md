@@ -52,6 +52,37 @@ recognized square root computes `fsqrt` for `x >= 0` and calls the library for
 negative and NaN inputs. This matches Clang's default `-fmath-errno` code. Keel
 has no `-fno-math-errno`.
 
+### Explicit memory builtins
+
+`__builtin_memcpy`, `__builtin_memmove` and `__builtin_memset` lower to the IR
+`memcpy`, `memmove` and `memset` intrinsics without a library declaration, and
+`__has_builtin` reports them. With an ordinary library declaration in scope,
+the builtin name also works as a function designator (address taking,
+`(__builtin_memcpy)(d,s,n)`), which becomes an ordinary call.
+
+Lengths convert to `size_t` and the `memset` fill to `int`, truncated to the
+IR's `i8`. All three arguments are evaluated once, left to right, even at zero
+length, and the expression returns the destination. `memcpy` requires disjoint
+regions; `memmove` allows overlap. A zero length adds no runtime pointer check.
+Non-pointer arguments other than null constants, function pointers, const
+destinations and volatile pointees are diagnosed; an explicit `(void *)` cast
+may drop qualifiers. Small constant lengths may become loads and stores in the
+[optimizer](../../compiler/optimizer.md#small-memory); other operations call
+libc.
+
+`__builtin___memcpy_chk`, `__builtin___memmove_chk` and `__builtin___memset_chk`
+emit `__memcpy_chk`, `__memmove_chk` or `__memset_chk` calls with all four
+arguments, even when a constant bound is smaller than the length. Their
+prototypes are known without a declaration, conflicting declarations and
+`returns_twice` are diagnosed, and `__has_builtin` does not report them.
+Linking needs a runtime that provides the checked symbols. The macOS SDK's
+`secure/_string.h` gates its fortify macros on `__has_builtin`, so those names
+stay ordinary library calls under Keel's preprocessor. Semantics follow
+[C11 N1570](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf)
+sections 7.24.2 and 7.24.6.1 and GCC's
+[library builtins](https://gcc.gnu.org/onlinedocs/gcc/Library-Builtins.html)
+and [object size checking](https://gcc.gnu.org/onlinedocs/gcc/Object-Size-Checking.html).
+
 ### Other builtins
 
 Supported builtins include `offsetof`, `types_compatible_p`, `choose_expr`,
@@ -75,10 +106,8 @@ deliberately limited behavior:
 - `__builtin_constant_p` recognizes integer expressions the frontend can
   evaluate; it does not ask the optimizer.
 - `__builtin_object_size` and `__builtin_dynamic_object_size` return the
-  unknown-size value. Fortified `memcpy`, `memmove` and `memset` builtins call
-  the checked external runtime functions with all four arguments; linking needs
-  those symbols. Other fortified `__builtin___*_chk` calls become plain library
-  calls and lose the bounds check.
+  unknown-size value. Fortified builtins other than the three memory functions
+  above become plain library calls and lose the bounds check.
 - `__builtin_unreachable` lowers to a trap, like `__builtin_trap`, and adds no
   optimizer assumption.
 

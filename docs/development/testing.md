@@ -222,6 +222,43 @@ they are separate from native integration campaigns. Do not prune inexpensive
 protocol checks to compensate for repeated native compiler or linker invocations.
 
 
+## Instruction metrics
+
+`tools/instruction_metrics.py catalog` lists every AArch64 encoding form in
+`crates/keel-asm/isa/a64.json` with its mask and four-byte size. With `--cpu`
+and the LLVM tools, it adds `llvm-mca` latency, throughput and resource
+estimates for one representative word per form, with an explicit reason for
+each missing value. LLVM models `apple-m5` with CycloneModel, so these are
+provisional estimates, not measured M5 timings. `analyze` reports a whole
+assembly file or a straight-line region, and `compare` compares two reports
+for the `size` or `speed` objective, requiring the same CPU, tool and
+iteration count. The estimates prove neither equivalence nor a hardware
+speedup.
+
+```sh
+cargo build -p keel --release
+python3 tools/instruction_metrics.py -o encodings.json catalog
+python3 tools/instruction_metrics.py -o apple-m5.json catalog \
+  --cpu apple-m5 --llvm-mca "$(command -v llvm-mca)" --llvm-mc "$(command -v llvm-mc)"
+# Exact metrics on an assembly file, including final branch and address fixups:
+target/release/keel asm-metrics input.s -o exact.json
+python3 tools/instruction_metrics.py -o before.json analyze before.s
+python3 tools/instruction_metrics.py -o after.json analyze after.s
+python3 tools/instruction_metrics.py compare before.json after.json --objective size
+# For a straight-line region, add CPU estimates to each report:
+python3 tools/instruction_metrics.py -o before.json analyze before.s \
+  --cpu apple-m5 --llvm-mca "$(command -v llvm-mca)"
+python3 tools/instruction_metrics.py -o after.json analyze after.s \
+  --cpu apple-m5 --llvm-mca "$(command -v llvm-mca)"
+python3 tools/instruction_metrics.py compare before.json after.json --objective speed
+```
+
+CPU analysis rejects regions with extra text bytes and needs one MCA region
+with the same instruction count. It declines a speed score for warnings,
+unmodeled side effects or missing throughput. The raw resource table includes
+MCA's aggregate row, whose index equals the instruction count; do not count it
+as an instruction.
+
 ## Profiling a slowdown
 
 Use an ordinary release build for timing comparisons. On Linux, start with

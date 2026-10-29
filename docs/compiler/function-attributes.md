@@ -1,11 +1,10 @@
 # Function attributes
 
-`FunctionAttrs` carries `noninterposable`, `no_semantic_interposition`,
-`inlinehint`, `alwaysinline`, `noinline`, `noreturn`, and `nounwind` on IR
-definitions, external declarations, and each direct
-callee record. These are separate from `Signature`: they do not participate
-in ABI or C function type compatibility. `returns_twice` retains its existing
-signature representation and behavior.
+`FunctionAttrs` carries linkage, binding, inline, control-flow and per-function
+policy attributes on IR definitions, external declarations and each direct
+callee record. These are separate from `Signature`: they do not take part in
+ABI or C function type compatibility. `returns_twice` stays part of the
+signature.
 
 ## Text and consistency
 
@@ -20,9 +19,10 @@ block0(v0: i32):
 }
 ```
 
-The binding attributes print as `noninterposable no_semantic_interposition`,
-followed by `inlinehint alwaysinline noinline noreturn nounwind`.
-The parser rejects duplicate and malformed tokens. The verifier rejects
+The printer writes them in this order: `weak constructor used retain
+destructor noninterposable no_semantic_interposition inlinehint alwaysinline
+noinline noreturn nounwind cold hot optnone flatten no_instrument_function
+no_profile_instrument_function naked interrupt`. The parser rejects duplicate and malformed tokens. The verifier rejects
 `alwaysinline` with `noinline`, and `noreturn` with `returns_twice`, on declarations,
 definitions and callee records. It requires direct callee attributes to agree
 with the module declaration/definition. `Module::sync_function_attrs` refreshes
@@ -45,10 +45,7 @@ The x86 backend uses each resolved set for vector lowering, instruction
 selection, inline assembly, and emitted-instruction checks. Wide direct calls
 require AVX transport at both the caller and callee. Indirect signatures must
 fit the caller's enabled transport. AArch64 and Wasm emission and LLVM export
-reject these explicit x86 IR requests. The LLVM bridge supports only Apple
-AArch64 modules, so x86 LLVM import is outside this implementation. Its existing
-policy for imported ARM CPU and feature strings is unchanged; preserving those
-contracts requires separate ARM bridge work.
+reject these explicit x86 IR requests.
 
 Optional inlining requires the caller's edits to contain the callee's
 permissions for every possible module baseline. Explicit feature contracts
@@ -59,10 +56,9 @@ lowered in the caller's permission context; copied operations still undergo
 the caller's feature checks. Owned regions and frame observers retain their
 existing inlining restrictions.
 
-Object encoders use `keel_codegen::x86_features::module_features` to obtain the
-union needed to encode the already validated functions. This union is not an
-instruction-selection baseline and grants no permissions to neighboring
-functions. Target-aware optimizer passes also receive each function's resolved
+Object encoders use `keel_codegen::x86_features::module_features`; see
+[x86 intrinsics](../targets/x86_64/intrinsics.md#function-permissions-and-runtime-cpu-queries).
+Target-aware optimizer passes also receive each function's resolved
 vector capabilities, so a module-wide AVX2 policy cannot widen a function that
 disables AVX.
 
@@ -148,13 +144,9 @@ subject to the representation safeguards below.
 
 ## Optimizer consumers
 
-`call-contracts` runs in Basic and Full, and is available as an explicit pass.
-None remains unchanged. Basic and Full run it before their second CFG cleanup,
-which removes newly redundant joins. This inexpensive contract/CFG cleanup does
-not require the Full tier's analyses. In Full this is after inlining, so imported
-direct calls receive the same treatment. The existing private-only inliner, its
-input pipeline, policy and tier placement are unchanged. The pass manager still
-verifies after every pass.
+`call-contracts` runs in Basic, Balanced, Size and Full, before their second
+CFG cleanup, which removes newly redundant joins. In the tiers that inline, it
+runs after inlining, so inlined direct calls get the same treatment.
 
 A direct `noreturn` **call** retains the call and terminates its normal continuation
 with a defensive `trap`. An existing following trap and its debug location are
@@ -224,20 +216,13 @@ module/function layout order, deterministically for a given input. Repeated
 explicit invocations each receive a fresh bounded budget.
 
 `keel_opt::inline_with_report` returns `InlineReport { changed, skipped }` with
-caller, callee, original instruction handle and reason for skipped explicit `alwaysinline` sites (unsupported
-callee/caller/site, recursion, unavailable private definition, signature mismatch,
-or hard safeguard). The normal pass interface preserves its boolean API and
-discards this report; no main CLI change is made. Indirect calls have no explicit
-request to report. Basic/none optimization tiers retain their existing pipelines:
-`alwaysinline` is acted on when the inliner runs, not by adding new tier passes.
-
-Hot/cold and per-function optimization requests have
-typed metadata and native policy consumers.
-Supported presets select local pipelines and optional selection; flatten requests
-bounded nested inlining.
-
-Deferred: assume, distinct unreachable, branch weights, memory/alias
-contracts, and public interposable inlining.
+caller, callee, original instruction handle and reason for skipped explicit
+`alwaysinline` sites (unsupported callee/caller/site, recursion, unavailable
+private definition, signature mismatch, or hard safeguard). The normal pass
+interface discards this report. `alwaysinline` acts only in tiers that run an
+inliner, so None and Basic do not inline. Hot, cold and per-function
+optimization requests select local pipelines and optional selection; `flatten`
+requests bounded nested inlining.
 
 ## Explicit non-interposable binding
 
@@ -266,19 +251,12 @@ runtime replacement must leave the attribute absent unless it can ensure this
 specific binding. This is a source/IR semantic assertion, not a linker binding
 implementation or an alias for LLVM's relocation-oriented `dso_local`.
 
-Target investigation: ELF supports runtime symbol preemption; LLVM represents
-that separately from linkage in its [runtime preemption specifiers](https://llvm.org/docs/LangRef.html#runtime-preemption-specifiers).
-Darwin's linker normally uses a two-level namespace, but supports
-`-flat_namespace`, `-interposable`, and `-interposable_list` (see Apple's
-[ld64 manual source](https://github.com/apple-oss-distributions/ld64/blob/main/doc/man/man1/ld-classic.1)).
-Those different defaults do not establish a universal Keel frontend promise.
-Existing public definitions remain conservatively interposable on both targets;
-no new target configuration or CLI/library option is necessary.
-
 ### Named binding-aware inliner integration
 
-Full uses `inline-noninterposable` in its three bounded inlining rounds.
-`inline-noninterposable` admits private definitions and explicitly
+Balanced runs `inline-noninterposable` in its three bounded inlining rounds.
+Full's `inline-cheap-reserve` and Size's `inline-size` apply the same binding
+rules with their own budgets. `inline-noninterposable` admits private
+definitions and explicitly
 `noninterposable` public definitions, as well as definitions carrying the
 `no_semantic_interposition` equivalent-body promise described below. It uses
 the same cloning implementation,
@@ -290,20 +268,13 @@ has been expanded. Calls and function addresses from other translation units can
 still reach the exported ABI entry. No alias/capture metadata is inferred or
 transferred onto the caller's parameters.
 
-This pass is registered by name and supports the normal optimization report's
-inline-site outcomes. It is part of Full; in other tiers it requires explicit
-scheduling. Neither `inline` nor `inline-aggregate-reserve` changes its
-private-only admission. A caller can explicitly schedule it before an existing tier pipeline;
-for a small CLI example:
+The pass reports inline-site outcomes in the normal optimization report. The
+private-only `inline` pass keeps its admission. A pipeline can schedule the
+binding-aware pass explicitly:
 
 ```sh
 keel cc -p inline-noninterposable,fast-cfg,fast-local,fast-cfg,dce,fast-loop-reduce source.c -o source.s
 ```
-
-This removes the two per-element helper calls in `k_narrow` when its two exported
-helpers are explicitly marked. It does not provide mixed-width SIMD conversion
-support and does not establish any runtime speedup. Ordinary unmarked kernel
-sources retain their prior semantics and calls.
 
 ## C semantic interposition mode
 
@@ -327,7 +298,7 @@ This promise is weaker than `noninterposable`. It does not promise which address
 or definition a symbol reference resolves to. Exported entry points, symbol
 visibility, function addresses, unexpanded direct calls and indirect calls retain
 normal emission and binding. No local aliases or relocation changes are requested.
-Full's binding-aware inliner consumes either promise, preserving the existing ABI,
+The binding-aware inliners consume either promise, preserving the existing ABI,
 legality, recursion, `noinline` and growth checks. The private-only `inline` pass
 remains private-only. Weak and weak-ODR bodies remain ineligible even if IR carries
 the attribute. The attribute round-trips through IR and synchronizes with named

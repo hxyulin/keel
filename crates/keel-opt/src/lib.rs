@@ -182,7 +182,7 @@ pub trait Pass: Sync {
         self.run_canonical(func, context.target)
     }
 
-    /// Request the structural form documented in `docs/compiler/simplification.md`.
+    /// Request the structural form documented in `docs/compiler/optimizer.md`.
     /// The manager restores it on entry when an earlier pass changed the IR.
     fn requires_canonical_form(&self) -> bool {
         false

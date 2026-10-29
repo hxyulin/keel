@@ -75,8 +75,8 @@ Each stage has its own effort setting:
 
 - **IR tiers.** `fast` runs local and CFG cleanup plus simple reductions.
   `basic` adds CFG simplification, instruction combining and DCE. `full` runs
-  rounds of inlining, GVN, [small-memory expansion](compiler/optimizer.md) and GCM,
-  then memory reuse, [stack promotion](compiler/optimizer.md) and bounded loop
+  rounds of inlining, GVN, [small-memory expansion](compiler/optimizer.md#small-memory) and GCM,
+  then memory reuse, [stack promotion](compiler/optimizer.md#stack-promote) and bounded loop
   transforms.
 - **Instruction selection.** `trees` enables generated tree patterns; `full`
   adds folded operands and register hints. `--isel trees,folds,hints|all|none`
@@ -190,7 +190,7 @@ let object = keel_asm::assemble_program_object(&program, keel_asm::TargetFeature
   allocation and lowering. Instrumentation is compiled out otherwise.
 - `keel asm-metrics input.s` and
   [`tools/instruction_metrics.py`](../tools/instruction_metrics.py) report
-  instruction sizes and modeled costs; see [instruction costs](compiler/optimizer.md).
+  instruction sizes and modeled costs; see [instruction metrics](development/testing.md#instruction-metrics).
 
 ## Language support at a glance
 
@@ -201,7 +201,7 @@ its own reference:
   numbers, K&R definitions,
   `__attribute__((cleanup))`
 - [Overflow builtins](frontends/c/extensions.md) up to 128 bits,
-  [memory builtins](compiler/optimizer.md), atomics including floating-point
+  [memory builtins](frontends/c/extensions.md#explicit-memory-builtins), atomics including floating-point
 - [Function attributes](compiler/function-attributes.md), [weak symbols](frontends/c/extensions.md),
   [constructors/destructors](frontends/c/extensions.md), [sections](frontends/c/extensions.md)
 - [AArch64 inline assembly](targets/aarch64/c-inline-asm.md) (checked subset)

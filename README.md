@@ -10,8 +10,10 @@ Every stage is also a standalone command, so you can start or stop anywhere in
 the pipeline.
 
 Optimization presets `-O0`, `-O1`, `-O2`, `-O3` and `-Os` select distinct
-compiler policies. See [optimization levels and measurements](docs/compiler/optimization-levels.md)
-for stage overrides, size-policy limits and x86-64 code models.
+compiler policies. See [optimization levels](docs/compiler/optimization-levels.md)
+for stage overrides and size-policy limits, and
+[x86 code generation](docs/targets/x86_64/codegen.md#code-models) for x86-64
+code models.
 
 ## Install
 
