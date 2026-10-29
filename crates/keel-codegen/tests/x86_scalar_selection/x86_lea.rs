@@ -80,7 +80,7 @@ fn shared_cross_block_and_separately_breakable_products_fall_back() {
 fn retained_actual_bridge_ir_selects_only_in_tree_modes_and_both_targets_assemble() {
     // Exact retained actual C bridge output at the approved base, not invented IR.
     // Fresh C->IR activation is a separate mandatory leased acceptance check.
-    let module = keel_ir::parse(include_str!("fixtures/bridge_madd.ir")).unwrap();
+    let module = keel_ir::parse(include_str!("../fixtures/bridge_madd.ir")).unwrap();
     keel_ir::verify_module(&module).unwrap();
     for target in Target::NATIVE {
         for trees in [false, true] {
@@ -292,7 +292,7 @@ fn native_edges_match_separately_compiled_clang_oracle_with_spills() {
 
 #[test]
 fn located_product_is_not_lost_at_an_unlocated_root() {
-    let original = include_str!("fixtures/debug_unlocated_lea_root.ir");
+    let original = include_str!("../fixtures/debug_unlocated_lea_root.ir");
     for (child, root, should_select) in [
         (" !f0:2:1", "", false),
         (" !f0:2:1", " !f0:2:4", true),

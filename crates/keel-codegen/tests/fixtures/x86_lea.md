@@ -29,7 +29,7 @@ not by itself establish activation by a fresh frontend build.
 ## Tests
 
 ```sh
-cargo test -p keel-codegen --test x86_lea
+cargo test -p keel-codegen --test x86_scalar_selection -- x86_lea::
 ```
 
 The tests check exact factors, widths, displacements and operand orders;

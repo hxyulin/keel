@@ -258,7 +258,7 @@ for(unsigned k=0;k<32;k++)if(output[k]!=0xa5)return 18;
         fs::write(dir.join("oracle.keel"), &ir).unwrap();
         fs::write(
             dir.join("run_native.py"),
-            include_str!("x86_widen/run_native.py"),
+            include_str!("../x86_widen/run_native.py"),
         )
         .unwrap();
     }
