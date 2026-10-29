@@ -395,6 +395,30 @@ fn command(command: &mut Command) {
     assert!(output.status.success(), "{command:?}: {output:?}");
 }
 
+/// Type-checks a test's C oracle once. `oracle` then records each
+/// configuration and, on x86-64 Linux, links and runs it.
+fn check_oracle_c(stem: &str, c: &str) {
+    let path = std::env::temp_dir().join(format!(
+        "keel-widen-x86-{}-{stem}-oracle.c",
+        std::process::id()
+    ));
+    fs::write(&path, c).unwrap();
+    command(
+        Command::new("clang")
+            .args([
+                "-target",
+                "x86_64-unknown-linux-gnu",
+                "-ffreestanding",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                "-fsyntax-only",
+            ])
+            .arg(&path),
+    );
+    fs::remove_file(path).unwrap();
+}
+
 fn oracle(stem: &str, source: &str, c: &str, asm: &str, object: &[u8]) {
     let dir = std::env::var_os("KEEL_X86_WIDEN_EVIDENCE")
         .map(PathBuf::from)
@@ -415,19 +439,6 @@ fn oracle(stem: &str, source: &str, c: &str, asm: &str, object: &[u8]) {
         include_str!("x86_widen/run_native.py"),
     )
     .unwrap();
-    command(
-        Command::new("clang")
-            .args([
-                "-target",
-                "x86_64-unknown-linux-gnu",
-                "-ffreestanding",
-                "-Wall",
-                "-Wextra",
-                "-Werror",
-                "-fsyntax-only",
-            ])
-            .arg(dir.join(format!("{stem}.c"))),
-    );
     #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
     {
         let exe = dir.join(stem);
@@ -459,6 +470,7 @@ fn oracle(stem: &str, source: &str, c: &str, asm: &str, object: &[u8]) {
 #[test]
 fn widening_and_all_vector_bitcasts_cover_controlled_aliases_and_spill_positions() {
     let (source, c) = fixture(true);
+    check_oracle_c("controlled", &c);
     for selection in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -484,6 +496,7 @@ fn widening_and_all_vector_bitcasts_cover_controlled_aliases_and_spill_positions
 #[test]
 fn widening_and_bitcasts_preserve_live_sources_with_both_allocators_and_all_spills() {
     let (source, c) = fixture(false);
+    check_oracle_c("live", &c);
     for selection in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -614,6 +627,7 @@ int main(void) {
 #[test]
 fn widening_streams_cover_zero_tails_and_guard_boundaries_without_load_fusion() {
     let (source, c) = stream_fixture();
+    check_oracle_c("stream", &c);
     for selection in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -722,6 +736,7 @@ fn profiles() -> Vec<(&'static str, Features)> {
 #[test]
 fn signed_dword_register_feature_alias_and_spill_windows() {
     let (source, c) = fixture_filtered(true, true);
+    check_oracle_c("register-controlled", &c);
     for (profile, features) in profiles() {
         for selection in [
             SelectionTier::Baseline,
@@ -801,6 +816,7 @@ fn signed_dword_register_feature_alias_and_spill_windows() {
 #[test]
 fn signed_dword_register_live_full_width_and_shape_controls() {
     let (source, c) = fixture_filtered(false, true);
+    check_oracle_c("register-live", &c);
     for (profile, features) in profiles() {
         for selection in [
             SelectionTier::Baseline,
