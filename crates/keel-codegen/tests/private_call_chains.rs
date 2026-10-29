@@ -1,3 +1,5 @@
+#[path = "common/native_oracle.rs"]
+mod native_oracle;
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools},
@@ -165,24 +167,25 @@ fn forward_references_custom_pools_and_chains_agree_on_both_target_object_routes
 #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 #[test]
 fn native_chain_pressure_unknown_clobbers_recursion_shuffles_and_transfers() {
-    use std::{fs, process::Command};
+    use std::{collections::HashSet, fs};
     let m = keel_ir::parse(&fixture()).unwrap();
-    let dir = std::env::var_os("KEEL_CALL_CHAIN_EVIDENCE_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::temp_dir().join(format!("keel-private-call-chains-{}", std::process::id()))
-        });
-    fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join("fixture.keel"), fixture()).unwrap();
-    fs::write(
-        dir.join("oracle.c"),
+    let evidence = std::env::var_os("KEEL_CALL_CHAIN_EVIDENCE_DIR").map(std::path::PathBuf::from);
+    if let Some(dir) = &evidence {
+        fs::create_dir_all(dir).unwrap();
+        fs::write(dir.join("fixture.keel"), fixture()).unwrap();
+    }
+    let oracle = native_oracle::PreparedOracle::new(
+        "private-call-chains",
         include_str!("private_leaf_calls/chain_oracle.c"),
-    )
-    .unwrap();
+        &["-O2"],
+    );
+    // The text and typed routes must agree, and an object that already ran
+    // gives the same executable, so each distinct object runs once.
+    let mut ran = HashSet::new();
     let mut configurations = 0;
     let mut reversed = m.clone();
     reversed.functions.reverse();
-    for m in [&m, &reversed] {
+    for (order, m) in [("forward", &m), ("reversed", &reversed)] {
         for selector in [SelectionTier::Baseline, SelectionTier::Full] {
             for allocator in [
                 &AllocationTier::Fast as &dyn keel_codegen::regalloc::RegisterAllocator,
@@ -201,16 +204,24 @@ fn native_chain_pressure_unknown_clobbers_recursion_shuffles_and_transfers() {
                     {
                         continue;
                     }
+                    let context = format!(
+                        "{order} {selector:?} {} {:?}",
+                        allocator.name(),
+                        pools.caller_saved
+                    );
                     let text =
                         keel_codegen::aarch64::compile_with_pipeline(m, pools, &pipeline).unwrap();
                     let program =
                         keel_codegen::aarch64::compile_program_with_pipeline(m, pools, &pipeline)
                             .unwrap();
-                    for object in [
-                        keel_asm::assemble_object(&text).unwrap(),
+                    let object = keel_asm::assemble_object(&text).unwrap();
+                    assert_eq!(
+                        object,
                         keel_asm::assemble_program_object(&program, Default::default()).unwrap(),
-                    ] {
-                        configurations += 1;
+                        "{context}"
+                    );
+                    configurations += 1;
+                    if let Some(dir) = &evidence {
                         fs::write(dir.join(format!("configuration-{configurations}.s")), &text)
                             .unwrap();
                         fs::write(
@@ -218,26 +229,10 @@ fn native_chain_pressure_unknown_clobbers_recursion_shuffles_and_transfers() {
                             &object,
                         )
                         .unwrap();
-                        fs::write(dir.join("calls.o"), object).unwrap();
-                        let build = Command::new("clang")
-                            .arg("-O2")
-                            .arg(dir.join("oracle.c"))
-                            .arg(dir.join("calls.o"))
-                            .arg("-o")
-                            .arg(dir.join("oracle"))
-                            .output()
-                            .unwrap();
-                        assert!(
-                            build.status.success(),
-                            "{}",
-                            String::from_utf8_lossy(&build.stderr)
-                        );
-                        let run = Command::new(dir.join("oracle")).output().unwrap();
-                        assert!(
-                            run.status.success(),
-                            "{}",
-                            String::from_utf8_lossy(&run.stderr)
-                        );
+                    }
+                    if !ran.contains(&object) {
+                        oracle.run(&object, &context);
+                        ran.insert(object);
                     }
                 }
             }
@@ -246,9 +241,9 @@ fn native_chain_pressure_unknown_clobbers_recursion_shuffles_and_transfers() {
     assert_eq!(
         configurations,
         if cfg!(feature = "experimental-regalloc") {
-            80
+            40
         } else {
-            56
+            28
         }
     );
 }

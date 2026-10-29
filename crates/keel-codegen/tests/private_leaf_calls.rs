@@ -1,3 +1,5 @@
+#[path = "common/native_oracle.rs"]
+mod native_oracle;
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools},
@@ -132,15 +134,15 @@ fn forward_references_custom_pools_tls_and_different_leaf_clobbers_agree_on_obje
 #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 #[test]
 fn native_pressure_known_unknown_and_tls_callees_preserve_values() {
-    use std::{fs, process::Command};
     let m = keel_ir::parse(&fixture()).unwrap();
-    let dir = std::env::temp_dir().join(format!("keel-private-leaf-calls-{}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
-    fs::write(
-        dir.join("oracle.c"),
+    let oracle = native_oracle::PreparedOracle::new(
+        "private-leaf-calls",
         include_str!("private_leaf_calls/oracle.c"),
-    )
-    .unwrap();
+        &["-O2"],
+    );
+    // The text and typed routes must agree, and an object that already ran
+    // gives the same executable, so each distinct object runs once.
+    let mut ran = std::collections::HashSet::new();
     let mut configurations = 0;
     for selector in [SelectionTier::Baseline, SelectionTier::Full] {
         for allocator in [
@@ -158,39 +160,25 @@ fn native_pressure_known_unknown_and_tls_callees_preserve_values() {
                 {
                     continue;
                 }
+                let context = format!("{selector:?} {} {:?}", allocator.name(), pools.caller_saved);
                 let text =
                     keel_codegen::aarch64::compile_with_pipeline(&m, pools, &pipeline).unwrap();
                 let program =
                     keel_codegen::aarch64::compile_program_with_pipeline(&m, pools, &pipeline)
                         .unwrap();
-                for object in [
-                    keel_asm::assemble_object(&text).unwrap(),
+                let object = keel_asm::assemble_object(&text).unwrap();
+                assert_eq!(
+                    object,
                     keel_asm::assemble_program_object(&program, Default::default()).unwrap(),
-                ] {
-                    configurations += 1;
-                    fs::write(dir.join("calls.o"), object).unwrap();
-                    let build = Command::new("clang")
-                        .arg("-O2")
-                        .arg(dir.join("oracle.c"))
-                        .arg(dir.join("calls.o"))
-                        .arg("-o")
-                        .arg(dir.join("oracle"))
-                        .output()
-                        .unwrap();
-                    assert!(
-                        build.status.success(),
-                        "{}",
-                        String::from_utf8_lossy(&build.stderr)
-                    );
-                    let run = Command::new(dir.join("oracle")).output().unwrap();
-                    assert!(
-                        run.status.success(),
-                        "{}",
-                        String::from_utf8_lossy(&run.stderr)
-                    );
+                    "{context}"
+                );
+                configurations += 1;
+                if !ran.contains(&object) {
+                    oracle.run(&object, &context);
+                    ran.insert(object);
                 }
             }
         }
     }
-    assert_eq!(configurations, 28);
+    assert_eq!(configurations, 14);
 }
