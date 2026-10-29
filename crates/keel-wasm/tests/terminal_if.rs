@@ -1,3 +1,6 @@
+#[path = "terminal_if/terminal_if_review.rs"]
+mod terminal_if_review;
+
 #[path = "support/adjacent_tee.rs"]
 mod adjacent_tee;
 

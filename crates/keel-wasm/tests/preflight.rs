@@ -1,3 +1,6 @@
+#[path = "preflight/special_entries.rs"]
+mod special_entries;
+
 use keel_ir::{Module, parse};
 use keel_wasm::{
     Export, Options, Wasm32MemoryOptions, Wasm32RuntimeOptions, emit_wasm32_runtime_module,

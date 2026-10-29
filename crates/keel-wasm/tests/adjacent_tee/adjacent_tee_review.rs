@@ -1,5 +1,4 @@
-#[path = "support/adjacent_tee.rs"]
-mod oracle;
+use super::oracle;
 
 #[test]
 fn decoded_snapshot_oracle_preserves_literal_nonmatches_and_immediates() {

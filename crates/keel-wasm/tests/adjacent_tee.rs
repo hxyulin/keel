@@ -1,3 +1,6 @@
+#[path = "adjacent_tee/adjacent_tee_review.rs"]
+mod adjacent_tee_review;
+
 #[path = "support/adjacent_tee.rs"]
 mod oracle;
 
