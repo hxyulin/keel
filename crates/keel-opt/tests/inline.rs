@@ -1018,9 +1018,7 @@ fn recursive_callers_cap_inlined_stack() {
         let calls: String = (0..8)
             .map(|n| format!(" v{} = call @h(v0)\n", n + 1))
             .collect();
-        format!(
-            "func @{caller}(i64) -> i64 {{\nblock0(v0: i64):\n{calls}{tail}\n return v8\n}}\n"
-        )
+        format!("func @{caller}(i64) -> i64 {{\nblock0(v0: i64):\n{calls}{tail}\n return v8\n}}\n")
     };
     let s = format!(
         "func @h(i64) -> i64 local {{

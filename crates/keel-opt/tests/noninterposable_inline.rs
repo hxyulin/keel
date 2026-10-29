@@ -159,7 +159,9 @@ fn binding_does_not_override_legality_noinline_recursion_or_budgets() {
     // Six instructions cost more than the call, so the call-count cap applies.
     let mut source = format!(
         "func @helper() noninterposable alwaysinline {{\nblock0:\n{} return\n}}\nfunc @caller() {{\nblock0:\n",
-        (0..5).map(|n| format!(" v{n} = iconst.i64 {n}\n")).collect::<String>()
+        (0..5)
+            .map(|n| format!(" v{n} = iconst.i64 {n}\n"))
+            .collect::<String>()
     );
     for _ in 0..130 {
         source.push_str(" call @helper()\n");
