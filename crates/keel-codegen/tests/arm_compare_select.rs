@@ -430,26 +430,27 @@ fn native_predicates_extrema_aliases_live_values_barriers_and_both_object_routes
         .output()
         .unwrap();
     assert!(out.status.success(), "{out:?}");
-    let mut executions = 0;
+    // compile_module asserts the typed and parsed objects are byte-identical,
+    // so each configuration executes the typed object only.
+    let run = |object: Vec<u8>, context: &str| {
+        fs::write(dir.join("test.o"), object).unwrap();
+        let out = Command::new("clang")
+            .arg(dir.join("oracle.o"))
+            .arg(dir.join("test.o"))
+            .arg("-o")
+            .arg(dir.join("test"))
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{out:?}");
+        let out = Command::new(dir.join("test")).output().unwrap();
+        assert!(out.status.success(), "{context}: {out:?}");
+    };
     for sel in [SelectionTier::Baseline, SelectionTier::Full] {
         for alloc in [AllocationTier::Fast, AllocationTier::Full] {
             for pools in [&EMPTY, &ONE, &keel_codegen::aarch64::REGISTERS] {
-                let (text, typed, parsed) = compile_module(&m, &sel, alloc, pools);
+                let (text, typed, _) = compile_module(&m, &sel, alloc, pools);
                 fs::write(dir.join("generated.s"), text).unwrap();
-                for object in [typed, parsed] {
-                    fs::write(dir.join("test.o"), object).unwrap();
-                    let out = Command::new("clang")
-                        .arg(dir.join("oracle.o"))
-                        .arg(dir.join("test.o"))
-                        .arg("-o")
-                        .arg(dir.join("test"))
-                        .output()
-                        .unwrap();
-                    assert!(out.status.success(), "{out:?}");
-                    let out = Command::new(dir.join("test")).output().unwrap();
-                    assert!(out.status.success(), "{sel:?}/{alloc:?}: {out:?}");
-                    executions += 1;
-                }
+                run(typed, &format!("{sel:?}/{alloc:?}"));
             }
         }
     }
@@ -482,22 +483,8 @@ fn native_predicates_extrema_aliases_live_values_barriers_and_both_object_routes
         }
     }
     for alloc in [AllocationTier::Fast, AllocationTier::Full] {
-        let (_, typed, parsed) =
+        let (_, typed, _) =
             compile_module(&m, &Constrained, alloc, &keel_codegen::aarch64::REGISTERS);
-        for object in [typed, parsed] {
-            fs::write(dir.join("test.o"), object).unwrap();
-            let out = Command::new("clang")
-                .arg(dir.join("oracle.o"))
-                .arg(dir.join("test.o"))
-                .arg("-o")
-                .arg(dir.join("test"))
-                .output()
-                .unwrap();
-            assert!(out.status.success(), "{out:?}");
-            let out = Command::new(dir.join("test")).output().unwrap();
-            assert!(out.status.success(), "constraints/{alloc:?}: {out:?}");
-            executions += 1;
-        }
+        run(typed, &format!("constraints/{alloc:?}"));
     }
-    fs::write(dir.join("evidence.json"),format!("{{\"functions\":250,\"cases_per_function\":225,\"executions\":{executions},\"status\":\"passed\",\"runtime_claim\":false}}\n")).unwrap();
 }
