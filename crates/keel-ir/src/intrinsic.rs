@@ -5978,12 +5978,43 @@ impl Intrinsic {
         }
     }
     pub fn from_name(name: &str) -> Option<Intrinsic> {
-        Intrinsic::ALL.into_iter().find(|i| i.info().name == name)
+        // Sorted by name, keeping `ALL` order among equal names, so the
+        // first match is the one a linear scan of `ALL` would find.
+        static BY_NAME: std::sync::OnceLock<Vec<Intrinsic>> = std::sync::OnceLock::new();
+        let by_name = BY_NAME.get_or_init(|| {
+            let mut all = Intrinsic::ALL.to_vec();
+            all.sort_by_key(|i| i.info().name);
+            all
+        });
+        let first = by_name.partition_point(|i| i.info().name < name);
+        by_name
+            .get(first)
+            .copied()
+            .filter(|i| i.info().name == name)
     }
 }
 
 impl fmt::Display for Intrinsic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.info().name)
+    }
+}
+
+#[cfg(test)]
+mod from_name_tests {
+    use super::Intrinsic;
+
+    #[test]
+    fn matches_a_linear_scan() {
+        for &intrinsic in Intrinsic::ALL.iter() {
+            let name = intrinsic.info().name;
+            let scan = Intrinsic::ALL
+                .iter()
+                .copied()
+                .find(|i| i.info().name == name);
+            assert_eq!(Intrinsic::from_name(name), scan);
+        }
+        assert_eq!(Intrinsic::from_name(""), None);
+        assert_eq!(Intrinsic::from_name("no_such_intrinsic"), None);
     }
 }
