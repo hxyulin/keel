@@ -2979,7 +2979,7 @@ impl<'a> FunctionCompiler<'a> {
                 if self.next_block == Some(else_dest.block) && self.block_args_noop(then_dest, 0) {
                     self.jump_to_block(Opcode::Jcc(condition(invert_cond(not))), then_dest.block);
                     self.block_args(else_dest, 1);
-                } else if else_dest.args.is_empty() && self.edge_moves(1).is_empty() {
+                } else if self.block_args_noop(else_dest, 1) {
                     self.jump_to_block(Opcode::Jcc(condition(not)), else_dest.block);
                     self.block_args(then_dest, 0);
                     self.branch_unless_next(then_dest.block);
@@ -5544,12 +5544,10 @@ impl<'a> FunctionCompiler<'a> {
         let targets: Vec<String> = dests
             .iter()
             .enumerate()
-            .map(
-                |(i, d)| match d.args.is_empty() && self.edge_moves(i).is_empty() {
-                    true => self.label(d.block),
-                    false => format!(".L{}_{inst}_edge{i}", self.func.name),
-                },
-            )
+            .map(|(i, d)| match self.block_args_noop(d, i) {
+                true => self.label(d.block),
+                false => format!(".L{}_{inst}_edge{i}", self.func.name),
+            })
             .collect();
 
         let (min, max) = match (values.iter().min(), values.iter().max()) {
@@ -5621,7 +5619,7 @@ impl<'a> FunctionCompiler<'a> {
             if dests
                 .iter()
                 .enumerate()
-                .all(|(i, dest)| dest.args.is_empty() && self.edge_moves(i).is_empty())
+                .all(|(i, dest)| self.block_args_noop(dest, i))
             {
                 self.branch_unless_next(dests[0].block);
             } else {
@@ -5629,7 +5627,7 @@ impl<'a> FunctionCompiler<'a> {
             }
         }
         for (i, (dest, target)) in dests.iter().zip(&targets).enumerate() {
-            if !dest.args.is_empty() || !self.edge_moves(i).is_empty() {
+            if !self.block_args_noop(dest, i) {
                 self.out.label(target.clone());
                 self.block_args(dest, i);
                 self.jump_to_block(Opcode::Jmp, dest.block);

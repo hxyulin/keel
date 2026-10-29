@@ -60,3 +60,44 @@ block2(v3: i32):
         }
     }
 }
+
+#[test]
+fn x86_edges_whose_arguments_are_in_place_need_no_landing_pad() {
+    // Both back edges pass block1's own parameter, so their copies are
+    // no-ops and each branch can target block1 directly.
+    let module = keel_ir::parse(
+        "func @f(i32, i32, i32) -> i32 {
+block0(v0: i32, v1: i32, v5: i32):
+    jump block1(v1)
+block1(v2: i32):
+    v3 = iadd v2, v5
+    brif v3, block2, block1(v2)
+block2:
+    switch v0, block3, [1: block1(v2), 2: block3, 3: block1(v2), 4: block3]
+block3:
+    return v3
+}",
+    )
+    .unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    for selection in [SelectionTier::Baseline, SelectionTier::Full] {
+        for allocation in [AllocationTier::Fast, AllocationTier::Full] {
+            let pipeline = CodegenPipeline {
+                selector: &selection,
+                allocator: &allocation,
+            };
+            let x86 = keel_codegen::x86_64::compile_with_pipeline(
+                &module,
+                &keel_codegen::x86_64::REGISTERS,
+                &pipeline,
+            )
+            .unwrap();
+            keel_asm::x86::assemble_object(&x86).unwrap();
+            assert!(
+                !x86.lines().any(|line| line.ends_with(':')
+                    && (line.contains("_else") || line.contains("_edge"))),
+                "{x86}"
+            );
+        }
+    }
+}
