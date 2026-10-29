@@ -188,16 +188,24 @@ comparisons. It never merges loads.
 GCM places each pure instruction between its early block (the deepest block
 defining an operand) and its late block (the common dominator of its uses),
 choosing the block in the fewest loops and, among those, the latest. That
-hoists invariants and sinks code into the branch that needs it, with three
+hoists invariants and sinks code into the branch that needs it, with these
 exceptions:
 
 - An instruction that stays in its block keeps its place, so chains of selects
   do not sink past calls and keep their conditions alive.
 - Instructions without operands (constants, addresses) are rematerialized in
   each block that uses them, undoing GVN's function-wide merging.
-- Addresses of fixed stack or global objects with constant offsets stay at the
-  late placement instead of being hoisted out of loops. Arithmetic on incoming
-  pointers still gets loop-invariant code motion.
+- A `ptradd` of a constant offset stays at the late placement instead of being
+  hoisted out of loops, whatever its base. Selection folds the offset into
+  loads and stores, while a hoisted address is one more pointer live across
+  the loop, often spilled. Other pointer arithmetic still gets loop-invariant
+  code motion.
+- When that base is a parameter or a pinned result, each load or store of at
+  most 8 bytes at the address gets its own copy of the `ptradd` and constant,
+  just before it, so selection can fold the offset there. The offset must be
+  one that every backend folds: a non-negative multiple of the access size,
+  below 4096 times it. Accesses in a block where another instruction uses the
+  address keep the original, which is computed there anyway.
 
 Repeating GVN and GCM to a fixed point would undo this placement, so GCM runs
 last in each round.

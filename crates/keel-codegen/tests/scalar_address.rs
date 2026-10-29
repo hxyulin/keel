@@ -312,3 +312,44 @@ block0(v0: ptr):
     assert!(asm.contains("\tstr\tx9, [sp, #8]\n"), "{asm}");
     assert!(asm.contains("\tldr\tx10, [sp, #8]\n"), "{asm}");
 }
+#[test]
+fn gcm_copies_of_a_shared_field_address_fold_into_each_access() {
+    // One field address from an incoming pointer serves a load and a store
+    // in two blocks of a loop. Shared, it needs its own register; after GCM
+    // gives the store a copy, both accesses fold the offset.
+    let src = "func @f(ptr, i64) -> i64 {
+block0(v0: ptr, v1: i64):
+ v2 = iconst.i64 24
+ v3 = ptradd v0, v2
+ v4 = iconst.i64 0
+ jump block1(v4)
+block1(v5: i64):
+ v6 = load.i64 v3
+ v7 = icmp.ult v5, v6
+ brif v7, block2, block3
+block2:
+ v8 = iadd v5, v1
+ store v8, v3
+ jump block1(v8)
+block3:
+ return v5
+}";
+    for target in [Target::Aarch64AppleDarwin, Target::X86_64LinuxGnu] {
+        let mut module = keel_ir::parse(src).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        let shared = compile_with_options(&module, target, SelectionOptions::ALL).unwrap();
+        keel_opt::run_passes(&mut module, &["gcm"]).unwrap();
+        let split = compile_with_options(&module, target, SelectionOptions::ALL).unwrap();
+        assert_eq!(
+            instruction_count(&split, "add"),
+            instruction_count(&shared, "add") - 1,
+            "{split}"
+        );
+        let folded = if target == Target::Aarch64AppleDarwin {
+            ", #24]"
+        } else {
+            " + 24]"
+        };
+        assert_eq!(split.matches(folded).count(), 2, "{split}");
+    }
+}

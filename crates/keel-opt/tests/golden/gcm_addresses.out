@@ -1,11 +1,10 @@
+file f0 = "fields.c"
 data @object = align 8 { zero 32 }
 
 func @addresses(ptr, i64) -> i64 cc(c) {
     ss0 = stack_slot 32, align 8
 block0(v0: ptr, v1: i64):
     v2 = iconst.i64 0
-    v17 = iconst.i64 8
-    v11 = ptradd v0, v17
     jump block1(v2)
 block1(v3: i64):
     v4 = stack_addr ss0
@@ -16,6 +15,7 @@ block1(v3: i64):
     v8 = symbol_addr @object
     v9 = ptradd v8, v5
     v10 = load.i64 v9
+    v11 = ptradd v0, v5
     v12 = load.i64 v11
     v14 = iconst.i64 1
     v15 = iadd v3, v14
@@ -24,4 +24,44 @@ block1(v3: i64):
 block2:
     v13 = iadd v10, v12
     return v13
+}
+
+func @fields(ptr, i64, ptr) -> i64 cc(c) {
+block0(v0: ptr, v1: i64, v2: ptr):
+    v9 = iconst.i64 0
+    v15 = iadd v1, v1
+    v16 = ptradd v0, v15
+    jump block1(v9)
+block1(v10: i64):
+    v7 = iconst.i64 -8
+    v8 = ptradd v0, v7
+    v11 = load.i64 v8
+    v3 = iconst.i64 16
+    v4 = ptradd v0, v3
+    v12 = load.i64 v4 !f0:3:1
+    v13 = icmp.ult v10, v12
+    brif v13, block2, block3
+block2:
+    v5 = iconst.i64 24
+    v6 = ptradd v0, v5
+    v14 = load.i64 v6
+    v27 = iconst.i64 16 !f0:5:1
+    v28 = ptradd v0, v27 !f0:5:1
+    store v14, v28 !f0:5:1
+    store v6, v2
+    v29 = iconst.i64 16
+    v17 = ptradd v16, v29
+    v18 = load.i64 v17
+    store v18, v17
+    v19 = iconst.i64 1
+    v20 = iadd v10, v19
+    jump block1(v20)
+block3:
+    v25 = iconst.i64 24
+    v26 = ptradd v0, v25
+    v21 = load.i64 v26
+    v22 = load.i64 v8
+    v23 = iadd v21, v22
+    v24 = iadd v23, v11
+    return v24
 }

@@ -1,7 +1,8 @@
 ; passes: gcm
-; Fixed stack/global field addresses remain in the loop, near their
-; loads and stores. Nested constant offsets get the same treatment.
-; Pointer arithmetic on an incoming pointer still hoists out of the loop.
+; Constant offsets from stack, global and incoming pointers remain in the
+; loop, near their loads and stores, and so do nested offsets. Selection
+; folds each into its access; hoisted, each would be another pointer live
+; across the loop.
 data @object = align 8 { zero 32 }
 
 func @addresses(ptr, i64) -> i64 {
@@ -27,4 +28,47 @@ block1(v3: i64):
     brif v16, block1(v15), block2
 block2:
     return v13
+}
+
+; `v4` serves a load and a store in different blocks: the load keeps it and
+; the store gets its own copy, with the store's location. `v6` is also stored
+; as a value in block2, so the load there keeps it, and only the load in
+; block3 gets a copy. `v17`, an offset from a computed pointer, gets no
+; copies but stays in the loop; the computed pointer itself leaves it.
+; AArch64 cannot fold the negative offset of `v20`, so its loads share it.
+file f0 = "fields.c"
+
+func @fields(ptr, i64, ptr) -> i64 {
+block0(v0: ptr, v1: i64, v2: ptr):
+    v3 = iconst.i64 16
+    v4 = ptradd v0, v3
+    v5 = iconst.i64 24
+    v6 = ptradd v0, v5
+    v19 = iconst.i64 -8
+    v20 = ptradd v0, v19
+    v7 = iconst.i64 0
+    jump block1(v7)
+block1(v8: i64):
+    v21 = load.i64 v20
+    v9 = load.i64 v4 !f0:3:1
+    v10 = icmp.ult v8, v9
+    brif v10, block2, block3
+block2:
+    v11 = load.i64 v6
+    store v11, v4 !f0:5:1
+    store v6, v2
+    v15 = iadd v1, v1
+    v16 = ptradd v0, v15
+    v17 = ptradd v16, v3
+    v18 = load.i64 v17
+    store v18, v17
+    v12 = iconst.i64 1
+    v13 = iadd v8, v12
+    jump block1(v13)
+block3:
+    v14 = load.i64 v6
+    v22 = load.i64 v20
+    v23 = iadd v14, v22
+    v24 = iadd v23, v21
+    return v24
 }

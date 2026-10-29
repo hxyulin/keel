@@ -476,8 +476,8 @@ from Apple arm64 that matter to a frontend:
   "src/main.c"`, declared before use. Frontends set a location on the
   instruction builder (`func.ins(at).loc(..)`, or `set_srcloc` on the SSA
   builder for everything built after). Passes keep an instruction's
-  location when they move or rewrite it; gcm gives its copies the
-  original's.
+  location when they move or rewrite it; gcm gives a rematerialized copy
+  the original's, and an address copied to a load or store that access's.
 - `keel compile -g` gives an input that names no files its own lines, so a
   debugger steps through the IR, with the `.keel` file as the source.
 - **Line tables come from the assembler.** Codegen emits `.file` and `.loc`
