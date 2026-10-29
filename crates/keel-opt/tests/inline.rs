@@ -1011,3 +1011,37 @@ block0(v0: ptr):
     assert_eq!(calls(&m, "f"), 2, "helper inlined, both ext calls remain");
     assert_eq!(f.call_contract(call), Some(&contract));
 }
+#[test]
+fn recursive_callers_cap_inlined_stack() {
+    let sites = |caller: &str, tail: &str| {
+        let calls: String = (0..8)
+            .map(|n| format!(" v{} = call @h(v0)\n", n + 1))
+            .collect();
+        format!(
+            "func @{caller}(i64) -> i64 {{\nblock0(v0: i64):\n{calls}{tail}\n return v8\n}}\n"
+        )
+    };
+    let s = format!(
+        "func @h(i64) -> i64 local {{
+ ss0 = stack_slot 400, align 1
+block0(v0: i64):
+ v1 = stack_addr ss0
+ store v0, v1
+ v2 = load.i64 v1
+ return v2
+}}
+{}{}",
+        sites("rec", " v9 = call @rec(v8)"),
+        sites("flat", "")
+    );
+    let m = run(&s, &["inline"]);
+    let frame = |name: &str| {
+        let f = m.functions.iter().find(|f| f.name == name).unwrap();
+        f.stack_slots().map(|(_, s)| u64::from(s.size)).sum::<u64>()
+    };
+    // Two 400-byte copies fit in 1024 bytes; a third does not.
+    assert_eq!(frame("rec"), 800);
+    assert_eq!(calls(&m, "rec"), 7);
+    assert_eq!(frame("flat"), 3200);
+    assert_eq!(calls(&m, "flat"), 0);
+}

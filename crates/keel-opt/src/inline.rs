@@ -408,6 +408,10 @@ const MAX_CALLS: usize = 128;
 const MAX_MODULE_GROWTH: usize = 16_384;
 const FULL_MAX_MODULE_GROWTH: usize = 65_536;
 const HARD_STACK: u64 = 65_536;
+// Every inlined site gets its own slots, and each recursion level pays for
+// all of them. Cap the whole frame of a caller in a call cycle, measured
+// live so later rounds see slots from earlier ones (LLVM uses 1024 too).
+const RECURSIVE_CALLER_STACK: u64 = 1024;
 
 // Switches spend blocks on cheap returns. Admit only a small, acyclic integer
 // leaf, charging every branch destination as well as every instruction. This
@@ -1316,7 +1320,17 @@ fn run_observed_policy_scoped(
         // Counting all callee instructions also covers unreachable blocks
         // that the dominator traversal may omit. Snapshot IR is additional.
         let (cost, stack_cost) = inline_cost(callee);
-        let budget = if count == MAX_CALLS {
+        let recursive_stack_ok = !recursive[index]
+            || stack_cost == 0
+            || caller
+                .stack_slots()
+                .map(|(_, s)| u64::from(s.size))
+                .sum::<u64>()
+                + stack_cost
+                <= RECURSIVE_CALLER_STACK;
+        let budget = if !recursive_stack_ok {
+            Some("recursive_caller_stack_budget")
+        } else if count == MAX_CALLS {
             Some("caller_call_count_budget")
         } else if growth + cost > MAX_GROWTH {
             Some("caller_instruction_growth_budget")
@@ -1330,6 +1344,7 @@ fn run_observed_policy_scoped(
         let cheap_candidate = cheap_reserve
             && !wrappers.contains(&callee.name)
             && cheap_helper(callee, cost, stack_cost)
+            && recursive_stack_ok
             && count < MAX_CALLS
             && growth + cost <= MAX_GROWTH
             && stack_growth + stack_cost <= HARD_STACK;
