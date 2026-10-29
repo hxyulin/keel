@@ -140,3 +140,9 @@ for selections, qualification coverage and the optimized test profile.
 End-to-end tests need `clang` (and `clang++` for C++ drivers). See the
 [test layout](docs/development/testing.md#test-layout).
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
+
+## License
+
+Keel is licensed under either the [MIT License](LICENSE-MIT) or the
+[Apache License, Version 2.0](LICENSE-APACHE), at your option.
+Third-party material retains its own license notices and terms.
