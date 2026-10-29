@@ -490,8 +490,10 @@ Keel supports GNU `section("name")` and no-argument `retain`, including
 static-storage object definitions (including `_Thread_local` / `__thread`) on both native targets. File-scope objects,
 tentative definitions, and static locals are supported. Attributes merge over
 the entire translation unit, including declarations following definitions.
-Conflicting section redeclarations diagnose. An attributed declaration must
-have a definition in the same translation unit. Automatic locals, parameters,
+Conflicting section redeclarations diagnose. `retain` requires a definition
+in the same translation unit. `section` on an external declaration allocates no
+storage and does not affect imported call contracts; a later definition
+inherits it and gets the ordinary storage checks. Automatic locals, parameters,
 members, typedefs, type positions and COMDAT/`weak_odr` combinations diagnose.
 Ordinary `weak` definitions retain their binding and symbol identity.
 
@@ -566,6 +568,12 @@ for roots, unwind handling and limits. ELF COMDAT selection is
 a separate earlier step: supported assembler-authored groups coalesce before
 layout, while C attributes and IR `weak_odr` plus section/retain combinations
 continue to diagnose. See [native COMDAT scope](../../linking/elf.md#comdat-selection-before-native-garbage-collection).
+
+Ordinary `.init.*` and `.fini.*` names are not special ELF sections. Known
+kernel text, data and rodata lifetime sections check their storage classes.
+Zero-initialized `.init.data`, `.exit.data` and `.meminit.data` objects occupy
+PROGBITS bytes and can share a section with initialized data. Special ELF
+names such as `.init_array`, TLS and COMDAT keep their own checks.
 
 <a id="c-sections-retain-darwin-arm64"></a>
 ### Darwin arm64

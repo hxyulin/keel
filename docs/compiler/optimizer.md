@@ -1033,6 +1033,21 @@ address discovery makes at most eight scans. Only fields read inside a natural
 loop are selected. The pass is available explicitly and is not part of the
 Full or Fast schedules (`cargo test -p keel-opt --test stack_cache`).
 
+## Private C vector constructors
+
+Full optimization recovers complete `i32x4` constructors from the existing
+same-block byte facts in `stack-forward`. Four copies of one `i32` value become
+`vsplat`; four extracts from at most two `i32x4` snapshots become `vshuffle`.
+The sources must remain defined in the same block, including block parameters.
+Partial or torn lanes, other scalar expressions, and mixed-width constructors
+keep their memory representation. The existing escape, volatile, atomic,
+stack-lifetime and debugger-home exclusions apply.
+
+This recovers ordinary C literals such as `(U){s,s,s,s}` and
+`(U){a[3],b[0],a[1],b[2]}` before target lane legalization. No producer is moved
+or cloned. Private stores disappear only when all reads of the slot disappear.
+The separate target selector then chooses the packed shuffle recipe.
+
 ## Bounded Fast pipeline
 
 `keel cc --opt-tier fast input.c -o output.s` and

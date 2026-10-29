@@ -1,12 +1,9 @@
 # x86-64 C inline assembly
 
-Keel supports scalar and SIMD GNU C inline assembly on `x86_64-unknown-linux-gnu`.
-This implements scalar fallthrough asm and deferred immediate validation from
-the [design](c-inline-asm.md).
-Explicit memory operands, bounded constraint choices and integer flag outputs
-are supported. Asm goto supports these outputs through restoration trampolines
-and ordinary IR control flow. Comma-separated alternatives remain unsupported.
-Basic asm is supported at function and file scope on x86-64 Linux.
+Keel supports scalar and SIMD GNU C inline assembly on `x86_64-unknown-linux-gnu`,
+including explicit memory operands, bounded constraint choices, integer flag
+outputs and asm goto. Basic asm is supported at function and file scope.
+Comma-separated alternatives are unsupported.
 
 ```c
 unsigned long add(unsigned long a, unsigned long b) {
@@ -27,8 +24,8 @@ SIMD constraints `x` and `v` accept `float`, `double`, and the frontend's
 128/256-bit vector types. Both use registers 0–15; `v` does not enable EVEX
 register allocation. The shared IR represents them with `w` (`FloatReg`) and
 also accepts 64-bit vectors. Scalar integer SIMD operands, MMX, x87, ZMM and
-registers 16–31 remain outside this operand contract. Named local-register
-variables retain their existing GPR-only contract.
+registers 16–31 are outside this operand contract. Named local-register
+variables are GPR-only.
 
 SIMD templates use `%xmmN` for scalar and 64/128-bit operands, `%ymmN` for
 256-bit operands. `%x0` selects the XMM view; `%t0` selects the YMM view of a
@@ -51,8 +48,8 @@ may have different widths and keep their own register views; a tie does not
 promise an extension into unspecified input bits.
 Output addresses and input expressions are evaluated once. A read/write register output
 captures its initial value and writes its final value to that captured address.
-One input may initialize each tied output. Untied operands receive distinct
-registers, even when GNU could reuse them. Fixed-register overlaps require a tie.
+Untied operands receive distinct registers, even when GNU could reuse them.
+Fixed-register sharing follows the [shared register rules](#shared-registers).
 Register exhaustion produces a diagnostic rather than relaxing a constraint.
 
 Scalar register outputs also accept `rm`, `mr`, `qm`, `mq` and `g` with `=` or
@@ -71,8 +68,8 @@ inlining in IR as `re` and `rI`. Symbols use a register for `er`, because Keel
 does not establish a signed-32-bit symbol range through a code-model contract.
 The [GCC x86 constraint definitions](https://gcc.gnu.org/onlinedocs/gcc/Machine-Constraints.html)
 define these numeric predicates. Standalone `e`/`I`, comma-separated alternatives
-and memory retries after scalar register exhaustion remain unsupported. Keel does not infer instruction-specific immediate ranges from
-arbitrary templates.
+and memory retries after scalar register exhaustion are unsupported. Keel does
+not infer instruction-specific immediate ranges from templates.
 
 Inputs also accept `Nd`/`dN` for x86 ports. Constants from 0 through 255 use
 an immediate; other values use RDX. Selection happens after required inlining
@@ -121,9 +118,32 @@ Clobbers accept `cc`, `memory`, generated GPR names/aliases, and XMM/YMM
 registers 0–15. High-byte names AH/CH/DH/BH clobber their parent
 RAX/RCX/RDX/RBX registers. RSP and RBP cannot be clobbered. R15 is also
 reserved in functions whose aligned frame needs it as a base pointer.
-Control/debug, tile, opmask and other register classes remain outside the
-operand/clobber contract. The IR retains target-tagged physical registers and
+Control/debug, tile, opmask and other register classes are outside the
+operand and clobber contract. The IR keeps target-tagged physical registers and
 early-clobber markers, including in textual round trips.
+
+### Shared registers
+
+One physical register has an input lifetime before the template and an output
+lifetime after it. A non-early fixed output may share an input register without
+an explicit matching constraint. Each output still needs its own register. A
+fixed independent input cannot share an early-clobber output, but an explicit
+matching input may initialize it. Clobbers cannot overlap operands.
+
+Several inputs may share a fixed register or match one output when their
+common low bits are provably equal. `asm::same_register_input` resolves SSA
+aliases, strips scalar conversions that keep the observed bits, and compares
+numeric constants modulo the common width and equal symbolic addresses.
+Separate loads, unrelated parameters, the same C variable name and runtime
+coincidence do not prove equality. Distinct volatile loads stay distinct.
+
+The widest input initializes the register once. Narrower inputs keep their own
+register views and need only their low bits. Neither a wider output nor a
+template modifier extends a narrow input. Multiple output writes, incompatible
+initializers and independent early-clobber overlaps are errors. The C parser
+keeps repeated matching constraints, the IR verifier checks every pair of
+matching inputs, and the x86 planner checks all inputs assigned to each
+physical register. AArch64 still rejects multiple inputs in one register.
 
 ### Aggregate register operands
 
@@ -136,12 +156,11 @@ normalized scalar IR type. Packed accesses retain alignment 1; whole-object and
 member volatile effects remain observable.
 
 Small records may choose a GPR for `g` and register/memory unions. Nonword and
-wider records retain the existing memory alternative where allowed; explicit
-`m` keeps its addressable-object contract. Const-member outputs reject in both
-register and memory paths. Atomic-member register packing,
-empty/nonword GPR values and multi-register modes remain conservatively
-unsupported. GCC supports some wider modes; this is Keel's bound. Aggregate
-`i`/`n` inputs diagnose rather than passing an address as their value.
+wider records use the memory alternative where allowed; explicit `m` keeps its
+addressable-object contract. Const-member outputs are rejected in both register
+and memory paths. Atomic-member register packing, empty or nonword GPR values
+and multi-register modes are unsupported. Aggregate `i`/`n` inputs are
+diagnosed rather than passing an address as their value.
 
 Padding checks use initialized lvalue objects; ABI argument/return copies do
 not promise to retain indeterminate padding. Clang rejects some tied-indirect
@@ -154,32 +173,47 @@ Read-only global `rsp` bindings have a separate
 [C observer contract](../../frontends/c/extensions.md). Their exact `+r` operand supports
 Linux's `ASM_CALL_CONSTRAINT` through the balanced stack contract below.
 
-All asm remains pinned, even without `volatile`. Memory clobbers and reserved-stack
-templates are compiler memory barriers, not hardware fences. Explicit memory
-operands describe reads and writes; register-only templates without a memory
-clobber retain load facts for `memory-forward` and `load-reuse`.
-Function-scope basic asm preserves literal text,
-assumes GPR preservation and models memory and flags conservatively.
-`inline` has no size-hint effect.
+### Memory effects
+
+All asm is pinned, even without `volatile`, and is never made pure, deleted by
+DCE or moved by GCM. `inline` has no size-hint effect. Memory effects follow
+the declarations; the compiler does not inspect the template to infer missing
+effects:
+
+| Declaration | Memory effect |
+|---|---|
+| Register or immediate operands and GPR or flags clobbers only | None |
+| Read-only memory operands | Read |
+| Write-only memory operands | Write |
+| Read/write memory operands, or a mixture of reads and writes | ReadWrite |
+| `memory` clobber or reserved-stack dependency | Barrier |
+
+`memory-forward` and `load-reuse` keep facts across register-only and
+read-only templates. Explicit memory writes invalidate facts conservatively,
+including facts about other addresses. A barrier is a compiler ordering
+constraint, not a hardware fence. Condition-code clobbers are separate from
+memory effects. See GCC's
+[extended asm contract](https://gcc.gnu.org/onlinedocs/gcc/Extended-Asm.html).
 
 ## Lowering and boundaries
 
-The backend snapshots GPR homes overwritten by declared clobbers, operand
-registers or staging scratch use, and stages every register input in frame slots
-before filling operand registers. Flag result slots are zeroed before the
-template, then `SETcc` writes their low bytes immediately after it. These
-captures preserve flags and require no GPR operands. It captures every output before restoring
-old homes, then installs SSA results. This handles fixed-register cycles,
-rematerialized inputs and values live across arbitrary declared GPR clobbers
-without changing the general allocator. Only affected callee-saved GPRs are added
-to the normal prologue/CFI. Operand-free templates with no GPR clobbers allocate
-no staging frame. Frame slots and stable frame-base
-registers remain outside operand allocation.
+The backend saves the GPR homes that the template may overwrite: declared
+register clobbers, assigned operand registers and the RAX staging scratch.
+Memory and flags clobbers add no GPRs. Saved homes occupy compact frame slots,
+and only affected callee-saved registers join the prologue and unwind
+descriptions. Register inputs are staged before any operand register is
+filled; an input whose home is saved is read from its slot. Flag result slots
+are zeroed before the template, and `SETcc` writes their low bytes right after
+it. Outputs and flags are captured before old homes are restored, then SSA
+results are installed. This handles tied and early outputs, fixed-register
+cycles, rematerialized inputs, forced spills and values live across declared
+clobbers without changing the allocator. Affected homes are saved even when no
+live value uses them. SIMD scratch registers are not used for staging.
 
-Preservation still includes affected homes even when no live SSA value uses them.
-Further reductions need liveness and precise instruction-boundary constraints.
-It does not use SIMD scratch registers for
-asm staging. This alone does not establish a kernel code-generation mode.
+Templates without register operands, outputs or GPR clobbers need no staging
+frame. This includes `asm volatile("sti" ::: "memory")`, compiler-only memory
+barriers and immediate-only templates. The assembler still validates their
+instructions and target features.
 
 Substituted text remains an explicit fragment in the enclosing object program.
 The shared assembler processes directives, macro state, labels, relocations and
@@ -197,8 +231,7 @@ or directive bytes. Section switches must return to the function's section.
 
 Still diagnosed: comma-separated alternatives, unsupported constraint unions,
 TLS-only immediates, SIMD local register variables and unsupported register
-classes. Supporting their instruction bytes in the assembler does
-not provide the missing C operand or control-flow contract.
+classes.
 
 ## Balanced stack calls
 
@@ -221,18 +254,15 @@ The template must preserve the enclosing frame bases and direction flag,
 restore RSP on every normal path, and maintain SysV call alignment at each
 call. Temporary stack adjustments and manually placed stack arguments are
 allowed when balanced. The compiler supplies an aligned entry stack and an
-ABI caller-clobber barrier, including live SIMD values. It captures ordinary
-outputs before restoring GPR homes. It does not infer call arguments or return
-types from the template. Unwinding, nonlocal exits and terminal transfers remain
-outside this contract.
+ABI caller-clobber barrier, including live SIMD values. It does not infer call
+arguments or return types from the template. Unwinding, nonlocal exits and
+terminal transfers are outside this contract.
 
 The RSP operand retains its GNU source number and name. It prints physical
 `%rsp`, accepting the default or `%q` view. Narrow views, ordinary writes,
 `=r`, early-clobber, duplicate stack operands, ties to the stack operand and
-output-bearing asm goto are rejected. In balanced mode, one compatible fixed
-input may share a non-early fixed output, including Linux's `=D`/`D` form.
-Competing inputs, duplicate outputs and explicit clobber conflicts still fail.
-Ordinary asm keeps its existing fixed-register matching policy.
+output-bearing asm goto are rejected. Fixed-register sharing, including
+Linux's `=D`/`D` form, follows the [shared register rules](#shared-registers).
 
 IR represents the dependency as an input-only `rsp` constraint with an `i64`
 snapshot from `stack_save` followed by `ptrtoint.i64`. The verifier resolves
@@ -270,40 +300,18 @@ not a source operand; matching constraints and template references are remapped
 around it. Reserved-stack outputs remain rejected. Functions containing cleanup
 locals or variably modified types reject asm goto under the existing scope-exit
 rules.
-AArch64 asm goto remains unsupported. This does not establish Linux kernel
-stack, calling convention, objtool or runtime compatibility.
+AArch64 asm goto is unsupported.
 
 `cargo test -p keel-c --test x86_asm_goto` checks diagnostics, ordinary CFG
 edges, IR round trips and text/typed/chunked object parity across selectors,
-allocators, normal/empty pools and optimization on/off. Its fixture covers
-multiple labels, live values across clobbers, backedges, input side effects,
-required inlining and metadata-driven indirect branches. A second fixture checks
-register/flag/memory outputs, numeric read/write label numbering, output-address
-side effects and live register/stack arguments. Its 24 generated objects pass
-GCC and Clang callers on Linux, with both compiler references.
+allocators, normal/empty pools and optimization on/off.
 
 ## Validation
 
-`cargo test -p keel-c --test x86_inline_asm` verifies contracts and diagnostics,
-pinned behavior, IR round trips, and byte-for-byte text/typed/chunked object
-parity across 144 configurations: v1/v2/v3, three selectors, two allocators,
-normal/empty pools, optimization on/off and debug info on/off. A custom allocator
-adds a forced constant-rematerialization configuration.
-
-The original 22-function fixture covers ties, fixed-register shuffles, early clobbers,
-multiple outputs, narrow register views, constants, pointers, output-address
-side effects, flags, memory barriers, local labels, shared macros, live values,
-clobbers and aligned frames. The crate tests own inline-assembly regressions. AArch64's existing inline-asm suite remains a separate regression.
-
-The full workspace run completed with 2,754 passed, three failed and 13 ignored
-across 506 groups. The failures were the retired x86-asm rejection assertion,
-the newly added high-byte-parent alias test, and the IR golden output that now
-retains `&`. The alias mapping and both expected results were corrected. All
-150 IR package tests and 20 affected C/branch tests then passed, and workspace
-check passed. The full workspace was not repeated after these fixes. Both
-generator freshness checks, all 98 generator tests and three audit tests passed.
-The final 145 exported objects match the native-qualified bytes exactly; the
-updated fixture also passed all 290 native executions and four broken controls.
+`cargo test -p keel-c --test x86_inline_asm` checks contracts and diagnostics,
+pinned behavior, IR round trips, and text/typed/chunked object parity across
+v1/v2/v3, three selectors, two allocators, normal/empty pools, optimization
+on/off and debug info on/off.
 
 ## Required inlining and deferred immediates
 
@@ -320,40 +328,18 @@ IR metadata. Retained standalone bodies must satisfy their own immediate
 constraints. A runtime argument does not become a constant because its helper
 was marked `always_inline`.
 
-Mandatory expansion retains existing binding, recursion, ABI and structural
+Mandatory expansion keeps the binding, recursion, ABI and structural
 legality checks. Missing definitions, noinline conflicts and unsupported calls
 produce errors rather than profitability skips. Expansion is limited to one
 million cloned instructions. Eight rounds of local constant cleanup are allowed
 for pending immediates. Debug parameter homes can forward known stores into
-loads; memory-writing barriers still invalidate those facts. Ordinary optional
-inlining remains an optimizer decision.
+loads; memory-writing barriers invalidate those facts. Ordinary optional
+inlining is an optimizer decision.
 
 For example, the kernel-style `rip_rel_ptr(&global)` helper can pass its pointer
 parameter to an `i` operand. After required inlining, `%c1(%%rip)` becomes
 `global(%rip)`. `n` rejects the same symbol. Unresolved runtime inputs fail final
 IR verification before emission. There is no relaxed public verifier mode.
-
-The fixture now adds two exported functions covering nested helpers, repeated
-calls, numeric arguments, symbolic offsets and unique labels. The historical
-290 native executions above qualify the earlier fixture. This increment passed
-145 fresh native executions against GCC 13.3.0 on Linux x86-64, with five broken
-controls rejected normally. The harness includes both new functions in all
-512-input cases. Clang/GNU byte-and-relocation comparisons also passed.
-A subsequent unchanged-input audit
-on a reproduced corpus removes all 450 earlier immediate first errors. Accepted
-C inputs remain four of 484 because unsupported constraints and section
-placement become the next errors. Assembly stays at 326 of 506. No crashes or
-timeouts occur, and no Keel object is linked into or run as the kernel.
-
-Production changes passed `cargo test --workspace --no-fail-fast`: 2,762 passed,
-zero failed and 13 ignored across 506 reported groups. During that run the
-address witness was strengthened so the symbol base cannot cancel between two
-XOR operands. Production code did not change. All seven tests in the affected
-C target passed again with fresh exports from the final fixture; those 145
-objects passed the native GCC run and all five broken controls. The full suite
-was not repeated for that test-only adjustment. Workspace check, the profiling
-feature build, both generator freshness checks, all 98 generator tests, three
-audit harness tests, scoped formatting and diff checks also passed.
 
 ## Explicit memory operands
 
@@ -382,28 +368,8 @@ arguments internally; C template references and ties are remapped while GNU
 source numbering and named operands keep their meaning. Required inlining
 clones these pointer operands normally.
 
-All asm remains pinned with unknown read/write memory effects. Optimizers may
-simplify address computations and surrounding code, but must preserve memory
-observations across the asm. No new optimizer algorithm or precise object-extent
-alias model is introduced. This is deliberately conservative, including for a
-read-only `m` operand. The constraint choices described above use these same
-pinned effects.
-
-The execution fixture adds memory reads/writes, mixed memory/register outputs,
-read/write ties, single address evaluation, aliasing input/output objects,
-byte/word/dword widths, array objects, unused outputs and aligned stack objects.
-Its native controls include omitted writes, wrong addresses and wrong reads.
-Earlier native and kernel audit counts above refer to their named checkpoints.
-
-This increment passed all 2,766 workspace tests, zero failures and 13 ignored
-across 507 reported groups at checkpoint `7572b6ef`. Workspace and profiling
-feature checks, 98 generator tests, both freshness checks and scoped formatting
-also passed. All 145 fresh native objects passed against GCC 13.3.0 with eight
-normally rejected controls. The
-unchanged kernel-corpus audit
-accepts 402 assembly inputs and four C inputs. All 330 previously accepted
-objects remain byte-for-byte identical. Later constraint failures still prevent
-further C acceptance; these tests do not qualify kernel code generation.
+Memory operands set the template's [memory effect](#memory-effects); a
+read-only `m` operand is a read.
 
 ## The x86-64 q register class
 
@@ -411,33 +377,12 @@ C inputs and outputs accept `q`, including `=q`, `+q` and the early-clobber
 forms `=&q` and `+&q`. GCC's
 [x86 constraint definition](https://gcc.gnu.org/onlinedocs/gcc/Machine-Constraints.html)
 allows every integer register in 64-bit mode. The C frontend therefore
-normalizes `q` to the existing IR `r` class. Backend allocation, reserved
-register rules, ties and input staging are unchanged.
+normalizes `q` to the IR `r` class.
 
 Operand type still selects byte, word, dword or qword views; `q` does not force
 a byte-sized value. Pointers are accepted. Byte operands can use the low-byte
-views of extended registers and RSI/RDI. Uppercase `Q`, which identifies a
-different class, remains unsupported. This normalization does not implement
-the restricted 32-bit `q` class or extend AArch64's constraint set.
-
-The fixture adds four functions for write-only outputs, read/write values at
-all scalar widths, early-clobber byte outputs forced beyond the legacy GPRs,
-and pointer values. The native controls also corrupt a `q` output and a byte
-operation. Earlier fixture and audit counts above belong to their named
-checkpoints.
-
-All 145 fresh objects passed native GCC 13.3.0 comparison for this 39-function
-fixture, with all ten broken controls rejected normally. The
-unchanged-input kernel audit
-removes all 254 prior `=q` first errors. Those files now stop at the `%a`
-template modifier. Acceptance remains four C and 402 assembly inputs, and all
-406 previously accepted objects remain byte-for-byte identical. There are no
-crashes, timeouts or acceptance regressions.
-
-At implementation checkpoint `b60de289`, the full workspace passed 2,767 tests,
-zero failures and 13 ignored across 507 groups. Workspace and profiling checks,
-all 98 generator tests, three audit tests, both generator freshness checks,
-scoped formatting and diff checks also passed.
+views of extended registers and RSI/RDI. Uppercase `Q` and the restricted
+32-bit `q` class are unsupported.
 
 ## Function-scope basic assembly
 
@@ -454,7 +399,7 @@ As in the [GNU basic-asm contract](https://gcc.gnu.org/onlinedocs/gcc-15.1.0/gcc
 the compiler assumes GPRs are preserved. Assembly must preserve the C stack and
 register state and fall through. Use extended asm to describe register inputs,
 outputs and changes. Opaque bytes do not establish instruction validity or
-runtime support. AArch64 retains its empty-or-`nop` basic-asm subset.
+runtime support. AArch64 accepts only empty or `nop` basic asm.
 
 ## File-scope assembly
 
@@ -473,19 +418,6 @@ Keel does not forward object assembly to an external tool.
 
 Static C definitions referenced only by opaque assembly need `used`, as in the
 [GNU basic-asm contract](https://gcc.gnu.org/onlinedocs/gcc-14.1.0/gcc/Basic-Asm.html).
-File-scope assembly is currently rejected by the AArch64, WebAssembly, LLVM bridge
-and Cranelift bridge paths. This does not provide source-order placement between
-C definitions, top-level extended asm or additional instruction support.
-
-ELF section attributes now admit ordinary `.init.*` and `.fini.*` names rather
-than treating them as special ELF sections. Known kernel text/data/rodata lifetime
-sections validate their storage classes. Zero-initialized `.init.data`,
-`.exit.data` and `.meminit.data` objects occupy PROGBITS bytes and can share a
-section with initialized data. Special ELF names such as `.init_array`, TLS and
-COMDAT retain their existing checks.
-
-Section annotations on external declarations are accepted without allocating
-storage or carrying placement into imported call contracts. A later definition
-inherits the annotation and receives the ordinary storage checks. Reserved
-section names, conflicting redeclarations and retain-without-definition still
-produce diagnostics.
+The AArch64, WebAssembly, LLVM bridge and Cranelift bridge paths reject
+file-scope assembly. There is no source-order placement between C definitions
+and no top-level extended asm.

@@ -1628,7 +1628,7 @@ intermediate assembly files. Existing assembly output remains the default;
 `--emit-ir` is incompatible with `--emit-object`. The x86 Linux path also emits
 typed instructions and metadata directly, with no intermediate assembly text.
 Its standalone syntax remains Intel, and its compiler rejects inline assembly.
-[Packed AVX arithmetic](../targets/x86_64/codegen.md#x86-avx-subset-packed-arithmetic-extension) is opt-in
+[Packed AVX arithmetic](../targets/x86_64/codegen.md#avx-selection) is opt-in
 with the existing `--target-features avx`, supporting 128-bit `f32x4`/`f64x2`
 arithmetic. It adds no AVX2, AVX-512 or wider-vector support.
 The owned program retains its items through assembly;
