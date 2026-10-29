@@ -1821,15 +1821,19 @@ impl<'a> FunctionCompiler<'a> {
             .unwrap_or(0);
         let rflags_home = (rflags_bytes != 0).then_some(offset.next_multiple_of(8));
         let offset = rflags_home.map_or(offset, |home| home + rflags_bytes);
-        let function_index = module
-            .functions
-            .iter()
-            .position(|f| f.name == func.name)
-            .expect("lowered function keeps its module identity")
-            as u64;
+        // Only inline assembly needs the module index; most functions have none.
+        let mut function_index = None;
         let mut inline_asm_plans = HashMap::default();
         for (_, inst) in func.layout_insts() {
             if let InstData::InlineAsm { asm, args } = func.inst_data(inst) {
+                let function_index = *function_index.get_or_insert_with(|| {
+                    module
+                        .functions
+                        .iter()
+                        .position(|f| f.name == func.name)
+                        .expect("lowered function keeps its module identity")
+                        as u64
+                });
                 let plan = inline_asm::plan(
                     module,
                     func,

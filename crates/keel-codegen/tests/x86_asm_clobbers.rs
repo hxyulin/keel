@@ -354,3 +354,31 @@ fn simd_register_constraints_reject_overlap_mismatched_ties_and_bad_views() {
         "256-bit operands require AVX"
     );
 }
+
+#[test]
+fn unique_operand_encodes_the_module_function_index() {
+    // Only the later functions have inline assembly, at the same instruction
+    // index, so their `%=` values must differ by module position alone.
+    let source = r##"
+func @none(i64) -> i64 {
+entry(v0:i64):
+ return v0
+}
+func @first() {
+entry:
+ asm "# id %=", ""()
+ return
+}
+func @second() {
+entry:
+ asm "# id %=", ""()
+ return
+}
+"##;
+    let module = keel_ir::parse(source).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let text = keel_codegen::compile(&module, keel_codegen::Target::X86_64LinuxGnu).unwrap();
+    for index in [1u64, 2] {
+        assert!(text.contains(&format!("# id {}\n", index << 32)), "{text}");
+    }
+}
