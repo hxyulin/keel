@@ -1,4 +1,4 @@
-//! All packed-string controls and signed length widths with exact ISA oracles.
+//! Packed-string controls and signed length widths with exact ISA oracles.
 use keel_asm_ir::x86::{CpuLevel, Features};
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
@@ -25,6 +25,19 @@ const ONE_SIMD: Pools = Pools {
     float_caller_saved: &[0],
     float_callee_saved: &[],
 };
+/// The imm8 control reaches the encoding unchanged, so boundary controls cover
+/// its lowering. One native configuration still executes all 256 controls.
+const BOUNDARY_CONTROLS: [u8; 11] = [0, 1, 2, 4, 8, 16, 32, 64, 127, 128, 255];
+#[derive(Clone, Copy, PartialEq)]
+enum Fixture {
+    Narrow,
+    #[cfg_attr(
+        not(all(target_os = "linux", target_arch = "x86_64")),
+        allow(dead_code)
+    )]
+    AllControls,
+    Wide,
+}
 struct Case {
     id: Intrinsic,
     mode: u8,
@@ -36,7 +49,8 @@ impl Case {
         format!("str_{}_{}_{}_{}", self.id, self.mode, self.alias, self.wide)
     }
 }
-fn cases(wide: bool) -> Vec<Case> {
+fn cases(fixture: Fixture) -> Vec<Case> {
+    let wide = fixture == Fixture::Wide;
     let mut v = Vec::new();
     for id in Intrinsic::ALL
         .into_iter()
@@ -46,14 +60,19 @@ fn cases(wide: bool) -> Vec<Case> {
         if wide && kind != 1 {
             continue;
         }
-        for mode in 0..256 {
-            if wide && !matches!(mode, 0 | 64 | 127 | 255) {
+        for mode in 0..=255 {
+            let selected = match fixture {
+                Fixture::Narrow => BOUNDARY_CONTROLS.contains(&mode),
+                Fixture::AllControls => true,
+                Fixture::Wide => matches!(mode, 0 | 64 | 127 | 255),
+            };
+            if !selected {
                 continue;
             }
             for alias in [false, true] {
                 v.push(Case {
                     id,
-                    mode: mode as u8,
+                    mode,
                     alias,
                     wide,
                 });
@@ -62,9 +81,10 @@ fn cases(wide: bool) -> Vec<Case> {
     }
     v
 }
-fn source(wide: bool) -> String {
+fn source(fixture: Fixture) -> String {
+    let wide = fixture == Fixture::Wide;
     let mut s = String::new();
-    for c in cases(wide) {
+    for c in cases(fixture) {
         let info = c.id.info();
         let (_, index, _) = c.id.x86_string_info().unwrap();
         let name = c.name();
@@ -110,14 +130,15 @@ fn opcode_byte(op: &str) -> u8 {
         0x63
     }
 }
-fn harness(wide: bool) -> String {
+fn harness(fixture: Fixture) -> String {
+    let wide = fixture == Fixture::Wide;
     let mut c = String::from(
         "#include <immintrin.h>\n#include <stdint.h>\nextern void*memcpy(void*,const void*,__SIZE_TYPE__);extern void*memset(void*,int,__SIZE_TYPE__);extern int memcmp(const void*,const void*,__SIZE_TYPE__);extern int printf(const char*,...);\n",
     );
     let mut table = String::from(
         "struct Case{void(*run)(const void*,const void*,const void*,void*);void(*ref)(const void*,const void*,const void*,void*);unsigned out,abytes,len;const char*name;};static const struct Case cases[]={\n",
     );
-    for ca in cases(wide) {
+    for ca in cases(fixture) {
         let info = ca.id.info();
         let (op, index, kind) = ca.id.x86_string_info().unwrap();
         let name = ca.name();
@@ -198,28 +219,33 @@ fn object(
     a: AllocationTier,
     empty: bool,
     f: Features,
-    wide: bool,
+    fixture: Fixture,
 ) -> Result<(Vec<u8>, String), keel_codegen::CodegenError> {
-    object_with_forced_wide(s, a, empty, f, wide, false)
+    object_with_forced_wide(s, a, empty, f, fixture, false)
 }
 fn object_with_forced_wide(
     s: SelectionTier,
     a: AllocationTier,
     empty: bool,
     f: Features,
-    wide: bool,
+    fixture: Fixture,
     force: bool,
 ) -> Result<(Vec<u8>, String), keel_codegen::CodegenError> {
     use std::sync::OnceLock;
     static NARROW: OnceLock<matrix::PreparedModule> = OnceLock::new();
+    static ALL_CONTROLS: OnceLock<matrix::PreparedModule> = OnceLock::new();
     static WIDE: OnceLock<matrix::PreparedModule> = OnceLock::new();
     static FORCED: OnceLock<matrix::PreparedModule> = OnceLock::new();
+    let wide = fixture == Fixture::Wide;
     let prepared = if force {
         FORCED.get_or_init(|| matrix::PreparedModule::parse(&forced_source()))
-    } else if wide {
-        WIDE.get_or_init(|| matrix::PreparedModule::parse(&source(true)))
     } else {
-        NARROW.get_or_init(|| matrix::PreparedModule::parse(&source(false)))
+        match fixture {
+            Fixture::Narrow => &NARROW,
+            Fixture::AllControls => &ALL_CONTROLS,
+            Fixture::Wide => &WIDE,
+        }
+        .get_or_init(|| matrix::PreparedModule::parse(&source(fixture)))
     };
     let m = prepared.for_selector(s);
     let selector = FeatureSelector {
@@ -250,9 +276,9 @@ fn object_with_forced_wide(
 }
 
 fn forced_source() -> String {
-    let original = source(true);
+    let original = source(Fixture::Wide);
     let mut s = String::new();
-    for (case, function) in cases(true)
+    for (case, function) in cases(Fixture::Wide)
         .into_iter()
         .zip(original.split(" return\n}\n").filter(|f| !f.is_empty()))
     {
@@ -274,7 +300,7 @@ fn forced_source() -> String {
     s
 }
 fn forced_harness() -> String {
-    harness(true).replace("c->ref(p,q,l,e);c->run", "uint32_t signbits=0;for(unsigned i=0;i<32;i++)signbits|=(uint32_t)(p[i]>>7)<<i;memcpy(e+total,&signbits,4);total+=4;c->ref(p,q,l,e);c->run")
+    harness(Fixture::Wide).replace("c->ref(p,q,l,e);c->run", "uint32_t signbits=0;for(unsigned i=0;i<32;i++)signbits|=(uint32_t)(p[i]>>7)<<i;memcpy(e+total,&signbits,4);total+=4;c->ref(p,q,l,e);c->run")
 }
 #[test]
 fn forced_live_ymm0_string_mask_exports() {
@@ -311,9 +337,15 @@ fn forced_live_ymm0_string_mask_exports() {
         SelectionTier::Full,
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
-            let (b, text) =
-                object_with_forced_wide(s, a, false, Features::for_level(CpuLevel::V3), true, true)
-                    .unwrap();
+            let (b, text) = object_with_forced_wide(
+                s,
+                a,
+                false,
+                Features::for_level(CpuLevel::V3),
+                Fixture::Wide,
+                true,
+            )
+            .unwrap();
             assert!(
                 text.contains("vmovups\tymm0, ymmword ptr"),
                 "wide definition must occupy YMM0"
@@ -346,9 +378,15 @@ fn native_forced_live_ymm0_across_string_masks() {
         SelectionTier::Full,
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
-            let (b, _) =
-                object_with_forced_wide(s, a, false, Features::for_level(CpuLevel::V3), true, true)
-                    .unwrap();
+            let (b, _) = object_with_forced_wide(
+                s,
+                a,
+                false,
+                Features::for_level(CpuLevel::V3),
+                Fixture::Wide,
+                true,
+            )
+            .unwrap();
             fs::write(d.join("forced.o"), b).unwrap();
             common::command(
                 Command::new("clang")
@@ -385,13 +423,14 @@ fn check_string_exports(exhaustive: bool) {
     });
     fs::create_dir_all(&d).unwrap();
     let mut configurations = 0;
-    for wide in [false, true] {
+    for fixture in [Fixture::Narrow, Fixture::Wide] {
+        let wide = fixture == Fixture::Wide;
         let name = if wide {
             "avx-strings-wide"
         } else {
             "avx-strings"
         };
-        let c = harness(wide);
+        let c = harness(fixture);
         fs::write(d.join("oracle.c"), &c).unwrap();
         common::command(
             Command::new("clang")
@@ -410,7 +449,7 @@ fn check_string_exports(exhaustive: bool) {
         );
         if let Some(e) = &export {
             fs::create_dir_all(e).unwrap();
-            fs::write(e.join(format!("{name}.ir")), source(wide)).unwrap();
+            fs::write(e.join(format!("{name}.ir")), source(fixture)).unwrap();
             fs::write(e.join(format!("{name}.c")), c).unwrap();
         }
         for s in [
@@ -430,7 +469,7 @@ fn check_string_exports(exhaustive: bool) {
                         continue;
                     }
                     let (b, text) =
-                        object(s, a, empty, Features::for_level(CpuLevel::V3), wide).unwrap();
+                        object(s, a, empty, Features::for_level(CpuLevel::V3), fixture).unwrap();
                     configurations += 1;
                     if let Some(e) = &export {
                         let n = format!("{name}-{s:?}-{a:?}-{empty}");
@@ -452,21 +491,21 @@ fn string_features_controls_lengths_purity_and_foreign_target() {
             AllocationTier::Full,
             false,
             Features::NONE,
-            false
+            Fixture::Narrow
         )
         .is_err()
     );
-    let small = source(true);
+    let small = source(Fixture::Wide);
     let bad = small.replace("iconst.i32 255", "iconst.i32 256");
     assert!(keel_ir::verify_module(&keel_ir::parse(&bad).unwrap()).is_err());
     let bad = small.replace("iconst.i32 255", "load.i32 align 1 v0");
     assert!(keel_ir::verify_module(&keel_ir::parse(&bad).unwrap()).is_err());
     let bad = small.replace("load.i64 align 1", "load.i32 align 1");
     assert!(keel_ir::verify_module(&keel_ir::parse(&bad).unwrap()).is_err());
-    for c in cases(false) {
+    for c in cases(Fixture::Narrow) {
         assert!(c.id.info().pure);
     }
-    let narrow = source(false)
+    let narrow = source(Fixture::Narrow)
         .split("func @str_x86_avx_vpcmpistri_index_1_")
         .next()
         .unwrap()
@@ -584,7 +623,6 @@ fn exhaustive_native_avx_strings_all_controls_lengths_flags_aliases() {
         if wide && !std::is_x86_feature_detected!("avx") {
             continue;
         }
-        fs::write(d.join("strings.c"), harness(wide)).unwrap();
         for s in [
             SelectionTier::Baseline,
             SelectionTier::Trees,
@@ -592,8 +630,18 @@ fn exhaustive_native_avx_strings_all_controls_lengths_flags_aliases() {
         ] {
             for a in [AllocationTier::Fast, AllocationTier::Full] {
                 for empty in [false, true] {
+                    let fixture = if wide {
+                        Fixture::Wide
+                    } else if (s, a, empty)
+                        == (SelectionTier::Baseline, AllocationTier::Fast, false)
+                    {
+                        Fixture::AllControls
+                    } else {
+                        Fixture::Narrow
+                    };
+                    fs::write(d.join("strings.c"), harness(fixture)).unwrap();
                     let (b, _) =
-                        object(s, a, empty, Features::for_level(CpuLevel::V3), wide).unwrap();
+                        object(s, a, empty, Features::for_level(CpuLevel::V3), fixture).unwrap();
                     fs::write(d.join("strings.o"), b).unwrap();
                     common::command(
                         Command::new("clang")
