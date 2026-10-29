@@ -85,6 +85,14 @@ extern void lane_unpackhi_ps256(const void*,const void*,const void*,void*),refer
 extern void lane_unpacklo_pd256(const void*,const void*,const void*,void*),reference_lane_unpacklo_pd256(const void*,const void*,const void*,void*);
 extern void lane_unpackhi_pd256(const void*,const void*,const void*,void*),reference_lane_unpackhi_pd256(const void*,const void*,const void*,void*);
 
+extern void lane_sqrt_ps128(const void*,const void*,const void*,void*),reference_lane_sqrt_ps128(const void*,const void*,const void*,void*),dead_lane_sqrt_ps128(const void*,const void*,const void*,void*);
+extern void lane_addsub_ps128(const void*,const void*,const void*,void*),reference_lane_addsub_ps128(const void*,const void*,const void*,void*),dead_lane_addsub_ps128(const void*,const void*,const void*,void*);
+extern void lane_sqrt_pd128(const void*,const void*,const void*,void*),reference_lane_sqrt_pd128(const void*,const void*,const void*,void*),dead_lane_sqrt_pd128(const void*,const void*,const void*,void*);
+extern void lane_addsub_pd128(const void*,const void*,const void*,void*),reference_lane_addsub_pd128(const void*,const void*,const void*,void*),dead_lane_addsub_pd128(const void*,const void*,const void*,void*);
+extern void lane_sqrt_ps256(const void*,const void*,const void*,void*),reference_lane_sqrt_ps256(const void*,const void*,const void*,void*),dead_lane_sqrt_ps256(const void*,const void*,const void*,void*);
+extern void lane_addsub_ps256(const void*,const void*,const void*,void*),reference_lane_addsub_ps256(const void*,const void*,const void*,void*),dead_lane_addsub_ps256(const void*,const void*,const void*,void*);
+extern void lane_sqrt_pd256(const void*,const void*,const void*,void*),reference_lane_sqrt_pd256(const void*,const void*,const void*,void*),dead_lane_sqrt_pd256(const void*,const void*,const void*,void*);
+extern void lane_addsub_pd256(const void*,const void*,const void*,void*),reference_lane_addsub_pd256(const void*,const void*,const void*,void*),dead_lane_addsub_pd256(const void*,const void*,const void*,void*);
 struct LaneCase {const char*name;unsigned bytes,lane_bytes,operation;fma_fn actual,reference,dead;};
 static const struct LaneCase lane_cases[]={
 {"_mm_hadd_ps",16,4,0,lane_hadd_ps128,reference_lane_hadd_ps128,dead_lane_hadd_ps128},
@@ -103,6 +111,15 @@ static const struct LaneCase lane_cases[]={
 {"_mm256_unpackhi_ps",32,4,3,lane_unpackhi_ps256,reference_lane_unpackhi_ps256,0},
 {"_mm256_unpacklo_pd",32,8,2,lane_unpacklo_pd256,reference_lane_unpacklo_pd256,0},
 {"_mm256_unpackhi_pd",32,8,3,lane_unpackhi_pd256,reference_lane_unpackhi_pd256,0},
+{"_mm_sqrt_ps",16,4,5,lane_sqrt_ps128,reference_lane_sqrt_ps128,dead_lane_sqrt_ps128},
+{"_mm_addsub_ps",16,4,4,lane_addsub_ps128,reference_lane_addsub_ps128,dead_lane_addsub_ps128},
+{"_mm_sqrt_pd",16,8,5,lane_sqrt_pd128,reference_lane_sqrt_pd128,dead_lane_sqrt_pd128},
+{"_mm_addsub_pd",16,8,4,lane_addsub_pd128,reference_lane_addsub_pd128,dead_lane_addsub_pd128},
+{"_mm256_sqrt_ps",32,4,5,lane_sqrt_ps256,reference_lane_sqrt_ps256,dead_lane_sqrt_ps256},
+{"_mm256_addsub_ps",32,4,4,lane_addsub_ps256,reference_lane_addsub_ps256,dead_lane_addsub_ps256},
+{"_mm256_sqrt_pd",32,8,5,lane_sqrt_pd256,reference_lane_sqrt_pd256,dead_lane_sqrt_pd256},
+{"_mm256_addsub_pd",32,8,4,lane_addsub_pd256,reference_lane_addsub_pd256,dead_lane_addsub_pd256},
+
 };
 /* Scalar SSE arithmetic supplies an independent finite-value lane oracle. */
 static void lane_pair(const void*a,const void*b,void*out,unsigned bytes,int subtract) {
@@ -117,6 +134,17 @@ static void lane_pair(const void*a,const void*b,void*out,unsigned bytes,int subt
 static void lane_reference(const struct LaneCase*t,const unsigned char*a,
                            const unsigned char*b,unsigned char*out) {
   unsigned bytes=t->lane_bytes;
+  if(t->operation>=4) {
+    for(unsigned lane=0;lane<t->bytes/bytes;lane++) {
+      unsigned offset=lane*bytes;
+      if(t->operation==4)lane_pair(a+offset,b+offset,out+offset,bytes,lane%2==0);
+      else if(bytes==4)
+        __asm__ volatile("sqrtss (%1),%%xmm0; movss %%xmm0,(%0)"::"r"(out+offset),"r"(a+offset):"xmm0","memory");
+      else
+        __asm__ volatile("sqrtsd (%1),%%xmm0; movsd %%xmm0,(%0)"::"r"(out+offset),"r"(a+offset):"xmm0","memory");
+    }
+    return;
+  }
   for(unsigned block=0;block<t->bytes;block+=16) {
     if(t->operation>=2) {
       unsigned half=t->operation==3?8:0;
@@ -132,7 +160,7 @@ static void lane_reference(const struct LaneCase*t,const unsigned char*a,
     }
   }
 }
-static int horizontal_unpack_checks(void) {
+static int packed_float_checks(void) {
   const uint32_t finite32[]={0,0x80000000,0x3f800000,0xbf800000,0x7f7fffff,0x00800000,1,0x3f800001};
   const uint64_t finite64[]={0,UINT64_C(0x8000000000000000),UINT64_C(0x3ff0000000000000),UINT64_C(0xbff0000000000000),UINT64_C(0x7fefffffffffffff),UINT64_C(0x0010000000000000),1,UINT64_C(0x3ff0000000000001)};
   const uint32_t special32[]={0x7f800000,0xff800000,0x7f800001,0x7fc12345,0xff800001,0xffc12345,0x007fffff,0x807fffff};
@@ -160,7 +188,7 @@ static int horizontal_unpack_checks(void) {
       printf("%s mode=%x pattern=%u flags=%u/%u\n",t->name,mode,pattern,flags,reference_flags);return 6;
     }
     /* Arithmetic NaN payload precedence is checked by the vendor instruction. */
-    if(pattern<8||t->operation>=2) {
+    if(pattern<8||(t->operation>=2&&t->operation<=3)||t->operation==5) {
       setcsr(mode);lane_reference(t,a+1,b+1,scalar+1);unsigned scalar_flags=csr()&63;
       if(memcmp(out,scalar,48)||flags!=scalar_flags) {
         printf("%s scalar mode=%x pattern=%u flags=%u/%u\n",t->name,mode,pattern,flags,scalar_flags);return 7;
@@ -184,7 +212,7 @@ fma_fn expected[]={reference_fmadd_ps128,reference_fmadd_pd128,reference_fmadd_p
 unsigned widths[]={16,16,32,32,16,16,16,16,32,32,16,16,16,16,32,32,16,16,16,16,32,32,16,16,16,16,32,32,16,16,32,32};
 unsigned doubles[]={0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1};
 
-status=horizontal_unpack_checks();if(status)goto done;
+status=packed_float_checks();if(status)goto done;
 for(unsigned rc=0;rc<4;rc++) for(unsigned ftz=0;ftz<2;ftz++) for(unsigned f=0;f<32;f++) for(unsigned pattern=0;pattern<8;pattern++) {
  unsigned char a[32],b[32],c[32],out[48],ref[48];
  if(doubles[f]) {
@@ -227,4 +255,4 @@ for(unsigned base=0;base<65536;base+=8){
  unsigned char av[4],bv[4];setcsr(0x1f80);float a=scalar_ps(input[0]);memcpy(av,&a,4);setcsr(0x1f80);float b=reference_scalar_ps(input[0]);memcpy(bv,&b,4);if(memcmp(av,bv,4)){status=4;goto done;}
 }
 for(unsigned rc=0;rc<4;rc++){setcsr(0x1f80|(rc<<13));unsigned short a=scalar_ph(1.00048828125f);setcsr(0x1f80|(rc<<13));unsigned short b=reference_scalar_ph(1.00048828125f);if(a!=b){status=5;goto done;}}
-done:setcsr(original);if(!status)puts("FMA/F16C/horizontal/unpack vendor oracle PASS");return status;}
+done:setcsr(original);if(!status)puts("FMA/F16C/packed arithmetic/unpack vendor oracle PASS");return status;}

@@ -19,4 +19,11 @@ static __inline__ __m128d _mm_hsub_pd(__m128d a, __m128d b) {
   return __builtin_keel_sse3_hsubpd(a, b);
 }
 
+static __inline__ __m128 _mm_addsub_ps(__m128 a, __m128 b) {
+  return __builtin_keel_sse3_addsubps(a, b);
+}
+static __inline__ __m128d _mm_addsub_pd(__m128d a, __m128d b) {
+  return __builtin_keel_sse3_addsubpd(a, b);
+}
+
 #endif /* _KEEL_PMMINTRIN_H */

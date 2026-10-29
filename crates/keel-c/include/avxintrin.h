@@ -173,4 +173,17 @@ static __inline__ __m256d _mm256_unpackhi_pd(__m256d a, __m256d b) {
   return (__m256d)__builtin_shufflevector(a, b, 1, 5, 3, 7);
 }
 
+static __inline__ __m256 _mm256_sqrt_ps(__m256 a) {
+  return __builtin_keel_avx_vsqrtps256(a);
+}
+static __inline__ __m256 _mm256_addsub_ps(__m256 a, __m256 b) {
+  return __builtin_keel_avx_vaddsubps256(a, b);
+}
+static __inline__ __m256d _mm256_sqrt_pd(__m256d a) {
+  return __builtin_keel_avx_vsqrtpd256(a);
+}
+static __inline__ __m256d _mm256_addsub_pd(__m256d a, __m256d b) {
+  return __builtin_keel_avx_vaddsubpd256(a, b);
+}
+
 #endif /* _KEEL_AVXINTRIN_H */

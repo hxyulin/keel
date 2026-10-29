@@ -75,4 +75,8 @@ static __inline__ __m128 _mm_unpackhi_ps(__m128 a, __m128 b) {
   return (__m128)__builtin_shufflevector(a, b, 2, 6, 3, 7);
 }
 
+static __inline__ __m128 _mm_sqrt_ps(__m128 a) {
+  return __builtin_keel_sse_sqrtps128(a);
+}
+
 #endif /* _KEEL_XMMINTRIN_H */

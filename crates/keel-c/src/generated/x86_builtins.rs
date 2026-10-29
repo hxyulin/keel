@@ -162,6 +162,20 @@ fn lookup(base: &str) -> Option<Binding> {
         "keel_avx_vhsubps256" => Binding::Value(Intrinsic::X86AvxVhsubps256),
         "keel_avx_vhaddpd256" => Binding::Value(Intrinsic::X86AvxVhaddpd256),
         "keel_avx_vhsubpd256" => Binding::Value(Intrinsic::X86AvxVhsubpd256),
+        "keel_sse41_pmuldq128" => Binding::Value(Intrinsic::X86Sse41Pmuldq128),
+        "keel_sse2_pmuludq128" => Binding::Value(Intrinsic::X86Sse2Pmuludq128),
+        "keel_sse2_psadbw128" => Binding::Value(Intrinsic::X86Sse2Psadbw128),
+        "keel_sse_sqrtps128" => Binding::Value(Intrinsic::X86SseSqrtps128),
+        "keel_sse3_addsubps" => Binding::Value(Intrinsic::X86Sse3Addsubps),
+        "keel_sse_sqrtpd128" => Binding::Value(Intrinsic::X86SseSqrtpd128),
+        "keel_sse3_addsubpd" => Binding::Value(Intrinsic::X86Sse3Addsubpd),
+        "keel_avx2_vpmuldq256" => Binding::Value(Intrinsic::X86Avx2Vpmuldq256),
+        "keel_avx2_vpmuludq256" => Binding::Value(Intrinsic::X86Avx2Vpmuludq256),
+        "keel_avx2_vpsadbw256" => Binding::Value(Intrinsic::X86Avx2Vpsadbw256),
+        "keel_avx_vsqrtps256" => Binding::Value(Intrinsic::X86AvxVsqrtps256),
+        "keel_avx_vaddsubps256" => Binding::Value(Intrinsic::X86AvxVaddsubps256),
+        "keel_avx_vsqrtpd256" => Binding::Value(Intrinsic::X86AvxVsqrtpd256),
+        "keel_avx_vaddsubpd256" => Binding::Value(Intrinsic::X86AvxVaddsubpd256),
         _ => return None,
     })
 }
@@ -340,6 +354,20 @@ const _: () = {
     assert!(Intrinsic::X86AvxVhsubps256 as u16 == 567);
     assert!(Intrinsic::X86AvxVhaddpd256 as u16 == 565);
     assert!(Intrinsic::X86AvxVhsubpd256 as u16 == 569);
+    assert!(Intrinsic::X86Sse41Pmuldq128 as u16 == 19);
+    assert!(Intrinsic::X86Sse2Pmuludq128 as u16 == 20);
+    assert!(Intrinsic::X86Sse2Psadbw128 as u16 == 21);
+    assert!(Intrinsic::X86SseSqrtps128 as u16 == 382);
+    assert!(Intrinsic::X86Sse3Addsubps as u16 == 394);
+    assert!(Intrinsic::X86SseSqrtpd128 as u16 == 383);
+    assert!(Intrinsic::X86Sse3Addsubpd as u16 == 395);
+    assert!(Intrinsic::X86Avx2Vpmuldq256 as u16 == 35);
+    assert!(Intrinsic::X86Avx2Vpmuludq256 as u16 == 36);
+    assert!(Intrinsic::X86Avx2Vpsadbw256 as u16 == 37);
+    assert!(Intrinsic::X86AvxVsqrtps256 as u16 == 559);
+    assert!(Intrinsic::X86AvxVaddsubps256 as u16 == 571);
+    assert!(Intrinsic::X86AvxVsqrtpd256 as u16 == 560);
+    assert!(Intrinsic::X86AvxVaddsubpd256 as u16 == 573);
 };
 
 #[cfg(test)]
@@ -499,6 +527,20 @@ mod tests {
             (Intrinsic::X86AvxVhsubps256, &[Type::Vector(VectorType::F32x8), Type::Vector(VectorType::F32x8)], Type::Vector(VectorType::F32x8)),
             (Intrinsic::X86AvxVhaddpd256, &[Type::Vector(VectorType::F64x4), Type::Vector(VectorType::F64x4)], Type::Vector(VectorType::F64x4)),
             (Intrinsic::X86AvxVhsubpd256, &[Type::Vector(VectorType::F64x4), Type::Vector(VectorType::F64x4)], Type::Vector(VectorType::F64x4)),
+            (Intrinsic::X86Sse41Pmuldq128, &[Type::Vector(VectorType::I32x4), Type::Vector(VectorType::I32x4)], Type::Vector(VectorType::I64x2)),
+            (Intrinsic::X86Sse2Pmuludq128, &[Type::Vector(VectorType::I32x4), Type::Vector(VectorType::I32x4)], Type::Vector(VectorType::I64x2)),
+            (Intrinsic::X86Sse2Psadbw128, &[Type::Vector(VectorType::I8x16), Type::Vector(VectorType::I8x16)], Type::Vector(VectorType::I64x2)),
+            (Intrinsic::X86SseSqrtps128, &[Type::Vector(VectorType::F32x4)], Type::Vector(VectorType::F32x4)),
+            (Intrinsic::X86Sse3Addsubps, &[Type::Vector(VectorType::F32x4), Type::Vector(VectorType::F32x4)], Type::Vector(VectorType::F32x4)),
+            (Intrinsic::X86SseSqrtpd128, &[Type::Vector(VectorType::F64x2)], Type::Vector(VectorType::F64x2)),
+            (Intrinsic::X86Sse3Addsubpd, &[Type::Vector(VectorType::F64x2), Type::Vector(VectorType::F64x2)], Type::Vector(VectorType::F64x2)),
+            (Intrinsic::X86Avx2Vpmuldq256, &[Type::Vector(VectorType::I32x8), Type::Vector(VectorType::I32x8)], Type::Vector(VectorType::I64x4)),
+            (Intrinsic::X86Avx2Vpmuludq256, &[Type::Vector(VectorType::I32x8), Type::Vector(VectorType::I32x8)], Type::Vector(VectorType::I64x4)),
+            (Intrinsic::X86Avx2Vpsadbw256, &[Type::Vector(VectorType::I8x32), Type::Vector(VectorType::I8x32)], Type::Vector(VectorType::I64x4)),
+            (Intrinsic::X86AvxVsqrtps256, &[Type::Vector(VectorType::F32x8)], Type::Vector(VectorType::F32x8)),
+            (Intrinsic::X86AvxVaddsubps256, &[Type::Vector(VectorType::F32x8), Type::Vector(VectorType::F32x8)], Type::Vector(VectorType::F32x8)),
+            (Intrinsic::X86AvxVsqrtpd256, &[Type::Vector(VectorType::F64x4)], Type::Vector(VectorType::F64x4)),
+            (Intrinsic::X86AvxVaddsubpd256, &[Type::Vector(VectorType::F64x4), Type::Vector(VectorType::F64x4)], Type::Vector(VectorType::F64x4)),
         ];
         for &(intrinsic, params, result) in signatures {
             assert_eq!(intrinsic.info().params, params, "{intrinsic:?}");

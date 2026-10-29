@@ -99,6 +99,10 @@ separate names, not arbitrary suffix combinations.
   `_mm{,256}_mulhi_epu16`. Byte shuffles: `_mm{,256}_shuffle_epi8`.
   Sign masks: `_mm{,256}_movemask_epi8`. Their architectural contracts and
   feature permissions are described below.
+- Widening products: `_mm{,256}_mul_epi32` and `_mm{,256}_mul_epu32`.
+  Byte sums of absolute differences: `_mm{,256}_sad_epu8`.
+- Packed square roots: `_mm{,256}_sqrt_{ps,pd}`. Alternating arithmetic:
+  `_mm{,256}_addsub_{ps,pd}` subtracts even lanes and adds odd lanes.
 - Horizontal integer arithmetic: `_mm{,256}_{hadd,hsub}_epi{16,32}` and
   `_mm{,256}_{hadds,hsubs}_epi16`. Horizontal floating arithmetic:
   `_mm{,256}_{hadd,hsub}_{ps,pd}`. Unpacks:
@@ -179,8 +183,8 @@ not grant CPU features or require the host to support the instructions.
 ### Reviewed builtin inventory
 
 [`vendor-bindings.json`](../../../tools/x86-isa/vendor-bindings.json) owns the
-149 reviewed frontend bindings for AES, packed integer operations and shifts,
-horizontal floating arithmetic, SSE2 numeric conversions, FMA and F16C.
+163 reviewed frontend bindings for AES, packed integer operations and shifts,
+architectural packed floating arithmetic, SSE2 numeric conversions, FMA and F16C.
 Its generated module supplies both parser lookup and
 `__has_builtin` recognition. The metadata records current semantic intrinsic
 IDs, types, controls, required features and ownership. Generated assertions
@@ -377,13 +381,20 @@ when their required feature is disabled:
   result; bits 6:4 are ignored.
 - `_mm{,256}_movemask_epi8` returns an `int` with each input byte's sign bit in
   the corresponding result bit. The 256-bit form can set bit 31.
+- `_mm{,256}_mul_epi32` and `_mm{,256}_mul_epu32` multiply the even 32-bit
+  lanes into full 64-bit signed/unsigned products. Odd input lanes are ignored.
+  The signed 128-bit form requires SSE4.1; the unsigned form requires SSE2.
+- `_mm{,256}_sad_epu8` sums unsigned byte absolute differences in independent
+  eight-byte groups. Each sum occupies a zero-extended 64-bit result lane. The
+  128-bit form requires SSE2.
 
 The 128-bit mixed-byte multiply-add, rounded multiply and byte shuffle require
-SSSE3. Other 128-bit products, averages and sign masks require SSE2. All listed
-256-bit forms require AVX2. Each public operand is evaluated once. Private
+SSSE3. The signed 128-bit widening product requires SSE4.1. Other 128-bit
+products, averages and sign masks require SSE2. All listed 256-bit forms require
+AVX2. Each public operand is evaluated once. Private
 semantic bridges use the intrinsic's exact signed C lane shapes and result
 shape, even for operations that interpret input bits as unsigned. These names
-are Keel bridges, not GNU builtin compatibility claims. The 34 wrappers are
+are Keel bridges, not GNU builtin compatibility claims. The 40 wrappers are
 checked against independent scalar and vendor-header oracles, including upper
 halves, signed extrema, packing boundaries, aliases and forced spills.
 
@@ -417,6 +428,24 @@ instructions, plus scalar SSE pair operations for finite inputs. Floating
 unpacks have byte-exact oracles for finite and nonfinite inputs. The packet
 covers rounding modes, DAZ/FTZ, seeded flags, dead arithmetic results, aliases,
 upper halves, selection/allocation routes and forced spills.
+
+### Architectural packed square root and alternating arithmetic
+
+`_mm{,256}_sqrt_{ps,pd}` computes each lane's square root through the existing
+architectural SSE/AVX intrinsics. The 128-bit forms are legal at baseline; the
+256-bit forms require AVX. They retain MXCSR rounding and status effects,
+including invalid status for negative nonzero inputs and signaling NaNs, even
+when the result is unused. Signed zero and NaN results follow the instruction.
+
+`_mm{,256}_addsub_{ps,pd}` subtracts corresponding input lanes at even indices
+and adds them at odd indices. The 128-bit forms require SSE3 and the 256-bit
+forms require AVX. They use architectural operations with rounding and status
+effects, rather than ordinary vector expressions that could discard unused
+results. All eight wrappers evaluate each operand once and use the existing
+16/32-byte vector ABI. The shared floating packet checks vendor results and
+masked status effects, scalar SSE arithmetic oracles, aliases and forced spills
+under all rounding modes, DAZ/FTZ and clear/seeded flags. These additions do not
+extend the ordinary C arithmetic/comparison floating-environment contract.
 
 <a id="x86-aes-ni-legacy-128-bit-aes-ni"></a>
 ## Legacy 128-bit AES-NI

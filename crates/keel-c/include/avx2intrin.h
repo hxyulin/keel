@@ -445,4 +445,14 @@ static __inline__ __m256i _mm256_unpackhi_epi64(__m256i a, __m256i b) {
   return (__m256i)__builtin_shufflevector((__keel_i64_256)a, (__keel_i64_256)b, 1, 5, 3, 7);
 }
 
+static __inline__ __m256i _mm256_mul_epi32(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vpmuldq256((__keel_i32_256)a, (__keel_i32_256)b);
+}
+static __inline__ __m256i _mm256_mul_epu32(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vpmuludq256((__keel_i32_256)a, (__keel_i32_256)b);
+}
+static __inline__ __m256i _mm256_sad_epu8(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vpsadbw256((__keel_i8_256)a, (__keel_i8_256)b);
+}
+
 #endif /* _KEEL_AVX2INTRIN_H */

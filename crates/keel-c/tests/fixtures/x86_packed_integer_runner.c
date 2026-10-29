@@ -17,6 +17,23 @@ static void packed_reference(const struct PackedCase*t,const unsigned char*a,
     for(unsigned i=0;i<t->bytes;i++)out[i]=b[i]&128?0:a[(i&~15u)+(b[i]&15)];
     return;
   }
+  if(t->operation>=20) {
+    for(unsigned lane=0;lane<t->bytes/8;lane++) {
+      uint64_t value=0;
+      if(t->operation==22) {
+        for(unsigned byte=0;byte<8;byte++) {
+          int x=a[lane*8+byte],y=b[lane*8+byte];
+          value+=(uint64_t)(x>y?x-y:y-x);
+        }
+      } else {
+        /* Widening multiplication ignores each odd 32-bit lane. */
+        uint64_t x=read_lane(a+lane*8,4),y=read_lane(b+lane*8,4);
+        value=t->operation==20?(uint64_t)(signed_lane(x,32)*signed_lane(y,32)):x*y;
+      }
+      write_lane(out+lane*8,8,value);
+    }
+    return;
+  }
   if(t->operation>=14) {
     for(unsigned block=0;block<t->bytes;block+=16) {
       if(t->operation>=18) {

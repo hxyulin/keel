@@ -366,4 +366,14 @@ static __inline__ __m128d _mm_unpackhi_pd(__m128d a, __m128d b) {
   return (__m128d)__builtin_shufflevector(a, b, 1, 3);
 }
 
+static __inline__ __m128i _mm_mul_epu32(__m128i a, __m128i b) {
+  return (__m128i)__builtin_keel_sse2_pmuludq128((__keel_i32_128)a, (__keel_i32_128)b);
+}
+static __inline__ __m128i _mm_sad_epu8(__m128i a, __m128i b) {
+  return (__m128i)__builtin_keel_sse2_psadbw128((__keel_i8_128)a, (__keel_i8_128)b);
+}
+static __inline__ __m128d _mm_sqrt_pd(__m128d a) {
+  return __builtin_keel_sse_sqrtpd128(a);
+}
+
 #endif /* _KEEL_EMMINTRIN_H */

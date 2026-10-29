@@ -249,19 +249,25 @@ fn native_supported() -> bool {
 }
 
 #[test]
-fn horizontal_arithmetic_keeps_status_effects_and_unpack_keeps_bits() {
+fn packed_float_arithmetic_preserves_status_and_unpack_keeps_bits() {
     for width in [128, 256] {
         let prefix = if width == 128 { "_mm" } else { "_mm256" };
         for suffix in ["ps", "pd"] {
             let ty = format!("__m{width}{}", if suffix == "pd" { "d" } else { "" });
-            for op in ["hadd", "hsub", "unpacklo", "unpackhi"] {
+            for op in ["hadd", "hsub", "unpacklo", "unpackhi", "addsub", "sqrt"] {
                 let call = format!("{prefix}_{op}_{suffix}");
-                let mut module=frontend(&format!("#include <immintrin.h>\n{ty} f({ty} a,{ty} b){{return {call}(a,b);}}\nvoid dead({ty} a,{ty} b){{(void){call}(a,b);}}")).unwrap();
+                let args = if op == "sqrt" { "a" } else { "a,b" };
+                let mut module=frontend(&format!("#include <immintrin.h>\n{ty} f({ty} a,{ty} b){{return {call}({args});}}\nvoid dead({ty} a,{ty} b){{(void){call}({args});}}")).unwrap();
                 keel_ir::verify_module(&module).unwrap();
-                let horizontal = op.starts_with('h');
-                let ir = if horizontal {
+                let effectful = !op.starts_with("unpack");
+                let sse3 = op.starts_with('h') || op == "addsub";
+                let ir = if effectful {
                     if width == 128 {
-                        format!("x86_sse3_{op}{suffix}")
+                        if op == "sqrt" {
+                            format!("x86_sse_sqrt{suffix}128")
+                        } else {
+                            format!("x86_sse3_{op}{suffix}")
+                        }
                     } else {
                         format!("x86_avx_v{op}{suffix}256")
                     }
@@ -270,7 +276,7 @@ fn horizontal_arithmetic_keeps_status_effects_and_unpack_keeps_bits() {
                 };
                 assert!(module.to_string().contains(&ir), "{call}");
                 keel_opt::optimize(&mut module).unwrap();
-                if horizontal {
+                if effectful {
                     let dead = module
                         .functions
                         .iter()
@@ -283,7 +289,7 @@ fn horizontal_arithmetic_keeps_status_effects_and_unpack_keeps_bits() {
                     );
                 }
                 let allowed = if width == 128 {
-                    Features::parse(if horizontal { "sse3" } else { "none" }).unwrap()
+                    Features::parse(if sse3 { "sse3" } else { "none" }).unwrap()
                 } else {
                     Features::parse("avx").unwrap()
                 };
@@ -298,7 +304,7 @@ fn horizontal_arithmetic_keeps_status_effects_and_unpack_keeps_bits() {
                 )
                 .unwrap();
                 keel_asm::x86::assemble_program_object_with_features(&program, allowed).unwrap();
-                if horizontal {
+                if effectful && (width == 256 || sse3) {
                     let mut missing = allowed;
                     if width == 128 {
                         missing.sse3 = false;
@@ -319,10 +325,15 @@ fn horizontal_arithmetic_keeps_status_effects_and_unpack_keeps_bits() {
                         "{call}"
                     );
                 }
-                let once=frontend(&format!("#include <immintrin.h>\nextern {ty} next(void);{ty} f(void){{return {call}(next(),next());}}")).unwrap();
+                let inputs = if op == "sqrt" {
+                    "next()"
+                } else {
+                    "next(),next()"
+                };
+                let once=frontend(&format!("#include <immintrin.h>\nextern {ty} next(void);{ty} f(void){{return {call}({inputs});}}")).unwrap();
                 assert_eq!(
                     once.to_string().matches("call @next()").count(),
-                    2,
+                    if op == "sqrt" { 1 } else { 2 },
                     "{call}"
                 );
             }

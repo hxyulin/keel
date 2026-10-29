@@ -2634,6 +2634,246 @@
       ],
       "ownership": "keel",
       "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_sse41_pmuldq128",
+      "intrinsic": "X86Sse41Pmuldq128",
+      "intrinsic_id": 19,
+      "family": "value",
+      "header": "smmintrin.h",
+      "params": [
+        "i32x4",
+        "i32x4"
+      ],
+      "result": "i64x2",
+      "control": "none",
+      "features": [
+        "sse41"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_sse2_pmuludq128",
+      "intrinsic": "X86Sse2Pmuludq128",
+      "intrinsic_id": 20,
+      "family": "value",
+      "header": "emmintrin.h",
+      "params": [
+        "i32x4",
+        "i32x4"
+      ],
+      "result": "i64x2",
+      "control": "none",
+      "features": [],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_sse2_psadbw128",
+      "intrinsic": "X86Sse2Psadbw128",
+      "intrinsic_id": 21,
+      "family": "value",
+      "header": "emmintrin.h",
+      "params": [
+        "i8x16",
+        "i8x16"
+      ],
+      "result": "i64x2",
+      "control": "none",
+      "features": [],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_sse_sqrtps128",
+      "intrinsic": "X86SseSqrtps128",
+      "intrinsic_id": 382,
+      "family": "value",
+      "header": "xmmintrin.h",
+      "params": [
+        "f32x4"
+      ],
+      "result": "f32x4",
+      "control": "none",
+      "features": [],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_sse3_addsubps",
+      "intrinsic": "X86Sse3Addsubps",
+      "intrinsic_id": 394,
+      "family": "value",
+      "header": "pmmintrin.h",
+      "params": [
+        "f32x4",
+        "f32x4"
+      ],
+      "result": "f32x4",
+      "control": "none",
+      "features": [
+        "sse3"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_sse_sqrtpd128",
+      "intrinsic": "X86SseSqrtpd128",
+      "intrinsic_id": 383,
+      "family": "value",
+      "header": "emmintrin.h",
+      "params": [
+        "f64x2"
+      ],
+      "result": "f64x2",
+      "control": "none",
+      "features": [],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_sse3_addsubpd",
+      "intrinsic": "X86Sse3Addsubpd",
+      "intrinsic_id": 395,
+      "family": "value",
+      "header": "pmmintrin.h",
+      "params": [
+        "f64x2",
+        "f64x2"
+      ],
+      "result": "f64x2",
+      "control": "none",
+      "features": [
+        "sse3"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_avx2_vpmuldq256",
+      "intrinsic": "X86Avx2Vpmuldq256",
+      "intrinsic_id": 35,
+      "family": "value",
+      "header": "avx2intrin.h",
+      "params": [
+        "i32x8",
+        "i32x8"
+      ],
+      "result": "i64x4",
+      "control": "none",
+      "features": [
+        "avx2"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_avx2_vpmuludq256",
+      "intrinsic": "X86Avx2Vpmuludq256",
+      "intrinsic_id": 36,
+      "family": "value",
+      "header": "avx2intrin.h",
+      "params": [
+        "i32x8",
+        "i32x8"
+      ],
+      "result": "i64x4",
+      "control": "none",
+      "features": [
+        "avx2"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_avx2_vpsadbw256",
+      "intrinsic": "X86Avx2Vpsadbw256",
+      "intrinsic_id": 37,
+      "family": "value",
+      "header": "avx2intrin.h",
+      "params": [
+        "i8x32",
+        "i8x32"
+      ],
+      "result": "i64x4",
+      "control": "none",
+      "features": [
+        "avx2"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_avx_vsqrtps256",
+      "intrinsic": "X86AvxVsqrtps256",
+      "intrinsic_id": 559,
+      "family": "value",
+      "header": "avxintrin.h",
+      "params": [
+        "f32x8"
+      ],
+      "result": "f32x8",
+      "control": "none",
+      "features": [
+        "avx"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_avx_vaddsubps256",
+      "intrinsic": "X86AvxVaddsubps256",
+      "intrinsic_id": 571,
+      "family": "value",
+      "header": "avxintrin.h",
+      "params": [
+        "f32x8",
+        "f32x8"
+      ],
+      "result": "f32x8",
+      "control": "none",
+      "features": [
+        "avx"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_avx_vsqrtpd256",
+      "intrinsic": "X86AvxVsqrtpd256",
+      "intrinsic_id": 560,
+      "family": "value",
+      "header": "avxintrin.h",
+      "params": [
+        "f64x4"
+      ],
+      "result": "f64x4",
+      "control": "none",
+      "features": [
+        "avx"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_avx_vaddsubpd256",
+      "intrinsic": "X86AvxVaddsubpd256",
+      "intrinsic_id": 573,
+      "family": "value",
+      "header": "avxintrin.h",
+      "params": [
+        "f64x4",
+        "f64x4"
+      ],
+      "result": "f64x4",
+      "control": "none",
+      "features": [
+        "avx"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
     }
   ],
   "reference_file": "vendor-references.json"
