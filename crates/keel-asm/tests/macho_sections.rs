@@ -369,13 +369,10 @@ fn omitted_tbss_alignment_and_tlv_descriptor_match_clang() {
 
 #[test]
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-fn omitted_tbss_alignment_uses_real_thread_local_storage() {
-    check_tls_runtime(TLS);
-}
-
-#[test]
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn inferred_thread_sections_use_real_thread_local_storage() {
+    // `.tbss` and both thread-section spellings give one Keel object, and
+    // compare() checks each against Clang, so one Keel image runs.
+    let object = keel_asm::assemble_object(TLS).unwrap();
     for suffix in ["", ",regular"] {
         let source = TLS
             .replace(
@@ -387,12 +384,17 @@ fn inferred_thread_sections_use_real_thread_local_storage() {
                 &format!(".section __DATA,__thread_vars{suffix}"),
             );
         compare(&source);
-        check_tls_runtime(&source);
+        assert_eq!(
+            keel_asm::assemble_object(&source).unwrap(),
+            object,
+            "{source}"
+        );
     }
+    check_tls_runtime(&object);
 }
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-fn check_tls_runtime(source: &str) {
+fn check_tls_runtime(object_bytes: &[u8]) {
     let temp = Temp::new();
     let driver = temp.0.join("tls.c");
     std::fs::write(
@@ -423,22 +425,15 @@ int main(void) {
 "#,
     )
     .unwrap();
-    for reference in [false, true] {
-        let bytes = if reference {
-            clang_object(&temp, source)
-        } else {
-            keel_asm::assemble_object(source).unwrap()
-        };
-        let object = temp.0.join("tls.o");
-        let executable = temp.0.join("run");
-        std::fs::write(&object, bytes).unwrap();
-        run(Command::new("clang")
-            .arg("-std=c11")
-            .arg(&driver)
-            .arg(object)
-            .arg("-pthread")
-            .arg("-o")
-            .arg(&executable));
-        assert!(common::execute(&executable).success(), "clang={reference}");
-    }
+    let object = temp.0.join("tls.o");
+    let executable = temp.0.join("run");
+    std::fs::write(&object, object_bytes).unwrap();
+    run(Command::new("clang")
+        .arg("-std=c11")
+        .arg(&driver)
+        .arg(object)
+        .arg("-pthread")
+        .arg("-o")
+        .arg(&executable));
+    assert!(common::execute(&executable).success());
 }
