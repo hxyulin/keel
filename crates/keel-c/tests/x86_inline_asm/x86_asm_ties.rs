@@ -1,8 +1,8 @@
 //! Different-width GPR ties share hardware while retaining operand types.
 use keel_ir::Target;
 use std::fs;
-const SOURCE: &str = include_str!("fixtures/x86_asm_ties.c");
-const RUNNER: &str = include_str!("fixtures/x86_asm_ties_runner.c");
+const SOURCE: &str = include_str!("../fixtures/x86_asm_ties.c");
+const RUNNER: &str = include_str!("../fixtures/x86_asm_ties_runner.c");
 const TYPES: &[&str] = &[
     "unsigned char",
     "unsigned short",

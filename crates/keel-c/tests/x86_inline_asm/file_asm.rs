@@ -198,7 +198,7 @@ int init(void) { return first + table[0] + zeros[0]; }
     }
 }
 
-const FIXTURE: &str = include_str!("fixtures/x86_file_asm.c");
+const FIXTURE: &str = include_str!("../fixtures/x86_file_asm.c");
 
 #[test]
 fn module_asm_has_text_typed_and_chunked_parity_across_codegen_choices() {

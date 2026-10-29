@@ -7,9 +7,9 @@ use keel_codegen::{
 use keel_ir::{InstData, Module, Target, Type};
 use std::{fs, path::Path, process::Command};
 
-const SOURCE: &str = include_str!("fixtures/x86_aggregate_asm.c");
+const SOURCE: &str = include_str!("../fixtures/x86_aggregate_asm.c");
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-const RUNNER: &str = include_str!("fixtures/x86_aggregate_asm_runner.c");
+const RUNNER: &str = include_str!("../fixtures/x86_aggregate_asm_runner.c");
 fn compile(source: &str) -> Result<Module, String> {
     keel_c::compile(
         source,

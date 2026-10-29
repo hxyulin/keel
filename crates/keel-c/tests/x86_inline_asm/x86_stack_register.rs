@@ -7,7 +7,7 @@ use keel_codegen::{
 use keel_ir::{InstData, Intrinsic, Target};
 use object::{Object, ObjectSymbol};
 
-const SOURCE: &str = include_str!("fixtures/x86_stack_register.c");
+const SOURCE: &str = include_str!("../fixtures/x86_stack_register.c");
 
 fn compile(source: &str, target: Target) -> Result<keel_ir::Module, String> {
     keel_c::compile(

@@ -2,8 +2,8 @@
 use keel_ir::Target;
 use std::fs;
 
-const SOURCE: &str = include_str!("fixtures/x86_local_register.c");
-const RUNNER: &str = include_str!("fixtures/x86_local_register_runner.c");
+const SOURCE: &str = include_str!("../fixtures/x86_local_register.c");
+const RUNNER: &str = include_str!("../fixtures/x86_local_register_runner.c");
 const REGISTERS: &[&str] = &[
     "rax", "rcx", "rdx", "rbx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
 ];

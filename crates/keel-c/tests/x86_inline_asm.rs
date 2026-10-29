@@ -1,3 +1,30 @@
+#[path = "x86_inline_asm/asm_stack_call.rs"]
+mod asm_stack_call;
+#[path = "x86_inline_asm/constant_asm_paths.rs"]
+mod constant_asm_paths;
+#[path = "x86_inline_asm/file_asm.rs"]
+mod file_asm;
+#[path = "x86_inline_asm/inline_asm.rs"]
+mod inline_asm;
+#[path = "x86_inline_asm/x86_aggregate_asm.rs"]
+mod x86_aggregate_asm;
+#[path = "x86_inline_asm/x86_asm_goto.rs"]
+mod x86_asm_goto;
+#[path = "x86_inline_asm/x86_asm_shared_registers.rs"]
+mod x86_asm_shared_registers;
+#[path = "x86_inline_asm/x86_asm_ties.rs"]
+mod x86_asm_ties;
+#[path = "x86_inline_asm/x86_local_register.rs"]
+mod x86_local_register;
+#[path = "x86_inline_asm/x86_port_constraint.rs"]
+mod x86_port_constraint;
+#[path = "x86_inline_asm/x86_return_address.rs"]
+mod x86_return_address;
+#[path = "x86_inline_asm/x86_stack_call.rs"]
+mod x86_stack_call;
+#[path = "x86_inline_asm/x86_stack_register.rs"]
+mod x86_stack_register;
+
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools},

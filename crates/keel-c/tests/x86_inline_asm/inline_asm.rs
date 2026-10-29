@@ -1,5 +1,5 @@
 use keel_ir::{AsmClobber, AsmOperand, InstData, Target};
-const SOURCE: &str = include_str!("fixtures/inline_asm.c");
+const SOURCE: &str = include_str!("../fixtures/inline_asm.c");
 
 fn compile(source: &str, debug_info: bool) -> keel_ir::Module {
     keel_c::compile(

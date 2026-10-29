@@ -5,7 +5,7 @@ use keel_codegen::{
 };
 use keel_ir::{InstData, Intrinsic, Module, Target};
 
-const SOURCE: &str = include_str!("fixtures/x86_return_address.c");
+const SOURCE: &str = include_str!("../fixtures/x86_return_address.c");
 
 fn compile(source: &str, target: Target) -> Result<Module, String> {
     keel_c::compile(

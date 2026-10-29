@@ -5,7 +5,7 @@ use keel_codegen::{
 };
 use keel_ir::{AsmOperand, InstData, Module, Target};
 
-const SOURCE: &str = include_str!("fixtures/x86_stack_call.c");
+const SOURCE: &str = include_str!("../fixtures/x86_stack_call.c");
 
 fn compile(source: &str) -> Result<Module, String> {
     keel_c::compile(

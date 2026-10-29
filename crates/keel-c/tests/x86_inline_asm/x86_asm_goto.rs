@@ -5,7 +5,7 @@ use keel_codegen::{
 };
 use keel_ir::{AsmOperand, InstData, Target};
 
-const SOURCE: &str = include_str!("fixtures/x86_asm_goto.c");
+const SOURCE: &str = include_str!("../fixtures/x86_asm_goto.c");
 
 fn compile(source: &str) -> Result<keel_ir::Module, String> {
     keel_c::compile(
@@ -26,14 +26,14 @@ fn restoration_trampolines_use_ordinary_cfg_and_survive_codegen() {
 
 #[test]
 fn goto_outputs_reach_all_successors_after_register_restoration() {
-    let source = include_str!("fixtures/x86_asm_goto_outputs.c");
+    let source = include_str!("../fixtures/x86_asm_goto_outputs.c");
     if let Some(dir) = std::env::var_os("KEEL_X86_ASM_GOTO_OUTPUTS_EXPORT") {
         let dir = std::path::PathBuf::from(dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("source.c"), source).unwrap();
         std::fs::write(
             dir.join("main.c"),
-            include_str!("fixtures/x86_asm_goto_outputs_main.c"),
+            include_str!("../fixtures/x86_asm_goto_outputs_main.c"),
         )
         .unwrap();
     }

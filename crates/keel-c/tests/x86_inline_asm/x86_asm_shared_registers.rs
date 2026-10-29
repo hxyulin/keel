@@ -5,7 +5,7 @@ use keel_codegen::{
 };
 use keel_ir::{InstData, Target};
 
-const SOURCE: &str = include_str!("fixtures/x86_asm_shared_registers.c");
+const SOURCE: &str = include_str!("../fixtures/x86_asm_shared_registers.c");
 
 fn compile(source: &str) -> keel_ir::Module {
     keel_c::compile(
