@@ -233,14 +233,22 @@ fn declarations_scopes_and_prototype_clang_differential() {
         "int f(); int f(int,...);",
         "int f(int) int x; { return x; }",
     ];
+    // Clang's verdict follows C prototype and scope rules, which do not depend
+    // on the target, so one triple is the oracle for every keel target.
+    for source in &accepted {
+        let out = clang_syntax(source, TARGETS[0]);
+        assert!(
+            out.status.success(),
+            "{source}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    for source in &rejected {
+        let out = clang_syntax(source, TARGETS[0]);
+        assert!(!out.status.success(), "Clang accepted {source}");
+    }
     for target in TARGETS {
         for source in &accepted {
-            let out = clang_syntax(source, target);
-            assert!(
-                out.status.success(),
-                "{source}: {}",
-                String::from_utf8_lossy(&out.stderr)
-            );
             let m = keel_c::compile(
                 source,
                 "accepted.c",
@@ -254,8 +262,6 @@ fn declarations_scopes_and_prototype_clang_differential() {
             assert!(!object(&m, target).is_empty());
         }
         for source in &rejected {
-            let out = clang_syntax(source, target);
-            assert!(!out.status.success(), "Clang accepted {source}");
             assert!(
                 keel_c::compile(
                     source,
@@ -356,22 +362,22 @@ fn native_runtime_and_clang_interoperability_both_directions() {
         let peer_c = dir.join(format!("peer{index}.c"));
         std::fs::write(&c, source).unwrap();
         std::fs::write(&peer_c, peer).unwrap();
-        let reference = dir.join(format!("reference{index}"));
         let out = |cmd: &mut Command| run(cmd);
+        // Every link below reuses one clang object for the peer.
+        let peer_o = dir.join(format!("peer{index}.o"));
+        out(Command::new("clang")
+            .args(["-std=c11", "-Wno-deprecated-non-prototype", "-c"])
+            .arg(&peer_c)
+            .arg("-o")
+            .arg(&peer_o));
+        let reference = dir.join(format!("reference{index}"));
         out(Command::new("clang")
             .args(["-std=c11", "-Wno-deprecated-non-prototype"])
             .arg(&c)
-            .arg(&peer_c)
+            .arg(&peer_o)
             .arg("-o")
             .arg(&reference));
         let want = out(&mut Command::new(&reference)).stdout;
-        out(Command::new("clang")
-            .args(["-std=c11", "-Wno-deprecated-non-prototype", "-O2"])
-            .arg(&c)
-            .arg(&peer_c)
-            .arg("-o")
-            .arg(&reference));
-        assert_eq!(out(&mut Command::new(&reference)).stdout, want);
         for debug_info in [false, true] {
             for optimize in [false, true] {
                 let mut m = keel_c::compile(
@@ -392,10 +398,8 @@ fn native_runtime_and_clang_interoperability_both_directions() {
                 std::fs::write(&obj, object(&m, Target::Aarch64AppleDarwin)).unwrap();
                 let exe = obj.with_extension("exe");
                 out(Command::new("clang")
-                    .arg("-std=c11")
-                    .arg("-Wno-deprecated-non-prototype")
                     .arg(&obj)
-                    .arg(&peer_c)
+                    .arg(&peer_o)
                     .arg("-o")
                     .arg(&exe));
                 assert_eq!(

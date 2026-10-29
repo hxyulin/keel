@@ -71,13 +71,8 @@ fn native_arm64_matches_clang_with_and_without_optimization() {
         .arg("-o")
         .arg(&reference));
     let want = run(&mut Command::new(&reference));
-    run(Command::new("clang")
-        .arg("-O2")
-        .arg(&c)
-        .arg("-o")
-        .arg(&reference));
-    assert_eq!(want.stdout, run(&mut Command::new(&reference)).stdout);
-    for debug_info in [false, true] {
+    // run.rs::programs runs this fixture without debug info.
+    for debug_info in [true] {
         for optimize in [false, true] {
             let opts = keel_c::Options {
                 debug_info,

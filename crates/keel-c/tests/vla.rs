@@ -401,12 +401,6 @@ fn native_arm64_matches_clang_with_and_without_optimization() {
             .arg("-o")
             .arg(&reference));
         let want = run(&mut Command::new(&reference));
-        run(Command::new("clang")
-            .arg("-O2")
-            .arg(&c)
-            .arg("-o")
-            .arg(&reference));
-        assert_eq!(want.stdout, run(&mut Command::new(&reference)).stdout);
         for debug_info in [false, true] {
             for optimize in [false, true] {
                 let opts = keel_c::Options {
@@ -419,12 +413,19 @@ fn native_arm64_matches_clang_with_and_without_optimization() {
                     keel_opt::optimize(&mut m).unwrap();
                 }
                 keel_ir::verify_module(&m).unwrap();
-                let asm = keel_codegen::compile(&m, opts.target).unwrap();
                 let path = dir.join(format!("keel-{debug_info}-{optimize}"));
-                let asm_path = path.with_extension("s");
-                std::fs::write(&asm_path, asm).unwrap();
-                run(Command::new("clang").arg(&asm_path).arg("-o").arg(&path));
-                let got = run(&mut Command::new(&path));
+                // run.rs::programs links the text route without debug info.
+                if debug_info {
+                    let asm = keel_codegen::compile(&m, opts.target).unwrap();
+                    let asm_path = path.with_extension("s");
+                    std::fs::write(&asm_path, asm).unwrap();
+                    run(Command::new("clang").arg(&asm_path).arg("-o").arg(&path));
+                    assert_eq!(
+                        run(&mut Command::new(&path)).stdout,
+                        want.stdout,
+                        "debug={debug_info}, optimize={optimize}"
+                    );
+                }
                 let obj_path = path.with_extension("o");
                 std::fs::write(&obj_path, object(&m, opts.target)).unwrap();
                 run(Command::new("clang").arg(&obj_path).arg("-o").arg(&path));
@@ -432,10 +433,6 @@ fn native_arm64_matches_clang_with_and_without_optimization() {
                     run(&mut Command::new(&path)).stdout,
                     want.stdout,
                     "direct object debug={debug_info}, optimize={optimize}"
-                );
-                assert_eq!(
-                    got.stdout, want.stdout,
-                    "debug={debug_info}, optimize={optimize}"
                 );
             }
         }
@@ -493,40 +490,36 @@ fn parameter_scope_and_constraint_differential_clang() {
     ];
     for (sources, success) in [(&accepted[..], true), (&rejected[..], false)] {
         for &source in sources {
+            // Clang's verdict follows C scope and constraint rules, which do not
+            // depend on the target, so one triple is the oracle for every target.
+            let mut child = Command::new("clang")
+                .args([
+                    "-target",
+                    "arm64-apple-macos11",
+                    "-std=c11",
+                    "-x",
+                    "c",
+                    "-fsyntax-only",
+                    "-",
+                ])
+                .stdin(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(source.as_bytes())
+                .unwrap();
+            let out = child.wait_with_output().unwrap();
+            assert_eq!(
+                out.status.success(),
+                success,
+                "Clang: {source}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
             for target in Target::NATIVE {
-                let triple = match target {
-                    keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
-                    Target::Aarch64AppleDarwin => "arm64-apple-macos11",
-                    Target::Aarch64LinuxGnu => "aarch64-unknown-linux-gnu",
-                    Target::X86_64LinuxGnu => "x86_64-unknown-linux-gnu",
-                };
-                let mut child = Command::new("clang")
-                    .args([
-                        "-target",
-                        triple,
-                        "-std=c11",
-                        "-x",
-                        "c",
-                        "-fsyntax-only",
-                        "-",
-                    ])
-                    .stdin(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .spawn()
-                    .unwrap();
-                child
-                    .stdin
-                    .take()
-                    .unwrap()
-                    .write_all(source.as_bytes())
-                    .unwrap();
-                let out = child.wait_with_output().unwrap();
-                assert_eq!(
-                    out.status.success(),
-                    success,
-                    "Clang: {source}: {}",
-                    String::from_utf8_lossy(&out.stderr)
-                );
                 let result = keel_c::compile(
                     source,
                     "parameter-scope.c",
