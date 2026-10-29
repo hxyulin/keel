@@ -66,6 +66,18 @@ fn native_arm_guard_pages_tails_extrema_wrapping_seeds_and_spills() {
         include_str!("../../keel-opt/tests/conditional_widen/oracle.c"),
     )
     .unwrap();
+    let build = Command::new("clang")
+        .args(["-O2", "-c"])
+        .arg(dir.join("oracle.c"))
+        .arg("-o")
+        .arg(dir.join("oracle.o"))
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
     for selection in [SelectionTier::Baseline, SelectionTier::Full] {
         for allocation in [AllocationTier::Fast, AllocationTier::Full] {
             for tiny in [false, true] {
@@ -91,8 +103,7 @@ fn native_arm_guard_pages_tails_extrema_wrapping_seeds_and_spills() {
                 let object = keel_asm::assemble_object(&text).unwrap();
                 fs::write(dir.join("loops.o"), object).unwrap();
                 let build = Command::new("clang")
-                    .arg("-O2")
-                    .arg(dir.join("oracle.c"))
+                    .arg(dir.join("oracle.o"))
                     .arg(dir.join("loops.o"))
                     .arg("-o")
                     .arg(dir.join("test"))

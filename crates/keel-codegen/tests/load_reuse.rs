@@ -1,4 +1,7 @@
 //! A successful load is reused on a conditional shift edge on both backends.
+#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+#[path = "common/native_oracle.rs"]
+mod native_oracle;
 use keel_codegen::{CodegenPipeline, SelectionTier, Target, regalloc::AllocationTier};
 use keel_ir::InstData;
 
@@ -154,11 +157,8 @@ fn branch_and_merge_facts_emit_on_both_targets() {
 #[test]
 #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 fn native_branch_and_merge_facts_preserve_pointer_bits_and_aliasing_stores() {
-    use std::{fs, process::Command};
-    let dir = std::env::temp_dir().join(format!("keel-branch-merge-{}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
-    fs::write(
-        dir.join("oracle.c"),
+    let oracle = native_oracle::PreparedOracle::new(
+        "branch-merge",
         r#"
 #include <stdint.h>
 #include <stdlib.h>
@@ -182,8 +182,8 @@ int main(void) {
  }
  return 0;
 }"#,
-    )
-    .unwrap();
+        &["-O2"],
+    );
     for optimized in [false, true] {
         let mut m = keel_ir::parse(MERGE_SOURCE).unwrap();
         if optimized {
@@ -201,30 +201,11 @@ int main(void) {
                     &pipeline,
                 )
                 .unwrap();
-                fs::write(
-                    dir.join("test.o"),
-                    keel_asm::assemble_program_object(&program, Default::default()).unwrap(),
-                )
-                .unwrap();
-                let output = Command::new("clang")
-                    .args(["-O2"])
-                    .arg(dir.join("oracle.c"))
-                    .arg(dir.join("test.o"))
-                    .arg("-o")
-                    .arg(dir.join("test"))
-                    .output()
-                    .unwrap();
-                assert!(
-                    output.status.success(),
-                    "{}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
-                assert!(
-                    Command::new(dir.join("test")).status().unwrap().success(),
-                    "{optimized}/{selector:?}/{allocator:?}"
+                oracle.run(
+                    &keel_asm::assemble_program_object(&program, Default::default()).unwrap(),
+                    &format!("{optimized}/{selector:?}/{allocator:?}"),
                 );
             }
         }
     }
-    fs::remove_dir_all(dir).unwrap();
 }

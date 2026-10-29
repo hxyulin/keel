@@ -399,8 +399,8 @@ fn native_loads_survive_call_spills_and_cross_block_liveness() {
     let source = pressure_source();
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("narrow-extensions");
     std::fs::create_dir_all(&dir).unwrap();
-    let driver = dir.join("driver.c");
-    std::fs::write(&driver, r#"
+    let driver = dir.join("driver.o");
+    std::fs::write(dir.join("driver.c"), r#"
 #include <stdint.h>
 extern uint64_t pressure(uint16_t *), wrapped(uint64_t,uint64_t), incoming(uint64_t), boolean(uint64_t,uint64_t), call_narrow(void);
 uint64_t dirty(void) { return UINT64_C(0xfedcba98765432ab); }
@@ -426,6 +426,18 @@ int main(void) {
  return 0;
 }
 "#).unwrap();
+    let result = std::process::Command::new("clang")
+        .arg("-c")
+        .arg(dir.join("driver.c"))
+        .arg("-o")
+        .arg(&driver)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
     for allocator in allocators() {
         for selector in [SelectionTier::Baseline, SelectionTier::Full] {
             for tiny in [false, true] {

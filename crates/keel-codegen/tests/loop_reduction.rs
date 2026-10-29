@@ -141,16 +141,14 @@ fn sse2_sum_objects_match_text_with_spilled_vector_accumulators() {
 #[test]
 fn multiple_faulting_streams_keep_the_scalar_first_fault() {
     use std::{fs, process::Command};
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
-        "../../target/runtime-loops-20261020/fault-order-{}",
-        std::process::id()
-    ));
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("loop-reduction-faults");
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("driver.c"),
         include_str!("fixtures/reduction_fault_order.c"),
     )
     .unwrap();
+    compile_driver(&dir);
     for optimized in [false, true] {
         let mut m = keel_ir::parse(include_str!("fixtures/reduction_fault_order.ir")).unwrap();
         if optimized {
@@ -179,8 +177,7 @@ fn multiple_faulting_streams_keep_the_scalar_first_fault() {
             )
             .unwrap();
             let output = Command::new("clang")
-                .arg("-O2")
-                .arg(dir.join("driver.c"))
+                .arg(dir.join("driver.o"))
                 .arg(dir.join("test.o"))
                 .arg("-o")
                 .arg(dir.join("test"))
@@ -206,10 +203,7 @@ fn multiple_faulting_streams_keep_the_scalar_first_fault() {
 #[test]
 fn native_sums_match_scalar_oracle_at_guarded_tails_and_wrapping_boundaries() {
     use std::{fs, process::Command};
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
-        "../../target/runtime-loops-20261020/native-sums-{}",
-        std::process::id()
-    ));
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("loop-reduction-sums");
     fs::create_dir_all(&dir).unwrap();
     let mut c = String::from("#include <stdint.h>\n#include <unistd.h>\n#include <sys/mman.h>\n");
     let mut body = String::from(
@@ -238,14 +232,14 @@ fn native_sums_match_scalar_oracle_at_guarded_tails_and_wrapping_boundaries() {
     body.push_str("munmap(region,2*page); return 0; }\n");
     c.push_str(&body);
     fs::write(dir.join("driver.c"), c).unwrap();
+    compile_driver(&dir);
     for optimized in [false, true] {
         for allocation in [AllocationTier::Fast, AllocationTier::Full] {
             for pools in [&TINY, &keel_codegen::aarch64::REGISTERS] {
                 let (_, object) = compile(optimized, allocation, pools);
                 fs::write(dir.join("test.o"), object).unwrap();
                 let output = Command::new("clang")
-                    .arg("-O2")
-                    .arg(dir.join("driver.c"))
+                    .arg(dir.join("driver.o"))
                     .arg(dir.join("test.o"))
                     .arg("-o")
                     .arg(dir.join("test"))
@@ -263,4 +257,21 @@ fn native_sums_match_scalar_oracle_at_guarded_tails_and_wrapping_boundaries() {
             }
         }
     }
+}
+
+/// Compiles `dir/driver.c` once at -O2; each configuration links the object.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn compile_driver(dir: &std::path::Path) {
+    let output = std::process::Command::new("clang")
+        .args(["-O2", "-c"])
+        .arg(dir.join("driver.c"))
+        .arg("-o")
+        .arg(dir.join("driver.o"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

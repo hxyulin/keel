@@ -1,3 +1,4 @@
+#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 #[path = "common/native_oracle.rs"]
 mod native_oracle;
 use keel_codegen::{

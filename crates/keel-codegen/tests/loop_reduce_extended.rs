@@ -100,6 +100,7 @@ fn native_affine_offsets_and_wrap_fallback_match_independent_oracle() {
         ),
     )
     .unwrap();
+    compile_driver(&dir);
     for tier in [
         keel_opt::OptimizationTier::Fast,
         keel_opt::OptimizationTier::Full,
@@ -123,9 +124,7 @@ fn native_affine_offsets_and_wrap_fallback_match_independent_oracle() {
                 )
                 .unwrap();
                 let output = Command::new("clang")
-                    .arg("-O0")
-                    .arg("-fno-lto")
-                    .arg(dir.join("driver.c"))
+                    .arg(dir.join("driver.o"))
                     .arg(dir.join("test.o"))
                     .arg("-o")
                     .arg(dir.join("test"))
@@ -159,6 +158,7 @@ fn extended_passes_preserve_first_fault_between_two_read_streams() {
         include_str!("fixtures/reduction_fault_order.c"),
     )
     .unwrap();
+    compile_driver(&dir);
     for tier in [
         keel_opt::OptimizationTier::Fast,
         keel_opt::OptimizationTier::Full,
@@ -198,9 +198,7 @@ fn extended_passes_preserve_first_fault_between_two_read_streams() {
             )
             .unwrap();
             let output = Command::new("clang")
-                .arg("-O0")
-                .arg("-fno-lto")
-                .arg(dir.join("driver.c"))
+                .arg(dir.join("driver.o"))
                 .arg(dir.join("test.o"))
                 .arg("-o")
                 .arg(dir.join("test"))
@@ -217,6 +215,27 @@ fn extended_passes_preserve_first_fault_between_two_read_streams() {
             );
         }
     }
+}
+
+/// Compiles `dir/driver.c` once without optimization or LTO; each
+/// configuration links the object.
+#[cfg(any(
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "linux", target_arch = "x86_64")
+))]
+fn compile_driver(dir: &std::path::Path) {
+    let output = std::process::Command::new("clang")
+        .args(["-O0", "-fno-lto", "-c"])
+        .arg(dir.join("driver.c"))
+        .arg("-o")
+        .arg(dir.join("driver.o"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[cfg(any(
