@@ -143,7 +143,7 @@ block0(v0: i64):
 #[test]
 fn deterministic_growth_budget_and_frozen_templates() {
     let mut s = String::from(
-        "func @tiny(i64) -> i64 local {\nblock0(v0: i64):\n v1 = iconst.i64 1\n v2 = iadd v0, v1\n\n return v2\n}\nfunc @f(i64) -> i64 {\nblock0(v0: i64):\n",
+        "func @tiny(i64) -> i64 local {\nblock0(v0: i64):\n v1 = iconst.i64 1\n v2 = iadd v0, v1\n v3 = iadd v2, v1\n v4 = iadd v3, v1\n v5 = iadd v4, v1\n v6 = iadd v5, v1\n v7 = iadd v6, v1\n return v7\n}\nfunc @f(i64) -> i64 {\nblock0(v0: i64):\n",
     );
     for n in 1..=140 {
         s.push_str(&format!("v{n} = call @tiny(v{})\n", n - 1));
@@ -360,7 +360,8 @@ fn explicit_requests_report_unsupported_recursion_and_external_sites() {
 
 #[test]
 fn alwaysinline_obeys_call_and_module_growth_safeguards() {
-    let m = run(&large_helper(1, "alwaysinline", 1, 140), &["inline"]);
+    // Cost 8 is above the call's own cost of 7, so the call-count cap applies.
+    let m = run(&large_helper(8, "alwaysinline", 1, 140), &["inline"]);
     assert_eq!(calls(&m, "f0"), 12);
     let mut m = keel_ir::parse(&large_helper(254, "alwaysinline", 9, 8)).unwrap();
     let report = keel_opt::inline_with_report(&mut m);
@@ -664,8 +665,8 @@ fn long_acyclic_chain_uses_frozen_templates() {
 #[test]
 fn detailed_reports_identify_each_budget_without_changing_decisions() {
     for (source, reason, skipped) in [
-        (large_helper(1, "", 1, 140), "caller_call_count_budget", 12),
-        (large_helper(1, "alwaysinline", 1, 140), "caller_call_count_budget", 12),
+        (large_helper(8, "", 1, 140), "caller_call_count_budget", 12),
+        (large_helper(8, "alwaysinline", 1, 140), "caller_call_count_budget", 12),
         (large_helper(64, "", 1, 33), "caller_instruction_growth_budget", 1),
         (large_helper(2049, "alwaysinline", 1, 1), "caller_instruction_growth_budget", 1),
         (large_helper(254, "alwaysinline", 9, 8), "module_instruction_growth_budget", 8),
@@ -1044,4 +1045,24 @@ block0(v0: i64):
     assert_eq!(calls(&m, "rec"), 7);
     assert_eq!(frame("flat"), 3200);
     assert_eq!(calls(&m, "flat"), 0);
+}
+#[test]
+fn callees_no_larger_than_their_call_skip_the_call_count_cap() {
+    // One argument and one result: a call costs 5 + 1 + 1 = 7.
+    let source = |extra: usize| {
+        let body: String = (0..extra)
+            .map(|n| format!(" v{} = iadd v{}, v0\n", n + 2, n + 1))
+            .collect();
+        let calls: String = (0..200)
+            .map(|n| format!(" v{} = call @h(v{n})\n", n + 1))
+            .collect();
+        format!(
+            "func @h(i64) -> i64 local {{\nblock0(v0: i64):\n v1 = iadd v0, v0\n{body} return v{}\n}}\nfunc @f(i64) -> i64 {{\nblock0(v0: i64):\n{calls} return v200\n}}",
+            extra + 1
+        )
+    };
+    // Cost 7: every site is inlined.
+    assert_eq!(calls(&run(&source(5), &["inline"]), "f"), 0);
+    // Cost 8: the cap still stops at 128 sites.
+    assert_eq!(calls(&run(&source(6), &["inline"]), "f"), 72);
 }

@@ -165,7 +165,8 @@ fn priority_is_module_wide_and_spends_the_same_module_budget() {
 fn caller_growth_and_call_count_remain_hard_for_priority_sites() {
     for (cost, count, admitted, reason) in [
         (32, 65, 64, "caller_instruction_growth_budget"),
-        (1, 129, 128, "caller_call_count_budget"),
+        // Cost 6 exceeds a zero-argument call's own cost of 5.
+        (6, 129, 128, "caller_call_count_budget"),
     ] {
         let s = leaf("tiny", cost, 0, "alwaysinline local") + &caller("caller", "tiny", count);
         let (_, sites) = run(&s, FULL);
@@ -187,8 +188,9 @@ fn caller_growth_and_call_count_remain_hard_for_priority_sites() {
 
 #[test]
 fn priority_and_remaining_sites_share_call_count_and_stack_ledgers() {
-    let s = leaf("ordinary", 1, 0, "local")
-        + &leaf("tiny", 1, 0, "alwaysinline local")
+    // Both cost 6, more than their calls, so both count against the cap.
+    let s = leaf("ordinary", 6, 0, "local")
+        + &leaf("tiny", 6, 0, "alwaysinline local")
         + &caller("caller", "ordinary", 1).replace(
             " return\n}",
             &(" call @tiny()\n".repeat(128) + " return\n}"),

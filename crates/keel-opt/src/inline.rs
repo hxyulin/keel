@@ -405,6 +405,10 @@ const MAX_BLOCKS: usize = 8;
 const MAX_STACK: u64 = 512;
 const MAX_GROWTH: usize = 2048;
 const MAX_CALLS: usize = 128;
+// A call costs about this many instructions before its arguments and
+// results: LLVM's call penalty of 25 at 5 per instruction. A callee that
+// costs no more than its call does not count against MAX_CALLS.
+const CALL_SITE_COST: usize = 5;
 const MAX_MODULE_GROWTH: usize = 16_384;
 const FULL_MAX_MODULE_GROWTH: usize = 65_536;
 const HARD_STACK: u64 = 65_536;
@@ -1328,9 +1332,15 @@ fn run_observed_policy_scoped(
                 .sum::<u64>()
                 + stack_cost
                 <= RECURSIVE_CALLER_STACK;
+        let no_larger_than_call = match caller.inst_data(call) {
+            InstData::Call { args, .. } => {
+                cost <= CALL_SITE_COST + args.len() + caller.inst_results(call).len()
+            }
+            _ => false,
+        };
         let budget = if !recursive_stack_ok {
             Some("recursive_caller_stack_budget")
-        } else if count == MAX_CALLS {
+        } else if count == MAX_CALLS && !no_larger_than_call {
             Some("caller_call_count_budget")
         } else if growth + cost > MAX_GROWTH {
             Some("caller_instruction_growth_budget")
@@ -1450,7 +1460,7 @@ fn run_observed_policy_scoped(
             growth += cost;
             module_growth += cost;
         }
-        count += 1;
+        count += usize::from(!no_larger_than_call);
         stack_growth += stack_cost;
         report.changed = true;
         report.callers.push(index);

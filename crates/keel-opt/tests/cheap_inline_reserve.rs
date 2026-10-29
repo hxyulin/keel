@@ -104,8 +104,10 @@ fn reserve_has_no_caller_growth_count_or_stack_exemption() {
         (16, 128, "caller_call_count_budget"),
         (32, 64, "caller_instruction_growth_budget"),
     ] {
+        // A 6-instruction predicate costs more than its call, so the
+        // call-count cap applies to it.
         let source = leaf("constructor", cost, "alwaysinline local", false)
-            + &leaf("predicate", 3, "local", true)
+            + &leaf("predicate", 6, "local", true)
             + &caller("caller", "constructor", calls)
                 .replace(" return\n}", " call @predicate()\n return\n}");
         let (_, sites) = run(&source, PASS);
