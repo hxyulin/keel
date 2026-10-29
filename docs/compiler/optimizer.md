@@ -531,8 +531,8 @@ and store sinking are out of scope.
 ## Wrapping integer reduction unrolling
 
 `loop-unroll` is an explicitly named function pass. It is registered in the pass
-catalog and runs in Full's late memory/loop epilogue, before
-`loop-reduce-multi` and `loop-rotate`. Other tiers require explicit scheduling.
+catalog and runs in Full's late memory/loop epilogue, after
+`loop-reduce-multi` and before `loop-rotate`. Other tiers require explicit scheduling.
 It has no dependency on `AliasInfo` and makes no IR, ABI,
 calling-convention, memory-contract, or verifier changes.
 
@@ -565,7 +565,8 @@ all operations, including unused loads, in original order.
 The pass rejects stores, calls, volatile accesses, atomics, lifetimes, trapping
 integer division/remainder, floating point, conditional bodies, additional exits,
 body parameters, aliased body results, body-defined external liveouts, dependent recurrences, nested
-loops, and functions carrying debug return/location/variable/scope information.
+loops, source locations in the loop's header or body, and functions carrying debug
+return/location/variable/scope information.
 It leaves all such candidates unchanged. Arbitrary invariant starts, signed IVs,
 other predicates, additional carried values, and a general rotation framework
 are outside this initial scope.

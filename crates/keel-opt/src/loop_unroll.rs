@@ -1,5 +1,6 @@
 //! Bounded two-way unrolling of wrapping integer additive reductions.
-//! The original loop is retained as the scalar tail. No pipeline enables this pass.
+//! The original loop is retained as the scalar tail. Full runs this pass in its
+//! epilogue, after loop-reduce-multi and before loop-rotate.
 //! Accept zero-based signed/unsigned counted innermost loops at any nesting depth.
 //! Run strength reduction (and alias cleanup) before unrolling, then rotation:
 //! up to two extra same-width additive recurrences are forwarded sequentially.
