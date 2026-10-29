@@ -276,15 +276,14 @@ fn arm64_system_and_keel_runtime_overrides_nulls_identity_and_archive_demand() {
             .arg(dir.join(format!("{name}.c")))
             .arg("-o")
             .arg(dir.join(format!("clang-{name}.o"))));
-        for text in [false, true] {
-            fs::write(
-                dir.join(format!("{text}-{name}.o")),
-                object(&src, target, text),
-            )
-            .unwrap();
-        }
-        let clang = fs::read(dir.join(format!("clang-{name}.o"))).unwrap();
+        // Keel's text and direct routes must give the same object; link one.
         let native = object(&src, target, false);
+        assert!(
+            object(&src, target, true) == native,
+            "{name}: text and direct objects differ"
+        );
+        fs::write(dir.join(format!("keel-{name}.o")), &native).unwrap();
+        let clang = fs::read(dir.join(format!("clang-{name}.o"))).unwrap();
         let c = object::File::parse(clang.as_slice()).unwrap();
         let k = object::File::parse(native.as_slice()).unwrap();
         for s in k.symbols().filter(|s| s.is_weak()) {
@@ -303,7 +302,7 @@ fn arm64_system_and_keel_runtime_overrides_nulls_identity_and_archive_demand() {
             }
         }
     }
-    for route in ["false", "true", "clang"] {
+    for route in ["keel", "clang"] {
         let archive = dir.join(format!("{route}.a"));
         run(Command::new("ar")
             .arg("rcs")
@@ -385,7 +384,7 @@ int main(void) {{
             } else {
                 paths.extend(additional);
             }
-            // Exercise mixed Clang/Keel input as well as each assembly route.
+            // Exercise mixed Clang/Keel input as well as each producer.
             for linker in ["system", "keel"] {
                 let exe = dir.join(format!("{route}-{case}-{linker}"));
                 if linker == "system" {

@@ -203,69 +203,68 @@ fn arm64_lifecycle_system_native_multi_tu_and_archive() {
         assert_eq!(want, b"start\nother-start\nmain\nother-stop\nstop\n");
         for debug in [false, true] {
             for optimize in [false, true] {
-                for assembly in [false, true] {
-                    let a = dir.join("main.o");
-                    let b = dir.join("other.o");
-                    fs::write(
-                        &a,
-                        object(&module(&main, target, debug, optimize), target, assembly),
-                    )
-                    .unwrap();
-                    fs::write(
-                        &b,
-                        object(&module(other, target, debug, optimize), target, assembly),
-                    )
-                    .unwrap();
-                    let archive = dir.join("other.a");
-                    let _ = fs::remove_file(&archive);
-                    run(Command::new("ar").arg("rcs").arg(&archive).arg(&b));
-                    for archived in [false, true] {
-                        let paths = [&a, if archived { &archive } else { &b }];
-                        for native in [false, true] {
-                            let exe = dir.join("keel");
-                            if native {
-                                let bytes: Vec<_> =
-                                    paths.iter().map(|p| fs::read(p).unwrap()).collect();
-                                let inputs: Vec<_> = bytes
-                                    .iter()
-                                    .map(|b| keel_link::Input {
-                                        name: "lifecycle",
-                                        bytes: b,
-                                    })
-                                    .collect();
-                                keel_link::link_signed(
-                                    &inputs,
-                                    keel_link::Options {
-                                        dylibs: vec![libc.clone()],
-                                        ..Default::default()
-                                    },
-                                    &exe,
-                                )
-                                .unwrap();
-                            } else {
-                                run(Command::new("clang")
-                                    .args(paths)
-                                    .arg("-Wl,-dead_strip")
-                                    .arg("-o")
-                                    .arg(&exe));
-                            }
-                            if !native {
-                                // Compiler used emits definitions but grants no linker retention.
-                                let bytes = fs::read(&exe).unwrap();
-                                let image = object::File::parse(bytes.as_slice()).unwrap();
-                                assert!(
-                                    !image.symbols().any(|s| matches!(
-                                        s.name().unwrap(),
-                                        "_emitted" | "_unused"
-                                    ))
-                                );
-                            }
-                            assert_eq!(
-                                run(&mut Command::new(&exe)).stdout,
-                                want,
-                                "debug={debug} optimize={optimize} assembly={assembly} archived={archived} native={native} exit={early_exit}"
+                // Keel's text and direct routes give the same object; link one.
+                let [main_o, other_o] = [main.as_str(), other].map(|src| {
+                    let m = module(src, target, debug, optimize);
+                    let direct = object(&m, target, false);
+                    assert!(
+                        object(&m, target, true) == direct,
+                        "text and direct objects differ: debug={debug} optimize={optimize}"
+                    );
+                    direct
+                });
+                let a = dir.join("main.o");
+                let b = dir.join("other.o");
+                fs::write(&a, main_o).unwrap();
+                fs::write(&b, other_o).unwrap();
+                let archive = dir.join("other.a");
+                let _ = fs::remove_file(&archive);
+                run(Command::new("ar").arg("rcs").arg(&archive).arg(&b));
+                for archived in [false, true] {
+                    let paths = [&a, if archived { &archive } else { &b }];
+                    for native in [false, true] {
+                        let exe = dir.join("keel");
+                        if native {
+                            let bytes: Vec<_> =
+                                paths.iter().map(|p| fs::read(p).unwrap()).collect();
+                            let inputs: Vec<_> = bytes
+                                .iter()
+                                .map(|b| keel_link::Input {
+                                    name: "lifecycle",
+                                    bytes: b,
+                                })
+                                .collect();
+                            keel_link::link_signed(
+                                &inputs,
+                                keel_link::Options {
+                                    dylibs: vec![libc.clone()],
+                                    ..Default::default()
+                                },
+                                &exe,
+                            )
+                            .unwrap();
+                        } else {
+                            run(Command::new("clang")
+                                .args(paths)
+                                .arg("-Wl,-dead_strip")
+                                .arg("-o")
+                                .arg(&exe));
+                        }
+                        if !native {
+                            // Compiler used emits definitions but grants no linker retention.
+                            let bytes = fs::read(&exe).unwrap();
+                            let image = object::File::parse(bytes.as_slice()).unwrap();
+                            assert!(
+                                !image
+                                    .symbols()
+                                    .any(|s| matches!(s.name().unwrap(), "_emitted" | "_unused"))
                             );
                         }
+                        assert_eq!(
+                            run(&mut Command::new(&exe)).stdout,
+                            want,
+                            "debug={debug} optimize={optimize} archived={archived} native={native} exit={early_exit}"
+                        );
                     }
                 }
             }

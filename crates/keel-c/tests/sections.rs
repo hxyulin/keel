@@ -39,6 +39,16 @@ fn object(m: &Module, target: Target, text: bool) -> Vec<u8> {
         }
     }
 }
+/// Keel's text and direct routes must give the same object, so tests that
+/// link objects link only this one.
+fn checked_object(m: &Module, target: Target) -> Vec<u8> {
+    let bytes = object(m, target, false);
+    assert!(
+        object(m, target, true) == bytes,
+        "text and direct objects differ"
+    );
+    bytes
+}
 fn names(target: Target) -> [&'static str; 4] {
     match target {
         keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
@@ -319,43 +329,40 @@ fn arm64_custom_sections_execute_with_system_and_native_linkers() {
     let libc = keel_link::Dylib::from_tbd(&sdk.join("usr/lib/libSystem.tbd"), sdk).unwrap();
     for debug in [false, true] {
         for optimize in [false, true] {
-            for text in [false, true] {
-                let bytes = object(
-                    &module(
-                        &source(Target::Aarch64AppleDarwin),
-                        Target::Aarch64AppleDarwin,
-                        debug,
-                        optimize,
-                    ),
+            let bytes = checked_object(
+                &module(
+                    &source(Target::Aarch64AppleDarwin),
                     Target::Aarch64AppleDarwin,
-                    text,
-                );
-                let input = dir.join("input.o");
-                fs::write(&input, &bytes).unwrap();
-                for native in [false, true] {
-                    let exe = dir.join("run");
-                    if native {
-                        keel_link::link_signed(
-                            &[keel_link::Input {
-                                name: "input.o",
-                                bytes: &bytes,
-                            }],
-                            keel_link::Options {
-                                dylibs: vec![libc.clone()],
-                                ..Default::default()
-                            },
-                            &exe,
-                        )
-                        .unwrap();
-                    } else {
-                        run(Command::new("clang")
-                            .arg(&input)
-                            .arg("-Wl,-dead_strip")
-                            .arg("-o")
-                            .arg(&exe));
-                    }
-                    run(&mut Command::new(&exe));
+                    debug,
+                    optimize,
+                ),
+                Target::Aarch64AppleDarwin,
+            );
+            let input = dir.join("input.o");
+            fs::write(&input, &bytes).unwrap();
+            for native in [false, true] {
+                let exe = dir.join("run");
+                if native {
+                    keel_link::link_signed(
+                        &[keel_link::Input {
+                            name: "input.o",
+                            bytes: &bytes,
+                        }],
+                        keel_link::Options {
+                            dylibs: vec![libc.clone()],
+                            ..Default::default()
+                        },
+                        &exe,
+                    )
+                    .unwrap();
+                } else {
+                    run(Command::new("clang")
+                        .arg(&input)
+                        .arg("-Wl,-dead_strip")
+                        .arg("-o")
+                        .arg(&exe));
                 }
+                run(&mut Command::new(&exe));
             }
         }
     }
@@ -397,89 +404,87 @@ int anchor(void) { return weak_data + weak_fn(); }
         .arg("-o")
         .arg(&strong_o));
     let strong_bytes = fs::read(&strong_o).unwrap();
-    for text in [false, true] {
-        let bytes = object(&module(src, target, true, true), target, text);
-        let file = object::File::parse(bytes.as_slice()).unwrap();
-        for name in ["_weak_data", "_weak_fn"] {
-            let sym = file.symbols().find(|s| s.name().unwrap() == name).unwrap();
-            assert!(
-                matches!(sym.flags(), object::SymbolFlags::MachO { n_desc } if n_desc & 0xa0 == 0xa0)
-            );
-            assert!(sym.is_global());
-        }
-        let input = dir.join("retained.o");
-        fs::write(&input, &bytes).unwrap();
-        let archive = dir.join("retained.a");
-        let _ = fs::remove_file(&archive);
-        run(Command::new("ar").arg("rcs").arg(&archive).arg(&input));
-        let archive_bytes = fs::read(&archive).unwrap();
-        for demanded in [false, true] {
-            let main_src = if demanded {
-                "int anchor(void); int main(void) { return anchor() != 84; }"
-            } else {
-                "int main(void) { return 0; }"
-            };
-            let main_bytes = object(&module(main_src, target, false, true), target, text);
-            let main_o = dir.join("main.o");
-            fs::write(&main_o, &main_bytes).unwrap();
-            for archived in [false, true] {
-                for reverse in [false, true] {
-                    for native in [false, true] {
-                        let exe = dir.join("run");
-                        let member_path = if archived { &archive } else { &input };
-                        let member_bytes = if archived { &archive_bytes } else { &bytes };
-                        if native {
-                            let mut inputs = vec![keel_link::Input {
-                                name: "main.o",
-                                bytes: &main_bytes,
-                            }];
-                            let parts = if reverse {
-                                [(&strong_bytes, "strong.o"), (member_bytes, "member")]
-                            } else {
-                                [(member_bytes, "member"), (&strong_bytes, "strong.o")]
-                            };
-                            inputs.extend(
-                                parts
-                                    .into_iter()
-                                    .map(|(bytes, name)| keel_link::Input { name, bytes }),
-                            );
-                            keel_link::link_signed(
-                                &inputs,
-                                keel_link::Options {
-                                    dylibs: vec![libc.clone()],
-                                    ..Default::default()
-                                },
-                                &exe,
-                            )
-                            .unwrap();
+    let bytes = checked_object(&module(src, target, true, true), target);
+    let file = object::File::parse(bytes.as_slice()).unwrap();
+    for name in ["_weak_data", "_weak_fn"] {
+        let sym = file.symbols().find(|s| s.name().unwrap() == name).unwrap();
+        assert!(
+            matches!(sym.flags(), object::SymbolFlags::MachO { n_desc } if n_desc & 0xa0 == 0xa0)
+        );
+        assert!(sym.is_global());
+    }
+    let input = dir.join("retained.o");
+    fs::write(&input, &bytes).unwrap();
+    let archive = dir.join("retained.a");
+    let _ = fs::remove_file(&archive);
+    run(Command::new("ar").arg("rcs").arg(&archive).arg(&input));
+    let archive_bytes = fs::read(&archive).unwrap();
+    for demanded in [false, true] {
+        let main_src = if demanded {
+            "int anchor(void); int main(void) { return anchor() != 84; }"
+        } else {
+            "int main(void) { return 0; }"
+        };
+        let main_bytes = checked_object(&module(main_src, target, false, true), target);
+        let main_o = dir.join("main.o");
+        fs::write(&main_o, &main_bytes).unwrap();
+        for archived in [false, true] {
+            for reverse in [false, true] {
+                for native in [false, true] {
+                    let exe = dir.join("run");
+                    let member_path = if archived { &archive } else { &input };
+                    let member_bytes = if archived { &archive_bytes } else { &bytes };
+                    if native {
+                        let mut inputs = vec![keel_link::Input {
+                            name: "main.o",
+                            bytes: &main_bytes,
+                        }];
+                        let parts = if reverse {
+                            [(&strong_bytes, "strong.o"), (member_bytes, "member")]
                         } else {
-                            let mut c = Command::new("clang");
-                            c.arg(&main_o);
-                            if reverse {
-                                c.arg(&strong_o).arg(member_path);
-                            } else {
-                                c.arg(member_path).arg(&strong_o);
-                            }
-                            run(c.arg("-Wl,-dead_strip").arg("-o").arg(&exe));
+                            [(member_bytes, "member"), (&strong_bytes, "strong.o")]
+                        };
+                        inputs.extend(
+                            parts
+                                .into_iter()
+                                .map(|(bytes, name)| keel_link::Input { name, bytes }),
+                        );
+                        keel_link::link_signed(
+                            &inputs,
+                            keel_link::Options {
+                                dylibs: vec![libc.clone()],
+                                ..Default::default()
+                            },
+                            &exe,
+                        )
+                        .unwrap();
+                    } else {
+                        let mut c = Command::new("clang");
+                        c.arg(&main_o);
+                        if reverse {
+                            c.arg(&strong_o).arg(member_path);
+                        } else {
+                            c.arg(member_path).arg(&strong_o);
                         }
-                        run(&mut Command::new(&exe));
-                        if !native {
-                            let symbols = symbol_names(&fs::read(&exe).unwrap());
-                            for name in [
-                                "_retained_data",
-                                "_retained_zero",
-                                "_retained_ro",
-                                "_retained_fn",
-                            ] {
-                                assert_eq!(
-                                    symbols.iter().any(|s| s == name),
-                                    !archived || demanded,
-                                    "{name}: archived={archived} demanded={demanded}"
-                                );
-                            }
-                            for name in ["_used_data", "_used_fn"] {
-                                assert!(!symbols.iter().any(|s| s == name), "{name}");
-                            }
+                        run(c.arg("-Wl,-dead_strip").arg("-o").arg(&exe));
+                    }
+                    run(&mut Command::new(&exe));
+                    if !native {
+                        let symbols = symbol_names(&fs::read(&exe).unwrap());
+                        for name in [
+                            "_retained_data",
+                            "_retained_zero",
+                            "_retained_ro",
+                            "_retained_fn",
+                        ] {
+                            assert_eq!(
+                                symbols.iter().any(|s| s == name),
+                                !archived || demanded,
+                                "{name}: archived={archived} demanded={demanded}"
+                            );
+                        }
+                        for name in ["_used_data", "_used_fn"] {
+                            assert!(!symbols.iter().any(|s| s == name), "{name}");
                         }
                     }
                 }
@@ -875,120 +880,117 @@ fn c_registration_tables_with_native_bounds_and_system_gc() {
                 let modules =
                     registration_sources(target).map(|src| module(&src, target, debug, optimize));
                 assert!(!modules[2].functions.iter().any(|f| f.name == "uncalled"));
-                for text in [false, true] {
-                    let objects = modules.each_ref().map(|m| object(m, target, text));
-                    let inputs: Vec<_> = objects
-                        .iter()
-                        .map(|bytes| keel_link::Input {
-                            name: "registration.o",
-                            bytes,
-                        })
-                        .collect();
-                    if target != Target::Aarch64AppleDarwin {
-                        let native = keel_link::elf::link(&inputs, Default::default()).unwrap();
+                let objects = modules.each_ref().map(|m| checked_object(m, target));
+                let inputs: Vec<_> = objects
+                    .iter()
+                    .map(|bytes| keel_link::Input {
+                        name: "registration.o",
+                        bytes,
+                    })
+                    .collect();
+                if target != Target::Aarch64AppleDarwin {
+                    let native = keel_link::elf::link(&inputs, Default::default()).unwrap();
+                    for (i, bytes) in objects.iter().enumerate() {
+                        fs::write(dir.join(format!("{i}.o")), bytes).unwrap();
+                    }
+                    let exe = dir.join("elf-gc");
+                    run(Command::new(&ld)
+                        .arg("--gc-sections")
+                        // Bound references must not become implicit GC roots:
+                        // the C retain attributes keep these records alive.
+                        .args(["-z", "start-stop-gc"])
+                        .args((0..3).map(|i| dir.join(format!("{i}.o"))))
+                        .arg("-o")
+                        .arg(&exe));
+                    for bytes in [&native.bytes, &fs::read(&exe).unwrap()] {
+                        let file = object::File::parse(bytes.as_slice()).unwrap();
+                        let begin = registration_value(&file, "__start_registry");
+                        let end = registration_value(&file, "__stop_registry");
+                        assert_eq!(begin % 32, 0);
+                        assert_eq!(end - begin, 64);
+                        assert_eq!(
+                            registration_pointer(&file, begin),
+                            registration_value(&file, "plugin_one")
+                        );
+                        assert_eq!(
+                            registration_pointer(&file, begin + 32),
+                            registration_value(&file, "second")
+                        );
+                        let unrelated = registration_value(&file, "unrelated");
+                        assert!(unrelated < begin || unrelated >= end);
+                        assert_eq!(registration_pointer(&file, begin + 16), 17);
+                        assert_eq!(registration_pointer(&file, begin + 48), 29);
+                        for (offset, value) in [(0, 11), (32, 19)] {
+                            let pointer = registration_pointer(&file, begin + offset + 8);
+                            // Both referents are int objects; do not read past the last one.
+                            let section = file
+                                .sections()
+                                .find(|s| {
+                                    pointer >= s.address() && pointer + 4 <= s.address() + s.size()
+                                })
+                                .unwrap();
+                            let at = (pointer - section.address()) as usize;
+                            assert_eq!(
+                                &section.data().unwrap()[at..at + 4],
+                                &i32::to_le_bytes(value)
+                            );
+                        }
+                    }
+                } else {
+                    let native = keel_link::link(
+                        &inputs,
+                        keel_link::Options {
+                            dylibs: vec![keel_link::Dylib {
+                                install_name: "/usr/lib/libSystem.B.dylib".into(),
+                                exports: Default::default(),
+                                weak_exports: Default::default(),
+                            }],
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                    let file = object::File::parse(native.bytes.as_slice()).unwrap();
+                    let section = file.section_by_name("registry").unwrap();
+                    assert_eq!(section.size(), 64);
+                    assert_eq!(section.address() % 32, 0);
+                    assert_eq!(
+                        registration_value(&file, "section$start$__DATA$registry"),
+                        section.address()
+                    );
+                    assert_eq!(
+                        registration_value(&file, "section$end$__DATA$registry"),
+                        section.address() + 64
+                    );
+                    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                    {
+                        let sdk = String::from_utf8(
+                            run(Command::new("xcrun").arg("--show-sdk-path")).stdout,
+                        )
+                        .unwrap();
+                        let sdk = Path::new(sdk.trim());
+                        let libc =
+                            keel_link::Dylib::from_tbd(&sdk.join("usr/lib/libSystem.tbd"), sdk)
+                                .unwrap();
+                        let exe = dir.join("arm64-run");
+                        keel_link::link_signed(
+                            &inputs,
+                            keel_link::Options {
+                                dylibs: vec![libc],
+                                ..Default::default()
+                            },
+                            &exe,
+                        )
+                        .unwrap();
+                        run(&mut Command::new(&exe));
                         for (i, bytes) in objects.iter().enumerate() {
                             fs::write(dir.join(format!("{i}.o")), bytes).unwrap();
                         }
-                        let exe = dir.join("elf-gc");
-                        run(Command::new(&ld)
-                            .arg("--gc-sections")
-                            // Bound references must not become implicit GC roots:
-                            // the C retain attributes keep these records alive.
-                            .args(["-z", "start-stop-gc"])
+                        run(Command::new("clang")
                             .args((0..3).map(|i| dir.join(format!("{i}.o"))))
+                            .arg("-Wl,-dead_strip")
                             .arg("-o")
                             .arg(&exe));
-                        for bytes in [&native.bytes, &fs::read(&exe).unwrap()] {
-                            let file = object::File::parse(bytes.as_slice()).unwrap();
-                            let begin = registration_value(&file, "__start_registry");
-                            let end = registration_value(&file, "__stop_registry");
-                            assert_eq!(begin % 32, 0);
-                            assert_eq!(end - begin, 64);
-                            assert_eq!(
-                                registration_pointer(&file, begin),
-                                registration_value(&file, "plugin_one")
-                            );
-                            assert_eq!(
-                                registration_pointer(&file, begin + 32),
-                                registration_value(&file, "second")
-                            );
-                            let unrelated = registration_value(&file, "unrelated");
-                            assert!(unrelated < begin || unrelated >= end);
-                            assert_eq!(registration_pointer(&file, begin + 16), 17);
-                            assert_eq!(registration_pointer(&file, begin + 48), 29);
-                            for (offset, value) in [(0, 11), (32, 19)] {
-                                let pointer = registration_pointer(&file, begin + offset + 8);
-                                // Both referents are int objects; do not read past the last one.
-                                let section = file
-                                    .sections()
-                                    .find(|s| {
-                                        pointer >= s.address()
-                                            && pointer + 4 <= s.address() + s.size()
-                                    })
-                                    .unwrap();
-                                let at = (pointer - section.address()) as usize;
-                                assert_eq!(
-                                    &section.data().unwrap()[at..at + 4],
-                                    &i32::to_le_bytes(value)
-                                );
-                            }
-                        }
-                    } else {
-                        let native = keel_link::link(
-                            &inputs,
-                            keel_link::Options {
-                                dylibs: vec![keel_link::Dylib {
-                                    install_name: "/usr/lib/libSystem.B.dylib".into(),
-                                    exports: Default::default(),
-                                    weak_exports: Default::default(),
-                                }],
-                                ..Default::default()
-                            },
-                        )
-                        .unwrap();
-                        let file = object::File::parse(native.bytes.as_slice()).unwrap();
-                        let section = file.section_by_name("registry").unwrap();
-                        assert_eq!(section.size(), 64);
-                        assert_eq!(section.address() % 32, 0);
-                        assert_eq!(
-                            registration_value(&file, "section$start$__DATA$registry"),
-                            section.address()
-                        );
-                        assert_eq!(
-                            registration_value(&file, "section$end$__DATA$registry"),
-                            section.address() + 64
-                        );
-                        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-                        {
-                            let sdk = String::from_utf8(
-                                run(Command::new("xcrun").arg("--show-sdk-path")).stdout,
-                            )
-                            .unwrap();
-                            let sdk = Path::new(sdk.trim());
-                            let libc =
-                                keel_link::Dylib::from_tbd(&sdk.join("usr/lib/libSystem.tbd"), sdk)
-                                    .unwrap();
-                            let exe = dir.join("arm64-run");
-                            keel_link::link_signed(
-                                &inputs,
-                                keel_link::Options {
-                                    dylibs: vec![libc],
-                                    ..Default::default()
-                                },
-                                &exe,
-                            )
-                            .unwrap();
-                            run(&mut Command::new(&exe));
-                            for (i, bytes) in objects.iter().enumerate() {
-                                fs::write(dir.join(format!("{i}.o")), bytes).unwrap();
-                            }
-                            run(Command::new("clang")
-                                .args((0..3).map(|i| dir.join(format!("{i}.o"))))
-                                .arg("-Wl,-dead_strip")
-                                .arg("-o")
-                                .arg(&exe));
-                            run(&mut Command::new(&exe));
-                        }
+                        run(&mut Command::new(&exe));
                     }
                 }
             }
