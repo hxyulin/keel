@@ -31,7 +31,7 @@ def outputs(root, output, opcode_identities):
             raise ValueError('baseline static identity needs a name and spellings')
         if 'parse' in row and (row['variant'] != 'Pclmulqdq' or row['parse'] != 'fallback'):
             raise ValueError('unsupported baseline parsing policy')
-    lines = [HEADER, '#[derive(Clone, Copy, Debug, PartialEq, Eq)]', 'pub enum Opcode {']
+    lines = [HEADER, '#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]', 'pub enum Opcode {']
     for row in rows:
         lines.extend('    ' + comment for comment in row.get('comments', []))
         payload = '(' + row['payload'] + ')' if 'payload' in row else ''

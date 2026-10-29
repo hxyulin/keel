@@ -133,7 +133,7 @@ def dimensions(row):
 
 def definitions(schema):
     rows = schema['classes']
-    lines = [HEADER, '#[derive(Clone, Copy, Debug, PartialEq, Eq)]', 'pub enum RegisterClass {']
+    lines = [HEADER, '#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]', 'pub enum RegisterClass {']
     for row in rows:
         if row.get('doc'):
             lines.append('    /// ' + row['doc'])
@@ -152,7 +152,7 @@ def definitions(schema):
         if row.get('isa_kinds'):
             lines.append('            ' + ' | '.join(json.dumps(k) for k in row['isa_kinds']) + f' => Self::{row["variant"]},')
     lines += ['            _ => return None,', '        })', '    }', '}',
-              '#[derive(Clone, Copy, Debug, PartialEq, Eq)]', 'pub struct Register {',
+              '#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]', 'pub struct Register {',
               '    pub class: RegisterClass,', '    pub number: u8,', '    pub width: u16,',
               '    pub high_byte: bool,', '}', 'impl Register {',
               '    pub fn parse(s: &str) -> Option<Self> {', '        let s = lowercase(s);',

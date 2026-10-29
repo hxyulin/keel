@@ -81,7 +81,7 @@ impl Opcode {
 
 include!("x86/isa/registers.rs");
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Modifier {
     #[default]
     None,
@@ -91,12 +91,12 @@ pub enum Modifier {
     GotTpOff,
     DtpOff,
 }
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Address {
     pub expression: Expression,
     pub modifier: Modifier,
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Memory {
     /// Zero means infer from the other operand.
     pub width: u16,
@@ -107,13 +107,13 @@ pub struct Memory {
     pub segment: Option<u8>,
     pub displacement: Address,
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Operand {
     Register(Register),
     Immediate(Address),
     Memory(Memory),
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Instruction {
     pub opcode: Opcode,
     pub operands: Vec<Operand>,

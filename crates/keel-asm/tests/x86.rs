@@ -41,6 +41,38 @@ fn movhlps_encodes_register_only_and_extended_registers() {
 }
 
 #[test]
+fn repeated_instructions_encode_like_first_occurrences() {
+    // Each line differs from its neighbours in one field the encoding reads.
+    let lines = [
+        "add rax, 1",
+        "add eax, 1",
+        "add rax, -1",
+        "add qword ptr [rax], 1",
+        "add dword ptr [rax], 1",
+        "lock add qword ptr [rax], 1",
+        "add qword ptr fs:[rax], 1",
+        "add qword ptr [eax], 1",
+        "rep movsb",
+        "movsb",
+        "movd xmm0, eax",
+        "popcnt rax, rcx",
+        "mov rax, [rip + 8]",
+    ];
+    let once: Vec<u8> = lines.iter().flat_map(|line| text(line)).collect();
+    let repeated = lines.join("\n");
+    let source = format!("{repeated}\nlabel:\n{repeated}\njmp label\n{repeated}");
+    let bytes = text(&source);
+    let n = once.len();
+    assert_eq!(bytes.len(), 3 * n + 2);
+    assert_eq!(&bytes[..n], once);
+    assert_eq!(&bytes[n..2 * n], once);
+    assert_eq!(bytes[2 * n], 0xeb);
+    assert_eq!(&bytes[2 * n + 2..], once);
+    // A later feature error still wins over reused encodings.
+    assert!(assemble_object("add rax, 1\nvaddps ymm0,ymm1,ymm2\nadd rax, 1").is_err());
+}
+
+#[test]
 fn short_branches_and_symbol_differences() {
     let bytes = text("start: jmp done\nje start\n.long done-start\ndone: ret");
     assert_eq!(bytes, [0xeb, 6, 0x74, 0xfc, 8, 0, 0, 0, 0xc3]);

@@ -3,7 +3,7 @@ use super::*;
 use std::fmt::{self, Write};
 include!("isa/evex_opcodes.rs");
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Rounding {
     Nearest,
     Down,
@@ -30,7 +30,7 @@ impl Rounding {
         }
     }
 }
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct EvexOptions {
     pub mask: Option<u8>,
     /// Explicit address-size override, including base-free VSIB addressing.
@@ -40,7 +40,7 @@ pub struct EvexOptions {
     pub broadcast: u8,
     pub rounding: Option<Rounding>,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct EvexOpcode {
     pub kind: EvexMnemonic,
     pub options: EvexOptions,

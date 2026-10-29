@@ -580,6 +580,10 @@ struct Items {
     // Parse errors anywhere take precedence over feature errors.
     unsupported: Option<Error>,
     parsed: usize,
+    /// Byte ranges in `encoded` of symbol-free instructions already encoded.
+    /// The encoding depends only on the instruction value and `features`,
+    /// which is fixed for the whole input.
+    encodings: FxHashMap<x86::Instruction, (u32, u32)>,
 }
 impl Items {
     fn new(features: x86::Features) -> Self {
@@ -601,6 +605,7 @@ impl Items {
             preprocessor: crate::parser::preprocess::Processor::default(),
             unsupported: None,
             parsed: 0,
+            encodings: FxHashMap::default(),
         }
     }
     fn parse(
@@ -729,6 +734,16 @@ impl Items {
         self.push(entry);
     }
     fn x86_instruction(&mut self, i: &x86::Instruction, line: usize) {
+        if self.unsupported.is_none()
+            && let Some(&(start, end)) = self.encodings.get(i)
+        {
+            self.encoded
+                .extend_from_within(start as usize..end as usize);
+            self.extend_run(line);
+            return;
+        }
+        let start = index32(self.encoded.len());
+        let original = i;
         let opcode = x86::evex::promote(i.opcode, &i.operands);
         let promoted;
         let i = if opcode != i.opcode {
@@ -740,7 +755,10 @@ impl Items {
         } else {
             i
         };
-        if !self.encode(i, line) {
+        if self.encode(i, line) {
+            let end = index32(self.encoded.len());
+            self.encodings.insert(original.clone(), (start, end));
+        } else {
             let index = self.symbolic.push(i, &mut self.symbols);
             self.push(Entry::Symbolic {
                 index,
@@ -782,8 +800,13 @@ impl Items {
         if !e.fixups.is_empty() {
             return false;
         }
-        self.parsed += 1;
         self.encoded.extend_from_slice(&e.bytes);
+        self.extend_run(line);
+        true
+    }
+    /// Close the run of encoded bytes over the instruction just appended.
+    fn extend_run(&mut self, line: usize) {
+        self.parsed += 1;
         let end = index32(self.encoded.len());
         match self.entries.last_mut() {
             Some(Entry::Encoded { end: run, .. }) => *run = end,
@@ -792,7 +815,6 @@ impl Items {
                 line: line32(line),
             }),
         }
-        true
     }
     fn finish(self) -> Result<Self, Error> {
         self.locals.finish()?;

@@ -33,7 +33,7 @@ def core_sources(rows):
             spellings.add(spelling)
     if fields != FIELDS:
         raise ValueError('core payload API changed; update explicit shape policy')
-    enum = [HEADER, '#[derive(Clone, Copy, Debug, PartialEq, Eq)]', 'pub enum CoreOpcode {']
+    enum = [HEADER, '#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]', 'pub enum CoreOpcode {']
     for row in rows:
         if 'fields' in row:
             enum += [f'    {row["variant"]} {{']

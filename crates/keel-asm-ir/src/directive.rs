@@ -1,6 +1,6 @@
 use std::fmt::{self, Write};
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Expression {
     pub add: Option<String>,
     pub subtract: Option<String>,

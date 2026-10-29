@@ -1,14 +1,14 @@
 //! Ordinary application core forms absent from the original assembler inventory.
 use super::*;
 use std::fmt::{self, Write};
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LoopKind {
     Loop,
     Equal,
     NotEqual,
     Zero,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum StringKind {
     Movs,
     Stos,
@@ -18,7 +18,7 @@ pub enum StringKind {
     Ins,
     Outs,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Repeat {
     None,
     Rep,
