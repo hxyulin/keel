@@ -288,6 +288,154 @@ pub enum InstData {
     Trap,
 }
 
+// Fails to compile if a format that `clone` copies bitwise gains a field
+// that is not `Copy`. Patterns list every field, so a new field also fails.
+const _: () = {
+    fn copy<T: Copy>(_: &T) {}
+    #[allow(dead_code)]
+    fn fields_are_copy(data: &InstData) {
+        match data {
+            InstData::Iconst { ty, imm } => {
+                copy(ty);
+                copy(imm);
+            }
+            InstData::Fconst { ty, bits } => {
+                copy(ty);
+                copy(bits);
+            }
+            InstData::F80const {
+                significand,
+                sign_exp,
+            } => {
+                copy(significand);
+                copy(sign_exp);
+            }
+            InstData::Unary { op, arg } => {
+                copy(op);
+                copy(arg);
+            }
+            InstData::Binary { op, args } => {
+                copy(op);
+                copy(args);
+            }
+            InstData::VectorSplat { ty, arg } => {
+                copy(ty);
+                copy(arg);
+            }
+            InstData::VectorUnary { op, arg } => {
+                copy(op);
+                copy(arg);
+            }
+            InstData::VectorReduce { op, arg } => {
+                copy(op);
+                copy(arg);
+            }
+            InstData::VectorBinary { op, args } => {
+                copy(op);
+                copy(args);
+            }
+            InstData::VectorExtract { arg, lane } => {
+                copy(arg);
+                copy(lane);
+            }
+            InstData::VectorInsert { args, lane } => {
+                copy(args);
+                copy(lane);
+            }
+            InstData::VectorIcmp { cond, args } => {
+                copy(cond);
+                copy(args);
+            }
+            InstData::VectorFcmp { cond, args } => {
+                copy(cond);
+                copy(args);
+            }
+            InstData::VectorSelect { args } => {
+                copy(args);
+            }
+            InstData::Overflow { op, args } => {
+                copy(op);
+                copy(args);
+            }
+            InstData::Fma { args } => {
+                copy(args);
+            }
+            InstData::Select { args } => {
+                copy(args);
+            }
+            InstData::Convert { op, ty, arg } => {
+                copy(op);
+                copy(ty);
+                copy(arg);
+            }
+            InstData::Icmp { cond, args } => {
+                copy(cond);
+                copy(args);
+            }
+            InstData::Fcmp { cond, args } => {
+                copy(cond);
+                copy(args);
+            }
+            InstData::Load { flags, ty, addr } => {
+                copy(flags);
+                copy(ty);
+                copy(addr);
+            }
+            InstData::Store { flags, value, addr } => {
+                copy(flags);
+                copy(value);
+                copy(addr);
+            }
+            InstData::AtomicLoad { ty, ordering, addr } => {
+                copy(ty);
+                copy(ordering);
+                copy(addr);
+            }
+            InstData::AtomicStore {
+                ordering,
+                value,
+                addr,
+            } => {
+                copy(ordering);
+                copy(value);
+                copy(addr);
+            }
+            InstData::AtomicRmw { op, ordering, args } => {
+                copy(op);
+                copy(ordering);
+                copy(args);
+            }
+            InstData::AtomicCas { ordering, args } => {
+                copy(ordering);
+                copy(args);
+            }
+            InstData::Fence { ordering } => {
+                copy(ordering);
+            }
+            InstData::VaArg {
+                ty,
+                list,
+                x86_vector_abi,
+            } => {
+                copy(ty);
+                copy(list);
+                copy(x86_vector_abi);
+            }
+            InstData::StackAddr { slot } => {
+                copy(slot);
+            }
+            InstData::SymbolAddr { symbol } => {
+                copy(symbol);
+            }
+            InstData::EhTypeid { typeinfo } => {
+                copy(typeinfo);
+            }
+            InstData::Trap => {}
+            _ => {}
+        }
+    }
+};
+
 // Passes clone instructions to rewrite them; most formats own no heap data
 // and copy as plain bytes, without a per-format jump.
 impl Clone for InstData {
