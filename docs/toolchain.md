@@ -58,8 +58,8 @@ libc headers (`stdio.h`, `stdlib.h`, ...) come from the target SDK or sysroot.
 | `-mmacosx-version-min=X` | macOS deployment target (default 11.0; also `MACOSX_DEPLOYMENT_TARGET`) |
 | `--target <triple>` | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`, `wasm32-unknown-unknown`; default is the host |
 
-Without `--sysroot`, macOS uses `SDKROOT` or `xcrun --sdk macosx
---show-sdk-path`; Linux searches the target multiarch directory and
+Without `--sysroot`, macOS uses `SDKROOT` or the SDK that `xcrun --sdk macosx
+--show-sdk-path` prints, as described in [Mach-O linking](linking/macho.md); Linux searches the target multiarch directory and
 `/usr/include`. Cross compilation needs a matching sysroot.
 
 ## Optimization and code generation

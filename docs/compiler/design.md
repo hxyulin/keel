@@ -1140,8 +1140,8 @@ by `<root>/usr/include/x86_64-linux-gnu` on Linux, and Darwin framework lookup
 uses `<root>/System/Library/Frameworks`. An explicit root adds no host system
 include directories. Explicit `-I`/`-isystem` paths are not rebased. Native Linux
 uses `/` when no root is specified and the compilation target matches the
-host. The macOS driver consults `SDKROOT`, then `xcrun --sdk macosx
---show-sdk-path`; the library API leaves SDK selection to its caller. An
+host. The macOS driver consults `SDKROOT`, then the SDK that `xcrun --sdk macosx
+--show-sdk-path` prints, read directly for the Command Line Tools; the library API leaves SDK selection to its caller. An
 explicit root avoids external discovery commands entirely.
 
 The macOS deployment version defaults to 11.0, the first arm64 macOS release.

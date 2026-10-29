@@ -38,8 +38,12 @@ target, response-file, config and environment handling; see the
 system-link compatibility boundary.
 External Clang Wasm selection is not Keel Wasm support.
 
-SDK discovery order is `--sysroot`, `SDKROOT`, then
-`xcrun --sdk macosx --show-sdk-path`. Linking works on any host given an SDK;
+SDK discovery order is `--sysroot`, `SDKROOT`, then the SDK that
+`xcrun --sdk macosx --show-sdk-path` prints. When the developer directory, from
+`DEVELOPER_DIR` or `xcode-select`, is the Command Line Tools, Keel reads its
+`SDKs/MacOSX.sdk` directly instead of running `xcrun`, which gives the same path.
+Other developer directories, such as Xcode's, still run `xcrun`.
+Linking works on any host given an SDK;
 running the output requires macOS arm64.
 
 ### Library API

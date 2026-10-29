@@ -230,14 +230,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
                     "macOS SDK required for Darwin linking; pass --sysroot or set SDKROOT".into(),
                 );
             }
-            let result = std::process::Command::new("xcrun")
-                .args(["--sdk", "macosx", "--show-sdk-path"])
-                .output()
-                .map_err(|e| format!("SDK discovery: {e}"))?;
-            if !result.status.success() {
-                return Err("SDK discovery failed; pass --sysroot".into());
-            }
-            PathBuf::from(String::from_utf8_lossy(&result.stdout).trim())
+            macos_sdk().ok_or("SDK discovery failed; pass --sysroot")?
         }
     };
     let dylibs = load_dylibs(&root, &libraries, keel_link::Dylib::from_tbd)?;
@@ -303,6 +296,35 @@ pub fn run(args: &[String]) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// The SDK that `xcrun --sdk macosx --show-sdk-path` prints when `SDKROOT`
+/// is unset. Running xcrun takes several milliseconds per process. For the
+/// Command Line Tools developer directory, `/usr/bin/xcrun` answers
+/// `SDKs/MacOSX.sdk` inside it, so read that directly. Other developer
+/// directories, such as Xcode's, run their own xcrun, so ask it.
+pub(crate) fn macos_sdk() -> Option<PathBuf> {
+    const COMMAND_LINE_TOOLS: &str = "/Library/Developer/CommandLineTools";
+    let developer = std::env::var_os("DEVELOPER_DIR")
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::fs::read_link("/var/db/xcode_select_link").ok());
+    if developer.as_deref() == Some(Path::new(COMMAND_LINE_TOOLS)) {
+        let sdk = Path::new(COMMAND_LINE_TOOLS).join("SDKs/MacOSX.sdk");
+        if sdk.is_dir() {
+            return Some(sdk);
+        }
+    }
+    xcrun_sdk()
+}
+
+fn xcrun_sdk() -> Option<PathBuf> {
+    let out = std::process::Command::new("xcrun")
+        .args(["--sdk", "macosx", "--show-sdk-path"])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())?;
+    Some(PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()))
 }
 
 fn load_dylibs(
@@ -939,5 +961,14 @@ exports:
             let expected = keel_link::Dylib::from_tbd(&sdk.path("parent"), &sdk.0).unwrap_err();
             assert_eq!(sdk.load(&["parent", "parent"]).unwrap_err(), expected);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn macos_sdk_matches_xcrun() {
+        assert_eq!(super::macos_sdk(), super::xcrun_sdk());
     }
 }

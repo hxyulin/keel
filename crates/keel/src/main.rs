@@ -314,15 +314,10 @@ impl Options {
             return Ok(Some(root));
         }
         if cfg!(target_os = "macos")
-            && let Ok(out) = std::process::Command::new("xcrun")
-                .args(["--sdk", "macosx", "--show-sdk-path"])
-                .output()
-            && out.status.success()
+            && let Some(root) = link::macos_sdk()
+            && root.is_dir()
         {
-            let root = std::path::PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
-            if root.is_dir() {
-                return Ok(Some(root));
-            }
+            return Ok(Some(root));
         }
         // Sources using only compiler headers can still compile without an SDK.
         Ok(None)
