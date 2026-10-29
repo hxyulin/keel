@@ -79,7 +79,7 @@ __m128 compare(__m128 a,__m128 b) { return _mm_cmplt_ps(a,b); }
 #[test]
 fn every_header_function_can_emit_an_object() {
     let target = Target::X86_64LinuxGnu;
-    for (header, level) in [("smmintrin.h", CpuLevel::V1), ("immintrin.h", CpuLevel::V3)] {
+    for (header, level) in [("smmintrin.h", CpuLevel::V2), ("immintrin.h", CpuLevel::V3)] {
         let source = keel_c::preprocess(
             &format!("#include <{header}>\n"),
             "headers.c",
@@ -469,7 +469,10 @@ fn integer_family_sources() -> (String, String, String) {
     }
     let harness = format!(
         "#include <stdint.h>\n{declarations}\n{}\nstatic const struct Case cases[]={{\n{cases}}};\n{}",
-        include_str!("fixtures/x86_integer_family_oracle.h"),
+        concat!(
+            include_str!("fixtures/x86_integer_lanes.h"),
+            include_str!("fixtures/x86_integer_family_oracle.h")
+        ),
         include_str!("fixtures/x86_integer_family_runner.c")
     );
     (source, narrow, harness)
@@ -593,4 +596,649 @@ fn integer_minmax_abs_sign_and_blend_match_vendor_and_scalar_oracles() {
             }
         }
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+enum PackedIntegerOperation {
+    AddSigned,
+    AddUnsigned,
+    SubSigned,
+    SubUnsigned,
+    Average,
+    MaddSigned,
+    MaddMixed,
+    MulHighSigned,
+    MulHighUnsigned,
+    MulRounded,
+    PackSigned,
+    PackUnsigned,
+    Shuffle,
+    SignMask,
+}
+
+struct PackedIntegerIntrinsic {
+    name: &'static str,
+    ir: &'static str,
+    width: u32,
+    input_bits: u32,
+    output_bits: u32,
+    operation: PackedIntegerOperation,
+    feature: &'static str,
+}
+
+const PACKED_INTEGER_INTRINSICS: &[PackedIntegerIntrinsic] = &[
+    PackedIntegerIntrinsic {
+        name: "_mm_avg_epu8",
+        ir: "x86_sse2_pavgb128",
+        width: 128,
+        input_bits: 8,
+        output_bits: 8,
+        operation: PackedIntegerOperation::Average,
+        feature: "",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm_avg_epu16",
+        ir: "x86_sse2_pavgw128",
+        width: 128,
+        input_bits: 16,
+        output_bits: 16,
+        operation: PackedIntegerOperation::Average,
+        feature: "",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm_madd_epi16",
+        ir: "x86_sse2_pmaddwd128",
+        width: 128,
+        input_bits: 16,
+        output_bits: 32,
+        operation: PackedIntegerOperation::MaddSigned,
+        feature: "",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm_maddubs_epi16",
+        ir: "x86_ssse3_pmaddubsw128",
+        width: 128,
+        input_bits: 8,
+        output_bits: 16,
+        operation: PackedIntegerOperation::MaddMixed,
+        feature: "ssse3",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm_mulhi_epi16",
+        ir: "x86_sse2_pmulhw128",
+        width: 128,
+        input_bits: 16,
+        output_bits: 16,
+        operation: PackedIntegerOperation::MulHighSigned,
+        feature: "",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm_mulhi_epu16",
+        ir: "x86_sse2_pmulhuw128",
+        width: 128,
+        input_bits: 16,
+        output_bits: 16,
+        operation: PackedIntegerOperation::MulHighUnsigned,
+        feature: "",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm_mulhrs_epi16",
+        ir: "x86_ssse3_pmulhrsw128",
+        width: 128,
+        input_bits: 16,
+        output_bits: 16,
+        operation: PackedIntegerOperation::MulRounded,
+        feature: "ssse3",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm_packs_epi16",
+        ir: "x86_sse2_packsswb128",
+        width: 128,
+        input_bits: 16,
+        output_bits: 8,
+        operation: PackedIntegerOperation::PackSigned,
+        feature: "",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm_packs_epi32",
+        ir: "x86_sse2_packssdw128",
+        width: 128,
+        input_bits: 32,
+        output_bits: 16,
+        operation: PackedIntegerOperation::PackSigned,
+        feature: "",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm_packus_epi16",
+        ir: "x86_sse2_packuswb128",
+        width: 128,
+        input_bits: 16,
+        output_bits: 8,
+        operation: PackedIntegerOperation::PackUnsigned,
+        feature: "",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm_packus_epi32",
+        ir: "x86_sse41_packusdw128",
+        width: 128,
+        input_bits: 32,
+        output_bits: 16,
+        operation: PackedIntegerOperation::PackUnsigned,
+        feature: "sse41",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm_shuffle_epi8",
+        ir: "x86_ssse3_pshufb128",
+        width: 128,
+        input_bits: 8,
+        output_bits: 8,
+        operation: PackedIntegerOperation::Shuffle,
+        feature: "ssse3",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm_movemask_epi8",
+        ir: "x86_sse_pmovmskb128",
+        width: 128,
+        input_bits: 8,
+        output_bits: 0,
+        operation: PackedIntegerOperation::SignMask,
+        feature: "",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm256_adds_epi8",
+        ir: "x86_avx2_vpaddsb256",
+        width: 256,
+        input_bits: 8,
+        output_bits: 8,
+        operation: PackedIntegerOperation::AddSigned,
+        feature: "avx2",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm256_adds_epu8",
+        ir: "x86_avx2_vpaddusb256",
+        width: 256,
+        input_bits: 8,
+        output_bits: 8,
+        operation: PackedIntegerOperation::AddUnsigned,
+        feature: "avx2",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm256_subs_epi8",
+        ir: "x86_avx2_vpsubsb256",
+        width: 256,
+        input_bits: 8,
+        output_bits: 8,
+        operation: PackedIntegerOperation::SubSigned,
+        feature: "avx2",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm256_subs_epu8",
+        ir: "x86_avx2_vpsubusb256",
+        width: 256,
+        input_bits: 8,
+        output_bits: 8,
+        operation: PackedIntegerOperation::SubUnsigned,
+        feature: "avx2",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm256_avg_epu8",
+        ir: "x86_avx2_vpavgb256",
+        width: 256,
+        input_bits: 8,
+        output_bits: 8,
+        operation: PackedIntegerOperation::Average,
+        feature: "avx2",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm256_adds_epi16",
+        ir: "x86_avx2_vpaddsw256",
+        width: 256,
+        input_bits: 16,
+        output_bits: 16,
+        operation: PackedIntegerOperation::AddSigned,
+        feature: "avx2",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm256_adds_epu16",
+        ir: "x86_avx2_vpaddusw256",
+        width: 256,
+        input_bits: 16,
+        output_bits: 16,
+        operation: PackedIntegerOperation::AddUnsigned,
+        feature: "avx2",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm256_subs_epi16",
+        ir: "x86_avx2_vpsubsw256",
+        width: 256,
+        input_bits: 16,
+        output_bits: 16,
+        operation: PackedIntegerOperation::SubSigned,
+        feature: "avx2",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm256_subs_epu16",
+        ir: "x86_avx2_vpsubusw256",
+        width: 256,
+        input_bits: 16,
+        output_bits: 16,
+        operation: PackedIntegerOperation::SubUnsigned,
+        feature: "avx2",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm256_avg_epu16",
+        ir: "x86_avx2_vpavgw256",
+        width: 256,
+        input_bits: 16,
+        output_bits: 16,
+        operation: PackedIntegerOperation::Average,
+        feature: "avx2",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm256_madd_epi16",
+        ir: "x86_avx2_vpmaddwd256",
+        width: 256,
+        input_bits: 16,
+        output_bits: 32,
+        operation: PackedIntegerOperation::MaddSigned,
+        feature: "avx2",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm256_maddubs_epi16",
+        ir: "x86_avx2_vpmaddubsw256",
+        width: 256,
+        input_bits: 8,
+        output_bits: 16,
+        operation: PackedIntegerOperation::MaddMixed,
+        feature: "avx2",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm256_mulhi_epi16",
+        ir: "x86_avx2_vpmulhw256",
+        width: 256,
+        input_bits: 16,
+        output_bits: 16,
+        operation: PackedIntegerOperation::MulHighSigned,
+        feature: "avx2",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm256_mulhi_epu16",
+        ir: "x86_avx2_vpmulhuw256",
+        width: 256,
+        input_bits: 16,
+        output_bits: 16,
+        operation: PackedIntegerOperation::MulHighUnsigned,
+        feature: "avx2",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm256_mulhrs_epi16",
+        ir: "x86_avx2_vpmulhrsw256",
+        width: 256,
+        input_bits: 16,
+        output_bits: 16,
+        operation: PackedIntegerOperation::MulRounded,
+        feature: "avx2",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm256_packs_epi16",
+        ir: "x86_avx2_vpacksswb256",
+        width: 256,
+        input_bits: 16,
+        output_bits: 8,
+        operation: PackedIntegerOperation::PackSigned,
+        feature: "avx2",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm256_packs_epi32",
+        ir: "x86_avx2_vpackssdw256",
+        width: 256,
+        input_bits: 32,
+        output_bits: 16,
+        operation: PackedIntegerOperation::PackSigned,
+        feature: "avx2",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm256_packus_epi16",
+        ir: "x86_avx2_vpackuswb256",
+        width: 256,
+        input_bits: 16,
+        output_bits: 8,
+        operation: PackedIntegerOperation::PackUnsigned,
+        feature: "avx2",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm256_packus_epi32",
+        ir: "x86_avx2_vpackusdw256",
+        width: 256,
+        input_bits: 32,
+        output_bits: 16,
+        operation: PackedIntegerOperation::PackUnsigned,
+        feature: "avx2",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm256_shuffle_epi8",
+        ir: "x86_avx2_vpshufb256",
+        width: 256,
+        input_bits: 8,
+        output_bits: 8,
+        operation: PackedIntegerOperation::Shuffle,
+        feature: "avx2",
+    },
+    PackedIntegerIntrinsic {
+        name: "_mm256_movemask_epi8",
+        ir: "x86_avx2_vpmovmskb256",
+        width: 256,
+        input_bits: 8,
+        output_bits: 0,
+        operation: PackedIntegerOperation::SignMask,
+        feature: "avx2",
+    },
+];
+
+fn packed_integer_kernel(i: usize, case: &PackedIntegerIntrinsic) -> String {
+    let width = case.width;
+    let prefix = if width == 128 { "_mm" } else { "_mm256" };
+    let name = case.name;
+    let (result, args, memory_args, store) = if case.operation == PackedIntegerOperation::SignMask {
+        (
+            "int".to_string(),
+            "a",
+            format!("kpacked_read{width}(a)"),
+            "__builtin_memcpy(out,&result,4);".to_string(),
+        )
+    } else {
+        (
+            format!("__m{width}i"),
+            "a,b",
+            format!("kpacked_read{width}(a),kpacked_read{width}(b)"),
+            format!("{prefix}_storeu_si{width}(out,result);"),
+        )
+    };
+    format!(
+        "{result} kpacked{i}(__m{width}i a,__m{width}i b){{(void)b;return {name}({args});}}\nvoid kpacked_memory{i}(const void*a,const void*b,void*out){{(void)b;{result} result={name}({memory_args});{store}}}\n"
+    )
+}
+
+fn packed_integer_sources() -> (String, String) {
+    let mut source = String::from("#include <immintrin.h>\nint kpacked_evaluations;\n");
+    for width in [128, 256] {
+        let prefix = if width == 128 { "_mm" } else { "_mm256" };
+        source += &format!(
+            "static __m{width}i kpacked_read{width}(const void*p){{kpacked_evaluations++;return {prefix}_loadu_si{width}(p);}}\n"
+        );
+    }
+    let mut harness = String::from(
+        "#include <immintrin.h>\n#include <stdint.h>\nextern int printf(const char*,...);\nextern void*memcpy(void*,const void*,__SIZE_TYPE__);\nextern void*memset(void*,int,__SIZE_TYPE__);\nextern int memcmp(const void*,const void*,__SIZE_TYPE__);\nextern int kpacked_evaluations;\n",
+    );
+    let mut table = String::new();
+    for (i, case) in PACKED_INTEGER_INTRINSICS.iter().enumerate() {
+        source += &packed_integer_kernel(i, case);
+        let width = case.width;
+        let result = if case.output_bits == 0 {
+            "int".to_string()
+        } else {
+            format!("__m{width}i")
+        };
+        let bytes = if case.output_bits == 0 { 4 } else { width / 8 };
+        harness += &format!(
+            "extern {result} kpacked{i}(__m{width}i,__m{width}i);extern {result} cpacked{i}(__m{width}i,__m{width}i);extern void kpacked_memory{i}(const void*,const void*,void*);\n"
+        );
+        for compiler in ['k', 'c'] {
+            harness += &format!(
+                "static void {compiler}abi{i}(const void*a,const void*b,void*out){{__m{width}i x,y;memcpy(&x,a,{});memcpy(&y,b,{});{result} z={compiler}packed{i}(x,y);memcpy(out,&z,{bytes});}}\n",
+                width / 8,
+                width / 8
+            );
+        }
+        table += &format!(
+            "{{\"{}\",{},{},{},{},{},kabi{i},cabi{i},kpacked_memory{i}}},\n",
+            case.name,
+            width / 8,
+            case.input_bits,
+            case.output_bits,
+            bytes,
+            case.operation as u8
+        );
+    }
+    harness += include_str!("fixtures/x86_integer_lanes.h");
+    harness += "typedef void (*PackedKernel)(const void*,const void*,void*);\nstruct PackedCase {const char*name;unsigned bytes,input_bits,output_bits,result_bytes,operation;PackedKernel keel,vendor,memory;};\nstatic const struct PackedCase cases[]={\n";
+    harness += &table;
+    harness += "};\n";
+    harness += include_str!("fixtures/x86_packed_integer_runner.c");
+    (source, harness)
+}
+
+#[test]
+fn packed_integer_bindings_preserve_types_features_and_operand_evaluation() {
+    // Inclusion must remain legal without enabling the newer inline bodies.
+    program(
+        &compile("#include <immintrin.h>\nint f(void){return 0;}"),
+        Features::for_level(CpuLevel::V1),
+    )
+    .unwrap();
+    for (i, case) in PACKED_INTEGER_INTRINSICS.iter().enumerate() {
+        let width = case.width;
+        let kernel = packed_integer_kernel(i, case);
+        let module = compile(&format!(
+            "#include <immintrin.h>\n{}",
+            kernel.lines().next().unwrap()
+        ));
+        assert!(module.to_string().contains(case.ir), "{}", case.name);
+        let features = Features::for_level(if width == 256 {
+            CpuLevel::V3
+        } else {
+            CpuLevel::V2
+        });
+        program(&module, features).unwrap();
+        if case.feature.is_empty() {
+            program(&module, Features::for_level(CpuLevel::V1)).unwrap();
+        } else {
+            let missing = features
+                .with_features(&format!("-{}", case.feature))
+                .unwrap();
+            let error = program(&module, missing).unwrap_err();
+            assert!(
+                error.message.contains(case.feature),
+                "{}: {error:?}",
+                case.name
+            );
+        }
+        let args = if case.operation == PackedIntegerOperation::SignMask {
+            "next()"
+        } else {
+            "next(),next()"
+        };
+        let result = if case.output_bits == 0 {
+            "int".to_string()
+        } else {
+            format!("__m{width}i")
+        };
+        let once = compile(&format!(
+            "#include <immintrin.h>\nextern __m{width}i next(void);{result} f(void){{return {}({args});}}",
+            case.name
+        ));
+        assert_eq!(
+            once.to_string().matches("call @next()").count(),
+            if case.operation == PackedIntegerOperation::SignMask {
+                1
+            } else {
+                2
+            },
+            "{}",
+            case.name
+        );
+    }
+    for call in [
+        "__builtin_keel_avx2_vpaddsb256(a)",
+        "__builtin_keel_avx2_vpaddsb256(a,1)",
+        "__builtin_keel_sse2_pavgb128(a,a)",
+        "__builtin_keel_ssse3_pmaddubsw128(a,a)",
+    ] {
+        let source =
+            format!("typedef int V __attribute__((vector_size(32)));V f(V a){{return {call};}}");
+        assert!(
+            keel_c::compile(
+                &source,
+                "invalid.c",
+                keel_c::Options {
+                    target: Target::X86_64LinuxGnu,
+                    debug_info: false
+                }
+            )
+            .is_err(),
+            "{call}"
+        );
+    }
+    for target in [Target::Aarch64AppleDarwin, Target::Aarch64LinuxGnu] {
+        let source = "typedef signed char V __attribute__((vector_size(16)));V f(V a){return __builtin_keel_ssse3_pshufb128(a,a);}";
+        assert!(
+            keel_c::compile(
+                source,
+                "foreign.c",
+                keel_c::Options {
+                    target,
+                    debug_info: false
+                }
+            )
+            .is_err()
+        );
+        let source=keel_c::preprocess("#if __has_builtin(__builtin_keel_ssse3_pshufb128) || __has_builtin(__builtin_keel_avx2_vpmovmskb256)\n#error foreign intrinsic\n#endif\nint f(void){return 0;}","foreign.c",&keel_c::PreprocessOptions {target,..Default::default()}).unwrap();
+        keel_c::compile(
+            &source,
+            "foreign.c",
+            keel_c::Options {
+                target,
+                debug_info: false,
+            },
+        )
+        .unwrap();
+    }
+}
+
+#[test]
+fn packed_integer_families_match_vendor_and_scalar_oracles() {
+    use keel_codegen::regalloc::Pools;
+    use std::{fs, path::PathBuf, process::Command};
+    let directory = std::env::var_os("KEEL_C_PACKED_INTEGER_EXPORT_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("c-packed-integer"));
+    fs::create_dir_all(&directory).unwrap();
+    let (source, harness) = packed_integer_sources();
+    fs::write(directory.join("kernels.c"), &source).unwrap();
+    fs::write(
+        directory.join("oracle.c"),
+        source.replace("kpacked", "cpacked"),
+    )
+    .unwrap();
+    fs::write(directory.join("harness.c"), harness).unwrap();
+    let raw = compile(&source);
+    let mut optimized = raw.clone();
+    keel_opt::optimize(&mut optimized).unwrap();
+    keel_ir::verify_module(&optimized).unwrap();
+    let features = Features::for_level(CpuLevel::V3);
+    let empty = Pools {
+        caller_saved: &[],
+        callee_saved: &[],
+        float_caller_saved: &[],
+        float_callee_saved: &[],
+    };
+    for (name, tier, allocator, spill, module) in [
+        (
+            "baseline",
+            SelectionTier::Baseline,
+            AllocationTier::Fast,
+            false,
+            &raw,
+        ),
+        (
+            "trees",
+            SelectionTier::Trees,
+            AllocationTier::Full,
+            false,
+            &raw,
+        ),
+        (
+            "optimized-spill",
+            SelectionTier::Full,
+            AllocationTier::Full,
+            true,
+            &optimized,
+        ),
+    ] {
+        let selector = FeatureSelector {
+            inner: &tier,
+            features,
+        };
+        let pipeline = CodegenPipeline {
+            selector: &selector,
+            allocator: &allocator,
+        };
+        let pools = if spill {
+            &empty
+        } else {
+            &keel_codegen::x86_64::REGISTERS
+        };
+        let typed =
+            keel_codegen::x86_64::compile_program_with_pipeline(module, pools, &pipeline).unwrap();
+        let object =
+            keel_asm::x86::assemble_program_object_with_features(&typed, features).unwrap();
+        let text = keel_codegen::x86_64::compile_with_pipeline(module, pools, &pipeline).unwrap();
+        assert_eq!(
+            object,
+            keel_asm::x86::assemble_object_with_features(&text, features).unwrap()
+        );
+        let mut chunks = keel_asm::x86::ProgramAssembler::new(features);
+        keel_codegen::x86_64::compile_program_chunks_with_pipeline(
+            module,
+            pools,
+            &pipeline,
+            &mut |part| chunks.push(part),
+        )
+        .unwrap();
+        assert_eq!(object, chunks.finish().unwrap());
+        fs::write(directory.join(format!("{name}.o")), object).unwrap();
+    }
+    command(Command::new("clang").current_dir(&directory).args([
+        "-target",
+        "x86_64-unknown-linux-gnu",
+        "-ffreestanding",
+        "-O2",
+        "-mavx2",
+        "-c",
+        "oracle.c",
+        "-o",
+        "oracle.o",
+    ]));
+    command(Command::new("clang").current_dir(&directory).args([
+        "-target",
+        "x86_64-unknown-linux-gnu",
+        "-ffreestanding",
+        "-O2",
+        "-mavx2",
+        "-c",
+        "harness.c",
+        "-o",
+        "harness.o",
+    ]));
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    if std::is_x86_feature_detected!("avx2") {
+        for name in ["baseline", "trees", "optimized-spill"] {
+            command(Command::new("clang").current_dir(&directory).args([
+                "harness.o",
+                "oracle.o",
+                &format!("{name}.o"),
+                "-o",
+                "run",
+            ]));
+            command(&mut Command::new(directory.join("run")));
+        }
+    } else {
+        eprintln!("native packed-integer execution skipped: host lacks AVX2");
+    }
+    #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+    eprintln!(
+        "native packed-integer execution skipped: requires x86-64 Linux; artifacts: {}",
+        directory.display()
+    );
 }

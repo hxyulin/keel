@@ -338,4 +338,68 @@ static __inline__ __m256i _mm256_srav_epi32(__m256i a, __m256i count) {
   return (__m256i)__builtin_keel_avx2_psravd256((__keel_i32_256)a, (__keel_i32_256)count);
 }
 
+static __inline__ __m256i _mm256_adds_epi8(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vpaddsb256((__keel_i8_256)a, (__keel_i8_256)b);
+}
+static __inline__ __m256i _mm256_adds_epu8(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vpaddusb256((__keel_i8_256)a, (__keel_i8_256)b);
+}
+static __inline__ __m256i _mm256_subs_epi8(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vpsubsb256((__keel_i8_256)a, (__keel_i8_256)b);
+}
+static __inline__ __m256i _mm256_subs_epu8(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vpsubusb256((__keel_i8_256)a, (__keel_i8_256)b);
+}
+static __inline__ __m256i _mm256_avg_epu8(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vpavgb256((__keel_i8_256)a, (__keel_i8_256)b);
+}
+static __inline__ __m256i _mm256_adds_epi16(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vpaddsw256((__keel_i16_256)a, (__keel_i16_256)b);
+}
+static __inline__ __m256i _mm256_adds_epu16(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vpaddusw256((__keel_i16_256)a, (__keel_i16_256)b);
+}
+static __inline__ __m256i _mm256_subs_epi16(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vpsubsw256((__keel_i16_256)a, (__keel_i16_256)b);
+}
+static __inline__ __m256i _mm256_subs_epu16(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vpsubusw256((__keel_i16_256)a, (__keel_i16_256)b);
+}
+static __inline__ __m256i _mm256_avg_epu16(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vpavgw256((__keel_i16_256)a, (__keel_i16_256)b);
+}
+static __inline__ __m256i _mm256_madd_epi16(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vpmaddwd256((__keel_i16_256)a, (__keel_i16_256)b);
+}
+static __inline__ __m256i _mm256_maddubs_epi16(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vpmaddubsw256((__keel_i8_256)a, (__keel_i8_256)b);
+}
+static __inline__ __m256i _mm256_mulhi_epi16(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vpmulhw256((__keel_i16_256)a, (__keel_i16_256)b);
+}
+static __inline__ __m256i _mm256_mulhi_epu16(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vpmulhuw256((__keel_i16_256)a, (__keel_i16_256)b);
+}
+static __inline__ __m256i _mm256_mulhrs_epi16(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vpmulhrsw256((__keel_i16_256)a, (__keel_i16_256)b);
+}
+static __inline__ __m256i _mm256_packs_epi16(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vpacksswb256((__keel_i16_256)a, (__keel_i16_256)b);
+}
+static __inline__ __m256i _mm256_packs_epi32(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vpackssdw256((__keel_i32_256)a, (__keel_i32_256)b);
+}
+static __inline__ __m256i _mm256_packus_epi16(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vpackuswb256((__keel_i16_256)a, (__keel_i16_256)b);
+}
+static __inline__ __m256i _mm256_packus_epi32(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vpackusdw256((__keel_i32_256)a, (__keel_i32_256)b);
+}
+static __inline__ __m256i _mm256_shuffle_epi8(__m256i a, __m256i b) {
+  return (__m256i)__builtin_keel_avx2_vpshufb256((__keel_i8_256)a, (__keel_i8_256)b);
+}
+static __inline__ int _mm256_movemask_epi8(__m256i a) {
+  return __builtin_keel_avx2_vpmovmskb256((__keel_i8_256)a);
+}
+
 #endif /* _KEEL_AVX2INTRIN_H */

@@ -74,4 +74,8 @@ static __inline__ __m128i _mm_blendv_epi8(__m128i a, __m128i b, __m128i selector
   return (a & ~mask) | (b & mask);
 }
 
+static __inline__ __m128i _mm_packus_epi32(__m128i a, __m128i b) {
+  return (__m128i)__builtin_keel_sse41_packusdw128((__keel_i32_128)a, (__keel_i32_128)b);
+}
+
 #endif /* _KEEL_SMMINTRIN_H */

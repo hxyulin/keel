@@ -307,4 +307,32 @@ static __inline__ __m128i _mm_max_epu8(__m128i a, __m128i b) {
   return (a & mask) | (b & ~mask);
 }
 
+static __inline__ __m128i _mm_avg_epu8(__m128i a, __m128i b) {
+  return (__m128i)__builtin_keel_sse2_pavgb128((__keel_i8_128)a, (__keel_i8_128)b);
+}
+static __inline__ __m128i _mm_avg_epu16(__m128i a, __m128i b) {
+  return (__m128i)__builtin_keel_sse2_pavgw128((__keel_i16_128)a, (__keel_i16_128)b);
+}
+static __inline__ __m128i _mm_madd_epi16(__m128i a, __m128i b) {
+  return (__m128i)__builtin_keel_sse2_pmaddwd128((__keel_i16_128)a, (__keel_i16_128)b);
+}
+static __inline__ __m128i _mm_mulhi_epi16(__m128i a, __m128i b) {
+  return (__m128i)__builtin_keel_sse2_pmulhw128((__keel_i16_128)a, (__keel_i16_128)b);
+}
+static __inline__ __m128i _mm_mulhi_epu16(__m128i a, __m128i b) {
+  return (__m128i)__builtin_keel_sse2_pmulhuw128((__keel_i16_128)a, (__keel_i16_128)b);
+}
+static __inline__ __m128i _mm_packs_epi16(__m128i a, __m128i b) {
+  return (__m128i)__builtin_keel_sse2_packsswb128((__keel_i16_128)a, (__keel_i16_128)b);
+}
+static __inline__ __m128i _mm_packs_epi32(__m128i a, __m128i b) {
+  return (__m128i)__builtin_keel_sse2_packssdw128((__keel_i32_128)a, (__keel_i32_128)b);
+}
+static __inline__ __m128i _mm_packus_epi16(__m128i a, __m128i b) {
+  return (__m128i)__builtin_keel_sse2_packuswb128((__keel_i16_128)a, (__keel_i16_128)b);
+}
+static __inline__ int _mm_movemask_epi8(__m128i a) {
+  return __builtin_keel_sse_pmovmskb128((__keel_i8_128)a);
+}
+
 #endif /* _KEEL_EMMINTRIN_H */

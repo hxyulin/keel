@@ -74,9 +74,9 @@ separate names, not arbitrary suffix combinations.
   `mullo_epi{16,32}`, `{cmpeq,cmpgt}_epi{8,16,32,64}`,
   `set1_epi{8,16,32,64x}`, `set_epi{32,64x}`. Integer arithmetic wraps at its lane
   width. Comparisons use signed lanes and return all-one/zero lane masks.
-- SSE2 saturation: `_mm_{adds,subs}_{epi8,epi16,epu8,epu16}` clamps each
-  mathematical sum/difference to its signed/unsigned lane range. This is an
-  eight-wrapper, 128-bit subset; see the saturation contract below.
+- SSE2/AVX2 saturation: `_mm{,256}_{adds,subs}_{epi8,epi16,epu8,epu16}` clamps
+  each mathematical sum/difference to its signed/unsigned lane range. See the
+  saturation contract below.
 - SSE2 packed shifts: `_mm_{slli,srli}_epi{16,32,64}` and
   `_mm_srai_epi{16,32}` with immediate controls, plus
   `_mm_{sll,srl}_epi{16,32,64}` and `_mm_sra_epi{16,32}` with vector counts.
@@ -93,6 +93,12 @@ separate names, not arbitrary suffix combinations.
   `_mm_{load,loadu,store,storeu}_si128`, and their `_mm256_*_si256` equivalents
   are supported. Unaligned memory spellings do not impose vector alignment or
   incompatible scalar aliasing requirements; each copies exactly its width.
+- Packed integer narrowing: `_mm{,256}_{packs,packus}_epi{16,32}`.
+  Averages: `_mm{,256}_avg_epu{8,16}`. Products:
+  `_mm{,256}_{madd,maddubs,mulhi,mulhrs}_epi16` and
+  `_mm{,256}_mulhi_epu16`. Byte shuffles: `_mm{,256}_shuffle_epi8`.
+  Sign masks: `_mm{,256}_movemask_epi8`. Their architectural contracts and
+  feature permissions are described below.
 - All six same-width bit casts among `ps`, `pd`, and `si128` under `_mm_cast`,
   and among `ps`, `pd`, and `si256` under `_mm256_cast`.
   `_mm256_castps256_ps128`, `_mm256_castpd256_pd128`, and
@@ -167,8 +173,8 @@ not grant CPU features or require the host to support the instructions.
 ### Reviewed builtin inventory
 
 [`vendor-bindings.json`](../../../tools/x86-isa/vendor-bindings.json) owns the
-95 reviewed frontend bindings for AES, packed shifts, saturation, SSE2 numeric
-conversions, FMA and F16C. Its generated module supplies both parser lookup and
+129 reviewed frontend bindings for AES, packed integer operations and shifts,
+SSE2 numeric conversions, FMA and F16C. Its generated module supplies both parser lookup and
 `__has_builtin` recognition. The metadata records current semantic intrinsic
 IDs, types, controls, required features and ownership. Generated assertions
 preserve IDs and check reviewed signatures against the existing IR. Semantic
@@ -208,7 +214,7 @@ bitwise operations and comparisons, including compound assignments; see
 and remaining scalar-shift/cross-domain limits. Constructor functions remain
 available for explicit element conversions.
 Masked/gather/scatter memory, streaming memory/fences, scalar-lane FP intrinsics
-beyond FMA, saturation beyond the bounded SSE2 subset, horizontal operations,
+beyond FMA, horizontal operations,
 shifts beyond the reviewed SSE2/AVX2 subset, conversions beyond the reviewed SSE2
 and F16C forms, AVX-512,
 full vendor header coverage and strict FP-environment compatibility are outside
@@ -310,7 +316,7 @@ backend preflight, release legality guard and assembler checks remain in force.
 No backend, optimizer, ABI, feature/default-width or FP-policy change is made.
 
 <a id="c-x86-intrinsics-bounded-sse2-saturation"></a>
-### Bounded SSE2 saturation
+### Bounded SSE2 and AVX2 saturation
 
 `_mm_adds_epi8`, `_mm_adds_epi16`, `_mm_adds_epu8`, `_mm_adds_epu16`,
 `_mm_subs_epi8`, `_mm_subs_epi16`, `_mm_subs_epu8`, `_mm_subs_epu16`
@@ -332,6 +338,47 @@ scalar/FP arguments and ARM targets are diagnosed. Results retain the operand
 C type. `__has_builtin` reports these names only on x86-64, independently of
 CPU selection; these are Keel bridges, not GNU builtin compatibility promises.
 Header inclusion alone emits no additional functions or enabled features.
+
+The eight `_mm256_` equivalents use the existing
+`x86_avx2_vp{add,sub}{s,us}{b,w}256` intrinsics and require AVX2 permission.
+Their 32-byte operands and results follow the same lane-wise saturation rules.
+The private semantic bridges accept signed C byte/word vectors as bit containers
+for both signed and unsigned operations; the intrinsic determines arithmetic
+signedness. The existing unsigned 128-bit bridge contracts remain unchanged.
+
+### Packed narrowing, products, averages and byte selection
+
+These wrappers call existing architectural operations, with no scalar fallback
+when their required feature is disabled:
+
+- `_mm{,256}_{packs,packus}_epi{16,32}` interprets input lanes as signed and
+  clamps to signed or unsigned lanes of half the width. AVX2 packs concatenate
+  the two narrowed inputs separately inside each 128-bit half. The 128-bit
+  `_mm_packus_epi32` requires SSE4.1; the other 128-bit packs require SSE2.
+- `_mm{,256}_avg_epu{8,16}` computes the unsigned average rounded upward without
+  narrow overflow.
+- `_mm{,256}_madd_epi16` adds pairs of signed word products and wraps the result
+  to 32 bits, including the all-INT16_MIN case. `_mm{,256}_maddubs_epi16`
+  multiplies unsigned first-input bytes by signed second-input bytes and clamps
+  each pair sum to a signed word.
+- `_mm{,256}_mulhi_epi16` and `_mm{,256}_mulhi_epu16` return the high 16 bits of
+  signed or unsigned products. `_mm{,256}_mulhrs_epi16` rounds signed products
+  by adding 16384 before an arithmetic shift by 15 and retaining 16 bits. The
+  INT16_MIN-times-INT16_MIN result is `0x8000`, without saturation.
+- `_mm{,256}_shuffle_epi8` selects each result byte using the corresponding
+  control byte's low four bits within its 128-bit half. Control bit 7 zeros the
+  result; bits 6:4 are ignored.
+- `_mm{,256}_movemask_epi8` returns an `int` with each input byte's sign bit in
+  the corresponding result bit. The 256-bit form can set bit 31.
+
+The 128-bit mixed-byte multiply-add, rounded multiply and byte shuffle require
+SSSE3. Other 128-bit products, averages and sign masks require SSE2. All listed
+256-bit forms require AVX2. Each public operand is evaluated once. Private
+semantic bridges use the intrinsic's exact signed C lane shapes and result
+shape, even for operations that interpret input bits as unsigned. These names
+are Keel bridges, not GNU builtin compatibility claims. The 34 wrappers are
+checked against independent scalar and vendor-header oracles, including upper
+halves, signed extrema, packing boundaries, aliases and forced spills.
 
 <a id="x86-aes-ni-legacy-128-bit-aes-ni"></a>
 ## Legacy 128-bit AES-NI
