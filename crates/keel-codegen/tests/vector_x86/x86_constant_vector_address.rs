@@ -228,7 +228,7 @@ fn exact_loads_features_parity_and_native_exports() {
         ("v3", Features::for_level(CpuLevel::V3), true),
     ] {
         let mut src = String::from("decl @clobber()\n");
-        let mut c = String::from(include_str!("x86_constant_vector_address/harness.c"));
+        let mut c = String::from(include_str!("../x86_constant_vector_address/harness.c"));
         let mut cases = String::from("static const struct Case cases[]={\n");
         for (i, offset) in OFFSETS.into_iter().enumerate() {
             for mode in 0..5 {
@@ -243,7 +243,7 @@ fn exact_loads_features_parity_and_native_exports() {
             }
         }
         c += &(cases + "};\n");
-        c += include_str!("x86_constant_vector_address/main.c");
+        c += include_str!("../x86_constant_vector_address/main.c");
         let module = keel_ir::parse(&src).unwrap();
         keel_ir::verify_module(&module).unwrap();
         for s in [

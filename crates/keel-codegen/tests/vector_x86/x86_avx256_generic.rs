@@ -1,12 +1,10 @@
 //! Full generic-operation oracle. The same scalar C reference exercises every
 //! supported wide shape, all lane widths, modulo shift counts, NaNs and zeros.
+use crate::userspace;
+use crate::vector_common as common;
 use keel_asm_ir::x86::{CpuLevel, Features};
 use keel_codegen::{SelectionTier, regalloc::AllocationTier};
 use std::{fs, path::PathBuf, process::Command};
-#[path = "common/vector.rs"]
-pub mod common;
-#[path = "common/userspace.rs"]
-mod userspace;
 fn source() -> String {
     common::fixture_for(&keel_ir::VectorType::ALL_256)
 }

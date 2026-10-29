@@ -139,7 +139,7 @@ fn literal_proofs_require_canonical_fresh_definitions() {
 }
 fn fixture() -> (String, String) {
     let mut ir = String::new();
-    let mut c = include_str!("x86_sign/oracle.c").to_string();
+    let mut c = include_str!("../x86_sign/oracle.c").to_string();
     let mut calls = String::new();
     for (cc, rev, k, complement) in rows() {
         for swapped in [false, true] {
@@ -173,7 +173,7 @@ fn fixture() -> (String, String) {
         c += &format!("extern void {name}(const void*,void*);\n");
         calls += &format!("if(check({name},0,{mode}))return 4;\n");
     }
-    c += include_str!("x86_sign/select_oracle.c");
+    c += include_str!("../x86_sign/select_oracle.c");
     for cc in ["slt", "ugt"] {
         for kind in 0..4 {
             for observed in [false, true] {
@@ -205,7 +205,7 @@ fn export_linux_oracles() {
         fs::write(dir.join("oracle.keel"), &ir).unwrap();
         fs::write(
             dir.join("run_native.py"),
-            include_str!("x86_sign/run_native.py"),
+            include_str!("../x86_sign/run_native.py"),
         )
         .unwrap();
     }
@@ -293,7 +293,7 @@ fn export_linux_oracles() {
         stems.push("kernel".to_string());
         fs::write(dir.join("kernel.s"), text).unwrap();
         fs::write(dir.join("kernel.o"), object).unwrap();
-        fs::write(dir.join("kernel.c"), include_str!("x86_sign/kernel.c")).unwrap();
+        fs::write(dir.join("kernel.c"), include_str!("../x86_sign/kernel.c")).unwrap();
         count += 1;
     }
     if let Some(dir) = &dir {
@@ -302,12 +302,12 @@ fn export_linux_oracles() {
         fs::write(dir.join("expected-stems.json"), format!("{:?}\n", stems)).unwrap();
         fs::write(
             dir.join("seal_export.py"),
-            include_str!("x86_sign/seal_export.py"),
+            include_str!("../x86_sign/seal_export.py"),
         )
         .unwrap();
         fs::write(
             dir.join("check_encodings.py"),
-            include_str!("x86_sign/check_encodings.py"),
+            include_str!("../x86_sign/check_encodings.py"),
         )
         .unwrap();
     }
@@ -380,7 +380,7 @@ impl RegisterAllocator for Controlled {
 }
 fn controlled_fixture() -> (String, String) {
     let mut ir = String::new();
-    let mut c = include_str!("x86_sign/oracle.c").to_string();
+    let mut c = include_str!("../x86_sign/oracle.c").to_string();
     c += "typedef uint64_t V __attribute__((vector_size(16)));\n";
     let mut calls = String::new();
     for mode in ["sign", "and", "select"] {
@@ -516,8 +516,8 @@ impl RegisterAllocator for ControlledSelect {
 }
 fn controlled_select_fixture() -> (String, String) {
     let mut ir = String::new();
-    let mut c = include_str!("x86_sign/oracle.c").to_string();
-    c += include_str!("x86_sign/select_oracle.c");
+    let mut c = include_str!("../x86_sign/oracle.c").to_string();
+    c += include_str!("../x86_sign/select_oracle.c");
     c += "typedef uint64_t V __attribute__((vector_size(16)));\n";
     let mut calls = String::new();
     for cc in ["slt", "ugt"] {

@@ -1,3 +1,27 @@
+#[allow(dead_code)]
+#[path = "common/userspace.rs"]
+mod userspace;
+#[path = "vector_x86/vector_reduce_add_x86.rs"]
+mod vector_reduce_add_x86;
+#[path = "vector_x86/x86_avx256_generic.rs"]
+mod x86_avx256_generic;
+#[path = "vector_x86/x86_avx2_direct_add.rs"]
+mod x86_avx2_direct_add;
+#[path = "vector_x86/x86_avx2_shuffle_selection.rs"]
+mod x86_avx2_shuffle_selection;
+#[path = "vector_x86/x86_constant_vector_address.rs"]
+mod x86_constant_vector_address;
+#[path = "vector_x86/x86_generic_shuffle.rs"]
+mod x86_generic_shuffle;
+#[path = "vector_x86/x86_packed_positive.rs"]
+mod x86_packed_positive;
+#[path = "vector_x86/x86_packed_sign.rs"]
+mod x86_packed_sign;
+#[path = "vector_x86/x86_pmulld_selection.rs"]
+mod x86_pmulld_selection;
+#[path = "vector_x86/x86_unsigned_byte_compare.rs"]
+mod x86_unsigned_byte_compare;
+
 use keel_asm_ir::x86::{CpuLevel, Features};
 use keel_codegen::{
     CodegenPipeline, SelectionTier,

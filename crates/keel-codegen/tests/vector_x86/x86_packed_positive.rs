@@ -160,7 +160,7 @@ fn constraints_and_source_boundaries() {
 
 fn fixture() -> (String, String) {
     let mut ir = String::new();
-    let mut c = include_str!("x86_positive/oracle.c").to_string();
+    let mut c = include_str!("../x86_positive/oracle.c").to_string();
     let mut calls = String::new();
     for reverse in [false, true] {
         for mode in ["direct", "offset", "indexed", "live"] {
@@ -224,7 +224,7 @@ fn export_linux_oracles() {
         fs::write(dir.join("oracle.keel"), &ir).unwrap();
         fs::write(
             dir.join("run_native.py"),
-            include_str!("x86_positive/run_native.py"),
+            include_str!("../x86_positive/run_native.py"),
         )
         .unwrap();
     }
@@ -240,7 +240,7 @@ fn export_linux_oracles() {
         fs::write(dir.join("kernel-direct.o"), obj).unwrap();
         fs::write(
             dir.join("kernel-direct.c"),
-            include_str!("x86_positive/kernel.c"),
+            include_str!("../x86_positive/kernel.c"),
         )
         .unwrap();
     }
