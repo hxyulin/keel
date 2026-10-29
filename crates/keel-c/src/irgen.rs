@@ -4465,6 +4465,12 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             }
             return Ok(Some(v));
         }
+        if op == Builtin::Prefetch {
+            // A prefetch is advisory and must not become a load from the
+            // supplied address. Keep calls and volatile reads that compute it.
+            self.discard(&args[0])?;
+            return Ok(None);
+        }
         // C lvalue conversions and compound operators synthesize these builtins
         // without passing through the explicit builtin parser's alignment gate.
         if matches!(
@@ -4680,6 +4686,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             }
             Builtin::GenericOverflow(op) => self.generic_overflow(op, args, &vals, e.loc)?,
             Builtin::Hint => vals[0],
+            Builtin::Prefetch => unreachable!("prefetch lowered before value operands"),
             Builtin::AssumeAligned(alignment) => {
                 // Keep the contract local to this expression's SSA result.
                 // Reusing vals[0] would leak a branch-local assumption to

@@ -17,6 +17,89 @@ fn compile(source: &str, target: Target) -> keel_ir::Module {
 }
 
 #[test]
+fn prefetch_accepts_optional_constant_controls_without_memory_access() {
+    for target in Target::NATIVE {
+        let mut module = compile(
+            "void f(void *p) { __builtin_prefetch(p); __builtin_prefetch(p,1); __builtin_prefetch(p,2,0); __builtin_prefetch(p,0,3); __builtin_prefetch(0); }",
+            target,
+        );
+        let f = &module.functions[0];
+        assert!(!f.layout_insts().any(|(_, i)| matches!(
+            f.inst_data(i),
+            InstData::Load { .. } | InstData::Call { .. } | InstData::Intrinsic { .. }
+        )));
+        keel_codegen::compile(&module, target).unwrap();
+        keel_opt::optimize(&mut module).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        keel_codegen::compile(&module, target).unwrap();
+        let mut volatile = compile(
+            "void f(void * volatile *p) { __builtin_prefetch(*p); }",
+            target,
+        );
+        for optimized in [false, true] {
+            if optimized {
+                keel_opt::optimize(&mut volatile).unwrap();
+            }
+            let f = &volatile.functions[0];
+            assert_eq!(f.layout_insts().filter(|(_, i)| matches!(f.inst_data(*i), InstData::Load { flags, .. } if flags.volatile)).count(), 1, "prefetch must evaluate its volatile address operand");
+        }
+    }
+}
+
+#[test]
+fn prefetch_rejects_invalid_addresses_and_controls() {
+    for expression in [
+        "__builtin_prefetch()",
+        "__builtin_prefetch(p,0,3,0)",
+        "__builtin_prefetch(42)",
+        "__builtin_prefetch(p,n)",
+        "__builtin_prefetch(p,-1)",
+        "__builtin_prefetch(p,3)",
+        "__builtin_prefetch(p,0,4)",
+        "__builtin_prefetch(p,0,1.0)",
+        "__builtin_prefetch(p,0,(n++,3))",
+        "int value = __builtin_prefetch(p)",
+    ] {
+        let source = format!("void f(void *p, int n) {{ {expression}; }}");
+        assert!(
+            keel_c::compile(&source, "prefetch.c", Default::default()).is_err(),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn prefetch_evaluates_address_side_effects_once_without_dereferencing_it() {
+    let source = "volatile int count; void *next(void) { ++count; return (void *)0; } int main(void) { int a[2]; int *p = a; void * volatile v = 0; __builtin_prefetch(next()); __builtin_prefetch(p++,1,0); __builtin_prefetch(v,0,3); return count != 1 || p != a+1; }";
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("prefetch-side-effects");
+    std::fs::create_dir_all(&dir).unwrap();
+    let c_source = dir.join("prefetch.c");
+    std::fs::write(&c_source, source).unwrap();
+    let oracle = dir.join("clang");
+    checked(Command::new("clang").arg(&c_source).arg("-o").arg(&oracle));
+    checked(&mut Command::new(oracle));
+    for optimized in [false, true] {
+        let target = keel_c::Options::default().target;
+        let mut module = compile(source, target);
+        if optimized {
+            keel_opt::optimize(&mut module).unwrap();
+        }
+        keel_ir::verify_module(&module).unwrap();
+        let asm = keel_codegen::compile(&module, target).unwrap();
+        let assembly = dir.join(format!("keel-{optimized}.s"));
+        let executable = dir.join(format!("keel-{optimized}"));
+        std::fs::write(&assembly, asm).unwrap();
+        checked(
+            Command::new("clang")
+                .arg(&assembly)
+                .arg("-o")
+                .arg(&executable),
+        );
+        checked(&mut Command::new(executable));
+    }
+}
+
+#[test]
 fn explicit_memory_builtins_use_existing_intrinsics_and_return_destination() {
     for target in Target::NATIVE {
         for (name, id) in [

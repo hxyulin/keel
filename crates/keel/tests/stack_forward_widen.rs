@@ -78,6 +78,22 @@ fn private_signed_widen_c_objects_and_native_footprints() {
         float_caller_saved: &[],
         float_callee_saved: &[],
     };
+    // The frontend and optimizer depend on the target, not selector, CPU profile
+    // or register pressure. Prepare each target once across those configurations.
+    let mut prepared: [Option<Vec<keel_ir::Module>>; 2] = [None, None];
+    let native = cfg!(any(
+        all(target_arch = "aarch64", target_os = "macos"),
+        all(target_arch = "x86_64", target_os = "linux")
+    ));
+    if native {
+        command(
+            Command::new("clang")
+                .args(["-O2", "-c"])
+                .arg(root.join("oracle.c"))
+                .arg("-o")
+                .arg(root.join("oracle.o")),
+        );
+    }
     // V3 with AVX/AVX2 disabled exercises the existing legal SSE2 recipe.
     for profile in 0..5 {
         let arm = profile == 4;
@@ -98,55 +114,58 @@ fn private_signed_widen_c_objects_and_native_footprints() {
             features.f16c = false;
             features.fma = false;
         }
-        let mut modules = Vec::new();
-        for (label, optimize) in [("before_", false), ("after_", true)] {
-            let mut m = keel_c::compile(
-                &SOURCE.replace("PREFIX", label),
-                "widen.c",
-                keel_c::Options {
-                    target,
-                    debug_info: false,
-                },
+        let modules = prepared[usize::from(arm)].get_or_insert_with(|| {
+            let mut modules = Vec::new();
+            for (label, optimize) in [("before_", false), ("after_", true)] {
+                let mut m = keel_c::compile(
+                    &SOURCE.replace("PREFIX", label),
+                    "widen.c",
+                    keel_c::Options {
+                        target,
+                        debug_info: false,
+                    },
+                )
+                .unwrap();
+                if optimize {
+                    keel_opt::optimize(&mut m).unwrap();
+                }
+                keel_ir::verify_module(&m).unwrap();
+                for f in &m.functions {
+                    assert_eq!(f.to_string().contains("swiden_low.i64x2"), optimize, "{f}");
+                    if optimize {
+                        assert_eq!(
+                            f.layout_insts()
+                                .filter(|&(_, i)| matches!(
+                                    f.inst_data(i),
+                                    keel_ir::InstData::Load {
+                                        ty: keel_ir::Type::Vector(keel_ir::VectorType::I32x4),
+                                        ..
+                                    }
+                                ))
+                                .count(),
+                            1,
+                            "{f}"
+                        );
+                        assert!(f.to_string().contains("store"));
+                    }
+                }
+                fs::write(root.join(format!("{target:?}-{label}.ir")), m.to_string()).unwrap();
+                modules.push(m);
+            }
+            // Explicit unaligned IR has the same private construction and exercises
+            // the matcher itself, while preserving the entire external input load.
+            let mut witness = keel_ir::parse(FOOTPRINT).unwrap();
+            keel_opt::optimize(&mut witness).unwrap();
+            keel_ir::verify_module(&witness).unwrap();
+            assert!(witness.to_string().contains("swiden_low.i64x2"));
+            fs::write(
+                root.join(format!("{target:?}-footprint.ir")),
+                witness.to_string(),
             )
             .unwrap();
-            if optimize {
-                keel_opt::optimize(&mut m).unwrap();
-            }
-            keel_ir::verify_module(&m).unwrap();
-            for f in &m.functions {
-                assert_eq!(f.to_string().contains("swiden_low.i64x2"), optimize, "{f}");
-                if optimize {
-                    assert_eq!(
-                        f.layout_insts()
-                            .filter(|&(_, i)| matches!(
-                                f.inst_data(i),
-                                keel_ir::InstData::Load {
-                                    ty: keel_ir::Type::Vector(keel_ir::VectorType::I32x4),
-                                    ..
-                                }
-                            ))
-                            .count(),
-                        1,
-                        "{f}"
-                    );
-                    assert!(f.to_string().contains("store"));
-                }
-            }
-            fs::write(root.join(format!("{profile}-{label}.ir")), m.to_string()).unwrap();
-            modules.push(m);
-        }
-        // Explicit unaligned IR has the same private construction and exercises
-        // the matcher itself, while preserving the entire external input load.
-        let mut witness = keel_ir::parse(FOOTPRINT).unwrap();
-        keel_opt::optimize(&mut witness).unwrap();
-        keel_ir::verify_module(&witness).unwrap();
-        assert!(witness.to_string().contains("swiden_low.i64x2"));
-        fs::write(
-            root.join(format!("{profile}-footprint.ir")),
-            witness.to_string(),
-        )
-        .unwrap();
-        modules.push(witness);
+            modules.push(witness);
+            modules
+        });
         for sel in [
             SelectionTier::Baseline,
             SelectionTier::Trees,
@@ -248,8 +267,7 @@ fn private_signed_widen_c_objects_and_native_footprints() {
                     let exe = root.join(format!("native-{profile}-{sel:?}-{spills}"));
                     command(
                         Command::new("clang")
-                            .arg("-O2")
-                            .arg(root.join("oracle.c"))
+                            .arg(root.join("oracle.o"))
                             .args(&objects)
                             .arg("-o")
                             .arg(&exe),

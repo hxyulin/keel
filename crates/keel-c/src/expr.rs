@@ -2083,6 +2083,35 @@ impl<'a> Parser<'a> {
                 })
             }
             "expect" => self.builtin_call(Builtin::Hint, &[LONG, LONG], LONG, loc),
+            "prefetch" => {
+                let args = self.builtin_args_any()?;
+                if !(1..=3).contains(&args.len()) {
+                    return Err(Error::new(
+                        loc,
+                        "`__builtin_prefetch` takes 1 to 3 arguments",
+                    ));
+                }
+                if !args[0].ty.is_ptr() && !is_null(&args[0]) {
+                    return Err(Error::new(loc, "prefetch address must be a pointer"));
+                }
+                for (arg, (name, max)) in args[1..].iter().zip([("rw", 2), ("locality", 3)]) {
+                    if !integer_constant_control(arg, self.c_layout)
+                        .is_some_and(|value| (0..=max).contains(&value))
+                    {
+                        return Err(Error::new(
+                            loc,
+                            format!("prefetch {name} must be an integer constant in 0..{max}"),
+                        ));
+                    }
+                }
+                let ptr = self.ptr_type(Ty::Void);
+                let address = self.convert_for_assign(args[0], &ptr)?;
+                Ok(mk(
+                    ExprKind::Builtin(Builtin::Prefetch, self.slice(&[address])),
+                    Ty::Void,
+                    loc,
+                ))
+            }
             "expect_with_probability" => {
                 let args = self.builtin_args(3, loc)?;
                 let mut args = args.into_iter();

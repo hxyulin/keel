@@ -15,6 +15,7 @@ mod frontends;
 mod manifest;
 mod report;
 mod run;
+mod slowdown;
 mod style;
 
 use anyhow::{Result, bail};
@@ -37,6 +38,9 @@ struct Cli {
     /// Parallel compile jobs (default: two for frontend checks, one per CPU otherwise).
     #[arg(short, long, global = true)]
     jobs: Option<usize>,
+    /// Native includes each compiler's preprocessing; shared uses Clang-preprocessed inputs.
+    #[arg(long, value_enum, default_value = "native", global = true)]
+    input_mode: build::InputMode,
     #[command(subcommand)]
     command: Command,
 }
@@ -99,6 +103,14 @@ enum Command {
     },
     /// Compare two saved runs (results files or target triples).
     Compare { a: String, b: String },
+    /// Check compatible same-host runtime runs for slowdowns.
+    Regressions {
+        a: String,
+        b: String,
+        /// Practical slowdown fraction; 0.05 means five percent.
+        #[arg(long, default_value_t = 0.05)]
+        threshold: f64,
+    },
 }
 
 fn main() -> ExitCode {
@@ -154,6 +166,7 @@ fn run(cli: Cli) -> Result<bool> {
                 keel: build::build_keel(&root, release)?,
                 root,
                 jobs,
+                input_mode: cli.input_mode,
             };
             let passed = run::test(&env, &chosen, &selected, &configs)?;
             println!();
@@ -180,10 +193,12 @@ fn run(cli: Cli) -> Result<bool> {
                 keel: build::build_keel(&root, true)?,
                 root: root.clone(),
                 jobs,
+                input_mode: cli.input_mode,
             };
             let mut results = run::Results {
                 target: target().into(),
                 host: output(&root, &["uname", "-n"]),
+                environment: environment(&root),
                 keel: commit(&root),
                 date: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)?
@@ -216,6 +231,11 @@ fn run(cli: Cli) -> Result<bool> {
             report::show(&report::load(&root, run.as_deref().unwrap_or(target()))?);
             Ok(true)
         }
+        Command::Regressions { a, b, threshold } => slowdown::check(
+            &report::load(&root, &a)?,
+            &report::load(&root, &b)?,
+            threshold,
+        ),
         Command::Compare { a, b } => {
             report::compare(&report::load(&root, &a)?, &report::load(&root, &b)?);
             Ok(true)
@@ -329,6 +349,63 @@ fn choose_benches<'a>(
         }
     }
     Ok(chosen)
+}
+
+fn environment(root: &Path) -> String {
+    let mut parts = vec![output(root, &["uname", "-srmv"])];
+    if cfg!(target_os = "macos") {
+        parts.push(output(root, &["sw_vers"]));
+        parts.push(output(
+            root,
+            &[
+                "sysctl",
+                "-n",
+                "machdep.cpu.brand_string",
+                "hw.model",
+                "hw.ncpu",
+            ],
+        ));
+        parts.push(output(root, &["xcrun", "--show-sdk-path"]));
+        parts.push(output(root, &["xcrun", "--show-sdk-version"]));
+    } else {
+        if let Ok(cpu) = std::fs::read_to_string("/proc/cpuinfo") {
+            // Exclude changing clock rates and per-core counters.
+            parts.extend(
+                cpu.lines()
+                    .filter(|line| {
+                        [
+                            "model name",
+                            "vendor_id",
+                            "cpu family",
+                            "model\t",
+                            "stepping",
+                            "microcode",
+                            "Features",
+                            "CPU implementer",
+                            "CPU part",
+                            "CPU revision",
+                        ]
+                        .iter()
+                        .any(|prefix| line.starts_with(prefix))
+                    })
+                    .map(str::to_string),
+            );
+        }
+        parts.push(output(root, &["getconf", "GNU_LIBC_VERSION"]));
+    }
+    for name in [
+        "SDKROOT",
+        "MACOSX_DEPLOYMENT_TARGET",
+        "CPATH",
+        "C_INCLUDE_PATH",
+        "LIBRARY_PATH",
+    ] {
+        parts.push(format!(
+            "{name}={}",
+            std::env::var(name).unwrap_or_default()
+        ));
+    }
+    parts.join("\n")
 }
 
 fn output(dir: &Path, argv: &[&str]) -> String {

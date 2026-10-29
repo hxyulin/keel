@@ -839,6 +839,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 return Err("preprocessing (`-E`/`-dM`) and `--emit-ir`/`--emit-object` cannot be used together".into());
             }
             let preprocessed = if opts.preprocess_only || !input.ends_with(".i") {
+                profiling::scope!("c-preprocessing");
                 Some(
                     keel_c::preprocess(
                         text,
@@ -984,9 +985,18 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
         let mut aarch64 = keel_asm::ProgramAssembler::new(keel_asm::TargetFeatures::default());
         let mut x86 = keel_asm::x86::ProgramAssembler::new(opts.x86_features);
         let mut arm_elf = keel_asm::ElfProgramAssembler::new(keel_asm::TargetFeatures::default());
-        let mut arm_elf_sink = |program| arm_elf.push(program);
-        let mut aarch64_sink = |program| aarch64.push(program);
-        let mut x86_sink = |program| x86.push_with_binary_inputs(program, &mut input::binary_input);
+        let mut arm_elf_sink = |program| {
+            profiling::scope!("integrated-assembly");
+            arm_elf.push(program)
+        };
+        let mut aarch64_sink = |program| {
+            profiling::scope!("integrated-assembly");
+            aarch64.push(program)
+        };
+        let mut x86_sink = |program| {
+            profiling::scope!("integrated-assembly");
+            x86.push_with_binary_inputs(program, &mut input::binary_input)
+        };
         let sink: &mut dyn FnMut(_) = match target {
             Target::Wasm32UnknownUnknown => return Err(
                 "unsupported target wasm32-unknown-unknown: native object emission is unavailable"
@@ -1002,7 +1012,9 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
         )
         .map_err(|e| e.to_string())?;
         drop(module);
-        let object = match target {
+        let object = {
+            profiling::scope!("object-finalization");
+            match target {
             Target::Wasm32UnknownUnknown => return Err(
                 "unsupported target wasm32-unknown-unknown: native object emission is unavailable"
                     .into(),
@@ -1011,7 +1023,9 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
             Target::Aarch64AppleDarwin => aarch64.finish(),
             Target::X86_64LinuxGnu => x86.finish(),
         }
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?
+        };
+        profiling::scope!("object-write");
         std::fs::write(output, object).map_err(|e| format!("{output}: {e}"))
     } else {
         let emission = opts.emission_options();

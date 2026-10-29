@@ -380,6 +380,16 @@ separate writable objects, legal read-only restricted aliases, ordinary writable
 aliases, and volatile reads against Clang. This demonstrates an instruction
 change, with no runtime performance claim.
 
+## Advisory prefetch
+
+`__builtin_prefetch(address[, rw[, locality]])` accepts a pointer address,
+an optional integer constant `rw` in 0..2, and an optional integer constant
+`locality` in 0..3. It returns `void`. Keel evaluates address side effects
+and volatile reads once, but emits no prefetch instruction and does not
+dereference the resulting address. The optional controls are validated, then
+discarded. This is an advisory hint, not a memory access or synchronization
+operation. See [GCC's builtin contract](https://gcc.gnu.org/onlinedocs/gcc/Other-Builtins.html#index-__builtin_prefetch).
+
 <a id="c-runtime-offsetof-runtime-offset-designators"></a>
 ## Runtime offset designators
 

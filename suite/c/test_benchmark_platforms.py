@@ -1,4 +1,5 @@
 """Regression tests for extensible application selection and failure reporting."""
+import gzip
 import json
 from pathlib import Path
 import shutil
@@ -36,18 +37,23 @@ class OptimizationMatrix(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which('clang'), 'native Clang required')
 class NativeHarness(unittest.TestCase):
-    def run_case(self, fail=False, reference_fail=False):
+    def run_case(self, fail=False, reference_fail=False, input_mode="native"):
         with tempfile.TemporaryDirectory(prefix='keel-app-harness-') as temporary:
             root = Path(temporary)
             app = root / 'suite/c/sample'
             app.mkdir(parents=True)
-            (app / 'driver.c').write_text('#include <stdio.h>\nint main(void) { puts("checked"); return '
+            (app / 'left').mkdir()
+            (app / 'right').mkdir()
+            (app / 'left/unit.c').write_text('int left(void) { return VALUE; }\n')
+            (app / 'right/unit.c').write_text('int right(void) { return 7; }\n')
+            (app / 'driver.c').write_text('#include <stdio.h>\nint left(void); int right(void);\nint main(void) { if (left() != right()) return 9; puts("checked"); return '
                                          + str(int(reference_fail)) + '; }\n')
             (app / 'suite.toml').write_text('''description = "harness integration"
 [build]
 dir = "."
 std = "c11"
-sources = ["{suite}/driver.c"]
+sources = ["{suite}/driver.c", "{suite}/left/unit.c", "{suite}/right/unit.c"]
+defines = ["VALUE=7"]
 binary = "sample"
 [test]
 run = ["{bin}"]
@@ -66,13 +72,25 @@ compare = "clang-O2"
             output = root / 'result'
             command = [sys.executable, str(Path(benchmark.__file__).resolve()), '--root', str(root),
                        '--work', str(output), '--keel', sys.executable, '--apps', 'sample',
-                       '--configs', 'clang-O2', '--checks-only']
+                       '--configs', 'clang-O2', '--checks-only', '--input-mode', input_mode]
             if fail:
                 command[command.index('--checks-only'):command.index('--checks-only')] = ['keel-broken']
                 command += ['--candidate-configs', str(candidate)]
             result = subprocess.run(command, capture_output=True, text=True, timeout=120)
             self.assertEqual(result.returncode, int(fail or reference_fail), result.stdout + result.stderr)
             report = json.loads((output / 'report.json').read_text())
+            self.assertEqual(report['input_mode'], input_mode)
+            with gzip.open(output / 'commands.jsonl.gz', 'rt') as log:
+                commands = [json.loads(line) for line in log]
+            compilation = [row for row in commands if row.get('label') == 'initial-build']
+            self.assertEqual(len([row for row in compilation if '-c' in row['argv']]), 3)
+            clang_units = [row for row in compilation if '-c' in row['argv']]
+            self.assertEqual(len({row['argv'][-1] for row in clang_units}), 3)
+            suffix = '.c' if input_mode == 'native' else '.i'
+            self.assertTrue(all(any(arg.endswith(suffix) for arg in row['argv']) for row in clang_units))
+            if input_mode == 'native':
+                self.assertTrue(all('-DVALUE=7' in row['argv'] for row in clang_units))
+                self.assertFalse(any(row.get('label') == 'preprocess' for row in commands))
             self.assertEqual(report['complete'], not reference_fail)
             self.assertEqual(set(report['apps']), {'sample'})
             sizes = report['apps']['sample']['builds']['clang-O2']
@@ -95,6 +113,9 @@ compare = "clang-O2"
 
     def test_new_manifest_checks_without_preparing_unselected_suites(self):
         self.run_case(False)
+
+    def test_shared_preprocessing_preserves_translation_units(self):
+        self.run_case(input_mode="shared")
 
     def test_failed_configuration_is_reported_and_returns_failure(self):
         self.run_case(True)

@@ -205,6 +205,8 @@ pub enum Builtin {
     /// Evaluates its arguments once and returns the first value. Branch
     /// likelihood metadata is validated by the parser, then ignored.
     Hint,
+    /// Advisory prefetch with no emitted instruction; evaluates its address.
+    Prefetch,
     /// Pointer alignment contract; optional offset remains a runtime operand.
     AssumeAligned(u64),
     Alloca,

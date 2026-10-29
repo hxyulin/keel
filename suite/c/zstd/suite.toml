@@ -1,0 +1,27 @@
+description = "Zstd 1.5.7 portable C library, separate common/compress/decompress/dictionary translation units"
+
+[[fetch]]
+url = "https://codeload.github.com/facebook/zstd/tar.gz/refs/tags/v1.5.7"
+sha256 = "37d7284556b20954e56e1ca85b80226768902e2edabd3b649e9e72c0c9012ee3"
+
+[build]
+dir = "zstd-1.5.7/lib"
+std = "gnu99"
+sources = ["common/*.c", "compress/*.c", "decompress/*.c", "dictBuilder/*.c", "{suite}/driver.c"]
+includes = ["."]
+# Compare the same portable-C implementation: the suite builds .c files, not
+# Zstd's optional external assembly. Old-format decoders are outside this scope.
+defines = ["ZSTD_DISABLE_ASM=1", "ZSTD_LEGACY_SUPPORT=0"]
+binary = "zstd-workload"
+
+[test]
+run = ["{bin} test"]
+compare = "clang-O2"
+
+[[bench]]
+name = "compress"
+run = "{bin} compress"
+
+[[bench]]
+name = "decompress"
+run = "{bin} decompress"

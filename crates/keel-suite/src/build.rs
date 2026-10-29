@@ -1,11 +1,10 @@
 //! Downloading, preparing, preprocessing and building a suite.
 //!
-//! Every configuration compiles the same preprocessed files: `clang -E`
-//! runs once per suite, so configurations differ only in the compiler.
-//! clang builds are cached until the manifest, the host or the flags
-//! change; keel builds never are, since keel is what is being tested.
+//! Native mode includes each compiler's preprocessing. Shared mode compiles
+//! identical Clang-preprocessed inputs to isolate compilation after preprocessing.
 
 use crate::manifest::{Compiler, Config, Fetch, Suite};
+
 use crate::style::{bar, spinner};
 use anyhow::{Context, Result, anyhow, bail};
 use indicatif::ProgressBar;
@@ -18,10 +17,19 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum InputMode {
+    #[default]
+    Native,
+    Shared,
+}
+
 pub struct Env {
     pub root: PathBuf,
     pub keel: PathBuf,
     pub jobs: usize,
+    pub input_mode: InputMode,
 }
 
 /// Builds the keel driver, in debug (with its assertions) or release.
@@ -47,12 +55,12 @@ pub fn build_keel(root: &Path, release: bool) -> Result<PathBuf> {
     Ok(root.join("target").join(profile).join("keel"))
 }
 
-/// A suite's sources, downloaded, prepared and preprocessed.
+/// A suite's downloaded and prepared compiler inputs.
 pub struct Sources {
     pub work: PathBuf,
-    /// The preprocessed files.
+    /// Raw C in native mode, or Clang-preprocessed files in shared mode.
     pub pre: Vec<PathBuf>,
-    /// Changes when anything the preprocessed files depend on does.
+    /// Digest of the manifest, maintained inputs and compiler inputs.
     stamp: String,
 }
 
@@ -65,7 +73,13 @@ pub fn sources(env: &Env, suite: &Suite) -> Result<Sources> {
     let build = &suite.manifest.build;
     let dir = work.join(&build.dir);
     let vars = suite.vars(&work, None);
-    let stamp = hash(&[&suite.text, std::env::consts::OS, std::env::consts::ARCH]);
+    let mut suite_inputs = Vec::new();
+    collect_suite_inputs(&suite.dir, &mut suite_inputs)?;
+    suite_inputs.sort();
+    let stamp = source_digest(
+        &suite_inputs,
+        &hash(&[&suite.text, std::env::consts::OS, std::env::consts::ARCH]),
+    )?;
 
     let generated = work.join("gen");
     if !build.prepare.is_empty() && !stamp_matches(&generated, &stamp) {
@@ -79,12 +93,31 @@ pub fn sources(env: &Env, suite: &Suite) -> Result<Sources> {
     }
 
     let files = suite.source_files(&dir, &vars)?;
+    if env.input_mode == InputMode::Native {
+        let mut dependencies = files.clone();
+        collect_headers(&dir, &mut dependencies)?;
+        collect_headers(&suite.dir, &mut dependencies)?;
+        dependencies.sort();
+        dependencies.dedup();
+        let stamp = source_digest(&dependencies, &stamp)?;
+        return Ok(Sources {
+            work,
+            pre: files,
+            stamp,
+        });
+    }
     let pre_dir = work.join("pre");
     let pre: Vec<PathBuf> = files
         .iter()
-        .map(|f| pre_dir.join(f.file_stem().unwrap()).with_extension("i"))
+        .enumerate()
+        .map(|(i, f)| {
+            pre_dir
+                .join(format!("{i}-{}", f.file_stem().unwrap().to_string_lossy()))
+                .with_extension("i")
+        })
         .collect();
-    if !stamp_matches(&pre_dir, &stamp) || pre.iter().any(|p| !p.exists()) {
+    {
+        // Reprocess headers and compiler builtins on every invocation.
         fs::create_dir_all(&pre_dir)?;
         let progress = bar(files.len(), format!("{} preprocess", suite.name));
         let jobs: Vec<_> = files.iter().zip(&pre).collect();
@@ -98,6 +131,7 @@ pub fn sources(env: &Env, suite: &Suite) -> Result<Sources> {
         progress.finish_and_clear();
         write_stamp(&pre_dir, &stamp)?;
     }
+    let stamp = source_digest(&pre, &stamp)?;
     Ok(Sources { work, pre, stamp })
 }
 
@@ -149,6 +183,18 @@ pub struct BuildStat {
     pub asm_ms: f64,
     /// Size of the executable's code.
     pub text_bytes: Option<u64>,
+    #[serde(default)]
+    pub input_mode: InputMode,
+    #[serde(default)]
+    pub input_sha256: String,
+    #[serde(default)]
+    pub config_flags: Vec<String>,
+    #[serde(default)]
+    pub jobs: usize,
+    #[serde(default)]
+    pub link_ms: f64,
+    #[serde(default)]
+    pub compiler_version: String,
 }
 
 pub struct Built {
@@ -163,36 +209,28 @@ pub fn build(env: &Env, suite: &Suite, sources: &Sources, config: &Config) -> Re
     let bin = out.join(&suite.manifest.build.binary);
     let stamp = hash(&[&sources.stamp, &config.flags.join(" ")]);
     let stat_file = out.join("stat.json");
-    if config.compiler == Compiler::Clang && stamp_matches(&out, &stamp) && bin.exists() {
-        let stat = fs::read_to_string(&stat_file)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok());
-        if let Some(stat) = stat {
-            return Ok(Built {
-                bin,
-                stat,
-                cached: true,
-            });
-        }
-    }
 
     let progress = bar(sources.pre.len(), format!("{} {}", suite.name, config.name));
     let start = Instant::now();
-    let times = parallel(&sources.pre, env.jobs, &progress, |file| {
-        compile(env, config, file, &out)
+    let units: Vec<_> = sources.pre.iter().enumerate().collect();
+    let times = parallel(&units, env.jobs, &progress, |(i, file)| {
+        compile(env, suite, config, file, *i, &out, &sources.work)
     });
     progress.finish_and_clear();
     let times = times.with_context(|| format!("building {} with {}", suite.name, config.name))?;
     let objects: Vec<String> = sources
         .pre
         .iter()
-        .map(|f| path(&out.join(f.file_stem().unwrap()).with_extension("o")))
+        .enumerate()
+        .map(|(i, _)| path(&out.join(format!("unit-{i}.o"))))
         .collect();
     let mut argv = vec!["clang".to_string()];
     argv.extend(objects);
     argv.extend(["-o".into(), path(&bin)]);
     argv.extend(suite.manifest.build.lib_flags());
+    let link_start = Instant::now();
     run_checked(&argv, &out, None).with_context(|| format!("linking {}", suite.name))?;
+    let link_ms = link_start.elapsed().as_secs_f64() * 1000.0;
 
     let sum = |f: fn(&(Duration, Duration)) -> Duration| -> f64 {
         times.iter().map(f).sum::<Duration>().as_secs_f64() * 1000.0
@@ -210,6 +248,24 @@ pub fn build(env: &Env, suite: &Suite, sources: &Sources, config: &Config) -> Re
         keel_ms,
         asm_ms,
         text_bytes: text_size(&bin),
+        input_mode: env.input_mode,
+        input_sha256: sources.stamp.clone(),
+        config_flags: config.flags.clone(),
+        jobs: env.jobs,
+        link_ms,
+        compiler_version: {
+            let compiler = match config.compiler {
+                Compiler::Clang => Path::new("clang"),
+                Compiler::Keel => &env.keel,
+            };
+            if config.compiler == Compiler::Keel {
+                source_digest(std::slice::from_ref(&env.keel), "keel-executable")?
+            } else {
+                String::from_utf8_lossy(&Command::new(compiler).arg("--version").output()?.stdout)
+                    .trim()
+                    .to_string()
+            }
+        },
     };
     fs::write(&stat_file, serde_json::to_string(&stat)?)?;
     write_stamp(&out, &stamp)?;
@@ -220,40 +276,116 @@ pub fn build(env: &Env, suite: &Suite, sources: &Sources, config: &Config) -> Re
     })
 }
 
-/// Compiles one preprocessed file to an object; gives the time of each
+/// Compiles one translation unit to an object; gives the time of each
 /// step (keel and the assembler, or clang and nothing).
-fn compile(env: &Env, config: &Config, file: &Path, out: &Path) -> Result<(Duration, Duration)> {
-    let stem = file.file_stem().unwrap();
-    let object = path(&out.join(stem).with_extension("o"));
+fn compile(
+    env: &Env,
+    suite: &Suite,
+    config: &Config,
+    file: &Path,
+    index: usize,
+    out: &Path,
+    work: &Path,
+) -> Result<(Duration, Duration)> {
+    let stem = format!("unit-{index}");
+    let dir = work.join(&suite.manifest.build.dir);
+    let input_flags = input_flags(env.input_mode, config.compiler, &suite.manifest.build);
+    let object = path(&out.join(&stem).with_extension("o"));
     let start = Instant::now();
     match config.compiler {
         Compiler::Clang => {
             let mut argv = vec!["clang".into(), "-w".into(), "-c".into()];
+            argv.extend(input_flags.iter().cloned());
             argv.extend(config.flags.iter().cloned());
             argv.extend([path(file), "-o".into(), object]);
-            run_checked(&argv, out, None)?;
+            run_checked(&argv, &dir, None)?;
             Ok((start.elapsed(), Duration::ZERO))
         }
         Compiler::Keel if config.flags.iter().any(|flag| flag == "--emit-object") => {
             let mut argv = vec![path(&env.keel), "cc".into()];
+            argv.extend(input_flags.iter().cloned());
             argv.extend(config.flags.iter().cloned());
             argv.extend([path(file), "-o".into(), object]);
-            run_checked(&argv, out, None)?;
+            run_checked(&argv, &dir, None)?;
             Ok((start.elapsed(), Duration::ZERO))
         }
         Compiler::Keel => {
-            let asm = path(&out.join(stem).with_extension("s"));
+            let asm = path(&out.join(&stem).with_extension("s"));
             let mut argv = vec![path(&env.keel), "cc".into()];
+            argv.extend(input_flags.iter().cloned());
             argv.extend(config.flags.iter().cloned());
             argv.extend([path(file), "-o".into(), asm.clone()]);
-            run_checked(&argv, out, None)?;
+            run_checked(&argv, &dir, None)?;
             let keel = start.elapsed();
             let start = Instant::now();
             let argv = ["clang", "-c", &asm, "-o", &object].map(String::from);
-            run_checked(&argv, out, None)?;
+            run_checked(&argv, &dir, None)?;
             Ok((keel, start.elapsed()))
         }
     }
+}
+
+fn input_flags(mode: InputMode, compiler: Compiler, build: &crate::manifest::Build) -> Vec<String> {
+    if mode == InputMode::Shared {
+        return Vec::new();
+    }
+    let mut flags = Vec::new();
+    // Keel's C frontend currently has one language mode and accepts no -std flag.
+    if compiler == Compiler::Clang {
+        flags.push(format!("-std={}", build.std));
+    }
+    flags.extend(build.define_flags());
+    flags.extend(build.include_flags());
+    flags
+}
+
+fn collect_suite_inputs(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            if entry.file_name() != "__pycache__" {
+                collect_suite_inputs(&entry.path(), files)?;
+            }
+        } else if kind.is_file() {
+            files.push(entry.path());
+        }
+    }
+    Ok(())
+}
+
+fn collect_headers(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            collect_headers(&entry.path(), files)?;
+        } else if kind.is_file()
+            && entry
+                .path()
+                .extension()
+                .is_some_and(|e| e == "h" || e == "inc")
+        {
+            files.push(entry.path());
+        }
+    }
+    Ok(())
+}
+
+fn source_digest(files: &[PathBuf], stamp: &str) -> Result<String> {
+    let mut hasher = Sha256::new();
+    hasher.update(stamp.as_bytes());
+    for file in files {
+        hasher.update(file.as_os_str().as_encoded_bytes());
+        hasher.update([0]);
+        hasher.update(fs::read(file)?);
+        hasher.update([0]);
+    }
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
 }
 
 /// Runs `f` on every item, on up to `jobs` threads; stops at the first error.
@@ -385,4 +517,29 @@ fn stamp_matches(dir: &Path, stamp: &str) -> bool {
 
 fn write_stamp(dir: &Path, stamp: &str) -> Result<()> {
     Ok(fs::write(dir.join(".stamp"), stamp)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_inputs_get_manifest_preprocessing_flags() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let suites = crate::manifest::load_suites(&root).unwrap();
+        let build = &suites
+            .iter()
+            .find(|s| s.name == "yyjson")
+            .unwrap()
+            .manifest
+            .build;
+        let clang = input_flags(InputMode::Native, Compiler::Clang, build);
+        assert!(clang.contains(&"-std=c11".into()));
+        assert!(clang.contains(&"-Isrc".into()));
+        let keel = input_flags(InputMode::Native, Compiler::Keel, build);
+        assert!(keel.contains(&"-Isrc".into()));
+        assert!(!keel.iter().any(|flag| flag.starts_with("-std=")));
+        assert!(input_flags(InputMode::Shared, Compiler::Clang, build).is_empty());
+        assert!(input_flags(InputMode::Shared, Compiler::Keel, build).is_empty());
+    }
 }

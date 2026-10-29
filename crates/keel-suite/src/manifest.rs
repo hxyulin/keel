@@ -29,7 +29,7 @@ pub struct Config {
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Compiler {
-    /// `clang -c` on the preprocessed file.
+    /// `clang -c` on raw C or shared preprocessed input.
     Clang,
     /// `keel cc`, then `clang -c` on its assembly.
     Keel,
@@ -285,11 +285,6 @@ impl Suite {
             let name = f.file_name().unwrap().to_string_lossy();
             !build.exclude.iter().any(|e| *e == name)
         });
-        let mut stems: Vec<_> = files.iter().map(|f| f.file_stem().unwrap()).collect();
-        stems.sort();
-        if let Some(w) = stems.windows(2).find(|w| w[0] == w[1]) {
-            bail!("two sources are named `{}`", w[0].to_string_lossy());
-        }
         Ok(files)
     }
 }

@@ -127,6 +127,7 @@ fn builtin(name: &str, target: Target) -> bool {
             | "va_copy"
             | "offsetof"
             | "expect"
+            | "prefetch"
             | "expect_with_probability"
             | "assume_aligned"
             | "object_size"

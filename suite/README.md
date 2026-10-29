@@ -15,6 +15,7 @@ The native-C registry currently contains:
 | `sqlite` | SQLite shell, query checks and benchmarks |
 | `yyjson` | JSON parsing, traversal and round trips |
 | `lz4` | LZ4 block compression and decompression |
+| `zstd` | Zstd portable C library, compression and decompression |
 
 These use unmodified, pinned upstream library code with deterministic drivers.
 They are not exhaustive upstream test suites or full application builds.
@@ -54,9 +55,22 @@ and `--no-save`.
 Sources are downloaded, checked against their SHA-256, and unpacked into
 `target/suite/<name>/`. Each configuration builds in `build/<config>/` there.
 
-`clang -E` runs once per suite: every configuration compiles the same
-preprocessed files, so the only difference between builds is the compiler.
-Clang builds are cached; Keel builds are redone each time.
+By default each compiler preprocesses the original C sources itself. Every
+source remains a separate translation unit and produces its own object before
+linking. Keel currently has one C language mode; the manifest's `std` selects
+Clang's mode. Both compilers receive the same manifest defines and include paths.
+
+Use `--input-mode shared` for a diagnostic comparison in which every compiler
+consumes the same Clang-preprocessed `.i` files. This excludes preprocessing from
+the build timings. Shared inputs are regenerated and all configurations are
+rebuilt on every invocation; saved build times never represent cache hits.
+
+Downloads and generated-source preparation happen before the build timer.
+`wall_ms` includes compilation at the recorded `jobs` setting and linking;
+`compile_ms` sums per-TU compiler/assembler durations, and `link_ms` measures
+linking separately. These are single build observations, not regression samples.
+Use `-j 1` for serial build measurements and a fixed `-j N` for project throughput.
+The platform runner provides repeated serial source-to-assembly/object timings.
 
 `cargo suite test` builds the selected configurations and runs each suite's
 test commands. `cargo suite run` builds every configuration, checks that each
@@ -65,8 +79,7 @@ benchmark prints the same output as the baseline build, then times it.
 ## Configurations
 
 `suite/configs.toml` lists the ways a program is built, in the order result
-tables show them. Each entry has a `name`, a `compiler` (`clang`: `clang -c` on
-the preprocessed file; `keel`: `keel cc`, then Clang assembles), and its
+tables show them. Each entry has a `name`, a `compiler` (`clang`: `clang -c`; `keel`: `keel cc`, then Clang assembles unless its flags request native object emission), and its
 `flags`. The top-level `baseline` is what benchmark ratios are computed against
 (`clang-O0`), and `test` is what `cargo suite test` builds unless given `-c`.
 
@@ -129,7 +142,7 @@ sha256 = "9fbf5e28..."
 
 [build]
 dir = "lua-5.4.7/src"       # where `prepare` and the preprocessor run
-std = "gnu99"               # clang -E -std=
+std = "gnu99"               # Clang language mode
 sources = ["*.c"]           # files, or `*` in a file name
 exclude = ["luac.c"]
 defines = []                # -D, without the -D
@@ -173,8 +186,15 @@ Commands are split at whitespace and run without a shell. Available variables:
 
 ## Results
 
-`cargo suite run` prints a table per suite with the mean time per benchmark and
-configuration and its ratio to the baseline, and saves the run as JSON in
+`cargo suite run` checks outputs, then interleaves configurations in rotating
+rounds with reversed rotations. Exact position/order balance requires complete
+cycles. It includes a copied baseline executable as an identical-binary control.
+Each timed sample must still match the checked output. Timings include process
+startup and output capture; output comparison happens after the timer stops.
+
+Tables show mean times and median paired time ratios, with bootstrap 95%
+intervals when at least five rounds are available. JSON retains raw samples,
+execution positions, the control and build metadata. Results are saved in
 `target/keel-suite/results/<target>/`. `show` and `compare` take a results file
 or a target triple (meaning that target's latest run).
 
@@ -286,3 +306,35 @@ Synthetic compiler regressions belong beside their crate tests. Add a standalone
 harness only for a reusable boundary this infrastructure cannot exercise.
 Temporary probes, progress tracking and report renderers belong in ignored
 directories. Git history retains retired experiments.
+
+## Checking runtime slowdowns
+
+```sh
+cargo suite run lua/fib -c clang-O0,keel-O -n 20
+# Save the printed result path, change the compiler revision, and repeat.
+cargo suite regressions /path/to/baseline.json /path/to/candidate.json --threshold 0.05
+```
+
+The regression command compares the same configuration across Keel revisions.
+It requires compatible host/target, inputs, flags, jobs and timing protocol,
+at least ten valid samples in each run, and quiet identical-binary controls.
+It independently bootstraps the two runs; rounds collected in different runs
+are not pairs. A slowdown is reported only when the interval's lower bound
+exceeds the practical threshold. The command fails for established slowdowns;
+inconclusive comparisons are printed and do not fail. Repeat a suspected
+slowdown on an otherwise idle host before treating it as confirmed.
+
+The default five percent threshold is a starting policy, not a measured noise
+floor. Calibrate it using unchanged compiler runs on the measurement host.
+Separate runs cannot exclude host drift. Keep the CPU, OS, SDK/system headers,
+compiler build profile and dependencies fixed; metadata is not a complete hash
+of the host environment. Build times remain descriptive single observations.
+
+## Zstd workload
+
+Zstd builds its pinned upstream common, compression, decompression and dictionary
+C files separately, plus a deterministic public-API driver. Both compilers use
+`ZSTD_DISABLE_ASM=1` and `ZSTD_LEGACY_SUPPORT=0`: this measures the portable C
+implementation without external assembly or old-format decoders. It does not
+measure an amalgamation or the upstream CLI. The driver checks round trips and
+runs compression and decompression separately on deterministic resident inputs.

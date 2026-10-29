@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Native application benchmark: frozen inputs, correctness first, paired timings.
 
-Compilation is serial preprocessed C -> assembly and C -> object, separately.
-Keel's object boundary uses its own emitter; other compilers use -c. Preprocessing,
-linking, compiler construction and dependency setup are excluded from both.
+Compilation is serial C -> assembly and C -> object, including native preprocessing by default.
+Keel's object boundary uses its own emitter; other compilers use -c. Shared mode
+excludes preprocessing. Linking, compiler construction and dependency setup are
+excluded from both compile boundaries.
 Runtime is CLI wall time including startup. No LTO, native CPU tuning or PGO.
 """
 import argparse
@@ -137,6 +138,28 @@ def executable_sizes(path):
     raise ValueError('size accounting requires little-endian ELF64 or Mach-O64')
 
 
+def source_files(directory, build, expand):
+    files = []
+    for pattern in build['sources']:
+        pattern = expand(pattern)
+        matches = [Path(pattern)] if Path(pattern).is_absolute() else sorted(directory.glob(pattern))
+        files.extend(f for f in matches if f.name not in build.get('exclude', []))
+    if not files or any(not f.is_file() for f in files):
+        raise ValueError('application has missing or empty sources')
+    return files
+
+
+def unit_name(source):
+    return hashlib.sha256(str(source).encode()).hexdigest()[:12] + '-' + source.stem
+
+
+def native_flags(build, kind):
+    # Keel currently accepts one C dialect rather than a -std selection.
+    return ([] if kind == 'keel' else ['-std=' + build['std']]) + [
+        '-D' + d for d in build.get('defines', [])] + [
+        '-I' + i for i in build.get('includes', [])]
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--root', type=Path, required=True)
@@ -154,6 +177,8 @@ def main():
                    help='extend the matrix; requires a compiler built with experimental-regalloc')
     p.add_argument('--checks-only', action='store_true',
                    help='build and run correctness checks, without compile/runtime timing rounds')
+    p.add_argument('--input-mode', choices=['native', 'shared'], default='native',
+                   help='native includes compiler preprocessing; shared isolates compilation of Clang .i inputs')
     p.add_argument('--gcc-native-preprocess', action='store_true',
                    help='supplementary GCC source-level comparison using its native headers/builtins')
     p.add_argument('--cpu', type=int)
@@ -166,6 +191,8 @@ def main():
     args = p.parse_args()
     if args.experimental_allocators and not args.optimization_matrix:
         p.error('--experimental-allocators requires --optimization-matrix')
+    if args.input_mode == 'native' and (args.gcc_native_preprocess or args.normalize_prepared):
+        p.error('--gcc-native-preprocess and --normalize-prepared require --input-mode shared')
     chosen_apps = args.apps or DEFAULT_APPS
     root, work = args.root.resolve(), args.work.resolve()
     unknown = set(chosen_apps) - set(discover_apps(root))
@@ -185,7 +212,8 @@ def main():
               'apps': {}, 'errors': [], 'noise_before': noise(args.cpu), 'compiler_versions': {},
               'compile_rounds': args.compile_rounds, 'runtime_rounds': args.runtime_rounds,
               'compile_warmups': 1, 'runtime_warmups': 2, 'route': 'native-c',
-              'checks_only': args.checks_only}
+              'checks_only': args.checks_only, 'input_mode': args.input_mode,
+              'compile_boundary': 'source-to-output including preprocessing' if args.input_mode == 'native' else 'preprocessed-input-to-output; preprocessing excluded'}
     log = gzip.open(work / 'commands.jsonl.gz', 'wt')
 
     def save():
@@ -271,38 +299,45 @@ def main():
                 for command in b.get('prepare', []):
                     run(prepare_argv(command, lambda s: expand(s, app, gen=gen),
                                      defines, libs, clang), 'prepare', cwd=directory)
-                files = []
-                for pattern in b['sources']:
-                    pattern = expand(pattern, app, gen=gen)
-                    matches = [Path(pattern)] if Path(pattern).is_absolute() else sorted(directory.glob(pattern))
-                    files.extend(f for f in matches if f.name not in b.get('exclude', []))
-                pre = prepared / 'pre'
-                pre.mkdir(exist_ok=True)
-                assert files and len({f.stem for f in files}) == len(files), (app, 'empty or colliding source names')
-                for file in files:
-                    run([clang, '-E', '-std=' + b['std'], *defines, *includes, file, '-o', pre / (file.stem + '.i')], 'preprocess', cwd=directory)
-                marker.write_text(json.dumps({'os': platform.system(), 'arch': platform.machine(), 'clang': report['compiler_versions']['clang'], 'fetches': fetches, 'sources': {p.name: sha(p) for p in sorted(pre.glob('*.i'))}}, indent=2) + '\n')
+                files = source_files(directory, b, lambda value: expand(value, app, gen=gen))
+                if args.input_mode == 'shared':
+                    pre = prepared / 'pre'
+                    pre.mkdir(exist_ok=True)
+                    outputs = []
+                    for index, file in enumerate(files):
+                        out = pre / (str(index) + '-' + file.stem + '.i')
+                        run([clang, '-E', '-std=' + b['std'], *defines, *includes, file, '-o', out], 'preprocess', cwd=directory)
+                        outputs.append(out)
+                else:
+                    outputs = files
+                dependencies = {str(p): sha(p) for base in [directory, root / 'suite/c' / app] for p in sorted(base.rglob('*')) if p.is_file() and p.suffix in ['.h', '.inc']}
+                marker.write_text(json.dumps({'dependencies': dependencies, 'os': platform.system(), 'arch': platform.machine(), 'clang': report['compiler_versions']['clang'], 'fetches': fetches, 'input_mode': args.input_mode, 'manifest_sha256': sha(root / 'suite/c' / app / 'suite.toml'), 'input_files': [str(f) for f in outputs], 'sources': {str(p): sha(p) for p in outputs}}, indent=2) + '\n')
             prep = json.loads(marker.read_text())
             assert prep['os'] == platform.system() and prep['arch'] == platform.machine(), prep
-            sources = sorted((prepared / 'pre').glob('*.i'))
-            assert {p.name: sha(p) for p in sources} == prep['sources'], app
+            assert prep.get('input_mode') == args.input_mode, 'prepared input mode changed; rerun without --reuse-prepared'
+            assert prep['manifest_sha256'] == sha(root / 'suite/c' / app / 'suite.toml'), 'manifest changed'
+            assert {p: sha(p) for p in prep['dependencies']} == prep['dependencies'], 'prepared headers changed'
+            if args.input_mode == 'shared':
+                assert prep['clang'] == report['compiler_versions']['clang'], 'preprocessor changed'
+            sources = [Path(f) for f in prep['input_files']]
+            assert {str(p): sha(p) for p in sources} == prep['sources'], app
             if args.normalize_prepared:
                 backup = prepared / 'pre-raw'
                 backup.mkdir(exist_ok=True)
                 mapping = {}
                 for source in sources:
                     raw = backup / source.name
-                    if not raw.exists():
+                    if not raw.exists() or not args.reuse_prepared:
                         shutil.copy2(source, raw)
                     normalized, aliases = common_float_aliases(raw.read_text())
                     source.write_text(normalized)
                     mapping[source.name] = aliases
                 prep['raw_sources'] = {p.name: sha(p) for p in sorted(backup.glob('*.i'))}
                 prep['compatibility_alias_renames'] = mapping
-                prep['sources'] = {p.name: sha(p) for p in sources}
+                prep['sources'] = {str(p): sha(p) for p in sources}
                 marker.write_text(json.dumps(prep, indent=2) + '\n')
             all_sources[app] = sources
-            report['apps'][app] = {'manifest_sha256': sha(root / 'suite/c' / app / 'suite.toml'), 'preparation': prep, 'sources': {p.name: sha(p) for p in sources}, 'builds': {}, 'checks': {}, 'compile': {}, 'runtime': {}}
+            report['apps'][app] = {'manifest_sha256': sha(root / 'suite/c' / app / 'suite.toml'), 'preparation': prep, 'sources': {str(p): sha(p) for p in sources}, 'builds': {}, 'checks': {}, 'compile': {}, 'runtime': {}}
         assert all(all_sources[a] for a in chosen_apps), 'application has no prepared sources'
         if args.prepare_only:
             report['complete'] = True
@@ -343,8 +378,8 @@ def main():
                     pattern = expand(pattern, app, gen=gen)
                     matches = [Path(pattern)] if Path(pattern).is_absolute() else sorted(directory.glob(pattern))
                     files.extend(f for f in matches if f.name not in b.get('exclude', []))
-                for source in files:
-                    run([gcc, '-E', '-std=' + b['std'], *['-D' + d for d in b.get('defines', [])], *['-I' + i for i in b.get('includes', [])], source, '-o', dest / (source.stem + '.i')], 'gcc-native-preprocess', cwd=directory)
+                for index, source in enumerate(files):
+                    run([gcc, '-E', '-std=' + b['std'], *['-D' + d for d in b.get('defines', [])], *['-I' + i for i in b.get('includes', [])], source, '-o', dest / (str(index) + '-' + source.stem + '.i')], 'gcc-native-preprocess', cwd=directory)
                 gcc_sources[app] = {p.name: p for p in dest.glob('*.i')}
                 assert gcc_sources[app].keys() == {p.name for p in all_sources[app]}
                 report['apps'][app]['gcc_native_sources'] = {n: sha(p) for n, p in gcc_sources[app].items()}
@@ -359,14 +394,17 @@ def main():
             if name.startswith('gcc-') and args.gcc_native_preprocess:
                 source = gcc_sources[app][source.name]
             suffix = '.s' if boundary == 'assembly' else '.o'
-            out = work / app / name / (source.stem + suffix)
+            out = work / app / name / (unit_name(source) + suffix)
+            _, build_spec = spec(app)
+            input_flags = native_flags(build_spec, kind) if args.input_mode == 'native' else []
             if kind == 'keel':
-                argv = [compiler, 'cc', *flags, *(['--emit-object'] if boundary == 'object' else []), source, '-o', out]
+                argv = [compiler, 'cc', *input_flags, *flags, *(['--emit-object'] if boundary == 'object' else []), source, '-o', out]
             else:
                 _, build_spec = spec(app)
                 arch = ['-march=x86-64'] if platform.machine() == 'x86_64' else ['-march=armv8-a']
-                argv = [compiler, '-w', '-std=' + build_spec['std'], '-ffp-contract=off', *arch, *flags, '-S' if boundary == 'assembly' else '-c', source, '-o', out]
-            return run(argv, label)[1]
+                argv = [compiler, '-w', '-std=' + build_spec['std'], '-ffp-contract=off', *arch, *input_flags, *flags, '-S' if boundary == 'assembly' else '-c', source, '-o', out]
+            directory = root / 'target/suite' / app / build_spec['dir']
+            return run(argv, label, cwd=directory)[1]
 
         # Build everything before tests/timing, retaining unsuccessful cases.
         for app in chosen_apps:
@@ -378,7 +416,7 @@ def main():
                     for source in all_sources[app]:
                         compile_one(app, name, source, 'object', 'initial-build')
                     binary = dest / b['binary']
-                    run([clang, *[dest / (s.stem + '.o') for s in all_sources[app]], '-o', binary, *['-l' + s for s in b.get('libs', [])]], 'common-link')
+                    run([clang, *[dest / (unit_name(gcc_sources[app][s.name] if name.startswith('gcc-') and args.gcc_native_preprocess else s) + '.o') for s in all_sources[app]], '-o', binary, *['-l' + s for s in b.get('libs', [])]], 'common-link')
                     report['apps'][app]['builds'][name] = {'status': 'built', 'binary': str(binary), 'sha256': sha(binary), 'bytes': binary.stat().st_size, **executable_sizes(binary)}
                 except Exception as e:
                     report['apps'][app]['builds'][name] = {'status': 'failed', 'error': str(e)}
@@ -452,7 +490,7 @@ def main():
                 save()
         if args.checks_only:
             assert all(sha(path) == digest for path, digest in report['compiler_sha256'].items())
-            assert all({p.name: sha(p) for p in all_sources[app]} == report['apps'][app]['sources']
+            assert all({str(p): sha(p) for p in all_sources[app]} == report['apps'][app]['sources']
                        for app in chosen_apps)
             report['phase'] = 'complete'
             report['complete'] = True
@@ -519,7 +557,7 @@ def main():
             for name, build in detail['builds'].items():
                 if build['status'] in ['built', 'incorrect']:
                     assert sha(build['binary']) == build['sha256']
-            assert {p.name: sha(p) for p in all_sources[app]} == detail['sources']
+            assert {str(p): sha(p) for p in all_sources[app]} == detail['sources']
         assert all(sha(p) == digest for p, digest in report['compiler_sha256'].items())
         report['noise_after'] = noise(args.cpu)
         report['phase'] = 'complete'

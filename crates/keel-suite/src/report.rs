@@ -1,6 +1,6 @@
 //! Result tables, and saving, loading and comparing runs.
 
-use crate::run::{BenchStat, Results};
+use crate::run::{BenchStat, IDENTICAL_CONTROL, Results};
 use crate::style::{Cell, Paint, bytes, ms, paint, print_table, ratio};
 use anyhow::{Context, Result, bail};
 use std::fs;
@@ -51,12 +51,32 @@ pub fn print_suite(results: &Results, suite: &str) {
                         .then(if noisy { "±" } else { " " }, Paint::Yellow);
                     match base {
                         Some(base) if !is_baseline => {
-                            let r = stat.mean_ms / base.mean_ms;
+                            let r = stat
+                                .paired_ratio
+                                .as_ref()
+                                .map_or(stat.mean_ms / base.mean_ms, |p| p.median);
                             ratios.push(r);
-                            let (text, paint) = ratio(r);
-                            cell = cell.then(format!(" {text}"), paint);
+                            let (text, color) = ratio(r);
+                            // Ratios describe relative speed, not a regression verdict.
+                            let color = if stat
+                                .paired_ratio
+                                .as_ref()
+                                .and_then(|p| p.bootstrap95)
+                                .is_some_and(|[lo, hi]| lo > 1.0 || hi < 1.0)
+                            {
+                                color
+                            } else {
+                                Paint::Dim
+                            };
+                            cell = cell.then(format!(" {text}"), color);
+                            if let Some([lo, hi]) =
+                                stat.paired_ratio.as_ref().and_then(|p| p.bootstrap95)
+                            {
+                                cell = cell.then(format!(" [{lo:.2}, {hi:.2}]"), Paint::Dim);
+                            }
                         }
-                        _ => cell = cell.then(" 1.00×", Paint::Dim),
+                        Some(_) => cell = cell.then(" 1.00×", Paint::Dim),
+                        None => {}
                     }
                     cell
                 }
@@ -96,6 +116,31 @@ pub fn print_suite(results: &Results, suite: &str) {
             "  {}",
             paint("± more than 5% standard deviation", Paint::Yellow)
         );
+    }
+    if results
+        .benches
+        .iter()
+        .any(|b| b.suite == suite && b.protocol.is_some())
+    {
+        println!("  Ratios are paired medians; brackets show percentile bootstrap 95% intervals.");
+        println!(
+            "  Fewer than five pairs have no interval; ratios are descriptive, not slowdown verdicts."
+        );
+        for bench in &benches {
+            if let Some(control) =
+                find(results, suite, bench, IDENTICAL_CONTROL).and_then(|b| b.paired_ratio.as_ref())
+            {
+                let interval = control
+                    .bootstrap95
+                    .map_or("no interval".into(), |[lo, hi]| {
+                        format!("[{lo:.2}, {hi:.2}]")
+                    });
+                println!(
+                    "  {bench} identical-binary control: {:.2}× {interval}",
+                    control.median
+                );
+            }
+        }
     }
     println!();
 }

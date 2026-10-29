@@ -220,3 +220,41 @@ negative controls where sampling would hide different behavior.
 The Python suite checks exercise runner failure handling and fixture protocols;
 they are separate from native integration campaigns. Do not prune inexpensive
 protocol checks to compensate for repeated native compiler or linker invocations.
+
+
+## Profiling a slowdown
+
+Use an ordinary release build for timing comparisons. On Linux, start with
+hardware counters and sampled stacks on the exact failing workload:
+
+```sh
+cargo build --release -p keel
+perf stat -r 10 -e task-clock,cycles,instructions,branches,branch-misses -- \
+  target/release/keel cc --emit-object input.c -o target/profile-input.o
+perf record --call-graph dwarf -o target/keel-perf.data -- \
+  target/release/keel cc --emit-object input.c -o target/profile-input.o
+perf report -i target/keel-perf.data
+```
+
+Counter access depends on the Linux host's perf permissions. Keep output writes
+and input residency consistent. For source attribution, build with release debug
+information (`CARGO_PROFILE_RELEASE_DEBUG=1`). Run sampling separately from the
+uninstrumented timing measurement. On macOS use Instruments Time Profiler for
+sampled stacks; Linux perf is not a macOS profiler.
+
+Keel already has optional Tracy scopes for frontend work, optimization passes,
+instruction selection and allocation. The CLI also marks C preprocessing,
+integrated assembly, object finalization and object writing. Integrated assembly
+runs inside the streaming codegen callback, so its scopes are nested in codegen;
+do not add inclusive durations as if the stages were disjoint.
+
+```sh
+cargo build --release -p keel --features profile-with-tracy
+# Start the matching Tracy capture application, then run the compiler workload.
+target/release/keel cc --emit-object input.c -o target/profile-input.o
+```
+
+Use Tracy for phase timelines and repeated pass attribution. Use sampled stacks
+and counters to explain time within those phases. The feature is off by default;
+rebuild without it before collecting regression timings. No additional profiling
+framework is required.
