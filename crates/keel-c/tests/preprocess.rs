@@ -212,6 +212,17 @@ fn splicing_comments_multiline_and_locations() {
 }
 
 #[test]
+fn short_line_gaps_use_newlines_instead_of_markers() {
+    let src = "int a;\n\nint b;\n#define F(x) x\nint c = F(1\n);\n\n\n\n\n\n\n\n\nint d;\n\n\n\n\n\n\n\n\n\nint e;\n";
+    let got = preprocess(src, "gap.c", &PreprocessOptions::default()).unwrap();
+    let body = got.lines().skip_while(|l| !l.starts_with("int a"));
+    assert_eq!(
+        body.collect::<Vec<_>>().join("\n"),
+        "int a ; \n\nint b ; \n\nint c = 1 \n; \n\n\n\n\n\n\n\n\nint d ; \n# 25 \"gap.c\"\nint e ; "
+    );
+}
+
+#[test]
 fn include_search_guards_once_and_macro_names() {
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("pp-includes");
     std::fs::create_dir_all(dir.join("search")).unwrap();

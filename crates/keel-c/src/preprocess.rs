@@ -139,6 +139,7 @@ fn preprocess_inner<const TRACK: bool>(
         scanned: HashMap::new(),
         counter: 0,
         output: String::new(),
+        output_next: None,
     };
     let predefined = arena.alloc_str(
         &crate::predefined_macros(options.target, options.darwin_deployment.as_deref())
@@ -197,6 +198,9 @@ struct Preprocessor<'a, const TRACK: bool> {
     scanned: HashMap<(PathBuf, bool), CachedTokens<'a>>,
     counter: u64,
     output: String,
+    /// The source file and line that the next `output` line continues, if
+    /// known, so short forward gaps need newlines rather than a line marker.
+    output_next: Option<(&'a str, u32)>,
 }
 
 enum FileSource {
@@ -785,28 +789,41 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
     }
 
     fn emit(&mut self, ts: &[Token<'a>]) {
-        let mut prev: Option<(&str, u32)> = None;
+        let mut prev: Option<(&'a str, u32)> = None;
         for t in ts {
             if t.text.is_empty() {
                 continue;
             }
             if prev != Some((t.file, t.line)) {
-                if prev.is_some() {
+                if let Some((file, line)) = prev {
                     self.output.push('\n');
+                    self.output_next = Some((file, line + 1));
                 }
-                write!(self.output, "# {} ", t.line).unwrap();
-                quoted_to(&mut self.output, t.file);
-                self.output.push('\n');
+                // Like Clang, write up to 8 newlines rather than a marker.
+                match self.output_next {
+                    Some((file, next)) if file == t.file && (next..=next + 8).contains(&t.line) => {
+                        for _ in next..t.line {
+                            self.output.push('\n');
+                        }
+                    }
+                    _ => {
+                        write!(self.output, "# {} ", t.line).unwrap();
+                        quoted_to(&mut self.output, t.file);
+                        self.output.push('\n');
+                    }
+                }
                 prev = Some((t.file, t.line));
             }
             self.output.push_str(t.text);
             self.output.push(' ');
             if t.text.contains('\n') {
                 prev = None;
+                self.output_next = None;
             }
         }
-        if prev.is_some() {
+        if let Some((file, line)) = prev {
             self.output.push('\n');
+            self.output_next = Some((file, line + 1));
         }
     }
     fn flush(&mut self, pending: &mut Vec<Token<'a>>) -> Result<(), Diagnostic> {
@@ -994,6 +1011,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                         self.output.push_str("#pragma ");
                         self.output.push_str(&spelling(args));
                         self.output.push('\n');
+                        self.output_next = None;
                     }
                 }
                 "line" => {
