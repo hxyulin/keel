@@ -3,7 +3,13 @@ use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{Allocation, AllocationInput, AllocationTier, Loc, Pools, RegisterAllocator},
 };
-use std::{fs, path::PathBuf, process::Command};
+use std::{
+    cell::OnceCell,
+    fs,
+    path::PathBuf,
+    process::Command,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 const EMPTY: Pools = Pools {
     caller_saved: &[],
@@ -144,45 +150,96 @@ fn command(c: &mut Command) {
     let out = c.output().unwrap();
     assert!(out.status.success(), "{c:?}: {out:?}");
 }
-fn oracle(arm: bool, stem: &str, source: &str, c: &str, asm: &str, obj: &[u8]) {
-    let root = std::env::var_os("KEEL_SHUFFLE_EVIDENCE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::temp_dir().join(format!("keel-shuffle-{}", std::process::id()))
-        });
-    let dir = root.join(if arm { "arm" } else { "x86" });
-    fs::create_dir_all(&dir).unwrap();
-    for (ext, bytes) in [
-        ("keel", source.as_bytes()),
-        ("c", c.as_bytes()),
-        ("s", asm.as_bytes()),
-        ("o", obj),
-    ] {
-        fs::write(dir.join(format!("{stem}.{ext}")), bytes).unwrap();
-    }
-    if !arm {
-        fs::write(
-            dir.join("run_native.py"),
-            include_str!("vector_shuffle/run_native.py"),
-        )
-        .unwrap();
-    }
-    let native = arm;
-    if native {
-        let exe = dir.join(format!("{stem}.native"));
-        let mut cc = Command::new("clang");
-        cc.args(["-O2", "-Wall", "-Wextra", "-Werror"]);
-        if !arm {
-            cc.args(["-march=x86-64", "-msse2", "-mno-avx"]);
+/// A test's C oracle. AArch64 configurations link one compiled oracle object,
+/// and x86 configurations share one syntax check. `KEEL_SHUFFLE_EVIDENCE`
+/// keeps each configuration's files for `vector_shuffle/run_native.py`.
+struct Oracle<'a> {
+    c: &'a str,
+    dir: PathBuf,
+    arm: OnceCell<PathBuf>,
+    x86: OnceCell<()>,
+}
+
+impl<'a> Oracle<'a> {
+    fn new(tag: &str, c: &'a str) -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "keel-shuffle-oracle-{tag}-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("oracle.c"), c).unwrap();
+        Self {
+            c,
+            dir,
+            arm: OnceCell::new(),
+            x86: OnceCell::new(),
         }
-        command(
-            cc.arg(dir.join(format!("{stem}.c")))
-                .arg(dir.join(format!("{stem}.o")))
-                .arg("-o")
-                .arg(&exe),
-        );
-        command(&mut Command::new(exe));
-    } else {
+    }
+
+    fn check(&self, arm: bool, stem: &str, source: &str, asm: &str, obj: &[u8]) {
+        let root = std::env::var_os("KEEL_SHUFFLE_EVIDENCE")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                std::env::temp_dir().join(format!("keel-shuffle-{}", std::process::id()))
+            });
+        let dir = root.join(if arm { "arm" } else { "x86" });
+        fs::create_dir_all(&dir).unwrap();
+        for (ext, bytes) in [
+            ("keel", source.as_bytes()),
+            ("c", self.c.as_bytes()),
+            ("s", asm.as_bytes()),
+            ("o", obj),
+        ] {
+            fs::write(dir.join(format!("{stem}.{ext}")), bytes).unwrap();
+        }
+        if arm {
+            let oracle = self.arm.get_or_init(|| {
+                let object = self.dir.join("oracle.o");
+                command(
+                    Command::new("clang")
+                        .args(["-O2", "-Wall", "-Wextra", "-Werror", "-c"])
+                        .arg(self.dir.join("oracle.c"))
+                        .arg("-o")
+                        .arg(&object),
+                );
+                object
+            });
+            let exe = dir.join(format!("{stem}.native"));
+            command(
+                Command::new("clang")
+                    .arg(oracle)
+                    .arg(dir.join(format!("{stem}.o")))
+                    .arg("-o")
+                    .arg(&exe),
+            );
+            command(&mut Command::new(exe));
+        } else {
+            fs::write(
+                dir.join("run_native.py"),
+                include_str!("vector_shuffle/run_native.py"),
+            )
+            .unwrap();
+            self.x86.get_or_init(|| {
+                command(
+                    Command::new("clang")
+                        .args([
+                            "-target",
+                            "x86_64-unknown-linux-gnu",
+                            "-ffreestanding",
+                            "-Wall",
+                            "-Wextra",
+                            "-Werror",
+                            "-fsyntax-only",
+                        ])
+                        .arg(self.dir.join("oracle.c")),
+                )
+            });
+        }
+        // Check instruction bytes against an independent assembler as well as the
+        // typed/text object equality above. The ELF/Mach-O containers may differ.
+        let clang_obj = dir.join(format!("{stem}.clang.o"));
         command(
             Command::new("clang")
                 .args([
@@ -192,61 +249,45 @@ fn oracle(arm: bool, stem: &str, source: &str, c: &str, asm: &str, obj: &[u8]) {
                     } else {
                         "x86_64-unknown-linux-gnu"
                     },
-                    "-ffreestanding",
-                    "-Wall",
-                    "-Wextra",
-                    "-Werror",
-                    "-fsyntax-only",
+                    "-c",
                 ])
-                .arg(dir.join(format!("{stem}.c"))),
+                .arg(dir.join(format!("{stem}.s")))
+                .arg("-o")
+                .arg(&clang_obj),
         );
-    }
-    // Check instruction bytes against an independent assembler as well as the
-    // typed/text object equality above. The ELF/Mach-O containers may differ.
-    let clang_obj = dir.join(format!("{stem}.clang.o"));
-    command(
-        Command::new("clang")
-            .args([
-                "-target",
-                if arm {
-                    "arm64-apple-macos11"
-                } else {
-                    "x86_64-unknown-linux-gnu"
-                },
-                "-c",
-            ])
-            .arg(dir.join(format!("{stem}.s")))
-            .arg("-o")
-            .arg(&clang_obj),
-    );
-    {
-        use object::{Object, ObjectSection};
-        let reference = fs::read(&clang_obj).unwrap();
-        let name = if arm { "__text" } else { ".text" };
-        let actual = object::File::parse(obj).unwrap();
-        let expected = object::File::parse(reference.as_slice()).unwrap();
-        assert_eq!(
-            actual.section_by_name(name).unwrap().data().unwrap(),
-            expected.section_by_name(name).unwrap().data().unwrap()
-        );
-    }
-    if std::env::var_os("KEEL_SHUFFLE_EVIDENCE").is_some() {
-        fs::write(dir.join(format!("{stem}.json")),format!("{{\"passed\":true,\"native_executed\":{native},\"typed_text_objects_equal\":true,\"clang_text_equal\":true}}\n")).unwrap();
-        fs::write(dir.join(format!("{stem}.html")),format!("<!doctype html><meta charset=utf-8><title>{stem}</title><h1>{stem}</h1><p>Passed. Native execution: {native}. Typed/text objects match. Clang instruction bytes match.</p>")).unwrap();
-    }
-    if std::env::var_os("KEEL_SHUFFLE_EVIDENCE").is_none() {
-        for ext in ["keel", "c", "s", "o", "native", "clang.o"] {
-            let path = dir.join(format!("{stem}.{ext}"));
-            if path.exists() {
-                fs::remove_file(path).unwrap();
+        {
+            use object::{Object, ObjectSection};
+            let reference = fs::read(&clang_obj).unwrap();
+            let name = if arm { "__text" } else { ".text" };
+            let actual = object::File::parse(obj).unwrap();
+            let expected = object::File::parse(reference.as_slice()).unwrap();
+            assert_eq!(
+                actual.section_by_name(name).unwrap().data().unwrap(),
+                expected.section_by_name(name).unwrap().data().unwrap(),
+                "{stem}"
+            );
+        }
+        if std::env::var_os("KEEL_SHUFFLE_EVIDENCE").is_none() {
+            for ext in ["keel", "c", "s", "o", "native", "clang.o"] {
+                let path = dir.join(format!("{stem}.{ext}"));
+                if path.exists() {
+                    fs::remove_file(path).unwrap();
+                }
             }
         }
+    }
+}
+
+impl Drop for Oracle<'_> {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.dir);
     }
 }
 
 #[test]
 fn native_window_controlled_aliases_and_spills() {
     let (source, c) = fixture(true);
+    let oracle = Oracle::new("controlled", &c);
     for arm in [true, false] {
         for sel in [
             SelectionTier::Baseline,
@@ -263,20 +304,14 @@ fn native_window_controlled_aliases_and_spills() {
                 // The four same-input windows are single-source permutations.
                 assert_eq!(text.matches("pshufd\t").count(), 4, "{text}");
             }
-            oracle(
-                arm,
-                &format!("controlled-{sel:?}"),
-                &source,
-                &c,
-                &text,
-                &obj,
-            );
+            oracle.check(arm, &format!("controlled-{sel:?}"), &source, &text, &obj);
         }
     }
 }
 #[test]
 fn native_window_preserves_both_live_sources_and_exact_loads() {
     let (source, c) = fixture(false);
+    let oracle = Oracle::new("live", &c);
     for arm in [true, false] {
         for sel in [
             SelectionTier::Baseline,
@@ -291,11 +326,10 @@ fn native_window_preserves_both_live_sources_and_exact_loads() {
                         2,
                         "{text}"
                     );
-                    oracle(
+                    oracle.check(
                         arm,
                         &format!("live-{sel:?}-{alloc:?}-{spill}"),
                         &source,
-                        &c,
                         &text,
                         &obj,
                     );
@@ -426,6 +460,7 @@ fn custom_fixed_and_reused_boundary_edits_preserve_shuffle_operands() {
         }
     }
     let (source, c) = fixture_layouts(true, &["distinct"]);
+    let oracle = Oracle::new("fixed-reuse", &c);
     let m = keel_ir::parse(&source).unwrap();
     for arm in [true, false] {
         for registers in [false, true] {
@@ -435,7 +470,7 @@ fn custom_fixed_and_reused_boundary_edits_preserve_shuffle_operands() {
                 text.matches(if arm { "ext\t" } else { "shufpd\t" }).count(),
                 2
             );
-            oracle(
+            oracle.check(
                 arm,
                 if registers {
                     "fixed-register-reuse"
@@ -443,7 +478,6 @@ fn custom_fixed_and_reused_boundary_edits_preserve_shuffle_operands() {
                     "fixed-stack-reuse"
                 },
                 &source,
-                &c,
                 &text,
                 &obj,
             );
@@ -455,6 +489,7 @@ fn custom_fixed_and_reused_boundary_edits_preserve_shuffle_operands() {
 fn load_shuffle_store_debug_lines_keep_their_order() {
     use keel_ir::EntityRef;
     let (source, c) = fixture(false);
+    let oracle = Oracle::new("debug", &c);
     let mut m = keel_ir::parse(&source).unwrap();
     m.files.push("window.c".into());
     for f in &mut m.functions {
@@ -499,7 +534,7 @@ fn load_shuffle_store_debug_lines_keep_their_order() {
                     }
                 }
             }
-            oracle(arm, &format!("debug-{sel:?}"), &source, &c, &text, &obj);
+            oracle.check(arm, &format!("debug-{sel:?}"), &source, &text, &obj);
         }
     }
 }
@@ -533,6 +568,7 @@ fn arm_narrow_window_all_lanes_aliases_spills_and_boundary_edits() {
                 "memcpy(expected,x+8,8);memcpy(expected+8,c->same?x:y,8);",
                 "memcpy(expected,x+12,4);memcpy(expected+4,c->same?x:y,12);",
             );
+        let oracle = Oracle::new("narrow", &c);
         for sel in [SelectionTier::Baseline, SelectionTier::Full] {
             for spill in [false, true] {
                 if controlled && spill {
@@ -547,11 +583,10 @@ fn arm_narrow_window_all_lanes_aliases_spills_and_boundary_edits() {
                         if controlled { 9 } else { 1 },
                         "{text}"
                     );
-                    oracle(
+                    oracle.check(
                         true,
                         &format!("narrow-{controlled}-{sel:?}-{alloc:?}-{spill}"),
                         &ir,
-                        &c,
                         &text,
                         &obj,
                     );
@@ -664,6 +699,7 @@ fn arm_narrow_custom_boundary_edits() {
             "memcpy(expected,x+8,8);memcpy(expected+8,c->same?x:y,8);",
             "memcpy(expected,x+12,4);memcpy(expected+4,c->same?x:y,12);",
         );
+    let oracle = Oracle::new("narrow-fixed-reuse", &c);
     let m = keel_ir::parse(&source).unwrap();
     for arm in [true] {
         for registers in [false, true] {
@@ -673,7 +709,7 @@ fn arm_narrow_custom_boundary_edits() {
                 text.matches(if arm { "ext\t" } else { "shufpd\t" }).count(),
                 1
             );
-            oracle(
+            oracle.check(
                 arm,
                 if registers {
                     "narrow-fixed-register-reuse"
@@ -681,7 +717,6 @@ fn arm_narrow_custom_boundary_edits() {
                     "narrow-fixed-stack-reuse"
                 },
                 &source,
-                &c,
                 &text,
                 &obj,
             );
