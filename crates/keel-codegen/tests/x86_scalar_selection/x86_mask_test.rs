@@ -383,6 +383,7 @@ fn native_gcc_clang_oracles_calls_aliases_and_guarded_exact_loads() {
 #include <sys/mman.h>
 #include <sys/wait.h>
 #include <sys/resource.h>
+#include <sys/prctl.h>
 #include <signal.h>
 #include <unistd.h>
 #include <assert.h>
@@ -513,7 +514,10 @@ block0(v0:ptr,v1:ptr,v2:ptr):
             }
         );
     }
-    c += "int main(void) { struct rlimit lim={0,0}; assert(!setrlimit(RLIMIT_CORE,&lim)); uint32_t edge[]={0,1,0x7fffffff,0x80000000,0xffffffff,0x55555555,0xaaaaaaaa}; for(unsigned i=0;i<263;i++){uint32_t x=i<7?edge[i]:random32(),y=random32(),z=random32();\n";
+    // RLIMIT_CORE does not stop a core_pattern pipe such as Ubuntu's apport,
+    // which takes about a second per deliberate fault. Non-dumpable processes
+    // skip it.
+    c += "int main(void) { struct rlimit lim={0,0}; assert(!setrlimit(RLIMIT_CORE,&lim)); assert(!prctl(PR_SET_DUMPABLE,0)); uint32_t edge[]={0,1,0x7fffffff,0x80000000,0xffffffff,0x55555555,0xaaaaaaaa}; for(unsigned i=0;i<263;i++){uint32_t x=i<7?edge[i]:random32(),y=random32(),z=random32();\n";
     c += &checks;
     c += "}\nlong n=sysconf(_SC_PAGESIZE); unsigned char *m=mmap(0,3*n,PROT_NONE,MAP_SHARED|MAP_ANONYMOUS,-1,0); assert(m!=MAP_FAILED); assert(!mprotect(m+n,n,PROT_READ|PROT_WRITE)); uint32_t *marker=mmap(0,n,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_ANONYMOUS,-1,0); assert(marker!=MAP_FAILED);\n";
     for (tag, width) in [("byte", 1), ("signed_byte", 1), ("word", 2), ("dword", 4)] {

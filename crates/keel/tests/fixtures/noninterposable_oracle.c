@@ -5,6 +5,9 @@
 #include <sys/mman.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 typedef struct { uint64_t a,b,c,d,e; } Big;
 extern signed char clamp_i8(short);
 extern unsigned short mix_u16(unsigned char,signed char,unsigned short);
@@ -30,6 +33,10 @@ static long element(short v) {
     return c*7+m-(short)(v*3)/7+(unsigned char)(v>>3);
 }
 int main(int argc,char **argv) {
+#ifdef __linux__
+    // Ubuntu's apport handles every deliberate fault; non-dumpable processes skip it.
+    assert(!prctl(PR_SET_DUMPABLE,0));
+#endif
     trace=mmap(0,sizeof(*trace),PROT_READ|PROT_WRITE,MAP_SHARED|MAP_ANON,-1,0);
     assert(trace!=MAP_FAILED);
     if(argc>1) {

@@ -191,6 +191,9 @@ fn pclmul_assembler_memory_is_m128_for_every_selector() {
     let harness = r#"
 #include <stdint.h>
 #include <sys/mman.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 #include <sys/wait.h>
 #include <unistd.h>
 #include <signal.h>
@@ -198,6 +201,10 @@ fn pclmul_assembler_memory_is_m128_for_every_selector() {
 extern void memory_0(void*,void*,void*),memory_1(void*,void*,void*),memory_16(void*,void*,void*),memory_17(void*,void*,void*),memory_255(void*,void*,void*);
 int main(void){
  __builtin_cpu_init();if(!__builtin_cpu_supports("pclmul"))return 77;
+#ifdef __linux__
+ /* Ubuntu's apport handles every deliberate fault; non-dumpable processes skip it. */
+ if(prctl(PR_SET_DUMPABLE,0))return 5;
+#endif
  void(*ops[])(void*,void*,void*)={memory_0,memory_1,memory_16,memory_17,memory_255};
  long p=sysconf(_SC_PAGESIZE);unsigned char*m=mmap(0,3*p,PROT_NONE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);if(m==MAP_FAILED||mprotect(m+p,p,PROT_READ|PROT_WRITE))return 1;
  uint64_t a[2]={1,1},out[2];memset(m+p,0x81,p);

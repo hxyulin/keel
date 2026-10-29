@@ -7,6 +7,9 @@
 #include <sys/wait.h>
 #include <sys/resource.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 extern void before_plain(void *,void *), after_plain(void *,void *);
 extern void before_snapshot(void *,void *), after_snapshot(void *,void *);
 extern void footprint(void *,void *);
@@ -90,6 +93,10 @@ static int fault(void *out, void *input, unsigned char *shared, long page) {
 }
 int main(void) {
     struct rlimit core={0,0}; if(setrlimit(RLIMIT_CORE,&core))return 89;
+#ifdef __linux__
+    // Ubuntu's apport ignores RLIMIT_CORE; non-dumpable processes skip it.
+    if(prctl(PR_SET_DUMPABLE,0))return 89;
+#endif
     long page=sysconf(_SC_PAGESIZE);
     unsigned char *a=guard(page), *d=guard(page);
     unsigned char *shared=mmap(0,page,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_ANONYMOUS,-1,0);

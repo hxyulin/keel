@@ -63,9 +63,12 @@ fn source() -> String {
     }
     s
 }
+// RLIMIT_CORE does not stop a core_pattern pipe such as Ubuntu's apport,
+// which takes about a second per deliberate fault. Non-dumpable processes
+// skip it (PR_SET_DUMPABLE is 4).
 fn harness() -> String {
     let mut c = String::from(
-        "#include <stdint.h>\nextern void *memcpy(void*,const void*,__SIZE_TYPE__);extern void *memset(void*,int,__SIZE_TYPE__);extern int memcmp(const void*,const void*,__SIZE_TYPE__);extern int printf(const char*,...);\n#ifdef __linux__\nextern long sysconf(int);extern void*mmap(void*,__SIZE_TYPE__,int,int,int,long);extern int mprotect(void*,__SIZE_TYPE__,int);extern int munmap(void*,__SIZE_TYPE__);extern int fork(void);extern int waitpid(int,int*,int);extern void _exit(int);struct Limit{unsigned long a,b;};extern int setrlimit(int,const struct Limit*);\n#endif\n",
+        "#include <stdint.h>\nextern void *memcpy(void*,const void*,__SIZE_TYPE__);extern void *memset(void*,int,__SIZE_TYPE__);extern int memcmp(const void*,const void*,__SIZE_TYPE__);extern int printf(const char*,...);\n#ifdef __linux__\nextern long sysconf(int);extern void*mmap(void*,__SIZE_TYPE__,int,int,int,long);extern int mprotect(void*,__SIZE_TYPE__,int);extern int munmap(void*,__SIZE_TYPE__);extern int fork(void);extern int waitpid(int,int*,int);extern void _exit(int);struct Limit{unsigned long a,b;};extern int setrlimit(int,const struct Limit*);extern int prctl(int,...);\n#endif\n",
     );
     let mut table = String::from(
         "struct Case{void(*run)(const void*,const void*,const void*,const void*,void*);unsigned bits,ibits,bytes,ibytes,n,scale,alias;const char*name;};static const struct Case cases[]={\n",
@@ -102,7 +105,7 @@ static void expected(const struct Case*c,const unsigned char*base,const unsigned
 static int check(const struct Case*c,const unsigned char*base,const unsigned char*idx,const unsigned char*old,const unsigned char*mask){unsigned char e[128],r[130];memset(r,0x5a,130);expected(c,base,idx,old,mask,e);c->run(base,idx,old,mask,r+1);unsigned size=3*c->bytes+c->ibytes;if(memcmp(r+1,e,size)||r[0]!=0x5a||r[1+size]!=0x5a){printf("failed %s\n",c->name);return 1;}return 0;}
 int main(void){
 #ifdef __linux__
- struct Limit no_core={0,0};setrlimit(4,&no_core);unsigned long page=(unsigned long)sysconf(30);unsigned char*a=mmap(0,3*page,3,0x22,-1,0);if(a==(void*)-1)return 90;if(mprotect(a,page,0)||mprotect(a+2*page,page,0))return 91;for(unsigned i=0;i<page;i++)a[page+i]=i*17+31;
+ struct Limit no_core={0,0};setrlimit(4,&no_core);prctl(4,0,0,0,0);unsigned long page=(unsigned long)sysconf(30);unsigned char*a=mmap(0,3*page,3,0x22,-1,0);if(a==(void*)-1)return 90;if(mprotect(a,page,0)||mprotect(a+2*page,page,0))return 91;for(unsigned i=0;i<page;i++)a[page+i]=i*17+31;
  for(unsigned k=0;k<sizeof(cases)/sizeof(cases[0]);k++){const struct Case*c=&cases[k];unsigned char idx[32],old[32],mask[32];for(unsigned offset=0;offset<16;offset++)for(unsigned pattern=0;pattern<(1u<<c->n);pattern++){
  for(unsigned i=0;i<32;i++){idx[i]=i*3;old[i]=i*31+19;mask[i]=i*7+1;}
  for(unsigned i=0;i<c->n;i++){uint64_t m=(0x123456789abcdefULL&(~0ULL>>(65-c->bits)))|((uint64_t)((pattern>>i)&1)<<(c->bits-1));put(mask+i*c->bits/8,c->bits,m);if(c->alias==1)put(old+i*c->bits/8,c->bits,m);int64_t index=(pattern>>i)&1?(int64_t)i*7-31:(int64_t)(page/c->scale);put(idx+i*c->ibits/8,c->ibits,(uint64_t)index);if(c->alias==2)put(old+i*c->ibits/8,c->ibits,(uint64_t)index);}

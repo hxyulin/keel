@@ -140,6 +140,7 @@ fn harness() -> &'static str {
 #if defined(__linux__) && defined(__x86_64__)
 #include <sys/mman.h>
 #include <sys/wait.h>
+#include <sys/prctl.h>
 #include <signal.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -185,6 +186,8 @@ static void* worker(void*arg){
  return 0;
 }
 int main(void){
+ // Ubuntu's apport ignores RLIMIT_CORE; non-dumpable fault children skip it.
+ CHECK(!prctl(PR_SET_DUMPABLE,0));
  unsigned ca,cb,cc,cd;
  if(!__get_cpuid(1,&ca,&cb,&cc,&cd)||!(cc&(1u<<13))){fputs("CX16 unavailable\n",stderr);return 77;}
  uint64_t rng=7;

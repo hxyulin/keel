@@ -49,12 +49,15 @@ fn execute(bytes: &[u8]) {
 #include <signal.h>
 #include <sys/wait.h>
 #include <sys/resource.h>
+#include <sys/prctl.h>
 #include <unistd.h>
 typedef struct { uint64_t lo, hi; } P;
 extern P aggregate_dup(void *, P);
 int main(void) {
     struct rlimit no_core = {0,0};
     if (setrlimit(RLIMIT_CORE, &no_core)) abort();
+    // Ubuntu's apport ignores RLIMIT_CORE; non-dumpable processes skip it.
+    if (prctl(PR_SET_DUMPABLE, 0)) abort();
     uint64_t tags[] = {0,1,UINT64_MAX-11,UINT64_MAX-10,UINT64_MAX,0x12345678fffffffbULL};
     for (unsigned i=0; i<sizeof(tags)/sizeof(tags[0]); ++i) {
         uint32_t count = 41;
