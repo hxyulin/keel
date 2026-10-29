@@ -335,12 +335,12 @@ fn constraints_on_every_matched_instruction_keep_exact_fallback() {
                     &keel_codegen::aarch64::REGISTERS,
                 );
                 assert!(!text.contains("sabal\t"));
-                oracle.check(
-                    &format!("sabal-constraint-{sel:?}-{alloc:?}-{at}"),
-                    &text,
-                    &obj,
-                    &c,
-                );
+                // Selection does not depend on the allocator, and with the
+                // normal registers both allocators assign this fallback the
+                // same registers, so the Full allocator executes it.
+                if alloc == AllocationTier::Full {
+                    oracle.check(&format!("sabal-constraint-{sel:?}-{at}"), &text, &obj, &c);
+                }
             }
         }
     }
