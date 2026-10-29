@@ -294,21 +294,6 @@ fn harness() -> String {
     c
 }
 #[test]
-fn independent_runtime_harness_compiles() {
-    let dir = std::env::temp_dir().join(format!("keel-v1-oracle-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let c = dir.join("test.c");
-    std::fs::write(&c, harness()).unwrap();
-    let mut clang = Command::new("clang");
-    if cfg!(target_os = "macos") {
-        clang.args(["-target", "x86_64-apple-darwin"]);
-    }
-    run(clang
-        .args(["-Wall", "-Wextra", "-Werror", "-fsyntax-only"])
-        .arg(&c));
-    std::fs::remove_dir_all(dir).unwrap();
-}
-#[test]
 fn strict_v1_executes_against_independent_oracle() {
     let darwin = cfg!(target_os = "macos");
     if !cfg!(all(target_os = "linux", target_arch = "x86_64"))
@@ -372,7 +357,7 @@ fn strict_v1_executes_against_independent_oracle() {
                 obj
             };
             run(clang
-                .args(["-O2", "-fno-builtin"])
+                .args(["-O2", "-fno-builtin", "-Wall", "-Wextra", "-Werror"])
                 .arg(&c)
                 .arg(&input)
                 .arg("-lm")

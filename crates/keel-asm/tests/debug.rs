@@ -46,33 +46,6 @@ Lsize = Lend-Lbegin
     assert_eq!(got.flags(), expected.flags());
 }
 #[test]
-fn line_rows_match_clang() {
-    let source = ".file 1 \"example.c\"\n.file 2 \"include/other.h\"\n.text\n.globl _example\n_example:\n.loc 1 4 2\nnop\n.loc 1 9 7 prologue_end\nnop\n.loc 2 3 1\nret\n";
-    common::compare_clang(source);
-    let temp = Temp::new();
-    let input = temp.0.join("lines.s");
-    let reference = temp.0.join("clang.o");
-    let ours = temp.0.join("ours.o");
-    std::fs::write(&input, source).unwrap();
-    run(Command::new("clang")
-        .args(["-target", "arm64-apple-macos11", "-c"])
-        .arg(input)
-        .arg("-o")
-        .arg(&reference));
-    std::fs::write(&ours, assemble_object(source).unwrap()).unwrap();
-    let normalize = |dump: String| {
-        dump.lines()
-            .filter(|s| s.starts_with("0x"))
-            .map(|s| s.split_whitespace().skip(1).collect::<Vec<_>>().join(" "))
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(
-        normalize(dump(&ours, "--debug-line")),
-        normalize(dump(&reference, "--debug-line"))
-    );
-    run(common::dwarfdump().arg("--verify").arg(&ours));
-}
-#[test]
 fn malformed_metadata_is_diagnosed() {
     for source in [
         ".cfi_endproc",

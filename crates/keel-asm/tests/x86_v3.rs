@@ -17,7 +17,8 @@ fn ymm_transport_identity_and_format() {
 }
 
 use keel_asm::x86::{
-    Features, assemble_object_with_features, assemble_program_object_with_features,
+    Features, Syntax, assemble_object_with_features, assemble_object_with_syntax_and_features,
+    assemble_program_object_with_features,
 };
 use keel_asm_ir::{
     Program,
@@ -203,6 +204,23 @@ fn differential_syntax(cases: Vec<String>, label: &str, att_syntax: bool) {
     };
     let input = dir.join("input.s");
     std::fs::write(&input, format!("{syntax}\n{source}")).unwrap();
+    // Keel assembles each row once. The AT&T matrix also checks that Keel's
+    // AT&T text encodes like its Intel text, including rows an oracle skips.
+    let own_objects = cases
+        .iter()
+        .map(|s| {
+            let intel = assemble_object_with_features(s, Features::all_known()).unwrap();
+            if !att_syntax {
+                return intel;
+            }
+            let att = att(&Instruction::parse_intel(s).unwrap());
+            let object =
+                assemble_object_with_syntax_and_features(&att, Syntax::Att, Features::all_known())
+                    .unwrap_or_else(|e| panic!("{s} -> {att}: {e}"));
+            assert_eq!(text(&intel), text(&object), "{s} -> {att}");
+            object
+        })
+        .collect::<Vec<_>>();
     let gnu_as = std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into());
     let mut differences = Vec::new();
     for tool in ["clang", gnu_as.as_str()] {
@@ -264,11 +282,10 @@ fn differential_syntax(cases: Vec<String>, label: &str, att_syntax: bool) {
                 continue;
             }
             let expected = sections[format!(".case{n}").as_str()];
-            let own_object = assemble_object_with_features(s, Features::all_known()).unwrap();
-            let ours = text(&own_object);
+            let ours = text(&own_objects[n]);
             if label == "relocations" {
                 assert_eq!(
-                    relocations(&own_object, ".text"),
+                    relocations(&own_objects[n], ".text"),
                     relocations(&bytes, &format!(".case{n}")),
                     "{tool}: relocations {s}"
                 );
@@ -483,21 +500,6 @@ fn att(i: &Instruction) -> String {
     format!("{name} {operands}")
 }
 #[test]
-fn all_forms_att_and_intel_encode_identically() {
-    use keel_asm::x86::{Syntax, assemble_object_with_syntax_and_features};
-    let mut sources = cases();
-    sources.extend(scalar_cases());
-    for source in sources {
-        let i = Instruction::parse_intel(&source).unwrap();
-        let att = att(&i);
-        let a = assemble_object_with_features(&source, Features::all_known()).unwrap();
-        let b = assemble_object_with_syntax_and_features(&att, Syntax::Att, Features::all_known())
-            .unwrap_or_else(|e| panic!("{source} -> {att}: {e}"));
-        assert_eq!(text(&a), text(&b), "{source} -> {att}");
-    }
-}
-
-#[test]
 fn malformed_typed_and_parsed_operands_are_rejected() {
     use keel_asm_ir::x86::{Address, Modifier, Operand};
     let reject = |i: Instruction| {
@@ -684,7 +686,6 @@ fn relocations(bytes: &[u8], section: &str) -> Vec<(u64, object::RelocationFlags
 }
 #[test]
 fn symbolic_ymm_vsib_and_trailing_immediates_match_external_relocations() {
-    use keel_asm::x86::{Syntax, assemble_object_with_syntax_and_features};
     let sources = [
         "vaddps ymm15,ymm14,ymmword ptr [rip+external+7]",
         "vroundps ymm15,ymmword ptr [rip+external+7],255",

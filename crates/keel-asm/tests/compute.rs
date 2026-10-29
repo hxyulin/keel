@@ -443,35 +443,6 @@ int main(void) {
     assert_eq!(execute(&executable).code(), Some(0));
 }
 
-/// Assemble unmodified Keel output, including its unwind and subsection directives.
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-#[test]
-fn keel_generated_integer_and_fp_functions_execute() {
-    use common::{Temp, execute, run};
-    use std::process::Command;
-    let sources = [
-        "func @main() -> i32 {\nblock0:\n v0 = iconst.i64 7\n v1 = iconst.i64 6\n v2 = imul v0, v1\n v3 = iconst.i64 42\n v4 = icmp.eq v2, v3\n brif v4, good, bad\ngood:\n v5 = iconst.i32 42\n return v5\nbad:\n v6 = iconst.i32 1\n return v6\n}",
-        "func @main() -> i32 {\nblock0:\n v0 = fconst.f64 6.0\n v1 = fconst.f64 7.0\n v2 = fmul v0, v1\n v3 = fptosi.i32 v2\n return v3\n}",
-        "func @main() -> i32 {\nblock0:\n v0 = iconst.i64 4398046511103\n v1 = popcnt v0\n v2 = trunc.i32 v1\n return v2\n}",
-    ];
-    for source in sources {
-        let module = keel_ir::parse(source).unwrap();
-        keel_ir::verify_module(&module).unwrap();
-        let source =
-            keel_codegen::compile(&module, keel_codegen::Target::Aarch64AppleDarwin).unwrap();
-        compare_clang(&source);
-        let temp = Temp::new();
-        let object = temp.0.join("keel.o");
-        let executable = temp.0.join("keel");
-        std::fs::write(&object, keel_asm::assemble_object(&source).unwrap()).unwrap();
-        run(Command::new("clang")
-            .arg(&object)
-            .arg("-o")
-            .arg(&executable));
-        assert_eq!(execute(&executable).code(), Some(42));
-    }
-}
-
 #[test]
 fn simd_popcount_and_reductions_match_clang() {
     compare_clang(

@@ -46,12 +46,14 @@ pub fn dwarfdump() -> Command {
     Command::new(tool)
 }
 
+#[allow(dead_code)] // Not every integration test compares with Clang.
 pub fn compare_clang(source: &str) {
     compare_clang_with_features(source, keel_asm::TargetFeatures::default(), &[]);
 }
 
 /// Optional ISA flags apply only to the reference assembly in this comparison.
 /// They do not change the default target or enable host execution.
+#[allow(dead_code)]
 pub fn compare_clang_with_features(
     source: &str,
     features: keel_asm::TargetFeatures,
