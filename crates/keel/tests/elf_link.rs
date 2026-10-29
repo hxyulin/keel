@@ -531,3 +531,49 @@ fn sframe_failures_preserve_cli_destination_at_every_validation_stage() {
         assert_eq!(data[3], 5);
     }
 }
+
+#[test]
+fn one_dash_long_options_and_target_spellings() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("elf-cli-long-options");
+    std::fs::create_dir_all(&dir).unwrap();
+    let object = keel_asm::x86::assemble_object(".text\n.globl _start\n_start:\nret\n").unwrap();
+    std::fs::write(dir.join("start.o"), object).unwrap();
+    let link = |options: &[&str]| {
+        let mut args = vec!["link"];
+        args.extend(options);
+        args.extend(["start.o", "-o", "program"]);
+        invoke(&dir, &args)
+    };
+    let target = ["--target", "x86_64-unknown-linux-gnu"];
+    // GNU ld long options keep their name instead of becoming `-e` or `-T`
+    // with an attached value.
+    for (option, message) in [
+        ("-export-dynamic", "option `-export-dynamic`"),
+        ("-eh-frame-hdr", "option `-eh-frame-hdr`"),
+        ("-Ttext=0x10000", "`-Ttext=0x10000`; set section addresses"),
+        ("-Tdata=0x10000", "`-Tdata=0x10000`; set section addresses"),
+        ("-Tbss=0x10000", "`-Tbss=0x10000`; set section addresses"),
+    ] {
+        let output = link(&[target[0], target[1], option]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "{option}");
+        assert!(stderr.contains(message), "{option}: {stderr}");
+    }
+    let mut images = Vec::new();
+    for options in [
+        &[target[0], target[1]][..],
+        &["--target=x86_64-unknown-linux-gnu"],
+        &["-target", "x86_64-unknown-linux-gnu"],
+        &[target[0], target[1], "-entry=_start"],
+        &[target[0], target[1], "-e_start"],
+    ] {
+        let output = link(options);
+        assert!(
+            output.status.success(),
+            "{options:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        images.push(std::fs::read(dir.join("program")).unwrap());
+    }
+    assert!(images.iter().all(|image| image == &images[0]));
+}

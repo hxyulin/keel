@@ -54,7 +54,11 @@ link the installed CRT objects explicitly (see
 | `--target aarch64-apple-darwin` | Use the [Mach-O linker](macho.md) instead. |
 | `--system ...` | Forward to the Clang driver instead. |
 
-Other options are rejected. Native Linux links also search the conventional
+Other options are rejected. As in GNU ld, a known multi-letter option may take
+one dash: `-entry=SYM` is `--entry=SYM`, and `-export-dynamic` is rejected as
+an option rather than read as `-e xport-dynamic`. `-Ttext=`, `-Tdata=` and
+`-Tbss=` are rejected; set section addresses in a linker script. `--target`
+also accepts `--target=TRIPLE` and `-target TRIPLE`. Native Linux links also search the conventional
 x86-64 Linux library directories. Cross links consult only explicit paths and
 `--sysroot`, never host Darwin directories, and nothing is downloaded.
 

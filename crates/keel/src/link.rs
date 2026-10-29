@@ -137,8 +137,13 @@ pub fn run(args: &[String]) -> Result<(), String> {
             native_args.push(arg.clone());
             native_args.extend(iter.cloned());
             break;
-        } else if arg == "--target" {
+        } else if arg == "--target" || arg == "-target" {
             target = iter.next().ok_or("--target requires a target triple")?;
+        } else if let Some(value) = arg
+            .strip_prefix("--target=")
+            .or_else(|| arg.strip_prefix("-target="))
+        {
+            target = value;
         } else {
             native_args.push(arg.clone());
             if native_value_option(arg)
@@ -389,6 +394,32 @@ fn append_elf_script(script: &mut Option<String>, path: &str) -> Result<(), Stri
     Ok(())
 }
 
+/// GNU ld long options, named without dashes, that one dash must not turn
+/// into a short option with an attached value (`-e`, `-T`, `-L`, `-l`).
+fn elf_long_option(arg: &str) -> bool {
+    let name = arg.split_once('=').map_or(arg, |(name, _)| name);
+    matches!(
+        name,
+        "entry"
+            | "script"
+            | "eh-frame-hdr"
+            | "emit-relocs"
+            | "enable-new-dtags"
+            | "end-group"
+            | "error-unresolved-symbols"
+            | "exclude-libs"
+            | "export-dynamic"
+            | "library"
+            | "library-path"
+            | "Tbss"
+            | "Tdata"
+            | "Ttext"
+            | "Ttext-segment"
+            | "Trodata-segment"
+            | "Tldata-segment"
+    )
+}
+
 fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), String> {
     use keel_link::elf_selection::{Request as SelectionRequest, Selection};
     enum Request {
@@ -412,7 +443,18 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
     let mut group_depth = 0usize;
     let mut relocatable = false;
     let mut args = args.iter();
-    while let Some(arg) = args.next() {
+    while let Some(original) = args.next() {
+        // Like GNU ld, read a known multi-letter option after one dash as the
+        // long option before trying short prefixes: `-export-dynamic` is not
+        // `-e xport-dynamic`.
+        let long;
+        let arg = match original.strip_prefix('-') {
+            Some(rest) if !rest.starts_with('-') && elf_long_option(rest) => {
+                long = format!("-{original}");
+                &long
+            }
+            _ => original,
+        };
         match arg.as_str() {
             "-o" => output = args.next().ok_or("-o requires a path")?.into(),
             "-e" | "--entry" => {
@@ -480,6 +522,15 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
                 requests.extend(args.map(|a| Request::Path(a.into())));
                 break;
             }
+            a if ["--Ttext", "--Tdata", "--Tbss"].iter().any(|o| {
+                a.strip_prefix(o)
+                    .is_some_and(|v| v.is_empty() || v.starts_with('='))
+            }) =>
+            {
+                return Err(format!(
+                    "unsupported native ELF linker option `{original}`; set section addresses in a linker script (-T)"
+                ));
+            }
             a if a.starts_with("--entry=") => {
                 options.entry = a[8..].into();
                 options.entry_override = Some(options.entry.clone());
@@ -496,7 +547,7 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
             }
             a if a.starts_with("--sysroot=") => sysroot = Some(a[10..].into()),
             a if a.starts_with('-') => {
-                return Err(format!("unsupported native ELF linker option `{a}`"));
+                return Err(format!("unsupported native ELF linker option `{original}`"));
             }
             _ => requests.push(Request::Path(PathBuf::from(arg))),
         }
