@@ -238,7 +238,7 @@ pub enum Builtin {
         kind: GenericAtomicOp,
         size: u8,
     },
-    /// Floating arithmetic retried with representation-based CAS.
+    /// Floating and `_Bool` arithmetic retried with representation-based CAS.
     AtomicFloatRmw {
         op: BinOp,
         new: bool,

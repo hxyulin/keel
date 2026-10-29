@@ -4706,7 +4706,10 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         }
         if let Builtin::AtomicFloatRmw { op, new } = op {
             let ty = e.ty;
-            let bits = if ty == Ty::Float {
+            let float = ty.is_float();
+            let bits = if !float {
+                ty.ir_with_layout(self.g.p.c_layout)
+            } else if ty == Ty::Float {
                 Type::I32
             } else {
                 Type::I64
@@ -4717,15 +4720,23 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             let expected = self.b.append_block_param(retry, bits);
             self.b.ins().jump(retry, &[first]);
             self.switch_to(retry);
-            let old = self.b.ins().convert(
-                ConvertOp::Bitcast,
-                ty.ir_with_layout(self.g.p.c_layout),
-                expected,
-            );
+            let old = if float {
+                self.b.ins().convert(
+                    ConvertOp::Bitcast,
+                    ty.ir_with_layout(self.g.p.c_layout),
+                    expected,
+                )
+            } else {
+                expected
+            };
             let x = self.convert(old, &ty, &args[1].ty, e.loc)?;
             let value = self.arith(op, &args[1].ty, x, vals[1], e.loc)?;
             let value = self.convert(value, &args[1].ty, &ty, e.loc)?;
-            let desired = self.b.ins().convert(ConvertOp::Bitcast, bits, value);
+            let desired = if float {
+                self.b.ins().convert(ConvertOp::Bitcast, bits, value)
+            } else {
+                value
+            };
             let found = self
                 .b
                 .ins()

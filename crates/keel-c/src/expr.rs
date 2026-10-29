@@ -250,6 +250,45 @@ impl<'a> Parser<'a> {
                     loc,
                 ));
             }
+            if ty == Ty::Int(IntKind::Bool) && op != "=" {
+                // An integer RMW on the byte could store values other than
+                // 0 and 1, so retry the converted result with CAS.
+                let bin = match op {
+                    "+=" => BinOp::Add,
+                    "-=" => BinOp::Sub,
+                    "&=" => BinOp::And,
+                    "|=" => BinOp::Or,
+                    "^=" => BinOp::Xor,
+                    _ => {
+                        return Err(Error::new(
+                            loc,
+                            format!("`{op}` on an `_Atomic` object is not supported"),
+                        ));
+                    }
+                };
+                let rhs = self.rvalue(rhs);
+                if !rhs.ty.is_arith() || rhs.ty.is_complex() {
+                    return Err(Error::new(loc, format!("invalid operands to `{op}`")));
+                }
+                let calc = usual_with_layout(&ty, &rhs.ty, self.c_layout);
+                if matches!(bin, BinOp::And | BinOp::Or | BinOp::Xor) && !calc.is_integer() {
+                    return Err(Error::new(loc, "operation needs integers"));
+                }
+                let rhs = self.cast(rhs, calc);
+                let args = vec![
+                    self.address_of_atomic(lhs),
+                    rhs,
+                    mk(ExprKind::Int(5), INT, loc),
+                ];
+                return Ok(mk(
+                    ExprKind::Builtin(
+                        Builtin::AtomicFloatRmw { op: bin, new: true },
+                        self.slice(&args),
+                    ),
+                    ty,
+                    loc,
+                ));
+            }
             let rmw = match op {
                 "=" => None,
                 "+=" => Some(RmwOp::Add),
@@ -1210,7 +1249,13 @@ impl<'a> Parser<'a> {
             };
             let step = mk(ExprKind::Int(step), LONG, loc);
             let step = self.cast(step, rmw_ty);
-            let op = if inc { RmwOp::Add } else { RmwOp::Sub };
+            // `_Bool` stays 0 or 1: `++` sets it and `--` flips it.
+            let op = match (ty == Ty::Int(IntKind::Bool), inc) {
+                (true, true) => RmwOp::Or,
+                (true, false) => RmwOp::Xor,
+                (false, true) => RmwOp::Add,
+                (false, false) => RmwOp::Sub,
+            };
             let sugar = *e.sugar.unqualified(&self.typedefs);
             let args = vec![
                 self.address_of_atomic(e),

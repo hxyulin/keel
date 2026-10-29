@@ -378,3 +378,80 @@ fn generic_buffers_preserve_volatile_members() {
         }
     }
 }
+
+/// `_Atomic _Bool` read-modify-writes store 0 or 1 and give the values plain
+/// `_Bool` gives. Clang's `_Atomic _Bool` lowering stores other values, so the
+/// reference is the same program with plain `_Bool`, built by Clang.
+#[test]
+#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+fn native_atomic_bool_rmw_matches_plain_bool() {
+    use std::process::Command;
+    fn run(cmd: &mut Command) -> std::process::Output {
+        let out = cmd.output().unwrap();
+        assert!(
+            out.status.success(),
+            "{cmd:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        out
+    }
+    const BODY: &str = r#"
+extern int printf(const char *, ...);
+static void show(QUAL _Bool *b, int v) {
+    printf("%d %u\n", v, *(unsigned char *)b);
+}
+int main(void) {
+    QUAL _Bool b;
+    for (int start = 0; start < 2; start++) {
+        b = start; show(&b, b++);
+        b = start; show(&b, ++b);
+        b = start; show(&b, b--);
+        b = start; show(&b, --b);
+        b = start; show(&b, b += 1);
+        b = start; show(&b, b -= 1);
+        b = start; show(&b, b += 256);
+        b = start; show(&b, b -= 0.5);
+        b = start; show(&b, b &= 2);
+        b = start; show(&b, b |= 2);
+        b = start; show(&b, b ^= 3);
+    }
+    return 0;
+}
+"#;
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("atomic-bool-rmw");
+    std::fs::create_dir_all(&dir).unwrap();
+    let plain = dir.join("plain.c");
+    std::fs::write(&plain, BODY.replace("QUAL ", "")).unwrap();
+    let reference = dir.join("clang");
+    run(Command::new("clang").arg(&plain).arg("-o").arg(&reference));
+    let want = run(&mut Command::new(&reference)).stdout;
+    let src = BODY.replace("QUAL", "_Atomic");
+    for target in [Target::Aarch64AppleDarwin, Target::X86_64LinuxGnu] {
+        for optimize in [false, true] {
+            let opts = keel_c::Options {
+                target,
+                ..Default::default()
+            };
+            let mut m = keel_c::compile(&src, "atomic_bool.c", opts).unwrap();
+            keel_ir::verify_module(&m).unwrap();
+            if optimize {
+                keel_opt::optimize(&mut m).unwrap();
+            }
+            keel_ir::verify_module(&m).unwrap();
+            let asm = keel_codegen::compile(&m, target).unwrap();
+            if target != Target::Aarch64AppleDarwin {
+                continue;
+            }
+            let path = dir.join(format!("keel-{optimize}"));
+            let asm_path = path.with_extension("s");
+            std::fs::write(&asm_path, asm).unwrap();
+            run(Command::new("clang").arg(&asm_path).arg("-o").arg(&path));
+            let got = run(&mut Command::new(path)).stdout;
+            assert_eq!(
+                String::from_utf8_lossy(&got),
+                String::from_utf8_lossy(&want),
+                "optimize={optimize}"
+            );
+        }
+    }
+}
