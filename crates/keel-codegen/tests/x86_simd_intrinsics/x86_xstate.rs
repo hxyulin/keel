@@ -1,4 +1,5 @@
 //! Owned standard-format xstate; Linux execution belongs to the parent runner.
+use crate::common;
 use keel_asm_ir::x86::{CpuLevel, Features};
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
@@ -7,9 +8,6 @@ use keel_codegen::{
 };
 use keel_ir::EntityRef;
 use std::{fs, path::PathBuf, process::Command};
-#[allow(dead_code)]
-#[path = "common/vector.rs"]
-pub mod common;
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -224,13 +222,17 @@ fn xstate_contract_and_packet() {
         .clone()
         .unwrap_or_else(|| common::temp("xstate-packet"));
     fs::create_dir_all(&d).unwrap();
-    fs::write(d.join("test.c"), include_str!("x86_xstate/test.c")).unwrap();
-    fs::write(d.join("README.md"), include_str!("x86_xstate/README.md")).unwrap();
-    fs::write(d.join("encoding.S"), include_str!("x86_xstate/encoding.S")).unwrap();
-    fs::write(d.join("builtin.c"), include_str!("x86_xstate/builtin.c")).unwrap();
+    fs::write(d.join("test.c"), include_str!("../x86_xstate/test.c")).unwrap();
+    fs::write(d.join("README.md"), include_str!("../x86_xstate/README.md")).unwrap();
+    fs::write(
+        d.join("encoding.S"),
+        include_str!("../x86_xstate/encoding.S"),
+    )
+    .unwrap();
+    fs::write(d.join("builtin.c"), include_str!("../x86_xstate/builtin.c")).unwrap();
     fs::write(d.join("test.ir"), source(true)).unwrap();
-    fs::write(d.join("probe.S"), include_str!("x86_xstate/probe.S")).unwrap();
-    fs::write(d.join("run.py"), include_str!("x86_xstate/run.py")).unwrap();
+    fs::write(d.join("probe.S"), include_str!("../x86_xstate/probe.S")).unwrap();
+    fs::write(d.join("run.py"), include_str!("../x86_xstate/run.py")).unwrap();
     let mut names = String::new();
     for s in [
         SelectionTier::Baseline,
@@ -290,7 +292,7 @@ fn xstate_contract_and_packet() {
         0x48, 0x0f, 0xae, 0x21, 0x48, 0x0f, 0xae, 0x29, 0x49, 0x0f, 0xae, 0x64, 0x24, 0x40, 0x49,
         0x0f, 0xae, 0x6c, 0x24, 0x40,
     ];
-    let asm = include_str!("x86_xstate/encoding.S");
+    let asm = include_str!("../x86_xstate/encoding.S");
     let obj = keel_asm::x86::assemble_object_with_features(asm, Features::for_level(CpuLevel::V3))
         .unwrap();
     let text_bytes = |b: &[u8]| {

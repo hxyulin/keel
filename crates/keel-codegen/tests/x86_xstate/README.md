@@ -4,7 +4,7 @@ The `x86_xstate` test generates a self-contained packet of objects, sources and
 a runner for checking Keel's XSAVE/XRSTOR-family code on real x86-64 hardware.
 Export the packet with:
 
-    KEEL_X86_XSTATE_EXPORT_DIR=/absolute/packet cargo test -p keel-codegen --test x86_xstate -- --nocapture
+    KEEL_X86_XSTATE_EXPORT_DIR=/absolute/packet cargo test -p keel-codegen --test x86_simd_intrinsics -- x86_xstate:: --nocapture
 
 Then run it on native x86-64 Linux:
 

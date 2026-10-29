@@ -1,4 +1,5 @@
 //! Architectural count semantics, independent of portable modulo shifts.
+use crate::common;
 use keel_asm_ir::x86::{CpuLevel, Features};
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
@@ -6,9 +7,6 @@ use keel_codegen::{
     x86_features::FeatureSelector,
 };
 use std::{fs, process::Command};
-#[allow(dead_code)]
-#[path = "common/vector.rs"]
-pub mod common;
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
