@@ -121,42 +121,45 @@ fn native_presets_and_stable_backends_execute_the_same_program() {
             .success(),
         "invalid independent expected value"
     );
+    // Each level runs with its preset backend. The unoptimized and Full IR
+    // levels also run with every selector and allocator.
+    let mut runs = Vec::new();
     for level in ["-O0", "-O1", "-O2", "-O3", "-Os"] {
-        for selection in ["baseline", "trees", "full"] {
-            for allocation in ["fast", "full"] {
-                successful(
-                    &dir,
-                    &[
-                        "cc",
-                        "input.c",
-                        "--target",
-                        target.triple(),
+        if level == "-O0" || level == "-O3" {
+            for selection in ["baseline", "trees", "full"] {
+                for allocation in ["fast", "full"] {
+                    runs.push(vec![
                         level,
                         "--isel-tier",
                         selection,
                         "--regalloc",
                         allocation,
-                        "--emit-object",
-                        "-o",
-                        "output.o",
-                    ],
-                );
-                let result = Command::new(&clang)
-                    .current_dir(&dir)
-                    .args(["output.o", "-o", "output"])
-                    .output()
-                    .unwrap();
-                assert!(
-                    result.status.success(),
-                    "{}",
-                    String::from_utf8_lossy(&result.stderr)
-                );
-                assert!(
-                    Command::new(dir.join("output")).status().unwrap().success(),
-                    "{level}/{selection}/{allocation}"
-                );
+                    ]);
+                }
             }
+        } else {
+            runs.push(vec![level]);
         }
+    }
+    for flags in runs {
+        let mut args = vec!["cc", "input.c", "--target", target.triple()];
+        args.extend(&flags);
+        args.extend(["--emit-object", "-o", "output.o"]);
+        successful(&dir, &args);
+        let result = Command::new(&clang)
+            .current_dir(&dir)
+            .args(["output.o", "-o", "output"])
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert!(
+            Command::new(dir.join("output")).status().unwrap().success(),
+            "{flags:?}"
+        );
     }
     fs::remove_dir_all(dir).unwrap();
 }

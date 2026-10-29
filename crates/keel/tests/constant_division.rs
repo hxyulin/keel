@@ -109,8 +109,21 @@ fn reciprocal_division_executes_against_independent_dynamic_division() {
     let (source, harness) = sources();
     fs::write(dir.join("division.c"), source).unwrap();
     fs::write(dir.join("harness.c"), harness).unwrap();
-    for tier in ["none", "basic", "full"] {
-        for selector in ["none", "trees", "folds", "hints", "all"] {
+    run(Command::new("clang").current_dir(&dir).args([
+        "-O2",
+        "-c",
+        "harness.c",
+        "-o",
+        "harness.o",
+    ]));
+    // Every selector runs on the reciprocal sequences. The emission test above
+    // covers the unoptimized and Basic tiers with every selector.
+    for (tier, selectors) in [
+        ("none", &["all"][..]),
+        ("basic", &["all"][..]),
+        ("full", &["none", "trees", "folds", "hints", "all"][..]),
+    ] {
+        for &selector in selectors {
             keel(
                 &dir,
                 &[
@@ -126,8 +139,7 @@ fn reciprocal_division_executes_against_independent_dynamic_division() {
                 ],
             );
             run(Command::new("clang").current_dir(&dir).args([
-                "-O2",
-                "harness.c",
+                "harness.o",
                 "division.o",
                 "-o",
                 "check",

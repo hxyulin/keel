@@ -127,6 +127,11 @@ fn native_alias_zero_trip_and_wrapping_oracle() {
     for v in variants(&dir) {
         for isel in ["none", "all"] {
             for allocation in ["fast", "full"] {
+                // The unoptimized input is a control for the oracle; one
+                // backend is enough for it.
+                if v == "before" && (isel, allocation) != ("all", "full") {
+                    continue;
+                }
                 let source = format!("{v}.keel");
                 let stem = format!("{v}-{isel}-{allocation}");
                 keel(

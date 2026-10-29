@@ -188,6 +188,11 @@ fn native_independent_abi_alias_wrapping_volatile_atomic_capture_and_fault_oracl
         "reference",
     ]));
     command(&mut Command::new(dir.join("reference")));
+    command(
+        Command::new("clang")
+            .current_dir(&dir)
+            .args(["-O2", "-c", "oracle.c", "-o", "oracle.o"]),
+    );
     for tier in [
         keel_opt::OptimizationTier::Fast,
         keel_opt::OptimizationTier::Full,
@@ -226,7 +231,7 @@ fn native_independent_abi_alias_wrapping_volatile_atomic_capture_and_fault_oracl
             command(
                 Command::new("clang")
                     .current_dir(&dir)
-                    .args(["-O2", "oracle.c", &obj, "-o", &tag]),
+                    .args(["oracle.o", &obj, "-o", &tag]),
             );
             command(&mut Command::new(dir.join(&tag)));
             command(Command::new(dir.join(&tag)).arg("faults"));
@@ -341,6 +346,14 @@ fn c_binding_mode_preserves_native_abi_effects_and_faults() {
     )
     .unwrap();
     fs::write(dir.join("oracle.c"), ORACLE).unwrap();
+    command(Command::new("clang").current_dir(&dir).args([
+        "-O2",
+        "-fno-strict-aliasing",
+        "-c",
+        "oracle.c",
+        "-o",
+        "oracle.o",
+    ]));
     for (index, flags) in [
         vec!["-fsemantic-interposition"],
         vec!["-fno-semantic-interposition"],
@@ -355,14 +368,11 @@ fn c_binding_mode_preserves_native_abi_effects_and_faults() {
         let mut args = vec!["cc", "-O", "--emit-object", "source.c", "-o", &obj];
         args.extend(flags);
         keel(&dir, &args);
-        command(Command::new("clang").current_dir(&dir).args([
-            "-O2",
-            "-fno-strict-aliasing",
-            "oracle.c",
-            &obj,
-            "-o",
-            &exe,
-        ]));
+        command(
+            Command::new("clang")
+                .current_dir(&dir)
+                .args(["oracle.o", &obj, "-o", &exe]),
+        );
         command(&mut Command::new(dir.join(&exe)));
         command(Command::new(dir.join(&exe)).arg("faults"));
     }

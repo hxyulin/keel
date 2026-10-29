@@ -273,28 +273,27 @@ fn large_cfg_object_routes_cross_targets_and_arm_native_oracle() {
                         &format!("{stem}-text.o"),
                     ],
                 );
+                // The routes have identical code, so execute the direct object only.
                 assert_eq!(
                     text(&dir.join(format!("{stem}.o"))),
                     text(&dir.join(format!("{stem}-text.o")))
                 );
                 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
                 if target == "aarch64-apple-darwin" {
-                    for route in ["", "-text"] {
-                        let executable = format!("{stem}{route}-check");
-                        run(
-                            &dir,
-                            Command::new("clang").current_dir(&dir).args([
-                                "oracle.o",
-                                &format!("{stem}{route}.o"),
-                                "-o",
-                                &executable,
-                            ]),
-                        );
-                        assert_eq!(
-                            run(&dir, Command::new(dir.join(&executable)).current_dir(&dir)).trim(),
-                            "1344 by-field large-CFG oracle cases passed"
-                        );
-                    }
+                    let executable = format!("{stem}-check");
+                    run(
+                        &dir,
+                        Command::new("clang").current_dir(&dir).args([
+                            "oracle.o",
+                            &format!("{stem}.o"),
+                            "-o",
+                            &executable,
+                        ]),
+                    );
+                    assert_eq!(
+                        run(&dir, Command::new(dir.join(&executable)).current_dir(&dir)).trim(),
+                        "1344 by-field large-CFG oracle cases passed"
+                    );
                 }
             }
         }

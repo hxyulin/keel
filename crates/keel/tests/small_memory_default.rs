@@ -10,40 +10,30 @@ fn implicit_full_expands_16_bytes_and_preserves_fallbacks() {
             fs::write(dir.join("copy.c"), format!(
                 "void copy(char *d, char *s, unsigned long n) {{ __builtin_memcpy(d, s, {length}); }}"
             )).unwrap();
-            for tier in ["none", "basic", "full"] {
-                let args = if tier == "full" {
-                    vec!["-O"]
-                } else {
-                    vec!["--opt-tier", tier]
-                };
-                for emit in ["--emit-ir", "asm", "--emit-object"] {
-                    let mut command = Command::new(env!("CARGO_BIN_EXE_keel"));
-                    command
-                        .current_dir(&dir)
-                        .args(["cc", "--target", target])
-                        .args(&args)
-                        .args(if emit == "asm" {
-                            vec!["copy.c"]
-                        } else if emit == "--emit-object" {
-                            vec![emit, "copy.c", "-o", "copy.o"]
-                        } else {
-                            vec![emit, "copy.c"]
-                        });
-                    let output = command.output().unwrap();
-                    assert!(
-                        output.status.success(),
-                        "{}",
-                        String::from_utf8_lossy(&output.stderr)
-                    );
-                    if emit != "--emit-object" {
-                        let text = String::from_utf8(output.stdout).unwrap();
-                        assert_eq!(
-                            text.contains("memcpy"),
-                            tier != "full" || length != "16",
-                            "{target} {tier} {length} {emit}: {text}"
-                        );
-                    }
-                }
+            // keel-opt small_memory::full_expands_small_memory_before_stack_forward_only
+            // checks every tier and length on IR; this checks the -O driver path.
+            for emit in ["--emit-ir", "asm"] {
+                let mut command = Command::new(env!("CARGO_BIN_EXE_keel"));
+                command
+                    .current_dir(&dir)
+                    .args(["cc", "--target", target, "-O"])
+                    .args(if emit == "asm" {
+                        vec!["copy.c"]
+                    } else {
+                        vec![emit, "copy.c"]
+                    });
+                let output = command.output().unwrap();
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                let text = String::from_utf8(output.stdout).unwrap();
+                assert_eq!(
+                    text.contains("memcpy"),
+                    length != "16",
+                    "{target} {length} {emit}: {text}"
+                );
             }
         }
     }

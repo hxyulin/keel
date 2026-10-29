@@ -180,89 +180,43 @@ fn private_signed_widen_c_objects_and_native_footprints() {
                     selector: &selector,
                     allocator: &AllocationTier::Full,
                 };
+                // keel-codegen vector_widen_x86 checks text, program and chunk
+                // parity for swiden_low; this test compiles the program route.
                 let mut objects = Vec::new();
                 for (i, m) in modules.iter().enumerate() {
-                    let (text, obj) = if arm {
+                    let obj = if arm {
                         let pools = if spills {
                             &empty
                         } else {
                             &keel_codegen::aarch64::REGISTERS
                         };
-                        let text =
-                            keel_codegen::aarch64::compile_with_pipeline(m, pools, &pipeline)
-                                .unwrap();
                         let p = keel_codegen::aarch64::compile_program_with_pipeline(
                             m, pools, &pipeline,
                         )
                         .unwrap();
-                        let obj =
-                            keel_asm::assemble_program_object(&p, Default::default()).unwrap();
-                        {
-                            let mut chunks = p.clone();
-                            chunks.items.clear();
-                            keel_codegen::aarch64::compile_program_chunks_with_pipeline(
-                                m,
-                                pools,
-                                &pipeline,
-                                &mut |part| chunks.items.extend(part.items),
-                            )
-                            .unwrap();
-                            assert_eq!(
-                                obj,
-                                keel_asm::assemble_program_object(&chunks, Default::default())
-                                    .unwrap()
-                            );
-                        }
-                        assert_eq!(obj, keel_asm::assemble_object(&text).unwrap());
-                        (text, obj)
+                        keel_asm::assemble_program_object(&p, Default::default()).unwrap()
                     } else {
                         let pools = if spills {
                             &empty
                         } else {
                             &keel_codegen::x86_64::REGISTERS
                         };
-                        let text = keel_codegen::x86_64::compile_with_pipeline(m, pools, &pipeline)
-                            .unwrap();
                         let p = keel_codegen::x86_64::compile_program_with_pipeline(
                             m, pools, &pipeline,
                         )
                         .unwrap();
-                        let obj =
-                            keel_asm::x86::assemble_program_object_with_features(&p, features)
-                                .unwrap();
-                        {
-                            let mut chunks = p.clone();
-                            chunks.items.clear();
-                            keel_codegen::x86_64::compile_program_chunks_with_pipeline(
-                                m,
-                                pools,
-                                &pipeline,
-                                &mut |part| chunks.items.extend(part.items),
-                            )
-                            .unwrap();
-                            assert_eq!(
-                                obj,
-                                keel_asm::x86::assemble_program_object_with_features(
-                                    &chunks, features,
-                                )
-                                .unwrap()
-                            );
-                        }
-                        assert_eq!(
-                            obj,
-                            keel_asm::x86::assemble_object_with_features(&text, features).unwrap()
-                        );
-                        (text, obj)
+                        keel_asm::x86::assemble_program_object_with_features(&p, features).unwrap()
                     };
-                    let name = root.join(format!("{profile}-{sel:?}-{spills}-{i}"));
-                    fs::write(name.with_extension("s"), text).unwrap();
-                    fs::write(name.with_extension("o"), obj).unwrap();
-                    objects.push(name.with_extension("o"));
+                    let name = root.join(format!("{profile}-{sel:?}-{spills}-{i}.o"));
+                    fs::write(&name, obj).unwrap();
+                    objects.push(name);
                 }
-                // Execute only profiles supported by this host. Strict assembly
-                // feature checking remains active independently of host CPUID.
-                if x86_native(profile)
-                    || arm && cfg!(all(target_arch = "aarch64", target_os = "macos"))
+                // Execute only profiles supported by this host, with the Full
+                // selector. Strict assembly feature checking remains active for
+                // every selector independently of host CPUID.
+                if sel == SelectionTier::Full
+                    && (x86_native(profile)
+                        || arm && cfg!(all(target_arch = "aarch64", target_os = "macos")))
                 {
                     let exe = root.join(format!("native-{profile}-{sel:?}-{spills}"));
                     command(

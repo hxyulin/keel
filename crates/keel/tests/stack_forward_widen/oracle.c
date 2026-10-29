@@ -116,7 +116,9 @@ int main(void) {
             if(memcmp(out,expected,16))return 2;
             // Every byte outside the exact objects remains a canary. Protected
             // pages on either side catch overreads and overwrites at both edges.
-            for(long n=0;n<page;n++) {
+            // The footprint does not depend on lane values, so scan the pages
+            // only for the 625 edge inputs.
+            for(long n=0;t<625&&n<page;n++) {
                 unsigned char *q=a+page+n;
                 if((q<p||q>=p+16)&&*q!=0xa5)return 3;
                 q=d+page+n;

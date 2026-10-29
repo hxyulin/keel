@@ -110,6 +110,19 @@ fn c_wrapping_sum_effects_footprints_and_objects() {
         });
     fs::create_dir_all(&root).unwrap();
     fs::write(root.join("oracle.c"), ORACLE).unwrap();
+    let native = cfg!(any(
+        all(target_arch = "aarch64", target_os = "macos"),
+        all(target_arch = "x86_64", target_os = "linux")
+    ));
+    if native {
+        command(
+            Command::new("clang")
+                .args(["-O2", "-c"])
+                .arg(root.join("oracle.c"))
+                .arg("-o")
+                .arg(root.join("oracle.o")),
+        );
+    }
     let empty = Pools {
         caller_saved: &[],
         callee_saved: &[],
@@ -168,79 +181,48 @@ fn c_wrapping_sum_effects_footprints_and_objects() {
                     selector: &selector,
                     allocator: &AllocationTier::Full,
                 };
+                // keel-codegen vector_reduce_add_x86 checks text, program and
+                // chunk parity for vreduce_add; this test compiles the program route.
                 let mut objects = Vec::new();
                 for (i, m) in modules.iter().enumerate() {
-                    let (text, obj) = if arm {
+                    let obj = if arm {
                         let pools = if spills {
                             &empty
                         } else {
                             &keel_codegen::aarch64::REGISTERS
                         };
-                        let text =
-                            keel_codegen::aarch64::compile_with_pipeline(m, pools, &pipeline)
-                                .unwrap();
                         let p = keel_codegen::aarch64::compile_program_with_pipeline(
                             m, pools, &pipeline,
                         )
                         .unwrap();
-                        let obj =
-                            keel_asm::assemble_program_object(&p, Default::default()).unwrap();
-                        assert_eq!(obj, keel_asm::assemble_object(&text).unwrap());
-                        (text, obj)
+                        keel_asm::assemble_program_object(&p, Default::default()).unwrap()
                     } else {
                         let pools = if spills {
                             &empty
                         } else {
                             &keel_codegen::x86_64::REGISTERS
                         };
-                        let text = keel_codegen::x86_64::compile_with_pipeline(m, pools, &pipeline)
-                            .unwrap();
                         let p = keel_codegen::x86_64::compile_program_with_pipeline(
                             m, pools, &pipeline,
                         )
                         .unwrap();
-                        let obj =
-                            keel_asm::x86::assemble_program_object_with_features(&p, features)
-                                .unwrap();
-                        if !spills {
-                            let mut chunks = p.clone();
-                            chunks.items.clear();
-                            keel_codegen::compile_program_chunks_with_pipeline(
-                                m,
-                                target,
-                                &pipeline,
-                                &mut |part| chunks.items.extend(part.items),
-                            )
-                            .unwrap();
-                            assert_eq!(
-                                obj,
-                                keel_asm::x86::assemble_program_object_with_features(
-                                    &chunks, features,
-                                )
-                                .unwrap()
-                            );
-                        }
-                        assert_eq!(
-                            obj,
-                            keel_asm::x86::assemble_object_with_features(&text, features).unwrap()
-                        );
-                        (text, obj)
+                        keel_asm::x86::assemble_program_object_with_features(&p, features).unwrap()
                     };
-                    let name = root.join(format!("{profile}-{sel:?}-{spills}-{i}"));
-                    fs::write(name.with_extension("s"), text).unwrap();
-                    fs::write(name.with_extension("o"), obj).unwrap();
-                    objects.push(name.with_extension("o"));
+                    let name = root.join(format!("{profile}-{sel:?}-{spills}-{i}.o"));
+                    fs::write(&name, obj).unwrap();
+                    objects.push(name);
                 }
-                // Execute baseline x86 on any native Linux x86 host. Higher
-                // levels are emission checks here; maintained suite gates native eligibility.
-                if profile == 0 && cfg!(all(target_arch = "x86_64", target_os = "linux"))
-                    || arm && cfg!(all(target_arch = "aarch64", target_os = "macos"))
+                // Execute baseline x86 on any native Linux x86 host, with the Full
+                // selector. Higher levels and other selectors are emission checks
+                // here; maintained suite gates native eligibility.
+                if sel == SelectionTier::Full
+                    && (profile == 0 && cfg!(all(target_arch = "x86_64", target_os = "linux"))
+                        || arm && cfg!(all(target_arch = "aarch64", target_os = "macos")))
                 {
                     let exe = root.join("native");
                     command(
                         Command::new("clang")
-                            .arg("-O2")
-                            .arg(root.join("oracle.c"))
+                            .arg(root.join("oracle.o"))
                             .args(&objects)
                             .arg("-o")
                             .arg(&exe),

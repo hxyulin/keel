@@ -194,16 +194,22 @@ fn native_vectorized_c_preserves_overlap_tails_signed_counts_and_page_boundaries
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("kernels.c"), KERNELS).unwrap();
     fs::write(dir.join("harness.c"), HARNESS).unwrap();
+    command(Command::new("clang").current_dir(&dir).args([
+        "-O2",
+        "-fno-vectorize",
+        "-fno-slp-vectorize",
+        "-ffp-contract=off",
+        "-c",
+        "harness.c",
+        "-o",
+        "harness.o",
+    ]));
     for extra in [vec![], vec!["--regalloc", "fast"], vec!["--isel", "all"]] {
         let mut flags = vec!["cc", "-O", "--emit-object", "kernels.c", "-o", "kernels.o"];
         flags.extend(extra);
         keel(&dir, &flags);
         command(Command::new("clang").current_dir(&dir).args([
-            "-O2",
-            "-fno-vectorize",
-            "-fno-slp-vectorize",
-            "-ffp-contract=off",
-            "harness.c",
+            "harness.o",
             "kernels.o",
             "-o",
             "test",

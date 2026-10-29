@@ -178,21 +178,20 @@ fn real_c_private_transport_both_routes_native_and_debug() {
                     .current_dir(&dir)
                     .args(["asm", "--target", stem, &assembly, "-o", &via_text]),
             );
+            // The routes have identical code, so execute the direct object only.
             assert_eq!(text(&dir.join(&direct)), text(&dir.join(&via_text)));
             if (cfg!(all(target_arch = "aarch64", target_os = "macos"))
                 && target == keel_ir::Target::Aarch64AppleDarwin)
                 || (cfg!(all(target_arch = "x86_64", target_os = "linux"))
                     && target == keel_ir::Target::X86_64LinuxGnu)
             {
-                for obj in [&direct, &via_text] {
-                    command(Command::new("clang").current_dir(&dir).args([
-                        obj,
-                        "oracle.c",
-                        "-o",
-                        "native-check",
-                    ]));
-                    command(&mut Command::new(dir.join("native-check")));
-                }
+                command(Command::new("clang").current_dir(&dir).args([
+                    &direct,
+                    "oracle.c",
+                    "-o",
+                    "native-check",
+                ]));
+                command(&mut Command::new(dir.join("native-check")));
             }
         }
     }
@@ -311,46 +310,40 @@ fn distinct_guard_pages_preserve_first_source_fault() {
                             &via_text,
                         ]),
                 );
+                // The routes have identical code, so execute the direct object only.
                 assert_eq!(text(&dir.join(&direct)), text(&dir.join(&via_text)));
                 let native = (cfg!(all(target_arch = "aarch64", target_os = "macos"))
                     && target == keel_ir::Target::Aarch64AppleDarwin)
                     || (cfg!(all(target_arch = "x86_64", target_os = "linux"))
                         && target == keel_ir::Target::X86_64LinuxGnu);
                 if native {
-                    for obj in [&direct, &via_text] {
-                        let exe = format!("{obj}-check");
-                        command(
-                            Command::new("clang")
-                                .current_dir(&dir)
-                                .args([obj, "fault.c", "-o", &exe]),
-                        );
-                        let mut codes = Vec::new();
-                        for mode in 0..4 {
-                            let result = Command::new(dir.join(&exe))
-                                .arg(mode.to_string())
-                                .output()
-                                .unwrap();
-                            let code = result.status.code().unwrap();
-                            let expected = if mode == 1
-                                || (name == "mixed"
-                                    && stage != "parameter-order-control"
-                                    && target == keel_ir::Target::Aarch64AppleDarwin)
-                            {
-                                15
-                            } else {
-                                11
-                            };
-                            assert_eq!(code, expected, "{stem} {obj} mode={mode}");
-                            codes.push(code);
-                        }
-                        fs::write(
-                            dir.join(format!("{exe}.faults.json")),
-                            format!("{codes:?}\n"),
-                        )
-                        .unwrap();
-                        if stage != "parameter-order-control" {
-                            observed.push(codes);
-                        }
+                    let exe = format!("{direct}-check");
+                    command(
+                        Command::new("clang")
+                            .current_dir(&dir)
+                            .args([&direct, "fault.c", "-o", &exe]),
+                    );
+                    let mut codes = Vec::new();
+                    for mode in 0..4 {
+                        let result = Command::new(dir.join(&exe))
+                            .arg(mode.to_string())
+                            .output()
+                            .unwrap();
+                        let code = result.status.code().unwrap();
+                        let expected = if mode == 1
+                            || (name == "mixed"
+                                && stage != "parameter-order-control"
+                                && target == keel_ir::Target::Aarch64AppleDarwin)
+                        {
+                            15
+                        } else {
+                            11
+                        };
+                        assert_eq!(code, expected, "{stem} {direct} mode={mode}");
+                        codes.push(code);
+                    }
+                    if stage != "parameter-order-control" {
+                        observed.push(codes);
                     }
                 }
             }
