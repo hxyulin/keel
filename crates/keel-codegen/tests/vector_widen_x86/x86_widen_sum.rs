@@ -5,7 +5,7 @@ use keel_codegen::{
     regalloc::{AllocationTier, Pools},
     x86_features::{FeatureSelector, vector_capabilities},
 };
-const SOURCE: &str = include_str!("../../keel-opt/tests/fixtures/signed_widen_sum.ir");
+const SOURCE: &str = include_str!("../../../keel-opt/tests/fixtures/signed_widen_sum.ir");
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],

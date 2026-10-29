@@ -1,4 +1,20 @@
 //! SSE2 widening/bitcasts and the bounded SSE4.1 signed dword register pilot.
+#[allow(dead_code)]
+#[path = "common/vector.rs"]
+pub mod common;
+#[path = "vector_widen_x86/x86_avx_widen_fallback.rs"]
+mod x86_avx_widen_fallback;
+#[path = "vector_widen_x86/x86_packed_low_load.rs"]
+mod x86_packed_low_load;
+#[path = "vector_widen_x86/x86_signed_wide_load.rs"]
+mod x86_signed_wide_load;
+#[path = "vector_widen_x86/x86_signed_widen_load.rs"]
+mod x86_signed_widen_load;
+#[path = "vector_widen_x86/x86_wide_conversions.rs"]
+mod x86_wide_conversions;
+#[path = "vector_widen_x86/x86_widen_sum.rs"]
+mod x86_widen_sum;
+
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools, RegisterAllocator},

@@ -107,7 +107,7 @@ fn export(stem: &str, ir: &str, c: &str, text: &str, object: &[u8]) {
     }
     fs::write(
         dir.join("run_native.py"),
-        include_str!("x86_widen/run_native.py"),
+        include_str!("../x86_widen/run_native.py"),
     )
     .unwrap();
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]

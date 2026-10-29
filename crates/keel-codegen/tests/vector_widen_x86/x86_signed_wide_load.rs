@@ -375,7 +375,7 @@ static void on_fault(int sig) {fault_seen=sig;siglongjmp(fault_env,1);}
         fs::write(dir.join("oracle.keel"), &ir).unwrap();
         fs::write(
             dir.join("run_native.py"),
-            include_str!("x86_widen/run_native.py"),
+            include_str!("../x86_widen/run_native.py"),
         )
         .unwrap();
     }

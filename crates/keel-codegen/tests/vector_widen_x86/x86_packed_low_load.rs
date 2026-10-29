@@ -278,7 +278,7 @@ typedef void (*Fn)(const void*,void*,uint64_t);
         fs::write(dir.join("oracle.keel"), &ir).unwrap();
         fs::write(
             dir.join("run_native.py"),
-            include_str!("x86_widen/run_native.py").replace(
+            include_str!("../x86_widen/run_native.py").replace(
                 "target/packed-widen-20261021/lock.jsonl",
                 "target/clang-gap-round2-20261021/lock.jsonl",
             ),
