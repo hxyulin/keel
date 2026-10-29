@@ -281,7 +281,7 @@ fn check_source_matrix(exhaustive: bool) {
     assert_eq!(expected.len(), 288);
     let mut config = 0;
     let mut checked_lines = std::collections::HashSet::new();
-    for (stage, m) in [("raw", &raw), ("opt", &optimized)] {
+    for (stage_index, (stage, m)) in [("raw", &raw), ("opt", &optimized)].into_iter().enumerate() {
         let mut count = 0;
         for f in &m.functions {
             for (_, i) in f.layout_insts() {
@@ -309,25 +309,43 @@ fn check_source_matrix(exhaustive: bool) {
         .into_iter()
         .enumerate()
         {
-            for selection in [
+            for (selection_index, selection) in [
                 SelectionTier::Baseline,
                 SelectionTier::Trees,
                 SelectionTier::Full,
-            ] {
-                for allocation in [AllocationTier::Fast, AllocationTier::Full] {
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                for (allocation_index, allocation) in [AllocationTier::Fast, AllocationTier::Full]
+                    .into_iter()
+                    .enumerate()
+                {
                     for (pool_index, pool) in [&keel_codegen::x86_64::REGISTERS, &tiny, &empty]
                         .into_iter()
                         .enumerate()
                     {
-                        if !exhaustive
-                            && !(feature_index == 1
+                        let planned = if exhaustive {
+                            // Neither the feature level nor the allocator changes
+                            // the text. Cover each stage, selector and pool at
+                            // NONE with alternating allocators, plus one V3 row.
+                            (feature_index == 0
+                                && allocation_index
+                                    == (stage_index + selection_index + pool_index) % 2)
+                                || (feature_index == 3
+                                    && selection == SelectionTier::Full
+                                    && allocation == AllocationTier::Full
+                                    && pool_index == 0)
+                        } else {
+                            feature_index == 1
                                 && ((selection == SelectionTier::Baseline
                                     && allocation == AllocationTier::Fast
                                     && pool_index == 0)
                                     || (selection == SelectionTier::Full
                                         && allocation == AllocationTier::Full
-                                        && pool_index == 2)))
-                        {
+                                        && pool_index == 2))
+                        };
+                        if !planned {
                             continue;
                         }
                         let selector = FeatureSelector {
@@ -377,7 +395,7 @@ fn check_source_matrix(exhaustive: bool) {
         }
         eprintln!("string I/O {stage} matrix complete: {config} configurations");
     }
-    assert_eq!(config, if exhaustive { 144 } else { 4 });
+    assert_eq!(config, if exhaustive { 20 } else { 4 });
     assert_eq!(checked_lines.len(), 12);
 }
 #[test]

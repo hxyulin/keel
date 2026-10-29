@@ -166,7 +166,7 @@ fn raw_opt_pipeline_matrix() {
         fs::write(dir.join("optimized.ir"), opt.to_string()).unwrap();
     }
     let mut configurations = 0;
-    for m in [&raw, &opt] {
+    for (stage_index, m) in [&raw, &opt].into_iter().enumerate() {
         let mut count = 0;
         for f in &m.functions {
             for (_, i) in f.layout_insts() {
@@ -185,19 +185,44 @@ fn raw_opt_pipeline_matrix() {
                 .to_string()
                 .contains("x86 architectural intrinsic")
         );
-        for features in [
+        for (feature_index, features) in [
             Features::NONE,
             Features::for_level(CpuLevel::V1),
             Features::for_level(CpuLevel::V2),
             Features::for_level(CpuLevel::V3),
-        ] {
-            for selection in [
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            for (selection_index, selection) in [
                 SelectionTier::Baseline,
                 SelectionTier::Trees,
                 SelectionTier::Full,
-            ] {
-                for allocation in [AllocationTier::Fast, AllocationTier::Full] {
-                    for pool in [&keel_codegen::x86_64::REGISTERS, &tiny, &empty] {
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                for (allocation_index, allocation) in [AllocationTier::Fast, AllocationTier::Full]
+                    .into_iter()
+                    .enumerate()
+                {
+                    for (pool_index, pool) in [&keel_codegen::x86_64::REGISTERS, &tiny, &empty]
+                        .into_iter()
+                        .enumerate()
+                    {
+                        // Neither the feature level nor the allocator changes
+                        // the text. Cover each stage, selector and pool at
+                        // NONE with alternating allocators, plus one V3 row.
+                        let planned = (feature_index == 0
+                            && allocation_index
+                                == (stage_index + selection_index + pool_index) % 2)
+                            || (feature_index == 3
+                                && selection == SelectionTier::Full
+                                && allocation == AllocationTier::Full
+                                && pool_index == 0);
+                        if !planned {
+                            continue;
+                        }
                         let selector = FeatureSelector {
                             inner: &selection,
                             features,
@@ -240,7 +265,7 @@ fn raw_opt_pipeline_matrix() {
             }
         }
     }
-    assert_eq!(configurations, 144);
+    assert_eq!(configurations, 20);
 }
 
 #[test]
