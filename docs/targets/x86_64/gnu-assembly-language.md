@@ -1,18 +1,12 @@
 # GNU x86-64 assembly language
 
-The native x86 ELF object path now accepts the six 64-bit language witnesses
-from the Linux readiness audit: `.code64`, numeric labels, required macro
-arguments, `\@` macro invocation numbers, `.org` and `.pushsection`/`.popsection`.
-`.code16`, `.code32` and `.code16gcc` remain explicit errors. This does not add
-C inline assembly, asm-goto, instruction families or kernel compiler flags.
+The x86 ELF object path feeds GNU statements through the shared assembly
+preprocessor that the AArch64 parser also uses. Its lexer handles `#`, `//`
+and block comments, quoted strings and semicolon statement separators. Macro
+definitions and invocation numbers persist across text fragments within one
+object. `.code16`, `.code32` and `.code16gcc` are errors.
 
-The old x86 `Items::parse` called the instruction source parser directly. It
-never entered the shared assembly preprocessor used by the AArch64 parser.
-The x86 path now feeds GNU statements to that same bounded macro/repetition/
-conditional processor. Its lexer handles `#`, `//` and block comments, quoted
-strings and semicolon statement separators. Macro definitions and invocation
-numbers persist across text fragments within one object. Existing public APIs
-and generated instruction data are unchanged.
+## Labels and expressions
 
 Numeric labels can repeat and cross section switches. `Nb` resolves to the
 latest preceding definition and `Nf` to the next definition in source order.
@@ -27,12 +21,13 @@ intermediate values stay within the supported 64-bit magnitude; arithmetic
 wraparound is not implemented. Expressions allow at most 64 levels of nesting,
 512 parser nodes and 64 KiB of source.
 
+## Sections and placement
+
 The section stack stores section identities, including unique sections.
 `.previous` swaps the current and previous section. Temporary section switches
 for `.ident` and local common storage preserve that state. GNU supplies the
 local-common oracle because Clang changes the previous section in that case.
-Subsection-number
-syntax is not added.
+Subsection numbers are not supported.
 
 `.org expression[, fill]` advances the current section's offset. The expression
 must resolve at the directive to an absolute value or a value in the current
@@ -42,6 +37,8 @@ low byte of an explicit integer. NOBITS sections grow without file bytes and
 ignore fill, matching GNU and Clang. This deliberately rejects GNU's warned
 fallback of assuming zero for an undefined `.org` symbol. LLVM accepts some
 cross-section origins which GNU rejects; Keel follows GNU's section rule.
+
+## Macros and conditionals
 
 Macro parameters accept `:req`; empty or missing required values fail.
 An adjacent parenthesized invocation such as `record(symbol)` is recognized;
@@ -73,6 +70,8 @@ an earlier use. Grouped constants and unary chains work in instruction operands.
 Grouped register arithmetic that the address model cannot represent is
 diagnosed instead of becoming a relocation against a register's name.
 
+## Data and space directives
+
 `.skip`, `.space` and `.zero` accept deferred absolute expressions over label
 differences. Linux alternatives can compare the lengths of code in separate
 sections: each subtraction must first produce an absolute same-section
@@ -85,22 +84,6 @@ Dot captures the directive's position on each pass. Each space directive is
 limited to 64 MiB. Existing `.org` evaluation and backward-placement constraints
 still apply on every layout pass.
 
-`crates/keel-asm/tests/x86_gnu_language.rs` compares section bytes, sizes, flags,
-and normalized ELF relocation types, targets and addends against both Clang
-and GNU as. It covers nested section switches, branch relaxation across `.org`,
-exception-table section deltas, macro invocations, NOBITS fill and negative
-language witnesses. Shared preprocessing tests also compare the new macro
-operators against Clang on AArch64. These checks do not establish kernel-build
-coverage.
-
-`crates/keel-asm/tests/x86_gnu_expressions.rs` adds GNU and Clang section-byte,
-flag, size and normalized relocation comparisons for exception-table iteration,
-unwind defaults, register conditionals, mutable counters, grouped symbol terms
-and alternatives padding. The empty-iteration difference uses GNU as its oracle.
-Negative witnesses cover undefined and cross-section expressions, alias and
-layout cycles, expression bounds, missing arguments and rejected legacy modes.
-These focused checks do not update the configured corpus acceptance counts.
-
 `.octa` emits 16-byte little-endian integers. It accepts signed/unsigned literals
 through 128 bits and constant expressions under the existing checked 64-bit
 magnitude rules. It does not add symbolic 128-bit relocations or widen shared
@@ -111,7 +94,7 @@ X86 ELF64 relocation addends accept positive or negative 64-bit magnitudes.
 They are normalized to the signed ELF addend representation before field-width
 checks and PC-relative adjustments. This handles high-half kernel address
 constants without accepting overflowing instruction fields. Larger magnitudes
-remain errors. ARM relocation behavior is unchanged.
+remain errors.
 
 ## Fill and register symbols
 
@@ -156,3 +139,10 @@ GNU comparisons cover section bytes, label offsets, skip/counts and layout;
 source, structured, chunked and CLI object paths produce identical payloads.
 Embedding externally built legacy-mode code is data packaging and does not add
 16/32-bit instruction assembly.
+
+## Tests
+
+`crates/keel-asm/tests/x86_gnu_language.rs` and
+`crates/keel-asm/tests/x86_gnu_expressions.rs` compare section bytes, sizes,
+flags and normalized relocations with Clang and GNU as, and cover the negative
+cases above.
