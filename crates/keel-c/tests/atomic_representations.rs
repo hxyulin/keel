@@ -72,29 +72,28 @@ fn native_arm64_matches_clang_with_and_without_optimization() {
         .arg(&reference));
     let want = run(&mut Command::new(&reference));
     // run.rs::programs runs this fixture without debug info.
-    for debug_info in [true] {
-        for optimize in [false, true] {
-            let opts = keel_c::Options {
-                debug_info,
-                ..Default::default()
-            };
-            let mut m = keel_c::compile(src, "atomic_representations.c", opts).unwrap();
-            keel_ir::verify_module(&m).unwrap();
-            if optimize {
-                keel_opt::optimize(&mut m).unwrap();
-            }
-            keel_ir::verify_module(&m).unwrap();
-            let asm = keel_codegen::compile(&m, opts.target).unwrap();
-            let path = dir.join(format!("keel-{debug_info}-{optimize}"));
-            let asm_path = path.with_extension("s");
-            std::fs::write(&asm_path, asm).unwrap();
-            run(Command::new("clang").arg(&asm_path).arg("-o").arg(&path));
-            let got = run(&mut Command::new(path));
-            assert_eq!(
-                got.stdout, want.stdout,
-                "debug={debug_info}, optimize={optimize}"
-            );
+    let debug_info = true;
+    for optimize in [false, true] {
+        let opts = keel_c::Options {
+            debug_info,
+            ..Default::default()
+        };
+        let mut m = keel_c::compile(src, "atomic_representations.c", opts).unwrap();
+        keel_ir::verify_module(&m).unwrap();
+        if optimize {
+            keel_opt::optimize(&mut m).unwrap();
         }
+        keel_ir::verify_module(&m).unwrap();
+        let asm = keel_codegen::compile(&m, opts.target).unwrap();
+        let path = dir.join(format!("keel-{debug_info}-{optimize}"));
+        let asm_path = path.with_extension("s");
+        std::fs::write(&asm_path, asm).unwrap();
+        run(Command::new("clang").arg(&asm_path).arg("-o").arg(&path));
+        let got = run(&mut Command::new(path));
+        assert_eq!(
+            got.stdout, want.stdout,
+            "debug={debug_info}, optimize={optimize}"
+        );
     }
 }
 
