@@ -1,3 +1,6 @@
+#[path = "x86_features/x86_target_features.rs"]
+mod x86_target_features;
+
 use keel_asm_ir::x86::Features;
 use keel_codegen::{
     CodegenPipeline, SelectionTier, Target, regalloc::AllocationTier, x86_features::FeatureSelector,

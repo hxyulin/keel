@@ -1,3 +1,6 @@
+#[path = "x86_aggregate_boundary/x86_aggregate_branch.rs"]
+mod x86_aggregate_branch;
+
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools},

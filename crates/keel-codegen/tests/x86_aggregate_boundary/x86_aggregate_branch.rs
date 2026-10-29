@@ -5,7 +5,7 @@ use keel_codegen::{
 
 #[test]
 fn branching_aggregate_keeps_native_parity_and_c_abi() {
-    let source = include_str!("fixtures/aggregate-branch.keel");
+    let source = include_str!("../fixtures/aggregate-branch.keel");
     let module = keel_ir::parse(source).unwrap();
     keel_ir::verify_module(&module).unwrap();
     let empty = Pools {
