@@ -11,7 +11,8 @@
 //! two registers of each kind (and class), which spills most values (running the spill
 //! code and register/stack mixes in parallel copies on every program); and
 //! after the default optimization pipeline, which must not change what the
-//! program does.
+//! program does. A configuration whose assembly already ran for the same
+//! program is not linked or run again.
 //!
 //! `debug_info` checks the debug info in lldb.
 
@@ -22,7 +23,8 @@ use keel_codegen::aarch64::{REGISTERS, compile_with_pipeline};
 #[cfg(target_arch = "x86_64")]
 use keel_codegen::x86_64::{REGISTERS, compile_with_pipeline};
 use keel_codegen::{Pools, regalloc::AllocationTier};
-use std::cell::OnceCell;
+use std::cell::{OnceCell, RefCell};
+use std::collections::HashSet;
 use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -149,6 +151,9 @@ struct PreparedProgram {
     raw: OnceCell<Result<keel_ir::Module, String>>,
     optimized: OnceCell<Result<keel_ir::Module, String>>,
     drivers: OnceCell<Result<Vec<PathBuf>, String>>,
+    /// Assembly that already linked and ran correctly. The same text and the
+    /// same driver objects give the same executable, so it need not run again.
+    passed: RefCell<HashSet<String>>,
     dir: PathBuf,
 }
 
@@ -162,6 +167,7 @@ impl PreparedProgram {
             raw: OnceCell::new(),
             optimized: OnceCell::new(),
             drivers: OnceCell::new(),
+            passed: RefCell::default(),
             // Separate preparations can run concurrently for the same fixture.
             dir: Path::new(env!("CARGO_TARGET_TMPDIR"))
                 .join("programs")
@@ -296,6 +302,9 @@ fn run_program(
         },
     )
     .map_err(|e| e.to_string())?;
+    if program.passed.borrow().contains(&asm) {
+        return Ok(());
+    }
 
     let stem = format!("{}{suffix}", path.file_stem().unwrap().to_string_lossy());
     let dir = &program.dir;
@@ -348,6 +357,7 @@ fn run_program(
             asm_path.display()
         ));
     }
+    program.passed.borrow_mut().insert(asm);
     Ok(())
 }
 
@@ -542,16 +552,23 @@ fn debug_info() {
         ]);
         tiers
     };
+    let mut checked = HashSet::new();
     for allocation in tiers {
-        debug_info_with_allocator(&allocation);
+        debug_info_with_allocator(&allocation, &mut checked);
     }
 }
 
+/// `checked` holds the assembly of sessions that already passed; a tier that
+/// emits the same assembly would give the same executable and lldb output.
 #[cfg(target_arch = "aarch64")]
-fn debug_info_with_allocator(allocation: &dyn keel_codegen::regalloc::RegisterAllocator) {
+fn debug_info_with_allocator(
+    allocation: &dyn keel_codegen::regalloc::RegisterAllocator,
+    checked: &mut HashSet<String>,
+) {
     let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
-    let lldb = debug_session(
+    if let Some(lldb) = debug_session(
         allocation,
+        checked,
         &tests.join("debug/calc.keel"),
         &tests.join("debug/main.c"),
         false,
@@ -568,22 +585,24 @@ fn debug_info_with_allocator(allocation: &dyn keel_codegen::regalloc::RegisterAl
             "continue",
             "frame info",
         ],
-    );
-    // `b calc` stops after the prologue, at the first line of the body,
-    // and so does `b nocol`, though its prologue has the same location.
-    for want in [
-        "`calc at calc.rs:2:13",
-        "`main at main.c:5",
-        "`calc at calc.rs:3:14",
-        "`nocol + ",
-        "`nocol at calc.rs:6\n",
-    ] {
-        assert!(lldb.contains(want), "lldb output lacks `{want}`:\n{lldb}");
+    ) {
+        // `b calc` stops after the prologue, at the first line of the body,
+        // and so does `b nocol`, though its prologue has the same location.
+        for want in [
+            "`calc at calc.rs:2:13",
+            "`main at main.c:5",
+            "`calc at calc.rs:3:14",
+            "`nocol + ",
+            "`nocol at calc.rs:6\n",
+        ] {
+            assert!(lldb.contains(want), "lldb output lacks `{want}`:\n{lldb}");
+        }
     }
 
     // The IR's own lines, as `keel compile -g` gives them.
-    let lldb = debug_session(
+    if let Some(lldb) = debug_session(
         allocation,
+        checked,
         &tests.join("programs/sum.keel"),
         &tests.join("programs/sum.c"),
         true,
@@ -598,19 +617,21 @@ fn debug_info_with_allocator(allocation: &dyn keel_codegen::regalloc::RegisterAl
             "continue",
             "frame info",
         ],
-    );
-    for want in [
-        "`sum at sum.keel:4:10",
-        "`main at sum.c:",
-        "`sum at sum.keel:13:10",
-    ] {
-        assert!(lldb.contains(want), "lldb output lacks `{want}`:\n{lldb}");
+    ) {
+        for want in [
+            "`sum at sum.keel:4:10",
+            "`main at sum.c:",
+            "`sum at sum.keel:13:10",
+        ] {
+            assert!(lldb.contains(want), "lldb output lacks `{want}`:\n{lldb}");
+        }
     }
 }
 
 #[test]
 #[cfg(all(target_arch = "aarch64", feature = "experimental-regalloc"))]
 fn rematerialization_debug_info() {
+    let mut checked = HashSet::new();
     for base in [AllocationTier::Fast, AllocationTier::Full] {
         let allocator = keel_codegen::regalloc::RematerializingAllocator {
             base: &base,
@@ -619,20 +640,22 @@ fn rematerialization_debug_info() {
             stack_addresses: true,
             null_pointers: false,
         };
-        debug_info_with_allocator(&allocator);
+        debug_info_with_allocator(&allocator, &mut checked);
     }
 }
 
 /// Compiles `keel`, links it with `driver` built with `-g`, and runs
-/// `commands` in lldb. Returns lldb's output.
+/// `commands` in lldb. Returns lldb's output, or `None` if `checked` already
+/// holds the assembly. The caller checks the output before the next session.
 #[cfg(target_arch = "aarch64")]
 fn debug_session(
     allocation: &dyn keel_codegen::regalloc::RegisterAllocator,
+    checked: &mut HashSet<String>,
     keel: &Path,
     driver: &Path,
     ir_lines: bool,
     commands: &[&str],
-) -> String {
+) -> Option<String> {
     let src = std::fs::read_to_string(keel).unwrap();
     let module = if ir_lines {
         keel_ir::parse_with_ir_lines(&src, keel.to_str().unwrap())
@@ -650,6 +673,9 @@ fn debug_session(
         },
     )
     .unwrap();
+    if !checked.insert(asm.clone()) {
+        return None;
+    }
 
     // Baseline and rematerializing debug tests may run concurrently. Each
     // session must own its assembly, executable and dsymutil outputs.
@@ -684,7 +710,7 @@ fn debug_session(
         lldb.arg("-o").arg(command);
     }
     let out = run_with_timeout(lldb.arg(&exe_path)).unwrap();
-    String::from_utf8_lossy(&out.stdout).into_owned()
+    Some(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 /// Valid IR the aarch64 backend refuses, with the reason it gives.
