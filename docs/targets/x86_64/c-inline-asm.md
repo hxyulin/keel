@@ -24,8 +24,8 @@ SIMD constraints `x` and `v` accept `float`, `double`, and the frontend's
 128/256-bit vector types. Both use registers 0–15; `v` does not enable EVEX
 register allocation. The shared IR represents them with `w` (`FloatReg`) and
 also accepts 64-bit vectors. Scalar integer SIMD operands, MMX, x87, ZMM and
-registers 16–31 are outside this operand contract. Named local-register
-variables are GPR-only.
+registers 16–31 are outside this operand contract. Named
+[local register variables](#local-register-variables) are GPR-only.
 
 SIMD templates use `%xmmN` for scalar and 64/128-bit operands, `%ymmN` for
 256-bit operands. `%x0` selects the XMM view; `%t0` selects the YMM view of a
@@ -144,6 +144,28 @@ initializers and independent early-clobber overlaps are errors. The C parser
 keeps repeated matching constraints, the IR verifier checks every pair of
 matching inputs, and the x86 planner checks all inputs assigned to each
 physical register. AArch64 still rejects multiple inputs in one register.
+
+### Local register variables
+
+An automatic declaration such as `register unsigned long value asm("rdx")`
+binds a direct extended-asm operand to that register, following
+[GNU local register use](https://gcc.gnu.org/onlinedocs/gcc-14.1.0/gcc/Local-Register-Variables.html).
+The variable otherwise uses ordinary C lowering; the declaration neither
+reserves the register nor samples it outside an asm operand. Bindings accept
+the GPR names and aliases, with an optional `%`; the C type and template
+modifiers select the width. RSP, RBP and high-byte aliases are rejected, and
+the backend can reject a register that the frame needs as its base. Types are
+integers up to 64 bits or pointers.
+
+Direct input, output and read/write operands keep their binding through `r`,
+`q`, the supported register/immediate or register/memory choices and `g`. A
+fixed-letter constraint must name the same register. Matching inputs pass
+their binding to a generic register output or must agree with an existing
+output binding. Taking a bound local's address, explicit memory operands,
+pure immediate constraints and incompatible classes are rejected. A cast or
+other expression that is not the local itself does not carry the binding.
+`x86_local_register.rs` checks inputs, outputs and read/write operands for all
+14 nonreserved GPRs.
 
 ### Aggregate register operands
 

@@ -1,5 +1,5 @@
 /* Native x86-64 Linux oracle, not a claim of Keel value/ABI support.
- * Run with genuine GCC and Clang; see docs/c-system-header-compat.md.
+ * Run with genuine GCC and Clang; see docs/frontends/c/extensions.md.
  * No system or application headers are rewritten by this reduction. */
 #include <stddef.h>
 #include <string.h>

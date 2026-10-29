@@ -150,6 +150,10 @@ supported. FLD followed by register arithmetic is not a substitute for a
 memory-operand form: operand widths, load exceptions, source order and NaN
 selection differ.
 
+```sh
+cargo test -p keel-codegen --test x86_x87_dc
+```
+
 ### Comparisons
 
 `x86_x87_fcom`, `fcomp`, `fcompp`, `fucom`, `fucomp` and `fucompp` take two F80
