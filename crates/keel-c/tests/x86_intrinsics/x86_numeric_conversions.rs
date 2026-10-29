@@ -7,7 +7,7 @@ use std::{fs, path::PathBuf, process::Command};
 fn compile(source: &str) -> Module {
     let source = keel_c::preprocess(
         source,
-        "widening.c",
+        "numeric.c",
         &keel_c::PreprocessOptions {
             target: Target::X86_64LinuxGnu,
             ..Default::default()
@@ -16,7 +16,7 @@ fn compile(source: &str) -> Module {
     .unwrap();
     let module = keel_c::compile(
         &source,
-        "widening.c",
+        "numeric.c",
         keel_c::Options {
             target: Target::X86_64LinuxGnu,
             debug_info: false,
@@ -37,66 +37,36 @@ fn command(command: &mut Command) {
     );
 }
 
+const CASES: &str = include_str!("../fixtures/x86_numeric_cases.h");
+const SOURCE: &str = include_str!("../fixtures/x86_numeric_conversions.c");
+const ASSEMBLY: &str = include_str!("../fixtures/x86_numeric_assembly.h");
+const RUNNER: &str = include_str!("../fixtures/x86_numeric_runner.c");
+
 fn sources() -> (String, String, String) {
-    let mut source = String::from("#include <immintrin.h>\n");
-    let mut narrow = source.clone();
-    let mut harness = String::from(
-        "#include <stdint.h>\n#include <immintrin.h>\nextern int printf(const char*,...);\n",
-    );
-    let mut cases = String::new();
-    for width in [128, 256] {
-        let prefix = if width == 128 { "_mm" } else { "_mm256" };
-        for signed in [true, false] {
-            for (input, output) in [(8, 16), (8, 32), (8, 64), (16, 32), (16, 64), (32, 64)] {
-                let name = format!(
-                    "{prefix}_cvtep{}{input}_epi{output}",
-                    if signed { 'i' } else { 'u' }
-                );
-                // The pointer increments prove each wrapper evaluates its argument once.
-                // Separate ABI entry points exercise vector argument/result transport.
-                let body = format!(
-                    "__m{width}i a{name}(__m128i x){{return {name}(x);}}\nvoid k{name}(const void*input,void*out){{const __m128i*p=input;__m{width}i r={name}(_mm_loadu_si128(p++));if(p!=(const __m128i*)input+1)r=(__m{width}i){{0}};{prefix}_storeu_si{width}(out,r);}}\n"
-                );
-                source += &body;
-                if width == 128 {
-                    narrow += &body;
-                }
-                harness += &format!(
-                    "extern void k{name}(const void*,void*);\nextern void c{name}(const void*,void*);\n"
-                );
-                harness += &format!(
-                    "extern __m{width}i a{name}(__m128i);\nextern __m{width}i reference{name}(__m128i);\nvoid abi_k{name}(const void*input,void*out){{{prefix}_storeu_si{width}(out,a{name}(_mm_loadu_si128(input)));}}\nvoid abi_c{name}(const void*input,void*out){{{prefix}_storeu_si{width}(out,reference{name}(_mm_loadu_si128(input)));}}\n"
-                );
-                cases += &format!(
-                    "{{\"{name}\",k{name},c{name},{},{input},{output},{}}},\n{{\"{name} ABI\",abi_k{name},abi_c{name},{},{input},{output},{}}},\n",
-                    width / 8,
-                    u8::from(signed),
-                    width / 8,
-                    u8::from(signed)
-                );
-            }
-        }
-    }
-    harness += "struct Case {const char *name;void (*keel)(const void*,void*);void (*vendor)(const void*,void*);unsigned bytes,input_bits,output_bits,signed_input;};\n";
-    harness += &format!("static const struct Case cases[]={{\n{cases}}};\n");
-    harness += include_str!("fixtures/x86_integer_lanes.h");
-    harness += include_str!("fixtures/x86_widening_runner.c");
+    let source = SOURCE.replace("#include \"x86_numeric_cases.h\"", CASES);
+    let narrow_cases = CASES
+        .lines()
+        .filter(|line| !line.starts_with("CONVERSION(256_"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let narrow = SOURCE.replace("#include \"x86_numeric_cases.h\"", &narrow_cases);
+    let harness = RUNNER
+        .replace("#include \"x86_numeric_assembly.h\"", ASSEMBLY)
+        .replace("#include \"x86_numeric_cases.h\"", CASES);
     (source, narrow, harness)
 }
 
 #[test]
-fn widening_matches_vendor_and_scalar_oracles() {
-    let directory = std::env::var_os("KEEL_C_WIDENING_EXPORT_DIR")
+fn numeric_conversions_preserve_mxcsr_upper_lanes_and_dead_effects() {
+    let directory = std::env::var_os("KEEL_C_NUMERIC_EXPORT_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("c-widening"));
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("c-numeric"));
     fs::create_dir_all(&directory).unwrap();
     let (source, narrow, harness) = sources();
     fs::write(directory.join("kernels.c"), &source).unwrap();
     fs::write(
         directory.join("oracle.c"),
-        source
-            .replace("void k_", "void c_")
-            .replace(" a_", " reference_"),
+        format!("#define REFERENCE\n{source}"),
     )
     .unwrap();
     fs::write(directory.join("harness.c"), harness).unwrap();
@@ -105,7 +75,8 @@ fn widening_matches_vendor_and_scalar_oracles() {
             "-target",
             "x86_64-unknown-linux-gnu",
             "-ffreestanding",
-            "-mavx2",
+            "-mavx",
+            "-frounding-math",
             "-O2",
             "-c",
             &format!("{file}.c"),
@@ -117,6 +88,18 @@ fn widening_matches_vendor_and_scalar_oracles() {
     let mut optimized = raw.clone();
     keel_opt::optimize(&mut optimized).unwrap();
     keel_ir::verify_module(&optimized).unwrap();
+    for name in [
+        "cvtdq2pd128",
+        "cvtpd2dq128",
+        "cvttss2si64",
+        "cvtsi2sd64",
+        "cvtss2sd",
+    ] {
+        assert!(
+            optimized.to_string().contains(&format!("x86_sse_{name}")),
+            "missing effectful {name}"
+        );
+    }
     let empty = Pools {
         caller_saved: &[],
         callee_saved: &[],
@@ -147,7 +130,10 @@ fn widening_matches_vendor_and_scalar_oracles() {
         },
     )
     .unwrap_err();
-    assert!(error.message.contains("256-bit SIMD"), "{error:?}");
+    assert!(
+        error.message.contains("AVX") || error.message.contains("256-bit SIMD"),
+        "{error:?}"
+    );
     let mut avx = features;
     avx.avx2 = false;
     let avx_selector = FeatureSelector {

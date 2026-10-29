@@ -199,7 +199,7 @@ fn strict_v1_parity_and_native_oracles() {
         }
         harness += "};\n";
     }
-    harness += include_str!("fixtures/x86_saturation_harness.c");
+    harness += include_str!("../fixtures/x86_saturation_harness.c");
     fs::write(dir.join("harness.c"), harness).unwrap();
     let empty = Pools {
         caller_saved: &[],

@@ -212,7 +212,7 @@ fn pclmul_c_single_evaluation_and_independent_values() {
         }
     }
     harness += "};\n";
-    harness += include_str!("../../keel-codegen/tests/fixtures/pclmul_harness.c");
+    harness += include_str!("../../../keel-codegen/tests/fixtures/pclmul_harness.c");
     let original = parse(&s, Target::X86_64LinuxGnu).unwrap();
     keel_ir::verify_module(&original).unwrap();
     let d = std::env::var_os("KEEL_C_PCLMUL_EXPORT_DIR")

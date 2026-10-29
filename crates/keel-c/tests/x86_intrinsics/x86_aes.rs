@@ -236,7 +236,7 @@ fn native_c_wrappers_independent_oracle_and_single_evaluation() {
         harness += &format!("aes_5_{n},");
     }
     harness += "};\n";
-    harness += &include_str!("../../keel-codegen/tests/fixtures/x86_aes_harness.c")
+    harness += &include_str!("../../../keel-codegen/tests/fixtures/x86_aes_harness.c")
         .replace("int main(void)", "static int oracle_main(void)");
     harness += "extern int eval_count; extern V once(const void*); int main(void){int e=oracle_main();if(e)return e;u8 a[16]={0},out[16],expected[16];eval_count=0;bytes(out,once(a));ref(5,a,a,255,expected);return eval_count==1&&eq(out,expected,16)?0:99;}\n";
     let module = compile(&source, Target::X86_64LinuxGnu).unwrap();

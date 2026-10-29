@@ -2,32 +2,29 @@ use keel_codegen::x86_features::{FeatureSelector, Features};
 use keel_codegen::{CodegenPipeline, SelectionTier, regalloc::AllocationTier};
 use keel_ir::Target;
 
-#[path = "common/x86_packet.rs"]
-mod packet;
+use crate::packet;
 
 #[test]
-fn queries_and_specialized_operations_use_architectural_semantics() {
+fn sse42_strings_and_crc_preserve_vendor_results() {
     packet::check(
-        include_str!("fixtures/x86_queries.c"),
-        include_str!("fixtures/x86_queries_runner.c"),
-        "KEEL_C_QUERIES_EXPORT_DIR",
-        "queries",
+        include_str!("../fixtures/x86_strings.c"),
+        include_str!("../fixtures/x86_strings_runner.c"),
+        "KEEL_C_STRINGS_EXPORT_DIR",
+        "strings",
         Some(&["-mavx2", "-DREFERENCE"]),
     );
 }
 
 #[test]
-fn specialized_controls_and_feature_permissions_are_checked() {
+fn string_controls_and_sse42_permissions_are_checked() {
     for expression in [
-        "_mm_dp_ps(a,a,i)",
-        "_mm_dp_pd(b,b,256)",
-        "_mm_mpsadbw_epu8(c,c,-1)",
-        "_mm256_mpsadbw_epu8(d,d,i)",
-        "_mm256_dp_ps(e,e,(i++,3))",
+        "_mm_cmpistri(a,a,i)",
+        "_mm_cmpistrz(a,a,256)",
+        "_mm_cmpestrm(a,1,a,2,-1)",
+        "_mm_cmpestra(a,1,a,2,(i++,3))",
     ] {
-        let source = format!(
-            "#include <immintrin.h>\nvoid f(__m128 a,__m128d b,__m128i c,__m256i d,__m256 e,int i){{(void){expression};}}"
-        );
+        let source =
+            format!("#include <nmmintrin.h>\nvoid f(__m128i a,int i){{(void){expression};}}");
         let source = keel_c::preprocess(
             &source,
             "bad.c",
@@ -53,36 +50,14 @@ fn specialized_controls_and_feature_permissions_are_checked() {
             "{expression}: {error}"
         );
     }
-    for (definition, enabled, missing) in [
-        (
-            "int f(__m128i a,__m128i b){return _mm_testnzc_si128(a,b);}",
-            "sse41",
-            "none",
-        ),
-        (
-            "__m128i f(__m128i a){return _mm_minpos_epu16(a);}",
-            "sse41",
-            "none",
-        ),
-        (
-            "__m128 f(__m128 a){return _mm_dp_ps(a,a,255);}",
-            "sse41",
-            "none",
-        ),
-        ("int f(__m128 a){return _mm_testz_ps(a,a);}", "avx", "sse41"),
-        (
-            "int f(__m256i a){return _mm256_testc_si256(a,a);}",
-            "avx",
-            "sse41",
-        ),
-        (
-            "__m256i f(__m256i a){return _mm256_mpsadbw_epu8(a,a,255);}",
-            "avx2",
-            "avx",
-        ),
+    for definition in [
+        "int f(__m128i a){return _mm_cmpistri(a,a,255);}",
+        "int f(__m128i a,int n){return _mm_cmpestrz(a,n,a,n,255);}",
+        "unsigned f(unsigned a,unsigned char b){return _mm_crc32_u8(a,b);}",
+        "unsigned long long f(unsigned long long a,unsigned long long b){return _mm_crc32_u64(a,b);}",
     ] {
-        let module = packet::frontend(&format!("#include <immintrin.h>\n{definition}"));
-        for (features, allowed) in [(enabled, true), (missing, false)] {
+        let module = packet::frontend(&format!("#include <nmmintrin.h>\n{definition}"));
+        for (features, allowed) in [("sse42", true), ("sse41", false)] {
             let selector = FeatureSelector {
                 inner: &SelectionTier::Baseline,
                 features: Features::parse(features).unwrap(),

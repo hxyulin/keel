@@ -128,7 +128,7 @@ fn sources() -> (String, String) {
         }
     }
     runner.push_str(&format!("static const struct MemoryCase memory_cases[]={{{}}};\nstatic const struct GatherCase gather_cases[]={{{}}};\n",memory.join(","),gather.join(",")));
-    runner.push_str(include_str!("fixtures/x86_mask_memory_runner.c"));
+    runner.push_str(include_str!("../fixtures/x86_mask_memory_runner.c"));
     (source, runner)
 }
 #[test]

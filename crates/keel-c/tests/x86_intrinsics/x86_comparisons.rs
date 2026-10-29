@@ -37,10 +37,10 @@ fn command(command: &mut Command) {
     );
 }
 
-const CASES: &str = include_str!("fixtures/x86_comparison_cases.h");
-const SOURCE: &str = include_str!("fixtures/x86_comparisons.c");
-const ASSEMBLY: &str = include_str!("fixtures/x86_comparison_assembly.h");
-const RUNNER: &str = include_str!("fixtures/x86_comparison_runner.c");
+const CASES: &str = include_str!("../fixtures/x86_comparison_cases.h");
+const SOURCE: &str = include_str!("../fixtures/x86_comparisons.c");
+const ASSEMBLY: &str = include_str!("../fixtures/x86_comparison_assembly.h");
+const RUNNER: &str = include_str!("../fixtures/x86_comparison_runner.c");
 
 fn sources() -> (String, String, String) {
     let source = SOURCE.replace("#include \"x86_comparison_cases.h\"", CASES);

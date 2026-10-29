@@ -251,7 +251,7 @@ fn sources() -> (String, String) {
         ));
     }
     runner.push_str("};\n");
-    runner.push_str(include_str!("fixtures/x86_lane_intrinsics_runner.c"));
+    runner.push_str(include_str!("../fixtures/x86_lane_intrinsics_runner.c"));
     (source, runner)
 }
 #[test]

@@ -6,8 +6,8 @@ use keel_codegen::{
 };
 use keel_ir::Target;
 use std::{fs, path::PathBuf, process::Command};
-const SOURCE: &str = include_str!("fixtures/x86_cpu_queries.c");
-const RUNNER: &str = include_str!("fixtures/x86_cpu_queries_runner.c");
+const SOURCE: &str = include_str!("../fixtures/x86_cpu_queries.c");
+const RUNNER: &str = include_str!("../fixtures/x86_cpu_queries_runner.c");
 fn frontend(source: &str, target: Target) -> Result<keel_ir::Module, String> {
     let source = keel_c::preprocess(
         source,

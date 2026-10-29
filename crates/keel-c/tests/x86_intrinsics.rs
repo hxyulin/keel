@@ -1,3 +1,40 @@
+#[path = "common/x86_packet.rs"]
+mod packet;
+#[path = "x86_intrinsics/pclmul.rs"]
+mod pclmul;
+#[path = "x86_intrinsics/x86_aes.rs"]
+mod x86_aes;
+#[path = "x86_intrinsics/x86_comparisons.rs"]
+mod x86_comparisons;
+#[path = "x86_intrinsics/x86_construct.rs"]
+mod x86_construct;
+#[path = "x86_intrinsics/x86_conversions.rs"]
+mod x86_conversions;
+#[path = "x86_intrinsics/x86_cpu_queries.rs"]
+mod x86_cpu_queries;
+#[path = "x86_intrinsics/x86_float_intrinsics.rs"]
+mod x86_float_intrinsics;
+#[path = "x86_intrinsics/x86_lane_intrinsics.rs"]
+mod x86_lane_intrinsics;
+#[path = "x86_intrinsics/x86_mask_memory.rs"]
+mod x86_mask_memory;
+#[path = "x86_intrinsics/x86_numeric_conversions.rs"]
+mod x86_numeric_conversions;
+#[path = "x86_intrinsics/x86_queries.rs"]
+mod x86_queries;
+#[path = "x86_intrinsics/x86_saturation.rs"]
+mod x86_saturation;
+#[path = "x86_intrinsics/x86_shifts.rs"]
+mod x86_shifts;
+#[path = "x86_intrinsics/x86_state_intrinsics.rs"]
+mod x86_state_intrinsics;
+#[path = "x86_intrinsics/x86_strings.rs"]
+mod x86_strings;
+#[path = "x86_intrinsics/x86_target_features.rs"]
+mod x86_target_features;
+#[path = "x86_intrinsics/x86_widening.rs"]
+mod x86_widening;
+
 use keel_codegen::x86_features::{CpuLevel, FeatureSelector, Features};
 use keel_codegen::{CodegenPipeline, SelectionTier, regalloc::AllocationTier};
 use keel_ir::Target;

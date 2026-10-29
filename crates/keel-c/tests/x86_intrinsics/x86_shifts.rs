@@ -281,8 +281,8 @@ fn native_vendor_reference_abi_and_footprints() {
         }
     }
     h += "static V(*shifts[])(V,V)={shift0,shift1,shift2,shift3,shift4,shift5,shift6,shift7};static V(*vendors[])(V,V)={vendor0,vendor1,vendor2,vendor3,vendor4,vendor5,vendor6,vendor7};static void(*memories[])(void*,const void*,const void*)={memory0,memory1,memory2,memory3,memory4,memory5,memory6,memory7};\n";
-    h += include_str!("fixtures/x86_shifts_oracle.h");
-    h += include_str!("fixtures/x86_shifts_harness.c");
+    h += include_str!("../fixtures/x86_shifts_oracle.h");
+    h += include_str!("../fixtures/x86_shifts_harness.c");
     h += "int main(void){int rc=run();if(rc)return rc;V a=_mm_set_epi32(-1,0x80000000,0x7fffffff,1);V z;\n";
     for (i, (_, _, bits)) in OPS.iter().enumerate() {
         for n in [0, bits - 1, *bits, bits + 1, 255] {
@@ -469,11 +469,11 @@ fn avx2_shift_sources() -> (String, String) {
             immediate.map_or(-1, |n| n as i32)
         );
     }
-    harness += include_str!("fixtures/x86_shifts_oracle.h");
+    harness += include_str!("../fixtures/x86_shifts_oracle.h");
     harness += "typedef void (*Kernel)(void*,const void*,const void*);\nstruct ShiftCase {const char*name;int bytes,bits,op,count_bytes,per_lane,immediate;Kernel keel,vendor,memory;};\nstatic const struct ShiftCase cases[]={\n";
     harness += &table;
     harness += "};\n";
-    harness += include_str!("fixtures/x86_avx2_shifts_harness.c");
+    harness += include_str!("../fixtures/x86_avx2_shifts_harness.c");
     (source, harness)
 }
 

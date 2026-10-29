@@ -1,11 +1,10 @@
-#[path = "common/x86_packet.rs"]
-mod packet;
+use crate::packet;
 
 #[test]
 fn constructors_broadcasts_and_duplicate_moves_preserve_bits() {
     packet::check(
-        include_str!("fixtures/x86_construct.c"),
-        include_str!("fixtures/x86_construct_runner.c"),
+        include_str!("../fixtures/x86_construct.c"),
+        include_str!("../fixtures/x86_construct_runner.c"),
         "KEEL_C_CONSTRUCT_EXPORT_DIR",
         "construct",
         None,

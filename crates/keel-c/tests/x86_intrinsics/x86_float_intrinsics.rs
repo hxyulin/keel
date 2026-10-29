@@ -7,8 +7,8 @@ use keel_codegen::{
 use keel_ir::Target;
 use std::{fs, path::PathBuf, process::Command};
 
-const SOURCE: &str = include_str!("fixtures/x86_float_intrinsics.c");
-const HARNESS: &str = include_str!("fixtures/x86_float_intrinsics_runner.c");
+const SOURCE: &str = include_str!("../fixtures/x86_float_intrinsics.c");
+const HARNESS: &str = include_str!("../fixtures/x86_float_intrinsics_runner.c");
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],

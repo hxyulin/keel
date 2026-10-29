@@ -4,7 +4,7 @@ use keel_codegen::{
     x86_features::{CpuLevel, FeatureSelector, Features},
 };
 use keel_ir::Target;
-const SOURCE: &str = include_str!("fixtures/x86_conversions.c");
+const SOURCE: &str = include_str!("../fixtures/x86_conversions.c");
 const NAMES: [&str; 3] = ["cvtdq2ps", "cvttps2dq", "cvtps2dq"];
 fn compile(src: &str, target: Target) -> Result<keel_ir::Module, String> {
     let pp = keel_c::preprocess(
@@ -199,7 +199,7 @@ fn native_bits_flags_vendor_abi_and_exact_memory() {
     fs::write(dir.join("vendor.c"), SOURCE.replace("k_", "v_")).unwrap();
     fs::write(
         dir.join("harness.c"),
-        include_str!("fixtures/x86_conversions_harness.c"),
+        include_str!("../fixtures/x86_conversions_harness.c"),
     )
     .unwrap();
     let module = compile(SOURCE, Target::X86_64LinuxGnu).unwrap();
