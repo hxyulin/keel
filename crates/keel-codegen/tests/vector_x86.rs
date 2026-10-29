@@ -92,12 +92,36 @@ fn compile_with_pools(
 #[test]
 fn all_vector_operations_emit_zero_text_and_identical_typed_objects() {
     let source = fixture();
-    for (s, a, t) in [
-        (SelectionTier::Baseline, AllocationTier::Full, false),
-        (SelectionTier::Full, AllocationTier::Full, true),
-        (SelectionTier::Full, AllocationTier::Fast, true),
+    // The V3 row also carries Q-width call transport and va_arg under VEX.
+    let mut v3 = source.clone();
+    for shape in keel_ir::VectorType::ALL_128 {
+        v3 += &format!(
+            "decl @external_{shape}({shape})->{shape}\nfunc @transport_{shape}(ptr,ptr) {{\nentry(v0:ptr,v1:ptr):\n v2 = load.{shape} align 1 v0\n v3 = call @external_{shape}(v2)\n store align 1 v2,v1\n store align 1 v3,v0\n return\n}}\n"
+        );
+        v3 += &format!(
+            "func @var_{shape}(i64,...)->{shape} {{\nss0 = stack_slot 24, align 8\nentry(v0:i64):\n v1 = stack_addr ss0\n intrinsic va_start(v1)\n v2 = va_arg.{shape} v1\n return v2\n}}\n"
+        );
+    }
+    let v1 = Features::default();
+    for (s, a, t, features, source) in [
+        (
+            SelectionTier::Baseline,
+            AllocationTier::Full,
+            false,
+            v1,
+            &source,
+        ),
+        (SelectionTier::Full, AllocationTier::Full, true, v1, &source),
+        (SelectionTier::Full, AllocationTier::Fast, true, v1, &source),
+        (
+            SelectionTier::Full,
+            AllocationTier::Full,
+            true,
+            Features::for_level(CpuLevel::V3),
+            &v3,
+        ),
     ] {
-        let (text, _) = compile(&source, s, a, t, Features::default());
+        let (text, _) = compile(source, s, a, t, features);
         for opcode in [
             "paddb", "paddw", "paddd", "paddq", "psubb", "psubq", "pmullw", "addps", "addpd",
             "sqrtps", "sqrtpd", "pcmpeqd", "pcmpgtd", "pshufd", "andnps",
