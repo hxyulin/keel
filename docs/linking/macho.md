@@ -186,8 +186,9 @@ callback); use compiler guard/wrapper initialization instead.
 
 - External section-based `N_WEAK_DEF` symbols coalesce to the first weak
   contribution; any strong definition wins regardless of object order. Losing
-  sections stay allocated because atoms are not split. Private-extern weak
-  definitions coalesce only statically.
+  sections stay allocated because atoms are not split. Each copy keeps the
+  compact unwind records and FDEs of its own object, so unwind lookups do not
+  mix copies. Private-extern weak definitions coalesce only statically.
 - Weak dylib exports keep their TAPI identity. A strong interface is preferred
   over a weak one. Weak exports carry the export-trie flag and `N_WEAK_DEF`;
   coalescible calls go through stubs/GOT, and pointer slots participate in
@@ -291,8 +292,8 @@ Other rules:
   rebuilt from surviving ranges. Unwind ownership must be unambiguous (one code
   contribution per record, symbolic code targets, local anchors); foreign
   implicit FDEs, external symbols in moving unwind metadata, and relocations
-  crossing record boundaries are diagnosed. A live indivisible contribution
-  containing a losing weak definition's unwind owner is an error.
+  crossing record boundaries are diagnosed. A losing weak copy in a live
+  contribution keeps its own unwind records.
 - Boundary symbols describe only surviving contributions; a boundary reference
   does not retain a section. Mark registration records `retain`/`.no_dead_strip`
   to keep a table and its callback edges.

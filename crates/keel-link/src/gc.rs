@@ -55,6 +55,9 @@ impl Graph<'_> {
         } else {
             (oi, si)
         };
+        self.definition(oi, si)
+    }
+    fn definition(&self, oi: usize, si: usize) -> Result<Option<Node>> {
         let s = &self.linker.objects[oi].symbols[si];
         if s.kind & 0xe == 2 {
             return Ok(None);
@@ -97,6 +100,28 @@ impl Graph<'_> {
             return fail("dead_strip: local pointer outside its input section");
         }
         Ok(Some(self.at(oi, si, offset)?))
+    }
+    /// The target of a relocation in section `si`. Unwind metadata names its
+    /// own object's copy of a definition, also when that copy is a losing
+    /// weak one (see Linker::unwind_target).
+    fn edge(
+        &mut self,
+        oi: usize,
+        si: usize,
+        r: &Reloc,
+        data: &[u8],
+        pointer: bool,
+    ) -> Result<Option<Node>> {
+        if self.records.contains_key(&(oi, si))
+            && r.external
+            && self.linker.objects[oi]
+                .symbols
+                .get(r.symbol)
+                .is_some_and(|s| s.kind & 0xe == 0xe)
+        {
+            return self.definition(oi, r.symbol);
+        }
+        self.target(oi, r, data, pointer)
     }
     /// Decode prefix/pair records before interpreting symbol fields. ADDEND's
     /// 24-bit symbol field is a signed number, never an edge.
@@ -143,11 +168,11 @@ impl Graph<'_> {
                     && anchor.kind & 0xe == 0xe
                     && anchor.kind & 1 == 0
                     && anchor.section == si + 1)
-                    && let Some(n) = self.target(oi, r, &s.data, false)?
+                    && let Some(n) = self.edge(oi, si, r, &s.data, false)?
                 {
                     edges.push(n);
                 }
-                if let Some(n) = self.target(oi, positive, &s.data, false)? {
+                if let Some(n) = self.edge(oi, si, positive, &s.data, false)? {
                     edges.push(n);
                 }
                 i += 1;
@@ -158,14 +183,14 @@ impl Graph<'_> {
                         r.kind
                     ));
                 }
-                if let Some(n) = self.target(oi, r, &s.data, r.kind == 0 && r.width == 8)? {
+                if let Some(n) = self.edge(oi, si, r, &s.data, r.kind == 0 && r.width == 8)? {
                     edges.push(n);
                 }
             }
         }
         Ok(edges)
     }
-    fn owner(&mut self, oi: usize, si: usize, field: usize, fde: bool) -> Result<Option<Node>> {
+    fn owner(&mut self, oi: usize, si: usize, field: usize, fde: bool) -> Result<Node> {
         let s = &self.linker.objects[oi].sections[si];
         let matches: Vec<_> = s.relocs.iter().filter(|r| r.offset == field).collect();
         let rel = if fde {
@@ -204,20 +229,8 @@ impl Graph<'_> {
             }
             matches[0]
         };
-        if rel.external {
-            let symbol = self.linker.objects[oi]
-                .symbols
-                .get(rel.symbol)
-                .ok_or("invalid unwind symbol")?;
-            if symbol.kind & 0xe == 0xe
-                && symbol.kind & 1 != 0
-                && !matches!(self.linker.globals.get(&symbol.name), Some(Target::Definition(o, s)) if *o == oi && *s == rel.symbol)
-            {
-                return Ok(None); // metadata for a coalesced-away weak definition
-            }
-        }
         let owner = self
-            .target(oi, rel, &s.data, !fde && !rel.external)?
+            .edge(oi, si, rel, &s.data, !fde && !rel.external)?
             .ok_or("dead_strip: unwind owner is not an input definition")?;
         if let Node::Section(o, sec) = owner {
             let code = &self.linker.objects[o].sections[sec];
@@ -228,7 +241,7 @@ impl Graph<'_> {
                 let raw = Reader(&s.data).u64(field)?;
                 let start = if rel.external {
                     let original = &self.linker.objects[oi].symbols[rel.symbol];
-                    let sym = if original.kind & 1 != 0 || original.kind & 0xe == 0 {
+                    let sym = if original.kind & 0xe == 0 {
                         let Some(Target::Definition(o, id)) =
                             self.linker.globals.get(&original.name)
                         else {
@@ -250,19 +263,6 @@ impl Graph<'_> {
                     raw.checked_sub(code.address)
                 }
                 .ok_or("dead_strip: unwind function precedes owner section")?;
-                let aliases: Vec<_> = self.linker.objects[o]
-                    .symbols
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, sym)| {
-                        sym.section == sec + 1
-                            && sym.value == code.address + start
-                            && sym.kind & 1 != 0
-                    })
-                    .collect();
-                if !aliases.is_empty() && aliases.iter().all(|(id, sym)| !matches!(self.linker.globals.get(&sym.name), Some(Target::Definition(winner, s)) if *winner == o && *s == *id)) {
-                    return Ok(None);
-                }
                 let length = if fde {
                     Reader(&s.data).u64(field + 8)?
                 } else {
@@ -277,7 +277,7 @@ impl Graph<'_> {
                         "dead_strip: unwind function range crosses its input section contribution",
                     );
                 }
-                return Ok(Some(owner));
+                return Ok(owner);
             }
         }
         fail("dead_strip: unwind owner must be file-backed executable __TEXT")
@@ -370,33 +370,15 @@ impl Linker {
             }
         }
         let mut pending = Vec::new();
-        let mut losing_owners = BTreeSet::new();
-
         for (&(oi, si), records) in &g.records.clone() {
             let compact = self.objects[oi].sections[si].name == "__compact_unwind";
             for r in records {
                 if !compact && r.cie.is_none() {
                     continue;
                 }
-                let Some(owner) = g
+                let owner = g
                     .owner(oi, si, r.start + if compact { 0 } else { 8 }, !compact)
-                    .map_err(|e| format!("{}: {e}", self.objects[oi].name))?
-                else {
-                    let field = r.start + if compact { 0 } else { 8 };
-                    let section = &self.objects[oi].sections[si];
-                    let rel = section
-                        .relocs
-                        .iter()
-                        .find(|rel| rel.offset == field && rel.kind == 0)
-                        .unwrap();
-                    let original_section = if rel.external {
-                        self.objects[oi].symbols[rel.symbol].section - 1
-                    } else {
-                        rel.symbol - 1
-                    };
-                    losing_owners.insert(Node::Section(oi, original_section));
-                    continue;
-                };
+                    .map_err(|e| format!("{}: {e}", self.objects[oi].name))?;
                 g.owners
                     .entry(owner)
                     .or_default()
@@ -510,11 +492,6 @@ impl Linker {
                     commons.insert(name);
                 }
             }
-        }
-        if losing_owners.iter().any(|owner| live.contains(owner)) {
-            return fail(
-                "dead_strip: a live indivisible code contribution contains a losing weak unwind owner; split input sections or use the system linker",
-            );
         }
         let demanded = std::mem::take(&mut g.demanded);
         let records = std::mem::take(&mut g.records);

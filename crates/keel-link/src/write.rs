@@ -694,6 +694,22 @@ impl Linker {
             Ok((None, out.address + s.offset as u64))
         }
     }
+    /// Unwind metadata describes code in its own object, as ld64 attaches
+    /// each record to that object's atom. A losing weak copy stays in the
+    /// image, so its compact record and FDE keep naming that copy rather
+    /// than the definition that won.
+    pub(crate) fn unwind_target(&self, oi: usize, r: &Reloc) -> Result<(Option<Target>, u64)> {
+        if r.external
+            && self.objects[oi]
+                .symbols
+                .get(r.symbol)
+                .is_some_and(|s| s.kind & 0xe == 0xe)
+        {
+            let t = Target::Definition(oi, r.symbol);
+            return Ok((Some(t), self.address(t)?));
+        }
+        self.reloc_target(oi, r)
+    }
     fn layout(&mut self) -> Result<(Vec<Segment>, usize, u64)> {
         let mut segments = vec![Segment {
             name: "__PAGEZERO",
@@ -811,6 +827,11 @@ impl Linker {
         let mut data = std::mem::take(&mut self.objects[oi].sections[si].data);
         let s = &self.objects[oi].sections[si];
         let metadata = s.name == "__compact_unwind" && s.segment == "__LD";
+        let target_of = if metadata || s.name == "__eh_frame" {
+            Self::unwind_target
+        } else {
+            Self::reloc_target
+        };
         let mut i = 0;
         let mut patched = RelocationRanges::default();
         while i < s.relocs.len() {
@@ -836,7 +857,7 @@ impl Linker {
                     + s.offset as u64
                     + r.offset as u64
             };
-            let (target, mut value) = self.reloc_target(oi, &r)?;
+            let (target, mut value) = target_of(self, oi, &r)?;
             let mut difference = false;
             if r.kind == 1 {
                 let unsigned = s.relocs.get(i).ok_or("unpaired SUBTRACTOR")?;
@@ -849,7 +870,7 @@ impl Linker {
                 {
                     return fail("invalid SUBTRACTOR/UNSIGNED pair");
                 }
-                let (positive_target, positive) = self.reloc_target(oi, unsigned)?;
+                let (positive_target, positive) = target_of(self, oi, unsigned)?;
                 if matches!(positive_target, Some(Target::Import(_))) {
                     return fail("cannot form a static difference with an imported symbol");
                 }

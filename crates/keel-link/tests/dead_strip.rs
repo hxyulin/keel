@@ -476,22 +476,6 @@ fn required_export_preserves_runtime_dso_consumer() {
     fs::remove_dir_all(dir).unwrap();
 }
 
-#[test]
-fn indivisible_live_weak_loser_with_unwind_is_diagnosed() {
-    let objects = [
-        assemble(
-            ".globl _main\n_main:\nret\n.globl _choice\n.weak_definition _choice\n_choice:\n.cfi_startproc\nret\n.cfi_endproc\n",
-        ),
-        assemble(".globl _choice\n_choice:\nret\n"),
-    ];
-    assert!(
-        link(&objects, options(true))
-            .err()
-            .unwrap()
-            .contains("live indivisible code contribution contains a losing weak unwind owner")
-    );
-}
-
 fn relocation_word(bytes: &[u8], kind: u32) -> usize {
     let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
     let mut at = 32;

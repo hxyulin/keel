@@ -116,7 +116,7 @@ impl Linker {
                         return None;
                     }
                     if r.offset % 32 == 0 {
-                        starts.push(self.reloc_target(oi, r).ok()?.1);
+                        starts.push(self.unwind_target(oi, r).ok()?.1);
                     }
                 }
             }

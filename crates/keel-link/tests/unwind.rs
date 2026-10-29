@@ -197,6 +197,89 @@ fn planning_accounts_for_address_dependent_gap_changes() {
 }
 
 #[test]
+fn weak_copies_keep_their_own_dwarf_unwind_entries() {
+    // An x28 CFA forces DWARF mode. The copies differ in length, so mapping
+    // the kept copy to the other object's FDE gives it the wrong range.
+    // Without subsections the FDE names a local label. With them, as in
+    // compiled output, it names _shared, which resolves to the kept copy.
+    let copy = |directives: &str, body: &str| {
+        format!(
+            ".globl _shared\n{directives}_shared:\n.cfi_startproc\n.cfi_def_cfa x28,16\n{body}ret\n.cfi_endproc\n"
+        )
+    };
+    let weak = ".weak_definition _shared\n";
+    let hidden = ".private_extern _shared\n.weak_definition _shared\n";
+    for (subsections, first, second) in [
+        ("", weak, weak),
+        (".subsections_via_symbols\n", weak, weak),
+        (".subsections_via_symbols\n", hidden, hidden),
+        (".subsections_via_symbols\n", weak, ""),
+    ] {
+        let first = keel_asm::assemble_object(&format!(
+            "{subsections}.globl _main\n_main:\nbl _shared\nb _other\n{}",
+            copy(first, "")
+        ))
+        .unwrap();
+        let strong = second.is_empty();
+        let second = keel_asm::assemble_object(&format!(
+            "{subsections}.globl _other\n_other:\nb _shared\n{}",
+            copy(second, "nop\n")
+        ))
+        .unwrap();
+        // A strong definition wins, otherwise the first weak one does. Both
+        // copies share a section with live code, so dead_strip keeps both.
+        for (objects, lengths) in [([&first, &second], (4, 8)), ([&second, &first], (8, 4))] {
+            let (kept, other) = if strong { (8, 4) } else { lengths };
+            for dead_strip in [false, true] {
+                let inputs = objects.map(|bytes| Input {
+                    name: "weak.o",
+                    bytes,
+                });
+                let exe = keel_link::link(
+                    &inputs,
+                    Options {
+                        dead_strip,
+                        dylibs: vec![Dylib {
+                            install_name: "/usr/lib/libSystem.B.dylib".into(),
+                            exports: BTreeSet::new(),
+                            weak_exports: BTreeSet::new(),
+                        }],
+                        ..Options::default()
+                    },
+                )
+                .unwrap();
+                let file = object::File::parse(exe.bytes.as_slice()).unwrap();
+                let eh_frame = file.section_by_name("__eh_frame").unwrap();
+                let fdes = eh_frame.data().unwrap();
+                let unwind = file.section_by_name("__unwind_info").unwrap();
+                let (entries, sentinel, _, _) = table(unwind.data().unwrap());
+                let mut ranges = Vec::new();
+                for (i, &(start, encoding)) in entries.iter().enumerate() {
+                    if encoding & 0x0f000000 != 0x03000000 {
+                        continue;
+                    }
+                    let end = entries.get(i + 1).map_or(sentinel, |e| e.0);
+                    let fde = encoding & 0xffffff;
+                    let field = eh_frame.address() + fde as u64 + 8;
+                    let begin = field.wrapping_add(pointer(fdes, fde + 8));
+                    assert_eq!(begin, 0x1_0000_0000 + start as u64);
+                    assert_eq!(pointer(fdes, fde + 16), (end - start) as u64);
+                    ranges.push((begin, end - start));
+                }
+                let shared = file
+                    .symbols()
+                    .find(|s| s.name() == Ok("_shared"))
+                    .unwrap()
+                    .address();
+                ranges.sort_by_key(|&(begin, _)| begin != shared);
+                assert_eq!(ranges.len(), 2);
+                assert_eq!((ranges[0], ranges[1].1), ((shared, kept), other));
+            }
+        }
+    }
+}
+
+#[test]
 fn tlv_metadata_replans_when_an_untracked_tls_template_moves() {
     let source = ".text\n.globl _main\n_main:\nret\n.section __TEXT,__txttls\n.quad 0\n.tbss _tls,8,3\n.section __LD,__compact_unwind\n.quad _main\n.long 4\n.long 0\n.quad 0\n.quad 0\n.quad 0x100004004\n.long 124\n.long 0\n.quad 0\n.quad 0\n.quad _tls+4294967552\n.long 0\n.long 0\n.quad 0\n.quad 0\n";
     let mut bytes = keel_asm::assemble_object(source).unwrap();
