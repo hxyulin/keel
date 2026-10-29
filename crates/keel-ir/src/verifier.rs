@@ -597,6 +597,19 @@ fn check_references(func: &Function, inserted: &mut Vec<bool>) -> Result<bool, V
                     }
                 }
             }
+            // Checked here, before anything formats the instruction, since
+            // printing a switch reads its default destination.
+            InstData::Switch { dests, cases, .. } if dests.len() != cases.len() + 1 => {
+                errors.push(VerifierError {
+                    location: inst.to_string(),
+                    message: format!(
+                        "switch has {} destinations for {} cases, expected {}",
+                        dests.len(),
+                        cases.len(),
+                        cases.len() + 1
+                    ),
+                });
+            }
             _ => {}
         }
     }
@@ -2437,6 +2450,42 @@ mod name_tests {
             check_data(&names, &ptr("missing", 0), DataLayout::NATIVE64),
             ["points to @missing, which is not declared"]
         );
+    }
+}
+
+#[cfg(test)]
+mod switch_tests {
+    use crate::InstData;
+
+    #[test]
+    fn rejects_wrong_destination_counts() {
+        let module = crate::parse(
+            "func @f(i64) {
+block0(v0: i64):
+    switch v0, block1, [1: block1]
+block1:
+    return
+}",
+        )
+        .unwrap();
+        let func = &module.functions[0];
+        let inst = func.block_insts(func.entry_block().unwrap())[0];
+        for count in [0, 3] {
+            let mut func = func.clone();
+            let InstData::Switch { dests, .. } = func.inst_data_mut(inst) else {
+                panic!("expected a switch");
+            };
+            let dest = dests[0].clone();
+            dests.clear();
+            dests.resize(count, dest);
+            let errors = super::verify(&func).unwrap_err();
+            assert!(
+                errors[0]
+                    .to_string()
+                    .contains(&format!("switch has {count} destinations for 1 cases")),
+                "{errors:?}"
+            );
+        }
     }
 }
 
