@@ -2,7 +2,8 @@
 //! both Clang and Keel, compiled by keel (as is and with the default optimization
 //! pipeline), linked with clang and run. Its output and exit status must be
 //! the same as the program built by clang alone, so the programs print
-//! what they compute rather than spelling out expected values.
+//! what they compute rather than spelling out expected values. When both
+//! preprocessors give byte-identical assembly, one image is linked and run.
 
 use std::path::Path;
 use std::process::{Command, Output};
@@ -17,11 +18,6 @@ fn run(cmd: &mut Command) -> Output {
         String::from_utf8_lossy(&out.stderr)
     );
     out
-}
-
-/// Compiles preprocessed C at `i_path` to an executable at `exe`.
-fn build_with_keel(i_path: &Path, exe: &Path, optimize: bool) -> Result<(), String> {
-    build(i_path, exe, optimize, keel_c::Options::default())
 }
 
 fn build(i_path: &Path, exe: &Path, optimize: bool, opts: keel_c::Options) -> Result<(), String> {
@@ -41,6 +37,17 @@ fn build_with_allocator(
     opts: keel_c::Options,
     allocation: keel_codegen::regalloc::AllocationTier,
 ) -> Result<(), String> {
+    let asm = compile_to_asm(i_path, optimize, opts, allocation)?;
+    link(&asm, exe, opts)
+}
+
+/// Compiles preprocessed C at `i_path` to assembly text.
+fn compile_to_asm(
+    i_path: &Path,
+    optimize: bool,
+    opts: keel_c::Options,
+    allocation: keel_codegen::regalloc::AllocationTier,
+) -> Result<String, String> {
     let src = std::fs::read_to_string(i_path).unwrap();
     let mut module =
         keel_c::compile(&src, i_path.to_str().unwrap(), opts).map_err(|e| e.to_string())?;
@@ -48,7 +55,7 @@ fn build_with_allocator(
     if optimize {
         keel_opt::optimize(&mut module).map_err(|e| e.to_string())?;
     }
-    let asm = keel_codegen::compile_with_pipeline(
+    keel_codegen::compile_with_pipeline(
         &module,
         opts.target,
         &keel_codegen::CodegenPipeline {
@@ -56,7 +63,11 @@ fn build_with_allocator(
             allocator: &allocation,
         },
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())
+}
+
+/// Assembles and links `asm` with clang into an executable at `exe`.
+fn link(asm: &str, exe: &Path, opts: keel_c::Options) -> Result<(), String> {
     let asm_path = exe.with_extension("s");
     std::fs::write(&asm_path, asm).unwrap();
     let out = Command::new("clang")
@@ -125,17 +136,39 @@ fn programs() {
         )
         .unwrap();
         std::fs::write(&standalone_path, standalone).unwrap();
-        for (preprocessor, preprocessed) in [("clang", &i_path), ("native", &standalone_path)] {
-            for optimize in [false, true] {
+        for optimize in [false, true] {
+            let suffix = if optimize { " (-O)" } else { "" };
+            let mut images = Vec::new();
+            for (preprocessor, preprocessed) in [("clang", &i_path), ("native", &standalone_path)] {
+                match compile_to_asm(
+                    preprocessed,
+                    optimize,
+                    keel_c::Options::default(),
+                    keel_codegen::regalloc::AllocationTier::Full,
+                ) {
+                    Ok(asm) => images.push((preprocessor, asm)),
+                    Err(e) => failures.push(format!("{stem} ({preprocessor} pp){suffix}: {e}")),
+                }
+            }
+            // Byte-identical assembly from both preprocessors links one image.
+            let shared = matches!(images.as_slice(), [(_, a), (_, b)] if a == b);
+            if shared {
+                images.pop();
+            }
+            for (preprocessor, asm) in images {
                 let name = format!(
-                    "{stem} ({preprocessor} pp){}",
-                    if optimize { " (-O)" } else { "" }
+                    "{stem} ({} pp){suffix}",
+                    if shared {
+                        "clang and native"
+                    } else {
+                        preprocessor
+                    }
                 );
                 let exe = out_dir.join(format!(
                     "{stem}-{preprocessor}{}",
                     if optimize { "-opt" } else { "" }
                 ));
-                if let Err(e) = build_with_keel(preprocessed, &exe, optimize) {
+                if let Err(e) = link(&asm, &exe, keel_c::Options::default()) {
                     failures.push(format!("{name}: {e}"));
                     continue;
                 }
