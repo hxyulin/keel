@@ -41,7 +41,7 @@ fn harness() -> String {
         }
     }
     s += "};\n";
-    s += include_str!("fixtures/pclmul_harness.c");
+    s += include_str!("../fixtures/pclmul_harness.c");
     s
 }
 #[test]

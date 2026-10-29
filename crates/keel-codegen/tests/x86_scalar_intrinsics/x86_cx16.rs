@@ -1,4 +1,5 @@
 //! Fixed-register CX16, including SysV i128 ABI and fault-time RBX unwind evidence.
+use crate::common;
 use keel_asm_ir::x86::{CpuLevel, Features};
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
@@ -8,9 +9,6 @@ use keel_codegen::{
 use keel_ir::{InstData, Intrinsic, MemoryEffects};
 use std::process::Command;
 use std::{fs, path::PathBuf};
-#[allow(dead_code)]
-#[path = "common/vector.rs"]
-pub mod common;
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],

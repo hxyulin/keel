@@ -1,4 +1,5 @@
 //! Intel legacy AES-NI contract: independent GF(256) oracle, no host AES oracle.
+use crate::common;
 use keel_asm_ir::x86::{CpuLevel, Features};
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
@@ -6,9 +7,6 @@ use keel_codegen::{
     x86_features::FeatureSelector,
 };
 use std::{fs, process::Command};
-#[allow(dead_code)]
-#[path = "common/vector.rs"]
-pub mod common;
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -452,7 +450,7 @@ fn harness() -> String {
     for i in 0..6 {
         c += &format!("extern void aesmem_{i}(const void*,const void*,void*);\n");
     }
-    c += include_str!("fixtures/x86_aes_harness.c");
+    c += include_str!("../fixtures/x86_aes_harness.c");
     c
 }
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
