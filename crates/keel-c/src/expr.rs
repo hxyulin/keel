@@ -1667,7 +1667,7 @@ impl<'a> Parser<'a> {
         {
             self.require_native_layout(loc, "x86 builtins")?;
         }
-        if let Some(id) = crate::x86_builtins::semantic_builtin(base) {
+        if let Some((id, control)) = crate::x86_builtins::semantic_builtin(base) {
             if self.target != Target::X86_64LinuxGnu {
                 return Err(Error::new(loc, "x86 value builtin requires x86-64"));
             }
@@ -1675,18 +1675,14 @@ impl<'a> Parser<'a> {
             let info = id.info();
             let mut args = self.builtin_args(info.params.len(), loc)?;
             for (i, (&expected, arg)) in info.params.iter().zip(&mut args).enumerate() {
-                if id.has_f16c_rounding() && i == 1 {
-                    let Some(control) = integer_constant_control(arg, self.c_layout)
-                        .filter(|n| (0..=255).contains(n))
+                if let Some(control) = control.filter(|_| i == 1) {
+                    let Some(value) = integer_constant_control(arg, self.c_layout)
+                        .filter(|n| (0..=control.maximum).contains(n))
                     else {
-                        return Err(Error::new(
-                            loc,
-                            "F16C rounding control must be an integer constant expression in 0..255",
-                        ));
+                        return Err(Error::new(loc, control.diagnostic));
                     };
-                    // The instruction ignores bits 7:3. Existing IR exposes only
-                    // the architecturally meaningful RC selector in bits 2:0.
-                    *arg = mk(ExprKind::Int(control & 7), INT, arg.loc);
+                    // Each reviewed recipe retains only the control bits exposed by IR.
+                    *arg = mk(ExprKind::Int(value & control.mask), INT, arg.loc);
                 }
                 let expected = self.x86_value_type(expected);
                 if arg.ty != expected {

@@ -186,4 +186,25 @@ static __inline__ __m256d _mm256_addsub_pd(__m256d a, __m256d b) {
   return __builtin_keel_avx_vaddsubpd256(a, b);
 }
 
+#define _mm256_round_ps(a, mode) __builtin_keel_avx_vroundps256((__m256)(a), (mode))
+static __inline__ __m256 _mm256_ceil_ps(__m256 a) {
+  return _mm256_round_ps(a, _MM_FROUND_CEIL);
+}
+static __inline__ __m256 _mm256_floor_ps(__m256 a) {
+  return _mm256_round_ps(a, _MM_FROUND_FLOOR);
+}
+#define _mm256_round_pd(a, mode) __builtin_keel_avx_vroundpd256((__m256d)(a), (mode))
+static __inline__ __m256d _mm256_ceil_pd(__m256d a) {
+  return _mm256_round_pd(a, _MM_FROUND_CEIL);
+}
+static __inline__ __m256d _mm256_floor_pd(__m256d a) {
+  return _mm256_round_pd(a, _MM_FROUND_FLOOR);
+}
+static __inline__ __m256 _mm256_blendv_ps(__m256 a, __m256 b, __m256 mask) {
+  return __builtin_keel_avx_vblendvps256(a, b, mask);
+}
+static __inline__ __m256d _mm256_blendv_pd(__m256d a, __m256d b, __m256d mask) {
+  return __builtin_keel_avx_vblendvpd256(a, b, mask);
+}
+
 #endif /* _KEEL_AVXINTRIN_H */

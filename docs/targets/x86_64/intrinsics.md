@@ -103,6 +103,9 @@ separate names, not arbitrary suffix combinations.
   Byte sums of absolute differences: `_mm{,256}_sad_epu8`.
 - Packed square roots: `_mm{,256}_sqrt_{ps,pd}`. Alternating arithmetic:
   `_mm{,256}_addsub_{ps,pd}` subtracts even lanes and adds odd lanes.
+- Rounding: `_mm{,256}_{round,ceil,floor}_{ps,pd}` and
+  `_mm_{round,ceil,floor}_{ss,sd}`. Variable floating blends:
+  `_mm{,256}_blendv_{ps,pd}`. See the control and upper-lane contracts below.
 - Horizontal integer arithmetic: `_mm{,256}_{hadd,hsub}_epi{16,32}` and
   `_mm{,256}_{hadds,hsubs}_epi16`. Horizontal floating arithmetic:
   `_mm{,256}_{hadd,hsub}_{ps,pd}`. Unpacks:
@@ -183,8 +186,9 @@ not grant CPU features or require the host to support the instructions.
 ### Reviewed builtin inventory
 
 [`vendor-bindings.json`](../../../tools/x86-isa/vendor-bindings.json) owns the
-163 reviewed frontend bindings for AES, packed integer operations and shifts,
-architectural packed floating arithmetic, SSE2 numeric conversions, FMA and F16C.
+173 reviewed frontend bindings for AES, packed integer operations and shifts,
+architectural floating arithmetic, rounding and blends, SSE2 numeric conversions,
+FMA and F16C.
 Its generated module supplies both parser lookup and
 `__has_builtin` recognition. The metadata records current semantic intrinsic
 IDs, types, controls, required features and ownership. Generated assertions
@@ -446,6 +450,36 @@ results. All eight wrappers evaluate each operand once and use the existing
 masked status effects, scalar SSE arithmetic oracles, aliases and forced spills
 under all rounding modes, DAZ/FTZ and clear/seeded flags. These additions do not
 extend the ordinary C arithmetic/comparison floating-environment contract.
+
+### Rounding and variable floating blends
+
+`_mm{,256}_round_{ps,pd}` rounds packed floating lanes to integral floating
+values. `_mm_round_ss(a,b,mode)` and `_mm_round_sd(a,b,mode)` round only the low
+lane of `b` and copy the remaining lanes from `a`. Unused lanes are copied as
+bits, including signaling-NaN payloads, without contributing exceptions.
+
+The control must be an integer constant expression in 0..15. Bits 1:0 select
+nearest-even, downward, upward or toward-zero rounding. Bit 2 instead selects
+MXCSR.RC, ignoring bits 1:0. Bit 3 suppresses the precision exception, while
+signaling NaNs can still raise invalid. The wrappers retain status effects even
+when their results are unused. `_mm{,256}_{ceil,floor}_{ps,pd}` and
+`_mm_{ceil,floor}_{ss,sd}` use the corresponding fixed rounding controls and
+retain the same upper-lane and exception behavior. The 128-bit forms require
+SSE4.1; packed 256-bit forms require AVX.
+
+`_mm{,256}_blendv_{ps,pd}(a,b,mask)` selects `b` when a mask lane's sign bit is
+set, otherwise `a`. Other mask bits have no effect. The 128-bit forms require
+SSE4.1 and the 256-bit forms require AVX. Selection copies bits without floating
+arithmetic or status effects. Each public operand is evaluated once, including
+scalar rounding operands and masks. These are architectural wrappers, with no
+software fallback when a required feature is disabled.
+
+The binding generator supplies the reviewed control bounds, normalization mask
+and diagnostic for both rounding and F16C; the parser uses one checked control
+path. This preserves F16C's separate 0..255 admission and ignored-bit handling.
+The shared floating packet compares vendor and scalar instruction oracles,
+including ties, signed zeros, nonfinite values, precision suppression, seeded
+flags, scalar upper lanes, mask sign-bit controls, aliases and forced spills.
 
 <a id="x86-aes-ni-legacy-128-bit-aes-ni"></a>
 ## Legacy 128-bit AES-NI

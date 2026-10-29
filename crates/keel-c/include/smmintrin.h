@@ -82,4 +82,49 @@ static __inline__ __m128i _mm_mul_epi32(__m128i a, __m128i b) {
   return (__m128i)__builtin_keel_sse41_pmuldq128((__keel_i32_128)a, (__keel_i32_128)b);
 }
 
+#define _mm_round_ps(a, mode) __builtin_keel_sse41_roundps128((__m128)(a), (mode))
+static __inline__ __m128 _mm_ceil_ps(__m128 a) {
+  return _mm_round_ps(a, _MM_FROUND_CEIL);
+}
+static __inline__ __m128 _mm_floor_ps(__m128 a) {
+  return _mm_round_ps(a, _MM_FROUND_FLOOR);
+}
+#define _mm_round_pd(a, mode) __builtin_keel_sse41_roundpd128((__m128d)(a), (mode))
+static __inline__ __m128d _mm_ceil_pd(__m128d a) {
+  return _mm_round_pd(a, _MM_FROUND_CEIL);
+}
+static __inline__ __m128d _mm_floor_pd(__m128d a) {
+  return _mm_round_pd(a, _MM_FROUND_FLOOR);
+}
+#define _mm_round_ss(a, b, mode) \
+  __extension__({ \
+    __m128 __keel_round_a = (a), __keel_round_b = (b); \
+    __keel_round_a[0] = __builtin_keel_sse41_roundss(__keel_round_b[0], (mode)); \
+    __keel_round_a; \
+  })
+static __inline__ __m128 _mm_ceil_ss(__m128 a, __m128 b) {
+  return _mm_round_ss(a, b, _MM_FROUND_CEIL);
+}
+static __inline__ __m128 _mm_floor_ss(__m128 a, __m128 b) {
+  return _mm_round_ss(a, b, _MM_FROUND_FLOOR);
+}
+#define _mm_round_sd(a, b, mode) \
+  __extension__({ \
+    __m128d __keel_round_a = (a), __keel_round_b = (b); \
+    __keel_round_a[0] = __builtin_keel_sse41_roundsd(__keel_round_b[0], (mode)); \
+    __keel_round_a; \
+  })
+static __inline__ __m128d _mm_ceil_sd(__m128d a, __m128d b) {
+  return _mm_round_sd(a, b, _MM_FROUND_CEIL);
+}
+static __inline__ __m128d _mm_floor_sd(__m128d a, __m128d b) {
+  return _mm_round_sd(a, b, _MM_FROUND_FLOOR);
+}
+static __inline__ __m128 _mm_blendv_ps(__m128 a, __m128 b, __m128 mask) {
+  return __builtin_keel_sse41_blendvps128(a, b, mask);
+}
+static __inline__ __m128d _mm_blendv_pd(__m128d a, __m128d b, __m128d mask) {
+  return __builtin_keel_sse41_blendvpd128(a, b, mask);
+}
+
 #endif /* _KEEL_SMMINTRIN_H */

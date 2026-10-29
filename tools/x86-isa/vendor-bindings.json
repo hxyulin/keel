@@ -2874,6 +2874,190 @@
       ],
       "ownership": "keel",
       "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_sse41_roundps128",
+      "intrinsic": "X86Sse41Roundps128",
+      "intrinsic_id": 396,
+      "family": "value",
+      "header": "smmintrin.h",
+      "params": [
+        "f32x4",
+        "i32"
+      ],
+      "result": "f32x4",
+      "control": "round_imm4",
+      "features": [
+        "sse41"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_sse41_roundpd128",
+      "intrinsic": "X86Sse41Roundpd128",
+      "intrinsic_id": 397,
+      "family": "value",
+      "header": "smmintrin.h",
+      "params": [
+        "f64x2",
+        "i32"
+      ],
+      "result": "f64x2",
+      "control": "round_imm4",
+      "features": [
+        "sse41"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_sse41_roundss",
+      "intrinsic": "X86Sse41Roundss",
+      "intrinsic_id": 398,
+      "family": "value",
+      "header": "smmintrin.h",
+      "params": [
+        "f32",
+        "i32"
+      ],
+      "result": "f32",
+      "control": "round_imm4",
+      "features": [
+        "sse41"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_sse41_roundsd",
+      "intrinsic": "X86Sse41Roundsd",
+      "intrinsic_id": 399,
+      "family": "value",
+      "header": "smmintrin.h",
+      "params": [
+        "f64",
+        "i32"
+      ],
+      "result": "f64",
+      "control": "round_imm4",
+      "features": [
+        "sse41"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_sse41_blendvps128",
+      "intrinsic": "X86Sse41Blendvps128",
+      "intrinsic_id": 0,
+      "family": "value",
+      "header": "smmintrin.h",
+      "params": [
+        "f32x4",
+        "f32x4",
+        "f32x4"
+      ],
+      "result": "f32x4",
+      "control": "none",
+      "features": [
+        "sse41"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_sse41_blendvpd128",
+      "intrinsic": "X86Sse41Blendvpd128",
+      "intrinsic_id": 1,
+      "family": "value",
+      "header": "smmintrin.h",
+      "params": [
+        "f64x2",
+        "f64x2",
+        "f64x2"
+      ],
+      "result": "f64x2",
+      "control": "none",
+      "features": [
+        "sse41"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_avx_vroundps256",
+      "intrinsic": "X86AvxVroundps256",
+      "intrinsic_id": 296,
+      "family": "value",
+      "header": "avxintrin.h",
+      "params": [
+        "f32x8",
+        "i32"
+      ],
+      "result": "f32x8",
+      "control": "round_imm4",
+      "features": [
+        "avx"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_avx_vroundpd256",
+      "intrinsic": "X86AvxVroundpd256",
+      "intrinsic_id": 298,
+      "family": "value",
+      "header": "avxintrin.h",
+      "params": [
+        "f64x4",
+        "i32"
+      ],
+      "result": "f64x4",
+      "control": "round_imm4",
+      "features": [
+        "avx"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_avx_vblendvps256",
+      "intrinsic": "X86AvxVblendvps256",
+      "intrinsic_id": 6,
+      "family": "value",
+      "header": "avxintrin.h",
+      "params": [
+        "f32x8",
+        "f32x8",
+        "f32x8"
+      ],
+      "result": "f32x8",
+      "control": "none",
+      "features": [
+        "avx"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
+    },
+    {
+      "builtin": "keel_avx_vblendvpd256",
+      "intrinsic": "X86AvxVblendvpd256",
+      "intrinsic_id": 7,
+      "family": "value",
+      "header": "avxintrin.h",
+      "params": [
+        "f64x4",
+        "f64x4",
+        "f64x4"
+      ],
+      "result": "f64x4",
+      "control": "none",
+      "features": [
+        "avx"
+      ],
+      "ownership": "keel",
+      "reference": "llvm_21_1_0"
     }
   ],
   "reference_file": "vendor-references.json"

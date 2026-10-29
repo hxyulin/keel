@@ -25,7 +25,7 @@ class VendorBindingTests(unittest.TestCase):
         self.assertEqual({family: sum(row['family'] == family for row in rows)
                           for family in vendor_bindings.FAMILIES},
                          {'aes': 6, 'packed_shift': 32, 'saturating': 8,
-                          'packed_conversion': 3, 'value': 114})
+                          'packed_conversion': 3, 'value': 124})
         source = vendor_bindings.generate(self.schema, generate.ROOT)
         self.assertEqual(source.count(' => Binding::'), len(names))
         self.assertIn('pub(crate) fn recognized(', source)
@@ -75,7 +75,7 @@ class VendorBindingTests(unittest.TestCase):
         for original in self.schema['bindings']:
             if original['family'] != 'value':
                 continue
-            for control in ['none', 'imm8', 'u64_count', 'rounding']:
+            for control in vendor_bindings.CONTROLS:
                 if control == original['control']:
                     continue
                 schema = copy.deepcopy(self.schema)
@@ -83,3 +83,11 @@ class VendorBindingTests(unittest.TestCase):
                 row['control'] = control
                 with self.assertRaisesRegex(ValueError, 'value control'):
                     vendor_bindings.validate(schema, generate.ROOT)
+
+    def test_control_recipe_requires_the_parser_control_position_and_type(self):
+        for params in [['f32x4'], ['f32x4', 'u64'], ['i32', 'f32x4']]:
+            schema = copy.deepcopy(self.schema)
+            row = next(row for row in schema['bindings'] if row['control'] == 'round_imm4')
+            row['params'] = params
+            with self.assertRaisesRegex(ValueError, 'second i32'):
+                vendor_bindings.validate(schema, generate.ROOT)

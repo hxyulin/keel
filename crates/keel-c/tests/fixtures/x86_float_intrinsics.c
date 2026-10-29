@@ -133,3 +133,296 @@ void FN(lane_addsub_pd256)(const void*a,const void*b,const void*c,void*out){(voi
 #ifndef REFERENCE
 void dead_lane_addsub_pd256(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m256d x;__builtin_memcpy(&x,a,32);__m256d y;__builtin_memcpy(&y,b,32);(void)_mm256_addsub_pd(x,y);}
 #endif
+
+void FN(lane_blendv_ps128)(const void*a,const void*b,const void*c,void*out){__m128 x,y,m;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);__builtin_memcpy(&m,c,16);__m128 r=_mm_blendv_ps(x,y,m);__builtin_memcpy(out,&r,16);}
+void FN(lane_blendv_pd128)(const void*a,const void*b,const void*c,void*out){__m128d x,y,m;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);__builtin_memcpy(&m,c,16);__m128d r=_mm_blendv_pd(x,y,m);__builtin_memcpy(out,&r,16);}
+void FN(lane_blendv_ps256)(const void*a,const void*b,const void*c,void*out){__m256 x,y,m;__builtin_memcpy(&x,a,32);__builtin_memcpy(&y,b,32);__builtin_memcpy(&m,c,32);__m256 r=_mm256_blendv_ps(x,y,m);__builtin_memcpy(out,&r,32);}
+void FN(lane_blendv_pd256)(const void*a,const void*b,const void*c,void*out){__m256d x,y,m;__builtin_memcpy(&x,a,32);__builtin_memcpy(&y,b,32);__builtin_memcpy(&m,c,32);__m256d r=_mm256_blendv_pd(x,y,m);__builtin_memcpy(out,&r,32);}
+void FN(lane_round_ps128_0)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128 x;__builtin_memcpy(&x,a,16);__m128 r=_mm_round_ps(x,0);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_ps128_0(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128 x;__builtin_memcpy(&x,a,16);(void)_mm_round_ps(x,0);}
+#endif
+void FN(lane_round_ps128_1)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128 x;__builtin_memcpy(&x,a,16);__m128 r=_mm_round_ps(x,1);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_ps128_1(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128 x;__builtin_memcpy(&x,a,16);(void)_mm_round_ps(x,1);}
+#endif
+void FN(lane_round_ps128_2)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128 x;__builtin_memcpy(&x,a,16);__m128 r=_mm_round_ps(x,2);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_ps128_2(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128 x;__builtin_memcpy(&x,a,16);(void)_mm_round_ps(x,2);}
+#endif
+void FN(lane_round_ps128_3)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128 x;__builtin_memcpy(&x,a,16);__m128 r=_mm_round_ps(x,3);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_ps128_3(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128 x;__builtin_memcpy(&x,a,16);(void)_mm_round_ps(x,3);}
+#endif
+void FN(lane_round_ps128_4)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128 x;__builtin_memcpy(&x,a,16);__m128 r=_mm_round_ps(x,4);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_ps128_4(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128 x;__builtin_memcpy(&x,a,16);(void)_mm_round_ps(x,4);}
+#endif
+void FN(lane_round_ps128_8)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128 x;__builtin_memcpy(&x,a,16);__m128 r=_mm_round_ps(x,8);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_ps128_8(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128 x;__builtin_memcpy(&x,a,16);(void)_mm_round_ps(x,8);}
+#endif
+void FN(lane_round_ps128_9)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128 x;__builtin_memcpy(&x,a,16);__m128 r=_mm_round_ps(x,9);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_ps128_9(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128 x;__builtin_memcpy(&x,a,16);(void)_mm_round_ps(x,9);}
+#endif
+void FN(lane_round_ps128_10)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128 x;__builtin_memcpy(&x,a,16);__m128 r=_mm_round_ps(x,10);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_ps128_10(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128 x;__builtin_memcpy(&x,a,16);(void)_mm_round_ps(x,10);}
+#endif
+void FN(lane_round_ps128_11)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128 x;__builtin_memcpy(&x,a,16);__m128 r=_mm_round_ps(x,11);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_ps128_11(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128 x;__builtin_memcpy(&x,a,16);(void)_mm_round_ps(x,11);}
+#endif
+void FN(lane_round_ps128_15)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128 x;__builtin_memcpy(&x,a,16);__m128 r=_mm_round_ps(x,15);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_ps128_15(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128 x;__builtin_memcpy(&x,a,16);(void)_mm_round_ps(x,15);}
+#endif
+void FN(lane_ceil_ps128)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128 x;__builtin_memcpy(&x,a,16);__m128 r=_mm_ceil_ps(x);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_ceil_ps128(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128 x;__builtin_memcpy(&x,a,16);(void)_mm_ceil_ps(x);}
+#endif
+void FN(lane_floor_ps128)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128 x;__builtin_memcpy(&x,a,16);__m128 r=_mm_floor_ps(x);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_floor_ps128(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128 x;__builtin_memcpy(&x,a,16);(void)_mm_floor_ps(x);}
+#endif
+void FN(lane_round_pd128_0)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128d x;__builtin_memcpy(&x,a,16);__m128d r=_mm_round_pd(x,0);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_pd128_0(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128d x;__builtin_memcpy(&x,a,16);(void)_mm_round_pd(x,0);}
+#endif
+void FN(lane_round_pd128_1)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128d x;__builtin_memcpy(&x,a,16);__m128d r=_mm_round_pd(x,1);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_pd128_1(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128d x;__builtin_memcpy(&x,a,16);(void)_mm_round_pd(x,1);}
+#endif
+void FN(lane_round_pd128_2)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128d x;__builtin_memcpy(&x,a,16);__m128d r=_mm_round_pd(x,2);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_pd128_2(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128d x;__builtin_memcpy(&x,a,16);(void)_mm_round_pd(x,2);}
+#endif
+void FN(lane_round_pd128_3)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128d x;__builtin_memcpy(&x,a,16);__m128d r=_mm_round_pd(x,3);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_pd128_3(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128d x;__builtin_memcpy(&x,a,16);(void)_mm_round_pd(x,3);}
+#endif
+void FN(lane_round_pd128_4)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128d x;__builtin_memcpy(&x,a,16);__m128d r=_mm_round_pd(x,4);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_pd128_4(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128d x;__builtin_memcpy(&x,a,16);(void)_mm_round_pd(x,4);}
+#endif
+void FN(lane_round_pd128_8)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128d x;__builtin_memcpy(&x,a,16);__m128d r=_mm_round_pd(x,8);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_pd128_8(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128d x;__builtin_memcpy(&x,a,16);(void)_mm_round_pd(x,8);}
+#endif
+void FN(lane_round_pd128_9)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128d x;__builtin_memcpy(&x,a,16);__m128d r=_mm_round_pd(x,9);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_pd128_9(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128d x;__builtin_memcpy(&x,a,16);(void)_mm_round_pd(x,9);}
+#endif
+void FN(lane_round_pd128_10)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128d x;__builtin_memcpy(&x,a,16);__m128d r=_mm_round_pd(x,10);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_pd128_10(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128d x;__builtin_memcpy(&x,a,16);(void)_mm_round_pd(x,10);}
+#endif
+void FN(lane_round_pd128_11)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128d x;__builtin_memcpy(&x,a,16);__m128d r=_mm_round_pd(x,11);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_pd128_11(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128d x;__builtin_memcpy(&x,a,16);(void)_mm_round_pd(x,11);}
+#endif
+void FN(lane_round_pd128_15)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128d x;__builtin_memcpy(&x,a,16);__m128d r=_mm_round_pd(x,15);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_pd128_15(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128d x;__builtin_memcpy(&x,a,16);(void)_mm_round_pd(x,15);}
+#endif
+void FN(lane_ceil_pd128)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128d x;__builtin_memcpy(&x,a,16);__m128d r=_mm_ceil_pd(x);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_ceil_pd128(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128d x;__builtin_memcpy(&x,a,16);(void)_mm_ceil_pd(x);}
+#endif
+void FN(lane_floor_pd128)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128d x;__builtin_memcpy(&x,a,16);__m128d r=_mm_floor_pd(x);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_floor_pd128(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128d x;__builtin_memcpy(&x,a,16);(void)_mm_floor_pd(x);}
+#endif
+void FN(lane_round_ss128_0)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128 x;__builtin_memcpy(&x,a,16);__m128 y;__builtin_memcpy(&y,b,16);__m128 r=_mm_round_ss(x,y,0);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_ss128_0(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128 x;__builtin_memcpy(&x,a,16);__m128 y;__builtin_memcpy(&y,b,16);(void)_mm_round_ss(x,y,0);}
+#endif
+void FN(lane_round_ss128_1)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128 x;__builtin_memcpy(&x,a,16);__m128 y;__builtin_memcpy(&y,b,16);__m128 r=_mm_round_ss(x,y,1);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_ss128_1(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128 x;__builtin_memcpy(&x,a,16);__m128 y;__builtin_memcpy(&y,b,16);(void)_mm_round_ss(x,y,1);}
+#endif
+void FN(lane_round_ss128_2)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128 x;__builtin_memcpy(&x,a,16);__m128 y;__builtin_memcpy(&y,b,16);__m128 r=_mm_round_ss(x,y,2);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_ss128_2(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128 x;__builtin_memcpy(&x,a,16);__m128 y;__builtin_memcpy(&y,b,16);(void)_mm_round_ss(x,y,2);}
+#endif
+void FN(lane_round_ss128_3)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128 x;__builtin_memcpy(&x,a,16);__m128 y;__builtin_memcpy(&y,b,16);__m128 r=_mm_round_ss(x,y,3);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_ss128_3(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128 x;__builtin_memcpy(&x,a,16);__m128 y;__builtin_memcpy(&y,b,16);(void)_mm_round_ss(x,y,3);}
+#endif
+void FN(lane_round_ss128_4)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128 x;__builtin_memcpy(&x,a,16);__m128 y;__builtin_memcpy(&y,b,16);__m128 r=_mm_round_ss(x,y,4);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_ss128_4(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128 x;__builtin_memcpy(&x,a,16);__m128 y;__builtin_memcpy(&y,b,16);(void)_mm_round_ss(x,y,4);}
+#endif
+void FN(lane_round_ss128_8)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128 x;__builtin_memcpy(&x,a,16);__m128 y;__builtin_memcpy(&y,b,16);__m128 r=_mm_round_ss(x,y,8);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_ss128_8(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128 x;__builtin_memcpy(&x,a,16);__m128 y;__builtin_memcpy(&y,b,16);(void)_mm_round_ss(x,y,8);}
+#endif
+void FN(lane_round_ss128_9)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128 x;__builtin_memcpy(&x,a,16);__m128 y;__builtin_memcpy(&y,b,16);__m128 r=_mm_round_ss(x,y,9);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_ss128_9(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128 x;__builtin_memcpy(&x,a,16);__m128 y;__builtin_memcpy(&y,b,16);(void)_mm_round_ss(x,y,9);}
+#endif
+void FN(lane_round_ss128_10)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128 x;__builtin_memcpy(&x,a,16);__m128 y;__builtin_memcpy(&y,b,16);__m128 r=_mm_round_ss(x,y,10);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_ss128_10(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128 x;__builtin_memcpy(&x,a,16);__m128 y;__builtin_memcpy(&y,b,16);(void)_mm_round_ss(x,y,10);}
+#endif
+void FN(lane_round_ss128_11)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128 x;__builtin_memcpy(&x,a,16);__m128 y;__builtin_memcpy(&y,b,16);__m128 r=_mm_round_ss(x,y,11);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_ss128_11(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128 x;__builtin_memcpy(&x,a,16);__m128 y;__builtin_memcpy(&y,b,16);(void)_mm_round_ss(x,y,11);}
+#endif
+void FN(lane_round_ss128_15)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128 x;__builtin_memcpy(&x,a,16);__m128 y;__builtin_memcpy(&y,b,16);__m128 r=_mm_round_ss(x,y,15);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_ss128_15(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128 x;__builtin_memcpy(&x,a,16);__m128 y;__builtin_memcpy(&y,b,16);(void)_mm_round_ss(x,y,15);}
+#endif
+void FN(lane_ceil_ss128)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128 x;__builtin_memcpy(&x,a,16);__m128 y;__builtin_memcpy(&y,b,16);__m128 r=_mm_ceil_ss(x,y);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_ceil_ss128(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128 x;__builtin_memcpy(&x,a,16);__m128 y;__builtin_memcpy(&y,b,16);(void)_mm_ceil_ss(x,y);}
+#endif
+void FN(lane_floor_ss128)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128 x;__builtin_memcpy(&x,a,16);__m128 y;__builtin_memcpy(&y,b,16);__m128 r=_mm_floor_ss(x,y);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_floor_ss128(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128 x;__builtin_memcpy(&x,a,16);__m128 y;__builtin_memcpy(&y,b,16);(void)_mm_floor_ss(x,y);}
+#endif
+void FN(lane_round_sd128_0)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128d x;__builtin_memcpy(&x,a,16);__m128d y;__builtin_memcpy(&y,b,16);__m128d r=_mm_round_sd(x,y,0);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_sd128_0(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128d x;__builtin_memcpy(&x,a,16);__m128d y;__builtin_memcpy(&y,b,16);(void)_mm_round_sd(x,y,0);}
+#endif
+void FN(lane_round_sd128_1)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128d x;__builtin_memcpy(&x,a,16);__m128d y;__builtin_memcpy(&y,b,16);__m128d r=_mm_round_sd(x,y,1);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_sd128_1(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128d x;__builtin_memcpy(&x,a,16);__m128d y;__builtin_memcpy(&y,b,16);(void)_mm_round_sd(x,y,1);}
+#endif
+void FN(lane_round_sd128_2)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128d x;__builtin_memcpy(&x,a,16);__m128d y;__builtin_memcpy(&y,b,16);__m128d r=_mm_round_sd(x,y,2);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_sd128_2(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128d x;__builtin_memcpy(&x,a,16);__m128d y;__builtin_memcpy(&y,b,16);(void)_mm_round_sd(x,y,2);}
+#endif
+void FN(lane_round_sd128_3)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128d x;__builtin_memcpy(&x,a,16);__m128d y;__builtin_memcpy(&y,b,16);__m128d r=_mm_round_sd(x,y,3);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_sd128_3(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128d x;__builtin_memcpy(&x,a,16);__m128d y;__builtin_memcpy(&y,b,16);(void)_mm_round_sd(x,y,3);}
+#endif
+void FN(lane_round_sd128_4)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128d x;__builtin_memcpy(&x,a,16);__m128d y;__builtin_memcpy(&y,b,16);__m128d r=_mm_round_sd(x,y,4);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_sd128_4(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128d x;__builtin_memcpy(&x,a,16);__m128d y;__builtin_memcpy(&y,b,16);(void)_mm_round_sd(x,y,4);}
+#endif
+void FN(lane_round_sd128_8)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128d x;__builtin_memcpy(&x,a,16);__m128d y;__builtin_memcpy(&y,b,16);__m128d r=_mm_round_sd(x,y,8);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_sd128_8(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128d x;__builtin_memcpy(&x,a,16);__m128d y;__builtin_memcpy(&y,b,16);(void)_mm_round_sd(x,y,8);}
+#endif
+void FN(lane_round_sd128_9)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128d x;__builtin_memcpy(&x,a,16);__m128d y;__builtin_memcpy(&y,b,16);__m128d r=_mm_round_sd(x,y,9);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_sd128_9(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128d x;__builtin_memcpy(&x,a,16);__m128d y;__builtin_memcpy(&y,b,16);(void)_mm_round_sd(x,y,9);}
+#endif
+void FN(lane_round_sd128_10)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128d x;__builtin_memcpy(&x,a,16);__m128d y;__builtin_memcpy(&y,b,16);__m128d r=_mm_round_sd(x,y,10);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_sd128_10(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128d x;__builtin_memcpy(&x,a,16);__m128d y;__builtin_memcpy(&y,b,16);(void)_mm_round_sd(x,y,10);}
+#endif
+void FN(lane_round_sd128_11)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128d x;__builtin_memcpy(&x,a,16);__m128d y;__builtin_memcpy(&y,b,16);__m128d r=_mm_round_sd(x,y,11);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_sd128_11(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128d x;__builtin_memcpy(&x,a,16);__m128d y;__builtin_memcpy(&y,b,16);(void)_mm_round_sd(x,y,11);}
+#endif
+void FN(lane_round_sd128_15)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128d x;__builtin_memcpy(&x,a,16);__m128d y;__builtin_memcpy(&y,b,16);__m128d r=_mm_round_sd(x,y,15);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_round_sd128_15(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128d x;__builtin_memcpy(&x,a,16);__m128d y;__builtin_memcpy(&y,b,16);(void)_mm_round_sd(x,y,15);}
+#endif
+void FN(lane_ceil_sd128)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128d x;__builtin_memcpy(&x,a,16);__m128d y;__builtin_memcpy(&y,b,16);__m128d r=_mm_ceil_sd(x,y);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_ceil_sd128(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128d x;__builtin_memcpy(&x,a,16);__m128d y;__builtin_memcpy(&y,b,16);(void)_mm_ceil_sd(x,y);}
+#endif
+void FN(lane_floor_sd128)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m128d x;__builtin_memcpy(&x,a,16);__m128d y;__builtin_memcpy(&y,b,16);__m128d r=_mm_floor_sd(x,y);__builtin_memcpy(out,&r,16);}
+#ifndef REFERENCE
+void dead_lane_floor_sd128(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m128d x;__builtin_memcpy(&x,a,16);__m128d y;__builtin_memcpy(&y,b,16);(void)_mm_floor_sd(x,y);}
+#endif
+void FN(lane_round_ps256_0)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m256 x;__builtin_memcpy(&x,a,32);__m256 r=_mm256_round_ps(x,0);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_round_ps256_0(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m256 x;__builtin_memcpy(&x,a,32);(void)_mm256_round_ps(x,0);}
+#endif
+void FN(lane_round_ps256_1)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m256 x;__builtin_memcpy(&x,a,32);__m256 r=_mm256_round_ps(x,1);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_round_ps256_1(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m256 x;__builtin_memcpy(&x,a,32);(void)_mm256_round_ps(x,1);}
+#endif
+void FN(lane_round_ps256_2)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m256 x;__builtin_memcpy(&x,a,32);__m256 r=_mm256_round_ps(x,2);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_round_ps256_2(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m256 x;__builtin_memcpy(&x,a,32);(void)_mm256_round_ps(x,2);}
+#endif
+void FN(lane_round_ps256_3)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m256 x;__builtin_memcpy(&x,a,32);__m256 r=_mm256_round_ps(x,3);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_round_ps256_3(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m256 x;__builtin_memcpy(&x,a,32);(void)_mm256_round_ps(x,3);}
+#endif
+void FN(lane_round_ps256_4)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m256 x;__builtin_memcpy(&x,a,32);__m256 r=_mm256_round_ps(x,4);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_round_ps256_4(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m256 x;__builtin_memcpy(&x,a,32);(void)_mm256_round_ps(x,4);}
+#endif
+void FN(lane_round_ps256_8)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m256 x;__builtin_memcpy(&x,a,32);__m256 r=_mm256_round_ps(x,8);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_round_ps256_8(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m256 x;__builtin_memcpy(&x,a,32);(void)_mm256_round_ps(x,8);}
+#endif
+void FN(lane_round_ps256_9)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m256 x;__builtin_memcpy(&x,a,32);__m256 r=_mm256_round_ps(x,9);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_round_ps256_9(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m256 x;__builtin_memcpy(&x,a,32);(void)_mm256_round_ps(x,9);}
+#endif
+void FN(lane_round_ps256_10)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m256 x;__builtin_memcpy(&x,a,32);__m256 r=_mm256_round_ps(x,10);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_round_ps256_10(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m256 x;__builtin_memcpy(&x,a,32);(void)_mm256_round_ps(x,10);}
+#endif
+void FN(lane_round_ps256_11)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m256 x;__builtin_memcpy(&x,a,32);__m256 r=_mm256_round_ps(x,11);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_round_ps256_11(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m256 x;__builtin_memcpy(&x,a,32);(void)_mm256_round_ps(x,11);}
+#endif
+void FN(lane_round_ps256_15)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m256 x;__builtin_memcpy(&x,a,32);__m256 r=_mm256_round_ps(x,15);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_round_ps256_15(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m256 x;__builtin_memcpy(&x,a,32);(void)_mm256_round_ps(x,15);}
+#endif
+void FN(lane_ceil_ps256)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m256 x;__builtin_memcpy(&x,a,32);__m256 r=_mm256_ceil_ps(x);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_ceil_ps256(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m256 x;__builtin_memcpy(&x,a,32);(void)_mm256_ceil_ps(x);}
+#endif
+void FN(lane_floor_ps256)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m256 x;__builtin_memcpy(&x,a,32);__m256 r=_mm256_floor_ps(x);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_floor_ps256(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m256 x;__builtin_memcpy(&x,a,32);(void)_mm256_floor_ps(x);}
+#endif
+void FN(lane_round_pd256_0)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m256d x;__builtin_memcpy(&x,a,32);__m256d r=_mm256_round_pd(x,0);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_round_pd256_0(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m256d x;__builtin_memcpy(&x,a,32);(void)_mm256_round_pd(x,0);}
+#endif
+void FN(lane_round_pd256_1)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m256d x;__builtin_memcpy(&x,a,32);__m256d r=_mm256_round_pd(x,1);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_round_pd256_1(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m256d x;__builtin_memcpy(&x,a,32);(void)_mm256_round_pd(x,1);}
+#endif
+void FN(lane_round_pd256_2)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m256d x;__builtin_memcpy(&x,a,32);__m256d r=_mm256_round_pd(x,2);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_round_pd256_2(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m256d x;__builtin_memcpy(&x,a,32);(void)_mm256_round_pd(x,2);}
+#endif
+void FN(lane_round_pd256_3)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m256d x;__builtin_memcpy(&x,a,32);__m256d r=_mm256_round_pd(x,3);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_round_pd256_3(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m256d x;__builtin_memcpy(&x,a,32);(void)_mm256_round_pd(x,3);}
+#endif
+void FN(lane_round_pd256_4)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m256d x;__builtin_memcpy(&x,a,32);__m256d r=_mm256_round_pd(x,4);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_round_pd256_4(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m256d x;__builtin_memcpy(&x,a,32);(void)_mm256_round_pd(x,4);}
+#endif
+void FN(lane_round_pd256_8)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m256d x;__builtin_memcpy(&x,a,32);__m256d r=_mm256_round_pd(x,8);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_round_pd256_8(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m256d x;__builtin_memcpy(&x,a,32);(void)_mm256_round_pd(x,8);}
+#endif
+void FN(lane_round_pd256_9)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m256d x;__builtin_memcpy(&x,a,32);__m256d r=_mm256_round_pd(x,9);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_round_pd256_9(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m256d x;__builtin_memcpy(&x,a,32);(void)_mm256_round_pd(x,9);}
+#endif
+void FN(lane_round_pd256_10)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m256d x;__builtin_memcpy(&x,a,32);__m256d r=_mm256_round_pd(x,10);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_round_pd256_10(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m256d x;__builtin_memcpy(&x,a,32);(void)_mm256_round_pd(x,10);}
+#endif
+void FN(lane_round_pd256_11)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m256d x;__builtin_memcpy(&x,a,32);__m256d r=_mm256_round_pd(x,11);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_round_pd256_11(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m256d x;__builtin_memcpy(&x,a,32);(void)_mm256_round_pd(x,11);}
+#endif
+void FN(lane_round_pd256_15)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m256d x;__builtin_memcpy(&x,a,32);__m256d r=_mm256_round_pd(x,15);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_round_pd256_15(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m256d x;__builtin_memcpy(&x,a,32);(void)_mm256_round_pd(x,15);}
+#endif
+void FN(lane_ceil_pd256)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m256d x;__builtin_memcpy(&x,a,32);__m256d r=_mm256_ceil_pd(x);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_ceil_pd256(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m256d x;__builtin_memcpy(&x,a,32);(void)_mm256_ceil_pd(x);}
+#endif
+void FN(lane_floor_pd256)(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;__m256d x;__builtin_memcpy(&x,a,32);__m256d r=_mm256_floor_pd(x);__builtin_memcpy(out,&r,32);}
+#ifndef REFERENCE
+void dead_lane_floor_pd256(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m256d x;__builtin_memcpy(&x,a,32);(void)_mm256_floor_pd(x);}
+#endif

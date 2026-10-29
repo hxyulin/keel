@@ -36,7 +36,7 @@ fn frontend(source: &str) -> Result<keel_ir::Module, String> {
     .map_err(|e| e.to_string())
 }
 fn features() -> Features {
-    Features::parse("sse3,fma,f16c").unwrap()
+    Features::parse("sse3,sse41,fma,f16c").unwrap()
 }
 fn pipeline<'a>(
     selector: &'a FeatureSelector<'a>,
@@ -167,6 +167,7 @@ fn floating_vendor_oracles_cover_rounding_status_and_lane_layouts() {
                 "-mfma",
                 "-mf16c",
                 "-msse3",
+                "-msse4.1",
                 "-DREFERENCE",
                 "-c",
             ])
@@ -239,6 +240,7 @@ fn floating_vendor_oracles_cover_rounding_status_and_lane_layouts() {
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 fn native_supported() -> bool {
     std::is_x86_feature_detected!("sse3")
+        && std::is_x86_feature_detected!("sse4.1")
         && std::is_x86_feature_detected!("avx")
         && std::is_x86_feature_detected!("fma")
         && std::is_x86_feature_detected!("f16c")
@@ -357,4 +359,130 @@ fn packed_float_arithmetic_preserves_status_and_unpack_keeps_bits() {
         &pipeline(&selector, &AllocationTier::Full),
     )
     .unwrap();
+}
+
+#[test]
+fn rounding_controls_scalar_lanes_and_blend_permissions() {
+    for width in [128, 256] {
+        let prefix = if width == 128 { "_mm" } else { "_mm256" };
+        for suffix in if width == 128 {
+            &["ps", "pd", "ss", "sd"][..]
+        } else {
+            &["ps", "pd"][..]
+        } {
+            let scalar = matches!(*suffix, "ss" | "sd");
+            let ty = format!(
+                "__m{width}{}",
+                if matches!(*suffix, "pd" | "sd") {
+                    "d"
+                } else {
+                    ""
+                }
+            );
+            let args = if scalar { "a,b" } else { "a" };
+            let name = format!("{prefix}_round_{suffix}");
+            for control in [
+                "n",
+                "-1",
+                "16",
+                "256",
+                "1.0",
+                "(n++,1)",
+                "(1/0)",
+                "(1<<31)",
+                "(1ULL<<64)",
+            ] {
+                let source = format!(
+                    "#include <immintrin.h>\n{ty} f({ty} a,{ty} b,int n){{return {name}({args},{control});}}"
+                );
+                let error = frontend(&source).unwrap_err();
+                assert!(
+                    error.contains("integer constant expression in 0..15"),
+                    "{name}: {control}: {error}"
+                );
+            }
+            for control in [0, 4, 8, 15] {
+                let mut module=frontend(&format!("#include <immintrin.h>\n{ty} f({ty} a,{ty} b){{return {name}({args},{control});}}\nvoid dead({ty} a,{ty} b){{(void){name}({args},{control});}}")).unwrap();
+                keel_ir::verify_module(&module).unwrap();
+                keel_opt::optimize(&mut module).unwrap();
+                let ir = if width == 256 {
+                    format!("x86_avx_vround{suffix}256")
+                } else {
+                    format!("x86_sse41_round{suffix}{}", if scalar { "" } else { "128" })
+                };
+                assert!(module.to_string().contains(&ir), "{name}");
+                let allowed = Features::parse(if width == 128 { "sse41" } else { "avx" }).unwrap();
+                let selector = FeatureSelector {
+                    inner: &SelectionTier::Baseline,
+                    features: allowed,
+                };
+                let program = keel_codegen::compile_program_with_pipeline(
+                    &module,
+                    Target::X86_64LinuxGnu,
+                    &pipeline(&selector, &AllocationTier::Full),
+                )
+                .unwrap();
+                keel_asm::x86::assemble_program_object_with_features(&program, allowed).unwrap();
+                let selector = FeatureSelector {
+                    inner: &SelectionTier::Baseline,
+                    features: Features::NONE,
+                };
+                assert!(
+                    keel_codegen::compile_program_with_pipeline(
+                        &module,
+                        Target::X86_64LinuxGnu,
+                        &pipeline(&selector, &AllocationTier::Full)
+                    )
+                    .is_err(),
+                    "{name}"
+                );
+            }
+            for op in ["round", "ceil", "floor"] {
+                let inputs = if scalar { "next(),next()" } else { "next()" };
+                let inputs = if op == "round" {
+                    format!("{inputs},_MM_FROUND_NEARBYINT")
+                } else {
+                    inputs.to_string()
+                };
+                let once=frontend(&format!("#include <immintrin.h>\nextern {ty} next(void);{ty} f(void){{return {prefix}_{op}_{suffix}({inputs});}}")).unwrap();
+                assert_eq!(
+                    once.to_string().matches("call @next()").count(),
+                    if scalar { 2 } else { 1 },
+                    "{op} {suffix}"
+                );
+            }
+        }
+        for suffix in ["ps", "pd"] {
+            let ty = format!("__m{width}{}", if suffix == "pd" { "d" } else { "" });
+            let source = format!(
+                "#include <immintrin.h>\nextern {ty} next(void);{ty} f(void){{return {prefix}_blendv_{suffix}(next(),next(),next());}}"
+            );
+            let module = frontend(&source).unwrap();
+            assert_eq!(module.to_string().matches("call @next()").count(), 3);
+            let allowed = Features::parse(if width == 128 { "sse41" } else { "avx" }).unwrap();
+            let selector = FeatureSelector {
+                inner: &SelectionTier::Baseline,
+                features: allowed,
+            };
+            let program = keel_codegen::compile_program_with_pipeline(
+                &module,
+                Target::X86_64LinuxGnu,
+                &pipeline(&selector, &AllocationTier::Full),
+            )
+            .unwrap();
+            keel_asm::x86::assemble_program_object_with_features(&program, allowed).unwrap();
+            let selector = FeatureSelector {
+                inner: &SelectionTier::Baseline,
+                features: Features::NONE,
+            };
+            assert!(
+                keel_codegen::compile_program_with_pipeline(
+                    &module,
+                    Target::X86_64LinuxGnu,
+                    &pipeline(&selector, &AllocationTier::Full)
+                )
+                .is_err()
+            );
+        }
+    }
 }

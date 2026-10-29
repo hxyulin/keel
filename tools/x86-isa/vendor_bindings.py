@@ -8,7 +8,15 @@ FAMILIES = {'aes', 'packed_shift', 'saturating', 'packed_conversion', 'value'}
 SCALARS = {'i64': 'I64', 'i32': 'I32', 'u64': 'I64', 'f32': 'F32', 'f64': 'F64'}
 VECTORS = {'i8x16', 'u8x16', 'i16x8', 'u16x8', 'i32x4', 'i64x2',
            'f32x4', 'f64x2', 'i8x32', 'i16x16', 'i32x8', 'i64x4', 'f32x8', 'f64x4'}
-CONTROLS = {'none', 'imm8', 'u64_count', 'rounding'}
+VALUE_CONTROLS = {
+    'rounding': ({'X86F16cPsToPh128', 'X86F16cPsToPh256'}, 255, 7,
+                 'F16C rounding control must be an integer constant expression in 0..255'),
+    'round_imm4': ({'X86Sse41Roundps128', 'X86Sse41Roundpd128',
+                    'X86Sse41Roundss', 'X86Sse41Roundsd',
+                    'X86AvxVroundps256', 'X86AvxVroundpd256'}, 15, 15,
+                   'SIMD rounding control must be an integer constant expression in 0..15'),
+}
+CONTROLS = {'none', 'imm8', 'u64_count'} | VALUE_CONTROLS.keys()
 
 
 def ir_type(ty, first=None):
@@ -100,19 +108,25 @@ def validate(schema, root):
         if family == 'packed_conversion' and ((params, row['result']) not in [(['i32x4'], 'f32x4'), (['f32x4'], 'i32x4')] or control != 'none'):
             raise ValueError('invalid conversion signature')
         if family == 'value':
-            rounding = row['intrinsic'] in {'X86F16cPsToPh128', 'X86F16cPsToPh256'}
-            if control != ('rounding' if rounding else 'none'):
+            expected = next((name for name, (intrinsics, *_) in VALUE_CONTROLS.items()
+                             if row['intrinsic'] in intrinsics), 'none')
+            if control != expected:
                 raise ValueError('value control differs from semantic parser recipe')
+            if control != 'none' and (len(params) != 2 or params[1] != 'i32'):
+                raise ValueError('value control requires a second i32 parameter')
     return rows
 
 
 def generate(schema, root):
     rows = validate(schema, root)
     lines = [HEADER, 'use keel_ir::{Intrinsic, VectorType};', '',
+             '#[derive(Clone, Copy)]', 'pub(crate) struct ImmediateControl {',
+             '    pub(crate) maximum: i64,', '    pub(crate) mask: i64,',
+             "    pub(crate) diagnostic: &'static str,", '}', '',
              '#[derive(Clone, Copy)]', 'enum Binding {',
              '    Aes(Intrinsic),', '    PackedShift(Intrinsic, VectorType, bool),',
              '    Saturating(Intrinsic, bool, bool),', '    PackedConversion(Intrinsic),',
-             '    Value(Intrinsic),', '}', '', '#[rustfmt::skip]', 'fn lookup(base: &str) -> Option<Binding> {',
+             "    Value(Intrinsic, Option<&'static ImmediateControl>),", '}', '', '#[rustfmt::skip]', 'fn lookup(base: &str) -> Option<Binding> {',
              '    Some(match base {']
     for row in rows:
         variant = 'Intrinsic::' + row['intrinsic']
@@ -128,7 +142,11 @@ def generate(schema, root):
         elif row['family'] == 'packed_conversion':
             value = f'Binding::PackedConversion({variant})'
         else:
-            value = f'Binding::Value({variant})'
+            control = 'None'
+            if row['control'] != 'none':
+                _, maximum, mask, diagnostic = VALUE_CONTROLS[row['control']]
+                control = f'Some(&ImmediateControl {{ maximum: {maximum}, mask: {mask}, diagnostic: {json.dumps(diagnostic)} }})'
+            value = f'Binding::Value({variant}, {control})'
         lines.append(f'        {json.dumps(row["builtin"])} => {value},')
     lines += ['        _ => return None,', '    })', '}', '',
               'pub(crate) fn recognized(base: &str) -> bool {', '    lookup(base).is_some()', '}', '']
@@ -137,7 +155,7 @@ def generate(schema, root):
         ('packed_shift_builtin', 'PackedShift(id, shape, immediate)', '(Intrinsic, VectorType, bool)', '(id, shape, immediate)'),
         ('saturating_builtin', 'Saturating(id, unsigned, word)', '(Intrinsic, bool, bool)', '(id, unsigned, word)'),
         ('packed_conversion_builtin', 'PackedConversion(id)', 'Intrinsic', 'id'),
-        ('semantic_builtin', 'Value(id)', 'Intrinsic', 'id'),
+        ('semantic_builtin', 'Value(id, control)', "(Intrinsic, Option<&'static ImmediateControl>)", '(id, control)'),
     ]:
         signature = f'pub(crate) fn {name}(base: &str) -> Option<{ty}> {{'
         if len(signature) > 100:
