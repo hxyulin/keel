@@ -1,3 +1,22 @@
+#[path = "gnu_types/empty_record_members.rs"]
+mod empty_record_members;
+#[path = "gnu_types/fallthrough.rs"]
+mod fallthrough;
+#[path = "gnu_types/foreign_abi_declarations.rs"]
+mod foreign_abi_declarations;
+#[path = "gnu_types/gnu_conditional_qualifiers.rs"]
+mod gnu_conditional_qualifiers;
+#[path = "gnu_types/gnu_union_casts.rs"]
+mod gnu_union_casts;
+#[path = "gnu_types/has_attribute.rs"]
+mod has_attribute;
+#[path = "gnu_types/kernel_frontend_forms.rs"]
+mod kernel_frontend_forms;
+#[path = "gnu_types/statement_expression_labels.rs"]
+mod statement_expression_labels;
+#[path = "gnu_types/transparent_unions.rs"]
+mod transparent_unions;
+
 use keel_ir::Target;
 fn compile(source: &str, target: Target) -> Result<keel_ir::Module, keel_c::Diagnostic> {
     keel_c::compile(
