@@ -230,7 +230,7 @@ comparable:
   random interleaving, and no core pinning or physical-page control.
 - Clang `-O2` runtimes are a C→object reference, not a same-IR result.
 - Publication-quality runtime claims need the fixed-page protocol on x86-64
-  Linux (see `docs/benchmarks/page-backing.md`), which was not run.
+  Linux (see `docs/benchmarks/linux-timing.md`), which was not run.
 
 `k_stackobj` accumulates and returns unsigned 64-bit values. Its arithmetic wraps
 modulo 2^64 for the driver's full-range signed inputs; the input sign still chooses

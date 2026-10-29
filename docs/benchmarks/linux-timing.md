@@ -16,14 +16,11 @@ the gated in-process scan or compile timers described here.
 
 - Record the source revision, overlays, toolchain, build flags, target, CPU,
   kernel, binary SHA256 and input SHA256. Build every image before timing.
-- Capture the effective compiler invocation as well as the Cargo command.
-  A build scheduler can add flags after Cargo prints its command. In the
-  keyword experiment, the first baseline used conventional code generation,
-  while later builds added `-Cincremental` and used finer compilation units.
-  An unchanged-source rebuild then changed unrelated functions and execution
-  time. The original matcher comparison therefore mixed build modes. The
-  [rustc codegen-unit documentation](https://doc.rust-lang.org/rustc/codegen-options/index.html#codegen-units)
-  describes different defaults for incremental and non-incremental compilation.
+- Capture the effective compiler invocation as well as the Cargo command. A
+  build scheduler can add flags such as `-Cincremental` after Cargo prints its
+  command, and incremental builds use different
+  [codegen-unit defaults](https://doc.rust-lang.org/rustc/codegen-options/index.html#codegen-units),
+  which can change unrelated functions and execution time.
 - Include an unchanged-source rebuild control, for example an A-to-B-to-A
   build cycle. Check effective optimization, incremental and codegen-unit
   settings, dependencies and representative generated functions before comparing
@@ -41,16 +38,15 @@ the gated in-process scan or compile timers described here.
   successful-compilation timings and report them separately. Include realistic
   misses when measuring a lookup table, not just its known keys.
 
-Acquire a shared performance lock before changing the benchmark executable or
-starting measurement. Confirm that no other build or profiler is running.
-Record process activity between runs and abort if competing work starts.
-Release the lock when the controller exits.
+Confirm that no other build or profiler is running before measuring. Record
+process activity between runs and abort if competing work starts.
 
 ## Hold executable and input placement stable
 
-ASLR and CPU affinity alone did not eliminate a timing shift between copies of
-an identical executable. A different filename can also change process layout.
-An identical-image control is necessary even with these controls.
+ASLR and CPU affinity alone do not remove timing shifts between copies of an
+identical executable, which can come from their physical code backing. A
+different filename can also change process layout. An identical-image control
+is necessary even with these controls.
 
 1. Choose one executable path and inode for every image and label. Keep argv
    and the environment identical except for intended workload arguments.
@@ -89,10 +85,34 @@ effects, repeat across independently retained frame pools, balance pool/workload
 order, and report every placement with its identical-image control. Holding
 inactive pools mapped and locked prevents their frames from being recycled into
 the active pool. Verify distinct frame sets and stable executable/input virtual
-addresses. Do not select each image's fastest placement. In the keyword follow-up,
-the same matched images changed sign across three pools despite quiet null
-controls. That establishes placement sensitivity, not a benefit from physical
-adjacency or a diagnosis of one particular cache level.
+addresses. Do not select each image's fastest placement. Matched images can
+change sign across pools despite quiet null controls.
+
+## Compare code placements
+
+When different code variants run on controlled physical backing, as in the
+fixed-backing harness:
+
+1. Keep executable bytes, code virtual addresses, workload and scheduling
+   explicit. Use normal user credentials and the same fixed core.
+2. Keep physical backing across variant swaps. A persistent private file and
+   read-only locked mapping can hold pages while their contents are rewritten
+   between launches. Verify page frames before and after writing; overwriting a
+   pathname does not by itself keep frames.
+3. Before measuring, verify the live child's code-frame assignment and loaded
+   code bytes. Each variant must load its own code.
+4. Cross variants over several predetermined frame sets and assignments, and
+   keep every result, including unfavorable ones.
+5. Treat physical sets and timing blocks as replication units. Repeated
+   launches of one backing measure its repeatability, not placement
+   robustness.
+6. Define the estimand. A barrier after loader preparation measures
+   post-loader execution, not process startup or deployment with randomized
+   layout.
+
+The harness must pass its identical-byte controls first. Speculative front-end
+counters can hint at a cause but do not attribute stalled cycles. See the
+[kernel pagemap documentation](https://docs.kernel.org/admin-guide/mm/pagemap.html).
 
 ## Check backing pages around the timed region
 
@@ -131,11 +151,8 @@ same protocol with both labels referring to the exact same binary bytes. Use
 the same executable path, input order, warmup, gates and measured passes for
 that identical-image control.
 
-The lexer experiment used two warmup corpus passes, one extra settling pass
-after inspection, and three measured passes per process. Three ABBA blocks give
-six processes per image. Another experiment used five warmup and six measured
-passes. Pick warmup and pass counts that fit the workload, document them, and
-keep them fixed between candidates. Rotate TU order consistently when measuring
+Pick warmup and pass counts that fit the workload, document them, and keep
+them fixed between candidates. Rotate TU order consistently when measuring
 a corpus. A warmup count alone does not prove thermal or frequency stability.
 
 Each process contributes its median pass time. Compare medians of the process

@@ -1,17 +1,11 @@
 # Pinned kernel size and runtime comparison
 
-The newest repaired-snapshot measurements
-compare matched O2 and Os core builds after the function-policy repair. The
-runtime numbers below remain historical evidence for the older qualified image.
-
 The qualified Keel core image is 73.4% larger as a compressed `bzImage` and takes
 1.52–2.38 times as long on five checked kernel-heavy microbenchmarks as the
 pinned GCC image. Guest init-entry timing is similar. These measurements are
 for the minimal Linux v6.12 captured core, not a general Linux performance claim.
 
-The ledger includes image and
-fixture hashes, every measured sample, ranges, paired ratios and failure controls.
-The existing [qualification scope](../integrations/linux-kernel.md) still applies.
+The [integration scope](../integrations/linux-kernel.md#scope-and-limits) applies.
 
 ## Method
 
@@ -48,26 +42,6 @@ Allocated sizes include BSS and section padding, exclude gaps between sections,
 and are not measured resident memory. Executable-section sizes include padding.
 In particular, the script rounds `.text` to 4 MiB for GCC and 8 MiB for Keel.
 Keel also retains a 418,380-byte `.eh_frame` orphan section absent from GCC.
-Discarding unused unwind information and reducing code growth are separate
-opportunities; neither change was made for this comparison.
-
-Some sampled function sizes show actual code growth beyond padding:
-
-| Function | GCC bytes | Keel bytes |
-| --- | ---: | ---: |
-| `do_syscall_64` | 168 | 717 |
-| `__x64_sys_getpid` | 27 | 53 |
-| `do_filp_open` | 226 | 370 |
-| `copy_process` | 5,146 | 10,590 |
-| `pipe_read` | 737 | 1,813 |
-| `pipe_write` | 1,126 | 2,199 |
-
-The disassembled Keel `getpid` wrapper includes redundant register moves and
-materializes a global address with `movabs` followed by a load. GCC folds the
-global access into a RIP-relative load and sets call arguments more directly.
-This identifies code-generation candidates, not a measured attribution of the
-runtime gap. The kernel address contract must survive any address-folding change.
-
 ## Runtime
 
 Times below are medians across nine boots per image. Ratios are medians of the
@@ -96,13 +70,10 @@ with wide ranges of 401.553–579.989 and 398.564–590.815 ms. These measuremen
 do not establish a startup speedup. Boot is close enough here that startup
 delays and VM overhead can dominate compiler differences.
 
-All 20 final guests, including two warmups, passed. A deliberately incorrect
-PID expectation returned the normal FAIL marker and exit 35 on both kernels;
-the checker rejected both. Five parser tests reject incomplete, duplicate,
-wrong-count and unsuccessful reports. All 12 kernel-audit Python tests passed.
-The C fixture also builds with `-Wall -Wextra -Werror`.
+A deliberately incorrect PID expectation returned the normal FAIL marker and
+exit 35 on both kernels, and the checker rejected both.
 
-## Reproduction and next work
+## Reproduction
 
 On an x86-64 Linux host with accessible `/dev/kvm`, GCC and QEMU:
 
@@ -115,11 +86,3 @@ python3 -m unittest discover -s suite/integration/linux-kernel -p 'test_*.py'
 size reference-vmlinux keel-vmlinux
 size -A reference-vmlinux keel-vmlinux
 ```
-
-The next performance investigation should profile syscall dispatch, VFS lookup,
-fault handling and scheduler/pipe paths before choosing optimizer changes.
-Dead register moves, call-argument shuffles, safe address folding, unwind
-retention and a size-oriented code-generation policy are candidates. The
-[native linker gaps](../integrations/linux-kernel.md) are independent of
-these throughput issues. No compiler or linker implementation was changed in
-this benchmark increment, and no Rust workspace rerun is claimed.

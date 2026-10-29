@@ -93,7 +93,7 @@ it; use `run_pipeline` or `run_passes`.
 | `sign-extend-idiom` (opt-in) | Recognize a manual signed-byte conversion |
 | `if-convert` (opt-in) | Bounded scalar if-conversion |
 | `load-narrow` (opt-in) | Narrow fault-free private stack loads; see `load_narrow.rs` |
-| `constant-args`, `empty-calls`, `unused-functions` | Module cleanup of constant arguments, empty calls and unreferenced private functions |
+| `constant-args`, `empty-calls`, `unused-functions` | [Module cleanup](#module-cleanup) of constant arguments, empty calls and unreachable functions |
 | `private-aggregate-cleanup` | Pass private two-word by-value aggregates as word pairs |
 | `internal-fast-calls` | Final private transport for contained direct calls |
 | `tail-calls` | Replace adjacent scalar call/return pairs; see [tail calls](#tail-calls) |
@@ -333,6 +333,18 @@ of at most 128 instructions whose only load comes before any store or other
 effect; later stores must be disjoint by `AliasInfo`. The exit has one incoming
 edge and ends in a return. Functions are limited to 512 blocks and 8192
 instructions, with at most eight transformations. No tier runs it.
+
+## Module cleanup
+
+`constant-args` substitutes an integer or floating literal into a local body
+only when every direct call passes the same literal and the function cannot
+escape through data, addresses, assembly, retention or lifecycle roots. Weak,
+public, variadic, returns-twice and explicit aggregate-transport functions are
+excluded. The signature and call arguments stay; the body is not inlined or
+cloned. `empty-calls` removes calls proven to have no effect, and
+`unused-functions` removes functions that optimization made unreachable. Both
+treat constructors, destructors, address references, relocations and assembly
+references as roots. Balanced, Size and Full run them late.
 
 ## Loop passes
 

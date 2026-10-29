@@ -6,10 +6,10 @@ hashes and every sample are in [assembly-link-20261024.json](assembly-link-20261
 | | |
 | --- | --- |
 | Machine | Apple M5 Max, macOS 27.0.1, SDK 27.0 |
-| Keel | `2cd51766`, release build, Rust 1.99.1 |
+| Keel | Release build, Rust 1.99.1, of commit `2cd51766`, which is not in this repository's rewritten history |
 | References | Apple Clang 21.0.0, Apple `ld-27037.1` |
 | Protocol | 2 warmups, 7 measured runs, median; shuffled order per round |
-| Input | `suite/runtime-kernels`: `kernels.c` + `driver.c` |
+| Input | [`runtime-kernels.c`](../../crates/keel/tests/fixtures/runtime-kernels.c) and [`driver.c`](../../suite/linker/fixtures/driver.c) |
 
 ## Results
 
