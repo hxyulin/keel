@@ -940,3 +940,159 @@ fn per_operation_policy_does_not_disable_other_memory_builtins() {
         keel_ir::verify_module(&module).unwrap();
     }
 }
+
+fn has_fsqrt(module: &keel_ir::Module) -> bool {
+    module.to_string().contains("fsqrt")
+}
+
+fn calls(module: &keel_ir::Module, name: &str) -> bool {
+    let f = module.functions.iter().find(|f| f.name == "f").unwrap();
+    f.layout_insts().any(|(_, i)| {
+        matches!(f.inst_data(i), InstData::Call { func, .. } if f.callee(*func).name == name)
+    })
+}
+
+#[test]
+fn library_sqrt_is_fsqrt_with_a_libm_fallback_where_libm_sets_errno() {
+    for target in Target::NATIVE {
+        for (name, ty) in [
+            ("sqrt", "double"),
+            ("sqrtf", "float"),
+            ("sqrtl", "long double"),
+        ] {
+            if name == "sqrtl" && target != Target::Aarch64AppleDarwin {
+                continue;
+            }
+            let builtin = keel_c::LibraryBuiltin::ALL
+                .into_iter()
+                .find(|builtin| builtin.name() == name)
+                .unwrap();
+            let source = format!("{ty} {name}({ty}); {ty} f({ty} x) {{ return {name}(x); }}");
+            let module = compile(&source, target);
+            assert!(has_fsqrt(&module), "{target:?} {module}");
+            // Darwin's libm never sets errno; Linux libm sets it for x < 0.
+            assert_eq!(
+                calls(&module, name),
+                target != Target::Aarch64AppleDarwin,
+                "{target:?} {module}"
+            );
+            for policy in [
+                keel_c::LibraryBuiltins::disabled(),
+                keel_c::LibraryBuiltins::hosted().disable(builtin),
+            ] {
+                let module = keel_c::compile_with_policies(
+                    &source,
+                    "sqrt.c",
+                    keel_c::Options {
+                        target,
+                        ..Default::default()
+                    },
+                    keel_c::FunctionBinding::default(),
+                    policy,
+                )
+                .unwrap();
+                assert!(!has_fsqrt(&module) && calls(&module, name), "{module}");
+            }
+        }
+        // Disabling one does not disable the others.
+        let source = "double sqrt(double); float sqrtf(float); float f(float x) { return sqrt(x) + sqrtf(x); }";
+        let module = keel_c::compile_with_policies(
+            source,
+            "sqrt.c",
+            keel_c::Options {
+                target,
+                ..Default::default()
+            },
+            keel_c::FunctionBinding::default(),
+            keel_c::LibraryBuiltins::hosted().disable(keel_c::LibraryBuiltin::Sqrt),
+        )
+        .unwrap();
+        assert!(has_fsqrt(&module) && calls(&module, "sqrt"), "{module}");
+        for mut module in [compile(source, target), module] {
+            keel_ir::verify_module(&module).unwrap();
+            keel_codegen::compile(&module, target).unwrap();
+            keel_opt::optimize(&mut module).unwrap();
+            keel_codegen::compile(&module, target).unwrap();
+        }
+    }
+}
+
+#[test]
+fn library_sqrt_recognition_requires_the_canonical_external_declaration() {
+    let cases = [
+        "double sqrt(double); double f(double x) { double (*p)(double) = sqrt; return p(x); }",
+        "double sqrt(double); double f(double x, double (*sqrt)(double)) { return sqrt(x); }",
+        "float sqrt(float); float f(float x) { return sqrt(x); }",
+        "double sqrtf(double); double f(double x) { return sqrtf(x); }",
+        "double sqrt(); double f(double x) { return sqrt(x); }",
+        "double sqrt(double, ...); double f(double x) { return sqrt(x); }",
+        "static double sqrt(double x) { return x; } double f(double x) { return sqrt(x); }",
+        "double sqrt(double); double f(double x) { return sqrt(x); } double sqrt(double x) { return x; }",
+        "double sqrt(double) __attribute__((weak)); double f(double x) { return sqrt(x); }",
+        "double sqrt(double) __asm__(\"_other\"); double f(double x) { return sqrt(x); }",
+        "double sqrt(double *); double f(double *x) { return sqrt(x); }",
+    ];
+    for target in Target::NATIVE {
+        for source in cases {
+            assert!(!has_fsqrt(&compile(source, target)), "{target:?} {source}");
+        }
+        if target != Target::Aarch64AppleDarwin {
+            // `long double` is not `double` here, so `sqrtl` is never this operation.
+            let source = "double sqrtl(double); double f(double x) { return sqrtl(x); }";
+            assert!(!has_fsqrt(&compile(source, target)), "{target:?}");
+        }
+    }
+}
+
+#[test]
+fn library_sqrt_native_differential_clang() {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/library_sqrt.c");
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("library-sqrt-differential");
+    std::fs::create_dir_all(&dir).unwrap();
+    let oracle = dir.join("clang");
+    checked(
+        Command::new("clang")
+            .args(["-std=c11", "-O2", "-o"])
+            .arg(&oracle)
+            .arg(&source)
+            .arg("-lm"),
+    );
+    let want = checked(&mut Command::new(&oracle)).stdout;
+    // Linux libm reports the domain error through errno; Darwin's does not.
+    let errno_line = String::from_utf8_lossy(&want)
+        .lines()
+        .last()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        errno_line.ends_with("EDOM nan EDOM"),
+        cfg!(target_os = "linux"),
+        "{errno_line}"
+    );
+    let preprocessed = checked(Command::new("clang").args(["-E", "-P"]).arg(&source)).stdout;
+    let text = String::from_utf8(preprocessed).unwrap();
+    for optimized in [false, true] {
+        let mut module = compile(&text, keel_c::Options::default().target);
+        assert!(has_fsqrt(&module));
+        if optimized {
+            keel_opt::optimize(&mut module).unwrap();
+        }
+        keel_ir::verify_module(&module).unwrap();
+        let asm = keel_codegen::compile(&module, keel_c::Options::default().target).unwrap();
+        let assembly = dir.join(format!("keel-{optimized}.s"));
+        let executable = dir.join(format!("keel-{optimized}"));
+        std::fs::write(&assembly, asm).unwrap();
+        checked(
+            Command::new("clang")
+                .arg(&assembly)
+                .arg("-o")
+                .arg(&executable)
+                .arg("-lm"),
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&checked(&mut Command::new(&executable)).stdout),
+            String::from_utf8_lossy(&want),
+            "optimized={optimized}"
+        );
+    }
+}

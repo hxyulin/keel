@@ -156,14 +156,7 @@ impl Options {
         } else {
             keel_c::LibraryBuiltins::hosted()
         };
-        for (index, builtin) in [
-            keel_c::LibraryBuiltin::Memcpy,
-            keel_c::LibraryBuiltin::Memmove,
-            keel_c::LibraryBuiltin::Memset,
-        ]
-        .into_iter()
-        .enumerate()
-        {
+        for (index, builtin) in keel_c::LibraryBuiltin::ALL.into_iter().enumerate() {
             if self.disabled_library_builtins & (1 << index) != 0 {
                 policy = policy.disable(builtin);
             }
@@ -382,15 +375,14 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                 opts.no_builtin = false;
             }
             "-fno-builtin-function" => {
-                let index = match raw.strip_prefix("-fno-builtin-") {
-                    Some("memcpy") => 0,
-                    Some("memmove") => 1,
-                    Some("memset") => 2,
-                    _ => {
-                        return Err(format!(
-                            "unsupported builtin opt-out `{raw}`; expected memcpy, memmove or memset"
-                        ));
-                    }
+                let name = raw.strip_prefix("-fno-builtin-").unwrap_or_default();
+                let Some(index) = keel_c::LibraryBuiltin::ALL
+                    .iter()
+                    .position(|builtin| builtin.name() == name)
+                else {
+                    return Err(format!(
+                        "unsupported builtin opt-out `{raw}`; expected memcpy, memmove, memset, sqrt, sqrtf or sqrtl"
+                    ));
                 };
                 opts.disabled_library_builtins |= 1 << index;
             }
@@ -1919,6 +1911,38 @@ mod library_builtin_options_tests {
                 let recognized = function.layout_insts().any(|(_, i)| matches!(function.inst_data(i), InstData::Intrinsic { id: found, .. } if *found == id));
                 assert_eq!(recognized, expected, "{flags:?}, {name}: {function}");
             }
+        }
+    }
+
+    #[test]
+    fn sqrt_builtin_flags_select_fsqrt() {
+        let dir = std::env::temp_dir().join(format!("keel-sqrt-flags-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("sqrt.i");
+        let output = dir.join("sqrt.keel");
+        std::fs::write(
+            &input,
+            "double sqrt(double); double f(double x) { return sqrt(x); }",
+        )
+        .unwrap();
+        for (flags, recognized) in [
+            (&[][..], true),
+            (&["-fno-builtin-sqrt"], false),
+            (&["-fno-builtin-sqrtf", "-fno-builtin-sqrtl"], true),
+            (&["-fno-builtin"], false),
+            (&["-ffreestanding"], false),
+        ] {
+            let mut argv = vec![
+                "cc".into(),
+                "--emit-ir".into(),
+                input.display().to_string(),
+                "-o".into(),
+                output.display().to_string(),
+            ];
+            argv.extend(flags.iter().map(|f| f.to_string()));
+            run(argv).unwrap();
+            let text = std::fs::read_to_string(&output).unwrap();
+            assert_eq!(text.contains("fsqrt"), recognized, "{flags:?}: {text}");
         }
     }
 

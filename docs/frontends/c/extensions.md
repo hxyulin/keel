@@ -4,17 +4,19 @@ This reference describes current implementation contracts and limits. Use
 [testing](../../development/testing.md) for validation commands; per-run results belong outside Git.
 
 <a id="c-library-memory-builtins"></a>
-## Standard-library memory builtins
+## Standard-library builtins
 
 Hosted native C compilation recognizes direct calls to canonical external
-`memcpy`, `memmove` and `memset` declarations as memory intrinsics. The library
+`memcpy`, `memmove` and `memset` declarations as memory intrinsics, and calls to
+`sqrt`, `sqrtf` and `sqrtl` as the IR `fsqrt` operation. The library
 API's `compile` and `compile_with_binding` entry points use this hosted policy.
 `compile_with_policies` accepts `LibraryBuiltins` for explicit control. The bounded
 Wasm profile remains freestanding and does not recognize ordinary library calls.
 
 Recognition uses declaration identity and types after parsing the complete
 translation unit. All declarations must retain the canonical native LP64
-prototype, including pointer qualifiers and `unsigned long` size. Typedef aliases
+prototype, including pointer qualifiers and `unsigned long` size. `sqrtl` is
+recognized only on Darwin, where `long double` is `double`. Typedef aliases
 and top-level parameter `restrict` do not prevent recognition. Definitions,
 static or weak bindings, renamed linker symbols, multiple C names for one linker
 symbol, incompatible declarations and missing prototypes retain ordinary call
@@ -28,7 +30,8 @@ designator, retain their ordinary call form.
 Taking a function's address still produces the library function's address.
 
 `-fno-builtin` disables ordinary-call recognition. The bounded per-function forms
-are `-fno-builtin-memcpy`, `-fno-builtin-memmove` and `-fno-builtin-memset`.
+are `-fno-builtin-memcpy`, `-fno-builtin-memmove`, `-fno-builtin-memset`,
+`-fno-builtin-sqrt`, `-fno-builtin-sqrtf` and `-fno-builtin-sqrtl`.
 `-ffreestanding` sets `__STDC_HOSTED__` to zero and disables ordinary recognition;
 `-fhosted` restores hosted preprocessing and global recognition. `-fbuiltin`
 reenables global recognition without changing `__STDC_HOSTED__`. Later global
@@ -42,6 +45,12 @@ the linked system libc. Keel does not supply a libc implementation. Programs tha
 require interposition or custom ordinary memory-function behavior must disable
 recognition. Optimizer passes rely on frontend intrinsic provenance rather than
 matching arbitrary linker names.
+
+Darwin's libm never sets `errno`, so a recognized square root there is only
+`fsqrt`. Linux libm sets `errno` to `EDOM` for negative inputs, so on Linux a
+recognized square root computes `fsqrt` for `x >= 0` and calls the library for
+negative and NaN inputs. This matches Clang's default `-fmath-errno` code. Keel
+has no `-fno-math-errno`.
 
 <a id="c-cleanup-jumps-cleanup-aware-jumps"></a>
 ## Cleanup-aware jumps

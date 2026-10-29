@@ -4110,7 +4110,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             if let Some(operation) = crate::LibraryBuiltin::named(global.name)
                 && self.g.library_builtins.allows(operation)
                 && self.g.library_builtin_symbols[index]
-                && global.memory_builtin_compatible
+                && global.library_builtin_compatible
                 && operation.prototype(&Ty::Func(fty))
                 && global.name == global.symbol
                 && !global.defined
@@ -4118,8 +4118,13 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 && global.weak.is_none()
                 && !global.returns_twice
                 && !global.incompatible_return
+                && (operation != crate::LibraryBuiltin::Sqrtl
+                    || self.g.p.target == keel_ir::Target::Aarch64AppleDarwin)
             {
-                return self.builtin(Builtin::Memory(operation.intrinsic()), args, e);
+                return match operation.intrinsic() {
+                    Some(id) => self.builtin(Builtin::Memory(id), args, e),
+                    None => self.library_sqrt(index, fty, &args[0], e.loc).map(Some),
+                };
             }
         }
         let mapping = self.g.abi_mapping(fty, usize::MAX, &[])?;
@@ -4261,6 +4266,44 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             return Ok(Some(self.b.ins().stack_addr(slot)));
         }
         Ok(self.b.function().inst_results(inst).first().copied())
+    }
+
+    /// A recognized `sqrt`, `sqrtf` or `sqrtl` call. Darwin's libm never sets
+    /// `errno`, so it is just `fsqrt`. Linux libm sets `errno` for negative
+    /// inputs, so those and NaNs still call the library, as Clang does.
+    fn library_sqrt(&mut self, g: usize, fty: &FuncTy, arg: &Expr<'p>, loc: Loc) -> R<Value> {
+        let x = self.val(arg)?;
+        self.set_loc(loc);
+        if self.g.p.target == keel_ir::Target::Aarch64AppleDarwin {
+            return Ok(self.b.ins().fsqrt(x));
+        }
+        let ty = fty.ret.ir_with_layout(self.g.p.c_layout);
+        let zero = if ty == Type::F32 {
+            self.b.ins().f32const(0.0)
+        } else {
+            self.b.ins().f64const(0.0)
+        };
+        // Ordered: false for NaN.
+        let in_domain = self.b.ins().fcmp(FloatCC::Ge, x, zero);
+        let fast = self.new_block();
+        let slow = self.new_block();
+        let done = self.new_block();
+        let result = self.b.append_block_param(done, ty);
+        self.b.ins().brif(in_domain, fast, &[], slow, &[]);
+        self.b.seal_block(fast);
+        self.b.seal_block(slow);
+        self.switch_to(fast);
+        let root = self.b.ins().fsqrt(x);
+        self.b.ins().jump(done, &[root]);
+        self.switch_to(slow);
+        self.g.use_global(g);
+        let fref = self.import_global(g, fty, Some(&[]))?;
+        let call = self.b.ins().call(fref, &[x]);
+        let root = self.b.function().inst_results(call)[0];
+        self.b.ins().jump(done, &[root]);
+        self.b.seal_block(done);
+        self.switch_to(done);
+        Ok(result)
     }
 
     /// Compute using unsigned magnitudes, retaining a carry beyond 128 bits.
