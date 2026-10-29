@@ -1349,13 +1349,12 @@ impl std::ops::IndexMut<usize> for ExpansionInput<'_> {
     }
 }
 
-/// Returns arguments and the index immediately after the closing parenthesis.
-/// The arguments of the invocation whose `(` is at `open`, the separating
-/// commas, and the index after its `)`.
-fn arguments<'a>(
-    ts: &ExpansionInput<'a>,
-    open: usize,
-) -> Result<(Vec<Vec<Token<'a>>>, Vec<Token<'a>>, usize), Diagnostic> {
+/// An invocation's arguments, the commas between them, and the index after
+/// its `)`.
+type Arguments<'a> = (Vec<Vec<Token<'a>>>, Vec<Token<'a>>, usize);
+
+/// The arguments of the invocation whose `(` is at `open`.
+fn arguments<'a>(ts: &ExpansionInput<'a>, open: usize) -> Result<Arguments<'a>, Diagnostic> {
     let mut args = vec![Vec::new()];
     let mut commas = Vec::new();
     let mut depth = 0;
