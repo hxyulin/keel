@@ -1,4 +1,4 @@
-//! All32 AVX predicate controls, including signaling differences and unused-result
+//! AVX predicate controls, including signaling differences and unused-result
 //! MXCSR effects. The oracle uses Clang's assembler to force the exact compare.
 use keel_asm_ir::x86::{CpuLevel, Features};
 use keel_codegen::{
@@ -17,6 +17,9 @@ const EMPTY: Pools = Pools {
     float_caller_saved: &[],
     float_callee_saved: &[],
 };
+/// The predicate reaches the encoding unchanged, so the cross-host matrix uses
+/// boundary predicates. The native Linux test executes all 32.
+const BOUNDARY_PREDICATES: [u8; 7] = [0, 1, 7, 8, 15, 16, 31];
 struct Case {
     id: Intrinsic,
     mode: u8,
@@ -27,10 +30,13 @@ impl Case {
         format!("cmp_{}_{}_{}", self.id, self.mode, self.alias)
     }
 }
-fn cases() -> Vec<Case> {
+fn cases(all_predicates: bool) -> Vec<Case> {
     let mut v = Vec::new();
     for id in Intrinsic::ALL.into_iter().filter(|i| i.is_x86_fp_compare()) {
         for mode in 0..32 {
+            if !all_predicates && !BOUNDARY_PREDICATES.contains(&mode) {
+                continue;
+            }
             for alias in [false, true] {
                 v.push(Case { id, mode, alias });
             }
@@ -38,9 +44,9 @@ fn cases() -> Vec<Case> {
     }
     v
 }
-fn source() -> String {
+fn source(all_predicates: bool) -> String {
     let mut s = String::new();
-    for c in cases() {
+    for c in cases(all_predicates) {
         let info = c.id.info();
         let ty = info.params[0];
         let out = info.returns[0];
@@ -65,14 +71,14 @@ fn source() -> String {
     }
     s
 }
-fn harness() -> String {
+fn harness(all_predicates: bool) -> String {
     let mut c = String::from(
         "#include <immintrin.h>\n#include <stdint.h>\nextern void *memcpy(void*,const void*,__SIZE_TYPE__);extern void *memset(void*,int,__SIZE_TYPE__);extern int memcmp(const void*,const void*,__SIZE_TYPE__);extern int printf(const char*,...);\n",
     );
     let mut table = String::from(
         "struct Case{void(*run)(const void*,const void*,void*);void(*unused)(const void*,const void*,void*);void(*ref)(const void*,const void*,void*);unsigned in,out,bits;const char*name;};static const struct Case cases[]={\n",
     );
-    for case in cases() {
+    for case in cases(all_predicates) {
         let i = case.id.info();
         let ty = i.params[0];
         let name = case.name();
@@ -128,17 +134,26 @@ _mm_setcsr(saved);return 0;}
 "#;
     c
 }
+#[path = "common/matrix.rs"]
+mod matrix;
 fn object(
     s: SelectionTier,
     a: AllocationTier,
     empty: bool,
     f: Features,
+    all_predicates: bool,
 ) -> Result<(Vec<u8>, String), keel_codegen::CodegenError> {
-    let mut m = keel_ir::parse(&source()).unwrap();
-    keel_ir::verify_module(&m).unwrap();
-    if s == SelectionTier::Full {
-        keel_opt::optimize(&mut m).unwrap();
-    }
+    use std::sync::OnceLock;
+    static BOUNDARY: OnceLock<matrix::PreparedModule> = OnceLock::new();
+    static ALL_PREDICATES: OnceLock<matrix::PreparedModule> = OnceLock::new();
+    let prepared = if all_predicates {
+        &ALL_PREDICATES
+    } else {
+        &BOUNDARY
+    };
+    let m = prepared
+        .get_or_init(|| matrix::PreparedModule::parse(&source(all_predicates)))
+        .for_selector(s);
     let selector = FeatureSelector {
         inner: &s,
         features: f,
@@ -152,8 +167,8 @@ fn object(
     } else {
         &keel_codegen::x86_64::REGISTERS
     };
-    let text = keel_codegen::x86_64::compile_with_pipeline(&m, pools, &pipeline)?;
-    let p = keel_codegen::x86_64::compile_program_with_pipeline(&m, pools, &pipeline)?;
+    let text = keel_codegen::x86_64::compile_with_pipeline(m, pools, &pipeline)?;
+    let p = keel_codegen::x86_64::compile_program_with_pipeline(m, pools, &pipeline)?;
     assert_eq!(p.stats().text_bytes, 0);
     let b = keel_asm::x86::assemble_program_object_with_features(&p, f).unwrap();
     assert_eq!(
@@ -167,12 +182,12 @@ fn every_avx_compare_predicate_typed_alias_spill_export() {
     let export = std::env::var_os("KEEL_X86_256_EXPORT_DIR").map(PathBuf::from);
     if let Some(d) = &export {
         fs::create_dir_all(d).unwrap();
-        fs::write(d.join("compare32.ir"), source()).unwrap();
-        fs::write(d.join("compare32.c"), harness()).unwrap();
+        fs::write(d.join("compare32.ir"), source(false)).unwrap();
+        fs::write(d.join("compare32.c"), harness(false)).unwrap();
     }
     let d = common::temp("compare32-syntax");
     fs::create_dir_all(&d).unwrap();
-    fs::write(d.join("compare.c"), harness()).unwrap();
+    fs::write(d.join("compare.c"), harness(false)).unwrap();
     common::command(
         Command::new("clang")
             .args([
@@ -192,7 +207,8 @@ fn every_avx_compare_predicate_typed_alias_spill_export() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (b, text) = object(s, a, empty, Features::for_level(CpuLevel::V3)).unwrap();
+                let (b, text) =
+                    object(s, a, empty, Features::for_level(CpuLevel::V3), false).unwrap();
                 if let Some(d) = &export {
                     let name = format!("compare32-{s:?}-{a:?}-{empty}");
                     fs::write(d.join(format!("{name}.o")), b).unwrap();
@@ -204,34 +220,43 @@ fn every_avx_compare_predicate_typed_alias_spill_export() {
 }
 #[test]
 fn compare_control_validation_and_unused_exception_effects() {
+    let source = source(false);
     for bad in [
-        source().replace("iconst.i32 0", "iconst.i32 32"),
-        source().replace("iconst.i32 0", "iconst.i32 -1"),
-        source().replace("iconst.i32 0", "load.i32 v0"),
-        source().replace("load.f32x4", "load.f64x2"),
+        source.replace("iconst.i32 0", "iconst.i32 32"),
+        source.replace("iconst.i32 0", "iconst.i32 -1"),
+        source.replace("iconst.i32 0", "load.i32 v0"),
+        source.replace("load.f32x4", "load.f64x2"),
     ] {
         assert!(keel_ir::verify_module(&keel_ir::parse(&bad).unwrap()).is_err());
     }
     let mut minimal = Features::NONE;
     minimal = minimal.with_features("avx").unwrap();
-    object(SelectionTier::Full, AllocationTier::Full, true, minimal).unwrap();
+    object(
+        SelectionTier::Full,
+        AllocationTier::Full,
+        true,
+        minimal,
+        false,
+    )
+    .unwrap();
     assert!(
         object(
             SelectionTier::Baseline,
             AllocationTier::Full,
             false,
-            Features::NONE
+            Features::NONE,
+            false
         )
         .is_err()
     );
-    let mut m = keel_ir::parse(&source()).unwrap();
+    let mut m = keel_ir::parse(&source).unwrap();
     keel_opt::optimize(&mut m).unwrap();
     let unused: Vec<_> = m
         .functions
         .iter()
         .filter(|f| f.name.starts_with("unused_"))
         .collect();
-    assert_eq!(unused.len(), 384);
+    assert_eq!(unused.len(), cases(false).len());
     for f in unused {
         assert!(f.layout_insts().any(|(_,i)|matches!(f.inst_data(i),keel_ir::InstData::Intrinsic{id,..}if id.is_x86_fp_compare())));
     }
@@ -244,7 +269,7 @@ fn native_all32_predicates_masks_signaling_and_aliases() {
     }
     let d = common::temp("compare32-native");
     fs::create_dir_all(&d).unwrap();
-    fs::write(d.join("compare.c"), harness()).unwrap();
+    fs::write(d.join("compare.c"), harness(true)).unwrap();
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -252,7 +277,7 @@ fn native_all32_predicates_masks_signaling_and_aliases() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (b, _) = object(s, a, empty, Features::for_level(CpuLevel::V3)).unwrap();
+                let (b, _) = object(s, a, empty, Features::for_level(CpuLevel::V3), true).unwrap();
                 fs::write(d.join("compare.o"), b).unwrap();
                 common::command(
                     Command::new("clang")
