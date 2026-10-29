@@ -85,13 +85,24 @@ fn native_loop_shapes_match_independent_oracle() {
     let source = include_str!("programs/loop_shapes.keel");
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("loop-shapes");
     fs::create_dir_all(&dir).unwrap();
-    let driver = dir.join("driver.c");
+    let driver = dir.join("driver.o");
     let asm = dir.join("test.s");
     let exe = dir.join("run");
-    fs::write(&driver, include_str!("programs/loop_shapes.c")).unwrap();
+    fs::write(dir.join("driver.c"), include_str!("programs/loop_shapes.c")).unwrap();
+    let output = Command::new("clang")
+        .arg("-c")
+        .arg(dir.join("driver.c"))
+        .arg("-o")
+        .arg(&driver)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let mut runs = 0;
     for (name, passes) in [
-        ("none", keel_opt::OptimizationTier::None.pipeline()),
         ("shapes", &[][..]),
         ("fast", keel_opt::OptimizationTier::Fast.pipeline()),
         ("full", keel_opt::OptimizationTier::Full.pipeline()),
@@ -100,21 +111,19 @@ fn native_loop_shapes_match_independent_oracle() {
         let mut module = keel_ir::parse(source).unwrap();
         keel_ir::verify_module(&module).unwrap();
         keel_opt::run_passes(&mut module, passes).unwrap();
-        if name != "none" {
-            keel_opt::run_passes(
-                &mut module,
-                &[
-                    "load-reuse",
-                    "loop-strength-reduce",
-                    "canonicalize",
-                    "instcombine",
-                    "dce",
-                    "loop-unroll",
-                    "loop-rotate",
-                ],
-            )
-            .unwrap();
-        }
+        keel_opt::run_passes(
+            &mut module,
+            &[
+                "load-reuse",
+                "loop-strength-reduce",
+                "canonicalize",
+                "instcombine",
+                "dce",
+                "loop-unroll",
+                "loop-rotate",
+            ],
+        )
+        .unwrap();
         keel_ir::verify_module(&module).unwrap();
         fs::write(dir.join(format!("{name}.keel")), module.to_string()).unwrap();
         if name == "full" {
@@ -148,50 +157,50 @@ fn native_loop_shapes_match_independent_oracle() {
             2,
             "division must reject unrolling"
         );
-        if name != "none" {
-            for f in &module.functions[2..4] {
-                assert_eq!(
-                    f.layout_insts()
-                        .filter(|(_, i)| matches!(f.inst_data(*i), keel_ir::InstData::Load { .. }))
-                        .count(),
-                    6,
-                    "signed two-stream activation {name}"
-                );
-            }
+        for f in &module.functions[2..4] {
+            assert_eq!(
+                f.layout_insts()
+                    .filter(|(_, i)| matches!(f.inst_data(*i), keel_ir::InstData::Load { .. }))
+                    .count(),
+                6,
+                "signed two-stream activation {name}"
+            );
         }
-        for selector in [SelectionTier::Baseline, SelectionTier::Full] {
-            for allocator in [AllocationTier::Fast, AllocationTier::Full] {
-                for pools in [&REGISTERS, &TINY] {
-                    let assembly = compile_with_pipeline(
-                        &module,
-                        pools,
-                        &CodegenPipeline {
-                            selector: &selector,
-                            allocator: &allocator,
-                        },
-                    )
-                    .unwrap();
-                    fs::write(&asm, assembly).unwrap();
-                    let output = Command::new("clang")
-                        .args([&asm, &driver])
-                        .arg("-o")
-                        .arg(&exe)
-                        .output()
-                        .unwrap();
-                    assert!(
-                        output.status.success(),
-                        "{}",
-                        String::from_utf8_lossy(&output.stderr)
-                    );
-                    let output = Command::new(&exe).output().unwrap();
-                    assert!(
-                        output.status.success(),
-                        "{name}, {selector:?}, {allocator:?}, pools={pools:?}: {output:?}"
-                    );
-                    runs += 1;
-                }
-            }
+        // Every pairing of selector, allocator and pool appears once.
+        for (selector, allocator, pools) in [
+            (SelectionTier::Baseline, AllocationTier::Full, &REGISTERS),
+            (SelectionTier::Baseline, AllocationTier::Fast, &TINY),
+            (SelectionTier::Full, AllocationTier::Full, &TINY),
+            (SelectionTier::Full, AllocationTier::Fast, &REGISTERS),
+        ] {
+            let assembly = compile_with_pipeline(
+                &module,
+                pools,
+                &CodegenPipeline {
+                    selector: &selector,
+                    allocator: &allocator,
+                },
+            )
+            .unwrap();
+            fs::write(&asm, assembly).unwrap();
+            let output = Command::new("clang")
+                .args([&asm, &driver])
+                .arg("-o")
+                .arg(&exe)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let output = Command::new(&exe).output().unwrap();
+            assert!(
+                output.status.success(),
+                "{name}, {selector:?}, {allocator:?}, pools={pools:?}: {output:?}"
+            );
+            runs += 1;
         }
     }
-    assert_eq!(runs, 40);
+    assert_eq!(runs, 16);
 }

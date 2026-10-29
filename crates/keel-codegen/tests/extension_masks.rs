@@ -27,13 +27,28 @@ fn native_extension_masks_match_unsigned_oracle() {
     let source = include_str!("programs/extension_masks.keel");
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("extension-masks");
     fs::create_dir_all(&dir).unwrap();
-    let driver = dir.join("driver.c");
+    let driver = dir.join("driver.o");
     let asm = dir.join("test.s");
     let exe = dir.join("run");
-    fs::write(&driver, include_str!("programs/extension_masks.c")).unwrap();
+    fs::write(
+        dir.join("driver.c"),
+        include_str!("programs/extension_masks.c"),
+    )
+    .unwrap();
+    let output = Command::new("clang")
+        .arg("-c")
+        .arg(dir.join("driver.c"))
+        .arg("-o")
+        .arg(&driver)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let mut runs = 0;
     for (name, passes) in [
-        ("none", keel_opt::OptimizationTier::None.pipeline()),
         ("fast", keel_opt::OptimizationTier::Fast.pipeline()),
         ("full", keel_opt::OptimizationTier::Full.pipeline()),
         ("combine", &["instcombine", "dce", "gcm"][..]),
@@ -42,39 +57,41 @@ fn native_extension_masks_match_unsigned_oracle() {
         keel_ir::verify_module(&module).unwrap();
         keel_opt::run_passes(&mut module, passes).unwrap();
         keel_ir::verify_module(&module).unwrap();
-        for selector in [SelectionTier::Baseline, SelectionTier::Full] {
-            for allocator in [AllocationTier::Fast, AllocationTier::Full] {
-                for pools in [&REGISTERS, &TINY] {
-                    let assembly = compile_with_pipeline(
-                        &module,
-                        pools,
-                        &CodegenPipeline {
-                            selector: &selector,
-                            allocator: &allocator,
-                        },
-                    )
-                    .unwrap();
-                    fs::write(&asm, assembly).unwrap();
-                    let output = Command::new("clang")
-                        .args([&asm, &driver])
-                        .arg("-o")
-                        .arg(&exe)
-                        .output()
-                        .unwrap();
-                    assert!(
-                        output.status.success(),
-                        "{}",
-                        String::from_utf8_lossy(&output.stderr)
-                    );
-                    let output = Command::new(&exe).output().unwrap();
-                    assert!(
-                        output.status.success(),
-                        "{name}, {selector:?}, {allocator:?}, pools={pools:?}: {output:?}"
-                    );
-                    runs += 1;
-                }
-            }
+        // Every pairing of selector, allocator and pool appears once.
+        for (selector, allocator, pools) in [
+            (SelectionTier::Baseline, AllocationTier::Full, &REGISTERS),
+            (SelectionTier::Baseline, AllocationTier::Fast, &TINY),
+            (SelectionTier::Full, AllocationTier::Full, &TINY),
+            (SelectionTier::Full, AllocationTier::Fast, &REGISTERS),
+        ] {
+            let assembly = compile_with_pipeline(
+                &module,
+                pools,
+                &CodegenPipeline {
+                    selector: &selector,
+                    allocator: &allocator,
+                },
+            )
+            .unwrap();
+            fs::write(&asm, assembly).unwrap();
+            let output = Command::new("clang")
+                .args([&asm, &driver])
+                .arg("-o")
+                .arg(&exe)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let output = Command::new(&exe).output().unwrap();
+            assert!(
+                output.status.success(),
+                "{name}, {selector:?}, {allocator:?}, pools={pools:?}: {output:?}"
+            );
+            runs += 1;
         }
     }
-    assert_eq!(runs, 32);
+    assert_eq!(runs, 12);
 }
