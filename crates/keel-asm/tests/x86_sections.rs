@@ -144,6 +144,45 @@ fn sections_with_the_same_name_belong_to_distinct_groups() {
 }
 
 #[test]
+fn section_lookup_keys_on_unique_id_and_retain_flag() {
+    // A bare name selects the earliest matching section, retained or not,
+    // and a section-name reference resolves to the first of that name.
+    let bytes = assemble_object(
+        r#"
+.section .payload,"a",@progbits,unique,2
+.byte 1
+.section .payload,"aR",@progbits
+.byte 2
+.section .payload,"a",@progbits
+.byte 3
+.section .payload
+.byte 4
+.section .payload,"a",@progbits,unique,2
+.byte 5
+.section .payload,"a",@progbits
+.byte 6
+.data
+.quad .payload
+"#,
+    )
+    .unwrap();
+    let file = object::File::parse(&*bytes).unwrap();
+    let payloads: Vec<_> = file
+        .sections()
+        .filter(|s| s.name() == Ok(".payload"))
+        .collect();
+    let data: Vec<_> = payloads.iter().map(|s| s.data().unwrap()).collect();
+    assert_eq!(data, [&[1, 5][..], &[2, 4], &[3, 6]]);
+    let data = file.section_by_name(".data").unwrap();
+    let (_, relocation) = data.relocations().next().unwrap();
+    let object::RelocationTarget::Symbol(symbol) = relocation.target() else {
+        panic!("expected a symbol relocation");
+    };
+    let symbol = file.symbol_by_index(symbol).unwrap();
+    assert_eq!(symbol.section_index(), Some(payloads[0].index()));
+}
+
+#[test]
 fn typed_sections_match_text_and_reject_invalid_attributes() {
     let mut program = Program::new();
     program.directive(Directive::ElfSectionMetadata {

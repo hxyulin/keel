@@ -10,7 +10,7 @@ mod sections;
 pub(crate) mod source;
 mod symbolic;
 use crate::Error;
-use crate::fxhash::{FxHashSet, FxHasher};
+use crate::fxhash::{FxHashMap, FxHashSet, FxHasher};
 pub use inputs::BinaryInputResolver;
 pub use keel_asm_ir::x86::{CpuLevel, Features, Syntax};
 use keel_asm_ir::{
@@ -24,7 +24,7 @@ use object::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::hash::Hasher;
+use std::hash::{Hash, Hasher};
 
 struct Section {
     name: String,
@@ -305,6 +305,9 @@ struct Assembler {
     /// sections in the same order: reserve them instead of regrowing.
     size_hints: Vec<u64>,
     prefs: Vec<(usize, u64, u64, u32, SymId, usize)>,
+    /// Sections by a hash of name, group, unique ID and retain flag, in
+    /// declaration order. Hashes may collide, so each match is rechecked.
+    section_index: FxHashMap<u64, Vec<usize>>,
 }
 
 /// Assemble x86 source (initially Intel) as a Linux relocatable ELF64 object.
@@ -1248,6 +1251,15 @@ fn assemble_items_inner<const PROFILE: bool>(
         }
     }
 }
+const SHF_GNU_RETAIN: u64 = 0x200000;
+fn section_key(name: &str, group: Option<&str>, unique: Option<u64>, retain: bool) -> u64 {
+    let mut h = FxHasher::default();
+    name.hash(&mut h);
+    group.hash(&mut h);
+    unique.hash(&mut h);
+    retain.hash(&mut h);
+    h.finish()
+}
 impl Assembler {
     fn new() -> Result<Self, Error> {
         let mut a = Self::default();
@@ -1337,12 +1349,25 @@ impl Assembler {
         });
         // GNU as gives retained and ordinary contributions distinct input
         // sections, even when their names match (including the default .text).
-        if let Some(i) = self.sections.iter().position(|s| {
-            s.name == name
-                && s.group == group
-                && s.unique == unique
-                && flags.is_none_or(|f| (s.flags ^ f) & 0x200000 == 0)
-        }) {
+        // A bare name matches either; the earlier declaration wins.
+        let find = |retain: bool| {
+            let key = section_key(name, group.as_deref(), unique, retain);
+            self.section_index.get(&key)?.iter().copied().find(|&i| {
+                let s = &self.sections[i];
+                s.name == name
+                    && s.group == group
+                    && s.unique == unique
+                    && (s.flags & SHF_GNU_RETAIN != 0) == retain
+            })
+        };
+        let found = match flags {
+            Some(f) => find(f & SHF_GNU_RETAIN != 0),
+            None => match (find(false), find(true)) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            },
+        };
+        if let Some(i) = found {
             let s = &self.sections[i];
             // A bare .section name switches back without redeclaring attributes.
             if flags.is_some_and(|f| {
@@ -1361,6 +1386,11 @@ impl Assembler {
         sections::validate(name, flags, nobits, entry_size, group.as_deref())?;
         self.previous = Some(self.current);
         self.current = self.sections.len();
+        let key = section_key(name, group.as_deref(), unique, flags & SHF_GNU_RETAIN != 0);
+        self.section_index
+            .entry(key)
+            .or_default()
+            .push(self.current);
         self.sections.push(Section {
             name: name.into(),
             flags,
@@ -2379,14 +2409,16 @@ impl Assembler {
     fn finish(mut self) -> Result<Vec<u8>, Error> {
         let err = |s: String| Error::new(0, s);
         // Ensure even undefined references receive symbol table entries.
-        let section_names: Vec<_> = self
-            .sections
-            .iter()
-            .map(|s| self.symbols.names.get(&s.name))
-            .collect();
+        // Map each name to its first section, as a search in order would.
+        let mut section_names = FxHashMap::default();
+        for (i, s) in self.sections.iter().enumerate() {
+            if let Some(n) = self.symbols.names.get(&s.name) {
+                section_names.entry(n).or_insert(i);
+            }
+        }
         for f in &self.fixes {
             if let Some(n) = f.expr.add {
-                let section = section_names.iter().position(|&s| s == Some(n));
+                let section = section_names.get(&n).copied();
                 let sym = self.symbols.entry(n);
                 if sym.section.is_none()
                     && sym.alias.is_none()
