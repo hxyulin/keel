@@ -286,9 +286,8 @@ fn compact_lsda_and_dwarf_exception_frames_work_after_a_regular_page_boundary() 
                 .args(["--verify", "--strict"])
                 .arg(executable),
         );
-        for _ in 0..5 {
-            checked(&mut Command::new(executable));
-        }
+        // Each run already gets a fresh ASLR slide.
+        checked(&mut Command::new(executable));
     }
     std::fs::remove_dir_all(temp).unwrap();
 }

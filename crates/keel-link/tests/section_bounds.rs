@@ -1,7 +1,7 @@
 //! Raw assembler coverage deliberately independent of C section attributes.
 use keel_link::{Dylib, Input, Options, elf};
 use object::{Object, ObjectSection, ObjectSymbol};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 fn elf_obj(s: &str) -> Vec<u8> {
     keel_asm::x86::assemble_object(s).unwrap()
@@ -278,6 +278,7 @@ fn native_arm64_and_apple_execute_same_registration_objects() {
             0,
         ),
     ];
+    let mut images = Vec::new();
     for (i, (objects, expected)) in cases.into_iter().enumerate() {
         let native = temp.join(format!("{i}-native"));
         keel_link::link_signed(
@@ -306,23 +307,44 @@ fn native_arm64_and_apple_execute_same_registration_objects() {
             "{}",
             String::from_utf8_lossy(&result.stderr)
         );
-        for exe in [&native, &system] {
+        for exe in [native, system] {
             assert_eq!(
-                std::process::Command::new(exe).status().unwrap().code(),
+                std::process::Command::new(&exe).status().unwrap().code(),
                 Some(expected),
                 "{}",
                 exe.display()
             );
-            let exports = std::process::Command::new("dyld_info")
-                .arg("-exports")
-                .arg(exe)
-                .output()
-                .unwrap();
-            assert!(exports.status.success());
-            if expected != 8 {
-                // User definitions retain their own export visibility.
-                assert!(!String::from_utf8_lossy(&exports.stdout).contains("section$"));
-            }
+            images.push((exe, expected));
+        }
+    }
+    // One dyld_info run lists every image's exports, each under a
+    // `path [arch]:` header.
+    let exports = std::process::Command::new("dyld_info")
+        .arg("-exports")
+        .args(images.iter().map(|(exe, _)| exe))
+        .output()
+        .unwrap();
+    assert!(exports.status.success());
+    let stdout = String::from_utf8_lossy(&exports.stdout);
+    let mut sections = BTreeMap::new();
+    let mut current = None;
+    for line in stdout.lines() {
+        if let Some((exe, _)) = images.iter().find(|(exe, _)| {
+            line.starts_with(&format!("{} [", exe.display())) && line.ends_with("]:")
+        }) {
+            current = Some(exe);
+        } else if let Some(exe) = current {
+            sections
+                .entry(exe)
+                .or_insert_with(String::new)
+                .push_str(line);
+        }
+    }
+    for (exe, expected) in &images {
+        assert!(sections.contains_key(exe), "{}\n{stdout}", exe.display());
+        if *expected != 8 {
+            // User definitions retain their own export visibility.
+            assert!(!sections[exe].contains("section$"), "{}", exe.display());
         }
     }
     std::fs::remove_dir_all(temp).unwrap();
@@ -366,6 +388,26 @@ fn clang_elf_objects_match_system_linker_bounds_policy() {
         (vec![format!("{common}.section registry,\"aw\",@progbits\n.quad 1\n.globl __start_registry\n__start_registry: .quad 2\n")], Some(8)),
         (vec![format!("{common}.section registry,\"aw\",@progbits\n.quad 1\n.weak __start_registry\n__start_registry: .quad 2\n")], Some(8)),
     ];
+    // One Clang run assembles every source into `{i}-{j}.o` in `temp`.
+    let mut names = Vec::new();
+    for (i, (sources, _)) in cases.iter().enumerate() {
+        for (j, source) in sources.iter().enumerate() {
+            let name = format!("{i}-{j}.s");
+            std::fs::write(temp.join(&name), source).unwrap();
+            names.push(name);
+        }
+    }
+    let out = std::process::Command::new("clang")
+        .args(["-target", "x86_64-unknown-linux-gnu", "-c"])
+        .args(&names)
+        .current_dir(&temp)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     for (i, (sources, span)) in cases.into_iter().enumerate() {
         let mut objects = Vec::new();
         let mut command = std::process::Command::new(&linker);
@@ -373,22 +415,8 @@ fn clang_elf_objects_match_system_linker_bounds_policy() {
             command.args(["-flavor", "gnu"]);
         }
         command.arg("-m").arg("elf_x86_64");
-        for (j, source) in sources.into_iter().enumerate() {
-            let path = temp.join(format!("{i}-{j}.s"));
-            let object = path.with_extension("o");
-            std::fs::write(&path, source).unwrap();
-            let out = std::process::Command::new("clang")
-                .args(["-target", "x86_64-unknown-linux-gnu", "-c"])
-                .arg(&path)
-                .arg("-o")
-                .arg(&object)
-                .output()
-                .unwrap();
-            assert!(
-                out.status.success(),
-                "{}",
-                String::from_utf8_lossy(&out.stderr)
-            );
+        for j in 0..sources.len() {
+            let object = temp.join(format!("{i}-{j}.o"));
             objects.push(std::fs::read(&object).unwrap());
             command.arg(object);
         }
