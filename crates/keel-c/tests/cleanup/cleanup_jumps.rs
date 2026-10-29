@@ -2,7 +2,7 @@
 use keel_ir::Target;
 use std::{fs, path::Path, process::Command};
 
-const SOURCE: &str = include_str!("fixtures/cleanup_jumps.c");
+const SOURCE: &str = include_str!("../fixtures/cleanup_jumps.c");
 
 fn run(command: &mut Command) {
     let output = command.output().unwrap();

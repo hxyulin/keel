@@ -1,3 +1,8 @@
+#[path = "cleanup/cleanup_jumps.rs"]
+mod cleanup_jumps;
+#[path = "cleanup/cleanup_switch.rs"]
+mod cleanup_switch;
+
 use keel_ir::Target;
 
 const SOURCE: &str = include_str!("fixtures/cleanup.c");
