@@ -1,4 +1,5 @@
 //! Packed-string controls and signed length widths with exact ISA oracles.
+use crate::common;
 use keel_asm_ir::x86::{CpuLevel, Features};
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
@@ -7,9 +8,6 @@ use keel_codegen::{
 };
 use keel_ir::Intrinsic;
 use std::{fs, path::PathBuf, process::Command};
-#[allow(dead_code)]
-#[path = "common/vector.rs"]
-pub mod common;
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -17,8 +15,7 @@ const EMPTY: Pools = Pools {
     float_callee_saved: &[],
 };
 
-#[path = "common/string_allocation.rs"]
-mod string_allocation;
+use crate::string_allocation;
 const ONE_SIMD: Pools = Pools {
     caller_saved: &[6, 7, 8, 9],
     callee_saved: &[3, 12, 13, 14, 15],
@@ -211,8 +208,7 @@ if(_mm_getcsr()!=csr)return 11;_mm_setcsr(saved);return 0;}
 "#;
     c
 }
-#[path = "common/matrix.rs"]
-mod matrix;
+use crate::matrix;
 
 fn object(
     s: SelectionTier,
