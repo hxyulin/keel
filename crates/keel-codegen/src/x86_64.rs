@@ -2974,11 +2974,17 @@ impl<'a> FunctionCompiler<'a> {
                     }
                 };
                 // Branch directly to a copy-free true edge when the false
-                // successor is next, copying its arguments on fallthrough.
-                // Otherwise keep copies on their own edges with landing pads.
-                if self.next_block == Some(else_dest.block) && self.block_args_noop(then_dest, 0) {
+                // successor is next or the false edge is the only one with
+                // copies, copying its arguments inline. Otherwise keep copies
+                // on their own edges with landing pads.
+                let then_noop = self.block_args_noop(then_dest, 0);
+                if then_noop
+                    && (self.next_block == Some(else_dest.block)
+                        || !self.block_args_noop(else_dest, 1))
+                {
                     self.jump_to_block(Opcode::Jcc(condition(invert_cond(not))), then_dest.block);
                     self.block_args(else_dest, 1);
+                    self.branch_unless_next(else_dest.block);
                 } else if self.block_args_noop(else_dest, 1) {
                     self.jump_to_block(Opcode::Jcc(condition(not)), else_dest.block);
                     self.block_args(then_dest, 0);

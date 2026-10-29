@@ -249,6 +249,34 @@ block2(v2: i64):
     });
 }
 
+/// The true successor is next, so the false edge is not a fallthrough, and
+/// only the false edge carries a copy.
+const FALSE_EDGE_COPY_NOT_NEXT: &str = "func @false_copy(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+ v2 = iconst.i64 91
+ brif v0, block1, block2(v2)
+block1:
+ v3 = iadd v0, v1
+ jump block2(v3)
+block2(v4: i64):
+ return v4
+}";
+
+#[test]
+fn copy_free_true_edge_branches_directly_when_the_false_edge_is_not_next() {
+    matrix(|tier, alloc, pools| {
+        let (text, _) = compile(FALSE_EDGE_COPY_NOT_NEXT, tier, alloc, pools);
+        assert!(
+            text.lines()
+                .any(|l| l.contains("\tjne\t") && l.contains("block1")),
+            "{text}"
+        );
+        assert!(!text.contains("_else:"), "{text}");
+        // One jump from the false edge to its join; block1 falls through.
+        assert_eq!(text.matches("\tjmp\t").count(), 1, "{text}");
+    });
+}
+
 #[test]
 fn same_target_with_different_arguments_skips_only_the_false_copy() {
     let src = "func @f(i64, i64) -> i64 {
@@ -446,6 +474,9 @@ block2:
 }";
     c += "extern uint64_t alias_noop(uint64_t);\n";
     checks += "assert(alias_noop((uint64_t)values[i])==(uint64_t)values[i]);\n";
+    src += FALSE_EDGE_COPY_NOT_NEXT;
+    c += "extern uint64_t false_copy(uint64_t,uint64_t);\n";
+    checks += "{ uint64_t x=values[i], y=values[j]; assert(false_copy(x,y)==(x ? x + y : 91)); }\n";
     src += "func @same_noop(i64, i64) -> i64 {
 block0(v0: i64, v1: i64):
  brif v0, block1(v0), block1(v1)
