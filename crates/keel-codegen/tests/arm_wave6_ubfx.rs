@@ -4,6 +4,11 @@ use keel_codegen::{
     regalloc::{AllocationTier, Pools},
 };
 
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[path = "common/native_oracle.rs"]
+mod native_oracle;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+use native_oracle::PreparedOracle;
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -126,46 +131,45 @@ fn typed_mask_normalization_and_shared_mask_preserve_their_uses() {
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[test]
 fn native_extraction_matches_independent_bits_with_spills() {
-    use std::{fs, process::Command};
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
-        "../../suite/reports/optimization-wave6-20261016/native-tests/ubfx-{}",
-        std::process::id()
-    ));
-    fs::create_dir_all(&dir).unwrap();
+    let mut ir = String::new();
+    let mut c = String::from("#include <stdint.h>\n");
+    let mut main = String::from("int main(void) {\n");
+    let mut case = 0;
     for bits in [32u32, 64] {
         for shift in [0i64, 7, -1, i64::from(bits) + 7] {
             let lsb = shift as u32 & (bits - 1);
             let width = 8.min(bits - lsb);
             let mask = (1u64 << width) - 1;
-            let mut src = source(bits, shift, mask as i64, false, false);
+            case += 1;
+            let name = format!("f{case}");
+            let mut src =
+                source(bits, shift, mask as i64, false, false).replace("@f(", &format!("@{name}("));
             if bits == 32 {
                 // Truncation can leave dirty high bits in a 64-bit stack home.
                 // The selected extraction must read the W execution width.
                 src = src
-                    .replace("func @f(i32)", "func @f(i64)")
+                    .replace(&format!("func @{name}(i32)"), &format!("func @{name}(i64)"))
                     .replace("block0(v0: i32):", "block0(v10: i64):\n v0 = trunc.i32 v10");
             }
-            let c = format!(
-                "#include <stdint.h>\nextern uint{bits}_t f(uint64_t);\nint main(void) {{\n uint64_t x=0x123456789abcdef0ULL;\n for(int i=0;i<1000;i++) {{\n x^=x<<13;x^=x>>7;x^=x<<17;\n uint{bits}_t input=(uint{bits}_t)x;\n if(f(x)!=((input >> {lsb}) & UINT64_C({mask}))) return 1;\n }}\nreturn 0;\n}}"
+            ir += &src;
+            ir += "\n";
+            c += &format!("extern uint{bits}_t {name}(uint64_t);\n");
+            main += &format!(
+                " {{\n uint64_t x=0x123456789abcdef0ULL;\n for(int i=0;i<1000;i++) {{\n x^=x<<13;x^=x>>7;x^=x<<17;\n uint{bits}_t input=(uint{bits}_t)x;\n if({name}(x)!=((input >> {lsb}) & UINT64_C({mask}))) return {case};\n }}\n }}\n"
             );
-            fs::write(dir.join("test.c"), c).unwrap();
-            for allocation in [AllocationTier::Fast, AllocationTier::Full] {
-                for pools in [&EMPTY, &keel_codegen::aarch64::REGISTERS] {
-                    let (_, object) = compile(&src, SelectionTier::Full, allocation, pools);
-                    fs::write(dir.join("test.o"), object).unwrap();
-                    let status = Command::new("clang")
-                        .arg("-O2")
-                        .arg(dir.join("test.c"))
-                        .arg(dir.join("test.o"))
-                        .arg("-o")
-                        .arg(dir.join("test"))
-                        .status()
-                        .unwrap();
-                    assert!(status.success());
-                    assert!(Command::new(dir.join("test")).status().unwrap().success());
-                }
-            }
         }
     }
-    fs::remove_dir_all(dir).unwrap();
+    c += &main;
+    c += "return 0;\n}\n";
+    // One image per allocation and pool runs all eight extractions.
+    let oracle = PreparedOracle::new("arm-ubfx", &c, &["-O2"]);
+    for allocation in [AllocationTier::Fast, AllocationTier::Full] {
+        for (pool, pools) in [
+            ("empty", &EMPTY),
+            ("normal", &keel_codegen::aarch64::REGISTERS),
+        ] {
+            let (_, object) = compile(&ir, SelectionTier::Full, allocation, pools);
+            oracle.run(&object, &format!("{allocation:?} {pool}"));
+        }
+    }
 }

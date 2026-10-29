@@ -3,6 +3,11 @@ use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools, RegisterAllocator},
 };
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[path = "common/native_oracle.rs"]
+mod native_oracle;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+use native_oracle::PreparedOracle;
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -135,12 +140,10 @@ fn spans_rematerialize_constants_without_losing_compare_uses() {
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[test]
 fn native_delayed_compares_preserve_predicates_with_spills() {
-    use std::{fs, process::Command};
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
-        "../../suite/reports/optimization-wave6-20261016/native-tests/spans-{}",
-        std::process::id()
-    ));
-    fs::create_dir_all(&dir).unwrap();
+    let mut ir = String::new();
+    let mut c = String::from("#include <stdint.h>\n");
+    let mut main = String::from("int main(void) {\n");
+    let mut case = 0;
     for bits in [32, 64] {
         for (cc, operator, signed) in [
             ("eq", "==", false),
@@ -155,34 +158,27 @@ fn native_delayed_compares_preserve_predicates_with_spills() {
             } else {
                 format!("uint{bits}_t")
             };
-            let harness = format!(
-                "#include <stdint.h>\nextern uint64_t f(uint{bits}_t,uint{bits}_t);\nint main(void) {{\n uint64_t x=0x123456789abcdef0ULL,y=0;\n for(int i=0;i<1000;i++) {{\n x^=x<<13;x^=x>>7;x^=x<<17;y^=y<<13;y^=y>>7;y^=y<<17;y+=i;\n uint{bits}_t a=(uint{bits}_t)x,b=(i%3)?(uint{bits}_t)y:a;\n if(f(a,b)!=((({ty})a {operator} ({ty})b)?37:91)) return 1;\n }}\nreturn 0;\n}}"
+            let name = format!("f{bits}_{cc}");
+            ir += &source(bits, cc, GAP).replace("@f(", &format!("@{name}("));
+            ir += "\n";
+            c += &format!("extern uint64_t {name}(uint{bits}_t,uint{bits}_t);\n");
+            case += 1;
+            main += &format!(
+                " {{\n uint64_t x=0x123456789abcdef0ULL,y=0;\n for(int i=0;i<1000;i++) {{\n x^=x<<13;x^=x>>7;x^=x<<17;y^=y<<13;y^=y>>7;y^=y<<17;y+=i;\n uint{bits}_t a=(uint{bits}_t)x,b=(i%3)?(uint{bits}_t)y:a;\n if({name}(a,b)!=((({ty})a {operator} ({ty})b)?37:91)) return {case};\n }}\n }}\n"
             );
-            fs::write(dir.join("test.c"), harness).unwrap();
-            for allocation in [AllocationTier::Fast, AllocationTier::Full] {
-                for pools in [&EMPTY, &keel_codegen::aarch64::REGISTERS] {
-                    let (_, object) = compile(
-                        &source(bits, cc, GAP),
-                        SelectionTier::Full,
-                        &allocation,
-                        pools,
-                    );
-                    fs::write(dir.join("test.o"), object).unwrap();
-                    assert!(
-                        Command::new("clang")
-                            .arg("-O2")
-                            .arg(dir.join("test.c"))
-                            .arg(dir.join("test.o"))
-                            .arg("-o")
-                            .arg(dir.join("test"))
-                            .status()
-                            .unwrap()
-                            .success()
-                    );
-                    assert!(Command::new(dir.join("test")).status().unwrap().success());
-                }
-            }
         }
     }
-    fs::remove_dir_all(dir).unwrap();
+    c += &main;
+    c += "return 0;\n}\n";
+    // One image per allocation and pool runs all twelve predicates.
+    let oracle = PreparedOracle::new("arm-compare-spans", &c, &["-O2"]);
+    for allocation in [AllocationTier::Fast, AllocationTier::Full] {
+        for (pool, pools) in [
+            ("empty", &EMPTY),
+            ("normal", &keel_codegen::aarch64::REGISTERS),
+        ] {
+            let (_, object) = compile(&ir, SelectionTier::Full, &allocation, pools);
+            oracle.run(&object, &format!("{allocation:?} {pool}"));
+        }
+    }
 }
