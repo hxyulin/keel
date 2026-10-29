@@ -1,4 +1,9 @@
 //! End-to-end C -> optimized vector IR -> native object -> Clang harness.
+#[path = "vectorize/ascii_scan.rs"]
+mod ascii_scan;
+#[path = "vectorize/packed_avx.rs"]
+mod packed_avx;
+
 use std::{fs, path::Path, process::Command};
 const KERNELS: &str = r#"
 void addf(float *d,const float *a,const float *b,unsigned long n){for(unsigned long i=0;i<n;i++)d[i]=a[i]+b[i];}

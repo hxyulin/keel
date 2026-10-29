@@ -1,4 +1,7 @@
 //! Exercise strict feature selection through the public CLI, including C input.
+#[path = "x86_cpu_level/vector_context.rs"]
+mod vector_context;
+
 use std::{fs, process::Command};
 
 fn keel() -> Command {

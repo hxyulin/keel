@@ -1,5 +1,10 @@
 //! C loops must reach packed 128-bit arithmetic through both CLI pipelines.
-use std::{fs, path::Path, process::Command};
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+use super::command as run;
+use super::keel;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+use std::process::Command;
+use std::{fs, path::Path};
 
 const TARGET: &str = "x86_64-unknown-linux-gnu";
 const STRICT: [(&str, &str, &str); 2] = [
@@ -7,23 +12,6 @@ const STRICT: [(&str, &str, &str); 2] = [
     ("muladd", "x*y+x", "a[i]*b[i]+a[i]"),
 ];
 const OPS: [(&str, &str); 4] = [("add", "+"), ("sub", "-"), ("mul", "*"), ("div", "/")];
-
-fn run(c: &mut Command) -> String {
-    let out = c.output().unwrap();
-    assert!(
-        out.status.success(),
-        "{c:?}: {}\n{}",
-        out.status,
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8(out.stdout).unwrap()
-}
-
-fn keel(dir: &Path, args: &[&str]) -> String {
-    run(Command::new(env!("CARGO_BIN_EXE_keel"))
-        .current_dir(dir)
-        .args(args))
-}
 
 fn kernels() -> String {
     let mut c = String::new();
@@ -205,7 +193,7 @@ fn native_packed_loops_match_ordered_scalar_reference() {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("packed-avx-runtime");
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("kernels.c"), kernels()).unwrap();
-    let mut harness = String::from(include_str!("packed_avx/harness.c"));
+    let mut harness = String::from(include_str!("../packed_avx/harness.c"));
     for (ty, suffix) in [("float", "ps"), ("double", "pd")] {
         for (op, symbol) in OPS {
             harness += &format!(

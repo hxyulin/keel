@@ -1,32 +1,13 @@
 //! Exercise permanent-corpus C shapes through the Full frontend pipeline.
-use object::{Object, ObjectSection};
+use super::{run, text};
 use std::{fs, path::Path, process::Command};
-fn run(cmd: &mut Command) {
-    let o = cmd.output().unwrap();
-    assert!(
-        o.status.success(),
-        "{cmd:?}: {}\n{}",
-        String::from_utf8_lossy(&o.stdout),
-        String::from_utf8_lossy(&o.stderr)
-    );
-}
-fn text(path: &Path) -> Vec<u8> {
-    let data = fs::read(path).unwrap();
-    let f = object::File::parse(data.as_slice()).unwrap();
-    f.sections()
-        .find(|s| matches!(s.name(), Ok(".text" | "__text")))
-        .unwrap()
-        .data()
-        .unwrap()
-        .to_vec()
-}
 #[test]
 fn full_frontend_conditional_widening_preserves_corpus_shapes_and_object_routes() {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("conditional-widen-frontend");
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("kernels.c"),
-        include_str!("fixtures/runtime-kernels.c"),
+        include_str!("../fixtures/runtime-kernels.c"),
     )
     .unwrap();
     for target in ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"] {
@@ -103,7 +84,7 @@ fn full_frontend_conditional_widening_preserves_corpus_shapes_and_object_routes(
     {
         // Reuse the protected-page oracle with ABI adapters for the two corpus
         // signatures. Nonzero starts/seeds are covered by the IR native gate.
-        let oracle = include_str!("../../keel-opt/tests/conditional_widen/oracle.c");
+        let oracle = include_str!("../../../keel-opt/tests/conditional_widen/oracle.c");
         let adapters = "\nextern uint64_t rk_positive32(const void*,const void*,const void*,uint64_t);\nextern uint64_t rk_balance32(const void*,const void*,const void*,uint64_t);\nuint64_t positive(const void *a,uint64_t n,uint64_t start,uint64_t seed){return seed+(start<n?rk_positive32((const char*)a+4*start,0,0,n-start):0);}\nuint64_t balance(const void *a,uint64_t n,uint64_t start,uint64_t seed){return seed+(start<n?rk_balance32((const char*)a+4*start,0,0,n-start):0);}\n";
         fs::write(dir.join("oracle.c"), oracle.to_owned() + adapters).unwrap();
         let native_target = if cfg!(target_arch = "x86_64") {

@@ -1,3 +1,4 @@
+use super::{command as run, keel};
 use std::{fs, path::Path, process::Command};
 
 const SOURCE: &str = r#"
@@ -56,22 +57,6 @@ int main(void){
  munmap(mem,3*page);return 0;
 }
 "#;
-
-fn run(command: &mut Command) -> String {
-    let output = command.output().unwrap();
-    assert!(
-        output.status.success(),
-        "{command:?}: {}\n{}",
-        output.status,
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8(output.stdout).unwrap()
-}
-fn keel(dir: &Path, args: &[&str]) -> String {
-    run(Command::new(env!("CARGO_BIN_EXE_keel"))
-        .current_dir(dir)
-        .args(args))
-}
 
 #[test]
 fn bounded_ascii_scan_emits_packed_loads_and_native_lane_extracts() {

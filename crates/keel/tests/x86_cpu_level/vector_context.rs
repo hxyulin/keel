@@ -6,7 +6,7 @@ fn effective_features_preserve_128_bit_default_and_schema2_reports() {
     let input = dir.join("sum.ir");
     fs::write(
         &input,
-        include_str!("../../keel-opt/tests/fixtures/signed_widen_sum.ir"),
+        include_str!("../../../keel-opt/tests/fixtures/signed_widen_sum.ir"),
     )
     .unwrap();
     for (index, flags, wide) in [

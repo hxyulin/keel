@@ -1,4 +1,7 @@
 //! Public presets must preserve behavior across native targets and stage overrides.
+#[path = "optimization_levels/verification_policy.rs"]
+mod verification_policy;
+
 use std::{fs, path::Path, process::Command};
 
 fn invoke(dir: &Path, args: &[&str]) -> std::process::Output {

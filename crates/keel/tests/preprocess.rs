@@ -1,3 +1,6 @@
+#[path = "preprocess/incbin.rs"]
+mod incbin;
+
 use std::path::Path;
 use std::process::{Command, Output};
 

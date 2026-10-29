@@ -1,4 +1,7 @@
 //! Post-capture stack caching: unknown initializer and aliases observe every write.
+#[path = "stack_cache/load_reuse.rs"]
+mod load_reuse;
+
 use object::{Object, ObjectSection};
 use std::{fs, path::Path, process::Command};
 const IR: &str = include_str!("../../keel-opt/tests/stack_cache/fields.keel");

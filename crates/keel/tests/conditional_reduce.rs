@@ -1,4 +1,7 @@
 //! Conditional reductions preserve wrapping arithmetic and exact scalar tails.
+#[path = "conditional_reduce/conditional_widen.rs"]
+mod conditional_widen;
+
 use object::{Object, ObjectSection};
 use std::{fs, path::Path, process::Command};
 const IR: &str = include_str!("../../keel-opt/tests/conditional_reduce/loops.keel");

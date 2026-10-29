@@ -1,3 +1,6 @@
+#[path = "aarch64_linux_compiler/aarch64_elf.rs"]
+mod aarch64_elf;
+
 use std::{
     path::{Path, PathBuf},
     process::Command,

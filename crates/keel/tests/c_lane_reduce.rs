@@ -1,10 +1,19 @@
 //! C lane intent -> exact SSA reduction -> feature-checked objects/native oracle.
+#[path = "c_lane_reduce/simd_constructors.rs"]
+mod simd_constructors;
+#[path = "c_lane_reduce/stack_forward_widen.rs"]
+mod stack_forward_widen;
+
 use keel_codegen::{
     CodegenPipeline, SelectionTier, Target,
     regalloc::{AllocationTier, Pools},
     x86_features::{CpuLevel, FeatureSelector, Features},
 };
-use std::{fs, process::Command};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 const SOURCE: &str = r#"
 typedef unsigned U __attribute__((vector_size(16)));
@@ -101,20 +110,48 @@ fn command(c: &mut Command) {
     assert!(o.status.success(), "{c:?}: {o:?}");
 }
 
-#[test]
-fn c_wrapping_sum_effects_footprints_and_objects() {
-    let root = std::env::var_os("KEEL_C_LANE_REDUCE_EVIDENCE")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::temp_dir().join(format!("keel-c-lane-reduce-{}", std::process::id()))
-        });
+const EMPTY: Pools = Pools {
+    caller_saved: &[],
+    callee_saved: &[],
+    float_caller_saved: &[],
+    float_callee_saved: &[],
+};
+
+const SELECTORS: [SelectionTier; 3] = [
+    SelectionTier::Baseline,
+    SelectionTier::Trees,
+    SelectionTier::Full,
+];
+
+/// Profiles 0 to 3 are x86 V1, V2, V3, and V3 with AVX, AVX2, F16C and FMA
+/// disabled, which exercises the legal SSE2 recipes. Profile 4 is AArch64.
+fn profile_features(profile: usize) -> (Target, Features) {
+    if profile == 4 {
+        return (Target::Aarch64AppleDarwin, Features::default());
+    }
+    let mut features = Features::for_level(match profile {
+        0 => CpuLevel::V1,
+        1 => CpuLevel::V2,
+        _ => CpuLevel::V3,
+    });
+    if profile == 3 {
+        features.avx = false;
+        features.avx2 = false;
+        features.f16c = false;
+        features.fma = false;
+    }
+    (Target::X86_64LinuxGnu, features)
+}
+
+/// Writes `oracle.c` and, on hosts that run the objects, compiles it once.
+fn scratch_with_oracle(name: &str, oracle: &str) -> PathBuf {
+    let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
     fs::create_dir_all(&root).unwrap();
-    fs::write(root.join("oracle.c"), ORACLE).unwrap();
-    let native = cfg!(any(
+    fs::write(root.join("oracle.c"), oracle).unwrap();
+    if cfg!(any(
         all(target_arch = "aarch64", target_os = "macos"),
         all(target_arch = "x86_64", target_os = "linux")
-    ));
-    if native {
+    )) {
         command(
             Command::new("clang")
                 .args(["-O2", "-c"])
@@ -123,31 +160,74 @@ fn c_wrapping_sum_effects_footprints_and_objects() {
                 .arg(root.join("oracle.o")),
         );
     }
-    let empty = Pools {
-        caller_saved: &[],
-        callee_saved: &[],
-        float_caller_saved: &[],
-        float_callee_saved: &[],
+    root
+}
+
+/// Compiles each module through the program route with strict assembler
+/// feature checks. keel-codegen vector_widen_x86 and vector_reduce_add_x86
+/// check text, program and chunk parity for these shapes.
+fn compile_objects(
+    root: &Path,
+    modules: &[keel_ir::Module],
+    profile: usize,
+    features: Features,
+    sel: SelectionTier,
+    spills: bool,
+) -> Vec<PathBuf> {
+    let selector = FeatureSelector {
+        inner: &sel,
+        features,
     };
-    // V3 with AVX/AVX2 disabled exercises the existing legal SSE2 recipe.
-    for profile in 0..5 {
-        let arm = profile == 4;
-        let target = if arm {
-            Target::Aarch64AppleDarwin
+    let pipeline = CodegenPipeline {
+        selector: &selector,
+        allocator: &AllocationTier::Full,
+    };
+    let mut objects = Vec::new();
+    for (i, m) in modules.iter().enumerate() {
+        let obj = if profile == 4 {
+            let pools = if spills {
+                &EMPTY
+            } else {
+                &keel_codegen::aarch64::REGISTERS
+            };
+            let p =
+                keel_codegen::aarch64::compile_program_with_pipeline(m, pools, &pipeline).unwrap();
+            keel_asm::assemble_program_object(&p, Default::default()).unwrap()
         } else {
-            Target::X86_64LinuxGnu
+            let pools = if spills {
+                &EMPTY
+            } else {
+                &keel_codegen::x86_64::REGISTERS
+            };
+            let p =
+                keel_codegen::x86_64::compile_program_with_pipeline(m, pools, &pipeline).unwrap();
+            keel_asm::x86::assemble_program_object_with_features(&p, features).unwrap()
         };
-        let mut features = Features::for_level(match profile {
-            0 => CpuLevel::V1,
-            1 => CpuLevel::V2,
-            _ => CpuLevel::V3,
-        });
-        if profile == 3 {
-            features.avx = false;
-            features.avx2 = false;
-            features.f16c = false;
-            features.fma = false;
-        }
+        let name = root.join(format!("{profile}-{sel:?}-{spills}-{i}.o"));
+        fs::write(&name, obj).unwrap();
+        objects.push(name);
+    }
+    objects
+}
+
+/// Links the objects with the precompiled oracle and runs the result.
+fn run_native(root: &Path, objects: &[PathBuf], exe: &str) {
+    let exe = root.join(exe);
+    command(
+        Command::new("clang")
+            .arg(root.join("oracle.o"))
+            .args(objects)
+            .arg("-o")
+            .arg(&exe),
+    );
+    command(Command::new(exe).current_dir(root));
+}
+
+#[test]
+fn c_wrapping_sum_effects_footprints_and_objects() {
+    let root = scratch_with_oracle("c-lane-reduce", ORACLE);
+    for profile in 0..5 {
+        let (target, features) = profile_features(profile);
         let mut modules = Vec::new();
         for (label, optimize) in [("before_", false), ("after_", true)] {
             let mut m = keel_c::compile(
@@ -164,70 +244,19 @@ fn c_wrapping_sum_effects_footprints_and_objects() {
             }
             keel_ir::verify_module(&m).unwrap();
             assert_eq!(m.to_string().contains("vreduce_add"), optimize);
-            fs::write(root.join(format!("{profile}-{label}.ir")), m.to_string()).unwrap();
             modules.push(m);
         }
-        for sel in [
-            SelectionTier::Baseline,
-            SelectionTier::Trees,
-            SelectionTier::Full,
-        ] {
+        for sel in SELECTORS {
             for spills in [false, true] {
-                let selector = FeatureSelector {
-                    inner: &sel,
-                    features: if arm { Features::default() } else { features },
-                };
-                let pipeline = CodegenPipeline {
-                    selector: &selector,
-                    allocator: &AllocationTier::Full,
-                };
-                // keel-codegen vector_reduce_add_x86 checks text, program and
-                // chunk parity for vreduce_add; this test compiles the program route.
-                let mut objects = Vec::new();
-                for (i, m) in modules.iter().enumerate() {
-                    let obj = if arm {
-                        let pools = if spills {
-                            &empty
-                        } else {
-                            &keel_codegen::aarch64::REGISTERS
-                        };
-                        let p = keel_codegen::aarch64::compile_program_with_pipeline(
-                            m, pools, &pipeline,
-                        )
-                        .unwrap();
-                        keel_asm::assemble_program_object(&p, Default::default()).unwrap()
-                    } else {
-                        let pools = if spills {
-                            &empty
-                        } else {
-                            &keel_codegen::x86_64::REGISTERS
-                        };
-                        let p = keel_codegen::x86_64::compile_program_with_pipeline(
-                            m, pools, &pipeline,
-                        )
-                        .unwrap();
-                        keel_asm::x86::assemble_program_object_with_features(&p, features).unwrap()
-                    };
-                    let name = root.join(format!("{profile}-{sel:?}-{spills}-{i}.o"));
-                    fs::write(&name, obj).unwrap();
-                    objects.push(name);
-                }
+                let objects = compile_objects(&root, &modules, profile, features, sel, spills);
                 // Execute baseline x86 on any native Linux x86 host, with the Full
                 // selector. Higher levels and other selectors are emission checks
                 // here; maintained suite gates native eligibility.
                 if sel == SelectionTier::Full
                     && (profile == 0 && cfg!(all(target_arch = "x86_64", target_os = "linux"))
-                        || arm && cfg!(all(target_arch = "aarch64", target_os = "macos")))
+                        || profile == 4 && cfg!(all(target_arch = "aarch64", target_os = "macos")))
                 {
-                    let exe = root.join("native");
-                    command(
-                        Command::new("clang")
-                            .arg(root.join("oracle.o"))
-                            .args(&objects)
-                            .arg("-o")
-                            .arg(&exe),
-                    );
-                    command(&mut Command::new(exe));
+                    run_native(&root, &objects, "native");
                 }
             }
         }

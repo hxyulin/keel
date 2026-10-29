@@ -19,12 +19,12 @@ fn standalone_arm_linux_assembly_archive_and_link() {
     let target = "aarch64-unknown-linux-gnu";
     std::fs::write(
         path("start.s"),
-        include_str!("../../keel-link/tests/fixtures/aarch64/start.s"),
+        include_str!("../../../keel-link/tests/fixtures/aarch64/start.s"),
     )
     .unwrap();
     std::fs::write(
         path("helper.s"),
-        include_str!("../../keel-link/tests/fixtures/aarch64/helper.s"),
+        include_str!("../../../keel-link/tests/fixtures/aarch64/helper.s"),
     )
     .unwrap();
     for name in ["start", "helper"] {
@@ -166,7 +166,7 @@ fn standalone_c_ir_assembly_archive_and_link() {
     ).unwrap();
     std::fs::write(
         path("start.s"),
-        include_str!("../../keel-link/tests/fixtures/aarch64/start.s"),
+        include_str!("../../../keel-link/tests/fixtures/aarch64/start.s"),
     )
     .unwrap();
     invoke(&[

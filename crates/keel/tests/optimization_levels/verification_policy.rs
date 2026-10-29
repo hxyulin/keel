@@ -1,16 +1,5 @@
-use std::{
-    fs,
-    path::Path,
-    process::{Command, Output},
-};
-
-fn keel(dir: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_keel"))
-        .current_dir(dir)
-        .args(args)
-        .output()
-        .unwrap()
-}
+use super::invoke as keel;
+use std::{fs, path::Path};
 
 #[test]
 fn flags_reports_and_initial_validation_work_in_every_build_mode() {

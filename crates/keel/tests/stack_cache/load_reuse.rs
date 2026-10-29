@@ -1,14 +1,6 @@
 //! Stores stay observable; exact post-store values forward through CFG chains.
+use super::run;
 use std::{fs, path::Path, process::Command};
-fn run(c: &mut Command) -> String {
-    let o = c.output().unwrap();
-    assert!(
-        o.status.success(),
-        "{c:?}: {}",
-        String::from_utf8_lossy(&o.stderr)
-    );
-    String::from_utf8(o.stdout).unwrap()
-}
 #[test]
 fn native_post_store_reads_preserve_arbitrary_alias_observations() {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("store-load-chain");

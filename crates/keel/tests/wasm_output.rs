@@ -1,3 +1,6 @@
+#[path = "wasm_output/wasm_target_unavailable.rs"]
+mod wasm_target_unavailable;
+
 use std::{
     path::{Path, PathBuf},
     process::{Command, Output},

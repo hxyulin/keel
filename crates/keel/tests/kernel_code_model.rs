@@ -1,3 +1,6 @@
+#[path = "kernel_code_model/unwind_flags.rs"]
+mod unwind_flags;
+
 use object::{Object, ObjectSection};
 use std::{fs, process::Command};
 
