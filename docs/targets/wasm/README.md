@@ -5,7 +5,9 @@ freestanding C translation unit, or from raw Keel IR that was produced for the
 wasm32 storage layout. There is no linker step: the output is a finished `.wasm`
 file with one owned memory and the functions you export explicitly.
 
-See [backend contracts](backend.md) and [C frontend limits](c-frontend.md).
+The [C profile](c-frontend.md) and the
+[`keel-wasm` crate](../../../crates/keel-wasm/README.md) define the accepted
+subset, memory semantics and code generation.
 
 ## Quick start
 
@@ -80,13 +82,10 @@ Native commands and target-free `opt` are unaffected.
 
 ## Inputs
 
-**C.** Raw C uses the [freestanding C profile](c-frontend.md): embedded
-portable headers, the ILP32 wasm32 layout, and a whole-translation-unit check that
-rejects unsupported features before dead code is pruned. Files ending in `.i` are
-treated as already preprocessed. Header directories you pass are your
-responsibility; there is no implicit host include path, SDK lookup, libc, native
-frontend fallback or external compiler. `SDKROOT` and Darwin deployment
-environment variables are ignored on this route.
+**C.** Raw C uses the [freestanding C profile](c-frontend.md). Files ending in
+`.i` are treated as already preprocessed. There is no implicit host include
+path, SDK lookup or libc, and `SDKROOT` and Darwin deployment variables are
+ignored.
 
 **Raw IR.** IR has no embedded target. `compile --target wasm32-unknown-unknown
 --emit-wasm` asserts that you supplied unoptimized IR with wasm32 storage layout;
@@ -99,9 +98,7 @@ validates the generated MVP bytes before any output file is opened.
 
 ## Supported subset
 
-The accepted C and IR subset is defined by the
-[C profile](c-frontend.md) and the
-[`keel-wasm` crate](../../../crates/keel-wasm/README.md). In summary:
+In summary:
 
 - Supported: integer computation up to 64 bits, ordinary control flow, direct calls
   with plain i32/i64 arguments and results, bounded local frames and recursion,
@@ -125,9 +122,7 @@ are equal (no growth), plus a checked software stack.
   page or separate objects within linear memory.
 
 Discard an instance after any trap: the saved stack pointer is restored only on
-normal returns. See the [runtime contract](backend.md) and the
-[`keel-wasm` README](../../../crates/keel-wasm/README.md) for exact access widths,
-pointer normalization, data placement and stack behavior.
+normal returns.
 
 ## Basic optimization profile
 
@@ -146,15 +141,13 @@ debug and release builds.
 Before optimization, the driver runs the backend's non-emitting admission check on
 the original module (including unexported functions, signatures and dead code), so
 unsupported input cannot become accepted by constant-branch pruning or DCE. The
-final emitter then repeats its legality checks and validates the MVP bytes. This
-adds a preflight and a module clone; no compile-time or runtime gain is claimed.
+final emitter then repeats its legality checks and validates the MVP bytes.
 
 Faulting loads, volatile loads (including `volatile notrap`), divisions and other
 pinned effects keep their order and exact access widths. DCE may remove an unused
 nonvolatile `notrap` load, relying on the producer's promise that it cannot trap.
 The optimizer never adds `notrap`; raw IR producers are responsible for that
-promise. The design rationale is in the
-basic optimization audit.
+promise.
 
 ## Output publication
 
@@ -172,11 +165,7 @@ or filesystem failure can leave the temporary behind.
 ## Testing
 
 The `wasm_output` integration test drives the real CLI on C, preprocessed C and raw
-IR inputs and runs the results under Node (Node must be on `PATH`). It covers
-checksums, local arrays, direct and recursive calls, static data pointers, explicit
-exports, fixed memory options, the basic profile, option and export errors,
-artifact rejection, in-place and failed outputs, and host isolation (no native
-compiler, SDK or linker is discovered or spawned).
+IR inputs and runs the results under Node, which must be on `PATH`.
 
 ```sh
 cargo test -p keel --bin keel \

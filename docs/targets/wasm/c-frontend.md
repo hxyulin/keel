@@ -3,14 +3,14 @@
 `keel-c` can compile one freestanding C translation unit for
 `wasm32-unknown-unknown`. The result is unoptimized IR with the WASM32 storage
 layout, intended for the `keel-wasm` runtime emitter. Most users reach this through
-the [CLI](README.md); this page is the contract for the C library APIs. It builds
-on the target foundation and the earlier
-integer lowering and
-pointer/data work.
+the [CLI](README.md); this page is the contract for the C library APIs.
 
-Native ABI, FP, memory, [ISA](../README.md),
-[intrinsic](../x86_64/intrinsics.md) and [GNU vector/mode](../../frontends/c/extensions.md) contracts
-are unaffected.
+Integer constant expressions and literal types use the wasm32 ILP32 model
+(`CDataLayout::WASM32`) throughout. With a 32-bit `long`,
+`unsigned int + long` is `unsigned long` and `unsigned long + long long` is
+signed `long long`, and literal suffix candidates continue through `long long`
+and `unsigned long long`. Numeric pointer constants keep their low 32 bits. A
+symbolic address cast to an integer is not a constant.
 
 ## Compile contract
 
@@ -34,7 +34,7 @@ validation.
 - Integer, pointer, array and record storage within the existing size, alignment
   and bounds limits, and defined static data with pointer initializers.
 - Pointer arithmetic using i64 IR offsets with wasm32 normalization (see the
-  [memory backend](backend.md)).
+  [memory semantics](../../../crates/keel-wasm/README.md#memory-semantics)).
 
 Every function needs a prototype and a definition in the translation unit. A
 forward prototype followed by a definition is fine. Unresolved functions and data

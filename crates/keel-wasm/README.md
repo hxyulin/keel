@@ -18,8 +18,8 @@ mutating it and returns either complete, independently validated bytes or a
 
 | Function | Adds |
 | --- | --- |
-| `emit_module(&Module, &Options)` | Scalar integer code, no memory ([scalar backend](../../docs/targets/wasm/backend.md)) |
-| `emit_wasm32_memory_module(&Module, &Wasm32MemoryOptions)` | One fixed, exported linear memory; loads, stores and pointers ([memory backend](../../docs/targets/wasm/backend.md)) |
+| `emit_module(&Module, &Options)` | Scalar integer code, no memory |
+| `emit_wasm32_memory_module(&Module, &Wasm32MemoryOptions)` | One fixed, exported linear memory; loads, stores and pointers ([memory semantics](#memory-semantics)) |
 | `emit_wasm32_runtime_module(&Module, &Wasm32RuntimeOptions)` | Static data, pointer fixups and a checked software stack for address-taken locals |
 
 `validate_wasm32_runtime_module(&Module, &Wasm32RuntimeOptions)` runs the same
@@ -72,6 +72,36 @@ assembly, imports, indirect and tail calls, function addresses, dynamic stack
 allocation, exception handling, TLS, weak/ODR linkage, RTTI, explicit sections and
 retain metadata. Rejection is whole-module: unexported functions, unused
 declarations and unreachable blocks are checked before any encoding begins.
+
+## Memory semantics
+
+The memory and runtime profiles define exactly one owned, unshared memory,
+exported under `export_name`, which must be nonempty and differ from every
+function export. Initial and maximum size both equal `pages` (64 KiB units,
+0..=65536). Memory starts zeroed, and there is no allocator, growth, import or
+second memory. Address zero is ordinary memory, and the engine traps only when
+a byte of an access lies outside memory.
+
+A host passes an address as an i64 scalar, which IR converts with
+`inttoptr.ptr`; pointer and i8/i16 signatures are rejected. Pointers live in
+i32 locals and occupy four bytes in memory:
+
+- `inttoptr.ptr(i64)` keeps the low 32 bits, and `ptrtoint.i64(ptr)`
+  zero-extends, so `ptrtoint(inttoptr(x))` loses high bits.
+- `ptradd(ptr, i64)` adds the low 32 bits of the offset with i32 wrap-around.
+  Every access uses memarg offset zero, so the wrap happens before the
+  engine's non-wrapping address calculation.
+- Pointer `eq`, `ne`, `ult`, `ule`, `ugt` and `uge` compare address bits;
+  signed pointer comparisons are rejected. There are no function addresses.
+
+i8, i16, i32 and i64 accesses touch exactly 1, 2, 4 and 8 bytes, and pointers
+4, little endian. Unaligned accesses work; the alignment hint never widens an
+access or adds a trap. `notrap` does not suppress bounds checks, and no load is
+removed or hoisted because of it. Volatile and ordinary accesses keep IR order.
+i8 and i16 values are zero-extended bit patterns in i32 locals: loads
+zero-extend, `sext` and `uext` convert, `trunc` renormalizes and narrow stores
+write only the low bytes. Narrow arithmetic, comparisons and switches are
+rejected.
 
 ## Runtime profile
 
