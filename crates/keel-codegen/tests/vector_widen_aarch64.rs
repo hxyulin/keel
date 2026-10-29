@@ -6,7 +6,12 @@ use keel_codegen::{
 };
 use keel_ir::{Type, VectorType};
 use keel_opt::VectorTarget;
-use std::{fs, process::Command};
+use std::fs;
+#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+#[path = "common/native_oracle.rs"]
+mod native_oracle;
+#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+use native_oracle::PreparedOracle;
 
 const TINY: Pools = Pools {
     caller_saved: &[9, 10],
@@ -233,38 +238,14 @@ fn widening_and_mixed_width_reductions_execute_edges_guard_pages_and_spills() {
             );
         }
     }
-    let dir = std::env::temp_dir().join(format!("keel-widen-arm-{}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join("oracle.c"), harness).unwrap();
+    let oracle = PreparedOracle::new("widen-arm", &harness, &["-O2"]);
     for allocation in [AllocationTier::Fast, AllocationTier::Full] {
         for tiny in [false, true] {
             let program = arm(&module, allocation, tiny);
-            fs::write(
-                dir.join("test.o"),
-                assemble_program_object(&program, TargetFeatures::default()).unwrap(),
-            )
-            .unwrap();
-            let build = Command::new("clang")
-                .arg("-O2")
-                .arg(dir.join("oracle.c"))
-                .arg(dir.join("test.o"))
-                .arg("-o")
-                .arg(dir.join("test"))
-                .output()
-                .unwrap();
-            assert!(
-                build.status.success(),
-                "{}",
-                String::from_utf8_lossy(&build.stderr)
-            );
-            let run = Command::new(dir.join("test")).output().unwrap();
-            assert!(
-                run.status.success(),
-                "{:?}: {}",
-                run.status,
-                String::from_utf8_lossy(&run.stderr)
+            oracle.run(
+                &assemble_program_object(&program, TargetFeatures::default()).unwrap(),
+                &format!("{allocation:?} tiny={tiny}"),
             );
         }
     }
-    fs::remove_dir_all(dir).unwrap();
 }
