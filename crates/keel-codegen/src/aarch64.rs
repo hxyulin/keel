@@ -2331,7 +2331,10 @@ impl<'a> FunctionCompiler<'a> {
                     );
                     self.mach("blr", [(Reg::x(S0)).into()]);
                     self.mach("mov", [(Reg::x(d)).into(), (Reg::x(0)).into()]);
-                } else if self.symbols.defines(name) {
+                } else if self.symbols.defines(name) && !self.symbols.exports_weak_odr(name) {
+                    // dyld may coalesce an exported weak_odr definition with
+                    // another image's, so code reads its address from the
+                    // GOT, as an import's.
                     self.out.symbolic(Symbolic::PageAddress {
                         register: d,
                         kind: PageKind::Direct,
