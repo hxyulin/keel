@@ -140,4 +140,106 @@ static __inline__ __m256i _mm256_inserti128_si256(__m256i a, __m128i b, int i) {
     __builtin_shufflevector(__keel_a, __keel_a, (i) & 3, ((i) >> 2) & 3,       \
                             ((i) >> 4) & 3, ((i) >> 6) & 3);                   \
   })
+
+static __inline__ __m256i _mm256_min_epi8(__m256i a, __m256i b) {
+  __keel_i8_256 x = (__keel_i8_256)a, y = (__keel_i8_256)b;
+  __m256i mask = (__m256i)(x < y);
+  return (a & mask) | (b & ~mask);
+}
+static __inline__ __m256i _mm256_max_epi8(__m256i a, __m256i b) {
+  __keel_i8_256 x = (__keel_i8_256)a, y = (__keel_i8_256)b;
+  __m256i mask = (__m256i)(x > y);
+  return (a & mask) | (b & ~mask);
+}
+static __inline__ __m256i _mm256_min_epu8(__m256i a, __m256i b) {
+  __keel_u8_256 x = (__keel_u8_256)a, y = (__keel_u8_256)b;
+  __m256i mask = (__m256i)(x < y);
+  return (a & mask) | (b & ~mask);
+}
+static __inline__ __m256i _mm256_max_epu8(__m256i a, __m256i b) {
+  __keel_u8_256 x = (__keel_u8_256)a, y = (__keel_u8_256)b;
+  __m256i mask = (__m256i)(x > y);
+  return (a & mask) | (b & ~mask);
+}
+static __inline__ __m256i _mm256_min_epi16(__m256i a, __m256i b) {
+  __keel_i16_256 x = (__keel_i16_256)a, y = (__keel_i16_256)b;
+  __m256i mask = (__m256i)(x < y);
+  return (a & mask) | (b & ~mask);
+}
+static __inline__ __m256i _mm256_max_epi16(__m256i a, __m256i b) {
+  __keel_i16_256 x = (__keel_i16_256)a, y = (__keel_i16_256)b;
+  __m256i mask = (__m256i)(x > y);
+  return (a & mask) | (b & ~mask);
+}
+static __inline__ __m256i _mm256_min_epu16(__m256i a, __m256i b) {
+  __keel_u16_256 x = (__keel_u16_256)a, y = (__keel_u16_256)b;
+  __m256i mask = (__m256i)(x < y);
+  return (a & mask) | (b & ~mask);
+}
+static __inline__ __m256i _mm256_max_epu16(__m256i a, __m256i b) {
+  __keel_u16_256 x = (__keel_u16_256)a, y = (__keel_u16_256)b;
+  __m256i mask = (__m256i)(x > y);
+  return (a & mask) | (b & ~mask);
+}
+static __inline__ __m256i _mm256_min_epi32(__m256i a, __m256i b) {
+  __keel_i32_256 x = (__keel_i32_256)a, y = (__keel_i32_256)b;
+  __m256i mask = (__m256i)(x < y);
+  return (a & mask) | (b & ~mask);
+}
+static __inline__ __m256i _mm256_max_epi32(__m256i a, __m256i b) {
+  __keel_i32_256 x = (__keel_i32_256)a, y = (__keel_i32_256)b;
+  __m256i mask = (__m256i)(x > y);
+  return (a & mask) | (b & ~mask);
+}
+static __inline__ __m256i _mm256_min_epu32(__m256i a, __m256i b) {
+  __keel_u32_256 x = (__keel_u32_256)a, y = (__keel_u32_256)b;
+  __m256i mask = (__m256i)(x < y);
+  return (a & mask) | (b & ~mask);
+}
+static __inline__ __m256i _mm256_max_epu32(__m256i a, __m256i b) {
+  __keel_u32_256 x = (__keel_u32_256)a, y = (__keel_u32_256)b;
+  __m256i mask = (__m256i)(x > y);
+  return (a & mask) | (b & ~mask);
+}
+static __inline__ __m256i _mm256_abs_epi8(__m256i a) {
+  __keel_u8_256 x = (__keel_u8_256)a;
+  __keel_u8_256 negative = (__keel_u8_256)((__keel_i8_256)a < (__keel_i8_256){0});
+  return (__m256i)((x & ~negative) | (((__keel_u8_256){0} - x) & negative));
+}
+static __inline__ __m256i _mm256_sign_epi8(__m256i a, __m256i b) {
+  __keel_u8_256 x = (__keel_u8_256)a;
+  __keel_i8_256 selector = (__keel_i8_256)b;
+  __keel_u8_256 positive = (__keel_u8_256)(selector > (__keel_i8_256){0});
+  __keel_u8_256 negative = (__keel_u8_256)(selector < (__keel_i8_256){0});
+  return (__m256i)((x & positive) | (((__keel_u8_256){0} - x) & negative));
+}
+static __inline__ __m256i _mm256_abs_epi16(__m256i a) {
+  __keel_u16_256 x = (__keel_u16_256)a;
+  __keel_u16_256 negative = (__keel_u16_256)((__keel_i16_256)a < (__keel_i16_256){0});
+  return (__m256i)((x & ~negative) | (((__keel_u16_256){0} - x) & negative));
+}
+static __inline__ __m256i _mm256_sign_epi16(__m256i a, __m256i b) {
+  __keel_u16_256 x = (__keel_u16_256)a;
+  __keel_i16_256 selector = (__keel_i16_256)b;
+  __keel_u16_256 positive = (__keel_u16_256)(selector > (__keel_i16_256){0});
+  __keel_u16_256 negative = (__keel_u16_256)(selector < (__keel_i16_256){0});
+  return (__m256i)((x & positive) | (((__keel_u16_256){0} - x) & negative));
+}
+static __inline__ __m256i _mm256_abs_epi32(__m256i a) {
+  __keel_u32_256 x = (__keel_u32_256)a;
+  __keel_u32_256 negative = (__keel_u32_256)((__keel_i32_256)a < (__keel_i32_256){0});
+  return (__m256i)((x & ~negative) | (((__keel_u32_256){0} - x) & negative));
+}
+static __inline__ __m256i _mm256_sign_epi32(__m256i a, __m256i b) {
+  __keel_u32_256 x = (__keel_u32_256)a;
+  __keel_i32_256 selector = (__keel_i32_256)b;
+  __keel_u32_256 positive = (__keel_u32_256)(selector > (__keel_i32_256){0});
+  __keel_u32_256 negative = (__keel_u32_256)(selector < (__keel_i32_256){0});
+  return (__m256i)((x & positive) | (((__keel_u32_256){0} - x) & negative));
+}
+static __inline__ __m256i _mm256_blendv_epi8(__m256i a, __m256i b, __m256i selector) {
+  __m256i mask = (__m256i)((__keel_i8_256)selector < (__keel_i8_256){0});
+  return (a & ~mask) | (b & mask);
+}
+
 #endif /* _KEEL_AVX2INTRIN_H */

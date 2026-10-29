@@ -50,6 +50,13 @@ EVEX families, MVEX, XOP and 3DNow remain outside these imports.
 - `keel-adapters.json` binds stable public enums and dialect aliases to source
   forms. Encoding selectors identify exact alternatives. Memory-width and
   family expectations guard compatibility; they do not supply emitted bytes.
+- `vendor-bindings.json` owns reviewed C builtin names, semantic intrinsic IDs,
+  signatures, controls, required features and parser recipes. `vendor_bindings.py`
+  generates the frontend lookups and signature/ID regression checks. Existing
+  Keel-private bridges remain distinct from vendor builtin compatibility.
+  `vendor-references.json` owns the source commits, licences and header hashes.
+  Optional `--check-vendor-headers /path/to/clang/lib/Headers` verifies the pinned
+  reference headers without making ordinary generation depend on a download.
 - `feature-fields.json` lists capability fields in public struct and `names()`
   order, with field docs, CLI aliases, stable bit IDs and prerequisites.
   `feature_fields.py` generates the struct, `NONE`, all-known set, containment,

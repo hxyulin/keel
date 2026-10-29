@@ -9,7 +9,8 @@ defines the proposed expansion beyond the implemented bounded headers.
 ## Bounded C x86 intrinsic subset
 
 Keel owns small `xmmintrin.h`, `emmintrin.h`, `smmintrin.h`, `avxintrin.h`,
-`avx2intrin.h`, `wmmintrin.h` and `immintrin.h` headers. They are embedded in the compiler;
+`avx2intrin.h`, `tmmintrin.h`, `fmaintrin.h`, `f16cintrin.h`,
+`wmmintrin.h` and `immintrin.h` headers. They are embedded in the compiler;
 no Clang resource directory is needed. These headers are for the
 `x86_64-unknown-linux-gnu` target. This is a useful, finite source-compatibility
 subset, **not complete `immintrin.h` compatibility** or general C
@@ -118,6 +119,61 @@ All lower through the existing typed IR, optimization, ABI, feature gating and
 instruction selection. The explicit PCLMUL builtin uses its dedicated typed
 intrinsic and lowering described in the linked contract.
 
+### Integer family and fused/conversion wrappers
+
+The integer headers also expose these families:
+
+- SSE2 `_mm_{min,max}_{epi16,epu8}`.
+- SSE4.1 `_mm_{min,max}_{epi8,epi32,epu16,epu32}` and `_mm_blendv_epi8`.
+- SSSE3 `_mm_{abs,sign}_epi{8,16,32}` through `tmmintrin.h`.
+- AVX2 `_mm256_{min,max}_{epi8,epi16,epi32,epu8,epu16,epu32}`,
+  `_mm256_{abs,sign}_epi{8,16,32}` and `_mm256_blendv_epi8`.
+
+These 38 wrappers use generic integer IR. The 128-bit forms may lower to
+baseline instructions rather than requiring the vendor header's named ISA
+family. The 256-bit forms require AVX transport and may use narrower/scalar
+operations without AVX2. They do not promise vendor feature-diagnostic parity
+or one matching instruction. Negation uses unsigned lane arithmetic, so absolute
+value and sign retain the signed-minimum bit pattern. Byte blends select by the
+mask byte's sign bit, not by whether the whole byte is nonzero. Each argument
+is evaluated once.
+
+`fmaintrin.h` exposes 32 FMA wrappers: `_mm_{fmadd,fmsub,fnmadd,fnmsub}`
+with `ps`, `pd`, `ss` and `sd` suffixes; the `_mm256_` packed `ps`/`pd`
+forms; and `_mm{,256}_{fmaddsub,fmsubadd}_{ps,pd}`. They use the existing
+architectural FMA IR and require FMA permission. Scalar `ss`/`sd` updates only
+the low lane and preserves the remaining lanes from the first argument. The
+operations retain the existing effectful floating-point contract; they are not
+expanded into separately rounded multiplication and addition or a libm call.
+
+`f16cintrin.h` exposes `_mm{,256}_cvtph_ps`, `_mm{,256}_cvtps_ph`,
+`_cvtsh_ss` and `_cvtss_sh` through the existing F16C IR. These require F16C
+permission. Packed conversion to half returns an `__m128i`; the 128-bit float
+source form zeroes its upper 64 result bits. The rounding argument must be an
+integer constant expression in 0..255. Bits 7:3 are ignored and the IR receives
+bits 2:0; bit 2 selects MXCSR rounding. The `_MM_FROUND_*` constants and combined
+rounding aliases are defined in `smmintrin.h`. In particular, the `NO_EXC`
+constant's bit 3 does not suppress F16C exceptions. Header inclusion itself does
+not grant CPU features or require the host to support the instructions.
+
+### Reviewed builtin inventory
+
+[`vendor-bindings.json`](../../../tools/x86-isa/vendor-bindings.json) owns the
+69 reviewed frontend bindings for AES, packed shifts, saturation, SSE2 numeric
+conversions, FMA and F16C. Its generated module supplies both parser lookup and
+`__has_builtin` recognition. The metadata records current semantic intrinsic
+IDs, types, controls, required features and ownership. Generated assertions
+preserve IDs and check reviewed signatures against the existing IR. Semantic
+lowering and CPU legality remain with the existing typed operations.
+
+[`vendor-references.json`](../../../tools/x86-isa/vendor-references.json) pins
+the existing Keel contracts and LLVM/Clang 21.1.0 reference commit, licence and
+six header hashes. The new wrappers are independently implemented against
+those references. Keel-private bridge names are marked separately from vendor
+builtin spellings. This is a bounded inventory, not complete Intel/GNU/Clang
+builtin or vendor-header compatibility. See the [generator reference](../../../tools/x86-isa/README.md)
+for regeneration and optional downloaded-header hash checks.
+
 <a id="c-x86-intrinsics-builtins-and-diagnostics"></a>
 ### Builtins and diagnostics
 
@@ -143,10 +199,10 @@ bitwise operations and comparisons, including compound assignments; see
 [GNU vector mode](../../frontends/c/extensions.md#gnu-vector-mode-scalar-broadcasts) for conversion checks
 and remaining scalar-shift/cross-domain limits. Constructor functions remain
 available for explicit element conversions.
-Masked/gather/scatter memory, streaming memory/fences, scalar-lane FP intrinsics,
-saturation beyond the bounded SSE2 subset, horizontal operations, shifts beyond
-the bounded SSE2 subset,
-conversions beyond the three SSE2 forms below, FMA, AVX-512,
+Masked/gather/scatter memory, streaming memory/fences, scalar-lane FP intrinsics
+beyond FMA, saturation beyond the bounded SSE2 subset, horizontal operations,
+shifts beyond the bounded SSE2 subset, conversions beyond the reviewed SSE2
+and F16C forms, AVX-512,
 full vendor header coverage and strict FP-environment compatibility are outside
 this header contract even where the backend already implements such operations.
 The existing C restrictions on vector varargs, unions and by-value x86 aggregates

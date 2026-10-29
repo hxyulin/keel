@@ -15,6 +15,7 @@ import att_rules
 import intrinsic_registry
 import system_intrinsics
 import query_bindings
+import vendor_bindings
 import coverage_ledger
 import evex
 import assembly_smoke
@@ -400,7 +401,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--check', action='store_true')
     parser.add_argument('--check-upstream', type=Path)
+    parser.add_argument('--check-vendor-headers', type=Path)
     args = parser.parse_args()
+    if args.check_vendor_headers:
+        vendor_bindings.check_reference_headers(ROOT, args.check_vendor_headers)
     source = (ROOT / 'zydis.json').read_bytes()
     provenance = json.loads((ROOT / 'zydis-source.json').read_text())
     if hashlib.sha256(source).hexdigest() != provenance['subset_sha256']:
@@ -449,6 +453,7 @@ def main():
     outputs.update(intrinsic_registry.outputs(ROOT))
     outputs.update(system_intrinsics.outputs(ROOT, OUTPUT))
     outputs.update(query_bindings.outputs(ROOT))
+    outputs.update(vendor_bindings.outputs(ROOT))
     outputs.update(coverage_ledger.outputs(ROOT, data, adapters, exclusion_reasons, form_isa))
     target, output = documentation_inventory(outputs[OUTPUT.with_name('v2.rs')], adapters['v2'])
     outputs[target] = output

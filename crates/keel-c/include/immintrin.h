@@ -6,5 +6,7 @@
 #endif
 #include <avx2intrin.h>
 #include <wmmintrin.h>
+#include <fmaintrin.h>
+#include <f16cintrin.h>
 
 #endif /* _KEEL_IMMINTRIN_H */

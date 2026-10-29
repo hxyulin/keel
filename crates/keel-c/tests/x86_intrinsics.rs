@@ -417,3 +417,180 @@ fn wide_abi_intrinsics_and_exact_memory_footprints() {
         }
     }
 }
+
+fn integer_family_sources() -> (String, String, String) {
+    let mut source = String::from("#include <immintrin.h>\n");
+    let mut narrow = source.clone();
+    let mut declarations = String::new();
+    let mut cases = String::new();
+    for width in [128, 256] {
+        let prefix = if width == 128 { "_mm" } else { "_mm256" };
+        let mut operations = Vec::new();
+        for bits in [8, 16, 32] {
+            for signed in [false, true] {
+                for (op, code) in [("min", 0), ("max", 1)] {
+                    operations.push((
+                        format!("{prefix}_{op}_ep{}{bits}", if signed { 'i' } else { 'u' }),
+                        bits,
+                        signed,
+                        code,
+                    ));
+                }
+            }
+            operations.push((format!("{prefix}_abs_epi{bits}"), bits, true, 2));
+            operations.push((format!("{prefix}_sign_epi{bits}"), bits, true, 3));
+        }
+        operations.push((format!("{prefix}_blendv_epi8"), 8, false, 4));
+        for (name, bits, signed, op) in operations {
+            let bytes = width / 8;
+            let load = format!("{prefix}_loadu_si{width}");
+            let store = format!("{prefix}_storeu_si{width}");
+            let ty = format!("__m{width}i");
+            let args = match op {
+                2 => "x",
+                4 => "x,y,z",
+                _ => "x,y",
+            };
+            let body = format!(
+                "void k{name}(const void*a,const void*b,const void*m,void*out){{ {ty} x={load}((const {ty}*)a),y={load}((const {ty}*)b),z={load}((const {ty}*)m); (void)y;(void)z;{store}(({ty}*)out,{name}({args})); }}\n"
+            );
+            source += &body;
+            if width == 128 {
+                narrow += &body;
+            }
+            declarations += &format!(
+                "extern void k{name}(const void*,const void*,const void*,void*);\nextern void c{name}(const void*,const void*,const void*,void*);\n"
+            );
+            cases += &format!(
+                "{{\"{name}\",k{name},c{name},{bytes},{bits},{},{op}}},\n",
+                u8::from(signed)
+            );
+        }
+    }
+    let harness = format!(
+        "#include <stdint.h>\n{declarations}\n{}\nstatic const struct Case cases[]={{\n{cases}}};\n{}",
+        include_str!("fixtures/x86_integer_family_oracle.h"),
+        include_str!("fixtures/x86_integer_family_runner.c")
+    );
+    (source, narrow, harness)
+}
+
+#[test]
+fn integer_minmax_abs_sign_and_blend_match_vendor_and_scalar_oracles() {
+    use keel_codegen::regalloc::Pools;
+    use std::{fs, path::PathBuf, process::Command};
+    let directory = std::env::var_os("KEEL_C_INTEGER_EXPORT_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("c-integer-intrinsics"));
+    fs::create_dir_all(&directory).unwrap();
+    let (source, narrow, harness) = integer_family_sources();
+    fs::write(directory.join("kernels.c"), &source).unwrap();
+    fs::write(
+        directory.join("oracle.c"),
+        source.replace("void k_", "void c_"),
+    )
+    .unwrap();
+    fs::write(directory.join("harness.c"), harness).unwrap();
+    // These wrappers have exact software lowerings; narrow values remain legal
+    // at baseline, while wide argument transport still requires AVX.
+    program(&compile(&narrow), Features::for_level(CpuLevel::V1)).unwrap();
+    let raw = compile(&source);
+    assert!(
+        program(&raw, Features::for_level(CpuLevel::V1))
+            .unwrap_err()
+            .message
+            .contains("256-bit SIMD")
+    );
+    let mut optimized = raw.clone();
+    keel_opt::optimize(&mut optimized).unwrap();
+    keel_ir::verify_module(&optimized).unwrap();
+    for file in ["oracle", "harness"] {
+        command(Command::new("clang").current_dir(&directory).args([
+            "-target",
+            "x86_64-unknown-linux-gnu",
+            "-ffreestanding",
+            "-mavx2",
+            "-O2",
+            "-c",
+            &format!("{file}.c"),
+            "-o",
+            &format!("{file}.o"),
+        ]));
+    }
+    let empty = Pools {
+        caller_saved: &[],
+        callee_saved: &[],
+        float_caller_saved: &[],
+        float_callee_saved: &[],
+    };
+    let features = Features::for_level(CpuLevel::V3);
+    for (name, selection, allocation, module) in [
+        (
+            "baseline",
+            SelectionTier::Baseline,
+            AllocationTier::Full,
+            &raw,
+        ),
+        (
+            "trees-fast",
+            SelectionTier::Trees,
+            AllocationTier::Fast,
+            &raw,
+        ),
+        (
+            "optimized",
+            SelectionTier::Full,
+            AllocationTier::Full,
+            &optimized,
+        ),
+    ] {
+        for spilled in [false, true] {
+            let selector = FeatureSelector {
+                inner: &selection,
+                features,
+            };
+            let pipeline = CodegenPipeline {
+                selector: &selector,
+                allocator: &allocation,
+            };
+            let pools = if spilled {
+                &empty
+            } else {
+                &keel_codegen::x86_64::REGISTERS
+            };
+            let text =
+                keel_codegen::x86_64::compile_with_pipeline(module, pools, &pipeline).unwrap();
+            let typed =
+                keel_codegen::x86_64::compile_program_with_pipeline(module, pools, &pipeline)
+                    .unwrap();
+            let object =
+                keel_asm::x86::assemble_program_object_with_features(&typed, features).unwrap();
+            assert_eq!(
+                object,
+                keel_asm::x86::assemble_object_with_features(&text, features).unwrap()
+            );
+            let mut chunks = keel_asm::x86::ProgramAssembler::new(features);
+            keel_codegen::x86_64::compile_program_chunks_with_pipeline(
+                module,
+                pools,
+                &pipeline,
+                &mut |part| chunks.push(part),
+            )
+            .unwrap();
+            assert_eq!(object, chunks.finish().unwrap());
+            let filename = format!("keel-{name}-{spilled}.o");
+            fs::write(directory.join(&filename), object).unwrap();
+            #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+            if std::is_x86_feature_detected!("avx2") {
+                command(Command::new("clang").current_dir(&directory).args([
+                    "oracle.o",
+                    "harness.o",
+                    &filename,
+                    "-o",
+                    "run",
+                ]));
+                command(&mut Command::new(directory.join("run")));
+            }
+        }
+    }
+}

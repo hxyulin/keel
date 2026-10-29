@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "references": {
+    "keel_reviewed": {
+      "project": "Keel reviewed builtin contract",
+      "commit": "4d70a2c32c2f771f21d9ac0a6baca9e93819dc3c",
+      "path": "crates/keel-c/src/expr.rs",
+      "sha256": "a48757b972112a08f7b71370b6a758f1a9ec13e8a36b3eeaa95e21cfd3ce61a9",
+      "scope": "Migration of existing compiler bindings. Keel-private bridges are not vendor builtin compatibility claims; no external header equivalence is inferred."
+    },
+    "llvm_21_1_0": {
+      "project": "LLVM/Clang",
+      "repository": "https://github.com/llvm/llvm-project",
+      "tag": "llvmorg-21.1.0",
+      "commit": "3623fe661ae35c6c80ac221f14d85be76aa870f1",
+      "license": "Apache-2.0 WITH LLVM-exception",
+      "scope": "API semantic references for independently implemented wrappers, not copied header bodies or full header conformance.",
+      "headers": {
+        "emmintrin.h": "48ec3b11cc4a7c5f7af2f23229b1402440b2d89d53cf4ee023211fe957d466d4",
+        "smmintrin.h": "b471a91b7d3990d9bcbc82262510681b5b6d250e646bd8aa07894598d0cc951f",
+        "tmmintrin.h": "6fb2fa4dd65f56573b3c2f404b21095d7ecde88675cf08a6495f49b51bd56ec0",
+        "avx2intrin.h": "eb2a35ae03975e937db2be1c6f162c7172bf8e782cfe66296129585e7e619853",
+        "fmaintrin.h": "648c377bcf8ca86b717eb695536c76e2206561751eacbfe285c9218767161664",
+        "f16cintrin.h": "835f822dd6d88ad7f2b14b5c82255c1f124dc850e305df53f6edabe894280357"
+      }
+    }
+  }
+}

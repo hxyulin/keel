@@ -284,4 +284,27 @@ static __inline__ __m128i _mm_subs_epu16(__m128i a, __m128i b) {
 }
 #include <__keel_sse2_conversions.h>
 
+
+/* Packed integer selection preserves all lane bits, including signed minima. */
+static __inline__ __m128i _mm_min_epi16(__m128i a, __m128i b) {
+  __keel_i16_128 x = (__keel_i16_128)a, y = (__keel_i16_128)b;
+  __m128i mask = (__m128i)(x < y);
+  return (a & mask) | (b & ~mask);
+}
+static __inline__ __m128i _mm_max_epi16(__m128i a, __m128i b) {
+  __keel_i16_128 x = (__keel_i16_128)a, y = (__keel_i16_128)b;
+  __m128i mask = (__m128i)(x > y);
+  return (a & mask) | (b & ~mask);
+}
+static __inline__ __m128i _mm_min_epu8(__m128i a, __m128i b) {
+  __keel_u8_128 x = (__keel_u8_128)a, y = (__keel_u8_128)b;
+  __m128i mask = (__m128i)(x < y);
+  return (a & mask) | (b & ~mask);
+}
+static __inline__ __m128i _mm_max_epu8(__m128i a, __m128i b) {
+  __keel_u8_128 x = (__keel_u8_128)a, y = (__keel_u8_128)b;
+  __m128i mask = (__m128i)(x > y);
+  return (a & mask) | (b & ~mask);
+}
+
 #endif /* _KEEL_EMMINTRIN_H */

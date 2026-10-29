@@ -90,11 +90,7 @@ fn builtin(name: &str, target: Target) -> bool {
             )
         });
     };
-    if crate::expr::aes_builtin(base).is_some()
-        || crate::expr::packed_shift_builtin(base).is_some()
-        || crate::expr::saturating_builtin(base).is_some()
-        || crate::expr::packed_conversion_builtin(base).is_some()
-    {
+    if crate::x86_builtins::recognized(base) {
         return target == Target::X86_64LinuxGnu;
     }
     if matches!(

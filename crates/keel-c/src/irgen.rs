@@ -4693,7 +4693,8 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             Builtin::X86Aes(id)
             | Builtin::X86PackedShift(id)
             | Builtin::X86Saturating(id)
-            | Builtin::X86PackedConversion(id) => {
+            | Builtin::X86PackedConversion(id)
+            | Builtin::X86Value(id) => {
                 let inst = ins.intrinsic(id, &vals);
                 self.b.function().inst_results(inst)[0]
             }

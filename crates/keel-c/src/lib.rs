@@ -49,6 +49,8 @@ mod preprocess;
 mod strings;
 mod types;
 mod unit;
+#[path = "generated/x86_builtins.rs"]
+mod x86_builtins;
 
 pub use batch::{BatchCompiler, BatchCompilerError, Input};
 pub use library_builtins::{LibraryBuiltin, LibraryBuiltins};

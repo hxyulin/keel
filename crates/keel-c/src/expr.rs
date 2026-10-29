@@ -9,6 +9,9 @@ use crate::eval::{
 use crate::lex::Tok;
 use crate::parse::{Parser, R};
 use crate::types::*;
+use crate::x86_builtins::{
+    aes_builtin, packed_conversion_builtin, packed_shift_builtin, saturating_builtin,
+};
 use crate::{Error, Loc};
 use keel_ir::Target;
 use keel_ir::{Intrinsic, OverflowOp, RmwOp};
@@ -1633,10 +1636,69 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn x86_value_type(&mut self, ty: keel_ir::Type) -> Ty<'a> {
+        use keel_ir::Type;
+        match ty {
+            Type::F32 => Ty::Float,
+            Type::F64 => Ty::Double,
+            Type::I32 => INT,
+            Type::I64 => Ty::Int(IntKind::LLong),
+            Type::Vector(shape) => {
+                let element = match shape.lane_type() {
+                    Type::F32 => Ty::Float,
+                    Type::F64 => Ty::Double,
+                    Type::I8 => Ty::Int(IntKind::SChar),
+                    Type::I16 => Ty::Int(IntKind::Short),
+                    Type::I32 => INT,
+                    Type::I64 => Ty::Int(IntKind::LLong),
+                    _ => unreachable!("reviewed x86 value lane type"),
+                };
+                Ty::Vector(self.type_ref(element), shape)
+            }
+            _ => unreachable!("reviewed x86 value signature"),
+        }
+    }
+
     fn builtin(&mut self, name: &str, loc: Loc) -> R<Expr<'a>> {
         let base = &name["__builtin_".len()..];
         if base.starts_with("ia32_") || base.starts_with("keel_sse2_") {
             self.require_native_layout(loc, "x86 builtins")?;
+        }
+        if let Some(id) = crate::x86_builtins::semantic_builtin(base) {
+            if self.target != Target::X86_64LinuxGnu {
+                return Err(Error::new(loc, "x86 value builtin requires x86-64"));
+            }
+            self.require_native_layout(loc, "x86 value builtins")?;
+            let info = id.info();
+            let mut args = self.builtin_args(info.params.len(), loc)?;
+            for (i, (&expected, arg)) in info.params.iter().zip(&mut args).enumerate() {
+                if id.has_f16c_rounding() && i == 1 {
+                    let Some(control) = integer_constant_control(arg, self.c_layout)
+                        .filter(|n| (0..=255).contains(n))
+                    else {
+                        return Err(Error::new(
+                            loc,
+                            "F16C rounding control must be an integer constant expression in 0..255",
+                        ));
+                    };
+                    // The instruction ignores bits 7:3. Existing IR exposes only
+                    // the architecturally meaningful RC selector in bits 2:0.
+                    *arg = mk(ExprKind::Int(control & 7), INT, arg.loc);
+                }
+                let expected = self.x86_value_type(expected);
+                if arg.ty != expected {
+                    return Err(Error::new(
+                        arg.loc,
+                        format!("x86 value builtin argument {} has the wrong type", i + 1),
+                    ));
+                }
+            }
+            let result = self.x86_value_type(info.returns[0]);
+            return Ok(mk(
+                ExprKind::Builtin(Builtin::X86Value(id), self.slice(&args)),
+                result,
+                loc,
+            ));
         }
         if let Some(id) = packed_conversion_builtin(base) {
             let args = self.builtin_args(1, loc)?;
@@ -3494,71 +3556,6 @@ pub(crate) fn generic_overflow(name: &str) -> Option<OverflowOp> {
         "mul_overflow" => Some(OverflowOp::Umul),
         _ => None,
     }
-}
-
-/// Frontend recognition is independent of the target CPU feature selection.
-pub(crate) fn aes_builtin(base: &str) -> Option<keel_ir::Intrinsic> {
-    use keel_ir::Intrinsic::*;
-    Some(match base {
-        "ia32_aesenc128" => X86Aesenc128,
-        "ia32_aesenclast128" => X86Aesenclast128,
-        "ia32_aesdec128" => X86Aesdec128,
-        "ia32_aesdeclast128" => X86Aesdeclast128,
-        "ia32_aesimc128" => X86Aesimc128,
-        "ia32_aeskeygenassist128" => X86Aeskeygenassist128,
-        _ => return None,
-    })
-}
-
-/// Private scalar-count bridge to architectural shifts; not generic C shift semantics.
-pub(crate) fn packed_shift_builtin(
-    base: &str,
-) -> Option<(keel_ir::Intrinsic, keel_ir::VectorType, bool)> {
-    use keel_ir::{Intrinsic::*, VectorType::*};
-    let (op, immediate) = if let Some(op) = base.strip_prefix("keel_sse2_imm_") {
-        (op, true)
-    } else {
-        (base.strip_prefix("keel_sse2_count_")?, false)
-    };
-    let (id, shape) = match op {
-        "psllw" => (X86Sse2Psllw128, I16x8),
-        "pslld" => (X86Sse2Pslld128, I32x4),
-        "psllq" => (X86Sse2Psllq128, I64x2),
-        "psrlw" => (X86Sse2Psrlw128, I16x8),
-        "psrld" => (X86Sse2Psrld128, I32x4),
-        "psrlq" => (X86Sse2Psrlq128, I64x2),
-        "psraw" => (X86Sse2Psraw128, I16x8),
-        "psrad" => (X86Sse2Psrad128, I32x4),
-        _ => return None,
-    };
-    Some((id, shape, immediate))
-}
-
-/// Bounded private frontend names; boolean fields are unsigned and word lanes.
-pub(crate) fn saturating_builtin(base: &str) -> Option<(keel_ir::Intrinsic, bool, bool)> {
-    use keel_ir::Intrinsic::*;
-    Some(match base {
-        "keel_sse2_paddsb" => (X86Sse2Paddsb128, false, false),
-        "keel_sse2_paddsw" => (X86Sse2Paddsw128, false, true),
-        "keel_sse2_paddusb" => (X86Sse2Paddusb128, true, false),
-        "keel_sse2_paddusw" => (X86Sse2Paddusw128, true, true),
-        "keel_sse2_psubsb" => (X86Sse2Psubsb128, false, false),
-        "keel_sse2_psubsw" => (X86Sse2Psubsw128, false, true),
-        "keel_sse2_psubusb" => (X86Sse2Psubusb128, true, false),
-        "keel_sse2_psubusw" => (X86Sse2Psubusw128, true, true),
-        _ => return None,
-    })
-}
-
-/// Private typed bridge: preserve architectural rounding, invalid results and flags.
-pub(crate) fn packed_conversion_builtin(base: &str) -> Option<keel_ir::Intrinsic> {
-    use keel_ir::Intrinsic::*;
-    Some(match base {
-        "keel_sse2_cvtdq2ps" => X86Ssecvtdq2ps128,
-        "keel_sse2_cvttps2dq" => X86Ssecvttps2dq128,
-        "keel_sse2_cvtps2dq" => X86Ssecvtps2dq128,
-        _ => return None,
-    })
 }
 
 #[cfg(test)]

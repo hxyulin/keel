@@ -179,6 +179,8 @@ pub enum Builtin {
     X86PackedShift(Intrinsic),
     /// Raw SSE2 conversion, retaining MXCSR effects and integer-indefinite results.
     X86PackedConversion(Intrinsic),
+    /// Typed vendor bridge to an existing effectful FMA/F16C operation.
+    X86Value(Intrinsic),
     /// Internal scalar broadcast after checked element conversion.
     VectorSplat,
     /// Quiet AVX comparison; the integer mask is bitcast back to the C float vector.
