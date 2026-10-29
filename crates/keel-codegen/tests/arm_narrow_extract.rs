@@ -24,6 +24,7 @@ fn every_integer_lane_typed_text_clang_and_native() {
     c += "}return 0;}\n";
     let m = keel_ir::parse(&ir).unwrap();
     keel_ir::verify_module(&m).unwrap();
+    let mut oracle = support::Oracle::new("extract");
     for sel in [SelectionTier::Baseline, SelectionTier::Full] {
         for alloc in [AllocationTier::Fast, AllocationTier::Full] {
             for pools in [&keel_codegen::aarch64::REGISTERS, &support::EMPTY] {
@@ -32,7 +33,7 @@ fn every_integer_lane_typed_text_clang_and_native() {
                 for lane in 0..4 {
                     assert!(text.contains(&format!(".s[{lane}]")));
                 }
-                support::oracle(
+                oracle.check(
                     &format!(
                         "extract-{sel:?}-{alloc:?}-{}",
                         pools.float_caller_saved.len()

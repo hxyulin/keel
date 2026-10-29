@@ -48,6 +48,8 @@ fn oracle_c(names: &[String], same: bool) -> String {
 }
 #[test]
 fn exact_signed_extrema_wrapping_and_both_routes_all_pools() {
+    let mut oracle = support::Oracle::new("sabal");
+    let c = oracle_c(&["sabal".into()], false);
     for commute in [false, true] {
         let src = if commute {
             SOURCE.replace("viadd v0,v10", "viadd v10,v0")
@@ -69,11 +71,11 @@ fn exact_signed_extrema_wrapping_and_both_routes_all_pools() {
                         !text.contains("sshll\t") && !text.contains("abs\t"),
                         "{text}"
                     );
-                    support::oracle(
+                    oracle.check(
                         &format!("sabal-{commute}-{sel:?}-{alloc:?}-{pool}"),
                         &text,
                         &obj,
-                        &oracle_c(&["sabal".into()], false),
+                        &c,
                     );
                 }
             }
@@ -113,6 +115,7 @@ impl RegisterAllocator for Controlled {
 }
 #[test]
 fn destructive_destination_and_all_input_spill_alias_layouts() {
+    let mut oracle = support::Oracle::new("sabal-controlled");
     for same in [false, true] {
         let mut src = String::new();
         let mut names = Vec::new();
@@ -144,7 +147,7 @@ fn destructive_destination_and_all_input_spill_alias_layouts() {
             let (text, obj) =
                 support::compile(&m, &sel, &Controlled, &keel_codegen::aarch64::REGISTERS);
             assert_eq!(text.matches("sabal\t").count(), names.len());
-            support::oracle(
+            oracle.check(
                 &format!("sabal-controlled-{same}-{sel:?}"),
                 &text,
                 &obj,
@@ -206,6 +209,7 @@ int main(void){for(unsigned p=0;p<128;p++){for(unsigned alias=0;alias<4;alias++)
  live(a,x,y,dest);if(memcmp(dest,expected,80))return 1;
 }}return 0;}
 "#;
+    let mut oracle = support::Oracle::new("sabal-live");
     for sel in [SelectionTier::Baseline, SelectionTier::Full] {
         for alloc in [AllocationTier::Fast, AllocationTier::Full] {
             for (pool, pools) in [
@@ -215,7 +219,7 @@ int main(void){for(unsigned p=0;p<128;p++){for(unsigned alias=0;alias<4;alias++)
             ] {
                 let (text, obj) = support::compile(&m, &sel, &alloc, pools);
                 assert_eq!(text.matches("sabal\t").count(), 1);
-                support::oracle(
+                oracle.check(
                     &format!("sabal-live-{sel:?}-{alloc:?}-{pool}"),
                     &text,
                     &obj,
@@ -265,6 +269,7 @@ int main(void){const int32_t e[]={INT32_MIN,INT32_MAX,0,-1,1};for(unsigned p=0;p
  W got=history(input,output,prev,acc);for(unsigned l=0;l<2;l++){int64_t d=(int64_t)input[l]-(l?(int64_t)input[0]:(int64_t)prev[3]);if(got[l]!=acc[l]+(uint64_t)(d<0?-d:d))return 1;}if(memcmp(output,want,48))return 2;
 }return 0;}
 "#;
+    let mut oracle = support::Oracle::new("sabal-history");
     for sel in [SelectionTier::Baseline, SelectionTier::Full] {
         for alloc in [AllocationTier::Fast, AllocationTier::Full] {
             for (pool, pools) in [
@@ -276,7 +281,7 @@ int main(void){const int32_t e[]={INT32_MIN,INT32_MAX,0,-1,1};for(unsigned p=0;p
                 assert_eq!(text.matches("sabal\t").count(), 1);
                 assert!(text.contains("ld1r\t"));
                 assert!(text.contains("#12"));
-                support::oracle(
+                oracle.check(
                     &format!("sabal-history-{sel:?}-{alloc:?}-{pool}"),
                     &text,
                     &obj,
@@ -318,6 +323,8 @@ fn constraints_on_every_matched_instruction_keep_exact_fallback() {
         }
     }
     let m = keel_ir::parse(SOURCE).unwrap();
+    let mut oracle = support::Oracle::new("sabal-constraint");
+    let c = oracle_c(&["sabal".into()], false);
     for sel in [SelectionTier::Baseline, SelectionTier::Full] {
         for alloc in [AllocationTier::Fast, AllocationTier::Full] {
             for at in 2..9 {
@@ -328,11 +335,11 @@ fn constraints_on_every_matched_instruction_keep_exact_fallback() {
                     &keel_codegen::aarch64::REGISTERS,
                 );
                 assert!(!text.contains("sabal\t"));
-                support::oracle(
+                oracle.check(
                     &format!("sabal-constraint-{sel:?}-{alloc:?}-{at}"),
                     &text,
                     &obj,
-                    &oracle_c(&["sabal".into()], false),
+                    &c,
                 );
             }
         }
@@ -406,6 +413,7 @@ fn accumulator_and_narrow_inputs_can_share_registers() {
             a
         }
     }
+    let mut oracle = support::Oracle::new("sabal-acc-alias");
     for side in ["left", "right", "both"] {
         let src = SOURCE.replace("i64x2,i32x4,i32x4", "i64x2,i32x4").replace(
             "block0(v0:i64x2,v1:i32x4,v2:i32x4):",
@@ -444,7 +452,7 @@ fn accumulator_and_narrow_inputs_can_share_registers() {
             let (text, obj) =
                 support::compile(&m, &sel, &Aliased, &keel_codegen::aarch64::REGISTERS);
             assert_eq!(text.matches("sabal\t").count(), 4);
-            support::oracle(&format!("sabal-acc-alias-{side}-{sel:?}"), &text, &obj, &c);
+            oracle.check(&format!("sabal-acc-alias-{side}-{sel:?}"), &text, &obj, &c);
         }
     }
 }
