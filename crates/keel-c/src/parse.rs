@@ -310,6 +310,8 @@ pub struct Declarator<'a> {
 pub(crate) struct SwitchCtx<'a> {
     pub ty: Ty<'a>,
     pub cases: Vec<SwitchCase>,
+    /// Disjoint case ranges, keyed by the ordered start key, for overlap checks.
+    pub case_ranges: std::collections::BTreeMap<u64, (i64, i64)>,
     pub default: Option<usize>,
     pub labels: usize,
 }
@@ -4718,6 +4720,7 @@ impl<'a> Parser<'a> {
                     self.fs.as_mut().unwrap().switches.push(SwitchCtx {
                         ty: cond.ty,
                         cases: Vec::new(),
+                        case_ranges: Default::default(),
                         default: None,
                         labels: 0,
                     });
@@ -4764,19 +4767,21 @@ impl<'a> Parser<'a> {
                             if key(last) < key(first) {
                                 return Err(Error::new(loc, "case range is empty"));
                             }
-                            for case in &sw.cases {
-                                if key(first) <= key(case.last) && key(case.first) <= key(last) {
-                                    let duplicate = if key(first) >= key(case.first) {
-                                        first
-                                    } else {
-                                        case.first
-                                    };
-                                    return Err(Error::new(
-                                        loc,
-                                        format!("duplicate case {duplicate}"),
-                                    ));
+                            // Report the smallest value that an earlier case already uses.
+                            let ranges = &sw.case_ranges;
+                            let duplicate = match ranges.range(..=key(first)).next_back() {
+                                Some((_, &(_, case_last))) if key(first) <= key(case_last) => {
+                                    Some(first)
                                 }
+                                _ => ranges
+                                    .range(key(first)..=key(last))
+                                    .next()
+                                    .map(|(_, &(case_first, _))| case_first),
+                            };
+                            if let Some(duplicate) = duplicate {
+                                return Err(Error::new(loc, format!("duplicate case {duplicate}")));
                             }
+                            sw.case_ranges.insert(key(first), (first, last));
                             sw.cases.push(SwitchCase { first, last, label });
                         }
                         None => {

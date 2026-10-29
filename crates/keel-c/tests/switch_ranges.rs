@@ -184,3 +184,31 @@ fn converted_ranges_reject_overlaps_and_empty_intervals() {
         assert!(err.message.contains("case range is empty"), "{err}");
     }
 }
+
+#[test]
+fn duplicate_case_names_the_smallest_reused_value() {
+    for (ty, labels, value) in [
+        ("int", "case 1 ... 5:; case 3 ... 9:;", "3"),
+        ("int", "case 4 ... 5:; case 1 ... 9:;", "4"),
+        // The new range overlaps two earlier ranges; the lower one wins.
+        ("int", "case 7 ... 8:; case 2 ... 3:; case 0 ... 9:;", "2"),
+        ("int", "case -5 ... -1:; case 2:; case -9 ... 9:;", "-5"),
+        (
+            "unsigned int",
+            "case 0xfffffff0U:; case 5:; case 1 ... -1:;",
+            "5",
+        ),
+    ] {
+        let source = format!("int f({ty} x) {{ switch(x) {{ {labels} }} return 0; }}");
+        let err = keel_c::compile(&source, "overlap.c", keel_c::Options::default()).unwrap_err();
+        assert_eq!(err.message, format!("duplicate case {value}"), "{labels}");
+    }
+    // Many disjoint cases stay accepted, and a late duplicate is still found.
+    let mut labels: String = (0..8000).map(|i| format!("case {}: x++;", i * 3)).collect();
+    let source = format!("int f(int x) {{ switch(x) {{ {labels} return 1; }} return 0; }}");
+    keel_c::compile(&source, "many.c", keel_c::Options::default()).unwrap();
+    labels.push_str("case 9000 ... 9002: x++;");
+    let source = format!("int f(int x) {{ switch(x) {{ {labels} return 1; }} return 0; }}");
+    let err = keel_c::compile(&source, "many.c", keel_c::Options::default()).unwrap_err();
+    assert_eq!(err.message, "duplicate case 9000");
+}
