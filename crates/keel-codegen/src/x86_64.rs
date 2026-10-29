@@ -2817,7 +2817,9 @@ impl<'a> FunctionCompiler<'a> {
                         }
                     },
                     // Writing a 32-bit register clears the upper 32 bits.
-                    ConvertOp::Uext if self.zero_extended_narrow(arg) => {
+                    ConvertOp::Uext
+                        if self.zero_extended_narrow(arg) || self.zero_extended_i32(arg) =>
+                    {
                         if d != a {
                             self.emit(Opcode::Mov, [asm_arg(r32(d)), asm_arg(r32(a))]);
                         }
@@ -5926,6 +5928,54 @@ impl<'a> FunctionCompiler<'a> {
 
     fn zero_extended_narrow(&self, value: Value) -> bool {
         crate::fold::zero_extended_narrow(self.func, &self.selection, &self.alloc, value, false)
+    }
+
+    /// An i32 whose producer wrote its full register with a 32-bit ALU
+    /// instruction or load, which clears the upper 32 bits. Every scalar
+    /// register and spill copy moves 64 bits, so the zeros survive to each
+    /// use. Parameters and call results come from other code, whose upper
+    /// bits the ABI leaves undefined.
+    fn zero_extended_i32(&self, value: Value) -> bool {
+        use crate::regalloc::{OperandKind, ValuePart};
+        let value = self.func.resolve(value);
+        if self.func.value_type(value) != Type::I32 {
+            return false;
+        }
+        let ValueDef::Result(inst, 0) = self.func.value_def(value) else {
+            return false;
+        };
+        if self.selection.covered(inst) || self.selection.matches.contains_key(&inst) {
+            return false;
+        }
+        if !matches!(
+            self.alloc.operand_loc(
+                self.alloc.edits.instruction_index(inst),
+                ValuePart::low(value),
+                OperandKind::Def
+            ),
+            Some(Loc::Reg(_) | Loc::Stack(_))
+        ) {
+            return false;
+        }
+        match *self.func.inst_data(inst) {
+            InstData::Load { ty, .. } => ty == Type::I32,
+            InstData::Binary { op, args } => {
+                self.ty(args[0]) == Type::I32
+                    && matches!(
+                        op,
+                        BinaryOp::Iadd
+                            | BinaryOp::Isub
+                            | BinaryOp::And
+                            | BinaryOp::Or
+                            | BinaryOp::Xor
+                            | BinaryOp::Shl
+                            | BinaryOp::Ushr
+                            | BinaryOp::Sshr
+                    )
+                    && !self.selection.division_remainders.contains_key(&inst)
+            }
+            _ => false,
+        }
     }
 
     /// Sign- or zero-extends a narrow value in `src` to 32 bits in

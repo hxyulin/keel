@@ -274,6 +274,71 @@ fn distinct_conversion_destination_still_copies_the_value() {
     }
 }
 
+/// Register-to-register `mov r32, r32` copies, and how many of them copy a
+/// register onto itself (the explicit zero extension).
+fn moves32(output: &str) -> (usize, usize) {
+    let r32 =
+        |r: &str| r.starts_with('e') && r.len() == 3 || r.starts_with('r') && r.ends_with('d');
+    let (mut all, mut same) = (0, 0);
+    for line in output.lines() {
+        let Some(operands) = line.trim_start().strip_prefix("mov\t") else {
+            continue;
+        };
+        if let Some((d, a)) = operands.split_once(", ")
+            && r32(d)
+            && r32(a)
+        {
+            all += 1;
+            same += usize::from(d == a);
+        }
+    }
+    (all, same)
+}
+
+#[test]
+fn i32_alu_and_load_results_need_no_explicit_zero_extension() {
+    let mut sources: Vec<String> = ["iadd", "isub", "and", "or", "xor", "shl", "ushr", "sshr"]
+        .iter()
+        .flat_map(|op| {
+            [
+                format!("func @f(i32, i32) -> i64 {{\nblock0(v0: i32, v1: i32):\n v2 = {op} v0, v1\n v3 = uext.i64 v2\n return v3\n}}"),
+                format!("func @f(i32) -> i64 {{\nblock0(v0: i32):\n v1 = iconst.i32 -3\n v2 = {op} v0, v1\n v3 = uext.i64 v2\n return v3\n}}"),
+            ]
+        })
+        .collect();
+    sources.push("func @f(ptr) -> i64 {\nblock0(v0: ptr):\n v1 = load.i32 v0\n v2 = uext.i64 v1\n return v2\n}".into());
+    for source in &sources {
+        for allocator in allocators() {
+            for selector in [SelectionTier::Baseline, SelectionTier::Full] {
+                for tiny in [false, true] {
+                    let output =
+                        assembly(source, Target::X86_64LinuxGnu, selector, allocator, tiny);
+                    assert_eq!(moves32(&output).1, 0, "{source}\n{output}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn i32_values_from_other_code_or_unproven_operations_still_extend() {
+    let sources = [
+        "func @f(i32) -> i64 {\nblock0(v0: i32):\n v1 = uext.i64 v0\n return v1\n}",
+        "decl @external() -> i32\nfunc @f() -> i64 {\nblock0:\n v0 = call @external()\n v1 = uext.i64 v0\n return v1\n}",
+        "func @f(i64) -> i64 {\nblock0(v0: i64):\n v1 = trunc.i32 v0\n v2 = uext.i64 v1\n return v2\n}",
+        "func @f(i32, i32) -> i64 {\nblock0(v0: i32, v1: i32):\n v2 = imul v0, v1\n v3 = uext.i64 v2\n return v3\n}",
+        "func @f(ptr) -> i64 {\nblock0(v0: ptr):\n v1 = load.i32 v0\n jump block1(v1)\n block1(v2: i32):\n v3 = uext.i64 v2\n return v3\n}",
+    ];
+    for (i, source) in sources.iter().enumerate() {
+        for allocator in allocators() {
+            for selector in [SelectionTier::Baseline, SelectionTier::Full] {
+                let output = assembly(source, Target::X86_64LinuxGnu, selector, allocator, false);
+                assert!(moves32(&output).0 > 0, "{i}: {output}");
+            }
+        }
+    }
+}
+
 fn pressure_source() -> String {
     let mut source =
         String::from("decl @clobber()\nfunc @pressure(ptr) -> i64 {\nblock0(v0: ptr):\n");
