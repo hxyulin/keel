@@ -1332,19 +1332,23 @@ impl std::ops::IndexMut<usize> for ExpansionInput<'_> {
 }
 
 /// Returns arguments and the index immediately after the closing parenthesis.
+/// The arguments of the invocation whose `(` is at `open`, the separating
+/// commas, and the index after its `)`.
 fn arguments<'a>(
     ts: &ExpansionInput<'a>,
     open: usize,
-) -> Result<(Vec<Vec<Token<'a>>>, usize), Diagnostic> {
+) -> Result<(Vec<Vec<Token<'a>>>, Vec<Token<'a>>, usize), Diagnostic> {
     let mut args = vec![Vec::new()];
+    let mut commas = Vec::new();
     let mut depth = 0;
     for (i, t) in ts.iter().enumerate().skip(open + 1) {
         match t.text {
             "(" => depth += 1,
-            ")" if depth == 0 => return Ok((args, i + 1)),
+            ")" if depth == 0 => return Ok((args, commas, i + 1)),
             ")" => depth -= 1,
             "," if depth == 0 => {
                 args.push(Vec::new());
+                commas.push(*t);
                 continue;
             }
             _ => {}
@@ -1464,7 +1468,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 if !input.get(1).is_some_and(|t| t.text == "(") {
                     return Err(t.error("expected '(' after preprocessing builtin"));
                 }
-                let (args, end) = arguments(&input, 1)?;
+                let (args, _, end) = arguments(&input, 1)?;
                 if args.len() != 1 {
                     return Err(t.error("expected one argument to preprocessing builtin"));
                 }
@@ -1490,7 +1494,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 if !input.get(1).is_some_and(|t| t.text == "(") {
                     return Err(t.error("expected '(' after _Pragma"));
                 }
-                let (args, end) = arguments(&input, 1)?;
+                let (args, _, end) = arguments(&input, 1)?;
                 if args.len() != 1 {
                     return Err(t.error("expected one _Pragma argument"));
                 }
@@ -1518,7 +1522,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                     out.push(input.pop().unwrap());
                     continue;
                 }
-                let (mut args, end) = arguments(&input, 1)?;
+                let (mut args, commas, end) = arguments(&input, 1)?;
                 if params.is_empty() && args.len() == 1 && args[0].is_empty() {
                     args.clear();
                 }
@@ -1530,9 +1534,10 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 if m.variadic {
                     let extras = args.split_off(fixed);
                     let mut rest = Vec::new();
+                    // Keep the invocation's commas and their spacing.
                     for (n, arg) in extras.into_iter().enumerate() {
                         if n > 0 {
-                            rest.push(t.with_text(self.arena, ","));
+                            rest.push(commas[fixed + n - 1]);
                         }
                         rest.extend(arg);
                     }

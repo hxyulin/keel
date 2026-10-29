@@ -141,6 +141,8 @@ CAT(<,:) CAT(%,:) CAT(x,y) XCAT(VALUE,3) CAT(,x) CAT(x,) CAT(,) CAT3(,,) CAT3(x,
 ARGS(1,2,3) ARGS(1)
 #define LOG(x, ...) call(x, ## __VA_ARGS__)
 LOG(1) LOG(1,) LOG(1,2,3)
+#define VSTR(x, ...) #__VA_ARGS__
+VSTR(0, a, b,   c) VSTR(0, a , b) VSTR(0,a,b) VSTR(0, (a,b) ,c)
 #define IGNORE(x) 5
 IGNORE(__COUNTER__) __COUNTER__
 #define TWICE(x) x x
