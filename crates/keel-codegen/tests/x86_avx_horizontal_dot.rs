@@ -1,4 +1,4 @@
-//! Architectural rounding/approximation/source-biased min/max and scalar flags.
+//! AVX horizontal add/subtract, ADDSUB and dot products with MXCSR flags.
 //! Forced instruction oracles preserve unused-result MXCSR effects.
 use keel_asm_ir::x86::{CpuLevel, Features};
 use keel_codegen::{
@@ -17,6 +17,16 @@ const EMPTY: Pools = Pools {
     float_caller_saved: &[],
     float_callee_saved: &[],
 };
+/// The dot-product control reaches the encoding unchanged, so boundary controls
+/// cover its lowering. One native configuration still executes all 256.
+const BOUNDARY_CONTROLS: [u8; 11] = [0, 1, 2, 4, 8, 16, 32, 64, 127, 128, 255];
+fn controls(count: i64, all_controls: bool) -> Vec<u8> {
+    if count == 256 && !all_controls {
+        BOUNDARY_CONTROLS.to_vec()
+    } else {
+        (0..count).map(|mode| mode as u8).collect()
+    }
+}
 struct Case {
     id: Intrinsic,
     mode: u8,
@@ -27,17 +37,18 @@ impl Case {
         format!("v2fp_{}_{}_{}", self.id, self.mode, self.alias)
     }
 }
-fn cases() -> Vec<Case> {
+fn cases(all_controls: bool) -> Vec<Case> {
     let mut v = Vec::new();
     for id in Intrinsic::ALL
         .into_iter()
         .filter(|i| i.is_x86_fp_horizontal_dot())
     {
-        for mode in 0..id
-            .has_x86_dot_control()
-            .then_some((2, 256))
-            .map_or(1, |c| c.1)
-        {
+        for mode in controls(
+            id.has_x86_dot_control()
+                .then_some((2, 256))
+                .map_or(1, |c| c.1),
+            all_controls,
+        ) {
             for alias in [false, true] {
                 if alias
                     && id
@@ -47,19 +58,15 @@ fn cases() -> Vec<Case> {
                 {
                     continue;
                 }
-                v.push(Case {
-                    id,
-                    mode: mode as u8,
-                    alias,
-                });
+                v.push(Case { id, mode, alias });
             }
         }
     }
     v
 }
-fn source() -> String {
+fn source(all_controls: bool) -> String {
     let mut s = String::new();
-    for c in cases() {
+    for c in cases(all_controls) {
         let info = c.id.info();
         let ty = info.params[0];
         let bytes = info.returns[0].bytes().unwrap();
@@ -88,14 +95,14 @@ fn source() -> String {
     }
     s
 }
-fn harness() -> String {
+fn harness(all_controls: bool) -> String {
     let mut c = String::from(
         "#include <immintrin.h>\n#include <stdint.h>\nextern void *memcpy(void*,const void*,__SIZE_TYPE__);extern void *memset(void*,int,__SIZE_TYPE__);extern int memcmp(const void*,const void*,__SIZE_TYPE__);extern int printf(const char*,...);\n",
     );
     let mut table = String::from(
         "struct Case{void(*run)(const void*,const void*,void*);void(*unused)(const void*,const void*,void*);void(*ref)(const void*,const void*,void*);unsigned in,out,bits;const char*name;};static const struct Case cases[]={\n",
     );
-    for case in cases() {
+    for case in cases(all_controls) {
         let i = case.id.info();
         let ty = i.params[0];
         let name = case.name();
@@ -158,17 +165,26 @@ _mm_setcsr(saved);return 0;}
 "#;
     c
 }
+#[path = "common/matrix.rs"]
+mod matrix;
 fn object(
     s: SelectionTier,
     a: AllocationTier,
     empty: bool,
     f: Features,
+    all_controls: bool,
 ) -> Result<(Vec<u8>, String), keel_codegen::CodegenError> {
-    let mut m = keel_ir::parse(&source()).unwrap();
-    keel_ir::verify_module(&m).unwrap();
-    if s == SelectionTier::Full {
-        keel_opt::optimize(&mut m).unwrap();
-    }
+    use std::sync::OnceLock;
+    static BOUNDARY: OnceLock<matrix::PreparedModule> = OnceLock::new();
+    static ALL_CONTROLS: OnceLock<matrix::PreparedModule> = OnceLock::new();
+    let prepared = if all_controls {
+        &ALL_CONTROLS
+    } else {
+        &BOUNDARY
+    };
+    let m = prepared
+        .get_or_init(|| matrix::PreparedModule::parse(&source(all_controls)))
+        .for_selector(s);
     let selector = FeatureSelector {
         inner: &s,
         features: f,
@@ -182,8 +198,8 @@ fn object(
     } else {
         &keel_codegen::x86_64::REGISTERS
     };
-    let text = keel_codegen::x86_64::compile_with_pipeline(&m, pools, &pipeline)?;
-    let p = keel_codegen::x86_64::compile_program_with_pipeline(&m, pools, &pipeline)?;
+    let text = keel_codegen::x86_64::compile_with_pipeline(m, pools, &pipeline)?;
+    let p = keel_codegen::x86_64::compile_program_with_pipeline(m, pools, &pipeline)?;
     assert_eq!(p.stats().text_bytes, 0);
     let b = keel_asm::x86::assemble_program_object_with_features(&p, f).unwrap();
     assert_eq!(
@@ -197,12 +213,12 @@ fn round_approx_minmax_comi_typed_alias_spill_export() {
     let export = std::env::var_os("KEEL_X86_256_EXPORT_DIR").map(PathBuf::from);
     if let Some(d) = &export {
         fs::create_dir_all(d).unwrap();
-        fs::write(d.join("avx-horizontal-dot.ir"), source()).unwrap();
-        fs::write(d.join("avx-horizontal-dot.c"), harness()).unwrap();
+        fs::write(d.join("avx-horizontal-dot.ir"), source(false)).unwrap();
+        fs::write(d.join("avx-horizontal-dot.c"), harness(false)).unwrap();
     }
     let d = common::temp("avx-horizontal-dot-syntax");
     fs::create_dir_all(&d).unwrap();
-    fs::write(d.join("compare.c"), harness()).unwrap();
+    fs::write(d.join("compare.c"), harness(false)).unwrap();
     common::command(
         Command::new("clang")
             .args([
@@ -228,7 +244,8 @@ fn round_approx_minmax_comi_typed_alias_spill_export() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (b, text) = object(s, a, empty, Features::for_level(CpuLevel::V3)).unwrap();
+                let (b, text) =
+                    object(s, a, empty, Features::for_level(CpuLevel::V3), false).unwrap();
                 if let Some(d) = &export {
                     let name = format!("avx-horizontal-dot-{s:?}-{a:?}-{empty}");
                     fs::write(d.join(format!("{name}.o")), b).unwrap();
@@ -245,18 +262,19 @@ fn avx_horizontal_dot_features_controls_and_unused_effects() {
             SelectionTier::Baseline,
             AllocationTier::Full,
             false,
-            Features::NONE
+            Features::NONE,
+            false
         )
         .is_err()
     );
     let mut f = Features::NONE;
     f = f.with_features("avx").unwrap();
-    object(SelectionTier::Full, AllocationTier::Full, true, f).unwrap();
+    object(SelectionTier::Full, AllocationTier::Full, true, f, false).unwrap();
     for to in ["iconst.i32 256", "load.i32 align 1 v0"] {
-        let bad = source().replace("iconst.i32 255", to);
+        let bad = source(false).replace("iconst.i32 255", to);
         assert!(keel_ir::verify_module(&keel_ir::parse(&bad).unwrap()).is_err());
     }
-    let mut m = keel_ir::parse(&source()).unwrap();
+    let mut m = keel_ir::parse(&source(false)).unwrap();
     keel_opt::optimize(&mut m).unwrap();
     for f in m.functions.iter().filter(|f| f.name.starts_with("unused_")) {
         assert!(f.layout_insts().any(|(_,i)|matches!(f.inst_data(i),keel_ir::InstData::Intrinsic{id,..}if id.is_x86_fp_horizontal_dot())));
@@ -277,7 +295,6 @@ fn native_avx_horizontal_dot_controls_flags_and_aliases() {
     }
     let d = common::temp("avx-horizontal-dot-native");
     fs::create_dir_all(&d).unwrap();
-    fs::write(d.join("compare.c"), harness()).unwrap();
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -285,7 +302,12 @@ fn native_avx_horizontal_dot_controls_flags_and_aliases() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (b, _) = object(s, a, empty, Features::for_level(CpuLevel::V3)).unwrap();
+                // Execute every control once; the others share its lowering.
+                let all_controls =
+                    (s, a, empty) == (SelectionTier::Baseline, AllocationTier::Fast, false);
+                fs::write(d.join("compare.c"), harness(all_controls)).unwrap();
+                let (b, _) =
+                    object(s, a, empty, Features::for_level(CpuLevel::V3), all_controls).unwrap();
                 fs::write(d.join("compare.o"), b).unwrap();
                 common::command(
                     Command::new("clang")
