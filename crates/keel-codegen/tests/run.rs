@@ -716,14 +716,14 @@ fn debug_session(
     Some(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-/// Valid IR the aarch64 backend refuses, with the reason it gives.
 /// A conditional branch over more than its ±1 MiB reach, as in big
 /// interpreter loops, is relaxed into one that reaches; without that the
-/// assembler rejects the program ("fixup value out of range"). Here it is
-/// the branch back to the head of a loop whose body is 1.2 MB of `add`s,
-/// run twice.
+/// assembler rejects the program. Here it is the branch back to the head of
+/// a loop whose body is 1.2 MB of `add`s, run twice. keel's assembler
+/// rejects the unrelaxed branch, as clang's does, and takes milliseconds on
+/// this file where clang takes seconds.
 #[test]
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 fn long_branches() {
     let n = 300_000;
     let mut src = String::from(
@@ -754,14 +754,21 @@ fn long_branches() {
     ));
     let module = keel_ir::parse(&src).unwrap();
     let asm = keel_codegen::aarch64::compile(&module).unwrap();
+    let err = keel_asm::assemble_object(&unrelax(&asm))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("branch displacement must be 4-byte aligned and in -1048576..=1048572"),
+        "{err}"
+    );
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("long-branches");
     std::fs::create_dir_all(&dir).unwrap();
-    let (asm_path, exe) = (dir.join("long.s"), dir.join("long"));
-    std::fs::write(&asm_path, asm).unwrap();
+    let (object, exe) = (dir.join("long.o"), dir.join("long"));
+    std::fs::write(&object, keel_asm::assemble_object(&asm).unwrap()).unwrap();
     let out = Command::new("clang")
         .arg("-o")
         .arg(&exe)
-        .arg(&asm_path)
+        .arg(&object)
         .output()
         .unwrap();
     assert!(
@@ -773,6 +780,39 @@ fn long_branches() {
     assert_eq!(status.code(), Some(7));
 }
 
+/// Undoes the backend's relaxation: `b.<inverse> Lf_nearN; b target;
+/// Lf_nearN:` becomes `b.<cond> target` again.
+#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+fn unrelax(asm: &str) -> String {
+    let lines: Vec<_> = asm.lines().collect();
+    let (mut out, mut undone, mut i) = (String::new(), 0, 0);
+    while i < lines.len() {
+        if let Some((inverse, near)) = lines[i]
+            .strip_prefix("\tb.")
+            .and_then(|rest| rest.split_once('\t'))
+            && near.contains("_near")
+            && lines.get(i + 2) == Some(&format!("{near}:").as_str())
+            && let Some(target) = lines[i + 1].strip_prefix("\tb\t")
+        {
+            let cond = match inverse {
+                "eq" => "ne",
+                "ne" => "eq",
+                _ => panic!("extend `unrelax` for b.{inverse}"),
+            };
+            out += &format!("\tb.{cond}\t{target}\n");
+            undone += 1;
+            i += 3;
+        } else {
+            out += lines[i];
+            out.push('\n');
+            i += 1;
+        }
+    }
+    assert!(undone > 0, "no relaxed branch");
+    out
+}
+
+/// Valid IR the aarch64 backend refuses, with the reason it gives.
 #[test]
 #[cfg(target_arch = "aarch64")]
 fn rejected() {
