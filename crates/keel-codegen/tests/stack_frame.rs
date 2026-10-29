@@ -302,3 +302,31 @@ block0(v0: ptr, v1: ptr):
 }",
     );
 }
+
+#[test]
+fn aarch64_epilogue_resets_sp_only_when_the_frame_moved_it() {
+    let module = keel_ir::parse(
+        "decl @g(i64) -> i64
+func @plain(i32, i32) -> i32 cc(c) {
+block0(v0: i32, v1: i32):
+ v2 = iadd v0, v1
+ return v2
+}
+func @framed(i64) -> i64 cc(c) {
+    ss0 = stack_slot 8, align 8
+block0(v0: i64):
+ v1 = stack_addr ss0
+ store v0, v1
+ v2 = ptrtoint.i64 v1
+ v3 = call @g(v2)
+ return v3
+}",
+    )
+    .unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let asm = keel_codegen::compile(&module, Target::Aarch64AppleDarwin).unwrap();
+    let (plain, framed) = asm.split_once("_framed:").unwrap();
+    assert!(plain.contains("\tldp\tx29, x30, [sp], #16\n"), "{asm}");
+    assert!(!plain.contains("mov\tsp, x29"), "{asm}");
+    assert!(framed.contains("\tmov\tsp, x29\n"), "{asm}");
+}

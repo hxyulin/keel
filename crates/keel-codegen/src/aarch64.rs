@@ -4075,16 +4075,20 @@ impl<'a> FunctionCompiler<'a> {
         // Point `sp` at the last pair pushed and pop in reverse. Measuring
         // from x29 makes the size of the rest of the frame irrelevant.
         if pairs == 0 {
-            self.native(
-                Opcode::ADD_64_addsub_imm,
-                [
-                    (FieldId::Rd, 31),
-                    (FieldId::Rn, 29),
-                    (FieldId::imm12, 0),
-                    (FieldId::sh, 0),
-                ],
-                |out| out.write_str("mov\tsp, x29"),
-            );
+            // With no frame, `sp` still points at the frame record. Only a
+            // dynamic allocation moves it, and that saves x19, so pairs > 0.
+            if self.frame_size > 0 || self.has_inline_asm {
+                self.native(
+                    Opcode::ADD_64_addsub_imm,
+                    [
+                        (FieldId::Rd, 31),
+                        (FieldId::Rn, 29),
+                        (FieldId::imm12, 0),
+                        (FieldId::sh, 0),
+                    ],
+                    |out| out.write_str("mov\tsp, x29"),
+                );
+            }
         } else {
             self.native(
                 Opcode::SUB_64_addsub_imm,
