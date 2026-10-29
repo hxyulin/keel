@@ -9,7 +9,7 @@ of them.
 | Target | Entry point |
 | --- | --- |
 | x86-64 Linux | [Assembly, compiler and system APIs](x86_64/README.md) |
-| AArch64 | [Native toolchain and Linux support](aarch64/README.md) |
+| AArch64 | [Native toolchain and Linux support](aarch64/README.md), [assembler](aarch64/assembler.md) |
 | WebAssembly | [Freestanding wasm32 commands and limits](wasm/README.md) |
 
 ## Supported families

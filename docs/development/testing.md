@@ -116,27 +116,13 @@ The broad component run remains available without `--quick`, as does ordinary
 selection. Use broad qualification at merge boundaries; do not use it as the
 normal edit/test loop.
 
-The large string, D8 ABI and modified-immediate targets retain separate boundary
-and exhaustive tests. Naming an individual target with `--quick` runs its
-boundaries; full qualification retains the complete matrices. For modified
-immediates, all 256 values run on baseline/fast with normal registers and
-full/full with spills; boundary values run on all twelve configurations.
-Independent assembler comparisons and host-conditional execution remain intact.
-Existing ignored tests stay ignored. Guest qualification and external corpus
-campaigns remain separate.
-
-Test preparation reuses verified parsed modules and lazily optimized modules.
-The native `run` corpus prepares each fixture once per test: its parsed IR,
-optimized IR (including fixture-specific `opt-passes`) and C or C++ driver
-objects are shared across configurations. Every configuration still compiles,
-links and executes its own backend output. Preparations use separate temporary
-directories so tests selecting the same fixture can run concurrently.
-The `arm_division` and `adjacent_diff` matrices also compile their C oracle once
-and reuse its object across backend configurations.
-String port I/O checks literal bytes once per distinct instruction and object
-parity for every configuration. Boundary smoke tests do not write exhaustive
-export files. Add a target to the core list only for a shared backend contract
-with bounded cost, not to track feature completion.
+Large matrices keep separate boundary and exhaustive tests: naming a target
+with `--quick` runs its boundaries, and full qualification runs the complete
+matrix. Test preparation parses and optimizes each fixture once per test and
+shares it across configurations, while every configuration still compiles,
+links and runs its own output. The `arm_division` and `adjacent_diff` matrices also compile their C oracle once
+and reuse its object across backend configurations. Add a target to the core
+list only for a shared backend contract with bounded cost.
 
 ## Parallel execution
 
@@ -167,10 +153,9 @@ cargo test --profile test-fast -p keel-codegen --test x86_string_port_io
 cargo test --profile test-fast -p keel-codegen --test x86_string_port_io source_matrix_boundary_smoke
 ```
 
-Tests comparing external GNU assembly require `KEEL_GNU_AS` to point to the
-appropriate assembler. Tool availability and host architecture still determine
-which native checks can execute. Shared export directories should belong to one
-run; do not run separate Cargo or nextest invocations against the same exports.
+Tool availability and host architecture determine which native checks run.
+Shared export directories belong to one run; do not point separate Cargo or
+nextest invocations at the same exports.
 
 ## Timing and runner checks
 
@@ -183,16 +168,6 @@ The JSON report records selected packages, quick/full coverage, commands, elapse
 wall time and exit codes. It does not infer test counts. Build time is included;
 compare warm execution separately before attributing a change to test code.
 A full runner exit succeeds only when all commands, including doctests, succeed.
-
-## Component coverage
-
-The runner separates assembler, decoder, linker, IR, optimizer, frontend and
-codegen tests. Use component selections and `--consumers` for focused changes;
-run the full workspace before treating an integration as validated. Optional
-external-tool and platform tests remain subject to their prerequisites.
-
-Historical timings and per-checkpoint test counts are not maintained here.
-Record new measurements in ignored report directories.
 
 ## Suite runner checks
 
@@ -221,6 +196,19 @@ The Python suite checks exercise runner failure handling and fixture protocols;
 they are separate from native integration campaigns. Do not prune inexpensive
 protocol checks to compensate for repeated native compiler or linker invocations.
 
+
+## Test layout
+
+End-to-end tests need `clang` (and `clang++` for C++ drivers); ARM64 debug
+tests need `lldb`. Tests run on macOS arm64 and x86-64 Linux.
+
+| Tests | Location | Format |
+| --- | --- | --- |
+| IR golden | `crates/keel-ir/tests/golden/` | `BLESS=1 cargo test` rewrites `.out` files |
+| Optimizer passes | `crates/keel-opt/tests/golden/` | first line `; passes: a, b` |
+| Codegen programs | `crates/keel-codegen/tests/programs/` | `; expect: exit N` or `; expect: trap`; optional same-named `.c` driver; built in 8 allocator/selection configurations |
+| C programs | `crates/keel-c/tests/programs/` | output must match Clang, with and without `-O` |
+| Applications | `suite/c/` | see the [suite guide](../../suite/README.md) |
 
 ## Instruction metrics
 

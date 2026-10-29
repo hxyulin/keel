@@ -138,5 +138,5 @@ verification for integration boundaries. See [targeted and full tests](docs/deve
 for selections, qualification coverage and the optimized test profile.
 
 End-to-end tests need `clang` (and `clang++` for C++ drivers). See the
-[development section](docs/toolchain.md#development) for test layout.
+[test layout](docs/development/testing.md#test-layout).
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/).

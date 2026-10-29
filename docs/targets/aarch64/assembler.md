@@ -6,8 +6,7 @@ returns encoded text and symbols or a complete relocatable object, and
 `keel asm input.s -o output.o` writes the object. Link it with the
 [native Mach-O linker](../../linking/macho.md), the
 [AArch64 Linux path](README.md#assembly-archives-and-native-linking) or a
-system linker. This page describes the Mach-O assembler; the x86-64 assembler
-has its [own reference](../x86_64/assembler.md).
+system linker. The x86-64 assembler has its [own reference](../x86_64/assembler.md).
 
 ## Interfaces
 

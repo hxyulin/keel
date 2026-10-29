@@ -68,13 +68,13 @@ Each stage has its own effort setting:
 
 | Flag | Values | Default | With `-O` |
 | --- | --- | --- | --- |
-| `--opt-tier` | `none`, `fast`, `basic`, `full` | `none` | `full` |
+| `--opt-tier` | `none`, `fast`, `basic`, `balanced`, `size`, `full` | `none` | `full` |
 | `--isel-tier` | `baseline`, `trees`, `full` | `baseline` | `full` |
 | `--regalloc` | `fast`, `full` | `full` | `full` |
 | `-p` | explicit pass list, e.g. `gvn,dce` | | overrides the IR tier |
 
-- **IR tiers.** `fast` runs local and CFG cleanup plus simple reductions.
-  `basic` adds CFG simplification, instruction combining and DCE. `full` runs
+- **IR tiers.** `-O0` to `-O3` and `-Os` select None, Fast, Balanced, Full and
+  Size; see [optimization levels](compiler/optimization-levels.md). `full` runs
   rounds of inlining, GVN, [small-memory expansion](compiler/optimizer.md#small-memory) and GCM,
   then memory reuse, [stack promotion](compiler/optimizer.md#stack-promote) and bounded loop
   transforms.
@@ -85,7 +85,7 @@ Each stage has its own effort setting:
   lifetime holes and register affinities; `fast` uses contiguous intervals.
 - **CPU.** `--tune apple-m5` enables Apple M5 scheduling choices (with tree
   selection) without enabling ISA features. On x86-64, `--cpu-level
-  v1|v2|v3` sets the ISA level (default `legacy`) and `--target-features`
+  v1|v2|v3` sets the ISA level (default `v1`) and `--target-features`
   enables extras such as AES-NI and PCLMULQDQ.
 
 ```sh
@@ -110,7 +110,7 @@ variadics, atomics, TLS and DWARF, with ELF objects and archives. See
 
 **x86-64 Linux** (`--target x86_64-unknown-linux-gnu`) implements the System V
 ABI. Pick an explicit `--cpu-level` for deployment. The x86 backend rejects
-exception handling and C inline assembly. See [userspace ISA status](targets/README.md).
+exception handling. See [userspace ISA status](targets/README.md).
 
 ```sh
 keel cc --target x86_64-unknown-linux-gnu --cpu-level v2 --emit-object hello.c -o hello.o
@@ -162,7 +162,8 @@ keel archive -o libfoo.a foo.o bar.o
 
 - The [macOS linker](linking/macho.md) links arm64 executables against the
   SDK's `.tbd` interfaces and ad-hoc signs the output. Supports
-  `--dead-strip`, `-L`/`-l`, `--rpath`, `--debug-map` and `--dsym`.
+  `--dead-strip`, `-l`, `--sysroot`, `--debug-map` and `--dsym`; other options
+  need `--system`.
 - The [ELF linker](linking/elf.md) links fixed-address executables entered at
   `_start`, optionally against shared libraries. You supply startup code;
   for libc/CRT startup use `--system`.
@@ -192,53 +193,16 @@ let object = keel_asm::assemble_program_object(&program, keel_asm::TargetFeature
   [`tools/instruction_metrics.py`](../tools/instruction_metrics.py) report
   instruction sizes and modeled costs; see [instruction metrics](development/testing.md#instruction-metrics).
 
-## Language support at a glance
+## Language support
 
-The C frontend targets C11 with common GNU extensions. Highlights, each with
-its own reference:
-
-- [GNU vectors and integer modes](frontends/c/extensions.md), VLAs and complex
-  numbers, K&R definitions,
-  `__attribute__((cleanup))`
-- [Overflow builtins](frontends/c/extensions.md) up to 128 bits,
-  [memory builtins](frontends/c/extensions.md#explicit-memory-builtins), atomics including floating-point
-- [Function attributes](compiler/function-attributes.md), [weak symbols](frontends/c/extensions.md),
-  [constructors/destructors](frontends/c/extensions.md), [sections](frontends/c/extensions.md)
-- [AArch64 inline assembly](targets/aarch64/c-inline-asm.md) (checked subset)
-- [x86 intrinsics](targets/x86_64/intrinsics.md) and [SIMD](targets/README.md):
-  NEON, SSE, AVX/AVX2, FMA, F16C (no AVX-512)
-
-Many attributes are parsed but ignored; unsupported ones are diagnosed. Keel
-does not claim full GCC or Clang compatibility. See
-[C frontend coverage](frontends/c/README.md) for the full list.
-
-The [LLVM IR importer](../suite/README.md) and
+The C frontend targets C11 with common GNU extensions; see
+[C frontend](frontends/c/README.md) and [extensions](frontends/c/extensions.md).
+The [LLVM IR importer](frontends/llvm.md) and
 [Cranelift bridge](../crates/keel-cranelift/README.md) are diagnostic tools,
 not alternative production paths.
 
 ## Development
 
-```sh
-python3 tools/test.py codegen --quick                    # Core backend regressions
-python3 tools/test.py codegen --test stack_frame --quick # Changed feature target
-python3 tools/test.py assembler --quick                  # Assembler component
-cargo suite test lua                                    # Explicit application check
-```
-
-Use `python3 tools/test.py full` for merge-boundary workspace verification.
-Unfiltered codegen runs include broad qualification matrices; they are not the
-normal development check. See [test selection](development/testing.md).
-
-End-to-end tests need `clang` (and `clang++` for C++ drivers); ARM64 debug
-tests need `lldb`. Tests run on macOS arm64 and x86-64 Linux.
-
-| Tests | Location | Format |
-| --- | --- | --- |
-| IR golden | `crates/keel-ir/tests/golden/` | `BLESS=1 cargo test` rewrites `.out` files |
-| Optimizer passes | `crates/keel-opt/tests/golden/` | first line `; passes: a, b` |
-| Codegen programs | `crates/keel-codegen/tests/programs/` | `; expect: exit N` or `; expect: trap`; optional same-named `.c` driver; built in 8 allocator/selection configurations |
-| C programs | `crates/keel-c/tests/programs/` | output must match Clang, with and without `-O` |
-| Applications | `suite/c/` | see the [suite guide](../suite/README.md) |
-
+See [testing](development/testing.md) for test selection and the test layout.
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/),
 scoped by area: `feat(ir): ...`, `fix(codegen): ...`, `docs: ...`.

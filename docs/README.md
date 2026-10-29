@@ -26,14 +26,14 @@ completion ledgers or per-feature progress pages.
 | Area | Reference |
 | --- | --- |
 | Commands, architecture and tests | [Toolchain](toolchain.md), [design](compiler/design.md), [testing](development/testing.md) |
-| C | [Coverage](frontends/c/README.md), [extensions](frontends/c/extensions.md), [attributes](compiler/function-attributes.md), [AArch64 inline assembly](targets/aarch64/c-inline-asm.md) |
-| Optimization | [Levels](compiler/optimization-levels.md), [optimizer contracts](compiler/optimizer.md), [SIMD IR](compiler/simd-ir.md), [x86 code generation](targets/x86_64/codegen.md) |
+| C | [Frontend](frontends/c/README.md), [extensions](frontends/c/extensions.md), [attributes](compiler/function-attributes.md) |
+| Optimization | [Levels](compiler/optimization-levels.md), [optimizer contracts](compiler/optimizer.md), [SIMD IR](compiler/simd-ir.md) |
 | LLVM import | [Semantics](frontends/llvm.md), [frontend runner](../suite/README.md) |
-| Native linking | [ELF](linking/elf.md), [GNU scripts](linking/gnu-scripts.md), [macOS](linking/macho.md), [archives](linking/archives.md) |
-| Assembly and intrinsics | [x86 assembler](targets/x86_64/assembler.md), [AArch64 assembler](targets/aarch64/assembler.md), [GNU syntax](targets/x86_64/gnu-assembly-language.md), [intrinsic selection](targets/x86_64/intrinsics.md), [ISA status](targets/README.md) |
-| Target entry points | [All targets](targets/README.md), [x86-64](targets/x86_64/README.md), [AArch64](targets/aarch64/README.md), [WebAssembly](targets/wasm/README.md) |
+| Native linking | [ELF](linking/elf.md), [GNU scripts](linking/gnu-scripts.md), [macOS](linking/macho.md), [archives](linking/archives.md), [unwind](linking/unwind.md) |
+| x86-64 | [Entry point](targets/x86_64/README.md), [code generation](targets/x86_64/codegen.md), [assembler](targets/x86_64/assembler.md), [GNU syntax](targets/x86_64/gnu-assembly-language.md), [intrinsics](targets/x86_64/intrinsics.md), [inline assembly](targets/x86_64/c-inline-asm.md), [system](targets/x86_64/system/README.md), [F80](targets/x86_64/f80/README.md) |
+| AArch64 | [Entry point](targets/aarch64/README.md), [assembler and DWARF line tables](targets/aarch64/assembler.md), [inline assembly](targets/aarch64/c-inline-asm.md) |
+| Other targets | [All targets](targets/README.md), [WebAssembly](targets/wasm/README.md) |
 | Linux kernel | [Integration](integrations/linux-kernel.md), [fixture](../suite/integration/linux-kernel/README.md), [benchmarks](benchmarks/linux-kernel.md) |
-| Runtime and debug metadata | [Unwind](linking/unwind.md), [DWARF line tables](targets/aarch64/assembler.md#debug-line-tables) |
 | Benchmarks and workload validation | [Suite](../suite/README.md), [controlled timing](benchmarks/linux-timing.md) |
 
 Detailed safety contracts linked from implementation code remain separate where
