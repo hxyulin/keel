@@ -129,23 +129,18 @@ fn packed_lane_matrix_oracle_and_encoding_parity() {
                         file.section_by_name("__text").unwrap().data().unwrap()
                     );
                 }
+                // The typed and text objects are byte-identical, so one runs.
                 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
                 {
-                    for (route, bytes) in [
-                        ("direct", object),
-                        ("text", keel_asm::assemble_object(&text).unwrap()),
-                    ] {
-                        fs::write(dir.join("test.o"), bytes).unwrap();
-                        common::command(
-                            Command::new("clang")
-                                .arg("-O2")
-                                .arg(dir.join("oracle.o"))
-                                .arg(dir.join("test.o"))
-                                .arg("-o")
-                                .arg(dir.join(route)),
-                        );
-                        common::command(&mut Command::new(dir.join(route)));
-                    }
+                    fs::write(dir.join("test.o"), object).unwrap();
+                    common::command(
+                        Command::new("clang")
+                            .arg(dir.join("oracle.o"))
+                            .arg(dir.join("test.o"))
+                            .arg("-o")
+                            .arg(dir.join("test")),
+                    );
+                    common::command(&mut Command::new(dir.join("test")));
                 }
             }
         }
