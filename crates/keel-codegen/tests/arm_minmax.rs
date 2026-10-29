@@ -1,4 +1,8 @@
 //! Bounded I32x4 min/max: independent Clang encoding and four-lane runtime oracle.
+#[path = "common/native_oracle.rs"]
+mod native_oracle;
+use native_oracle::PreparedOracle;
+
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{Allocation, AllocationInput, AllocationTier, Loc, Pools, RegisterAllocator},
@@ -108,9 +112,36 @@ fn module(s: &str) -> keel_ir::Module {
     m
 }
 fn fixture(controlled: bool) -> (String, String, usize) {
-    fixture_mode(controlled, false)
+    fixture_mode(controlled, CompareMode::Pair)
 }
-fn fixture_mode(controlled: bool, zero: bool) -> (String, String, usize) {
+#[derive(Clone, Copy)]
+enum CompareMode {
+    Pair,
+    Zero,
+}
+
+fn compare_select(cc: &str, operands: [&str; 4], rev: bool, mode: CompareMode) -> String {
+    let [x, y, mask, result] = operands;
+    match mode {
+        CompareMode::Zero => {
+            let args = if rev {
+                format!("{x},{mask}")
+            } else {
+                format!("{mask},{x}")
+            };
+            format!(
+                "v20 = iconst.i32 0\n v21 = vsplat.i32x4 v20\n {mask} = vicmp.{cc} {x},v21\n {result} = vand {args}"
+            )
+        }
+        CompareMode::Pair => {
+            let (yes, no) = if rev { (y, x) } else { (x, y) };
+            format!("{mask} = vicmp.{cc} {x},{y}\n {result} = vselect {mask},{yes},{no}")
+        }
+    }
+}
+
+fn fixture_mode(controlled: bool, mode: CompareMode) -> (String, String, usize) {
+    let zero = matches!(mode, CompareMode::Zero);
     let mut ir = String::new();
     let mut c = String::from(
         "#include <stdint.h>\n#include <string.h>\n#include <stdio.h>\ntypedef uint32_t V __attribute__((vector_size(16)));\n",
@@ -145,18 +176,18 @@ fn fixture_mode(controlled: bool, zero: bool) -> (String, String, usize) {
                 &["live"][..]
             } {
                 let name = format!("mm_{cc}_{}_{layout}", u8::from(rev));
-                let (yes, no) = if rev { ("v1", "v0") } else { ("v0", "v1") };
+                let body = compare_select(cc, ["v0", "v1", "v2", "v3"], rev, mode);
                 if controlled {
                     ir += &format!(
-                        "func @{name}(i32x4,i32x4) -> i32x4 {{\nblock0(v0:i32x4,v1:i32x4):\n v2 = vicmp.{cc} v0,v1\n v3 = vselect v2,{yes},{no}\n return v3\n}}\n"
+                        "func @{name}(i32x4,i32x4) -> i32x4 {{\nblock0(v0:i32x4,v1:i32x4):\n {body}\n return v3\n}}\n"
                     );
                     c += &format!(
                         "extern V {name}(V,V);static void call_{name}(const uint32_t*a,const uint32_t*b,uint32_t*o){{V x,y,z;memcpy(&x,a,16);memcpy(&y,b,16);z={name}(x,y);memcpy(o,&z,16);}}\n"
                     );
                 } else {
-                    let (yes, no) = if rev { ("v4", "v3") } else { ("v3", "v4") };
+                    let body = compare_select(cc, ["v3", "v4", "v5", "v6"], rev, mode);
                     ir += &format!(
-                        "func @{name}(ptr,ptr,ptr) {{\nblock0(v0:ptr,v1:ptr,v2:ptr):\n v3 = load.i32x4 align 1 v0\n v4 = load.i32x4 align 1 v1\n v5 = vicmp.{cc} v3,v4\n v6 = vselect v5,{yes},{no}\n store align 1 v6,v2\n v7 = iconst.i64 16\n v8 = ptradd v2,v7\n store align 1 v3,v8\n v9 = iconst.i64 32\n v10 = ptradd v2,v9\n store align 1 v4,v10\n return\n}}\n"
+                        "func @{name}(ptr,ptr,ptr) {{\nblock0(v0:ptr,v1:ptr,v2:ptr):\n v3 = load.i32x4 align 1 v0\n v4 = load.i32x4 align 1 v1\n {body}\n store align 1 v6,v2\n v7 = iconst.i64 16\n v8 = ptradd v2,v7\n store align 1 v3,v8\n v9 = iconst.i64 32\n v10 = ptradd v2,v9\n store align 1 v4,v10\n return\n}}\n"
                     );
                     c += &format!(
                         "extern void {name}(const uint32_t*,const uint32_t*,uint32_t*);\n"
@@ -185,7 +216,11 @@ static int check(const char*name,void(*run)(const uint32_t*,const uint32_t*,uint
  for(unsigned i=0;i<81+4096;i++){
   uint32_t x[4],y[4],o[12]={0};
   for(unsigned l=0;l<4;l++){x[l]=i<81?edges[(i/9+l)%9]:rnd();y[l]=i<81?edges[(i%9+l)%9]:rnd();}
-  run(x,y,o);
+"#;
+    if zero {
+        c += "  for(unsigned l=0;l<4;l++)y[l]=0;\n";
+    }
+    c += r#"  run(x,y,o);
   for(unsigned l=0;l<4;l++){
    int less=sign?((int32_t)x[l]<(int32_t)y[l]):x[l]<y[l];
    uint32_t want=(less==minimum)?x[l]:y[l];
@@ -198,34 +233,9 @@ int main(void){
 "#;
     c += &calls;
     c += "return 0;}\n";
-    if zero {
-        for cc in ["slt", "sgt"] {
-            let (x, y, m, r) = if controlled {
-                ("v0", "v1", "v2", "v3")
-            } else {
-                ("v3", "v4", "v5", "v6")
-            };
-            ir = ir.replace(
-                &format!(" {m} = vicmp.{cc} {x},{y}"),
-                &format!(" v20 = iconst.i32 0\n v21 = vsplat.i32x4 v20\n {m} = vicmp.{cc} {x},v21"),
-            );
-            ir = ir.replace(
-                &format!("{r} = vselect {m},{x},{y}"),
-                &format!("{r} = vand {m},{x}"),
-            );
-            ir = ir.replace(
-                &format!("{r} = vselect {m},{y},{x}"),
-                &format!("{r} = vand {x},{m}"),
-            );
-        }
-        c = c.replace(
-            "  run(x,y,o);",
-            "  for(unsigned l=0;l<4;l++)y[l]=0;\n  run(x,y,o);",
-        );
-    }
     (ir, c, count)
 }
-fn oracle(stem: &str, ir: &str, c: &str, text: &str, obj: &[u8]) {
+fn oracle(stem: &str, ir: &str, c: &str, text: &str, obj: &[u8], prepared: &PreparedOracle) {
     let d = dir();
     for (ext, bytes) in [
         ("keel", ir.as_bytes()),
@@ -235,18 +245,7 @@ fn oracle(stem: &str, ir: &str, c: &str, text: &str, obj: &[u8]) {
     ] {
         fs::write(d.join(format!("{stem}.{ext}")), bytes).unwrap();
     }
-    if cfg!(all(target_arch = "aarch64", target_os = "macos")) {
-        let exe = d.join(format!("{stem}.native"));
-        command(
-            Command::new("clang")
-                .args(["-O2", "-Wall", "-Wextra", "-Werror"])
-                .arg(d.join(format!("{stem}.c")))
-                .arg(d.join(format!("{stem}.o")))
-                .arg("-o")
-                .arg(&exe),
-        );
-        command(&mut Command::new(exe));
-    }
+    prepared.run(obj, stem);
 }
 fn recipes(s: &str) -> usize {
     ["smin\t", "smax\t", "umin\t", "umax\t"]
@@ -258,7 +257,14 @@ fn recipes(s: &str) -> usize {
 fn independent_clang_native_encoding() {
     use object::{Object, ObjectSection};
     for zero in [false, true] {
-        let (ir, _, n) = fixture_mode(true, zero);
+        let (ir, _, n) = fixture_mode(
+            true,
+            if zero {
+                CompareMode::Zero
+            } else {
+                CompareMode::Pair
+            },
+        );
         let m = module(&ir);
         let (text, p, _) = compile(&m, &SelectionTier::Baseline, &Controlled, false);
         assert_eq!(recipes(&text), n);
@@ -288,6 +294,7 @@ fn independent_clang_native_encoding() {
 fn all_four_lanes_aliases_spills_live_inputs_and_tiers() {
     for controlled in [true, false] {
         let (ir, c, n) = fixture(controlled);
+        let prepared = PreparedOracle::new("minmax", &c, &["-O2", "-Wall", "-Wextra", "-Werror"]);
         let m = module(&ir);
         for (si, s) in [
             SelectionTier::Baseline,
@@ -319,6 +326,7 @@ fn all_four_lanes_aliases_spills_live_inputs_and_tiers() {
                         &c,
                         &text,
                         &obj,
+                        &prepared,
                     );
                 }
             }
@@ -370,7 +378,16 @@ impl keel_codegen::InstructionSelector for Constrained {
 #[test]
 fn constraints_and_debug_keep_normal_fallback_correct() {
     for zero in [false, true] {
-        let (ir, c, _) = fixture_mode(false, zero);
+        let (ir, c, _) = fixture_mode(
+            false,
+            if zero {
+                CompareMode::Zero
+            } else {
+                CompareMode::Pair
+            },
+        );
+        let prepared =
+            PreparedOracle::new("minmax-debug", &c, &["-O2", "-Wall", "-Wextra", "-Werror"]);
         let mut m = module(&ir);
         let (text, _, obj) = compile(&m, &Constrained, &AllocationTier::Full, false);
         assert_eq!(recipes(&text), 0);
@@ -381,6 +398,7 @@ fn constraints_and_debug_keep_normal_fallback_correct() {
             &c,
             &text,
             &obj,
+            &prepared,
         );
         m.files.push("minmax.c".into());
         for f in &mut m.functions {
@@ -402,7 +420,14 @@ fn constraints_and_debug_keep_normal_fallback_correct() {
         assert!(text.contains(if zero { "and\tv" } else { "bsl\t" }));
         assert!(text.contains(".loc\t1 3 1"));
         assert!(text.contains(".loc\t1 4 1"));
-        oracle(&format!("debug-{}", u8::from(zero)), &ir, &c, &text, &obj);
+        oracle(
+            &format!("debug-{}", u8::from(zero)),
+            &ir,
+            &c,
+            &text,
+            &obj,
+            &prepared,
+        );
     }
 }
 #[test]
@@ -412,13 +437,14 @@ fn arbitrary_mask_select_preserves_lane_truth() {
 extern void arbitrary(const uint32_t*,const uint32_t*,const uint32_t*,uint32_t*);
 int main(void){uint32_t m[4]={0,0x55555555,0x80000001,0xffffffff},a[4]={0xffffffff,0xdeadbeef,0x76543210,0},b[4]={1,0x12345678,0xfedcba98,0xffffffff},o[4]; arbitrary(m,a,b,o);for(unsigned i=0;i<4;i++)if(o[i]!=(m[i]?a[i]:b[i]))return 1;return 0;}
 "#;
+    let prepared = PreparedOracle::new(
+        "minmax-fallback",
+        c,
+        &["-O2", "-Wall", "-Wextra", "-Werror"],
+    );
+    let m = module(ir);
     for spill in [false, true] {
-        let (text, _, obj) = compile(
-            &module(ir),
-            &SelectionTier::Full,
-            &AllocationTier::Full,
-            spill,
-        );
+        let (text, _, obj) = compile(&m, &SelectionTier::Full, &AllocationTier::Full, spill);
         assert_eq!(recipes(&text), 0);
         assert!(text.contains("bsl\t"));
         oracle(
@@ -427,6 +453,7 @@ int main(void){uint32_t m[4]={0,0x55555555,0x80000001,0xffffffff},a[4]={0xffffff
             c,
             &text,
             &obj,
+            &prepared,
         );
     }
 }
@@ -434,7 +461,8 @@ int main(void){uint32_t m[4]={0,0x55555555,0x80000001,0xffffffff},a[4]={0xffffff
 #[test]
 fn zero_filters_all_lanes_native_aliases_spills_and_tiers() {
     for controlled in [true, false] {
-        let (ir, c, n) = fixture_mode(controlled, true);
+        let (ir, c, n) = fixture_mode(controlled, CompareMode::Zero);
+        let prepared = PreparedOracle::new("minmax", &c, &["-O2", "-Wall", "-Wextra", "-Werror"]);
         let m = module(&ir);
         for (si, s) in [
             SelectionTier::Baseline,
@@ -467,6 +495,7 @@ fn zero_filters_all_lanes_native_aliases_spills_and_tiers() {
                         &c,
                         &text,
                         &obj,
+                        &prepared,
                     );
                 }
             }
@@ -509,13 +538,14 @@ int main(void){
  return 0;
 }
 "#;
+    let prepared = PreparedOracle::new(
+        "minmax-fallback",
+        c,
+        &["-O2", "-Wall", "-Wextra", "-Werror"],
+    );
+    let m = module(&ir);
     for spill in [false, true] {
-        let (text, _, obj) = compile(
-            &module(&ir),
-            &SelectionTier::Full,
-            &AllocationTier::Full,
-            spill,
-        );
+        let (text, _, obj) = compile(&m, &SelectionTier::Full, &AllocationTier::Full, spill);
         assert_eq!(recipes(&text), 0);
         assert!(text.contains("cmgt\t"));
         assert!(text.contains("bsl\t"));
@@ -525,6 +555,7 @@ int main(void){
             c,
             &text,
             &obj,
+            &prepared,
         );
     }
 }

@@ -239,6 +239,37 @@ pub fn arg_locs_for(args: &[ArgKind], named: usize, linux: bool) -> (Vec<ArgLoc>
     (locs, stack)
 }
 
+/// Call-site placements shared by frame reservation and argument emission.
+pub(crate) struct CallLayout {
+    pub locations: Vec<ArgLoc>,
+    pub copy_offsets: Vec<Option<u64>>,
+    pub stack_bytes: u32,
+    pub copy_bytes: u64,
+}
+
+impl CallLayout {
+    pub fn new(args: &[ArgKind<'_>], named: usize, linux: bool) -> Self {
+        let (locations, stack_bytes) = arg_locs_for(args, named, linux);
+        let mut copy_bytes = 0u64;
+        // Scalar calls need no copy-offset storage.
+        let mut copy_offsets = Vec::new();
+        for (i, (loc, kind)) in locations.iter().zip(args).enumerate() {
+            if let (ArgLoc::Copy(_), ArgKind::ByVal(layout)) = (loc, kind) {
+                copy_offsets.resize(args.len(), None);
+                copy_bytes = copy_bytes.next_multiple_of(16);
+                copy_offsets[i] = Some(copy_bytes);
+                copy_bytes += layout.size();
+            }
+        }
+        Self {
+            locations,
+            copy_offsets,
+            stack_bytes,
+            copy_bytes,
+        }
+    }
+}
+
 pub fn arg_locs_into_for<'a>(
     args: impl IntoIterator<Item = ArgKind<'a>>,
     named: usize,

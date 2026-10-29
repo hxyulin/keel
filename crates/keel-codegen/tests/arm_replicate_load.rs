@@ -1,4 +1,8 @@
 //! Exact-width NEON load/splat covers, including native guards and all spills.
+#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+#[path = "common/native_oracle.rs"]
+mod native_oracle;
+
 use keel_asm::{TargetFeatures, assemble_object, assemble_program_object};
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
@@ -78,14 +82,18 @@ block0(v0: ptr,v1: ptr,v2: ptr):
     src
 }
 
-fn compile(
-    src: &str,
+fn parse(src: &str) -> keel_ir::Module {
+    let module = keel_ir::parse(src).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    module
+}
+
+fn compile_module(
+    module: &keel_ir::Module,
     selection: SelectionTier,
     allocation: AllocationTier,
     spilled: bool,
 ) -> (String, Vec<u8>) {
-    let module = keel_ir::parse(src).unwrap();
-    keel_ir::verify_module(&module).unwrap();
     let pipeline = CodegenPipeline {
         selector: &selection,
         allocator: &allocation,
@@ -95,9 +103,9 @@ fn compile(
     } else {
         &keel_codegen::aarch64::REGISTERS
     };
-    let text = keel_codegen::aarch64::compile_with_pipeline(&module, pools, &pipeline).unwrap();
+    let text = keel_codegen::aarch64::compile_with_pipeline(module, pools, &pipeline).unwrap();
     let program =
-        keel_codegen::aarch64::compile_program_with_pipeline(&module, pools, &pipeline).unwrap();
+        keel_codegen::aarch64::compile_program_with_pipeline(module, pools, &pipeline).unwrap();
     let object = assemble_program_object(&program, TargetFeatures::default()).unwrap();
     assert_eq!(assemble_object(&text).unwrap(), object);
     (text, object)
@@ -105,41 +113,41 @@ fn compile(
 
 #[test]
 fn exact_replicates_and_conservative_rejections() {
+    let source = source();
+    let module = parse(&source);
+    let shared_widen = parse(&source.replace(" store v8,v1", " store v6,v2\n store v8,v1"));
+    let simple = source.split("func @swiden_low").next().unwrap();
+    let volatile = parse(
+        &simple
+            .replace("load.i8 ", "load.i8 volatile ")
+            .replace("load.i16 ", "load.i16 volatile ")
+            .replace("load.i32 ", "load.i32 volatile ")
+            .replace("load.i64 ", "load.i64 volatile "),
+    );
+    let shared = parse(&simple.replace(" store v3,v1", " store v2,v1\n store v3,v1"));
+    let barrier = parse(&simple.replace(" v3 = vsplat", " store v1,v1\n v3 = vsplat"));
     for selection in [SelectionTier::Baseline, SelectionTier::Full] {
         for allocation in [AllocationTier::Fast, AllocationTier::Full] {
             for spilled in [false, true] {
-                let (text, _) = compile(&source(), selection, allocation, spilled);
+                let (text, _) = compile_module(&module, selection, allocation, spilled);
                 assert_eq!(text.matches("ld1r\t").count(), 28);
                 assert_eq!(text.matches("saddw\t").count(), 6);
                 assert_eq!(text.matches("uaddw\t").count(), 6);
-                let shared_widen = source().replace(" store v8,v1", " store v6,v2\n store v8,v1");
-                let shared_text = compile(&shared_widen, selection, allocation, spilled).0;
+                let shared_text = compile_module(&shared_widen, selection, allocation, spilled).0;
                 assert!(!shared_text.contains("saddw\t") && !shared_text.contains("uaddw\t"));
-                let simple = source()
-                    .split("func @swiden_low")
-                    .next()
-                    .unwrap()
-                    .to_owned();
-                let volatile = simple
-                    .replace("load.i8 ", "load.i8 volatile ")
-                    .replace("load.i16 ", "load.i16 volatile ")
-                    .replace("load.i32 ", "load.i32 volatile ")
-                    .replace("load.i64 ", "load.i64 volatile ");
                 assert!(
-                    !compile(&volatile, selection, allocation, spilled)
+                    !compile_module(&volatile, selection, allocation, spilled)
                         .0
                         .contains("ld1r\t")
                 );
-                let shared = simple.replace(" store v3,v1", " store v2,v1\n store v3,v1");
                 assert!(
-                    !compile(&shared, selection, allocation, spilled)
+                    !compile_module(&shared, selection, allocation, spilled)
                         .0
                         .contains("ld1r\t")
                 );
-                let barrier = simple.replace(" v3 = vsplat", " store v1,v1\n v3 = vsplat");
                 // A shared source and intervening memory operation must not move.
                 assert!(
-                    !compile(&barrier, selection, allocation, spilled)
+                    !compile_module(&barrier, selection, allocation, spilled)
                         .0
                         .contains("ld1r\t")
                 );
@@ -151,7 +159,7 @@ fn exact_replicates_and_conservative_rejections() {
 #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 #[test]
 fn native_exact_guarded_reads_aliases_and_spilled_values() {
-    use std::{fs, process::Command};
+    use native_oracle::PreparedOracle;
     let mut harness = String::from(
         "#include <stdint.h>\n#include <string.h>\n#include <sys/mman.h>\n#include <unistd.h>\n#include <stdio.h>\n",
     );
@@ -211,36 +219,17 @@ fn native_exact_guarded_reads_aliases_and_spilled_values() {
     harness += &format!(
         "int main(void){{ size_t n=sysconf(_SC_PAGESIZE); unsigned char *p=mmap(0,2*n,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0); if(p==MAP_FAILED||mprotect(p+n,n,PROT_NONE))return 5; unsigned char *end=p+n; {checks} puts(\"exact replicate guard/alias/spill oracle passed\"); return 0; }}"
     );
-    let dir = std::env::temp_dir().join(format!("keel-replicate-{}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join("oracle.c"), harness).unwrap();
+    let oracle = PreparedOracle::new("replicate", &harness, &["-O2"]);
+    let module = parse(&source());
     for selection in [SelectionTier::Baseline, SelectionTier::Full] {
         for allocation in [AllocationTier::Fast, AllocationTier::Full] {
             for spilled in [false, true] {
-                let (_, object) = compile(&source(), selection, allocation, spilled);
-                fs::write(dir.join("test.o"), object).unwrap();
-                let build = Command::new("clang")
-                    .arg("-O2")
-                    .arg(dir.join("oracle.c"))
-                    .arg(dir.join("test.o"))
-                    .arg("-o")
-                    .arg(dir.join("test"))
-                    .output()
-                    .unwrap();
-                assert!(
-                    build.status.success(),
-                    "{}",
-                    String::from_utf8_lossy(&build.stderr)
-                );
-                let run = Command::new(dir.join("test")).output().unwrap();
-                assert!(
-                    run.status.success(),
-                    "{selection:?}/{allocation:?}/spilled={spilled}: {:?} {}",
-                    run.status,
-                    String::from_utf8_lossy(&run.stderr)
+                let (_, object) = compile_module(&module, selection, allocation, spilled);
+                oracle.run(
+                    &object,
+                    &format!("{selection:?}/{allocation:?}/spilled={spilled}"),
                 );
             }
         }
     }
-    fs::remove_dir_all(dir).unwrap();
 }

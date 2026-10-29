@@ -1,4 +1,8 @@
 //! SIMD asm operands retain their full width through staging and spills.
+#[path = "common/native_oracle.rs"]
+mod native_oracle;
+use native_oracle::PreparedOracle;
+
 use keel_asm::{TargetFeatures, assemble_object, assemble_program_object};
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
@@ -73,8 +77,21 @@ fn compile(
     allocation: AllocationTier,
     spilled: bool,
 ) -> (String, Vec<u8>) {
+    compile_module(&parse(source), selection, allocation, spilled)
+}
+
+fn parse(source: &str) -> keel_ir::Module {
     let module = keel_ir::parse(source).unwrap();
     keel_ir::verify_module(&module).unwrap();
+    module
+}
+
+fn compile_module(
+    module: &keel_ir::Module,
+    selection: SelectionTier,
+    allocation: AllocationTier,
+    spilled: bool,
+) -> (String, Vec<u8>) {
     let pipeline = CodegenPipeline {
         selector: &selection,
         allocator: &allocation,
@@ -84,9 +101,9 @@ fn compile(
     } else {
         &keel_codegen::aarch64::REGISTERS
     };
-    let text = keel_codegen::aarch64::compile_with_pipeline(&module, pools, &pipeline).unwrap();
+    let text = keel_codegen::aarch64::compile_with_pipeline(module, pools, &pipeline).unwrap();
     let program =
-        keel_codegen::aarch64::compile_program_with_pipeline(&module, pools, &pipeline).unwrap();
+        keel_codegen::aarch64::compile_program_with_pipeline(module, pools, &pipeline).unwrap();
     let object = assemble_program_object(&program, TargetFeatures::default()).unwrap();
     assert_eq!(assemble_object(&text).unwrap(), object);
     (text, object)
@@ -101,29 +118,20 @@ fn vector_operands_assemble_and_execute_without_losing_high_lanes() {
     keel_opt::optimize(&mut module).unwrap();
     let optimized = module.to_string();
     assert_eq!(optimized.matches("asm ").count(), 9);
+    let module = parse(&(optimized + &large_spills()));
+    let oracle = PreparedOracle::new("vector-asm", HARNESS, &["-O2"]);
     for selection in [SelectionTier::Baseline, SelectionTier::Full] {
         for spilled in [false, true] {
-            let (text, object) = compile(
-                &(optimized.clone() + &large_spills()),
-                selection,
-                AllocationTier::Full,
-                spilled,
-            );
+            let (text, object) = compile_module(&module, selection, AllocationTier::Full, spilled);
             assert!(text.contains("/*q0*/"), "{text}");
             assert!(text.contains("/*v0*/"), "{text}");
             assert!(text.contains("/*unused v0*/"), "{text}");
-            run_native(&object, selection, spilled);
+            oracle.run(&object, &format!("{selection:?}/spilled={spilled}"));
         }
     }
 }
 
-#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
-fn run_native(object: &[u8], selection: SelectionTier, spilled: bool) {
-    use std::{fs, process::Command};
-    let dir = std::env::temp_dir().join(format!("keel-vector-asm-{}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join("test.o"), object).unwrap();
-    fs::write(dir.join("oracle.c"), r#"
+const HARNESS: &str = r#"
 #include <stdint.h>
 #include <string.h>
 #define DECL(n) extern void n(const void*,void*,void*);
@@ -156,31 +164,7 @@ int main(void) {
  }
  return 0;
 }
-"#).unwrap();
-    let build = Command::new("clang")
-        .arg("-O2")
-        .arg(dir.join("oracle.c"))
-        .arg(dir.join("test.o"))
-        .arg("-o")
-        .arg(dir.join("test"))
-        .output()
-        .unwrap();
-    assert!(
-        build.status.success(),
-        "{}",
-        String::from_utf8_lossy(&build.stderr)
-    );
-    let run = Command::new(dir.join("test")).output().unwrap();
-    assert!(
-        run.status.success(),
-        "{selection:?}/spilled={spilled}: {:?}",
-        run.status
-    );
-    fs::remove_dir_all(dir).unwrap();
-}
-
-#[cfg(not(all(target_arch = "aarch64", target_os = "macos")))]
-fn run_native(_: &[u8], _: SelectionTier, _: bool) {}
+"#;
 
 #[test]
 fn simd_modifier_rejects_general_registers_and_keeps_scalar_support() {

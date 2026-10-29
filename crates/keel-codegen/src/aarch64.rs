@@ -846,6 +846,8 @@ struct FunctionCompiler<'a> {
     /// Inline assembly has no declared flag inputs. Preserve the old NZCV
     /// definitions throughout such functions, including across block edges.
     has_inline_asm: bool,
+    asm_plans: HashMap<Inst, AsmPlan>,
+    call_layouts: HashMap<Inst, abi::CallLayout>,
     /// Offset from `sp` of the area where calls put copies of big structs
     /// passed by value.
     copy_base: usize,
@@ -892,8 +894,6 @@ struct FunctionCompiler<'a> {
     /// The moves of a call's arguments or an edge's block arguments, kept
     /// between parallel copies rather than allocated for each.
     copies: Vec<(Loc, Loc)>,
-    /// Where a call's arguments go, kept between calls likewise.
-    arg_places: Vec<ArgLoc>,
 }
 
 impl<'a> FunctionCompiler<'a> {
@@ -1080,6 +1080,7 @@ impl<'a> FunctionCompiler<'a> {
         // arguments, copies of big structs passed by value, and a slot for
         // an `sret` address.
         let (mut outgoing, mut copies, mut needs_sret_save) = (0, 0u64, false);
+        let mut call_layouts = HashMap::default();
         for (_, inst) in func.layout_insts().filter(|_| present.call) {
             let (args, params) = match func.inst_data(inst) {
                 InstData::Call { func: callee, args }
@@ -1108,19 +1109,14 @@ impl<'a> FunctionCompiler<'a> {
                 continue;
             }
             let kinds = arg_kinds(func, params, args);
-            let (locs, stack) = abi::arg_locs_for(&kinds, params.len(), linux);
-            outgoing = outgoing.max(stack);
-            let mut bytes: u64 = 0;
-            for (loc, kind) in locs.iter().zip(&kinds) {
-                match (loc, kind) {
-                    (ArgLoc::Copy(_), ArgKind::ByVal(layout)) => {
-                        bytes = bytes.next_multiple_of(16) + layout.size();
-                    }
-                    (ArgLoc::SretRegs(_), _) => needs_sret_save = true,
-                    _ => {}
-                }
-            }
-            copies = copies.max(bytes);
+            let layout = abi::CallLayout::new(&kinds, params.len(), linux);
+            outgoing = outgoing.max(layout.stack_bytes);
+            copies = copies.max(layout.copy_bytes);
+            needs_sret_save |= layout
+                .locations
+                .iter()
+                .any(|loc| matches!(loc, ArgLoc::SretRegs(_)));
+            call_layouts.insert(inst, layout);
         }
         let copy_base = (outgoing as usize).next_multiple_of(16);
         let mut offset = copy_base + copies as usize;
@@ -1166,6 +1162,7 @@ impl<'a> FunctionCompiler<'a> {
         // the assembly.
         let (mut asm_saved, mut asm_float_saved) = (Vec::new(), Vec::new());
         let mut has_inline_asm = false;
+        let mut asm_plans = HashMap::default();
         for (_, inst) in func.layout_insts().filter(|_| present.inline_asm) {
             let InstData::InlineAsm { asm, args } = func.inst_data(inst) else {
                 continue;
@@ -1179,8 +1176,7 @@ impl<'a> FunctionCompiler<'a> {
                     return Err(at("different-width asm ties require the x86 backend".into()));
                 }
             }
-            let regs = asm_regs(func, asm, args).map_err(at)?;
-            asm_text(func, asm, args, &regs).map_err(at)?;
+            asm_plans.insert(inst, AsmPlan::new(func, asm, args).map_err(at)?);
             for clobber in &asm.clobbers {
                 let AsmClobber::Reg(r) = *clobber else {
                     continue;
@@ -1452,6 +1448,8 @@ impl<'a> FunctionCompiler<'a> {
             folded_values,
             fused_compares,
             has_inline_asm,
+            asm_plans,
+            call_layouts,
             selection,
             replicate_loads,
             packed_low_loads,
@@ -1487,7 +1485,6 @@ impl<'a> FunctionCompiler<'a> {
             scope: None,
             scope_marks: Vec::new(),
             copies: Vec::new(),
-            arg_places: Vec::new(),
         })
     }
 
@@ -2879,39 +2876,15 @@ impl<'a> FunctionCompiler<'a> {
                 }
             },
             InstData::X86RflagsRegion { .. } => unreachable!("rejected x86 FLAGS region"),
-            InstData::InlineAsm { ref asm, ref args } => {
-                let regs = asm_regs(func, asm, args).expect("checked when the compiler was made");
-                let n_out = asm.outputs.len();
-                // Vector spill addresses use x17. Finish them before staging
-                // GPR inputs, and capture GPR outputs before vector writeback.
-                for float in [true, false] {
-                    for (i, &arg) in args.iter().enumerate() {
-                        if let Some(r) = regs[n_out + i]
-                            && r.float == float
-                        {
-                            let width = |v| func.value_type(func.resolve(v)).bytes().unwrap_or(8);
-                            // Equivalent initializers share one copy. The widest
-                            // owns the register, including mixed-width GPR views.
-                            let shadowed = args.iter().enumerate().any(|(j, &other)| {
-                                regs[n_out + j] == Some(r)
-                                    && (width(other) > width(arg)
-                                        || (width(other) == width(arg) && j < i))
-                            });
-                            if !shadowed {
-                                self.emit_move(asm_loc(r), self.loc(arg));
-                            }
-                        }
-                    }
+            InstData::InlineAsm { ref args, .. } => {
+                let plan = self.asm_plans.remove(&inst).expect("asm was planned");
+                for (i, r) in plan.initializers {
+                    self.emit_move(asm_loc(r), self.loc(args[i]));
                 }
-                let text = asm_text(func, asm, args, &regs).expect("checked");
-                self.out.inline_assembly(&text);
-                for float in [false, true] {
-                    for (k, &output) in func.inst_results(inst).iter().enumerate() {
-                        if let (Some(dst), Some(r)) = (self.defined(output), regs[k])
-                            && r.float == float
-                        {
-                            self.emit_move(dst, asm_loc(r));
-                        }
+                self.out.inline_assembly(&plan.text);
+                for (k, r) in plan.outputs {
+                    if let Some(dst) = self.defined(func.inst_results(inst)[k]) {
+                        self.emit_move(dst, asm_loc(r));
                     }
                 }
             }
@@ -2966,9 +2939,12 @@ impl<'a> FunctionCompiler<'a> {
     ) -> Option<RegisterSret<'s>> {
         let func = self.func;
         let kind = |i: usize, arg: Value| arg_kind(func, params, i, arg);
-        let mut locs = std::mem::take(&mut self.arg_places);
-        let kinds = args.iter().enumerate().map(|(i, &arg)| kind(i, arg));
-        abi::arg_locs_into_for(kinds, params.len(), self.linux, &mut locs);
+        let layout = self
+            .current_inst
+            .and_then(|inst| self.call_layouts.remove(&inst))
+            .unwrap_or_else(|| {
+                abi::CallLayout::new(&arg_kinds(func, params, args), params.len(), self.linux)
+            });
         let mut moves = std::mem::take(&mut self.copies);
         let mut extend = Vec::new();
         // Registers filled after the moves.
@@ -2978,9 +2954,9 @@ impl<'a> FunctionCompiler<'a> {
             Struct(Vec<Loc>, &'l Layout, Value),
         }
         let mut late = Vec::new();
-        let mut copied: u64 = 0;
         let mut sret = None;
-        for (i, (&arg, loc)) in args.iter().zip(locs.drain(..)).enumerate() {
+        let copy_offsets = layout.copy_offsets;
+        for (i, (&arg, loc)) in args.iter().zip(layout.locations).enumerate() {
             let layout = match kind(i, arg) {
                 ArgKind::ByVal(layout) | ArgKind::Sret(layout) => Some(layout),
                 ArgKind::Value(_) => None,
@@ -3008,9 +2984,7 @@ impl<'a> FunctionCompiler<'a> {
                 }
                 ArgLoc::Copy(slot) => {
                     let size = layout.expect("a struct").size();
-                    copied = copied.next_multiple_of(16);
-                    let at = self.copy_base + copied as usize;
-                    copied += size;
+                    let at = self.copy_base + copy_offsets[i].expect("copy placement") as usize;
                     let src = self.use_reg(arg, S0);
                     self.copy_bytes(self.base, at, src, size);
                     match slot {
@@ -3044,7 +3018,6 @@ impl<'a> FunctionCompiler<'a> {
                 }
             }
         }
-        self.arg_places = locs;
         self.parallel_copy(&moves);
         moves.clear();
         self.copies = moves;
@@ -6023,6 +5996,48 @@ fn asm_regs(
         }
     }
     Ok(regs)
+}
+
+/// Operand copies and rendered text validated before allocation/emission.
+struct AsmPlan {
+    initializers: Vec<(usize, PhysReg)>,
+    outputs: Vec<(usize, PhysReg)>,
+    text: String,
+}
+
+impl AsmPlan {
+    fn new(func: &Function, asm: &InlineAsm, args: &[Value]) -> Result<Self, String> {
+        let regs = asm_regs(func, asm, args)?;
+        let text = asm_text(func, asm, args, &regs)?;
+        let n_out = asm.outputs.len();
+        let width = |v| func.value_type(func.resolve(v)).bytes().unwrap_or(8);
+        let mut initializers: Vec<(usize, PhysReg)> = Vec::new();
+        for (i, &arg) in args.iter().enumerate() {
+            let Some(r) = regs[n_out + i] else { continue };
+            if let Some((previous, _)) = initializers.iter_mut().find(|(_, reg)| *reg == r) {
+                // The widest equivalent initializer owns the register.
+                if width(arg) > width(args[*previous]) {
+                    *previous = i;
+                }
+            } else {
+                initializers.push((i, r));
+            }
+        }
+        // Vector spill addresses use x17. Stage SIMD inputs first and capture
+        // GPR outputs first, before vector copies can overwrite that scratch.
+        initializers.sort_by_key(|(_, r)| !r.float);
+        let mut outputs: Vec<_> = regs[..n_out]
+            .iter()
+            .enumerate()
+            .filter_map(|(i, r)| r.map(|r| (i, r)))
+            .collect();
+        outputs.sort_by_key(|(_, r)| r.float);
+        Ok(Self {
+            initializers,
+            outputs,
+            text,
+        })
+    }
 }
 
 fn asm_loc(r: PhysReg) -> Loc {

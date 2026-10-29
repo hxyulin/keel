@@ -158,16 +158,17 @@ fn invalid_or_unsupported_source_is_diagnosed() {
 }
 
 #[test]
-fn backend_restrictions_remain_errors() {
+fn backend_operand_contracts_are_enforced() {
+    // Equivalent matching initializers share one physical input register.
+    for source in [
+        "void f(int x){asm(\"\" : \"+r\"(x) : \"0\"(x));}",
+        "void f(int x){asm(\"\" : \"=r\"(x) : \"0\"(x), \"0\"(x));}",
+    ] {
+        let module = compile(source, false);
+        keel_ir::verify_module(&module).unwrap();
+        keel_codegen::compile(&module, Target::Aarch64AppleDarwin).unwrap();
+    }
     for (source, expected) in [
-        (
-            "void f(int x){asm(\"\" : \"+r\"(x) : \"0\"(x));}",
-            "named by two inputs",
-        ),
-        (
-            "void f(int x){asm(\"\" : \"=r\"(x) : \"0\"(x), \"0\"(x));}",
-            "named by two inputs",
-        ),
         (
             "void f(int n){int a[n]; asm(\"\" ::: \"x19\");}",
             "base pointer",
