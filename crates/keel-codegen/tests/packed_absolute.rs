@@ -1,9 +1,14 @@
-//! Exact wrapping I64x2 absolute value: native ARM and exportable SSE2 oracles.
+//! Exact wrapping I64x2 absolute value: a native ARM oracle, and clang's
+//! assembler as an independent check of both targets' instruction bytes.
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{Allocation, AllocationInput, AllocationTier, Loc, Pools, RegisterAllocator},
 };
-use std::{fs, path::PathBuf, process::Command};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -167,103 +172,88 @@ fn command(c: &mut Command) {
     let out = c.output().unwrap();
     assert!(out.status.success(), "{c:?}: {out:?}");
 }
-fn oracle(arm: bool, stem: &str, source: &str, c: &str, asm: &str, obj: &[u8]) {
-    let root = std::env::var_os("KEEL_PACKED_ABS_EVIDENCE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::temp_dir().join(format!("keel-packed-abs-{}", std::process::id()))
-        });
-    let dir = root.join(if arm { "arm" } else { "x86" });
-    fs::create_dir_all(&dir).unwrap();
-    for (ext, bytes) in [
-        ("keel", source.as_bytes()),
-        ("c", c.as_bytes()),
-        ("s", asm.as_bytes()),
-        ("o", obj),
-    ] {
-        fs::write(dir.join(format!("{stem}.{ext}")), bytes).unwrap();
+/// One fixture's C harness, built or checked once per target.
+struct Oracle {
+    arm: bool,
+    dir: PathBuf,
+    /// The compiled harness, when this host runs the target's objects.
+    harness: Option<PathBuf>,
+}
+
+impl Oracle {
+    fn new(arm: bool, name: &str, c: &str) -> Self {
+        let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+            .join("packed-absolute")
+            .join(format!("{name}-{}", if arm { "arm" } else { "x86" }));
+        fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("harness.c");
+        fs::write(&source, c).unwrap();
+        let harness = if arm && cfg!(all(target_arch = "aarch64", target_os = "macos")) {
+            let object = dir.join("harness.o");
+            command(
+                Command::new("clang")
+                    .args(["-O2", "-Wall", "-Wextra", "-Werror", "-c"])
+                    .arg(&source)
+                    .arg("-o")
+                    .arg(&object),
+            );
+            Some(object)
+        } else {
+            // The objects do not run on this host; keep the harness valid C.
+            command(
+                Command::new("clang")
+                    .args(["-target", target(arm), "-ffreestanding"])
+                    .args(["-Wall", "-Wextra", "-Werror", "-fsyntax-only"])
+                    .arg(&source),
+            );
+            None
+        };
+        Self { arm, dir, harness }
     }
-    if !arm {
-        fs::write(
-            dir.join("run_native.py"),
-            include_str!("packed_absolute/run_native.py"),
-        )
-        .unwrap();
-    }
-    let native = arm;
-    if native {
-        let exe = dir.join(format!("{stem}.native"));
-        let mut cc = Command::new("clang");
-        cc.args(["-O2", "-Wall", "-Wextra", "-Werror"]);
-        if !arm {
-            cc.args(["-march=x86-64", "-msse2", "-mno-avx"]);
+
+    fn check(&self, stem: &str, asm: &str, obj: &[u8]) {
+        let object = self.dir.join(format!("{stem}.o"));
+        fs::write(&object, obj).unwrap();
+        if let Some(harness) = &self.harness {
+            let exe = self.dir.join(stem);
+            command(
+                Command::new("clang")
+                    .arg(harness)
+                    .arg(&object)
+                    .arg("-o")
+                    .arg(&exe),
+            );
+            command(&mut Command::new(exe));
         }
-        command(
-            cc.arg(dir.join(format!("{stem}.c")))
-                .arg(dir.join(format!("{stem}.o")))
-                .arg("-o")
-                .arg(&exe),
-        );
-        command(&mut Command::new(exe));
-    } else {
+        // Check instruction bytes against an independent assembler as well as
+        // the typed/text object equality. The ELF/Mach-O containers may differ.
+        let text = self.dir.join(format!("{stem}.s"));
+        let clang_obj = self.dir.join(format!("{stem}.clang.o"));
+        fs::write(&text, asm).unwrap();
         command(
             Command::new("clang")
-                .args([
-                    "-target",
-                    if arm {
-                        "arm64-apple-macos11"
-                    } else {
-                        "x86_64-unknown-linux-gnu"
-                    },
-                    "-ffreestanding",
-                    "-Wall",
-                    "-Wextra",
-                    "-Werror",
-                    "-fsyntax-only",
-                ])
-                .arg(dir.join(format!("{stem}.c"))),
+                .args(["-target", target(self.arm), "-c"])
+                .arg(&text)
+                .arg("-o")
+                .arg(&clang_obj),
         );
-    }
-    // Check instruction bytes against an independent assembler as well as the
-    // typed/text object equality above. The ELF/Mach-O containers may differ.
-    let clang_obj = dir.join(format!("{stem}.clang.o"));
-    command(
-        Command::new("clang")
-            .args([
-                "-target",
-                if arm {
-                    "arm64-apple-macos11"
-                } else {
-                    "x86_64-unknown-linux-gnu"
-                },
-                "-c",
-            ])
-            .arg(dir.join(format!("{stem}.s")))
-            .arg("-o")
-            .arg(&clang_obj),
-    );
-    {
         use object::{Object, ObjectSection};
         let reference = fs::read(&clang_obj).unwrap();
-        let name = if arm { "__text" } else { ".text" };
+        let name = if self.arm { "__text" } else { ".text" };
         let actual = object::File::parse(obj).unwrap();
         let expected = object::File::parse(reference.as_slice()).unwrap();
         assert_eq!(
             actual.section_by_name(name).unwrap().data().unwrap(),
-            expected.section_by_name(name).unwrap().data().unwrap()
+            expected.section_by_name(name).unwrap().data().unwrap(),
+            "{stem}"
         );
     }
-    if std::env::var_os("KEEL_PACKED_ABS_EVIDENCE").is_some() {
-        fs::write(dir.join(format!("{stem}.json")),format!("{{\"passed\":true,\"native_executed\":{native},\"typed_text_objects_equal\":true,\"clang_text_equal\":true}}\n")).unwrap();
-        fs::write(dir.join(format!("{stem}.html")),format!("<!doctype html><meta charset=utf-8><title>{stem}</title><h1>{stem}</h1><p>Passed. Native execution: {native}. Typed/text objects match. Clang instruction bytes match.</p>")).unwrap();
-    }
-    if std::env::var_os("KEEL_PACKED_ABS_EVIDENCE").is_none() {
-        for ext in ["keel", "c", "s", "o", "native", "clang.o"] {
-            let path = dir.join(format!("{stem}.{ext}"));
-            if path.exists() {
-                fs::remove_file(path).unwrap();
-            }
-        }
+}
+fn target(arm: bool) -> &'static str {
+    if arm {
+        "arm64-apple-macos11"
+    } else {
+        "x86_64-unknown-linux-gnu"
     }
 }
 
@@ -271,6 +261,7 @@ fn oracle(arm: bool, stem: &str, source: &str, c: &str, asm: &str, obj: &[u8]) {
 fn controlled_aliases_and_spills() {
     let (ir, c) = fixture(true);
     for arm in [true, false] {
+        let oracle = Oracle::new(arm, "controlled", &c);
         for sel in [
             SelectionTier::Baseline,
             SelectionTier::Trees,
@@ -278,7 +269,7 @@ fn controlled_aliases_and_spills() {
         ] {
             let (text, obj) = compile(arm, &ir, sel, &Controlled, false);
             assert_eq!(abs_recipes(&text, arm), 10, "{text}");
-            oracle(arm, &format!("controlled-{sel:?}"), &ir, &c, &text, &obj);
+            oracle.check(&format!("controlled-{sel:?}"), &text, &obj);
         }
     }
 }
@@ -286,6 +277,7 @@ fn controlled_aliases_and_spills() {
 fn live_sources_full_fast_and_all_spills() {
     let (ir, c) = fixture(false);
     for arm in [true, false] {
+        let oracle = Oracle::new(arm, "live", &c);
         for sel in [
             SelectionTier::Baseline,
             SelectionTier::Trees,
@@ -295,14 +287,7 @@ fn live_sources_full_fast_and_all_spills() {
                 for spill in [false, true] {
                     let (text, obj) = compile(arm, &ir, sel, &alloc, spill);
                     assert_eq!(abs_recipes(&text, arm), 2, "{text}");
-                    oracle(
-                        arm,
-                        &format!("live-{sel:?}-{alloc:?}-{spill}"),
-                        &ir,
-                        &c,
-                        &text,
-                        &obj,
-                    );
+                    oracle.check(&format!("live-{sel:?}-{alloc:?}-{spill}"), &text, &obj);
                 }
             }
         }
@@ -341,10 +326,11 @@ r=swapped(a,b);memcpy(o,&r,16);for(unsigned l=0;l<2;l++)if(o[l]!=((x[l]>>63)?x[l
 }return 0;}
 "#;
     for arm in [true, false] {
+        let oracle = Oracle::new(arm, "negative", &c);
         for spill in [false, true] {
             let (text, obj) = compile(arm, &ir, SelectionTier::Full, &AllocationTier::Full, spill);
             assert!(abs_recipes(&text, arm) == 0, "{text}");
-            oracle(arm, &format!("negative-{spill}"), &ir, &c, &text, &obj);
+            oracle.check(&format!("negative-{spill}"), &text, &obj);
         }
     }
 }
@@ -391,10 +377,11 @@ fn custom_constraints_and_debug_lines_keep_fallback_semantics() {
     }
     let (ir, c) = fixture(true);
     for arm in [true, false] {
+        let oracle = Oracle::new(arm, "custom", &c);
         let mut m = keel_ir::parse(&ir).unwrap();
         let (text, obj) = compile_module(arm, &m, &Constrained, &AllocationTier::Full, false);
         assert!(abs_recipes(&text, arm) == 0, "{text}");
-        oracle(arm, "custom-constraints", &ir, &c, &text, &obj);
+        oracle.check("custom-constraints", &text, &obj);
         m.files.push("packed-abs.c".into());
         for f in &mut m.functions {
             let insts: Vec<_> = f.layout_insts().map(|(_, i)| i).collect();
@@ -420,6 +407,6 @@ fn custom_constraints_and_debug_lines_keep_fallback_semantics() {
                 cursor += function[cursor..].find(&marker).unwrap() + marker.len();
             }
         }
-        oracle(arm, "debug-barriers", &ir, &c, &text, &obj);
+        oracle.check("debug-barriers", &text, &obj);
     }
 }
