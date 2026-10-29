@@ -250,3 +250,24 @@ fn native_truth_values_match_independent_clang_oracle() {
     }
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn moves_only_on_the_false_edge_need_no_landing_pad() {
+    // The then-block comes next, since it also reaches the join, and its
+    // edge needs no moves.
+    let src = "func @f(i64, i64) -> i64 {\nblock0(v0: i64, v1: i64):\n v2 = iconst.i64 91\n brif v0, block1, block2(v2)\nblock1:\n v5 = iadd v1, v1\n jump block2(v5)\nblock2(v3: i64):\n v4 = iadd v3, v1\n return v4\n}";
+    for pools in [&SPILLED, &keel_codegen::aarch64::REGISTERS] {
+        let (text, _) = compile(src, SelectionTier::Full, AllocationTier::Full, pools);
+        assert!(!text.contains("_else:"), "{text}");
+        let branch = text.find("\tcbnz\t").unwrap();
+        assert!(
+            text[branch..]
+                .lines()
+                .next()
+                .unwrap()
+                .ends_with("Lf_block1"),
+            "{text}"
+        );
+        assert!(text.contains("\tb\tLf_block2\n"), "{text}");
+    }
+}

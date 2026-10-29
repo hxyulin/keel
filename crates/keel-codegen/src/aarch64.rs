@@ -2771,8 +2771,13 @@ impl<'a> FunctionCompiler<'a> {
                     }
                 };
                 // Copy block arguments only on their own edge. A fallthrough
-                // edge can copy inline; otherwise it needs a landing pad.
-                if self.next_block == Some(else_dest.block) && self.block_args_noop(then_dest, 0) {
+                // edge, or the only edge with moves, can copy inline;
+                // otherwise the false edge needs a landing pad.
+                let then_noop = self.block_args_noop(then_dest, 0);
+                if then_noop
+                    && (self.next_block == Some(else_dest.block)
+                        || !self.block_args_noop(else_dest, 1))
+                {
                     match &test {
                         BrifTest::Flags(condition) => {
                             self.conditional(
@@ -2785,6 +2790,7 @@ impl<'a> FunctionCompiler<'a> {
                         }
                     }
                     self.block_args(else_dest, 1);
+                    self.branch_unless_next(else_dest.block);
                 } else if self.block_args_noop(else_dest, 1) {
                     self.brif_false(&test, self.block_name(else_dest.block));
                     self.block_args(then_dest, 0);
