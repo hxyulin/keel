@@ -1,3 +1,6 @@
+#[path = "call_load_reuse/call_contract_load_reuse.rs"]
+mod call_contract_load_reuse;
+
 use keel_ir::{InstData, Module};
 fn optimize(src: &str) -> Module {
     let mut m = keel_ir::parse(src).unwrap();

@@ -1,7 +1,6 @@
-mod conditional_widen {
-    pub mod fixture;
-}
-use conditional_widen::fixture::source;
+#[path = "../conditional_widen/fixture.rs"]
+mod fixture;
+use fixture::source;
 use keel_opt::VectorTarget;
 fn optimize(source: &str, target: VectorTarget, pass: &str) -> keel_ir::Module {
     let mut m = keel_ir::parse(source).unwrap();

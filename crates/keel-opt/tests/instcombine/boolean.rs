@@ -1,4 +1,4 @@
-mod support;
+use crate::support;
 
 #[test]
 fn absorption_and_cancellation_preserve_all_i8_pairs_and_wide_edges() {

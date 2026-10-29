@@ -1,3 +1,8 @@
+#[path = "load_reuse/asm_memory_effects.rs"]
+mod asm_memory_effects;
+#[path = "load_reuse/lifetime.rs"]
+mod lifetime;
+
 use keel_ir::{InstData, Module};
 
 fn optimize(source: &str) -> Module {

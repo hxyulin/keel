@@ -1,3 +1,10 @@
+#[path = "stack_forward/stack_forward_lifetimes.rs"]
+mod stack_forward_lifetimes;
+#[path = "stack_forward/stack_forward_vector.rs"]
+mod stack_forward_vector;
+#[path = "stack_forward/stack_forward_widen.rs"]
+mod stack_forward_widen;
+
 use keel_ir::{InstData, Module};
 fn run(s: &str) -> Module {
     let mut m = keel_ir::parse(s).unwrap();

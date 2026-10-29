@@ -1,4 +1,4 @@
-#[path = "../../keel-codegen/tests/fixtures/reduction_casts.rs"]
+#[path = "../../../keel-codegen/tests/fixtures/reduction_casts.rs"]
 mod fixtures;
 use keel_opt::VectorTarget;
 #[test]

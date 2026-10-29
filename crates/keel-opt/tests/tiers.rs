@@ -1,3 +1,10 @@
+#[path = "tiers/fast.rs"]
+mod fast;
+#[path = "tiers/unchanged_skip.rs"]
+mod unchanged_skip;
+#[path = "tiers/verification_policy.rs"]
+mod verification_policy;
+
 mod support;
 use keel_opt::{OptimizationTier, Pass};
 use std::sync::atomic::{AtomicUsize, Ordering};

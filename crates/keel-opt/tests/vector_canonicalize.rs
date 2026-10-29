@@ -1,3 +1,6 @@
+#[path = "vector_canonicalize/vector.rs"]
+mod vector;
+
 use keel_ir::{EntityRef, InstData as D, Module, Value, VectorType};
 
 fn clean(source: &str) -> Module {

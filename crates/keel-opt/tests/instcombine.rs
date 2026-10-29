@@ -1,3 +1,10 @@
+#[path = "instcombine/algebra.rs"]
+mod algebra;
+#[path = "instcombine/boolean.rs"]
+mod boolean;
+#[path = "instcombine/canonical_constants.rs"]
+mod canonical_constants;
+
 mod support;
 use support::execute;
 

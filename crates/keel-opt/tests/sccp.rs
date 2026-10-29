@@ -1,3 +1,6 @@
+#[path = "sccp/overflow_fold.rs"]
+mod overflow_fold;
+
 mod support;
 use keel_ir::{BinaryOp, InstData};
 use support::execute;

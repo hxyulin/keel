@@ -1,4 +1,4 @@
-#[path = "../../keel-codegen/tests/fixtures/reduction_multi.rs"]
+#[path = "../../../keel-codegen/tests/fixtures/reduction_multi.rs"]
 mod fixtures;
 use keel_opt::VectorTarget;
 fn vectorized(source: &str) -> keel_ir::Module {

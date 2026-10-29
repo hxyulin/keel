@@ -1,3 +1,16 @@
+#[path = "loop_vectorize/ascii_scan.rs"]
+mod ascii_scan;
+#[path = "loop_vectorize/conditional_widen.rs"]
+mod conditional_widen;
+#[path = "loop_vectorize/loop_reduce_affine.rs"]
+mod loop_reduce_affine;
+#[path = "loop_vectorize/loop_reduce_casts.rs"]
+mod loop_reduce_casts;
+#[path = "loop_vectorize/loop_reduce_multi.rs"]
+mod loop_reduce_multi;
+#[path = "loop_vectorize/packed_clamp.rs"]
+mod packed_clamp;
+
 use keel_ir::{InstData, Type, VectorType};
 use keel_opt::VectorTarget;
 

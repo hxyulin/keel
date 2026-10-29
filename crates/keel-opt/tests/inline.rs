@@ -1,3 +1,14 @@
+#[path = "inline/leaf_switch_inline.rs"]
+mod leaf_switch_inline;
+#[path = "inline/public_required_inline.rs"]
+mod public_required_inline;
+#[path = "inline/required_frame_observers.rs"]
+mod required_frame_observers;
+#[path = "inline/required_inline_discard.rs"]
+mod required_inline_discard;
+#[path = "inline/weak_odr.rs"]
+mod weak_odr;
+
 use keel_ir::{InstData, Module};
 fn run(s: &str, passes: &[&str]) -> Module {
     let mut m = keel_ir::parse(s).unwrap();

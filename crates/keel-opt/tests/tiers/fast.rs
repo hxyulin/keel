@@ -1,4 +1,4 @@
-mod support;
+use crate::support;
 
 use keel_ir::{BinaryOp, EntityRef, InstData, SourceLoc};
 use keel_opt::OptimizationTier;

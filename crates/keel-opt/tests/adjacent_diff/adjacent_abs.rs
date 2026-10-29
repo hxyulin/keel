@@ -1,7 +1,6 @@
-mod support;
+use crate::support;
 // Keep the pass independently testable without changing root-owned registration.
-#[path = "../src/adjacent_abs.rs"]
-mod adjacent_abs;
+use crate::adjacent_abs_pass as adjacent_abs;
 use keel_ir::{EntityRef, InstData as D, Type};
 
 fn triangle(ty: Type) -> String {
@@ -141,7 +140,7 @@ fn refuses_other_predicates_values_shared_or_effectful_arms() {
 }
 #[test]
 fn preserves_instruction_locations_and_load_order_in_real_adjacent() {
-    let src = include_str!("adjacent_abs/adjacent.keel");
+    let src = include_str!("../adjacent_abs/adjacent.keel");
     let mut before = keel_ir::parse(&format!("file f0 = \"kernels.c\"\n{src}")).unwrap();
     let loc = keel_ir::SourceLoc {
         file: keel_ir::SourceFile::new(0),
@@ -193,7 +192,7 @@ fn preserves_instruction_locations_and_load_order_in_real_adjacent() {
 
 #[test]
 fn does_not_cross_volatile_atomic_call_or_write_barriers() {
-    let base = include_str!("adjacent_abs/adjacent.keel");
+    let base = include_str!("../adjacent_abs/adjacent.keel");
     for src in [
         base.replace("load.i32", "load.i32 volatile"),
         base.replace("load.i32", "atomic_load.i32 relaxed"),

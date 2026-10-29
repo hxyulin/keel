@@ -1,4 +1,4 @@
-mod support;
+use crate::support;
 fn apply(source: &str) -> (keel_ir::Module, keel_ir::Module) {
     let original = keel_ir::parse(source).unwrap();
     keel_ir::verify_module(&original).unwrap();

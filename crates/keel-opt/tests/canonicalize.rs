@@ -1,3 +1,6 @@
+#[path = "canonicalize/rotate.rs"]
+mod rotate;
+
 mod support;
 use keel_ir::{EntityRef, Function, InstData, Value};
 use keel_opt::Pass;

@@ -1,5 +1,8 @@
-#[path = "../src/adjacent_abs.rs"]
+#[path = "adjacent_diff/adjacent_abs.rs"]
 mod adjacent_abs;
+
+#[path = "../src/adjacent_abs.rs"]
+mod adjacent_abs_pass;
 #[path = "../src/adjacent_diff.rs"]
 mod adjacent_diff;
 mod support;
@@ -16,7 +19,7 @@ fn either_variant_accepts(f: &mut keel_ir::Function) -> bool {
 
 fn canonical() -> keel_ir::Module {
     let mut m = keel_ir::parse(include_str!("adjacent_abs/adjacent.keel")).unwrap();
-    assert!(adjacent_abs::run(&mut m.functions[0]));
+    assert!(adjacent_abs_pass::run(&mut m.functions[0]));
     m
 }
 
@@ -45,7 +48,7 @@ fn derives_inputs_from_dataflow_for_ordinary_and_reordered_signatures() {
     ] {
         let mut m = keel_ir::parse(&source).unwrap();
         keel_ir::verify_module(&m).unwrap();
-        assert!(adjacent_abs::run(&mut m.functions[0]));
+        assert!(adjacent_abs_pass::run(&mut m.functions[0]));
         assert!(adjacent_diff::run(&mut m.functions[0]));
         keel_ir::verify_module(&m).unwrap();
     }
@@ -105,7 +108,7 @@ fn rejects_extra_load_write_atomic_call_and_custom_operations() {
         ),
     ] {
         let mut m = keel_ir::parse(&source).unwrap();
-        assert!(adjacent_abs::run(&mut m.functions[0]));
+        assert!(adjacent_abs_pass::run(&mut m.functions[0]));
         keel_ir::verify_module(&m).unwrap();
         let before = m.to_string();
         assert!(!either_variant_accepts(&mut m.functions[0]));

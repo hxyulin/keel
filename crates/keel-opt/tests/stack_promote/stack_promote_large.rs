@@ -1,4 +1,4 @@
-mod support;
+use crate::support;
 use keel_ir::{Function, InstData as D, Module};
 
 fn execute(f: &Function, inputs: &[u64]) -> u64 {

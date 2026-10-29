@@ -1,3 +1,6 @@
+#[path = "if_convert/if_convert_nested.rs"]
+mod if_convert_nested;
+
 mod support;
 use keel_ir::{InstData as D, Type};
 fn apply(src: &str) -> keel_ir::Module {

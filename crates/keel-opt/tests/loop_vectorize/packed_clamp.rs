@@ -1,7 +1,7 @@
 use keel_ir::{ConvertOp, InstData as D, Type, VectorType};
 use keel_opt::VectorTarget;
 
-const SOURCE: &str = include_str!("packed_clamp/loops.keel");
+const SOURCE: &str = include_str!("../packed_clamp/loops.keel");
 
 fn optimize(target: VectorTarget, pass: &str) -> keel_ir::Module {
     let mut m = keel_ir::parse(SOURCE).unwrap();

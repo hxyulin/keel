@@ -1,3 +1,6 @@
+#[path = "module_cleanup/constant_args.rs"]
+mod constant_args;
+
 use keel_ir::{Module, parse, verify_module};
 
 fn clean(source: &str) -> Module {

@@ -1,3 +1,6 @@
+#[path = "tail_calls/internal_fast_calls.rs"]
+mod internal_fast_calls;
+
 use keel_ir::{parse, verify_module};
 
 fn optimize(source: &str) -> String {

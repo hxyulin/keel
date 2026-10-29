@@ -1,5 +1,5 @@
 //! Direct edges and nested ternaries, independent of block layout order.
-mod support;
+use crate::support;
 use keel_ir::{EntityRef, InstData as D, Value};
 fn apply(src: &str) -> keel_ir::Module {
     let mut m = keel_ir::parse(src).unwrap();

@@ -1,4 +1,4 @@
-mod support;
+use crate::support;
 use keel_ir::{InstData, ValueDef};
 
 #[test]

@@ -185,7 +185,7 @@ fn debug_home_is_never_forwarded_in_dynamic_function() {
 
 #[test]
 fn native_fixture_forwards_payload_but_keeps_post_restore_tag_read() {
-    let source = include_str!("stack_forward_lifetimes/copy.keel");
+    let source = include_str!("../stack_forward_lifetimes/copy.keel");
     let before = keel_ir::parse(source).unwrap();
     assert_eq!(loads(&before), 2);
     let m = optimize(source);
@@ -220,7 +220,7 @@ fn saved_sp_must_remain_an_opaque_restore_mark() {
 
 #[test]
 fn quickjs_integer_sub_crosses_tag_branch_and_preserves_float_read() {
-    let source = include_str!("stack_forward_lifetimes/sub.keel");
+    let source = include_str!("../stack_forward_lifetimes/sub.keel");
     let original = keel_ir::parse(source).unwrap();
     assert_eq!(loads(&original), 3);
     let m = optimize(source);
@@ -241,7 +241,7 @@ fn quickjs_integer_sub_crosses_tag_branch_and_preserves_float_read() {
 
 #[test]
 fn subranges_require_unique_dominating_initialization_and_no_observer() {
-    let source = include_str!("stack_forward_lifetimes/sub.keel");
+    let source = include_str!("../stack_forward_lifetimes/sub.keel");
     for effect in [
         "store v1, v3",
         "v15 = trunc.i8 v1\n store v15, v3",

@@ -1,7 +1,7 @@
 use keel_opt::VectorTarget;
 
 fn source() -> &'static str {
-    include_str!("../../keel-codegen/tests/fixtures/reduction_affine.ir")
+    include_str!("../../../keel-codegen/tests/fixtures/reduction_affine.ir")
 }
 fn run(src: &str, pass: &str, target: VectorTarget) -> keel_ir::Module {
     let mut m = keel_ir::parse(src).unwrap();
@@ -75,7 +75,7 @@ fn two_streams_require_an_explicit_nontrapping_contract_even_when_aliasing() {
 
 #[test]
 fn actual_logic_remains_blocked_until_a_stream_is_explicitly_safe() {
-    let src = include_str!("../../keel-codegen/tests/fixtures/reduction_logic.ir");
+    let src = include_str!("../../../keel-codegen/tests/fixtures/reduction_logic.ir");
     for target in [
         VectorTarget::Portable,
         VectorTarget::Aarch64Neon,
