@@ -63,12 +63,17 @@ fn strict_v2_cumulative_vectors_abi_and_representative_operations() {
                         .all(|sym| !sym.is_undefined() || sym.name().unwrap().is_empty())
                 );
                 let (abi_object, abi_text) = compile(&source, s, a, spilled);
-                let (vectors, vector_text) = compile(&common::fixture(), s, a, spilled);
+                // `source` already compiles the vector corpus. The separate
+                // vector object only feeds the export and the native harness.
+                let vectors = (export.is_some()
+                    || cfg!(all(target_os = "linux", target_arch = "x86_64")))
+                .then(|| compile(&common::fixture(), s, a, spilled));
                 if let Some(dir) = &export {
+                    let (vectors, vector_text) = vectors.as_ref().unwrap();
                     for (kind, object, assembly) in [
                         ("ops", &ops, &text),
                         ("abi", &abi_object, &abi_text),
-                        ("vectors", &vectors, &vector_text),
+                        ("vectors", vectors, vector_text),
                     ] {
                         let stem = format!("{kind}-{s:?}-{a:?}-{spilled}");
                         fs::write(dir.join(format!("{stem}.o")), object).unwrap();
@@ -79,7 +84,8 @@ fn strict_v2_cumulative_vectors_abi_and_representative_operations() {
                 {
                     let name = format!("{s:?}-{a:?}-{spilled}");
                     execute(&format!("ops-{name}"), &ops, FOOTPRINTS);
-                    execute(&format!("vectors-{name}"), &vectors, &common::harness());
+                    let (vectors, _) = vectors.as_ref().unwrap();
+                    execute(&format!("vectors-{name}"), vectors, &common::harness());
                     execute(&format!("abi-{name}"), &abi_object, &abi_c);
                 }
                 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
