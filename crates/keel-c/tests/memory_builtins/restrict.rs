@@ -180,7 +180,7 @@ fn memory_forward_native_differential_against_clang() {
     }
 
     let target = Target::host().expect("native restrict test requires a supported host");
-    let source = include_str!("fixtures/restrict_memory_forward.c");
+    let source = include_str!("../fixtures/restrict_memory_forward.c");
     let mut module = compile(source);
     // R1-1: prove the consumer changed this exact module before native codegen.
     // The ordinary/default pipeline alone does not run memory-forward.

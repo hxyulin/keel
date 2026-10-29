@@ -1,3 +1,14 @@
+#[path = "memory_builtins/checked_memory_safe.rs"]
+mod checked_memory_safe;
+#[path = "memory_builtins/memcmp_builtin_equality.rs"]
+mod memcmp_builtin_equality;
+#[path = "memory_builtins/memory.rs"]
+mod memory;
+#[path = "memory_builtins/memory_forward_offsets.rs"]
+mod memory_forward_offsets;
+#[path = "memory_builtins/restrict.rs"]
+mod restrict;
+
 use keel_ir::{InstData, Intrinsic, Target, Type, ValueDef};
 use std::path::Path;
 use std::process::Command;

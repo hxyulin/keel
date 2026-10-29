@@ -19,7 +19,7 @@ fn loads(m: &Module, name: &str) -> usize {
 
 #[test]
 fn explicit_forwarding_offsets_matches_clang_and_both_targets() {
-    let source = include_str!("fixtures/memory_forward_offsets.c");
+    let source = include_str!("../fixtures/memory_forward_offsets.c");
     let mut m = keel_c::compile(source, "memory_forward_offsets.c", Default::default()).unwrap();
     // Simplify frontend index scaling without folding loads or running default passes.
     keel_opt::run_passes(&mut m, &["canonicalize", "instcombine"]).unwrap();
