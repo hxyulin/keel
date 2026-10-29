@@ -1,5 +1,5 @@
 //! Exact string port I/O, including an opaque owned-terminal FLAGS boundary.
-//! No ordinary IR is lowered inside ownership. See docs/targets/x86_64/system/string-port-io.md.
+//! No ordinary IR is lowered inside ownership. See docs/targets/x86_64/system/README.md.
 use super::*;
 use keel_asm_ir::x86::{CoreOpcode, Instruction, Repeat, StringKind};
 use keel_asm_ir::{Item, Program};

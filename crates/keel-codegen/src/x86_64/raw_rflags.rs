@@ -1,4 +1,4 @@
-//! Exact long-mode FLAGS observation. See docs/targets/x86_64/system/raw-rflags.md.
+//! Exact long-mode FLAGS observation. See docs/targets/x86_64/system/README.md.
 use super::*;
 
 pub(super) const SWAP_BLOCKER: &str = "x86_rflags_swap requires a verified owned-FLAGS region: IR has no FLAGS resource or proof of DF/TF/AC and execution-state restoration before calls/return";

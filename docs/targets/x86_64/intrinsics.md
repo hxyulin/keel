@@ -1141,7 +1141,7 @@ not establish physical MMX behavior.
 <a id="x86-unmasked-fp-x87"></a>
 ### x87
 
-[f80/numerical.md](f80/numerical.md) requires empty x87 tags, all six CW
+[F80 numerical operations](f80/README.md#numerical-operations) requires empty x87 tags, all six CW
 exception masks set, and no pending unmasked exception; PC/RC are inherited and
 CW is preserved. Its operations perform input FLD, snapshot FNSTSW immediately
 after the principal opcode, then store/discard results and restore empty tags
@@ -1149,17 +1149,16 @@ and the entry TOP. Input loading and result storage are therefore distinct
 exceptional stages. The returned status includes the temporary physical TOP; it
 is not a fault-context ABI.
 
-[basic](f80/basic.md), [binary](f80/binary.md), [compare](f80/compare.md),
-[dc](f80/dc.md), [bcd](f80/bcd.md), and [constants](f80/constants.md) also
-restrict their raw contracts to a masked CW. [stages](f80/README.md) separately
+The other [raw x87 value intrinsics](f80/README.md#raw-x87-value-intrinsics) also
+restrict their raw contracts to a masked CW. [The F80 environment contract](f80/README.md#fp-environment-contract) separately
 allows unmasked exceptions to interrupt ordinary F80 sequences with temporary
 operands; that value-level statement does not override the raw numerical
-precondition. [legacy-images](f80/legacy-images.md) admits ordinary masked
+precondition. [Legacy images](f80/README.md#legacy-images-and-the-owned-region) admits ordinary masked
 execution and flag-only unmasked CW seeds without pending exceptions, but
 excludes pending-unmasked entry for waiting forms and leaves no-WAIT pending
 capture/delivery unvalidated.
 
-The [bounded x87 execution region](f80/unmasked-region.md) is the unmasked x87
+The [bounded x87 execution region](f80/README.md#unmasked-execution-region) is the unmasked x87
 path. It uses one appended intrinsic ID and leaves the masked raw APIs
 unchanged. Eighty stable principal controls cover the numerical, basic, binary,
 compare, integer, FI, BCD, constants, and multi-result families. Entry requires

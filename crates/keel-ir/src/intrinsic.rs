@@ -5286,7 +5286,7 @@ impl Intrinsic {
             || self.is_x86_x87_compare()
     }
     /// (opcode, operand-size bits, exact memory footprint). These are pinned raw
-    /// operations under docs/targets/x86_64/f80/legacy-images.md, not FXSAVE-format adapters.
+    /// operations under docs/targets/x86_64/f80/README.md, not FXSAVE-format adapters.
     pub fn x86_legacy_x87_image(self) -> Option<(&'static str, u16, usize)> {
         Some(match self {
             Self::X86X87Fnstenv16 => ("fnstenv", 16, 14),

@@ -99,7 +99,7 @@ compare mnemonic lookup with the original binary-search result.
 
 Fixed adapters also generate their source mnemonic, operand-size selection and
 leading-FWAIT normalization. The decoder uses generated width-specific names
-for canonical formatting. [SYSEXIT/RSM support](../../docs/targets/x86_64/system/exits.md)
+for canonical formatting. [SYSEXIT/RSM support](../../docs/targets/x86_64/system/README.md#sysexit-and-rsm)
 adds public adapters without another instruction-specific encoder or compiler
 terminal API.
 The baseline formatting macro expands into an exhaustive match with handwritten

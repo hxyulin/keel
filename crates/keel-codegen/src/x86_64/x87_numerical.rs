@@ -1,4 +1,4 @@
-//! Single-step x87 numerical instructions. See docs/targets/x86_64/f80/numerical.md.
+//! Single-step x87 numerical instructions. See docs/targets/x86_64/f80/README.md.
 use super::*;
 
 impl FunctionCompiler<'_> {

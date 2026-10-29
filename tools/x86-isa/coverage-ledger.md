@@ -106,7 +106,7 @@ static spelling with `Opcode::parse` and the tracked compiler names/IDs with
 qualification.
 
 Existing semantic evidence stays in [system support](../../docs/targets/README.md)
-and [transition contracts](../../docs/targets/x86_64/system/transitions.md). A future result
+and [transition contracts](../../docs/targets/x86_64/system/README.md#terminal-transitions). A future result
 import should attach explicit witness/campaign scope and artifact digests to
 form IDs. It must distinguish encoding comparisons, actual decode witnesses,
 emulated execution and native execution, including expected negative controls.

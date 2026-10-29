@@ -18,14 +18,14 @@
     "api-identities.json": "cb5bf3cd6f2f9e9967e45c82a70c46fa5b3e50208d75e6f88223b010ebbbafc6",
     "core-identities.json": "ac059a1d9dacace878b682288f8867cdc7039eb02be1391ef7af6178efffb0e1",
     "condition-codes.json": "55fcd155a4edb173273b22af2bbce8f73cc1287780bd6c1dc70fe103be77f526",
-    "system-intrinsics.json": "f66074b95d10411807897443a00c9f423c4bd79b87ad6984cc8048bfee14d3d9",
+    "system-intrinsics.json": "73b21eb11269d6a851496f3560b5b74bbeb9d77b8334fa3ccaa7f97f74731402",
     "registers.json": "a2ffabc211ad0f80d52048883c31b35b5db021fffe8007ce1d8b978223abe036",
     "feature-fields.json": "09437e6fbe6fcbbd1c55f49ef269559cd4a70245e0e19e1ce21a0d0f9b320aa5",
     "feature-policy.json": "2186888ddd77f63bb968d047c58a75959d5ab9cd61a9488df7434814caab4ab6",
     "cpu-profiles.json": "094974c05cfcdfa6c6b21b11fe1147b4e25cf98f63c5b732f8dd8ceed0fee189",
     "evex.json": "6fab09bc22a8ce3786a722e034832f057660fec3311492c7a2294166b84d8f7a",
     "evex-source.json": "d23d7d4ab30c3fd544c00fdc198078a75372f7478442a3fbfab7c5afeb4d0fdb",
-    "query-bindings.json": "c7d3ee349e7a243afefe72f227133b07debf88ec92433cbd9903aace46045926"
+    "query-bindings.json": "66d9e118497b3976b3adbfb6b1b3e520ab708605dc50751a81f65f6df2d791b3"
   },
   "avx512_provenance": {
     "project": "Zydis instruction database",

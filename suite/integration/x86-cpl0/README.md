@@ -182,8 +182,8 @@ value must return FAIL and exit 35 normally. Faults and timeouts fail the
 campaign. `--status` and `--table-loads` are mutually exclusive.
 
 All eighteen verdicts match under QEMU 11.1.2 TCG on macOS ARM64. See
-[descriptor/status observations](../../../docs/targets/x86_64/system/descriptor-queries.md#cpl0-selectorstatus-fixture)
-for constants, memory layout and the limits of this emulated evidence.
+[descriptor/status observations](../../../docs/targets/x86_64/system/README.md#observations)
+for the API contract.
 
 ## MSR campaign
 
@@ -208,7 +208,7 @@ under QEMU 11.1.2 TCG on macOS ARM64. Five broken controls must return the
 exact READY/FAIL transcript and exit 35: omitted write, narrow read, wrong
 index, clobbered live value and no observations. All five fail as expected.
 The other campaign modes are mutually exclusive with `--msr`. See
-[raw MSR access](../../../docs/targets/x86_64/system/msr.md) for the API contract and evidence limits.
+[raw MSR access](../../../docs/targets/x86_64/system/README.md#msrs) for the API contract.
 
 ## CLTS and cache-control campaign
 
@@ -232,8 +232,8 @@ checks do not prove physical cache writeback or invalidation. All eighteen
 verdicts match. Faults and timeouts fail the campaign.
 
 `--cpu-control` is mutually exclusive with the other campaign modes. See
-[privileged CPU/cache control](../../../docs/targets/x86_64/system/privileged-control.md) for the
-contracts and remaining evidence limits.
+[privileged CPU/cache control](../../../docs/targets/x86_64/system/README.md#cpu-and-cache-control) for the
+API contracts.
 
 ## LLDT/LTR/LMSW and INVLPG campaigns
 
@@ -261,8 +261,8 @@ expected verdicts. Mapping changes are restored on normal success or mismatch.
 Both campaigns pass under QEMU 11.1.2 TCG on macOS ARM64. They provide bounded
 emulated evidence, with no native hardware, multicore or exception-resumption
 claim. The modes are mutually exclusive with all other campaign modes. See
-[system mutation/invalidation](../../../docs/targets/x86_64/system/write.md) for seeds,
-contracts and limits.
+[system mutation/invalidation](../../../docs/targets/x86_64/system/README.md#mutation-and-invalidation) for the
+API contracts.
 
 ## Control and debug registers
 
@@ -271,7 +271,7 @@ assembly reference and five normally returning broken controls. The fixture
 covers CR0/2/3/4/8 and DR0–7, including DR4/5 aliases with DE clear. It checks
 actual hardware state and output values separately, switches CR3 between two
 copies of the same page map, and restores the original state. No breakpoint
-is enabled. See [contracts and finite evidence](../../../docs/targets/x86_64/system/registers.md).
+is enabled. See the [API contract](../../../docs/targets/x86_64/system/README.md#control-and-debug-registers).
 
 ## Interrupt control and HLT resumption
 
@@ -289,7 +289,7 @@ return normally with exact READY/FAIL and exit 35, or with a well-formed
 success report whose HLT evidence is rejected. Faults, malformed transcripts,
 tool errors and timeouts never satisfy a negative. Existing modes keep their
 previous exact transcript and exit checks. See
-[contracts, observation rules and limits](../../../docs/targets/x86_64/system/interrupt-control.md).
+[API contract](../../../docs/targets/x86_64/system/README.md#interrupt-control-and-halt).
 
 ## GS exchange
 
@@ -298,7 +298,7 @@ normally returning broken controls. It checks both base MSRs, selector zero
 and 16, independent GS-relative reads, round trips, wide canonical bases,
 eight live SSA values and canaries. The bridge restores the original selector
 and both base MSRs. IF stays clear. See
-[contracts and finite evidence](../../../docs/targets/x86_64/system/swapgs.md).
+[API contract](../../../docs/targets/x86_64/system/README.md#gs-base-exchange).
 
 ## Owned IRETQ return
 
@@ -309,4 +309,4 @@ controls check registers, selectors, flags, stack installation, image guards
 and caller liveness. A private DPL3 gate/TSS returns to the trusted verifier.
 The fixture temporarily grants user access to its shared low/high mappings;
 it observes privilege changes without claiming isolation. See the
-[public image and terminal call contract](../../../docs/targets/x86_64/system/iretq.md).
+[public image and terminal call contract](../../../docs/targets/x86_64/system/README.md#iretq-transport).

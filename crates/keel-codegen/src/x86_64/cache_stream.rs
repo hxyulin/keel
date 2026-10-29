@@ -2,7 +2,7 @@
 //! CLFLUSH is a faulting cache-line writeback/invalidate at the exact address;
 //! unlike prefetch it follows byte-read protection checks. Requires independent
 //! CPUID.CLFSH. Hardware ordering differs on Intel/AMD; see
-//! docs/targets/x86_64/system/clflush-contract.md. No implicit fence is inserted.
+//! docs/targets/x86_64/system/README.md. No implicit fence is inserted.
 //!
 //! All are pinned IR barriers (including unused hints/loads), ordering compiler
 //! memory accesses without adding a hardware fence. Callers use x86_sfence for

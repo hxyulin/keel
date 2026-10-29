@@ -11,7 +11,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/targets/x86_64/system/write.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "unary",
         "mnemonic": "lgdt",
@@ -31,7 +31,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/targets/x86_64/system/write.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "unary",
         "mnemonic": "lidt",
@@ -53,7 +53,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw MSR access with caller-owned CPL0, MSR index and model/state preconditions. See docs/targets/x86_64/system/msr.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw MSR access with caller-owned CPL0, MSR index and model/state preconditions. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "handwritten",
         "handler": "rdmsr"
@@ -71,7 +71,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw MSR access with caller-owned CPL0, MSR index and model/state preconditions. See docs/targets/x86_64/system/msr.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw MSR access with caller-owned CPL0, MSR index and model/state preconditions. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "handwritten",
         "handler": "wrmsr"
@@ -86,7 +86,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw CPU/cache control with caller-owned CPL0 and architectural state. See docs/targets/x86_64/system/privileged-control.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw CPU/cache control with caller-owned CPL0 and architectural state. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "fixed",
         "mnemonic": "clts"
@@ -101,7 +101,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw CPU/cache control with caller-owned CPL0 and architectural state. See docs/targets/x86_64/system/privileged-control.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw CPU/cache control with caller-owned CPL0 and architectural state. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "fixed",
         "mnemonic": "invd"
@@ -116,7 +116,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw CPU/cache control with caller-owned CPL0 and architectural state. See docs/targets/x86_64/system/privileged-control.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw CPU/cache control with caller-owned CPL0 and architectural state. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "fixed",
         "mnemonic": "wbinvd"
@@ -133,7 +133,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/targets/x86_64/system/write.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "unary",
         "mnemonic": "lldt",
@@ -153,7 +153,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/targets/x86_64/system/write.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "unary",
         "mnemonic": "lldt",
@@ -173,7 +173,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/targets/x86_64/system/write.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "unary",
         "mnemonic": "ltr",
@@ -193,7 +193,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/targets/x86_64/system/write.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "unary",
         "mnemonic": "ltr",
@@ -213,7 +213,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/targets/x86_64/system/write.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "unary",
         "mnemonic": "lmsw",
@@ -233,7 +233,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/targets/x86_64/system/write.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "unary",
         "mnemonic": "lmsw",
@@ -253,7 +253,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/targets/x86_64/system/write.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw descriptor/status mutation or address invalidation with caller-owned privilege and architectural state. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "unary",
         "mnemonic": "invlpg",
@@ -273,7 +273,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/registers.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "system_register",
         "register": "cr0",
@@ -291,7 +291,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/registers.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "system_register",
         "register": "cr0",
@@ -309,7 +309,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/registers.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "system_register",
         "register": "cr2",
@@ -327,7 +327,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/registers.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "system_register",
         "register": "cr2",
@@ -345,7 +345,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/registers.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "system_register",
         "register": "cr3",
@@ -363,7 +363,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/registers.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "system_register",
         "register": "cr3",
@@ -381,7 +381,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/registers.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "system_register",
         "register": "cr4",
@@ -399,7 +399,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/registers.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "system_register",
         "register": "cr4",
@@ -417,7 +417,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/registers.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "system_register",
         "register": "cr8",
@@ -435,7 +435,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/registers.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "system_register",
         "register": "cr8",
@@ -453,7 +453,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/registers.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "system_register",
         "register": "dr0",
@@ -471,7 +471,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/registers.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "system_register",
         "register": "dr0",
@@ -489,7 +489,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/registers.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "system_register",
         "register": "dr1",
@@ -507,7 +507,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/registers.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "system_register",
         "register": "dr1",
@@ -525,7 +525,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/registers.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "system_register",
         "register": "dr2",
@@ -543,7 +543,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/registers.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "system_register",
         "register": "dr2",
@@ -561,7 +561,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/registers.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "system_register",
         "register": "dr3",
@@ -579,7 +579,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/registers.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "system_register",
         "register": "dr3",
@@ -597,7 +597,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/registers.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "system_register",
         "register": "dr4",
@@ -615,7 +615,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/registers.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "system_register",
         "register": "dr4",
@@ -633,7 +633,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/registers.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "system_register",
         "register": "dr5",
@@ -651,7 +651,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/registers.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "system_register",
         "register": "dr5",
@@ -669,7 +669,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/registers.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "system_register",
         "register": "dr6",
@@ -687,7 +687,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/registers.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "system_register",
         "register": "dr6",
@@ -705,7 +705,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/registers.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "system_register",
         "register": "dr7",
@@ -723,7 +723,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/registers.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw control/debug register access with caller-owned CPL0 and register-state preconditions, including conditional DR4/5 aliases. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "system_register",
         "register": "dr7",
@@ -739,7 +739,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw interrupt control with caller-owned privilege, interrupt delivery and continuation; STI;HLT remains adjacent. See docs/targets/x86_64/system/interrupt-control.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw interrupt control with caller-owned privilege, interrupt delivery and continuation; STI;HLT remains adjacent. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "fixed",
         "mnemonic": "cli"
@@ -754,7 +754,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw interrupt control with caller-owned privilege, interrupt delivery and continuation; STI;HLT remains adjacent. See docs/targets/x86_64/system/interrupt-control.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw interrupt control with caller-owned privilege, interrupt delivery and continuation; STI;HLT remains adjacent. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "fixed",
         "mnemonic": "sti"
@@ -769,7 +769,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw interrupt control with caller-owned privilege, interrupt delivery and continuation; STI;HLT remains adjacent. See docs/targets/x86_64/system/interrupt-control.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw interrupt control with caller-owned privilege, interrupt delivery and continuation; STI;HLT remains adjacent. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "fixed",
         "mnemonic": "hlt"
@@ -784,7 +784,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw interrupt control with caller-owned privilege, interrupt delivery and continuation; STI;HLT remains adjacent. See docs/targets/x86_64/system/interrupt-control.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw interrupt control with caller-owned privilege, interrupt delivery and continuation; STI;HLT remains adjacent. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "adjacent_fixed",
         "mnemonics": [
@@ -802,7 +802,7 @@
       "pure": false,
       "memory": "Barrier",
       "target": "x86_64",
-      "doc": "Raw GS-base exchange with caller-owned long-mode CPL0 state and asynchronous entry policy. See docs/targets/x86_64/system/swapgs.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
+      "doc": "Raw GS-base exchange with caller-owned long-mode CPL0 state and asynchronous entry policy. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing.",
       "lowering": {
         "kind": "fixed",
         "mnemonic": "swapgs"
