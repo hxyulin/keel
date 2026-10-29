@@ -127,7 +127,9 @@ fn stack_object_pipeline_vectorizes_both_native_targets() {
                     .filter(|(b, i)| *b == entry
                         && matches!(f.inst_data(*i), keel_ir::InstData::Load { .. }))
                     .count(),
-                3,
+                // Canonical memset supplies zero initializers; an opaque seed
+                // call still requires loading all three aggregate fields.
+                if name == "k_stackobj" { 0 } else { 3 },
                 "{f}"
             );
         }

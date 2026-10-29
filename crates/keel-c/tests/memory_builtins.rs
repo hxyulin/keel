@@ -158,7 +158,17 @@ fn library_builtin_designators_keep_addresses_and_parenthesized_calls() {
             let source = format!(
                 "void *{name}(void *, {second}, unsigned long); void *(*p)(void *, {second}, unsigned long) = __builtin_{name}; void *(*q)(void *, {second}, unsigned long) = &__builtin_{name}; void *parenthesized(void *d, {second} s) {{ return (__builtin_{name})(d,s,1); }} void *direct(void *d, {second} s) {{ return __builtin_{name}(d,s,1); }}"
             );
-            let mut module = compile(&source, target);
+            let mut module = keel_c::compile_with_policies(
+                &source,
+                "memory-builtins.c",
+                keel_c::Options {
+                    target,
+                    ..Default::default()
+                },
+                keel_c::FunctionBinding::default(),
+                keel_c::LibraryBuiltins::disabled(),
+            )
+            .unwrap();
             let parenthesized = module
                 .functions
                 .iter()
@@ -391,10 +401,20 @@ fn explicit_pointer_casts_set_memory_builtin_qualifiers() {
 }
 
 #[test]
-fn ordinary_memory_symbols_keep_calls_and_volatile_arguments_keep_accesses() {
+fn disabled_memory_symbols_keep_calls_and_volatile_arguments_keep_accesses() {
     let source = "void *memcpy(void *, const void *, unsigned long); void *f(void *d, const void *s) { return memcpy(d,s,7); }";
     for target in Target::NATIVE {
-        let module = compile(source, target);
+        let module = keel_c::compile_with_policies(
+            source,
+            "memory-builtins.c",
+            keel_c::Options {
+                target,
+                ..Default::default()
+            },
+            keel_c::FunctionBinding::default(),
+            keel_c::LibraryBuiltins::disabled(),
+        )
+        .unwrap();
         let f = module.functions.iter().find(|f| f.name == "f").unwrap();
         assert!(f.layout_insts().any(|(_, i)| matches!(f.inst_data(i), InstData::Call { func, .. } if f.callee(*func).name == "memcpy")));
         assert!(!module.to_string().contains("intrinsic memcpy"));
@@ -618,8 +638,8 @@ fn native_fortify_headers_have_explicit_compatibility_behavior() {
         },
     )
     .unwrap();
-    // Darwin gates memory fortification on __has_builtin; Keel must leave
-    // these as ordinary calls. Other SDKs may select checked builtins,
+    // Darwin gates memory fortification on __has_builtin; Keel leaves
+    // canonical ordinary calls available for hosted builtin recognition. Other SDKs may select checked builtins,
     // whose canonical prototypes preserve all four arguments.
     if cfg!(target_os = "macos") {
         let module = compile(&text, keel_c::Options::default().target);
@@ -631,7 +651,13 @@ fn native_fortify_headers_have_explicit_compatibility_behavior() {
                 _ => None,
             })
             .collect();
-        assert_eq!(calls, ["memcpy", "memmove", "memset"]);
+        assert!(calls.is_empty(), "{module}");
+        for name in ["memcpy", "memmove", "memset"] {
+            assert!(
+                module.to_string().contains(&format!("intrinsic {name}")),
+                "{module}"
+            );
+        }
     } else {
         let module = compile(&text, keel_c::Options::default().target);
         keel_ir::verify_module(&module).unwrap();
@@ -744,5 +770,173 @@ fn finite_checked_bound_fails_in_child_without_out_of_bounds_storage() {
             !outcome.status.success(),
             "optimized={optimized} ignored the finite checked bound"
         );
+    }
+}
+
+#[test]
+fn hosted_canonical_memory_calls_have_frontend_intrinsic_provenance() {
+    for target in Target::NATIVE {
+        for (name, id, second, parameter) in [
+            ("memcpy", Intrinsic::Memcpy, "s", "const void *"),
+            ("memmove", Intrinsic::Memmove, "s", "const void *"),
+            ("memset", Intrinsic::Memset, "13", "int"),
+        ] {
+            let source = format!(
+                "void *{name}(void *, {parameter}, unsigned long); void *f(void *d, const void *s, unsigned long n) {{ return ({name})(d,{second},n); }}"
+            );
+            let module = compile(&source, target);
+            let f = module.functions.iter().find(|f| f.name == "f").unwrap();
+            assert!(f.layout_insts().any(|(_, i)| matches!(f.inst_data(i), InstData::Intrinsic { id: got, .. } if *got == id)), "{module}");
+            assert!(
+                !f.layout_insts()
+                    .any(|(_, i)| matches!(f.inst_data(i), InstData::Call { .. })),
+                "{module}"
+            );
+            let policy = keel_c::LibraryBuiltins::hosted().disable(match name {
+                "memcpy" => keel_c::LibraryBuiltin::Memcpy,
+                "memmove" => keel_c::LibraryBuiltin::Memmove,
+                _ => keel_c::LibraryBuiltin::Memset,
+            });
+            let module = keel_c::compile_with_policies(
+                &source,
+                "memory-builtins.c",
+                keel_c::Options {
+                    target,
+                    ..Default::default()
+                },
+                keel_c::FunctionBinding::default(),
+                policy,
+            )
+            .unwrap();
+            let f = module.functions.iter().find(|f| f.name == "f").unwrap();
+            assert!(
+                f.layout_insts()
+                    .any(|(_, i)| matches!(f.inst_data(i), InstData::Call { .. })),
+                "{module}"
+            );
+            let explicit = source.replace(&format!("({name})("), &format!("__builtin_{name}("));
+            let module = keel_c::compile_with_policies(
+                &explicit,
+                "memory-builtins.c",
+                keel_c::Options {
+                    target,
+                    ..Default::default()
+                },
+                keel_c::FunctionBinding::default(),
+                keel_c::LibraryBuiltins::disabled(),
+            )
+            .unwrap();
+            assert!(
+                module.to_string().contains(&format!("intrinsic {name}")),
+                "{module}"
+            );
+        }
+    }
+}
+
+#[test]
+fn library_memory_recognition_requires_final_unambiguous_external_declarations() {
+    let cases = [
+        "void *memcpy(void *,const void *,unsigned long); void *f(void *d,const void *s) { return ((void *(*)(void *,const void *,unsigned int))memcpy)(d,s,2); }",
+        "void *memcpy(void *,const void *,unsigned long); void *f(void *d,const void *s) { return ((void *(*)(void *,const void *,unsigned long))(void *)memcpy)(d,s,2); }",
+        "const void *memcpy(void *,const void *,unsigned long); const void *f(void *d,const void *s) { return memcpy(d,s,2); }",
+        "volatile void *memcpy(void *,const void *,unsigned long); volatile void *f(void *d,const void *s) { return memcpy(d,s,2); }",
+        "const void *memcpy(void *,const void *,unsigned long); void *memcpy(void *,const void *,unsigned long); const void *f(void *d,const void *s) { return memcpy(d,s,2); }",
+        "static void *memcpy(void *d,const void *s,unsigned long n) { return d; } void *f(void *d,const void *s) { return memcpy(d,s,2); }",
+        "void *memcpy(void *,const void *,unsigned long); void *f(void *d,const void *s) { return memcpy(d,s,2); } void *memcpy(void *d,const void *s,unsigned long n) { return d; }",
+        "void *memcpy(void *,const void *,unsigned long) __attribute__((weak)); void *f(void *d,const void *s) { return memcpy(d,s,2); }",
+        "void *memcpy(void *,const void *,unsigned long) __asm__(\"_custom_copy\"); void *f(void *d,const void *s) { return memcpy(d,s,2); }",
+        "int memcpy(void *,const void *,unsigned long); int f(void *d,const void *s) { return memcpy(d,s,2); }",
+        "void *memcpy(void *,const void *,unsigned int); void *f(void *d,const void *s) { return memcpy(d,s,2); }",
+        "void *memcpy(void *,void *,unsigned long); void *f(void *d,void *s) { return memcpy(d,s,2); }",
+        "void *memcpy(void *,const volatile void *,unsigned long); void *f(void *d,const volatile void *s) { return memcpy(d,s,2); }",
+        "void *memcpy(); void *f(void *d,const void *s) { return memcpy(d,s,2UL); } void *memcpy(void *,const void *,unsigned long);",
+        "int memcpy(void *,const void *,unsigned long); void *memcpy(void *,const void *,unsigned long); int f(void *d,const void *s) { return memcpy(d,s,2); }",
+        "void *memcpy(void *,const void *,unsigned long); void *f(void *d,const void *s,void *(*memcpy)(void *,const void *,unsigned long)) { return memcpy(d,s,2); }",
+        "void *memcpy(void *,const void *,unsigned long); void *f(void *d,const void *s) { void *(*p)(void *,const void *,unsigned long)=memcpy; return p(d,s,2); }",
+    ];
+    for target in Target::NATIVE {
+        for source in cases {
+            let source = if target == Target::Aarch64AppleDarwin {
+                source.replace("__asm__(\"memcpy\")", "__asm__(\"_memcpy\")")
+            } else {
+                source.to_string()
+            };
+            let module = compile(&source, target);
+            assert!(
+                !module.to_string().contains("intrinsic memcpy"),
+                "{source}\n{module}"
+            );
+        }
+    }
+}
+
+#[test]
+fn alternate_c_identity_for_library_linker_symbol_prevents_builtin_recognition() {
+    for target in Target::NATIVE {
+        let symbol = if target == Target::Aarch64AppleDarwin {
+            "_memcpy"
+        } else {
+            "memcpy"
+        };
+        let source = format!(
+            "void *custom(void *,const void *,unsigned long) __asm__(\"{symbol}\"); void *custom(void *d,const void *s,unsigned long n) {{ return d; }} void *memcpy(void *,const void *,unsigned long); void *f(void *d,const void *s) {{ return memcpy(d,s,2); }}"
+        );
+        let module = keel_c::compile(
+            &source,
+            "library-alias.c",
+            keel_c::Options {
+                target,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        // The existing IR verifier rejects duplicate definitions/declarations of
+        // a linker symbol. Before that rejection, no builtin may bypass it.
+        assert!(!module.to_string().contains("intrinsic memcpy"), "{module}");
+        assert!(keel_ir::verify_module(&module).is_err());
+    }
+}
+
+#[test]
+fn qualified_typedef_prototypes_recognize_memory_builtins() {
+    let source = "typedef unsigned long size_t; typedef void V; typedef const V CV; V *memcpy(V *restrict, CV *restrict, size_t); void *copy(V *restrict d, CV *restrict s, size_t n) { return memcpy(d,s,n); }";
+    for target in Target::NATIVE {
+        let module = compile(source, target);
+        assert!(module.to_string().contains("intrinsic memcpy"), "{module}");
+    }
+}
+
+#[test]
+fn per_operation_policy_does_not_disable_other_memory_builtins() {
+    let source = "void *memcpy(void *,const void *,unsigned long); void *memmove(void *,const void *,unsigned long); void *memset(void *,int,unsigned long); void f(void *d,const void *s,unsigned long n) { memcpy(d,s,n); memmove(d,s,n); memset(d,17,n); }";
+    for target in Target::NATIVE {
+        let policy = keel_c::LibraryBuiltins::disabled()
+            .enable(keel_c::LibraryBuiltin::Memcpy)
+            .enable(keel_c::LibraryBuiltin::Memmove)
+            .enable(keel_c::LibraryBuiltin::Memset)
+            .disable(keel_c::LibraryBuiltin::Memcpy);
+        let module = keel_c::compile_with_policies(
+            source,
+            "policy.c",
+            keel_c::Options {
+                target,
+                ..Default::default()
+            },
+            keel_c::FunctionBinding::default(),
+            policy,
+        )
+        .unwrap();
+        let f = module.functions.iter().find(|f| f.name == "f").unwrap();
+        assert!(f.layout_insts().any(|(_,i)| matches!(f.inst_data(i),InstData::Call { func,.. } if f.callee(*func).name=="memcpy")), "{module}");
+        for id in [Intrinsic::Memmove, Intrinsic::Memset] {
+            assert!(
+                f.layout_insts().any(
+                    |(_, i)| matches!(f.inst_data(i),InstData::Intrinsic { id: got,.. } if *got==id)
+                ),
+                "{module}"
+            );
+        }
+        keel_ir::verify_module(&module).unwrap();
     }
 }

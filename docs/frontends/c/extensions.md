@@ -3,6 +3,46 @@
 This reference describes current implementation contracts and limits. Use
 [testing](../../development/testing.md) for validation commands; per-run results belong outside Git.
 
+<a id="c-library-memory-builtins"></a>
+## Standard-library memory builtins
+
+Hosted native C compilation recognizes direct calls to canonical external
+`memcpy`, `memmove` and `memset` declarations as memory intrinsics. The library
+API's `compile` and `compile_with_binding` entry points use this hosted policy.
+`compile_with_policies` accepts `LibraryBuiltins` for explicit control. The bounded
+Wasm profile remains freestanding and does not recognize ordinary library calls.
+
+Recognition uses declaration identity and types after parsing the complete
+translation unit. All declarations must retain the canonical native LP64
+prototype, including pointer qualifiers and `unsigned long` size. Typedef aliases
+and top-level parameter `restrict` do not prevent recognition. Definitions,
+static or weak bindings, renamed linker symbols, multiple C names for one linker
+symbol, incompatible declarations and missing prototypes retain ordinary call
+behavior. A later definition or incompatible declaration also prevents earlier
+calls from acquiring builtin semantics.
+
+Parentheses and taking a known function designator's address do not hide its
+identity: `(memcpy)(...)` and a direct `(&memcpy)(...)` can be recognized. Identity-preserving casts may also be recognized. Calls through pointer objects
+or parameters, and casts that change the function prototype or obscure the
+designator, retain their ordinary call form.
+Taking a function's address still produces the library function's address.
+
+`-fno-builtin` disables ordinary-call recognition. The bounded per-function forms
+are `-fno-builtin-memcpy`, `-fno-builtin-memmove` and `-fno-builtin-memset`.
+`-ffreestanding` sets `__STDC_HOSTED__` to zero and disables ordinary recognition;
+`-fhosted` restores hosted preprocessing and global recognition. `-fbuiltin`
+reenables global recognition without changing `__STDC_HOSTED__`. Later global
+flags win; per-function exclusions remain active across global toggles.
+Explicit `__builtin_memcpy`, `__builtin_memmove` and `__builtin_memset` retain
+their existing semantics regardless of these ordinary-call policies.
+
+Arguments are evaluated once even for zero-length operations. Small fixed-size
+intrinsics may become direct loads/stores; larger or dynamic operations can call
+the linked system libc. Keel does not supply a libc implementation. Programs that
+require interposition or custom ordinary memory-function behavior must disable
+recognition. Optimizer passes rely on frontend intrinsic provenance rather than
+matching arbitrary linker names.
+
 <a id="c-cleanup-jumps-cleanup-aware-jumps"></a>
 ## Cleanup-aware jumps
 

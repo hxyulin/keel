@@ -42,6 +42,7 @@ mod headers;
 mod init;
 mod irgen;
 mod lex;
+mod library_builtins;
 mod parse;
 mod predefined;
 mod preprocess;
@@ -50,6 +51,7 @@ mod types;
 mod unit;
 
 pub use batch::{BatchCompiler, BatchCompilerError, Input};
+pub use library_builtins::{LibraryBuiltin, LibraryBuiltins};
 
 pub use predefined::predefined_macros;
 pub use preprocess::{PreprocessOptions, preprocess};
@@ -143,6 +145,23 @@ pub fn compile_with_binding(
     opts: Options,
     binding: FunctionBinding,
 ) -> Result<keel_ir::Module, Diagnostic> {
+    let builtins = if opts.target == keel_ir::Target::Wasm32UnknownUnknown {
+        LibraryBuiltins::disabled()
+    } else {
+        LibraryBuiltins::hosted()
+    };
+    compile_with_policies(src, path, opts, binding, builtins)
+}
+
+/// Compiles C with explicit definition binding and library builtin policies.
+/// Library recognition is native-only; the bounded Wasm profile stays freestanding.
+pub fn compile_with_policies(
+    src: &str,
+    path: &str,
+    opts: Options,
+    binding: FunctionBinding,
+    builtins: LibraryBuiltins,
+) -> Result<keel_ir::Module, Diagnostic> {
     if opts.target == keel_ir::Target::Wasm32UnknownUnknown
         && binding == FunctionBinding::NoSemanticInterposition
     {
@@ -170,6 +189,7 @@ pub fn compile_with_binding(
     parsed.map_err(|e| diagnostic(&files, e))?;
     let funcs = std::mem::take(&mut parser.funcs);
     let mut module = irgen::Gen::new(&parser, funcs, &files, opts.debug_info)
+        .with_library_builtins(builtins)
         .run()
         .map_err(|e| diagnostic(&files, e))?;
     apply_function_binding(&mut module, opts.target, binding);

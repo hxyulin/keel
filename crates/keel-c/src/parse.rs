@@ -1276,6 +1276,7 @@ impl<'a> Parser<'a> {
             thread_local: false,
             returns_twice: false,
             incompatible_return: false,
+            memory_builtin_compatible: false,
             function_attrs: keel_ir::FunctionAttrs::default(),
             visibility: None,
             weak: None,
@@ -1649,6 +1650,13 @@ impl<'a> Parser<'a> {
                 let g = self
                     .declare_function(name, label, fty, spec, &attrs, file_scope)
                     .map_err(|message| Error::new(name_loc, message))?;
+                let returned = match d.sugar.unqualified(&self.typedefs) {
+                    Sugar::Func(ret) => ret.pointee(&self.typedefs),
+                    _ => Sugar::Plain,
+                };
+                self.globals[g].memory_builtin_compatible &= !returned.is_const(&self.typedefs)
+                    && !returned.is_volatile(&self.typedefs)
+                    && !returned.is_restrict(&self.typedefs);
                 self.globals[g].sugar = d.sugar;
                 self.symbol_attrs(g, &attrs)?;
                 self.function_alias(g, attrs, file_scope)?;
@@ -1867,6 +1875,7 @@ impl<'a> Parser<'a> {
                 thread_local: spec.thread_local,
                 returns_twice: false,
                 incompatible_return: false,
+                memory_builtin_compatible: false,
                 function_attrs: keel_ir::FunctionAttrs::default(),
                 visibility: None,
                 weak: None,
@@ -1965,6 +1974,8 @@ impl<'a> Parser<'a> {
         let g = match existing {
             Some(g) => {
                 let global = &mut self.globals[g];
+                global.memory_builtin_compatible &= crate::LibraryBuiltin::named(name)
+                    .is_some_and(|operation| operation.prototype(&ty));
                 if global.ty.numeric_redeclaration_conflict(&ty)
                     || matches!((global.ty, ty), (Ty::Func(a), Ty::Func(b))
                         if !a.parameters_compatible(b))
@@ -2008,6 +2019,8 @@ impl<'a> Parser<'a> {
                     thread_local: false,
                     returns_twice: false,
                     incompatible_return: false,
+                    memory_builtin_compatible: crate::LibraryBuiltin::named(name)
+                        .is_some_and(|operation| operation.prototype(&ty)),
                     function_attrs: keel_ir::FunctionAttrs::default(),
                     visibility: None,
                     weak: None,

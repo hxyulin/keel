@@ -34,7 +34,7 @@ intrinsic headers are subsets. Kernel acceptance uses pinned, preprocessed
 
 ## References
 
-- [Language extensions and layout](extensions.md).
+- [Language extensions and layout](extensions.md), including [memory builtin policy](extensions.md#c-library-memory-builtins).
 - [Function attributes and optimization policies](../../compiler/function-attributes.md).
 - [Inline assembly](inline-asm.md) and [x86 constraints](../../targets/x86_64/c-inline-asm.md).
 - [x86 intrinsics](../../targets/x86_64/intrinsics.md) and [Wasm frontend](../../targets/wasm/c-frontend.md).

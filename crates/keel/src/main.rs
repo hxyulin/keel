@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! keel compile [--code-model pic|small|kernel] [-O0|-O1|-O2|-O3|-Os] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
-//! keel cc [-O0|-O1|-O2|-O3|-Os] [-g] [--code-model pic|small|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]  C to assembly
+//! keel cc [-O0|-O1|-O2|-O3|-Os] [-g] [--code-model pic|small|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-fbuiltin|-fno-builtin] [-fno-builtin-function] [-fhosted|-ffreestanding] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]  C to assembly
 //! keel opt [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
 //! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s> -o <output.o>                 assembly to native object
 //! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s>... --out-dir <directory>      batch assembly
@@ -42,7 +42,7 @@ mod x86_options;
 
 const USAGE: &str = "usage:
   keel compile [--code-model pic|small|kernel] [-O0|-O1|-O2|-O3|-Os] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
-  keel cc [-O0|-O1|-O2|-O3|-Os] [-g] [--code-model pic|small|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]
+  keel cc [-O0|-O1|-O2|-O3|-Os] [-g] [--code-model pic|small|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-fbuiltin|-fno-builtin] [-fno-builtin-function] [-fhosted|-ffreestanding] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]
   keel opt [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
   keel compile|cc|opt [--verify-each | --no-verify-each] [--opt-report <new-report.json>] <input> [-o <output>]
   keel compile|cc [--emit-object] <input> -o <output.o>  (AArch64 Mach-O or AArch64/x86-64 ELF)
@@ -120,6 +120,9 @@ struct Options {
     wasm: wasm::Options,
     preprocess_only: bool,
     dump_macros: bool,
+    freestanding: bool,
+    no_builtin: bool,
+    disabled_library_builtins: u8,
     sysroot: Option<std::path::PathBuf>,
     system_include_dirs: Vec<std::path::PathBuf>,
     darwin_deployment: Option<String>,
@@ -131,16 +134,41 @@ struct Options {
 
 impl Options {
     fn preprocessing_defines(&self) -> Vec<(String, Option<String>)> {
-        let mut defines = Vec::new();
+        let hosted = !self.freestanding && self.target != Some(Target::Wasm32UnknownUnknown);
+        let mut defines = vec![(
+            "__STDC_HOSTED__".into(),
+            Some(if hosted { "1" } else { "0" }.into()),
+        )];
         if self.optimization != keel_opt::OptimizationTier::None {
             defines.push(("__OPTIMIZE__".into(), Some("1".into())));
         }
         if self.optimization == keel_opt::OptimizationTier::Size {
             defines.push(("__OPTIMIZE_SIZE__".into(), Some("1".into())));
         }
-        // Explicit -D/-U overrides compiler-provided optimization macros.
+        // Explicit -D/-U overrides compiler-provided macros.
         defines.extend(self.defines.iter().cloned());
         defines
+    }
+
+    fn library_builtins(&self) -> keel_c::LibraryBuiltins {
+        let mut policy = if self.no_builtin {
+            keel_c::LibraryBuiltins::disabled()
+        } else {
+            keel_c::LibraryBuiltins::hosted()
+        };
+        for (index, builtin) in [
+            keel_c::LibraryBuiltin::Memcpy,
+            keel_c::LibraryBuiltin::Memmove,
+            keel_c::LibraryBuiltin::Memset,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if self.disabled_library_builtins & (1 << index) != 0 {
+                policy = policy.disable(builtin);
+            }
+        }
+        policy
     }
 
     fn c_function_binding(&self) -> keel_c::FunctionBinding {
@@ -325,6 +353,8 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             "-O"
         } else if raw.starts_with("--code-model=") || raw.starts_with("-mcmodel=") {
             "--code-model"
+        } else if raw.starts_with("-fno-builtin-") {
+            "-fno-builtin-function"
         } else if raw.starts_with("-I") {
             "-I"
         } else if raw.starts_with("-D") {
@@ -341,6 +371,29 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             supplied.push(flag);
         }
         match flag {
+            "-fbuiltin" => opts.no_builtin = false,
+            "-fno-builtin" => opts.no_builtin = true,
+            "-ffreestanding" => {
+                opts.freestanding = true;
+                opts.no_builtin = true;
+            }
+            "-fhosted" => {
+                opts.freestanding = false;
+                opts.no_builtin = false;
+            }
+            "-fno-builtin-function" => {
+                let index = match raw.strip_prefix("-fno-builtin-") {
+                    Some("memcpy") => 0,
+                    Some("memmove") => 1,
+                    Some("memset") => 2,
+                    _ => {
+                        return Err(format!(
+                            "unsupported builtin opt-out `{raw}`; expected memcpy, memmove or memset"
+                        ));
+                    }
+                };
+                opts.disabled_library_builtins |= 1 << index;
+            }
             "--emit-wasm" => opts.emit_wasm = true,
             "--wasm-opt" => {
                 if args.next().map(String::as_str) != Some("basic") {
@@ -790,6 +843,11 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--emit-ir",
                     "-fsemantic-interposition",
                     "-fno-semantic-interposition",
+                    "-fbuiltin",
+                    "-fno-builtin",
+                    "-fno-builtin-function",
+                    "-fhosted",
+                    "-ffreestanding",
                     "--link-intent",
                     "-E",
                     "-dM",
@@ -873,11 +931,12 @@ fn run(args: Vec<String>) -> Result<(), String> {
             };
             let mut module = {
                 profiling::scope!("c-frontend");
-                keel_c::compile_with_binding(
+                keel_c::compile_with_policies(
                     preprocessed.as_deref().unwrap_or(text),
                     &input,
                     c_opts,
                     opts.c_function_binding(),
+                    opts.library_builtins(),
                 )
                 .map_err(|e| e.to_string())?
             };
@@ -1774,5 +1833,149 @@ mod vector_context_tests {
         let before = module.to_string();
         assert!(invalid.optimize(&mut module).is_err());
         assert_eq!(before, module.to_string());
+    }
+}
+
+#[cfg(test)]
+mod library_builtin_options_tests {
+    #[test]
+    fn wasm_macro_default_remains_freestanding() {
+        let opts = super::Options {
+            target: Some(super::Target::Wasm32UnknownUnknown),
+            ..Default::default()
+        };
+        assert!(
+            opts.preprocessing_defines()
+                .iter()
+                .any(|(name, value)| name == "__STDC_HOSTED__" && value.as_deref() == Some("0"))
+        );
+        assert!(
+            opts.target().is_err(),
+            "ordinary native cc must retain its Wasm rejection"
+        );
+    }
+    use super::*;
+    use keel_ir::{InstData, Intrinsic};
+
+    const SOURCE: &str = "void *memcpy(void *,const void *,unsigned long);\nvoid *memmove(void *,const void *,unsigned long);\nvoid *memset(void *,int,unsigned long);\nvoid *copy(void *d,const void *s,unsigned long n){return memcpy(d,s,n);}\nvoid *move(void *d,const void *s,unsigned long n){return memmove(d,s,n);}\nvoid *fill(void *d,int c,unsigned long n){return memset(d,c,n);}\nvoid *explicit(void *d,const void *s,unsigned long n){return __builtin_memcpy(d,s,n);}\n";
+
+    #[test]
+    fn library_builtin_flags_apply_to_preprocessed_inputs_and_keep_explicit_builtins() {
+        let dir =
+            std::env::temp_dir().join(format!("keel-library-builtin-flags-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("memory.i");
+        let output = dir.join("memory.keel");
+        std::fs::write(&input, SOURCE).unwrap();
+        let cases: &[(&[&str], [bool; 3])] = &[
+            (&[], [true, true, true]),
+            (&["-fno-builtin"], [false, false, false]),
+            (&["-fno-builtin-memcpy"], [false, true, true]),
+            (
+                &["-fno-builtin-memmove", "-fno-builtin-memset"],
+                [true, false, false],
+            ),
+            (&["-fno-builtin", "-fbuiltin"], [true, true, true]),
+            (&["-fbuiltin", "-fno-builtin"], [false, false, false]),
+            (&["-ffreestanding"], [false, false, false]),
+            (&["-ffreestanding", "-fhosted"], [true, true, true]),
+            (&["-fhosted", "-ffreestanding"], [false, false, false]),
+            (&["-ffreestanding", "-fbuiltin"], [true, true, true]),
+            (
+                &["-fno-builtin-memcpy", "-fno-builtin", "-fhosted"],
+                [false, true, true],
+            ),
+        ];
+        for &(flags, enabled) in cases {
+            let mut argv = vec![
+                "cc".into(),
+                "--target".into(),
+                "x86_64-unknown-linux-gnu".into(),
+                "--emit-ir".into(),
+                input.display().to_string(),
+                "-o".into(),
+                output.display().to_string(),
+            ];
+            argv.extend(flags.iter().map(|f| f.to_string()));
+            run(argv).unwrap();
+            let text = std::fs::read_to_string(&output).unwrap();
+            let module = keel_ir::parse(&text).unwrap();
+            for ((name, id), expected) in [
+                ("copy", Intrinsic::Memcpy),
+                ("move", Intrinsic::Memmove),
+                ("fill", Intrinsic::Memset),
+                ("explicit", Intrinsic::Memcpy),
+            ]
+            .into_iter()
+            .zip(enabled.into_iter().chain([true]))
+            {
+                let function = module.functions.iter().find(|f| f.name == name).unwrap();
+                let recognized = function.layout_insts().any(|(_, i)| matches!(function.inst_data(i), InstData::Intrinsic { id: found, .. } if *found == id));
+                assert_eq!(recognized, expected, "{flags:?}, {name}: {function}");
+            }
+        }
+    }
+
+    #[test]
+    fn freestanding_macro_and_builtin_switches_are_independent() {
+        let dir =
+            std::env::temp_dir().join(format!("keel-hosted-macro-flags-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("hosted.c");
+        let output = dir.join("hosted.i");
+        std::fs::write(&input, "__STDC_HOSTED__\n").unwrap();
+        let cases: &[(&[&str], &str)] = &[
+            (&[], "1"),
+            (&["-fno-builtin"], "1"),
+            (&["-ffreestanding"], "0"),
+            (&["-ffreestanding", "-fbuiltin"], "0"),
+            (&["-ffreestanding", "-fhosted"], "1"),
+            (&["-fhosted", "-ffreestanding"], "0"),
+            (&["-ffreestanding", "-D__STDC_HOSTED__=7"], "7"),
+        ];
+        for &(flags, expected) in cases {
+            let mut argv = vec![
+                "cc".into(),
+                "--target".into(),
+                "x86_64-unknown-linux-gnu".into(),
+                "-E".into(),
+                input.display().to_string(),
+                "-o".into(),
+                output.display().to_string(),
+            ];
+            argv.extend(flags.iter().map(|f| f.to_string()));
+            run(argv).unwrap();
+            let text = std::fs::read_to_string(&output).unwrap();
+            assert_eq!(
+                text.lines().last().unwrap().trim(),
+                expected,
+                "{flags:?}: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn unsupported_builtin_names_and_non_c_options_are_diagnosed() {
+        for flag in [
+            "-fno-builtin-",
+            "-fno-builtin-strlen",
+            "-fno-builtin-__builtin_memcpy",
+        ] {
+            let error = run(vec!["cc".into(), flag.into()]).unwrap_err();
+            assert!(
+                error.contains("unsupported builtin opt-out"),
+                "{flag}: {error}"
+            );
+        }
+        for flag in [
+            "-fbuiltin",
+            "-fno-builtin",
+            "-ffreestanding",
+            "-fhosted",
+            "-fno-builtin-memcpy",
+        ] {
+            let error = run(vec!["compile".into(), flag.into()]).unwrap_err();
+            assert!(error.starts_with("unknown flag"), "{flag}: {error}");
+        }
     }
 }

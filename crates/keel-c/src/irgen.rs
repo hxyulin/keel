@@ -69,6 +69,8 @@ pub struct Gen<'p> {
     files: &'p [&'p str],
     module: Module,
     debug: bool,
+    library_builtins: crate::LibraryBuiltins,
+    library_builtin_symbols: Vec<bool>,
     /// Module source files, by the lexer's file index.
     srcfiles: HashMap<u32, SourceFile>,
     used: Vec<bool>,
@@ -99,6 +101,24 @@ impl<'p> Gen<'p> {
             files,
             module: Module::default(),
             debug,
+            library_builtins: if p.target == keel_ir::Target::Wasm32UnknownUnknown {
+                crate::LibraryBuiltins::disabled()
+            } else {
+                crate::LibraryBuiltins::hosted()
+            },
+            library_builtin_symbols: p
+                .globals
+                .iter()
+                .enumerate()
+                .map(|(index, global)| {
+                    crate::LibraryBuiltin::named(global.name).is_some()
+                        && !p
+                            .globals
+                            .iter()
+                            .enumerate()
+                            .any(|(other, alias)| other != index && alias.symbol == global.symbol)
+                })
+                .collect(),
             srcfiles: HashMap::default(),
             used: vec![false; p.globals.len()],
             worklist: Vec::new(),
@@ -113,6 +133,11 @@ impl<'p> Gen<'p> {
                 ssa: FunctionBuilderContext::new(),
             },
         }
+    }
+
+    pub fn with_library_builtins(mut self, builtins: crate::LibraryBuiltins) -> Self {
+        self.library_builtins = builtins;
+        self
     }
 
     /// Whether an object of type `ty` is or contains anything volatile.
@@ -4071,6 +4096,28 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
 
     fn call(&mut self, f: &Expr<'p>, args: &[Expr<'p>], e: &Expr<'p>) -> R<Option<Value>> {
         let fty = f.ty.pointee().and_then(Ty::func).unwrap();
+        // The complete translation unit supplies symbol identity and all
+        // declarations, including definitions after this call's source position.
+        if self.g.p.target != keel_ir::Target::Wasm32UnknownUnknown
+            && let ExprKind::Addr(inner) = f.kind
+            && let ExprKind::Global(index) = inner.kind
+        {
+            let global = &self.g.p.globals[index];
+            if let Some(operation) = crate::LibraryBuiltin::named(global.name)
+                && self.g.library_builtins.allows(operation)
+                && self.g.library_builtin_symbols[index]
+                && global.memory_builtin_compatible
+                && operation.prototype(&Ty::Func(fty))
+                && global.name == global.symbol
+                && !global.defined
+                && !global.internal
+                && global.weak.is_none()
+                && !global.returns_twice
+                && !global.incompatible_return
+            {
+                return self.builtin(Builtin::Memory(operation.intrinsic()), args, e);
+            }
+        }
         let mapping = self.g.abi_mapping(fty, usize::MAX, &[])?;
         self.set_loc(e.loc);
         let mut vals = Vec::new();

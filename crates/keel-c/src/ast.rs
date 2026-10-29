@@ -421,6 +421,8 @@ pub struct Global<'a> {
     pub returns_twice: bool,
     /// Retained across permissive ordinary redeclarations for cleanup ABI validation.
     pub incompatible_return: bool,
+    /// Every declaration seen has the canonical library memory prototype.
+    pub memory_builtin_compatible: bool,
     pub function_attrs: keel_ir::FunctionAttrs,
     /// Explicit `visibility(..)`, from any declaration. Without effect on
     /// internal symbols.
