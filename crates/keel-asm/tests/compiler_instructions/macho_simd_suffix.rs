@@ -1,6 +1,6 @@
 //! Apple suffixes normalize into existing, validated SIMD encoders.
 #![allow(dead_code)]
-mod common;
+use crate::common;
 use keel_asm::{TargetFeatures, assemble, assemble_with_features};
 use std::fmt::Write;
 

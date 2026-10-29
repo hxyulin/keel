@@ -3,6 +3,8 @@
 //! Headers, files, checksums, embedded source, `__debug_line_str` bytes and
 //! decoded rows are compared; `__debug_line` program bytes are not, because
 //! Keel uses standard opcodes where LLVM uses special opcodes.
+#[path = "dwarf5/dwarf5_layout.rs"]
+mod dwarf5_layout;
 use keel_asm::{assemble, assemble_object};
 use object::{Object, ObjectSection};
 use std::path::Path;

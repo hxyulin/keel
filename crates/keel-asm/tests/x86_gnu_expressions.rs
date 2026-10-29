@@ -1,3 +1,7 @@
+#[allow(dead_code)]
+mod common;
+#[path = "x86_gnu_expressions/semantic_parity.rs"]
+mod semantic_parity;
 use keel_asm::x86::{assemble_object, assemble_program_object};
 use keel_asm_ir::Program;
 use object::{Object, ObjectSection, ObjectSymbol, RelocationTarget};

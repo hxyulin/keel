@@ -1,7 +1,6 @@
-#[allow(dead_code)]
-mod common;
+use crate::common;
 
-use common::Temp;
+use crate::common::Temp;
 use keel_asm::{assemble, assemble_with_metrics};
 use std::process::Command;
 

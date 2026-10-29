@@ -1,6 +1,8 @@
 //! Every compiler fixture must assemble through Keel, in addition to the
 //! compiler suites that use Clang for reference assembly and execution.
 #![cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[path = "compiler_coverage/m5_tuning.rs"]
+mod m5_tuning;
 use keel_codegen::{Pools, aarch64::REGISTERS};
 use std::{path::Path, process::Command};
 

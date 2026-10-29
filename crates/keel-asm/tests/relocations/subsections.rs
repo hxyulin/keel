@@ -1,8 +1,8 @@
+use crate::common;
+use crate::common::{Temp, run};
 use keel_asm::{RelocationKind, assemble, assemble_object};
 use object::{Object, ObjectSymbol};
 use std::process::Command;
-mod common;
-use common::{Temp, run};
 
 const SOURCE: &str = r#"
 .subsections_via_symbols

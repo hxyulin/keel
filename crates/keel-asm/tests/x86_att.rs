@@ -1,4 +1,6 @@
 //! Syntax and byte/relocation oracles against Clang's integrated assembler.
+#[path = "x86_att/x86_signed_immediates.rs"]
+mod x86_signed_immediates;
 use keel_asm::x86::{
     Features, Syntax, assemble_object, assemble_object_with_syntax_and_features,
     assemble_program_object,

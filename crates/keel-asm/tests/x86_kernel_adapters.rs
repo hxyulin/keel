@@ -1,4 +1,6 @@
 //! Kernel spelling/operand witnesses. Optional instructions are assembled, never executed.
+#[path = "x86_kernel_adapters/x86_remaining_kernel_adapters.rs"]
+mod x86_remaining_kernel_adapters;
 use keel_asm::x86::assemble_object_with_syntax_and_features;
 use keel_asm_ir::x86::{CpuLevel, Features, Instruction, Register, Syntax};
 use object::{Object, ObjectSection};

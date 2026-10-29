@@ -1,3 +1,9 @@
+#[path = "sme/scalable.rs"]
+mod scalable;
+#[path = "sme/sme_kernels.rs"]
+mod sme_kernels;
+#[path = "sme/streaming.rs"]
+mod streaming;
 use keel_asm::{TargetFeatures, assemble, assemble_with_features};
 mod common;
 const M5: &[&str] = &["-mcpu=apple-m5"];

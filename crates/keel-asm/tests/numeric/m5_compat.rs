@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-mod common;
+use crate::common;
 use keel_asm::{TargetFeatures, assemble, assemble_with_features};
 
 const PAC: &str = "paciasp\npacibsp\nautiasp\nautibsp\npacia1716\npacib1716\nautia1716\nautib1716\npaciaz\npacibz\nautiaz\nautibz\nxpaclri\npacia x0, sp\npacib x1, x2\npacda x3, x4\npacdb x5, x6\nautia x7, x8\nautib x9, x10\nautda x11, x12\nautdb x13, x14\npaciza x0\npacizb x1\npacdza x2\npacdzb x3\nautiza x4\nautizb x5\nautdza x6\nautdzb x7\nxpaci x8\nxpacd x9\npacga x0, x1, sp\nbraa x0, sp\nbrab x1, x2\nblraa x3, x4\nblrab x5, sp\nbraaz x0\nbrabz x1\nblraaz x2\nblrabz x3\nretaa\nretab\n";

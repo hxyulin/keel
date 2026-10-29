@@ -217,7 +217,7 @@ fn keel_generated_globals_and_tls_execute() {
     use common::execute;
     let repo =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../keel-codegen/tests/programs");
-    for program in ["globals", "tls", "switch", "linkage"] {
+    for program in ["globals", "tls", "switch", "linkage", "i128", "inline_asm"] {
         let source = std::fs::read_to_string(repo.join(format!("{program}.keel"))).unwrap();
         let module = keel_ir::parse(&source).unwrap();
         keel_ir::verify_module(&module).unwrap();
@@ -230,6 +230,7 @@ fn keel_generated_globals_and_tls_execute() {
         run(Command::new("clang")
             .arg(repo.join(format!("{program}.c")))
             .arg(&obj)
+            .arg("-lm")
             .arg("-o")
             .arg(&exe));
         assert_eq!(execute(&exe).code(), Some(0), "{program}");

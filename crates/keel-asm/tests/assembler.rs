@@ -1,3 +1,9 @@
+#[path = "assembler/aarch64_elf.rs"]
+mod aarch64_elf;
+#[path = "assembler/arena.rs"]
+mod arena;
+#[path = "assembler/metrics.rs"]
+mod metrics;
 use keel_asm::{assemble, assemble_object};
 use object::{Object, ObjectSection, ObjectSymbol};
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]

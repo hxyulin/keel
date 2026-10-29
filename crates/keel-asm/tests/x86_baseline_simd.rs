@@ -1,3 +1,7 @@
+#[path = "x86_baseline_simd/x86_packed.rs"]
+mod x86_packed;
+#[path = "x86_baseline_simd/x86_v1_mxcsr.rs"]
+mod x86_v1_mxcsr;
 use keel_asm::x86::{assemble_object, assemble_program_object_with_features};
 use keel_asm_ir::x86::{Features, Instruction, Operand, Register, RegisterClass};
 use object::{Object, ObjectSection, ObjectSymbol};

@@ -1,4 +1,6 @@
 //! Bounded instruction forms observed in intact Clang compiler output.
+#[path = "x86_compiler_output/x86_x87_full.rs"]
+mod x86_x87_full;
 use keel_asm::x86::{assemble_object, assemble_program_object};
 use keel_asm_ir::x86::{Instruction, parse_program};
 use object::{Object, ObjectSection, ObjectSymbol, RelocationTarget};

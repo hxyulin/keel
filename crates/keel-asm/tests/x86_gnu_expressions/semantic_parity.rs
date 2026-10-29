@@ -1,15 +1,11 @@
 //! Accepted hand-written input must mean what Clang's integrated assembler
 //! makes of it: same bytes, section attributes and symbol bindings.
-#![allow(dead_code)]
-mod common;
-
-use common::Temp;
+use crate::common::Temp;
 use keel_asm::x86::assemble_object;
-use object::{Object, ObjectSection, ObjectSymbol};
+use object::{Object, ObjectSection};
 use std::process::Command;
 
 const X86: &str = "x86_64-unknown-linux-gnu";
-const A64: &str = "arm64-apple-macos11";
 
 /// Clang's object for `source`, or its diagnostics when it rejects it.
 fn clang(target: &str, source: &str) -> Result<Vec<u8>, String> {
@@ -234,141 +230,4 @@ mov rax, -017
         .map(str::to_string),
         &[".data", ".text"],
     );
-}
-
-/// `(sh_type, sh_flags)` by name, from the raw ELF64 section headers.
-fn section_headers(bytes: &[u8]) -> Vec<(String, u32, u64)> {
-    let file = object::File::parse(bytes).unwrap();
-    let shoff = u64::from_le_bytes(bytes[0x28..0x30].try_into().unwrap()) as usize;
-    file.sections()
-        .map(|s| {
-            let at = shoff + s.index().0 * 64;
-            (
-                s.name().unwrap().to_owned(),
-                u32::from_le_bytes(bytes[at + 4..at + 8].try_into().unwrap()),
-                u64::from_le_bytes(bytes[at + 8..at + 16].try_into().unwrap()),
-            )
-        })
-        .collect()
-}
-
-#[test]
-fn x86_inferred_section_attributes_match_clang() {
-    let source = r#"
-.section .text.foo
-.section .text.hot.x
-.section .text.unlikely.
-.section .textfoo
-.section .init
-.section .fini
-.section .rodata.x
-.section .rodata1
-.section .rodatax
-.section .data.rel.ro.x
-.section .data.x
-.section .data1
-.section .bss.x
-.section .bss.rel.ro
-.section .bssx
-.section .tdata.x
-.section .tbss.x
-.section .tbssx
-.section .comment
-.section .foo
-.section .debug_foo
-.section .bss.a,"aw"
-.section .bss.b,"aw",@progbits
-.section .text.c,""
-.section .text.d,"a"
-.section .rodata.e,"aw"
-.section .tbss.f,"awT"
-.section .data.g,"",@nobits
-.section .bss.h,"",@progbits
-.section .foo2,"aw",@nobits
-.section .text.x
-.section .text.x,"ax",@progbits
-.section .data.y,"aw"
-.section .data.y
-.section .bss.z
-.section .bss.z,"aw",@nobits
-.section .text.w,"aw"
-.section .note.GNU-stack,"",@progbits
-"#;
-    let names: Vec<_> = source
-        .lines()
-        .filter_map(|l| l.strip_prefix(".section "))
-        .map(|l| l.split(',').next().unwrap())
-        .collect();
-    let pick = |bytes: &[u8]| {
-        let mut headers: Vec<_> = section_headers(bytes)
-            .into_iter()
-            .filter(|(name, ..)| names.contains(&name.as_str()))
-            .collect();
-        headers.sort();
-        headers
-    };
-    let ours = pick(&assemble_object(source).unwrap());
-    let reference = pick(&clang(X86, source).unwrap());
-    assert_eq!(ours, reference);
-    assert!(ours.contains(&(".text.foo".into(), 1, 6)));
-    assert!(ours.contains(&(".bss.x".into(), 8, 3)));
-}
-
-/// Name, external and undefined bits, ignoring Clang's `ltmp` section symbols.
-fn a64_bindings(bytes: &[u8]) -> Vec<(String, bool, bool)> {
-    let file = object::File::parse(bytes).unwrap();
-    let mut symbols: Vec<_> = file
-        .symbols()
-        .filter(|s| !s.name().unwrap().starts_with("ltmp"))
-        .map(|s| {
-            (
-                s.name().unwrap().to_owned(),
-                s.is_global(),
-                s.is_undefined(),
-            )
-        })
-        .collect();
-    symbols.sort();
-    symbols
-}
-
-#[test]
-fn a64_extern_keeps_declared_binding_like_clang() {
-    // One source holds every case with its own symbol names; the bindings
-    // are compared per symbol.
-    let cases = [
-        ".extern _foo\n_foo: ret",
-        ".extern _foo\n.text\nret",
-        ".extern _foo\nbl _foo",
-        ".globl _foo\n.extern _foo\n_foo: ret",
-        ".extern _foo\n.globl _foo\n_foo: ret",
-        ".extern _a, _b\n_a: ret\nbl _b",
-        ".extern _a\n.globl _b\n_a: ret\n_b: bl _a",
-    ]
-    .iter()
-    .enumerate()
-    .map(|(n, case)| {
-        ["_foo", "_a", "_b"]
-            .iter()
-            .fold(case.to_string(), |s, name| {
-                s.replace(name, &format!("{name}_{n}"))
-            })
-    })
-    .collect::<Vec<_>>();
-    let source = cases.join("\n") + "\n";
-    let ours = keel_asm::assemble(&source)
-        .and_then(|a| a.to_macho())
-        .unwrap_or_else(|e| panic!("{source}: {e}"));
-    let ours = a64_bindings(&ours);
-    let reference = a64_bindings(&clang(A64, &source).unwrap());
-    let names = ours.iter().chain(&reference).map(|(name, ..)| name);
-    for name in names {
-        let case = cases.iter().find(|c| c.contains(name.as_str())).unwrap();
-        let binding =
-            |bindings: &[(String, bool, bool)]| bindings.iter().find(|(n, ..)| n == name).cloned();
-        assert_eq!(binding(&ours), binding(&reference), "{name} in:\n{case}");
-    }
-    // Keel only accepts the meaningful spelling; Clang ignores the statement.
-    assert!(keel_asm::assemble(".extern").is_err());
-    assert!(keel_asm::assemble(".extern Lfoo\nbl Lfoo").is_err());
 }

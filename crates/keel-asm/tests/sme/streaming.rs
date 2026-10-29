@@ -1,12 +1,12 @@
+use crate::common;
 use keel_asm::{TargetFeatures, assemble, assemble_with_features};
-mod common;
 fn compare(s: &str) {
     common::compare_clang_with_features(s, TargetFeatures::apple_m5(), &["-mcpu=apple-m5"]);
 }
 #[test]
 fn streaming_named_forms_match_clang_and_require_explicit_features() {
     let mut s = String::new();
-    for line in include_str!("streaming-cases.txt")
+    for line in include_str!("../streaming-cases.txt")
         .lines()
         .filter(|s| !s.starts_with('#'))
     {

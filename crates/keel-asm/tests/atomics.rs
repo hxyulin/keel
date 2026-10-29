@@ -1,3 +1,5 @@
+#[path = "atomics/exclusive_literal.rs"]
+mod exclusive_literal;
 use keel_asm::{assemble, assemble_object};
 use std::{fmt::Write, process::Command};
 mod common;

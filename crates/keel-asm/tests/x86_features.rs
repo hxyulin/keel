@@ -1,4 +1,6 @@
 //! Regression coverage for compiler-produced Intel LOCK/shift/SSE2 forms.
+#[path = "x86_features/x86_features_runtime.rs"]
+mod x86_features_runtime;
 use keel_asm::x86::{assemble_object, assemble_program_object};
 use keel_asm_ir::{
     Program,

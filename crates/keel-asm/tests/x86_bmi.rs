@@ -1,4 +1,8 @@
 //! Intel SDM Vol. 2 instruction tables are the encoding authority (docs/targets/x86_64/assembler.md).
+#[path = "x86_bmi/x86_bmi_codegen.rs"]
+mod x86_bmi_codegen;
+#[path = "x86_bmi/x86_bmi_runtime.rs"]
+mod x86_bmi_runtime;
 use keel_asm::x86::{
     assemble_object, assemble_object_with_features, assemble_program_object_with_features,
 };

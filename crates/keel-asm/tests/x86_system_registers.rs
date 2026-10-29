@@ -1,4 +1,10 @@
 //! Encoding only. Control/debug instructions never execute on the host.
+#[path = "x86_system_registers/x86_descriptor_loads.rs"]
+mod x86_descriptor_loads;
+#[path = "x86_system_registers/x86_selector_queries.rs"]
+mod x86_selector_queries;
+#[path = "x86_system_registers/x86_system_write.rs"]
+mod x86_system_write;
 use keel_asm_ir::x86::{Features, Instruction, Operand, Register, RegisterClass, Syntax};
 use object::{Object, ObjectSection};
 use std::{fs, process::Command};

@@ -1,6 +1,8 @@
 //! Instruction families used by unchanged optimized Clang/rustc output.
 #![allow(dead_code)]
 mod common;
+#[path = "compiler_instructions/macho_simd_suffix.rs"]
+mod macho_simd_suffix;
 use keel_asm::{TargetFeatures, assemble, assemble_with_features};
 use std::fmt::Write;
 

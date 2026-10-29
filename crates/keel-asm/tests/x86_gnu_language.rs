@@ -1,3 +1,11 @@
+#[allow(dead_code)]
+mod common;
+#[path = "x86_gnu_language/x86_gnu_fill_aliases.rs"]
+mod x86_gnu_fill_aliases;
+#[path = "x86_gnu_language/x86_gnu_prefixes.rs"]
+mod x86_gnu_prefixes;
+#[path = "x86_gnu_language/x86_incbin.rs"]
+mod x86_incbin;
 use keel_asm::x86::{assemble_object, assemble_program_object};
 use keel_asm_ir::Program;
 use object::{Object, ObjectSection, ObjectSymbol, RelocationTarget};

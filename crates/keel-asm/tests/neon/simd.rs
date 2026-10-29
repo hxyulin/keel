@@ -1,6 +1,5 @@
+use crate::common::compare_clang;
 use keel_asm::assemble;
-mod common;
-use common::compare_clang;
 
 #[test]
 fn neon_register_arithmetic_matches_clang() {
@@ -90,7 +89,7 @@ fn neon_reserved_sizes_and_mismatched_operands_are_rejected() {
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[test]
 fn neon_integer_and_fp_execute() {
-    use common::{Temp, execute, run};
+    use crate::common::{Temp, execute, run};
     use std::process::Command;
     let source = "
 .text

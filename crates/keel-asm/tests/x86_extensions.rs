@@ -1,4 +1,6 @@
 //! Encoding and feature contracts only; these tests do not execute extensions.
+#[path = "x86_extensions/x86_pclmul.rs"]
+mod x86_pclmul;
 use keel_asm::x86::{assemble_object_with_features, assemble_object_with_syntax_and_features};
 use keel_asm_ir::x86::{CpuLevel, ExtensionOpcode, Features, Instruction, Syntax};
 use object::{Object, ObjectSection};

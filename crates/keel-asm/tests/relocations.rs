@@ -1,3 +1,5 @@
+#[path = "relocations/subsections.rs"]
+mod subsections;
 use keel_asm::{RelocationKind, assemble, assemble_object};
 use object::{Object, ObjectSection, ObjectSymbol, RelocationFlags, RelocationTarget};
 use std::process::Command;

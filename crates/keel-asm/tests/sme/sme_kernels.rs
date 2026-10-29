@@ -1,9 +1,9 @@
+use crate::common;
 use keel_asm::TargetFeatures;
-mod common;
 const SOURCES: [&str; 3] = [
-    include_str!("fixtures/sme-kernels/fp32.s"),
-    include_str!("fixtures/sme-kernels/bf16.s"),
-    include_str!("fixtures/sme-kernels/int8.s"),
+    include_str!("../fixtures/sme-kernels/fp32.s"),
+    include_str!("../fixtures/sme-kernels/bf16.s"),
+    include_str!("../fixtures/sme-kernels/int8.s"),
 ];
 #[test]
 fn tail_aware_matrix_kernels_match_clang_with_just_sme() {
@@ -46,7 +46,7 @@ fn matrix_kernels_match_scalar_references_for_irregular_dimensions() {
             .unwrap(),
     )
     .unwrap();
-    std::fs::write(&driver, include_str!("fixtures/sme-kernels/driver.c")).unwrap();
+    std::fs::write(&driver, include_str!("../fixtures/sme-kernels/driver.c")).unwrap();
     run(Command::new("clang")
         .arg("-O2")
         .arg("-Wall")

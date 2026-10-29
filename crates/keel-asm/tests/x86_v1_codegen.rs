@@ -1,4 +1,6 @@
 //! Strict-v1 lowering: tier matrix, independent assembler and runtime oracle.
+#[path = "x86_v1_codegen/x86_backend.rs"]
+mod x86_backend;
 use keel_asm::x86::{assemble_object_with_features, assemble_program_object_with_features};
 use keel_asm_ir::{
     Program,

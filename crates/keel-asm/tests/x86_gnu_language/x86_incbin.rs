@@ -1,8 +1,4 @@
-#[expect(
-    dead_code,
-    reason = "Shared differential helpers include ARM-only operations."
-)]
-mod common;
+use crate::common;
 use keel_asm::x86::{self, Features, ProgramAssembler, Syntax};
 use keel_asm_ir::x86::SourceParser;
 use object::{Object, ObjectSection, ObjectSymbol};

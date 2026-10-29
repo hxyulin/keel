@@ -1,3 +1,5 @@
+#[path = "numeric/m5_compat.rs"]
+mod m5_compat;
 use keel_asm::{TargetFeatures, assemble, assemble_with_features};
 mod common;
 use common::compare_clang_with_features;

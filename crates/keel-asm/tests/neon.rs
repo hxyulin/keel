@@ -1,3 +1,5 @@
+#[path = "neon/simd.rs"]
+mod simd;
 use keel_asm::assemble;
 mod common;
 use common::compare_clang;
@@ -731,4 +733,51 @@ int main(void){
         .arg("-o")
         .arg(&exe));
     assert_eq!(execute(&exe).code(), Some(0));
+}
+
+#[test]
+fn every_movi_modified_immediate_matches_clang() {
+    use std::fmt::Write;
+    let mut source = String::new();
+    for imm in 0..256u64 {
+        for dest in ["v0.8b", "v31.16b"] {
+            writeln!(source, "movi {dest},#{imm}").unwrap();
+        }
+        for dest in ["v0.4h", "v31.8h"] {
+            for shift in [0, 8] {
+                writeln!(source, "movi {dest},#{imm},lsl #{shift}").unwrap();
+            }
+        }
+        for dest in ["v0.2s", "v31.4s"] {
+            for shift in [0, 8, 16, 24] {
+                writeln!(source, "movi {dest},#{imm},lsl #{shift}").unwrap();
+            }
+            for shift in [8, 16] {
+                writeln!(source, "movi {dest},#{imm},msl #{shift}").unwrap();
+            }
+        }
+        let mut mask = 0u64;
+        for bit in 0..8 {
+            if imm & (1 << bit) != 0 {
+                mask |= 255 << (bit * 8);
+            }
+        }
+        for dest in ["d31", "v0.2d"] {
+            writeln!(source, "movi {dest},#0x{mask:x}").unwrap();
+        }
+    }
+    compare_clang(&source);
+    for source in [
+        "movi d0,#1",
+        "movi v0.1d,#0",
+        "movi v0.16b,#256",
+        "movi v0.8h,#1,lsl #16",
+        "movi v0.4s,#1,msl #0",
+        "movi v0.4s,#1,lsl #32",
+        "movi v0.2d,#0,lsl #8",
+        "movi v32.8b,#0",
+        "movi v0.8b,#symbol",
+    ] {
+        assert!(assemble(source).is_err(), "{source}");
+    }
 }

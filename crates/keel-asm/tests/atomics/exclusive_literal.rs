@@ -1,6 +1,5 @@
+use crate::common::compare_clang;
 use keel_asm::assemble;
-mod common;
-use common::compare_clang;
 
 #[test]
 fn exclusive_accesses_match_clang() {
@@ -85,7 +84,7 @@ fn invalid_exclusive_and_literal_forms_are_diagnosed() {
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[test]
 fn exclusive_retry_loops_and_literal_loads_execute() {
-    use common::{Temp, execute, run};
+    use crate::common::{Temp, execute, run};
     use std::process::Command;
     let source = "
 .text

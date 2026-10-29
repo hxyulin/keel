@@ -1,6 +1,10 @@
 //! Mach-O visibility must survive both textual and structured assembly.
 #![allow(dead_code)]
 mod common;
+#[path = "private_extern/retention.rs"]
+mod retention;
+#[path = "private_extern/semantic_parity.rs"]
+mod semantic_parity;
 use common::{Temp, run};
 use object::{Object, ObjectSymbol};
 use std::{collections::BTreeMap, process::Command};

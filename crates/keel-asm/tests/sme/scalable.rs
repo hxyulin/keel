@@ -1,6 +1,6 @@
+use crate::common;
+use crate::common::compare_clang_with_features;
 use keel_asm::{TargetFeatures, assemble, assemble_with_features};
-mod common;
-use common::compare_clang_with_features;
 
 const SVE_FLAGS: &[&str] = &["-march=armv8-a+sve"];
 const SME_FLAGS: &[&str] = &["-march=armv8-a+sme"];

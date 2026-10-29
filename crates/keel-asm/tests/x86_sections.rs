@@ -1,3 +1,9 @@
+#[allow(dead_code)]
+mod common;
+#[path = "x86_sections/retention.rs"]
+mod retention;
+#[path = "x86_sections/semantic_parity.rs"]
+mod semantic_parity;
 use keel_asm::x86::{assemble_object, assemble_program_object};
 use keel_asm_ir::{Directive, Program};
 use object::{Object, ObjectComdat, ObjectSection, ObjectSymbol};

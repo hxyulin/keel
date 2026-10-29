@@ -1,3 +1,13 @@
+#[path = "x86_core/x86_conditions.rs"]
+mod x86_conditions;
+#[path = "x86_core/x86_core_review.rs"]
+mod x86_core_review;
+#[path = "x86_core/x86_fixed_baseline.rs"]
+mod x86_fixed_baseline;
+#[path = "x86_core/x86_generated_tables.rs"]
+mod x86_generated_tables;
+#[path = "x86_core/x86_pushf_alias.rs"]
+mod x86_pushf_alias;
 use keel_asm::x86::assemble_program_object_with_features;
 // Core inventory includes optional CLFSH encoding witnesses, not a v1 guarantee.
 fn assemble_object(source: &str) -> Result<Vec<u8>, keel_asm::Error> {

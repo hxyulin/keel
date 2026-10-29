@@ -1,8 +1,8 @@
+use crate::common;
+use crate::common::{Temp, run};
 use keel_asm::assemble;
 use object::{Object, ObjectSection};
 use std::{fmt::Write, process::Command};
-mod common;
-use common::{Temp, run};
 
 fn frame(name: &str, rules: &str) -> String {
     format!(".text\n{name}:\n.cfi_startproc\n{rules}\nret\n.cfi_endproc\n")

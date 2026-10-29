@@ -460,3 +460,13 @@ fn simd_popcount_and_reductions_match_clang() {
         assert!(assemble(invalid).is_err(), "{invalid}");
     }
 }
+
+#[test]
+fn carry_negation_and_supervisor_calls_match_clang() {
+    compare_clang(
+        "ngc w0,w1\nngcs x30,xzr\nngc xzr,x0\nngcs wzr,wzr\nsvc #0\nsvc #0x80\nsvc #65535",
+    );
+    for source in ["ngc x0,w1", "ngcs sp,x1", "svc #-1", "svc #65536", "svc"] {
+        assert!(assemble(source).is_err(), "{source}");
+    }
+}

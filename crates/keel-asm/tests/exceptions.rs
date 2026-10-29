@@ -1,3 +1,5 @@
+#[path = "exceptions/compact.rs"]
+mod compact;
 use keel_asm::{RelocationKind, assemble, assemble_object};
 use object::{Object, ObjectSection, ObjectSymbol, RelocationFlags};
 use std::process::Command;

@@ -1,5 +1,7 @@
 #[allow(dead_code)]
 mod common;
+#[path = "preprocessing/syntax.rs"]
+mod syntax;
 use keel_asm::{assemble, assemble_with_metrics};
 
 #[test]
