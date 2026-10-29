@@ -1,5 +1,7 @@
 #[path = "x86_aggregate_boundary/x86_aggregate_branch.rs"]
 mod x86_aggregate_branch;
+#[path = "x86_aggregate_boundary/x86_sret_address.rs"]
+mod x86_sret_address;
 
 use keel_codegen::{
     CodegenPipeline, SelectionTier,

@@ -9,7 +9,7 @@ const EMPTY: Pools = Pools {
     float_caller_saved: &[],
     float_callee_saved: &[],
 };
-const SOURCE: &str = include_str!("fixtures/arm_sret_address.keel");
+const SOURCE: &str = include_str!("fixtures/sret_address.keel");
 
 fn compile(
     m: &keel_ir::Module,
@@ -120,7 +120,7 @@ fn native_register_results_dynamic_frames_overlap_and_indirect_calls() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("oracle.c"),
-        include_str!("fixtures/arm_sret_address.c"),
+        include_str!("fixtures/sret_address.c"),
     )
     .unwrap();
     for sel in [SelectionTier::Baseline, SelectionTier::Full] {

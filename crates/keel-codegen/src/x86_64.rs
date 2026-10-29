@@ -850,7 +850,10 @@ fn stack_slot(func: &Function, addr: Value) -> Option<usize> {
 }
 
 enum AggregateResult<'a> {
-    Registers(Vec<sysv::RegPiece>, &'a Layout),
+    /// The pieces, the layout, and the frame offset of a fixed destination,
+    /// whose address is computed again after the call instead of being kept
+    /// in the call's save slot.
+    Registers(Vec<sysv::RegPiece>, &'a Layout, Option<usize>),
     X87,
     ScalarMemory,
 }
@@ -906,6 +909,8 @@ struct FunctionCompiler<'a> {
     string_io_programs: HashMap<Inst, keel_asm_ir::Program>,
     inline_asm_home: Option<usize>,
     inline_asm_plans: HashMap<Inst, inline_asm::Plan>,
+    /// Emission consumes `inline_asm_plans`; this keeps whether there were any.
+    has_inline_asm: bool,
     rflags_home: Option<usize>,
     rflags_programs: HashMap<Inst, keel_asm_ir::Program>,
     /// Offset from `rsp` of the slot keeping this function's own `sret`
@@ -1982,6 +1987,7 @@ impl<'a> FunctionCompiler<'a> {
             string_io_home,
             string_io_programs: HashMap::default(),
             inline_asm_home,
+            has_inline_asm: !inline_asm_plans.is_empty(),
             inline_asm_plans,
             rflags_home,
             rflags_programs: HashMap::default(),
@@ -4201,13 +4207,20 @@ impl<'a> FunctionCompiler<'a> {
                 }
                 ArgLoc::SretRegs(_) if tail => {}
                 ArgLoc::SretRegs(regs) => {
-                    let p = self.use_reg(arg, S1);
-                    let save = self.frame(self.sret_save.expect("planned"));
-                    self.emit(
-                        Opcode::Mov,
-                        [asm_arg(sized((save).clone(), 64)), asm_arg(r64(p))],
-                    );
-                    sret = Some(AggregateResult::Registers(regs, layout.expect("a struct")));
+                    let fixed = self.fixed_result_offset(arg);
+                    if fixed.is_none() {
+                        let p = self.use_reg(arg, S1);
+                        let save = self.frame(self.sret_save.expect("planned"));
+                        self.emit(
+                            Opcode::Mov,
+                            [asm_arg(sized((save).clone(), 64)), asm_arg(r64(p))],
+                        );
+                    }
+                    sret = Some(AggregateResult::Registers(
+                        regs,
+                        layout.expect("a struct"),
+                        fixed,
+                    ));
                 }
             }
         }
@@ -4264,6 +4277,15 @@ impl<'a> FunctionCompiler<'a> {
         sret
     }
 
+    /// The frame offset of the stack slot that `sret` addresses. Inline
+    /// assembly keeps the saved pointer, as on AArch64.
+    fn fixed_result_offset(&self, sret: Value) -> Option<usize> {
+        if self.has_inline_asm {
+            return None;
+        }
+        stack_slot(self.func, sret).map(|slot| self.stack_slot_offsets[slot])
+    }
+
     /// Moves a call's result, if it has one, from rax or xmm0 to its place,
     /// and stores a struct result that came back in registers to its
     /// `sret` address.
@@ -4291,9 +4313,14 @@ impl<'a> FunctionCompiler<'a> {
             self.emit(Opcode::Mov, [asm_arg(r64(S3)), asm_arg(sized(save, 64))]);
             self.emit(Opcode::Fstp, [asm_arg(sized(memory(r64(S3), 0), 80))]);
         }
-        if let Some(AggregateResult::Registers(regs, layout)) = sret {
-            let save = self.frame(self.sret_save.expect("planned"));
-            self.emit(Opcode::Mov, [asm_arg(r64(11)), asm_arg(sized(save, 64))]);
+        if let Some(AggregateResult::Registers(regs, layout, fixed)) = sret {
+            if let Some(offset) = fixed {
+                let at = self.frame(offset);
+                self.emit(Opcode::Lea, [asm_arg(r64(S3)), asm_arg(at)]);
+            } else {
+                let save = self.frame(self.sret_save.expect("planned"));
+                self.emit(Opcode::Mov, [asm_arg(r64(S3)), asm_arg(sized(save, 64))]);
+            }
             if let Some(ty) = sysv::register_vector(layout) {
                 self.emit(
                     movs(ty),
