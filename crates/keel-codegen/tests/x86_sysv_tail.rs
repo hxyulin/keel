@@ -23,11 +23,10 @@ const TINY: Pools = Pools {
 fn compatible_tail_packet() {
     let module = keel_ir::parse(include_str!("sysv_tail/corpus.ir")).unwrap();
     keel_ir::verify_module(&module).unwrap();
-    let dir = std::env::var_os("KEEL_SYSV_TAIL_EXPORT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::temp_dir().join(format!("keel-sysv-tail-{}", std::process::id()))
-        });
+    let export = std::env::var_os("KEEL_SYSV_TAIL_EXPORT").map(PathBuf::from);
+    let dir = export.clone().unwrap_or_else(|| {
+        std::env::temp_dir().join(format!("keel-sysv-tail-{}", std::process::id()))
+    });
     fs::create_dir_all(&dir).unwrap();
     for name in ["corpus.ir", "oracle.c", "depth.S", "run.py"] {
         fs::copy(
@@ -137,6 +136,9 @@ fn compatible_tail_packet() {
     }
     fs::remove_file(dir.join("clang.o")).unwrap();
     fs::write(dir.join("roster.json"), format!("{{\"schema\":1,\"fullprofile\":false,\"native_accepted\":false,\"y_requires_v3\":true,\"objects\":[{}]}}\n", names.join(","))).unwrap();
+    if export.is_none() {
+        fs::remove_dir_all(dir).unwrap();
+    }
 }
 #[test]
 fn incompatible_tails_reject() {
