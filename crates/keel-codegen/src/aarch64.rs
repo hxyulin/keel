@@ -6007,7 +6007,7 @@ fn asm_loc(r: PhysReg) -> Loc {
 /// `asm`'s template with its operands substituted. `%N` is operand N:
 /// a register named for its type (`x0` or `w0`, `d0` or `s0`), `[x0]` for
 /// memory, or the number for a constant. A modifier picks another view of
-/// a register (`%w0`, `%x0`; `%s0`, `%d0`, `%q0`, `%h0`, `%b0`), and `%c0`
+/// a register (`%w0`, `%x0`; `%s0`, `%d0`, `%q0`, `%h0`, `%b0`, `%v0`), and `%c0`
 /// is a constant; `%%` is `%`. `%[N]` (also `%c[N]`, etc.) delimits a number
 /// when literal digits follow the reference.
 fn asm_text(
@@ -6070,7 +6070,7 @@ fn asm_text(
             (AsmOperand::Imm | AsmOperand::NumericImm | AsmOperand::Mem, _, _) => return Err(bad()),
             (_, Some(r), None) if r.float => write!(out, "{}", freg(r.num, ty)).unwrap(),
             (_, Some(r), None) => write!(out, "{}", reg(r.num, ty)).unwrap(),
-            (_, Some(r), Some(m @ ('s' | 'd' | 'q' | 'h' | 'b'))) if r.float => {
+            (_, Some(r), Some(m @ ('s' | 'd' | 'q' | 'h' | 'b' | 'v'))) if r.float => {
                 write!(out, "{m}{}", r.num).unwrap()
             }
             (_, Some(r), Some(m @ ('w' | 'x'))) if !r.float => write!(out, "{m}{}", r.num).unwrap(),

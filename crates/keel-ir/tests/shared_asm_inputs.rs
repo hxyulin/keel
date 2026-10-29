@@ -49,3 +49,35 @@ fn unrelated_values_and_required_high_bits_cannot_share() {
     let error = check(" v3 = trunc.i8 v0", "=r,0,0,0", "v3,v0,v1").unwrap_err();
     assert!(error.contains("conflicting or unproven"), "{error}");
 }
+
+fn vector_asm(input: &str, output: &str, constraints: &str) -> Result<(), String> {
+    let module = keel_ir::parse(&format!(
+        "func @f({input}) -> {output} {{
+block0(v0:{input}):
+ v1 = asm \"/*%q0*/\", \"{constraints}\"(v0) -> {output}
+ return v1
+}}"
+    ))
+    .unwrap();
+    keel_ir::verify_module(&module).map_err(|e| format!("{e:?}"))
+}
+
+#[test]
+fn simd_constraints_accept_vectors_and_preserve_tied_types() {
+    for ty in ["i8x8", "i32x4", "i64x2", "f32x4", "f64x2"] {
+        for constraints in ["=w,0", "={v0},0", "=w,w", "={q0},{v1}"] {
+            vector_asm(ty, ty, constraints).unwrap();
+        }
+    }
+    for (input, output, constraints, message) in [
+        ("i32x4", "i32x4", "=r,0", "cannot be i32x4"),
+        ("i32x4", "i32x4", "=w,r", "cannot be i32x4"),
+        ("i32x4", "i32x4", "={x0},0", "cannot be i32x4"),
+        ("i32x4", "f32x4", "=w,0", "but its output 0 is f32x4"),
+        ("i32x2", "i32x4", "=w,0", "but its output 0 is i32x4"),
+        ("i64", "i64", "=w,0", "cannot be i64"),
+    ] {
+        let error = vector_asm(input, output, constraints).unwrap_err();
+        assert!(error.contains(message), "{constraints}: {error}");
+    }
+}

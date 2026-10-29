@@ -901,7 +901,9 @@ impl Verifier<'_> {
                 (ty.is_int() && ty != Type::I128) || ty == Type::Ptr
             }
             AsmOperand::StackPointer => ty == Type::I64,
-            AsmOperand::FloatReg | AsmOperand::Fixed(PhysReg { float: true, .. }) => ty.is_float(),
+            AsmOperand::FloatReg | AsmOperand::Fixed(PhysReg { float: true, .. }) => {
+                ty.is_float() || ty.is_vector()
+            }
             AsmOperand::Mem | AsmOperand::MemWrite | AsmOperand::MemReadWrite => ty == Type::Ptr,
             AsmOperand::Flag(cc) => cc < 16 && ty.is_int() && ty != Type::I128,
             AsmOperand::Imm | AsmOperand::NumericImm | AsmOperand::Tied(_) => true,

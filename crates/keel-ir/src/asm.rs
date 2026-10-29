@@ -33,7 +33,7 @@ pub struct InlineAsm {
 pub enum AsmOperand {
     /// `r`: a general-purpose register.
     Reg,
-    /// `w`: a SIMD/FP register.
+    /// `w`: a SIMD/FP register holding a scalar float or a vector.
     FloatReg,
     /// `{x0}`, `{d8}`: that register.
     Fixed(PhysReg),

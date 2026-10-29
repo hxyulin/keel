@@ -1,0 +1,192 @@
+//! SIMD asm operands retain their full width through staging and spills.
+use keel_asm::{TargetFeatures, assemble_object, assemble_program_object};
+use keel_codegen::{
+    CodegenPipeline, SelectionTier,
+    regalloc::{AllocationTier, Pools},
+};
+
+const EMPTY: Pools = Pools {
+    caller_saved: &[],
+    callee_saved: &[],
+    float_caller_saved: &[],
+    float_callee_saved: &[],
+};
+
+fn source() -> String {
+    let mut source = String::new();
+    for (name, ty, template, constraints) in [
+        ("barrier", "i32x4", "/*%q0*/", "=w,0,~{memory},~{cc}"),
+        (
+            "fixed_barrier",
+            "i32x4",
+            "/*%v0*/",
+            "={v0},0,~{memory},~{cc}",
+        ),
+        (
+            "invert",
+            "i32x4",
+            "not %v0.16b, %v1.16b",
+            "=w,w,~{memory},~{cc}",
+        ),
+        (
+            "fixed_invert",
+            "i32x4",
+            "not %v0.16b, %v1.16b",
+            "={v0},{v1},~{memory},~{cc}",
+        ),
+        (
+            "tied_invert",
+            "i32x4",
+            "not %v0.16b, %v1.16b",
+            "=w,0,~{memory},~{cc}",
+        ),
+        ("narrow_invert", "i8x8", "not %v0.8b, %v1.8b", "=w,0"),
+        ("float_barrier", "f64x2", "/*%q0*/", "=w,0"),
+    ] {
+        source += &format!(
+            "func @{name}(ptr,ptr,ptr) {{
+block0(v0:ptr,v1:ptr,v2:ptr):
+ v3 = load.{ty} v0
+ v4 = asm \"{template}\", \"{constraints}\"(v3) -> {ty}
+ store v4,v1
+ store v3,v2
+ return
+}}\n"
+        );
+    }
+    source += "func @barrier_value(i32x4) -> i32x4 {
+block0(v0:i32x4):
+ v1 = asm \"/*%q0*/\", \"=w,0,~{memory},~{cc}\"(v0) -> i32x4
+ return v1
+}
+func @unused_barrier(i32x4) {
+block0(v0:i32x4):
+ v1 = asm \"/*unused %v0*/\", \"=w,0,~{memory},~{cc}\"(v0) -> i32x4
+ return
+}\n";
+    source
+}
+
+fn compile(
+    source: &str,
+    selection: SelectionTier,
+    allocation: AllocationTier,
+    spilled: bool,
+) -> (String, Vec<u8>) {
+    let module = keel_ir::parse(source).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let pipeline = CodegenPipeline {
+        selector: &selection,
+        allocator: &allocation,
+    };
+    let pools = if spilled {
+        &EMPTY
+    } else {
+        &keel_codegen::aarch64::REGISTERS
+    };
+    let text = keel_codegen::aarch64::compile_with_pipeline(&module, pools, &pipeline).unwrap();
+    let program =
+        keel_codegen::aarch64::compile_program_with_pipeline(&module, pools, &pipeline).unwrap();
+    let object = assemble_program_object(&program, TargetFeatures::default()).unwrap();
+    assert_eq!(assemble_object(&text).unwrap(), object);
+    (text, object)
+}
+
+#[test]
+fn vector_operands_assemble_and_execute_without_losing_high_lanes() {
+    let source = source();
+    // Exercise the barrier through optimization too: its opaque result and
+    // original input remain distinct, and the asm must not disappear.
+    let mut module = keel_ir::parse(&source).unwrap();
+    keel_opt::optimize(&mut module).unwrap();
+    let optimized = module.to_string();
+    assert_eq!(optimized.matches("asm ").count(), 9);
+    for selection in [SelectionTier::Baseline, SelectionTier::Full] {
+        for spilled in [false, true] {
+            let (text, object) = compile(&optimized, selection, AllocationTier::Full, spilled);
+            assert!(text.contains("/*q0*/"), "{text}");
+            assert!(text.contains("/*v0*/"), "{text}");
+            assert!(text.contains("/*unused v0*/"), "{text}");
+            run_native(&object, selection, spilled);
+        }
+    }
+}
+
+#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+fn run_native(object: &[u8], selection: SelectionTier, spilled: bool) {
+    use std::{fs, process::Command};
+    let dir = std::env::temp_dir().join(format!("keel-vector-asm-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("test.o"), object).unwrap();
+    fs::write(dir.join("oracle.c"), r#"
+#include <stdint.h>
+#include <string.h>
+#define DECL(n) extern void n(const void*,void*,void*);
+DECL(barrier) DECL(fixed_barrier) DECL(invert) DECL(fixed_invert)
+DECL(tied_invert) DECL(narrow_invert) DECL(float_barrier)
+typedef int32_t vec4 __attribute__((vector_size(16)));
+extern vec4 barrier_value(vec4);
+int main(void) {
+ vec4 value={1,-2,0x12345678,-1234567};
+ vec4 result=barrier_value(value);
+ if(memcmp(&result,&value,16))return 3;
+ void (*run[])(const void*,void*,void*)={barrier,fixed_barrier,invert,fixed_invert,tied_invert,narrow_invert,float_barrier};
+ for(unsigned f=0;f<7;f++) for(unsigned p=0;p<17;p++) {
+  unsigned char input[16],out[16],live[16];
+  for(unsigned i=0;i<16;i++)input[i]=(unsigned char)(p*71+i*19);
+  memset(out,0xa5,16); memset(live,0xa5,16);
+  run[f](input,out,live);
+  unsigned size=f==5?8:16;
+  for(unsigned i=0;i<size;i++) {
+   unsigned char expected=f>=2&&f<=5?(unsigned char)~input[i]:input[i];
+   if(out[i]!=expected||live[i]!=input[i])return 1;
+  }
+  for(unsigned i=size;i<16;i++)if(out[i]!=0xa5||live[i]!=0xa5)return 2;
+ }
+ return 0;
+}
+"#).unwrap();
+    let build = Command::new("clang")
+        .arg("-O2")
+        .arg(dir.join("oracle.c"))
+        .arg(dir.join("test.o"))
+        .arg("-o")
+        .arg(dir.join("test"))
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let run = Command::new(dir.join("test")).output().unwrap();
+    assert!(
+        run.status.success(),
+        "{selection:?}/spilled={spilled}: {:?}",
+        run.status
+    );
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(not(all(target_arch = "aarch64", target_os = "macos")))]
+fn run_native(_: &[u8], _: SelectionTier, _: bool) {}
+
+#[test]
+fn simd_modifier_rejects_general_registers_and_keeps_scalar_support() {
+    let source = "func @f(i64) -> i64 {
+block0(v0:i64):
+ v1 = asm \"/*%v0*/\", \"=r,0\"(v0) -> i64
+ return v1
+}";
+    let module = keel_ir::parse(source).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let error = keel_codegen::aarch64::compile(&module).unwrap_err();
+    assert!(
+        error.to_string().contains("does not fit operand 0"),
+        "{error}"
+    );
+    for ty in ["f32", "f64"] {
+        let scalar = source.replace("i64", ty).replace("=r,0", "=w,0");
+        compile(&scalar, SelectionTier::Full, AllocationTier::Full, false);
+    }
+}

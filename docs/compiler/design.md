@@ -297,8 +297,9 @@ and an input `0` tied to it, and named operands become numbers.
   why it means nothing more). Then inputs, one per argument: `r`, `w`,
   `{x16}`, `m` for memory at the address given, `i`/`n` for a constant
   (an `iconst`), and `0`, `1`… for the register of that output, which the
-  input initializes. Then clobbers: `~{x9}`, `~{d8}`, `~{lr}`,
-  `~{memory}`, `~{cc}`.
+  input initializes. SIMD/FP constraints accept scalar floats and vectors;
+  a vector tie requires the same lane type and width. Then clobbers:
+  `~{x9}`, `~{d8}`, `~{lr}`, `~{memory}`, `~{cc}`.
 - An `asm` is pinned and never removed: every asm is treated as C's `asm
   volatile`. Memory is never cached in registers across one, so
   `~{memory}` changes nothing yet; nor does `~{cc}`, as no value lives in
@@ -312,9 +313,10 @@ and an input `0` tied to it, and named operands become numbers.
   that can cover system calls (the number goes in x16 on Darwin, x8 on
   Linux).
 - The template names a register by its operand's type: `x0` or `w0`, `d0`
-  or `s0`. An `m` operand is `[x0]`, an `i` operand its number. Modifiers
-  pick another view: `%w0`, `%x0`, `%s0`, `%d0`, `%q0`, `%h0`, `%b0`, and
-  `%c0` for a constant; `%%` is `%`. Separate instructions with `\n`: on
+  or `s0`, and `d0`/`q0` for 64/128-bit vectors. An `m` operand is `[x0]`,
+  an `i` operand its number. Modifiers pick another view: `%w0`, `%x0`,
+  `%s0`, `%d0`, `%q0`, `%h0`, `%b0`, `%v0` (the `v0` spelling), and `%c0`
+  for a constant; `%%` is `%`. Separate instructions with `\n`: on
   Darwin `;` starts a comment.
 - Clobbering a caller-saved allocatable register (x9–x15, v19–v31) makes
   the asm count as a call to the register allocator, so no value stays in
