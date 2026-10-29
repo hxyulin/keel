@@ -1,3 +1,6 @@
+#[path = "packed_bitfields/packed_enums.rs"]
+mod packed_enums;
+
 use std::{path::Path, process::Command};
 
 use keel_ir::{InstData, Target, Type};

@@ -2,9 +2,9 @@
 use keel_ir::Target;
 use std::{fs, path::Path, process::Command};
 
-const HEADER: &str = include_str!("fixtures/packed_enums.h");
-const SOURCE: &str = include_str!("fixtures/packed_enums.c");
-const RUNNER: &str = include_str!("fixtures/packed_enums_runner.c");
+const HEADER: &str = include_str!("../fixtures/packed_enums.h");
+const SOURCE: &str = include_str!("../fixtures/packed_enums.c");
+const RUNNER: &str = include_str!("../fixtures/packed_enums_runner.c");
 
 fn compile(source: &str, target: Target, debug: bool) -> keel_ir::Module {
     let module = keel_c::compile(
