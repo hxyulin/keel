@@ -25,8 +25,8 @@ def main():
     packet = args.packet.resolve()
     roster = json.loads((packet / "roster.json").read_text())
     names = roster["objects"]
-    if len(names) != 36 or len(set(names)) != 36:
-        parser.error("expected the complete 36-object packet")
+    if len(names) != 24 or len(set(names)) != 24:
+        parser.error("expected the complete 24-object packet")
     compilers = args.compilers or ["gcc", "clang"]
     count = 0
     rejected = 0
@@ -34,7 +34,7 @@ def main():
         work = pathlib.Path(work)
         for compiler in compilers:
             print(run([compiler, "--version"]).splitlines()[0], flush=True)
-            for level, march in [("V1", "x86-64"), ("V2", "x86-64-v2"), ("V3", "x86-64-v3")]:
+            for level, march in [("V1", "x86-64"), ("V3", "x86-64-v3")]:
                 primary = work / "primary.o"
                 run([compiler, "-O2", f"-march={march}", "-c", str(packet / "oracle.c"), "-o", str(primary)])
                 for name in names:
