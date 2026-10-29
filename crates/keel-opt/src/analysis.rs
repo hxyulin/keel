@@ -117,10 +117,6 @@ pub(crate) fn get(func: &Function) -> Rc<Analysis> {
     let cached = CACHE.with(|cache| cache.borrow().get(&key).cloned());
     if let Some(analysis) = cached {
         if analysis.stamp.get() == func.cfg_stamp() || analysis.matches(func) {
-            debug_assert!(
-                analysis.matches(func),
-                "cached CFG inputs changed without a new stamp"
-            );
             #[cfg(feature = "audit-analysis")]
             assert!(
                 analysis.same_as_fresh(func),
@@ -147,6 +143,21 @@ pub(crate) fn get(func: &Function) -> Rc<Analysis> {
     });
     CACHE.with(|cache| cache.borrow_mut().insert(key, analysis.clone()));
     analysis
+}
+
+/// Checks that a cached entry carrying `func`'s stamp still has its CFG.
+/// [`get`] trusts an equal stamp, and checking there on every hit would make
+/// per-block callers quadratic; the pass manager checks after each pass run.
+#[cfg(debug_assertions)]
+pub(crate) fn debug_check_stamp(func: &Function) {
+    let key = func as *const Function as usize;
+    let cached = CACHE.with(|cache| cache.borrow().get(&key).cloned());
+    if let Some(analysis) = cached {
+        assert!(
+            analysis.stamp.get() != func.cfg_stamp() || analysis.matches(func),
+            "cached CFG inputs changed without a new stamp"
+        );
+    }
 }
 
 /// Drops every cached analysis; the pipeline ends with this.
@@ -335,5 +346,20 @@ mod tests {
         after.loops(&slot);
         assert!(after.same_as_fresh(&slot));
         clear();
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "cached CFG inputs changed without a new stamp")]
+    fn stamp_check_rejects_an_entry_whose_cfg_differs() {
+        clear();
+        let mut function = Function::new("stale", Signature::new(&[], &[]));
+        function.create_block();
+        let stale = get(&function);
+        let entry = function.create_block();
+        function.insert_inst(InsertPoint::End(entry), InstData::Return { args: vec![] });
+        // Stand in for a CFG change that did not renew the stamp.
+        stale.stamp.set(function.cfg_stamp());
+        debug_check_stamp(&function);
     }
 }

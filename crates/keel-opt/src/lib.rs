@@ -929,6 +929,11 @@ fn execute_pipeline(
         let pass_ns = start.map_or(0, |start| start.elapsed().as_nanos());
         if let Some(changed) = module_changed {
             versions.module_changed(&mut canonical);
+            #[cfg(debug_assertions)]
+            module
+                .functions
+                .iter()
+                .for_each(analysis::debug_check_stamp);
             let (result, verification_ns) =
                 observe_verification(verification_enabled, reporting, || {
                     module
@@ -1029,6 +1034,8 @@ fn execute_pipeline(
                 pass.run_with_context(func, function_context)
             };
             let pass_ns = start.map_or(0, |start| start.elapsed().as_nanos());
+            #[cfg(debug_assertions)]
+            analysis::debug_check_stamp(func);
             canonical[index] = pass.produces_canonical_form() || (canonical[index] && !changed);
             versions.record(pass, slot, index, changed);
             let (result, verification_ns) =
