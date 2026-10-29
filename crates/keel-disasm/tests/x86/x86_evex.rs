@@ -104,7 +104,7 @@ fn evex_oracles_and_att_decorators() {
 fn generated_binding_smoke_assembles_and_roundtrips() {
     let mut count = 0;
     let mut errors = Vec::new();
-    for row in include_str!("generated/x86-evex-smoke.txt")
+    for row in include_str!("../generated/x86-evex-smoke.txt")
         .lines()
         .filter(|l| !l.starts_with('#'))
     {
@@ -183,10 +183,13 @@ fn oracle(source: &str, tag: &str, gnu: bool) -> Vec<u8> {
 fn generated_sources_match_clang_and_gnu() {
     use object::ObjectSymbol;
     let fixtures = [
-        (Syntax::Intel, include_str!("generated/x86-evex-smoke.txt")),
+        (
+            Syntax::Intel,
+            include_str!("../generated/x86-evex-smoke.txt"),
+        ),
         (
             Syntax::Att,
-            include_str!("generated/x86-evex-smoke-att.txt"),
+            include_str!("../generated/x86-evex-smoke-att.txt"),
         ),
     ];
     for (syntax, fixture) in fixtures {
@@ -461,8 +464,8 @@ fn generated_att_bindings_match_intel() {
             .map(|l| l.splitn(3, '|').nth(2).unwrap())
             .collect::<Vec<_>>()
     };
-    let intel = cases(include_str!("generated/x86-evex-smoke.txt"));
-    let att = cases(include_str!("generated/x86-evex-smoke-att.txt"));
+    let intel = cases(include_str!("../generated/x86-evex-smoke.txt"));
+    let att = cases(include_str!("../generated/x86-evex-smoke-att.txt"));
     assert_eq!(intel.len(), att.len());
     for (intel, att) in intel.iter().zip(att) {
         assert_eq!(own(intel, Syntax::Intel), own(att, Syntax::Att), "{att}");

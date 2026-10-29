@@ -1,3 +1,11 @@
+#[path = "x86/x86_amx.rs"]
+mod x86_amx;
+#[path = "x86/x86_apx.rs"]
+mod x86_apx;
+#[path = "x86/x86_evex.rs"]
+mod x86_evex;
+#[path = "x86/x86_formatting.rs"]
+mod x86_formatting;
 use keel_disasm::x86::{Operand, decode};
 
 #[test]
