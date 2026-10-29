@@ -1,3 +1,8 @@
+#[path = "wasm_freestanding/wasm_profile.rs"]
+mod wasm_profile;
+#[path = "wasm_freestanding/wasm_target_unavailable.rs"]
+mod wasm_target_unavailable;
+
 use keel_c::{Options, PreprocessOptions, compile, predefined_macros, preprocess};
 use keel_ir::Target;
 use std::{
