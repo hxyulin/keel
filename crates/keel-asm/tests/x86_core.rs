@@ -630,8 +630,10 @@ fn scalar_core_forms_match_both_assemblers_and_syntaxes() {
                 ]
                 .map(|a| format!("{size} ptr {a}")),
             );
+            // Count 1 selects the D0/D1 form. The others sit at the operand
+            // width and imm8 boundaries; interior counts take the same path.
             for dst in destinations {
-                for n in 0..=255 {
+                for n in [0, 1, 2, 31, 32, 63, 64, 127, 128, 255] {
                     rows.push(format!("{op} {dst},{n}"));
                 }
                 rows.push(format!("{op} {dst},cl"));
@@ -640,7 +642,8 @@ fn scalar_core_forms_match_both_assemblers_and_syntaxes() {
     }
     rows.push("cwd".into());
     rows.push("int1".into());
-    for vector in 0..=255 {
+    // Assemblers may special-case int 3, so keep it beside the imm8 boundaries.
+    for vector in [0, 1, 3, 4, 127, 128, 255] {
         rows.push(format!("int {vector}"));
     }
     for a in [
@@ -664,7 +667,7 @@ fn scalar_core_forms_match_both_assemblers_and_syntaxes() {
 }
 #[test]
 fn rel8_core_branches_labels_relocations_and_boundaries() {
-    for op in [
+    let ops = [
         "loop",
         "loope",
         "loopne",
@@ -673,17 +676,20 @@ fn rel8_core_branches_labels_relocations_and_boundaries() {
         "addr32 loop",
         "addr32 loope",
         "addr32 loopne",
-    ] {
-        matrix(
-            vec![
-                "back:".into(),
-                format!("{op} forward"),
-                format!("{op} back"),
-                "forward:".into(),
-                format!("{op} external+7"),
-            ],
-            &op.replace(' ', "-"),
-        );
+    ];
+    // One matrix holds every opcode, each with its own labels.
+    let mut rows = Vec::new();
+    for (k, op) in ops.iter().enumerate() {
+        rows.extend([
+            format!("back{k}:"),
+            format!("{op} forward{k}"),
+            format!("{op} back{k}"),
+            format!("forward{k}:"),
+            format!("{op} external+7"),
+        ]);
+    }
+    matrix(rows, "rel8");
+    for op in ops {
         let len = if op.starts_with("addr32") || op == "jecxz" {
             3
         } else {

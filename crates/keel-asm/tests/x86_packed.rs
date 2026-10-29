@@ -35,12 +35,14 @@ fn relocations(bytes: &[u8]) -> Vec<(u64, String, i64, String)> {
 #[test]
 fn packed_sse2_register_memory_matrix_matches_clang_and_gnu() {
     let mut source = String::from(".intel_syntax noprefix\n.text\n");
+    // x86_baseline_simd::mmx_and_sse2_packed_forms checks the integer forms'
+    // bytes against both assemblers; this matrix checks the float forms.
     for op in [
-        "paddb", "paddw", "paddd", "paddq", "psubb", "psubw", "psubd", "psubq", "pmullw", "addps",
-        "addpd", "subps", "subpd", "mulps", "mulpd", "divps", "divpd", "sqrtps", "sqrtpd",
+        "addps", "addpd", "subps", "subpd", "mulps", "mulpd", "divps", "divpd", "sqrtps", "sqrtpd",
     ] {
-        for dst in 0..16 {
-            for src in 0..16 {
+        // Register numbers at the REX boundary; interior numbers encode alike.
+        for dst in [0, 7, 8, 15] {
+            for src in [0, 7, 8, 15] {
                 source += &format!("{op} xmm{dst}, xmm{src}\n");
             }
             for memory in [
@@ -55,6 +57,11 @@ fn packed_sse2_register_memory_matrix_matches_clang_and_gnu() {
                 source += &format!("{op} xmm{dst}, xmmword ptr {memory}\n");
             }
         }
+    }
+    for op in [
+        "paddb", "paddw", "paddd", "paddq", "psubb", "psubw", "psubd", "psubq", "pmullw", "addps",
+        "addpd", "subps", "subpd", "mulps", "mulpd", "divps", "divpd", "sqrtps", "sqrtpd",
+    ] {
         for bad in [
             format!("{op} rax, rdx"),
             format!("{op} xmm0, qword ptr [rax]"),

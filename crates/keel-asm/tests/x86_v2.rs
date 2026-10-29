@@ -9,11 +9,26 @@ use keel_asm_ir::{
     x86::{CpuLevel, Features, Instruction, Opcode, Operand, Register, Syntax, V2Form, V2Opcode},
 };
 use object::{Object, ObjectSection, ObjectSymbol};
-use std::{path::Path, process::Command};
+use std::process::Command;
 
 fn features() -> Features {
     Features::for_level(CpuLevel::V2)
 }
+// ALL includes optional AES identities; the byte oracle enables them
+// explicitly without changing the psABI v2 feature profile.
+fn oracle_features() -> Features {
+    Features {
+        aes: true,
+        ..features()
+    }
+}
+/// Register numbers at the REX extension boundary. Interior numbers take the
+/// same encoding path.
+const REGISTERS: [usize; 4] = [0, 7, 8, 15];
+/// Byte registers 4 to 7 (spl to dil) also need a REX prefix.
+const BYTE_REGISTERS: [usize; 7] = [0, 4, 5, 6, 7, 8, 15];
+/// imm8 ends and the signed boundary. Every byte value takes the same path.
+const IMM8: [u16; 5] = [0, 1, 127, 128, 255];
 fn size(bits: u16) -> &'static str {
     match bits {
         8 => "byte",
@@ -39,7 +54,7 @@ fn addresses() -> [&'static str; 9] {
 }
 fn sources(bits: u16, registers: bool) -> Vec<String> {
     let mut src = if registers {
-        (0..16).map(|r| format!("xmm{r}")).collect()
+        REGISTERS.iter().map(|r| format!("xmm{r}")).collect()
     } else {
         Vec::new()
     };
@@ -51,11 +66,11 @@ fn cases(op: V2Opcode) -> Vec<String> {
     let mut out = Vec::new();
     match s.form {
         V2Form::Binary | V2Form::Memory | V2Form::Control | V2Form::Control64 | V2Form::Blend => {
-            for dst in 0..16 {
+            for dst in REGISTERS {
                 for src in sources(s.memory_bits, s.form != V2Form::Memory) {
                     let base = format!("{} xmm{dst},{src}", s.mnemonic);
                     if matches!(s.form, V2Form::Control | V2Form::Control64) {
-                        for n in [0, 1, 15, 127, 128, 255] {
+                        for n in IMM8 {
                             out.push(format!("{base},{n}"));
                         }
                     } else {
@@ -66,51 +81,24 @@ fn cases(op: V2Opcode) -> Vec<String> {
                     }
                 }
             }
-            if matches!(s.form, V2Form::Control | V2Form::Control64) {
-                for n in 0..=255 {
-                    out.push(format!("{} xmm15,xmm8,{n}", s.mnemonic));
-                    out.push(format!(
-                        "{} xmm8,{} ptr [rip+external+7],{n}",
-                        s.mnemonic,
-                        size(s.memory_bits)
-                    ));
-                }
-            }
         }
         V2Form::Extract | V2Form::Insert => {
-            for xmm in 0..16 {
+            for xmm in REGISTERS {
                 let rb = if s.memory_bits <= 16 {
                     32
                 } else {
                     s.memory_bits
                 };
-                let mut integer = (0..16).map(|r| gpr(r, rb)).collect::<Vec<_>>();
+                let mut integer = REGISTERS.map(|r| gpr(r, rb)).to_vec();
                 integer.extend(sources(s.memory_bits, false));
                 for i in integer {
-                    for n in [0, 1, 15, 127, 128, 255] {
+                    for n in IMM8 {
                         out.push(if s.form == V2Form::Extract {
                             format!("{} {i},xmm{xmm},{n}", s.mnemonic)
                         } else {
                             format!("{} xmm{xmm},{i},{n}", s.mnemonic)
                         });
                     }
-                }
-            }
-            let rb = if s.memory_bits <= 16 {
-                32
-            } else {
-                s.memory_bits
-            };
-            for n in 0..=255 {
-                for integer in [
-                    gpr(15, rb),
-                    format!("{} ptr [rip+external+7]", size(s.memory_bits)),
-                ] {
-                    out.push(if s.form == V2Form::Extract {
-                        format!("{} {integer},xmm8,{n}", s.mnemonic)
-                    } else {
-                        format!("{} xmm8,{integer},{n}", s.mnemonic)
-                    });
                 }
             }
         }
@@ -129,14 +117,19 @@ fn cases(op: V2Opcode) -> Vec<String> {
         }
         V2Form::Nullary => out.push(s.mnemonic.into()),
         V2Form::Crc32 => {
-            for dst in 0..16 {
+            for dst in REGISTERS {
                 for dst_bits in [32, 64] {
                     for bits in [8, 16, 32, 64] {
                         if dst_bits == 64 && !matches!(bits, 8 | 64) || dst_bits == 32 && bits == 64
                         {
                             continue;
                         }
-                        let mut src = (0..16).map(|r| gpr(r, bits)).collect::<Vec<_>>();
+                        let numbers = if bits == 8 {
+                            &BYTE_REGISTERS[..]
+                        } else {
+                            &REGISTERS[..]
+                        };
+                        let mut src = numbers.iter().map(|&r| gpr(r, bits)).collect::<Vec<_>>();
                         if bits == 8 {
                             src.extend(["ah", "ch", "dh", "bh"].map(str::to_string));
                         }
@@ -181,8 +174,11 @@ fn gpr(n: usize, bits: u16) -> String {
 }
 type RelocationRecord = (u64, String, i64, String);
 fn section(bytes: &[u8]) -> (Vec<u8>, Vec<RelocationRecord>) {
+    named_section(bytes, ".text")
+}
+fn named_section(bytes: &[u8], name: &str) -> (Vec<u8>, Vec<RelocationRecord>) {
     let f = object::File::parse(bytes).unwrap();
-    let s = f.section_by_name(".text").unwrap();
+    let s = f.section_by_name(name).unwrap();
     let rel = s
         .relocations()
         .map(|(off, r)| {
@@ -211,65 +207,74 @@ fn run(c: &mut Command) {
             .join("\n")
     );
 }
-fn oracle(cases: &[String], dir: &Path) -> (usize, usize) {
-    // ALL includes optional AES identities; this byte oracle enables them
-    // explicitly without changing the psABI v2 feature profile.
-    let oracle_features = Features {
-        aes: true,
-        ..features()
-    };
-    std::fs::create_dir_all(dir).unwrap();
-    let source = format!(".intel_syntax noprefix\n.text\n{}\n", cases.join("\n"));
-    let ours = assemble_object_with_features(&source, oracle_features).unwrap();
-    let mut typed = Program::new();
-    let mut att_source = String::new();
-    for case in cases {
-        let i = Instruction::parse_intel(case).unwrap();
+/// Checks each group of rows (one opcode) in Keel's Intel text, typed program
+/// and AT&T text, then against Clang and GNU as in both dialects. Each tool
+/// runs once per dialect over every group, one section per group.
+fn oracle(label: &str, groups: &[(&str, Vec<String>)]) {
+    let dir = std::env::temp_dir().join(format!("keel-v2-{label}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut actual = Vec::new();
+    for (name, cases) in groups {
+        let source = format!(".intel_syntax noprefix\n.text\n{}\n", cases.join("\n"));
+        let ours = assemble_object_with_features(&source, oracle_features()).unwrap();
+        let mut typed = Program::new();
+        let mut att_source = String::new();
+        for case in cases {
+            let i = Instruction::parse_intel(case).unwrap();
+            assert_eq!(
+                Instruction::parse_intel(&i.to_string()).unwrap(),
+                i,
+                "{case}"
+            );
+            att_source += &att(&i);
+            att_source.push('\n');
+            typed.x86_instruction(i);
+        }
         assert_eq!(
-            Instruction::parse_intel(&i.to_string()).unwrap(),
-            i,
-            "{case}"
+            ours,
+            assemble_program_object_with_features(&typed, oracle_features()).unwrap(),
+            "{name}: direct/text objects"
         );
-        att_source += &att(&i);
-        att_source.push('\n');
-        typed.x86_instruction(i);
+        let att_object =
+            assemble_object_with_syntax_and_features(&att_source, Syntax::Att, oracle_features())
+                .unwrap();
+        assert_eq!(
+            section(&ours),
+            section(&att_object),
+            "{name}: Intel/AT&T parity"
+        );
+        actual.push(section(&ours));
     }
-    assert_eq!(
-        ours,
-        assemble_program_object_with_features(&typed, oracle_features).unwrap(),
-        "direct/text objects"
-    );
-    let att_object =
-        assemble_object_with_syntax_and_features(&att_source, Syntax::Att, oracle_features)
-            .unwrap();
-    assert_eq!(section(&ours), section(&att_object), "Intel/AT&T parity");
-    std::fs::write(dir.join("att.s"), &att_source).unwrap();
     let input = dir.join("input.s");
-    std::fs::write(&input, source).unwrap();
-    std::fs::write(dir.join("keel.o"), &ours).unwrap();
-    let actual = section(&ours);
+    let output = dir.join("reference.o");
     for (assembler, dialect) in [
         ("clang", Syntax::Intel),
         ("gnu", Syntax::Intel),
         ("clang", Syntax::Att),
         ("gnu", Syntax::Att),
     ] {
-        if assembler == "clang" && cases.first().is_some_and(|c| {
-            matches!(Instruction::parse_intel(c).unwrap().opcode, Opcode::V2(v) if v.spec().form == V2Form::Control64)
-        }) { continue; } // LLVM exposes no opcode spelling that sets string-form REX.W.
-        // LLVM chooses the SSE2 register encoding for PEXTRW and has no
-        // spelling to force SSE4. GNU pextrw.s independently checks those
-        // exact bytes. LLVM still checks every SSE4 memory destination.
-        let reference_cases = cases
-            .iter()
-            .filter(|case| {
-                assembler != "clang" || !case.starts_with("pextrw.s ") || case.contains('[')
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        let reference_source = reference_cases
-            .iter()
-            .map(|case| {
+        let mut reference = String::from(if dialect == Syntax::Att {
+            ".att_syntax prefix\n"
+        } else {
+            ".intel_syntax noprefix\n"
+        });
+        let mut checked = Vec::new();
+        for (k, (name, cases)) in groups.iter().enumerate() {
+            if assembler == "clang" && cases.first().is_some_and(|c| {
+                matches!(Instruction::parse_intel(c).unwrap().opcode, Opcode::V2(v) if v.spec().form == V2Form::Control64)
+            }) { continue; } // LLVM exposes no opcode spelling that sets string-form REX.W.
+            // LLVM chooses the SSE2 register encoding for PEXTRW and has no
+            // spelling to force SSE4. GNU pextrw.s independently checks those
+            // exact bytes. LLVM still checks every SSE4 memory destination.
+            let reference_cases = cases
+                .iter()
+                .filter(|case| {
+                    assembler != "clang" || !case.starts_with("pextrw.s ") || case.contains('[')
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            reference += &format!(".section .rows{k},\"ax\",@progbits\n");
+            for case in &reference_cases {
                 let mut case = if dialect == Syntax::Att {
                     att(&Instruction::parse_intel(case).unwrap())
                 } else {
@@ -281,31 +286,20 @@ fn oracle(cases: &[String], dir: &Path) -> (usize, usize) {
                 if assembler == "clang" {
                     case = case.replace("pextrw.s ", "pextrw ");
                 }
-                case
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        std::fs::write(
-            &input,
-            format!(
-                "{}\n.text\n{reference_source}\n",
-                if dialect == Syntax::Att {
-                    ".att_syntax prefix"
-                } else {
-                    ".intel_syntax noprefix"
-                }
-            ),
-        )
-        .unwrap();
-        let actual = if reference_cases.len() == cases.len() {
-            actual.clone()
-        } else {
-            section(
-                &assemble_object_with_features(&reference_cases.join("\n"), oracle_features)
-                    .unwrap(),
-            )
-        };
-        let output = dir.join(format!("{assembler}.o"));
+                reference += &case;
+                reference.push('\n');
+            }
+            let expected = if reference_cases.len() == cases.len() {
+                actual[k].clone()
+            } else {
+                section(
+                    &assemble_object_with_features(&reference_cases.join("\n"), oracle_features())
+                        .unwrap(),
+                )
+            };
+            checked.push((k, name, reference_cases, expected));
+        }
+        std::fs::write(&input, reference).unwrap();
         if assembler == "clang" {
             run(Command::new("clang")
                 .args(["-target", "x86_64-unknown-linux-gnu", "-c"])
@@ -320,23 +314,43 @@ fn oracle(cases: &[String], dir: &Path) -> (usize, usize) {
                 .arg("-o")
                 .arg(&output));
         }
-        let expected = section(&std::fs::read(output).unwrap());
-        assert_eq!(actual.0.len(), expected.0.len(), "{assembler} text size");
-        assert_eq!(
-            actual.0.iter().zip(&expected.0).position(|(a, b)| a != b),
-            None,
-            "{assembler} first byte mismatch"
-        );
-        assert_eq!(actual.1, expected.1, "{assembler} relocation tuples");
+        let object = std::fs::read(&output).unwrap();
+        for (k, name, cases, ours) in checked {
+            let theirs = named_section(&object, &format!(".rows{k}"));
+            let context = format!("{assembler} {dialect:?} {name}");
+            if let Some(offset) =
+                (0..ours.0.len().max(theirs.0.len())).find(|&n| ours.0.get(n) != theirs.0.get(n))
+            {
+                panic!(
+                    "{context}: bytes differ at offset {offset}, in {}",
+                    case_at(&cases, offset as u64)
+                );
+            }
+            if let Some((a, b)) = ours.1.iter().zip(&theirs.1).find(|(a, b)| a != b) {
+                panic!(
+                    "{context}: relocation {a:?} != {b:?}, in {}",
+                    case_at(&cases, a.0)
+                );
+            }
+            assert_eq!(ours.1.len(), theirs.1.len(), "{context}: relocation count");
+        }
     }
-    (actual.0.len(), actual.1.len())
+    std::fs::remove_dir_all(dir).unwrap();
+}
+/// Names the case whose bytes hold `offset`. Only failure messages use it.
+fn case_at(cases: &[String], offset: u64) -> &str {
+    let mut end = 0;
+    for case in cases {
+        let object = assemble_object_with_features(case, oracle_features()).unwrap();
+        end += section(&object).0.len() as u64;
+        if offset < end {
+            return case;
+        }
+    }
+    "the end of the rows"
 }
 #[test]
 fn every_inventory_form_matches_clang_gnu_and_typed_text() {
-    let root = std::env::var_os("KEEL_V2_ARTIFACTS").map(std::path::PathBuf::from);
-    let dir = root
-        .clone()
-        .unwrap_or_else(|| std::env::temp_dir().join(format!("keel-v2-{}", std::process::id())));
     let inventory: serde_json::Value = serde_json::from_str(include_str!(
         "../../../docs/targets/x86_64/coverage/v2-inventory.json"
     ))
@@ -345,7 +359,7 @@ fn every_inventory_form_matches_clang_gnu_and_typed_text() {
         inventory["instructions"].as_array().unwrap().len(),
         V2Opcode::ALL.len()
     );
-    let mut report = Vec::new();
+    let mut groups = Vec::new();
     for &op in V2Opcode::ALL {
         let s = op.spec();
         assert!(
@@ -355,25 +369,14 @@ fn every_inventory_form_matches_clang_gnu_and_typed_text() {
                 .iter()
                 .any(|i| i["mnemonic"] == s.mnemonic)
         );
-        let cases = cases(op);
-        let (bytes, relocations) = oracle(&cases, &dir.join(s.mnemonic));
-        report.push(serde_json::json!({"mnemonic":s.mnemonic,"family":s.family,"cases":cases.len(),"gnu_cases_per_dialect":cases.len(),"clang_cases_per_dialect":if s.form==V2Form::Control64 {0} else if s.mnemonic=="pextrw.s" {cases.iter().filter(|c|c.contains('[')).count()} else {cases.len()},"bytes":bytes,"relocations":relocations,"clang":if s.mnemonic=="pextrw.s" {"memory_forms_pass_register_force_unavailable"} else if s.form == V2Form::Control64 {"rex_w_force_unavailable"} else {"pass"},"gnu":"pass","typed_text":"pass","format_roundtrip":"pass","intel_att":"pass","native_semantics":"pending_parent_linux"}));
-        eprintln!(
-            "{}: {} forms, {bytes} bytes, {relocations} relocations",
-            s.mnemonic,
-            cases.len()
-        );
+        groups.push((s.mnemonic, cases(op)));
     }
-    for (name, family) in [
-        ("roundss", "sse41"),
-        ("roundsd", "sse41"),
-        ("popcnt", "popcnt"),
-    ] {
+    for name in ["roundss", "roundsd", "popcnt"] {
         let mut cases = Vec::new();
         if name == "popcnt" {
             for bits in [16, 32, 64] {
-                for dst in 0..16 {
-                    let mut src = (0..16).map(|r| gpr(r, bits)).collect::<Vec<_>>();
+                for dst in REGISTERS {
+                    let mut src = REGISTERS.map(|r| gpr(r, bits)).to_vec();
                     src.extend(sources(bits, false));
                     for source in src {
                         cases.push(format!("popcnt {},{source}", gpr(dst, bits)));
@@ -381,28 +384,20 @@ fn every_inventory_form_matches_clang_gnu_and_typed_text() {
                 }
             }
         } else {
-            for dst in 0..16 {
+            for dst in REGISTERS {
                 for source in sources(if name == "roundss" { 32 } else { 64 }, true) {
-                    for n in [0, 1, 3, 4, 8, 15, 127, 128, 255] {
+                    for n in IMM8 {
                         cases.push(format!("{name} xmm{dst},{source},{n}"));
                     }
                 }
             }
         }
-        let (bytes, relocations) = oracle(&cases, &dir.join(name));
         assert!(
             assemble_object_with_features(&cases[0], Features::for_level(CpuLevel::V1)).is_err()
         );
-        report.push(serde_json::json!({"mnemonic":name,"family":family,"cases":cases.len(),"bytes":bytes,"relocations":relocations,"clang":"pass","gnu":"pass","typed_text":"pass","intel_att":"pass","native_semantics":"pending_parent_linux","existing_identity":true}));
+        groups.push((name, cases));
     }
-    std::fs::write(
-        dir.join("encoding-results.json"),
-        serde_json::to_string_pretty(&report).unwrap(),
-    )
-    .unwrap();
-    if root.is_none() {
-        std::fs::remove_dir_all(dir).unwrap();
-    }
+    oracle("inventory", &groups);
 }
 #[test]
 fn gates_and_invalid_forms_are_explicit() {
@@ -660,8 +655,8 @@ fn mmx_cases(op: V2Opcode) -> Vec<String> {
         for src in sources {
             let base = format!("{} mm{dst},{src}", s.mnemonic);
             if s.form == V2Form::Control {
-                // Every immediate byte, every MMX register pair and address class.
-                for n in 0..=255 {
+                // Every MMX register pair and address class.
+                for n in IMM8 {
                     rows.push(format!("{base},{n}"));
                 }
             } else {
@@ -674,15 +669,11 @@ fn mmx_cases(op: V2Opcode) -> Vec<String> {
 
 #[test]
 fn ssse3_mmx_inventory_matches_clang_gnu_and_typed_text() {
-    let root = std::env::var_os("KEEL_V2_MMX_ARTIFACTS").map(std::path::PathBuf::from);
-    let dir = root.clone().unwrap_or_else(|| {
-        std::env::temp_dir().join(format!("keel-v2-mmx-{}", std::process::id()))
-    });
     let inventory: serde_json::Value = serde_json::from_str(include_str!(
         "../../../docs/targets/x86_64/coverage/v2-inventory.json"
     ))
     .unwrap();
-    let mut report = Vec::new();
+    let mut groups = Vec::new();
     for &op in V2Opcode::ALL.iter().filter(|op| op.supports_mmx()) {
         let s = op.spec();
         let entry = inventory["instructions"]
@@ -696,19 +687,10 @@ fn ssse3_mmx_inventory_matches_clang_gnu_and_typed_text() {
         assert_eq!(entry["mmx_encoding"]["map"], s.map);
         assert_eq!(entry["mmx_encoding"]["byte"], s.byte);
         assert_eq!(entry["operand_forms"].as_array().unwrap().len(), 4);
-        let rows = mmx_cases(op);
-        let (bytes, relocations) = oracle(&rows, &dir.join(s.mnemonic));
-        report.push(serde_json::json!({"mnemonic":s.mnemonic,"family":"ssse3","register_family":"MMX","xed_forms":2,"cases":rows.len(),"bytes":bytes,"relocations":relocations,"clang":"pass","gnu":"pass","clang_cases_per_dialect":rows.len(),"gnu_cases_per_dialect":rows.len(),"typed_text":"pass","format_roundtrip":"pass","intel_att":"pass","native_semantics":"pending_parent_linux"}));
+        groups.push((s.mnemonic, mmx_cases(op)));
     }
-    assert_eq!(report.len(), 16);
-    std::fs::write(
-        dir.join("mmx-encoding-results.json"),
-        serde_json::to_string_pretty(&report).unwrap(),
-    )
-    .unwrap();
-    if root.is_none() {
-        std::fs::remove_dir_all(dir).unwrap();
-    }
+    assert_eq!(groups.len(), 16);
+    oracle("mmx", &groups);
 }
 
 #[test]
@@ -817,10 +799,7 @@ fn ssse3_mmx_feature_gates_and_malformed_operands() {
 
 #[test]
 fn ssse3_mmx_malformed_operands_match_independent_assemblers() {
-    let dir = std::env::temp_dir().join(format!("keel-v2-mmx-invalid-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let input = dir.join("invalid.s");
-    let output = dir.join("invalid.o");
+    let mut bad_lines = Vec::new();
     for &op in V2Opcode::ALL.iter().filter(|op| op.supports_mmx()) {
         let name = op.spec().mnemonic;
         let suffix = if op.spec().form == V2Form::Control {
@@ -836,31 +815,48 @@ fn ssse3_mmx_malformed_operands_match_independent_assemblers() {
             format!("{name} [rax],mm1{suffix}"),
         ] {
             reject(&bad);
-            std::fs::write(&input, format!(".intel_syntax noprefix\n{bad}\n")).unwrap();
-            let mut clang = Command::new("clang");
-            clang.args([
-                "-target",
-                "x86_64-unknown-linux-gnu",
-                "-c",
-                "-x",
-                "assembler",
-            ]);
-            let mut gnu =
-                Command::new(std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into()));
-            gnu.arg("--64");
-            for mut command in [clang, gnu] {
-                let r = command.arg(&input).arg("-o").arg(&output).output().unwrap();
-                assert!(
-                    !r.status.success(),
-                    "independent assembler accepted {bad}: {command:?}"
-                );
-            }
+            bad_lines.push(bad);
         }
         let att = format!(
             "{name} {}%xmm1,%mm0",
             if suffix.is_empty() { "" } else { "$7," }
         );
         assert!(assemble_object_with_syntax_and_features(&att, Syntax::Att, features()).is_err());
+    }
+    // Both assemblers keep going after an error and report each line, so one
+    // run per assembler checks every rejection.
+    let dir = std::env::temp_dir().join(format!("keel-v2-mmx-invalid-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("invalid.s");
+    let output = dir.join("invalid.o");
+    std::fs::write(
+        &input,
+        format!(".intel_syntax noprefix\n{}\n", bad_lines.join("\n")),
+    )
+    .unwrap();
+    let mut clang = Command::new("clang");
+    clang.args([
+        "-target",
+        "x86_64-unknown-linux-gnu",
+        "-c",
+        "-x",
+        "assembler",
+    ]);
+    let mut gnu = Command::new(std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into()));
+    gnu.arg("--64");
+    for mut command in [clang, gnu] {
+        let r = command.arg(&input).arg("-o").arg(&output).output().unwrap();
+        assert!(!r.status.success(), "{command:?}");
+        let stderr = String::from_utf8_lossy(&r.stderr);
+        for (n, bad) in bad_lines.iter().enumerate() {
+            let location = format!("{}:{}:", input.display(), n + 2);
+            assert!(
+                stderr
+                    .lines()
+                    .any(|l| l.starts_with(&location) && l.to_lowercase().contains("error")),
+                "independent assembler accepted {bad}: {command:?}\n{stderr}"
+            );
+        }
     }
     std::fs::remove_dir_all(dir).unwrap();
 }

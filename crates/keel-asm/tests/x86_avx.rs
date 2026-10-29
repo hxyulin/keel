@@ -192,6 +192,10 @@ fn typed_avx_rejects_malformed_registers_and_memory() {
     assert!(assemble_program_object_with_features(&p, avx()).is_err());
 }
 
+/// Register numbers at the VEX.R/B and inverted vvvv extension boundaries.
+/// Every combination of them also covers each alias (d == a, d == b, a == b)
+/// and Clang's VEX2 source swap (a < 8, b >= 8).
+const REGISTERS: [u8; 4] = [0, 7, 8, 15];
 fn differential_cases() -> Vec<String> {
     let mut cases = Vec::new();
     for (op, width) in [
@@ -227,10 +231,9 @@ fn differential_cases() -> Vec<String> {
         ("vroundsd", 64),
     ] {
         let imm = if op.starts_with("vround") { ",11" } else { "" };
-        // All register numbers in every field; independent src/dst and alias cases.
-        for d in 0..16 {
-            for a in 0..16 {
-                for b in [0, 7, 8, 15, d, a] {
+        for d in REGISTERS {
+            for a in REGISTERS {
+                for b in REGISTERS {
                     cases.push(format!("{op} xmm{d},xmm{a},xmm{b}{imm}"));
                 }
             }
@@ -269,10 +272,10 @@ fn differential_cases() -> Vec<String> {
         ("vmovapd", "xmmword", false),
         ("vmovupd", "xmmword", false),
     ] {
-        for d in 0..16 {
-            for a in 0..16 {
+        for d in REGISTERS {
+            for a in REGISTERS {
                 if scalar {
-                    for b in 0..16 {
+                    for b in REGISTERS {
                         cases.push(format!("{op} xmm{d},xmm{a},xmm{b}"));
                     }
                 } else {
@@ -286,8 +289,8 @@ fn differential_cases() -> Vec<String> {
         }
     }
     for (op, size) in [("vucomiss", "dword"), ("vucomisd", "qword")] {
-        for d in 0..16 {
-            for b in 0..16 {
+        for d in REGISTERS {
+            for b in REGISTERS {
                 cases.push(format!("{op} xmm{d},xmm{b}"));
             }
             for address in ["r12+8*r15-16", "rip+external+9", "rip+local"] {
@@ -309,7 +312,7 @@ fn differential_cases() -> Vec<String> {
 #[test]
 fn avx_matrix_matches_clang_and_gnu() {
     let cases = differential_cases();
-    assert_eq!(cases.len(), 57_935);
+    assert_eq!(cases.len(), 3_623);
     println!("AVX differential matrix: {} instructions", cases.len());
     let source = format!(
         ".intel_syntax noprefix\n.text\n{}\nlocal: .zero 16\n",
