@@ -12,9 +12,7 @@ const EMPTY: Pools = Pools {
     float_caller_saved: &[],
     float_callee_saved: &[],
 };
-#[allow(dead_code)]
-#[path = "common/vector.rs"]
-pub mod common;
+use crate::common;
 
 #[test]
 fn independent_dc_encoding_and_all_live_output_combinations() {

@@ -162,9 +162,7 @@ impl keel_codegen::regalloc::RegisterAllocator for SharedHome {
         a
     }
 }
-#[allow(dead_code)]
-#[path = "common/vector.rs"]
-pub mod common;
+use crate::common;
 
 #[test]
 fn independent_oracle_and_packet() {
@@ -178,11 +176,14 @@ fn independent_oracle_and_packet() {
         .unwrap_or_else(|| common::temp("x87-numerical"));
     fs::create_dir_all(&d).unwrap();
     for (name, data) in [
-        ("test.c", include_str!("x86_x87_numerical/test.c")),
-        ("probe.S", include_str!("x86_x87_numerical/probe.S")),
-        ("encoding.S", include_str!("x86_x87_numerical/encoding.S")),
-        ("run.py", include_str!("x86_x87_numerical/run.py")),
-        ("README.md", include_str!("x86_x87_numerical/README.md")),
+        ("test.c", include_str!("../x86_x87_numerical/test.c")),
+        ("probe.S", include_str!("../x86_x87_numerical/probe.S")),
+        (
+            "encoding.S",
+            include_str!("../x86_x87_numerical/encoding.S"),
+        ),
+        ("run.py", include_str!("../x86_x87_numerical/run.py")),
+        ("README.md", include_str!("../x86_x87_numerical/README.md")),
     ] {
         fs::write(d.join(name), data).unwrap();
     }
@@ -277,7 +278,8 @@ fn independent_oracle_and_packet() {
     assert_eq!(bytes(&fs::read(d.join("encoding.S.o")).unwrap()), expected);
     assert_eq!(
         bytes(
-            &keel_asm::x86::assemble_object(include_str!("x86_x87_numerical/encoding.S")).unwrap()
+            &keel_asm::x86::assemble_object(include_str!("../x86_x87_numerical/encoding.S"))
+                .unwrap()
         ),
         expected
     );

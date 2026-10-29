@@ -1,3 +1,11 @@
+#[allow(dead_code)]
+#[path = "common/vector.rs"]
+pub mod common;
+#[path = "f80/x86_x87_dc.rs"]
+mod x86_x87_dc;
+#[path = "f80/x86_x87_numerical.rs"]
+mod x86_x87_numerical;
+
 #[test]
 fn unsupported_targets_reject_f80_foreign_abi() {
     for src in [
