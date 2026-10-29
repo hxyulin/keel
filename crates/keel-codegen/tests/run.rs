@@ -372,13 +372,16 @@ fn run_with_timeout(cmd: &mut Command) -> Result<Output, String> {
         .spawn()
         .map_err(|e| format!("running {}: {e}", cmd.get_program().display()))?;
     let start = Instant::now();
+    // Most programs exit within a few milliseconds, so poll quickly at first.
+    let mut poll = Duration::from_micros(100);
     while child.try_wait().unwrap().is_none() {
         if start.elapsed() > TIMEOUT {
             child.kill().unwrap();
             child.wait().unwrap();
             return Err(format!("still running after {TIMEOUT:?}; killed"));
         }
-        std::thread::sleep(Duration::from_millis(5));
+        std::thread::sleep(poll);
+        poll = (poll * 2).min(Duration::from_millis(5));
     }
     // The programs print little, so the pipes cannot fill up and block them.
     Ok(child.wait_with_output().unwrap())
