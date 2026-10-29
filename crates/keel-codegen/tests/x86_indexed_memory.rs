@@ -558,11 +558,14 @@ fn native_independent_c_oracles_exact_width_wrap_spills_and_fault_order() {
             String::from_utf8_lossy(&out.stderr)
         );
     };
-    run(Command::new("clang")
-        .args(["-O0", "-fno-lto", "-c"])
-        .arg(dir.join("oracle.c"))
-        .arg("-o")
-        .arg(dir.join("oracle.o")));
+    // Both C files are immutable; compile them once and link each image.
+    for name in ["oracle", "driver"] {
+        run(Command::new("clang")
+            .args(["-O0", "-fno-lto", "-c"])
+            .arg(dir.join(format!("{name}.c")))
+            .arg("-o")
+            .arg(dir.join(format!("{name}.o"))));
+    }
     let mut m = module(&ir);
     for optimized in [false, true] {
         if optimized {
@@ -661,8 +664,7 @@ fn native_independent_c_oracles_exact_width_wrap_spills_and_fault_order() {
             );
             let binary = dir.join(&stem);
             run(Command::new("clang")
-                .args(["-O0", "-fno-lto"])
-                .arg(dir.join("driver.c"))
+                .arg(dir.join("driver.o"))
                 .arg(dir.join("oracle.o"))
                 .arg(dir.join(format!("{stem}.o")))
                 .arg("-o")

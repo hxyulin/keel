@@ -504,6 +504,17 @@ block2:
     let dir = std::env::temp_dir().join(format!("keel-x86-brif-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("oracle.c"), c).unwrap();
+    // The oracle is immutable; compile it once and link each image.
+    assert!(
+        Command::new("cc")
+            .args(["-O2", "-c"])
+            .arg(dir.join("oracle.c"))
+            .arg("-o")
+            .arg(dir.join("oracle.o"))
+            .status()
+            .unwrap()
+            .success()
+    );
     matrix(|tier, alloc, pools| {
         // Execute on the host only. On ARM this validates the shared IR
         // fixtures and independent oracle; it makes no x86 execution claim.
@@ -530,8 +541,7 @@ block2:
         fs::write(dir.join("test.o"), object).unwrap();
         assert!(
             Command::new("cc")
-                .arg("-O2")
-                .arg(dir.join("oracle.c"))
+                .arg(dir.join("oracle.o"))
                 .arg(dir.join("test.o"))
                 .arg("-o")
                 .arg(dir.join("test"))
