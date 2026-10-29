@@ -29,7 +29,8 @@ fn both(module: &keel_ir::Module, accepted: bool, features: Features) {
 fn huge_positive_and_overflow_layouts_reject_at_every_early_contract() {
     for producer in ["gnu", "clang"] {
         for (layout, ir_ok) in [
-            ("[536870912 x f64x1]", true),
+            ("[536870911 x f64x1]", true),
+            ("[536870912 x f64x1]", false),
             ("[4294967295 x [4294967295 x f64x1]]", false),
             ("{[4294967295 x [4294967295 x f64x1]],i64}", false),
         ] {

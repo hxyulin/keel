@@ -2073,6 +2073,10 @@ impl Verifier<'_> {
                     Some(0) if !(sig.x86_vector_abi.is_some() && layout_contains_f64x1(l)) => {
                         self.inst_error(inst, "invalid call operand aggregate layout".into())
                     }
+                    Some(size) if size > u64::from(u32::MAX) => self.inst_error(
+                        inst,
+                        "call operand aggregate layout is larger than a stack slot".into(),
+                    ),
                     _ => {}
                 }
             }
@@ -2216,6 +2220,11 @@ fn check_signature(sig: &Signature) -> Vec<String> {
                 Some(0) if !(sig.x86_vector_abi.is_some() && layout_contains_f64x1(layout)) => {
                     errors.push(format!("`{param}`: the struct is empty"))
                 }
+                // The caller copies it into a stack slot, whose size is a u32.
+                Some(size) if size > u64::from(u32::MAX) => errors.push(format!(
+                    "`{param}`: the struct is larger than {} bytes",
+                    u32::MAX
+                )),
                 _ => {}
             }
         }

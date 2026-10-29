@@ -74,6 +74,17 @@ impl Layout {
         self.leaves_with_layout(DataLayout::NATIVE64)
     }
 
+    /// Visits the type of every scalar inside, but an array's element only
+    /// once, so the walk is linear in the layout's size, not its leaf count.
+    pub fn for_each_leaf_type(&self, visit: &mut impl FnMut(Type)) {
+        match self {
+            Layout::Scalar(ty) => visit(*ty),
+            Layout::Struct(fields) => fields.iter().for_each(|f| f.for_each_leaf_type(visit)),
+            Layout::Array(_, 0) => {}
+            Layout::Array(elem, _) => elem.for_each_leaf_type(visit),
+        }
+    }
+
     /// Every scalar and its byte offset under an explicit storage model.
     /// Callers must first validate `checked_size_with_layout` with the same
     /// model and ensure the leaf count is practical to materialize in a Vec.

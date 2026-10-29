@@ -3,3 +3,5 @@ verifier errors:
   @b: `ptr sret {i64}` must be the first parameter of a function that returns nothing
   @c: `ptr sret {i64}` must be the first parameter of a function that returns nothing
   @d: `ptr byval {}`: the struct is empty
+  @e: `ptr byval [2 x [2147483648 x i8]]`: the struct is larger than 4294967295 bytes
+  @f: `ptr sret [4294967295 x [4294967295 x i8]]`: the struct is larger than 4294967295 bytes

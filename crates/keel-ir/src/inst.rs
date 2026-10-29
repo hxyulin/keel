@@ -1687,6 +1687,8 @@ impl InstData {
     }
 
     /// Types hidden behind ABI pointers, in addition to ordinary SSA types.
+    /// A type may be visited more than once, and an array's element types
+    /// are visited once rather than once per element.
     /// Capability checks must visit these even when every SSA value is ptr.
     pub fn for_each_abi_type(&self, visit: impl FnMut(Type)) {
         self.for_each_abi_type_filtered(visit, |_, _| true);
@@ -1708,9 +1710,7 @@ impl InstData {
                     if let Some(layout) = p.layout()
                         && include(layout, Some(i))
                     {
-                        for (_, ty) in layout.leaves() {
-                            visit(ty);
-                        }
+                        layout.for_each_leaf_type(&mut visit);
                     }
                 }
             }
@@ -1718,9 +1718,7 @@ impl InstData {
         if let Self::AggregateVaArg { layout, .. } = self
             && include(layout, None)
         {
-            for (_, ty) in layout.leaves() {
-                visit(ty);
-            }
+            layout.for_each_leaf_type(&mut visit);
         }
     }
 

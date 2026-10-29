@@ -2,3 +2,5 @@ decl @a(i64 byval {i32})
 decl @b(i32, ptr sret {i64})
 decl @c(ptr sret {i64}) -> i32
 decl @d(ptr byval {})
+decl @e(ptr byval [2 x [2147483648 x i8]])
+decl @f(ptr sret [4294967295 x [4294967295 x i8]])
