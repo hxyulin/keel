@@ -88,6 +88,51 @@ fn assert_clang(source: &str) {
     let ours = assemble(source);
     assert_eq!(text(&ours), text(&reference), "{source}");
 }
+/// One Clang process assembles every case into its own section. Keel still
+/// assembles each case alone, so a byte mismatch names one instruction.
+fn assert_clang_cases(cases: &[String]) {
+    let source = cases
+        .iter()
+        .enumerate()
+        .map(|(n, case)| format!(".section .case{n},\"ax\",@progbits\n{case}\n"))
+        .collect::<String>();
+    let reference = clang(&source);
+    let reference = object::File::parse(reference.as_slice()).unwrap();
+    for (n, case) in cases.iter().enumerate() {
+        let expected = reference
+            .section_by_name(&format!(".case{n}"))
+            .unwrap()
+            .data()
+            .unwrap();
+        let ours = assemble(&format!(".text\n{case}\n"));
+        assert_eq!(text(&ours), expected, "{case}");
+    }
+}
+/// Clang keeps going after an assembly error, so one run checks that it
+/// rejects every line.
+fn assert_clang_rejects_each(lines: &[&str]) {
+    let dir = Scratch::new();
+    let input = dir.0.join("bad.s");
+    std::fs::write(&input, format!(".text\n{}\n", lines.join("\n"))).unwrap();
+    let result = Command::new("clang")
+        .args(["-c", "-target", "x86_64-unknown-linux-gnu"])
+        .arg(&input)
+        .arg("-o")
+        .arg(dir.0.join("bad.o"))
+        .output()
+        .expect("Clang is required for the AT&T differential tests");
+    assert!(!result.status.success());
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    for (n, line) in lines.iter().enumerate() {
+        let location = format!("{}:{}:", input.display(), n + 2);
+        assert!(
+            stderr
+                .lines()
+                .any(|l| l.starts_with(&location) && l.contains("error")),
+            "Clang accepted {line}\n{stderr}"
+        );
+    }
+}
 
 #[test]
 fn clang_integer_width_address_and_extension_matrix() {
@@ -165,10 +210,7 @@ fn clang_integer_width_address_and_extension_matrix() {
         ]
         .map(str::to_string),
     );
-    // Separate cases make any unexpected byte mismatch identify one instruction.
-    for case in &cases {
-        assert_clang(&format!(".text\n{case}\n"));
-    }
+    assert_clang_cases(&cases);
     eprintln!(
         "{} integer/address/extension Clang byte oracles",
         cases.len()
@@ -224,15 +266,12 @@ fn clang_simd_bmi_and_condition_operand_orders() {
         ]
         .map(str::to_string),
     );
-    for case in &cases {
-        assert_clang(&format!(".text\n{case}\n"));
-    }
+    assert_clang_cases(&cases);
     eprintln!("{} SIMD/BMI/condition Clang byte oracles", cases.len());
 }
 
 #[test]
 fn added_sse2_model_opcodes_keep_att_operand_order() {
-    // Requires the separately reviewed x86-features prerequisite patch.
     let mut cases = Vec::new();
     for op in [
         "movdqa",
@@ -306,9 +345,7 @@ fn added_sse2_model_opcodes_keep_att_operand_order() {
         cases.push(format!("{op} %xmm13,%r10d"));
         cases.push(format!("{op} %xmm13,%r10"));
     }
-    for case in &cases {
-        assert_clang(&format!(".text\n{case}\n"));
-    }
+    assert_clang_cases(&cases);
     eprintln!("{} added SSE2 AT&T Clang byte oracles", cases.len());
 }
 
@@ -325,10 +362,11 @@ fn actual_clang_and_rustc_instruction_body_oracles() {
     );
 }
 
+/// Keel rejects the same lines in
+/// `malformed_or_unrepresentable_forms_fail_on_the_source_line`.
 #[test]
 fn clang_also_rejects_invalid_widths_and_addresses() {
-    let dir = Scratch::new();
-    for bad in [
+    assert_clang_rejects_each(&[
         "movq %eax,%rax",
         "movb %xmm1,%al",
         "movsbq %ax,%rax",
@@ -341,23 +379,7 @@ fn clang_also_rejects_invalid_widths_and_addresses() {
         "movq (),%rax",
         "movq (%rax,%rcx,4,%rdx),%rax",
         "movb %ah,%r8b",
-    ] {
-        let source = format!(".text\n{bad}\n");
-        assert!(
-            assemble_object_with_syntax_and_features(&source, Syntax::Att, FEATURES).is_err(),
-            "{bad}"
-        );
-        let input = dir.0.join("bad.s");
-        std::fs::write(&input, &source).unwrap();
-        let result = Command::new("clang")
-            .args(["-c", "-target", "x86_64-unknown-linux-gnu"])
-            .arg(&input)
-            .arg("-o")
-            .arg(dir.0.join("bad.o"))
-            .output()
-            .unwrap();
-        assert!(!result.status.success(), "Clang accepted {bad}");
-    }
+    ]);
 }
 
 #[test]

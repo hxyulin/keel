@@ -393,31 +393,36 @@ fn clang_also_rejects_invalid_x87_register_and_width_forms() {
             ],
         ),
     ] {
-        for bad in cases {
-            let source = format!("{directive}\n{bad}\n");
-            assert!(assemble_object(&source).is_err());
-            std::fs::write(&input, source).unwrap();
-            let p = Command::new("clang")
-                .args(["-c", "-target", "x86_64-unknown-linux-gnu"])
-                .arg(&input)
-                .arg("-o")
-                .arg(&output)
-                .output()
-                .unwrap();
-            assert!(!p.status.success(), "Clang accepted {bad}");
-            if let Some(tool) = gnu() {
-                let p = Command::new(tool)
-                    .arg("--64")
-                    .arg(&input)
-                    .arg("-o")
-                    .arg(&output)
-                    .output()
-                    .unwrap();
-                // GNU rewrites `fldl %st` to `fld %st` with a warning; it
-                // must still never accept one of these forms silently.
+        for bad in &cases {
+            assert!(assemble_object(&format!("{directive}\n{bad}\n")).is_err());
+        }
+        // Each assembler keeps going after an error, so one run per dialect
+        // must report every line. GNU rewrites `fldl %st` to `fld %st` with a
+        // warning; it must still never accept one of these forms silently.
+        std::fs::write(&input, format!("{directive}\n{}\n", cases.join("\n"))).unwrap();
+        for tool in std::iter::once("clang".to_string()).chain(gnu()) {
+            let clang = tool == "clang";
+            let mut command = Command::new(&tool);
+            if clang {
+                command.args(["-c", "-target", "x86_64-unknown-linux-gnu"]);
+            } else {
+                command.arg("--64");
+            }
+            let p = command.arg(&input).arg("-o").arg(&output).output().unwrap();
+            let stderr = String::from_utf8_lossy(&p.stderr);
+            for (n, bad) in cases.iter().enumerate() {
+                let location = format!("{}:{}:", input.display(), n + 2);
+                let diagnosed = |l: &str| {
+                    l.starts_with(&location)
+                        && if clang {
+                            l.contains("error:")
+                        } else {
+                            l.contains("Error:") || l.contains("Warning:")
+                        }
+                };
                 assert!(
-                    !p.status.success() || String::from_utf8_lossy(&p.stderr).contains("Warning:"),
-                    "GNU accepted {bad}"
+                    stderr.lines().any(diagnosed),
+                    "{tool} accepted {bad}\n{stderr}"
                 );
             }
         }

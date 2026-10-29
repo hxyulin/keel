@@ -176,11 +176,54 @@ fn cfi_and_line_tables_are_present() {
     assert!(line.size() > 40);
 }
 
+/// Runs Clang and GNU as once each over every case, one section per case,
+/// and returns each tool's name and bytes per case.
+fn reference_sections(name: &str, cases: &[String]) -> Vec<(String, Vec<Vec<u8>>)> {
+    use std::process::Command;
+    let temp = std::env::temp_dir().join(format!("keel-x86-{name}-{}", std::process::id()));
+    std::fs::create_dir_all(&temp).unwrap();
+    let input = temp.join("input.s");
+    let source = cases
+        .iter()
+        .enumerate()
+        .map(|(n, case)| format!(".section .case{n},\"ax\",@progbits\n{case}\n"))
+        .collect::<String>();
+    std::fs::write(&input, format!(".intel_syntax noprefix\n{source}")).unwrap();
+    let gnu = std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into());
+    let mut references = Vec::new();
+    for (tool, args) in [
+        ("clang", &["-target", "x86_64-unknown-linux-gnu", "-c"][..]),
+        (gnu.as_str(), &["--64"][..]),
+    ] {
+        let output = temp.join("reference.o");
+        let result = Command::new(tool)
+            .args(args)
+            .arg(&input)
+            .arg("-o")
+            .arg(&output)
+            .output()
+            .unwrap_or_else(|e| panic!("{tool} is required for differential tests: {e}"));
+        assert!(
+            result.status.success(),
+            "{tool}: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let bytes = std::fs::read(&output).unwrap();
+        let file = object::File::parse(&*bytes).unwrap();
+        let sections = (0..cases.len())
+            .map(|n| {
+                let section = file.section_by_name(&format!(".case{n}")).unwrap();
+                section.data().unwrap().to_vec()
+            })
+            .collect();
+        references.push((tool.to_string(), sections));
+    }
+    std::fs::remove_dir_all(temp).unwrap();
+    references
+}
+
 #[test]
 fn instruction_bytes_match_reference_assemblers() {
-    use std::process::Command;
-    let temp = std::env::temp_dir().join(format!("keel-x86-reference-{}", std::process::id()));
-    std::fs::create_dir_all(&temp).unwrap();
     // Branches and accumulator immediates have valid alternative encodings;
     // this matrix chooses forms with a shared canonical encoding.
     let cases = [
@@ -281,7 +324,9 @@ fn instruction_bytes_match_reference_assemblers() {
         "cvtss2sd xmm9,xmm10",
         "cvtsd2ss xmm9,xmm10",
     ];
-    for (n, case) in cases.iter().enumerate() {
+    let mut rendered_cases = Vec::new();
+    let mut ours = Vec::new();
+    for case in cases {
         let instruction = Instruction::parse_intel(case).unwrap();
         let rendered = instruction.to_string();
         assert_eq!(
@@ -290,53 +335,16 @@ fn instruction_bytes_match_reference_assemblers() {
             "{case}: {rendered}"
         );
         assert_eq!(text(&rendered), text(case), "{case}: {rendered}");
-        let source = format!(".intel_syntax noprefix\n.text\n{rendered}\n");
-        let input = temp.join("input.s");
-        let output = temp.join("clang.o");
-        std::fs::write(&input, &source).unwrap();
-        let result = Command::new("clang")
-            .args(["-target", "x86_64-unknown-linux-gnu", "-c"])
-            .arg(&input)
-            .arg("-o")
-            .arg(&output)
-            .output()
-            .expect("Clang is required for differential tests");
-        assert!(
-            result.status.success(),
-            "case {n}: {case}: {}",
-            String::from_utf8_lossy(&result.stderr)
-        );
-        let reference = std::fs::read(&output).unwrap();
-        let reference = object::File::parse(&*reference).unwrap();
-        assert_eq!(
-            text(&source),
-            reference.section_by_name(".text").unwrap().data().unwrap(),
-            "case {n}: {case}"
-        );
-        #[cfg(target_os = "linux")]
-        {
-            let gnu = temp.join("gnu.o");
-            let result = Command::new("as")
-                .args(["--64", "-o"])
-                .arg(&gnu)
-                .arg(&input)
-                .output()
-                .unwrap();
-            assert!(
-                result.status.success(),
-                "GNU as {case}: {}",
-                String::from_utf8_lossy(&result.stderr)
-            );
-            let bytes = std::fs::read(gnu).unwrap();
-            let file = object::File::parse(&*bytes).unwrap();
-            assert_eq!(
-                text(&source),
-                file.section_by_name(".text").unwrap().data().unwrap(),
-                "GNU as case {n}: {case}"
-            );
+        ours.push(text(&format!(
+            ".intel_syntax noprefix\n.text\n{rendered}\n"
+        )));
+        rendered_cases.push(rendered);
+    }
+    for (tool, references) in reference_sections("reference", &rendered_cases) {
+        for (n, case) in cases.iter().enumerate() {
+            assert_eq!(ours[n], references[n], "{tool} case {n}: {case}");
         }
     }
-    std::fs::remove_dir_all(temp).unwrap();
 }
 
 #[test]
@@ -831,9 +839,6 @@ lea rax,[rax+.Ltls@tpoff]
 
 #[test]
 fn branch_layout_matches_clang_and_gnu_with_aliases_and_alignment() {
-    use std::process::Command;
-    let temp = std::env::temp_dir().join(format!("keel-x86-relax-{}", std::process::id()));
-    std::fs::create_dir_all(&temp).unwrap();
     let mut cases = Vec::new();
     for gap in [0, 125, 126, 127, 128, 129, 254] {
         for op in ["jmp", "je", "jg"] {
@@ -845,38 +850,27 @@ fn branch_layout_matches_clang_and_gnu_with_aliases_and_alignment() {
         // these cases have unambiguous branch distances.
         cases.push(format!("start: jmp target\n.zero 32\n.p2align 7,0xcc,{max}\ntarget: jne start\n.long target-start\n"));
     }
-    for (index, case) in cases.iter().enumerate() {
-        let source = format!(".intel_syntax noprefix\n.text\n{case}");
-        let input = temp.join("input.s");
-        std::fs::write(&input, &source).unwrap();
-        let mut commands = vec![("clang", vec!["-target", "x86_64-unknown-linux-gnu", "-c"])];
-        if cfg!(target_os = "linux") {
-            commands.push(("as", vec!["--64"]));
-        }
-        for (tool, args) in commands {
-            let output = temp.join(format!("{tool}.o"));
-            let result = Command::new(tool)
-                .args(args)
-                .arg(&input)
-                .arg("-o")
-                .arg(&output)
-                .output()
-                .unwrap();
-            assert!(
-                result.status.success(),
-                "{tool}: {}",
-                String::from_utf8_lossy(&result.stderr)
-            );
-            let reference = std::fs::read(&output).unwrap();
-            let reference = object::File::parse(&*reference).unwrap();
+    // Branch layout is section-local, so the batched reference gives each
+    // case its own section and its own label names.
+    let renamed = cases
+        .iter()
+        .enumerate()
+        .map(|(n, case)| {
+            case.replace("start", &format!("start{n}"))
+                .replace("target", &format!("target{n}"))
+                .replace("alias", &format!("alias{n}"))
+        })
+        .collect::<Vec<_>>();
+    for (tool, references) in reference_sections("relax", &renamed) {
+        for (index, case) in cases.iter().enumerate() {
+            let source = format!(".intel_syntax noprefix\n.text\n{case}");
             assert_eq!(
                 text(&source),
-                reference.section_by_name(".text").unwrap().data().unwrap(),
+                references[index],
                 "{tool} case {index}: {source}"
             );
         }
     }
-    std::fs::remove_dir_all(temp).unwrap();
 }
 
 #[test]
