@@ -1,4 +1,14 @@
 //! Public dialect contract pinned from db6129d3, independent of generation.
+#[path = "x86_identity_compat/x86_att_compat.rs"]
+mod x86_att_compat;
+#[path = "x86_identity_compat/x86_core_compat.rs"]
+mod x86_core_compat;
+#[path = "x86_identity_compat/x86_operand_size_rules.rs"]
+mod x86_operand_size_rules;
+#[path = "x86_identity_compat/x86_register_compat.rs"]
+mod x86_register_compat;
+#[path = "x86_identity_compat/x86_required_features.rs"]
+mod x86_required_features;
 use keel_asm_ir::x86::{FixedOpcode, Instruction, Opcode, V2Opcode, V3Opcode, X87Opcode};
 use std::fmt::Write;
 

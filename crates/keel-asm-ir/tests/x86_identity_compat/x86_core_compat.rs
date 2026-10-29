@@ -3,7 +3,7 @@ use keel_asm_ir::x86::{CoreOpcode, Opcode, isa};
 
 #[test]
 fn original_core_spellings_and_wrapper_precedence() {
-    for line in include_str!("fixtures/x86-core-identities.txt").lines() {
+    for line in include_str!("../fixtures/x86-core-identities.txt").lines() {
         if line.starts_with('#') {
             continue;
         }

@@ -17,7 +17,7 @@ const CLASSES: [(RegisterClass, u8, u8); 12] = [
     (RegisterClass::Tile, 11, 11),
 ];
 fn canonical() -> Vec<(Register, &'static str)> {
-    include_str!("fixtures/x86-registers.txt")
+    include_str!("../fixtures/x86-registers.txt")
         .lines()
         .filter(|s| !s.starts_with('#'))
         .map(|line| {

@@ -5,7 +5,7 @@ use keel_asm_ir::x86::Instruction;
 
 #[test]
 fn generated_att_rules_keep_parsing_formatting_and_errors() {
-    for line in include_str!("fixtures/x86-att-rules.txt").lines() {
+    for line in include_str!("../fixtures/x86-att-rules.txt").lines() {
         if line.starts_with('#') {
             continue;
         }
