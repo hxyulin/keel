@@ -121,3 +121,55 @@ block0:
         );
     }
 }
+
+#[test]
+fn expansion_resumes_at_the_caller_and_reaches_nested_and_later_sites() {
+    // Each expansion of @outer in @first adds two @inner sites that must be
+    // found before the search moves on to the later callers.
+    let mut module = keel_ir::parse(
+        r#"
+decl @leaf()
+func @first() {
+block0:
+ call @outer()
+ call @outer()
+ return
+}
+func @outer() alwaysinline local {
+block0:
+ call @inner()
+ call @inner()
+ return
+}
+func @middle() {
+block0:
+ return
+}
+func @inner() alwaysinline local {
+block0:
+ call @leaf()
+ return
+}
+func @last() {
+block0:
+ call @inner()
+ call @outer()
+ return
+}
+"#,
+    )
+    .unwrap();
+    keel_opt::required_inline_asm(&mut module).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    for (name, leaf_calls) in [("first", 4), ("last", 3)] {
+        let f = module.functions.iter().find(|f| f.name == name).unwrap();
+        let callees: Vec<_> = f
+            .layout_insts()
+            .filter_map(|(_, i)| match f.inst_data(i) {
+                InstData::Call { func, .. } => Some(f.callee(*func).name.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(callees, vec!["leaf"; leaf_calls], "@{name}");
+    }
+}

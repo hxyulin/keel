@@ -2005,9 +2005,16 @@ pub fn required_inline_asm_with_c_definitions(
         .map(|(f, _)| f.name.clone())
         .collect();
     let mut expanded = 0usize;
+    // Expansion edits only the caller, so definitions keep their indices and
+    // the functions before the caller have no mandatory sites left.
+    let mut index_of: FxHashMap<String, usize> = FxHashMap::default();
+    for (index, function) in module.functions.iter().enumerate() {
+        index_of.entry(function.name.clone()).or_insert(index);
+    }
+    let mut first = 0;
     loop {
         let mut next = None;
-        for (index, caller) in module.functions.iter().enumerate() {
+        for (index, caller) in module.functions.iter().enumerate().skip(first) {
             for (_, call) in caller.layout_insts() {
                 let reference = match caller.inst_data(call) {
                     InstData::Call { func, .. }
@@ -2016,7 +2023,7 @@ pub fn required_inline_asm_with_c_definitions(
                     _ => continue,
                 };
                 let decl = caller.callee(reference);
-                let definition = module.functions.iter().position(|f| f.name == decl.name);
+                let definition = index_of.get(decl.name.as_str()).copied();
                 if !decl.attrs.alwaysinline
                     && !definition.is_some_and(|i| module.functions[i].attrs.alwaysinline)
                 {
@@ -2083,6 +2090,7 @@ pub fn required_inline_asm_with_c_definitions(
         let Some((index, call, target)) = next else {
             break;
         };
+        first = index;
         let (caller, callee) = two_functions(&mut module.functions, index, target);
         inline_call(caller, call, callee);
         crate::phi_simplify::run(caller);
