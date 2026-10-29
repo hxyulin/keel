@@ -282,3 +282,23 @@ block0(v0: i64):
 }}"
     ));
 }
+
+#[test]
+fn aarch64_float_struct_register_areas_above_large_copies_assemble() {
+    assemble_aarch64(
+        "decl @sink(ptr byval [16800 x i8]) -> f32
+func @param(ptr byval [3 x f32], ptr byval [16800 x i8]) -> f32 {
+block0(v0: ptr, v1: ptr):
+ v2 = load.f32 v0
+ v3 = call @sink(v1)
+ v4 = fadd v2, v3
+ return v4
+}
+func @ret(ptr sret [3 x f32], ptr byval [16800 x i8]) {
+block0(v0: ptr, v1: ptr):
+ v2 = call @sink(v1)
+ store v2, v0
+ return
+}",
+    );
+}

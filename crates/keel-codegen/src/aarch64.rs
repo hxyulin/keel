@@ -3732,30 +3732,21 @@ impl<'a> FunctionCompiler<'a> {
     /// frame at `area`, which is rounded up to 8 bytes, so whole registers
     /// fit.
     fn store_struct_regs(&mut self, regs: &[Loc], layout: &Layout, area: usize) {
-        let base = self.base;
+        let base = Reg::from(self.base);
         match abi::classify(layout) {
             StructClass::Hfa { ty, .. } => {
+                let width = ty.bytes().expect("a float") as usize;
                 for (&(offset, _), &r) in layout.leaves().iter().zip(regs) {
                     let fr = freg(loc_reg(r), ty);
-                    self.mach(
-                        "str",
-                        [
-                            (fr).into(),
-                            Address::offset(base, area + offset as usize).into(),
-                        ],
-                    );
+                    let address = self.stack_arg_address(base, area + offset as usize, width, S0);
+                    self.mach("str", [(fr).into(), address.into()]);
                 }
             }
             _ => {
                 for (k, &r) in regs.iter().enumerate() {
                     let r = loc_reg(r);
-                    self.mach(
-                        "str",
-                        [
-                            (Reg::x(r)).into(),
-                            Address::offset(base, area + 8 * k).into(),
-                        ],
-                    );
+                    let address = self.stack_arg_address(base, area + 8 * k, 8, S0);
+                    self.mach("str", [(Reg::x(r)).into(), address.into()]);
                 }
             }
         }
@@ -3764,29 +3755,20 @@ impl<'a> FunctionCompiler<'a> {
     /// Loads the registers a struct of `layout` is returned in from the
     /// frame at `area`.
     fn load_struct_regs(&mut self, layout: &Layout, area: usize) {
-        let base = self.base;
+        let base = Reg::from(self.base);
         match abi::classify(layout) {
             StructClass::Hfa { ty, .. } => {
+                let width = ty.bytes().expect("a float") as usize;
                 for (i, &(offset, _)) in layout.leaves().iter().enumerate() {
                     let fr = freg(i as u8, ty);
-                    self.mach(
-                        "ldr",
-                        [
-                            (fr).into(),
-                            Address::offset(base, area + offset as usize).into(),
-                        ],
-                    );
+                    let address = self.stack_arg_address(base, area + offset as usize, width, S0);
+                    self.mach("ldr", [(fr).into(), address.into()]);
                 }
             }
             StructClass::Gprs { count } => {
                 for k in 0..count as usize {
-                    self.mach(
-                        "ldr",
-                        [
-                            (Reg::x(k)).into(),
-                            Address::offset(base, area + 8 * k).into(),
-                        ],
-                    );
+                    let address = self.stack_arg_address(base, area + 8 * k, 8, S0);
+                    self.mach("ldr", [(Reg::x(k)).into(), address.into()]);
                 }
             }
             StructClass::Indirect => unreachable!("returned through memory"),
