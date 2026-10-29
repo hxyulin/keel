@@ -139,7 +139,7 @@ fn gnu_differential() {
             &[".text"][..],
         ),
         (
-            include_str!("fixtures/linux-notes/aggregate.s"),
+            include_str!("../fixtures/linux-notes/aggregate.s"),
             "PHDRS { text PT_LOAD FLAGS(5); note PT_NOTE FLAGS(0); } SECTIONS { .text 4096 : { *(.text) } :text .notes : { KEEP(*(.note.*)) } :text :note }",
             &["_start"][..],
             &[".text", ".notes"][..],
@@ -228,9 +228,9 @@ fn input_lists_preserve_input_order_and_fill_restarts_at_each_hole() {
 
 #[test]
 fn linux_notes_survive_default_and_script_layout_and_reject_writes() {
-    let source = include_str!("fixtures/linux-notes/aggregate.s");
+    let source = include_str!("../fixtures/linux-notes/aggregate.s");
     let input = keel_asm::x86::assemble_object(source).unwrap();
-    let expected = include_bytes!("fixtures/linux-notes/aggregate.note.Linux.bin");
+    let expected = include_bytes!("../fixtures/linux-notes/aggregate.note.Linux.bin");
     let ordinary = elf::link(
         &[Input {
             name: "linux-note.o",

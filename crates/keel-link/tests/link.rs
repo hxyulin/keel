@@ -1,3 +1,15 @@
+#[path = "link/dead_strip.rs"]
+mod dead_strip;
+#[path = "link/file_output.rs"]
+mod file_output;
+#[path = "link/native.rs"]
+mod native;
+#[path = "link/private_extern.rs"]
+mod private_extern;
+#[path = "link/section_bounds.rs"]
+mod section_bounds;
+#[path = "link/unwind.rs"]
+mod unwind;
 use keel_link::{Dylib, Input, Options};
 use std::collections::BTreeSet;
 fn options() -> Options {
@@ -833,7 +845,7 @@ fn weak_binds(bytes: &[u8]) -> Vec<(String, Vec<u64>)> {
         command += u32_at(command + 4);
     };
     let mut stream = bytes[offset..offset + size].iter().copied();
-    let mut leb = |stream: &mut dyn Iterator<Item = u8>| {
+    let leb = |stream: &mut dyn Iterator<Item = u8>| {
         let (mut value, mut shift) = (0u64, 0);
         loop {
             let byte = stream.next().unwrap();

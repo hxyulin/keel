@@ -156,8 +156,8 @@ fn strong_override_is_independent_of_group_signature() {
 }
 #[test]
 fn clang_cpp_template_inline_data_and_mixed_unwind() {
-    let a = include_bytes!("fixtures/comdat/clang-a.o").to_vec();
-    let b = include_bytes!("fixtures/comdat/clang-b.o").to_vec();
+    let a = include_bytes!("../fixtures/comdat/clang-a.o").to_vec();
+    let b = include_bytes!("../fixtures/comdat/clang-b.o").to_vec();
     for rest in [[a.clone(), b.clone()], [b, a]] {
         let exe = link(&[object(START), rest[0].clone(), rest[1].clone()]).unwrap();
         let f = object::File::parse(exe.bytes.as_slice()).unwrap();
@@ -382,8 +382,8 @@ fn selected_grouped_lifecycle_is_retained_once() {
 
 #[test]
 fn gcc_cpp_template_inline_data_and_mixed_unwind() {
-    let a = include_bytes!("fixtures/comdat/gcc-a.o").to_vec();
-    let b = include_bytes!("fixtures/comdat/gcc-b.o").to_vec();
+    let a = include_bytes!("../fixtures/comdat/gcc-a.o").to_vec();
+    let b = include_bytes!("../fixtures/comdat/gcc-b.o").to_vec();
     for rest in [[a.clone(), b.clone()], [b, a]] {
         let exe = link(&[object(START), rest[0].clone(), rest[1].clone()]).unwrap();
         let f = object::File::parse(exe.bytes.as_slice()).unwrap();

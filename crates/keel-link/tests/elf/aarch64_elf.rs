@@ -1,8 +1,8 @@
 use keel_link::{Input, archive, elf};
 use object::{Object, ObjectSection, ObjectSymbol};
 
-const START: &str = include_str!("fixtures/aarch64/start.s");
-const HELPER: &str = include_str!("fixtures/aarch64/helper.s");
+const START: &str = include_str!("../fixtures/aarch64/start.s");
+const HELPER: &str = include_str!("../fixtures/aarch64/helper.s");
 fn options() -> elf::Options {
     elf::Options {
         machine: elf::Machine::Aarch64,

@@ -1,3 +1,29 @@
+#[path = "elf/aarch64_elf.rs"]
+mod aarch64_elf;
+#[path = "elf/elf_comdat.rs"]
+mod elf_comdat;
+#[path = "elf/elf_crt_symbols.rs"]
+mod elf_crt_symbols;
+#[path = "elf/elf_debugger.rs"]
+mod elf_debugger;
+#[path = "elf/elf_gc.rs"]
+mod elf_gc;
+#[path = "elf/elf_lifecycle.rs"]
+mod elf_lifecycle;
+#[path = "elf/elf_notes.rs"]
+mod elf_notes;
+#[path = "elf/elf_rel8.rs"]
+mod elf_rel8;
+#[path = "elf/elf_relocatable.rs"]
+mod elf_relocatable;
+#[path = "elf/elf_script.rs"]
+mod elf_script;
+#[path = "elf/elf_selection.rs"]
+mod elf_selection;
+#[path = "elf/elf_sframe.rs"]
+mod elf_sframe;
+#[path = "elf/elf_unwind.rs"]
+mod elf_unwind;
 use keel_link::{Input, elf};
 use object::{Object, ObjectSection, ObjectSymbol};
 fn object(source: &str) -> Vec<u8> {

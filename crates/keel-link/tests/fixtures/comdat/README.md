@@ -25,7 +25,7 @@ x86_64-linux-gnu-g++ -std=c++17 -O0 -fno-exceptions -fno-rtti \
 x86_64-linux-gnu-as gcc-a.s -o gcc-a.o
 ```
 
-`cargo test -p keel-link --test elf_comdat` consumes the checked objects without
+`cargo test -p keel-link --test elf elf_comdat` consumes the checked objects without
 requiring any external compiler. Other fixtures in that test cover multi-member
 atomic selection, local targets and discarded-local diagnosis, signature binding
 and section-symbol identities, strong overrides, cross-group references, archives,

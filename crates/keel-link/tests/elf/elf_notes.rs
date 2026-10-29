@@ -7,8 +7,8 @@ const NEEDED: u32 = 0xc0008002;
 const FEATURE_USED: u32 = 0xc0010001;
 const ISA_USED: u32 = 0xc0010002;
 const START: &str = ".text\n.globl _start\n_start: ret\n";
-const ABI: &[u8] = include_bytes!("fixtures/gnu-notes/crt1.o.note.ABI-tag.bin");
-const SPLIT: &[u8] = include_bytes!("fixtures/gnu-notes/split.o.note.gnu.property.bin");
+const ABI: &[u8] = include_bytes!("../fixtures/gnu-notes/crt1.o.note.ABI-tag.bin");
+const SPLIT: &[u8] = include_bytes!("../fixtures/gnu-notes/split.o.note.gnu.property.bin");
 
 fn obj(source: &str) -> Vec<u8> {
     keel_asm::x86::assemble_object(source).unwrap()
@@ -271,11 +271,11 @@ fn generated_import_code_updates_only_complete_used_metadata() {
 #[test]
 fn retained_crt_note_bytes_preserve_v4_with_unmarked_user_object() {
     let notes: &[&[u8]] = &[
-        include_bytes!("fixtures/gnu-notes/crt1.o.note.gnu.property.bin"),
-        include_bytes!("fixtures/gnu-notes/crti.o.note.gnu.property.bin"),
-        include_bytes!("fixtures/gnu-notes/crtbegin.o.note.gnu.property.bin"),
-        include_bytes!("fixtures/gnu-notes/crtend.o.note.gnu.property.bin"),
-        include_bytes!("fixtures/gnu-notes/crtn.o.note.gnu.property.bin"),
+        include_bytes!("../fixtures/gnu-notes/crt1.o.note.gnu.property.bin"),
+        include_bytes!("../fixtures/gnu-notes/crti.o.note.gnu.property.bin"),
+        include_bytes!("../fixtures/gnu-notes/crtbegin.o.note.gnu.property.bin"),
+        include_bytes!("../fixtures/gnu-notes/crtend.o.note.gnu.property.bin"),
+        include_bytes!("../fixtures/gnu-notes/crtn.o.note.gnu.property.bin"),
     ];
     let mut objects = vec![obj(START)];
     objects.extend(
@@ -298,16 +298,16 @@ fn retained_gnu_oracle_matches_split_missing_usedzero_and_isazero() {
     let split = obj(&format!("{START}{}", section(".note.gnu.property", SPLIT)));
     let usedzero = obj(&section(
         ".note.gnu.property",
-        include_bytes!("fixtures/gnu-notes/usedzero.o.note.gnu.property.bin"),
+        include_bytes!("../fixtures/gnu-notes/usedzero.o.note.gnu.property.bin"),
     ));
     for (extra, expected) in [
         (
             obj(""),
-            include_bytes!("fixtures/gnu-notes/split-missing.note.gnu.property.bin").as_slice(),
+            include_bytes!("../fixtures/gnu-notes/split-missing.note.gnu.property.bin").as_slice(),
         ),
         (
             usedzero,
-            include_bytes!("fixtures/gnu-notes/split-usedzero.note.gnu.property.bin").as_slice(),
+            include_bytes!("../fixtures/gnu-notes/split-usedzero.note.gnu.property.bin").as_slice(),
         ),
     ] {
         let exe = link(&[split.clone(), extra]).unwrap();
@@ -324,7 +324,7 @@ fn retained_gnu_oracle_matches_split_missing_usedzero_and_isazero() {
         "{START}{}",
         section(
             ".note.gnu.property",
-            include_bytes!("fixtures/gnu-notes/isazero.o.note.gnu.property.bin")
+            include_bytes!("../fixtures/gnu-notes/isazero.o.note.gnu.property.bin")
         )
     ));
     let exe = link(&[zero]).unwrap();
@@ -334,11 +334,11 @@ fn retained_gnu_oracle_matches_split_missing_usedzero_and_isazero() {
             .unwrap()
             .data()
             .unwrap(),
-        include_bytes!("fixtures/gnu-notes/isazero-gnu.note.gnu.property.bin")
+        include_bytes!("../fixtures/gnu-notes/isazero-gnu.note.gnu.property.bin")
     );
     for bytes in [
         SPLIT,
-        include_bytes!("fixtures/gnu-notes/allprops.o.note.gnu.property.bin").as_slice(),
+        include_bytes!("../fixtures/gnu-notes/allprops.o.note.gnu.property.bin").as_slice(),
     ] {
         assert!(
             link(&[obj(&format!(
@@ -603,10 +603,10 @@ fn note_relocations_and_references_into_consumed_properties_are_rejected() {
 }
 
 // Retained independent-review DSO: real LOAD/DYNAMIC/hash and data relocation.
-const REVIEW_DSO: &[u8] = include_bytes!("fixtures/gnu-notes/libreview.so");
-const DEFINED_DSO: &[u8] = include_bytes!("fixtures/gnu-notes/libdefined.so");
-const WEAK_DEFINED_DSO: &[u8] = include_bytes!("fixtures/gnu-notes/libweak-defined.so");
-const PROTECTED_DSO: &[u8] = include_bytes!("fixtures/gnu-notes/libprotected-defined.so");
+const REVIEW_DSO: &[u8] = include_bytes!("../fixtures/gnu-notes/libreview.so");
+const DEFINED_DSO: &[u8] = include_bytes!("../fixtures/gnu-notes/libdefined.so");
+const WEAK_DEFINED_DSO: &[u8] = include_bytes!("../fixtures/gnu-notes/libweak-defined.so");
+const PROTECTED_DSO: &[u8] = include_bytes!("../fixtures/gnu-notes/libprotected-defined.so");
 
 fn symbol_location(bytes: &[u8], table: &str, name: &str) -> usize {
     let file = object::File::parse(bytes).unwrap();
@@ -925,7 +925,7 @@ fn compiler_defined_lookups_follow_executable_selection_without_archive_demand()
             // DSO relocation, not a native prop relocation, exercises the guard.
             let member = obj(&format!(
                 ".text\n.globl pull\npull: ret\n{}",
-                section(".note.gnu.property", &crate::note(&[(NEEDED, 8)])).replace(
+                section(".note.gnu.property", &self::note(&[(NEEDED, 8)])).replace(
                     ".byte",
                     &format!("{binding}\n.type prop,@object\nprop: .byte")
                 )
@@ -1020,11 +1020,11 @@ fn compiler_got_and_plt_lookups_include_both_runtime_tables() {
     let data = obj(".data\n.globl prop\n.type prop,@object\nprop: .quad 7\n");
     for (shared, kind) in [
         (
-            include_bytes!("fixtures/gnu-notes/libgot-defined.so").as_slice(),
+            include_bytes!("../fixtures/gnu-notes/libgot-defined.so").as_slice(),
             6,
         ),
         (
-            include_bytes!("fixtures/gnu-notes/libplt-defined.so").as_slice(),
+            include_bytes!("../fixtures/gnu-notes/libplt-defined.so").as_slice(),
             7,
         ),
     ] {

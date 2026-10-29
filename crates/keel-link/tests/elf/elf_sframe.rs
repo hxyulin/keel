@@ -69,7 +69,7 @@ fn valid() -> Vec<u8> {
 
 #[test]
 fn notes_abi_sframe_unwind_and_dynamic_share_final_headers_and_addresses() {
-    let abi = include_bytes!("fixtures/gnu-notes/crt1.o.note.ABI-tag.bin");
+    let abi = include_bytes!("../fixtures/gnu-notes/crt1.o.note.ABI-tag.bin");
     let metadata = object(&format!(
         ".section .note.gnu.property,\"a\",@note\n.p2align 3\n.long 4,16,5,0x00554e47,0xc0008002,4,8,0\n\
          .section .note.ABI-tag,\"a\",@note\n.p2align 2\nabi: .byte {}\n\
@@ -86,7 +86,8 @@ fn notes_abi_sframe_unwind_and_dynamic_share_final_headers_and_addresses() {
                 inputs.reverse();
             }
             if dynamic {
-                inputs.push(include_bytes!("fixtures/gnu-notes/libprotected-defined.so").to_vec());
+                inputs
+                    .push(include_bytes!("../fixtures/gnu-notes/libprotected-defined.so").to_vec());
             }
             let exe = if gc { gc_link(&inputs) } else { link(&inputs) }.unwrap();
             let f = object::File::parse(exe.bytes.as_slice()).unwrap();
@@ -612,7 +613,7 @@ fn gc_all_live_retains_exact_crt_rows() {
 
 #[test]
 fn retained_real_crt_section_symbol_relocations_match_final_image() {
-    let crt = include_bytes!("fixtures/sframe/crt1.o").to_vec();
+    let crt = include_bytes!("../fixtures/sframe/crt1.o").to_vec();
     let input = object::File::parse(crt.as_slice()).unwrap();
     let metadata = input.section_by_name(".sframe").unwrap();
     let text = input.section_by_name(".text").unwrap();

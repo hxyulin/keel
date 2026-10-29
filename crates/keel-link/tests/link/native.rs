@@ -215,7 +215,7 @@ fn compact_lsda_and_dwarf_exception_frames_work_after_a_regular_page_boundary() 
     }
     // Force only the throwing frame to DWARF without changing its machine
     // instructions. The catch frame retains compact register rules and LSDA.
-    source.push_str(&include_str!("fixtures/compact.s").replace(
+    source.push_str(&include_str!("../fixtures/compact.s").replace(
         "_compact_throw:\n.cfi_startproc",
         "_compact_throw:\n.cfi_startproc\n.cfi_remember_state\n.cfi_restore_state",
     ));

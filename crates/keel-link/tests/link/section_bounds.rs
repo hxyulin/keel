@@ -1,7 +1,7 @@
 //! Raw assembler coverage deliberately independent of C section attributes.
 use keel_link::{Dylib, Input, Options, elf};
 use object::{Object, ObjectSection, ObjectSymbol};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 fn elf_obj(s: &str) -> Vec<u8> {
     keel_asm::x86::assemble_object(s).unwrap()
@@ -326,7 +326,7 @@ fn native_arm64_and_apple_execute_same_registration_objects() {
         .unwrap();
     assert!(exports.status.success());
     let stdout = String::from_utf8_lossy(&exports.stdout);
-    let mut sections = BTreeMap::new();
+    let mut sections = std::collections::BTreeMap::new();
     let mut current = None;
     for line in stdout.lines() {
         if let Some((exe, _)) = images.iter().find(|(exe, _)| {

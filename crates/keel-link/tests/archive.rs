@@ -1,3 +1,5 @@
+#[path = "archive/thin_archive.rs"]
+mod thin_archive;
 use keel_link::{
     Input,
     archive::{self, Target},
