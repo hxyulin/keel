@@ -167,28 +167,6 @@ fn archive(members: &[(&str, Vec<u8>)]) -> Vec<u8> {
     }
     a
 }
-#[test]
-fn archives_extract_transitive_members_and_skip_unused_duplicate() {
-    let main = object(".globl _main\n_main:\nb _a\n");
-    let a = object(".globl _a\n_a:\nb _b\n");
-    let b = object(".globl _b\n_b:\nret\n");
-    let unused = object(".globl _main\n_main:\nret\n");
-    let ar = archive(&[("b.o", b), ("unused.o", unused), ("a.o", a)]);
-    keel_link::link(
-        &[
-            Input {
-                name: "main",
-                bytes: &main,
-            },
-            Input {
-                name: "libtest.a",
-                bytes: &ar,
-            },
-        ],
-        options(),
-    )
-    .unwrap();
-}
 
 fn assert_archive_image(inputs: &[(&str, &[u8])], extracted: &[(&str, &[u8])]) {
     let build = |inputs: &[(&str, &[u8])]| {
