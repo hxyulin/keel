@@ -72,7 +72,7 @@ fn named_factory_contracts_and_inliner_legality() {
 }
 #[test]
 fn accepted_clang_placement_oracle_preserves_named_declarations() {
-    let oracle = include_str!("fixtures/attribute-placement-oracle.tsv");
+    let oracle = include_str!("../fixtures/attribute-placement-oracle.tsv");
     for attr in ATTRS {
         let (mut accepted, mut rejected) = (0, 0);
         for line in oracle.lines() {

@@ -1,3 +1,12 @@
+#[path = "contracts/attribute_consumers.rs"]
+mod attribute_consumers;
+#[path = "contracts/attribute_corrections.rs"]
+mod attribute_corrections;
+#[path = "contracts/attribute_factory_ownership.rs"]
+mod attribute_factory_ownership;
+#[path = "contracts/attribute_ownership.rs"]
+mod attribute_ownership;
+
 use keel_ir::{InstData, Target};
 
 #[test]
