@@ -100,7 +100,7 @@ pub use program::*;
 use keel_ir::{Block, EntityRef, Function, InstData, Type, Value, ValueDef};
 
 /// A physical register or eight-byte frame slot at an allocation boundary.
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Loc {
     /// A general-purpose register, by number (`x9` is `Reg(9)`).
     Reg(u8),
