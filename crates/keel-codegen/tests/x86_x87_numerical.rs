@@ -173,7 +173,9 @@ fn independent_oracle_and_packet() {
     use object::{Object, ObjectSection};
     use std::{fs, path::PathBuf, process::Command};
     let export = std::env::var_os("KEEL_X87_NUMERICAL_EXPORT_DIR").map(PathBuf::from);
-    let d = export.unwrap_or_else(|| common::temp("x87-numerical"));
+    let d = export
+        .clone()
+        .unwrap_or_else(|| common::temp("x87-numerical"));
     fs::create_dir_all(&d).unwrap();
     for (name, data) in [
         ("test.c", include_str!("x86_x87_numerical/test.c")),
@@ -192,68 +194,54 @@ fn independent_oracle_and_packet() {
         ..EMPTY
     };
     let mut names = String::new();
-    for (cpu, level) in [
-        ("v1", CpuLevel::V1),
-        ("v2", CpuLevel::V2),
-        ("v3", CpuLevel::V3),
-    ] {
-        let features = Features::for_level(level);
-        for s in [
-            SelectionTier::Baseline,
-            SelectionTier::Trees,
-            SelectionTier::Full,
-        ] {
-            let first = SharedHome(0);
-            let second = SharedHome(1);
-            let fast = AllocationTier::Fast;
-            let full = AllocationTier::Full;
-            let plans: [(&str, &dyn RegisterAllocator, &Pools); 8] = [
-                ("Fast-normal", &fast, &keel_codegen::x86_64::REGISTERS),
-                ("Fast-tiny", &fast, &tiny),
-                ("Fast-spill", &fast, &EMPTY),
-                ("Full-normal", &full, &keel_codegen::x86_64::REGISTERS),
-                ("Full-tiny", &full, &tiny),
-                ("Full-spill", &full, &EMPTY),
-                ("shared-first", &first, &EMPTY),
-                ("shared-second", &second, &EMPTY),
-            ];
-            for (plan, allocator, pools) in plans {
-                for optimized in [false, true] {
-                    let name = format!(
-                        "{cpu}-{s:?}-{plan}-{}",
-                        if optimized { "opt" } else { "raw" }
-                    );
-                    let mut m = keel_ir::parse(&src).unwrap();
-                    if optimized {
-                        keel_opt::optimize(&mut m).unwrap();
-                    }
-                    keel_ir::verify_module(&m).unwrap();
-                    let selector = FeatureSelector {
-                        inner: &s,
-                        features,
-                    };
-                    let pipeline = CodegenPipeline {
-                        selector: &selector,
-                        allocator,
-                    };
-                    let program =
-                        keel_codegen::x86_64::compile_program_with_pipeline(&m, pools, &pipeline)
-                            .unwrap();
-                    let text =
-                        keel_codegen::x86_64::compile_with_pipeline(&m, pools, &pipeline).unwrap();
-                    let typed =
-                        keel_asm::x86::assemble_program_object_with_features(&program, features)
-                            .unwrap();
-                    let parsed =
-                        keel_asm::x86::assemble_object_with_features(&text, features).unwrap();
-                    assert_eq!(typed, parsed);
-                    fs::write(d.join(format!("{name}.s")), text).unwrap();
-                    for (kind, obj) in [("typed", typed), ("text", parsed)] {
-                        let row = format!("{name}-{kind}");
-                        names += &format!("{row}\n");
-                        fs::write(d.join(format!("{row}.o")), obj).unwrap();
-                    }
-                }
+    let raw = keel_ir::parse(&src).unwrap();
+    keel_ir::verify_module(&raw).unwrap();
+    let mut optimized = raw.clone();
+    keel_opt::optimize(&mut optimized).unwrap();
+    keel_ir::verify_module(&optimized).unwrap();
+    // Only the pool and the shared-home plans change this text. V2, V3 and
+    // the Trees selector emit the same text as V1 with Baseline or Full.
+    let features = Features::for_level(CpuLevel::V1);
+    for s in [SelectionTier::Baseline, SelectionTier::Full] {
+        let first = SharedHome(0);
+        let second = SharedHome(1);
+        let fast = AllocationTier::Fast;
+        let full = AllocationTier::Full;
+        let plans: [(&str, &dyn RegisterAllocator, &Pools); 8] = [
+            ("Fast-normal", &fast, &keel_codegen::x86_64::REGISTERS),
+            ("Fast-tiny", &fast, &tiny),
+            ("Fast-spill", &fast, &EMPTY),
+            ("Full-normal", &full, &keel_codegen::x86_64::REGISTERS),
+            ("Full-tiny", &full, &tiny),
+            ("Full-spill", &full, &EMPTY),
+            ("shared-first", &first, &EMPTY),
+            ("shared-second", &second, &EMPTY),
+        ];
+        for (plan, allocator, pools) in plans {
+            for (stage, m) in [("raw", &raw), ("opt", &optimized)] {
+                let name = format!("v1-{s:?}-{plan}-{stage}");
+                let selector = FeatureSelector {
+                    inner: &s,
+                    features,
+                };
+                let pipeline = CodegenPipeline {
+                    selector: &selector,
+                    allocator,
+                };
+                let program =
+                    keel_codegen::x86_64::compile_program_with_pipeline(m, pools, &pipeline)
+                        .unwrap();
+                let text =
+                    keel_codegen::x86_64::compile_with_pipeline(m, pools, &pipeline).unwrap();
+                let typed =
+                    keel_asm::x86::assemble_program_object_with_features(&program, features)
+                        .unwrap();
+                // The text route assembles to the same bytes, so ship one image.
+                let parsed = keel_asm::x86::assemble_object_with_features(&text, features).unwrap();
+                assert_eq!(typed, parsed);
+                fs::write(d.join(format!("{name}.s")), text).unwrap();
+                names += &format!("{name}\n");
+                fs::write(d.join(format!("{name}.o")), typed).unwrap();
             }
         }
     }
@@ -295,7 +283,7 @@ fn independent_oracle_and_packet() {
     );
     common::command(Command::new("python3").arg(d.join("run.py")).arg("--seal"));
     common::command(Command::new("python3").arg(d.join("run.py")).arg("--check"));
-    let victim = d.join("v1-Baseline-Fast-normal-raw-typed.o");
+    let victim = d.join("v1-Baseline-Fast-normal-raw.o");
     let original = fs::read(&victim).unwrap();
     fs::write(&victim, b"tamper").unwrap();
     assert!(
@@ -320,5 +308,8 @@ fn independent_oracle_and_packet() {
                 .success()
         );
         assert!(!d.join("results.json").exists());
+    }
+    if export.is_none() {
+        fs::remove_dir_all(d).unwrap();
     }
 }

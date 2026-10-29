@@ -45,10 +45,12 @@ PC/RC and TOP prestates apply to those probes for both restricted opcodes. Each 
 called with output aliasing either input and with inputs/output terminating
 exactly at guarded page boundaries. All four result-liveness modes are checked. Unused outputs additionally receive an inaccessible pointer and must not access it.
 
-The exact finite roster has 288 objects: v1/v2/v3, three selectors, Fast/Full
-with normal/tiny/spill pools plus two custom sparse allocation plans sharing
-the F80 result with either dying input, raw/optimized, typed/text emission.
-Each genuine compiler runs every object: 576 native runs with these exact counters per run:
+The exact finite roster has 32 objects: v1, the Baseline and Full selectors,
+Fast/Full with normal/tiny/spill pools plus two custom sparse allocation plans
+sharing the F80 result with either dying input, raw/optimized. V2, V3 and the
+Trees selector emit the same text as these configurations. The typed and text
+emission routes produce identical objects, so the packet ships the typed one.
+Each genuine compiler runs every object: 64 native runs with these exact counters per run:
 
 - 1,503,936 safety/status invocations (185,688 prior cases × eight TOPs, plus 18,432 restricted-domain probes).
 - 654,720 mandatory defined-domain payload comparisons.

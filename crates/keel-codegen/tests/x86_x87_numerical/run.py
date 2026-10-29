@@ -5,10 +5,10 @@ p=pathlib.Path(__file__).resolve().parent
 if sys.argv[1:] in ([],['--check-compilers']): (p/'results.json').unlink(missing_ok=True)
 if not __debug__: raise SystemExit('optimized Python disables acceptance checks')
 plans=[a+'-'+pool for a in ['Fast','Full'] for pool in ['normal','tiny','spill']]+['shared-first','shared-second']
-names=[f'{cpu}-{s}-{plan}-{opt}-{kind}' for cpu in ['v1','v2','v3'] for s in ['Baseline','Trees','Full'] for plan in plans for opt in ['raw','opt'] for kind in ['typed','text']]
-assert len(names)==288 and len(set(names))==288
+names=[f'v1-{s}-{plan}-{opt}' for s in ['Baseline','Full'] for plan in plans for opt in ['raw','opt']]
+assert len(names)==32 and len(set(names))==32
 assert (p/'objects.txt').read_text().splitlines()==names
-files=['README.md','encoding.S','probe.S','test.c','test.ir','run.py','objects.txt']+[n+'.o' for n in names]+[n.removesuffix('-typed')+'.s' for n in names if n.endswith('-typed')]
+files=['README.md','encoding.S','probe.S','test.c','test.ir','run.py','objects.txt']+[n+'.o' for n in names]+[n+'.s' for n in names]
 allowed_objects={n+'.o' for n in names}|{'encoding.S.o','probe.S.o','test.c.o','encoding.o'}
 assert {f.name for f in p.glob('*.o')}<=allowed_objects,'unlisted object in packet'
 def hashes(): return {f:hashlib.sha256((p/f).read_bytes()).hexdigest() for f in files}
@@ -17,7 +17,7 @@ if sys.argv[1:]==['--seal']:
 assert json.loads((p/'manifest.json').read_text())==hashes(),'packet hash mismatch'
 for n in names:
  b=(p/(n+'.o')).read_bytes();assert b[:7]==b'\x7fELF\x02\x01\x01' and b[16:20]==b'\x01\x00\x3e\x00','invalid object'
-if sys.argv[1:]==['--check']:print('PASS sealed x87-numerical packet 288 objects');sys.exit(0)
+if sys.argv[1:]==['--check']:print('PASS sealed x87-numerical packet 32 objects');sys.exit(0)
 def compiler_identity(command,implementation):
  driver=shutil.which(command)
  assert driver is not None,f'missing compiler driver: {command}'
@@ -69,6 +69,6 @@ for compiler,identity in compilers.items():
   assert r.returncode==0 and r.stdout.startswith(expected) and diagnostic is not None
   assert int(diagnostic[1])<=96384 and int(diagnostic[2])<=1503936
   results.append(dict(compiler=compiler,compiler_identity=identity,object=name,sha256=hashes()[name+'.o'],stdout=r.stdout,diagnostics=dict(undefined_payload_differences=int(diagnostic[1]),raw_status_differences=int(diagnostic[2]))))
-assert len(results)==576
+assert len(results)==64
 (p/'results.json').write_text(json.dumps(results,indent=2)+'\n')
-print('PASS all 576 x87-numerical native runs')
+print('PASS all 64 x87-numerical native runs')
