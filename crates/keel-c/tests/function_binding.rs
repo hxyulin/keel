@@ -1,3 +1,14 @@
+#[path = "function_binding/function_policies.rs"]
+mod function_policies;
+#[path = "function_binding/gnu_extern_inline.rs"]
+mod gnu_extern_inline;
+#[path = "function_binding/noninterposable.rs"]
+mod noninterposable;
+#[path = "function_binding/public_required_inline.rs"]
+mod public_required_inline;
+#[path = "function_binding/required_inline_discard.rs"]
+mod required_inline_discard;
+
 use keel_c::{FunctionBinding, Options};
 use keel_ir::{InstData, Target};
 
