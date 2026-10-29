@@ -1,7 +1,7 @@
 //! Regression coverage for the flattened initializer replication boundary.
 use keel_ir::Target;
 
-const SOURCE: &str = include_str!("fixtures/initializer_snapshot.c");
+const SOURCE: &str = include_str!("../fixtures/initializer_snapshot.c");
 
 #[test]
 fn initializer_snapshot_layout_and_execution() {

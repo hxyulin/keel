@@ -4,6 +4,12 @@
 //! a type-dependent result is still built. The structural tests pin the
 //! shapes; the program at the end compares behavior at the boundaries with
 //! clang, built as is, optimized and with debug info.
+#[path = "frontend_direct_ir/batch.rs"]
+mod batch;
+#[path = "frontend_direct_ir/compact_frame.rs"]
+mod compact_frame;
+#[path = "frontend_direct_ir/initializers.rs"]
+mod initializers;
 
 use std::path::Path;
 use std::process::Command;
