@@ -509,13 +509,20 @@ fn assemble_plain(
     // extra representation. Each entry packs a statement ordinal and a fixed
     // instruction word into eight bytes. Symbolic instructions are excluded.
     let mut fixed_words = Vec::new();
-    for _ in 0..32 {
+    // Symbolic LEB widths never shrink, so every pass after the first either
+    // reproduces the previous layout or widens a field, and no field exceeds
+    // ten bytes. That bounds the passes without capping acyclic chains.
+    let mut leb_widths = Vec::new();
+    let mut pass = 0;
+    loop {
+        pass += 1;
         let (assembly, symbolic_leb, locations) = assemble_pass(
             source,
             previous.as_ref(),
             metrics,
             features,
             &mut fixed_words,
+            &mut leb_widths,
         )?;
         if !symbolic_leb {
             return Ok((assembly, locations));
@@ -536,12 +543,22 @@ fn assemble_plain(
         if previous.as_ref() == Some(&symbol_locations) {
             return Ok((assembly, locations));
         }
+        if pass > 1 + 9 * leb_widths.len() {
+            return Err(Error::new(0, "symbolic LEB128 layout did not converge"));
+        }
         previous = Some(symbol_locations);
     }
-    Err(Error::new(
-        0,
-        "symbolic LEB128 layout did not converge after 32 passes",
-    ))
+}
+/// Return the width of the next symbolic LEB field: its previous width, or
+/// the width `needed` by its current value if that is larger.
+fn leb_width(widths: &mut Vec<u8>, index: &mut usize, needed: usize) -> usize {
+    if widths.len() == *index {
+        widths.push(1);
+    }
+    let width = &mut widths[*index];
+    *width = (*width).max(needed as u8);
+    *index += 1;
+    usize::from(*width)
 }
 fn assemble_pass(
     source: program::Input<'_>,
@@ -549,8 +566,10 @@ fn assemble_pass(
     metrics: bool,
     features: crate::TargetFeatures,
     fixed_words: &mut Vec<u64>,
+    leb_widths: &mut Vec<u8>,
 ) -> Result<(Assembly, bool, Vec<InstructionLocation>), Error> {
     let record_words = previous.is_some() && fixed_words.is_empty();
+    let mut leb_index = 0;
     let mut next_word = 0;
     let mut locations = Vec::new();
     // Declare scratch first so every collection (including nested owners) drops
@@ -747,6 +766,10 @@ fn assemble_pass(
                                 })?,
                                 &mut bytes,
                             )
+                        }
+                        if expr.add.is_some() {
+                            let width = leb_width(leb_widths, &mut leb_index, bytes.len());
+                            crate::pad_leb(&mut bytes, 0, width, value < 0);
                         }
                         data::append(&mut result, current, &bytes).map_err(err)?;
                     }
@@ -1147,6 +1170,7 @@ fn assemble_pass(
                 } else {
                     expr.constant
                 };
+                let start = bytes.len();
                 if op == ".uleb128" {
                     debug::uleb(
                         u64::try_from(value)
@@ -1159,6 +1183,10 @@ fn assemble_pass(
                             .map_err(|_| err("signed LEB128 value out of range".into()))?,
                         &mut bytes,
                     );
+                }
+                if expr.add.is_some() {
+                    let width = leb_width(leb_widths, &mut leb_index, bytes.len() - start);
+                    crate::pad_leb(&mut bytes, start, width, value < 0);
                 }
             }
             data::append(&mut result, current, &bytes).map_err(err)?;
@@ -2035,6 +2063,7 @@ mod layout_replay_tests {
         let input = program::Input::Text(source);
         let mut previous = None;
         let mut words = Vec::new();
+        let mut widths = Vec::new();
         let mut passes = 0;
         for _ in 0..32 {
             let cached = assemble_pass(
@@ -2043,6 +2072,7 @@ mod layout_replay_tests {
                 true,
                 crate::TargetFeatures::default(),
                 &mut words,
+                &mut widths.clone(),
             )
             .unwrap();
             let fresh = assemble_pass(
@@ -2051,6 +2081,7 @@ mod layout_replay_tests {
                 true,
                 crate::TargetFeatures::default(),
                 &mut Vec::new(),
+                &mut widths,
             )
             .unwrap();
             assert_eq!(cached, fresh);

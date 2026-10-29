@@ -480,12 +480,35 @@ fn long_acyclic_leb_chains_converge_and_actual_cycles_fail() {
             .to_string()
             .contains("cyclic variable-length directive layout")
     );
-    let error = assemble_object(".data\nstart:\n.uleb128 start-end+129\nend:").unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("cyclic variable-length directive layout")
+}
+
+/// LSDA-style fields whose growth a later `.p2align` absorbs. Clang keeps
+/// the wider encoding.
+const SHRINKING_LEBS: &str = ".section .rodata,\"a\"\n.uleb128 .Lb-.La\n.La:\n.p2align 2\n\
+    .space 125\n.Lb:\n.sleb128 .Ld-.Lc\n.Lc:\n.p2align 2\n.space 62\n.Ld:\n.p2align 2\n\
+    .sleb128 .Le-.Lf\n.Le:\n.p2align 2\n.space 62\n.Lf:\n";
+
+#[test]
+fn symbolic_leb_fields_never_shrink() {
+    let section = |source: &str| {
+        let bytes = assemble_object(source).unwrap();
+        let file = object::File::parse(&*bytes).unwrap();
+        let name = if source.contains(".rodata") {
+            ".rodata"
+        } else {
+            ".data"
+        };
+        file.section_by_name(name).unwrap().data().unwrap().to_vec()
+    };
+    // 128 at one byte needs two; 127 at two bytes is padded to `ff 00`.
+    assert_eq!(
+        section(".data\nstart:\n.uleb128 start-end+129\nend:"),
+        [0xff, 0]
     );
+    let data = section(SHRINKING_LEBS);
+    assert_eq!(&data[..2], &[0xff, 0]);
+    assert_eq!(&data[129..131], &[0xbf, 0]);
+    assert_eq!(&data[196..198], &[0xc0, 0x7f]);
 }
 
 fn decoded_object(source: &str, option: &str, tag: &str) -> String {

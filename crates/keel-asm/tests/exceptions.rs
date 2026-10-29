@@ -127,7 +127,6 @@ fn symbolic_leb_layout_and_got_constraints() {
     for source in [
         ".data\n.uleb128 Missing-Lmissing",
         ".data\nLbegin:\n.uleb128 Lend-Lbegin\n.text\nLend: ret",
-        ".data\nLbegin:\n.uleb128 129-Lend+Lbegin\nLend:",
         ".cfi_startproc\n.cfi_personality 0, _personality\n.cfi_endproc",
         ".cfi_startproc\n.cfi_lsda 0, Llsda\n.cfi_endproc",
         ".cfi_startproc\n.cfi_personality 155, _p\n.cfi_personality 155, _p\n.cfi_endproc",

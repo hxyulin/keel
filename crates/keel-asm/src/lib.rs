@@ -584,6 +584,21 @@ struct Encoding {
     requirements: &'static [Requirement],
 }
 
+/// Pad the minimal LEB128 encoding at `out[start..]` to `width` bytes with
+/// continuation bytes, as LLVM does: 127 in two bytes is `ff 00`. Symbolic
+/// LEB fields never shrink between layout passes, so a value may need fewer
+/// bytes than its field holds.
+fn pad_leb(out: &mut Vec<u8>, start: usize, width: usize, negative: bool) {
+    let len = out.len() - start;
+    if len >= width {
+        return;
+    }
+    *out.last_mut().unwrap() |= 0x80;
+    let fill = if negative { 0x7f } else { 0 };
+    out.extend(std::iter::repeat_n(fill | 0x80, width - len - 1));
+    out.push(fill);
+}
+
 /// Every variable field must be supplied once. Fixed bits within partially
 /// variable fields (e.g. MOVZ wN's `hw`) remain constrained by the ISA mask.
 fn encode(name: &str, values: &[(FieldId, u32)]) -> Result<u32, String> {

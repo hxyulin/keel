@@ -90,3 +90,20 @@ fn instruction_bytes_match_clang_aarch64_elf() {
     assert_eq!(text(&actual), text(&reference));
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn symbolic_leb_fields_never_shrink() {
+    // LSDA-style fields whose growth a later `.p2align` absorbs. Clang keeps
+    // the wider encoding and pads it.
+    let bytes = keel_asm::assemble_elf_object(
+        ".section .rodata,\"a\"\n.uleb128 .Lb-.La\n.La:\n.p2align 2\n.space 125\n.Lb:\n\
+         .sleb128 .Ld-.Lc\n.Lc:\n.p2align 2\n.space 62\n.Ld:\n.p2align 2\n\
+         .sleb128 .Le-.Lf\n.Le:\n.p2align 2\n.space 62\n.Lf:\n",
+    )
+    .unwrap();
+    let file = object::File::parse(bytes.as_slice()).unwrap();
+    let data = file.section_by_name(".rodata").unwrap().data().unwrap();
+    assert_eq!(&data[..2], &[0xff, 0]);
+    assert_eq!(&data[129..131], &[0xbf, 0]);
+    assert_eq!(&data[196..198], &[0xc0, 0x7f]);
+}

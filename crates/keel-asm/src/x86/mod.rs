@@ -1099,10 +1099,13 @@ fn assemble_items_inner<const PROFILE: bool>(
                 pending_leb_error.get_or_insert_with(|| Error::new(*line, e));
                 continue;
             }
-            leb_widths[i] = bytes.len();
-            if width != bytes.len() {
+            // Widths only grow, so layout converges even when alignment
+            // after the field would let it shrink and grow again.
+            if bytes.len() > width {
+                leb_widths[i] = bytes.len();
                 variable_changed = true;
             } else {
+                crate::pad_leb(&mut bytes, 0, width, value < 0);
                 let at = *offset as usize;
                 a.sections[*section].data[at..at + width].copy_from_slice(&bytes);
             }

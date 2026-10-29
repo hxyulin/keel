@@ -2364,9 +2364,12 @@ objects. `.ascii`/`.asciz` preserve quoted punctuation and support standard
 newline/tab/carriage-return, quote/backslash, and octal escapes.
 `.uleb128`/`.sleb128` encode integer constants and same-section symbol
 differences, including forward labels. Symbolic LEB128 lengths affect label
-positions, so assembly repeats layout passes until positions stabilize, with
-a 32-pass limit that diagnoses cyclic layouts. Constant-only input takes one
-pass. Undefined/cross-section LEB128 expressions, other `.loc` options
+positions, so assembly repeats layout passes until positions stabilize. A
+symbolic field never shrinks: when its value needs fewer bytes than the
+previous pass gave it, the encoding is padded with continuation bytes, as LLVM
+does (127 in two bytes is `ff 00`). Each pass either reproduces the previous
+layout or widens a field, so layout converges even when a later `.p2align`
+absorbs the growth. Constant-only input takes one pass. Undefined/cross-section LEB128 expressions, other `.loc` options
 (such as `view`), and arbitrary string concatenation remain errors.
 Constant assignments (`name = expression` or `.set name, expression`) accept
 constants and same-section differences, including forward labels; they can
