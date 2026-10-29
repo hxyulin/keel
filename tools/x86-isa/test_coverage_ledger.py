@@ -29,11 +29,11 @@ class CoverageLedgerTests(unittest.TestCase):
 
     def test_shared_selection_and_table_order_are_exhaustive(self):
         included = [f for f in self.ledger['forms'] if f['table_index'] is not None]
-        self.assertEqual(len(included), 3495)
+        self.assertEqual(len(included), 3563)
         self.assertEqual(sorted(f['table_index'] for f in included), list(range(len(included))))
         ordered = sorted(included, key=lambda f: f['table_index'])
         self.assertEqual([f['mnemonic'] for f in ordered], sorted(f['mnemonic'] for f in included))
-        self.assertEqual(len(self.data) - len(included), 109)
+        self.assertEqual(len(self.data) - len(included), 41)
         for row, form in zip(self.data, self.ledger['forms']):
             self.assertEqual(form['table_index'] is not None, generate.enabled(row))
             if not generate.enabled(row):
@@ -42,8 +42,8 @@ class CoverageLedgerTests(unittest.TestCase):
                 self.assertEqual(form['compiler_candidates'], [])
 
     def test_all_exclusion_reasons_are_retained_including_overlaps(self):
-        row = {'filters': {'feature_amd': '1', 'feature_knc': '1', 'feature_mpx': '1', 'rex_2': 'required'}}
-        self.assertEqual(generate.exclusion_reasons(row), ['feature_amd', 'feature_knc', 'feature_mpx', 'rex_2'])
+        row = {'filters': {'feature_amd': '1', 'feature_knc': '1', 'feature_mpx': '1', 'rex_2': 'rex2'}}
+        self.assertEqual(generate.exclusion_reasons(row), ['feature_amd', 'feature_knc', 'feature_mpx'])
         self.assertFalse(generate.enabled(row))
         self.assertTrue(generate.enabled({'filters': {'rex_2': 'no_rex2'}}))
 

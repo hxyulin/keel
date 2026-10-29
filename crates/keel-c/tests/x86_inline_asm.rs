@@ -241,7 +241,7 @@ fn unsupported_and_impossible_contracts_are_diagnosed() {
         ("asm(\"\" ::: \"rsp\");", "stack or frame pointer"),
         ("asm(\"\" ::: \"ebp\");", "stack or frame pointer"),
         ("asm(\"\" ::: \"x0\");", "another architecture"),
-        ("asm(\"\" ::: \"xmm0\");", "unknown register"),
+        ("asm(\"\" ::: \"zmm0\");", "unknown register"),
         ("asm(\"%h0\" :: \"r\"(x));", "modifier"),
     ] {
         let source = format!("void f(long x){{{body}}}");
@@ -949,5 +949,91 @@ long f(void) {{ return pick({value}L); }}
             )
             .is_err()
         );
+    }
+}
+
+#[test]
+fn simd_constraints_keep_opaque_outputs_and_full_width_live_values() {
+    const SOURCE: &str = include_str!("fixtures/x86_simd_asm.c");
+    for debug in [false, true] {
+        let raw = compile(SOURCE, debug).unwrap();
+        keel_ir::verify_module(&raw).unwrap();
+        let mut optimized = raw.clone();
+        keel_opt::optimize(&mut optimized).unwrap();
+        for selection in [SelectionTier::Baseline, SelectionTier::Full] {
+            let module = if selection == SelectionTier::Full {
+                &optimized
+            } else {
+                &raw
+            };
+            let features = Features::for_level(CpuLevel::V3);
+            let selector = FeatureSelector {
+                inner: &selection,
+                features,
+            };
+            for allocation in [AllocationTier::Fast, AllocationTier::Full] {
+                for spilled in [false, true] {
+                    let empty = Pools {
+                        caller_saved: &[],
+                        callee_saved: &[],
+                        float_caller_saved: &[],
+                        float_callee_saved: &[],
+                    };
+                    let pools = if spilled {
+                        &empty
+                    } else {
+                        &keel_codegen::x86_64::REGISTERS
+                    };
+                    let pipeline = CodegenPipeline {
+                        selector: &selector,
+                        allocator: &allocation,
+                    };
+                    let text =
+                        keel_codegen::x86_64::compile_with_pipeline(module, pools, &pipeline)
+                            .unwrap();
+                    let program = keel_codegen::x86_64::compile_program_with_pipeline(
+                        module, pools, &pipeline,
+                    )
+                    .unwrap();
+                    let object =
+                        keel_asm::x86::assemble_program_object_with_features(&program, features)
+                            .unwrap();
+                    assert_eq!(
+                        object,
+                        keel_asm::x86::assemble_object_with_features(&text, features).unwrap()
+                    );
+                    let mut chunks = keel_asm::x86::ProgramAssembler::new(features);
+                    keel_codegen::x86_64::compile_program_chunks_with_pipeline(
+                        module,
+                        pools,
+                        &pipeline,
+                        &mut |p| chunks.push(p),
+                    )
+                    .unwrap();
+                    assert_eq!(object, chunks.finish().unwrap());
+                    if let Some(dir) = std::env::var_os("KEEL_C_ASM_SIMD_EXPORT_DIR") {
+                        let dir = std::path::Path::new(&dir);
+                        std::fs::create_dir_all(dir).unwrap();
+                        std::fs::write(
+                            dir.join(format!("{debug}-{selection:?}-{allocation:?}-{spilled}.o")),
+                            object,
+                        )
+                        .unwrap();
+                        std::fs::write(
+                            dir.join("runner.c"),
+                            include_str!("../../keel-codegen/tests/x86_asm_clobbers/simd_runner.c"),
+                        )
+                        .unwrap();
+                    }
+                }
+            }
+        }
+    }
+    for source in [
+        "void f(int x){asm(\"\"::\"x\"(x));}",
+        "void f(long double x){asm(\"\"::\"v\"(x));}",
+        "void f(float x){asm(\"\"::\"r\"(x));}",
+    ] {
+        assert!(compile(source, false).is_err(), "{source}");
     }
 }

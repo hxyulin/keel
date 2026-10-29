@@ -171,5 +171,51 @@
     "field": "waitpkg",
     "bit": 32,
     "doc": "WAITPKG timed wait capability; execution also depends on OS wait-control policy."
+  },
+  {
+    "field": "amx_tile",
+    "bit": 33,
+    "requires": [
+      "xsave",
+      "osxsave"
+    ],
+    "doc": "AMX tile state and memory instructions; execution requires enabled tile XCR0/XFD state and configured tiles."
+  },
+  {
+    "field": "amx_int8",
+    "bit": 34,
+    "requires": [
+      "amx_tile"
+    ],
+    "doc": "AMX integer tile dot products."
+  },
+  {
+    "field": "amx_bf16",
+    "bit": 35,
+    "requires": [
+      "amx_tile"
+    ],
+    "doc": "AMX BF16 tile dot products."
+  },
+  {
+    "field": "amx_fp16",
+    "bit": 36,
+    "requires": [
+      "amx_tile"
+    ],
+    "doc": "AMX FP16 tile dot products."
+  },
+  {
+    "field": "apx_f",
+    "bit": 37,
+    "aliases": [
+      "apx",
+      "apxf"
+    ],
+    "requires": [
+      "xsave",
+      "osxsave"
+    ],
+    "doc": "Intel APX foundation; REX2 EGPR forms require OS-enabled APX state."
   }
 ]

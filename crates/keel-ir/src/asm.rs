@@ -283,16 +283,22 @@ fn operand(code: &str) -> Result<AsmOperand, String> {
 }
 
 impl PhysReg {
-    /// `x0`–`x30` and `w0`–`w30` (also `fp` and `lr`), or `v0`–`v31` and
+    /// x86 GPR and XMM/YMM names, or AArch64 `x0`–`x30` and `w0`–`w30`
+    /// (also `fp` and `lr`), or `v0`–`v31` and
     /// their `q`, `d`, `s`, `h` and `b` views. Also accepts generated x86 GPR
     /// names and aliases, retaining their architecture and canonical number.
     pub fn parse(name: &str) -> Result<Self, String> {
         if let Some(r) = keel_asm_ir::x86::Register::parse(name)
-            && r.class == keel_asm_ir::x86::RegisterClass::Gpr
+            && matches!(
+                r.class,
+                keel_asm_ir::x86::RegisterClass::Gpr
+                    | keel_asm_ir::x86::RegisterClass::Xmm
+                    | keel_asm_ir::x86::RegisterClass::Ymm
+            )
         {
             return Ok(Self {
                 arch: AsmArch::X86,
-                float: false,
+                float: r.class != keel_asm_ir::x86::RegisterClass::Gpr,
                 // AH/CH/DH/BH encode as 4..7 but alias GPRs 0..3.
                 num: if r.high_byte { r.number - 4 } else { r.number },
             });
@@ -334,9 +340,13 @@ impl fmt::Display for PhysReg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.arch == AsmArch::X86 {
             let r = keel_asm_ir::x86::Register {
-                class: keel_asm_ir::x86::RegisterClass::Gpr,
+                class: if self.float {
+                    keel_asm_ir::x86::RegisterClass::Xmm
+                } else {
+                    keel_asm_ir::x86::RegisterClass::Gpr
+                },
                 number: self.num,
-                width: 64,
+                width: if self.float { 128 } else { 64 },
                 high_byte: false,
             };
             return write!(f, "{r}");

@@ -129,7 +129,7 @@ def outputs(root, output, opcode_identities):
                      sizes=7, addresses=6, osz='default', mod_mask=8 if mod == '3' else 7,
                      reg_mask=1 << int(f['modrm_reg']) if 'modrm_reg' in f else 255,
                      rm_mask=1 << int(f['modrm_rm']) if 'modrm_rm' in f else 255,
-                     w=int(f.get('rex_w', -1)), b=-1, vector=vector,
+                     w=int(f.get('rex_w', -1)), b=-1, vector=vector, rex2=-1,
                      lock=False, rep=False, repne=False, gather='is_gather' in row.get('flags', []),
                      ignore_mod=False, far=False, decode=True, group1=-1,
                      isa=row['meta_info']['isa_set'], extension=row['meta_info']['extension'])

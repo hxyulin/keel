@@ -35,7 +35,7 @@ class RegisterSchemaTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'number domain'):
             registers.validate(self.schema)
         self.setUp()
-        self.schema['classes'][0]['high_byte']['first'] = 15
+        self.schema['classes'][0]['high_byte']['first'] = 32
         with self.assertRaisesRegex(ValueError, 'high-byte'):
             registers.validate(self.schema)
 

@@ -187,7 +187,7 @@ def build(root, data, adapters, exclusion_reasons, form_isa):
                 provenance=inputs['zydis-source.json'],
                 input_sha256={name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in INPUTS},
                 avx512_provenance=inputs['evex-source.json'],
-                not_enumerated=['Other EVEX families including APX', 'MVEX', 'XOP encoding', '3DNow encoding', 'explicit non-64-bit source forms'],
+                not_enumerated=['Other EVEX families including APX NDD/NF', 'MVEX', 'XOP encoding', '3DNow encoding', 'explicit non-64-bit source forms'],
                 validation_scope='No test results or runtime campaign verdicts are ingested. Untracked does not mean untested or unsupported.',
                 summary=summary, isa_sets=sets, dynamic_identity_families=dynamic,
                 assembler_bindings=public, compiler_bindings=compiler, forms=forms, avx512_forms=avx512)

@@ -55,6 +55,12 @@ pub(super) fn signed_word64(n: i128) -> i128 {
         n
     }
 }
+struct LegacyPrefix {
+    mandatory: u8,
+    bits: u16,
+    rex2: bool,
+}
+
 impl<'a> Encoding<'a> {
     fn finish(&mut self) -> Result<(), String> {
         if self.bytes.len() > 15 {
@@ -126,13 +132,17 @@ impl<'a> Encoding<'a> {
     /// Emit legacy prefixes, REX, opcode and ModRM/SIB. `reg` is an opcode extension or register field.
     fn rm(
         &mut self,
-        prefix: u8,
+        prefix: LegacyPrefix,
         opcode: &[u8],
-        bits: u16,
         field: u8,
         rm: &'a Operand,
         field_byte: Option<Register>,
     ) -> Result<(), String> {
+        let LegacyPrefix {
+            mandatory: prefix,
+            bits,
+            rex2,
+        } = prefix;
         let (b, x) = match rm {
             R(r) if r.class != RegisterClass::Rip => (r.number >> 3, 0),
             M(m) => (
@@ -157,19 +167,41 @@ impl<'a> Encoding<'a> {
         if bits == 16 && prefix != 0x66 {
             self.bytes.push(0x66)
         }
-        let rex = 0x40 | if bits == 64 { 8 } else { 0 } | ((field >> 3) << 2) | (x << 1) | b;
+        let rex = 0x40
+            | if bits == 64 { 8 } else { 0 }
+            | (((field >> 3) & 1) << 2)
+            | ((x & 1) << 1)
+            | (b & 1);
         let byte_regs = [field_byte, if let R(r) = rm { Some(*r) } else { None }];
         let force = byte_regs
             .into_iter()
             .flatten()
             .any(|r| r.width == 8 && r.number >= 4 && !r.high_byte);
-        if rex != 0x40 || force {
+        if rex2 || rex != 0x40 || force {
             if byte_regs.into_iter().flatten().any(|r| r.high_byte) {
                 return Err("high-byte register cannot be encoded with REX".into());
             }
-            self.bytes.push(rex);
+            if rex2 {
+                let map1 = opcode.len() == 2 && opcode[0] == 0x0f;
+                if opcode.len() != 1 && !map1 {
+                    return Err("REX2 only supports legacy opcode maps 0 and 1".into());
+                }
+                self.bytes.extend([
+                    0xd5,
+                    (u8::from(map1) << 7)
+                        | ((field >> 4) << 6)
+                        | ((x >> 1) << 5)
+                        | ((b >> 1) << 4)
+                        | (rex & 15),
+                ]);
+                self.bytes.extend_from_slice(&opcode[usize::from(map1)..]);
+            } else {
+                self.bytes.push(rex);
+                self.bytes.extend_from_slice(opcode);
+            }
+        } else {
+            self.bytes.extend_from_slice(opcode);
         }
-        self.bytes.extend_from_slice(opcode);
         match rm {
             R(r) => self.bytes.push(0xc0 | ((field & 7) << 3) | (r.number & 7)),
             M(m) => self.memory(field, m)?,
@@ -181,7 +213,7 @@ impl<'a> Encoding<'a> {
         self.memory_scaled(field, m, 1)
     }
     fn memory_scaled(&mut self, field: u8, m: &'a Memory, scale: u16) -> Result<(), String> {
-        self.memory_scaled_address(field, m, scale, false)
+        self.memory_scaled_address(field, m, scale, false, false)
     }
     fn memory_scaled_address(
         &mut self,
@@ -189,6 +221,7 @@ impl<'a> Encoding<'a> {
         m: &'a Memory,
         scale: u16,
         address32: bool,
+        force_sib: bool,
     ) -> Result<(), String> {
         let address32 = address32 || m.base.into_iter().chain(m.index).any(|r| r.width == 32);
         let a = &m.displacement;
@@ -240,7 +273,7 @@ impl<'a> Encoding<'a> {
         } else {
             2
         };
-        let sib = m.index.is_some() || base == Some(4) || base.is_none();
+        let sib = force_sib || m.index.is_some() || base == Some(4) || base.is_none();
         self.bytes
             .push((mode << 6) | ((field & 7) << 3) | if sib { 4 } else { base.unwrap() });
         if sib {
@@ -266,6 +299,7 @@ struct VexPrefix {
     source: Option<u8>,
     vector256: bool,
     wide: bool,
+    force_sib: bool,
 }
 
 impl<'a> Encoding<'a> {
@@ -283,6 +317,7 @@ impl<'a> Encoding<'a> {
             source,
             vector256: l,
             wide: w,
+            force_sib,
         } = prefix;
         let (b, x) = match rm {
             R(r) => (r.number >> 3, 0),
@@ -314,7 +349,7 @@ impl<'a> Encoding<'a> {
         self.bytes.push(byte);
         match rm {
             R(r) => self.bytes.push(0xc0 | ((field & 7) << 3) | (r.number & 7)),
-            M(m) => self.memory_scaled_address(field, m, 1, address32)?,
+            M(m) => self.memory_scaled_address(field, m, 1, address32, force_sib)?,
             _ => unreachable!(),
         }
         Ok(())
@@ -330,8 +365,9 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding<'_>, Strin
 }
 fn validate(i: &Instruction) -> Result<(), String> {
     fn register(r: Register) -> bool {
-        // The current legacy/VEX emitters carry four register-number bits.
-        r.number < 16 && r.is_valid()
+        // Only legacy REX2 forms can extend GPRs; form matching rejects
+        // unsupported VEX/EVEX encodings after this structural check.
+        (r.class == RegisterClass::Gpr || r.number < 16) && r.is_valid()
     }
     let vsib = if i.opcode.required_features().avx {
         keel_asm_ir::x86::V3_FORMS
@@ -359,6 +395,7 @@ fn validate(i: &Instruction) -> Result<(), String> {
                     return Err("GOTTPOFF is not supported on SIMD/state or v3 operands".into());
                 }
                 if !(matches!(m.width, 0 | 8 | 16 | 32 | 64 | 128 | 256)
+                    || m.width == 512 && i.opcode.required_features().amx_tile
                     || matches!(i.opcode, Fld | Fstp) && m.width == 80
                     || matches!(
                         i.opcode,

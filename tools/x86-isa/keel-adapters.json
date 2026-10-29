@@ -9162,6 +9162,22 @@
     "prefetchw",
     "invpcid",
     "tpause",
-    "rdseed"
+    "rdseed",
+    "ldtilecfg",
+    "sttilecfg",
+    "tdpbf16ps",
+    "tdpbssd",
+    "tdpbsud",
+    "tdpbusd",
+    "tdpbuud",
+    "tdpfp16ps",
+    "tileloadd",
+    "tileloaddt1",
+    "tilerelease",
+    "tilestored",
+    "tilezero",
+    "jmpabs",
+    "pushp",
+    "popp"
   ]
 }

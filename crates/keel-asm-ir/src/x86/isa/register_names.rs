@@ -43,8 +43,11 @@ pub fn register_name(kind: &str, number: u8) -> Option<String> {
             if !(number < 8) { return None; }
             format!("k{number}")
         }
+        "tmm" => {
+            if !(number < 8) { return None; }
+            format!("tmm{number}")
+        }
         "bnd" => format!("bnd{number}"),
-        "tmm" => format!("tmm{number}"),
         _ => return None,
     })
 }

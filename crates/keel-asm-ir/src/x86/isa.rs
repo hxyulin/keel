@@ -52,6 +52,8 @@ pub struct IsaForm {
     pub w: i8,
     pub b: i8,
     pub vector: u16,
+    /// REX2 policy: -1 forbids, 0 permits, 1 requires the prefix.
+    pub rex2: i8,
     pub lock: bool,
     pub rep: bool,
     pub repne: bool,

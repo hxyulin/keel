@@ -55,12 +55,13 @@ def generate(data):
         domains = {'mode': {'64'}, 'modrm_mod': {'3', '!3'}, 'rex_w': {'0', '1'},
                    'rex_b': {'0', '1'}, 'vector_length': {'128', '256'},
                    'prefix_group1': {'0', '1'}, 'force_modrm_reg': {True}, 'force_modrm_rm': {True}}
+        domains['rex_2'] = {'no_rex2', 'rex2'}
         domains.update({key: {'0', '1'} for key in FILTERS if key.startswith('feature_')})
         for key, domain in domains.items():
             if key in f and f[key] not in domain:
                 raise ValueError(f'unsupported {key} value: {f[key]}')
-        # Keep the full input snapshot, but explicitly exclude unsupported CPU
-        # interpretation switches and REX2. They are not baseline long mode.
+        # Keep unsupported CPU interpretation switches out of long-mode tables.
+        # REX2 permission remains explicit on every admitted form.
         if exclusion_reasons(row):
             continue
         operands = []
@@ -87,6 +88,7 @@ def generate(data):
             'rm_mask': mask(f.get('modrm_rm'), list('01234567')),
             'w': int(f.get('rex_w', -1)), 'b': int(f.get('rex_b', -1)),
             'vector': int(f.get('vector_length', 0)),
+            'rex2': {'no_rex2': -1, 'rex2': 1, None: 0}[f.get('rex_2')],
             'lock': 'accepts_lock' in prefixes,
             'rep': any(p in prefixes for p in ('accepts_rep', 'accepts_reperepz')),
             'repne': 'accepts_repnerepnz' in prefixes,
@@ -127,8 +129,6 @@ def generate(data):
 def exclusion_reasons(row):
     f = row.get('filters', {})
     reasons = [key for key in ('feature_amd', 'feature_knc', 'feature_mpx') if f.get(key) == '1']
-    if f.get('rex_2') not in (None, 'no_rex2'):
-        reasons.append('rex_2')
     return reasons
 
 
@@ -181,7 +181,8 @@ def extension_adapters(data, mnemonics):
                                     for r in rows for o in r.get('operands', []))
         identities.append(dict(variant=variant, mnemonic=mnemonic, scalar_suffix=scalar))
         features.append(dict(opcode=opcode, source_mnemonic=mnemonic))
-        if any(r.get('encoding') == 'vex' for r in rows):
+        if any(r.get('encoding') == 'vex' for r in rows) and not any(
+                r['meta_info']['isa_set'].startswith('AMX_') for r in rows):
             vex.append(dict(opcode=opcode, source_mnemonic=mnemonic, force_w=False))
     return identities, features, vex
 

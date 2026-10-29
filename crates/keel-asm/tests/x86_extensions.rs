@@ -134,6 +134,10 @@ fn malformed_extension_operands_are_rejected() {
 fn exposed_forms_match_clang_and_gnu_and_format_roundtrip() {
     let mut cases = Vec::new();
     for op in ExtensionOpcode::ALL {
+        // AMX and APX have separate encoding-oracle matrices.
+        if op.required_features().amx_tile || op.required_features().apx_f {
+            continue;
+        }
         // Unary/system adapters have dedicated independent byte matrices in
         // x86_kernel_adapters.rs and x86_remaining_kernel_adapters.rs.
         if matches!(

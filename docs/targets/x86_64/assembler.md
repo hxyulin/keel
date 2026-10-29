@@ -32,6 +32,85 @@ and YMM VPCLMULQDQ (`avx,vpclmulqdq`). These optional forms have generated
 public `ExtensionOpcode` adapters. They do not add compiler intrinsics or
 instruction-selection rules. See the [extension coverage and feature rules](../../../tools/x86-isa/README.md#optional-legacyvex-extensions).
 
+## AMX assembly
+
+The assembler and decoder expose the imported AMX-TILE, AMX-INT8, AMX-BF16
+and AMX-FP16 forms. The feature names are `amx_tile`, `amx_int8`, `amx_bf16`
+and `amx_fp16`. Arithmetic features require `amx_tile`; tile permission requires
+XSAVE and OSXSAVE. Positive feature edits add these prerequisites. No v1/v2/v3
+CPU profile enables AMX implicitly.
+
+- Tile configuration and state: `ldtilecfg`, `sttilecfg`, `tilerelease`, `tilezero`.
+- Tile memory: `tileloadd`, `tileloaddt1`, `tilestored`.
+- Integer dot products: `tdpbssd`, `tdpbsud`, `tdpbusd`, `tdpbuud`.
+- Floating dot products: `tdpbf16ps`, `tdpfp16ps`.
+
+Intel and AT&T syntax accept `tmm0` through `tmm7`. Typed programs use
+`RegisterClass::Tile`, whose 8192-bit width describes the maximum register
+payload, not its configured shape. Tile configuration remains runtime state.
+The shared VEX encoder emits the required SIB byte for tile memory operations,
+including a base-only address with no stride register. Both 32-bit and 64-bit
+addresses are supported. Tile loads/stores cannot use RIP-relative addressing;
+tile configuration loads/stores can. Configuration memory is a 64-byte image;
+data movement spans the rows and columns in the active tile configuration.
+
+```asm
+ldtilecfg [rdi]
+tileloadd tmm1, [rsi+rdx]
+tileloadd tmm2, [rcx+r8]
+tdpbssd tmm0, tmm1, tmm2
+tilestored [r9+r10], tmm0
+tilerelease
+```
+
+Assembly permission does not enable tile XCR0/XFD state or arrange OS tile-state
+permission. The caller owns tile configuration, shape compatibility, memory
+bounds, and architectural execution preconditions. This interface adds no tile
+SSA values, compiler tile allocation, C tile intrinsics, or native runtime
+qualification. Encoding tests compare literal bytes and independent Clang/GNU
+objects in both dialects, then decode and reassemble; they never execute AMX.
+
+## APX REX2 assembly
+
+The assembler and decoder support the REX2 part of Intel APX. Enable it with
+`--target-features +apx_f` (`apx` and `apxf` are aliases). This adds XSAVE and
+OSXSAVE prerequisites; it does not enable the required APX state in XCR0 or
+qualify execution on the host. No v1/v2/v3 profile enables APX implicitly.
+
+General registers `r16` through `r31` and their `b`, `w` and `d` views work in
+eligible legacy opcode maps 0 and 1. The same registers can be memory bases
+and indices, including 32-bit addressing. REX2 does not extend the number of
+XMM registers in legacy SSE instructions. Such instructions can use extended
+GPRs for their memory addresses. High-byte AH/CH/DH/BH operands cannot be
+combined with REX2.
+
+```asm
+add r16, r17
+mov qword ptr [r20+r28*4+8], r31
+pushp r17
+popp r30
+jmpabs 0x123456789abcdef0
+```
+
+The imported source also exposes the APX `pushp`, `popp` and `jmpabs` forms.
+`jmpabs` carries an absolute 64-bit address; symbolic operands use the existing
+64-bit absolute relocation. `pushp` and `popp` select the APX push/pop hint
+with REX2.W, while ordinary `push` and `pop` retain their existing semantics.
+Intel and AT&T source and typed instruction operands share the same feature
+and form checks. REX2 is emitted only where the source permits it, and is
+required for the source's REX2-only records.
+
+The pinned source has no APX EVEX new-destination/no-flags forms. Three-operand
+APX arithmetic, NF/NDD decorators, EGPR use in VEX forms, and legacy maps 2/3
+remain rejected. This adds no compiler EGPR allocation, compiler intrinsics,
+or APX calling convention. Compiler fixed-register operands still require
+the existing register bank. Tests compare literal bytes, Clang and GNU objects,
+and decode/reassembly with feature-disabled and malformed-prefix controls;
+they never execute APX.
+
+The prefix and register rules follow the
+[Intel APX architecture specification](https://cdrdv2-public.intel.com/861610/355828-007-intel-apx-spec.pdf).
+
 ## Design
 
 The existing `keel-asm-ir::Instruction`, generated `Opcode`/`FieldId`, symbolic
@@ -48,15 +127,15 @@ parsing assembly source. Text output serializes the same typed instructions as
 Intel syntax. ELF sections, symbol types/sizes, data, source locations, CFI and
 DWARF (including TLS offsets) also use typed directives. Compiler-produced x86
 programs contain zero text bytes; standalone assembly and explicit API text
-fragments retain the source parser. The x86 compiler still rejects inline
-assembly. The assembler borrows structured items across layout passes instead
+fragments retain the source parser. Compiler inline assembly uses the checked
+[GPR/SIMD operand contract](c-inline-asm.md). The assembler borrows structured items across layout passes instead
 of cloning the complete program.
 
 Instruction forms, opcode bytes, operand roles and ISA requirements come from
 the [shared generated tables](../../../tools/x86-isa/README.md), which also drive the
 x86 disassembler. Stable opcode enums remain the assembly API. Common emission
-code handles REX, legacy and VEX prefixes, ModRM, SIB, immediate and displacement
-sizing. The `object` crate serializes ELF64 section headers, string tables,
+code handles legacy, REX, REX2, VEX and EVEX prefixes, ModRM, SIB, immediate
+and displacement sizing. The `object` crate serializes ELF64 section headers, string tables,
 ordered symbol tables and RELA records; Keel owns assembly layout, symbol
 expressions, relocation selection and instruction encoding.
 
@@ -113,13 +192,13 @@ necessary linker relocations.
 Resolved displacements outside signed 32 bits are diagnosed. Keel does not
 synthesize large-code-model thunks.
 
-This is a backend-oriented assembler, not a replacement for all GNU assembler
-syntax. AVX forms beyond the documented XMM subset, AVX2/AVX-512, x87,
-arbitrary vector instructions, AT&T syntax, macros,
-preprocessing, include files, numeric directional labels, non-COMDAT section groups,
-arbitrary expression arithmetic, symbolic LEB128,
-exception personality/LSDA directives and general-dynamic TLS are not implemented.
-Unsupported directives and operands return errors; they are not silently dropped.
+Instruction support follows the generated form catalogue and the documented
+operand subsets, including the AMX and APX boundaries above and the
+[EVEX subset](../../../tools/x86-isa/README.md#avx-512fvl-and-evex).
+Intel and AT&T dialects share the encoder. GNU preprocessing, macros, labels
+and expressions follow the [GNU language contract](gnu-assembly-language.md).
+Unsupported directives and operands return errors; successful assembly does not
+establish a compiler operand ABI or runtime execution qualification.
 
 Layout and fixups require memory proportional to the input/object. Symbol lookup
 uses a hash map; ELF emission sorts names once to keep output deterministic.

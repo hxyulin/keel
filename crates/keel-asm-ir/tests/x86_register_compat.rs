@@ -2,7 +2,7 @@
 use keel_asm_ir::x86::{Register, RegisterClass, isa};
 use std::{collections::BTreeSet, fmt::Write};
 
-const CLASSES: [(RegisterClass, u8, u8); 11] = [
+const CLASSES: [(RegisterClass, u8, u8); 12] = [
     (RegisterClass::Gpr, 0, 0),
     (RegisterClass::Xmm, 1, 1),
     (RegisterClass::Mmx, 2, 4),
@@ -14,6 +14,7 @@ const CLASSES: [(RegisterClass, u8, u8); 11] = [
     (RegisterClass::Debug, 8, 8),
     (RegisterClass::Zmm, 9, 9),
     (RegisterClass::Mask, 10, 10),
+    (RegisterClass::Tile, 11, 11),
 ];
 fn canonical() -> Vec<(Register, &'static str)> {
     include_str!("fixtures/x86-registers.txt")
@@ -55,7 +56,7 @@ fn public_ids_tags_names_and_parse_roundtrips_are_stable() {
 }
 
 #[test]
-fn structural_validation_matches_the_original_canonical_domain() {
+fn structural_validation_preserves_the_original_domain_and_reviewed_extensions() {
     let valid: BTreeSet<_> = canonical()
         .into_iter()
         .map(|(r, _)| (r.class as u8, r.number, r.width, r.high_byte))
@@ -63,7 +64,7 @@ fn structural_validation_matches_the_original_canonical_domain() {
     assert_eq!(valid.len(), 137);
     for (class, _, _) in CLASSES {
         for number in 0..=255 {
-            for width in (0..=512).chain([65535]) {
+            for width in (0..=512).chain([8192, 65535]) {
                 for high_byte in [false, true] {
                     let r = Register {
                         class,
@@ -77,6 +78,7 @@ fn structural_validation_matches_the_original_canonical_domain() {
                             || (16..32).contains(&number)
                                 && !high_byte
                                 && match class {
+                                    RegisterClass::Gpr => matches!(width, 8 | 16 | 32 | 64),
                                     RegisterClass::Xmm => width == 128,
                                     RegisterClass::Ymm => width == 256,
                                     _ => false,
@@ -85,6 +87,7 @@ fn structural_validation_matches_the_original_canonical_domain() {
                                 && match class {
                                     RegisterClass::Zmm => number < 32 && width == 512,
                                     RegisterClass::Mask => number < 8 && width == 64,
+                                    RegisterClass::Tile => number < 8 && width == 8192,
                                     _ => false,
                                 },
                         "{r:?}"
@@ -103,6 +106,9 @@ fn numeric_spelling_and_formatter_compatibility_remain_separate_from_validity() 
         ("ymm+000", "ymm0"),
         ("r+008b", "r8b"),
         ("r00015d", "r15d"),
+        ("r00031d", "r31d"),
+        ("r+016b", "r16b"),
+        ("tmm7", "tmm7"),
         ("ST", "st(0)"),
         ("CR8", "cr8"),
         ("DR4", "dr4"),
@@ -115,8 +121,8 @@ fn numeric_spelling_and_formatter_compatibility_remain_separate_from_validity() 
         assert!(Register::parse(source).is_some());
     }
     for source in [
-        "cr00", "cr+0", "CR08", "dr04", "dr+4", "mm00", "st(00)", "st(+0)", "r7", "r16", "xmm32",
-        "ymm32", "xmm-0", " rax", "rax ", "cr1", "dr8",
+        "cr00", "cr+0", "CR08", "dr04", "dr+4", "mm00", "st(00)", "st(+0)", "r7", "r32", "tmm8",
+        "xmm32", "ymm32", "xmm-0", " rax", "rax ", "cr1", "dr8",
     ] {
         assert_eq!(Register::parse(source), None, "{source}");
     }

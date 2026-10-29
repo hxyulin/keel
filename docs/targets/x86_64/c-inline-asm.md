@@ -1,6 +1,6 @@
 # x86-64 C inline assembly
 
-Keel supports scalar GNU C inline assembly on `x86_64-unknown-linux-gnu`.
+Keel supports scalar and SIMD GNU C inline assembly on `x86_64-unknown-linux-gnu`.
 This implements scalar fallthrough asm and deferred immediate validation from
 the [design](c-inline-asm.md).
 Explicit memory operands, bounded constraint choices and integer flag outputs
@@ -23,6 +23,28 @@ unsigned long add(unsigned long a, unsigned long b) {
 Register operands accept integers through 64 bits, pointers and the bounded
 aggregate representation described below. Register constraints are
 `r` and x86-64 `q`, and fixed `a`, `b`, `c`, `d`, `S`, `D` for RAX, RBX, RCX, RDX, RSI, RDI.
+SIMD constraints `x` and `v` accept `float`, `double`, and the frontend's
+128/256-bit vector types. Both use registers 0–15; `v` does not enable EVEX
+register allocation. The shared IR represents them with `w` (`FloatReg`) and
+also accepts 64-bit vectors. Scalar integer SIMD operands, MMX, x87, ZMM and
+registers 16–31 remain outside this operand contract. Named local-register
+variables retain their existing GPR-only contract.
+
+SIMD templates use `%xmmN` for scalar and 64/128-bit operands, `%ymmN` for
+256-bit operands. `%x0` selects the XMM view; `%t0` selects the YMM view of a
+256-bit operand. GPR width modifiers cannot select SIMD register views.
+XMM/YMM spellings alias the same physical register in explicit IR operands and
+clobbers. A 256-bit operand requires AVX; instruction-specific requirements
+(such as AVX2 for `vpaddd`) remain checked by the assembler.
+
+Inputs are snapshotted before any asm operand register is initialized. Results
+are captured before original register homes are restored. SIMD staging and
+clobber preservation retain the whole live payload, including YMM upper halves;
+result writeback uses each result's own width. Matching SIMD inputs/results
+require identical IR types. Early-clobber, conflicting-register and clobber
+checks apply independently to GPR and SIMD registers. Empty/comment-only
+volatile templates retain opaque results and their declared memory effects.
+
 Outputs use `=` or `+`, optionally followed by early-clobber `&`. Matching input
 constraints use an output number or `[name]`. Scalar GPR inputs and results
 may have different widths and keep their own register views; a tie does not
@@ -95,12 +117,13 @@ High-byte `%h`, dialect alternatives and other
 modifiers are not supported. Numeric local labels and GNU macros use the shared
 assembler, including definitions used by a later asm statement.
 
-Clobbers accept `cc`, `memory` and generated GPR names/aliases. High-byte
-names AH/CH/DH/BH clobber their parent RAX/RCX/RDX/RBX registers. RSP and RBP
-cannot be clobbered. R15 is also reserved in functions whose aligned frame needs
-it as a base pointer. FP/SIMD, control/debug and other register classes are not
-asm operands or clobbers in this milestone. The IR retains target-tagged physical
-registers and early-clobber markers, including in textual round trips.
+Clobbers accept `cc`, `memory`, generated GPR names/aliases, and XMM/YMM
+registers 0–15. High-byte names AH/CH/DH/BH clobber their parent
+RAX/RCX/RDX/RBX registers. RSP and RBP cannot be clobbered. R15 is also
+reserved in functions whose aligned frame needs it as a base pointer.
+Control/debug, tile, opmask and other register classes remain outside the
+operand/clobber contract. The IR retains target-tagged physical registers and
+early-clobber markers, including in textual round trips.
 
 ### Aggregate register operands
 
@@ -173,8 +196,8 @@ the compiler does not infer these effects by inspecting arbitrary instructions
 or directive bytes. Section switches must return to the function's section.
 
 Still diagnosed: comma-separated alternatives, unsupported constraint unions,
-TLS-only immediates, local register variables, FP/SIMD register operands and
-output-bearing asm goto. Supporting their instruction bytes in the assembler does
+TLS-only immediates, SIMD local register variables and unsupported register
+classes. Supporting their instruction bytes in the assembler does
 not provide the missing C operand or control-flow contract.
 
 ## Balanced stack calls

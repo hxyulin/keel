@@ -48,6 +48,7 @@ pub(super) fn encode(i: &Instruction) -> Result<Encoding<'_>, String> {
                 source,
                 vector256: f.form.vector == 256,
                 wide: f.form.w == 1,
+                force_sib: false,
             },
             f.form.byte,
             rm,
@@ -121,6 +122,7 @@ pub(super) fn encode(i: &Instruction) -> Result<Encoding<'_>, String> {
                 m,
                 f.displacement_scale(op.options.broadcast != 0),
                 op.options.address32,
+                false,
             )?,
             _ => unreachable!(),
         }

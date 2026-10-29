@@ -47,6 +47,16 @@ pub struct Features {
     pub rdseed: bool,
     /// WAITPKG timed wait capability; execution also depends on OS wait-control policy.
     pub waitpkg: bool,
+    /// AMX tile state and memory instructions; execution requires enabled tile XCR0/XFD state and configured tiles.
+    pub amx_tile: bool,
+    /// AMX integer tile dot products.
+    pub amx_int8: bool,
+    /// AMX BF16 tile dot products.
+    pub amx_bf16: bool,
+    /// AMX FP16 tile dot products.
+    pub amx_fp16: bool,
+    /// Intel APX foundation; REX2 EGPR forms require OS-enabled APX state.
+    pub apx_f: bool,
 }
 impl Features {
     pub const NONE: Self = Self {
@@ -83,6 +93,11 @@ impl Features {
         prefetchw: false,
         rdseed: false,
         waitpkg: false,
+        amx_tile: false,
+        amx_int8: false,
+        amx_bf16: false,
+        amx_fp16: false,
+        apx_f: false,
     };
     /// Every declared capability, for tests and tooling; not host detection.
     pub const fn all_known() -> Self { Self {
@@ -119,6 +134,11 @@ impl Features {
         prefetchw: true,
         rdseed: true,
         waitpkg: true,
+        amx_tile: true,
+        amx_int8: true,
+        amx_bf16: true,
+        amx_fp16: true,
+        apx_f: true,
     } }
     /// Stable schema bit IDs, covering every capability.
     pub const fn fingerprint(self) -> u64 {
@@ -155,6 +175,11 @@ impl Features {
             | ((self.prefetchw as u64) << 30)
             | ((self.rdseed as u64) << 31)
             | ((self.waitpkg as u64) << 32)
+            | ((self.amx_tile as u64) << 33)
+            | ((self.amx_int8 as u64) << 34)
+            | ((self.amx_bf16 as u64) << 35)
+            | ((self.amx_fp16 as u64) << 36)
+            | ((self.apx_f as u64) << 37)
     }
     pub const fn is_empty(self) -> bool { self.fingerprint() == 0 }
     pub const fn contains(self, required: Self) -> bool {
@@ -301,6 +326,44 @@ impl Features {
             "waitpkg" => {
                 self.waitpkg = enabled;
             }
+            "amx_tile" => {
+                self.amx_tile = enabled;
+                if enabled {
+                    self.xsave = true;
+                    self.osxsave = true;
+                }
+            }
+            "amx_int8" => {
+                self.amx_int8 = enabled;
+                if enabled {
+                    self.xsave = true;
+                    self.osxsave = true;
+                    self.amx_tile = true;
+                }
+            }
+            "amx_bf16" => {
+                self.amx_bf16 = enabled;
+                if enabled {
+                    self.xsave = true;
+                    self.osxsave = true;
+                    self.amx_tile = true;
+                }
+            }
+            "amx_fp16" => {
+                self.amx_fp16 = enabled;
+                if enabled {
+                    self.xsave = true;
+                    self.osxsave = true;
+                    self.amx_tile = true;
+                }
+            }
+            "apx_f" | "apx" | "apxf" => {
+                self.apx_f = enabled;
+                if enabled {
+                    self.xsave = true;
+                    self.osxsave = true;
+                }
+            }
             _ => return false,
         }
         true
@@ -332,6 +395,27 @@ impl Features {
         }
         if self.avx512vl && !self.avx512f {
             return Err("avx512vl requires avx512f");
+        }
+        if self.amx_tile && !self.xsave {
+            return Err("amx_tile requires xsave");
+        }
+        if self.amx_tile && !self.osxsave {
+            return Err("amx_tile requires osxsave");
+        }
+        if self.amx_int8 && !self.amx_tile {
+            return Err("amx_int8 requires amx_tile");
+        }
+        if self.amx_bf16 && !self.amx_tile {
+            return Err("amx_bf16 requires amx_tile");
+        }
+        if self.amx_fp16 && !self.amx_tile {
+            return Err("amx_fp16 requires amx_tile");
+        }
+        if self.apx_f && !self.xsave {
+            return Err("apx_f requires xsave");
+        }
+        if self.apx_f && !self.osxsave {
+            return Err("apx_f requires osxsave");
         }
         Ok(())
     }
@@ -370,6 +454,11 @@ impl Features {
             (self.prefetchw, "prefetchw"),
             (self.rdseed, "rdseed"),
             (self.waitpkg, "waitpkg"),
+            (self.amx_tile, "amx_tile"),
+            (self.amx_int8, "amx_int8"),
+            (self.amx_bf16, "amx_bf16"),
+            (self.amx_fp16, "amx_fp16"),
+            (self.apx_f, "apx_f"),
         ]
         .into_iter()
         .filter_map(|(on, name)| on.then_some(name))

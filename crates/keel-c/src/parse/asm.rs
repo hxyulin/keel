@@ -188,7 +188,15 @@ impl<'a> Parser<'a> {
                                     || x86
                                         && matches!(
                                             code,
-                                            "q" | "a" | "b" | "c" | "d" | "S" | "D" | "m"
+                                            "q" | "a"
+                                                | "b"
+                                                | "c"
+                                                | "d"
+                                                | "S"
+                                                | "D"
+                                                | "m"
+                                                | "x"
+                                                | "v"
                                         )
                                     || x86
                                         && bound_register.is_some()
@@ -198,7 +206,7 @@ impl<'a> Parser<'a> {
                                         loc,
                                         if x86 {
                                             format!(
-                                                "unsupported asm output constraint `{constraint}` (supported: r, q, a, b, c, d, S, D, m, rm, g and =@cc<condition>; & applies to register outputs)"
+                                                "unsupported asm output constraint `{constraint}` (supported: r, q, a, b, c, d, S, D, x, v, m, rm, g and =@cc<condition>; & applies to register outputs)"
                                             )
                                         } else {
                                             "unsupported asm output constraint (supported: =r, +r, =w, +w, with optional &; memory outputs are not supported)".into()
@@ -369,6 +377,11 @@ impl<'a> Parser<'a> {
                                     expr = self.rvalue(expr);
                                     asm_register_type(&constraint, expr.ty, loc)?;
                                 }
+                                "x" | "v" if x86 => {
+                                    expr = self.rvalue(expr);
+                                    asm_register_type(&constraint, expr.ty, loc)?;
+                                    constraint = "w".into();
+                                }
                                 code if x86
                                     && (matches!(
                                         code,
@@ -440,7 +453,7 @@ impl<'a> Parser<'a> {
                                     "asm clobber register belongs to another architecture",
                                 ));
                             }
-                            if x86 && matches!(reg.num, 4 | 5) {
+                            if x86 && !reg.float && matches!(reg.num, 4 | 5) {
                                 return Err(Error::new(
                                     loc,
                                     "asm cannot clobber the stack or frame pointer",
@@ -817,7 +830,10 @@ fn asm_register_type(code: &str, ty: Ty<'_>, loc: Loc) -> R<()> {
         "r" | "q" | "a" | "b" | "c" | "d" | "S" | "D" | "{rax}" | "{rbx}" | "{rcx}" | "{rdx}"
         | "{rsi}" | "{rdi}" => matches!(ty, Ty::Int(k) if k.size() <= 8) || ty.is_ptr(),
         code if asm_fixed_register(code).is_some() => asm_gpr_type(ty),
-        "w" => matches!(ty, Ty::Float | Ty::Double),
+        "w" | "x" | "v" => {
+            matches!(ty, Ty::Float | Ty::Double)
+                || matches!(ty, Ty::Vector(_, shape) if matches!(shape.bytes(), 8 | 16 | 32))
+        }
         _ => false,
     };
     if ok {
@@ -878,6 +894,7 @@ fn asm_constraint(code: &str, x86: bool) -> &str {
         // In x86-64, q admits all integer registers, just as r does. This is
         // not the four-register q class used in 32-bit mode, nor uppercase Q.
         "q" => "r",
+        "x" | "v" => "w",
         "a" => "{rax}",
         "b" => "{rbx}",
         "c" => "{rcx}",

@@ -1,16 +1,27 @@
-//! Scalar GNU inline assembly. Stage inputs/results and preserve GPR homes so
+//! GNU inline assembly. Stage inputs/results and preserve GPR/SIMD homes so
 //! the operand assignment is independent of allocator choices and scratch regs.
 use super::*;
-use keel_ir::{AsmArch, AsmClobber, AsmOperand as Constraint, InlineAsm};
+use keel_ir::{AsmArch, AsmClobber, AsmOperand as Constraint, InlineAsm, PhysReg};
+
+#[derive(Clone, Copy)]
+struct Home {
+    offset: usize,
+    bits: u16,
+}
 
 pub(super) struct Plan {
-    regs: Vec<Option<u8>>,
+    regs: Vec<Option<PhysReg>>,
     flags: Vec<(usize, u8)>,
-    initializers: [Option<usize>; 16],
+    initializers: Vec<(PhysReg, usize)>,
     text: String,
     /// Registers overwritten by operand staging or the template, in slot order.
     pub saved_regs: Vec<u8>,
     pub bytes: usize,
+    saved_simd: Vec<u8>,
+    simd_home: usize,
+    simd_bits: u16,
+    inputs: Vec<Home>,
+    outputs: Vec<Home>,
 }
 
 fn available(r: u8, frame: Option<u8>) -> bool {
@@ -24,6 +35,7 @@ pub(super) fn plan(
     args: &[Value],
     frame: Option<u8>,
     unique: u64,
+    wide_vectors: bool,
 ) -> Result<Plan, String> {
     for (&constraint, &arg) in asm.inputs.iter().zip(args) {
         if constraint == Constraint::Imm
@@ -96,13 +108,19 @@ pub(super) fn plan(
             };
         }
     }
-    let mut taken = [false; 16];
+    let mut taken = [[false; 16]; 2];
     for c in &asm.clobbers {
         if let AsmClobber::Reg(r) = c {
-            if r.arch != AsmArch::X86 || r.float || !available(r.num, frame) {
+            if r.arch != AsmArch::X86
+                || if r.float {
+                    r.num >= 16
+                } else {
+                    !available(r.num, frame)
+                }
+            {
                 return Err(format!("unsupported or reserved x86 asm clobber {r}"));
             }
-            taken[r.num as usize] = true;
+            taken[usize::from(r.float)][r.num as usize] = true;
         }
     }
     let mut regs = vec![None; ops.len()];
@@ -112,37 +130,47 @@ pub(super) fn plan(
         } else {
             func.value_type(func.resolve(args[i - n]))
         };
-        if !((ty.is_int() && ty != Type::I128) || ty == Type::Ptr) {
-            return Err(format!(
-                "x86 asm operand {i} requires a scalar integer or pointer"
-            ));
+        let simd = matches!(ty, Type::F32 | Type::F64) || ty.is_vector();
+        if !((ty.is_int() && ty != Type::I128) || ty == Type::Ptr || simd) {
+            return Err(format!("unsupported x86 asm operand type {ty}"));
+        }
+        if ty.is_vector() && !matches!(ty.bytes(), Some(8 | 16 | 32)) {
+            return Err("x86 asm supports only 64/128/256-bit vectors".into());
         }
         match *op {
-            Constraint::Reg => {}
+            Constraint::Reg if !simd => {}
+            Constraint::FloatReg if simd => {}
             Constraint::StackPointer if i >= n && ty == Type::I64 => {}
             Constraint::Flag(cc) if i < n && cc < 16 && ty.is_int() && !early[i] => {}
             Constraint::Mem | Constraint::MemWrite | Constraint::MemReadWrite
                 if i >= n && ty == Type::Ptr => {}
             Constraint::Fixed(r) => {
-                if r.arch != AsmArch::X86 || r.float || !available(r.num, frame) {
+                if r.arch != AsmArch::X86
+                    || r.float != simd
+                    || if r.float {
+                        r.num >= 16
+                    } else {
+                        !available(r.num, frame)
+                    }
+                {
                     return Err(format!("unsupported or reserved x86 asm operand {r}"));
                 }
                 // Outputs have overlapping write lifetimes. Fixed inputs may
                 // share a non-early output, but never a clobber or early output.
-                if taken[r.num as usize]
+                if taken[usize::from(r.float)][r.num as usize]
                     && (i < n
                         || asm
                             .clobbers
                             .iter()
                             .any(|c| matches!(c, AsmClobber::Reg(clobber) if *clobber == r))
-                        || (0..n).any(|out| regs[out] == Some(r.num) && early[out]))
+                        || (0..n).any(|out| regs[out] == Some(r) && early[out]))
                 {
                     return Err(format!(
                         "asm operand {i}: register {r} overlaps another output, early-clobber or clobber"
                     ));
                 }
-                taken[r.num as usize] = true;
-                regs[i] = Some(r.num);
+                taken[usize::from(r.float)][r.num as usize] = true;
+                regs[i] = Some(r);
             }
             Constraint::Imm | Constraint::NumericImm
                 if i >= n
@@ -161,15 +189,22 @@ pub(super) fn plan(
         }
     }
     for (i, op) in ops.iter().enumerate() {
-        if matches!(
-            op,
-            Constraint::Reg | Constraint::Mem | Constraint::MemWrite | Constraint::MemReadWrite
-        ) {
+        let float = *op == Constraint::FloatReg;
+        if float
+            || matches!(
+                op,
+                Constraint::Reg | Constraint::Mem | Constraint::MemWrite | Constraint::MemReadWrite
+            )
+        {
             let r = (0..16)
-                .find(|&r| available(r, frame) && !taken[r as usize])
+                .find(|&r| (float || available(r, frame)) && !taken[usize::from(float)][r as usize])
                 .ok_or("too many x86 asm operands for the free registers")?;
-            taken[r as usize] = true;
-            regs[i] = Some(r);
+            taken[usize::from(float)][r as usize] = true;
+            regs[i] = Some(PhysReg {
+                arch: AsmArch::X86,
+                float,
+                num: r,
+            });
         }
     }
     for (i, op) in ops.iter().enumerate().skip(n) {
@@ -180,50 +215,64 @@ pub(super) fn plan(
     }
     // Each physical register gets exactly one initialization. Compare with
     // the widest input so no narrower reload can destroy required upper bits.
-    let mut initializers: [Option<usize>; 16] = [None; 16];
+    let mut initializers: Vec<(PhysReg, usize)> = Vec::new();
     for (i, &arg) in args.iter().enumerate() {
         let Some(r) = regs[n + i] else { continue };
-        let slot = &mut initializers[r as usize];
-        if let Some(previous) = *slot {
-            if !keel_ir::asm::same_register_input(func, args[previous], arg) {
+        if let Some((_, previous)) = initializers.iter_mut().find(|(reg, _)| *reg == r) {
+            if !keel_ir::asm::same_register_input(func, args[*previous], arg) {
                 return Err(format!(
-                    "asm inputs {previous} and {i} require conflicting or unproven values in {}",
-                    r64(r)
+                    "asm inputs {previous} and {i} require conflicting or unproven values in {r}"
                 ));
             }
             if func.value_type(func.resolve(arg)).bytes().unwrap_or(8)
                 > func
-                    .value_type(func.resolve(args[previous]))
+                    .value_type(func.resolve(args[*previous]))
                     .bytes()
                     .unwrap_or(8)
             {
-                *slot = Some(i);
+                *previous = i;
             }
         } else {
-            *slot = Some(i);
+            initializers.push((r, i));
         }
     }
     let text = substitute(func, asm, args, &regs, unique)?;
     // Staging uses RAX, while operand initialization and template outputs can
     // overwrite their assigned homes. A memory/flags clobber changes no GPR.
-    let mut overwritten = [false; 16];
+    let mut overwritten = [[false; 16]; 2];
     for c in &asm.clobbers {
         if let AsmClobber::Reg(r) = c {
-            overwritten[r.num as usize] = true;
+            overwritten[usize::from(r.float)][r.num as usize] = true;
         }
     }
     for &r in regs.iter().flatten() {
-        overwritten[r as usize] = true;
+        overwritten[usize::from(r.float)][r.num as usize] = true;
     }
     if regs.iter().any(Option::is_some) || n != 0 {
-        overwritten[S0 as usize] = true;
+        overwritten[0][S0 as usize] = true;
     }
-    let saved_regs: Vec<_> = (0..16).filter(|&r| overwritten[r as usize]).collect();
-    let bytes = if saved_regs.is_empty() && n == 0 {
-        0
-    } else {
-        8 * (saved_regs.len() + args.len() + n)
+    if regs.iter().flatten().any(|r| r.float) {
+        overwritten[1][FS0 as usize] = true;
+    }
+    let saved_regs: Vec<_> = (0..16).filter(|&r| overwritten[0][r as usize]).collect();
+    let saved_simd: Vec<_> = (0..16).filter(|&r| overwritten[1][r as usize]).collect();
+    let simd_bits = if wide_vectors { 256 } else { 128 };
+    let simd_home = saved_regs.len() * 8;
+    let mut bytes = simd_home + saved_simd.len() * usize::from(simd_bits / 8);
+    let mut home = |ty: Type| {
+        let bits = ty.bytes().unwrap_or(8).max(8) as u16 * 8;
+        let offset = bytes;
+        bytes += usize::from(bits / 8);
+        Home { offset, bits }
     };
+    let inputs = args
+        .iter()
+        .map(|&arg| home(func.value_type(func.resolve(arg))))
+        .collect();
+    let outputs = asm.outputs.iter().map(|&(_, ty)| home(ty)).collect();
+    if saved_regs.is_empty() && saved_simd.is_empty() && n == 0 {
+        bytes = 0;
+    }
     // The shared object assembler owns instruction/directive validation and
     // feature checks. Parsing fragments here would bypass GNU preprocessing
     // (numeric local labels and macros in particular).
@@ -241,6 +290,11 @@ pub(super) fn plan(
             .collect(),
         text,
         saved_regs,
+        saved_simd,
+        simd_bits,
+        simd_home,
+        inputs,
+        outputs,
         bytes,
     })
 }
@@ -249,7 +303,7 @@ fn substitute(
     func: &Function,
     asm: &InlineAsm,
     args: &[Value],
-    regs: &[Option<u8>],
+    regs: &[Option<PhysReg>],
     unique: u64,
 ) -> Result<String, String> {
     let n = asm.outputs.len();
@@ -303,7 +357,7 @@ fn substitute(
                 if modifier.is_some() {
                     return Err("unsupported x86 asm memory modifier".into());
                 }
-                write!(text, "(%{})", r64(r)).unwrap();
+                write!(text, "(%{})", r64(r.num)).unwrap();
                 continue;
             }
             let ty = if i < n {
@@ -311,6 +365,25 @@ fn substitute(
             } else {
                 func.value_type(func.resolve(args[i - n]))
             };
+            if r.float {
+                let bits = match modifier {
+                    None => {
+                        if ty.bytes() == Some(32) {
+                            256
+                        } else {
+                            128
+                        }
+                    }
+                    Some('x') => 128,
+                    Some('t') => 256,
+                    _ => return Err("unsupported x86 asm SIMD register modifier".into()),
+                };
+                if bits == 256 && ty.bytes() != Some(32) {
+                    return Err("asm YMM modifier requires a 256-bit operand".into());
+                }
+                write!(text, "%{}", simd_width(r.num, bits)).unwrap();
+                continue;
+            }
             let width = match modifier {
                 None => {
                     if ty == Type::Ptr {
@@ -342,7 +415,7 @@ fn substitute(
                 "%{}",
                 Register {
                     class: RegisterClass::Gpr,
-                    number: r,
+                    number: r.num,
                     width: width as u16,
                     high_byte: false
                 }
@@ -406,87 +479,172 @@ impl FunctionCompiler<'_> {
             return;
         }
         let home = self.inline_asm_home.expect("asm frame prepared");
-        let n = plan.regs.len() - args.len();
-        let inputs_at = plan.saved_regs.len();
-        let outputs_at = inputs_at + args.len();
-        let memory_at = |this: &Self, slot| sized(this.frame(home + 8 * slot), 64);
-        // Preserve overwritten GPR homes, including scratch registers, before
-        // any input rematerialization or memory-to-memory copy uses RAX.
+        let mem = |this: &Self, slot: Home| sized(this.frame(home + slot.offset), slot.bits);
         for (slot, &r) in plan.saved_regs.iter().enumerate() {
             self.emit(
                 Opcode::Mov,
-                [asm_arg(memory_at(self, slot)), asm_arg(r64(r))],
+                [
+                    asm_arg(sized(self.frame(home + 8 * slot), 64)),
+                    asm_arg(r64(r)),
+                ],
             );
         }
-        for (i, &arg) in args.iter().enumerate() {
-            if plan.regs[n + i].is_none() {
-                continue;
-            }
-            let dst = memory_at(self, inputs_at + i);
-            match self.loc(arg) {
-                Loc::Reg(r) => {
-                    if let Ok(slot) = plan.saved_regs.binary_search(&r) {
-                        self.emit(
-                            Opcode::Mov,
-                            [asm_arg(r64(S0)), asm_arg(memory_at(self, slot))],
-                        );
-                    } else {
-                        self.emit_move(Loc::Reg(S0), Loc::Reg(r));
-                    }
-                }
-                src => self.emit_move(Loc::Reg(S0), src),
-            }
-            self.emit(Opcode::Mov, [asm_arg(dst), asm_arg(r64(S0))]);
+        for (slot, &r) in plan.saved_simd.iter().enumerate() {
+            let at = home + plan.simd_home + slot * usize::from(plan.simd_bits / 8);
+            self.emit(
+                move_bits(plan.simd_bits),
+                [
+                    asm_arg(sized(self.frame(at), plan.simd_bits)),
+                    asm_arg(simd_width(r, plan.simd_bits)),
+                ],
+            );
         }
-        // Every input now has a stable frame home. Loading RAX last is not
-        // needed: these MOV loads use only the stable frame base.
-        for (r, initializer) in plan.initializers.iter().enumerate() {
-            if let Some(i) = *initializer {
+        let n = plan.outputs.len();
+        for (i, &arg) in args.iter().enumerate() {
+            let Some(reg) = plan.regs[n + i] else {
+                continue;
+            };
+            let dst = mem(self, plan.inputs[i]);
+            if reg.float {
+                // Sources are snapshotted before any asm register is initialized.
+                let bits = plan.inputs[i].bits;
+                match self.loc(arg) {
+                    Loc::FReg(r) => self.emit(
+                        move_bits(bits),
+                        [asm_arg(dst), asm_arg(simd_width(r, bits))],
+                    ),
+                    Loc::Stack(slot) => {
+                        self.emit(
+                            move_bits(bits),
+                            [
+                                asm_arg(simd_width(FS0, bits)),
+                                asm_arg(sized(self.slot(slot), bits)),
+                            ],
+                        );
+                        self.emit(
+                            move_bits(bits),
+                            [asm_arg(dst), asm_arg(simd_width(FS0, bits))],
+                        );
+                    }
+                    _ => unreachable!("SIMD asm input has a SIMD location"),
+                }
+            } else {
+                match self.loc(arg) {
+                    Loc::Reg(r) => {
+                        if let Ok(slot) = plan.saved_regs.binary_search(&r) {
+                            self.emit(
+                                Opcode::Mov,
+                                [
+                                    asm_arg(r64(S0)),
+                                    asm_arg(sized(self.frame(home + 8 * slot), 64)),
+                                ],
+                            );
+                        } else {
+                            self.emit_move(Loc::Reg(S0), Loc::Reg(r));
+                        }
+                    }
+                    src => self.emit_move(Loc::Reg(S0), src),
+                }
+                self.emit(Opcode::Mov, [asm_arg(dst), asm_arg(r64(S0))]);
+            }
+        }
+        for &(r, i) in &plan.initializers {
+            let src = mem(self, plan.inputs[i]);
+            if r.float {
                 self.emit(
-                    Opcode::Mov,
+                    move_bits(plan.inputs[i].bits),
                     [
-                        asm_arg(r64(r as u8)),
-                        asm_arg(memory_at(self, inputs_at + i)),
+                        asm_arg(simd_width(r.num, plan.inputs[i].bits)),
+                        asm_arg(src),
                     ],
                 );
+            } else {
+                self.emit(Opcode::Mov, [asm_arg(r64(r.num)), asm_arg(src)]);
             }
         }
-        // Initialize full-width boolean homes without touching flags after
-        // the template. SETcc then writes only each slot's low byte.
         for &(i, _) in &plan.flags {
             self.emit(
                 Opcode::Mov,
-                [asm_arg(memory_at(self, outputs_at + i)), asm_arg(0i64)],
+                [asm_arg(mem(self, plan.outputs[i])), asm_arg(0i64)],
             );
         }
         self.out.inline_assembly(&plan.text);
         for &(i, cc) in &plan.flags {
             self.emit(
                 Opcode::Setcc(cc),
-                [asm_arg(sized(self.frame(home + 8 * (outputs_at + i)), 8))],
+                [asm_arg(sized(self.frame(home + plan.outputs[i].offset), 8))],
             );
         }
-        for i in 0..n {
+        for (i, slot) in plan.outputs.iter().enumerate() {
             let Some(r) = plan.regs[i] else { continue };
-            self.emit(
-                Opcode::Mov,
-                [asm_arg(memory_at(self, outputs_at + i)), asm_arg(r64(r))],
-            );
+            if r.float {
+                self.emit(
+                    move_bits(slot.bits),
+                    [
+                        asm_arg(mem(self, *slot)),
+                        asm_arg(simd_width(r.num, slot.bits)),
+                    ],
+                );
+            } else {
+                self.emit(
+                    Opcode::Mov,
+                    [asm_arg(mem(self, *slot)), asm_arg(r64(r.num))],
+                );
+            }
         }
         for (slot, &r) in plan.saved_regs.iter().enumerate() {
             self.emit(
                 Opcode::Mov,
-                [asm_arg(r64(r)), asm_arg(memory_at(self, slot))],
+                [
+                    asm_arg(r64(r)),
+                    asm_arg(sized(self.frame(home + 8 * slot), 64)),
+                ],
+            );
+        }
+        for (slot, &r) in plan.saved_simd.iter().enumerate() {
+            let at = home + plan.simd_home + slot * usize::from(plan.simd_bits / 8);
+            self.emit(
+                move_bits(plan.simd_bits),
+                [
+                    asm_arg(simd_width(r, plan.simd_bits)),
+                    asm_arg(sized(self.frame(at), plan.simd_bits)),
+                ],
             );
         }
         for (i, &value) in self.func.inst_results(inst).iter().enumerate() {
             if let Some(dst) = self.defined(value) {
-                // Restore all old homes first, then install SSA result homes.
-                self.emit(
-                    Opcode::Mov,
-                    [asm_arg(r64(S0)), asm_arg(memory_at(self, outputs_at + i))],
-                );
-                self.emit_move(dst, Loc::Reg(S0));
+                if self.ty(value).is_float() || self.ty(value).is_vector() {
+                    self.emit(
+                        move_bits(plan.outputs[i].bits),
+                        [
+                            asm_arg(simd_width(FS0, plan.outputs[i].bits)),
+                            asm_arg(mem(self, plan.outputs[i])),
+                        ],
+                    );
+                    match dst {
+                        Loc::FReg(r) => self.emit(
+                            move_bits(plan.outputs[i].bits),
+                            [
+                                asm_arg(simd_width(r, plan.outputs[i].bits)),
+                                asm_arg(simd_width(FS0, plan.outputs[i].bits)),
+                            ],
+                        ),
+                        Loc::Stack(slot) => self.emit(
+                            move_bits(plan.outputs[i].bits),
+                            [
+                                asm_arg(sized(self.slot(slot), plan.outputs[i].bits)),
+                                asm_arg(simd_width(FS0, plan.outputs[i].bits)),
+                            ],
+                        ),
+                        _ => unreachable!("SIMD asm result has a SIMD location"),
+                    }
+                } else {
+                    self.emit(
+                        Opcode::Mov,
+                        [asm_arg(r64(S0)), asm_arg(mem(self, plan.outputs[i]))],
+                    );
+                    self.emit_move(dst, Loc::Reg(S0));
+                }
             }
         }
     }

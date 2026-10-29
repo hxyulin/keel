@@ -35,10 +35,11 @@ python3 tools/x86-isa/generate.py --check-upstream /path/to/instructions.json
 ```
 
 The generator rejects unknown filter names, unsupported filter values and
-unclassified feature sets used by Keel adapters. It excludes REX2 and the
-alternate AMD, KNC and MPX interpretations. The default decoder uses the
+unclassified feature sets used by Keel adapters. It retains REX2 permission
+and excludes the alternate AMD, KNC and MPX interpretations. The default decoder uses the
 ModRM-bearing UD0 form; Keel's explicit `ud0.short` encoding remains available.
-The legacy/VEX selection remains unchanged. A separate `evex.json` selection
+The legacy/VEX source snapshot remains pinned; its REX2 records now enter the
+reviewed catalogue. A separate `evex.json` selection
 adds AVX-512F/VL and its VEX mask operations, from the same upstream pin. Other
 EVEX families, MVEX, XOP and 3DNow remain outside these imports.
 
@@ -391,7 +392,7 @@ displacements in range use disp8*N. RIP-relative fixups include any trailing
 immediate when computing the relocation addend.
 
 This increment does not add AVX-512 compiler intrinsics, selection, allocation
-or runtime qualification. It does not cover BW/DQ/CD, FP16, APX, additional
+or runtime qualification. It does not cover BW/DQ/CD, FP16, APX EVEX NDD/NF, additional
 EVEX opcode maps or a complete v4 profile. Those need their own import/feature
 review and witnesses; new operand or tuple kinds require shared-engine work.
 

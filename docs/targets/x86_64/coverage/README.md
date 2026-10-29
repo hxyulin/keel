@@ -5,12 +5,12 @@ See [ledger definitions](../../../../tools/x86-isa/coverage-ledger.md) before in
 Machine-readable form records are in [coverage.json](coverage.json).
 
 Legacy/VEX imported source forms: **3603**, plus **1** local extension.
-Legacy/VEX catalogue: **3495** forms; **109** imported forms excluded.
-Decoder registration enabled: **3494**; disabled by policy: **1**.
-Forms with declarative assembler candidates: **2865**.
-Public binding records: **1011**; without a direct source join: **86** (not an unsupported count).
+Legacy/VEX catalogue: **3563** forms; **41** imported forms excluded.
+Decoder registration enabled: **3562**; disabled by policy: **1**.
+Forms with declarative assembler candidates: **2937**.
+Public binding records: **1027**; without a direct source join: **86** (not an unsupported count).
 Tracked compiler declarations: **45**, with **43** regular recipes and **2** hooks.
-ISA policy keys without an explicit feature classification: **77**.
+ISA policy keys without an explicit feature classification: **72**.
 
 Separate AVX-512F/VL table: **1899** records and **351** mnemonic bindings.
 It contains **1884** EVEX records plus **15** VEX mask records already present in the legacy/VEX import.
@@ -27,7 +27,6 @@ Per-form validation is untracked; existing tests and campaign records are not in
 | `feature_amd` | 18 |
 | `feature_knc` | 7 |
 | `feature_mpx` | 16 |
-| `rex_2` | 68 |
 
 Reasons can overlap. These counts do not enumerate encodings outside the import.
 
@@ -42,11 +41,11 @@ An unclassified key is not automatically baseline; the runtime feature lookup cu
 | `AES` | 12 | 12 | 12 | 12 | 0 | aes |  |
 | `AMD3DNOW` | 1 | 1 | 1 | 0 | 0 | unclassified |  |
 | `AMD_INVLPGB` | 2 | 2 | 2 | 0 | 0 | unclassified |  |
-| `AMX_BF16` | 1 | 1 | 1 | 0 | 0 | unclassified |  |
-| `AMX_FP16` | 1 | 1 | 1 | 0 | 0 | unclassified |  |
-| `AMX_INT8` | 4 | 4 | 4 | 0 | 0 | unclassified |  |
-| `AMX_TILE` | 14 | 14 | 14 | 0 | 0 | unclassified |  |
-| `APX_F` | 17 | 0 | 0 | 0 | 0 | unclassified |  |
+| `AMX_BF16` | 1 | 1 | 1 | 1 | 0 | xsave, osxsave, amx_tile, amx_bf16 |  |
+| `AMX_FP16` | 1 | 1 | 1 | 1 | 0 | xsave, osxsave, amx_tile, amx_fp16 |  |
+| `AMX_INT8` | 4 | 4 | 4 | 4 | 0 | xsave, osxsave, amx_tile, amx_int8 |  |
+| `AMX_TILE` | 14 | 14 | 14 | 14 | 0 | xsave, osxsave, amx_tile |  |
+| `APX_F` | 17 | 17 | 17 | 17 | 0 | xsave, osxsave, apx_f |  |
 | `AVX` | 700 | 700 | 700 | 700 | 0 | avx, xsave, osxsave | v3 |
 | `AVX2` | 286 | 286 | 286 | 286 | 0 | avx, avx2, xsave, osxsave | v3 |
 | `AVX2GATHER` | 16 | 16 | 16 | 16 | 0 | avx, avx2, xsave, osxsave | v3 |
@@ -63,14 +62,14 @@ An unclassified key is not automatically baseline; the runtime feature lookup cu
 | `AVX_VNNI_INT8` | 24 | 24 | 24 | 0 | 0 | unclassified |  |
 | `BMI1` | 14 | 14 | 14 | 14 | 0 | bmi1 | v3 |
 | `BMI2` | 32 | 32 | 32 | 32 | 0 | bmi2 | v3 |
-| `CET` | 17 | 14 | 14 | 0 | 0 | unclassified |  |
+| `CET` | 17 | 17 | 17 | 0 | 0 | unclassified |  |
 | `CLDEMOTE` | 1 | 1 | 1 | 0 | 0 | unclassified |  |
-| `CLFLUSHOPT` | 2 | 1 | 1 | 0 | 0 | unclassified |  |
-| `CLFSH` | 2 | 1 | 1 | 1 | 0 | clflush |  |
-| `CLWB` | 2 | 1 | 1 | 0 | 0 | unclassified |  |
+| `CLFLUSHOPT` | 2 | 2 | 2 | 0 | 0 | unclassified |  |
+| `CLFSH` | 2 | 2 | 2 | 2 | 0 | clflush |  |
+| `CLWB` | 2 | 2 | 2 | 0 | 0 | unclassified |  |
 | `CLZERO` | 1 | 1 | 1 | 0 | 0 | unclassified |  |
 | `CMOV` | 32 | 32 | 32 | 32 | 0 | unclassified |  |
-| `CMPXCHG16B` | 2 | 1 | 1 | 1 | 0 | cx16 | v2, v3 |
+| `CMPXCHG16B` | 2 | 2 | 2 | 2 | 0 | cx16 | v2, v3 |
 | `ENQCMD` | 2 | 2 | 2 | 0 | 0 | unclassified |  |
 | `F16C` | 8 | 8 | 8 | 8 | 0 | avx, f16c, xsave, osxsave | v3 |
 | `FAT_NOP` | 24 | 24 | 24 | 24 | 0 | baseline | v1, v2, v3 |
@@ -79,8 +78,8 @@ An unclassified key is not automatically baseline; the runtime feature lookup cu
 | `FMA` | 192 | 192 | 192 | 192 | 0 | avx, fma, xsave, osxsave | v3 |
 | `FMA4` | 128 | 128 | 128 | 0 | 0 | unclassified |  |
 | `FRED` | 2 | 2 | 2 | 0 | 0 | unclassified |  |
-| `FXSAVE` | 4 | 2 | 2 | 2 | 0 | baseline | v1, v2, v3 |
-| `FXSAVE64` | 4 | 2 | 2 | 2 | 0 | baseline | v1, v2, v3 |
+| `FXSAVE` | 4 | 4 | 4 | 4 | 0 | baseline | v1, v2, v3 |
+| `FXSAVE64` | 4 | 4 | 4 | 4 | 0 | baseline | v1, v2, v3 |
 | `GFNI` | 6 | 6 | 6 | 0 | 0 | unclassified |  |
 | `HRESET` | 1 | 1 | 1 | 0 | 0 | unclassified |  |
 | `I186` | 52 | 52 | 52 | 39 | 0 | baseline | v1, v2, v3 |
@@ -89,7 +88,7 @@ An unclassified key is not automatically baseline; the runtime feature lookup cu
 | `I386` | 106 | 106 | 106 | 84 | 0 | baseline | v1, v2, v3 |
 | `I486` | 1 | 1 | 1 | 1 | 0 | baseline | v1, v2, v3 |
 | `I486REAL` | 20 | 20 | 20 | 20 | 3 | baseline | v1, v2, v3 |
-| `I86` | 463 | 429 | 429 | 395 | 7 | baseline | v1, v2, v3 |
+| `I86` | 463 | 445 | 445 | 411 | 7 | baseline | v1, v2, v3 |
 | `ICACHE_PREFETCH` | 2 | 2 | 2 | 0 | 0 | unclassified |  |
 | `INVPCID` | 1 | 1 | 1 | 1 | 0 | invpcid |  |
 | `KEEL` | 1 | 1 | 1 | 1 | 0 | unclassified |  |
@@ -116,25 +115,25 @@ An unclassified key is not automatically baseline; the runtime feature lookup cu
 | `PAUSE` | 1 | 1 | 1 | 1 | 0 | baseline | v1, v2, v3 |
 | `PBNDKB` | 1 | 1 | 1 | 0 | 0 | unclassified |  |
 | `PCLMULQDQ` | 2 | 2 | 2 | 2 | 0 | pclmulqdq |  |
-| `PCOMMIT` | 2 | 1 | 1 | 0 | 0 | unclassified |  |
+| `PCOMMIT` | 2 | 2 | 2 | 0 | 0 | unclassified |  |
 | `PCONFIG` | 1 | 1 | 1 | 0 | 0 | unclassified |  |
 | `PENTIUMMMX` | 132 | 132 | 132 | 132 | 0 | baseline | v1, v2, v3 |
-| `PENTIUMREAL` | 5 | 4 | 4 | 4 | 2 | unclassified |  |
+| `PENTIUMREAL` | 5 | 5 | 5 | 5 | 2 | unclassified |  |
 | `PKU` | 2 | 2 | 2 | 0 | 0 | unclassified |  |
 | `POPCNT` | 2 | 2 | 2 | 2 | 0 | popcnt | v2, v3 |
 | `PPRO` | 35 | 32 | 31 | 32 | 0 | baseline | v1, v2, v3 |
 | `PREFETCHW` | 1 | 1 | 1 | 1 | 0 | prefetchw |  |
 | `PREFETCHWT1` | 1 | 1 | 1 | 0 | 0 | unclassified |  |
 | `PREFETCH_NOP` | 7 | 7 | 7 | 1 | 0 | baseline | v1, v2, v3 |
-| `PT` | 4 | 2 | 2 | 0 | 0 | unclassified |  |
+| `PT` | 4 | 4 | 4 | 0 | 0 | unclassified |  |
 | `RAO_INT` | 8 | 8 | 8 | 0 | 0 | unclassified |  |
-| `RDPID` | 2 | 1 | 1 | 0 | 0 | unclassified |  |
+| `RDPID` | 2 | 2 | 2 | 0 | 0 | unclassified |  |
 | `RDPMC` | 1 | 1 | 1 | 1 | 0 | unclassified |  |
 | `RDPRU` | 1 | 1 | 1 | 0 | 0 | unclassified |  |
-| `RDRAND` | 2 | 1 | 1 | 1 | 0 | rdrand |  |
-| `RDSEED` | 2 | 1 | 1 | 1 | 0 | rdseed |  |
+| `RDRAND` | 2 | 2 | 2 | 2 | 0 | rdrand |  |
+| `RDSEED` | 2 | 2 | 2 | 2 | 0 | rdseed |  |
 | `RDTSCP` | 1 | 1 | 1 | 1 | 0 | rdtscp |  |
-| `RDWRFSGS` | 8 | 4 | 4 | 4 | 0 | fsgsbase |  |
+| `RDWRFSGS` | 8 | 8 | 8 | 8 | 0 | fsgsbase |  |
 | `RTM` | 4 | 4 | 4 | 0 | 0 | unclassified |  |
 | `SERIALIZE` | 1 | 1 | 1 | 0 | 0 | unclassified |  |
 | `SGX` | 2 | 2 | 2 | 0 | 0 | unclassified |  |
@@ -146,27 +145,27 @@ An unclassified key is not automatically baseline; the runtime feature lookup cu
 | `SMAP` | 2 | 2 | 2 | 0 | 0 | unclassified |  |
 | `SMX` | 1 | 1 | 1 | 0 | 0 | unclassified |  |
 | `SNP` | 4 | 4 | 4 | 0 | 0 | unclassified |  |
-| `SSE` | 99 | 98 | 98 | 98 | 0 | baseline | v1, v2, v3 |
-| `SSE2` | 270 | 268 | 268 | 268 | 0 | baseline | v1, v2, v3 |
+| `SSE` | 99 | 99 | 99 | 99 | 0 | baseline | v1, v2, v3 |
+| `SSE2` | 270 | 270 | 270 | 270 | 0 | baseline | v1, v2, v3 |
 | `SSE2MMX` | 6 | 6 | 6 | 6 | 0 | baseline | v1, v2, v3 |
 | `SSE3` | 20 | 20 | 20 | 19 | 0 | sse3 | v2, v3 |
 | `SSE3X87` | 2 | 2 | 2 | 0 | 0 | sse3 | v2, v3 |
 | `SSE4` | 97 | 97 | 97 | 97 | 0 | sse41 | v2, v3 |
 | `SSE42` | 18 | 18 | 18 | 16 | 0 | sse42 | v2, v3 |
 | `SSE4A` | 6 | 6 | 6 | 0 | 0 | unclassified |  |
-| `SSEMXCSR` | 4 | 2 | 2 | 2 | 0 | baseline | v1, v2, v3 |
+| `SSEMXCSR` | 4 | 4 | 4 | 4 | 0 | baseline | v1, v2, v3 |
 | `SSE_PREFETCH` | 4 | 4 | 4 | 4 | 0 | baseline | v1, v2, v3 |
 | `SSSE3` | 32 | 32 | 32 | 32 | 0 | ssse3 | v2, v3 |
 | `SSSE3MMX` | 32 | 32 | 32 | 32 | 0 | ssse3 | v2, v3 |
 | `SVM` | 8 | 8 | 8 | 0 | 0 | unclassified |  |
 | `TDX` | 4 | 4 | 4 | 0 | 0 | unclassified |  |
 | `TSX_LDTRK` | 2 | 2 | 2 | 0 | 0 | unclassified |  |
-| `UINTR` | 6 | 5 | 5 | 0 | 0 | unclassified |  |
+| `UINTR` | 6 | 6 | 6 | 0 | 0 | unclassified |  |
 | `VAES` | 8 | 8 | 8 | 8 | 0 | vaes, avx, xsave, osxsave |  |
 | `VMFUNC` | 1 | 1 | 1 | 0 | 0 | unclassified |  |
 | `VPCLMULQDQ` | 2 | 2 | 2 | 2 | 0 | vpclmulqdq, avx, xsave, osxsave |  |
-| `VTX` | 18 | 14 | 14 | 0 | 0 | unclassified |  |
-| `WAITPKG` | 6 | 3 | 3 | 1 | 0 | waitpkg |  |
+| `VTX` | 18 | 18 | 18 | 0 | 0 | unclassified |  |
+| `WAITPKG` | 6 | 6 | 6 | 2 | 0 | waitpkg |  |
 | `WRMSRNS` | 1 | 1 | 1 | 0 | 0 | unclassified |  |
 | `X87` | 134 | 134 | 134 | 130 | 0 | baseline | v1, v2, v3 |
 | `XOP` | 16 | 16 | 16 | 0 | 0 | unclassified |  |

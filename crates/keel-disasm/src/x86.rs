@@ -233,6 +233,8 @@ struct Prefix {
     p66: bool,
     address32: bool,
     rex: u8,
+    rex2: bool,
+    rex2_high: u8,
     rep: u8,
     lock: bool,
     segment: Option<&'static str>,
@@ -247,13 +249,13 @@ impl Prefix {
         self.rex & 8 != 0
     }
     fn b(self) -> u8 {
-        self.rex & 1
+        (self.rex & 1) | ((self.rex2_high >> 3) & 2)
     }
     fn x(self) -> u8 {
-        (self.rex >> 1) & 1
+        ((self.rex >> 1) & 1) | ((self.rex2_high >> 4) & 2)
     }
     fn r(self) -> u8 {
-        (self.rex >> 2) & 1
+        ((self.rex >> 2) & 1) | ((self.rex2_high >> 5) & 2)
     }
     fn address(self) -> u16 {
         if self.address32 { 32 } else { 64 }
@@ -297,7 +299,18 @@ fn prefixes(r: &mut Reader<'_>) -> Option<Prefix> {
         r.byte()?;
     }
     let first = *r.bytes.get(r.pos)?;
-    if first == 0x62 {
+    if first == 0xd5 {
+        // REX2 must be the final prefix and cannot follow a REX prefix.
+        if p.rex != 0 {
+            return None;
+        }
+        r.byte()?;
+        let payload = r.byte()?;
+        p.rex2 = true;
+        p.rex2_high = payload & 0x70;
+        p.rex = 0x40 | (payload & 15);
+        p.map = payload >> 7;
+    } else if first == 0x62 {
         if p.rex != 0 || p.p66 || p.rep != 0 || p.lock {
             return None;
         }
@@ -437,10 +450,15 @@ fn decode_form(
     ef: Option<&'static EvexForm>,
     address: u64,
 ) -> Option<Instruction> {
-    if f.vex != p.vex || f.map != p.map || f.byte != byte {
+    if f.vex != p.vex
+        || f.map != p.map
+        || f.byte != byte
+        || (f.rex2 == -1 && p.rex2)
+        || (f.rex2 == 1 && !p.rex2)
+    {
         return None;
     }
-    if (f.w >= 0 && (f.w == 1) != p.w()) || (f.b >= 0 && f.b as u8 != p.b()) {
+    if (f.w >= 0 && (f.w == 1) != p.w()) || (f.b >= 0 && f.b as u8 != p.b() & 1) {
         return None;
     }
     let mut evex_options = None;
@@ -521,6 +539,25 @@ fn decode_form(
     {
         return None;
     }
+    if f.isa.starts_with("AMX_") {
+        // AMX tile registers have only three number bits. The generic VEX
+        // extensions remain available to the GPR base/index of memory forms.
+        if f.operands
+            .iter()
+            .any(|o| o.kind == "tmm" && o.encoding == "modrm_reg")
+            && p.r() != 0
+            || f.operands
+                .iter()
+                .any(|o| o.kind == "tmm" && o.encoding == "modrm_rm")
+                && p.b() != 0
+            || f.operands
+                .iter()
+                .any(|o| o.kind == "tmm" && o.encoding == "ndsndd")
+                && p.source >= 8
+        {
+            return None;
+        }
+    }
     let mut mem = if let Some(m) = m {
         if m >> 6 != 3 && !f.ignore_mod {
             Some(memory(&mut r, m, p)?)
@@ -555,6 +592,11 @@ fn decode_form(
             "is4" => r.byte()? >> 4,
             _ => 0,
         };
+        let n = if p.rex2 && !spec.kind.starts_with("gpr") {
+            n & 15
+        } else {
+            n
+        };
         let operand = match spec.kind {
             "mem" | "mem_vsibx" | "mem_vsiby" | "mem_vsibz" | "agen" | "agen_norel" => {
                 let mem = mem?;
@@ -581,9 +623,17 @@ fn decode_form(
                     }
                 });
                 Operand::Memory {
-                    bits: ef.map_or(spec.bytes(size), |ef| {
-                        ef.memory_bytes(*spec, evex_options.is_some_and(|o| o.broadcast != 0))
-                    }) * 8,
+                    bits: if matches!(f.mnemonic, "clflush" | "invlpg")
+                        || f.mnemonic.starts_with("prefetch")
+                    {
+                        // These operands name an address, not a scalar/vector
+                        // data access of the imported cache-line width.
+                        8
+                    } else {
+                        ef.map_or(spec.bytes(size), |ef| {
+                            ef.memory_bytes(*spec, evex_options.is_some_and(|o| o.broadcast != 0))
+                        }) * 8
+                    },
                     address_bits: p.address(),
                     base: if mem.ip {
                         Some(if p.address32 { "eip" } else { "rip" }.into())
@@ -605,7 +655,7 @@ fn decode_form(
                 displacement: r.number((p.address() / 8) as usize, false)? as i64,
                 segment: p.segment,
             },
-            "imm" => Operand::Immediate(
+            "imm" | "abs" => Operand::Immediate(
                 r.number(spec.bytes(size) as usize, spec.encoding.starts_with('s'))?,
             ),
             "implicit_imm1" => Operand::Immediate(1),
@@ -684,7 +734,10 @@ pub fn decode(bytes: &[u8], address: u64) -> Option<Instruction> {
     let mut r = Reader { bytes, pos: 0 };
     let mut p = prefixes(&mut r)?;
     let mut byte = r.byte()?;
-    if !p.vex && p.evex.is_none() && byte == 0x0f {
+    if p.rex2 && byte == 0x0f {
+        return None;
+    }
+    if !p.vex && p.evex.is_none() && !p.rex2 && byte == 0x0f {
         p.map = 1;
         byte = r.byte()?;
         if byte == 0x38 || byte == 0x3a {

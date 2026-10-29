@@ -3,7 +3,7 @@ impl Register {
     fn write_to<W: Write + ?Sized>(&self, w: &mut W) -> fmt::Result {
         match self.class {
             RegisterClass::Gpr => {
-                if !((self.number < 16) && (matches!(self.width, 8 | 16 | 32 | 64))) {
+                if !((self.number < 32) && (matches!(self.width, 8 | 16 | 32 | 64))) {
                     return Err(fmt::Error);
                 }
                 if self.high_byte {
@@ -34,6 +34,22 @@ impl Register {
                             13 => "r13b",
                             14 => "r14b",
                             15 => "r15b",
+                            16 => "r16b",
+                            17 => "r17b",
+                            18 => "r18b",
+                            19 => "r19b",
+                            20 => "r20b",
+                            21 => "r21b",
+                            22 => "r22b",
+                            23 => "r23b",
+                            24 => "r24b",
+                            25 => "r25b",
+                            26 => "r26b",
+                            27 => "r27b",
+                            28 => "r28b",
+                            29 => "r29b",
+                            30 => "r30b",
+                            31 => "r31b",
                             _ => return Err(fmt::Error),
                         })
                     }
@@ -55,6 +71,22 @@ impl Register {
                             13 => "r13w",
                             14 => "r14w",
                             15 => "r15w",
+                            16 => "r16w",
+                            17 => "r17w",
+                            18 => "r18w",
+                            19 => "r19w",
+                            20 => "r20w",
+                            21 => "r21w",
+                            22 => "r22w",
+                            23 => "r23w",
+                            24 => "r24w",
+                            25 => "r25w",
+                            26 => "r26w",
+                            27 => "r27w",
+                            28 => "r28w",
+                            29 => "r29w",
+                            30 => "r30w",
+                            31 => "r31w",
                             _ => return Err(fmt::Error),
                         })
                     }
@@ -76,6 +108,22 @@ impl Register {
                             13 => "r13d",
                             14 => "r14d",
                             15 => "r15d",
+                            16 => "r16d",
+                            17 => "r17d",
+                            18 => "r18d",
+                            19 => "r19d",
+                            20 => "r20d",
+                            21 => "r21d",
+                            22 => "r22d",
+                            23 => "r23d",
+                            24 => "r24d",
+                            25 => "r25d",
+                            26 => "r26d",
+                            27 => "r27d",
+                            28 => "r28d",
+                            29 => "r29d",
+                            30 => "r30d",
+                            31 => "r31d",
                             _ => return Err(fmt::Error),
                         })
                     }
@@ -97,6 +145,22 @@ impl Register {
                             13 => "r13",
                             14 => "r14",
                             15 => "r15",
+                            16 => "r16",
+                            17 => "r17",
+                            18 => "r18",
+                            19 => "r19",
+                            20 => "r20",
+                            21 => "r21",
+                            22 => "r22",
+                            23 => "r23",
+                            24 => "r24",
+                            25 => "r25",
+                            26 => "r26",
+                            27 => "r27",
+                            28 => "r28",
+                            29 => "r29",
+                            30 => "r30",
+                            31 => "r31",
                             _ => return Err(fmt::Error),
                         })
                     }
@@ -179,6 +243,13 @@ impl Register {
                     return Err(fmt::Error);
                 }
                 w.write_str("k")?;
+                write_int(w, self.number.into(), false)
+            }
+            RegisterClass::Tile => {
+                if !((self.number < 8) && (self.width == 8192) && (!self.high_byte)) {
+                    return Err(fmt::Error);
+                }
+                w.write_str("tmm")?;
                 write_int(w, self.number.into(), false)
             }
         }

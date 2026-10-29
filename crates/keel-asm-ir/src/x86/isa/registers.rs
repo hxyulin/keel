@@ -18,6 +18,8 @@ pub enum RegisterClass {
     Debug = 8,
     Zmm = 9,
     Mask = 10,
+    /// AMX tile register; its configured shape is runtime tile state, with a maximum 1024-byte payload.
+    Tile = 11,
 }
 impl RegisterClass {
     /// Stable Keel symbolic tag; separate from the enum discriminant.
@@ -34,6 +36,7 @@ impl RegisterClass {
             Self::Debug => 8,
             Self::Zmm => 9,
             Self::Mask => 10,
+            Self::Tile => 11,
         }
     }
     pub const fn from_symbolic_tag(tag: u8) -> Option<Self> {
@@ -49,6 +52,7 @@ impl RegisterClass {
             8 => Self::Debug,
             9 => Self::Zmm,
             10 => Self::Mask,
+            11 => Self::Tile,
             _ => return None,
         })
     }
@@ -65,6 +69,7 @@ impl RegisterClass {
             "dr" => Self::Debug,
             "zmm" => Self::Zmm,
             "mask" => Self::Mask,
+            "tmm" => Self::Tile,
             _ => return None,
         })
     }
@@ -142,28 +147,28 @@ impl Register {
         if let Some(rest) = s.strip_prefix("r")
             && let Some(number) = rest.strip_suffix("b")
             && let Ok(number) = number.parse::<u8>()
-            && matches!(number, 8..=15)
+            && matches!(number, 8..=31)
         {
                 return Some(Self { class: RegisterClass::Gpr, number, width: 8, high_byte: false });
         }
         if let Some(rest) = s.strip_prefix("r")
             && let Some(number) = rest.strip_suffix("w")
             && let Ok(number) = number.parse::<u8>()
-            && matches!(number, 8..=15)
+            && matches!(number, 8..=31)
         {
                 return Some(Self { class: RegisterClass::Gpr, number, width: 16, high_byte: false });
         }
         if let Some(rest) = s.strip_prefix("r")
             && let Some(number) = rest.strip_suffix("d")
             && let Ok(number) = number.parse::<u8>()
-            && matches!(number, 8..=15)
+            && matches!(number, 8..=31)
         {
                 return Some(Self { class: RegisterClass::Gpr, number, width: 32, high_byte: false });
         }
         if let Some(rest) = s.strip_prefix("r")
             && let Some(number) = rest.strip_suffix("")
             && let Ok(number) = number.parse::<u8>()
-            && matches!(number, 8..=15)
+            && matches!(number, 8..=31)
         {
                 return Some(Self { class: RegisterClass::Gpr, number, width: 64, high_byte: false });
         }
@@ -248,12 +253,24 @@ impl Register {
                 return Some(Self { class: RegisterClass::Mask, number, width: 64, high_byte: false });
             }
         }
+        if let Some(rest) = s.strip_prefix("tmm")
+            && let Some(number) = rest.strip_suffix("")
+        {
+            if number.len() != 1 {
+                return None;
+            }
+            if let Ok(number) = number.parse::<u8>()
+                && number < 8
+            {
+                return Some(Self { class: RegisterClass::Tile, number, width: 8192, high_byte: false });
+            }
+        }
         None
     }
     /// Structural validity, independent of instruction/address restrictions.
     pub fn is_valid(self) -> bool {
         match self.class {
-            RegisterClass::Gpr => (self.number < 16) && (matches!(self.width, 8 | 16 | 32 | 64)) && (!self.high_byte || (matches!(self.number, 4..=7) && self.width == 8)),
+            RegisterClass::Gpr => (self.number < 32) && (matches!(self.width, 8 | 16 | 32 | 64)) && (!self.high_byte || (matches!(self.number, 4..=7) && self.width == 8)),
             RegisterClass::Xmm => (self.number < 32) && (self.width == 128) && (!self.high_byte),
             RegisterClass::Mmx => (self.number < 8) && (self.width == 64) && (!self.high_byte),
             RegisterClass::Ymm => (self.number < 32) && (self.width == 256) && (!self.high_byte),
@@ -264,6 +281,7 @@ impl Register {
             RegisterClass::Debug => (self.number < 8) && (self.width == 64) && (!self.high_byte),
             RegisterClass::Zmm => (self.number < 32) && (self.width == 512) && (!self.high_byte),
             RegisterClass::Mask => (self.number < 8) && (self.width == 64) && (!self.high_byte),
+            RegisterClass::Tile => (self.number < 8) && (self.width == 8192) && (!self.high_byte),
         }
     }
 }

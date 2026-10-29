@@ -728,11 +728,22 @@ pub fn required_features(opcode: Opcode, operands: &[Operand]) -> Features {
         .map_or(op.kind.required_features(), |f| f.requirements());
     }
     let base = opcode.required_features();
-    if base.avx {
+    let mut required = if base.avx {
         v3::form(opcode, operands).map_or(base, |f| v3::requirement(f.isa))
     } else {
         base
+    };
+    let egpr = |r: Register| r.class == RegisterClass::Gpr && r.number >= 16;
+    if operands.iter().any(|operand| match operand {
+        Operand::Register(r) => egpr(*r),
+        Operand::Memory(m) => m.base.into_iter().chain(m.index).any(egpr),
+        Operand::Immediate(_) => false,
+    }) {
+        required.apx_f = true;
+        required.xsave = true;
+        required.osxsave = true;
     }
+    required
 }
 
 impl Instruction {

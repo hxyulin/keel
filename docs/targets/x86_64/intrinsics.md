@@ -2,6 +2,8 @@
 
 This reference describes current implementation contracts and limits. Use
 [testing](../../development/testing.md) for validation commands; per-run results belong outside Git.
+The [vendor compatibility design](#design-for-vendor-intrinsic-compatibility)
+defines the proposed expansion beyond the implemented bounded headers.
 
 <a id="c-x86-intrinsics-bounded-c-x86-intrinsic-subset"></a>
 ## Bounded C x86 intrinsic subset
@@ -684,3 +686,170 @@ the saved producer FIP/FOP from the delivery RIP.
   and are not equated with SSA state.
 - Arbitrary nonempty x87 entry and signal-context restart are outside these
   contracts.
+
+## Design for vendor intrinsic compatibility
+
+This section defines the expansion design. The bounded header contract above
+remains the implemented interface. Assembly coverage, accepted builtin names and
+runtime-qualified intrinsic semantics are separate milestones.
+
+### Compatibility boundary
+
+The first compatibility target is C source using Intel-style intrinsic headers
+on `x86_64-unknown-linux-gnu`, checked against pinned LLVM/Clang headers and GCC
+where their interfaces overlap. A release must name the exact reference commits,
+header hashes, licences and covered names. “Full” means all entries in that
+reviewed manifest, including macro wrappers and composite intrinsics; it does
+not mean all spellings in every vendor release. New vendor releases require an
+explicit manifest update.
+
+C++ overloads/templates, Microsoft-specific headers and calling conventions,
+32-bit x86, SVML and other external vector-math libraries need separate source,
+ABI or runtime contracts. They must appear as explicit exclusions in the
+manifest rather than silently counting as compatible. APX instruction coverage
+is primarily an encoding and compiler-allocation concern; it does not imply a
+new vendor intrinsic for every opcode.
+
+Reference interfaces:
+
+- [Intel Intrinsics Guide](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html)
+  supplies names and semantic descriptions, including operations implemented by
+  instruction sequences. It is not the header parser or an encoding oracle.
+- [Clang language extensions](https://clang.llvm.org/docs/LanguageExtensions.html)
+  describe feature queries, builtin queries and vector language extensions.
+- [Clang target attributes](https://clang.llvm.org/docs/AttributeReference.html#target)
+  describe the source interface for function-specific target permissions.
+
+### One reviewed binding inventory
+
+Add a versioned vendor binding inventory beside the existing inputs in
+`tools/x86-isa/`. Keep it separate from the ISA form catalogue: a C wrapper may
+map to generic IR, one semantic intrinsic, or a sequence of operations. Reuse
+`intrinsic-registry.json` for stable IDs only when a new semantic IR intrinsic
+is needed. Do not allocate an IR ID for each header alias.
+
+Each vendor binding records:
+
+| Field | Contract |
+| --- | --- |
+| Identity | Header, C spelling, builtin aliases, reference revision and source location |
+| Type | Exact parameter/result types, overload rules, signedness, alignment and ABI representation |
+| Arguments | ICE requirements, legal control values, ignored bits, pointer qualifiers and evaluation count |
+| Permissions | Required CPU features, target modes and architectural/OS state preconditions |
+| Effects | Memory reads/writes and access widths, flags, FP environment, faults, ordering and state changes |
+| Lowering | Generic IR, existing semantic intrinsic, reviewed new intrinsic, or documented external runtime call |
+| Evidence | Admission cases, independent semantic oracle and feature/state qualification requirements |
+
+Generate the embedded header index, builtin-name recognition, `__has_builtin`
+answers, signatures, immediate diagnostics and binding documentation from that
+inventory. Migrate the existing AES, shift, saturation and conversion name
+lists first; `expr.rs` and `features.rs` must not maintain parallel name lists.
+Use reviewed wrapper templates instead of mechanically copying LLVM builtin
+bodies into headers that Keel cannot compile.
+
+Generation must reject missing/duplicate identities, unknown features,
+unresolved type names, overlapping aliases and unsupported lowering recipes.
+Keep unsupported bindings explicit in the inventory and exclude them from
+positive `__has_builtin` answers. Header inclusion must remain legal without
+enabling every feature named by its declarations. Recognizing a builtin name
+does not grant CPU permission or establish that an instruction can execute.
+
+### Frontend and type work
+
+Preserve nominal container types (`__m128i`, `__m256i`, eventually `__m512i`)
+while reviewing each builtin's actual lane type. Establish the required 512-bit value
+and mask types, half/bfloat element types, casts and overloaded builtin rules
+before admitting the families that depend on them. A pointer to unaligned data
+must not become an aligned load merely because the wrapper uses a vector type.
+
+Validate immediate controls in the frontend against each binding's rules.
+Distinguish an out-of-range immediate from an instruction that masks or ignores
+control bits. Macro wrappers must evaluate non-constant operands the documented
+number of times. Keep constant-expression acceptance separate from optimizer
+constant propagation, including at `-O0`.
+
+Legacy MMX values must retain the existing explicit x87/MMX state contracts. AMX configuration and
+tile operations need a tile-state contract, with tile IDs, configuration
+validity, release, faults and call clobbers. An 8192-bit assembler tile register
+is not an ordinary 8192-bit SSA vector or a C-callable argument. Start AMX vendor
+wrappers with checked constant tile IDs and explicit effects; introduce tile SSA
+only after its allocation, lifetime and calling-boundary rules are defined.
+
+### Function-specific features and dispatch
+
+Add explicit function feature permissions in shared IR rather than using
+optimization/tuning attributes as a proxy. Resolve a function's effective
+features from the module baseline plus its declared ordered edits, using the
+existing feature prerequisite validator. The backend's function selector,
+legality checks, builtin lowering and assembly output must use that same set.
+Preserve it through IR printing/parsing and LLVM import where supported.
+
+A baseline function may make an ordinary call to a feature-specific function;
+it may not inline a body requiring unavailable features. Enforce this in both
+optional inlining and mandatory `always_inline` expansion, with a diagnostic
+when mandatory expansion cannot satisfy the feature contract. Global flags must
+not be widened to make such a call compile. A compatible call also needs a
+compatible argument/result ABI; wide-vector transport must be checked at both
+ends of a call, including indirect calls and cross-module declarations.
+
+Compile-time feature macros describe the translation unit's baseline. Builtin
+recognition queries describe admitted frontend interfaces. A future
+`__builtin_cpu_supports` implementation must report executable capabilities,
+including required OS-enabled extended state; CPU feature bits alone are
+insufficient for AVX, AVX-512 or AMX. Its results do not make an arbitrary branch
+a proof that illegal instructions can be placed in a baseline function.
+Automatic multiversion resolvers and dispatch remain separate from explicit
+feature-specific calls and queries.
+
+### Semantic lowering
+
+Prefer existing generic vector/integer IR when it preserves the full contract.
+Target intrinsics own operations whose semantics cannot be expressed there.
+Attach reviewed effects before allowing CSE, DCE, hoisting or constant folding;
+replace the current binary pure/pinned classification only where richer effects
+are required, using the shared memory and FP-state contracts.
+
+Masked AVX-512 operations require typed predicates, merge/zero results, opmask
+allocation and defined lane mapping. Masked memory must suppress the specified
+inactive-lane accesses and faults. Computing an unmasked operation followed by a
+select is not a valid general implementation. Rounding, SAE, MXCSR effects,
+NaN behavior and exception delivery also belong to individual contracts.
+Assembler decorators alone do not supply these semantics.
+
+Retain the current SysV vector ABI policy and extend it deliberately for wide
+values and mask types. Unsupported argument/result transport must diagnose even
+when the body itself has legal instructions. Compiler-generated calls must
+account for caller/callee SIMD and tile state. Any future APX allocation needs
+separate EGPR pools, scratch and spill rules, call clobbers and ABI handling;
+assembler acceptance of r16–r31 must not widen the current allocator implicitly.
+
+### Implementation order and acceptance
+
+1. Inventory and migrate the existing bounded bindings without changing their
+   names, IDs, behavior or feature requirements. Generate recognition and header
+   embedding from one source; keep handwritten semantic lowering where needed.
+2. Finish existing SSE through AVX2 family gaps and scalar crypto/query wrappers.
+   Add the language support required by their real vendor headers. Keep feature
+   permissions explicit at every optimization level.
+3. Add per-function feature permissions and cross-feature inlining/ABI checks.
+   Then implement runtime CPU/OS-state queries and explicit dispatch tests.
+4. Add the 512-bit and mask type/ABI/allocation foundation, then AVX-512 families
+   in dependency order. Each family needs encoding, IR, frontend and semantic
+   evidence before it is included in the compatibility claim.
+5. Add AMX wrappers and state management after assembly support, with explicit
+   tile effects and suitable runtime qualification. Treat APX compiler
+   allocation and missing encoding families as their own backend work.
+
+For every admitted binding, test declaration/header inclusion, positive calls
+at `-O0` and optimized settings, required immediate diagnostics, target/feature
+rejection, result types and ABI layout. Validate semantic families using pinned
+Clang/GCC or independent scalar/assembly oracles, including boundary controls,
+NaNs, aliasing, guard pages, masks and visible state changes where applicable.
+Use text/typed/chunked object parity and decode/reassembly for encoding paths.
+
+Compile immutable reference oracles once per fixture and reuse them across
+selector/allocator/spill matrices. Execute one image when byte parity has
+already established equivalent output routes. Unsupported host features produce
+explicit execution skips while cross-assembly checks still run. AMX/APX/AVX-512
+byte agreement is not hardware execution evidence. Family runtime qualification
+must identify the machine, CPU permissions and OS state it actually exercised.

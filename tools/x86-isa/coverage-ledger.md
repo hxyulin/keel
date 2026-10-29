@@ -46,7 +46,8 @@ No timestamps, local build paths or current Git HEAD enter generated output.
 `table_index` follows the producer's stable mnemonic ordering, including ties.
 
 The catalogue generator and ledger share `exclusion_reasons()`. The current
-filters exclude requested alternate AMD/KNC/MPX interpretations and REX2.
+filters exclude requested alternate AMD/KNC/MPX interpretations. REX2
+permission is retained in the generated forms rather than excluded.
 All applicable reasons are retained, so per-reason totals may overlap. Forms
 outside the pinned selections, including other EVEX families, MVEX/XOP/3DNow encodings and explicit
 non-64-bit source records, are named as out of scope rather than assigned

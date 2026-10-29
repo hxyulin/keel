@@ -18,7 +18,23 @@
               12,
               13,
               14,
-              15
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31
             ],
             "parse_digits": null
           },
@@ -46,7 +62,23 @@
               12,
               13,
               14,
-              15
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31
             ],
             "parse_digits": null
           },
@@ -74,7 +106,23 @@
               12,
               13,
               14,
-              15
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31
             ],
             "parse_digits": null
           },
@@ -102,7 +150,23 @@
               12,
               13,
               14,
-              15
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31
             ],
             "parse_digits": null
           },
@@ -602,16 +666,52 @@
         "width": 64,
         "check_number": true
       }
+    },
+    {
+      "variant": "Tile",
+      "id": 11,
+      "symbolic_tag": 11,
+      "doc": "AMX tile register; its configured shape is runtime tile state, with a maximum 1024-byte payload.",
+      "views": [
+        {
+          "width": 8192,
+          "numbered": {
+            "prefix": "tmm",
+            "suffix": "",
+            "numbers": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7
+            ],
+            "parse_digits": 1
+          }
+        }
+      ],
+      "format": {
+        "check": [
+          "number",
+          "width",
+          "high_byte"
+        ]
+      },
+      "isa_kinds": [
+        "tmm"
+      ],
+      "decode": {
+        "width": 8192,
+        "check_number": true
+      }
     }
   ],
   "decoder_only": [
     {
       "isa_kind": "bnd",
       "prefix": "bnd"
-    },
-    {
-      "isa_kind": "tmm",
-      "prefix": "tmm"
     }
   ]
 }

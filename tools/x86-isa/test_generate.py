@@ -98,9 +98,9 @@ class GeneratorTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'no imported forms'):
             generate.extension_adapters(self.data, ['nonexistent'])
         identities, features, vex = generate.extension_adapters(self.data, self.adapters['extensions'])
-        self.assertEqual(len(identities), 26)
+        self.assertEqual(len(identities), 42)
         self.assertEqual([i['mnemonic'] for i in identities if i['scalar_suffix']],
-                         ['adcx', 'adox', 'rdfsbase', 'rdgsbase', 'wrfsbase', 'wrgsbase'])
+                         ['adcx', 'adox', 'rdfsbase', 'rdgsbase', 'wrfsbase', 'wrgsbase', 'pushp', 'popp'])
         non_scalar, _, _ = generate.extension_adapters(self.data, ['serialize', 'clwb', 'tpause', 'rdrand', 'rdseed'])
         self.assertFalse(any(i['scalar_suffix'] for i in non_scalar))
         source = generate.feature_adapters(self.data, features, self.policy)

@@ -154,5 +154,20 @@
   ],
   "WAITPKG": [
     "waitpkg"
+  ],
+  "AMX_TILE": [
+    "amx_tile"
+  ],
+  "AMX_INT8": [
+    "amx_int8"
+  ],
+  "AMX_BF16": [
+    "amx_bf16"
+  ],
+  "AMX_FP16": [
+    "amx_fp16"
+  ],
+  "APX_F": [
+    "apx_f"
   ]
 }

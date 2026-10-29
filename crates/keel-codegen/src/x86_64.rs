@@ -1796,6 +1796,7 @@ impl<'a> FunctionCompiler<'a> {
                     args,
                     frame_register,
                     (function_index << 32) | inst.index() as u64,
+                    wide_vectors,
                 )
                 .map_err(err)?;
                 inline_asm_plans.insert(inst, plan);

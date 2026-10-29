@@ -293,7 +293,7 @@ fn matches_operand(spec: IsaOperand, o: &Operand, size: u16, address: u16) -> bo
             if spec.kind == "rel" {
                 return true;
             }
-            if spec.kind != "imm" {
+            if !matches!(spec.kind, "imm" | "abs") {
                 return false;
             }
             let bytes = spec.bytes(size);
@@ -354,6 +354,10 @@ fn match_form<'a>(
         w,
         address,
     } = context;
+    let rex2 = form.rex2 == 1 || i.required_features().apx_f;
+    if rex2 && (form.rex2 == -1 || form.vex || form.map > 1) {
+        return None;
+    }
     if !form.allows_size(size)
         || form.addresses & if address == 32 { 2 } else { 4 } == 0
         || d.size.is_some_and(|n| n != size)
@@ -392,7 +396,8 @@ fn match_form<'a>(
     if matches!(i.opcode, Core(CoreOpcode::Ud0 | CoreOpcode::Ud1)) && i.operands.len() != 2 {
         return None;
     }
-    let vex = d.name.starts_with('v') && !matches!(d.name.as_str(), "verr" | "verw")
+    let vex = i.opcode.required_features().amx_tile
+        || d.name.starts_with('v') && !matches!(d.name.as_str(), "verr" | "verw")
         || matches!(
             i.opcode,
             Andn | Bextr
@@ -657,6 +662,14 @@ fn match_form<'a>(
     if used != i.operands.len() {
         return None;
     }
+    if form.isa.starts_with("AMX_")
+        && form.rm_mask == 1 << 4
+        && i.operands
+            .iter()
+            .any(|o| matches!(o, M(m) if m.base.is_some_and(|r| r.class == RegisterClass::Rip)))
+    {
+        return None;
+    }
     if form.gather {
         let registers: SmallVec<[u8; 3]> = i
             .operands
@@ -751,7 +764,7 @@ fn emit<'a>(
     let (mut code, n) = f.opcode();
     code[n - 1] |= opcode_reg & 7;
     if f.vex {
-        if d.address32 {
+        if d.address32 && !f.isa.starts_with("AMX_") {
             return Err("32-bit addresses are not supported on VEX forms".into());
         }
         let pp = match prefix {
@@ -769,22 +782,41 @@ fn emit<'a>(
                     source,
                     vector256: f.vector == 256,
                     wide: choice.w,
+                    force_sib: f.rm_mask == 1 << 4,
                 },
                 f.byte,
                 rm,
-                false,
+                address == 32,
             )?;
         } else {
-            e.bytes.extend([
-                0xc5,
-                0x80 | source.map_or(0x78, |r| (!r & 15) << 3)
-                    | if f.vector == 256 { 4 } else { 0 }
-                    | pp,
-                f.byte,
-            ]);
+            let v =
+                source.map_or(0x78, |r| (!r & 15) << 3) | if f.vector == 256 { 4 } else { 0 } | pp;
+            if f.map == 1 && !choice.w {
+                e.bytes.extend([0xc5, 0x80 | v, f.byte]);
+            } else {
+                e.bytes.extend([
+                    0xc4,
+                    0xe0 | f.map,
+                    v | if choice.w { 0x80 } else { 0 },
+                    f.byte,
+                ]);
+            }
+            if f.mod_mask != 0 {
+                e.bytes.push(0xc0 | (field << 3) | rm_number);
+            }
         }
     } else if let Some(rm) = rm {
-        e.rm(prefix, &code[..n], bits, field, rm, field_byte)?;
+        e.rm(
+            LegacyPrefix {
+                mandatory: prefix,
+                bits,
+                rex2: f.rex2 == 1 || i.required_features().apx_f,
+            },
+            &code[..n],
+            field,
+            rm,
+            field_byte,
+        )?;
     } else {
         if address == 32 {
             e.bytes.push(0x67);
@@ -801,11 +833,17 @@ fn emit<'a>(
             .iter()
             .zip(&choice.operands)
             .any(|(_, o)| matches!(o,Some(R(r)) if r.width==8&&r.number>=4&&!r.high_byte));
-        let rex = 0x40 | if choice.w { 8 } else { 0 } | r;
-        if rex != 0x40 || force {
-            e.bytes.push(rex);
+        let rex = 0x40 | if choice.w { 8 } else { 0 } | (r & 1);
+        if f.rex2 == 1 || i.required_features().apx_f {
+            e.bytes
+                .extend([0xd5, (f.map << 7) | ((r >> 1) << 4) | (rex & 15)]);
+            e.bytes.extend_from_slice(&code[usize::from(f.map == 1)..n]);
+        } else {
+            if rex != 0x40 || force {
+                e.bytes.push(rex);
+            }
+            e.bytes.extend_from_slice(&code[..n]);
         }
-        e.bytes.extend_from_slice(&code[..n]);
         if f.mod_mask != 0 {
             e.bytes.push(0xc0 | (field << 3) | rm_number);
         }
@@ -820,7 +858,7 @@ fn emit<'a>(
                 matches!(i.opcode, Call | Jmp),
                 spec.bytes(choice.size) as u8,
             )?;
-        } else if spec.kind == "imm" {
+        } else if matches!(spec.kind, "imm" | "abs") {
             if let Some(I(a)) = op {
                 if let Some(n) = constant(a)
                     && full_byte_pattern(n, spec.bytes(choice.size), choice.size)
@@ -1014,6 +1052,7 @@ pub(super) fn vector_or_state(i: &Instruction) -> bool {
             .iter()
             .any(|o| matches!(o.kind, "xmm" | "ymm" | "mmx"))
             || matches!(f.extension, "SSE" | "SSE2" | "FXSAVE")
+            || f.isa.starts_with("AMX_")
             || f.mnemonic.starts_with("fxsave")
             || f.mnemonic.starts_with("fxrstor")
     })
