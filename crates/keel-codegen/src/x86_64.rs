@@ -4777,6 +4777,21 @@ impl<'a> FunctionCompiler<'a> {
             self.emit(mnemonic, [asm_arg(reg(d, width)), asm_arg(reg(a, width))]);
             return;
         }
+        // A sum into a third register is one LEA. Nothing reads an IR add's
+        // flags, and a 32-bit LEA truncates like a 32-bit ADD, so a 32-bit
+        // constant may be taken as signed.
+        if mnemonic == Opcode::Add && a != d {
+            let at = match b {
+                Operand::Reg(r) if r != d => Some(indexed(r64(a), r64(r), 1)),
+                Operand::Imm(k) if width != Type::I64 => Some(memory(r64(a), (k as i32).into())),
+                Operand::Imm(k) => i32::try_from(k).ok().map(|k| memory(r64(a), k.into())),
+                Operand::Reg(_) => None,
+            };
+            if let Some(at) = at {
+                self.emit(Opcode::Lea, [asm_arg(reg(d, width)), asm_arg(&at)]);
+                return;
+            }
+        }
         // `mov d, a` would overwrite b.
         let dst = match b {
             Operand::Reg(r) if r == d && r != a => S0,

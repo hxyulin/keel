@@ -333,3 +333,52 @@ fn located_product_is_not_lost_at_an_unlocated_root() {
         }
     }
 }
+
+#[test]
+fn sums_into_a_third_register_use_lea() {
+    // Both inputs stay live past each sum, so it needs its own register.
+    for (ty, rhs, wide) in [
+        ("i64", "v1", true),
+        ("i32", "v1", false),
+        ("i64", "v6", true),
+        ("i32", "v6", false),
+    ] {
+        let src = format!(
+            "func @f({ty}, {ty}, ptr) -> {ty} {{
+block0(v0: {ty}, v1: {ty}, v2: ptr):
+ v6 = iconst.{ty} -7
+ v3 = iadd v0, {rhs}
+ store v3, v2
+ v4 = imul v0, v1
+ v5 = imul v4, v3
+ return v5
+}}"
+        );
+        let module = keel_ir::parse(&src).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        let text =
+            compile_with_options(&module, Target::X86_64LinuxGnu, SelectionOptions::ALL).unwrap();
+        keel_asm::x86::assemble_object(&text).unwrap();
+        assert_eq!(count(&text, "add"), 0, "{text}");
+        let sum = text
+            .lines()
+            .find(|l| l.trim_start().starts_with("lea\t") && !l.contains("rip"))
+            .unwrap_or_else(|| panic!("{text}"));
+        // A 32-bit sum writes a 32-bit register; the address is 64-bit.
+        let d = sum.trim_start()["lea\t".len()..].split(',').next().unwrap();
+        assert_eq!(d.starts_with('r') && !d.ends_with('d'), wide, "{sum}");
+    }
+    // A displacement must fit 32 bits; a wider constant keeps the add.
+    let src = "func @f(i64, ptr) -> i64 {
+block0(v0: i64, v1: ptr):
+ v2 = iconst.i64 2147483648
+ v3 = iadd v0, v2
+ store v3, v1
+ v4 = imul v0, v3
+ return v4
+}";
+    let module = keel_ir::parse(src).unwrap();
+    let text =
+        compile_with_options(&module, Target::X86_64LinuxGnu, SelectionOptions::ALL).unwrap();
+    assert_eq!(count(&text, "add"), 1, "{text}");
+}

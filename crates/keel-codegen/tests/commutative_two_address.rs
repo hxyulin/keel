@@ -109,6 +109,8 @@ fn controlled_overlap_instructions_and_materialization() {
                         "lhs" | "same" => {
                             format!("{mnemonic}\t{a}, {}", if layout == "same" { a } else { b })
                         }
+                        // A sum into a third register is one LEA.
+                        "distinct" if *op == "iadd" => format!("lea\t{d}, [rsi + rdi * 1]"),
                         "distinct" => format!("mov\tr8, rsi\n\t{mnemonic}\t{d}, {b}"),
                         "stacka" if *op != "isub" => format!(
                             "{mnemonic}\t{b}, {}",
@@ -118,6 +120,10 @@ fn controlled_overlap_instructions_and_materialization() {
                         "stackb" => format!(
                             "{mnemonic}\t{a}, {}",
                             if bits == 64 { "rcx" } else { "ecx" }
+                        ),
+                        "stackresult" if *op == "iadd" => format!(
+                            "lea\t{}, [rsi + rdi * 1]",
+                            if bits == 64 { "rax" } else { "eax" }
                         ),
                         "stackall" | "stackresult" => format!(
                             "{mnemonic}\t{}, {}",
