@@ -56,6 +56,58 @@ fn clang_object(temp: &Temp, name: &str, source: &str) -> Vec<u8> {
     std::fs::read(output).unwrap()
 }
 
+type Relocation = (String, u64, String, u8, object::RelocationFlags);
+fn relocations(bytes: &[u8]) -> Vec<Relocation> {
+    use object::{ObjectSection, RelocationTarget};
+    let file = object::File::parse(bytes).unwrap();
+    let mut result = Vec::new();
+    for section in file.sections() {
+        for (offset, relocation) in section.relocations() {
+            let RelocationTarget::Symbol(index) = relocation.target() else {
+                panic!("weak definition reference must remain a symbol relocation");
+            };
+            result.push((
+                section.name().unwrap().to_owned(),
+                offset,
+                file.symbol_by_index(index)
+                    .unwrap()
+                    .name()
+                    .unwrap()
+                    .to_owned(),
+                relocation.size(),
+                relocation.flags(),
+            ));
+        }
+    }
+    result
+}
+
+/// Keel's object for `source`, after checking that its nlist entries and
+/// relocations equal Clang's. The runtime tests then link only Keel's objects.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn keel_object_matching_clang(temp: &Temp, source: &str) -> Vec<u8> {
+    let reference = clang_object(temp, "reference", source);
+    let actual = keel_asm::assemble_object(source).unwrap();
+    assert_eq!(nlists(&actual), nlists(&reference), "{source}");
+    assert_eq!(relocations(&actual), relocations(&reference), "{source}");
+    actual
+}
+
+/// Compiles a C driver once, so each link reuses the object.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn driver_object(temp: &Temp, name: &str, source: &str, flags: &[&str]) -> std::path::PathBuf {
+    let input = temp.0.join(format!("{name}.c"));
+    let output = temp.0.join(format!("{name}.o"));
+    std::fs::write(&input, source).unwrap();
+    run(Command::new("clang")
+        .arg("-c")
+        .args(flags)
+        .arg(input)
+        .arg("-o")
+        .arg(&output));
+    output
+}
+
 #[test]
 fn weak_definition_attributes_match_clang_without_changing_visibility() {
     let temp = Temp::new();
@@ -140,9 +192,9 @@ fn exact_aliases_take_target_weak_attributes_with_independent_visibility() {
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn weak_aliases_and_forward_chains_coalesce_across_objects_at_runtime() {
     let temp = Temp::new();
-    let driver = temp.0.join("main.c");
-    std::fs::write(
-        &driver,
+    let driver = driver_object(
+        &temp,
+        "main",
         r#"
 extern int target(void), alias(void), chain(void);
 int main(void) {
@@ -152,41 +204,34 @@ int main(void) {
         || pointers[0] != pointers[1] || pointers[0] != pointers[2];
 }
 "#,
-    )
-    .unwrap();
+        &[],
+    );
     for directive in [".weak_definition", ".weak_def_can_be_hidden"] {
-        for reference in [true, false] {
-            let mut objects = Vec::new();
-            for (index, value) in [7, 11].into_iter().enumerate() {
-                let source = format!(
-                    ".subsections_via_symbols\n.globl _target,_alias,_chain\n.set _alias,_chain\n.set _chain,_target\n{directive} _target\n_target: mov w0,#{value}\nret\n"
-                );
-                let bytes = if reference {
-                    clang_object(&temp, &format!("reference_{index}"), &source)
-                } else {
-                    keel_asm::assemble_object(&source).unwrap()
-                };
-                let object = temp.0.join(format!("weak_{index}.o"));
-                std::fs::write(&object, bytes).unwrap();
-                objects.push(object);
+        let mut objects = Vec::new();
+        for (index, value) in [7, 11].into_iter().enumerate() {
+            let source = format!(
+                ".subsections_via_symbols\n.globl _target,_alias,_chain\n.set _alias,_chain\n.set _chain,_target\n{directive} _target\n_target: mov w0,#{value}\nret\n"
+            );
+            let object = temp.0.join(format!("weak_{index}.o"));
+            std::fs::write(&object, keel_object_matching_clang(&temp, &source)).unwrap();
+            objects.push(object);
+        }
+        for reverse in [false, true] {
+            if reverse {
+                objects.reverse();
             }
-            for reverse in [false, true] {
-                if reverse {
-                    objects.reverse();
-                }
-                let executable = temp.0.join("run");
-                run(Command::new("clang")
-                    .arg(&driver)
-                    .args(&objects)
-                    .arg("-Wl,-dead_strip")
-                    .arg("-o")
-                    .arg(&executable));
-                let status = common::execute(&executable);
-                assert!(
-                    status.success(),
-                    "directive={directive}, clang={reference}, reverse={reverse}, status={status}"
-                );
-            }
+            let executable = temp.0.join("run");
+            run(Command::new("clang")
+                .arg(&driver)
+                .args(&objects)
+                .arg("-Wl,-dead_strip")
+                .arg("-o")
+                .arg(&executable));
+            let status = common::execute(&executable);
+            assert!(
+                status.success(),
+                "directive={directive}, reverse={reverse}, status={status}"
+            );
         }
     }
 }
@@ -195,53 +240,46 @@ int main(void) {
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn weak_annotation_on_alias_of_strong_target_still_overrides_weak_object() {
     let temp = Temp::new();
-    let driver = temp.0.join("main.c");
-    std::fs::write(
-        &driver,
+    let driver = driver_object(
+        &temp,
+        "main",
         "extern int target(void), alias(void);\nint main(void) { int (*volatile pointers[])(void) = {target, alias}; return target() != 42 || alias() != 42 || pointers[0] != pointers[1]; }\n",
-    )
-    .unwrap();
+        &[],
+    );
     for directive in [".weak_definition", ".weak_def_can_be_hidden"] {
-        for reference in [true, false] {
-            let mut objects = Vec::new();
-            for (name, source) in [
-                (
-                    "weak",
-                    ".subsections_via_symbols\n.globl _alias\n.weak_definition _alias\n_alias: mov w0,#7\nret\n".to_owned(),
+        let mut objects = Vec::new();
+        for (name, source) in [
+            (
+                "weak",
+                ".subsections_via_symbols\n.globl _alias\n.weak_definition _alias\n_alias: mov w0,#7\nret\n".to_owned(),
+            ),
+            (
+                "strong",
+                format!(
+                    ".subsections_via_symbols\n.globl _target,_alias\n{directive} _alias\n.set _alias,_target\n_target: mov w0,#42\nret\n"
                 ),
-                (
-                    "strong",
-                    format!(
-                        ".subsections_via_symbols\n.globl _target,_alias\n{directive} _alias\n.set _alias,_target\n_target: mov w0,#42\nret\n"
-                    ),
-                ),
-            ] {
-                let bytes = if reference {
-                    clang_object(&temp, name, &source)
-                } else {
-                    keel_asm::assemble_object(&source).unwrap()
-                };
-                let object = temp.0.join(format!("{name}.o"));
-                std::fs::write(&object, bytes).unwrap();
-                objects.push(object);
+            ),
+        ] {
+            let object = temp.0.join(format!("{name}.o"));
+            std::fs::write(&object, keel_object_matching_clang(&temp, &source)).unwrap();
+            objects.push(object);
+        }
+        for reverse in [false, true] {
+            if reverse {
+                objects.reverse();
             }
-            for reverse in [false, true] {
-                if reverse {
-                    objects.reverse();
-                }
-                let executable = temp.0.join("run");
-                run(Command::new("clang")
-                    .arg(&driver)
-                    .args(&objects)
-                    .arg("-Wl,-dead_strip")
-                    .arg("-o")
-                    .arg(&executable));
-                let status = common::execute(&executable);
-                assert!(
-                    status.success(),
-                    "directive={directive}, clang={reference}, reverse={reverse}, status={status}"
-                );
-            }
+            let executable = temp.0.join("run");
+            run(Command::new("clang")
+                .arg(&driver)
+                .args(&objects)
+                .arg("-Wl,-dead_strip")
+                .arg("-o")
+                .arg(&executable));
+            let status = common::execute(&executable);
+            assert!(
+                status.success(),
+                "directive={directive}, reverse={reverse}, status={status}"
+            );
         }
     }
 }
@@ -252,30 +290,6 @@ fn weak_calls_and_pointers_keep_symbol_relocations() {
     let temp = Temp::new();
     let reference = clang_object(&temp, "reference", source);
     let actual = keel_asm::assemble_object(source).unwrap();
-    let relocations = |bytes: &[u8]| {
-        use object::{ObjectSection, RelocationTarget};
-        let file = object::File::parse(bytes).unwrap();
-        let mut result = Vec::new();
-        for section in file.sections() {
-            for (offset, relocation) in section.relocations() {
-                let RelocationTarget::Symbol(index) = relocation.target() else {
-                    panic!("weak definition reference must remain a symbol relocation");
-                };
-                result.push((
-                    section.name().unwrap().to_owned(),
-                    offset,
-                    file.symbol_by_index(index)
-                        .unwrap()
-                        .name()
-                        .unwrap()
-                        .to_owned(),
-                    relocation.size(),
-                    relocation.flags(),
-                ));
-            }
-        }
-        result
-    };
     assert_eq!(relocations(&actual), relocations(&reference));
     assert_eq!(relocations(&actual).len(), 2);
 }
@@ -305,10 +319,7 @@ fn weak_same_atom_branches_match_clang_resolution() {
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn weak_definitions_coalesce_and_yield_to_strong_definitions_at_runtime() {
     let temp = Temp::new();
-    let driver = temp.0.join("main.c");
-    std::fs::write(
-        &driver,
-        r#"
+    let driver = r#"
 extern int value(void), read_one(void), read_two(void);
 extern int (*pointer_one)(void), (*pointer_two)(void);
 int main(void) {
@@ -317,9 +328,9 @@ int main(void) {
         || read_one() != result || read_two() != result
         || pointer_one != value || pointer_two != value;
 }
-"#,
-    )
-    .unwrap();
+"#;
+    let weak_only = driver_object(&temp, "main_weak", driver, &["-DEXPECTED=0"]);
+    let with_strong = driver_object(&temp, "main_strong", driver, &["-DEXPECTED=42"]);
     let strong = temp.0.join("strong.o");
     std::fs::write(
         &strong,
@@ -331,49 +342,40 @@ int main(void) {
     )
     .unwrap();
     for directive in [".weak_definition", ".weak_def_can_be_hidden"] {
-        for reference in [false, true] {
-            let mut objects = Vec::new();
-            for (name, value) in [("one", 7), ("two", 11)] {
-                let source = format!(
-                    ".subsections_via_symbols\n.globl _value,_read_{name},_pointer_{name}\n{directive} _value\n_value: mov w0,#{value}\nret\n_read_{name}: b _value\n.data\n.p2align 3\n_pointer_{name}: .quad _value\n"
-                );
-                let bytes = if reference {
-                    clang_object(&temp, name, &source)
-                } else {
-                    keel_asm::assemble_object(&source).unwrap()
-                };
-                let object = temp.0.join(format!("weak_{name}.o"));
-                std::fs::write(&object, bytes).unwrap();
-                objects.push(object);
+        let mut objects = Vec::new();
+        for (name, value) in [("one", 7), ("two", 11)] {
+            let source = format!(
+                ".subsections_via_symbols\n.globl _value,_read_{name},_pointer_{name}\n{directive} _value\n_value: mov w0,#{value}\nret\n_read_{name}: b _value\n.data\n.p2align 3\n_pointer_{name}: .quad _value\n"
+            );
+            let object = temp.0.join(format!("weak_{name}.o"));
+            std::fs::write(&object, keel_object_matching_clang(&temp, &source)).unwrap();
+            objects.push(object);
+        }
+        // Reverse the order as well: a strong definition always prevails,
+        // while either weak body may be selected when both are weak.
+        for reverse in [false, true] {
+            if reverse {
+                objects.reverse();
             }
-            // Reverse the order as well: a strong definition always prevails,
-            // while either weak body may be selected when both are weak.
-            for reverse in [false, true] {
-                if reverse {
-                    objects.reverse();
+            for strong_definition in [false, true] {
+                let executable = temp.0.join("run");
+                let mut command = Command::new("clang");
+                command
+                    .arg(if strong_definition {
+                        &with_strong
+                    } else {
+                        &weak_only
+                    })
+                    .args(&objects);
+                if strong_definition {
+                    command.arg(&strong);
                 }
-                for with_strong in [false, true] {
-                    let executable = temp.0.join("run");
-                    let mut command = Command::new("clang");
-                    command.arg(&driver).args(&objects);
-                    if with_strong {
-                        command.arg(&strong);
-                    }
-                    command
-                        .arg(if with_strong {
-                            "-DEXPECTED=42"
-                        } else {
-                            "-DEXPECTED=0"
-                        })
-                        .arg("-Wl,-dead_strip")
-                        .arg("-o")
-                        .arg(&executable);
-                    run(&mut command);
-                    assert!(
-                        common::execute(&executable).success(),
-                        "directive={directive}, clang={reference}, reverse={reverse}, strong={with_strong}"
-                    );
-                }
+                command.arg("-Wl,-dead_strip").arg("-o").arg(&executable);
+                run(&mut command);
+                assert!(
+                    common::execute(&executable).success(),
+                    "directive={directive}, reverse={reverse}, strong={strong_definition}"
+                );
             }
         }
     }

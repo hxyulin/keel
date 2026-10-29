@@ -202,28 +202,66 @@ fn strict_v1_tier_matrix_matches_llvm_and_gnu() {
     }
     std::fs::remove_dir_all(dir).unwrap();
 }
-fn harness() -> String {
-    let mut c = String::from(
-        "#include <stdint.h>\n#include <string.h>\n#include <math.h>\n#include <fenv.h>\n#include <stdio.h>\n#include <xmmintrin.h>\n",
-    );
+/// The fixture's functions as (return type, name, parameter type).
+fn signatures() -> Vec<(&'static str, String, &'static str)> {
+    let mut out = Vec::new();
     for bits in [8, 16, 32, 64] {
-        c += &format!("extern uint64_t pc{bits}(uint64_t);\n");
+        out.push(("uint64_t", format!("pc{bits}"), "uint64_t"));
     }
-    c += "extern __uint128_t pc128(__uint128_t);\nextern uint64_t pc_pressure(uint64_t);\n";
+    out.push(("__uint128_t", "pc128".into(), "__uint128_t"));
+    out.push(("uint64_t", "pc_pressure".into(), "uint64_t"));
     for bits in [32, 64] {
         let ty = if bits == 32 { "float" } else { "double" };
         for op in ["fnearest", "ffloor", "fceil", "ftrunc"] {
-            c +=
-                &format!("extern {ty} {op}{bits}({ty});\nextern {ty} {op}{bits}_pressure({ty});\n");
+            out.push((ty, format!("{op}{bits}"), ty));
+            out.push((ty, format!("{op}{bits}_pressure"), ty));
         }
     }
-    c += "int main(void) { uint64_t r=0x123456789abcdefULL;\nfor(unsigned n=0;n<10000;n++) {r^=r<<13;r^=r>>7;r^=r<<17;\n";
-    for bits in [8, 16, 32, 64] {
+    out
+}
+/// One C harness checks every tier. Tier `k` defines its functions with the
+/// prefix `t{k}_`, so all tiers link into one image, and one check function
+/// calls each tier through a table.
+fn harness(tiers: &[String]) -> String {
+    let mut c = String::from(
+        "#include <stdint.h>\n#include <string.h>\n#include <math.h>\n#include <fenv.h>\n#include <stdio.h>\n#include <xmmintrin.h>\nstruct tier {\n",
+    );
+    for (ret, name, arg) in signatures() {
+        c += &format!("{ret} (*{name})({arg});\n");
+    }
+    c += "};\n";
+    for k in 0..tiers.len() {
+        for (ret, name, arg) in signatures() {
+            c += &format!("extern {ret} t{k}_{name}({arg});\n");
+        }
+    }
+    c += &checks();
+    c += "int main(void) { int status;\n";
+    for (k, tier) in tiers.iter().enumerate() {
+        let table = signatures()
+            .iter()
+            .map(|(_, name, _)| format!("t{k}_{name}"))
+            .collect::<Vec<_>>()
+            .join(",");
         c += &format!(
-            "{{uint{bits}_t x=(uint{bits}_t)r; unsigned want=0; for(unsigned b=0;b<{bits};b++) want+=(x>>b)&1; if(pc{bits}(x)!=want) return 1;}}\n"
+            "{{const struct tier t={{{table}}}; if((status=check(&t))) {{fprintf(stderr,\"{tier}: %d\\n\",status); return status;}}}}\n"
         );
     }
-    c += "{uint64_t hi=(r<<19)|(r>>45); __uint128_t x=((__uint128_t)hi<<64)|r; unsigned want=0; for(unsigned b=0;b<128;b++) want+=(x>>b)&1; if(pc128(x)!=want) return 2;}\n{uint64_t want=0; for(unsigned b=0;b<64;b++) want+=(r>>b)&1; for(unsigned j=1;j<=20;j++) want^=r+j; if(pc_pressure(r)!=want) return 5;}\n}\n";
+    c += "return 0; }\n";
+    c
+}
+fn checks() -> String {
+    let p = "t->";
+    let mut c = String::new();
+    c += "static int check(const struct tier *t) { uint64_t r=0x123456789abcdefULL;\nfor(unsigned n=0;n<10000;n++) {r^=r<<13;r^=r>>7;r^=r<<17;\n";
+    for bits in [8, 16, 32, 64] {
+        c += &format!(
+            "{{uint{bits}_t x=(uint{bits}_t)r; unsigned want=0; for(unsigned b=0;b<{bits};b++) want+=(x>>b)&1; if({p}pc{bits}(x)!=want) return 1;}}\n"
+        );
+    }
+    c += &format!(
+        "{{uint64_t hi=(r<<19)|(r>>45); __uint128_t x=((__uint128_t)hi<<64)|r; unsigned want=0; for(unsigned b=0;b<128;b++) want+=(x>>b)&1; if({p}pc128(x)!=want) return 2;}}\n{{uint64_t want=0; for(unsigned b=0;b<64;b++) want+=(r>>b)&1; for(unsigned j=1;j<=20;j++) want^=r+j; if({p}pc_pressure(r)!=want) return 5;}}\n}}\n"
+    );
     // Independent libm oracle, with bit-exact zero/NaN checks and varied ambient rounding.
     for bits in [32, 64] {
         let (ty, suffix, one, sign, quiet, exp) = if bits == 32 {
@@ -279,7 +317,7 @@ fn harness() -> String {
             ("ftrunc", "trunc"),
         ] {
             c += &format!(
-                "{{_mm_setcsr(_mm_getcsr()&~64u); fesetround(FE_TONEAREST); volatile {ty} want={oracle}{suffix}(x); uint{bits}_t expected; memcpy(&expected,(const void*)&want,sizeof(want)); if((raw&{exp}ULL)=={exp}ULL && (raw&({quiet}ULL*2-1))) expected=raw|{quiet}ULL; int modes[]={{FE_TONEAREST,FE_DOWNWARD,FE_UPWARD,FE_TOWARDZERO}}; for(unsigned m=0;m<4;m++) for(unsigned daz=0;daz<=64;daz+=64) {{fesetround(modes[m]); _mm_setcsr((_mm_getcsr()&~64u)|daz); uint{bits}_t check_expected=(daz && !(raw&{exp}ULL))?(raw&{sign}ULL):expected; feclearexcept(FE_ALL_EXCEPT); {ty} got={op}{bits}(x); uint{bits}_t actual; memcpy(&actual,&got,sizeof(got)); if(actual!=check_expected || fetestexcept(FE_INEXACT) || (!!fetestexcept(FE_INVALID) != (((raw&{exp}ULL)=={exp}ULL) && (raw&({quiet}ULL*2-1)) && !(raw&{quiet}ULL)))) {{fprintf(stderr,\"{op}{bits} n=%u mode=%u raw=%llx got=%llx want=%llx\\n\",n,m,(unsigned long long)raw,(unsigned long long)actual,(unsigned long long)check_expected); return 3;}} }} }}\n"
+                "{{_mm_setcsr(_mm_getcsr()&~64u); fesetround(FE_TONEAREST); volatile {ty} want={oracle}{suffix}(x); uint{bits}_t expected; memcpy(&expected,(const void*)&want,sizeof(want)); if((raw&{exp}ULL)=={exp}ULL && (raw&({quiet}ULL*2-1))) expected=raw|{quiet}ULL; int modes[]={{FE_TONEAREST,FE_DOWNWARD,FE_UPWARD,FE_TOWARDZERO}}; for(unsigned m=0;m<4;m++) for(unsigned daz=0;daz<=64;daz+=64) {{fesetround(modes[m]); _mm_setcsr((_mm_getcsr()&~64u)|daz); uint{bits}_t check_expected=(daz && !(raw&{exp}ULL))?(raw&{sign}ULL):expected; feclearexcept(FE_ALL_EXCEPT); {ty} got={p}{op}{bits}(x); uint{bits}_t actual; memcpy(&actual,&got,sizeof(got)); if(actual!=check_expected || fetestexcept(FE_INEXACT) || (!!fetestexcept(FE_INVALID) != (((raw&{exp}ULL)=={exp}ULL) && (raw&({quiet}ULL*2-1)) && !(raw&{quiet}ULL)))) {{fprintf(stderr,\"{op}{bits} n=%u mode=%u raw=%llx got=%llx want=%llx\\n\",n,m,(unsigned long long)raw,(unsigned long long)actual,(unsigned long long)check_expected); return 3;}} }} }}\n"
             );
         }
         c += "}}\n";
@@ -287,7 +325,8 @@ fn harness() -> String {
     c += "_mm_setcsr(_mm_getcsr()&~64u); fesetround(FE_TONEAREST);\n";
     for bits in [32, 64] {
         for op in ["fnearest", "ffloor", "fceil", "ftrunc"] {
-            c += &format!("if({op}{bits}_pressure(1.25)!= {op}{bits}(1.25)+50.0) return 4;\n");
+            c +=
+                &format!("if({p}{op}{bits}_pressure(1.25)!= {p}{op}{bits}(1.25)+50.0) return 4;\n");
         }
     }
     c += "return 0; }\n";
@@ -308,39 +347,36 @@ fn strict_v1_executes_against_independent_oracle() {
     }
     let dir = std::env::temp_dir().join(format!("keel-v1-runtime-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let c = dir.join("test.c");
-    std::fs::write(&c, harness()).unwrap();
+    // Every selection and allocation tier links into one image.
+    let mut tiers = Vec::new();
+    let mut inputs = Vec::new();
+    let mut wrapped = String::from(".text\n");
     for selection in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
         SelectionTier::Full,
     ] {
         for allocation in [AllocationTier::Fast, AllocationTier::Full] {
-            let (_, p) = compile(selection, allocation);
-            let obj = dir.join("test.o");
-            std::fs::write(
-                &obj,
+            let k = tiers.len();
+            tiers.push(format!("{selection:?}/{allocation:?}"));
+            let source = fixture().replace("func @", &format!("func @t{k}_"));
+            let (_, p) = compile_source(&source, selection, allocation);
+            let bytes =
                 assemble_program_object_with_features(&p, Features::for_level(CpuLevel::V1))
-                    .unwrap(),
-            )
-            .unwrap();
-            let exe = dir.join("test");
-            let mut clang = Command::new("clang");
-            let input = if darwin {
+                    .unwrap();
+            if darwin {
                 // Same SysV register ABI. Rewrap each relocation-free function's
                 // exact ELF bytes, preserving internal relative branches.
-                let bytes = std::fs::read(&obj).unwrap();
                 let file = object::File::parse(bytes.as_slice()).unwrap();
                 let text = file.section_by_name(".text").unwrap();
                 assert_eq!(text.relocations().count(), 0);
                 let bytes = text.data().unwrap();
-                let mut source = String::from(".text\n");
                 for sym in file
                     .symbols()
                     .filter(|s| s.kind() == object::SymbolKind::Text && s.size() > 0)
                 {
                     let name = sym.name().unwrap();
-                    source += &format!(
+                    wrapped += &format!(
                         ".globl _{name}\n_{name}:\n.byte {}\n",
                         bytes[sym.address() as usize..(sym.address() + sym.size()) as usize]
                             .iter()
@@ -349,23 +385,31 @@ fn strict_v1_executes_against_independent_oracle() {
                             .join(",")
                     );
                 }
-                let path = dir.join("wrapped.s");
-                std::fs::write(&path, source).unwrap();
-                clang.args(["-target", "x86_64-apple-darwin"]);
-                path
             } else {
-                obj
-            };
-            run(clang
-                .args(["-O2", "-fno-builtin", "-Wall", "-Wextra", "-Werror"])
-                .arg(&c)
-                .arg(&input)
-                .arg("-lm")
-                .arg("-o")
-                .arg(&exe));
-            run(&mut Command::new(&exe));
+                let obj = dir.join(format!("t{k}.o"));
+                std::fs::write(&obj, bytes).unwrap();
+                inputs.push(obj);
+            }
         }
     }
+    let c = dir.join("test.c");
+    std::fs::write(&c, harness(&tiers)).unwrap();
+    let mut clang = Command::new("clang");
+    if darwin {
+        let path = dir.join("wrapped.s");
+        std::fs::write(&path, wrapped).unwrap();
+        clang.args(["-target", "x86_64-apple-darwin"]);
+        inputs.push(path);
+    }
+    let exe = dir.join("test");
+    run(clang
+        .args(["-O2", "-fno-builtin", "-Wall", "-Wextra", "-Werror"])
+        .arg(&c)
+        .args(&inputs)
+        .arg("-lm")
+        .arg("-o")
+        .arg(&exe));
+    run(&mut Command::new(&exe));
     std::fs::remove_dir_all(dir).unwrap();
 }
 

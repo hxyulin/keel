@@ -159,40 +159,87 @@ fn advertised(features: &[&str]) -> bool {
         output.status.success() && output.stdout == b"1\n"
     })
 }
+/// The kernels of one runtime test. Kernel `k` is `_matrix{k}` and its C
+/// check is `check{k}`, so one link and one run cover every kernel.
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-fn native(source: &str, driver: &str) {
-    use common::{Temp, execute, run};
-    use std::process::Command;
-    compare(source);
-    let temp = Temp::new();
-    let object = temp.0.join("matrix.o");
-    let c = temp.0.join("driver.c");
-    let executable = temp.0.join("matrix");
-    std::fs::write(
-        &object,
-        keel_asm::assemble_object_with_features(source, TargetFeatures::apple_m5()).unwrap(),
-    )
-    .unwrap();
-    std::fs::write(&c, driver).unwrap();
-    run(Command::new("clang")
-        .arg("-O2")
-        .arg(&c)
-        .arg(&object)
-        .arg("-o")
-        .arg(&executable));
-    assert_eq!(execute(&executable).code(), Some(0));
+#[derive(Default)]
+struct Native {
+    kernels: Vec<String>,
+    checks: Vec<String>,
+}
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+impl Native {
+    /// `driver` declares `matrix` and defines `int main(void)`.
+    fn add(&mut self, body: &str, driver: &str) {
+        let k = self.kernels.len();
+        self.kernels.push(leaf(&format!("_matrix{k}"), body));
+        self.checks.push(
+            driver
+                .replace("matrix", &format!("matrix{k}"))
+                .replace("int main(void)", &format!("static int check{k}(void)")),
+        );
+    }
+    fn run(self) {
+        use common::{Temp, execute, run};
+        use std::process::Command;
+        if self.kernels.is_empty() {
+            return;
+        }
+        // One Clang run checks every kernel; only a mismatch compares each
+        // kernel alone to name it.
+        let source = self.kernels.concat();
+        if std::panic::catch_unwind(|| compare(&source)).is_err() {
+            for kernel in &self.kernels {
+                if std::panic::catch_unwind(|| compare(kernel)).is_err() {
+                    panic!("kernel bytes differ from Clang:\n{kernel}");
+                }
+            }
+            panic!("kernel bytes differ from Clang only when combined");
+        }
+        let mut driver = String::from("#include <stdio.h>\n");
+        for check in &self.checks {
+            driver += check;
+            driver.push('\n');
+        }
+        driver += "int main(void) { int status;\n";
+        for k in 0..self.checks.len() {
+            driver += &format!(
+                "if ((status = check{k}())) {{ fprintf(stderr, \"kernel {k}: %d\\n\", status); return 1; }}\n"
+            );
+        }
+        driver += "return 0; }\n";
+        let temp = Temp::new();
+        let object = temp.0.join("matrix.o");
+        let c = temp.0.join("driver.c");
+        let executable = temp.0.join("matrix");
+        std::fs::write(
+            &object,
+            keel_asm::assemble_object_with_features(&source, TargetFeatures::apple_m5()).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(&c, driver).unwrap();
+        run(Command::new("clang")
+            .arg("-O2")
+            .arg(&c)
+            .arg(&object)
+            .arg("-o")
+            .arg(&executable));
+        let status = execute(&executable);
+        assert_eq!(status.code(), Some(0), "{}", self.kernels.join("\n"));
+    }
 }
 // Ordinary PCS leaf, entered with inactive ZA. No calls in streaming mode;
 // preserve the callee-saved low halves of V8..V15 across both transitions.
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-fn leaf(body: &str) -> String {
+fn leaf(name: &str, body: &str) -> String {
     format!(
-        ".text\n.globl _matrix\n_matrix:\nsub sp,sp,#64\nstp d8,d9,[sp]\nstp d10,d11,[sp,#16]\nstp d12,d13,[sp,#32]\nstp d14,d15,[sp,#48]\nsmstart\n{body}\nsmstop\nldp d8,d9,[sp]\nldp d10,d11,[sp,#16]\nldp d12,d13,[sp,#32]\nldp d14,d15,[sp,#48]\nadd sp,sp,#64\nret\n"
+        ".text\n.globl {name}\n{name}:\nsub sp,sp,#64\nstp d8,d9,[sp]\nstp d10,d11,[sp,#16]\nstp d12,d13,[sp,#32]\nstp d14,d15,[sp,#48]\nsmstart\n{body}\nsmstop\nldp d8,d9,[sp]\nldp d10,d11,[sp,#16]\nldp d12,d13,[sp,#32]\nldp d14,d15,[sp,#48]\nadd sp,sp,#64\nret\n"
     )
 }
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[test]
 fn native_outer_products_verify_matrix_results_and_memory_round_trips() {
+    let mut native = Native::default();
     for (features, op, dst, src, input, output, expected) in [
         (vec!["FEAT_SME"], "fmopa", "s", "s", "float", "float", 6),
         (
@@ -250,8 +297,9 @@ fn native_outer_products_verify_matrix_results_and_memory_round_trips() {
         let driver = format!(
             "extern long matrix(const {input}*,const {input}*,{output}*); int main(void) {{ {input} a[256],b[256]; {output} out[256]; for(int i=0;i<256;i++){{a[i]=2;b[i]=3;out[i]=0;}} long n=matrix(a,b,out); if(n<1||n>256)return 1; for(int i=0;i<n;i++)if(out[i]!={expected})return 2; return 0; }}"
         );
-        native(&leaf(&body), &driver);
+        native.add(&body, &driver);
     }
+    native.run();
 }
 #[test]
 fn baseline_bytes_remain_unchanged_under_m5() {
@@ -404,6 +452,7 @@ fn native_sme2_grouped_tile_and_array_transfers_preserve_values() {
     if !advertised(&["FEAT_SME2"]) {
         return;
     }
+    let mut native = Native::default();
     for len in [2, 4] {
         // Test horizontal and vertical slice groups independently. Each vector
         // has a different value so exchanges and replication cannot pass.
@@ -421,8 +470,8 @@ fn native_sme2_grouped_tile_and_array_transfers_preserve_values() {
                     i + 7
                 ));
             }
-            native(
-                &leaf(&body),
+            native.add(
+                &body,
                 "extern long matrix(void);int main(void){return matrix()!=0;}",
             );
         }
@@ -438,11 +487,12 @@ fn native_sme2_grouped_tile_and_array_transfers_preserve_values() {
                 i + 17
             ));
         }
-        native(
-            &leaf(&body),
+        native.add(
+            &body,
             "extern long matrix(void);int main(void){return matrix()!=0;}",
         );
     }
+    native.run();
 }
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -451,8 +501,9 @@ fn native_sme2_za_accumulation_and_zt0_round_trip() {
     if !advertised(&["FEAT_SME2"]) {
         return;
     }
-    native(
-        &leaf("ldr zt0,[x0]\nstr zt0,[x1]\nzero {zt0}\nstr zt0,[x2]"),
+    let mut native = Native::default();
+    native.add(
+        "ldr zt0,[x0]\nstr zt0,[x1]\nzero {zt0}\nstr zt0,[x2]",
         "extern void matrix(const unsigned char*,unsigned char*,unsigned char*);int main(void){unsigned char in[64],out[64],zero[64];for(int i=0;i<64;i++){in[i]=i*3+1;out[i]=0;zero[i]=255;}matrix(in,out,zero);for(int i=0;i<64;i++)if(out[i]!=in[i]||zero[i]!=0)return 1;return 0;}",
     );
     for len in [2, 4] {
@@ -473,7 +524,7 @@ fn native_sme2_za_accumulation_and_zt0_round_trip() {
         let driver = format!(
             "extern void matrix(const float*,const float*,float*);int main(void){{float a[256],b[256],out[4];for(int i=0;i<256;i++){{a[i]=2;b[i]=3;}}matrix(a,b,out);for(int i=0;i<{len};i++)if(out[i]!=(i+1)*6)return 1;return 0;}}"
         );
-        native(&leaf(&body), &driver);
+        native.add(&body, &driver);
         let mut body = String::from("mov w8,#0\nptrue p0.s\nzero {za}\n");
         for i in 0..len {
             body.push_str(&format!("dup z{i}.s,#{}\n", i + 7));
@@ -486,13 +537,14 @@ fn native_sme2_za_accumulation_and_zt0_round_trip() {
                 i * 4
             ));
         }
-        native(
-            &leaf(&body),
+        native.add(
+            &body,
             &format!(
                 "extern void matrix(int*);int main(void){{int out[4];matrix(out);for(int i=0;i<{len};i++)if(out[i]!=i+7)return 1;return 0;}}"
             ),
         );
     }
+    native.run();
 }
 
 #[test]
@@ -554,6 +606,7 @@ fn outer_product_tiles_predicates_and_optional_types_match_clang() {
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[test]
 fn native_bf16_outer_products_verify_widening_and_non_widening_results() {
+    let mut native = Native::default();
     for (flag, dst, expected, output) in [
         ("FEAT_SME", "s", "0x41400000u", "unsigned int"),
         ("FEAT_SME_B16B16", "h", "0x40c0u", "unsigned short"),
@@ -569,6 +622,7 @@ fn native_bf16_outer_products_verify_widening_and_non_widening_results() {
         let driver = format!(
             "extern long matrix(const unsigned short*,const unsigned short*,{output}*);int main(void){{unsigned short a[256],b[256];{output} out[256];for(int i=0;i<256;i++){{a[i]=0x4000;b[i]=0x4040;out[i]=0;}}long n=matrix(a,b,out);if(n<1||n>256)return 1;for(int i=0;i<n;i++)if(out[i]!={expected})return 2;return 0;}}"
         );
-        native(&leaf(&body), &driver);
+        native.add(&body, &driver);
     }
+    native.run();
 }
