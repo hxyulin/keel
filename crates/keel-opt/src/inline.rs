@@ -713,6 +713,53 @@ fn eligibility_reason_with_frames(
     body_eligibility_reason(f, frames)
 }
 
+// These operations refer only to SSA operands and architectural state. Cloning
+// their arguments preserves their existing pinning/effects. Frame observers,
+// nonlocal control flow and owned regions keep their separate restrictions.
+fn inlineable_target_intrinsic(id: Intrinsic) -> bool {
+    id.x86_packed_search().is_some()
+        || id.x86_sign_blend().is_some()
+        || id.x86_packed_pair().is_some()
+        || id.x86_packed_shift().is_some()
+        || id.x86_byte_shift().is_some()
+        || id.is_x86_byte_shuffle()
+        || id.is_x86_cache_stream()
+        || id.is_x86_raw_fma()
+        || id.is_x86_f16c()
+        || id.is_x86_bmi()
+        || id.is_x86_gather()
+        || id.is_x86_masked_mem()
+        || id.is_x86_raw_fp_convert()
+        || id.is_x86_fp_compare()
+        || id.x86_aes_opcode().is_some()
+        || id.is_x86_pure_bits()
+        || id.is_x86_fp_misc()
+        || id.is_x86_legacy_raw_fp_convert()
+        || id.is_x86_legacy_fp_misc()
+        || id.is_x86_legacy_fp_compare()
+        || id.is_x86_legacy_sign_mask()
+        || id.is_x86_legacy_fp_v2()
+        || id.is_x86_crc32()
+        || id.is_x86_legacy_ptest()
+        || id.is_x86_string()
+        || id.is_x86_fp_horizontal_dot()
+        || matches!(
+            id,
+            Intrinsic::X86Pclmulqdq128
+                | Intrinsic::X86AvxVzeroall
+                | Intrinsic::X86AvxVmaskmovdqu
+                | Intrinsic::X86SseMaskmovdqu
+                | Intrinsic::X86SseReadMxcsr
+                | Intrinsic::X86SseSwapMxcsr
+                | Intrinsic::X86CpuXcr0
+                | Intrinsic::X86Cpuid
+                | Intrinsic::X86Lfence
+                | Intrinsic::X86Sfence
+                | Intrinsic::X86Mfence
+                | Intrinsic::X86Pause
+        )
+}
+
 fn body_eligibility_reason(f: &Function, frames: FrameSemantics) -> Option<&'static str> {
     if f.attrs.noinline || f.attrs.optnone {
         return Some("noinline");
@@ -763,8 +810,9 @@ fn body_eligibility_reason(f: &Function, frames: FrameSemantics) -> Option<&'sta
                         | Intrinsic::Memmove
                         | Intrinsic::Memset
                         | Intrinsic::Debugtrap
-                ) && !(matches!(frames, FrameSemantics::CRequiredInline)
-                    && matches!(id, Intrinsic::FrameAddress | Intrinsic::StackSave)) =>
+                ) && !inlineable_target_intrinsic(*id)
+                    && !(matches!(frames, FrameSemantics::CRequiredInline)
+                        && matches!(id, Intrinsic::FrameAddress | Intrinsic::StackSave)) =>
             {
                 Some("unsupported_callee_intrinsic")
             }
@@ -1186,6 +1234,12 @@ fn run_observed_policy_scoped(
             let callee = template(&frozen, &module.functions, t);
             if decl.sig != callee.sig {
                 Some(("ABI signature mismatch", "abi_signature_mismatch"))
+            } else if !caller
+                .attrs
+                .target_features
+                .permits_inlining(&callee.attrs.target_features)
+            {
+                Some(("target feature mismatch", "target_feature_mismatch"))
             } else if callee.name == caller.name {
                 Some(("recursive callee", "recursive_callee"))
             } else if !requested && callee.attrs.cold && !caller.attrs.cold && !caller.attrs.flatten
@@ -1964,6 +2018,18 @@ pub fn required_inline_asm_with_c_definitions(
                 }
                 if decl.sig != callee.sig {
                     return Err(fail("ABI signature mismatch"));
+                }
+                // Unannotated mandatory wrappers are compiled in the caller's
+                // permission context. Every copied operation still passes the
+                // backend's local legality checks. Explicit callee permissions
+                // cannot be erased this way.
+                if !callee.attrs.target_features.is_empty()
+                    && !caller
+                        .attrs
+                        .target_features
+                        .permits_inlining(&callee.attrs.target_features)
+                {
+                    return Err(fail("target feature mismatch"));
                 }
                 let reason = if definitions.contains(&callee.name.as_str()) {
                     body_eligibility_reason(callee, FrameSemantics::CRequiredInline)

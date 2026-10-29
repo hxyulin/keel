@@ -267,3 +267,42 @@ fn empty_call_cleanup_removes_unused_symbol_addresses_before_emission() {
         assert!(!module.functions.iter().any(|f| f.layout_insts().any(|(_, i)| matches!(f.inst_data(i), keel_ir::InstData::SymbolAddr { symbol } if f.symbol_name(*symbol) == "absent"))), "{tier:?}: {module}");
     }
 }
+
+#[test]
+fn optional_and_required_inlining_preserve_target_permissions() {
+    for (caller, callee, allowed) in [
+        ("", "avx2", false),
+        ("avx", "avx2", false),
+        ("avx2", "avx", true),
+        ("avx2", "", true),
+        ("-avx", "", false),
+    ] {
+        let attribute = |value: &str| {
+            if value.is_empty() {
+                String::new()
+            } else {
+                format!("target_features(\"{value}\")")
+            }
+        };
+        let source = format!(
+            "func @helper(i32) -> i32 alwaysinline {} local {{\nblock0(v0:i32):\n return v0\n}}\nfunc @caller(i32) -> i32 {} {{\nblock0(v0:i32):\n v1 = call @helper(v0)\n return v1\n}}\n",
+            attribute(callee),
+            attribute(caller)
+        );
+        let mut module = keel_ir::parse(&source).unwrap();
+        let original = module.clone();
+        keel_opt::run_passes(&mut module, &["inline"]).unwrap();
+        assert_eq!(
+            !body(&module, "caller").contains("call @helper"),
+            allowed,
+            "{caller:?} <- {callee:?}"
+        );
+        let mut required = original;
+        let result = keel_opt::required_inline_asm(&mut required);
+        if allowed || callee.is_empty() {
+            result.unwrap();
+        } else {
+            assert!(result.unwrap_err().contains("target feature mismatch"));
+        }
+    }
+}

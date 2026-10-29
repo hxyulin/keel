@@ -386,13 +386,12 @@ pub(crate) fn compile_output(
     crate::validate_odr(module, crate::Target::X86_64LinuxGnu)?;
     validate_vector_abi(module)?;
     f80::validate(module)?;
-    crate::validate_vector_width_with_memory_policy(
+    crate::validate_vector_width_per_function(
         module,
         8,
-        if pipeline.selector.x86_features().avx {
-            32
-        } else {
-            16
+        |name, attrs| {
+            crate::x86_features::function_features(name, attrs, pipeline.selector.x86_features())
+                .map(|features| if features.avx { 32 } else { 16 })
         },
         |producer, layout, unnamed| {
             producer.and_then(|p| sysv::producer_aggregate(layout,p)).is_some_and(|policy| {
@@ -428,18 +427,28 @@ pub(crate) fn compile_output(
     let mut frames = Vec::new();
     let symbols = crate::symbols::Symbols::new(module);
     for original in &module.functions {
+        let features = crate::x86_features::function_features(
+            &original.name,
+            &original.attrs,
+            pipeline.selector.x86_features(),
+        )?;
+        let selector = crate::x86_features::FeatureSelector {
+            inner: pipeline.selector,
+            features,
+        };
+        let local_pipeline = crate::CodegenPipeline {
+            selector: &selector,
+            allocator: pipeline.allocator,
+        };
         let boundary = (!debug)
             .then(|| aggregate_boundary::lower(original))
             .flatten();
-        let func = vector::lower(
-            boundary.as_ref().unwrap_or(original),
-            pipeline.selector.x86_features(),
-        );
+        let func = vector::lower(boundary.as_ref().unwrap_or(original), features);
         let mut compiler = FunctionCompiler::new(
             &func,
             &symbols,
             pools,
-            pipeline,
+            &local_pipeline,
             structured,
             crate::emission::function_goal(&func.attrs, emission.goal),
         )?;
@@ -1787,7 +1796,9 @@ impl<'a> FunctionCompiler<'a> {
                 matches!(
                     func.inst_data(i),
                     InstData::Intrinsic {
-                        id: Intrinsic::X86Cx16Cmpxchg16b | Intrinsic::X86Cpuid,
+                        id: Intrinsic::X86Cx16Cmpxchg16b
+                            | Intrinsic::X86Cpuid
+                            | Intrinsic::X86CpuXcr0,
                         ..
                     }
                 )
@@ -3053,7 +3064,8 @@ impl<'a> FunctionCompiler<'a> {
             } => self.native_byte_mask_store(id, args),
             InstData::Intrinsic {
                 id:
-                    id @ (Intrinsic::X86Xgetbv0
+                    id @ (Intrinsic::X86CpuXcr0
+                    | Intrinsic::X86Xgetbv0
                     | Intrinsic::X86Cpuid
                     | Intrinsic::X86Rdtsc
                     | Intrinsic::X86Rdpmc

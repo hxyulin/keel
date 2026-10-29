@@ -29,6 +29,11 @@ fn named_factory_contracts_and_inliner_legality() {
     for attr in ATTRS {
         for final_placement in [false, true] {
             let source = source(attr, final_placement);
+            let source = if attr == "always_inline" {
+                format!("{source} __typeof__(&h) keep_h=h;")
+            } else {
+                source
+            };
             for target in TARGETS {
                 for debug_info in [false, true] {
                     let original = keel_c::compile(
@@ -49,7 +54,8 @@ fn named_factory_contracts_and_inliner_legality() {
                         let main = m.functions.iter().find(|f| f.name == "main").unwrap();
                         assert_eq!(
                             calls(main, "h"),
-                            !optimized || matches!(attr, "noinline" | "returns_twice"),
+                            attr != "always_inline"
+                                && (!optimized || matches!(attr, "noinline" | "returns_twice")),
                             "{source}\n{m}"
                         );
                         assert!(

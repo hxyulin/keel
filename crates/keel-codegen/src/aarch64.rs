@@ -309,6 +309,12 @@ pub(crate) fn compile_output(
     emission: crate::EmissionOptions,
 ) -> Result<Output, CodegenError> {
     crate::validate_function_entries(module)?;
+    if let Some((name, _)) = module.x86_target_feature_request() {
+        return Err(CodegenError {
+            func: name.to_owned(),
+            message: "x86 function target features require x86_64-unknown-linux-gnu".into(),
+        });
+    }
     let selector = crate::emission::FunctionSelector(pipeline.selector);
     let pipeline = &crate::CodegenPipeline {
         selector: &selector,

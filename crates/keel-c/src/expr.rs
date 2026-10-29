@@ -1641,6 +1641,9 @@ impl<'a> Parser<'a> {
         match ty {
             Type::F32 => Ty::Float,
             Type::F64 => Ty::Double,
+            Type::Ptr => Ty::Ptr(self.type_ref(Ty::Void)),
+            Type::I8 => Ty::Int(IntKind::SChar),
+            Type::I16 => Ty::Int(IntKind::Short),
             Type::I32 => INT,
             Type::I64 => Ty::Int(IntKind::LLong),
             Type::Vector(shape) => {
@@ -1667,6 +1670,50 @@ impl<'a> Parser<'a> {
         {
             self.require_native_layout(loc, "x86 builtins")?;
         }
+        if matches!(base, "cpu_supports" | "cpu_init") {
+            if self.target != Target::X86_64LinuxGnu {
+                return Err(Error::new(loc, "CPU capability builtins require x86-64"));
+            }
+            self.require_native_layout(loc, "CPU capability builtins")?;
+            if base == "cpu_init" {
+                self.builtin_args(0, loc)?;
+                return Ok(mk(
+                    ExprKind::Builtin(Builtin::X86CpuInit, self.slice(&[])),
+                    Ty::Void,
+                    loc,
+                ));
+            }
+            let args = self.builtin_args(1, loc)?;
+            let mut argument = &args[0];
+            loop {
+                match argument.kind {
+                    ExprKind::Cast(inner) => argument = inner,
+                    ExprKind::Addr(inner) if matches!(inner.kind, ExprKind::Str(_)) => {
+                        argument = inner
+                    }
+                    _ => break,
+                }
+            }
+            let ExprKind::Str(index) = argument.kind else {
+                return Err(Error::new(
+                    loc,
+                    "CPU capability name must be a string literal",
+                ));
+            };
+            let string = &self.strings[index];
+            let feature = string
+                .bytes
+                .strip_suffix(&[0])
+                .filter(|_| !string.wide)
+                .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                .and_then(crate::x86_cpu::lookup)
+                .ok_or_else(|| Error::new(loc, "unknown CPU capability name"))?;
+            return Ok(mk(
+                ExprKind::Builtin(Builtin::X86CpuSupports(feature), self.slice(&[])),
+                INT,
+                loc,
+            ));
+        }
         if let Some((id, control)) = crate::x86_builtins::semantic_builtin(base) {
             if self.target != Target::X86_64LinuxGnu {
                 return Err(Error::new(loc, "x86 value builtin requires x86-64"));
@@ -1675,10 +1722,12 @@ impl<'a> Parser<'a> {
             let info = id.info();
             let mut args = self.builtin_args(info.params.len(), loc)?;
             for (i, (&expected, arg)) in info.params.iter().zip(&mut args).enumerate() {
-                if let Some(control) = control.filter(|_| i == 1) {
-                    let Some(value) = integer_constant_control(arg, self.c_layout)
-                        .filter(|n| (0..=control.maximum).contains(n))
-                    else {
+                if let Some(control) = control.filter(|control| i == control.index) {
+                    let Some(value) = integer_constant_control(arg, self.c_layout).filter(|n| {
+                        (0..=control.maximum).contains(n)
+                            && (control.allowed_values.is_empty()
+                                || control.allowed_values.contains(n))
+                    }) else {
                         return Err(Error::new(loc, control.diagnostic));
                     };
                     // Each reviewed recipe retains only the control bits exposed by IR.
@@ -1692,7 +1741,10 @@ impl<'a> Parser<'a> {
                     ));
                 }
             }
-            let result = self.x86_value_type(info.returns[0]);
+            let result = info
+                .returns
+                .first()
+                .map_or(Ty::Void, |&ty| self.x86_value_type(ty));
             return Ok(mk(
                 ExprKind::Builtin(Builtin::X86Value(id), self.slice(&args)),
                 result,

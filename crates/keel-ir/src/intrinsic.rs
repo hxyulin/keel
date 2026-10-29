@@ -1910,6 +1910,7 @@ impl Intrinsic {
             Intrinsic::X86Fxsave64 => ("x86_fxsave64", &[Type::Ptr], &[], false),
             Intrinsic::X86Fxrstor64 => ("x86_fxrstor64", &[Type::Ptr], &[], false),
             Intrinsic::X86Xsave64 => ("x86_xsave64", &[Type::Ptr, Type::I64], &[], false),
+            Intrinsic::X86CpuXcr0 => ("x86_cpu_xcr0", &[], &[Type::I64], false),
             Intrinsic::X86Xgetbv0 => ("x86_xgetbv0", &[], &[Type::I64], false),
             Intrinsic::X86Clflush => ("x86_clflush", &[Type::Ptr], &[], false),
             Intrinsic::X86Prefetchnta => ("x86_prefetchnta", &[Type::Ptr], &[], false),
@@ -5376,6 +5377,7 @@ impl Intrinsic {
                 | Self::X86X87InitWait
                 | Self::X86X87Wait
                 | Self::X86MmxEmms
+                | Self::X86CpuXcr0
                 | Self::X86Xgetbv0
                 | Self::X86Cpuid
                 | Self::X86Rdtsc

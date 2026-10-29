@@ -964,10 +964,12 @@ pub enum Intrinsic {
     LifetimeStart = 819,
     #[doc = "`lifetime_end(ptr)`: ends accessibility of the whole fixed stack slot addressed by ptr. A pinned compiler lifetime barrier; emits no machine instructions."]
     LifetimeEnd = 820,
+    #[doc = "Pinned executable-state query: returns XCR0 only when CPUID.1 reports both XSAVE and OSXSAVE; otherwise returns zero. The guarded XGETBV does not grant the enclosing function XSAVE permission."]
+    X86CpuXcr0 = 821,
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 821] = [
+    pub const ALL: [Intrinsic; 822] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -1789,6 +1791,7 @@ impl Intrinsic {
         Intrinsic::X86Swapgs,
         Intrinsic::LifetimeStart,
         Intrinsic::LifetimeEnd,
+        Intrinsic::X86CpuXcr0,
     ];
 }
 
@@ -2606,5 +2609,6 @@ macro_rules! x86_intrinsics {
             | $crate::Intrinsic::X86Hlt
             | $crate::Intrinsic::X86StiHlt
             | $crate::Intrinsic::X86Swapgs
+            | $crate::Intrinsic::X86CpuXcr0
     };
 }

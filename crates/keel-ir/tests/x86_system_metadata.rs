@@ -13,10 +13,14 @@ fn all_numeric_ids_and_inventory_order_stay_stable() {
         .map(|id| (format!("{id:?}"), *id as usize))
         .collect();
     let expected: Vec<_> = fixture(include_str!("fixtures/intrinsic-inventory.txt")).collect();
-    assert_eq!(Intrinsic::ALL.len(), expected.len() + 2);
+    assert_eq!(Intrinsic::ALL.len(), expected.len() + 3);
     assert_eq!(
         &Intrinsic::ALL[expected.len()..],
-        &[Intrinsic::LifetimeStart, Intrinsic::LifetimeEnd]
+        &[
+            Intrinsic::LifetimeStart,
+            Intrinsic::LifetimeEnd,
+            Intrinsic::X86CpuXcr0
+        ]
     );
     assert_eq!(
         actual.len(),

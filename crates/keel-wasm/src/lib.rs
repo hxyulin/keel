@@ -280,6 +280,11 @@ fn prepare<'a>(
     has_placement: bool,
     has_runtime: bool,
 ) -> Result<Prepared<'a>, Diagnostic> {
+    if let Some((name, _)) = module.x86_target_feature_request() {
+        return Err(reject(format!(
+            "@{name}: x86 function target features require x86_64-unknown-linux-gnu"
+        )));
+    }
     if let Some((name, contract)) = module.special_entry_contract() {
         return Err(reject(format!(
             "@{name}: {contract} function entry/return lowering is not implemented"

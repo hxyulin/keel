@@ -217,5 +217,10 @@
       "osxsave"
     ],
     "doc": "Intel APX foundation; REX2 EGPR forms require OS-enabled APX state."
+  },
+  {
+    "field": "monitor",
+    "bit": 38,
+    "doc": "MONITOR/MWAIT instructions; execution requires the OS-enabled monitor facility and permitted privilege."
   }
 ]

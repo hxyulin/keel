@@ -1008,10 +1008,24 @@ fn execute_pipeline(
                 canonical[index] = true;
             }
             let start = reporting.then(Instant::now);
+            let function_context = OptimizationContext {
+                capabilities: if context.target == VectorTarget::X86Sse2 {
+                    func.attrs
+                        .target_features
+                        .vector_capabilities(context.capabilities)
+                        .map_err(|message| OptError::FunctionPolicy {
+                            func: func.name.clone(),
+                            message,
+                        })?
+                } else {
+                    context.capabilities
+                },
+                ..context
+            };
             let changed = if pass.requires_canonical_form() {
-                pass.run_canonical_with_context(func, context)
+                pass.run_canonical_with_context(func, function_context)
             } else {
-                pass.run_with_context(func, context)
+                pass.run_with_context(func, function_context)
             };
             let pass_ns = start.map_or(0, |start| start.elapsed().as_nanos());
             canonical[index] = pass.produces_canonical_form() || (canonical[index] && !changed);

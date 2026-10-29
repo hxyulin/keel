@@ -2812,7 +2812,9 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 if let Some(lane) = fold_int(index, FOLD_DEPTH, self.g.p.c_layout) {
                     self.b.ins().vextract(vector, lane as u8)
                 } else {
-                    let slot = self.b.create_stack_slot(16, 16);
+                    let size = self.size(&base.ty) as u32;
+                    let align = self.g.types().align(&base.ty) as u32;
+                    let slot = self.b.create_stack_slot(size, align);
                     let address = self.b.ins().stack_addr(slot);
                     self.b.ins().store(vector, address);
                     let offset = self.scaled(index, self.size(&e.ty))?;
@@ -4503,7 +4505,77 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         Ok(self.b.function().inst_results(call)[0])
     }
 
+    fn cpu_cpuid(&mut self, leaf: u32) -> Value {
+        let leaf = self.b.ins().iconst(Type::I32, i64::from(leaf));
+        let subleaf = self.b.ins().iconst(Type::I32, 0);
+        let inst = self
+            .b
+            .ins()
+            .intrinsic(Intrinsic::X86Cpuid, &[leaf, subleaf]);
+        self.b.function().inst_results(inst)[0]
+    }
+
+    fn cpu_register(&mut self, cpuid: Value, shift: i64) -> Value {
+        let shift = self.b.ins().iconst(Type::I128, shift);
+        let shifted = self.b.ins().ushr(cpuid, shift);
+        self.b.ins().trunc(Type::I32, shifted)
+    }
+
+    fn cpu_mask(&mut self, register: Value, mask: u32) -> Value {
+        let mask = self.b.ins().iconst(Type::I32, i64::from(mask));
+        let bits = self.b.ins().and(register, mask);
+        self.b.ins().icmp(IntCC::Eq, bits, mask)
+    }
+
+    fn cpu_supports(&mut self, feature: &crate::x86_cpu::Feature) -> Value {
+        let maximum = self.cpu_cpuid(if feature.leaf >= 0x8000_0000 {
+            0x8000_0000
+        } else {
+            0
+        });
+        let maximum = self.b.ins().trunc(Type::I32, maximum);
+        let leaf = self.b.ins().iconst(Type::I32, i64::from(feature.leaf));
+        let exists = self.b.ins().icmp(IntCC::Uge, maximum, leaf);
+        let available = self.new_block();
+        let done = self.new_block();
+        let result = self.b.append_block_param(done, Type::I32);
+        let absent = self.b.ins().iconst(Type::I32, 0);
+        self.b.ins().brif(exists, available, &[], done, &[absent]);
+        self.b.seal_block(available);
+        self.switch_to(available);
+        let queried = self.cpu_cpuid(feature.leaf);
+        let register = self.cpu_register(queried, feature.register.shift());
+        let mut supported = self.cpu_mask(register, feature.mask);
+        if feature.avx {
+            let leaf1 = if feature.leaf == 1 {
+                queried
+            } else {
+                self.cpu_cpuid(1)
+            };
+            let ecx = self.cpu_register(leaf1, 64);
+            let avx = self.cpu_mask(ecx, crate::x86_cpu::AVX_CPUID);
+            let xcr0_inst = self.b.ins().intrinsic(Intrinsic::X86CpuXcr0, &[]);
+            let xcr0 = self.b.function().inst_results(xcr0_inst)[0];
+            let mask = self.b.ins().iconst(Type::I64, 6);
+            let enabled = self.b.ins().and(xcr0, mask);
+            let enabled = self.b.ins().icmp(IntCC::Eq, enabled, mask);
+            supported = self.b.ins().and(supported, avx);
+            supported = self.b.ins().and(supported, enabled);
+        }
+        let supported = self.b.ins().uext(Type::I32, supported);
+        self.b.ins().jump(done, &[supported]);
+        self.b.seal_block(done);
+        self.switch_to(done);
+        result
+    }
+
     fn builtin(&mut self, op: Builtin, args: &[Expr<'p>], e: &Expr<'p>) -> R<Option<Value>> {
+        if let Builtin::X86CpuSupports(feature) = op {
+            return Ok(Some(self.cpu_supports(feature)));
+        }
+        if op == Builtin::X86CpuInit {
+            return Ok(None);
+        }
         // The expectation is usually a literal, with nothing to evaluate.
         if op == Builtin::Hint {
             let v = self.val(&args[0])?;
@@ -4667,7 +4739,10 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         }
         let ins = self.b.ins();
         Ok(Some(match op {
-            Builtin::AtomicGeneric { .. } | Builtin::AtomicFloatRmw { .. } => unreachable!(),
+            Builtin::AtomicGeneric { .. }
+            | Builtin::AtomicFloatRmw { .. }
+            | Builtin::X86CpuSupports(_)
+            | Builtin::X86CpuInit => unreachable!(),
             Builtin::Memory(id) => {
                 // All arguments were evaluated once above, including at
                 // length zero. Copy/fill intrinsics return dst in C; a
@@ -4696,7 +4771,12 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             | Builtin::X86PackedConversion(id)
             | Builtin::X86Value(id) => {
                 let inst = ins.intrinsic(id, &vals);
-                self.b.function().inst_results(inst)[0]
+                if let Some(&result) = self.b.function().inst_results(inst).first() {
+                    result
+                } else {
+                    // Void expressions carry a placeholder that no C value can use.
+                    self.b.ins().iconst(Type::I32, 0)
+                }
             }
             Builtin::VectorFloatCompare(cc) => {
                 let mask = ins.vfcmp(cc, vals[0], vals[1]);

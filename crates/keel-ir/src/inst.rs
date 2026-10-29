@@ -85,8 +85,8 @@ pub enum InstData {
         cond: FloatCC,
         args: [Value; 2],
     },
-    /// Select an entire lane from args[1] if its integer mask lane is nonzero,
-    /// otherwise args[2]. Mask has the same lane count and width as the arms.
+    /// Select an entire lane from `args[1]` if its integer mask lane is nonzero,
+    /// otherwise `args[2]`. Mask has the same lane count and width as the arms.
     VectorSelect {
         args: [Value; 3],
     },
@@ -1162,6 +1162,7 @@ impl InstData {
                 | Intrinsic::X86Sse41Movntdqa128
                 | Intrinsic::X86Avx2Vmovntdqa256
                 | Intrinsic::X86Xrstor64
+                | Intrinsic::X86CpuXcr0
                 | Intrinsic::X86Cpuid
                 | Intrinsic::X86Rdtsc
                 | Intrinsic::X86Rdpmc

@@ -169,8 +169,64 @@ extern void lane_round_pd256_11(const void*,const void*,const void*,void*),refer
 extern void lane_round_pd256_15(const void*,const void*,const void*,void*),reference_lane_round_pd256_15(const void*,const void*,const void*,void*),dead_lane_round_pd256_15(const void*,const void*,const void*,void*);
 extern void lane_ceil_pd256(const void*,const void*,const void*,void*),reference_lane_ceil_pd256(const void*,const void*,const void*,void*),dead_lane_ceil_pd256(const void*,const void*,const void*,void*);
 extern void lane_floor_pd256(const void*,const void*,const void*,void*),reference_lane_floor_pd256(const void*,const void*,const void*,void*),dead_lane_floor_pd256(const void*,const void*,const void*,void*);
+extern void fp_min_ps128(const void*,const void*,const void*,void*),reference_fp_min_ps128(const void*,const void*,const void*,void*);extern void dead_fp_min_ps128(const void*,const void*,const void*,void*);
+extern void fp_max_ps128(const void*,const void*,const void*,void*),reference_fp_max_ps128(const void*,const void*,const void*,void*);extern void dead_fp_max_ps128(const void*,const void*,const void*,void*);
+extern void fp_rcp_ps128(const void*,const void*,const void*,void*),reference_fp_rcp_ps128(const void*,const void*,const void*,void*);extern void dead_fp_rcp_ps128(const void*,const void*,const void*,void*);
+extern void fp_rsqrt_ps128(const void*,const void*,const void*,void*),reference_fp_rsqrt_ps128(const void*,const void*,const void*,void*);extern void dead_fp_rsqrt_ps128(const void*,const void*,const void*,void*);
+extern void fp_min_pd128(const void*,const void*,const void*,void*),reference_fp_min_pd128(const void*,const void*,const void*,void*);extern void dead_fp_min_pd128(const void*,const void*,const void*,void*);
+extern void fp_max_pd128(const void*,const void*,const void*,void*),reference_fp_max_pd128(const void*,const void*,const void*,void*);extern void dead_fp_max_pd128(const void*,const void*,const void*,void*);
+extern void fp_min_ss128(const void*,const void*,const void*,void*),reference_fp_min_ss128(const void*,const void*,const void*,void*);extern void dead_fp_min_ss128(const void*,const void*,const void*,void*);
+extern void fp_max_ss128(const void*,const void*,const void*,void*),reference_fp_max_ss128(const void*,const void*,const void*,void*);extern void dead_fp_max_ss128(const void*,const void*,const void*,void*);
+extern void fp_rcp_ss128(const void*,const void*,const void*,void*),reference_fp_rcp_ss128(const void*,const void*,const void*,void*);extern void dead_fp_rcp_ss128(const void*,const void*,const void*,void*);
+extern void fp_rsqrt_ss128(const void*,const void*,const void*,void*),reference_fp_rsqrt_ss128(const void*,const void*,const void*,void*);extern void dead_fp_rsqrt_ss128(const void*,const void*,const void*,void*);
+extern void fp_sqrt_ss128(const void*,const void*,const void*,void*),reference_fp_sqrt_ss128(const void*,const void*,const void*,void*);extern void dead_fp_sqrt_ss128(const void*,const void*,const void*,void*);
+extern void fp_add_ss128(const void*,const void*,const void*,void*),reference_fp_add_ss128(const void*,const void*,const void*,void*);
+extern void fp_sub_ss128(const void*,const void*,const void*,void*),reference_fp_sub_ss128(const void*,const void*,const void*,void*);
+extern void fp_mul_ss128(const void*,const void*,const void*,void*),reference_fp_mul_ss128(const void*,const void*,const void*,void*);
+extern void fp_div_ss128(const void*,const void*,const void*,void*),reference_fp_div_ss128(const void*,const void*,const void*,void*);
+extern void fp_min_sd128(const void*,const void*,const void*,void*),reference_fp_min_sd128(const void*,const void*,const void*,void*);extern void dead_fp_min_sd128(const void*,const void*,const void*,void*);
+extern void fp_max_sd128(const void*,const void*,const void*,void*),reference_fp_max_sd128(const void*,const void*,const void*,void*);extern void dead_fp_max_sd128(const void*,const void*,const void*,void*);
+extern void fp_sqrt_sd128(const void*,const void*,const void*,void*),reference_fp_sqrt_sd128(const void*,const void*,const void*,void*);extern void dead_fp_sqrt_sd128(const void*,const void*,const void*,void*);
+extern void fp_add_sd128(const void*,const void*,const void*,void*),reference_fp_add_sd128(const void*,const void*,const void*,void*);
+extern void fp_sub_sd128(const void*,const void*,const void*,void*),reference_fp_sub_sd128(const void*,const void*,const void*,void*);
+extern void fp_mul_sd128(const void*,const void*,const void*,void*),reference_fp_mul_sd128(const void*,const void*,const void*,void*);
+extern void fp_div_sd128(const void*,const void*,const void*,void*),reference_fp_div_sd128(const void*,const void*,const void*,void*);
+extern void fp_min_ps256(const void*,const void*,const void*,void*),reference_fp_min_ps256(const void*,const void*,const void*,void*);extern void dead_fp_min_ps256(const void*,const void*,const void*,void*);
+extern void fp_max_ps256(const void*,const void*,const void*,void*),reference_fp_max_ps256(const void*,const void*,const void*,void*);extern void dead_fp_max_ps256(const void*,const void*,const void*,void*);
+extern void fp_rcp_ps256(const void*,const void*,const void*,void*),reference_fp_rcp_ps256(const void*,const void*,const void*,void*);extern void dead_fp_rcp_ps256(const void*,const void*,const void*,void*);
+extern void fp_rsqrt_ps256(const void*,const void*,const void*,void*),reference_fp_rsqrt_ps256(const void*,const void*,const void*,void*);extern void dead_fp_rsqrt_ps256(const void*,const void*,const void*,void*);
+extern void fp_min_pd256(const void*,const void*,const void*,void*),reference_fp_min_pd256(const void*,const void*,const void*,void*);extern void dead_fp_min_pd256(const void*,const void*,const void*,void*);
+extern void fp_max_pd256(const void*,const void*,const void*,void*),reference_fp_max_pd256(const void*,const void*,const void*,void*);extern void dead_fp_max_pd256(const void*,const void*,const void*,void*);
 struct LaneCase {const char*name;unsigned bytes,lane_bytes,operation;fma_fn actual,reference,dead;};
 static const struct LaneCase lane_cases[]={
+{"fp_min_ps128",16,4,7,fp_min_ps128,reference_fp_min_ps128,dead_fp_min_ps128},
+{"fp_max_ps128",16,4,8,fp_max_ps128,reference_fp_max_ps128,dead_fp_max_ps128},
+{"fp_rcp_ps128",16,4,9,fp_rcp_ps128,reference_fp_rcp_ps128,dead_fp_rcp_ps128},
+{"fp_rsqrt_ps128",16,4,10,fp_rsqrt_ps128,reference_fp_rsqrt_ps128,dead_fp_rsqrt_ps128},
+{"fp_min_pd128",16,8,7,fp_min_pd128,reference_fp_min_pd128,dead_fp_min_pd128},
+{"fp_max_pd128",16,8,8,fp_max_pd128,reference_fp_max_pd128,dead_fp_max_pd128},
+{"fp_min_ss128",16,4,39,fp_min_ss128,reference_fp_min_ss128,dead_fp_min_ss128},
+{"fp_max_ss128",16,4,40,fp_max_ss128,reference_fp_max_ss128,dead_fp_max_ss128},
+{"fp_rcp_ss128",16,4,41,fp_rcp_ss128,reference_fp_rcp_ss128,dead_fp_rcp_ss128},
+{"fp_rsqrt_ss128",16,4,42,fp_rsqrt_ss128,reference_fp_rsqrt_ss128,dead_fp_rsqrt_ss128},
+{"fp_sqrt_ss128",16,4,47,fp_sqrt_ss128,reference_fp_sqrt_ss128,dead_fp_sqrt_ss128},
+{"fp_add_ss128",16,4,43,fp_add_ss128,reference_fp_add_ss128,0},
+{"fp_sub_ss128",16,4,44,fp_sub_ss128,reference_fp_sub_ss128,0},
+{"fp_mul_ss128",16,4,45,fp_mul_ss128,reference_fp_mul_ss128,0},
+{"fp_div_ss128",16,4,46,fp_div_ss128,reference_fp_div_ss128,0},
+{"fp_min_sd128",16,8,39,fp_min_sd128,reference_fp_min_sd128,dead_fp_min_sd128},
+{"fp_max_sd128",16,8,40,fp_max_sd128,reference_fp_max_sd128,dead_fp_max_sd128},
+{"fp_sqrt_sd128",16,8,111,fp_sqrt_sd128,reference_fp_sqrt_sd128,dead_fp_sqrt_sd128},
+{"fp_add_sd128",16,8,43,fp_add_sd128,reference_fp_add_sd128,0},
+{"fp_sub_sd128",16,8,44,fp_sub_sd128,reference_fp_sub_sd128,0},
+{"fp_mul_sd128",16,8,45,fp_mul_sd128,reference_fp_mul_sd128,0},
+{"fp_div_sd128",16,8,46,fp_div_sd128,reference_fp_div_sd128,0},
+{"fp_min_ps256",32,4,7,fp_min_ps256,reference_fp_min_ps256,dead_fp_min_ps256},
+{"fp_max_ps256",32,4,8,fp_max_ps256,reference_fp_max_ps256,dead_fp_max_ps256},
+{"fp_rcp_ps256",32,4,9,fp_rcp_ps256,reference_fp_rcp_ps256,dead_fp_rcp_ps256},
+{"fp_rsqrt_ps256",32,4,10,fp_rsqrt_ps256,reference_fp_rsqrt_ps256,dead_fp_rsqrt_ps256},
+{"fp_min_pd256",32,8,7,fp_min_pd256,reference_fp_min_pd256,dead_fp_min_pd256},
+{"fp_max_pd256",32,8,8,fp_max_pd256,reference_fp_max_pd256,dead_fp_max_pd256},
 {"_mm_hadd_ps",16,4,0,lane_hadd_ps128,reference_lane_hadd_ps128,dead_lane_hadd_ps128},
 {"_mm_hsub_ps",16,4,1,lane_hsub_ps128,reference_lane_hsub_ps128,dead_lane_hsub_ps128},
 {"_mm_hadd_pd",16,8,0,lane_hadd_pd128,reference_lane_hadd_pd128,dead_lane_hadd_pd128},
@@ -291,6 +347,32 @@ static void lane_pair(const void*a,const void*b,void*out,unsigned bytes,int subt
 static void lane_reference(const struct LaneCase*t,const unsigned char*a,
                            const unsigned char*b,const unsigned char*mask,unsigned char*out) {
   unsigned bytes=t->lane_bytes;
+  if(t->operation>=7) {
+    unsigned operation=t->operation&31;
+    unsigned count=t->operation&32?1:t->bytes/bytes;
+    memcpy(out,a,t->bytes);
+    for(unsigned lane=0;lane<count;lane++) {
+      unsigned offset=lane*bytes;
+      const unsigned char *x=a+offset,*y=b+offset;
+      if(t->operation&64)x=y;
+#define FP_ORACLE(OP) if(bytes==4)__asm__ volatile("movss (%1),%%xmm0; " OP "ss (%2),%%xmm0; movss %%xmm0,(%0)"::"r"(out+offset),"r"(x),"r"(y):"xmm0","memory"); else __asm__ volatile("movsd (%1),%%xmm0; " OP "sd (%2),%%xmm0; movsd %%xmm0,(%0)"::"r"(out+offset),"r"(x),"r"(y):"xmm0","memory")
+      switch(operation) {
+        case 7: FP_ORACLE("min");break;
+        case 8: FP_ORACLE("max");break;
+        case 9: __asm__ volatile("rcpss (%1),%%xmm0; movss %%xmm0,(%0)"::"r"(out+offset),"r"(x):"xmm0","memory");break;
+        case 10: __asm__ volatile("rsqrtss (%1),%%xmm0; movss %%xmm0,(%0)"::"r"(out+offset),"r"(x):"xmm0","memory");break;
+        case 11: FP_ORACLE("add");break;
+        case 12: FP_ORACLE("sub");break;
+        case 13: FP_ORACLE("mul");break;
+        case 14: FP_ORACLE("div");break;
+        case 15:
+          if(bytes==4)__asm__ volatile("sqrtss (%1),%%xmm0; movss %%xmm0,(%0)"::"r"(out+offset),"r"(x):"xmm0","memory");
+          else __asm__ volatile("sqrtsd (%1),%%xmm0; movsd %%xmm0,(%0)"::"r"(out+offset),"r"(x):"xmm0","memory");break;
+      }
+#undef FP_ORACLE
+    }
+    return;
+  }
   if(t->operation==6) {
     for(unsigned offset=0;offset<t->bytes;offset+=bytes)
       memcpy(out+offset,mask[offset+bytes-1]&128?b+offset:a+offset,bytes);
@@ -432,12 +514,32 @@ static int round_checks(void) {
   return 0;
 }
 
+extern int mask_ps128(const void*),reference_mask_ps128(const void*);
+extern int mask_pd128(const void*),reference_mask_pd128(const void*);
+extern int mask_ps256(const void*),reference_mask_ps256(const void*);
+extern int mask_pd256(const void*),reference_mask_pd256(const void*);
+static int mask_checks(void) {
+ struct MaskCase {unsigned bytes,lane_bytes;int(*actual)(const void*),(*reference)(const void*);};
+ static const struct MaskCase cases[]={{16,4,mask_ps128,reference_mask_ps128},{16,8,mask_pd128,reference_mask_pd128},{32,4,mask_ps256,reference_mask_ps256},{32,8,mask_pd256,reference_mask_pd256}};
+ for(unsigned f=0;f<sizeof(cases)/sizeof(*cases);f++)for(unsigned mask=0;mask<256;mask++) {
+  const struct MaskCase*t=&cases[f];unsigned char input[40];memset(input,0x7f,sizeof(input));
+  unsigned expected=0;
+  for(unsigned lane=0;lane<t->bytes/t->lane_bytes;lane++) {
+   unsigned sign=(mask>>lane)&1;input[1+(lane+1)*t->lane_bytes-1]=(unsigned char)(0x7f|(sign<<7));expected|=sign<<lane;
+  }
+  unsigned mode=0x1fa0;setcsr(mode);int actual=t->actual(input+1);
+  if(actual!=(int)expected||actual!=t->reference(input+1)||csr()!=mode){printf("movemask %u mask=%u result=%d expected=%u\n",f,mask,actual,expected);return 16;}
+ }
+ return 0;
+}
+
 int main(void){unsigned original=csr();int status=0;
 fma_fn actual[]={fmadd_ps128,fmadd_pd128,fmadd_ps256,fmadd_pd256,fmadd_ss128,fmadd_sd128,fmsub_ps128,fmsub_pd128,fmsub_ps256,fmsub_pd256,fmsub_ss128,fmsub_sd128,fnmadd_ps128,fnmadd_pd128,fnmadd_ps256,fnmadd_pd256,fnmadd_ss128,fnmadd_sd128,fnmsub_ps128,fnmsub_pd128,fnmsub_ps256,fnmsub_pd256,fnmsub_ss128,fnmsub_sd128,fmaddsub_ps128,fmaddsub_pd128,fmaddsub_ps256,fmaddsub_pd256,fmsubadd_ps128,fmsubadd_pd128,fmsubadd_ps256,fmsubadd_pd256};
 fma_fn expected[]={reference_fmadd_ps128,reference_fmadd_pd128,reference_fmadd_ps256,reference_fmadd_pd256,reference_fmadd_ss128,reference_fmadd_sd128,reference_fmsub_ps128,reference_fmsub_pd128,reference_fmsub_ps256,reference_fmsub_pd256,reference_fmsub_ss128,reference_fmsub_sd128,reference_fnmadd_ps128,reference_fnmadd_pd128,reference_fnmadd_ps256,reference_fnmadd_pd256,reference_fnmadd_ss128,reference_fnmadd_sd128,reference_fnmsub_ps128,reference_fnmsub_pd128,reference_fnmsub_ps256,reference_fnmsub_pd256,reference_fnmsub_ss128,reference_fnmsub_sd128,reference_fmaddsub_ps128,reference_fmaddsub_pd128,reference_fmaddsub_ps256,reference_fmaddsub_pd256,reference_fmsubadd_ps128,reference_fmsubadd_pd128,reference_fmsubadd_ps256,reference_fmsubadd_pd256};
 unsigned widths[]={16,16,32,32,16,16,16,16,32,32,16,16,16,16,32,32,16,16,16,16,32,32,16,16,16,16,32,32,16,16,32,32};
 unsigned doubles[]={0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1};
 
+status=mask_checks();if(status)goto done;
 status=packed_float_checks();if(status)goto done;
 status=round_checks();if(status)goto done;
 for(unsigned rc=0;rc<4;rc++) for(unsigned ftz=0;ftz<2;ftz++) for(unsigned f=0;f<32;f++) for(unsigned pattern=0;pattern<8;pattern++) {

@@ -2524,6 +2524,56 @@ impl<'a> Parser<'a> {
                     | "swiftasync" | "preserve_none" | "riscv_vector_cc" | "ext_vector_type" => {
                         return Err(unsupported_attribute(loc, name));
                     }
+                    "target" => {
+                        if self.target != Target::X86_64LinuxGnu {
+                            return Err(unsupported_attribute(loc, name));
+                        }
+                        attrs.function_policy.get_or_insert(loc);
+                        self.expect("(")?;
+                        let mut requests = Vec::new();
+                        loop {
+                            if !matches!(self.peek(), Tok::Str { .. }) {
+                                return Err(self.unexpected("an x86 target feature string"));
+                            }
+                            let source = self.asm_string()?;
+                            let mut edits = Vec::new();
+                            for token in source.split(',') {
+                                let token = token.trim();
+                                if token.is_empty() {
+                                    return Err(Error::new(loc, "empty x86 target feature"));
+                                }
+                                let (prefix, feature) = token
+                                    .strip_prefix("no-")
+                                    .map_or(("+", token), |name| ("-", name));
+                                if matches!(feature, "sse" | "sse2" | "x87" | "fxsr" | "mmx") {
+                                    if prefix == "-" {
+                                        return Err(Error::new(
+                                            loc,
+                                            "cannot disable mandatory x86-64 baseline features",
+                                        ));
+                                    }
+                                    continue;
+                                }
+                                let feature = match feature {
+                                    "bmi" => "bmi1",
+                                    "sse4.1" => "sse41",
+                                    "sse4.2" => "sse42",
+                                    _ => feature,
+                                };
+                                edits.push(format!("{prefix}{feature}"));
+                            }
+                            if !edits.is_empty() {
+                                requests.push(edits.join(","));
+                            }
+                            if self.eat(")") {
+                                break;
+                            }
+                            self.expect(",")?;
+                        }
+                        let requests = keel_ir::X86TargetFeatures::new(requests)
+                            .map_err(|message| Error::new(loc, message))?;
+                        attrs.function_attrs.target_features.append(&requests);
+                    }
                     "optimize" => {
                         attrs.function_policy.get_or_insert(loc);
                         self.expect("(")?;

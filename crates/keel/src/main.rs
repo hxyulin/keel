@@ -1042,7 +1042,13 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
         // Assemble each function's program as codegen produces it, so the
         // whole module's structured program is never resident at once.
         let mut aarch64 = keel_asm::ProgramAssembler::new(keel_asm::TargetFeatures::default());
-        let mut x86 = keel_asm::x86::ProgramAssembler::new(opts.x86_features);
+        let encoding_features = if target == Target::X86_64LinuxGnu {
+            keel_codegen::x86_features::module_features(&module, opts.x86_features)
+                .map_err(|e| e.to_string())?
+        } else {
+            opts.x86_features
+        };
+        let mut x86 = keel_asm::x86::ProgramAssembler::new(encoding_features);
         let mut arm_elf = keel_asm::ElfProgramAssembler::new(keel_asm::TargetFeatures::default());
         let mut arm_elf_sink = |program| {
             profiling::scope!("integrated-assembly");

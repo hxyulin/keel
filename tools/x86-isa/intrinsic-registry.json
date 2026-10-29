@@ -820,6 +820,7 @@
     {"id": 817, "variant": "X86StiHlt", "inventory": 817, "metadata": "x86_system"},
     {"id": 818, "variant": "X86Swapgs", "inventory": 818, "metadata": "x86_system"},
     {"id": 819, "variant": "LifetimeStart", "inventory": 819, "metadata": "handwritten", "doc": "`lifetime_start(ptr)`: starts or restarts accessibility of the whole fixed stack slot addressed by ptr. A pinned compiler lifetime barrier; emits no machine instructions."},
-    {"id": 820, "variant": "LifetimeEnd", "inventory": 820, "metadata": "handwritten", "doc": "`lifetime_end(ptr)`: ends accessibility of the whole fixed stack slot addressed by ptr. A pinned compiler lifetime barrier; emits no machine instructions."}
+    {"id": 820, "variant": "LifetimeEnd", "inventory": 820, "metadata": "handwritten", "doc": "`lifetime_end(ptr)`: ends accessibility of the whole fixed stack slot addressed by ptr. A pinned compiler lifetime barrier; emits no machine instructions."},
+    {"id": 821, "variant": "X86CpuXcr0", "inventory": 821, "metadata": "handwritten", "doc": "Pinned executable-state query: returns XCR0 only when CPUID.1 reports both XSAVE and OSXSAVE; otherwise returns zero. The guarded XGETBV does not grant the enclosing function XSAVE permission."}
   ]
 }

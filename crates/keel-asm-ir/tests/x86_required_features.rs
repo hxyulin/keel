@@ -5,6 +5,8 @@ fn borrowed_requirements_preserve_form_specific_contracts_and_fallbacks() {
     // Expected feature names are independent of either query implementation.
     for (source, expected) in [
         ("nop", ""),
+        ("monitor", "monitor"),
+        ("mwait", "monitor"),
         ("lock add dword ptr [rax],1", ""),
         ("vpaddd xmm0,xmm1,xmm2", "avx,xsave,osxsave"),
         ("vpaddd ymm0,ymm1,ymm2", "avx,avx2,xsave,osxsave"),
@@ -33,6 +35,7 @@ fn borrowed_requirements_preserve_form_specific_contracts_and_fallbacks() {
         for name in expected.split(',').filter(|s| !s.is_empty()) {
             match name {
                 "avx" => want.avx = true,
+                "monitor" => want.monitor = true,
                 "avx2" => want.avx2 = true,
                 "xsave" => want.xsave = true,
                 "osxsave" => want.osxsave = true,

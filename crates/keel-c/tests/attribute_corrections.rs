@@ -33,6 +33,13 @@ fn inline_emission_is_finalized_after_all_declarations() {
                     for late in [false, true] {
                         for policy in ["", "always_inline", "noinline"] {
                             let source = linkage_source(storage, declaration, late, policy);
+                            // Keep an addressable definition for mandatory-inline
+                            // rows so linkage is still tested after call expansion.
+                            let source = if policy == "always_inline" {
+                                format!("{source} __typeof__(&h) keep_h=h;")
+                            } else {
+                                source
+                            };
                             let m = keel_c::compile(
                                 &source,
                                 "linkage.c",
@@ -50,7 +57,10 @@ fn inline_emission_is_finalized_after_all_declarations() {
                                 let h = m.functions.iter().find(|f| f.name == "h");
                                 assert_eq!(
                                     h.is_some(),
-                                    !optimized || !local || policy == "noinline",
+                                    policy == "always_inline"
+                                        || !optimized
+                                        || !local
+                                        || policy == "noinline",
                                     "{source}\n{m}"
                                 );
                                 if let Some(h) = h {
@@ -59,10 +69,10 @@ fn inline_emission_is_finalized_after_all_declarations() {
                                     assert!(m.decls.iter().any(|d| d.name == "h"), "{source}\n{m}");
                                 }
                                 let f = m.functions.iter().find(|f| f.name == "f").unwrap();
-                                let mandatory_public_inline = policy == "always_inline" && !local;
+                                let mandatory_inline = policy == "always_inline";
                                 assert_eq!(
                                     calls(f, "h"),
-                                    !mandatory_public_inline
+                                    !mandatory_inline
                                         && (!optimized || !local || policy == "noinline"),
                                     "{source}\n{m}"
                                 );

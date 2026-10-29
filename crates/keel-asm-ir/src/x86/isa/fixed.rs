@@ -69,6 +69,8 @@ FixedOpcode::Sysretq => &[72, 15, 7],
 FixedOpcode::Sysexit => &[15, 53],
 FixedOpcode::Sysexitq => &[72, 15, 53],
 FixedOpcode::Rsm => &[15, 170],
+FixedOpcode::Monitor => &[15, 1, 200],
+FixedOpcode::Mwait => &[15, 1, 201],
 } }
 #[rustfmt::skip]
 pub const fn source(op: FixedOpcode) -> (&'static str, Option<u16>, bool) { match op {
@@ -139,6 +141,8 @@ FixedOpcode::Sysretq => ("sysret", Some(64), false),
 FixedOpcode::Sysexit => ("sysexit", Some(32), false),
 FixedOpcode::Sysexitq => ("sysexit", Some(64), false),
 FixedOpcode::Rsm => ("rsm", None, false),
+FixedOpcode::Monitor => ("monitor", None, false),
+FixedOpcode::Mwait => ("mwait", None, false),
 } }
 #[rustfmt::skip]
 pub fn fixed_width_mnemonic(source: &str, size: u16) -> Option<&'static str> { match (source, size) {

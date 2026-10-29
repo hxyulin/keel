@@ -806,12 +806,12 @@ fn rejected() {
             "x19 is the base pointer",
         ),
         (
-            "func @g(i64) cc(c) {
-             block0(v0: i64):
-                 asm \"\", \"{x1},{x1}\"(v0, v0)
+            "func @g(i64, i64) cc(c) {
+             block0(v0: i64, v1: i64):
+                 asm \"\", \"{x1},{x1}\"(v0, v1)
                  return
              }",
-            "x1 is named by two inputs",
+            "x1 has conflicting or unproven inputs",
         ),
         (
             "func @g(i64) cc(c) {

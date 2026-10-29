@@ -8,6 +8,47 @@ impl FunctionCompiler<'_> {
         result: Option<Value>,
     ) {
         match id {
+            Intrinsic::X86CpuXcr0 => {
+                let save = sized(
+                    self.frame(self.cx16_save.expect("planned fixed-RBX slot")),
+                    64,
+                );
+                let value = result.expect("XCR0 query result");
+                let absent = format!(".L{}_{value}_xcr0_absent", self.func.name);
+                let done = format!(".L{}_{value}_xcr0_done", self.func.name);
+                self.emit(Opcode::Mov, [asm_arg(save.clone()), asm_arg(r64(3))]);
+                self.emit(Opcode::Xor, [asm_arg(r32(S0)), asm_arg(r32(S0))]);
+                self.emit(Opcode::Xor, [asm_arg(r32(S1)), asm_arg(r32(S1))]);
+                self.emit(Opcode::parse("cpuid").unwrap(), []);
+                self.emit(Opcode::Cmp, [asm_arg(r32(S0)), asm_arg(1)]);
+                self.emit(Opcode::parse("jb").unwrap(), [asm_arg(&absent)]);
+                self.emit(Opcode::Mov, [asm_arg(r32(S0)), asm_arg(1)]);
+                self.emit(Opcode::Xor, [asm_arg(r32(S1)), asm_arg(r32(S1))]);
+                self.emit(Opcode::parse("cpuid").unwrap(), []);
+                // XGETBV is legal only after both CPU and OS enable XSAVE.
+                let required = (1u32 << 26) | (1u32 << 27);
+                self.emit(Opcode::And, [asm_arg(r32(S1)), asm_arg(required)]);
+                self.emit(Opcode::Cmp, [asm_arg(r32(S1)), asm_arg(required)]);
+                self.emit(Opcode::parse("jne").unwrap(), [asm_arg(&absent)]);
+                self.emit(Opcode::Xor, [asm_arg(r32(S1)), asm_arg(r32(S1))]);
+                // Only this guarded access has XSAVE encoding permission.
+                let baseline = self.features;
+                self.features.xsave = true;
+                self.emit(Opcode::parse("xgetbv").unwrap(), []);
+                self.features = baseline;
+                self.emit(Opcode::Shl, [asm_arg(r64(S2)), asm_arg(32)]);
+                self.emit(Opcode::Or, [asm_arg(r64(S0)), asm_arg(r64(S2))]);
+                self.emit(Opcode::Jmp, [asm_arg(&done)]);
+                self.out.label(absent);
+                self.emit(Opcode::Xor, [asm_arg(r32(S0)), asm_arg(r32(S0))]);
+                self.out.label(done);
+                self.emit(Opcode::Mov, [asm_arg(r64(3)), asm_arg(save)]);
+                let d = self.def_reg(result);
+                if d != S0 {
+                    self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(S0))]);
+                }
+                self.def_done(result, d);
+            }
             Intrinsic::X86Cpuid => {
                 let save = sized(
                     self.frame(self.cx16_save.expect("planned fixed-RBX slot")),

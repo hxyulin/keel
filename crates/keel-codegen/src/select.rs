@@ -344,7 +344,7 @@ impl Selection {
 
     /// Fusion changes where operands are read. Publish the compare's selected
     /// leaves at the branch before allocation, rather than hiding this in emission.
-    /// `uses` are [`crate::fold::use_counts`] of `func`.
+    /// `uses` are `crate::fold::use_counts` of `func`.
     pub(crate) fn fuse_compares(
         &mut self,
         func: &Function,
@@ -678,7 +678,7 @@ impl Selection {
     /// graph. A value used elsewhere remains materialized for those uses.
     ///
     /// `folds` names only `stack_addr` and `iconst` results, as for
-    /// [`crate::fold::folded_values`], which also gives each instruction's.
+    /// `crate::fold::folded_values`, which also gives each instruction's.
     pub fn fold_operands(&mut self, func: &Function, folds: impl Fn(&InstData) -> Vec<Value>) {
         let mut record = crate::fold::FoldRecord::default();
         let elided = crate::fold::folded_values_recording(
@@ -731,7 +731,7 @@ impl Selection {
         Self::compute_with_uses(func, target, options, None)
     }
     /// [`Self::compute_with_options`], with the raw IR use counts of
-    /// [`crate::fold::use_counts`] if the caller has them.
+    /// `crate::fold::use_counts` if the caller has them.
     pub fn compute_with_uses(
         func: &Function,
         target: Target,

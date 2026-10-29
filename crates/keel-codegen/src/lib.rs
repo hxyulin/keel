@@ -547,12 +547,51 @@ pub(crate) fn validate_vector_width_with_memory_policy(
     maximum: u32,
     byte_copy: impl Fn(Option<keel_ir::X86VectorAbi>, &keel_ir::Layout, bool) -> bool,
 ) -> Result<(), CodegenError> {
+    validate_vector_width_per_function(module, minimum, |_, _| Ok(maximum), byte_copy)
+}
+
+/// Validate each function and both ends of direct calls using their own width.
+pub(crate) fn validate_vector_width_per_function(
+    module: &Module,
+    minimum: u32,
+    maximum: impl Fn(&str, &keel_ir::FunctionAttrs) -> Result<u32, CodegenError>,
+    byte_copy: impl Fn(Option<keel_ir::X86VectorAbi>, &keel_ir::Layout, bool) -> bool,
+) -> Result<(), CodegenError> {
     use keel_ir::InstData;
-    let unsupported = |ty: keel_ir::Type| {
+    fn referenced(function: &keel_ir::Function) -> keel_ir::fxhash::FxHashSet<&str> {
+        function
+            .layout_insts()
+            .filter_map(|(_, instruction)| match function.inst_data(instruction) {
+                InstData::Call { func, .. }
+                | InstData::ReturnCall { func, .. }
+                | InstData::Invoke { func, .. }
+                | InstData::SymbolAddr {
+                    symbol: keel_ir::Symbol::Func(func),
+                } => Some(function.callee(*func).name.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+    let mut references: keel_ir::fxhash::FxHashSet<&str> =
+        module.functions.iter().flat_map(referenced).collect();
+    for data in &module.data {
+        if let Some(initializer) = &data.init {
+            references.extend(initializer.items.iter().filter_map(|item| match item {
+                keel_ir::DataItem::Ptr { symbol, .. } | keel_ir::DataItem::RttiName { symbol } => {
+                    Some(symbol.as_str())
+                }
+                _ => None,
+            }));
+        }
+    }
+    let unsupported = |ty: keel_ir::Type, maximum: u32| {
         ty.vector()
             .is_some_and(|v| v.bytes() < minimum || v.bytes() > maximum)
     };
-    let check_signature = |name: &str, sig: &keel_ir::Signature| -> Result<(), CodegenError> {
+    let check_signature = |name: &str,
+                           sig: &keel_ir::Signature,
+                           maximum: u32|
+     -> Result<(), CodegenError> {
         for param in sig.params.iter().chain(&sig.returns) {
             let ty = std::iter::once(param.ty).chain(
                 param
@@ -562,7 +601,7 @@ pub(crate) fn validate_vector_width_with_memory_policy(
                     .flat_map(|layout| layout.leaves().into_iter().map(|(_, ty)| ty)),
             );
             for ty in ty {
-                if unsupported(ty) {
+                if unsupported(ty, maximum) {
                     return Err(CodegenError {
                         func: name.into(),
                         message: format!(
@@ -576,15 +615,28 @@ pub(crate) fn validate_vector_width_with_memory_policy(
         Ok(())
     };
     for decl in &module.decls {
-        check_signature(&decl.name, &decl.sig)?;
+        let decl_maximum = maximum(&decl.name, &decl.attrs)?;
+        // Mandatory inlining retains declaration/import metadata after removing
+        // an owned local wrapper. It has no transport contract left to emit.
+        if decl.attrs.alwaysinline && !references.contains(decl.name.as_str()) {
+            continue;
+        }
+        check_signature(&decl.name, &decl.sig, decl_maximum)?;
     }
     for f in &module.functions {
-        check_signature(&f.name, &f.sig)?;
+        let caller_maximum = maximum(&f.name, &f.attrs)?;
+        check_signature(&f.name, &f.sig, caller_maximum)?;
+        let references = referenced(f);
         for (_, callee) in f.callees() {
-            check_signature(&f.name, &callee.sig)?;
+            let callee_maximum = maximum(&callee.name, &callee.attrs)?;
+            if callee.attrs.alwaysinline && !references.contains(callee.name.as_str()) {
+                continue;
+            }
+            check_signature(&f.name, &callee.sig, caller_maximum)?;
+            check_signature(&callee.name, &callee.sig, callee_maximum)?;
         }
         for (_, sig) in f.signatures() {
-            check_signature(&f.name, sig)?;
+            check_signature(&f.name, sig, caller_maximum)?;
         }
         for (_, i) in f.layout_insts() {
             let mut bad = None;
@@ -604,7 +656,7 @@ pub(crate) fn validate_vector_width_with_memory_policy(
             };
             data.for_each_abi_type_filtered(
                 |ty| {
-                    if unsupported(ty) {
+                    if unsupported(ty, caller_maximum) {
                         bad = Some(ty);
                     }
                 },
@@ -628,7 +680,7 @@ pub(crate) fn validate_vector_width_with_memory_policy(
         }
         let mut bad = None;
         for_each_current_value_type(f, |ty| {
-            if unsupported(ty) {
+            if unsupported(ty, caller_maximum) {
                 bad = Some(ty);
             }
         });

@@ -28,11 +28,16 @@ fn block_declarations_merge_contracts_without_requesting_external_emission() {
             for late in [false, true] {
                 for policy in ["", "noinline", "always_inline"] {
                     let source = block_source(storage, declaration, late, policy);
+                    let source = if policy == "always_inline" {
+                        format!("{source} __typeof__(&h) keep_h=h;")
+                    } else {
+                        source
+                    };
                     check_matrix(&source, |m, optimized| {
                         let h = m.functions.iter().find(|f| f.name == "h");
                         assert_eq!(
                             h.is_some(),
-                            !optimized || policy == "noinline",
+                            policy == "always_inline" || !optimized || policy == "noinline",
                             "{source}\n{m}"
                         );
                         if let Some(h) = h {
@@ -42,7 +47,7 @@ fn block_declarations_merge_contracts_without_requesting_external_emission() {
                         }
                         assert_eq!(
                             calls(m.functions.iter().find(|f| f.name == "f").unwrap(), "h"),
-                            !optimized || policy == "noinline",
+                            policy != "always_inline" && (!optimized || policy == "noinline"),
                             "{source}\n{m}"
                         );
                     });

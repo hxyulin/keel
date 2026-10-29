@@ -2,6 +2,63 @@
 use crate::{InstructionSelector, Target};
 pub use keel_asm_ir::x86::{CpuLevel, Features};
 
+/// Resolve one function's permissions against the module baseline.
+///
+/// # Errors
+/// Returns a named diagnostic for invalid feature prerequisites.
+pub fn function_features(
+    name: &str,
+    attrs: &keel_ir::FunctionAttrs,
+    baseline: Features,
+) -> Result<Features, crate::CodegenError> {
+    attrs
+        .target_features
+        .resolve(baseline)
+        .map_err(|message| crate::CodegenError {
+            func: name.to_owned(),
+            message,
+        })
+}
+
+/// Encoding permissions for the complete module. This union is for assembly
+/// after codegen has checked each function against its own permissions; it must
+/// never be used as the instruction selector's module baseline.
+///
+/// # Errors
+/// Returns a named diagnostic for invalid function feature prerequisites.
+pub fn module_features(
+    module: &keel_ir::Module,
+    baseline: Features,
+) -> Result<Features, crate::CodegenError> {
+    let mut encoding = baseline;
+    for function in &module.functions {
+        let local = function_features(&function.name, &function.attrs, baseline)?;
+        encoding = encoding
+            .with_feature_lists(local.names())
+            .map_err(|message| crate::CodegenError {
+                func: function.name.clone(),
+                message,
+            })?;
+        if function.layout_insts().any(|(_, instruction)| {
+            matches!(
+                function.inst_data(instruction),
+                keel_ir::InstData::Intrinsic {
+                    id: keel_ir::Intrinsic::X86CpuXcr0,
+                    ..
+                }
+            )
+        }) {
+            encoding = encoding
+                .with_features("xsave")
+                .map_err(|message| crate::CodegenError {
+                    func: function.name.clone(),
+                    message,
+                })?;
+        }
+    }
+    Ok(encoding)
+}
+
 pub(crate) fn validate_target_features(
     target: Target,
     features: Features,

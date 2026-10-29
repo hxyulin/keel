@@ -804,6 +804,20 @@ impl Parser {
         let mut attrs = crate::FunctionAttrs::default();
         let mut contract_seen = false;
         loop {
+            if self.eat(&Tok::Ident("target_features".into())) {
+                if !attrs.target_features.is_empty() {
+                    return Err(self.unexpected("one target_features attribute"));
+                }
+                self.expect(Tok::Punct('('))?;
+                let mut sources = vec![self.string("an x86 feature list")?];
+                while self.eat(&Tok::Punct(',')) {
+                    sources.push(self.string("an x86 feature list")?);
+                }
+                self.expect(Tok::Punct(')'))?;
+                attrs.target_features = crate::X86TargetFeatures::new(sources)
+                    .map_err(|message| self.unexpected(&message))?;
+                continue;
+            }
             if self.eat(&Tok::Ident("contract".into())) {
                 if contract_seen {
                     return Err(self.unexpected("one function contract"));

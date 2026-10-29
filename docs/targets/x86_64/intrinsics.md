@@ -8,9 +8,9 @@ defines the proposed expansion beyond the implemented bounded headers.
 <a id="c-x86-intrinsics-bounded-c-x86-intrinsic-subset"></a>
 ## Bounded C x86 intrinsic subset
 
-Keel owns small `xmmintrin.h`, `emmintrin.h`, `pmmintrin.h`, `smmintrin.h`, `avxintrin.h`,
+Keel owns `xmmintrin.h`, `emmintrin.h`, `pmmintrin.h`, `smmintrin.h`, `avxintrin.h`,
 `avx2intrin.h`, `tmmintrin.h`, `fmaintrin.h`, `f16cintrin.h`,
-`wmmintrin.h` and `immintrin.h` headers. They are embedded in the compiler;
+`wmmintrin.h`, `nmmintrin.h`, `crc32intrin.h` and `immintrin.h` headers. They are embedded in the compiler;
 no Clang resource directory is needed. These headers are for the
 `x86_64-unknown-linux-gnu` target. This is a useful, finite source-compatibility
 subset, **not complete `immintrin.h` compatibility** or general C
@@ -25,8 +25,9 @@ SSE-only programs can use `--cpu-level v1`. Including the umbrella header does
 not enable ISA features or emit unused inline functions. Feature legality stays
 with the existing typed IR/backend: 256-bit transport requires AVX; operations
 may expand to legal narrower/scalar instructions when AVX2 is disabled. A header
-name does not promise a single matching machine instruction. There are no
-per-function `target` attributes or runtime CPU dispatch in this subset.
+name does not promise a single matching machine instruction.
+[Function-specific permissions and runtime queries](#function-permissions-and-runtime-cpu-queries)
+allow explicit dispatch from a baseline function.
 
 ```c
 #include <immintrin.h>
@@ -57,6 +58,9 @@ The following families are the supported contract. Braced alternatives describe
 separate names, not arbitrary suffix combinations.
 
 - Types: `__m128`, `__m128d`, `__m128i`, `__m256`, `__m256d`, `__m256i`.
+  Their `_u` typedefs retain the same size and lane representation with
+  alignment 1. Unaligned integer memory interfaces use those pointer types;
+  ordinary containers retain their 16/32-byte alignment.
   Integer container types have signed 64-bit C lanes; use intrinsics or explicit
   vector casts to choose another lane width. Nominal typedef identity is not a
   promise of every implementation detail of another compiler's private types.
@@ -85,8 +89,9 @@ separate names, not arbitrary suffix combinations.
   shared-count shifts, plus `_mm{,256}_{sllv,srlv}_epi{32,64}` and
   `_mm{,256}_srav_epi32`. Shared counts use an `__m128i` even for 256-bit data;
   per-lane counts have the same width as the data. See the shift contract below.
-- SSE2 numeric conversions: `_mm_cvtepi32_ps`, `_mm_cvttps_epi32` and
-  `_mm_cvtps_epi32`; see the bounded architectural conversion contract below.
+- Numeric conversions include SSE2 and AVX packed integer/float/double forms,
+  scalar signed-integer conversions, scalar float/double conversions and
+  signed/unsigned integer widening. See the numeric conversion contracts below.
 - Integer bit operations: `_mm_{and,or,xor,andnot}_si128` and
   `_mm256_{and,or,xor,andnot}_si256`; `andnot(a,b)` means `~a & b`.
   `_mm_setzero_si128`, `_mm256_setzero_si256`,
@@ -116,32 +121,29 @@ separate names, not arbitrary suffix combinations.
   and among `ps`, `pd`, and `si256` under `_mm256_cast`.
   `_mm256_castps256_ps128`, `_mm256_castpd256_pd128`, and
   `_mm256_castsi256_si128` select the low half. Casts with an undefined upper
-  half are not included. The three numeric conversions below are separate from
-  these bit casts.
+  half are also available; Keel chooses zero for their unspecified upper lanes.
+  Numeric conversions are separate from these bit casts.
 - `_MM_SHUFFLE`, `_mm_shuffle_ps`, `_mm_shuffle_pd`, `_mm_shuffle_epi32`,
   `_mm256_shuffle_ps`, `_mm256_shuffle_epi32`, and
   `_mm256_permute4x64_epi64`. AVX 32-bit shuffles operate independently within
   each 128-bit half; the 64-bit permutation can cross halves. Controls must be
   integer constant expressions. Vector operands are evaluated once.
-- `_mm_{extract,insert}_epi{16,32}`; 16-bit extraction zero extends.
+- Integer extraction/insertion: `_mm{,256}_{extract,insert}_epi{8,16,32,64}`.
+  Narrow byte/word extraction zero extends; `_mm_extract_ps` returns the
+  selected float lane's integer bits. `_mm_insert_ps` selects source and
+  destination lanes and applies its zero mask with an ICE control in 0..255.
   `_mm256_{extractf128,insertf128}_{ps,pd,si256}` and
-  `_mm256_{extracti128,inserti128}_si256`. These wrappers also accept runtime
-  lane controls as an extension: low 3/2/1 bits select a 16-bit lane, 32-bit lane,
-  or 128-bit half respectively. Each argument is evaluated once. Immediate-only
-  vendor behavior is not a diagnostic compatibility promise here.
-- SSE comparisons `_mm_cmp{eq,lt,le,gt,ge,neq}_{ps,pd}`.
-  AVX `_mm256_cmp_{ps,pd}` supports only the constant quiet predicates
-  `_CMP_EQ_OQ` (0), `_CMP_UNORD_Q` (3), `_CMP_NEQ_UQ` (4), `_CMP_ORD_Q` (7),
-  `_CMP_LT_OQ` (17), `_CMP_LE_OQ` (18), `_CMP_GE_OQ` (29), `_CMP_GT_OQ` (30).
-  Other predicates, including signaling variants, are diagnosed. True lanes
-  contain all bits set in the floating return type. NaNs follow the predicate's
-  ordered/unordered value semantics. This subset does not establish a strict
-  floating-environment contract for signaling NaNs, exception flags/traps, or
-  differences between quiet and signaling SSE instructions.
+  `_mm256_{extracti128,inserti128}_si256` manipulate halves. Integer lane and
+  half wrappers also accept runtime indices as an extension, using the low
+  index bits. Each argument is evaluated once. This extension does not promise
+  immediate-diagnostic parity with vendor compilers.
+- Floating comparisons include the named SSE packed/scalar forms, all 32 AVX
+  predicates through `_mm_cmp_{ps,pd,ss,sd}` and `_mm256_cmp_{ps,pd}`, and the
+  scalar COMI/UCOMI relations. See the floating comparison contract below.
 
 The SSE/AVX header functions use C vectors, scalar lane access, and fixed-size
 `__builtin_memcpy`; saturation, shifts, shuffles and AVX comparisons use checked builtins.
-The three numeric conversions also use checked builtins and dedicated architectural IR.
+Architectural numeric conversions also use checked builtins and dedicated IR.
 All lower through the existing typed IR, optimization, ABI, feature gating and
 instruction selection. The explicit PCLMUL builtin uses its dedicated typed
 intrinsic and lowering described in the linked contract.
@@ -183,10 +185,278 @@ rounding aliases are defined in `smmintrin.h`. In particular, the `NO_EXC`
 constant's bit 3 does not suppress F16C exceptions. Header inclusion itself does
 not grant CPU features or require the host to support the instructions.
 
+### Lane construction and broadcasts
+
+The headers provide `_mm{,256}_setr_{ps,pd}`, the reversed integer constructors
+`setr_epi{8,16,32}`, `_mm256_setr_epi64x`, and byte/word `set_epi{8,16}`
+constructors. Reversed constructors place the first argument in lane zero.
+`_mm{,256}_{movehdup,moveldup}_ps` duplicate odd/even lanes inside each
+128-bit half; `_mm{,256}_movedup_pd` duplicates each half's low double.
+
+`_mm256_{set,setr}_m128{,d,i}` combine two halves with the documented argument
+order. `_mm256_zext{ps,pd,si}128_{ps,pd,si}256` copy the low half and zero the
+high half. The matching `_mm256_cast*128_*256` spellings also choose zero for
+the upper half, whose contents vendor interfaces leave unspecified.
+
+Register broadcasts `_mm{,256}_broadcast{b,w,d,q}_epi{8,16,32,64}` duplicate the
+low integer lane. `_mm{,256}_broadcastss_ps` and
+`_mm{,256}_broadcastsd_pd` duplicate the low floating lane.
+`_mm256_broadcastsi128_si256` and its `_mm_broadcastsi128_si256` alias repeat a
+128-bit integer half. Memory broadcasts `_mm_broadcast_ss`,
+`_mm256_broadcast_{ss,sd,ps,pd}` read exactly 4, 8 or 16 bytes, including
+unaligned addresses. All these operations preserve lane bits, including NaN
+payloads, and evaluate each argument once. Generic lane lowering may expand
+without the ISA named by the vendor header; wide transport still requires AVX.
+
+### Queries and specialized arithmetic
+
+`_mm_test{z,c,nzc}_si128` require SSE4.1. `_mm256_test{z,c,nzc}_si256`
+and `_mm{,256}_test{z,c,nzc}_{ps,pd}` require AVX, including the 128-bit
+floating forms. Integer tests inspect every bit; floating tests inspect only
+each lane's sign bit. `testz` checks that `a & b` has no selected bits, `testc`
+checks `~a & b`, and `testnzc` returns one only when both intersections have a
+selected bit. `_mm_test_all_ones`, `_mm_test_all_zeros`, and
+`_mm_test_mix_ones_zeros` provide the corresponding convenience spellings.
+These integer results do not change the FP environment, even for NaN payloads.
+
+`_mm_dp_{ps,pd}` and `_mm256_dp_ps` use architectural dot products, retaining
+MXCSR rounding and exception effects. The control selects contributing products
+with its high nibble and destination lanes with its low nibble; 256-bit `ps`
+works separately in each 128-bit half. `_mm_minpos_epu16` returns the unsigned
+minimum and the first matching lane index, and zeroes the remaining lanes.
+`_mm{,256}_mpsadbw_epu8` computes eight sliding four-byte absolute-difference
+sums per 128-bit half. The wide form uses distinct three-bit controls for its
+two halves. Dot-product and SAD controls must be integer constant expressions
+in 0..255. Narrow forms require SSE4.1; wide dot product requires AVX and wide
+multiple SAD requires AVX2. Each vector operand is evaluated once.
+
+### Lane rearrangements and conveniences
+
+Immediate blends, `alignr`, whole-register byte shifts, high/low word shuffles,
+AVX immediate/variable permutations and cross-half permutations preserve exact
+lane bits. Controls retain the vendor operation's 128-bit-half boundaries;
+`permute2f128`, `permute2x128`, `permute4x64`, and `permutevar8x32` can move
+values across halves where their operation specifies it. Byte shifts and
+`alignr` zero their out-of-range source bytes rather than wrapping counts.
+Immediate controls are checked constant expressions with the range defined by
+the individual wrapper. Generic lowering can use narrower operations.
+
+Scalar bit transfers, `_mm_set_{ss,sd}`, `_mm_set_{ps,pd}1`, move-low/high
+helpers, `_mm_move_epi64`, signed-less-than integer aliases and AVX scalar
+extraction are available. Scalar-to-integer-vector constructors zero the
+remaining bits; extraction returns the selected low bits without a numeric
+floating conversion. Every `_mm{,256}_undefined_*` constructor chooses a zero
+vector. Vendor interfaces leave those bits unspecified, so callers must not
+rely on this choice for cross-compiler equivalence.
+
+### Floating arithmetic and comparisons
+
+Scalar `_mm_{add,sub,mul,div}_{ss,sd}` update the low lane and copy upper lanes
+from their first argument. `_mm_sqrt_ss` uses its argument's low lane;
+`_mm_sqrt_sd(a,b)` computes from `b` and copies upper lanes from `a`.
+`_mm{,256}_{min,max}_{ps,pd}` and `_mm_{min,max}_{ss,sd}` use architectural
+operand-order semantics, including unordered operands and signed-zero ties.
+They are not replacements for C `fmin`/`fmax`. `_mm{,256}_{rcp,rsqrt}_ps`
+and `_mm_{rcp,rsqrt}_ss` use hardware approximation instructions, not exact
+reciprocal or square-root expressions. `_mm{,256}_movemask_{ps,pd}` packs
+lane sign bits into an integer without evaluating floating values.
+
+Named SSE comparisons retain their quiet/signaling predicate behavior. The
+AVX `_mm_cmp_{ps,pd,ss,sd}` and `_mm256_cmp_{ps,pd}` accept constant predicates
+in 0..31, including signaling forms; all `_CMP_*` constants are defined.
+True result lanes contain all ones. Scalar comparisons preserve unused lanes
+from the first operand and evaluate only the low lanes. Architectural
+comparison operations retain MXCSR effects even when the result is unused.
+
+COMI/UCOMI wrappers return Clang-style C relations: unordered comparisons
+return false for equality and ordered relations, and true for inequality.
+Their instruction still controls exception behavior: COMI signals for quiet
+or signaling NaNs, while UCOMI signals only for signaling NaNs. GCC's wrappers
+can expose different unordered boolean results through direct condition-code
+tests. Keel does not claim simultaneous Clang/GCC equality for those cases.
+Basic scalar arithmetic follows the C frontend's ordinary FP optimization
+contract; architectural comparison, min/max, estimate, square-root, fused and
+rounding operations retain their dedicated IR contracts.
+
+### Numeric conversion expansion
+
+The headers expose the SSE2 and AVX packed `cvtepi32_{ps,pd}`,
+`cvt{ps,pd}_epi32`, `cvtt{ps,pd}_epi32` and `cvt{ps,pd}_{pd,ps}` operations
+for the actual supported source/result widths. These are architectural
+conversions. Rounded forms read MXCSR rounding; truncating forms round toward
+zero. Invalid or out-of-range floating-to-integer conversions produce the
+architectural integer-indefinite bit pattern and invalid status, rather than
+saturating. Narrow-result conversions zero unused result lanes as specified by
+the instruction. Conversion inputs outside the selected low source lanes do
+not contribute exceptions.
+
+Scalar `_mm_cvt{ss,sd}_si{32,64}`, `_mm_cvtt{ss,sd}_si{32,64}`,
+`_mm_cvtsi{32,64}_{ss,sd}`, `_mm_cvtsd_ss` and `_mm_cvtss_sd` preserve the
+same rounding and status behavior. Two-input scalar conversions replace only
+the first argument's low lane. Legacy SSE aliases `cvt_ss2si`, `cvtt_ss2si`
+and `cvt_si2ss` name the same operations. SSE/SSE2 forms use the corresponding
+baseline feature permission; the packed wide conversions require AVX.
+
+Integer widening covers signed/unsigned 8→16/32/64, 16→32/64 and 32→64
+conversions at 128-bit and 256-bit result widths. They extend only the low
+source lanes needed to fill the result, ignoring the rest. These wrappers use
+generic integer IR and can expand without SSE4.1 or AVX2; 256-bit transport
+still requires AVX. Widening is separate from packed saturating narrowing.
+
+### Memory, streaming and machine state
+
+Scalar and partial loads/stores access exactly their named scalar or partial
+width. Loaded unused lanes are zeroed where the vendor operation specifies it;
+merge loads preserve the first operand's other lanes. Reversed and duplicate
+loads/stores preserve bits without arithmetic. `lddqu` spellings use exact
+unaligned 16/32-byte transfers. `_mm256_loadu2_m128{,d,i}` and
+`_mm256_storeu2_m128{,d,i}` access two distinct 16-byte ranges. The first
+pointer names the high half and the second the low half; stores write the low
+half first. Source vectors are captured before aliasing destination writes.
+
+`_mm{,256}_maskload_{ps,pd}` and `_mm{,256}_maskstore_{ps,pd}` require AVX.
+The integer `epi32`/`epi64` forms require AVX2. A mask lane's sign bit enables
+its memory access. Inactive loads return zero and inactive stores leave memory
+unchanged; inactive lanes suppress accesses and faults. These use architectural
+memory operations, not a full load followed by a select. `_mm_maskmoveu_si128`
+uses SSE2 byte-mask non-temporal stores with its existing architectural
+memory/fault contract.
+
+The 128/256-bit AVX2 `i32gather`/`i64gather` forms cover `ps`, `pd`, `epi32`
+and `epi64`, with masked counterparts. Indices are signed and scale must be a
+constant 1, 2, 4 or 8. Masked-off lanes preserve the source lane and suppress
+memory accesses and faults. Mixed index/result widths retain their
+architectural active-lane count and unused-result-lane behavior. These
+interfaces do not model signal-handler restart after a partially completed
+faulting gather.
+
+Streaming stores and `_mm{,256}_stream_load_si{128,256}` use architectural
+non-temporal operations, including their alignment and memory-type conditions.
+`_mm_{sfence,lfence,mfence}` preserve their ordering effects, and `_mm_pause`
+emits the processor hint. `_mm_prefetch` maps the named `_MM_HINT_*` controls
+to the existing advisory prefetch builtin, which may emit no instruction.
+It does not promise a cache access or ordering effect.
+
+`_mm_getcsr`, `_mm_setcsr`, and `_MM_GET/SET_*` field helpers read/write MXCSR,
+including rounding, exception status/masks, FTZ and DAZ. Callers must supply a
+valid supported MXCSR bit pattern. `_mm256_zeroall` and `_mm256_zeroupper`
+require AVX; code generation preserves live language values across their
+register clobbers, so later code may reload vector state.
+
+SSE3 `_mm_monitor` and `_mm_mwait` are available only with explicit `+monitor`
+permission. Their assembler/codegen boundary is covered; native execution and
+OS/privilege permission are not established by accepting the wrapper or CPU
+feature. They must not be executed solely because SSE3 is enabled.
+
+### SSE4.2 strings and CRC32C
+
+`nmmintrin.h` forwards to the shared SSE4 definitions in `smmintrin.h`.
+`_mm_cmpistr{a,c,i,m,o,s,z}` and `_mm_cmpestr{a,c,i,m,o,s,z}` provide implicit
+and explicit signed-length string comparisons. The `_SIDD_*` constants select
+byte/word signedness, aggregation, polarity and mask/index format. Controls
+are integer constant expressions in 0..255; the high unused control bit retains
+its architectural ignored-bit behavior. Explicit lengths use signed 32-bit
+inputs and architectural absolute-value saturation, including `INT_MIN`.
+Index, mask and flag wrappers use their corresponding architectural results.
+Each vector and length argument is evaluated once.
+
+`crc32intrin.h` exposes `_mm_crc32_u{8,16,32,64}`. These update CRC32C using
+the instruction's reflected Castagnoli polynomial; they are not the IEEE CRC32
+polynomial. No initial/final complement is added. The 64-bit input form consumes
+the accumulator's low 32 bits and zero extends the 32-bit result. String and
+CRC wrappers require SSE4.2 and do not grant permission on header inclusion.
+
+### Remaining source compatibility boundary
+
+Use the pinned headers to inspect public wrapper names without counting names
+mentioned only in comments, documentation, or calls inside another wrapper:
+
+```sh
+python3 tools/x86-isa/vendor_coverage.py --reference-dir /path/to/pinned/headers
+```
+
+The checker reports definitions and macros in the seven SSE–AVX2 headers plus
+`crc32intrin.h`, and compares them with compiler-owned headers and private
+fragments. The pinned non-MMX public-name inventory has no missing candidates.
+That is an admission result, not proof of complete signature, feature,
+immediate, ABI or semantic conformance. MMX entries are reported separately.
+C++ overloads, 32-bit x86, AVX-512, AMX and unlisted headers remain separate
+contracts. Do not commit per-run output.
+
+Presence in the header inventory does not grant target features or runtime
+execution safety. Function attributes grant compilation permissions; explicit
+runtime queries let callers choose an executable implementation.
+Unmasked-exception and trap-delivery coverage remains bounded by the explicit
+[FP contracts](#unmasked-fp-contract-and-remaining-hardware-exposure) below.
+
+### Function permissions and runtime CPU queries
+
+On `x86_64-unknown-linux-gnu`, function declarations and definitions accept
+`__attribute__((target("avx2,no-fma")))`. Names use the existing feature policy;
+GNU spellings such as `sse4.1` normalize to Keel's feature names. Ordered edits
+apply to the module baseline and must leave valid prerequisites. Unknown names,
+architecture/tuning selections and attributes on non-function objects diagnose.
+`__has_attribute(target)` advertises this interface on x86-64. Predefined feature
+macros continue to describe the translation unit's baseline.
+
+A baseline function can call a feature-specific implementation through a scalar
+or pointer interface. Each function's selector and legality checks use its own
+resolved permissions. A wide-vector argument/result still needs compatible
+transport permissions at both ends of the call; a feature attribute does not
+supply that ABI permission to its caller. These requests survive IR text
+printing/parsing. The LLVM bridge currently supports Apple ARM only; x86 LLVM
+admission is outside this interface. Its existing ARM attribute policy is unchanged.
+
+Inlining must preserve permissions in both ordinary optimization and mandatory
+`always_inline` expansion. The current check proves compatibility for every
+possible module baseline from the caller's and callee's explicit feature edits.
+It can therefore retain a call that would be safe under a particular baseline.
+Mandatory inlining diagnoses when this conservative proof fails. Inherited
+header bodies inline into the caller's feature context, including explicit
+feature disables, and their operations are checked against that context.
+
+`__builtin_cpu_supports("avx2")` returns an `int`, zero or one. Its argument must
+be a supported string literal. Supported names are `sse`, `sse2`, `sse3`,
+`ssse3`, `sse4.1`, `sse4.2`, `avx`, `avx2`, `aes`, `pclmul`, `popcnt`, `bmi`,
+`bmi2`, `cx16`, `movbe`, `lzcnt`, `xsave`, `fma`, `f16c` and `monitor`.
+Unknown names, runtime strings and non-x86 targets diagnose. Recognition queries
+for `__builtin_cpu_supports` and `__builtin_cpu_init` are independent of the
+selected baseline.
+
+Each call checks the maximum CPUID leaf before reading the selected feature
+bits. `avx`, `avx2`, `fma` and `f16c` also require CPUID's XSAVE, OSXSAVE and AVX
+bits and XCR0 bits 1 and 2. The guarded XCR0 intrinsic executes XGETBV only after
+checking CPUID leaf availability and CPU/OS XSAVE permission. `xsave` requires
+both XSAVE and OSXSAVE. `monitor` reports its CPU feature bit; it does not prove
+OS enablement or privilege to execute MONITOR/MWAIT.
+
+`__builtin_cpu_init()` takes no arguments and returns void. Queries read the
+machine directly, with no shared cache or constructor dependency, so initialization
+emits no code. A positive query does not grant compilation permissions to an
+arbitrary branch. Put optional instructions in an attributed function and call
+it after the runtime check, as in this pointer-interface example:
+
+```c
+__attribute__((target("avx2"), noinline))
+void add_avx2(int *out, const int *a, const int *b);
+void add_scalar(int *out, const int *a, const int *b);
+void add(int *out, const int *a, const int *b) {
+    if (__builtin_cpu_supports("avx2")) add_avx2(out, a, b);
+    else add_scalar(out, a, b);
+}
+```
+
+Library users keep the baseline `FeatureSelector` for codegen, then pass
+`keel_codegen::x86_features::module_features(&module, baseline)` to object
+assembly. That union admits all checked function bodies and the guarded XGETBV
+sequence. It is an encoding permission set and must not replace the selector's
+baseline. Automatic multiversion resolvers, `target_clones`, `__builtin_cpu_is`,
+C++ compatibility and AVX-512/AMX runtime queries remain outside this interface.
+
 ### Reviewed builtin inventory
 
 [`vendor-bindings.json`](../../../tools/x86-isa/vendor-bindings.json) owns the
-173 reviewed frontend bindings for AES, packed integer operations and shifts,
+310 reviewed frontend bindings for AES, packed integer operations and shifts,
 architectural floating arithmetic, rounding and blends, SSE2 numeric conversions,
 FMA and F16C.
 Its generated module supplies both parser lookup and
@@ -197,7 +467,7 @@ lowering and CPU legality remain with the existing typed operations.
 
 [`vendor-references.json`](../../../tools/x86-isa/vendor-references.json) pins
 the existing Keel contracts and LLVM/Clang 21.1.0 reference commit, licence and
-nine header hashes. The new wrappers are independently implemented against
+eleven header hashes. The new wrappers are independently implemented against
 those references. Keel-private bridge names are marked separately from vendor
 builtin spellings. This is a bounded inventory, not complete Intel/GNU/Clang
 builtin or vendor-header compatibility. See the [generator reference](../../../tools/x86-isa/README.md)
@@ -228,12 +498,8 @@ bitwise operations and comparisons, including compound assignments; see
 [GNU vector mode](../../frontends/c/extensions.md#gnu-vector-mode-scalar-broadcasts) for conversion checks
 and remaining scalar-shift/cross-domain limits. Constructor functions remain
 available for explicit element conversions.
-Masked/gather/scatter memory, streaming memory/fences, scalar-lane FP intrinsics
-beyond the reviewed fused and horizontal operations,
-shifts beyond the reviewed SSE2/AVX2 subset, conversions beyond the reviewed SSE2
-and F16C forms, AVX-512,
-full vendor header coverage and strict FP-environment compatibility are outside
-this header contract even where the backend already implements such operations.
+AVX-512, scatter operations, full vendor-header coverage and unrestricted
+FP trap/restart compatibility remain outside this C header boundary.
 The existing C restrictions on vector varargs, unions and by-value x86 aggregates
 remain in force; see [GNU vector mode](../../frontends/c/extensions.md).
 
@@ -570,7 +836,7 @@ feature selection; it returns false on ARM, where direct builtin use and header
 inclusion diagnose.
 
 This contract adds no VEX/EVEX/VAES, AVX-512, automatic AES recognition,
-per-function target dispatch, AES modes, GCM or crypto library. It makes no
+automatic AES dispatch, AES modes, GCM or crypto library. It makes no
 whole-program constant-time or security claim.
 
 <a id="x86-aes-ni-testing"></a>
@@ -629,8 +895,9 @@ keel cc --target x86_64-unknown-linux-gnu --cpu-level v1 \
 it again. Library callers use `Features::for_level(level).with_features("+pclmulqdq")`
 with `FeatureSelector`, and the same features when assembling objects.
 `Features::all_known()` includes this optional capability; level presets do not.
-The deployment CPU must support CPUID.01H:ECX.PCLMULQDQ[1]. No runtime dispatch
-or per-function target attributes are added. ARM targets reject the intrinsic,
+The deployment CPU must support CPUID.01H:ECX.PCLMULQDQ[1]. An explicit
+`__builtin_cpu_supports("pclmul")` check can select a function with
+`target("pclmulqdq")`. ARM targets reject the intrinsic,
 feature selection and owned x86 header.
 
 <a id="x86-pclmulqdq-exact-operation"></a>
@@ -1011,29 +1278,18 @@ only after its allocation, lifetime and calling-boundary rules are defined.
 
 ### Function-specific features and dispatch
 
-Add explicit function feature permissions in shared IR rather than using
-optimization/tuning attributes as a proxy. Resolve a function's effective
-features from the module baseline plus its declared ordered edits, using the
-existing feature prerequisite validator. The backend's function selector,
-legality checks, builtin lowering and assembly output must use that same set.
-Preserve it through IR printing/parsing and LLVM import where supported.
+The implemented [function permission and CPU query contract](#function-permissions-and-runtime-cpu-queries)
+provides ordered IR feature edits, C `target` attributes, legality and inlining
+checks, and explicit runtime dispatch with CPU/OS-state checks for the bounded
+SSE–AVX2 interface. Module feature unions admit object encoding while selectors
+retain the baseline and resolve each function separately.
 
-A baseline function may make an ordinary call to a feature-specific function;
-it may not inline a body requiring unavailable features. Enforce this in both
-optional inlining and mandatory `always_inline` expansion, with a diagnostic
-when mandatory expansion cannot satisfy the feature contract. Global flags must
-not be widened to make such a call compile. A compatible call also needs a
-compatible argument/result ABI; wide-vector transport must be checked at both
-ends of a call, including indirect calls and cross-module declarations.
-
-Compile-time feature macros describe the translation unit's baseline. Builtin
-recognition queries describe admitted frontend interfaces. A future
-`__builtin_cpu_supports` implementation must report executable capabilities,
-including required OS-enabled extended state; CPU feature bits alone are
-insufficient for AVX, AVX-512 or AMX. Its results do not make an arbitrary branch
-a proof that illegal instructions can be placed in a baseline function.
-Automatic multiversion resolvers and dispatch remain separate from explicit
-feature-specific calls and queries.
+Automatic multiversion resolvers, C++ interfaces, richer architecture/tuning
+attributes and runtime AVX-512/AMX queries need separate contracts. Extending
+inlining beyond the current proof for every possible baseline would require an
+explicit effective module feature context throughout the optimizer. A runtime
+branch alone remains insufficient permission to emit optional instructions in
+a baseline function.
 
 ### Semantic lowering
 
@@ -1065,8 +1321,8 @@ assembler acceptance of r16–r31 must not widen the current allocator implicitl
 2. Finish existing SSE through AVX2 family gaps and scalar crypto/query wrappers.
    Add the language support required by their real vendor headers. Keep feature
    permissions explicit at every optimization level.
-3. Add per-function feature permissions and cross-feature inlining/ABI checks.
-   Then implement runtime CPU/OS-state queries and explicit dispatch tests.
+3. Extend the implemented function permissions and bounded runtime queries only
+   after defining additional ABI, state, inlining or multiversion contracts.
 4. Add the 512-bit and mask type/ABI/allocation foundation, then AVX-512 families
    in dependency order. Each family needs encoding, IR, frontend and semantic
    evidence before it is included in the compatibility claim.

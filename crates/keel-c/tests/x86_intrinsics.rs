@@ -101,7 +101,11 @@ fn every_header_function_can_emit_an_object() {
         )
         .unwrap();
         keel_ir::verify_module(&module).unwrap();
-        program(&module, Features::for_level(level)).unwrap();
+        program(
+            &module,
+            Features::for_level(level).with_features("monitor").unwrap(),
+        )
+        .unwrap();
     }
 }
 

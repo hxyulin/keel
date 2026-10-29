@@ -117,11 +117,11 @@ fn function_attributes_merge_across_declarations_and_definitions() {
             )
             .unwrap();
             keel_ir::verify_module(&m).unwrap();
-            let helper = m.functions.iter().find(|f| f.name == "helper").unwrap();
-            assert!(helper.attrs.inlinehint && helper.attrs.alwaysinline && helper.attrs.nounwind);
-            assert!(!helper.attrs.noreturn);
+            let helper = m.function_attrs("helper").unwrap();
+            assert!(helper.inlinehint && helper.alwaysinline && helper.nounwind);
+            assert!(!helper.noreturn);
             let f = m.functions.iter().find(|f| f.name == "f").unwrap();
-            assert_eq!(f.callees().next().unwrap().1.attrs, helper.attrs);
+            assert_eq!(&f.callees().next().unwrap().1.attrs, helper);
             keel_codegen::compile(&m, target).unwrap();
             let mut m = m;
             keel_opt::optimize(&mut m).unwrap();

@@ -426,3 +426,127 @@ void FN(lane_floor_pd256)(const void*a,const void*b,const void*c,void*out){(void
 #ifndef REFERENCE
 void dead_lane_floor_pd256(const void*a,const void*b,const void*c,void*out){(void)b;(void)c;(void)out;__m256d x;__builtin_memcpy(&x,a,32);(void)_mm256_floor_pd(x);}
 #endif
+
+void FN(fp_min_ps128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128 x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);__m128 z=_mm_min_ps(x,y);__builtin_memcpy(out,&z,16);}
+#ifndef REFERENCE
+void dead_fp_min_ps128(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m128 x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);(void)_mm_min_ps(x,y);}
+#endif
+
+void FN(fp_max_ps128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128 x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);__m128 z=_mm_max_ps(x,y);__builtin_memcpy(out,&z,16);}
+#ifndef REFERENCE
+void dead_fp_max_ps128(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m128 x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);(void)_mm_max_ps(x,y);}
+#endif
+
+void FN(fp_rcp_ps128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128 x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);__m128 z=_mm_rcp_ps(x);__builtin_memcpy(out,&z,16);}
+#ifndef REFERENCE
+void dead_fp_rcp_ps128(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m128 x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);(void)_mm_rcp_ps(x);}
+#endif
+
+void FN(fp_rsqrt_ps128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128 x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);__m128 z=_mm_rsqrt_ps(x);__builtin_memcpy(out,&z,16);}
+#ifndef REFERENCE
+void dead_fp_rsqrt_ps128(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m128 x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);(void)_mm_rsqrt_ps(x);}
+#endif
+
+void FN(fp_min_pd128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128d x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);__m128d z=_mm_min_pd(x,y);__builtin_memcpy(out,&z,16);}
+#ifndef REFERENCE
+void dead_fp_min_pd128(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m128d x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);(void)_mm_min_pd(x,y);}
+#endif
+
+void FN(fp_max_pd128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128d x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);__m128d z=_mm_max_pd(x,y);__builtin_memcpy(out,&z,16);}
+#ifndef REFERENCE
+void dead_fp_max_pd128(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m128d x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);(void)_mm_max_pd(x,y);}
+#endif
+
+void FN(fp_min_ss128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128 x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);__m128 z=_mm_min_ss(x,y);__builtin_memcpy(out,&z,16);}
+#ifndef REFERENCE
+void dead_fp_min_ss128(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m128 x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);(void)_mm_min_ss(x,y);}
+#endif
+
+void FN(fp_max_ss128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128 x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);__m128 z=_mm_max_ss(x,y);__builtin_memcpy(out,&z,16);}
+#ifndef REFERENCE
+void dead_fp_max_ss128(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m128 x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);(void)_mm_max_ss(x,y);}
+#endif
+
+void FN(fp_rcp_ss128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128 x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);__m128 z=_mm_rcp_ss(x);__builtin_memcpy(out,&z,16);}
+#ifndef REFERENCE
+void dead_fp_rcp_ss128(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m128 x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);(void)_mm_rcp_ss(x);}
+#endif
+
+void FN(fp_rsqrt_ss128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128 x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);__m128 z=_mm_rsqrt_ss(x);__builtin_memcpy(out,&z,16);}
+#ifndef REFERENCE
+void dead_fp_rsqrt_ss128(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m128 x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);(void)_mm_rsqrt_ss(x);}
+#endif
+
+void FN(fp_sqrt_ss128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128 x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);__m128 z=_mm_sqrt_ss(x);__builtin_memcpy(out,&z,16);}
+#ifndef REFERENCE
+void dead_fp_sqrt_ss128(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m128 x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);(void)_mm_sqrt_ss(x);}
+#endif
+
+void FN(fp_add_ss128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128 x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);__m128 z=_mm_add_ss(x,y);__builtin_memcpy(out,&z,16);}
+
+void FN(fp_sub_ss128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128 x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);__m128 z=_mm_sub_ss(x,y);__builtin_memcpy(out,&z,16);}
+
+void FN(fp_mul_ss128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128 x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);__m128 z=_mm_mul_ss(x,y);__builtin_memcpy(out,&z,16);}
+
+void FN(fp_div_ss128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128 x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);__m128 z=_mm_div_ss(x,y);__builtin_memcpy(out,&z,16);}
+
+void FN(fp_min_sd128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128d x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);__m128d z=_mm_min_sd(x,y);__builtin_memcpy(out,&z,16);}
+#ifndef REFERENCE
+void dead_fp_min_sd128(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m128d x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);(void)_mm_min_sd(x,y);}
+#endif
+
+void FN(fp_max_sd128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128d x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);__m128d z=_mm_max_sd(x,y);__builtin_memcpy(out,&z,16);}
+#ifndef REFERENCE
+void dead_fp_max_sd128(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m128d x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);(void)_mm_max_sd(x,y);}
+#endif
+
+void FN(fp_sqrt_sd128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128d x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);__m128d z=_mm_sqrt_sd(x,y);__builtin_memcpy(out,&z,16);}
+#ifndef REFERENCE
+void dead_fp_sqrt_sd128(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m128d x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);(void)_mm_sqrt_sd(x,y);}
+#endif
+
+void FN(fp_add_sd128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128d x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);__m128d z=_mm_add_sd(x,y);__builtin_memcpy(out,&z,16);}
+
+void FN(fp_sub_sd128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128d x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);__m128d z=_mm_sub_sd(x,y);__builtin_memcpy(out,&z,16);}
+
+void FN(fp_mul_sd128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128d x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);__m128d z=_mm_mul_sd(x,y);__builtin_memcpy(out,&z,16);}
+
+void FN(fp_div_sd128)(const void*a,const void*b,const void*c,void*out){(void)c;__m128d x,y;__builtin_memcpy(&x,a,16);__builtin_memcpy(&y,b,16);__m128d z=_mm_div_sd(x,y);__builtin_memcpy(out,&z,16);}
+
+void FN(fp_min_ps256)(const void*a,const void*b,const void*c,void*out){(void)c;__m256 x,y;__builtin_memcpy(&x,a,32);__builtin_memcpy(&y,b,32);__m256 z=_mm256_min_ps(x,y);__builtin_memcpy(out,&z,32);}
+#ifndef REFERENCE
+void dead_fp_min_ps256(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m256 x,y;__builtin_memcpy(&x,a,32);__builtin_memcpy(&y,b,32);(void)_mm256_min_ps(x,y);}
+#endif
+
+void FN(fp_max_ps256)(const void*a,const void*b,const void*c,void*out){(void)c;__m256 x,y;__builtin_memcpy(&x,a,32);__builtin_memcpy(&y,b,32);__m256 z=_mm256_max_ps(x,y);__builtin_memcpy(out,&z,32);}
+#ifndef REFERENCE
+void dead_fp_max_ps256(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m256 x,y;__builtin_memcpy(&x,a,32);__builtin_memcpy(&y,b,32);(void)_mm256_max_ps(x,y);}
+#endif
+
+void FN(fp_rcp_ps256)(const void*a,const void*b,const void*c,void*out){(void)c;__m256 x,y;__builtin_memcpy(&x,a,32);__builtin_memcpy(&y,b,32);__m256 z=_mm256_rcp_ps(x);__builtin_memcpy(out,&z,32);}
+#ifndef REFERENCE
+void dead_fp_rcp_ps256(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m256 x,y;__builtin_memcpy(&x,a,32);__builtin_memcpy(&y,b,32);(void)_mm256_rcp_ps(x);}
+#endif
+
+void FN(fp_rsqrt_ps256)(const void*a,const void*b,const void*c,void*out){(void)c;__m256 x,y;__builtin_memcpy(&x,a,32);__builtin_memcpy(&y,b,32);__m256 z=_mm256_rsqrt_ps(x);__builtin_memcpy(out,&z,32);}
+#ifndef REFERENCE
+void dead_fp_rsqrt_ps256(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m256 x,y;__builtin_memcpy(&x,a,32);__builtin_memcpy(&y,b,32);(void)_mm256_rsqrt_ps(x);}
+#endif
+
+void FN(fp_min_pd256)(const void*a,const void*b,const void*c,void*out){(void)c;__m256d x,y;__builtin_memcpy(&x,a,32);__builtin_memcpy(&y,b,32);__m256d z=_mm256_min_pd(x,y);__builtin_memcpy(out,&z,32);}
+#ifndef REFERENCE
+void dead_fp_min_pd256(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m256d x,y;__builtin_memcpy(&x,a,32);__builtin_memcpy(&y,b,32);(void)_mm256_min_pd(x,y);}
+#endif
+
+void FN(fp_max_pd256)(const void*a,const void*b,const void*c,void*out){(void)c;__m256d x,y;__builtin_memcpy(&x,a,32);__builtin_memcpy(&y,b,32);__m256d z=_mm256_max_pd(x,y);__builtin_memcpy(out,&z,32);}
+#ifndef REFERENCE
+void dead_fp_max_pd256(const void*a,const void*b,const void*c,void*out){(void)c;(void)out;__m256d x,y;__builtin_memcpy(&x,a,32);__builtin_memcpy(&y,b,32);(void)_mm256_max_pd(x,y);}
+#endif
+
+int FN(mask_ps128)(const void*a){__m128 x;__builtin_memcpy(&x,a,16);return _mm_movemask_ps(x);}
+
+int FN(mask_pd128)(const void*a){__m128d x;__builtin_memcpy(&x,a,16);return _mm_movemask_pd(x);}
+
+int FN(mask_ps256)(const void*a){__m256 x;__builtin_memcpy(&x,a,32);return _mm256_movemask_ps(x);}
+
+int FN(mask_pd256)(const void*a){__m256d x;__builtin_memcpy(&x,a,32);return _mm256_movemask_pd(x);}

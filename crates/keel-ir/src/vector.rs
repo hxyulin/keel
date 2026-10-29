@@ -291,8 +291,8 @@ impl FromStr for VectorReduceOp {
 }
 
 impl VectorBinaryOp {
-    /// Pair adjacent lanes of the concatenation a,b: result[i] =
-    /// binary(concat[2*i], concat[2*i+1]). Floating operations preserve that
+    /// Pair adjacent lanes of the concatenation a,b: `result[i] =
+    /// binary(concat[2*i], concat[2*i+1])`. Floating operations preserve that
     /// operand order and scalar IEEE NaN/signed-zero behavior.
     pub fn pairwise_binary(self) -> Option<Self> {
         Some(match self {

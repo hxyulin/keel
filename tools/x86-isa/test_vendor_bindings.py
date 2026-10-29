@@ -25,7 +25,7 @@ class VendorBindingTests(unittest.TestCase):
         self.assertEqual({family: sum(row['family'] == family for row in rows)
                           for family in vendor_bindings.FAMILIES},
                          {'aes': 6, 'packed_shift': 32, 'saturating': 8,
-                          'packed_conversion': 3, 'value': 124})
+                          'packed_conversion': 3, 'value': 261})
         source = vendor_bindings.generate(self.schema, generate.ROOT)
         self.assertEqual(source.count(' => Binding::'), len(names))
         self.assertIn('pub(crate) fn recognized(', source)
@@ -55,6 +55,7 @@ class VendorBindingTests(unittest.TestCase):
         self.assertEqual(vendor_bindings.ir_type('same_as_input', 'int_i32x4'),
                          'Type::Vector(VectorType::I32x4)')
         self.assertEqual(vendor_bindings.ir_type('u64'), 'Type::I64')
+        self.assertEqual(vendor_bindings.ir_type('ptr'), 'Type::Ptr')
 
     def test_reference_hash_check_is_explicit_and_rejects_wrong_inputs(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -72,22 +73,46 @@ class VendorBindingTests(unittest.TestCase):
         self.assertEqual(self.schema['reference_file'], 'vendor-references.json')
 
     def test_value_controls_match_the_parser_recipe(self):
-        for original in self.schema['bindings']:
-            if original['family'] != 'value':
-                continue
-            for control in vendor_bindings.CONTROLS:
-                if control == original['control']:
-                    continue
+        # Whole-manifest validation above admits every reviewed mapping. Each
+        # distinct parser recipe needs one negative matrix, not one per alias.
+        representatives = {}
+        for row in self.schema['bindings']:
+            if row['family'] == 'value':
+                representatives.setdefault(row['control'], row)
+        self.assertEqual(set(representatives), {'none'} | vendor_bindings.VALUE_CONTROLS.keys())
+        for expected, original in representatives.items():
+            for control in vendor_bindings.CONTROLS - {expected}:
                 schema = copy.deepcopy(self.schema)
                 row = next(row for row in schema['bindings'] if row['builtin'] == original['builtin'])
                 row['control'] = control
-                with self.assertRaisesRegex(ValueError, 'value control'):
-                    vendor_bindings.validate(schema, generate.ROOT)
+                with self.subTest(expected=expected, rejected=control):
+                    with self.assertRaisesRegex(ValueError, 'value control'):
+                        vendor_bindings.validate(schema, generate.ROOT)
 
     def test_control_recipe_requires_the_parser_control_position_and_type(self):
         for params in [['f32x4'], ['f32x4', 'u64'], ['i32', 'f32x4']]:
             schema = copy.deepcopy(self.schema)
             row = next(row for row in schema['bindings'] if row['control'] == 'round_imm4')
             row['params'] = params
-            with self.assertRaisesRegex(ValueError, 'second i32'):
+            with self.assertRaisesRegex(ValueError, 'trailing i32'):
                 vendor_bindings.validate(schema, generate.ROOT)
+
+    def test_gather_scales_generate_a_closed_set_at_the_correct_position(self):
+        schema = copy.deepcopy(self.schema)
+        row = next(row for row in schema['bindings'] if row['control'] == 'gather_scale')
+        self.assertEqual(row['params'], ['ptr', 'i32x4', 'f32x4', 'i32x4', 'i32'])
+        source = vendor_bindings.generate(schema, generate.ROOT)
+        self.assertIn('allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15', source)
+        row['params'] = row['params'][:-1]
+        with self.assertRaisesRegex(ValueError, 'trailing i32'):
+            vendor_bindings.validate(schema, generate.ROOT)
+
+    def test_value_void_pointer_and_zero_arguments_generate_output_slices(self):
+        schema = copy.deepcopy(self.schema)
+        row = next(row for row in schema['bindings'] if row['family'] == 'value' and row['control'] == 'none')
+        row.update(params=['ptr'], result='void')
+        source = vendor_bindings.generate(schema, generate.ROOT)
+        self.assertIn('&[Type::Ptr], &[])', source)
+        row.update(params=[], result='i32')
+        source = vendor_bindings.generate(schema, generate.ROOT)
+        self.assertIn('&[], &[Type::I32])', source)

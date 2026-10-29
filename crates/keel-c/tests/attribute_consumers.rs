@@ -47,12 +47,9 @@ fn late_contracts_reach_definitions_calls_and_inlined_calls() {
                         }
                         let f = m.functions.iter().find(|f| f.name == "f").unwrap();
                         let helper_call = f.layout_insts().any(|(_, i)| matches!(f.inst_data(i), InstData::Call { func, .. } if f.callee(*func).name == "helper"));
-                        assert_eq!(helper_call, tier != OptimizationTier::Full, "{m}");
-                        let owner = if tier == OptimizationTier::Full {
-                            f
-                        } else {
-                            m.functions.iter().find(|f| f.name == "helper").unwrap()
-                        };
+                        // Mandatory C inlining runs before optional tier passes.
+                        assert!(!helper_call, "{m}");
+                        let owner = f;
                         let call = owner.layout_insts().find_map(|(_, i)| matches!(owner.inst_data(i), InstData::Call { func, .. } if owner.callee(*func).name == "stop").then_some(i)).unwrap();
                         let insts = owner.block_insts(owner.inst_block(call));
                         let pos = insts.iter().position(|&i| i == call).unwrap();

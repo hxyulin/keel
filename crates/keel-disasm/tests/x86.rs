@@ -156,6 +156,8 @@ fn privileged_fixed_adapters_and_decoder_share_generated_forms() {
     // form selected by decoding. This checks encoding identity, not execution.
     for (name, bytes) in [
         ("rdmsr", &[0x0f, 0x32][..]),
+        ("monitor", &[0x0f, 0x01, 0xc8]),
+        ("mwait", &[0x0f, 0x01, 0xc9]),
         ("wrmsr", &[0x0f, 0x30][..]),
         ("clts", &[0x0f, 0x06][..]),
         ("invd", &[0x0f, 0x08][..]),

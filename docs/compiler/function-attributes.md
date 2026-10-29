@@ -31,6 +31,41 @@ not resolve conflicting policies. Function imports default to no promises;
 programmatic builders must explicitly set/synchronize attributes. Inlining
 preserves imported callee contracts.
 
+## Function ISA permissions
+
+`target_features("avx2", "-fma,+fma")` retains ordered x86 permission edits
+in `FunctionAttrs::target_features`. The shared feature schema validates names;
+the backend applies edits to the invocation's baseline and then validates
+prerequisites. A positive edit enables its prerequisites. A negative edit clears
+the named feature only, so disabling AVX in an AVX2 baseline also requires
+disabling AVX2 and other features that depend on AVX. These requests are separate
+from optimization settings and do not change the ABI signature.
+
+The x86 backend uses each resolved set for vector lowering, instruction
+selection, inline assembly, and emitted-instruction checks. Wide direct calls
+require AVX transport at both the caller and callee. Indirect signatures must
+fit the caller's enabled transport. AArch64 and Wasm emission and LLVM export
+reject these explicit x86 IR requests. The LLVM bridge supports only Apple
+AArch64 modules, so x86 LLVM import is outside this implementation. Its existing
+policy for imported ARM CPU and feature strings is unchanged; preserving those
+contracts requires separate ARM bridge work.
+
+Optional inlining requires the caller's edits to contain the callee's
+permissions for every possible module baseline. Explicit feature contracts
+have the same restriction during mandatory C inlining. This is conservative:
+matching global flags alone do not prove that an explicitly annotated callee
+can be inlined into an unannotated caller. Unannotated mandatory wrappers are
+lowered in the caller's permission context; copied operations still undergo
+the caller's feature checks. Owned regions and frame observers retain their
+existing inlining restrictions.
+
+Object encoders use `keel_codegen::x86_features::module_features` to obtain the
+union needed to encode the already validated functions. This union is not an
+instruction-selection baseline and grants no permissions to neighboring
+functions. Target-aware optimizer passes also receive each function's resolved
+vector capabilities, so a module-wide AVX2 policy cannot widen a function that
+disables AVX.
+
 Verification checks representation and consistency, not arbitrary semantic
 contracts. A `return` in a `noreturn` body is accepted, just as an external
 contract cannot be proved here. The `call-contracts` optimizer pass consumes

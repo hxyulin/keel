@@ -27,6 +27,23 @@ pub struct Module {
 }
 
 impl Module {
+    /// First explicit x86 permission request, including declarations and callees.
+    /// Consumers for other targets must reject it rather than discard it.
+    pub fn x86_target_feature_request(&self) -> Option<(&str, &crate::X86TargetFeatures)> {
+        self.functions
+            .iter()
+            .map(|f| (f.name.as_str(), &f.attrs.target_features))
+            .chain(
+                self.decls
+                    .iter()
+                    .map(|d| (d.name.as_str(), &d.attrs.target_features)),
+            )
+            .chain(self.functions.iter().flat_map(|f| {
+                f.callees()
+                    .map(|(_, d)| (d.name.as_str(), &d.attrs.target_features))
+            }))
+            .find(|(_, features)| !features.is_empty())
+    }
     /// The signature of a declared or defined function.
     pub fn signature(&self, name: &str) -> Option<&Signature> {
         let decl = self.decls.iter().find(|d| d.name == name).map(|d| &d.sig);

@@ -51,6 +51,7 @@ mod types;
 mod unit;
 #[path = "generated/x86_builtins.rs"]
 mod x86_builtins;
+mod x86_cpu;
 
 pub use batch::{BatchCompiler, BatchCompilerError, Input};
 pub use library_builtins::{LibraryBuiltin, LibraryBuiltins};
@@ -278,6 +279,7 @@ fn finalize_inline_asm(
         .collect();
     if inline_only.is_empty()
         && definitions.is_empty()
+        && !module.functions.iter().any(|f| f.attrs.alwaysinline)
         && (target != keel_ir::Target::X86_64LinuxGnu
             || !module.functions.iter().any(|f| {
                 f.layout_insts()

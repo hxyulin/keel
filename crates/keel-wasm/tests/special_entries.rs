@@ -7,3 +7,13 @@ fn entry_contracts_cannot_fall_through_to_the_ordinary_abi() {
         assert!(message.contains(policy) && message.contains("not implemented"));
     }
 }
+
+#[test]
+fn x86_permissions_cannot_be_discarded_by_wasm_emission() {
+    let module = keel_ir::parse("decl @entry() target_features(\"avx2\")\n").unwrap();
+    let error = keel_wasm::emit_module(&module, &Default::default()).unwrap_err();
+    assert!(
+        error.to_string().contains("x86 function target features"),
+        "{error}"
+    );
+}

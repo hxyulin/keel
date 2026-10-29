@@ -262,6 +262,8 @@ impl Signature {
 /// Function symbol binding, promises and optimization policy, separate from ABI types.
 #[derive(Clone, Default, PartialEq, Eq, Debug)]
 pub struct FunctionAttrs {
+    /// Ordered x86 ISA permission edits, independent of optimization policy.
+    pub target_features: crate::X86TargetFeatures,
     /// Scoped semantic promises, independent of the ABI signature.
     pub contract: crate::CallContract,
     /// Ordinary weak symbol binding (definition or optional external reference).
@@ -313,6 +315,7 @@ pub struct FunctionAttrs {
 
 impl FunctionAttrs {
     pub fn merge(&mut self, other: Self) {
+        self.target_features.append(&other.target_features);
         self.contract = self.contract.intersect(&other.contract);
         self.weak |= other.weak;
         self.constructor |= other.constructor;
@@ -404,6 +407,9 @@ impl fmt::Display for FunctionAttrs {
         }
         if !self.optimize.is_empty() {
             write!(f, " {}", self.optimize)?;
+        }
+        if !self.target_features.is_empty() {
+            write!(f, " {}", self.target_features)?;
         }
         if let Some(section) = self.section {
             write!(f, " section {section}")?;

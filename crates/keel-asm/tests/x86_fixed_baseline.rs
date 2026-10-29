@@ -19,6 +19,10 @@ fn baseline_fixed_forms_match_clang_gnu_and_typed_transport() {
     let mut chunks = keel_asm::x86::ProgramAssembler::new(Default::default());
     let mut expected = Vec::new();
     for &op in FixedOpcode::ALL {
+        // Optional MONITOR forms have their own gated byte/decoder tests.
+        if matches!(op, FixedOpcode::Monitor | FixedOpcode::Mwait) {
+            continue;
+        }
         source.push_str(op.mnemonic());
         source.push('\n');
         expected.extend_from_slice(op.bytes());

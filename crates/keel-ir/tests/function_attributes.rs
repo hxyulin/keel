@@ -156,3 +156,37 @@ fn function_alignment_roundtrips_merges_and_verifies() {
     }
     assert!(parse("decl @f() align 16 align 32").is_err());
 }
+
+#[test]
+fn target_features_roundtrip_without_changing_signatures_and_sync_callees() {
+    let mut module = parse("decl @outside(i32) -> i32 target_features(\"avx2\",\"-fma,+fma\")\nfunc @caller(i32) -> i32 target_features(\"avx2,fma\") {\nblock0(v0:i32):\n v1 = call @outside(v0)\n return v1\n}\n").unwrap();
+    verify_module(&module).unwrap();
+    let text = module.to_string();
+    let again = parse(&text).unwrap();
+    assert_eq!(again.to_string(), text);
+    assert_eq!(module.decls[0].sig, module.functions[0].sig);
+    assert_eq!(
+        module.decls[0]
+            .attrs
+            .target_features
+            .iter()
+            .collect::<Vec<_>>(),
+        ["avx2", "-fma,+fma"]
+    );
+    module.decls[0].attrs.target_features =
+        keel_ir::X86TargetFeatures::new(["avx".to_owned()]).unwrap();
+    assert!(verify_module(&module).is_err());
+    module.sync_function_attrs();
+    verify_module(&module).unwrap();
+    for attributes in [
+        "target_features()",
+        "target_features(\"unknown\")",
+        "target_features(\"\")",
+        "target_features(\"avx\") target_features(\"avx2\")",
+    ] {
+        assert!(
+            parse(&format!("decl @f() {attributes}\n")).is_err(),
+            "{attributes}"
+        );
+    }
+}

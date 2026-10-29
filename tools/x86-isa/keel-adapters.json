@@ -3313,6 +3313,20 @@
       "source_mnemonic": "rsm",
       "size": null,
       "wait": false
+    },
+    {
+      "variant": "Monitor",
+      "mnemonic": "monitor",
+      "source_mnemonic": "monitor",
+      "size": null,
+      "wait": false
+    },
+    {
+      "variant": "Mwait",
+      "mnemonic": "mwait",
+      "source_mnemonic": "mwait",
+      "size": null,
+      "wait": false
     }
   ],
   "feature_opcodes": [
@@ -6735,6 +6749,14 @@
     {
       "opcode": "Opcode::Core(CoreOpcode::Clflush)",
       "source_mnemonic": "clflush"
+    },
+    {
+      "opcode": "Opcode::Fixed(crate::x86::FixedOpcode::Monitor)",
+      "source_mnemonic": "monitor"
+    },
+    {
+      "opcode": "Opcode::Fixed(crate::x86::FixedOpcode::Mwait)",
+      "source_mnemonic": "mwait"
     }
   ],
   "identities": {
@@ -9132,6 +9154,16 @@
       {
         "variant": "Rsm",
         "mnemonic": "rsm",
+        "aliases": []
+      },
+      {
+        "variant": "Monitor",
+        "mnemonic": "monitor",
+        "aliases": []
+      },
+      {
+        "variant": "Mwait",
+        "mnemonic": "mwait",
         "aliases": []
       }
     ]

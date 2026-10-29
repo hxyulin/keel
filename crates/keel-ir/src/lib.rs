@@ -27,6 +27,8 @@ pub mod types;
 pub mod vector;
 pub mod vector_capabilities;
 pub use vector_capabilities::VectorCapabilities;
+mod target_features;
+pub use target_features::X86TargetFeatures;
 pub mod verifier;
 pub mod x87_owned_stack;
 

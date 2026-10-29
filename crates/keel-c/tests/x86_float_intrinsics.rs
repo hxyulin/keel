@@ -486,3 +486,78 @@ fn rounding_controls_scalar_lanes_and_blend_permissions() {
         }
     }
 }
+
+#[test]
+fn remaining_float_wrappers_preserve_scalar_lanes_and_permissions() {
+    for width in [128, 256] {
+        for suffix in ["ps", "pd", "ss", "sd"] {
+            let scalar = matches!(suffix, "ss" | "sd");
+            if scalar && width == 256 {
+                continue;
+            }
+            let double = matches!(suffix, "pd" | "sd");
+            let ty = format!("__m{width}{}", if double { "d" } else { "" });
+            let prefix = if width == 128 { "_mm" } else { "_mm256" };
+            let mut operations = vec!["min", "max"];
+            if !double {
+                operations.extend(["rcp", "rsqrt"]);
+            }
+            if scalar {
+                operations.extend(["sqrt", "add", "sub", "mul", "div"]);
+            }
+            for op in operations {
+                let binary = matches!(op, "min" | "max" | "add" | "sub" | "mul" | "div")
+                    || (op == "sqrt" && double);
+                let name = format!("{prefix}_{op}_{suffix}");
+                let args = if binary { "next(),next()" } else { "next()" };
+                let module = frontend(&format!("#include <immintrin.h>\nextern {ty} next(void);{ty} f(void){{return {name}({args});}}" )).unwrap();
+                keel_ir::verify_module(&module).unwrap();
+                assert_eq!(
+                    module.to_string().matches("call @next()").count(),
+                    if binary { 2 } else { 1 },
+                    "{name}"
+                );
+                let allowed = if width == 128 {
+                    Features::NONE
+                } else {
+                    Features::parse("avx").unwrap()
+                };
+                let selector = FeatureSelector {
+                    inner: &SelectionTier::Baseline,
+                    features: allowed,
+                };
+                let program = keel_codegen::compile_program_with_pipeline(
+                    &module,
+                    Target::X86_64LinuxGnu,
+                    &pipeline(&selector, &AllocationTier::Full),
+                )
+                .unwrap();
+                keel_asm::x86::assemble_program_object_with_features(&program, allowed).unwrap();
+                if width == 256 {
+                    let denied = FeatureSelector {
+                        inner: &SelectionTier::Baseline,
+                        features: Features::NONE,
+                    };
+                    assert!(
+                        keel_codegen::compile_program_with_pipeline(
+                            &module,
+                            Target::X86_64LinuxGnu,
+                            &pipeline(&denied, &AllocationTier::Full)
+                        )
+                        .is_err(),
+                        "{name}"
+                    );
+                }
+                if !matches!(op, "add" | "sub" | "mul" | "div") {
+                    let args = if binary { "a,b" } else { "a" };
+                    let mut dead = frontend(&format!(
+                        "#include <immintrin.h>\nvoid f({ty} a,{ty} b){{(void){name}({args});}}"
+                    ))
+                    .unwrap();
+                    keel_opt::optimize(&mut dead).unwrap();
+                    assert!(dead.to_string().contains("intrinsic"), "{name}: {dead}");
+                }
+            }
+        }
+    }
+}

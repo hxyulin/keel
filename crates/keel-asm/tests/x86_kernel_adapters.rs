@@ -25,6 +25,8 @@ fn assemble(source: &str, syntax: Syntax, features: Features) -> Vec<u8> {
 fn literal_kernel_spellings_use_generated_forms() {
     for (source, expected) in [
         ("rdtscp", &[0x0f, 0x01, 0xf9][..]),
+        ("monitor", &[0x0f, 0x01, 0xc8]),
+        ("mwait", &[0x0f, 0x01, 0xc9]),
         ("rdgsbase %r9", &[0xf3, 0x49, 0x0f, 0xae, 0xc9]),
         ("rdrand %r9w", &[0x66, 0x41, 0x0f, 0xc7, 0xf1]),
         ("fxrstorq (%r12)", &[0x49, 0x0f, 0xae, 0x0c, 0x24]),
@@ -48,6 +50,8 @@ fn literal_kernel_spellings_use_generated_forms() {
 fn optional_kernel_capabilities_are_independent_of_cpu_profiles() {
     for (source, feature) in [
         ("rdtscp", "rdtscp"),
+        ("monitor", "monitor"),
+        ("mwait", "monitor"),
         ("rdgsbase %r9", "fsgsbase"),
         ("rdrand %r9w", "rdrand"),
         ("prefetchw (%rcx)", "prefetchw"),
@@ -98,6 +102,8 @@ fn optional_kernel_capabilities_are_independent_of_cpu_profiles() {
 fn kernel_operand_matrix_matches_clang_and_gnu() {
     let mut cases = vec![
         "rdtscp".to_owned(),
+        "monitor".to_owned(),
+        "mwait".to_owned(),
         "prefetchw 13(%r12,%r9,4)".to_owned(),
         "fxrstorq 32(%r13)".to_owned(),
         "fxsaveq (%r12)".to_owned(),
@@ -166,4 +172,31 @@ fn kernel_operand_matrix_matches_clang_and_gnu() {
         );
     }
     fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn monitor_forms_keep_implicit_operands_and_long_mode_contract() {
+    let features = Features::for_level(CpuLevel::V1)
+        .with_features("monitor")
+        .unwrap();
+    for (source, expected) in [
+        ("monitor", &[0x0f, 0x01, 0xc8][..]),
+        ("mwait", &[0x0f, 0x01, 0xc9][..]),
+    ] {
+        for syntax in [Syntax::Att, Syntax::Intel] {
+            assert_eq!(assemble(source, syntax, features), expected);
+        }
+        let form = &keel_asm_ir::x86::isa::forms(source)[0];
+        assert_eq!(form.cpl, Some(0));
+        for invalid in [
+            format!("{source} %eax"),
+            format!(".code32\n{source}"),
+            format!(".code16\n{source}"),
+        ] {
+            assert!(
+                assemble_object_with_syntax_and_features(&invalid, Syntax::Att, features).is_err(),
+                "{invalid}"
+            );
+        }
+    }
 }

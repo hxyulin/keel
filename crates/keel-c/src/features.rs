@@ -26,6 +26,7 @@ pub fn query(name: &str, argument: &str, target: Target) -> u64 {
         ),
         // cleanup remains false: whole-function jump/nonlocal restrictions
         // still require source fallbacks in general-purpose GNU C libraries.
+        "__has_attribute" if arg == "target" => target == Target::X86_64LinuxGnu,
         "__has_attribute" => matches!(
             arg,
             "aligned"
@@ -95,7 +96,9 @@ fn builtin(name: &str, target: Target) -> bool {
     }
     if matches!(
         base,
-        "ia32_pclmulqdq128"
+        "cpu_supports"
+            | "cpu_init"
+            | "ia32_pclmulqdq128"
             | "ia32_cmpps256"
             | "ia32_cmppd256"
             | "return_address"

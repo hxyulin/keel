@@ -231,6 +231,11 @@ fn attrs(a: &FunctionAttrs) -> String {
 /// Verify and translate the complete module in memory. Errors never return
 /// partial LLVM text. The caller must not publish output until this succeeds.
 pub fn export(module: &Module, target: TargetProfile) -> ExportResult<String> {
+    if let Some((name, _)) = module.x86_target_feature_request() {
+        return Err(format!(
+            "@{name}: function target features are unsupported by the LLVM bridge"
+        ));
+    }
     if let Some((name, contract)) = module.special_entry_contract() {
         return Err(format!(
             "@{name}: {contract} function entry/return lowering is not implemented"

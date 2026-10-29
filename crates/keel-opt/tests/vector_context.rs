@@ -391,3 +391,41 @@ fn default_library_context_matches_legacy_pipelines_for_every_target() {
         }
     }
 }
+
+#[test]
+fn function_permissions_override_vector_context_without_widening_neighbors() {
+    struct Observe;
+    impl Pass for Observe {
+        fn name(&self) -> &'static str {
+            "observe-target-features"
+        }
+        fn description(&self) -> &'static str {
+            "Check per-function vector permissions"
+        }
+        fn run(&self, _: &mut Function) -> bool {
+            panic!("missing context")
+        }
+        fn run_with_context(&self, function: &mut Function, context: OptimizationContext) -> bool {
+            let expected = if function.name == "wide" { 256 } else { 128 };
+            assert_eq!(
+                context.capabilities.value_bits(),
+                expected,
+                "{}",
+                function.name
+            );
+            false
+        }
+    }
+    let mut module=parse("func @wide() target_features(\"avx2\") {\nblock0:\n return\n}\nfunc @base() {\nblock0:\n return\n}\nfunc @narrow() target_features(\"-avx2,-avx\") {\nblock0:\n return\n}\n").unwrap();
+    let context = OptimizationContext {
+        target: VectorTarget::X86Sse2,
+        capabilities: VectorCapabilities::BASELINE,
+    };
+    keel_opt::run_pipeline_with_context_and_options(
+        &mut module,
+        &[&Observe],
+        context,
+        OptimizeOptions::default(),
+    )
+    .unwrap();
+}

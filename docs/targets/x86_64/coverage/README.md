@@ -7,10 +7,10 @@ Machine-readable form records are in [coverage.json](coverage.json).
 Legacy/VEX imported source forms: **3603**, plus **1** local extension.
 Legacy/VEX catalogue: **3563** forms; **41** imported forms excluded.
 Decoder registration enabled: **3562**; disabled by policy: **1**.
-Forms with declarative assembler candidates: **2937**.
-Public binding records: **1027**; without a direct source join: **86** (not an unsupported count).
+Forms with declarative assembler candidates: **2939**.
+Public binding records: **1029**; without a direct source join: **86** (not an unsupported count).
 Tracked compiler declarations: **45**, with **43** regular recipes and **2** hooks.
-ISA policy keys without an explicit feature classification: **72**.
+ISA policy keys without an explicit feature classification: **71**.
 
 Separate AVX-512F/VL table: **1899** records and **351** mnemonic bindings.
 It contains **1884** EVEX records plus **15** VEX mask records already present in the legacy/VEX import.
@@ -102,7 +102,7 @@ An unclassified key is not automatically baseline; the runtime feature lookup cu
 | `LONGMODE` | 29 | 29 | 29 | 13 | 1 | baseline | v1, v2, v3 |
 | `LZCNT` | 2 | 2 | 2 | 2 | 0 | lzcnt | v3 |
 | `MCOMMIT` | 1 | 1 | 1 | 0 | 0 | unclassified |  |
-| `MONITOR` | 2 | 2 | 2 | 0 | 0 | unclassified |  |
+| `MONITOR` | 2 | 2 | 2 | 2 | 0 | monitor |  |
 | `MONITORX` | 2 | 2 | 2 | 0 | 0 | unclassified |  |
 | `MOVBE` | 2 | 2 | 2 | 2 | 0 | movbe | v3 |
 | `MOVDIR` | 3 | 3 | 3 | 0 | 0 | unclassified |  |

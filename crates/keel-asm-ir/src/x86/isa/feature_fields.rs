@@ -57,6 +57,8 @@ pub struct Features {
     pub amx_fp16: bool,
     /// Intel APX foundation; REX2 EGPR forms require OS-enabled APX state.
     pub apx_f: bool,
+    /// MONITOR/MWAIT instructions; execution requires the OS-enabled monitor facility and permitted privilege.
+    pub monitor: bool,
 }
 impl Features {
     pub const NONE: Self = Self {
@@ -98,6 +100,7 @@ impl Features {
         amx_bf16: false,
         amx_fp16: false,
         apx_f: false,
+        monitor: false,
     };
     /// Every declared capability, for tests and tooling; not host detection.
     pub const fn all_known() -> Self { Self {
@@ -139,6 +142,7 @@ impl Features {
         amx_bf16: true,
         amx_fp16: true,
         apx_f: true,
+        monitor: true,
     } }
     /// Stable schema bit IDs, covering every capability.
     pub const fn fingerprint(self) -> u64 {
@@ -180,6 +184,56 @@ impl Features {
             | ((self.amx_bf16 as u64) << 35)
             | ((self.amx_fp16 as u64) << 36)
             | ((self.apx_f as u64) << 37)
+            | ((self.monitor as u64) << 38)
+    }
+    /// Restore a schema fingerprint, rejecting unknown bits and invalid prerequisites.
+    pub fn from_fingerprint(bits: u64) -> Result<Self, &'static str> {
+        if bits & !549755813887 != 0 {
+            return Err("unknown x86 feature fingerprint bits");
+        }
+        let features = Self {
+            aes: bits & (1 << 0) != 0,
+            adx: bits & (1 << 1) != 0,
+            sha: bits & (1 << 2) != 0,
+            vaes: bits & (1 << 3) != 0,
+            vpclmulqdq: bits & (1 << 4) != 0,
+            avx: bits & (1 << 5) != 0,
+            bmi1: bits & (1 << 6) != 0,
+            bmi2: bits & (1 << 7) != 0,
+            clflush: bits & (1 << 8) != 0,
+            pclmulqdq: bits & (1 << 9) != 0,
+            cx16: bits & (1 << 10) != 0,
+            lahf_sahf: bits & (1 << 11) != 0,
+            popcnt: bits & (1 << 12) != 0,
+            sse3: bits & (1 << 13) != 0,
+            ssse3: bits & (1 << 14) != 0,
+            sse41: bits & (1 << 15) != 0,
+            sse42: bits & (1 << 16) != 0,
+            avx2: bits & (1 << 17) != 0,
+            f16c: bits & (1 << 18) != 0,
+            fma: bits & (1 << 19) != 0,
+            lzcnt: bits & (1 << 20) != 0,
+            movbe: bits & (1 << 21) != 0,
+            xsave: bits & (1 << 22) != 0,
+            osxsave: bits & (1 << 23) != 0,
+            avx512f: bits & (1 << 24) != 0,
+            avx512vl: bits & (1 << 25) != 0,
+            rdtscp: bits & (1 << 26) != 0,
+            fsgsbase: bits & (1 << 27) != 0,
+            rdrand: bits & (1 << 28) != 0,
+            invpcid: bits & (1 << 29) != 0,
+            prefetchw: bits & (1 << 30) != 0,
+            rdseed: bits & (1 << 31) != 0,
+            waitpkg: bits & (1 << 32) != 0,
+            amx_tile: bits & (1 << 33) != 0,
+            amx_int8: bits & (1 << 34) != 0,
+            amx_bf16: bits & (1 << 35) != 0,
+            amx_fp16: bits & (1 << 36) != 0,
+            apx_f: bits & (1 << 37) != 0,
+            monitor: bits & (1 << 38) != 0,
+        };
+        features.validate()?;
+        Ok(features)
     }
     pub const fn is_empty(self) -> bool { self.fingerprint() == 0 }
     pub const fn contains(self, required: Self) -> bool {
@@ -364,6 +418,9 @@ impl Features {
                     self.osxsave = true;
                 }
             }
+            "monitor" => {
+                self.monitor = enabled;
+            }
             _ => return false,
         }
         true
@@ -459,6 +516,7 @@ impl Features {
             (self.amx_bf16, "amx_bf16"),
             (self.amx_fp16, "amx_fp16"),
             (self.apx_f, "apx_f"),
+            (self.monitor, "monitor"),
         ]
         .into_iter()
         .filter_map(|(on, name)| on.then_some(name))

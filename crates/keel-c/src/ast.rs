@@ -181,6 +181,10 @@ pub enum Builtin {
     X86PackedConversion(Intrinsic),
     /// Typed vendor bridge to an existing effectful FMA/F16C operation.
     X86Value(Intrinsic),
+    /// Runtime capability with CPU-leaf and executable OS-state checks.
+    X86CpuSupports(&'static crate::x86_cpu::Feature),
+    /// Direct runtime queries need no constructor or shared cache.
+    X86CpuInit,
     /// Internal scalar broadcast after checked element conversion.
     VectorSplat,
     /// Quiet AVX comparison; the integer mask is bitcast back to the C float vector.
