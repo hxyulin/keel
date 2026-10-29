@@ -325,8 +325,11 @@ fn native_constant_division_matches_c_oracle() {
     fs::create_dir(&dir).unwrap();
     fs::write(dir.join("oracle.c"), &c).unwrap();
     // The oracle is large and invariant: compile it once, link per config.
+    // At -O0 clang computes the expected values with hardware sdiv/udiv,
+    // independent of LLVM's reciprocal sequences, and compiles in a second
+    // instead of 16.
     let driver = Command::new("clang")
-        .arg("-O1")
+        .arg("-O0")
         .arg("-c")
         .arg(dir.join("oracle.c"))
         .arg("-o")
