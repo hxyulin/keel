@@ -1,6 +1,19 @@
 //! Characterization tests for the Python LLVM importer contract.
+#[path = "import/contracts.rs"]
+mod contracts;
+#[path = "import/definedness.rs"]
+mod definedness;
+#[path = "import/value_facts.rs"]
+mod value_facts;
+
 use std::{path::PathBuf, process::Command};
 const HEADER: &str = "target triple = \"arm64-apple-macosx11.0.0\"\ntarget datalayout = \"e-m:o-i64:64-i128:128-n32:64-S128-Fn32\"\n";
+fn translated(importer: &keel_llvm::import::Importer, body: &str) -> keel_ir::Module {
+    let text = importer
+        .translate(format!("{HEADER}{body}").as_bytes(), Default::default())
+        .unwrap();
+    keel_ir::parse(&text).unwrap()
+}
 fn importer() -> Option<keel_llvm::import::Importer> {
     let path = std::env::var_os("KEEL_TEST_LIBLLVM")?;
     // SAFETY: the test environment supplies the trusted LLVM 23 runtime.

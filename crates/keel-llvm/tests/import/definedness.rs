@@ -123,7 +123,7 @@ fn scalar_refinement_matches_allowed_outcomes_and_freeze_stability() {
     };
     let text = importer
         .translate(
-            include_bytes!("fixtures/definedness/refinement.ll"),
+            include_bytes!("../fixtures/definedness/refinement.ll"),
             Default::default(),
         )
         .unwrap();
@@ -184,7 +184,7 @@ fn richer_boundary_facts_preserve_defined_execution_and_masked_ranges() {
     };
     let text = importer
         .translate(
-            include_bytes!("fixtures/definedness/richer_facts.ll"),
+            include_bytes!("../fixtures/definedness/richer_facts.ll"),
             Default::default(),
         )
         .unwrap();
@@ -244,7 +244,7 @@ fn load_result_facts_preserve_masked_poison_and_independent_memory_reads() {
     };
     let text = importer
         .translate(
-            include_bytes!("fixtures/definedness/local_facts.ll"),
+            include_bytes!("../fixtures/definedness/local_facts.ll"),
             Default::default(),
         )
         .unwrap();
@@ -304,7 +304,7 @@ fn masked_poison_selects_and_phi_edges_match_defined_c_oracle() {
     };
     let text = importer
         .translate(
-            include_bytes!("fixtures/definedness/masked.ll"),
+            include_bytes!("../fixtures/definedness/masked.ll"),
             Default::default(),
         )
         .unwrap();
@@ -344,7 +344,7 @@ fn masked_dividend_refinement_totalizes_signed_overflow() {
     };
     let text = importer
         .translate(
-            include_bytes!("fixtures/definedness/division.ll"),
+            include_bytes!("../fixtures/definedness/division.ll"),
             Default::default(),
         )
         .unwrap();

@@ -1,7 +1,7 @@
 //! LLVM load-result metadata, including poison masking and scope isolation.
+use super::translated;
 use keel_ir::{InstData, ValueFacts};
 use std::path::Path;
-const HEADER: &str = "target triple = \"arm64-apple-macosx11.0.0\"\ntarget datalayout = \"e-m:o-i64:64-i128:128-n32:64-S128-Fn32\"\n";
 fn importer() -> Option<keel_llvm::import::Importer> {
     let Some(path) = std::env::var_os("KEEL_TEST_LIBLLVM") else {
         eprintln!("skipped: set KEEL_TEST_LIBLLVM to the trusted LLVM 23 runtime");
@@ -9,12 +9,6 @@ fn importer() -> Option<keel_llvm::import::Importer> {
     };
     // SAFETY: the test environment explicitly selects the trusted LLVM 23 runtime.
     Some(unsafe { keel_llvm::import::Importer::load(Path::new(&path)) }.unwrap())
-}
-fn translated(importer: &keel_llvm::import::Importer, body: &str) -> keel_ir::Module {
-    let text = importer
-        .translate(format!("{HEADER}{body}").as_bytes(), Default::default())
-        .unwrap();
-    keel_ir::parse(&text).unwrap()
 }
 fn load_facts(module: &keel_ir::Module) -> Vec<(String, Option<ValueFacts>)> {
     module

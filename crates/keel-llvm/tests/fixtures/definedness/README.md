@@ -42,7 +42,7 @@ must not transfer to siblings or make later loads non-faulting.
 ```sh
 KEEL_TEST_LIBLLVM="$(rustc --print sysroot)/lib/libLLVM.dylib" \
 KEEL_TEST_KEEL="$PWD/target/debug/keel" \
-  cargo test -p keel-llvm --test definedness
+  cargo test -p keel-llvm --test import definedness::
 ```
 
 Execution needs Apple arm64 and Clang. LLVM-dependent tests report a skip when

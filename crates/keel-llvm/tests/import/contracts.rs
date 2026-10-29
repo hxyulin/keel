@@ -1,17 +1,11 @@
 //! Memory/pointer contract transport and definedness boundaries.
+use super::translated;
 use keel_ir::{InstData, MemoryAccess as A, MemorySummary};
 use std::{path::PathBuf, process::Command};
-const HEADER: &str = "target triple = \"arm64-apple-macosx11.0.0\"\ntarget datalayout = \"e-m:o-i64:64-i128:128-n32:64-S128-Fn32\"\n";
 fn importer() -> Option<keel_llvm::import::Importer> {
     let path = std::env::var_os("KEEL_TEST_LIBLLVM")?;
     // SAFETY: the test environment supplies the trusted LLVM 23 runtime.
     Some(unsafe { keel_llvm::import::Importer::load(&PathBuf::from(path)) }.unwrap())
-}
-fn translated(i: &keel_llvm::import::Importer, body: &str) -> keel_ir::Module {
-    let text = i
-        .translate(format!("{HEADER}{body}").as_bytes(), Default::default())
-        .unwrap();
-    keel_ir::parse(&text).unwrap()
 }
 
 #[test]

@@ -1,3 +1,16 @@
+#[path = "export/aggregate_va_arg_rejection.rs"]
+mod aggregate_va_arg_rejection;
+#[path = "export/raw_div.rs"]
+mod raw_div;
+#[path = "export/special_entries.rs"]
+mod special_entries;
+#[path = "export/weak_odr.rs"]
+mod weak_odr;
+#[path = "export/x86_cx16.rs"]
+mod x86_cx16;
+#[path = "export/x86_vector_abi.rs"]
+mod x86_vector_abi;
+
 use keel_llvm::{TargetProfile, export};
 use std::process::Command;
 fn translate(src: &str) -> Result<String, String> {
