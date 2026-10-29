@@ -93,19 +93,26 @@ fn all_backend_fixtures_assemble_in_normal_tiny_and_optimized_configurations() {
 #[test]
 fn all_c_fixtures_assemble_with_and_without_optimization_and_debug_info() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../keel-c/tests/programs");
+    // Keel's preprocessor replaces one `clang -E` per fixture, as keel-c's
+    // run.rs does; only the SDK path needs an external tool.
+    let sdk = Command::new("xcrun")
+        .args(["--sdk", "macosx", "--show-sdk-path"])
+        .output()
+        .unwrap();
+    assert!(sdk.status.success());
+    let options = keel_c::PreprocessOptions {
+        sysroot: Some(String::from_utf8(sdk.stdout).unwrap().trim().into()),
+        ..Default::default()
+    };
     let mut count = 0;
     for path in std::fs::read_dir(dir)
         .unwrap()
         .map(|e| e.unwrap().path())
         .filter(|p| p.extension().is_some_and(|e| e == "c"))
     {
-        let preprocessed = Command::new("clang")
-            .args(["-E", "-std=c11"])
-            .arg(&path)
-            .output()
-            .unwrap();
-        assert!(preprocessed.status.success());
-        let source = String::from_utf8(preprocessed.stdout).unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let source = keel_c::preprocess(&raw, path.to_str().unwrap(), &options)
+            .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
         for debug_info in [false, true] {
             for opt in [false, true] {
                 let mut module = keel_c::compile(

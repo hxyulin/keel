@@ -223,22 +223,16 @@ fn apple_new_suffixes_reject_invalid_arrangements_lanes_and_immediates() {
     }
 }
 
+/// Clang checks the instruction bytes, so only Keel's object links and runs.
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn native_pair(source: &str, driver: &str, features: TargetFeatures) {
     use common::{Temp, execute, run};
     use std::process::Command;
+    common::compare_clang_with_features(source, features, &["-mcpu=apple-m5"]);
     let temp = Temp::new();
-    let input = temp.0.join("input.s");
     let main = temp.0.join("main.c");
-    let reference = temp.0.join("reference.o");
     let ours = temp.0.join("ours.o");
-    std::fs::write(&input, source).unwrap();
     std::fs::write(&main, driver).unwrap();
-    run(Command::new("clang")
-        .args(["-c", "-mcpu=apple-m5"])
-        .arg(input)
-        .arg("-o")
-        .arg(&reference));
     std::fs::write(
         &ours,
         assemble_with_features(source, features)
@@ -247,16 +241,14 @@ fn native_pair(source: &str, driver: &str, features: TargetFeatures) {
             .unwrap(),
     )
     .unwrap();
-    for object in [&reference, &ours] {
-        let executable = temp.0.join("run");
-        run(Command::new("clang")
-            .arg("-std=c11")
-            .arg(&main)
-            .arg(object)
-            .arg("-o")
-            .arg(&executable));
-        assert!(execute(&executable).success(), "{}", object.display());
-    }
+    let executable = temp.0.join("run");
+    run(Command::new("clang")
+        .arg("-std=c11")
+        .arg(&main)
+        .arg(&ours)
+        .arg("-o")
+        .arg(&executable));
+    assert!(execute(&executable).success());
 }
 
 #[test]

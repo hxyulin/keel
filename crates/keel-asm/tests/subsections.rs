@@ -178,32 +178,22 @@ fn temporary_aliases_keep_their_targets_original_atom() {
 fn temporary_alias_pointers_survive_linker_reordering() {
     let temp = Temp::new();
     let source = ".subsections_via_symbols\n.globl _f,_g,_pointer\n_f:nop\nLinside:ret\n_g:ret\n.set Lalias,Linside\n.data\n_pointer:.quad Lalias\n";
-    let input = temp.0.join("alias.s");
     let driver = temp.0.join("driver.c");
     let order = temp.0.join("order");
-    std::fs::write(&input, source).unwrap();
     std::fs::write(&driver, "#include <stdint.h>\nextern void f(void),g(void);extern void *pointer;int main(void){g();return pointer!=(void*)((uintptr_t)f+4);}").unwrap();
     std::fs::write(&order, "_g\n_f\n_pointer\n").unwrap();
-    for tag in ["ours", "clang"] {
-        let object = temp.0.join(format!("{tag}.o"));
-        if tag == "ours" {
-            std::fs::write(&object, assemble_object(source).unwrap()).unwrap();
-        } else {
-            run(Command::new("clang")
-                .args(["-c", "-target", "arm64-apple-macos11"])
-                .arg(&input)
-                .arg("-o")
-                .arg(&object));
-        }
-        let exe = temp.0.join(tag);
-        run(Command::new("clang")
-            .arg(&driver)
-            .arg(&object)
-            .arg("-Wl,-dead_strip")
-            .args(["-Xlinker", "-order_file", "-Xlinker"])
-            .arg(&order)
-            .arg("-o")
-            .arg(&exe));
-        assert!(common::execute(&exe).success());
-    }
+    // temporary_aliases_keep_their_targets_original_atom pins the relocation,
+    // so only Keel's object links and runs.
+    let object = temp.0.join("ours.o");
+    std::fs::write(&object, assemble_object(source).unwrap()).unwrap();
+    let exe = temp.0.join("ours");
+    run(Command::new("clang")
+        .arg(&driver)
+        .arg(&object)
+        .arg("-Wl,-dead_strip")
+        .args(["-Xlinker", "-order_file", "-Xlinker"])
+        .arg(&order)
+        .arg("-o")
+        .arg(&exe));
+    assert!(common::execute(&exe).success());
 }

@@ -101,7 +101,17 @@ fn new_syntax_preserves_physical_lines_and_instruction_metrics() {
 fn invalid_radices_and_zero_register_roles_are_rejected_by_both() {
     let temp = Temp::new();
     let input = temp.0.join("invalid.s");
-    for source in [
+    let clang = |source: &str| {
+        std::fs::write(&input, source).unwrap();
+        Command::new("clang")
+            .args(["-target", "arm64-apple-macos11", "-x", "assembler", "-c"])
+            .arg(&input)
+            .arg("-o")
+            .arg(temp.0.join("invalid.o"))
+            .output()
+            .unwrap()
+    };
+    let lines = [
         "mov x0, #08",
         "mov x0, #0b102",
         "mov x0, #0b",
@@ -117,21 +127,31 @@ fn invalid_radices_and_zero_register_roles_are_rejected_by_both() {
         "mov sp, x31",
         "mov x31, sp",
         "add x31, x0, #1",
-        "mov x0, x32",
-        "nop /* unterminated",
         "mov x0, x/* comment */1",
         ".unknown /* comment */ 1",
-    ] {
+    ];
+    // Clang only rejects `mov x0, x32` at fixup time, after its parse errors,
+    // and an unterminated comment swallows the lines after it.
+    let alone = ["mov x0, x32", "nop /* unterminated"];
+    for source in lines.iter().chain(&alone) {
         let error = assemble(source).expect_err(source);
         assert_eq!(error.line, 1, "{source}: {error}");
-        std::fs::write(&input, format!("{source}\n")).unwrap();
-        let output = Command::new("clang")
-            .args(["-target", "arm64-apple-macos11", "-x", "assembler", "-c"])
-            .arg(&input)
-            .arg("-o")
-            .arg(temp.0.join("invalid.o"))
-            .output()
-            .unwrap();
+    }
+    // Clang keeps going after a parse error, so one run checks every line.
+    let output = clang(&format!("{}\n", lines.join("\n")));
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    for (n, source) in lines.iter().enumerate() {
+        let location = format!("{}:{}:", input.display(), n + 1);
+        assert!(
+            stderr
+                .lines()
+                .any(|l| l.starts_with(&location) && l.contains("error:")),
+            "clang accepted {source}\n{stderr}"
+        );
+    }
+    for source in alone {
+        let output = clang(&format!("{source}\n"));
         assert!(!output.status.success(), "clang accepted {source}");
     }
 }

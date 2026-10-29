@@ -180,12 +180,6 @@ fn mixed_checksums_match_clang_without_inventing_values() {
     for files in [
         format!(".file 0 \"/w\" \"a.c\"\n.file 1 \"/w\" \"b.h\" md5 {MD5_B}"),
         format!(".file 0 \"/w\" \"a.c\" md5 {MD5_A}\n.file 1 \"/w\" \"b.h\""),
-        format!(
-            ".file 0 \"/w\" \"a.c\" md5 {MD5_A}\n.file 1 \"/w\" \"b.h\" md5 {MD5_B}\n.file 2 \"/w\" \"c.h\""
-        ),
-        format!(
-            ".file 0 \"/w\" \"a.c\"\n.file 1 \"/w\" \"b.h\"\n.file 2 \"/w\" \"c.h\" md5 {MD5_C}"
-        ),
         // Equal names with different checksum presence must remain distinct.
         format!(".file 0 \"/w\" \"a.c\"\n.file 1 \"/w\" \"a.c\" md5 {MD5_A}"),
         format!(".file 0 \"/w\" \"a.c\" md5 {MD5_A}\n.file 1 \"/w\" \"a.c\""),

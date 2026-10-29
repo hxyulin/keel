@@ -31,6 +31,21 @@ fn tuned_integer_multiply_executes_with_optimization_allocation_and_spills() {
     let directory = std::env::temp_dir().join(format!("keel-m5-native-{}", std::process::id()));
     std::fs::create_dir_all(&directory).unwrap();
     std::fs::write(directory.join("driver.c"), driver).unwrap();
+    let output = Command::new("clang")
+        .args(["-O2", "-c"])
+        .arg(directory.join("driver.c"))
+        .arg("-o")
+        .arg(directory.join("driver.o"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // Several configurations produce identical objects; each distinct object
+    // links and runs once.
+    let mut executed = std::collections::HashSet::new();
     let tiny = Pools {
         caller_saved: &[9],
         callee_saved: &[],
@@ -64,14 +79,13 @@ fn tuned_integer_multiply_executes_with_optimization_allocation_and_spills() {
                         "restricted allocation must exercise spills"
                     );
                 }
-                std::fs::write(
-                    directory.join("program.o"),
-                    keel_asm::assemble_object(&assembly).unwrap(),
-                )
-                .unwrap();
+                let object = keel_asm::assemble_object(&assembly).unwrap();
+                if !executed.insert(object.clone()) {
+                    continue;
+                }
+                std::fs::write(directory.join("program.o"), object).unwrap();
                 let output = Command::new("clang")
-                    .arg("-O2")
-                    .arg(directory.join("driver.c"))
+                    .arg(directory.join("driver.o"))
                     .arg(directory.join("program.o"))
                     .arg("-o")
                     .arg(directory.join("program"))
@@ -86,10 +100,12 @@ fn tuned_integer_multiply_executes_with_optimization_allocation_and_spills() {
                     Command::new(directory.join("program"))
                         .status()
                         .unwrap()
-                        .success()
+                        .success(),
+                    "{tier:?} {allocation:?} {pools:?}"
                 );
             }
         }
     }
+    eprintln!("{} distinct objects of 12 configurations", executed.len());
     std::fs::remove_dir_all(directory).unwrap();
 }

@@ -325,8 +325,10 @@ fn unwind_addresses_target_each_executable_section() {
     }
     // Object-file FDE addresses still contain linker relocations. Retain the
     // final linked-address check wherever the native Mach-O linker is available.
+    // The object check above already compares Clang's records.
     #[cfg(target_os = "macos")]
-    for object in [&ours, &reference] {
+    {
+        let object = &ours;
         let linked = object.with_extension("dylib");
         run(Command::new("clang")
             .arg("-dynamiclib")

@@ -104,16 +104,9 @@ fmulx.4s v3,v3,v2[0]
 str q3,[x0]
 ret
 "#;
+    // compare_clang checks the bytes, so only Keel's object links and runs.
     common::compare_clang(source);
     let temp = Temp::new();
-    let input = temp.0.join("input.s");
-    let reference = temp.0.join("reference.o");
-    std::fs::write(&input, source).unwrap();
-    run(Command::new("clang")
-        .arg("-c")
-        .arg(input)
-        .arg("-o")
-        .arg(&reference));
     let driver = temp.0.join("main.c");
     std::fs::write(
         &driver,
@@ -139,15 +132,13 @@ int main(void) {
     .unwrap();
     let ours = temp.0.join("ours.o");
     std::fs::write(&ours, keel_asm::assemble_object(source).unwrap()).unwrap();
-    for object in [&ours, &reference] {
-        let executable = temp.0.join("run");
-        run(Command::new("clang")
-            .arg(&driver)
-            .arg(object)
-            .arg("-o")
-            .arg(&executable));
-        assert!(execute(&executable).success(), "{}", object.display());
-    }
+    let executable = temp.0.join("run");
+    run(Command::new("clang")
+        .arg(&driver)
+        .arg(&ours)
+        .arg("-o")
+        .arg(&executable));
+    assert!(execute(&executable).success());
 }
 
 #[test]

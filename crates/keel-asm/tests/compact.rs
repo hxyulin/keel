@@ -52,7 +52,6 @@ fn every_canonical_register_pair_subset_matches_clang() {
         "_gxx",
         &format!("{FP}\n.cfi_personality 155,___gxx_personality_v0"),
     );
-    common::compare_clang(&source);
     let temp = Temp::new();
     let input = temp.0.join("compact.s");
     let reference = temp.0.join("clang.o");
@@ -65,6 +64,14 @@ fn every_canonical_register_pair_subset_matches_clang() {
     let bytes = std::fs::read(reference).unwrap();
     let reference = object::File::parse(bytes.as_slice()).unwrap();
     let a = assemble(&source).unwrap();
+    // One Clang object checks the instructions and the unwind records.
+    let text = reference.section_by_name("__text").unwrap();
+    assert_eq!(
+        a.text,
+        text.data().unwrap(),
+        "instruction bytes differ from clang"
+    );
+    assert!((1u64 << a.text_alignment) >= text.align());
     let bytes = a.to_macho().unwrap();
     let ours = object::File::parse(bytes.as_slice()).unwrap();
     let got = ours.section_by_name("__compact_unwind").unwrap();

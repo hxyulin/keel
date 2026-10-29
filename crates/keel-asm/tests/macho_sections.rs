@@ -136,32 +136,41 @@ _state: .long 0
 
 #[test]
 fn compiler_section_contents_flags_and_relocations_match_clang() {
-    for source in [
-        ".section __TEXT,__custom\n.byte 7\n.section __DATA,__custom\n.byte 8\n",
-        ".section __TEXT,__custom_code,regular,pure_instructions\n.p2align 2\nret\n",
-        ".section __TEXT,__StaticInit,regular,pure_instructions\n.p2align 2\nret\n",
-        ".section __TEXT,__StaticInit,regular,pure_instructions\n.long 0xd65f03c0\n",
-        ".section __TEXT,__StaticInit,regular,pure_instructions\n",
-        ".section __DWARF,__debug_aranges,regular,debug\n.long 12\n.short 2\n.long 0\n.byte 8,0\n",
-        ".section __DWARF,__debug_aranges\n.byte 1,2\n",
-        ".section __DATA,__mod_init_func,mod_init_funcs\n.p2align 3\n.quad _initialize\n",
-        ".section __TEXT,__StaticInit\n.long 0\n",
-        ".section __TEXT,__StaticInit\nret\n",
-        ".section __TEXT,__custom\nret\n.byte 0\n.p2align 4\n",
-        ".section __DWARF,__debug_aranges,regular\n.byte 1,2\n",
-        ".section __DWARF,__custom,regular\n.byte 1,2\n",
-        ".section __DATA,__mod_init_func\n.quad _initialize\n",
-        ".tbss _zero,4\n.tbss _other,8,3\n",
-        CONSTRUCTOR,
+    // The sources in one group declare distinct sections, so each section
+    // means the same together as alone. A redeclared section with another
+    // type or content goes in a later group.
+    for group in [
+        &[
+            ".section __TEXT,__custom\n.byte 7\n.section __DATA,__custom\n.byte 8\n",
+            ".section __TEXT,__custom_code,regular,pure_instructions\n.p2align 2\nret\n",
+            ".section __TEXT,__StaticInit,regular,pure_instructions\n.p2align 2\nret\n",
+            ".section __DWARF,__debug_aranges,regular,debug\n.long 12\n.short 2\n.long 0\n.byte 8,0\n",
+            ".section __DATA,__mod_init_func,mod_init_funcs\n.p2align 3\n.quad _initialize\n",
+            ".section __DWARF,__custom,regular\n.byte 1,2\n",
+            ".tbss _zero,4\n.tbss _other,8,3\n",
+        ][..],
+        &[
+            ".section __TEXT,__StaticInit,regular,pure_instructions\n.long 0xd65f03c0\n",
+            ".section __DWARF,__debug_aranges\n.byte 1,2\n",
+            ".section __TEXT,__custom\nret\n.byte 0\n.p2align 4\n",
+            ".section __DATA,__mod_init_func\n.quad _initialize\n",
+        ],
+        &[
+            ".section __TEXT,__StaticInit,regular,pure_instructions\n",
+            ".section __DWARF,__debug_aranges,regular\n.byte 1,2\n",
+        ],
+        &[".section __TEXT,__StaticInit\n.long 0\n"],
+        &[".section __TEXT,__StaticInit\nret\n"],
+        &[CONSTRUCTOR],
     ] {
-        compare(source);
+        compare(&group.concat());
     }
 }
 
 #[test]
 fn reserved_section_defaults_match_native_types_and_storage() {
     let temp = Temp::new();
-    for (segment, name, flags) in [
+    let reserved = [
         ("__TEXT", "__cstring", 2),
         ("__TEXT", "__literal4", 3),
         ("__TEXT", "__literal8", 4),
@@ -173,24 +182,35 @@ fn reserved_section_defaults_match_native_types_and_storage() {
         ("__TEXT", "__eh_frame", 0x6800_000b),
         ("__TEXT", "__StaticInit", 0),
         ("__DATA", "__mod_init_func", 0),
-    ] {
-        for suffix in ["", ",regular"] {
-            let source = format!(".section {segment},{name}{suffix}\n.zero 16\n");
-            let expected = clang_object(&temp, &source);
-            let actual = keel_asm::assemble_object(&source).unwrap();
-            assert_eq!(sections(&actual), sections(&expected), "{source}");
+    ];
+    for suffix in ["", ",regular"] {
+        // One source per spelling declares every reserved section.
+        let source = reserved
+            .iter()
+            .map(|(segment, name, _)| format!(".section {segment},{name}{suffix}\n.zero 16\n"))
+            .collect::<String>();
+        let expected = clang_object(&temp, &source);
+        let actual = keel_asm::assemble_object(&source).unwrap();
+        assert_eq!(sections(&actual), sections(&expected), "{source}");
+        for (segment, name, flags) in reserved {
             for bytes in [&actual, &expected] {
                 let file = object::File::parse(bytes.as_slice()).unwrap();
                 let section = file.section_by_name(name).unwrap();
-                assert_eq!(section.flags(), object::SectionFlags::MachO { flags });
+                assert_eq!(
+                    section.flags(),
+                    object::SectionFlags::MachO { flags },
+                    "{segment},{name}{suffix}"
+                );
                 assert_eq!(section.size(), 16);
                 assert_eq!(section.file_range().is_none(), matches!(flags, 1 | 18));
             }
             // Keel's writer derives its TLV header flag from the effective
             // section type, independently of declaration spelling. Clang omits
             // this flag in objects; native TLS behavior is checked below.
+            let alone = format!(".section {segment},{name}{suffix}\n.zero 16\n");
+            let actual = keel_asm::assemble_object(&alone).unwrap();
             let header_flags = u32::from_le_bytes(actual[24..28].try_into().unwrap());
-            assert_eq!(header_flags & 0x800000 != 0, flags == 19);
+            assert_eq!(header_flags & 0x800000 != 0, flags == 19, "{alone}");
         }
     }
 }
@@ -242,23 +262,18 @@ fn reselected_custom_code_links_and_executes_both_fragments() {
         "extern int first(void), second(void), entry(void);\nint main(void) { return first() != 7 || second() != 41 || entry() != 41; }\n",
     )
     .unwrap();
-    for reference in [false, true] {
-        let bytes = if reference {
-            clang_object(&temp, RESELECT_CODE)
-        } else {
-            keel_asm::assemble_object(RESELECT_CODE).unwrap()
-        };
-        let object = temp.0.join("reselect.o");
-        let executable = temp.0.join("run");
-        std::fs::write(&object, bytes).unwrap();
-        run(Command::new("clang")
-            .arg(&driver)
-            .arg(object)
-            .arg("-Wl,-dead_strip")
-            .arg("-o")
-            .arg(&executable));
-        assert!(common::execute(&executable).success(), "clang={reference}");
-    }
+    // bare_section_reselection_preserves_declared_kind_and_contents checks
+    // these bytes and relocations against Clang's, so only Keel's object runs.
+    let object = temp.0.join("reselect.o");
+    let executable = temp.0.join("run");
+    std::fs::write(&object, keel_asm::assemble_object(RESELECT_CODE).unwrap()).unwrap();
+    run(Command::new("clang")
+        .arg(&driver)
+        .arg(object)
+        .arg("-Wl,-dead_strip")
+        .arg("-o")
+        .arg(&executable));
+    assert!(common::execute(&executable).success());
 }
 
 #[test]
@@ -294,23 +309,18 @@ fn module_init_function_runs_before_main_with_cross_section_call_and_loh() {
         "extern int state, get_state(void);\nint main(void) { return state != 37 || get_state() != 37; }\n",
     )
     .unwrap();
-    for reference in [false, true] {
-        let bytes = if reference {
-            clang_object(&temp, CONSTRUCTOR)
-        } else {
-            keel_asm::assemble_object(CONSTRUCTOR).unwrap()
-        };
-        let object = temp.0.join("constructor.o");
-        let executable = temp.0.join("run");
-        std::fs::write(&object, bytes).unwrap();
-        run(Command::new("clang")
-            .arg(&driver)
-            .arg(object)
-            .arg("-Wl,-dead_strip")
-            .arg("-o")
-            .arg(&executable));
-        assert!(common::execute(&executable).success(), "clang={reference}");
-    }
+    // compiler_section_contents_flags_and_relocations_match_clang checks
+    // these bytes and relocations against Clang's, so only Keel's object runs.
+    let object = temp.0.join("constructor.o");
+    let executable = temp.0.join("run");
+    std::fs::write(&object, keel_asm::assemble_object(CONSTRUCTOR).unwrap()).unwrap();
+    run(Command::new("clang")
+        .arg(&driver)
+        .arg(object)
+        .arg("-Wl,-dead_strip")
+        .arg("-o")
+        .arg(&executable));
+    assert!(common::execute(&executable).success());
 }
 
 const TLS: &str = r#"
