@@ -189,8 +189,18 @@ The ordinary `inline` pass expands only private, nonrecursive definitions and
 supported direct `call` sites. Public/interposable definitions, missing
 definitions, variadics,
 `returns_twice`, exception-handling bodies/callers, dynamic-frame intrinsics,
-inline assembly, tail-call sites, and other preexisting unsupported operations
+tail-call sites, and other preexisting unsupported operations
 remain excluded. By-value parameters larger than 128 bytes remain unsupported.
+
+A callee with inline assembly follows the ordinary cost rules when every copy
+of the template assembles and allocates as it does in the callee. Each copy
+repeats the labels its template defines, so the template may define only
+numeric local labels (`1:`) and labels made unique with `%=`, which includes
+the restoration labels of asm goto. Named labels, `name = value` and the
+`.set`, `.equ`, `.equiv`, `.eqv`, `.macro`, `.comm`, `.lcomm` and `.symver`
+directives keep the callee out of line. So do operands or clobbers that the
+caller's frame can reserve: the `rsp` operand, AArch64 x19, x86 r15, and more
+than 13 operands and register clobbers in total.
 `noinline` prohibits expanding a function; it does not prevent optimizing calls
 inside that function. Self and mutual direct recursion are excluded.
 

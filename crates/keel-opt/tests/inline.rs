@@ -1064,3 +1064,29 @@ fn callees_no_larger_than_their_call_skip_the_call_count_cap() {
     // Cost 8: the cap still stops at 128 sites.
     assert_eq!(calls(&run(&source(6), &["inline"]), "f"), 72);
 }
+#[test]
+fn asm_callees_inline_unless_their_labels_would_repeat() {
+    for (template, inlined) in [
+        ("1:\\n\\tadd %0, %0, %1", true),
+        ("lbl_%=: add %0, %0, %1", true),
+        ("lbl: add %0, %0, %1", false),
+    ] {
+        let m = run(
+            &format!(
+                "func @add(i64, i64) -> i64 local {{
+block0(v0: i64, v1: i64):
+ v2 = asm \"{template}\", \"=r,0,r\"(v0, v1) -> i64
+ return v2
+}}
+func @test(i64, i64) -> i64 {{
+block0(v0: i64, v1: i64):
+ v2 = call @add(v0, v1)
+ v3 = call @add(v2, v1)
+ return v3
+}}"
+            ),
+            &["inline"],
+        );
+        assert_eq!(calls(&m, "test"), if inlined { 0 } else { 2 }, "{template}");
+    }
+}
