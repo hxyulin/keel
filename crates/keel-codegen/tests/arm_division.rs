@@ -1,3 +1,6 @@
+//! Division by a variable divisor keeps its zero and overflow traps, and a
+//! quotient and remainder of the same operands share one division.
+//! `arm_constant_division` covers constant divisors.
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools},
@@ -29,19 +32,7 @@ fn compile(
     (text, object)
 }
 
-fn function(name: &str, width: u32, op: &str, divisor: Option<i64>) -> String {
-    let (params, block, constant) = match divisor {
-        Some(n) => (
-            format!("i{width}"),
-            format!("v0: i{width}"),
-            format!("v1 = iconst.i{width} {n}\n"),
-        ),
-        None => (
-            format!("i{width}, i{width}"),
-            format!("v0: i{width}, v1: i{width}"),
-            String::new(),
-        ),
-    };
+fn function(name: &str, width: u32, op: &str) -> String {
     let ext = if width < 32 {
         if op.starts_with('s') {
             " sext"
@@ -52,54 +43,35 @@ fn function(name: &str, width: u32, op: &str, divisor: Option<i64>) -> String {
         ""
     };
     format!(
-        "func @{name}({params}) -> i{width}{ext} cc(c) {{\nblock0({block}):\n{constant} v2 = {op} v0, v1\n return v2\n}}\n"
+        "func @{name}(i{width}, i{width}) -> i{width}{ext} cc(c) {{\nblock0(v0: i{width}, v1: i{width}):\n v2 = {op} v0, v1\n return v2\n}}\n"
     )
 }
 
 #[test]
-fn constant_divisor_checks_use_ir_width_and_keep_required_traps() {
+fn variable_divisor_checks_keep_required_traps() {
     for width in [8, 16, 32, 64] {
-        let mask = u64::MAX >> (64 - width);
         for op in ["sdiv", "srem", "udiv", "urem"] {
-            for divisor in [None, Some(0), Some(1), Some(3), Some(-1), Some(mask as i64)] {
-                let m = keel_ir::parse(&function("f", width, op, divisor)).unwrap();
-                for allocation in [AllocationTier::Fast, AllocationTier::Full] {
-                    for selection in [SelectionTier::Baseline, SelectionTier::Full] {
-                        for pools in [&SPILLED, &keel_codegen::aarch64::REGISTERS] {
-                            let (text, _) = compile(&m, selection, allocation, pools);
-                            let normalized = divisor.map(|n| n as u64 & mask);
-                            assert_eq!(
-                                text.contains("\tcbz\t"),
-                                normalized.is_none_or(|n| n == 0),
-                                "{width} {op} {divisor:?}\n{text}"
-                            );
-                            assert_eq!(
-                                text.contains("\tccmp\t"),
-                                op == "sdiv" && normalized.is_none_or(|n| n == mask),
-                                "{width} {op} {divisor:?}\n{text}"
-                            );
-                        }
+            let m = keel_ir::parse(&function("f", width, op)).unwrap();
+            for allocation in [AllocationTier::Fast, AllocationTier::Full] {
+                for selection in [SelectionTier::Baseline, SelectionTier::Full] {
+                    for pools in [&SPILLED, &keel_codegen::aarch64::REGISTERS] {
+                        let (text, _) = compile(&m, selection, allocation, pools);
+                        assert!(text.contains("\tcbz\t"), "{width} {op}\n{text}");
+                        assert_eq!(
+                            text.contains("\tccmp\t"),
+                            op == "sdiv",
+                            "{width} {op}\n{text}"
+                        );
                     }
                 }
             }
-        }
-        if width < 64 {
-            let m = keel_ir::parse(&function(
-                "wrapped_zero",
-                width,
-                "udiv",
-                Some(1i64 << width),
-            ))
-            .unwrap();
-            let (text, _) = compile(&m, SelectionTier::Full, AllocationTier::Full, &SPILLED);
-            assert!(text.contains("\tcbz\t"), "{text}");
         }
     }
 }
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[test]
-fn native_constant_and_reused_quotients_match_oracle_and_trap_edges() {
+fn native_variable_and_reused_quotients_match_oracle_and_trap_edges() {
     use std::{fs, os::unix::process::ExitStatusExt, process::Command};
     let mut ir = String::new();
     let mut c = String::from("#include <stdint.h>\n#include <stdlib.h>\n#include <limits.h>\n");
@@ -112,63 +84,16 @@ fn native_constant_and_reused_quotients_match_oracle_and_trap_edges() {
             let signed = op.starts_with('s');
             let ct = format!("{}int{width}_t", if signed { "" } else { "u" });
             let operator = if op.ends_with("div") { "/" } else { "%" };
-            let mut divisors = vec![None, Some(0), Some(1), Some(3), Some(-1), Some(mask as i64)];
-            if width < 64 {
-                divisors.push(Some(1i64 << width));
-            }
-            for (index, divisor) in divisors.into_iter().enumerate() {
-                let name = format!("f{width}_{op}_{index}");
-                ir += &function(&name, width, op, divisor);
-                c += &format!(
-                    "extern {ct} {name}({ct}{});\n",
-                    if divisor.is_none() {
-                        format!(", {ct}")
-                    } else {
-                        String::new()
-                    }
-                );
-                let args = if divisor.is_none() { "a,b" } else { "a" };
-                let b = divisor.unwrap_or(3) as u64 & mask;
-                let signed_b = if signed {
-                    ((b << (64 - width)) as i64 >> (64 - width)).to_string()
-                } else {
-                    format!("{b}ULL")
-                };
-                if b != 0 {
-                    checks += &format!(
-                        "{{ {ct} b=({ct})({signed_b}); uint64_t vals[]={{0,1,2,3,{min}ULL,{}ULL,{mask}ULL}}; for(unsigned j=0;j<7;j++){{ {ct} a=({ct})vals[j];",
-                        min - 1
-                    );
-                    if signed && op == "sdiv" && b == mask {
-                        checks += &format!("if((uint64_t)a==({ct}){min}ULL)continue;");
-                    }
-                    let expected = if signed && op == "srem" && b == mask {
-                        "0".to_string()
-                    } else {
-                        format!("a {operator} b")
-                    };
-                    checks += &format!("if({name}({args})!=({ct})({expected}))return 1; }} }}\n");
-                }
-                if divisor.is_none() || b == 0 {
-                    traps.push(format!(
-                        "(void){name}((({ct})1){});",
-                        if divisor.is_none() {
-                            format!(",({ct})0")
-                        } else {
-                            String::new()
-                        }
-                    ));
-                }
-                if signed && op == "sdiv" && (divisor.is_none() || b == mask) {
-                    traps.push(format!(
-                        "(void){name}(({ct}){min}ULL{});",
-                        if divisor.is_none() {
-                            format!(",({ct})-1")
-                        } else {
-                            String::new()
-                        }
-                    ));
-                }
+            let name = format!("f{width}_{op}");
+            ir += &function(&name, width, op);
+            c += &format!("extern {ct} {name}({ct}, {ct});\n");
+            checks += &format!(
+                "{{ {ct} b=({ct})3; uint64_t vals[]={{0,1,2,3,{min}ULL,{}ULL,{mask}ULL}}; for(unsigned j=0;j<7;j++){{ {ct} a=({ct})vals[j]; if({name}(a,b)!=({ct})(a {operator} b))return 1; }} }}\n",
+                min - 1
+            );
+            traps.push(format!("(void){name}(({ct})1,({ct})0);"));
+            if op == "sdiv" {
+                traps.push(format!("(void){name}(({ct}){min}ULL,({ct})-1);"));
             }
         }
         // Same-block quotient reuse, with division results deliberately unused.
