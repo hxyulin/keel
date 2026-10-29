@@ -5,7 +5,9 @@
 //!
 //! ```text
 //! x0–x7    arguments and results of calls; never allocated
-//! x8       scratch (keel does not return structs through it yet)
+//! x8       address of a struct returned in memory (`sret`), both for
+//!          calls and on entry; otherwise scratch, once the prologue has
+//!          copied an incoming address out
 //! x9–x15   allocatable, caller-saved: for values not live across a call
 //! x16–x17  scratch (IP0/IP1, which the ABI already lets veneers clobber)
 //! x18      reserved by Apple; never touched
