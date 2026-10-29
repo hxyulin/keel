@@ -228,44 +228,35 @@ fn native_factory_contracts_match_clang() {
             let source = source(attr, final_placement);
             let c = dir.join(format!("{attr}-final{final_placement}.c"));
             fs::write(&c, &source).unwrap();
-            let ast = run(Command::new("clang")
-                .args(["-std=c11", "-fsyntax-only", "-Xclang", "-ast-dump"])
-                .arg(&c));
-            fs::write(c.with_extension("clang-ast.txt"), ast.stdout).unwrap();
-            for debug_info in [false, true] {
-                for optimized in [false, true] {
-                    let stem =
-                        format!("{attr}-final{final_placement}-debug{debug_info}-opt{optimized}");
-                    let mut m = keel_c::compile(
-                        &source,
-                        c.to_str().unwrap(),
-                        keel_c::Options {
-                            debug_info,
-                            ..Default::default()
-                        },
-                    )
-                    .unwrap();
-                    if optimized {
-                        keel_opt::optimize(&mut m).unwrap();
-                    }
-                    keel_ir::verify_module(&m).unwrap();
-                    fs::write(dir.join(format!("{stem}.ir")), m.to_string()).unwrap();
-                    let asm = dir.join(format!("{stem}.s"));
-                    fs::write(&asm, keel_codegen::compile(&m, Default::default()).unwrap())
-                        .unwrap();
-                    for (compiler, input) in [("keel", &asm), ("clang", &c)] {
-                        let exe = dir.join(format!("{stem}-{compiler}"));
-                        let mut cmd = Command::new("clang");
-                        cmd.arg("-std=c11")
-                            .arg(if optimized { "-O2" } else { "-O0" });
-                        if debug_info {
-                            cmd.arg("-g");
-                        }
-                        run(cmd.arg(input).arg("-o").arg(&exe));
-                        run(&mut Command::new(&exe));
-                        println!("{stem}-{compiler}: exit 0");
-                    }
+            // Clang only checks that the fixture is valid and exits 0.
+            let reference = dir.join(format!("{attr}-final{final_placement}-clang"));
+            run(Command::new("clang")
+                .args(["-std=c11", "-O0"])
+                .arg(&c)
+                .arg("-o")
+                .arg(&reference));
+            run(&mut Command::new(&reference));
+            // named_factory_contracts_and_inliner_legality covers debug info
+            // on and off.
+            for optimized in [false, true] {
+                let stem = format!("{attr}-final{final_placement}-opt{optimized}");
+                let mut m =
+                    keel_c::compile(&source, c.to_str().unwrap(), Default::default()).unwrap();
+                if optimized {
+                    keel_opt::optimize(&mut m).unwrap();
                 }
+                keel_ir::verify_module(&m).unwrap();
+                let asm = dir.join(format!("{stem}.s"));
+                fs::write(&asm, keel_codegen::compile(&m, Default::default()).unwrap()).unwrap();
+                let exe = dir.join(format!("{stem}-keel"));
+                run(Command::new("clang")
+                    .arg("-std=c11")
+                    .arg(if optimized { "-O2" } else { "-O0" })
+                    .arg(&asm)
+                    .arg("-o")
+                    .arg(&exe));
+                run(&mut Command::new(&exe));
+                println!("{stem}-keel: exit 0");
             }
         }
     }

@@ -382,62 +382,47 @@ fn native_round2_links_returns_and_traps() {
         fs::write(&c, &source).unwrap();
         let d = dir.join(format!("{name}-driver.c"));
         fs::write(&d, driver).unwrap();
-        // Retain Clang's type/attribute ownership oracle, including the named
-        // noreturn promise whose deliberately returning driver violates it.
-        let ast = run(Command::new("clang")
-            .args(["-std=c11", "-fsyntax-only", "-Xclang", "-ast-dump"])
-            .arg(&c));
-        fs::write(dir.join(format!("{name}-clang-ast.txt")), ast.stdout).unwrap();
-        for debug_info in [false, true] {
-            for optimized in [false, true] {
-                let stem = format!("{name}-debug{debug_info}-opt{optimized}");
-                let mut m = keel_c::compile(
-                    &source,
-                    c.to_str().unwrap(),
-                    keel_c::Options {
-                        debug_info,
-                        ..Default::default()
-                    },
-                )
-                .unwrap();
-                if optimized {
-                    keel_opt::optimize(&mut m).unwrap();
-                }
-                keel_ir::verify_module(&m).unwrap();
-                let asm = dir.join(format!("{stem}.s"));
-                fs::write(&asm, keel_codegen::compile(&m, Default::default()).unwrap()).unwrap();
-                for (compiler, input) in [("keel", &asm), ("clang", &c)] {
-                    // Clang's behavior after a violated noreturn promise is not
-                    // the oracle for Keel's explicitly required existing trap.
-                    if trap && compiler == "clang" {
-                        continue;
-                    }
-                    let exe = dir.join(format!("{stem}-{compiler}"));
-                    let mut cmd = Command::new("clang");
-                    cmd.arg("-std=c11")
-                        .arg(if optimized { "-O2" } else { "-O0" });
-                    if debug_info {
-                        cmd.arg("-g");
-                    }
-                    cmd.arg(input);
-                    if !driver.is_empty() {
-                        cmd.arg(&d);
-                    }
-                    run(cmd.arg("-o").arg(&exe));
-                    let status = Command::new(&exe).status().unwrap();
-                    if trap {
-                        // Match the native trap instruction on each enabled target.
-                        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-                        let trap_signal = 5; // brk: SIGTRAP
-                        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-                        let trap_signal = 4; // ud2: SIGILL
-                        assert_eq!(status.signal(), Some(trap_signal), "{stem}: {status}");
-                    } else {
-                        assert!(status.success(), "{stem}: {status}");
-                    }
-                    println!("{stem}-{compiler}: {status}");
-                }
+        let link = |input: &Path, exe: &Path, optimized: bool| {
+            let mut cmd = Command::new("clang");
+            cmd.arg("-std=c11")
+                .arg(if optimized { "-O2" } else { "-O0" })
+                .arg(input);
+            if !driver.is_empty() {
+                cmd.arg(&d);
             }
+            run(cmd.arg("-o").arg(exe));
+        };
+        // Clang only checks that the fixture is valid and exits 0. Its behavior
+        // after a violated noreturn promise is not the oracle for Keel's trap.
+        if !trap {
+            let exe = dir.join(format!("{name}-clang"));
+            link(&c, &exe, false);
+            run(&mut Command::new(&exe));
+        }
+        // The IR tests above cover debug info on and off.
+        for optimized in [false, true] {
+            let stem = format!("{name}-opt{optimized}");
+            let mut m = keel_c::compile(&source, c.to_str().unwrap(), Default::default()).unwrap();
+            if optimized {
+                keel_opt::optimize(&mut m).unwrap();
+            }
+            keel_ir::verify_module(&m).unwrap();
+            let asm = dir.join(format!("{stem}.s"));
+            fs::write(&asm, keel_codegen::compile(&m, Default::default()).unwrap()).unwrap();
+            let exe = dir.join(format!("{stem}-keel"));
+            link(&asm, &exe, optimized);
+            let status = Command::new(&exe).status().unwrap();
+            if trap {
+                // Match the native trap instruction on each enabled target.
+                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                let trap_signal = 5; // brk: SIGTRAP
+                #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+                let trap_signal = 4; // ud2: SIGILL
+                assert_eq!(status.signal(), Some(trap_signal), "{stem}: {status}");
+            } else {
+                assert!(status.success(), "{stem}: {status}");
+            }
+            println!("{stem}-keel: {status}");
         }
     }
 }

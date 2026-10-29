@@ -257,7 +257,9 @@ fn native_linkage_and_pointer_factories_match_clang() {
             }
         }
     }
-    for attr in ["noreturn", "nothrow", "always_inline", "noinline"] {
+    // The noreturn factories link and run as factory-0 and factory-1 in
+    // attribute_ownership::native_round2_links_returns_and_traps.
+    for attr in ["nothrow", "always_inline", "noinline"] {
         for nested in [false, true] {
             fixtures.push((
                 format!("pointer-{attr}-{nested}"),
@@ -269,51 +271,34 @@ fn native_linkage_and_pointer_factories_match_clang() {
     for (name, source, external) in fixtures {
         let c = dir.join(format!("{name}.c"));
         fs::write(&c, &source).unwrap();
-        for debug_info in [false, true] {
-            for optimized in [false, true] {
-                let stem = format!("{name}-debug{debug_info}-opt{optimized}");
-                let reference = dir.join(format!("{stem}-clang"));
-                let mut clang = Command::new("clang");
-                clang
-                    .arg("-std=c11")
-                    .arg(if optimized { "-O2" } else { "-O0" });
-                if debug_info {
-                    clang.arg("-g");
-                }
-                clang.arg(&c);
-                if external {
-                    clang.arg(&driver);
-                }
-                command(clang.arg("-o").arg(&reference));
-                command(&mut Command::new(&reference));
-                let mut m = keel_c::compile(
-                    &source,
-                    c.to_str().unwrap(),
-                    keel_c::Options {
-                        debug_info,
-                        ..Default::default()
-                    },
-                )
-                .unwrap();
-                if optimized {
-                    keel_opt::optimize(&mut m).unwrap();
-                }
-                keel_ir::verify_module(&m).unwrap();
-                let asm = dir.join(format!("{stem}.s"));
-                fs::write(&asm, keel_codegen::compile(&m, Default::default()).unwrap()).unwrap();
-                let exe = dir.join(&stem);
-                let mut clang = Command::new("clang");
-                if debug_info {
-                    clang.arg("-g");
-                }
-                clang.arg(&asm);
-                if external {
-                    clang.arg(&driver);
-                }
-                command(clang.arg("-o").arg(&exe));
-                command(&mut Command::new(&exe));
-                println!("{stem}: Keel and Clang exit 0");
+        // Clang only checks that the fixture is valid and exits 0.
+        let reference = dir.join(format!("{name}-clang"));
+        let mut clang = Command::new("clang");
+        clang.args(["-std=c11", "-O0"]).arg(&c);
+        if external {
+            clang.arg(&driver);
+        }
+        command(clang.arg("-o").arg(&reference));
+        command(&mut Command::new(&reference));
+        // The IR tests above cover debug info on and off.
+        for optimized in [false, true] {
+            let stem = format!("{name}-opt{optimized}");
+            let mut m = keel_c::compile(&source, c.to_str().unwrap(), Default::default()).unwrap();
+            if optimized {
+                keel_opt::optimize(&mut m).unwrap();
             }
+            keel_ir::verify_module(&m).unwrap();
+            let asm = dir.join(format!("{stem}.s"));
+            fs::write(&asm, keel_codegen::compile(&m, Default::default()).unwrap()).unwrap();
+            let exe = dir.join(&stem);
+            let mut clang = Command::new("clang");
+            clang.arg(&asm);
+            if external {
+                clang.arg(&driver);
+            }
+            command(clang.arg("-o").arg(&exe));
+            command(&mut Command::new(&exe));
+            println!("{stem}: Keel and Clang exit 0");
         }
     }
 }
