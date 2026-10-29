@@ -1371,10 +1371,12 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         let mut input = ExpansionInput(ts);
         let mut out = std::mem::take(&mut self.expansion_scratch);
         out.reserve(input.len());
+        // Bound macro invocations and the tokens they add, not the input:
+        // a large array initializer has many tokens and no macros.
         let mut steps = 0;
+        let limit = input.len().saturating_add(1_000_000);
         while !input.0.is_empty() {
-            steps += 1;
-            if steps > 1_000_000 || input.len().saturating_add(out.len()) > 1_000_000 {
+            if steps > 1_000_000 || input.len().saturating_add(out.len()) > limit {
                 return Err(input[0].error("macro expansion limit exceeded"));
             }
             let current = &input[0];
@@ -1405,6 +1407,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 out.push(input.pop().unwrap());
                 continue;
             }
+            steps += 1;
             let t = *current;
             let name = t.text;
             if name == "defined" && self.in_condition {

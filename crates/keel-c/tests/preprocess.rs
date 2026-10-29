@@ -241,6 +241,29 @@ fn include_search_guards_once_and_macro_names() {
 }
 
 #[test]
+fn expansion_limit_counts_only_macro_tokens() {
+    // An `xxd -i` style array: 1.2M tokens between directives, no macros.
+    let mut src = String::from("unsigned char blob[] = {\n");
+    for i in 0..600_000 {
+        src.push_str(&format!("0x{:02x},", i % 256));
+        if i % 12 == 11 {
+            src.push('\n');
+        }
+    }
+    src.push_str("};\n");
+    let out = preprocess(&src, "blob.c", &PreprocessOptions::default()).unwrap();
+    assert_eq!(out.matches("0x").count(), 600_000);
+    // Doubling 21 times gives 2M tokens, which still exceeds the limit.
+    let mut runaway = String::from("#define A0 x\n");
+    for i in 1..=21 {
+        runaway.push_str(&format!("#define A{i} A{0} A{0}\n", i - 1));
+    }
+    runaway.push_str("A21\n");
+    let error = preprocess(&runaway, "runaway.c", &PreprocessOptions::default()).unwrap_err();
+    assert!(error.message.contains("macro expansion limit"), "{error}");
+}
+
+#[test]
 fn rejects_invalid_input_with_source_location() {
     for (src, message) in [
         ("#if 1\n", "unterminated conditional"),
