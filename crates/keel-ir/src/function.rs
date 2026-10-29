@@ -1373,7 +1373,8 @@ impl Function {
     /// Makes every use of `old` read `new` instead. `old`'s defining
     /// instruction is left in place; dead code removal deletes it.
     pub fn replace_all_uses(&mut self, old: Value, new: Value) {
-        assert_ne!(self.resolve(new), old, "alias cycle");
+        let new = self.resolve(new);
+        assert_ne!(new, old, "alias cycle");
         assert_eq!(self.value_type(old), self.value_type(new), "type mismatch");
         self.values[old].def = ValueDef::Alias(new);
     }
@@ -2551,6 +2552,22 @@ block3(v14: i64):
         func.replace_all_uses(v11, v4);
         assert_eq!(func.resolve(v11), v4);
         assert!(func.to_string().contains("jump block1(v13, v4)"));
+    }
+
+    #[test]
+    fn replace_all_uses_stores_resolved_target() {
+        let sig = Signature::new(&[Type::I64; 3], &[]);
+        let mut func = Function::new("f", sig);
+        let entry = func.create_block();
+        let a = func.append_block_param(entry, Type::I64);
+        let c = func.append_block_param(entry, Type::I64);
+        let d = func.append_block_param(entry, Type::I64);
+        func.replace_all_uses(a, c);
+        func.replace_all_uses(d, a);
+        // `d` resolves to `c`, so this must not alias `a` and `d` to each other.
+        func.replace_all_uses(a, d);
+        assert_eq!(func.resolve(a), c);
+        assert_eq!(func.resolve(d), c);
     }
 
     #[test]
