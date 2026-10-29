@@ -178,7 +178,13 @@ impl fmt::Display for Module {
             f.write_str("\n")?;
         }
         for decl in &self.decls {
-            writeln!(f, "decl @{}{}{}", decl.name, decl.sig, decl.attrs)?;
+            writeln!(
+                f,
+                "decl {}{}{}",
+                crate::data::Global(&decl.name),
+                decl.sig,
+                decl.attrs
+            )?;
         }
         for data in &self.data {
             writeln!(f, "{data}")?;

@@ -1683,7 +1683,13 @@ fn find_entry<K: EntityRef, V, Q: std::hash::Hash + PartialEq + ?Sized>(
 
 impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "func @{}{}{}", self.name, self.sig, self.attrs)?;
+        write!(
+            f,
+            "func {}{}{}",
+            crate::data::Global(&self.name),
+            self.sig,
+            self.attrs
+        )?;
         if !self.restrict_params.is_empty() {
             f.write_str(" restrict_params(")?;
             write_list(f, self.restrict_params.iter())?;
@@ -1699,7 +1705,7 @@ impl fmt::Display for Function {
             f.write_str(" hidden")?;
         }
         if let Some(personality) = &self.personality {
-            write!(f, " personality @{personality}")?;
+            write!(f, " personality {}", crate::data::Global(personality))?;
         }
         f.write_str(" {\n")?;
         for (ss, data) in self.stack_slots() {
@@ -1807,22 +1813,28 @@ impl Function {
                 write_decimal(f, "ss", false, crate::EntityRef::index(*slot) as u64)
             }
             InstData::Call { func, args: a } => {
-                f.write_str("call @")?;
-                f.write_str(&self.callees[*func].name)?;
+                write!(f, "call {}", crate::data::Global(&self.callees[*func].name))?;
                 f.write_str("(")?;
                 self.write_call_args(f, a)?;
                 f.write_str(")")
             }
             InstData::SymbolAddr { symbol } => {
-                write!(f, "symbol_addr @{}", self.symbol_name(*symbol))
+                write!(
+                    f,
+                    "symbol_addr {}",
+                    crate::data::Global(self.symbol_name(*symbol))
+                )
             }
             InstData::Invoke {
                 func,
                 args: a,
                 dests,
             } => {
-                f.write_str("invoke @")?;
-                f.write_str(&self.callees[*func].name)?;
+                write!(
+                    f,
+                    "invoke {}",
+                    crate::data::Global(&self.callees[*func].name)
+                )?;
                 f.write_str("(")?;
                 self.write_call_args(f, a)?;
                 f.write_str("), ")?;
@@ -1835,9 +1847,11 @@ impl Function {
                 for (i, clause) in clauses.iter().enumerate() {
                     f.write_str(if i == 0 { " " } else { ", " })?;
                     match clause {
-                        Clause::Catch(Some(typeinfo)) => {
-                            write!(f, "catch @{}", self.data_symbols[*typeinfo])?
-                        }
+                        Clause::Catch(Some(typeinfo)) => write!(
+                            f,
+                            "catch {}",
+                            crate::data::Global(&self.data_symbols[*typeinfo])
+                        )?,
                         Clause::Catch(None) => f.write_str("catch null")?,
                         Clause::Cleanup => f.write_str("cleanup")?,
                     }
@@ -1845,11 +1859,18 @@ impl Function {
                 Ok(())
             }
             InstData::EhTypeid { typeinfo } => {
-                write!(f, "eh_typeid @{}", self.data_symbols[*typeinfo])
+                write!(
+                    f,
+                    "eh_typeid {}",
+                    crate::data::Global(&self.data_symbols[*typeinfo])
+                )
             }
             InstData::ReturnCall { func, args: a } => {
-                f.write_str("return_call @")?;
-                f.write_str(&self.callees[*func].name)?;
+                write!(
+                    f,
+                    "return_call {}",
+                    crate::data::Global(&self.callees[*func].name)
+                )?;
                 f.write_str("(")?;
                 self.write_call_args(f, a)?;
                 f.write_str(")")

@@ -272,6 +272,12 @@ fn lex(src: &str) -> Result<Vec<(Tok, Loc)>, ParseError> {
                 let (data, end) = lex_bytes(line, i + 2, line_no)?;
                 tokens.push((Tok::Bytes(data), loc));
                 i = end;
+            } else if c == b'@' && bytes.get(i + 1) == Some(&b'"') {
+                let (data, end) = lex_bytes(line, i + 2, line_no)?;
+                let text = String::from_utf8(data)
+                    .map_err(|_| error(loc, "a symbol name must be UTF-8".into()))?;
+                tokens.push((Tok::Global(text), loc));
+                i = end;
             } else if c == b'"' {
                 let (data, end) = lex_bytes(line, i + 1, line_no)?;
                 let text = String::from_utf8(data)
@@ -2979,6 +2985,28 @@ mod lexer_tests {
             "\"\\x",
         ] {
             assert!(lex(source).is_err(), "{source}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod quoted_global_tests {
+    #[test]
+    fn symbol_names_outside_the_bare_set_round_trip() {
+        for name in ["my-func", "has space", "q\"uote"] {
+            let mut module = crate::parse(
+                "decl @g()\nfunc @f() {\nblock0:\n    call @g()\n    v0 = symbol_addr @g\n    return\n}\n",
+            )
+            .unwrap();
+            module.functions[0].name = name.into();
+            module.decls[0].name = format!("{name}.decl");
+            let callee = module.functions[0].callees().next().unwrap().0;
+            module.functions[0].callee_mut(callee).name = format!("{name}.decl");
+            let text = module.to_string();
+            assert!(text.contains("@\""), "{text}");
+            let reparsed = crate::parse(&text).unwrap_or_else(|e| panic!("{e}\n{text}"));
+            assert_eq!(reparsed.functions[0].name, name);
+            assert_eq!(reparsed.to_string(), text);
         }
     }
 }

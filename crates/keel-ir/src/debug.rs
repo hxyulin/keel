@@ -300,7 +300,7 @@ impl fmt::Display for DebugGlobal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("dglobal ")?;
         quoted(f, &self.name)?;
-        write!(f, " {} @{}", self.ty, self.symbol)
+        write!(f, " {} {}", self.ty, crate::data::Global(&self.symbol))
     }
 }
 

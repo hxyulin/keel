@@ -142,15 +142,15 @@ impl fmt::Display for DataObject {
             ""
         };
         let Some(init) = &self.init else {
-            return write!(f, "decl data {weak}{thread_local}@{}", self.name);
+            return write!(f, "decl data {weak}{thread_local}{}", Global(&self.name));
         };
         let local = if self.local { "local " } else { "" };
         let weak_odr = if self.weak_odr { "weak_odr " } else { "" };
         let hidden = if self.hidden { "hidden " } else { "" };
         write!(
             f,
-            "data @{} = {local}{weak}{weak_odr}{hidden}{thread_local}",
-            self.name
+            "data {} = {local}{weak}{weak_odr}{hidden}{thread_local}",
+            Global(&self.name)
         )?;
         if self.retain {
             f.write_str("retain ")?;
@@ -167,6 +167,26 @@ impl fmt::Display for DataObject {
             write!(f, "{item}")?;
         }
         f.write_str(" }")
+    }
+}
+
+/// Prints a symbol name as `@name`, or as `@"..."` when the name has
+/// characters the parser does not accept in a bare global name.
+pub(crate) struct Global<'a>(pub &'a str);
+
+impl fmt::Display for Global<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("@")?;
+        let bare = !self.0.is_empty()
+            && self
+                .0
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'$'));
+        if bare {
+            f.write_str(self.0)
+        } else {
+            write_quoted(f, self.0.as_bytes())
+        }
     }
 }
 
@@ -197,9 +217,9 @@ impl fmt::Display for DataItem {
             }
             DataItem::Int { ty, value } => write!(f, "{ty} {value}"),
             DataItem::Zero(n) => write!(f, "zero {n}"),
-            DataItem::RttiName { symbol } => write!(f, "rtti_name @{symbol}"),
-            DataItem::Ptr { symbol, addend: 0 } => write!(f, "ptr @{symbol}"),
-            DataItem::Ptr { symbol, addend } => write!(f, "ptr @{symbol} + {addend}"),
+            DataItem::RttiName { symbol } => write!(f, "rtti_name {}", Global(symbol)),
+            DataItem::Ptr { symbol, addend: 0 } => write!(f, "ptr {}", Global(symbol)),
+            DataItem::Ptr { symbol, addend } => write!(f, "ptr {} + {addend}", Global(symbol)),
         }
     }
 }
