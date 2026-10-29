@@ -56,3 +56,68 @@ fn invalid_c_ownership_is_rejected_before_module_changes() {
         assert_eq!(module.to_string(), before, "case {case}");
     }
 }
+
+#[test]
+fn mandatory_wrapper_can_participate_in_ordinary_recursion() {
+    let mut module = keel_ir::parse(
+        r#"
+func @wrapper() alwaysinline local {
+block0:
+ call @ordinary()
+ return
+}
+func @ordinary() {
+block0:
+ call @wrapper()
+ return
+}
+"#,
+    )
+    .unwrap();
+    keel_opt::required_inline_asm(&mut module).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let ordinary = module
+        .functions
+        .iter()
+        .find(|f| f.name == "ordinary")
+        .unwrap();
+    let calls: Vec<_> = ordinary
+        .layout_insts()
+        .filter_map(|(_, inst)| match ordinary.inst_data(inst) {
+            InstData::Call { func, .. } => Some(ordinary.callee(*func).name.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(calls, ["ordinary"]);
+}
+
+#[test]
+fn mandatory_recursive_cycles_are_rejected() {
+    for recursive_body in ["call @wrapper()", "call @other()"] {
+        let source = format!(
+            r#"
+func @wrapper() alwaysinline local {{
+block0:
+ {recursive_body}
+ return
+}}
+func @other() alwaysinline local {{
+block0:
+ call @wrapper()
+ return
+}}
+func @caller() {{
+block0:
+ call @wrapper()
+ return
+}}
+"#
+        );
+        let mut module = keel_ir::parse(&source).unwrap();
+        let error = keel_opt::required_inline_asm(&mut module).unwrap_err();
+        assert!(
+            error.contains("recursive callee"),
+            "{recursive_body}: {error}"
+        );
+    }
+}

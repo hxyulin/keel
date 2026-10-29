@@ -1882,20 +1882,29 @@ pub fn required_inline_asm_with_c_definitions(
         module.sync_function_attrs();
     }
     discard_unused(module);
-    // Reject recursive mandatory edges before cloning can grow the graph.
+    // Only mandatory edges drive expansion. Ordinary calls may close a cycle
+    // through an alwaysinline wrapper without requiring infinite expansion.
+    let mandatory_definitions: FxHashSet<&str> = module
+        .functions
+        .iter()
+        .filter(|f| f.attrs.alwaysinline)
+        .map(|f| f.name.as_str())
+        .collect();
     let sites: Vec<Vec<Inst>> = module
         .functions
         .iter()
         .map(|f| {
             f.layout_insts()
                 .filter_map(|(_, i)| {
-                    matches!(
-                        f.inst_data(i),
-                        InstData::Call { .. }
-                            | InstData::ReturnCall { .. }
-                            | InstData::Invoke { .. }
-                    )
-                    .then_some(i)
+                    let reference = match f.inst_data(i) {
+                        InstData::Call { func, .. }
+                        | InstData::ReturnCall { func, .. }
+                        | InstData::Invoke { func, .. } => *func,
+                        _ => return None,
+                    };
+                    let decl = f.callee(reference);
+                    (decl.attrs.alwaysinline || mandatory_definitions.contains(decl.name.as_str()))
+                        .then_some(i)
                 })
                 .collect()
         })

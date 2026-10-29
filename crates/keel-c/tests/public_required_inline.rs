@@ -92,3 +92,53 @@ fn weak_required_definitions_keep_the_binding_gate() {
     ).unwrap_err();
     assert!(error.to_string().contains("public_definition"), "{error}");
 }
+
+#[test]
+fn required_wrapper_preserves_ordinary_recursive_calls() {
+    let source = r#"
+int slow(int);
+static __attribute__((always_inline)) inline int wrap(int x) { return slow(x); }
+int slow(int x) { return x ? wrap(x - 1) + 1 : 0; }
+__attribute__((always_inline)) int trigger(int x) { return x; }
+int main(void) { return wrap(4) != 4; }
+"#;
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("recursive-required-inline");
+    fs::create_dir_all(&dir).unwrap();
+    for target in Target::NATIVE {
+        let mut module = keel_c::compile(
+            source,
+            "recursive-required.c",
+            keel_c::Options {
+                target,
+                debug_info: false,
+            },
+        )
+        .unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        for function in &module.functions {
+            assert!(!function.layout_insts().any(|(_, inst)| matches!(
+                function.inst_data(inst),
+                InstData::Call { func, .. } if function.callee(*func).name == "wrap"
+            )));
+        }
+        keel_opt::optimize(&mut module).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        if Some(target) == Target::host() {
+            let assembly = dir.join("recursive.s");
+            fs::write(&assembly, keel_codegen::compile(&module, target).unwrap()).unwrap();
+            let executable = dir.join("recursive");
+            let output = Command::new("clang")
+                .arg(assembly)
+                .arg("-o")
+                .arg(&executable)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(Command::new(executable).status().unwrap().code(), Some(0));
+        }
+    }
+}
