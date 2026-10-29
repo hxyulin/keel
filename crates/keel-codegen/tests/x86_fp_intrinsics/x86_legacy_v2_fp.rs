@@ -1,5 +1,6 @@
-//! AVX horizontal add/subtract, ADDSUB and dot products with MXCSR flags.
+//! SSE3 horizontal add/subtract and ADDSUB, SSE4.1 rounding and dot products.
 //! Forced instruction oracles preserve unused-result MXCSR effects.
+use crate::common;
 use keel_asm_ir::x86::{CpuLevel, Features};
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
@@ -8,9 +9,6 @@ use keel_codegen::{
 };
 use keel_ir::{Intrinsic, Type};
 use std::{fs, path::PathBuf, process::Command};
-#[allow(dead_code)]
-#[path = "common/vector.rs"]
-pub mod common;
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -41,21 +39,14 @@ fn cases(all_controls: bool) -> Vec<Case> {
     let mut v = Vec::new();
     for id in Intrinsic::ALL
         .into_iter()
-        .filter(|i| i.is_x86_fp_horizontal_dot())
+        .filter(|i| i.is_x86_legacy_fp_v2())
     {
         for mode in controls(
-            id.has_x86_dot_control()
-                .then_some((2, 256))
-                .map_or(1, |c| c.1),
+            id.x86_legacy_fp_v2_control().map_or(1, |c| c.1),
             all_controls,
         ) {
             for alias in [false, true] {
-                if alias
-                    && id
-                        .has_x86_dot_control()
-                        .then_some((2, 256))
-                        .is_some_and(|c| c.0 == 1)
-                {
+                if alias && id.x86_legacy_fp_v2_control().is_some_and(|c| c.0 == 1) {
                     continue;
                 }
                 v.push(Case { id, mode, alias });
@@ -73,7 +64,7 @@ fn source(all_controls: bool) -> String {
         let srcbytes = ty.bytes().unwrap();
         let name = c.name();
         let b = if c.alias { "v3" } else { "v4" };
-        let extra = match c.id.has_x86_dot_control().then_some((2, 256)) {
+        let extra = match c.id.x86_legacy_fp_v2_control() {
             Some((1, _)) => ",v5".into(),
             Some((2, _)) => format!(",{b},v5"),
             _ => format!(",{b}"),
@@ -137,14 +128,14 @@ fn harness(all_controls: bool) -> String {
             "extern void {name}(const void*,const void*,void*);extern void unused_{name}(const void*,const void*,void*);__attribute__((noinline))static void ref_{name}(const void*p,const void*q,void*out){{{ct} aa[{n}],bb[{n}];memcpy(aa,p,{bytes});memcpy(bb,q,{bytes});{vt} a={load}(aa),b={load}({}),e;",
             if case.alias { "aa" } else { "bb" }
         );
-        let op = case.id.x86_fp_horizontal_dot_opcode().unwrap();
-        let asm = if case.id.has_x86_dot_control() {
-            format!("{op} ${},%2,%1,%0", case.mode)
-        } else {
-            format!("{op} %2,%1,%0")
+        let op = case.id.x86_legacy_fp_v2_opcode().unwrap();
+        let (asm, input) = match case.id.x86_legacy_fp_v2_control() {
+            Some((1, _)) => (format!("{op} ${},%1,%0", case.mode), "a"),
+            Some((2, _)) => (format!("{op} ${},%1,%0", case.mode), "b"),
+            _ => (format!("{op} %1,%0"), "b"),
         };
         c += &format!(
-            "__asm__ volatile(\"{asm}\":\"=x\"(e):\"x\"(a),\"x\"(b):\"memory\");memcpy(out,&e,{});}}\n",
+            "e=a;__asm__ volatile(\"{asm}\":\"+x\"(e):\"x\"({input}):\"memory\");memcpy(out,&e,{});}}\n",
             i.returns[0].bytes().unwrap()
         );
         table += &format!(
@@ -165,8 +156,7 @@ _mm_setcsr(saved);return 0;}
 "#;
     c
 }
-#[path = "common/matrix.rs"]
-mod matrix;
+use crate::matrix;
 fn object(
     s: SelectionTier,
     a: AllocationTier,
@@ -213,10 +203,10 @@ fn round_approx_minmax_comi_typed_alias_spill_export() {
     let export = std::env::var_os("KEEL_X86_256_EXPORT_DIR").map(PathBuf::from);
     if let Some(d) = &export {
         fs::create_dir_all(d).unwrap();
-        fs::write(d.join("avx-horizontal-dot.ir"), source(false)).unwrap();
-        fs::write(d.join("avx-horizontal-dot.c"), harness(false)).unwrap();
+        fs::write(d.join("legacy-v2-fp.ir"), source(false)).unwrap();
+        fs::write(d.join("legacy-v2-fp.c"), harness(false)).unwrap();
     }
-    let d = common::temp("avx-horizontal-dot-syntax");
+    let d = common::temp("legacy-v2-fp-syntax");
     fs::create_dir_all(&d).unwrap();
     fs::write(d.join("compare.c"), harness(false)).unwrap();
     common::command(
@@ -226,7 +216,7 @@ fn round_approx_minmax_comi_typed_alias_spill_export() {
                 "x86_64-unknown-linux-gnu",
                 "-ffreestanding",
                 "-march=x86-64",
-                "-mavx",
+                "-mno-avx",
                 "-msse4.1",
                 "-msse3",
                 "-O2",
@@ -245,9 +235,9 @@ fn round_approx_minmax_comi_typed_alias_spill_export() {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
                 let (b, text) =
-                    object(s, a, empty, Features::for_level(CpuLevel::V3), false).unwrap();
+                    object(s, a, empty, Features::for_level(CpuLevel::V2), false).unwrap();
                 if let Some(d) = &export {
-                    let name = format!("avx-horizontal-dot-{s:?}-{a:?}-{empty}");
+                    let name = format!("legacy-v2-fp-{s:?}-{a:?}-{empty}");
                     fs::write(d.join(format!("{name}.o")), b).unwrap();
                     fs::write(d.join(format!("{name}.s")), text).unwrap();
                 }
@@ -256,7 +246,7 @@ fn round_approx_minmax_comi_typed_alias_spill_export() {
     }
 }
 #[test]
-fn avx_horizontal_dot_features_controls_and_unused_effects() {
+fn v2_features_controls_and_unused_effects() {
     assert!(
         object(
             SelectionTier::Baseline,
@@ -267,19 +257,44 @@ fn avx_horizontal_dot_features_controls_and_unused_effects() {
         )
         .is_err()
     );
-    let mut f = Features::NONE;
-    f = f.with_features("avx").unwrap();
-    object(SelectionTier::Full, AllocationTier::Full, true, f, false).unwrap();
-    for to in ["iconst.i32 256", "load.i32 align 1 v0"] {
-        let bad = source(false).replace("iconst.i32 255", to);
-        assert!(keel_ir::verify_module(&keel_ir::parse(&bad).unwrap()).is_err());
+    for disable_sse3 in [false, true] {
+        let mut f = Features::for_level(CpuLevel::V2);
+        if disable_sse3 {
+            f.sse3 = false;
+        } else {
+            f.sse41 = false;
+        }
+        assert!(
+            object(
+                SelectionTier::Baseline,
+                AllocationTier::Full,
+                false,
+                f,
+                false
+            )
+            .is_err()
+        );
+    }
+    for (from, to) in [
+        ("iconst.i32 15", "iconst.i32 16"),
+        ("iconst.i32 255", "iconst.i32 256"),
+        ("iconst.i32 255", "load.i32 align 1 v0"),
+    ] {
+        let mut bad = source(false);
+        if from.ends_with(" 15") {
+            bad = bad
+                .split("func @v2fp_x86_sse41_dpps")
+                .next()
+                .unwrap()
+                .into();
+        }
+        assert!(keel_ir::verify_module(&keel_ir::parse(&bad.replace(from, to)).unwrap()).is_err());
     }
     let mut m = keel_ir::parse(&source(false)).unwrap();
     keel_opt::optimize(&mut m).unwrap();
     for f in m.functions.iter().filter(|f| f.name.starts_with("unused_")) {
-        assert!(f.layout_insts().any(|(_,i)|matches!(f.inst_data(i),keel_ir::InstData::Intrinsic{id,..}if id.is_x86_fp_horizontal_dot())));
+        assert!(f.layout_insts().any(|(_,i)|matches!(f.inst_data(i),keel_ir::InstData::Intrinsic{id,..}if id.is_x86_legacy_fp_v2())));
     }
-    m.functions.truncate(2);
     assert!(
         keel_codegen::aarch64::compile(&m)
             .unwrap_err()
@@ -289,11 +304,11 @@ fn avx_horizontal_dot_features_controls_and_unused_effects() {
 }
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
-fn native_avx_horizontal_dot_controls_flags_and_aliases() {
-    if !std::is_x86_feature_detected!("avx") {
+fn native_legacy_round_dot_horizontal_controls_flags_and_aliases() {
+    if !std::is_x86_feature_detected!("sse4.1") {
         return;
     }
-    let d = common::temp("avx-horizontal-dot-native");
+    let d = common::temp("legacy-v2-fp-native");
     fs::create_dir_all(&d).unwrap();
     for s in [
         SelectionTier::Baseline,
@@ -307,14 +322,14 @@ fn native_avx_horizontal_dot_controls_flags_and_aliases() {
                     (s, a, empty) == (SelectionTier::Baseline, AllocationTier::Fast, false);
                 fs::write(d.join("compare.c"), harness(all_controls)).unwrap();
                 let (b, _) =
-                    object(s, a, empty, Features::for_level(CpuLevel::V3), all_controls).unwrap();
+                    object(s, a, empty, Features::for_level(CpuLevel::V2), all_controls).unwrap();
                 fs::write(d.join("compare.o"), b).unwrap();
                 common::command(
                     Command::new("clang")
                         .args([
                             "-O2",
                             "-march=x86-64",
-                            "-mavx",
+                            "-mno-avx",
                             "-msse4.1",
                             "-msse3",
                             "-fno-fast-math",

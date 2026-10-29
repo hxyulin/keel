@@ -1,5 +1,6 @@
 //! All32 AVX predicate controls, including signaling differences and unused-result
 //! MXCSR effects. The oracle uses Clang's assembler to force the exact compare.
+use crate::common;
 use keel_asm_ir::x86::{CpuLevel, Features};
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
@@ -8,9 +9,6 @@ use keel_codegen::{
 };
 use keel_ir::{Intrinsic, Type};
 use std::{fs, path::PathBuf, process::Command};
-#[allow(dead_code)]
-#[path = "common/vector.rs"]
-pub mod common;
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -131,8 +129,7 @@ _mm_setcsr(saved);return 0;}
 "#;
     c
 }
-#[path = "common/matrix.rs"]
-mod matrix;
+use crate::matrix;
 fn object(
     s: SelectionTier,
     a: AllocationTier,

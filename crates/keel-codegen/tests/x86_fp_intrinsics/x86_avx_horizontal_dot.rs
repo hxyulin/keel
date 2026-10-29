@@ -1,5 +1,6 @@
-//! Architectural rounding/approximation/source-biased min/max and scalar flags.
+//! AVX horizontal add/subtract, ADDSUB and dot products with MXCSR flags.
 //! Forced instruction oracles preserve unused-result MXCSR effects.
+use crate::common;
 use keel_asm_ir::x86::{CpuLevel, Features};
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
@@ -8,15 +9,22 @@ use keel_codegen::{
 };
 use keel_ir::{Intrinsic, Type};
 use std::{fs, path::PathBuf, process::Command};
-#[allow(dead_code)]
-#[path = "common/vector.rs"]
-pub mod common;
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
     float_caller_saved: &[],
     float_callee_saved: &[],
 };
+/// The dot-product control reaches the encoding unchanged, so boundary controls
+/// cover its lowering. One native configuration still executes all 256.
+const BOUNDARY_CONTROLS: [u8; 11] = [0, 1, 2, 4, 8, 16, 32, 64, 127, 128, 255];
+fn controls(count: i64, all_controls: bool) -> Vec<u8> {
+    if count == 256 && !all_controls {
+        BOUNDARY_CONTROLS.to_vec()
+    } else {
+        (0..count).map(|mode| mode as u8).collect()
+    }
+}
 struct Case {
     id: Intrinsic,
     mode: u8,
@@ -24,18 +32,28 @@ struct Case {
 }
 impl Case {
     fn name(&self) -> String {
-        format!("misc_{}_{}_{}", self.id, self.mode, self.alias)
+        format!("v2fp_{}_{}_{}", self.id, self.mode, self.alias)
     }
 }
-fn cases() -> Vec<Case> {
+fn cases(all_controls: bool) -> Vec<Case> {
     let mut v = Vec::new();
     for id in Intrinsic::ALL
         .into_iter()
-        .filter(|i| i.is_x86_legacy_fp_misc())
+        .filter(|i| i.is_x86_fp_horizontal_dot())
     {
-        for mode in 0..if id.has_x86_round_control() { 16 } else { 1 } {
+        for mode in controls(
+            id.has_x86_dot_control()
+                .then_some((2, 256))
+                .map_or(1, |c| c.1),
+            all_controls,
+        ) {
             for alias in [false, true] {
-                if alias && (id.has_x86_round_control() || id.info().params.len() == 1) {
+                if alias
+                    && id
+                        .has_x86_dot_control()
+                        .then_some((2, 256))
+                        .is_some_and(|c| c.0 == 1)
+                {
                     continue;
                 }
                 v.push(Case { id, mode, alias });
@@ -44,27 +62,26 @@ fn cases() -> Vec<Case> {
     }
     v
 }
-fn source() -> String {
+fn source(all_controls: bool) -> String {
     let mut s = String::new();
-    for c in cases() {
+    for c in cases(all_controls) {
         let info = c.id.info();
         let ty = info.params[0];
         let bytes = info.returns[0].bytes().unwrap();
         let srcbytes = ty.bytes().unwrap();
         let name = c.name();
+        let b = if c.alias { "v3" } else { "v4" };
+        let extra = match c.id.has_x86_dot_control().then_some((2, 256)) {
+            Some((1, _)) => ",v5".into(),
+            Some((2, _)) => format!(",{b},v5"),
+            _ => format!(",{b}"),
+        };
         for unused in [false, true] {
             s += &format!(
-                "func @{}{name}(ptr,ptr,ptr){{\nblock0(v0:ptr,v1:ptr,v2:ptr):\n v3 = load.{ty} align 1 v0\n v4 = load.{ty} align 1 v1\n v5 = iconst.i32 {}\n v6 = intrinsic {}(v3{})\n",
+                "func @{}{name}(ptr,ptr,ptr){{\nblock0(v0:ptr,v1:ptr,v2:ptr):\n v3 = load.{ty} align 1 v0\n v4 = load.{ty} align 1 v1\n v5 = iconst.i32 {}\n v6 = intrinsic {}(v3{extra})\n",
                 if unused { "unused_" } else { "" },
                 c.mode,
-                c.id,
-                if c.id.has_x86_round_control() {
-                    ",v5"
-                } else if info.params.len() == 2 {
-                    if c.alias { ",v3" } else { ",v4" }
-                } else {
-                    ""
-                }
+                c.id
             );
             if !unused {
                 s += &format!(
@@ -76,14 +93,14 @@ fn source() -> String {
     }
     s
 }
-fn harness() -> String {
+fn harness(all_controls: bool) -> String {
     let mut c = String::from(
         "#include <immintrin.h>\n#include <stdint.h>\nextern void *memcpy(void*,const void*,__SIZE_TYPE__);extern void *memset(void*,int,__SIZE_TYPE__);extern int memcmp(const void*,const void*,__SIZE_TYPE__);extern int printf(const char*,...);\n",
     );
     let mut table = String::from(
         "struct Case{void(*run)(const void*,const void*,void*);void(*unused)(const void*,const void*,void*);void(*ref)(const void*,const void*,void*);unsigned in,out,bits;const char*name;};static const struct Case cases[]={\n",
     );
-    for case in cases() {
+    for case in cases(all_controls) {
         let i = case.id.info();
         let ty = i.params[0];
         let name = case.name();
@@ -118,25 +135,16 @@ fn harness() -> String {
             "extern void {name}(const void*,const void*,void*);extern void unused_{name}(const void*,const void*,void*);__attribute__((noinline))static void ref_{name}(const void*p,const void*q,void*out){{{ct} aa[{n}],bb[{n}];memcpy(aa,p,{bytes});memcpy(bb,q,{bytes});{vt} a={load}(aa),b={load}({}),e;",
             if case.alias { "aa" } else { "bb" }
         );
-        let op = case.id.x86_legacy_fp_misc_opcode().unwrap();
-        if op.contains("comis") {
-            c += &format!(
-                "unsigned char cf,pf,zf;__asm__ volatile(\"{op} %4,%3;setb %0;setp %1;sete %2\":\"=qm\"(cf),\"=qm\"(pf),\"=qm\"(zf):\"x\"(a),\"x\"(b):\"cc\",\"memory\");uint32_t flags=cf|pf<<2|zf<<6;memcpy(out,&flags,4);}}\n"
-            );
+        let op = case.id.x86_fp_horizontal_dot_opcode().unwrap();
+        let asm = if case.id.has_x86_dot_control() {
+            format!("{op} ${},%2,%1,%0", case.mode)
         } else {
-            if i.params.len() == 2 {
-                c += &format!(
-                    "e=a;__asm__ volatile(\"{op} %1,%0\":\"+x\"(e):\"x\"(b):\"memory\");memcpy(out,&e,{});}}\n",
-                    i.returns[0].bytes().unwrap()
-                );
-            } else {
-                c += &format!(
-                    "__asm__ volatile(\"{op} %1,%0\":\"=x\"(e):\"x\"(a):\"memory\");memcpy(out,&e,{});}}\n",
-                    i.returns[0].bytes().unwrap()
-                );
-            }
-        }
-
+            format!("{op} %2,%1,%0")
+        };
+        c += &format!(
+            "__asm__ volatile(\"{asm}\":\"=x\"(e):\"x\"(a),\"x\"(b):\"memory\");memcpy(out,&e,{});}}\n",
+            i.returns[0].bytes().unwrap()
+        );
         table += &format!(
             "{{{name},unused_{name},ref_{name},{bytes},{},{bits},\"{name}\"}},\n",
             i.returns[0].bytes().unwrap()
@@ -155,17 +163,24 @@ _mm_setcsr(saved);return 0;}
 "#;
     c
 }
-#[path = "common/matrix.rs"]
-mod matrix;
+use crate::matrix;
 fn object(
     s: SelectionTier,
     a: AllocationTier,
     empty: bool,
     f: Features,
+    all_controls: bool,
 ) -> Result<(Vec<u8>, String), keel_codegen::CodegenError> {
-    static PREPARED: std::sync::OnceLock<matrix::PreparedModule> = std::sync::OnceLock::new();
-    let m = PREPARED
-        .get_or_init(|| matrix::PreparedModule::parse(&source()))
+    use std::sync::OnceLock;
+    static BOUNDARY: OnceLock<matrix::PreparedModule> = OnceLock::new();
+    static ALL_CONTROLS: OnceLock<matrix::PreparedModule> = OnceLock::new();
+    let prepared = if all_controls {
+        &ALL_CONTROLS
+    } else {
+        &BOUNDARY
+    };
+    let m = prepared
+        .get_or_init(|| matrix::PreparedModule::parse(&source(all_controls)))
         .for_selector(s);
     let selector = FeatureSelector {
         inner: &s,
@@ -195,12 +210,12 @@ fn round_approx_minmax_comi_typed_alias_spill_export() {
     let export = std::env::var_os("KEEL_X86_256_EXPORT_DIR").map(PathBuf::from);
     if let Some(d) = &export {
         fs::create_dir_all(d).unwrap();
-        fs::write(d.join("legacy-fp-misc.ir"), source()).unwrap();
-        fs::write(d.join("legacy-fp-misc.c"), harness()).unwrap();
+        fs::write(d.join("avx-horizontal-dot.ir"), source(false)).unwrap();
+        fs::write(d.join("avx-horizontal-dot.c"), harness(false)).unwrap();
     }
-    let d = common::temp("legacy-fp-misc-syntax");
+    let d = common::temp("avx-horizontal-dot-syntax");
     fs::create_dir_all(&d).unwrap();
-    fs::write(d.join("compare.c"), harness()).unwrap();
+    fs::write(d.join("compare.c"), harness(false)).unwrap();
     common::command(
         Command::new("clang")
             .args([
@@ -208,7 +223,9 @@ fn round_approx_minmax_comi_typed_alias_spill_export() {
                 "x86_64-unknown-linux-gnu",
                 "-ffreestanding",
                 "-march=x86-64",
-                "-mno-avx",
+                "-mavx",
+                "-msse4.1",
+                "-msse3",
                 "-O2",
                 "-c",
             ])
@@ -224,9 +241,10 @@ fn round_approx_minmax_comi_typed_alias_spill_export() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (b, text) = object(s, a, empty, Features::for_level(CpuLevel::V1)).unwrap();
+                let (b, text) =
+                    object(s, a, empty, Features::for_level(CpuLevel::V3), false).unwrap();
                 if let Some(d) = &export {
-                    let name = format!("legacy-fp-misc-{s:?}-{a:?}-{empty}");
+                    let name = format!("avx-horizontal-dot-{s:?}-{a:?}-{empty}");
                     fs::write(d.join(format!("{name}.o")), b).unwrap();
                     fs::write(d.join(format!("{name}.s")), text).unwrap();
                 }
@@ -235,34 +253,45 @@ fn round_approx_minmax_comi_typed_alias_spill_export() {
     }
 }
 #[test]
-fn legacy_fp_misc_baseline_and_types() {
-    object(
-        SelectionTier::Full,
-        AllocationTier::Full,
-        true,
-        Features::NONE,
-    )
-    .unwrap();
-    let bad = source().replace("load.f32x4", "load.f64x2");
-    assert!(keel_ir::verify_module(&keel_ir::parse(&bad).unwrap()).is_err());
+fn avx_horizontal_dot_features_controls_and_unused_effects() {
     assert!(
-        keel_codegen::aarch64::compile(&keel_ir::parse(&source()).unwrap())
+        object(
+            SelectionTier::Baseline,
+            AllocationTier::Full,
+            false,
+            Features::NONE,
+            false
+        )
+        .is_err()
+    );
+    let mut f = Features::NONE;
+    f = f.with_features("avx").unwrap();
+    object(SelectionTier::Full, AllocationTier::Full, true, f, false).unwrap();
+    for to in ["iconst.i32 256", "load.i32 align 1 v0"] {
+        let bad = source(false).replace("iconst.i32 255", to);
+        assert!(keel_ir::verify_module(&keel_ir::parse(&bad).unwrap()).is_err());
+    }
+    let mut m = keel_ir::parse(&source(false)).unwrap();
+    keel_opt::optimize(&mut m).unwrap();
+    for f in m.functions.iter().filter(|f| f.name.starts_with("unused_")) {
+        assert!(f.layout_insts().any(|(_,i)|matches!(f.inst_data(i),keel_ir::InstData::Intrinsic{id,..}if id.is_x86_fp_horizontal_dot())));
+    }
+    m.functions.truncate(2);
+    assert!(
+        keel_codegen::aarch64::compile(&m)
             .unwrap_err()
             .message
             .contains("x86 architectural")
     );
-    let mut m = keel_ir::parse(&source()).unwrap();
-    keel_opt::optimize(&mut m).unwrap();
-    for f in m.functions.iter().filter(|f| f.name.starts_with("unused_")) {
-        assert!(f.layout_insts().any(|(_,i)|matches!(f.inst_data(i),keel_ir::InstData::Intrinsic{id,..}if id.is_x86_legacy_fp_misc())));
-    }
 }
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
-fn native_round_approx_minmax_comi_flags_and_aliases() {
-    let d = common::temp("legacy-fp-misc-native");
+fn native_avx_horizontal_dot_controls_flags_and_aliases() {
+    if !std::is_x86_feature_detected!("avx") {
+        return;
+    }
+    let d = common::temp("avx-horizontal-dot-native");
     fs::create_dir_all(&d).unwrap();
-    fs::write(d.join("compare.c"), harness()).unwrap();
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -270,14 +299,21 @@ fn native_round_approx_minmax_comi_flags_and_aliases() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (b, _) = object(s, a, empty, Features::for_level(CpuLevel::V1)).unwrap();
+                // Execute every control once; the others share its lowering.
+                let all_controls =
+                    (s, a, empty) == (SelectionTier::Baseline, AllocationTier::Fast, false);
+                fs::write(d.join("compare.c"), harness(all_controls)).unwrap();
+                let (b, _) =
+                    object(s, a, empty, Features::for_level(CpuLevel::V3), all_controls).unwrap();
                 fs::write(d.join("compare.o"), b).unwrap();
                 common::command(
                     Command::new("clang")
                         .args([
                             "-O2",
                             "-march=x86-64",
-                            "-mno-avx",
+                            "-mavx",
+                            "-msse4.1",
+                            "-msse3",
                             "-fno-fast-math",
                             "-ffp-contract=off",
                         ])
