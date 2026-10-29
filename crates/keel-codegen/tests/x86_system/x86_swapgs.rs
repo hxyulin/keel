@@ -1,11 +1,10 @@
 //! Compile/export only. SWAPGS executes only in a disposable CPL0 guest.
+use crate::userspace;
 use keel_asm_ir::x86::CpuLevel;
 use keel_codegen::{SelectionTier, regalloc::AllocationTier};
 use keel_ir::{InstData, Intrinsic, MemoryEffects};
 use object::{Object, ObjectSymbol};
-#[path = "common/userspace.rs"]
-mod userspace;
-const SOURCE: &str = include_str!("../../../suite/integration/x86-cpl0/cases/swapgs.keel");
+const SOURCE: &str = include_str!("../../../../suite/integration/x86-cpl0/cases/swapgs.keel");
 #[test]
 fn swapgs_registry_effects_and_foreign_rejection() {
     let id = Intrinsic::X86Swapgs;

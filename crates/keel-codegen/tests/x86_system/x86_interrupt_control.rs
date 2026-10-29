@@ -1,11 +1,10 @@
 //! Compile/export only. CLI/STI/HLT never execute on the host.
+use crate::userspace;
 use keel_asm_ir::x86::CpuLevel;
 use keel_codegen::{SelectionTier, regalloc::AllocationTier};
 use keel_ir::{InstData, Intrinsic, MemoryEffects};
-#[path = "common/userspace.rs"]
-mod userspace;
 const SOURCE: &str =
-    include_str!("../../../suite/integration/x86-cpl0/cases/interrupt_control.keel");
+    include_str!("../../../../suite/integration/x86-cpl0/cases/interrupt_control.keel");
 #[test]
 fn interrupt_control_registry_effects_and_foreign_rejection() {
     for (n, id, name) in [

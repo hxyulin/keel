@@ -114,8 +114,7 @@ on a host with QEMU and GNU binutils (override tool paths as above):
 
 ```sh
 KEEL_DESCRIPTOR_EXPORT_DIR=target/descriptor-cpl0-exports \
-  cargo test -p keel-codegen \
-  --test x86_descriptor_cpl0 --test x86_descriptor_queries_encoding
+  cargo test -p keel-codegen --test x86_system -- x86_descriptor_
 python3 suite/integration/x86-cpl0/descriptor_campaign.py \
   --exports target/descriptor-cpl0-exports --timeout 5
 ```
@@ -146,8 +145,7 @@ Export the twelve table-load objects, then use the same campaign with
 
 ```sh
 KEEL_DESCRIPTOR_LOAD_EXPORT_DIR="$PWD/target/descriptor-load-exports" \
-  cargo test -p keel-codegen --test x86_descriptor_cpl0 \
-  --test x86_descriptor_queries_encoding
+  cargo test -p keel-codegen --test x86_system -- x86_descriptor_
 python3 suite/integration/x86-cpl0/descriptor_campaign.py --table-loads \
   --exports target/descriptor-load-exports --timeout 5
 ```
@@ -166,8 +164,7 @@ bounded emulated evidence, not native bare-metal qualification.
 
 ```sh
 KEEL_DESCRIPTOR_STATUS_EXPORT_DIR="$PWD/target/descriptor-status-exports" \
-  cargo test -p keel-codegen --test x86_descriptor_cpl0 \
-  --test x86_descriptor_queries_encoding
+  cargo test -p keel-codegen --test x86_system -- x86_descriptor_
 python3 suite/integration/x86-cpl0/descriptor_campaign.py --status \
   --exports target/descriptor-status-exports --timeout 5
 ```
@@ -189,7 +186,7 @@ for the API contract.
 
 ```sh
 KEEL_MSR_EXPORT_DIR="$PWD/target/msr-exports" \
-  cargo test -p keel-codegen --test x86_msr
+  cargo test -p keel-codegen --test x86_system -- x86_msr::
 python3 suite/integration/x86-cpl0/descriptor_campaign.py --msr \
   --exports target/msr-exports --timeout 5
 ```
@@ -214,7 +211,7 @@ The other campaign modes are mutually exclusive with `--msr`. See
 
 ```sh
 KEEL_CPU_CONTROL_EXPORT_DIR="$PWD/target/cpu-control-exports" \
-  cargo test -p keel-codegen --test x86_privileged_control
+  cargo test -p keel-codegen --test x86_system -- x86_privileged_control::
 python3 suite/integration/x86-cpl0/descriptor_campaign.py --cpu-control \
   --exports target/cpu-control-exports --timeout 5
 ```
@@ -240,7 +237,7 @@ API contracts.
 ```sh
 KEEL_SYSTEM_LOAD_EXPORT_DIR="$PWD/target/system-load-exports" \
 KEEL_INVLPG_EXPORT_DIR="$PWD/target/invlpg-exports" \
-  cargo test -p keel-codegen --test x86_system_write
+  cargo test -p keel-codegen --test x86_system -- x86_system_write::
 python3 suite/integration/x86-cpl0/descriptor_campaign.py --system-loads \
   --exports target/system-load-exports --timeout 5
 python3 suite/integration/x86-cpl0/descriptor_campaign.py --invlpg \

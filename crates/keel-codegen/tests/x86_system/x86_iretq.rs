@@ -1,11 +1,10 @@
 //! Never execute the adapter in the host process.
+use crate::userspace;
 use keel_asm_ir::x86::{CpuLevel, Features};
 use keel_codegen::{SelectionTier, regalloc::AllocationTier, x86_64::iretq};
 use object::{Object, ObjectSection};
-#[path = "common/userspace.rs"]
-mod userspace;
 
-const SOURCE: &str = include_str!("../../../suite/integration/x86-cpl0/cases/iretq.keel");
+const SOURCE: &str = include_str!("../../../../suite/integration/x86-cpl0/cases/iretq.keel");
 
 #[test]
 fn image_contract_and_transport_bytes() {

@@ -4,10 +4,9 @@ use keel_codegen::{SelectionTier, regalloc::AllocationTier};
 use keel_ir::{InstData, Intrinsic, MemoryEffects};
 use object::{Object, ObjectSection, ObjectSymbol};
 
-#[path = "common/userspace.rs"]
-mod userspace;
+use crate::userspace;
 
-const SOURCE: &str = include_str!("../../../suite/integration/x86-cpl0/cases/cpu_control.keel");
+const SOURCE: &str = include_str!("../../../../suite/integration/x86-cpl0/cases/cpu_control.keel");
 const OPS: [(Intrinsic, &str, &str, usize, u8); 3] = [
     (Intrinsic::X86Clts, "x86_clts", "clts", 778, 0x06),
     (Intrinsic::X86Invd, "x86_invd", "invd", 779, 0x08),

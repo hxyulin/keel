@@ -1,14 +1,13 @@
 //! Compile/export only. Control/debug register access executes only in guests.
+use crate::userspace;
 use keel_asm_ir::x86::CpuLevel;
 use keel_codegen::{
     SelectionTier,
     regalloc::{Allocation, AllocationInput, AllocationTier, Loc, RegisterAllocator},
 };
 use keel_ir::{EntityRef, InstData, Intrinsic, MemoryEffects, Type, Value};
-#[path = "common/userspace.rs"]
-mod userspace;
 const SOURCE: &str =
-    include_str!("../../../suite/integration/x86-cpl0/cases/system_registers.keel");
+    include_str!("../../../../suite/integration/x86-cpl0/cases/system_registers.keel");
 const REGISTERS: [&str; 13] = [
     "cr0", "cr2", "cr3", "cr4", "cr8", "dr0", "dr1", "dr2", "dr3", "dr4", "dr5", "dr6", "dr7",
 ];

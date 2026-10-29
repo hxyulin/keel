@@ -7,10 +7,9 @@ use keel_codegen::{
 use keel_ir::{EntityRef, InstData, Intrinsic, MemoryEffects, Type, Value};
 use object::{Object, ObjectSection, ObjectSymbol};
 
-#[path = "common/userspace.rs"]
-mod userspace;
+use crate::userspace;
 
-const SOURCE: &str = include_str!("../../../suite/integration/x86-cpl0/cases/msr.keel");
+const SOURCE: &str = include_str!("../../../../suite/integration/x86-cpl0/cases/msr.keel");
 
 #[test]
 fn signatures_effects_and_foreign_target_rejection() {

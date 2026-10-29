@@ -1,4 +1,5 @@
 //! Fixed-register queries return explicit SSA values; hardware fences are not C11 fence aliases.
+use crate::common;
 use keel_asm_ir::x86::Features;
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
@@ -7,9 +8,6 @@ use keel_codegen::{
 };
 use keel_ir::{EntityRef, Value};
 use std::{fs, process::Command};
-#[allow(dead_code)]
-#[path = "common/vector.rs"]
-pub mod common;
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
