@@ -975,3 +975,39 @@ fn reserve_rejects_oversize_stack_nonleaf_and_missing_byval() {
     let candidate = run(&source, &["inline-aggregate-reserve"]);
     assert_eq!(calls(&candidate, "caller0"), 2);
 }
+#[test]
+fn inlining_keeps_contracts_on_existing_calls_to_imported_callees() {
+    let mut m = keel_ir::parse(
+        "decl @ext(ptr) -> i64
+func @helper(ptr) -> i64 local {
+block0(v0: ptr):
+ v1 = call @ext(v0)
+ return v1
+}
+func @f(ptr) -> i64 {
+block0(v0: ptr):
+ v1 = call @ext(v0)
+ v2 = call @helper(v0)
+ v3 = iadd v1, v2
+ return v3
+}",
+    )
+    .unwrap();
+    let contract = keel_ir::CallContract {
+        nofree: true,
+        nosync: true,
+        ..Default::default()
+    };
+    let f = m.functions.iter_mut().find(|f| f.name == "f").unwrap();
+    let call = f
+        .layout_insts()
+        .map(|(_, i)| i)
+        .find(|&i| matches!(f.inst_data(i), InstData::Call { .. }))
+        .unwrap();
+    f.set_call_contract(call, contract.clone()).unwrap();
+    keel_opt::run_passes(&mut m, &["inline"]).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    let f = m.functions.iter().find(|f| f.name == "f").unwrap();
+    assert_eq!(calls(&m, "f"), 2, "helper inlined, both ext calls remain");
+    assert_eq!(f.call_contract(call), Some(&contract));
+}

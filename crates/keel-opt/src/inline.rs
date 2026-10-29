@@ -1517,7 +1517,8 @@ fn inline_call(caller: &mut Function, call: Inst, callee: &Function) {
         .callees()
         .map(|(r, decl)| {
             let imported = caller.import_function(&decl.name, decl.sig.clone());
-            caller.callee_mut(imported).attrs = decl.attrs.clone();
+            // Keep contracts and facts on the caller's existing calls.
+            caller.set_callee_attrs(imported, decl.attrs.clone());
             (r, imported)
         })
         .collect();
