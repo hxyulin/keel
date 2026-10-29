@@ -1,4 +1,12 @@
 //! Bounded integer compare/select covers publish all leaves before allocation.
+#[path = "arm_compare_select/arm_scalar_abs.rs"]
+mod arm_scalar_abs;
+#[path = "arm_compare_select/arm_wave6_compare_spans.rs"]
+mod arm_wave6_compare_spans;
+#[allow(dead_code)]
+#[path = "common/native_oracle.rs"]
+mod native_oracle;
+
 use keel_asm::{TargetFeatures, assemble_object, assemble_program_object};
 use keel_codegen::regalloc::{AllocationTier, Pools};
 use keel_codegen::{CodegenPipeline, InstructionSelector, SelectionTier};

@@ -1,5 +1,8 @@
 //! Indexed accesses keep the effect in place and expose both address leaves
 //! before allocation, including when every leaf needs a scratch reload.
+#[path = "arm_indexed_memory/arm_extended_address.rs"]
+mod arm_extended_address;
+
 use keel_codegen::{
     CodegenPipeline, OptionsSelector, SelectionOptions,
     regalloc::{AllocationTier, Pools},

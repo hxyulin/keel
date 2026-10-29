@@ -1,4 +1,9 @@
 //! Exact-width NEON load/splat covers, including native guards and all spills.
+#[path = "arm_replicate_load/arm_packed_low_load.rs"]
+mod arm_packed_low_load;
+#[path = "arm_replicate_load/arm_vector_fusion_boundaries.rs"]
+mod arm_vector_fusion_boundaries;
+
 #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 #[path = "common/native_oracle.rs"]
 mod native_oracle;

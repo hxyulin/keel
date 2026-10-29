@@ -1,11 +1,10 @@
 //! The compare is emitted at the branch, after intervening definitions/reloads.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+use crate::native_oracle;
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools, RegisterAllocator},
 };
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-#[path = "common/native_oracle.rs"]
-mod native_oracle;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use native_oracle::PreparedOracle;
 const EMPTY: Pools = Pools {

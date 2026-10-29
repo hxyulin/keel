@@ -1,5 +1,13 @@
 //! Exercise the emitted instruction and allocation contract without an IR
 //! optimizer, so canonicalization cannot hide either operand position or uses.
+#[path = "arm_logical_immediates/arm_wave6_immediates.rs"]
+mod arm_wave6_immediates;
+#[path = "arm_logical_immediates/arm_wave6_ubfx.rs"]
+mod arm_wave6_ubfx;
+#[allow(dead_code)]
+#[path = "common/native_oracle.rs"]
+mod native_oracle;
+
 use keel_codegen::{
     CodegenPipeline, OptionsSelector, SelectionOptions,
     regalloc::{AllocationTier, Pools},

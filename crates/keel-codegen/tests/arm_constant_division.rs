@@ -1,6 +1,8 @@
 //! Constant-divisor division on AArch64: reciprocal multiplies and shifts
 //! replace `sdiv`/`udiv`, while divisors that trap or are 1 keep the
 //! hardware path and its checks.
+#[path = "arm_constant_division/arm_division.rs"]
+mod arm_division;
 
 use keel_codegen::{
     CodegenPipeline, SelectionTier,

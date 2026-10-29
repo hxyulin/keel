@@ -5,8 +5,7 @@ use keel_codegen::{
 };
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-#[path = "common/native_oracle.rs"]
-mod native_oracle;
+use crate::native_oracle;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use native_oracle::PreparedOracle;
 const EMPTY: Pools = Pools {
