@@ -203,8 +203,9 @@ fn differential_syntax(cases: Vec<String>, label: &str, att_syntax: bool) {
     };
     let input = dir.join("input.s");
     std::fs::write(&input, format!("{syntax}\n{source}")).unwrap();
+    let gnu_as = std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into());
     let mut differences = Vec::new();
-    for tool in ["clang", "/opt/homebrew/bin/x86_64-elf-as"] {
+    for tool in ["clang", gnu_as.as_str()] {
         {
             let gnu = ["vpcmpestri", "vpcmpestrm", "vpcmpistri"].iter().fold(
                 source.clone(),
@@ -240,6 +241,8 @@ fn differential_syntax(cases: Vec<String>, label: &str, att_syntax: bool) {
         let mut cmd = Command::new(tool);
         if tool == "clang" {
             cmd.args(["-target", "x86_64-unknown-linux-gnu", "-c"]);
+        } else {
+            cmd.arg("--64");
         }
         let result = cmd.arg(&input).arg("-o").arg(&output).output().unwrap();
         assert!(
