@@ -350,13 +350,15 @@ impl<'a> Parser<'a> {
                 if !ty.is_integer() || !rhs.ty.is_integer() {
                     return Err(Error::new(loc, "shift needs integers"));
                 }
-                promoted(&ty)
+                bit_field_promoted(&lhs).unwrap_or_else(|| promoted(&ty))
             }
             _ => {
                 if !ty.is_arith() || !rhs.ty.is_arith() {
                     return Err(Error::new(loc, format!("invalid operands to `{op:?}=`")));
                 }
-                let comp = usual_with_layout(&ty, &rhs.ty, self.c_layout);
+                let rhs_ty = bit_field_promoted(&rhs).unwrap_or(rhs.ty);
+                let lhs_ty = bit_field_promoted(&lhs).unwrap_or(ty);
+                let comp = usual_with_layout(&lhs_ty, &rhs_ty, self.c_layout);
                 if matches!(op, BinOp::Rem | BinOp::And | BinOp::Or | BinOp::Xor)
                     && !comp.is_integer()
                 {
@@ -520,6 +522,7 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn binop(&mut self, p: &str, l: Expr<'a>, r: Expr<'a>, loc: Loc) -> R<Expr<'a>> {
         let (l, r) = (self.rvalue(l), self.rvalue(r));
+        let (l, r) = (self.promote_bit_field(l), self.promote_bit_field(r));
         if l.ty.is_vector() || r.ty.is_vector() {
             return self.vector_binop(p, l, r, loc);
         }
@@ -3328,8 +3331,17 @@ impl<'a> Parser<'a> {
     /// The integer promotions.
     pub(crate) fn promote(&mut self, e: Expr<'a>) -> Expr<'a> {
         let e = self.rvalue(e);
-        let ty = promoted(&e.ty);
+        let ty = bit_field_promoted(&e).unwrap_or_else(|| promoted(&e.ty));
         self.cast(e, ty)
+    }
+
+    /// Promotes a bit-field read to `int` or `unsigned int` where its width
+    /// requires it (C11 6.3.1.1p2); other operands pass through unchanged.
+    fn promote_bit_field(&mut self, e: Expr<'a>) -> Expr<'a> {
+        match bit_field_promoted(&e) {
+            Some(ty) => self.cast(e, ty),
+            None => e,
+        }
     }
 
     /// A transparent union admits its member pointer types at call boundaries.
@@ -3512,6 +3524,35 @@ pub(crate) fn bin_op(p: &str) -> BinOp {
         ">" => BinOp::Gt,
         ">=" => BinOp::Ge,
         _ => unreachable!("{p}"),
+    }
+}
+
+/// The promoted type of a bit-field value narrower than its declared type:
+/// a bit-field member, or an assignment, compound assignment or prefix
+/// increment of one. Below 32 bits it is `int`; at exactly 32 bits it is
+/// `int` or `unsigned int` by the declared signedness.
+fn bit_field_promoted<'a>(e: &Expr<'a>) -> Option<Ty<'a>> {
+    let field = match &e.kind {
+        ExprKind::Assign(lhs, _)
+        | ExprKind::OpAssign { lhs, .. }
+        | ExprKind::IncDec {
+            lhs, prefix: true, ..
+        } => *lhs,
+        _ => e,
+    };
+    let (
+        ExprKind::Member {
+            bits: Some(bits), ..
+        },
+        Ty::Int(k),
+    ) = (&field.kind, field.ty)
+    else {
+        return None;
+    };
+    match bits.width {
+        ..32 => Some(INT),
+        32 => Some(if k.signed() { INT } else { UINT }),
+        _ => None,
     }
 }
 

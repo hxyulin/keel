@@ -74,6 +74,18 @@ int main(void) {
     bf.d -= 1;
     bf.c = bf.c * 2;
     printf("%u %d %u %d %u\n", bf.a, bf.b, bf.c, bf.d, bf.e);
+    /* Bit-fields narrower than int promote to int (C11 6.3.1.1p2). */
+    struct { unsigned u:5; unsigned w:32; long l:5; long x:40; } pr = { 0 };
+    printf("%d %d %d %d %d\n", (pr.u - 1) > 0, _Generic(pr.u + 0, int: 1, default: 0),
+           _Generic(pr.w + 0, unsigned: 1, default: 0), _Generic(pr.l + 0, int: 1, default: 0),
+           _Generic(pr.x + 0, long: 1, default: 0));
+    pr.u = 1;
+    printf("%d %d %d\n", (pr.u += 7) - 9 > 0, (pr.u = 3) - 4 > 0, ++pr.u - 5 > 0);
+    pr.u = 5;
+    pr.u /= -1;
+    pr.w = 5;
+    pr.w /= -1;
+    printf("%u %u %d\n", pr.u, pr.w, (pr.u - 28) / 2);
 
     struct nested a = { .name = "hi", .pos.y = 9, 4 /* as_int */, .id = 3 };
     printf("%d %d %d %d %s\n", a.id, a.pos.x, a.pos.y, a.as_int, a.name);
