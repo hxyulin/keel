@@ -1,12 +1,11 @@
 //! Exhaustive lane indices and source choices, with independent byte-copy oracle.
+use crate::common;
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools},
 };
 use keel_ir::VectorType;
 use std::{fs, process::Command};
-#[path = "common/vector.rs"]
-pub mod common;
 const SPILL: Pools = Pools {
     caller_saved: &[9, 10],
     callee_saved: &[19],

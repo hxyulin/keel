@@ -1,12 +1,11 @@
 //! Independent extended-integer oracle, including FPSR.QC preservation.
+use crate::common;
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools},
 };
 use keel_ir::VectorType;
 use std::{fs, process::Command};
-#[path = "common/vector.rs"]
-pub mod common;
 const OPS: [&str; 16] = [
     "vsmin",
     "vsmax",

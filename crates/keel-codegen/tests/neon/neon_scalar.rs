@@ -1,16 +1,13 @@
 //! Independent clang scalar instruction oracle: bits, QC/FP flags and spills.
+use crate::common;
+use crate::immediates;
+use crate::matrix;
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools},
 };
 use keel_ir::{NeonIntrinsic as N, Type, VectorType};
 use std::{fs, process::Command};
-#[path = "common/vector.rs"]
-pub mod common;
-#[path = "common/immediates.rs"]
-mod immediates;
-#[path = "common/matrix.rs"]
-mod matrix;
 const SPILL: Pools = Pools {
     caller_saved: &[9, 10],
     callee_saved: &[19],

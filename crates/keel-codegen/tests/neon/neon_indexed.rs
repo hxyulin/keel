@@ -1,12 +1,11 @@
 //! All indexed records via lane extraction/broadcast and pinned intrinsics.
+use crate::common;
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools},
 };
 use keel_ir::{NeonIntrinsic as N, Type, VectorType};
 use std::{fs, process::Command};
-#[path = "common/vector.rs"]
-pub mod common;
 const SPILL: Pools = Pools {
     caller_saved: &[9, 10],
     callee_saved: &[19],
@@ -49,7 +48,7 @@ fn fixture() -> (String, String, usize, usize) {
     let mut cases = String::from("static const struct C cases[]={\n");
     let mut records = 0;
     let mut combinations = 0;
-    for record in include_str!("../../keel-asm/isa/neon.txt")
+    for record in include_str!("../../../keel-asm/isa/neon.txt")
         .lines()
         .filter(|s| s.contains("_asimdelem_") || s.contains("_asisdelem_"))
     {

@@ -1,14 +1,12 @@
 //! Architectural intrinsics checked against independently compiled ACLE calls.
+use crate::common;
+use crate::matrix;
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools},
 };
 use keel_ir::{NeonIntrinsic as N, Type, VectorType};
 use std::{fs, process::Command};
-#[path = "common/vector.rs"]
-pub mod common;
-#[path = "common/matrix.rs"]
-mod matrix;
 const SPILL: Pools = Pools {
     caller_saved: &[9, 10],
     callee_saved: &[19],

@@ -1,12 +1,11 @@
 //! Exact native witnesses for zero comparisons, scalar integer and bit recipes.
+use crate::common;
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools},
 };
 use keel_ir::{Type, VectorType};
 use std::{fs, process::Command};
-#[path = "common/vector.rs"]
-pub mod common;
 const SPILL: Pools = Pools {
     caller_saved: &[9, 10],
     callee_saved: &[19],
@@ -49,7 +48,7 @@ fn fixture() -> (String, String, usize, usize) {
     let mut cases = String::from("static const struct C cases[]={\n");
     let mut records = 0;
     let mut combinations = 0;
-    for record in include_str!("../../keel-asm/isa/neon.txt")
+    for record in include_str!("../../../keel-asm/isa/neon.txt")
         .lines()
         .filter(|s| !s.starts_with('#'))
     {
@@ -430,7 +429,7 @@ fn pure_and_zero_form_records_have_native_execution_witnesses() {
                 let text = keel_codegen::aarch64::compile_with_pipeline(&m, pools, &p).unwrap();
                 let program =
                     keel_codegen::aarch64::compile_program_with_pipeline(&m, pools, &p).unwrap();
-                for record in include_str!("../../keel-asm/isa/neon.txt")
+                for record in include_str!("../../../keel-asm/isa/neon.txt")
                     .lines()
                     .filter(|s| {
                         s.contains("_asimdmisc_Z")

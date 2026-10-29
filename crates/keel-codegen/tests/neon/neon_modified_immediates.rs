@@ -1,12 +1,11 @@
 //! Every modified-immediate encoding pattern has an executed IR bit-expansion witness.
+use crate::common;
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools},
 };
 use keel_ir::{Type, VectorType};
 use std::{fs, process::Command};
-#[path = "common/vector.rs"]
-pub mod common;
 const SPILL: Pools = Pools {
     caller_saved: &[9, 10],
     callee_saved: &[19],
@@ -46,7 +45,7 @@ fn fixture(immediates: &[u64]) -> (String, String, usize, usize) {
     let mut cases = String::from("static const struct C cases[]={\n");
     let mut records = 0;
     let mut combinations = 0;
-    for record in include_str!("../../keel-asm/isa/neon.txt")
+    for record in include_str!("../../../keel-asm/isa/neon.txt")
         .lines()
         .filter(|s| s.contains("_asimdimm_"))
     {
@@ -213,8 +212,7 @@ __asm__ volatile("msr fpcr,%0"::"r"(savedcr):"memory");status(old);return 0;}
 "#;
     (ir, c, records, combinations)
 }
-#[path = "common/matrix.rs"]
-mod matrix;
+use crate::matrix;
 
 #[test]
 fn exhaustive_all_modified_immediate_patterns_have_native_expansion_witnesses() {
