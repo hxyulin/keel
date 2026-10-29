@@ -5,12 +5,17 @@ use keel_codegen::{
 };
 use std::{fs, process::Command};
 // Runtime-only shared helpers are unused when cross-checking emission.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[path = "common/native_oracle.rs"]
+mod native_oracle;
 #[cfg_attr(
     not(all(target_os = "macos", target_arch = "aarch64")),
     allow(dead_code)
 )]
 #[path = "common/vector.rs"]
 pub mod vector_common;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+use native_oracle::PreparedOracle;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use vector_common::harness;
 use vector_common::{command, fixture, temp};
@@ -89,9 +94,7 @@ fn neon_operations_emit_zero_text_and_identical_objects() {
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[test]
 fn vector_operations_execute_unaligned_edges_masks_and_spills() {
-    let dir = temp("arm-runtime");
-    let c = dir.join("test.c");
-    fs::write(&c, harness()).unwrap();
+    let oracle = PreparedOracle::new("arm-runtime", &harness(), &["-O2", "-ffp-contract=off"]);
     let source = fixture();
     for selection in [
         SelectionTier::Baseline,
@@ -101,57 +104,29 @@ fn vector_operations_execute_unaligned_edges_masks_and_spills() {
         for allocation in [AllocationTier::Fast, AllocationTier::Full] {
             for tiny in [false, true] {
                 let (_, program) = compile(&source, selection, allocation, tiny);
-                let object = dir.join("test.o");
-                fs::write(
-                    &object,
-                    assemble_program_object(&program, TargetFeatures::default()).unwrap(),
-                )
-                .unwrap();
-                let exe = dir.join("test");
-                command(
-                    Command::new("clang")
-                        .args(["-O2", "-ffp-contract=off"])
-                        .arg(&c)
-                        .arg(&object)
-                        .arg("-o")
-                        .arg(&exe),
+                oracle.run(
+                    &assemble_program_object(&program, TargetFeatures::default()).unwrap(),
+                    &format!("{selection:?} {allocation:?} tiny={tiny}"),
                 );
-                command(&mut Command::new(exe));
             }
         }
     }
-    fs::remove_dir_all(dir).unwrap();
 }
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[test]
 fn apple_vector_abi_calls_varargs_cycles_and_partial_register_preservation_execute() {
     let (extra, harness) = vector_common::abi_fixture(true);
     let source = fixture() + &extra;
-    let dir = temp("arm-abi");
-    let c = dir.join("test.c");
-    fs::write(&c, harness).unwrap();
+    let oracle = PreparedOracle::new("arm-abi", &harness, &["-O2", "-ffp-contract=off"]);
     for allocation in [AllocationTier::Fast, AllocationTier::Full] {
         for tiny in [false, true] {
             let (_, program) = compile(&source, SelectionTier::Full, allocation, tiny);
-            let object = dir.join("test.o");
-            fs::write(
-                &object,
-                assemble_program_object(&program, TargetFeatures::default()).unwrap(),
-            )
-            .unwrap();
-            let exe = dir.join("test");
-            command(
-                Command::new("clang")
-                    .args(["-O2", "-ffp-contract=off"])
-                    .arg(&c)
-                    .arg(&object)
-                    .arg("-o")
-                    .arg(&exe),
+            oracle.run(
+                &assemble_program_object(&program, TargetFeatures::default()).unwrap(),
+                &format!("{allocation:?} tiny={tiny}"),
             );
-            command(&mut Command::new(exe));
         }
     }
-    fs::remove_dir_all(dir).unwrap();
 }
 #[test]
 fn native_neon_instruction_encodings_match_clang() {
@@ -324,31 +299,16 @@ fn aggregate_fixture() -> (String, String) {
 #[test]
 fn homogeneous_vector_aggregates_and_indirect_structs_interoperate_with_clang() {
     let (source, harness) = aggregate_fixture();
-    let dir = temp("arm-aggregates");
-    let input = dir.join("test.c");
-    fs::write(&input, harness).unwrap();
+    let oracle = PreparedOracle::new("arm-aggregates", &harness, &["-O2", "-ffp-contract=off"]);
     for allocation in [AllocationTier::Fast, AllocationTier::Full] {
         for tiny in [false, true] {
             let (_, p) = compile(&source, SelectionTier::Full, allocation, tiny);
-            let object = dir.join("test.o");
-            fs::write(
-                &object,
-                assemble_program_object(&p, TargetFeatures::default()).unwrap(),
-            )
-            .unwrap();
-            let exe = dir.join("test");
-            command(
-                Command::new("clang")
-                    .args(["-O2", "-ffp-contract=off"])
-                    .arg(&input)
-                    .arg(&object)
-                    .arg("-o")
-                    .arg(&exe),
+            oracle.run(
+                &assemble_program_object(&p, TargetFeatures::default()).unwrap(),
+                &format!("{allocation:?} tiny={tiny}"),
             );
-            command(&mut Command::new(exe));
         }
     }
-    fs::remove_dir_all(dir).unwrap();
 }
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[test]
