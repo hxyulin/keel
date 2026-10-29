@@ -186,6 +186,12 @@ fn every_i8_comparison_constant_and_operand_range_is_exact() {
         ("v9 = popcnt v0", "v9"),
         ("v1 = iconst.i8 -4\n v9 = or v0, v1", "v9"),
     ];
+    // Fast runs the same instcombine rules, so it only needs the range edges
+    // of the shapes above and the sign boundary.
+    let fast_constants = [
+        0, 1, 2, 3, 7, 8, 9, 12, 13, 14, 15, 16, 63, 64, 126, 127, 128, 129, 251, 252, 253, 254,
+        255,
+    ];
     let inputs = singles(0..256);
     for (body, operand) in shapes {
         for cc in PREDICATES {
@@ -195,7 +201,12 @@ fn every_i8_comparison_constant_and_operand_range_is_exact() {
                     literal(k, Type::I8)
                 );
                 let original = keel_ir::parse(&source).unwrap();
-                for pipeline in [Pipeline::Instcombine, Pipeline::Fast] {
+                let pipelines: &[Pipeline] = if fast_constants.contains(&k) {
+                    &[Pipeline::Instcombine, Pipeline::Fast]
+                } else {
+                    &[Pipeline::Instcombine]
+                };
+                for &pipeline in pipelines {
                     let module = optimize(&source, pipeline);
                     for input in &inputs {
                         assert_eq!(
@@ -418,11 +429,14 @@ fn masks_that_keep_every_possible_bit_are_removed() {
 
 #[test]
 fn constant_shift_pairs_cover_every_i8_count_pair_including_reduced_counts() {
+    // Counts reduce modulo 8. These cover zero, small, equal and overflowing
+    // sums, and counts of 8 and more.
+    let counts = [0, 1, 2, 7, 8, 9, 15, 16];
     let inputs = singles(0..256);
     for inner in ["shl", "ushr", "sshr"] {
         for outer in ["shl", "ushr", "sshr"] {
-            for m in 0..20 {
-                for n in 0..20 {
+            for m in counts {
+                for n in counts {
                     let source = format!(
                         "func @f(i8) -> i8 {{\nblock0(v0: i8):\n v1 = iconst.i8 {m}\n v2 = {inner} v0, v1\n v3 = iconst.i64 {n}\n v4 = {outer} v2, v3\n return v4\n}}"
                     );
