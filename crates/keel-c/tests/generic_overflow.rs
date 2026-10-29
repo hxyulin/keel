@@ -1,7 +1,5 @@
 //! The generic contract is independent of the fixed-type overflow IR operation.
 use keel_ir::{InstData, Target};
-use std::path::Path;
-use std::process::Command;
 
 const TYPES: &[&str] = &[
     "signed char",
@@ -89,96 +87,5 @@ fn generic_overflow_diagnostics() {
         "typedef volatile unsigned long V; int f(V *p) { return __builtin_mul_overflow(1,2,p); }",
     ] {
         keel_c::compile(source, "valid-generic.c", Default::default()).unwrap();
-    }
-}
-
-fn checked(command: &mut Command) -> std::process::Output {
-    let output = command.output().unwrap();
-    assert!(
-        output.status.success(),
-        "{command:?}: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    output
-}
-
-#[test]
-fn generic_overflow_differential_clang() {
-    differential_clang("generic_overflow");
-}
-
-#[test]
-fn fixed_overflow_differential_clang() {
-    differential_clang("overflow_builtins");
-}
-
-fn differential_clang(stem: &str) {
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/programs/{stem}.c"));
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("{stem}-differential"));
-    std::fs::create_dir_all(&dir).unwrap();
-    let reference = dir.join("clang");
-    checked(
-        Command::new("clang")
-            .args(["-std=c11", "-O0", "-o"])
-            .arg(&reference)
-            .arg(&source),
-    );
-    let want = checked(&mut Command::new(&reference));
-    let reference_opt = dir.join("clang-opt");
-    checked(
-        Command::new("clang")
-            .args(["-std=c11", "-O2", "-o"])
-            .arg(&reference_opt)
-            .arg(&source),
-    );
-    assert_eq!(
-        checked(&mut Command::new(&reference_opt)).stdout,
-        want.stdout
-    );
-    let preprocessed = checked(Command::new("clang").args(["-E", "-std=c11"]).arg(&source));
-    let src = String::from_utf8(preprocessed.stdout).unwrap();
-    let native_src = keel_c::preprocess(
-        &std::fs::read_to_string(&source).unwrap(),
-        source.to_str().unwrap(),
-        &keel_c::PreprocessOptions {
-            sysroot: if cfg!(target_os = "macos") {
-                Some(
-                    String::from_utf8(
-                        checked(Command::new("xcrun").args(["--sdk", "macosx", "--show-sdk-path"]))
-                            .stdout,
-                    )
-                    .unwrap()
-                    .trim()
-                    .into(),
-                )
-            } else {
-                None
-            },
-            ..Default::default()
-        },
-    )
-    .unwrap();
-    for (pp, src) in [("clang", src), ("native", native_src)] {
-        for optimized in [false, true] {
-            let mut module =
-                keel_c::compile(&src, source.to_str().unwrap(), Default::default()).unwrap();
-            keel_ir::verify_module(&module).unwrap();
-            if optimized {
-                keel_opt::optimize(&mut module).unwrap();
-            }
-            keel_ir::verify_module(&module).unwrap();
-            let asm = keel_codegen::compile(&module, keel_c::Options::default().target).unwrap();
-            let assembly = dir.join(format!("{pp}-{optimized}.s"));
-            let executable = dir.join(format!("{pp}-{optimized}"));
-            std::fs::write(&assembly, asm).unwrap();
-            checked(
-                Command::new("clang")
-                    .arg(&assembly)
-                    .arg("-o")
-                    .arg(&executable),
-            );
-            let got = checked(&mut Command::new(&executable));
-            assert_eq!(got.stdout, want.stdout, "{pp} optimized={optimized}");
-        }
     }
 }

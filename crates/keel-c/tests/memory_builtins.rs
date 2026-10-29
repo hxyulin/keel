@@ -675,57 +675,6 @@ fn checked(command: &mut Command) -> std::process::Output {
 }
 
 #[test]
-fn memory_builtins_native_differential_clang() {
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/memory_builtins.c");
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("memory-builtins-differential");
-    std::fs::create_dir_all(&dir).unwrap();
-    let mut want = None;
-    for level in ["-O0", "-O2"] {
-        let exe = dir.join(format!("clang{level}"));
-        checked(
-            Command::new("clang")
-                .args(["-std=c11", "-fno-builtin", level, "-o"])
-                .arg(&exe)
-                .arg(&source),
-        );
-        let output = checked(&mut Command::new(&exe)).stdout;
-        assert!(
-            output.starts_with(b"0 "),
-            "oracle failed: {}",
-            String::from_utf8_lossy(&output)
-        );
-        if let Some(want) = &want {
-            assert_eq!(&output, want);
-        } else {
-            want = Some(output);
-        }
-    }
-    let source = std::fs::read_to_string(source).unwrap();
-    for optimized in [false, true] {
-        let mut module = compile(&source, keel_c::Options::default().target);
-        if optimized {
-            keel_opt::optimize(&mut module).unwrap();
-        }
-        keel_ir::verify_module(&module).unwrap();
-        let asm = keel_codegen::compile(&module, keel_c::Options::default().target).unwrap();
-        let assembly = dir.join(format!("keel-{optimized}.s"));
-        let executable = dir.join(format!("keel-{optimized}"));
-        std::fs::write(&assembly, asm).unwrap();
-        checked(
-            Command::new("clang")
-                .arg(&assembly)
-                .arg("-o")
-                .arg(&executable),
-        );
-        assert_eq!(
-            checked(&mut Command::new(&executable)).stdout,
-            *want.as_ref().unwrap(),
-            "optimized={optimized}"
-        );
-    }
-}
-
-#[test]
 fn finite_checked_bound_fails_in_child_without_out_of_bounds_storage() {
     // The actual allocation can hold the entire write. Only the explicit
     // smaller bound must cause failure, so an unchecked call would exit 0.
@@ -1044,55 +993,14 @@ fn library_sqrt_recognition_requires_the_canonical_external_declaration() {
     }
 }
 
+/// `run.rs::programs` runs `programs/library_sqrt.c` against clang. This
+/// checks that the system `<math.h>` declarations select fsqrt.
 #[test]
-fn library_sqrt_native_differential_clang() {
+fn library_sqrt_from_system_headers_is_fsqrt() {
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/library_sqrt.c");
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("library-sqrt-differential");
-    std::fs::create_dir_all(&dir).unwrap();
-    let oracle = dir.join("clang");
-    checked(
-        Command::new("clang")
-            .args(["-std=c11", "-O2", "-o"])
-            .arg(&oracle)
-            .arg(&source)
-            .arg("-lm"),
-    );
-    let want = checked(&mut Command::new(&oracle)).stdout;
-    // Linux libm reports the domain error through errno; Darwin's does not.
-    let errno_line = String::from_utf8_lossy(&want)
-        .lines()
-        .last()
-        .unwrap()
-        .to_string();
-    assert_eq!(
-        errno_line.ends_with("EDOM nan EDOM"),
-        cfg!(target_os = "linux"),
-        "{errno_line}"
-    );
     let preprocessed = checked(Command::new("clang").args(["-E", "-P"]).arg(&source)).stdout;
     let text = String::from_utf8(preprocessed).unwrap();
-    for optimized in [false, true] {
-        let mut module = compile(&text, keel_c::Options::default().target);
-        assert!(has_fsqrt(&module));
-        if optimized {
-            keel_opt::optimize(&mut module).unwrap();
-        }
-        keel_ir::verify_module(&module).unwrap();
-        let asm = keel_codegen::compile(&module, keel_c::Options::default().target).unwrap();
-        let assembly = dir.join(format!("keel-{optimized}.s"));
-        let executable = dir.join(format!("keel-{optimized}"));
-        std::fs::write(&assembly, asm).unwrap();
-        checked(
-            Command::new("clang")
-                .arg(&assembly)
-                .arg("-o")
-                .arg(&executable)
-                .arg("-lm"),
-        );
-        assert_eq!(
-            String::from_utf8_lossy(&checked(&mut Command::new(&executable)).stdout),
-            String::from_utf8_lossy(&want),
-            "optimized={optimized}"
-        );
-    }
+    let module = compile(&text, keel_c::Options::default().target);
+    keel_ir::verify_module(&module).unwrap();
+    assert!(has_fsqrt(&module));
 }
