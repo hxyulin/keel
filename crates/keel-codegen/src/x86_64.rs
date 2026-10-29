@@ -197,6 +197,36 @@ pub fn compile_with_options(
     )
 }
 
+// An explicit tail terminator already permits discarding this activation. With
+// the same signature and unchanged parameters, every physical argument (including
+// stack arguments and aggregate pieces) is already in its destination. Keep the
+// normal path for debug homes and for any instruction that could observe a frame.
+fn identity_tail_callee(func: &Function) -> Option<&str> {
+    if func.sig.variadic || func.sig.returns_twice || func.personality.is_some() {
+        return None;
+    }
+    let mut blocks = func.blocks();
+    let entry = blocks.next()?;
+    if blocks.next().is_some() {
+        return None;
+    }
+    let [inst] = func.block_insts(entry) else {
+        return None;
+    };
+    let InstData::ReturnCall { func: callee, args } = func.inst_data(*inst) else {
+        return None;
+    };
+    let decl = func.callee(*callee);
+    (decl.sig == func.sig
+        && !args.has_explicit_abi()
+        && args.len() == func.block_params(entry).len()
+        && args
+            .iter()
+            .zip(func.block_params(entry))
+            .all(|(&arg, &param)| func.resolve(arg) == func.resolve(param)))
+    .then_some(decl.name.as_str())
+}
+
 /// Address materialization for an x86-64 ELF image. Independent of CPU features.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
@@ -2051,67 +2081,75 @@ impl<'a> FunctionCompiler<'a> {
             self.prologue_end = true;
         }
         self.cfi(Cfi::Start);
-        if self.frameless {
-            // The return address remains at rsp; the caller's rbp is untouched.
+        if let Some(callee) = (!self.debug).then(|| identity_tail_callee(func)).flatten() {
             self.cfi(Cfi::DefCfa {
                 register: 7,
                 offset: 8,
             });
+            self.call_function(Opcode::Jmp, callee);
         } else {
-            self.emit(Opcode::Push, [asm_arg(r64(5))]);
-            self.cfi(Cfi::DefCfaOffset(16));
-            self.cfi(Cfi::Offset {
-                register: 6,
-                offset: -16,
-            });
-            self.emit(Opcode::Mov, [asm_arg(r64(5)), asm_arg(r64(4))]);
-            self.cfi(Cfi::DefCfaRegister(6));
-        }
-        // Each push is 8 bytes further from the CFA, which is rbp + 16.
-        for (k, r) in self.saved.clone().into_iter().enumerate() {
-            self.emit(Opcode::Push, [asm_arg(r64(r))]);
-            self.cfi(Cfi::Offset {
-                register: dwarf_register(r),
-                offset: -((24 + 8 * k) as i64),
-            });
-        }
-        if self.frame_size > 0 {
-            self.emit(Opcode::Sub, [asm_arg(r64(4)), asm_arg(self.frame_size)]);
-        }
-        if let Some(r) = self.frame_register {
-            self.emit(
-                Opcode::And,
-                [asm_arg(r64(4)), asm_arg(-(self.frame_align as i64))],
-            );
-            self.emit(Opcode::Mov, [asm_arg(r64(r)), asm_arg(r64(4))]);
-        }
-        self.entry();
+            if self.frameless {
+                // The return address remains at rsp; the caller's rbp is untouched.
+                self.cfi(Cfi::DefCfa {
+                    register: 7,
+                    offset: 8,
+                });
+            } else {
+                self.emit(Opcode::Push, [asm_arg(r64(5))]);
+                self.cfi(Cfi::DefCfaOffset(16));
+                self.cfi(Cfi::Offset {
+                    register: 6,
+                    offset: -16,
+                });
+                self.emit(Opcode::Mov, [asm_arg(r64(5)), asm_arg(r64(4))]);
+                self.cfi(Cfi::DefCfaRegister(6));
+            }
+            // Each push is 8 bytes further from the CFA, which is rbp + 16.
+            for (k, r) in self.saved.clone().into_iter().enumerate() {
+                self.emit(Opcode::Push, [asm_arg(r64(r))]);
+                self.cfi(Cfi::Offset {
+                    register: dwarf_register(r),
+                    offset: -((24 + 8 * k) as i64),
+                });
+            }
+            if self.frame_size > 0 {
+                self.emit(Opcode::Sub, [asm_arg(r64(4)), asm_arg(self.frame_size)]);
+            }
+            if let Some(r) = self.frame_register {
+                self.emit(
+                    Opcode::And,
+                    [asm_arg(r64(4)), asm_arg(-(self.frame_align as i64))],
+                );
+                self.emit(Opcode::Mov, [asm_arg(r64(r)), asm_arg(r64(4))]);
+            }
+            self.entry();
 
-        // Only reachable blocks, in the order the allocator numbered them.
-        let order = self.alloc.order.clone();
-        let aligned = if self.goal == crate::CodegenGoal::Size {
-            HashSet::default()
-        } else {
-            loop_align::headers(func)
-        };
-        for (i, &block) in order.iter().enumerate() {
-            self.next_block = order.get(i + 1).copied();
-            if aligned.contains(&block) {
-                // A 32-byte fetch boundary costs at most 31 bytes per header.
-                self.out.align(5);
-            }
-            self.out.block_label(&func.name, self.bare_name, block);
-            for &inst in func.block_insts(block) {
-                self.out.inst_comment(func, inst);
-                if self.debug {
-                    self.set_srcloc(func.inst_loc(inst));
+            // Only reachable blocks, in the order the allocator numbered them.
+            let order = self.alloc.order.clone();
+            let aligned = if self.goal == crate::CodegenGoal::Size {
+                HashSet::default()
+            } else {
+                loop_align::headers(func)
+            };
+            for (i, &block) in order.iter().enumerate() {
+                self.next_block = order.get(i + 1).copied();
+                if aligned.contains(&block) {
+                    // A 32-byte fetch boundary costs at most 31 bytes per header.
+                    self.out.align(5);
                 }
-                self.allocated_inst(inst);
+                self.out.block_label(&func.name, self.bare_name, block);
+                for &inst in func.block_insts(block) {
+                    self.out.inst_comment(func, inst);
+                    if self.debug {
+                        self.set_srcloc(func.inst_loc(inst));
+                    }
+                    self.allocated_inst(inst);
+                }
             }
-        }
-        if self.uses_trap {
-            self.out.label(format!(".L{name}_trap"));
-            self.emit(Opcode::Ud2, []);
+            if self.uses_trap {
+                self.out.label(format!(".L{name}_trap"));
+                self.emit(Opcode::Ud2, []);
+            }
         }
         self.out.label(format!(".L{name}_end"));
         self.cfi(Cfi::End);

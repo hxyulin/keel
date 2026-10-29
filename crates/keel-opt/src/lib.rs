@@ -50,6 +50,7 @@ mod loop_strength_reduce;
 mod loop_unroll;
 mod loop_vectorize;
 pub mod private_aggregate;
+mod tail_calls;
 pub use loop_vectorize::VectorTarget;
 
 /// Per-invocation immutable target context. Legacy entrypoints retain 128-bit policy.
@@ -392,6 +393,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[21],
     &call_load_reuse::CallLoadReuse,
     &internal_fast_calls::InternalFastCalls,
+    &tail_calls::TailCalls,
     &constant_args::ConstantArgs,
     &module_cleanup::EmptyCalls,
     &module_cleanup::UnusedFunctions,
@@ -545,6 +547,7 @@ pub const BALANCED_PIPELINE: &[&str] = &[
     "unused-functions",
     "private-aggregate-cleanup",
     "internal-fast-calls",
+    "tail-calls",
 ];
 
 /// Size policy. Bounded hinted, constant-argument and single-use helper inlining
@@ -599,6 +602,7 @@ pub const SIZE_PIPELINE: &[&str] = &[
     "unused-functions",
     "private-aggregate-cleanup",
     "internal-fast-calls",
+    "tail-calls",
 ];
 
 pub fn optimize_with_tier(module: &mut Module, tier: OptimizationTier) -> Result<(), OptError> {
@@ -626,7 +630,7 @@ const FULL_ROUND: [&str; 16] = [
 
 const FULL_ROUNDS: usize = 3;
 
-const FULL_EPILOGUE: [&str; 25] = [
+const FULL_EPILOGUE: [&str; 26] = [
     "load-reuse",
     "stack-promote",
     "phi-simplify",
@@ -652,6 +656,7 @@ const FULL_EPILOGUE: [&str; 25] = [
     "dce",
     "private-aggregate-cleanup",
     "internal-fast-calls",
+    "tail-calls",
 ];
 
 // Inlining freezes its templates at each invocation. Cleanup exposes smaller

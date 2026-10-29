@@ -794,6 +794,18 @@ analyses they need; there is no analysis cache yet.
 | `loop-reduce` | read-only wrapping i32/i64 sums with independent vector accumulators, fixed-offset stream loads, countdown and scalar tail; no floating reassociation |
 | `loop-strength-reduce` | wrapping i32/i64 induction products replaced by same-width recurrences in two-block loops; at most 16 products per function, eight original header parameters and 128 body instructions; no memory operations or traps are moved |
 | `fast-loop-reduce` | the same sum transform, restricted to functions with at most 256 instructions / 16 blocks, one stream address and at most eight vector-expression values |
+| `tail-calls` | replace adjacent scalar direct call/return pairs when exact signatures fit native argument registers and a local call-graph proof excludes frame observers, pointers, unknown calls and implicit helpers |
+
+Balanced, Size and Full run `tail-calls` after final private calling-convention
+selection. Recognition requires matching nonvariadic signatures with at most six
+single-register scalar arguments and one result. The entire direct-call closure
+must contain only scalar arithmetic, control flow and calls to strong local
+bodies with the same frame-independent property. Unknown callees, frame and stack
+intrinsics, pointer values, memory accesses, assembly and implicit FMA helpers
+block recognition. This preserves ordinary call semantics when a callee can
+inspect its caller's frame. Explicit IR `return_call` remains available for
+producer-proven cases outside this recognition boundary. The separate wasm32
+basic pipeline does not run this native pass.
 
 See the [simplification audit](simplification.md) for missing analysis/rewrite
 families, concrete phase-order examples, and early/late/repeated cleanup sweeps.

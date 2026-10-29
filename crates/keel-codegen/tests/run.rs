@@ -1167,3 +1167,69 @@ fn experimental_allocator_programs(
     }
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }
+
+#[test]
+fn automatic_tail_calls_execute_in_constant_stack() {
+    let mut module = keel_ir::parse(
+        "func @sum(i64,i64)->i64 noinline local {
+entry(v0:i64,v1:i64):
+ v2=iconst.i64 0
+ v3=icmp.eq v0,v2
+ brif v3,done,recur
+done:
+ return v1
+recur:
+ v4=iconst.i64 1
+ v5=isub v0,v4
+ v6=iadd v1,v0
+ v7=call @sum(v5,v6)
+ return v7
+}
+func @automatic_tail(i64,i64)->i64 {
+entry(v0:i64,v1:i64):
+ v2=call @sum(v0,v1)
+ return v2
+}",
+    )
+    .unwrap();
+    keel_opt::run_passes(&mut module, &["tail-calls"]).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    assert_eq!(module.to_string().matches("return_call").count(), 2);
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("automatic-tail-calls");
+    std::fs::create_dir_all(&dir).unwrap();
+    let driver = dir.join("driver.c");
+    std::fs::write(&driver, "extern unsigned long long automatic_tail(unsigned long long,unsigned long long);\nint main(void) { return automatic_tail(10000000,0) != 50000005000000ULL; }\n").unwrap();
+    // Keep the x86 source beside the native fixture for the Linux ABI oracle.
+    std::fs::write(
+        dir.join("x86.s"),
+        keel_codegen::x86_64::compile(&module).unwrap(),
+    )
+    .unwrap();
+    for allocator in [AllocationTier::Fast, AllocationTier::Full] {
+        let text = compile_with_pipeline(
+            &module,
+            &TINY,
+            &keel_codegen::CodegenPipeline {
+                selector: &keel_codegen::SelectionTier::Full,
+                allocator: &allocator,
+            },
+        )
+        .unwrap();
+        let asm = dir.join("native.s");
+        let exe = dir.join("run");
+        std::fs::write(&asm, text).unwrap();
+        let output = Command::new("clang")
+            .args([&asm, &driver])
+            .arg("-o")
+            .arg(&exe)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let output = run_with_timeout(&mut Command::new(&exe)).unwrap();
+        assert!(output.status.success(), "{allocator:?}: {output:?}");
+    }
+}

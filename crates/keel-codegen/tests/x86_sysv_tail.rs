@@ -200,3 +200,77 @@ fn witness_assembly_syntax() {
     );
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn identity_tail_is_one_jump() {
+    // Distinct physical boundaries: GP and stack scalars, mixed SIMD/GP,
+    // register aggregate results, and memory aggregate results/byval arguments.
+    for signature in [
+        "(i64,i64,i64,i64,i64,i64,i64,i64)->i64",
+        "(f64,i64)->f64",
+        "(ptr sret {i64,i64},ptr byval {i64,i64})",
+        "(ptr sret {i64,i64,i64},ptr byval {i64,i64,i64})",
+        "(i8 sext)->i8 sext",
+    ] {
+        let params = if signature.starts_with("(i64,i64,i64") {
+            "v0:i64,v1:i64,v2:i64,v3:i64,v4:i64,v5:i64,v6:i64,v7:i64"
+        } else if signature.starts_with("(f64") {
+            "v0:f64,v1:i64"
+        } else if signature.starts_with("(ptr") {
+            "v0:ptr,v1:ptr"
+        } else {
+            "v0:i8"
+        };
+        let args = params
+            .split(',')
+            .map(|p| p.split(':').next().unwrap())
+            .collect::<Vec<_>>()
+            .join(",");
+        let source = format!(
+            "decl @target{signature}\nfunc @forward{signature} {{\nentry({params}):\n return_call @target({args})\n}}"
+        );
+        let module = keel_ir::parse(&source).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        for pools in [&keel_codegen::x86_64::REGISTERS, &EMPTY] {
+            let text = keel_codegen::x86_64::compile_with(&module, pools).unwrap();
+            let instructions: Vec<_> = text
+                .lines()
+                .filter(|line| line.starts_with('\t') && !line.trim_start().starts_with('.'))
+                .collect();
+            assert_eq!(instructions, ["\tjmp\t\"target\"@PLT"], "{text}");
+            let program = keel_codegen::x86_64::compile_program_with_pipeline(
+                &module,
+                pools,
+                &CodegenPipeline {
+                    selector: &SelectionTier::Full,
+                    allocator: &AllocationTier::Full,
+                },
+            )
+            .unwrap();
+            let typed = keel_asm::x86::assemble_program_object(&program).unwrap();
+            assert_eq!(typed, keel_asm::x86::assemble_object(&text).unwrap());
+            let file = object::File::parse(&*typed).unwrap();
+            assert_eq!(
+                file.section_by_name(".text").unwrap().data().unwrap().len(),
+                5
+            );
+        }
+    }
+}
+
+#[test]
+fn identity_tail_keeps_debug_frame_and_argument_permutations() {
+    let source = "decl @target(i64,i64)->i64\nfunc @forward(i64,i64)->i64 {\nentry(v0:i64,v1:i64):\n return_call @target(v1,v0)\n}";
+    let module = keel_ir::parse(source).unwrap();
+    let text = keel_codegen::x86_64::compile(&module).unwrap();
+    assert!(text.contains("\tpush\trbp"), "{text}");
+    let explicit = source.replace("@target(v1,v0)", "@target(v0 : i64,v1 : i64)");
+    let module = keel_ir::parse(&explicit).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let text = keel_codegen::x86_64::compile(&module).unwrap();
+    assert!(text.contains("\tpush\trbp"), "{text}");
+    let mut module = keel_ir::parse(&source.replace("@target(v1,v0)", "@target(v0,v1)")).unwrap();
+    module.files.push("forward.c".into());
+    let text = keel_codegen::x86_64::compile(&module).unwrap();
+    assert!(text.contains("\tpush\trbp"), "{text}");
+}

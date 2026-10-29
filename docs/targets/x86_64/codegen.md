@@ -255,11 +255,19 @@ moving unrelated code. The C extension stays limited to SIMD functions.
 An eligible function needs no stack storage, incoming stack arguments,
 callee-saved registers, special-purpose parameters, TLS addresses, debug files,
 or exception personality. Calls, including helper calls for wide division and
-software FMA, retain frames. Intrinsics, inline assembly, tail calls and exception
+software FMA, retain frames. Intrinsics, inline assembly and exception
 instructions also retain frames. This keeps dynamic stack allocation and frame
 observers on the existing frame path.
 
-A frameless leaf leaves `rsp` and `rbp` unchanged. Its unwind rules define the
+A single-block function containing only a direct `return_call` can also omit
+its frame and all argument moves when its signature exactly matches the callee
+and each argument forwards the corresponding entry parameter. This includes
+incoming stack arguments and aggregate parameters/results. Debug files,
+variadic signatures, `returns_twice` and exception personalities keep the normal
+path. An explicit tail terminator already permits discarding the activation;
+this shortcut does not turn ordinary calls into tail calls.
+
+A frameless leaf or forwarding tail leaves `rsp` and `rbp` unchanged. Its unwind rules define the
 CFA as `rsp + 8`, with the return address at `CFA - 8`. The assembler still emits
 an `.eh_frame` FDE. Wide-vector stack alignment and vector spills retain frames.
 

@@ -876,3 +876,10 @@ func @sret_alias(ptr sret {i64,i64,i64},ptr byval {i64,i64,i64}) {
 entry(v0:ptr,v1:ptr):
  return_call @id_mem(v0,v0)
 }
+
+; Identity forwarding must preserve register and incoming stack arguments without
+; allocating homes or staging copies.
+func @identity_scalars(i64,i64,i64,i64,i64,i64,i64,i64,i64,i64)->i64 {
+entry(v0:i64,v1:i64,v2:i64,v3:i64,v4:i64,v5:i64,v6:i64,v7:i64,v8:i64,v9:i64):
+ return_call @scalar_int(v0,v1,v2,v3,v4,v5,v6,v7,v8,v9)
+}

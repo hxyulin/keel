@@ -163,10 +163,14 @@ fn named_registration_order_and_cleanup_policy_remain_explicit() {
             .pipeline()
             .iter()
             .rev()
-            .take(2)
+            .take(3)
             .copied()
             .collect::<Vec<_>>(),
-        ["internal-fast-calls", "private-aggregate-cleanup"]
+        [
+            "tail-calls",
+            "internal-fast-calls",
+            "private-aggregate-cleanup"
+        ]
     );
     let mut m = parse(SOURCE).unwrap();
     keel_opt::run_passes(&mut m, &["private-aggregate"]).unwrap();

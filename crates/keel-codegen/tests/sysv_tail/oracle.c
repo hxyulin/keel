@@ -173,7 +173,9 @@ U alias_target(mem a,mem b) {
         && b.a==overlap_first.b && b.b==overlap_first.c;
 }
 extern U overlap(mem,mem);
+extern U identity_scalars(TYPES(U));
 int main(void) {
+    check(identity_scalars(1,2,3,4,5,6,7,8,9,10),385,"identity scalar stack arguments");
     for(unsigned seed=1;seed<=3;++seed) {
 #define RUN(N) test_##N(seed);
         RUN(gp) RUN(mem) RUN(q) RUN(qm) RUN(fx)

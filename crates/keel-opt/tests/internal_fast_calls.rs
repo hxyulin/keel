@@ -70,7 +70,8 @@ fn promotes_word_helpers_without_extensions_too() {
 fn full_finalizes_private_transport_after_cleanup_and_fast_retains_its_schedule() {
     use keel_opt::{OptimizationTier, optimize_with_tier};
     let pipeline = OptimizationTier::Full.pipeline();
-    assert_eq!(pipeline.last(), Some(&"internal-fast-calls"));
+    assert_eq!(pipeline.last(), Some(&"tail-calls"));
+    assert_eq!(pipeline[pipeline.len() - 2], "internal-fast-calls");
     assert_eq!(
         pipeline
             .iter()
@@ -78,8 +79,8 @@ fn full_finalizes_private_transport_after_cleanup_and_fast_retains_its_schedule(
             .count(),
         1
     );
-    assert_eq!(pipeline[pipeline.len() - 2], "private-aggregate-cleanup");
-    assert_eq!(pipeline[pipeline.len() - 3], "dce");
+    assert_eq!(pipeline[pipeline.len() - 3], "private-aggregate-cleanup");
+    assert_eq!(pipeline[pipeline.len() - 4], "dce");
     let source = SOURCE.replace("cc(c) local", "cc(c) noinline local");
     for tier in [OptimizationTier::Fast, OptimizationTier::Full] {
         let mut m = parse(&source).unwrap();
