@@ -1,16 +1,15 @@
-// Correctness only: run under the caller's normal fast_opt_locked.py lock.
-// Compiles unchanged on Linux x86_64 and native Apple ARM64.
+// Correctness only. Compiles unchanged on Linux x86_64 and native Apple ARM64.
 #define _GNU_SOURCE
 #include <assert.h>
 #include <inttypes.h>
 #include <limits.h>
+#include <setjmp.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
-#include <sys/wait.h>
 #include <unistd.h>
 
 typedef uint64_t (*kernel)(const void *,const void *,const void *,uint64_t);
@@ -33,30 +32,27 @@ static void check(const unsigned char *a,uint64_t n) {
     assert(rk_adjacent_scalar(a,a,a,n)==want);
     ++cases;
 }
-static int output_fd;
+// The kernels only read memory, so the handler can jump out of a faulting
+// call and the next call starts from a clean state. sigsetjmp saves the
+// signal mask, so siglongjmp unblocks SIGSEGV and SIGBUS again. A fault
+// outside first_fault restores the default action and kills the process.
+static sigjmp_buf fault_jump;
+static volatile sig_atomic_t armed;
+static volatile uintptr_t fault_addr;
 static void fault(int sig,siginfo_t *info,void *unused) {
-    (void)sig;
     (void)unused;
-    uintptr_t addr=(uintptr_t)info->si_addr;
-    (void)!write(output_fd,&addr,sizeof(addr));
-    _exit(0);
+    if (!armed) { signal(sig,SIG_DFL); return; }
+    armed=0;
+    fault_addr=(uintptr_t)info->si_addr;
+    siglongjmp(fault_jump,1);
 }
 static uintptr_t first_fault(kernel f,const void *a,uint64_t n) {
-    int p[2]; assert(pipe(p)==0);
-    pid_t child=fork(); assert(child>=0);
-    if (!child) {
-        close(p[0]); output_fd=p[1];
-        struct sigaction action={0}; action.sa_sigaction=fault;
-        action.sa_flags=SA_SIGINFO; sigemptyset(&action.sa_mask);
-        assert(sigaction(SIGSEGV,&action,0)==0); assert(sigaction(SIGBUS,&action,0)==0);
+    if (!sigsetjmp(fault_jump,1)) {
+        armed=1;
         volatile uint64_t result=f(a,a,a,n); (void)result;
-        _exit(9);
+        fprintf(stderr,"n=%"PRIu64" did not fault\n",n); abort();
     }
-    close(p[1]); uintptr_t addr=0;
-    assert(read(p[0],&addr,sizeof(addr))==sizeof(addr)); close(p[0]);
-    int status; assert(waitpid(child,&status,0)==child);
-    assert(WIFEXITED(status)&&WEXITSTATUS(status)==0);
-    return addr;
+    return fault_addr;
 }
 static void compare_fault(const void *a,uint64_t n) {
     uintptr_t want=first_fault(rk_adjacent_scalar,a,n);
@@ -65,6 +61,9 @@ static void compare_fault(const void *a,uint64_t n) {
     ++faults;
 }
 int main(void) {
+    struct sigaction action={0}; action.sa_sigaction=fault;
+    action.sa_flags=SA_SIGINFO; sigemptyset(&action.sa_mask);
+    assert(sigaction(SIGSEGV,&action,0)==0); assert(sigaction(SIGBUS,&action,0)==0);
     size_t page=(size_t)sysconf(_SC_PAGESIZE);
     unsigned char *region=mmap(0,3*page,PROT_NONE,MAP_PRIVATE|MAP_ANON,-1,0);
     assert(region!=MAP_FAILED); unsigned char *mem=region+page;

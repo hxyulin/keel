@@ -1,9 +1,23 @@
-//! Standalone pass validation: no root-owned registration or backend edits.
-#[path = "../../keel-opt/src/adjacent_abs.rs"]
-mod adjacent_abs;
-#[path = "../../keel-opt/src/adjacent_diff.rs"]
-pub mod adjacent_diff;
+//! Ordered adjacent absolute-difference reductions, with wide and opt-in
+//! narrow history: typed and text objects agree on both targets, and a
+//! native oracle checks values, guard pages and first faults.
 use keel_codegen::{CodegenPipeline, SelectionTier, Target, regalloc::AllocationTier};
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum History {
+    Wide,
+    /// Includes the generic lane legalization fallback.
+    Narrow,
+}
+
+impl History {
+    fn pass(self) -> &'static str {
+        match self {
+            History::Wide => "adjacent-diff",
+            History::Narrow => "adjacent-diff-narrow",
+        }
+    }
+}
 
 fn compile(
     m: &keel_ir::Module,
@@ -78,15 +92,19 @@ fn compile(
     (text, program)
 }
 
-fn module(optimize: bool) -> keel_ir::Module {
+fn module(history: History, optimize: bool) -> keel_ir::Module {
     let mut m = keel_ir::parse(include_str!(
         "../../keel-opt/tests/adjacent_abs/adjacent.keel"
     ))
     .unwrap();
     let mut scalar = m.functions[0].clone();
     scalar.name = "rk_adjacent_scalar".into();
-    assert!(adjacent_abs::run(&mut m.functions[0]));
-    assert!(adjacent_diff::run(&mut m.functions[0]));
+    for pass in ["adjacent-abs", history.pass()] {
+        assert!(
+            keel_opt::find_pass(pass).unwrap().run(&mut m.functions[0]),
+            "{pass}"
+        );
+    }
     if optimize {
         keel_opt::optimize_with_tier(&mut m, keel_opt::OptimizationTier::Full).unwrap();
     }
@@ -95,10 +113,17 @@ fn module(optimize: bool) -> keel_ir::Module {
     m
 }
 
-fn evidence() -> std::path::PathBuf {
-    let p = std::env::var_os("KEEL_ADJACENT_DIFF_EVIDENCE_DIR")
+fn evidence(history: History) -> std::path::PathBuf {
+    let (variable, default) = match history {
+        History::Wide => ("KEEL_ADJACENT_DIFF_EVIDENCE_DIR", "adjacent-diff"),
+        History::Narrow => (
+            "KEEL_ADJACENT_DIFF_NARROW_EVIDENCE_DIR",
+            "adjacent-diff-narrow",
+        ),
+    };
+    let p = std::env::var_os(variable)
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("adjacent-diff"));
+        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(default));
     std::fs::create_dir_all(&p).unwrap();
     p
 }
@@ -169,8 +194,18 @@ fn assert_arm_unrolled_load_cover(text: &str, selection: SelectionTier) {
 
 #[test]
 fn simd_objects_on_both_targets_with_both_allocators_and_selectors() {
+    simd_objects(History::Wide);
+}
+
+#[test]
+fn narrow_simd_objects_on_both_targets_with_both_allocators_and_selectors() {
+    simd_objects(History::Narrow);
+}
+
+fn simd_objects(history: History) {
+    let dir = evidence(history);
     for optimize in [false, true] {
-        let m = module(optimize);
+        let m = module(history, optimize);
         for target in [Target::Aarch64AppleDarwin, Target::X86_64LinuxGnu] {
             for selection in [SelectionTier::Baseline, SelectionTier::Full] {
                 for allocation in [AllocationTier::Fast, AllocationTier::Full] {
@@ -186,7 +221,7 @@ fn simd_objects_on_both_targets_with_both_allocators_and_selectors() {
                             }
                             Target::Aarch64AppleDarwin | Target::Aarch64LinuxGnu => {
                                 assert!(text.contains(".2d"), "{text}");
-                                if !spills {
+                                if !spills && history == History::Wide {
                                     assert_arm_unrolled_load_cover(&text, selection);
                                 }
                                 let obj = if target == Target::Aarch64LinuxGnu {
@@ -219,10 +254,9 @@ fn simd_objects_on_both_targets_with_both_allocators_and_selectors() {
                         let stem = format!(
                             "opt{optimize}-{target:?}-{selection:?}-{allocation:?}-spills{spills}"
                         );
-                        std::fs::write(evidence().join(format!("{stem}.s")), text).unwrap();
-                        std::fs::write(evidence().join(format!("{stem}.o")), obj).unwrap();
-                        std::fs::write(evidence().join(format!("{stem}.keel")), m.to_string())
-                            .unwrap();
+                        std::fs::write(dir.join(format!("{stem}.s")), text).unwrap();
+                        std::fs::write(dir.join(format!("{stem}.o")), obj).unwrap();
+                        std::fs::write(dir.join(format!("{stem}.keel")), m.to_string()).unwrap();
                     }
                 }
             }
@@ -236,13 +270,30 @@ fn simd_objects_on_both_targets_with_both_allocators_and_selectors() {
 ))]
 #[test]
 fn native_oracle_extrema_tails_unaligned_guard_pages_and_first_faults() {
+    native_oracle(History::Wide);
+}
+
+#[cfg(any(
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "linux", target_arch = "x86_64")
+))]
+#[test]
+fn narrow_native_oracle_extrema_tails_unaligned_guard_pages_and_first_faults() {
+    native_oracle(History::Narrow);
+}
+
+#[cfg(any(
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "linux", target_arch = "x86_64")
+))]
+fn native_oracle(history: History) {
     use std::{fs, process::Command};
     let target = if cfg!(target_arch = "aarch64") {
         Target::Aarch64AppleDarwin
     } else {
         Target::X86_64LinuxGnu
     };
-    let dir = evidence();
+    let dir = evidence(history);
     fs::write(dir.join("oracle.c"), include_str!("adjacent_diff/oracle.c")).unwrap();
     let oracle = dir.join("oracle.o");
     let out = Command::new("clang")
@@ -258,7 +309,7 @@ fn native_oracle_extrema_tails_unaligned_guard_pages_and_first_faults() {
         String::from_utf8_lossy(&out.stderr)
     );
     for optimize in [false, true] {
-        let m = module(optimize);
+        let m = module(history, optimize);
         for selection in [SelectionTier::Baseline, SelectionTier::Full] {
             for allocation in [AllocationTier::Fast, AllocationTier::Full] {
                 for spills in [false, true] {
