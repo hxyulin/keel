@@ -1,5 +1,5 @@
 //! Native integer lane extraction retains explicit signed extension.
-#[path = "arm_narrow/oracle.rs"]
+#[path = "../arm_narrow/oracle.rs"]
 mod support;
 use keel_codegen::{SelectionTier, regalloc::AllocationTier};
 #[test]

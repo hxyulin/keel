@@ -1,4 +1,7 @@
 //! Narrow [prior.high64, current.low64] selection; arbitrary bits, no FP math.
+#[path = "vector_shuffle_window/arm_narrow_extract.rs"]
+mod arm_narrow_extract;
+
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{Allocation, AllocationInput, AllocationTier, Loc, Pools, RegisterAllocator},

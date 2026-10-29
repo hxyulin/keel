@@ -1,4 +1,6 @@
 //! Packed low-lane widening and exact-footprint mixed-width reductions.
+#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+use crate::native_oracle;
 use keel_asm::{TargetFeatures, assemble_object, assemble_program_object};
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
@@ -6,12 +8,9 @@ use keel_codegen::{
 };
 use keel_ir::{Type, VectorType};
 use keel_opt::VectorTarget;
-use std::fs;
-#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
-#[path = "common/native_oracle.rs"]
-mod native_oracle;
 #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 use native_oracle::PreparedOracle;
+use std::fs;
 
 const TINY: Pools = Pools {
     caller_saved: &[9, 10],

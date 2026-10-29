@@ -1,11 +1,17 @@
+#[path = "vector_aarch64/neon_varargs.rs"]
+mod neon_varargs;
+#[path = "vector_aarch64/vector_widen_aarch64.rs"]
+mod vector_widen_aarch64;
+
 use keel_asm::{TargetFeatures, assemble_object, assemble_program_object};
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools},
 };
 use std::{fs, process::Command};
-// Runtime-only shared helpers are unused when cross-checking emission.
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+// neon_varargs uses the oracle on every host; PreparedOracle skips the run
+// off macOS AArch64. Runtime-only vector helpers are unused when
+// cross-checking emission.
 #[path = "common/native_oracle.rs"]
 mod native_oracle;
 #[cfg_attr(

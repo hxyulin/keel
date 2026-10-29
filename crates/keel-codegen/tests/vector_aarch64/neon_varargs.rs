@@ -1,6 +1,5 @@
+use crate::native_oracle;
 use keel_codegen::{CodegenPipeline, SelectionTier, regalloc::AllocationTier};
-#[path = "common/native_oracle.rs"]
-mod native_oracle;
 use native_oracle::PreparedOracle;
 #[test]
 fn apple_mixed_d_q_vector_varargs() {

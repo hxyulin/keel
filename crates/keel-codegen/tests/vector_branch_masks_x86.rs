@@ -1,4 +1,7 @@
 //! SSE2 unsigned ordering and mask proofs; the exported oracle runs on Linux x86.
+#[path = "vector_branch_masks_x86/vector_zero_select.rs"]
+mod vector_zero_select;
+
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{Allocation, AllocationInput, AllocationTier, Loc, Pools, RegisterAllocator},
