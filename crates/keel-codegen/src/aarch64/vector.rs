@@ -725,6 +725,25 @@ impl FunctionCompiler<'_> {
         let shape = ty.vector().unwrap();
         let lane = shape.lane_type();
         let d = self.def_freg(result);
+        if constant_bits(self.func, arg) == Some(0) {
+            self.native(
+                Opcode::MOVI_asimdimm_D2_d,
+                [
+                    (FieldId::a, 0),
+                    (FieldId::b, 0),
+                    (FieldId::c, 0),
+                    (FieldId::d, 0),
+                    (FieldId::e, 0),
+                    (FieldId::f, 0),
+                    (FieldId::g, 0),
+                    (FieldId::h, 0),
+                    (FieldId::Rd, d.into()),
+                ],
+                |out| write!(out, "movi\tv{d}.2d, #0"),
+            );
+            self.def_done(result, d);
+            return;
+        }
         let (opcode, source) = if lane.is_float() {
             (Opcode::DUP_asimdins_DV_v, self.use_freg(arg, FS1))
         } else {
@@ -791,6 +810,10 @@ impl FunctionCompiler<'_> {
     fn vector_shift(&mut self, op: V, args: [Value; 2], result: Option<Value>) {
         let shape = self.ty(args[0]).vector().unwrap();
         let bytes = shape.lane_type().bytes().unwrap();
+        if let Some(&amount) = self.constant_shifts.get(&self.current_inst.unwrap()) {
+            self.vector_shift_immediate(op, args[0], amount, result);
+            return;
+        }
         let a = self.use_freg(args[0], FS0);
         let b = self.use_freg(args[1], FS1);
         // SSHL/USHL interpret only the low signed byte of each count. Masking
@@ -869,6 +892,39 @@ impl FunctionCompiler<'_> {
                     arrangement(shape),
                     arrangement(shape),
                     arrangement(shape)
+                )
+            },
+        );
+        self.def_done(result, d);
+    }
+
+    /// Shifts each lane of `arg` by `amount`, less than the lane width.
+    /// `sshr` and `ushr` encode counts 1 to the width, so a zero count uses
+    /// `shl`, which encodes 0 to the width minus 1.
+    fn vector_shift_immediate(&mut self, op: V, arg: Value, amount: u32, result: Option<Value>) {
+        let shape = self.ty(arg).vector().unwrap();
+        let width = shape.lane_type().bytes().unwrap() * 8;
+        let a = self.use_freg(arg, FS0);
+        let d = self.def_freg(result);
+        let (opcode, name, encoded) = match op {
+            V::Sshr if amount != 0 => (Opcode::SSHR_asimdshf_R, "sshr", 2 * width - amount),
+            V::Ushr if amount != 0 => (Opcode::USHR_asimdshf_R, "ushr", 2 * width - amount),
+            _ => (Opcode::SHL_asimdshf_R, "shl", width + amount),
+        };
+        let arrangement = arrangement(shape);
+        self.native(
+            opcode,
+            [
+                (FieldId::Q, u32::from(shape.bytes() == 16)),
+                (FieldId::immh, encoded >> 3),
+                (FieldId::immb, encoded & 7),
+                (FieldId::Rd, d.into()),
+                (FieldId::Rn, a.into()),
+            ],
+            |out| {
+                write!(
+                    out,
+                    "{name}\tv{d}.{arrangement}, v{a}.{arrangement}, #{amount}"
                 )
             },
         );
@@ -1201,6 +1257,83 @@ pub(super) fn select_widening_adds(
         previous = Some((block, inst));
     }
     selected
+}
+
+/// The bits of `value` if an `iconst` or `fconst` defines it.
+pub(super) fn constant_bits(func: &Function, value: Value) -> Option<u64> {
+    let keel_ir::ValueDef::Result(inst, _) = func.value_def(func.resolve(value)) else {
+        return None;
+    };
+    match *func.inst_data(inst) {
+        InstData::Iconst { imm, .. } => Some(imm as u64),
+        InstData::Fconst { bits, .. } => Some(bits),
+        _ => None,
+    }
+}
+
+/// Whether `inst` splats an all-zero constant, which `movi` builds without
+/// reading the scalar.
+pub(super) fn zero_splat(func: &Function, inst: Inst) -> bool {
+    matches!(*func.inst_data(inst), InstData::VectorSplat { arg, .. }
+        if constant_bits(func, arg) == Some(0))
+}
+
+/// Encodes zero splats and shifts by a splatted constant as immediates. The
+/// result maps each such shift to its count, already reduced modulo the lane
+/// width. A splat or constant whose only use is now an immediate is covered.
+pub(super) fn select_constant_operands(
+    facts: &crate::kinds::FunctionFacts<'_>,
+    selection: &mut crate::select::Selection,
+) -> HashMap<Inst, u32> {
+    let func = facts.func;
+    let uses = facts.raw_uses();
+    let only_use = |selection: &mut crate::select::Selection, value: Value| {
+        let value = func.resolve(value);
+        if uses[value.index()] == 1
+            && let keel_ir::ValueDef::Result(def, _) = func.value_def(value)
+            && !selection.covered(def)
+        {
+            selection.cover(def);
+            Some(def)
+        } else {
+            None
+        }
+    };
+    let mut shifts = HashMap::default();
+    for (_, inst) in func.layout_insts() {
+        if selection.covered(inst) || selection.matches.contains_key(&inst) {
+            continue;
+        }
+        match *func.inst_data(inst) {
+            InstData::VectorSplat { arg, .. } if zero_splat(func, inst) => {
+                selection.set_operands(inst, vec![]);
+                only_use(selection, arg);
+            }
+            InstData::VectorBinary {
+                op: V::Shl | V::Ushr | V::Sshr,
+                args,
+            } => {
+                let amount = func.resolve(args[1]);
+                let keel_ir::ValueDef::Result(splat, _) = func.value_def(amount) else {
+                    continue;
+                };
+                let InstData::VectorSplat { ty, arg } = *func.inst_data(splat) else {
+                    continue;
+                };
+                let Some(bits) = constant_bits(func, arg) else {
+                    continue;
+                };
+                let width = ty.vector().unwrap().lane_type().bytes().unwrap() * 8;
+                selection.set_operands(inst, vec![func.resolve(args[0])]);
+                shifts.insert(inst, (bits % u64::from(width)) as u32);
+                if only_use(selection, amount).is_some() {
+                    only_use(selection, arg);
+                }
+            }
+            _ => {}
+        }
+    }
+    shifts
 }
 
 /// Preserve the complete splat, including lanes unused by widening. Moving an

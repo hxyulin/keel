@@ -427,3 +427,136 @@ fn unaligned_large_vector_spills_survive_dynamic_stack_and_hva_calls() {
     }
     fs::remove_dir_all(dir).unwrap();
 }
+
+/// Shifts by a splatted constant at each lane width's boundaries, counts at
+/// or above the width (reduced modulo the width), a splat with another use,
+/// and zero splats, with a C oracle.
+fn constant_operand_fixture() -> (String, String) {
+    let (mut ir, mut c) = (String::new(), String::new());
+    let mut tests = Vec::new();
+    c += "#include <stdint.h>\n#include <string.h>\n";
+    for (width, lanes) in [(8u32, 16), (16, 8), (32, 4), (64, 2)] {
+        let ty = format!("i{width}x{lanes}");
+        c += &format!("typedef int{width}_t V{width} __attribute__((vector_size(16)));\n");
+        for amount in [0, 1, width - 1, width, 2 * width - 1] {
+            for op in ["vshl", "vushr", "vsshr"] {
+                let name = format!("{op}_{width}_{amount}");
+                ir += &format!(
+                    "func @{name}({ty}) -> {ty} {{\nblock0(v0: {ty}):\n v1 = iconst.i{width} {amount}\n v2 = vsplat.{ty} v1\n v3 = {op} v0, v2\n return v3\n}}\n"
+                );
+                let k = amount % width;
+                let expected = match op {
+                    "vshl" => format!("(int{width}_t)((uint{width}_t)a[i] << {k})"),
+                    "vushr" => format!("(int{width}_t)((uint{width}_t)a[i] >> {k})"),
+                    _ => format!("(int{width}_t)(a[i] >> {k})"),
+                };
+                c += &format!(
+                    "V{width} {name}(V{width});\nstatic int t_{name}(V{width} a) {{ V{width} r = {name}(a); for (int i = 0; i < {lanes}; i++) if (r[i] != {expected}) return 1; return 0; }}\n"
+                );
+                tests.push((name, width));
+            }
+        }
+        let name = format!("shared_{width}");
+        ir += &format!(
+            "func @{name}({ty}) -> {ty} {{\nblock0(v0: {ty}):\n v1 = iconst.i{width} 3\n v2 = vsplat.{ty} v1\n v3 = vsshr v0, v2\n v4 = viadd v3, v2\n return v4\n}}\n"
+        );
+        c += &format!(
+            "V{width} {name}(V{width});\nstatic int t_{name}(V{width} a) {{ V{width} r = {name}(a); for (int i = 0; i < {lanes}; i++) if (r[i] != (int{width}_t)((a[i] >> 3) + 3)) return 1; return 0; }}\n"
+        );
+        tests.push((name, width));
+        let name = format!("zero_{width}");
+        ir += &format!(
+            "func @{name}() -> {ty} {{\nblock0:\n v1 = iconst.i{width} 0\n v2 = vsplat.{ty} v1\n return v2\n}}\n"
+        );
+        c += &format!(
+            "V{width} {name}(void);\nstatic int t_{name}(V{width} a) {{ (void)a; V{width} r = {name}(), z = {{0}}; return memcmp(&r, &z, 16) != 0; }}\n"
+        );
+        tests.push((name, width));
+    }
+    for (ty, lanes, c_ty) in [("f32", 4, "float"), ("f64", 2, "double")] {
+        for (suffix, value) in [("pz", "0.0"), ("nz", "-0.0")] {
+            let name = format!("fzero_{ty}_{suffix}");
+            ir += &format!(
+                "func @{name}() -> {ty}x{lanes} {{\nblock0:\n v1 = fconst.{ty} {value}\n v2 = vsplat.{ty}x{lanes} v1\n return v2\n}}\n"
+            );
+            c += &format!(
+                "typedef {c_ty} {name}_t __attribute__((vector_size(16)));\n{name}_t {name}(void);\nstatic int t_{name}(V8 a) {{ (void)a; {name}_t r = {name}(), e = {{{value}, {value}}}; for (int i = 2; i < {lanes}; i++) e[i] = {value}; return memcmp(&r, &e, 16) != 0; }}\n"
+            );
+            tests.push((name, 8));
+        }
+    }
+    c += "int main(void) { unsigned char seed[16]; for (int s = 0; s < 4; s++) { for (int i = 0; i < 16; i++) seed[i] = (unsigned char)(0x81 + i * 37 + s * 101);\n";
+    for (name, width) in &tests {
+        c += &format!(" {{ V{width} a; memcpy(&a, seed, 16); if (t_{name}(a)) return 1; }}\n");
+    }
+    c += " } return 0; }\n";
+    (ir, c)
+}
+
+#[test]
+fn constant_shift_counts_and_zero_splats_use_immediates() {
+    let (source, _) = constant_operand_fixture();
+    let (text, _) = compile(&source, SelectionTier::Full, AllocationTier::Full, false);
+    let function = |name: &str| {
+        let start = text.find(&format!("\n_{name}:")).unwrap();
+        let end = start + text[start..].find(".cfi_endproc").unwrap();
+        &text[start..end]
+    };
+    for (name, instruction) in [
+        ("vsshr_8_7", "sshr\tv19.16b, v19.16b, #7"),
+        ("vushr_16_1", "ushr\tv19.8h, v19.8h, #1"),
+        ("vshl_32_31", "shl\tv19.4s, v19.4s, #31"),
+        ("vsshr_64_63", "sshr\tv19.2d, v19.2d, #63"),
+        ("vushr_32_32", "shl\tv19.4s, v19.4s, #0"),
+        ("vshl_64_127", "shl\tv19.2d, v19.2d, #63"),
+        ("zero_16", "movi\tv19.2d, #0"),
+        ("fzero_f64_pz", "movi\tv19.2d, #0"),
+    ] {
+        let body = function(name);
+        assert!(body.contains(instruction), "{name}: {body}");
+        assert!(!body.contains("dup\t"), "{name}: {body}");
+        assert!(!body.contains("movz\t"), "{name}: {body}");
+    }
+    let shared = function("shared_8");
+    assert!(shared.contains("sshr\tv19.16b, v19.16b, #3"), "{shared}");
+    assert!(
+        shared.contains("dup\tv"),
+        "the other use keeps the splat: {shared}"
+    );
+    assert!(
+        !function("fzero_f32_nz").contains("movi"),
+        "-0.0 is not zero bits"
+    );
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[test]
+fn constant_shift_counts_and_zero_splats_execute() {
+    let (source, c) = constant_operand_fixture();
+    let dir = temp("arm-constant-operands");
+    let input = dir.join("test.c");
+    fs::write(&input, c).unwrap();
+    for (selection, allocation, tiny) in [
+        (SelectionTier::Baseline, AllocationTier::Fast, true),
+        (SelectionTier::Full, AllocationTier::Full, false),
+    ] {
+        let (_, program) = compile(&source, selection, allocation, tiny);
+        let object = dir.join("test.o");
+        fs::write(
+            &object,
+            assemble_program_object(&program, TargetFeatures::default()).unwrap(),
+        )
+        .unwrap();
+        let exe = dir.join("test");
+        command(
+            Command::new("clang")
+                .arg("-O0")
+                .arg(&input)
+                .arg(&object)
+                .arg("-o")
+                .arg(&exe),
+        );
+        command(&mut Command::new(exe));
+    }
+    fs::remove_dir_all(dir).unwrap();
+}

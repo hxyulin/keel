@@ -351,3 +351,100 @@ uint64_t expected(uint64_t a, uint64_t b) {\n\
     run(&mut Command::new(exe));
     fs::remove_dir_all(dir).unwrap();
 }
+
+/// Float constants at the edges of the 8-bit `fmov` immediate, which holds
+/// (16 + f) / 16 * 2^e for f in 0..16 and e in -3..=4, and their neighbours.
+fn float_constants() -> Vec<(&'static str, u64, bool)> {
+    let mut constants = Vec::new();
+    for (value, encodable) in [
+        (2.0, true),
+        (-2.5, true),
+        (0.125, true),
+        (-0.1328125, true),
+        (31.0, true),
+        (-31.0, true),
+        (1.9375, true),
+        (32.0, false),
+        (0.0625, false),
+        (0.1, false),
+        (-0.0, false),
+        (1.03125, false),
+        (1e300, false),
+    ] {
+        constants.push(("f64", f64::to_bits(value), encodable));
+        let narrow = value as f32;
+        if f64::from(narrow) == value {
+            constants.push(("f32", u64::from(narrow.to_bits()), encodable));
+        }
+    }
+    constants
+}
+
+#[test]
+fn encodable_float_constants_use_the_fmov_immediate() {
+    for (ty, bits, encodable) in float_constants() {
+        let source = format!(
+            "func @constant() -> {ty} {{\nblock0:\n v0 = fconst.{ty} {bits:#x}\n return v0\n}}\n"
+        );
+        let (text, _) = compile(
+            &source,
+            SelectionTier::Full,
+            &AllocationTier::Full,
+            &keel_codegen::aarch64::REGISTERS,
+        );
+        let immediate = text
+            .lines()
+            .any(|l| l.starts_with("\tfmov\t") && l.contains(", #"));
+        assert_eq!(immediate, encodable, "{ty} {bits:#x}: {text}");
+        assert_eq!(moves(&text).is_empty(), encodable, "{ty} {bits:#x}: {text}");
+    }
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[test]
+fn float_constants_execute_with_exact_bits() {
+    use std::{fs, process::Command};
+    let dir = std::env::temp_dir().join(format!("keel-arm-fconst-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let (mut source, mut checks) = (String::new(), String::new());
+    let mut declarations = String::from("#include <stdint.h>\n#include <string.h>\n");
+    for (index, (ty, bits, _)) in float_constants().into_iter().enumerate() {
+        let (c_ty, int_ty) = if ty == "f32" {
+            ("float", "uint32_t")
+        } else {
+            ("double", "uint64_t")
+        };
+        source += &format!(
+            "func @c{index}() -> {ty} {{\nblock0:\n v0 = fconst.{ty} {bits:#x}\n return v0\n}}\n"
+        );
+        declarations += &format!("{c_ty} c{index}(void);\n");
+        checks += &format!(
+            " {{ {c_ty} v = c{index}(); {int_ty} b; memcpy(&b, &v, sizeof b); if (b != {bits:#x}ull) return 1; }}\n"
+        );
+    }
+    let c = dir.join("test.c");
+    fs::write(
+        &c,
+        format!("{declarations}int main(void) {{\n{checks} return 0;\n}}\n"),
+    )
+    .unwrap();
+    let (_, object) = compile(
+        &source,
+        SelectionTier::Full,
+        &AllocationTier::Full,
+        &keel_codegen::aarch64::REGISTERS,
+    );
+    let obj = dir.join("test.o");
+    fs::write(&obj, object).unwrap();
+    let exe = dir.join("test");
+    let status = Command::new("clang")
+        .arg(&c)
+        .arg(&obj)
+        .arg("-o")
+        .arg(&exe)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    assert!(Command::new(&exe).status().unwrap().success());
+    fs::remove_dir_all(dir).unwrap();
+}

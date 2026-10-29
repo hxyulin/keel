@@ -620,6 +620,19 @@ fn folded_offset(
         .then_some(offset)
 }
 
+/// The 8-bit `fmov` immediate encoding `value`, if there is one: a sign,
+/// an exponent from -3 to 4 and four fraction bits.
+fn fmov_imm8(value: f64) -> Option<u32> {
+    let bits = value.to_bits();
+    let exponent = (bits >> 52) & 0x7ff;
+    if bits & ((1 << 48) - 1) != 0 || !(0x3fc..=0x403).contains(&exponent) {
+        return None;
+    }
+    let sign = (bits >> 63) as u32;
+    let fraction = ((bits >> 48) & 15) as u32;
+    Some(sign << 7 | ((exponent >> 9) as u32 & 1) << 6 | (exponent as u32 & 3) << 4 | fraction)
+}
+
 /// One checked plan shared by preallocation folding and emission. Only exact
 /// execution-width integers participate; pointer/narrow lowering stays unchanged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -839,6 +852,8 @@ struct FunctionCompiler<'a> {
     allocation_index: Option<usize>,
     selection: crate::select::Selection,
     replicate_loads: HashMap<Inst, Value>,
+    /// Vector shifts by a splatted constant, with the count.
+    constant_shifts: HashMap<Inst, u32>,
     packed_absolute_values: HashMap<Inst, Value>,
     packed_low_loads: HashMap<Inst, Value>,
     packed_minmax: HashMap<Inst, packed_minmax::MinMax>,
@@ -1323,6 +1338,11 @@ impl<'a> FunctionCompiler<'a> {
         } else {
             (HashMap::default(), HashMap::default())
         };
+        let constant_shifts = if present.vector_splat {
+            vector::select_constant_operands(&facts, &mut selection)
+        } else {
+            HashMap::default()
+        };
         let widening_adds = if present.widen_low {
             vector::select_widening_adds(&facts, &mut selection)
         } else {
@@ -1462,6 +1482,7 @@ impl<'a> FunctionCompiler<'a> {
             call_layouts,
             selection,
             replicate_loads,
+            constant_shifts,
             packed_low_loads,
             packed_minmax,
             extended_adds,
@@ -2144,9 +2165,26 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Fconst { ty, bits } => {
                 let d = self.def_freg(result);
                 let fd = freg(d, ty);
+                let value = match ty {
+                    Type::F32 => Some(f64::from(f32::from_bits(bits as u32))),
+                    Type::F64 => Some(f64::from_bits(bits)),
+                    _ => None,
+                };
                 if bits == 0 {
                     let zero = if ty == Type::F32 { "wzr" } else { "xzr" };
                     self.mach("fmov", [(fd).into(), (zero).into()]);
+                } else if let Some(value) = value
+                    && let Some(imm8) = fmov_imm8(value)
+                {
+                    self.native(
+                        if ty == Type::F32 {
+                            Opcode::FMOV_S_floatimm
+                        } else {
+                            Opcode::FMOV_D_floatimm
+                        },
+                        [(FieldId::Rd, d.into()), (FieldId::imm8, imm8)],
+                        |out| write!(out, "fmov\t{fd}, #{value:?}"),
+                    );
                 } else {
                     let is64 = ty == Type::F64;
                     self.materialize(S0, bits, is64);
