@@ -24,7 +24,7 @@ const TINY: Pools = Pools {
 #[test]
 fn native_extension_masks_match_unsigned_oracle() {
     use std::{fs, path::Path, process::Command};
-    let source = include_str!("programs/extension_masks.keel");
+    let source = include_str!("../programs/extension_masks.keel");
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("extension-masks");
     fs::create_dir_all(&dir).unwrap();
     let driver = dir.join("driver.o");
@@ -32,7 +32,7 @@ fn native_extension_masks_match_unsigned_oracle() {
     let exe = dir.join("run");
     fs::write(
         dir.join("driver.c"),
-        include_str!("programs/extension_masks.c"),
+        include_str!("../programs/extension_masks.c"),
     )
     .unwrap();
     let output = Command::new("clang")

@@ -1,11 +1,10 @@
 #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
-#[path = "common/native_oracle.rs"]
-mod native_oracle;
+use crate::native_oracle;
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools},
 };
-const SOURCE: &str = include_str!("private_leaf_calls/pressure.keel");
+const SOURCE: &str = include_str!("pressure.keel");
 const TINY: Pools = Pools {
     caller_saved: &[9, 10],
     callee_saved: &[19, 20],
@@ -177,7 +176,7 @@ fn native_chain_pressure_unknown_clobbers_recursion_shuffles_and_transfers() {
     }
     let oracle = native_oracle::PreparedOracle::new(
         "private-call-chains",
-        include_str!("private_leaf_calls/chain_oracle.c"),
+        include_str!("chain_oracle.c"),
         &["-O2"],
     );
     // The text and typed routes must agree, and an object that already ran

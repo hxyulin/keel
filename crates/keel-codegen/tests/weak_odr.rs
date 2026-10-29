@@ -1,3 +1,8 @@
+#[path = "weak_odr/hidden_visibility.rs"]
+mod hidden_visibility;
+#[path = "weak_odr/weak.rs"]
+mod weak;
+
 use keel_codegen::{Target, compile, compile_program};
 use keel_ir::{InstData, Module};
 use object::{Object, ObjectSection, ObjectSymbol, SymbolFlags};

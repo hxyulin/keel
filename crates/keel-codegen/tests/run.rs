@@ -15,6 +15,12 @@
 //! program is not linked or run again.
 //!
 //! `debug_info` checks the debug info in lldb.
+#[path = "run/extension_masks.rs"]
+mod extension_masks;
+#[path = "run/loop_shapes.rs"]
+mod loop_shapes;
+#[path = "run/loop_strength_reduce.rs"]
+mod loop_strength_reduce;
 
 #[cfg(all(target_arch = "aarch64", target_os = "linux"))]
 use keel_codegen::aarch64::{REGISTERS, compile_linux_with_pipeline as compile_with_pipeline};
