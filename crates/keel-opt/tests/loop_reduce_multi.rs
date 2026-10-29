@@ -134,3 +134,48 @@ fn recurrence_budget_accepts_four_and_rejects_five() {
         }
     }
 }
+
+#[test]
+fn default_pipeline_vectorizes_offset_sum_before_pair_unrolling() {
+    // Loop-reduce rejects the sign-extended offset; loop-unroll accepts it.
+    // Unrolling first would leave only its remainder to vectorize, behind a
+    // 16-element guard that remainder never passes.
+    let source = "func @f(ptr, i64, i32) -> i32 {
+block0(v0: ptr, v1: i64, v2: i32):
+    v3 = iconst.i32 0
+    v4 = iconst.i64 0
+    jump block1(v4, v3)
+block1(v5: i64, v8: i32):
+    v7 = icmp.slt v5, v1
+    brif v7, block2, block3
+block2:
+    v11 = sext.i64 v2
+    v12 = iadd v5, v11
+    v13 = iconst.i64 4
+    v14 = imul v12, v13
+    v15 = ptradd v0, v14
+    v16 = load.i32 v15
+    v17 = iadd v8, v16
+    v18 = iconst.i64 1
+    v19 = iadd v5, v18
+    jump block1(v19, v17)
+block3:
+    return v8
+}
+";
+    let mut m = keel_ir::parse(source).unwrap();
+    keel_opt::optimize(&mut m).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    let f = &m.functions[0];
+    let (mut scalar, mut vector) = (0, 0);
+    for (_, i) in f.layout_insts() {
+        if let keel_ir::InstData::Load { ty, .. } = f.inst_data(i) {
+            match ty {
+                keel_ir::Type::Vector(_) => vector += 1,
+                _ => scalar += 1,
+            }
+        }
+    }
+    // One scalar tail load: no two-lane copy of the loop.
+    assert_eq!((scalar, vector), (1, 4), "{m}");
+}

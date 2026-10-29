@@ -640,8 +640,8 @@ const FULL_EPILOGUE: [&str; 26] = [
     "canonicalize",
     "instcombine",
     "dce",
-    "loop-unroll",
     "loop-reduce-multi",
+    "loop-unroll",
     "loop-rotate",
     "phi-simplify",
     "dce",
@@ -666,7 +666,8 @@ const FULL_EPILOGUE: [&str; 26] = [
 // Convert only private abs triangles before vectorization; this moves a single
 // wrapping negation, never a memory access or a potentially trapping operation.
 // The epilogue reuses memory facts before introducing loop recurrences, then
-// unrolls before extended reductions and rotation. Keep phi cleanup late and
+// vectorizes extended reductions before unrolling and rotation: unrolling first
+// leaves only a remainder loop too short to vectorize. Keep phi cleanup late and
 // omit an extra GCM: broader schedules regressed Lua fib in app screening.
 // Finalize private call transport only after IR rewrites. Physical preservation
 // summaries are built by codegen from the final selected/allocated leaf bodies.
