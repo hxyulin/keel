@@ -1,4 +1,9 @@
 //! Scope, composition and invalidation of producer contracts.
+#[path = "contracts/lifetime.rs"]
+mod lifetime;
+#[path = "contracts/value_facts.rs"]
+mod value_facts;
+
 use keel_ir::{
     CallContract, FunctionAttrs, InstData, MemoryAccess, MemoryEffects, MemorySummary,
     PointerContract,

@@ -1,3 +1,10 @@
+#[path = "sections/global_symbols.rs"]
+mod global_symbols;
+#[path = "sections/weak.rs"]
+mod weak;
+#[path = "sections/weak_odr.rs"]
+mod weak_odr;
+
 use keel_ir::{Target, parse, section::validate_module, verify_module};
 #[test]
 fn placement_metadata_roundtrips_and_invalid_storage_diagnoses() {

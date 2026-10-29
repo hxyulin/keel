@@ -1,4 +1,7 @@
 //! The stack token is an ordering dependency, not an integer installed in RSP.
+#[path = "stack_pointer_asm/shared_asm_inputs.rs"]
+mod shared_asm_inputs;
+
 use keel_ir::{AsmOperand, InlineAsm, InstData, Intrinsic, Type, is_stack_pointer_snapshot};
 
 const SOURCE: &str = r#"

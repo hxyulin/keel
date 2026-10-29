@@ -1,3 +1,10 @@
+#[path = "call_operand_abi/fast_cc.rs"]
+mod fast_cc;
+#[path = "call_operand_abi/x86_va_arg_abi.rs"]
+mod x86_va_arg_abi;
+#[path = "call_operand_abi/x86_vector_abi.rs"]
+mod x86_vector_abi;
+
 use keel_ir::{InstData, Purpose};
 const SOURCE: &str = "decl @sink(i64, ...)\nfunc @caller(ptr) {\nentry(v0:ptr):\n v1 = iconst.i64 7\n call @sink(v1 : i64, v0 : ptr byval {f64, i64})\n return\n}\n";
 #[test]

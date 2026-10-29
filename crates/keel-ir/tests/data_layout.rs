@@ -1,3 +1,8 @@
+#[path = "data_layout/f80.rs"]
+mod f80;
+#[path = "data_layout/targets.rs"]
+mod targets;
+
 use Layout::Scalar as scalar;
 use keel_ir::{DataInit, DataItem, DataLayout, Layout, Type, VectorType, parse};
 

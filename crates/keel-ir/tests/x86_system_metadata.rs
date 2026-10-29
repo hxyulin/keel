@@ -1,4 +1,7 @@
 //! Frozen pre-generation IDs and signatures; no privileged instructions execute.
+#[path = "x86_system_metadata/x86_query_metadata.rs"]
+mod x86_query_metadata;
+
 use keel_ir::{InstData, Intrinsic, MemoryEffects, Type};
 use std::collections::HashMap;
 

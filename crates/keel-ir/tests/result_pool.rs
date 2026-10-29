@@ -1,3 +1,6 @@
+#[path = "result_pool/imports.rs"]
+mod imports;
+
 use keel_ir::{
     EntityRef, Function, InsertPoint, InstData, Signature, SourceFile, SourceLoc, Type, ValueDef,
 };

@@ -1,3 +1,10 @@
+#[path = "function_attributes/function_policies.rs"]
+mod function_policies;
+#[path = "function_attributes/lifecycle.rs"]
+mod lifecycle;
+#[path = "function_attributes/restrict.rs"]
+mod restrict;
+
 use keel_ir::{FunctionAttrs, parse, verify, verify_module};
 
 #[test]

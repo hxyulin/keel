@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 #[test]
 fn query_and_scalar_io_metadata_matches_the_frozen_contract() {
-    let rows: HashMap<_, _> = include_str!("fixtures/x86-query-bindings.txt")
+    let rows: HashMap<_, _> = include_str!("../fixtures/x86-query-bindings.txt")
         .lines()
         .filter(|s| !s.starts_with('#'))
         .map(|row| (row.split('|').nth(2).unwrap(), row))

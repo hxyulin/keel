@@ -1,3 +1,8 @@
+#[path = "vector/vector_256.rs"]
+mod vector_256;
+#[path = "vector/vector_64.rs"]
+mod vector_64;
+
 use keel_ir::{BinaryOp, InstData, MemoryEffects, Type, VectorBinaryOp, VectorType};
 
 fn checked(source: &str) -> keel_ir::Module {
