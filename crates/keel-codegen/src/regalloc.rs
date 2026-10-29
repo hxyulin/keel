@@ -668,11 +668,12 @@ fn build_fast_intervals(
         let next = points.partition_point(|&c| c <= from);
         points.get(next).is_some_and(|&c| c < to)
     };
+    let unread = unread_entry_params(func, order, selection);
     for &block in order {
         let header = 2 * slot + 1;
         slot += 1;
         for &param in func.block_params(block) {
-            if !is_alias(param) {
+            if !is_alias(param) && !unread.get(param.index()).is_some_and(|&u| u) {
                 extend(&mut open, param, header, &mut touched);
             }
         }
@@ -1056,6 +1057,33 @@ fn liveness(
     }
 }
 
+/// Marks, by value, the entry parameters that no instruction reads. They
+/// get no interval and so no location, and the entry copy skips them. Empty
+/// when there are none, or when debug information may describe them.
+fn unread_entry_params(
+    func: &Function,
+    order: &[Block],
+    selection: &crate::select::Selection,
+) -> Vec<bool> {
+    let debug = func.debug_loc.is_some() || !func.debug_vars.is_empty();
+    let Some(entry) = func.entry_block() else {
+        return Vec::new();
+    };
+    if debug || func.block_params(entry).is_empty() {
+        return Vec::new();
+    }
+    let mut unread = vec![false; func.num_values()];
+    for &param in func.block_params(entry) {
+        unread[param.index()] = true;
+    }
+    for &block in order {
+        for &inst in func.block_insts(block) {
+            selection.for_each_operand(func, inst, |v| unread[v.index()] = false);
+        }
+    }
+    unread
+}
+
 /// Extends `v`'s range in the current block to `point`.
 fn extend(open: &mut [Option<(u32, u32)>], v: Value, point: u32, touched: &mut Vec<Value>) {
     let range = &mut open[v.index()];
@@ -1115,6 +1143,7 @@ fn compute_liveness(
     calls.clear();
     preserved_calls.clear();
     twice.clear();
+    let unread = unread_entry_params(func, order, selection);
     // Slot `k` owns the read point 2k and the write point 2k + 1.
     let mut slot = 0u32;
     for &block in order {
@@ -1124,7 +1153,7 @@ fn compute_liveness(
         slot += 1;
         for &param in func.block_params(block) {
             def_block[param.index()] = b;
-            if !is_alias(param) {
+            if !is_alias(param) && !unread.get(param.index()).is_some_and(|&u| u) {
                 extend(open, param, header, touched);
             }
         }

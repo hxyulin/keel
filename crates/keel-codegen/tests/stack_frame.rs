@@ -330,3 +330,33 @@ block0(v0: i64):
     assert!(!plain.contains("mov\tsp, x29"), "{asm}");
     assert!(framed.contains("\tmov\tsp, x29\n"), "{asm}");
 }
+
+#[test]
+fn unused_entry_parameters_take_no_callee_saved_registers() {
+    // Nine arguments, three read: the six unread ones would otherwise be
+    // copied into callee-saved registers that the frame must save.
+    let module = keel_ir::parse(
+        "func @f(i64, i64, i64, i64, i64, i64, i64, i64, i64) -> i64 {
+        block0(v0: i64, v1: i64, v2: i64, v3: i64, v4: i64, v5: i64, v6: i64, v7: i64, v8: i64):
+            v9 = iadd v0, v4
+            v10 = iadd v9, v8
+            return v10
+        }",
+    )
+    .unwrap();
+    for target in Target::NATIVE {
+        for allocator in [AllocationTier::Fast, AllocationTier::Full] {
+            let pipeline = CodegenPipeline {
+                selector: &SelectionTier::Full,
+                allocator: &allocator,
+            };
+            let asm = keel_codegen::compile_with_pipeline(&module, target, &pipeline).unwrap();
+            for saved in ["rbx", "r12", "r13", "r14", "r15", "x19", "x20"] {
+                assert!(
+                    !asm.contains(saved),
+                    "{target:?} {allocator:?} saves {saved}:\n{asm}"
+                );
+            }
+        }
+    }
+}
