@@ -104,6 +104,20 @@ _used:
     assert!(file.section_by_name("__used").is_none());
 }
 #[test]
+fn commons_from_other_objects_satisfy_references() {
+    let main = assemble(
+        ".globl _main\n_main:\nadrp x0,_shared@PAGE\nadd x0,x0,_shared@PAGEOFF\nmov w0,#0\nret\n",
+    );
+    let commons = assemble(".comm _shared,8,3\n.comm _unused,8,3\n.comm _other,8,3\n");
+    let other = assemble(".globl _f\n_f:\nadrp x0,_other@PAGE\nret\n");
+    let exe = link(&[main, commons, other], options(true)).unwrap();
+    let n = names(&exe);
+    assert!(n.contains("_shared"));
+    for dead in ["_unused", "_other", "_f"] {
+        assert!(!n.contains(dead), "{dead}");
+    }
+}
+#[test]
 fn boundaries_do_not_root_contributions_and_exports_are_explicit_roots() {
     let main = assemble(
         ".globl _main\n_main:\nadrp x0,section$end$__DATA$registry@PAGE\nadd x0,x0,section$end$__DATA$registry@PAGEOFF\nret\n",

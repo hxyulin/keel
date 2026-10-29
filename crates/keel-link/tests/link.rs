@@ -842,3 +842,114 @@ fn undersized_macho_commands_cannot_read_the_next_payload() {
         assert!(error.contains("load command size"), "cmd={cmd:#x}: {error}");
     }
 }
+
+/// Decode the weak-binding stream into names and the segment offsets bound
+/// to each, in stream order.
+fn weak_binds(bytes: &[u8]) -> Vec<(String, Vec<u64>)> {
+    let u32_at = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+    let mut command = 32;
+    let (offset, size) = loop {
+        if u32_at(command) == 0x8000_0022 {
+            break (u32_at(command + 24), u32_at(command + 28));
+        }
+        command += u32_at(command + 4);
+    };
+    let mut stream = bytes[offset..offset + size].iter().copied();
+    let mut leb = |stream: &mut dyn Iterator<Item = u8>| {
+        let (mut value, mut shift) = (0u64, 0);
+        loop {
+            let byte = stream.next().unwrap();
+            value |= u64::from(byte & 0x7f) << shift;
+            shift += 7;
+            if byte & 0x80 == 0 {
+                return value;
+            }
+        }
+    };
+    let mut records: Vec<(String, Vec<u64>)> = Vec::new();
+    let mut at = 0;
+    while let Some(op) = stream.next() {
+        match op & 0xf0 {
+            0x00 => break,
+            0x40 => {
+                let name = stream.by_ref().take_while(|&b| b != 0).collect();
+                records.push((String::from_utf8(name).unwrap(), Vec::new()));
+            }
+            0x50 => {}
+            0x60 => _ = leb(&mut stream),
+            0x70 => at = leb(&mut stream),
+            0x90 => records.last_mut().unwrap().1.push(at),
+            _ => panic!("unexpected weak-binding opcode {op:#x}"),
+        }
+    }
+    records
+}
+
+#[test]
+fn weak_binding_groups_records_by_name_in_address_order() {
+    let main = object(
+        ".globl _main\n_main:\nret\n.globl _wb\n.weak_definition _wb\n_wb:\nret\n\
+         .globl _wa\n.weak_definition _wa\n_wa:\nret\n\
+         .data\n.quad _wb\n.quad _wa\n.quad _wb\n.quad _wa+8\n",
+    );
+    let exe = keel_link::link(
+        &[Input {
+            name: "weak.o",
+            bytes: &main,
+        }],
+        options(),
+    )
+    .unwrap();
+    let records = weak_binds(&exe.bytes);
+    let names: Vec<_> = records.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(names, ["_wa", "_wb"]);
+    let (wa, wb) = (&records[0].1, &records[1].1);
+    assert_eq!(wa.len(), 2);
+    assert_eq!(wb.len(), 2);
+    // Pointers alternate _wb, _wa, _wb, _wa, eight bytes apart.
+    assert_eq!(wb[0] + 8, wa[0]);
+    assert_eq!(wb[1], wb[0] + 16);
+    assert_eq!(wa[1], wa[0] + 16);
+}
+
+#[test]
+fn debug_map_function_ends_use_the_next_symbol_by_address() {
+    // Globals are not in address order in the symbol table, and local L
+    // labels do not end a function.
+    let main = object(
+        ".globl _zfirst\n_zfirst:\nnop\nLinside:\nnop\n.globl _asecond\n_asecond:\nnop\n\
+         .globl _main\n_main:\nmov w0,#0\nnop\nret\n\
+         .section __DWARF,__debug_info,regular,debug\n.byte 0\n",
+    );
+    let mut opts = options();
+    opts.debug_directory = Some(std::env::temp_dir().join("keel-debug-map-function-ends"));
+    let exe = keel_link::link(
+        &[Input {
+            name: "ends.o",
+            bytes: &main,
+        }],
+        opts,
+    )
+    .unwrap();
+    use object::read::macho::{MachOFile64, Nlist};
+    let file = MachOFile64::<object::Endianness>::parse(exe.bytes.as_slice()).unwrap();
+    let endian = object::Endianness::Little;
+    let table = file.macho_symbol_table();
+    let entries: Vec<_> = table
+        .iter()
+        .filter(|n| n.n_type() == 0x24)
+        .map(|n| {
+            let name = n.name(endian, table.strings()).unwrap();
+            (String::from_utf8(name.to_vec()).unwrap(), n.n_value(endian))
+        })
+        .collect();
+    let mut sizes: Vec<_> = entries
+        .chunks(2)
+        .map(|pair| {
+            assert_eq!(pair[1].0, "");
+            (pair[0].0.as_str(), pair[1].1)
+        })
+        .collect();
+    sizes.sort();
+    assert_eq!(sizes, [("_asecond", 4), ("_main", 12), ("_zfirst", 8)]);
+}

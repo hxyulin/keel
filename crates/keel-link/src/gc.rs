@@ -21,6 +21,8 @@ struct Graph<'a> {
     records: BTreeMap<(usize, usize), Vec<Record>>,
     owners: BTreeMap<Node, Vec<Node>>,
     demanded: BTreeSet<(usize, usize)>,
+    /// Names with a tentative (common) definition in any object.
+    commons: BTreeSet<&'a str>,
 }
 impl Graph<'_> {
     fn at(&self, oi: usize, si: usize, offset: usize) -> Result<Node> {
@@ -44,13 +46,7 @@ impl Graph<'_> {
             match self.linker.globals.get(&s.name) {
                 Some(Target::Definition(o, s)) => (*o, *s),
                 Some(Target::Header) => return Ok(None),
-                None if self
-                    .linker
-                    .objects
-                    .iter()
-                    .flat_map(|o| &o.symbols)
-                    .any(|c| c.name == s.name && c.kind & 0xe == 0 && c.value != 0) =>
-                {
+                None if self.commons.contains(s.name.as_str()) => {
                     return Ok(Some(Node::Common(s.name.clone())));
                 }
                 None => return Ok(None), // imports and synthesized boundaries resolve after GC
@@ -294,6 +290,13 @@ impl Linker {
             records: BTreeMap::new(),
             owners: BTreeMap::new(),
             demanded: BTreeSet::new(),
+            commons: self
+                .objects
+                .iter()
+                .flat_map(|o| &o.symbols)
+                .filter(|c| c.kind & 0xe == 0 && c.value != 0)
+                .map(|c| c.name.as_str())
+                .collect(),
         };
         // Parse record extents first, so all symbol references can be mapped to
         // records even when a CIE or an FDE is shared or appears out of order.

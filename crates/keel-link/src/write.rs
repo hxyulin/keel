@@ -252,26 +252,28 @@ impl Linker {
         }
         binding.push(0);
         let mut weak_binding = Vec::new();
+        let mut weak_binds: BTreeMap<&str, Vec<(u64, i64)>> = BTreeMap::new();
+        for (&addr, (symbol, addend)) in &self.weak_binds {
+            weak_binds.entry(symbol).or_default().push((addr, *addend));
+        }
         // dyld requires weak binding records in symbol-name order.
         for name in &self.weak_names {
             let strong = matches!(self.globals.get(name), Some(Target::Definition(o, s)) if self.objects[*o].symbols[*s].desc & 0x80 == 0);
             weak_binding.push(0x40 | if strong { 8 } else { 0 });
             weak_binding.extend_from_slice(name.as_bytes());
             weak_binding.push(0);
-            for (&addr, (symbol, addend)) in &self.weak_binds {
-                if symbol != name {
-                    continue;
-                }
+            for &(addr, addend) in weak_binds.get(name.as_str()).into_iter().flatten() {
                 let (seg, off) = segment_offset(&segments, addr)?;
                 weak_binding.push(0x51);
                 weak_binding.push(0x60);
-                sleb(&mut weak_binding, *addend);
+                sleb(&mut weak_binding, addend);
                 weak_binding.push(0x70 | seg);
                 uleb(&mut weak_binding, off);
                 weak_binding.push(0x90);
             }
         }
         weak_binding.push(0);
+        drop(weak_binds);
         let exports = self.exports()?;
         for data in [&rebase, &binding, &exports, &weak_binding] {
             let off = file + linkedit.len();
@@ -575,6 +577,20 @@ impl Linker {
                 let path = directory.join(format!("object-{oi:05}-{hash}.o"));
                 nlist(symbols, strings, &object.name, 0x64, 0, 0, 0); // N_SO
                 nlist(symbols, strings, path.to_str().unwrap(), 0x66, 0, 1, 0); // N_OSO; zero timestamp means no staleness check
+                // Sorted symbol values per section, so each function's end is
+                // the next value above its start.
+                let mut starts = vec![Vec::new(); object.sections.len() + 1];
+                for s in &object.symbols {
+                    if !s.name.starts_with("ltmp")
+                        && !s.name.starts_with('L')
+                        && let Some(values) = starts.get_mut(s.section)
+                    {
+                        values.push(s.value);
+                    }
+                }
+                for values in &mut starts {
+                    values.sort_unstable();
+                }
                 for (si, symbol) in object.symbols.iter().enumerate() {
                     let common =
                         symbol.kind & 0xe == 0 && symbol.kind & 1 != 0 && symbol.value != 0;
@@ -641,17 +657,10 @@ impl Linker {
                         self.symbol_address(oi, symbol)?,
                     );
                     if code {
-                        let end = object
-                            .symbols
-                            .iter()
-                            .filter(|s| {
-                                s.section == symbol.section
-                                    && s.value > symbol.value
-                                    && !s.name.starts_with("ltmp")
-                                    && !s.name.starts_with('L')
-                            })
-                            .map(|s| s.value)
-                            .min()
+                        let values = &starts[symbol.section];
+                        let end = values
+                            .get(values.partition_point(|&v| v <= symbol.value))
+                            .copied()
                             .unwrap_or(section.address + section.size as u64);
                         nlist(symbols, strings, "", 0x24, 0, 0, end - symbol.value);
                     }
