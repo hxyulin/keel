@@ -8,11 +8,11 @@
 //! expression of its own struct type, which initializes it whole. Anything
 //! not mentioned is zero.
 
-use crate::Error;
 use crate::ast::*;
 use crate::lex::Tok;
 use crate::parse::{Parser, R};
 use crate::types::*;
+use crate::{Error, Loc};
 
 /// Where a sub-object is.
 #[derive(Copy, Clone)]
@@ -163,6 +163,10 @@ impl<'a> Parser<'a> {
             return Ok(1);
         }
         let e = self.assign()?;
+        // Brace elision applies only inside a braced list.
+        if matches!(slot.ty, Ty::Array(..)) {
+            return Err(array_initializer_error(e.loc));
+        }
         self.init_with(slot, e, items)?;
         Ok(1)
     }
@@ -330,7 +334,10 @@ impl<'a> Parser<'a> {
             self.init_item(&sub, first.take(), items)?;
             i += 1;
         }
-        Ok(())
+        match first {
+            Some(e) if matches!(slot.ty, Ty::Array(..)) => Err(array_initializer_error(e.loc)),
+            _ => Ok(()),
+        }
     }
 
     /// An undesignated item of a list for `slot`.
@@ -514,4 +521,11 @@ impl<'a> Parser<'a> {
         self.expect("=")?;
         self.init_item(slot, None, items)
     }
+}
+
+fn array_initializer_error(loc: Loc) -> Error {
+    Error::new(
+        loc,
+        "array initializer must be an initializer list or string literal",
+    )
 }

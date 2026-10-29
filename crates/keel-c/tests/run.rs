@@ -787,6 +787,22 @@ fn rejected() {
             "1:20: error: too many initializers",
         ),
         (
+            "int a[] = 5;",
+            "1:11: error: array initializer must be an initializer list or string literal",
+        ),
+        (
+            "int b[2] = 7;",
+            "1:12: error: array initializer must be an initializer list or string literal",
+        ),
+        (
+            "unsigned short c[] = \"hi\";",
+            "1:22: error: array initializer must be an initializer list or string literal",
+        ),
+        (
+            "struct f { int n; int a[]; } f = { 1, 5 };",
+            "1:39: error: array initializer must be an initializer list or string literal",
+        ),
+        (
             "int f(int x) { switch (x) { case 1: case 1: return 0; } }",
             "error: duplicate case 1",
         ),
