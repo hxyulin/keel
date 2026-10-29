@@ -1,3 +1,12 @@
+#[path = "sections/elf_readonly_sections.rs"]
+mod elf_readonly_sections;
+#[path = "sections/function_aliases.rs"]
+mod function_aliases;
+#[path = "sections/optimized_link_references.rs"]
+mod optimized_link_references;
+#[path = "sections/storage_metadata.rs"]
+mod storage_metadata;
+
 use keel_ir::{Module, Target};
 use object::{Object, ObjectSection, ObjectSymbol};
 use std::{fs, path::Path, process::Command};
