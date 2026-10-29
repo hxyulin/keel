@@ -15,10 +15,6 @@ impl crate::Pass for LoopRotate {
             || f.debug_loc.is_some()
             || !f.debug_vars.is_empty()
             || !f.debug_scopes.is_empty()
-            || f.layout_insts().any(|(_, i)| {
-                f.inst_loc(i).is_some()
-                    || matches!(f.inst_data(i), D::Call { .. } | D::CallIndirect { .. })
-            })
         {
             return false;
         }
@@ -93,6 +89,16 @@ fn rotate(f: &mut Function, h: Block) -> bool {
     let Some(latch) = latch else {
         return false;
     };
+    // Calls and debugger locations elsewhere in the function do not affect
+    // the loop; only its own blocks are checked.
+    if region.iter().chain([&h]).any(|&b| {
+        f.block_insts(b).iter().any(|&i| {
+            f.inst_loc(i).is_some()
+                || matches!(f.inst_data(i), D::Call { .. } | D::CallIndirect { .. })
+        })
+    }) {
+        return false;
+    }
     if cfg.preds(h).len() != 2
         || !cfg.preds(h).contains(&latch)
         || cfg

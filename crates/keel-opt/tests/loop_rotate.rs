@@ -62,3 +62,41 @@ fn rejects_debug_calls_header_loads_and_multiple_exits() {
             .run(&mut m.functions[0])
     );
 }
+#[test]
+fn calls_and_locations_outside_the_loop_do_not_block_rotation() {
+    let outside = [
+        format!(
+            "decl @effect()\n{}",
+            source()
+                .replace(" jump block1(v1)", " call @effect()\n jump block1(v1)")
+                .replace(" return v2", " call @effect()\n return v2")
+        ),
+        format!(
+            "file f0 = \"t.c\"\n{}",
+            source().replace(" return v2", " return v2 !f0:2:1")
+        ),
+    ];
+    for src in &outside {
+        let mut m = keel_ir::parse(src).unwrap();
+        assert!(
+            keel_opt::find_pass("loop-rotate")
+                .unwrap()
+                .run(&mut m.functions[0]),
+            "{src}"
+        );
+        keel_ir::verify_module(&m).unwrap();
+    }
+    // A location inside the loop still keeps it as it is.
+    let src = format!(
+        "file f0 = \"t.c\"\n{}",
+        source().replace(" v8 = isub v2,v7", " v8 = isub v2,v7 !f0:1:1")
+    );
+    let mut m = keel_ir::parse(&src).unwrap();
+    let before = m.to_string();
+    assert!(
+        !keel_opt::find_pass("loop-rotate")
+            .unwrap()
+            .run(&mut m.functions[0])
+    );
+    assert_eq!(before, m.to_string());
+}

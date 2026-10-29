@@ -395,10 +395,6 @@ fn run(f: &mut Function) -> bool {
         || f.debug_loc.is_some()
         || !f.debug_vars.is_empty()
         || !f.debug_scopes.is_empty()
-        || f.layout_insts().any(|(_, i)| {
-            f.inst_loc(i).is_some()
-                || matches!(f.inst_data(i), D::Call { .. } | D::CallIndirect { .. })
-        })
     {
         return false;
     }
@@ -406,6 +402,16 @@ fn run(f: &mut Function) -> bool {
     let mut changed = false;
     for header in headers {
         if let Some(c) = analyze(f, header) {
+            // Cloning would drop the loop's debugger locations. Calls and
+            // locations elsewhere in the function do not affect the loop.
+            if [c.header, c.body].iter().any(|&b| {
+                f.block_insts(b).iter().any(|&i| {
+                    f.inst_loc(i).is_some()
+                        || matches!(f.inst_data(i), D::Call { .. } | D::CallIndirect { .. })
+                })
+            }) {
+                continue;
+            }
             transform(f, c);
             changed = true;
         }

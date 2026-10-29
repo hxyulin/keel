@@ -669,3 +669,36 @@ fn extra_same_width_recurrence_wraps_and_rejects_dependent_stride() {
         }
     }
 }
+
+#[test]
+fn calls_and_locations_outside_the_loop_do_not_block_unrolling() {
+    let src = kernel(Type::I64);
+    let outside = [
+        format!(
+            "decl @effect()\n{}",
+            src.replace(
+                " jump block1(v4,v3)",
+                " call @effect()\n jump block1(v4,v3)"
+            )
+            .replace(" return v6", " call @effect()\n return v6")
+        ),
+        format!(
+            "file f0 = \"t.c\"\n{}",
+            src.replace(" return v6", " return v6 !f0:2:1")
+        ),
+    ];
+    for case in &outside {
+        assert_eq!(
+            loads(&optimize(case, &["loop-unroll"]).functions[0]),
+            3,
+            "{case}"
+        );
+    }
+    // Cloning would drop a location inside the loop.
+    let inside = format!(
+        "file f0 = \"t.c\"\n{}",
+        src.replace(" v13 = xor v12,v2", " v13 = xor v12,v2 !f0:1:1")
+    );
+    let before = keel_ir::parse(&inside).unwrap().to_string();
+    assert_eq!(before, optimize(&inside, &["loop-unroll"]).to_string());
+}
