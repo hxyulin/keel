@@ -980,6 +980,17 @@ impl InstData {
                 | Intrinsic::X86Avx512MaskAbsq
                 | Intrinsic::X86Avx512MaskMuldq
                 | Intrinsic::X86Avx512MaskMuludq => None,
+                Intrinsic::X86Avx512Kandw
+                | Intrinsic::X86Avx512Kandnw
+                | Intrinsic::X86Avx512Korw
+                | Intrinsic::X86Avx512Kxorw
+                | Intrinsic::X86Avx512Kxnorw
+                | Intrinsic::X86Avx512Knotw
+                | Intrinsic::X86Avx512Kshiftlw
+                | Intrinsic::X86Avx512Kshiftrw
+                | Intrinsic::X86Avx512Kunpckbw
+                | Intrinsic::X86Avx512Ktestw
+                | Intrinsic::X86Avx512Kortestw => None,
                 crate::x86_system_intrinsics!(all) => id.generated_system_memory_effects(),
                 crate::x86_query_intrinsics!(all) => id.generated_query_memory_effects(),
                 Intrinsic::X86Avx512Compressd
@@ -1012,6 +1023,72 @@ impl InstData {
                 | Intrinsic::X86Avx512Roundscalepd
                 | Intrinsic::X86Avx512Fixupimmps
                 | Intrinsic::X86Avx512Fixupimmpd => Barrier,
+                Intrinsic::X86Avx512Addss
+                | Intrinsic::X86Avx512Addsd
+                | Intrinsic::X86Avx512Subss
+                | Intrinsic::X86Avx512Subsd
+                | Intrinsic::X86Avx512Mulss
+                | Intrinsic::X86Avx512Mulsd
+                | Intrinsic::X86Avx512Divss
+                | Intrinsic::X86Avx512Divsd
+                | Intrinsic::X86Avx512Sqrtss
+                | Intrinsic::X86Avx512Sqrtsd
+                | Intrinsic::X86Avx512Minss
+                | Intrinsic::X86Avx512Minsd
+                | Intrinsic::X86Avx512Maxss
+                | Intrinsic::X86Avx512Maxsd
+                | Intrinsic::X86Avx512Cmpss
+                | Intrinsic::X86Avx512Cmpsd
+                | Intrinsic::X86Avx512Getexpss
+                | Intrinsic::X86Avx512Getexpsd
+                | Intrinsic::X86Avx512Getmantss
+                | Intrinsic::X86Avx512Getmantsd
+                | Intrinsic::X86Avx512Scalefss
+                | Intrinsic::X86Avx512Scalefsd
+                | Intrinsic::X86Avx512Rcp14ss
+                | Intrinsic::X86Avx512Rcp14sd
+                | Intrinsic::X86Avx512Rsqrt14ss
+                | Intrinsic::X86Avx512Rsqrt14sd
+                | Intrinsic::X86Avx512Roundscaless
+                | Intrinsic::X86Avx512Roundscalesd
+                | Intrinsic::X86Avx512Fixupimmss
+                | Intrinsic::X86Avx512Fixupimmsd => Barrier,
+                Intrinsic::X86Avx512Vfmadd132ps
+                | Intrinsic::X86Avx512Vfmadd132pd
+                | Intrinsic::X86Avx512Vfmadd213ps
+                | Intrinsic::X86Avx512Vfmadd213pd
+                | Intrinsic::X86Avx512Vfmadd231ps
+                | Intrinsic::X86Avx512Vfmadd231pd
+                | Intrinsic::X86Avx512Vfmsub132ps
+                | Intrinsic::X86Avx512Vfmsub132pd
+                | Intrinsic::X86Avx512Vfmsub213ps
+                | Intrinsic::X86Avx512Vfmsub213pd
+                | Intrinsic::X86Avx512Vfmsub231ps
+                | Intrinsic::X86Avx512Vfmsub231pd
+                | Intrinsic::X86Avx512Vfnmadd132ps
+                | Intrinsic::X86Avx512Vfnmadd132pd
+                | Intrinsic::X86Avx512Vfnmadd213ps
+                | Intrinsic::X86Avx512Vfnmadd213pd
+                | Intrinsic::X86Avx512Vfnmadd231ps
+                | Intrinsic::X86Avx512Vfnmadd231pd
+                | Intrinsic::X86Avx512Vfnmsub132ps
+                | Intrinsic::X86Avx512Vfnmsub132pd
+                | Intrinsic::X86Avx512Vfnmsub213ps
+                | Intrinsic::X86Avx512Vfnmsub213pd
+                | Intrinsic::X86Avx512Vfnmsub231ps
+                | Intrinsic::X86Avx512Vfnmsub231pd
+                | Intrinsic::X86Avx512Vfmaddsub132ps
+                | Intrinsic::X86Avx512Vfmaddsub132pd
+                | Intrinsic::X86Avx512Vfmaddsub213ps
+                | Intrinsic::X86Avx512Vfmaddsub213pd
+                | Intrinsic::X86Avx512Vfmaddsub231ps
+                | Intrinsic::X86Avx512Vfmaddsub231pd
+                | Intrinsic::X86Avx512Vfmsubadd132ps
+                | Intrinsic::X86Avx512Vfmsubadd132pd
+                | Intrinsic::X86Avx512Vfmsubadd213ps
+                | Intrinsic::X86Avx512Vfmsubadd213pd
+                | Intrinsic::X86Avx512Vfmsubadd231ps
+                | Intrinsic::X86Avx512Vfmsubadd231pd => Barrier,
                 Intrinsic::X86Avx512Vcvtdq2ps
                 | Intrinsic::X86Avx512Vcvtudq2ps
                 | Intrinsic::X86Avx512Vcvtdq2pd
@@ -1864,7 +1941,8 @@ impl InstData {
             | Self::Trap => true,
             Self::Neon { .. } => true,
             Self::Intrinsic { id, .. } => {
-                !(id.is_x86_avx512_integer()
+                !(id.is_x86_avx512_mask_alu()
+                    || id.is_x86_avx512_integer()
                     || id.is_x86_bmi()
                     || id.is_x86_sha256()
                     || ((id.is_x86_avx512_mask() || id.is_x86_avx512_pack()) && id.info().pure)

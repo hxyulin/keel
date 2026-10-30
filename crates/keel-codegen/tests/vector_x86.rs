@@ -890,3 +890,11 @@ mod x86_avx512_integer_intrinsics;
 
 #[path = "vector_x86/x86_avx512_convert_raw.rs"]
 mod x86_avx512_convert_raw;
+
+#[path = "vector_x86/x86_avx512_fma.rs"]
+mod x86_avx512_fma;
+#[path = "vector_x86/x86_avx512_scalar.rs"]
+mod x86_avx512_scalar;
+
+#[path = "vector_x86/x86_avx512_mask_alu.rs"]
+mod x86_avx512_mask_alu;

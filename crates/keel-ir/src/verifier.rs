@@ -1682,6 +1682,23 @@ impl Verifier<'_> {
                         }
                     }
                 }
+                if id.has_x86_avx512_mask_shift_control() {
+                    let control =
+                        args.get(1)
+                            .and_then(|&arg| match func.value_def(func.resolve(arg)) {
+                                ValueDef::Result(i, _) => match func.inst_data(i) {
+                                    InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                    _ => None,
+                                },
+                                _ => None,
+                            });
+                    if !control.is_some_and(|n| (0..256).contains(&n)) {
+                        self.inst_error(
+                            inst,
+                            "word mask shift control must be iconst.i32 in0..=255".into(),
+                        );
+                    }
+                }
                 if let Some(index) = id.x86_avx512_integer_control() {
                     let control =
                         args.get(index)
@@ -1696,6 +1713,44 @@ impl Verifier<'_> {
                         self.inst_error(
                             inst,
                             "AVX512 integer control must be iconst.i32 in0..=255".into(),
+                        );
+                    }
+                }
+                if let Some((_, immediate, control)) = id.x86_avx512_scalar() {
+                    for index in immediate.into_iter().chain(control) {
+                        let value = args.get(index).and_then(|&arg| {
+                            match func.value_def(func.resolve(arg)) {
+                                ValueDef::Result(i, _) => match func.inst_data(i) {
+                                    InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                    _ => None,
+                                },
+                                _ => None,
+                            }
+                        });
+                        if !value
+                            .is_some_and(|value| id.valid_x86_avx512_scalar_control(index, value))
+                        {
+                            self.inst_error(
+                                inst,
+                                "invalid scalar EVEX immediate or SAE/rounding control".into(),
+                            );
+                        }
+                    }
+                }
+                if id.x86_avx512_fma_opcode().is_some() {
+                    let control =
+                        args.get(5)
+                            .and_then(|&arg| match func.value_def(func.resolve(arg)) {
+                                ValueDef::Result(i, _) => match func.inst_data(i) {
+                                    InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                    _ => None,
+                                },
+                                _ => None,
+                            });
+                    if !control.is_some_and(|n| matches!(n, 4 | 8..=11)) {
+                        self.inst_error(
+                            inst,
+                            "AVX512 FMA control must be iconst.i32 4 or8..=11".into(),
                         );
                     }
                 }

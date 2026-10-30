@@ -1204,10 +1204,164 @@ pub enum Intrinsic {
     X86Avx512MaskMuldq = 939,
     #[doc = "Pure AVX512F integer operation with scalar lane masks. Immediate controls are constant bytes. Raw shifts saturate oversized counts; rotations reduce counts modulo lane width."]
     X86Avx512MaskMuludq = 940,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfmadd132ps = 941,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfmadd132pd = 942,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfmadd213ps = 943,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfmadd213pd = 944,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfmadd231ps = 945,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfmadd231pd = 946,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfmsub132ps = 947,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfmsub132pd = 948,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfmsub213ps = 949,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfmsub213pd = 950,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfmsub231ps = 951,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfmsub231pd = 952,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfnmadd132ps = 953,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfnmadd132pd = 954,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfnmadd213ps = 955,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfnmadd213pd = 956,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfnmadd231ps = 957,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfnmadd231pd = 958,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfnmsub132ps = 959,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfnmsub132pd = 960,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfnmsub213ps = 961,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfnmsub213pd = 962,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfnmsub231ps = 963,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfnmsub231pd = 964,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfmaddsub132ps = 965,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfmaddsub132pd = 966,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfmaddsub213ps = 967,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfmaddsub213pd = 968,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfmaddsub231ps = 969,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfmaddsub231pd = 970,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfmsubadd132ps = 971,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfmsubadd132pd = 972,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfmsubadd213ps = 973,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfmsubadd213pd = 974,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfmsubadd231ps = 975,
+    #[doc = "Raw masked AVX512F FMA in encoded Intel operand order (a is the arithmetic destination), with independent inactive merge bits. Control4 uses MXCSR;8..11 select nearest/down/up/zero with SAE."]
+    X86Avx512Vfmsubadd231pd = 976,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Addss = 977,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Addsd = 978,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Subss = 979,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Subsd = 980,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Mulss = 981,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Mulsd = 982,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Divss = 983,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Divsd = 984,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Sqrtss = 985,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Sqrtsd = 986,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Minss = 987,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Minsd = 988,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Maxss = 989,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Maxsd = 990,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Cmpss = 991,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Cmpsd = 992,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Getexpss = 993,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Getexpsd = 994,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Getmantss = 995,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Getmantsd = 996,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Scalefss = 997,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Scalefsd = 998,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Rcp14ss = 999,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Rcp14sd = 1000,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Rsqrt14ss = 1001,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Rsqrt14sd = 1002,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Roundscaless = 1003,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Roundscalesd = 1004,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Fixupimmss = 1005,
+    #[doc = "Raw scalar AVX512F operation in XMM containers. Only mask bit zero controls the scalar lane; upper lanes follow encoded source passthrough and inactive low lanes preserve independent merge bits."]
+    X86Avx512Fixupimmsd = 1006,
+    #[doc = "Pure foundation 16-bit mask algebra. Test helpers return ZF in bit 0 and CF in bit 1; all other bits are zero. KTEST semantics use an AVX512F recipe rather than the AVX512DQ instruction."]
+    X86Avx512Kandw = 1007,
+    #[doc = "Pure foundation 16-bit mask algebra. Test helpers return ZF in bit 0 and CF in bit 1; all other bits are zero. KTEST semantics use an AVX512F recipe rather than the AVX512DQ instruction."]
+    X86Avx512Kandnw = 1008,
+    #[doc = "Pure foundation 16-bit mask algebra. Test helpers return ZF in bit 0 and CF in bit 1; all other bits are zero. KTEST semantics use an AVX512F recipe rather than the AVX512DQ instruction."]
+    X86Avx512Korw = 1009,
+    #[doc = "Pure foundation 16-bit mask algebra. Test helpers return ZF in bit 0 and CF in bit 1; all other bits are zero. KTEST semantics use an AVX512F recipe rather than the AVX512DQ instruction."]
+    X86Avx512Kxorw = 1010,
+    #[doc = "Pure foundation 16-bit mask algebra. Test helpers return ZF in bit 0 and CF in bit 1; all other bits are zero. KTEST semantics use an AVX512F recipe rather than the AVX512DQ instruction."]
+    X86Avx512Kxnorw = 1011,
+    #[doc = "Pure foundation 16-bit mask algebra. Test helpers return ZF in bit 0 and CF in bit 1; all other bits are zero. KTEST semantics use an AVX512F recipe rather than the AVX512DQ instruction."]
+    X86Avx512Knotw = 1012,
+    #[doc = "Pure foundation 16-bit mask algebra. Test helpers return ZF in bit 0 and CF in bit 1; all other bits are zero. KTEST semantics use an AVX512F recipe rather than the AVX512DQ instruction."]
+    X86Avx512Kshiftlw = 1013,
+    #[doc = "Pure foundation 16-bit mask algebra. Test helpers return ZF in bit 0 and CF in bit 1; all other bits are zero. KTEST semantics use an AVX512F recipe rather than the AVX512DQ instruction."]
+    X86Avx512Kshiftrw = 1014,
+    #[doc = "Pure foundation 16-bit mask algebra. Test helpers return ZF in bit 0 and CF in bit 1; all other bits are zero. KTEST semantics use an AVX512F recipe rather than the AVX512DQ instruction."]
+    X86Avx512Kunpckbw = 1015,
+    #[doc = "Pure foundation 16-bit mask algebra. Test helpers return ZF in bit 0 and CF in bit 1; all other bits are zero. KTEST semantics use an AVX512F recipe rather than the AVX512DQ instruction."]
+    X86Avx512Ktestw = 1016,
+    #[doc = "Pure foundation 16-bit mask algebra. Test helpers return ZF in bit 0 and CF in bit 1; all other bits are zero. KTEST semantics use an AVX512F recipe rather than the AVX512DQ instruction."]
+    X86Avx512Kortestw = 1017,
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 941] = [
+    pub const ALL: [Intrinsic; 1018] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -2149,6 +2303,83 @@ impl Intrinsic {
         Intrinsic::X86Avx512MaskAbsq,
         Intrinsic::X86Avx512MaskMuldq,
         Intrinsic::X86Avx512MaskMuludq,
+        Intrinsic::X86Avx512Vfmadd132ps,
+        Intrinsic::X86Avx512Vfmadd132pd,
+        Intrinsic::X86Avx512Vfmadd213ps,
+        Intrinsic::X86Avx512Vfmadd213pd,
+        Intrinsic::X86Avx512Vfmadd231ps,
+        Intrinsic::X86Avx512Vfmadd231pd,
+        Intrinsic::X86Avx512Vfmsub132ps,
+        Intrinsic::X86Avx512Vfmsub132pd,
+        Intrinsic::X86Avx512Vfmsub213ps,
+        Intrinsic::X86Avx512Vfmsub213pd,
+        Intrinsic::X86Avx512Vfmsub231ps,
+        Intrinsic::X86Avx512Vfmsub231pd,
+        Intrinsic::X86Avx512Vfnmadd132ps,
+        Intrinsic::X86Avx512Vfnmadd132pd,
+        Intrinsic::X86Avx512Vfnmadd213ps,
+        Intrinsic::X86Avx512Vfnmadd213pd,
+        Intrinsic::X86Avx512Vfnmadd231ps,
+        Intrinsic::X86Avx512Vfnmadd231pd,
+        Intrinsic::X86Avx512Vfnmsub132ps,
+        Intrinsic::X86Avx512Vfnmsub132pd,
+        Intrinsic::X86Avx512Vfnmsub213ps,
+        Intrinsic::X86Avx512Vfnmsub213pd,
+        Intrinsic::X86Avx512Vfnmsub231ps,
+        Intrinsic::X86Avx512Vfnmsub231pd,
+        Intrinsic::X86Avx512Vfmaddsub132ps,
+        Intrinsic::X86Avx512Vfmaddsub132pd,
+        Intrinsic::X86Avx512Vfmaddsub213ps,
+        Intrinsic::X86Avx512Vfmaddsub213pd,
+        Intrinsic::X86Avx512Vfmaddsub231ps,
+        Intrinsic::X86Avx512Vfmaddsub231pd,
+        Intrinsic::X86Avx512Vfmsubadd132ps,
+        Intrinsic::X86Avx512Vfmsubadd132pd,
+        Intrinsic::X86Avx512Vfmsubadd213ps,
+        Intrinsic::X86Avx512Vfmsubadd213pd,
+        Intrinsic::X86Avx512Vfmsubadd231ps,
+        Intrinsic::X86Avx512Vfmsubadd231pd,
+        Intrinsic::X86Avx512Addss,
+        Intrinsic::X86Avx512Addsd,
+        Intrinsic::X86Avx512Subss,
+        Intrinsic::X86Avx512Subsd,
+        Intrinsic::X86Avx512Mulss,
+        Intrinsic::X86Avx512Mulsd,
+        Intrinsic::X86Avx512Divss,
+        Intrinsic::X86Avx512Divsd,
+        Intrinsic::X86Avx512Sqrtss,
+        Intrinsic::X86Avx512Sqrtsd,
+        Intrinsic::X86Avx512Minss,
+        Intrinsic::X86Avx512Minsd,
+        Intrinsic::X86Avx512Maxss,
+        Intrinsic::X86Avx512Maxsd,
+        Intrinsic::X86Avx512Cmpss,
+        Intrinsic::X86Avx512Cmpsd,
+        Intrinsic::X86Avx512Getexpss,
+        Intrinsic::X86Avx512Getexpsd,
+        Intrinsic::X86Avx512Getmantss,
+        Intrinsic::X86Avx512Getmantsd,
+        Intrinsic::X86Avx512Scalefss,
+        Intrinsic::X86Avx512Scalefsd,
+        Intrinsic::X86Avx512Rcp14ss,
+        Intrinsic::X86Avx512Rcp14sd,
+        Intrinsic::X86Avx512Rsqrt14ss,
+        Intrinsic::X86Avx512Rsqrt14sd,
+        Intrinsic::X86Avx512Roundscaless,
+        Intrinsic::X86Avx512Roundscalesd,
+        Intrinsic::X86Avx512Fixupimmss,
+        Intrinsic::X86Avx512Fixupimmsd,
+        Intrinsic::X86Avx512Kandw,
+        Intrinsic::X86Avx512Kandnw,
+        Intrinsic::X86Avx512Korw,
+        Intrinsic::X86Avx512Kxorw,
+        Intrinsic::X86Avx512Kxnorw,
+        Intrinsic::X86Avx512Knotw,
+        Intrinsic::X86Avx512Kshiftlw,
+        Intrinsic::X86Avx512Kshiftrw,
+        Intrinsic::X86Avx512Kunpckbw,
+        Intrinsic::X86Avx512Ktestw,
+        Intrinsic::X86Avx512Kortestw,
     ];
 }
 
@@ -3086,5 +3317,82 @@ macro_rules! x86_intrinsics {
             | $crate::Intrinsic::X86Avx512MaskAbsq
             | $crate::Intrinsic::X86Avx512MaskMuldq
             | $crate::Intrinsic::X86Avx512MaskMuludq
+            | $crate::Intrinsic::X86Avx512Vfmadd132ps
+            | $crate::Intrinsic::X86Avx512Vfmadd132pd
+            | $crate::Intrinsic::X86Avx512Vfmadd213ps
+            | $crate::Intrinsic::X86Avx512Vfmadd213pd
+            | $crate::Intrinsic::X86Avx512Vfmadd231ps
+            | $crate::Intrinsic::X86Avx512Vfmadd231pd
+            | $crate::Intrinsic::X86Avx512Vfmsub132ps
+            | $crate::Intrinsic::X86Avx512Vfmsub132pd
+            | $crate::Intrinsic::X86Avx512Vfmsub213ps
+            | $crate::Intrinsic::X86Avx512Vfmsub213pd
+            | $crate::Intrinsic::X86Avx512Vfmsub231ps
+            | $crate::Intrinsic::X86Avx512Vfmsub231pd
+            | $crate::Intrinsic::X86Avx512Vfnmadd132ps
+            | $crate::Intrinsic::X86Avx512Vfnmadd132pd
+            | $crate::Intrinsic::X86Avx512Vfnmadd213ps
+            | $crate::Intrinsic::X86Avx512Vfnmadd213pd
+            | $crate::Intrinsic::X86Avx512Vfnmadd231ps
+            | $crate::Intrinsic::X86Avx512Vfnmadd231pd
+            | $crate::Intrinsic::X86Avx512Vfnmsub132ps
+            | $crate::Intrinsic::X86Avx512Vfnmsub132pd
+            | $crate::Intrinsic::X86Avx512Vfnmsub213ps
+            | $crate::Intrinsic::X86Avx512Vfnmsub213pd
+            | $crate::Intrinsic::X86Avx512Vfnmsub231ps
+            | $crate::Intrinsic::X86Avx512Vfnmsub231pd
+            | $crate::Intrinsic::X86Avx512Vfmaddsub132ps
+            | $crate::Intrinsic::X86Avx512Vfmaddsub132pd
+            | $crate::Intrinsic::X86Avx512Vfmaddsub213ps
+            | $crate::Intrinsic::X86Avx512Vfmaddsub213pd
+            | $crate::Intrinsic::X86Avx512Vfmaddsub231ps
+            | $crate::Intrinsic::X86Avx512Vfmaddsub231pd
+            | $crate::Intrinsic::X86Avx512Vfmsubadd132ps
+            | $crate::Intrinsic::X86Avx512Vfmsubadd132pd
+            | $crate::Intrinsic::X86Avx512Vfmsubadd213ps
+            | $crate::Intrinsic::X86Avx512Vfmsubadd213pd
+            | $crate::Intrinsic::X86Avx512Vfmsubadd231ps
+            | $crate::Intrinsic::X86Avx512Vfmsubadd231pd
+            | $crate::Intrinsic::X86Avx512Addss
+            | $crate::Intrinsic::X86Avx512Addsd
+            | $crate::Intrinsic::X86Avx512Subss
+            | $crate::Intrinsic::X86Avx512Subsd
+            | $crate::Intrinsic::X86Avx512Mulss
+            | $crate::Intrinsic::X86Avx512Mulsd
+            | $crate::Intrinsic::X86Avx512Divss
+            | $crate::Intrinsic::X86Avx512Divsd
+            | $crate::Intrinsic::X86Avx512Sqrtss
+            | $crate::Intrinsic::X86Avx512Sqrtsd
+            | $crate::Intrinsic::X86Avx512Minss
+            | $crate::Intrinsic::X86Avx512Minsd
+            | $crate::Intrinsic::X86Avx512Maxss
+            | $crate::Intrinsic::X86Avx512Maxsd
+            | $crate::Intrinsic::X86Avx512Cmpss
+            | $crate::Intrinsic::X86Avx512Cmpsd
+            | $crate::Intrinsic::X86Avx512Getexpss
+            | $crate::Intrinsic::X86Avx512Getexpsd
+            | $crate::Intrinsic::X86Avx512Getmantss
+            | $crate::Intrinsic::X86Avx512Getmantsd
+            | $crate::Intrinsic::X86Avx512Scalefss
+            | $crate::Intrinsic::X86Avx512Scalefsd
+            | $crate::Intrinsic::X86Avx512Rcp14ss
+            | $crate::Intrinsic::X86Avx512Rcp14sd
+            | $crate::Intrinsic::X86Avx512Rsqrt14ss
+            | $crate::Intrinsic::X86Avx512Rsqrt14sd
+            | $crate::Intrinsic::X86Avx512Roundscaless
+            | $crate::Intrinsic::X86Avx512Roundscalesd
+            | $crate::Intrinsic::X86Avx512Fixupimmss
+            | $crate::Intrinsic::X86Avx512Fixupimmsd
+            | $crate::Intrinsic::X86Avx512Kandw
+            | $crate::Intrinsic::X86Avx512Kandnw
+            | $crate::Intrinsic::X86Avx512Korw
+            | $crate::Intrinsic::X86Avx512Kxorw
+            | $crate::Intrinsic::X86Avx512Kxnorw
+            | $crate::Intrinsic::X86Avx512Knotw
+            | $crate::Intrinsic::X86Avx512Kshiftlw
+            | $crate::Intrinsic::X86Avx512Kshiftrw
+            | $crate::Intrinsic::X86Avx512Kunpckbw
+            | $crate::Intrinsic::X86Avx512Ktestw
+            | $crate::Intrinsic::X86Avx512Kortestw
     };
 }
