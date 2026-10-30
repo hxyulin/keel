@@ -65,6 +65,12 @@ use portable lane lowering. C accepts `float` and `double` vectors with
 
 ## Shuffles
 
+AVX512F selects arbitrary two-source dword and qword shuffles across all 512
+bits, including floating vectors. Indices address the concatenation of both
+inputs. Native quarter extraction and insertion preserve scalar lane bits,
+including NaN payloads, without requiring SSE4.1 or AVX2. Scalar insertion stages
+one 128-bit quarter before replacing it in the original ZMM value.
+
 The 128-bit shuffle selector uses SSE2 encodings for:
 
 - every one-source dword permutation;
