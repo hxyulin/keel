@@ -11,7 +11,8 @@
 //! Merging two identical computations in sibling branches (hoisting them to
 //! a common dominator) would need code motion first; that is GCM's job.
 //! Pinned instructions are never numbered: two loads of the same address
-//! may see different memory.
+//! may see different memory. A dominating conditional edge also determines
+//! later branches on the same SSA condition, without changing its integer value.
 
 use crate::scratch::Scratch;
 use keel_ir::fxhash::FxBuildHasher;
@@ -25,6 +26,9 @@ pub fn run(func: &mut Function) -> bool {
     let Some(entry) = func.entry_block() else {
         return false;
     };
+    // Folding branches only deletes edges. The original dominators remain
+    // valid, and their predecessor census may miss new facts but cannot
+    // establish one from an edge that did not dominate the original block.
     let children = domtree.children();
 
     // Entries are never removed. One is in scope while its block is open on
@@ -42,19 +46,48 @@ pub fn run(func: &mut Function) -> bool {
     let empty = Inst::new(u32::MAX as usize);
     let mut table = Scratch::filled(mask + 1, (0u32, empty));
     let mut open = Scratch::filled(func.num_blocks(), false);
-    // (block, whether its instructions were visited)
-    let mut stack = vec![(entry, false)];
+    // A true branch proves nonzero, not the integer value one. Keep these
+    // facts separate from value numbering and use them only for branches.
+    let mut truth = vec![None; func.num_values()];
+    // (block, whether visited, condition fact to restore on leaving)
+    let mut stack = vec![(entry, false, None)];
     let mut changed = false;
-    while let Some((block, visited)) = stack.pop() {
+    while let Some((block, visited, restore)) = stack.pop() {
         if visited {
             open[block.index()] = false;
+            if let Some((condition, previous)) = restore {
+                truth[condition] = previous;
+            }
             continue;
         }
         open[block.index()] = true;
-        stack.push((block, true));
+        // A unique predecessor is not a unique edge when both branch arms
+        // enter the same block. Loop headers and joins cannot acquire a fact
+        // from just one of their incoming paths.
+        let restore = if block != entry
+            && let [pred] = analysis.cfg.preds(block)
+            && let Some(&term) = func.block_insts(*pred).last()
+            && let InstData::Brif { cond, dests } = func.inst_data(term)
+            && dests[0].block != dests[1].block
+        {
+            let condition = func.resolve(*cond).index();
+            Some((condition, truth[condition].replace(dests[0].block == block)))
+        } else {
+            None
+        };
+        stack.push((block, true, restore));
         let mut i = 0;
         while let Some(&inst) = func.block_insts(block).get(i) {
             let data = func.inst_data(inst);
+            if let InstData::Brif { cond, dests } = data
+                && let Some(taken) = truth[func.resolve(*cond).index()]
+            {
+                let dest = dests[usize::from(!taken)].clone();
+                *func.inst_data_mut(inst) = InstData::Jump { dest };
+                changed = true;
+                i += 1;
+                continue;
+            }
             if data.is_pinned() {
                 i += 1;
                 continue;
@@ -92,7 +125,7 @@ pub fn run(func: &mut Function) -> bool {
             }
         }
         for &child in children[block].iter().rev() {
-            stack.push((child, false));
+            stack.push((child, false, None));
         }
     }
     changed

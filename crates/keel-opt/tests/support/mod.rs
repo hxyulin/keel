@@ -18,6 +18,24 @@ pub fn execute(func: &Function, inputs: &[u64]) -> u64 {
         for &inst in func.block_insts(block) {
             let read = |v: Value| values[func.resolve(v).index()];
             if let InstData::Overflow {
+                op: op @ (OverflowOp::Uadd | OverflowOp::Umul),
+                args,
+            } = func.inst_data(inst)
+            {
+                let a = u128::from(read(args[0]));
+                let b = u128::from(read(args[1]));
+                let exact = if *op == OverflowOp::Uadd {
+                    a + b
+                } else {
+                    a * b
+                };
+                let results = func.inst_results(inst);
+                let limit = mask(func.value_type(results[0]));
+                values[results[0].index()] = exact as u64 & limit;
+                values[results[1].index()] = u64::from(exact > u128::from(limit));
+                continue;
+            }
+            if let InstData::Overflow {
                 op: OverflowOp::Sadd,
                 args,
             } = func.inst_data(inst)

@@ -162,3 +162,195 @@ block0(v0: i64, v1: i64):
         }
     }
 }
+
+fn branch_count(module: &keel_ir::Module) -> usize {
+    module.functions[0]
+        .layout_insts()
+        .filter(|(_, inst)| {
+            matches!(
+                module.functions[0].inst_data(*inst),
+                keel_ir::InstData::Brif { .. }
+            )
+        })
+        .count()
+}
+
+fn apply_branches(source: &str) -> (keel_ir::Module, keel_ir::Module) {
+    let original = keel_ir::parse(source).unwrap();
+    keel_ir::verify_module(&original).unwrap();
+    let mut optimized = original.clone();
+    keel_opt::run_passes(&mut optimized, &["gvn"]).unwrap();
+    keel_ir::verify_module(&optimized).unwrap();
+    (original, optimized)
+}
+
+#[test]
+fn repeated_conditions_choose_both_edges_without_canonicalizing_integer_values() {
+    let (original, optimized) = apply_branches(
+        "func @f(i8) -> i8 {
+block0(v0: i8):
+ brif v0, block1, block2
+block1:
+ brif v0, block3(v0), block4(v0)
+block2:
+ brif v0, block4(v0), block3(v0)
+block3(v1: i8):
+ return v1
+block4(v2: i8):
+ v3 = iconst.i8 17
+ return v3
+}",
+    );
+    assert_eq!(branch_count(&optimized), 1, "{optimized}");
+    for value in 0..256 {
+        assert_eq!(execute(&optimized.functions[0], &[value]), value);
+        assert_eq!(
+            execute(&optimized.functions[0], &[value]),
+            execute(&original.functions[0], &[value])
+        );
+    }
+}
+
+#[test]
+fn repeated_conditions_follow_comparisons_aliased_by_value_numbering() {
+    let (original, optimized) = apply_branches(
+        "func @f(i64) -> i64 {
+block0(v0: i64):
+ v1 = iconst.i64 0
+ v2 = icmp.ne v0, v1
+ brif v2, block1, block2
+block1:
+ v3 = icmp.ne v1, v0
+ brif v3, block3(v0), block2
+block2:
+ return v1
+block3(v4: i64):
+ return v4
+}",
+    );
+    assert_eq!(icmps(&optimized), 1);
+    assert_eq!(branch_count(&optimized), 1, "{optimized}");
+    for value in [0, 1, 2, 255, 1 << 63, u64::MAX] {
+        assert_eq!(
+            execute(&optimized.functions[0], &[value]),
+            execute(&original.functions[0], &[value])
+        );
+    }
+}
+
+#[test]
+fn joins_and_parallel_edges_do_not_establish_branch_truth() {
+    for source in [
+        "func @f(i8) -> i8 {
+block0(v0: i8):
+ v1 = iconst.i8 17
+ v2 = iconst.i8 29
+ brif v0, block1(v1), block1(v2)
+block1(v3: i8):
+ brif v0, block2(v3), block3(v3)
+block2(v4: i8):
+ return v4
+block3(v5: i8):
+ return v5
+}",
+        "func @f(i8) -> i8 {
+block0(v0: i8):
+ brif v0, block1, block2
+block1:
+ v1 = iconst.i8 17
+ jump block3(v1)
+block2:
+ v2 = iconst.i8 29
+ jump block3(v2)
+block3(v3: i8):
+ brif v0, block4(v3), block5(v0)
+block4(v4: i8):
+ return v4
+block5(v5: i8):
+ return v5
+}",
+    ] {
+        let (original, optimized) = apply_branches(source);
+        assert_eq!(branch_count(&optimized), 2, "{optimized}");
+        for value in [0, 1, 2, 255] {
+            assert_eq!(
+                execute(&optimized.functions[0], &[value]),
+                execute(&original.functions[0], &[value]),
+                "value={value}\n{optimized}"
+            );
+        }
+    }
+}
+
+#[test]
+fn conditional_facts_stay_out_of_siblings_and_loop_headers() {
+    let (original, optimized) = apply_branches(
+        "func @f(i8, i8) -> i8 {
+block0(v0: i8, v1: i8):
+ brif v0, block1, block2
+block1:
+ brif v1, block3, block4
+block3:
+ brif v1, block5, block4
+block2:
+ brif v1, block5, block4
+block4:
+ v2 = iconst.i8 17
+ return v2
+block5:
+ return v1
+}",
+    );
+    assert_eq!(branch_count(&optimized), 3, "{optimized}");
+    for x in [0, 1, 2, 255] {
+        for y in [0, 1, 2, 255] {
+            assert_eq!(
+                execute(&optimized.functions[0], &[x, y]),
+                execute(&original.functions[0], &[x, y])
+            );
+        }
+    }
+
+    let (original, optimized) = apply_branches(
+        "func @f(i8) -> i8 {
+block0(v0: i8):
+ jump block1(v0)
+block1(v1: i8):
+ brif v1, block2, block3
+block2:
+ brif v1, block4, block3
+block4:
+ v2 = iconst.i8 1
+ v3 = isub v1, v2
+ jump block1(v3)
+block3:
+ return v1
+}",
+    );
+    // The loop body's repeated check folds. Its fact must not fold the
+    // header's next-iteration test after the loop-carried value changes.
+    assert_eq!(branch_count(&optimized), 1, "{optimized}");
+    for value in [0, 1, 2, 17, 255] {
+        assert_eq!(
+            execute(&optimized.functions[0], &[value]),
+            execute(&original.functions[0], &[value])
+        );
+    }
+}
+
+#[test]
+fn overflow_flag_aliases_remain_correct_with_code_motion_after_branch_folding() {
+    let original = keel_ir::parse(include_str!("golden/overflow.keel")).unwrap();
+    let mut optimized = original.clone();
+    keel_opt::run_passes(&mut optimized, &["gvn", "gcm", "dce"]).unwrap();
+    assert_eq!(branch_count(&optimized), 1, "{optimized}");
+    for x in [0, 1, 1 << 63, u64::MAX] {
+        for y in [0, 1, 1 << 63, u64::MAX] {
+            assert_eq!(
+                execute(&optimized.functions[0], &[x, y]),
+                execute(&original.functions[0], &[x, y]),
+                "x={x}, y={y}\n{optimized}"
+            );
+        }
+    }
+}
