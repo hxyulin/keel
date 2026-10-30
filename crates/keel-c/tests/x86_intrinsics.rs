@@ -1641,3 +1641,9 @@ mod x86_avx512_vl;
 
 #[path = "x86_intrinsics/x86_avx512_vl_float.rs"]
 mod x86_avx512_vl_float;
+
+#[path = "x86_intrinsics/x86_avx512_vl_integer_move.rs"]
+mod x86_avx512_vl_integer_move;
+
+#[path = "x86_intrinsics/x86_avx512_vl_convert.rs"]
+mod x86_avx512_vl_convert;

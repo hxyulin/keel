@@ -1096,6 +1096,14 @@ Active lanes observe MXCSR rounding, DAZ and FTZ; inactive lanes suppress
 exceptions even when invalid-operation exceptions are unmasked. The C
 wrappers provide both merge and mask-zero forms, with no ER/SAE argument.
 
+Masked integer arithmetic includes dword low multiplication, signed and
+unsigned dword/qword min/max, and dword/qword AND, AND-NOT, OR and XOR.
+AND-NOT computes `(~a) & b`. Integer moves and float/double bit moves take
+a merge vector, mask and one input. Blends use the same move contract with
+the first input as merge and the second input as the active value. These
+register operations are pure and do not observe or change MXCSR, including
+when floating containers hold signaling NaNs or negative zero.
+
 Only the low bit for each existing lane is used. Higher input mask bits do
 not enable additional lanes, and comparison results zero unused bits.
 Inactive lanes retain their merge bits and suppress memory accesses or
@@ -1107,6 +1115,25 @@ to MXCSR and retain ordered/unordered and signaling predicate distinctions.
 load/store and comparison wrappers, plus mask-zero arithmetic and loads.
 The compiler uses one physical SIMD allocation index for XMM, YMM and ZMM
 views, including functions that mix these widths.
+
+Narrow raw conversions cover signed and unsigned dword conversion with float
+and double, rounded and truncated float-to-integer conversion, float/double
+conversion, and binary16/float conversion. They take `(merge, i8 mask, input)`;
+only `vcvtps2ph` adds an `i32` immediate in 0..255. These forms have no ER or
+SAE. Float-to-half immediate bit 2 selects MXCSR rounding; otherwise bits 1:0
+select the rounding direction. Bits 3..7 are ignored and never suppress
+exceptions. Other rounded conversions use MXCSR; truncating forms use zero
+rounding. Active invalid conversions retain hardware indefinite values.
+
+The 128-bit double-to-dword and double-to-float forms produce two low lanes
+and always zero the upper two dwords, even with mask zero. The 128-bit
+float-to-half form similarly zeros its upper four halfwords. Widening from
+dword/float to double consumes only two input lanes at 128 bits, and
+half-to-float consumes only four halfwords. Other narrow forms produce four
+or eight lanes as their containers permit. Ignored input lanes do not raise
+exceptions. Inactive converted lanes preserve merge bits and suppress native
+floating exceptions, including where a vendor header uses an unmasked
+conversion followed by a selection. All conversions remain pinned to MXCSR.
 
 ## SHA-256
 

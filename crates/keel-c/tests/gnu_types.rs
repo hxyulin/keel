@@ -242,7 +242,7 @@ fn unsupported_vectors_are_diagnosed() {
             "typedef union {int x; float y;} U __attribute__((transparent_union));",
             "typedef union {int x; float y;} U __attribute__((__transparent_union__));",
             "typedef int V __attribute__((vector_size(8)));",
-            "typedef int V __attribute__((vector_size(64)));",
+            "typedef int V __attribute__((vector_size(128)));",
             "typedef int V __attribute__((vector_size(0)));",
             "typedef int V __attribute__((vector_size(-16)));",
             "int n; typedef int V __attribute__((vector_size(n)));",
