@@ -14,10 +14,10 @@ class EvexTests(unittest.TestCase):
         self.rows = evex.load(ROOT)
 
     def test_import_scope_and_smoke_cases(self):
-        self.assertEqual(len(self.rows), 1901)
-        self.assertEqual(sum(r['encoding'] == 'evex' for r in self.rows), 1886)
-        self.assertEqual(len({r['mnemonic'] for r in self.rows}), 352)
-        self.assertEqual(len(assembly_smoke.evex_sources(ROOT).splitlines()) - 1, 2425)
+        self.assertEqual(len(self.rows), 2762)
+        self.assertEqual(sum(r['encoding'] == 'evex' for r in self.rows), 2695)
+        self.assertEqual(len({r['mnemonic'] for r in self.rows}), 539)
+        self.assertEqual(len(assembly_smoke.evex_sources(ROOT).splitlines()) - 1, 3385)
         self.assertEqual(json.loads((ROOT / 'evex-source.json').read_text())['commit'],
                          json.loads((ROOT / 'zydis-source.json').read_text())['commit'])
 
@@ -30,7 +30,7 @@ class EvexTests(unittest.TestCase):
                                  ('evex', {'mask_mode': 'unknown'}),
                                  ('evex', {'mask_flags': ['unknown']}),
                                  ('evex', {'functionality': 'nf'}),
-                                 ('evex', {'static_broadcast': '8to16'})]:
+                                 ('evex', {'static_broadcast': '3to16'})]:
             rows = copy.deepcopy(self.rows)
             row = next(r for r in rows if r['encoding'] == 'evex')
             row.setdefault(location, {}).update(fields)

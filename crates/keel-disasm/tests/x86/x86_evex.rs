@@ -17,7 +17,7 @@ fn own(source: &str, syntax: Syntax) -> Vec<u8> {
         &keel_asm::x86::assemble_object_with_syntax_and_features(
             source,
             syntax,
-            Features::parse("avx512vl,vpclmulqdq").unwrap(),
+            Features::parse("avx512vl,avx512dq,avx512bw,avx512cd,vpclmulqdq").unwrap(),
         )
         .unwrap_or_else(|e| panic!("{source}: {e}")),
     )
@@ -113,7 +113,7 @@ fn generated_binding_smoke_assembles_and_roundtrips() {
         let source = fields[2];
         let object = match keel_asm::x86::assemble_object_with_features(
             source,
-            Features::parse("avx512vl,vpclmulqdq").unwrap(),
+            Features::parse("avx512vl,avx512dq,avx512bw,avx512cd,vpclmulqdq").unwrap(),
         ) {
             Ok(o) => o,
             Err(e) => {
@@ -132,7 +132,7 @@ fn generated_binding_smoke_assembles_and_roundtrips() {
         }
         let encoded = keel_asm::x86::assemble_object_with_features(
             &i.assembly(),
-            Features::parse("avx512vl,vpclmulqdq").unwrap(),
+            Features::parse("avx512vl,avx512dq,avx512bw,avx512cd,vpclmulqdq").unwrap(),
         );
         match encoded {
             Ok(o) if text(&o) == bytes => {}
@@ -150,7 +150,7 @@ fn generated_binding_smoke_assembles_and_roundtrips() {
             .collect::<Vec<_>>()
             .join("\n")
     );
-    assert_eq!(count, 2425);
+    assert_eq!(count, 3385);
 }
 
 fn oracle(source: &str, tag: &str, gnu: bool) -> Vec<u8> {
@@ -469,5 +469,207 @@ fn generated_att_bindings_match_intel() {
     assert_eq!(intel.len(), att.len());
     for (intel, att) in intel.iter().zip(att) {
         assert_eq!(own(intel, Syntax::Intel), own(att, Syntax::Att), "{att}");
+    }
+}
+
+#[test]
+fn evex_dq_bw_cd_independent_bytes_and_decode_roundtrips() {
+    // This is a hand-selected boundary matrix, independent of generated smoke
+    // fixtures. These instructions are assembled and decoded, never executed.
+    let mut cases: Vec<String> = [
+        "vpmullq zmm31{k7}{z},zmm16,zmm29",
+        "vcvtpd2qq zmm31{k7}{z},zmm29,{rn-sae}",
+        "vcvttpd2qq zmm17{k2},zmm30,{sae}",
+        "vcvttps2uqq zmm31{k7}{z},ymm20,{sae}",
+        "vcvtuqq2ps ymm31{k7}{z},zmm20,{rd-sae}",
+        "vcvtqq2pd zmm31{k7}{z},zmm20,{ru-sae}",
+        "vextractf64x2 xmm31{k1}{z},zmm20,3",
+        "vinserti64x2 zmm31{k7}{z},zmm20,xmm29,3",
+        "kandb k7,k6,k5",
+        "knotb k7,k6",
+        "kmovb k7,r15d",
+        "kmovb r15d,k7",
+        "ktestw k7,k6",
+        "vpaddb zmm31{k7}{z},zmm20,zmm29",
+        "vpcmpb k7{k6},zmm20,zmm29,255",
+        "vpcmpuw k7{k6},zmm20,zmm29,3",
+        "vpmovb2m k7,zmm31",
+        "vpmovm2b zmm31,k7",
+        "vpbroadcastb zmm31{k7}{z},r15d",
+        "vpbroadcastw zmm31,r15d",
+        "vpmovswb ymm31{k7}{z},zmm20",
+        "kandq k7,k6,k5",
+        "kandd k7,k6,k5",
+        "kshiftlq k7,k6,63",
+        "kshiftrd k7,k6,31",
+        "kunpckwd k7,k6,k5",
+        "kunpckdq k7,k6,k5",
+        "kmovq k7,r15",
+        "kmovq r15,k7",
+        "kmovq k7,qword ptr [r13+127]",
+        "kmovq qword ptr [r13+128],k7",
+        "kmovd k7,r15d",
+        "kmovd r15d,k7",
+        "vpconflictd zmm31{k7}{z},zmm20",
+        "vpconflictq zmm31{k7}{z},zmm20",
+        "vplzcntd zmm31{k7}{z},zmm20",
+        "vpmullq ymm31{k7}{z},ymm16,ymm29",
+        "vpaddb xmm31{k7}{z},xmm20,xmm29",
+        "vpconflictd ymm31{k7}{z},ymm20",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
+    // Displacements straddle compressed disp8*N limits. Distinct short-memory
+    // tuples catch use of the ZMM destination size as an access/scale shortcut.
+    for (template, scale) in [
+        ("vpmullq zmm31{k7}{z},zmm20,qword ptr [r13+DISP]{1to8}", 8),
+        ("vplzcntq zmm31{k7}{z},qword ptr [r13+DISP]{1to8}", 8),
+        ("vbroadcastf64x2 zmm31{k7}{z},xmmword ptr [r13+DISP]", 16),
+        ("vpmovsxbw zmm31{k7}{z},ymmword ptr [r13+DISP]", 32),
+        ("vpmovwb ymmword ptr [r13+DISP]{k7},zmm20", 32),
+        ("vpmovuswb ymmword ptr [r13+DISP]{k7},zmm20", 32),
+        ("vpsubw zmm31{k7}{z},zmm20,zmmword ptr [r13+DISP]", 64),
+        ("vpconflictd zmm31{k7}{z},zmmword ptr [r13+DISP]", 64),
+        ("vpbroadcastb zmm31{k7}{z},byte ptr [r13+DISP]", 1),
+        ("vpbroadcastw zmm31{k7}{z},word ptr [r13+DISP]", 2),
+    ] {
+        for displacement in [-129 * scale, -128 * scale, -1, 127 * scale, 128 * scale] {
+            cases.push(template.replace("DISP", &displacement.to_string()));
+        }
+    }
+    let features = Features::parse("avx512dq,avx512bw,avx512cd,avx512vl").unwrap();
+    let encode = |source: &str, syntax| {
+        text(
+            &keel_asm::x86::assemble_object_with_syntax_and_features(source, syntax, features)
+                .unwrap_or_else(|e| panic!("{source}: {e}")),
+        )
+    };
+    let mut source = String::from(".intel_syntax noprefix\n.text\n");
+    let mut expected = Vec::new();
+    for case in &cases {
+        source.push_str(case);
+        source.push('\n');
+        let bytes = encode(case, Syntax::Intel);
+        let decoded = decode(&bytes, 0).unwrap_or_else(|| panic!("{case}: {bytes:02x?}"));
+        assert_eq!(decoded.bytes.len(), bytes.len(), "{case}");
+        assert_eq!(
+            encode(&decoded.assembly(), Syntax::Intel),
+            bytes,
+            "{case}: {}",
+            decoded.assembly()
+        );
+        let parsed = Instruction::parse_intel(case).unwrap();
+        assert_eq!(
+            Instruction::parse_intel(&parsed.to_string()).unwrap(),
+            parsed,
+            "{case}"
+        );
+        expected.extend(bytes);
+    }
+    for gnu in [false, true] {
+        assert_eq!(
+            text(&oracle(&source, "dq-bw-cd", gnu)),
+            expected,
+            "GNU={gnu}"
+        );
+    }
+    for (att, intel) in [
+        (
+            "vpmullq %zmm29,%zmm16,%zmm31{%k7}{z}",
+            "vpmullq zmm31{k7}{z},zmm16,zmm29",
+        ),
+        (
+            "vcvtpd2qq {rn-sae},%zmm29,%zmm31{%k7}{z}",
+            "vcvtpd2qq zmm31{k7}{z},zmm29,{rn-sae}",
+        ),
+        (
+            "vpmovwb %zmm20,4064(%r13){%k7}",
+            "vpmovwb ymmword ptr [r13+4064]{k7},zmm20",
+        ),
+        ("kmovq %r15,%k7", "kmovq k7,r15"),
+        (
+            "vplzcntq 1016(%r13){1to8},%zmm31{%k7}{z}",
+            "vplzcntq zmm31{k7}{z},qword ptr [r13+1016]{1to8}",
+        ),
+    ] {
+        let bytes = encode(intel, Syntax::Intel);
+        assert_eq!(encode(att, Syntax::Att), bytes, "{att}");
+        let source = format!(".att_syntax\n.text\n{att}\n");
+        for gnu in [false, true] {
+            assert_eq!(
+                text(&oracle(&source, "dq-bw-cd-att", gnu)),
+                bytes,
+                "GNU={gnu}, {att}"
+            );
+        }
+    }
+}
+
+#[test]
+fn evex_dq_bw_cd_feature_permissions_and_invalid_forms() {
+    let assemble =
+        |source: &str, features| keel_asm::x86::assemble_object_with_features(source, features);
+    let f = Features::parse("avx512f").unwrap();
+    let vl = Features::parse("avx512vl").unwrap();
+    for (feature, wide, narrow) in [
+        (
+            "avx512dq",
+            "vpmullq zmm31{k7}{z},zmm20,zmm29",
+            "vpmullq ymm31{k7}{z},ymm20,ymm29",
+        ),
+        (
+            "avx512bw",
+            "vpaddb zmm31{k7}{z},zmm20,zmm29",
+            "vpaddb xmm31{k7}{z},xmm20,xmm29",
+        ),
+        (
+            "avx512cd",
+            "vpconflictq zmm31{k7}{z},zmm20",
+            "vpconflictq ymm31{k7}{z},ymm20",
+        ),
+    ] {
+        let enabled = Features::parse(feature).unwrap();
+        assert!(enabled.avx512f && !enabled.avx512vl);
+        assert!(assemble(wide, enabled).is_ok(), "{wide}");
+        assert!(assemble(wide, f).is_err(), "{wide}");
+        assert!(assemble(wide, vl).is_err(), "{wide}");
+        assert!(assemble(narrow, enabled).is_err(), "{narrow}");
+        assert!(
+            assemble(narrow, enabled.with_features("avx512vl").unwrap()).is_ok(),
+            "{narrow}"
+        );
+        let required = Instruction::parse_intel(wide).unwrap().required_features();
+        assert!(
+            required.avx512f && !required.avx512vl,
+            "{wide}: {required:?}"
+        );
+    }
+    for (source, feature) in [
+        ("kmovb k7,r15d", "avx512dq"),
+        ("ktestw k7,k6", "avx512dq"),
+        ("kmovd k7,r15d", "avx512bw"),
+        ("kmovq k7,r15", "avx512bw"),
+        ("kandq k7,k6,k5", "avx512bw"),
+        ("kandd k7,k6,k5", "avx512bw"),
+    ] {
+        assert!(
+            assemble(source, Features::parse(feature).unwrap()).is_ok(),
+            "{source}"
+        );
+        assert!(assemble(source, f).is_err(), "{source}");
+    }
+    let all = Features::parse("avx512dq,avx512bw,avx512cd,avx512vl").unwrap();
+    for source in [
+        "vpmullq zmm31{k7}{z},zmm20,zmm29,{sae}",
+        "vpaddb zmm31{k7}{z},zmm20,byte ptr [rax]{1to64}",
+        "vpmovwb ymmword ptr [rax]{k7}{z},zmm20",
+        "vpbroadcastw zmm31{k7}{z},byte ptr [rax]",
+        "vplzcntq zmm31{k7}{z},qword ptr [rax]{1to16}",
+        "vcvttpd2qq zmm31{k7}{z},zmm20,{rn-sae}",
+        "kmovq k7,r15d",
+        "kmovd k7,r15",
+    ] {
+        assert!(assemble(source, all).is_err(), "{source}");
     }
 }

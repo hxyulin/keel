@@ -348,15 +348,18 @@ candidates, the 45 tracked compiler recipes and feature/profile policy.
 [Definitions and limits](coverage-ledger.md) explain why candidates, unknown
 policy, unknown privilege and untracked validation are separate states.
 
-## AVX-512F/VL and EVEX
+## AVX-512F/VL, DQ, BW, CD and EVEX
 
-`evex.json` adds 1,884 EVEX AVX-512F records and 15 VEX-encoded foundation mask
-records. The latter are also present in the original legacy/VEX snapshot.
+`evex.json` contains 2,695 EVEX records for AVX512F, DQ, BW and CD, plus
+512-bit VPCLMULQDQ, and 67 VEX-encoded mask-register records. The VEX records
+are also present in the original legacy/VEX snapshot.
 `evex-source.json` pins the upstream commit, source hash and selection hash.
 `generate.py --check-upstream <instructions.json>` checks both selections.
 The imported data retains the Zydis MIT licence in `LICENSE-ZYDIS`.
 
-`evex.py` generates a separate form/decode table and 351 `EvexMnemonic` bindings.
+`evex.py` generates a separate form/decode table and 539 `EvexMnemonic` bindings.
+Their explicit order in `api-identities.json` preserves every existing numeric
+identity and appends new instructions independently of database sorting.
 It preserves mask policy, encoded length constraints, rounding/SAE, broadcast,
 element sizes and displacement tuples. Unknown encoding conditions fail
 validation. Feature requirements come from the existing policy and prerequisite
@@ -365,7 +368,10 @@ encoding functions. Registers and both symbolic tag directions are generated
 from `registers.json`; existing IDs/tags are unchanged, with ZMM and mask classes
 appended. XMM/YMM names now extend through register 31 for EVEX.
 
-Enable `avx512f` explicitly, or `avx512vl` for 128/256-bit VL forms. Positive
+Enable `avx512f` explicitly, or `avx512vl` for 128/256-bit VL forms. DQ, BW
+and CD use `avx512dq`, `avx512bw` and `avx512cd`; packed narrow extension forms
+require VL as well. Mask-register and 128N/scalar forms retain their distinct
+feature rules. Each extension implies F, while F does not enable them. Positive
 feature edits include prerequisite closure. The v1/v2/v3 profiles remain
 unchanged; no v4 profile is added. Runtime execution still requires OS-enabled
 opmask and ZMM state in XCR0. Target flags do not inspect the host or enable

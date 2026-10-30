@@ -222,5 +222,29 @@
     "field": "monitor",
     "bit": 38,
     "doc": "MONITOR/MWAIT instructions; execution requires the OS-enabled monitor facility and permitted privilege."
+  },
+  {
+    "field": "avx512dq",
+    "bit": 39,
+    "requires": [
+      "avx512f"
+    ],
+    "doc": "AVX-512 dword/qword operations; execution requires foundation vector state."
+  },
+  {
+    "field": "avx512bw",
+    "bit": 40,
+    "requires": [
+      "avx512f"
+    ],
+    "doc": "AVX-512 byte/word operations and wide mask registers; execution requires foundation vector state."
+  },
+  {
+    "field": "avx512cd",
+    "bit": 41,
+    "requires": [
+      "avx512f"
+    ],
+    "doc": "AVX-512 conflict detection and vector leading-zero counts; execution requires foundation vector state."
   }
 ]

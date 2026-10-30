@@ -55,3 +55,22 @@ fn borrowed_requirements_preserve_form_specific_contracts_and_fallbacks() {
         assert_eq!(i.required_features(), want, "{source}");
     }
 }
+
+#[test]
+fn avx512_extension_fingerprints_append_bits_and_keep_prerequisites_distinct() {
+    let foundation = Features::parse("avx512f").unwrap();
+    for (name, bit) in [("avx512dq", 39), ("avx512bw", 40), ("avx512cd", 41)] {
+        let features = Features::parse(name).unwrap();
+        assert!(features.contains(foundation), "{name}");
+        assert!(!features.avx512vl, "{name} does not imply VL");
+        assert!(!features.avx2, "{name} does not imply AVX2");
+        assert_eq!(features.fingerprint() ^ foundation.fingerprint(), 1 << bit);
+        assert_eq!(
+            Features::from_fingerprint(features.fingerprint()).unwrap(),
+            features
+        );
+        assert!(!foundation.contains(features));
+        let narrow = features.with_features("avx512vl").unwrap();
+        assert!(narrow.contains(features) && narrow.avx512vl);
+    }
+}

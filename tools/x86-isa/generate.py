@@ -422,8 +422,8 @@ def main():
         if expected != data:
             raise ValueError('Zydis subset differs from upstream selection')
         selected = [{k: v for k, v in row.items() if k != 'comment'} for row in json.loads(upstream)
-                    if (row.get('encoding') == 'evex' and (row['meta_info']['isa_set'].startswith('AVX512F_') or row['meta_info']['isa_set'] == 'AVX512_VPCLMULQDQ_512')
-                        or row.get('encoding') == 'vex' and row['meta_info']['isa_set'] == 'AVX512F_KOP')
+                    if (row.get('encoding') == 'evex' and (row['meta_info']['isa_set'].startswith(('AVX512F_', 'AVX512DQ_', 'AVX512BW_', 'AVX512CD_')) or row['meta_info']['isa_set'] == 'AVX512_VPCLMULQDQ_512')
+                        or row.get('encoding') == 'vex' and row['meta_info']['isa_set'].startswith(('AVX512F_', 'AVX512DQ_', 'AVX512BW_', 'AVX512CD_')) and row['meta_info']['isa_set'].endswith('_KOP'))
                     and row.get('filters', {}).get('mode') != '!64']
         if selected != evex.load(ROOT):
             raise ValueError('EVEX subset differs from upstream selection')

@@ -17,6 +17,7 @@ class ApiIdentityTests(unittest.TestCase):
         # Independent pin: changing a public API requires an intentional review
         # of the old contract, not simply regenerating expected output.
         original = copy.deepcopy(self.schema)
+        original.pop('evex')
         self.assertEqual(original['baseline'].pop(), {'variant': 'Evex', 'payload': 'EvexOpcode'})
         digest = hashlib.sha256(json.dumps(original, sort_keys=True).encode()).hexdigest()
         self.assertEqual(digest, '03d95d6201f3d0d3ff10418533a715f25eca52568be2bf1b31ef9ad7e2a0aaac')

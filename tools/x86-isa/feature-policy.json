@@ -177,5 +177,53 @@
     "avx",
     "avx512f",
     "vpclmulqdq"
+  ],
+  "AVX512DQ_128": [
+    "avx512dq",
+    "avx512vl"
+  ],
+  "AVX512DQ_128N": [
+    "avx512dq"
+  ],
+  "AVX512DQ_256": [
+    "avx512dq",
+    "avx512vl"
+  ],
+  "AVX512DQ_512": [
+    "avx512dq"
+  ],
+  "AVX512DQ_KOP": [
+    "avx512dq"
+  ],
+  "AVX512DQ_SCALAR": [
+    "avx512dq"
+  ],
+  "AVX512BW_128": [
+    "avx512bw",
+    "avx512vl"
+  ],
+  "AVX512BW_128N": [
+    "avx512bw"
+  ],
+  "AVX512BW_256": [
+    "avx512bw",
+    "avx512vl"
+  ],
+  "AVX512BW_512": [
+    "avx512bw"
+  ],
+  "AVX512BW_KOP": [
+    "avx512bw"
+  ],
+  "AVX512CD_128": [
+    "avx512cd",
+    "avx512vl"
+  ],
+  "AVX512CD_256": [
+    "avx512cd",
+    "avx512vl"
+  ],
+  "AVX512CD_512": [
+    "avx512cd"
   ]
 }

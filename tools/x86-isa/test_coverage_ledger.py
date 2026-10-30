@@ -121,14 +121,14 @@ class CoverageLedgerTests(unittest.TestCase):
 
     def test_avx512_table_is_separate_and_reused_vex_records_are_identified(self):
         rows = self.ledger['avx512_forms']
-        self.assertEqual(len(rows), 1901)
-        self.assertEqual(sorted(r['table_index'] for r in rows), list(range(1901)))
+        self.assertEqual(len(rows), 2762)
+        self.assertEqual(sorted(r['table_index'] for r in rows), list(range(2762)))
         old = {r['id'] for r in self.ledger['forms']}
-        self.assertEqual(sum(r['id'] in old for r in rows), 15)
-        self.assertEqual(sum(r['encoding'] == 'evex' for r in rows), 1886)
+        self.assertEqual(sum(r['id'] in old for r in rows), 67)
+        self.assertEqual(sum(r['encoding'] == 'evex' for r in rows), 2695)
         for row in rows:
             self.assertIn('avx512f', row['requires'])
-            self.assertEqual('avx512vl' in row['requires'], row['isa_set'] in ('AVX512F_128', 'AVX512F_256'))
+            self.assertEqual('avx512vl' in row['requires'], row['isa_set'].endswith(('_128', '_256')))
             self.assertEqual(row['validation'], 'untracked')
 
 

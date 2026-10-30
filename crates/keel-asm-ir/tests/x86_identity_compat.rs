@@ -13,6 +13,23 @@ use keel_asm_ir::x86::{FixedOpcode, Instruction, Opcode, V2Opcode, V3Opcode, X87
 use std::fmt::Write;
 
 #[test]
+fn foundation_evex_numeric_identities_remain_append_only() {
+    use keel_asm_ir::x86::EvexMnemonic;
+    for line in include_str!("fixtures/x86-evex-identities.txt").lines() {
+        if line.starts_with('#') {
+            continue;
+        }
+        let fields: Vec<_> = line.split('|').collect();
+        let index: usize = fields[0].parse().unwrap();
+        let opcode = EvexMnemonic::parse(fields[2]).unwrap();
+        assert_eq!(opcode as usize, index, "{}", fields[2]);
+        assert_eq!(EvexMnemonic::ALL[index], opcode);
+        assert_eq!(format!("{opcode:?}"), fields[1]);
+        assert_eq!(opcode.mnemonic(), fields[2]);
+    }
+}
+
+#[test]
 fn mnemonic_groups_match_binary_search_for_known_names_and_near_misses() {
     use keel_asm_ir::x86::isa::{self, FORMS};
     let check = |name: &str| {

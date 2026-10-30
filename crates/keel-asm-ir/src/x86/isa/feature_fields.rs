@@ -59,6 +59,12 @@ pub struct Features {
     pub apx_f: bool,
     /// MONITOR/MWAIT instructions; execution requires the OS-enabled monitor facility and permitted privilege.
     pub monitor: bool,
+    /// AVX-512 dword/qword operations; execution requires foundation vector state.
+    pub avx512dq: bool,
+    /// AVX-512 byte/word operations and wide mask registers; execution requires foundation vector state.
+    pub avx512bw: bool,
+    /// AVX-512 conflict detection and vector leading-zero counts; execution requires foundation vector state.
+    pub avx512cd: bool,
 }
 impl Features {
     pub const NONE: Self = Self {
@@ -101,6 +107,9 @@ impl Features {
         amx_fp16: false,
         apx_f: false,
         monitor: false,
+        avx512dq: false,
+        avx512bw: false,
+        avx512cd: false,
     };
     /// Every declared capability, for tests and tooling; not host detection.
     pub const fn all_known() -> Self { Self {
@@ -143,6 +152,9 @@ impl Features {
         amx_fp16: true,
         apx_f: true,
         monitor: true,
+        avx512dq: true,
+        avx512bw: true,
+        avx512cd: true,
     } }
     /// Stable schema bit IDs, covering every capability.
     pub const fn fingerprint(self) -> u64 {
@@ -185,10 +197,13 @@ impl Features {
             | ((self.amx_fp16 as u64) << 36)
             | ((self.apx_f as u64) << 37)
             | ((self.monitor as u64) << 38)
+            | ((self.avx512dq as u64) << 39)
+            | ((self.avx512bw as u64) << 40)
+            | ((self.avx512cd as u64) << 41)
     }
     /// Restore a schema fingerprint, rejecting unknown bits and invalid prerequisites.
     pub fn from_fingerprint(bits: u64) -> Result<Self, &'static str> {
-        if bits & !549755813887 != 0 {
+        if bits & !4398046511103 != 0 {
             return Err("unknown x86 feature fingerprint bits");
         }
         let features = Self {
@@ -231,6 +246,9 @@ impl Features {
             amx_fp16: bits & (1 << 36) != 0,
             apx_f: bits & (1 << 37) != 0,
             monitor: bits & (1 << 38) != 0,
+            avx512dq: bits & (1 << 39) != 0,
+            avx512bw: bits & (1 << 40) != 0,
+            avx512cd: bits & (1 << 41) != 0,
         };
         features.validate()?;
         Ok(features)
@@ -421,6 +439,33 @@ impl Features {
             "monitor" => {
                 self.monitor = enabled;
             }
+            "avx512dq" => {
+                self.avx512dq = enabled;
+                if enabled {
+                    self.avx = true;
+                    self.xsave = true;
+                    self.osxsave = true;
+                    self.avx512f = true;
+                }
+            }
+            "avx512bw" => {
+                self.avx512bw = enabled;
+                if enabled {
+                    self.avx = true;
+                    self.xsave = true;
+                    self.osxsave = true;
+                    self.avx512f = true;
+                }
+            }
+            "avx512cd" => {
+                self.avx512cd = enabled;
+                if enabled {
+                    self.avx = true;
+                    self.xsave = true;
+                    self.osxsave = true;
+                    self.avx512f = true;
+                }
+            }
             _ => return false,
         }
         true
@@ -474,6 +519,15 @@ impl Features {
         if self.apx_f && !self.osxsave {
             return Err("apx_f requires osxsave");
         }
+        if self.avx512dq && !self.avx512f {
+            return Err("avx512dq requires avx512f");
+        }
+        if self.avx512bw && !self.avx512f {
+            return Err("avx512bw requires avx512f");
+        }
+        if self.avx512cd && !self.avx512f {
+            return Err("avx512cd requires avx512f");
+        }
         Ok(())
     }
     pub fn names(self) -> impl Iterator<Item = &'static str> {
@@ -517,6 +571,9 @@ impl Features {
             (self.amx_fp16, "amx_fp16"),
             (self.apx_f, "apx_f"),
             (self.monitor, "monitor"),
+            (self.avx512dq, "avx512dq"),
+            (self.avx512bw, "avx512bw"),
+            (self.avx512cd, "avx512cd"),
         ]
         .into_iter()
         .filter_map(|(on, name)| on.then_some(name))

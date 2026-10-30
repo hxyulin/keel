@@ -10,10 +10,10 @@ Decoder registration enabled: **3562**; disabled by policy: **1**.
 Forms with declarative assembler candidates: **2939**.
 Public binding records: **1029**; without a direct source join: **86** (not an unsupported count).
 Tracked compiler declarations: **45**, with **43** regular recipes and **2** hooks.
-ISA policy keys without an explicit feature classification: **71**.
+ISA policy keys without an explicit feature classification: **69**.
 
-Separate AVX-512F/VL table: **1901** records and **352** mnemonic bindings.
-It contains **1886** EVEX records plus **15** VEX mask records already present in the legacy/VEX import.
+Separate AVX-512F/VL table: **2762** records and **539** mnemonic bindings.
+It contains **2695** EVEX records plus **67** VEX mask records already present in the legacy/VEX import.
 Do not add those reused VEX records to the unique-import total. These records are listed under `avx512_forms`.
 
 **Registration is not successful decoding. Candidate links are not complete operand support.**
@@ -49,8 +49,8 @@ An unclassified key is not automatically baseline; the runtime feature lookup cu
 | `AVX` | 700 | 700 | 700 | 700 | 0 | avx, xsave, osxsave | v3 |
 | `AVX2` | 286 | 286 | 286 | 286 | 0 | avx, avx2, xsave, osxsave | v3 |
 | `AVX2GATHER` | 16 | 16 | 16 | 16 | 0 | avx, avx2, xsave, osxsave | v3 |
-| `AVX512BW_KOP` | 34 | 34 | 34 | 0 | 0 | unclassified |  |
-| `AVX512DQ_KOP` | 18 | 18 | 18 | 0 | 0 | unclassified |  |
+| `AVX512BW_KOP` | 34 | 34 | 34 | 0 | 0 | avx, xsave, osxsave, avx512f, avx512bw |  |
+| `AVX512DQ_KOP` | 18 | 18 | 18 | 0 | 0 | avx, xsave, osxsave, avx512f, avx512dq |  |
 | `AVX512F_KOP` | 15 | 15 | 15 | 0 | 0 | avx, xsave, osxsave, avx512f |  |
 | `AVXAES` | 12 | 12 | 12 | 12 | 0 | aes, avx, xsave, osxsave |  |
 | `AVX_GFNI` | 12 | 12 | 12 | 0 | 0 | unclassified |  |

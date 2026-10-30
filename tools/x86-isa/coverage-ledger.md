@@ -127,13 +127,13 @@ unchanged. Logs are `/tmp/keel-coverage-ledger-workspace.log`,
 `/tmp/keel-coverage-ledger-python.log` and `/tmp/keel-coverage-ledger-check.log`.
 These global checks do not populate individual form execution verdicts.
 
-## Separate AVX-512F/VL table
+## Separate AVX-512F/VL, DQ, BW and CD table
 
 Schema version 2 adds `avx512_forms`, with locators into `evex.json` and indices
 into `isa::EVEX_FORMS`. The original `forms` array and its summary counters
-continue to describe the legacy/VEX table. The new section contains 1,884 EVEX
-records and 15 VEX-encoded mask records also present in the original import.
-Those 15 records retain identical content IDs; they are reused, not additional
+continue to describe the legacy/VEX table. The section contains 2,695 EVEX
+records and 67 VEX-encoded mask records also present in the original import.
+Those 67 records retain identical content IDs; they are reused, not additional
 unique imported instructions. Requirements and the public `EvexMnemonic`
 binding are recorded per entry. Decoder registration names the EVEX index or
 the shared VEX index. Validation remains `untracked`; generated source witnesses
