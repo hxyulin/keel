@@ -1096,10 +1096,118 @@ pub enum Intrinsic {
     X86Avx512ExpandLoadps = 885,
     #[doc = "AVX512F packed lane operation. Compression keeps selected source lanes in order; expansion consumes packed lanes in order. Packed memory accesses exactly popcount(mask) elements and suppresses all access for a zero mask."]
     X86Avx512ExpandLoadpd = 886,
+    #[doc = "Raw masked AVX512F packed conversion. Merge bits and inactive exception suppression follow hardware; active lanes observe MXCSR unless static rounding/SAE is selected."]
+    X86Avx512Vcvtdq2ps = 887,
+    #[doc = "Raw masked AVX512F packed conversion. Merge bits and inactive exception suppression follow hardware; active lanes observe MXCSR unless static rounding/SAE is selected."]
+    X86Avx512Vcvtudq2ps = 888,
+    #[doc = "Raw masked AVX512F packed conversion. Merge bits and inactive exception suppression follow hardware; active lanes observe MXCSR unless static rounding/SAE is selected."]
+    X86Avx512Vcvtdq2pd = 889,
+    #[doc = "Raw masked AVX512F packed conversion. Merge bits and inactive exception suppression follow hardware; active lanes observe MXCSR unless static rounding/SAE is selected."]
+    X86Avx512Vcvtudq2pd = 890,
+    #[doc = "Raw masked AVX512F packed conversion. Merge bits and inactive exception suppression follow hardware; active lanes observe MXCSR unless static rounding/SAE is selected."]
+    X86Avx512Vcvtps2dq = 891,
+    #[doc = "Raw masked AVX512F packed conversion. Merge bits and inactive exception suppression follow hardware; active lanes observe MXCSR unless static rounding/SAE is selected."]
+    X86Avx512Vcvtps2udq = 892,
+    #[doc = "Raw masked AVX512F packed conversion. Merge bits and inactive exception suppression follow hardware; active lanes observe MXCSR unless static rounding/SAE is selected."]
+    X86Avx512Vcvttps2dq = 893,
+    #[doc = "Raw masked AVX512F packed conversion. Merge bits and inactive exception suppression follow hardware; active lanes observe MXCSR unless static rounding/SAE is selected."]
+    X86Avx512Vcvttps2udq = 894,
+    #[doc = "Raw masked AVX512F packed conversion. Merge bits and inactive exception suppression follow hardware; active lanes observe MXCSR unless static rounding/SAE is selected."]
+    X86Avx512Vcvtpd2dq = 895,
+    #[doc = "Raw masked AVX512F packed conversion. Merge bits and inactive exception suppression follow hardware; active lanes observe MXCSR unless static rounding/SAE is selected."]
+    X86Avx512Vcvtpd2udq = 896,
+    #[doc = "Raw masked AVX512F packed conversion. Merge bits and inactive exception suppression follow hardware; active lanes observe MXCSR unless static rounding/SAE is selected."]
+    X86Avx512Vcvttpd2dq = 897,
+    #[doc = "Raw masked AVX512F packed conversion. Merge bits and inactive exception suppression follow hardware; active lanes observe MXCSR unless static rounding/SAE is selected."]
+    X86Avx512Vcvttpd2udq = 898,
+    #[doc = "Raw masked AVX512F packed conversion. Merge bits and inactive exception suppression follow hardware; active lanes observe MXCSR unless static rounding/SAE is selected."]
+    X86Avx512Vcvtps2pd = 899,
+    #[doc = "Raw masked AVX512F packed conversion. Merge bits and inactive exception suppression follow hardware; active lanes observe MXCSR unless static rounding/SAE is selected."]
+    X86Avx512Vcvtpd2ps = 900,
+    #[doc = "Raw masked AVX512F packed conversion. Merge bits and inactive exception suppression follow hardware; active lanes observe MXCSR unless static rounding/SAE is selected."]
+    X86Avx512Vcvtph2ps = 901,
+    #[doc = "Raw masked AVX512F packed conversion. Merge bits and inactive exception suppression follow hardware; active lanes observe MXCSR unless static rounding/SAE is selected."]
+    X86Avx512Vcvtps2ph = 902,
+    #[doc = "Raw masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress exceptions; controls explicitly select SAE or rounding."]
+    X86Avx512Getexpps = 903,
+    #[doc = "Raw masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress exceptions; controls explicitly select SAE or rounding."]
+    X86Avx512Getexppd = 904,
+    #[doc = "Raw masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress exceptions; controls explicitly select SAE or rounding."]
+    X86Avx512Getmantps = 905,
+    #[doc = "Raw masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress exceptions; controls explicitly select SAE or rounding."]
+    X86Avx512Getmantpd = 906,
+    #[doc = "Raw masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress exceptions; controls explicitly select SAE or rounding."]
+    X86Avx512Scalefps = 907,
+    #[doc = "Raw masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress exceptions; controls explicitly select SAE or rounding."]
+    X86Avx512Scalefpd = 908,
+    #[doc = "Raw masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress exceptions; controls explicitly select SAE or rounding."]
+    X86Avx512Rcp14ps = 909,
+    #[doc = "Raw masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress exceptions; controls explicitly select SAE or rounding."]
+    X86Avx512Rcp14pd = 910,
+    #[doc = "Raw masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress exceptions; controls explicitly select SAE or rounding."]
+    X86Avx512Rsqrt14ps = 911,
+    #[doc = "Raw masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress exceptions; controls explicitly select SAE or rounding."]
+    X86Avx512Rsqrt14pd = 912,
+    #[doc = "Raw masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress exceptions; controls explicitly select SAE or rounding."]
+    X86Avx512Roundscaleps = 913,
+    #[doc = "Raw masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress exceptions; controls explicitly select SAE or rounding."]
+    X86Avx512Roundscalepd = 914,
+    #[doc = "Raw masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress exceptions; controls explicitly select SAE or rounding."]
+    X86Avx512Fixupimmps = 915,
+    #[doc = "Raw masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress exceptions; controls explicitly select SAE or rounding."]
+    X86Avx512Fixupimmpd = 916,
+    #[doc = "Pure AVX512F integer operation with scalar lane masks. Immediate controls are constant bytes. Raw shifts saturate oversized counts; rotations reduce counts modulo lane width."]
+    X86Avx512MaskTernlogd = 917,
+    #[doc = "Pure AVX512F integer operation with scalar lane masks. Immediate controls are constant bytes. Raw shifts saturate oversized counts; rotations reduce counts modulo lane width."]
+    X86Avx512MaskTernlogq = 918,
+    #[doc = "Pure AVX512F integer operation with scalar lane masks. Immediate controls are constant bytes. Raw shifts saturate oversized counts; rotations reduce counts modulo lane width."]
+    X86Avx512MaskRold = 919,
+    #[doc = "Pure AVX512F integer operation with scalar lane masks. Immediate controls are constant bytes. Raw shifts saturate oversized counts; rotations reduce counts modulo lane width."]
+    X86Avx512MaskRolq = 920,
+    #[doc = "Pure AVX512F integer operation with scalar lane masks. Immediate controls are constant bytes. Raw shifts saturate oversized counts; rotations reduce counts modulo lane width."]
+    X86Avx512MaskRord = 921,
+    #[doc = "Pure AVX512F integer operation with scalar lane masks. Immediate controls are constant bytes. Raw shifts saturate oversized counts; rotations reduce counts modulo lane width."]
+    X86Avx512MaskRorq = 922,
+    #[doc = "Pure AVX512F integer operation with scalar lane masks. Immediate controls are constant bytes. Raw shifts saturate oversized counts; rotations reduce counts modulo lane width."]
+    X86Avx512MaskRolvd = 923,
+    #[doc = "Pure AVX512F integer operation with scalar lane masks. Immediate controls are constant bytes. Raw shifts saturate oversized counts; rotations reduce counts modulo lane width."]
+    X86Avx512MaskRolvq = 924,
+    #[doc = "Pure AVX512F integer operation with scalar lane masks. Immediate controls are constant bytes. Raw shifts saturate oversized counts; rotations reduce counts modulo lane width."]
+    X86Avx512MaskRorvd = 925,
+    #[doc = "Pure AVX512F integer operation with scalar lane masks. Immediate controls are constant bytes. Raw shifts saturate oversized counts; rotations reduce counts modulo lane width."]
+    X86Avx512MaskRorvq = 926,
+    #[doc = "Pure AVX512F integer operation with scalar lane masks. Immediate controls are constant bytes. Raw shifts saturate oversized counts; rotations reduce counts modulo lane width."]
+    X86Avx512MaskSllvd = 927,
+    #[doc = "Pure AVX512F integer operation with scalar lane masks. Immediate controls are constant bytes. Raw shifts saturate oversized counts; rotations reduce counts modulo lane width."]
+    X86Avx512MaskSllvq = 928,
+    #[doc = "Pure AVX512F integer operation with scalar lane masks. Immediate controls are constant bytes. Raw shifts saturate oversized counts; rotations reduce counts modulo lane width."]
+    X86Avx512MaskSrlvd = 929,
+    #[doc = "Pure AVX512F integer operation with scalar lane masks. Immediate controls are constant bytes. Raw shifts saturate oversized counts; rotations reduce counts modulo lane width."]
+    X86Avx512MaskSrlvq = 930,
+    #[doc = "Pure AVX512F integer operation with scalar lane masks. Immediate controls are constant bytes. Raw shifts saturate oversized counts; rotations reduce counts modulo lane width."]
+    X86Avx512MaskSravd = 931,
+    #[doc = "Pure AVX512F integer operation with scalar lane masks. Immediate controls are constant bytes. Raw shifts saturate oversized counts; rotations reduce counts modulo lane width."]
+    X86Avx512MaskSravq = 932,
+    #[doc = "Pure AVX512F integer operation with scalar lane masks. Immediate controls are constant bytes. Raw shifts saturate oversized counts; rotations reduce counts modulo lane width."]
+    X86Avx512Testd = 933,
+    #[doc = "Pure AVX512F integer operation with scalar lane masks. Immediate controls are constant bytes. Raw shifts saturate oversized counts; rotations reduce counts modulo lane width."]
+    X86Avx512Testq = 934,
+    #[doc = "Pure AVX512F integer operation with scalar lane masks. Immediate controls are constant bytes. Raw shifts saturate oversized counts; rotations reduce counts modulo lane width."]
+    X86Avx512Testnd = 935,
+    #[doc = "Pure AVX512F integer operation with scalar lane masks. Immediate controls are constant bytes. Raw shifts saturate oversized counts; rotations reduce counts modulo lane width."]
+    X86Avx512Testnq = 936,
+    #[doc = "Pure AVX512F integer operation with scalar lane masks. Immediate controls are constant bytes. Raw shifts saturate oversized counts; rotations reduce counts modulo lane width."]
+    X86Avx512MaskAbsd = 937,
+    #[doc = "Pure AVX512F integer operation with scalar lane masks. Immediate controls are constant bytes. Raw shifts saturate oversized counts; rotations reduce counts modulo lane width."]
+    X86Avx512MaskAbsq = 938,
+    #[doc = "Pure AVX512F integer operation with scalar lane masks. Immediate controls are constant bytes. Raw shifts saturate oversized counts; rotations reduce counts modulo lane width."]
+    X86Avx512MaskMuldq = 939,
+    #[doc = "Pure AVX512F integer operation with scalar lane masks. Immediate controls are constant bytes. Raw shifts saturate oversized counts; rotations reduce counts modulo lane width."]
+    X86Avx512MaskMuludq = 940,
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 887] = [
+    pub const ALL: [Intrinsic; 941] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -1987,6 +2095,60 @@ impl Intrinsic {
         Intrinsic::X86Avx512ExpandLoadq,
         Intrinsic::X86Avx512ExpandLoadps,
         Intrinsic::X86Avx512ExpandLoadpd,
+        Intrinsic::X86Avx512Vcvtdq2ps,
+        Intrinsic::X86Avx512Vcvtudq2ps,
+        Intrinsic::X86Avx512Vcvtdq2pd,
+        Intrinsic::X86Avx512Vcvtudq2pd,
+        Intrinsic::X86Avx512Vcvtps2dq,
+        Intrinsic::X86Avx512Vcvtps2udq,
+        Intrinsic::X86Avx512Vcvttps2dq,
+        Intrinsic::X86Avx512Vcvttps2udq,
+        Intrinsic::X86Avx512Vcvtpd2dq,
+        Intrinsic::X86Avx512Vcvtpd2udq,
+        Intrinsic::X86Avx512Vcvttpd2dq,
+        Intrinsic::X86Avx512Vcvttpd2udq,
+        Intrinsic::X86Avx512Vcvtps2pd,
+        Intrinsic::X86Avx512Vcvtpd2ps,
+        Intrinsic::X86Avx512Vcvtph2ps,
+        Intrinsic::X86Avx512Vcvtps2ph,
+        Intrinsic::X86Avx512Getexpps,
+        Intrinsic::X86Avx512Getexppd,
+        Intrinsic::X86Avx512Getmantps,
+        Intrinsic::X86Avx512Getmantpd,
+        Intrinsic::X86Avx512Scalefps,
+        Intrinsic::X86Avx512Scalefpd,
+        Intrinsic::X86Avx512Rcp14ps,
+        Intrinsic::X86Avx512Rcp14pd,
+        Intrinsic::X86Avx512Rsqrt14ps,
+        Intrinsic::X86Avx512Rsqrt14pd,
+        Intrinsic::X86Avx512Roundscaleps,
+        Intrinsic::X86Avx512Roundscalepd,
+        Intrinsic::X86Avx512Fixupimmps,
+        Intrinsic::X86Avx512Fixupimmpd,
+        Intrinsic::X86Avx512MaskTernlogd,
+        Intrinsic::X86Avx512MaskTernlogq,
+        Intrinsic::X86Avx512MaskRold,
+        Intrinsic::X86Avx512MaskRolq,
+        Intrinsic::X86Avx512MaskRord,
+        Intrinsic::X86Avx512MaskRorq,
+        Intrinsic::X86Avx512MaskRolvd,
+        Intrinsic::X86Avx512MaskRolvq,
+        Intrinsic::X86Avx512MaskRorvd,
+        Intrinsic::X86Avx512MaskRorvq,
+        Intrinsic::X86Avx512MaskSllvd,
+        Intrinsic::X86Avx512MaskSllvq,
+        Intrinsic::X86Avx512MaskSrlvd,
+        Intrinsic::X86Avx512MaskSrlvq,
+        Intrinsic::X86Avx512MaskSravd,
+        Intrinsic::X86Avx512MaskSravq,
+        Intrinsic::X86Avx512Testd,
+        Intrinsic::X86Avx512Testq,
+        Intrinsic::X86Avx512Testnd,
+        Intrinsic::X86Avx512Testnq,
+        Intrinsic::X86Avx512MaskAbsd,
+        Intrinsic::X86Avx512MaskAbsq,
+        Intrinsic::X86Avx512MaskMuldq,
+        Intrinsic::X86Avx512MaskMuludq,
     ];
 }
 
@@ -2870,5 +3032,59 @@ macro_rules! x86_intrinsics {
             | $crate::Intrinsic::X86Avx512ExpandLoadq
             | $crate::Intrinsic::X86Avx512ExpandLoadps
             | $crate::Intrinsic::X86Avx512ExpandLoadpd
+            | $crate::Intrinsic::X86Avx512Vcvtdq2ps
+            | $crate::Intrinsic::X86Avx512Vcvtudq2ps
+            | $crate::Intrinsic::X86Avx512Vcvtdq2pd
+            | $crate::Intrinsic::X86Avx512Vcvtudq2pd
+            | $crate::Intrinsic::X86Avx512Vcvtps2dq
+            | $crate::Intrinsic::X86Avx512Vcvtps2udq
+            | $crate::Intrinsic::X86Avx512Vcvttps2dq
+            | $crate::Intrinsic::X86Avx512Vcvttps2udq
+            | $crate::Intrinsic::X86Avx512Vcvtpd2dq
+            | $crate::Intrinsic::X86Avx512Vcvtpd2udq
+            | $crate::Intrinsic::X86Avx512Vcvttpd2dq
+            | $crate::Intrinsic::X86Avx512Vcvttpd2udq
+            | $crate::Intrinsic::X86Avx512Vcvtps2pd
+            | $crate::Intrinsic::X86Avx512Vcvtpd2ps
+            | $crate::Intrinsic::X86Avx512Vcvtph2ps
+            | $crate::Intrinsic::X86Avx512Vcvtps2ph
+            | $crate::Intrinsic::X86Avx512Getexpps
+            | $crate::Intrinsic::X86Avx512Getexppd
+            | $crate::Intrinsic::X86Avx512Getmantps
+            | $crate::Intrinsic::X86Avx512Getmantpd
+            | $crate::Intrinsic::X86Avx512Scalefps
+            | $crate::Intrinsic::X86Avx512Scalefpd
+            | $crate::Intrinsic::X86Avx512Rcp14ps
+            | $crate::Intrinsic::X86Avx512Rcp14pd
+            | $crate::Intrinsic::X86Avx512Rsqrt14ps
+            | $crate::Intrinsic::X86Avx512Rsqrt14pd
+            | $crate::Intrinsic::X86Avx512Roundscaleps
+            | $crate::Intrinsic::X86Avx512Roundscalepd
+            | $crate::Intrinsic::X86Avx512Fixupimmps
+            | $crate::Intrinsic::X86Avx512Fixupimmpd
+            | $crate::Intrinsic::X86Avx512MaskTernlogd
+            | $crate::Intrinsic::X86Avx512MaskTernlogq
+            | $crate::Intrinsic::X86Avx512MaskRold
+            | $crate::Intrinsic::X86Avx512MaskRolq
+            | $crate::Intrinsic::X86Avx512MaskRord
+            | $crate::Intrinsic::X86Avx512MaskRorq
+            | $crate::Intrinsic::X86Avx512MaskRolvd
+            | $crate::Intrinsic::X86Avx512MaskRolvq
+            | $crate::Intrinsic::X86Avx512MaskRorvd
+            | $crate::Intrinsic::X86Avx512MaskRorvq
+            | $crate::Intrinsic::X86Avx512MaskSllvd
+            | $crate::Intrinsic::X86Avx512MaskSllvq
+            | $crate::Intrinsic::X86Avx512MaskSrlvd
+            | $crate::Intrinsic::X86Avx512MaskSrlvq
+            | $crate::Intrinsic::X86Avx512MaskSravd
+            | $crate::Intrinsic::X86Avx512MaskSravq
+            | $crate::Intrinsic::X86Avx512Testd
+            | $crate::Intrinsic::X86Avx512Testq
+            | $crate::Intrinsic::X86Avx512Testnd
+            | $crate::Intrinsic::X86Avx512Testnq
+            | $crate::Intrinsic::X86Avx512MaskAbsd
+            | $crate::Intrinsic::X86Avx512MaskAbsq
+            | $crate::Intrinsic::X86Avx512MaskMuldq
+            | $crate::Intrinsic::X86Avx512MaskMuludq
     };
 }

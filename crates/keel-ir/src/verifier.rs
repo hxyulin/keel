@@ -1661,6 +1661,61 @@ impl Verifier<'_> {
                         );
                     }
                 }
+                if let Some((_, immediate, control)) = id.x86_avx512_special() {
+                    for index in immediate.into_iter().chain(control) {
+                        let value = args.get(index).and_then(|&arg| {
+                            match func.value_def(func.resolve(arg)) {
+                                ValueDef::Result(i, _) => match func.inst_data(i) {
+                                    InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                    _ => None,
+                                },
+                                _ => None,
+                            }
+                        });
+                        if !value
+                            .is_some_and(|value| id.valid_x86_avx512_special_control(index, value))
+                        {
+                            self.inst_error(
+                                inst,
+                                "invalid AVX512 floating immediate or SAE/rounding control".into(),
+                            );
+                        }
+                    }
+                }
+                if let Some(index) = id.x86_avx512_integer_control() {
+                    let control =
+                        args.get(index)
+                            .and_then(|&arg| match func.value_def(func.resolve(arg)) {
+                                ValueDef::Result(i, _) => match func.inst_data(i) {
+                                    InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                    _ => None,
+                                },
+                                _ => None,
+                            });
+                    if !control.is_some_and(|n| (0..256).contains(&n)) {
+                        self.inst_error(
+                            inst,
+                            "AVX512 integer control must be iconst.i32 in0..=255".into(),
+                        );
+                    }
+                }
+                if id.is_x86_avx512_convert() {
+                    let control =
+                        args.get(3)
+                            .and_then(|&arg| match func.value_def(func.resolve(arg)) {
+                                ValueDef::Result(i, _) => match func.inst_data(i) {
+                                    InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                    _ => None,
+                                },
+                                _ => None,
+                            });
+                    if !control.is_some_and(|n| id.valid_x86_avx512_convert_control(n)) {
+                        self.inst_error(
+                            inst,
+                            "invalid AVX512 conversion rounding/SAE control".into(),
+                        );
+                    }
+                }
                 if id.is_x86_avx512_float_compare() {
                     let control =
                         args.get(3)

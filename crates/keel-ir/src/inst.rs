@@ -956,6 +956,30 @@ impl InstData {
             }
             Self::VaArg { .. } | Self::AggregateVaArg { .. } => ReadWrite,
             Self::Intrinsic { id, .. } => match id {
+                Intrinsic::X86Avx512MaskTernlogd
+                | Intrinsic::X86Avx512MaskTernlogq
+                | Intrinsic::X86Avx512MaskRold
+                | Intrinsic::X86Avx512MaskRolq
+                | Intrinsic::X86Avx512MaskRord
+                | Intrinsic::X86Avx512MaskRorq
+                | Intrinsic::X86Avx512MaskRolvd
+                | Intrinsic::X86Avx512MaskRolvq
+                | Intrinsic::X86Avx512MaskRorvd
+                | Intrinsic::X86Avx512MaskRorvq
+                | Intrinsic::X86Avx512MaskSllvd
+                | Intrinsic::X86Avx512MaskSllvq
+                | Intrinsic::X86Avx512MaskSrlvd
+                | Intrinsic::X86Avx512MaskSrlvq
+                | Intrinsic::X86Avx512MaskSravd
+                | Intrinsic::X86Avx512MaskSravq
+                | Intrinsic::X86Avx512Testd
+                | Intrinsic::X86Avx512Testq
+                | Intrinsic::X86Avx512Testnd
+                | Intrinsic::X86Avx512Testnq
+                | Intrinsic::X86Avx512MaskAbsd
+                | Intrinsic::X86Avx512MaskAbsq
+                | Intrinsic::X86Avx512MaskMuldq
+                | Intrinsic::X86Avx512MaskMuludq => None,
                 crate::x86_system_intrinsics!(all) => id.generated_system_memory_effects(),
                 crate::x86_query_intrinsics!(all) => id.generated_query_memory_effects(),
                 Intrinsic::X86Avx512Compressd
@@ -974,6 +998,36 @@ impl InstData {
                 | Intrinsic::X86Avx512ExpandLoadq
                 | Intrinsic::X86Avx512ExpandLoadps
                 | Intrinsic::X86Avx512ExpandLoadpd => Read,
+                Intrinsic::X86Avx512Getexpps
+                | Intrinsic::X86Avx512Getexppd
+                | Intrinsic::X86Avx512Getmantps
+                | Intrinsic::X86Avx512Getmantpd
+                | Intrinsic::X86Avx512Scalefps
+                | Intrinsic::X86Avx512Scalefpd
+                | Intrinsic::X86Avx512Rcp14ps
+                | Intrinsic::X86Avx512Rcp14pd
+                | Intrinsic::X86Avx512Rsqrt14ps
+                | Intrinsic::X86Avx512Rsqrt14pd
+                | Intrinsic::X86Avx512Roundscaleps
+                | Intrinsic::X86Avx512Roundscalepd
+                | Intrinsic::X86Avx512Fixupimmps
+                | Intrinsic::X86Avx512Fixupimmpd => Barrier,
+                Intrinsic::X86Avx512Vcvtdq2ps
+                | Intrinsic::X86Avx512Vcvtudq2ps
+                | Intrinsic::X86Avx512Vcvtdq2pd
+                | Intrinsic::X86Avx512Vcvtudq2pd
+                | Intrinsic::X86Avx512Vcvtps2dq
+                | Intrinsic::X86Avx512Vcvtps2udq
+                | Intrinsic::X86Avx512Vcvttps2dq
+                | Intrinsic::X86Avx512Vcvttps2udq
+                | Intrinsic::X86Avx512Vcvtpd2dq
+                | Intrinsic::X86Avx512Vcvtpd2udq
+                | Intrinsic::X86Avx512Vcvttpd2dq
+                | Intrinsic::X86Avx512Vcvttpd2udq
+                | Intrinsic::X86Avx512Vcvtps2pd
+                | Intrinsic::X86Avx512Vcvtpd2ps
+                | Intrinsic::X86Avx512Vcvtph2ps
+                | Intrinsic::X86Avx512Vcvtps2ph => Barrier,
                 Intrinsic::X86Avx512Vpgatherdd
                 | Intrinsic::X86Avx512Vpgatherdq
                 | Intrinsic::X86Avx512Vpgatherqd
@@ -1810,7 +1864,8 @@ impl InstData {
             | Self::Trap => true,
             Self::Neon { .. } => true,
             Self::Intrinsic { id, .. } => {
-                !(id.is_x86_bmi()
+                !(id.is_x86_avx512_integer()
+                    || id.is_x86_bmi()
                     || id.is_x86_sha256()
                     || ((id.is_x86_avx512_mask() || id.is_x86_avx512_pack()) && id.info().pure)
                     || id.x86_aes_opcode().is_some()

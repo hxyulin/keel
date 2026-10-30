@@ -874,10 +874,19 @@ mod x86_avx512_shuffle;
 #[path = "vector_x86/x86_avx512_reduce.rs"]
 mod x86_avx512_reduce;
 
-#[path = "vector_x86/x86_avx512_convert.rs"]
-mod x86_avx512_convert;
 #[path = "vector_x86/x86_avx512_indexed.rs"]
 mod x86_avx512_indexed;
 
+#[path = "vector_x86/x86_avx512_convert.rs"]
+mod x86_avx512_convert;
 #[path = "vector_x86/x86_avx512_pack.rs"]
 mod x86_avx512_pack;
+
+#[path = "vector_x86/x86_avx512_special.rs"]
+mod x86_avx512_special;
+
+#[path = "vector_x86/x86_avx512_integer_intrinsics.rs"]
+mod x86_avx512_integer_intrinsics;
+
+#[path = "vector_x86/x86_avx512_convert_raw.rs"]
+mod x86_avx512_convert_raw;
