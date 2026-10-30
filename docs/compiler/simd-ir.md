@@ -158,6 +158,10 @@ listed, for example `-p simplify-cfg,canonicalize,instcombine,simplify-cfg,gvn,d
 The counted-map subset is increasing-by-one loops with a 32- or
 64-bit induction variable, an invariant starting index, a separate header and
 straight-line body, one store, and contiguous streams of one scalar element type.
+Integer literals may precede the header's comparison and branch. Accepted
+loops move those literals into the preheader before adding vector guards;
+rejected loops keep their original placement. This includes fixed trip counts
+and uniform integer operands, without moving loads or other computations.
 Loads, copies, fills, integer
 add/subtract/bitwise operations, and floating add/subtract/multiply/divide can be
 widened to the matching 128-bit shape. Uniform scalar operands are broadcast once

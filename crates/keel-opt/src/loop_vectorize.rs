@@ -232,6 +232,12 @@ fn invariant(f: &Function, dom: &DominatorTree, pre: Block, v: Value) -> bool {
     };
     dom.dominates(b, pre)
 }
+// Accepted headers contain only integer literals before their compare/branch.
+// transform() moves these definitions to the preheader before creating guards.
+fn header_literal(f: &Function, header: Block, v: Value) -> bool {
+    def(f, v)
+        .is_some_and(|i| f.inst_block(i) == header && matches!(f.inst_data(i), D::Iconst { .. }))
+}
 struct Analyze<'a> {
     f: &'a Function,
     dom: &'a DominatorTree,
@@ -243,6 +249,9 @@ struct Analyze<'a> {
     conditional: bool,
 }
 impl Analyze<'_> {
+    fn invariant(&self, v: Value) -> bool {
+        invariant(self.f, self.dom, self.c.pre, v) || header_literal(self.f, self.c.header, v)
+    }
     fn index(&mut self, v: Value) -> Option<Option<Value>> {
         let v = self.f.resolve(v);
         if v == self.c.iv {
@@ -267,7 +276,7 @@ impl Analyze<'_> {
                 // Only addition at address width: never reassociate a narrow
                 // wrapping add through an extension. The guard checks this sum.
                 for (index, offset) in [(args[0], args[1]), (args[1], args[0])] {
-                    if invariant(self.f, self.dom, self.c.pre, offset)
+                    if self.invariant(offset)
                         && (self.f.resolve(index) == self.c.iv
                             || matches!(
                                 def(self.f, index).map(|i| self.f.inst_data(i)),
@@ -300,7 +309,7 @@ impl Analyze<'_> {
         else {
             return None;
         };
-        if !invariant(self.f, self.dom, self.c.pre, base) {
+        if !self.invariant(base) {
             return None;
         }
         let bytes = self.c.stream_bytes;
@@ -359,7 +368,7 @@ impl Analyze<'_> {
             return (self.c.widths.get(&v).copied().unwrap_or(self.c.shape) == shape).then_some(());
         }
         self.c.widths.insert(v, shape);
-        if invariant(self.f, self.dom, self.c.pre, v) {
+        if self.invariant(v) {
             self.c.vectors.insert(v);
             return Some(());
         }
@@ -539,9 +548,13 @@ fn analyze(
     if !matches!(f.value_type(iv), Type::I32 | Type::I64) {
         return None;
     }
-    let [cmp, branch] = *f.block_insts(header) else {
+    let (literals, &[cmp, branch]) = f.block_insts(header).split_last_chunk::<2>()?;
+    if !literals
+        .iter()
+        .all(|&i| matches!(f.inst_data(i), D::Iconst { .. }))
+    {
         return None;
-    };
+    }
     let D::Brif { cond, ref dests } = *f.inst_data(branch) else {
         return None;
     };
@@ -587,7 +600,10 @@ fn analyze(
         return None;
     }
     let pre = *preds.iter().find(|&&b| b != body)?;
-    if pre == header || !dom.dominates(header, body) || !invariant(f, dom, pre, bound) {
+    if pre == header
+        || !dom.dominates(header, body)
+        || !(invariant(f, dom, pre, bound) || header_literal(f, header, bound))
+    {
         return None;
     }
     let pre_jump = *f.block_insts(pre).last()?;
@@ -1353,6 +1369,14 @@ fn reduce_body(
 }
 
 fn transform(f: &mut Function, mut c: Candidate, target: VectorTarget) {
+    // Keep rejected candidates untouched. Only accepted loops move their pure
+    // header literals, preserving SSA identities for scalar tails and exits.
+    let header = f.block_insts(c.header);
+    let literals = header[..header.len() - 2].to_vec();
+    let pre_jump = *f.block_insts(c.pre).last().unwrap();
+    for literal in literals {
+        f.move_inst(literal, keel_ir::InsertPoint::Before(pre_jump));
+    }
     let guard = f.create_block();
     let entry = guard;
     let setup = f.create_block();

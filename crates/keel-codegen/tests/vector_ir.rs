@@ -53,3 +53,94 @@ fn d_shapes_use_arm_exact_width_transport() {
         keel_codegen::compile_program(&module, Target::Aarch64AppleDarwin).unwrap();
     }
 }
+
+#[cfg(any(
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "linux", target_arch = "x86_64")
+))]
+#[test]
+fn literal_header_maps_preserve_overlap_guards_negative_starts_and_tails() {
+    use std::{fs, process::Command};
+    let mut m = keel_ir::parse(
+        "func @header_map(ptr,ptr,i64) cc(c) {
+block0(v0: ptr,v1: ptr,v2: i64):
+ jump block1(v2)
+block1(v3: i64):
+ v4 = iconst.i64 17
+ v5 = iconst.i32 7
+ v6 = icmp.slt v3,v4
+ brif v6,block2,block3
+block2:
+ v7 = iconst.i64 2
+ v8 = shl v3,v7
+ v9 = ptradd v0,v8
+ v10 = ptradd v1,v8
+ v11 = load.i32 v9
+ v12 = load.i32 v10
+ v13 = iadd v11,v12
+ v14 = xor v13,v5
+ store v14,v9
+ v15 = iconst.i64 1
+ v16 = iadd v3,v15
+ jump block1(v16)
+block3:
+ return
+}",
+    )
+    .unwrap();
+    keel_opt::run_passes(&mut m, &["loop-vectorize"]).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    assert!(
+        m.functions[0]
+            .layout_insts()
+            .any(|(_, i)| m.functions[0].inst_data(i).is_vector_instruction())
+    );
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("literal-header-map");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("driver.c"),
+        include_str!("fixtures/literal_header_map.c"),
+    )
+    .unwrap();
+    let output = Command::new("clang")
+        .args(["-O2", "-c"])
+        .arg(dir.join("driver.c"))
+        .arg("-o")
+        .arg(dir.join("driver.o"))
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let target = if cfg!(target_arch = "x86_64") {
+        Target::X86_64LinuxGnu
+    } else {
+        Target::Aarch64AppleDarwin
+    };
+    for allocation in [AllocationTier::Fast, AllocationTier::Full] {
+        let pipeline = CodegenPipeline {
+            selector: &SelectionTier::Full,
+            allocator: &allocation,
+        };
+        let text = keel_codegen::compile_with_pipeline(&m, target, &pipeline).unwrap();
+        let program = keel_codegen::compile_program_with_pipeline(&m, target, &pipeline).unwrap();
+        let object = if cfg!(target_arch = "x86_64") {
+            let object = keel_asm::x86::assemble_program_object(&program).unwrap();
+            assert_eq!(object, keel_asm::x86::assemble_object(&text).unwrap());
+            object
+        } else {
+            let object = keel_asm::assemble_program_object(&program, Default::default()).unwrap();
+            assert_eq!(object, keel_asm::assemble_object(&text).unwrap());
+            object
+        };
+        fs::write(dir.join("test.o"), object).unwrap();
+        let output = Command::new("clang")
+            .arg(dir.join("driver.o"))
+            .arg(dir.join("test.o"))
+            .arg("-o")
+            .arg(dir.join("test"))
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let output = Command::new(dir.join("test")).output().unwrap();
+        assert!(output.status.success(), "{allocation:?}: {output:?}");
+    }
+}

@@ -103,6 +103,54 @@ fn target_cost_gate_avoids_scalarized_integer_multiply() {
     assert_eq!(packed(&optimize(&source, VectorTarget::Aarch64Neon)), 0);
 }
 
+#[test]
+fn literal_header_bounds_vectorize_without_changing_rejected_loops() {
+    for index in [Type::I32, Type::I64] {
+        for bound in [0, 15, 17, 1024] {
+            let src = kernel(Type::I32, index, "iadd", false).replace(
+                " v6 = icmp.ult v5,v3",
+                &format!(" v20 = iconst.{index} {bound}\n v6 = icmp.ult v5,v20"),
+            );
+            let m = optimize(&src, VectorTarget::X86Sse2);
+            assert_eq!(packed(&m), usize::from(bound >= 16), "{m}");
+            if bound >= 16 {
+                let f = &m.functions[0];
+                let (_, literal) = f.layout_insts().find(|(_, i)| {
+                    matches!(f.inst_data(*i), InstData::Iconst { imm, .. } if *imm == bound)
+                }).unwrap();
+                assert_eq!(f.inst_block(literal), f.entry_block().unwrap());
+            } else {
+                assert_eq!(m.to_string(), keel_ir::parse(&src).unwrap().to_string());
+            }
+            let mut twice = m.clone();
+            keel_opt::run_passes_for_target(&mut twice, &["loop-vectorize"], VectorTarget::X86Sse2)
+                .unwrap();
+            assert_eq!(m.to_string(), twice.to_string());
+        }
+    }
+}
+
+#[test]
+fn header_literals_can_feed_vector_expressions_but_header_effects_stay_scalar() {
+    let src = kernel(Type::I32, Type::I64, "iadd", false)
+        .replace(
+            " v6 = icmp.ult v5,v3",
+            " v20 = iconst.i64 1024\n v21 = iconst.i32 7\n v6 = icmp.ult v5,v20",
+        )
+        .replace(
+            " v17 = iadd v15,v16",
+            " v22 = iadd v15,v16\n v17 = xor v22,v21",
+        );
+    let m = optimize(&src, VectorTarget::X86Sse2);
+    assert_eq!(packed(&m), 3, "{m}");
+    for extra in ["v23 = load.i32 v0", "v23 = udiv v3,v5"] {
+        let source = src.replace(" v20 = iconst.i64", &format!(" {extra}\n v20 = iconst.i64"));
+        let m = optimize(&source, VectorTarget::X86Sse2);
+        assert_eq!(packed(&m), 0, "{m}");
+        assert_eq!(m.to_string(), keel_ir::parse(&source).unwrap().to_string());
+    }
+}
+
 fn sum_loop(ty: &str) -> String {
     let (bytes, mask) = if ty == "i32" {
         (4, 0xff00ff)
@@ -140,6 +188,27 @@ fn reduce_sum(source: &str, target: VectorTarget) -> keel_ir::Module {
     keel_opt::run_passes_for_target(&mut m, &["loop-reduce"], target).unwrap();
     keel_ir::verify_module(&m).unwrap();
     m
+}
+
+#[test]
+fn reduction_header_literals_preserve_negative_bounds_and_scalar_tails() {
+    for bound in [-1, 17] {
+        let src = sum_loop("i64").replace(
+            " v6 = icmp.ult v4,v1",
+            &format!(" v20 = iconst.i64 {bound}\n v6 = icmp.slt v4,v20"),
+        );
+        for target in [
+            VectorTarget::Portable,
+            VectorTarget::Aarch64Neon,
+            VectorTarget::X86Sse2,
+        ] {
+            let m = reduce_sum(&src, target);
+            assert_eq!(packed(&m) > 0, bound > 0, "{m}");
+            if bound < 0 {
+                assert_eq!(m.to_string(), keel_ir::parse(&src).unwrap().to_string());
+            }
+        }
+    }
 }
 
 #[test]
