@@ -1040,6 +1040,12 @@ upper 64 bits are ignored. Dword and qword logical/arithmetic shifts saturate
 oversized counts, as do the raw per-lane shift intrinsics. Inactive result
 lanes preserve the merge source.
 
+Standard C scalar-count `_mm512_{slli,srli,srai}_epi{32,64}` wrappers also
+accept runtime counts. They convert the count to `unsigned int`, zero-extend
+it into the low qword of an XMM count, and use the shared-count typed form.
+Counts above 255 retain their saturating meaning; wider C arguments first
+undergo the specified conversion to 32 bits. Each argument is evaluated once.
+
 Scalar broadcasts accept `i32`, `i64`, `f32` or `f64` and return the matching
 512-bit shape. Block broadcasts repeat `i32x4`, `i64x4`, `f32x4` or `f64x4`
 across the result. Pure register block forms stage one exact 16-/32-byte
@@ -1456,3 +1462,7 @@ Inactive lanes retain merge bits. All forms require F plus BW, and narrow
 forms also require VL. C supplies masked and mask-zero interfaces at all
 widths, all 512-bit unmasked forms, and narrow variable-word shifts. Existing
 narrow unmasked immediate/shared-count interfaces keep their prior contracts.
+Standard C `slli`, `srli` and `srai` wrappers accept runtime unsigned scalar
+counts through the shared-count form, with the same 32-bit conversion rule
+as the foundation dword/qword wrappers. Direct typed immediate operations
+still require constants in 0..255.

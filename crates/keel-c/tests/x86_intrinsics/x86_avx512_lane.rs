@@ -155,12 +155,20 @@ fn source() -> (String, String) {
         } else {
             &["", "mask_", "maskz_"]
         };
-        let controls: Vec<i32> = if api.kind == 0 {
-            vec![0, api.bits as i32, 255]
+        let controls: Vec<String> = if api.kind == 0 {
+            vec![
+                "0".into(),
+                api.bits.to_string(),
+                "255".into(),
+                "256".into(),
+                "-1".into(),
+                "take_s64(b)".into(),
+                "4294967296ULL".into(),
+            ]
         } else if matches!(api.kind, 4 | 5) {
-            vec![0, api.max]
+            vec!["0".into(), api.max.to_string()]
         } else {
-            vec![0]
+            vec!["0".into()]
         };
         for control in controls {
             for &mode in modes {
@@ -315,8 +323,8 @@ int main(void){{
  long page=sysconf(_SC_PAGESIZE);unsigned char*guard=mmap(0,page*3,PROT_NONE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);if(guard==MAP_FAILED||mprotect(guard+page,page,PROT_READ|PROT_WRITE))return 2;
  unsigned char a[64],b[64],m[64],out[64],expected[64],saved[64];
  for(unsigned i=0;i<64;i++){{a[i]=(unsigned char)(0xf1-i*13);b[i]=(unsigned char)(0x51+i*73);m[i]=(unsigned char)(0x81+i*37);}}
- uint64_t counts[]={{0,31,32,63,64,UINT64_MAX}};
- for(unsigned count=0;count<6;count++){{memcpy(b,&counts[count],8);uint64_t upper=UINT64_MAX;memcpy(b+8,&upper,8);
+ uint64_t counts[]={{0,31,32,63,64,255,256,UINT32_MAX,UINT64_C(1)<<32,UINT64_MAX}};
+ for(unsigned count=0;count<sizeof(counts)/sizeof(*counts);count++){{memcpy(b,&counts[count],8);uint64_t upper=UINT64_MAX;memcpy(b+8,&upper,8);
  for(unsigned pattern=0;pattern<5;pattern++){{unsigned k=(unsigned[]){{0,0xffff,0xa55a,0x80,0xf0}}[pattern];
  for(unsigned ci=0;ci<sizeof(cases)/sizeof(*cases);ci++){{const struct Case*c=&cases[ci];vector_count=mask_count=scalar_count=pointer_count=reference_vector_count=reference_mask_count=reference_scalar_count=reference_pointer_count=0;memset(out,0xa5,64);memset(expected,0xa5,64);
   if(!c->kind){{c->actual(m,a,b,out,k);c->reference(m,a,b,expected,k);}}
@@ -360,9 +368,11 @@ fn avx512_c_lane_controls_and_all_typed_routes() {
                 ty(api.small),
                 api.api
             );
-            assert!(
-                parse(&text, Target::X86_64LinuxGnu).is_err(),
-                "{} {control}",
+            let parsed = parse(&text, Target::X86_64LinuxGnu);
+            assert_eq!(
+                parsed.is_err(),
+                api.kind != 0,
+                "{} {control}: {parsed:?}",
                 api.api
             );
         }
@@ -380,7 +390,9 @@ fn avx512_c_lane_controls_and_all_typed_routes() {
             })
         })
         .collect();
-    assert_eq!(covered.len(), 44);
+    // Public scalar-count wrappers use shared shifts. Direct immediate IR
+    // variants retain separate backend coverage.
+    assert_eq!(covered.len(), 38);
 }
 #[test]
 fn avx512_c_lane_native_wrappers_and_single_evaluation() {

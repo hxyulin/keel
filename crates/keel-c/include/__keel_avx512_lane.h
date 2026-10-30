@@ -2,13 +2,13 @@
 #ifndef _KEEL_AVX512_LANE_H
 #define _KEEL_AVX512_LANE_H
 
-#define _mm512_mask_slli_epi32(src,k,a,imm) ((__m512i)__builtin_keel_avx512_masksllid((__keel_avx512_i32x16)(src),(short)(k),(__keel_avx512_i32x16)(a),(imm)))
+#define _mm512_mask_slli_epi32(src,k,a,imm) _mm512_mask_sll_epi32((src),(k),(a),((__m128i){(unsigned int)(imm),0}))
 #define _mm512_maskz_slli_epi32(k,a,imm) _mm512_mask_slli_epi32(((__keel_avx512_i32x16){0}),(k),(a),(imm))
 #define _mm512_slli_epi32(a,imm) _mm512_mask_slli_epi32(((__keel_avx512_i32x16){0}),0xffff,(a),(imm))
-#define _mm512_mask_srli_epi32(src,k,a,imm) ((__m512i)__builtin_keel_avx512_masksrlid((__keel_avx512_i32x16)(src),(short)(k),(__keel_avx512_i32x16)(a),(imm)))
+#define _mm512_mask_srli_epi32(src,k,a,imm) _mm512_mask_srl_epi32((src),(k),(a),((__m128i){(unsigned int)(imm),0}))
 #define _mm512_maskz_srli_epi32(k,a,imm) _mm512_mask_srli_epi32(((__keel_avx512_i32x16){0}),(k),(a),(imm))
 #define _mm512_srli_epi32(a,imm) _mm512_mask_srli_epi32(((__keel_avx512_i32x16){0}),0xffff,(a),(imm))
-#define _mm512_mask_srai_epi32(src,k,a,imm) ((__m512i)__builtin_keel_avx512_masksraid((__keel_avx512_i32x16)(src),(short)(k),(__keel_avx512_i32x16)(a),(imm)))
+#define _mm512_mask_srai_epi32(src,k,a,imm) _mm512_mask_sra_epi32((src),(k),(a),((__m128i){(unsigned int)(imm),0}))
 #define _mm512_maskz_srai_epi32(k,a,imm) _mm512_mask_srai_epi32(((__keel_avx512_i32x16){0}),(k),(a),(imm))
 #define _mm512_srai_epi32(a,imm) _mm512_mask_srai_epi32(((__keel_avx512_i32x16){0}),0xffff,(a),(imm))
 #define _mm512_mask_sll_epi32(src,k,a,count) ((__m512i)__builtin_keel_avx512_maskslld((__keel_avx512_i32x16)(src),(short)(k),(__keel_avx512_i32x16)(a),(__m128i)(count)))
@@ -21,13 +21,13 @@
 #define _mm512_maskz_sra_epi32(k,a,count) _mm512_mask_sra_epi32(((__keel_avx512_i32x16){0}),(k),(a),(count))
 #define _mm512_sra_epi32(a,count) _mm512_mask_sra_epi32(((__keel_avx512_i32x16){0}),0xffff,(a),(count))
 
-#define _mm512_mask_slli_epi64(src,k,a,imm) ((__m512i)__builtin_keel_avx512_maskslliq((__m512i)(src),(signed char)(k),(__m512i)(a),(imm)))
+#define _mm512_mask_slli_epi64(src,k,a,imm) _mm512_mask_sll_epi64((src),(k),(a),((__m128i){(unsigned int)(imm),0}))
 #define _mm512_maskz_slli_epi64(k,a,imm) _mm512_mask_slli_epi64(((__m512i){0}),(k),(a),(imm))
 #define _mm512_slli_epi64(a,imm) _mm512_mask_slli_epi64(((__m512i){0}),0xff,(a),(imm))
-#define _mm512_mask_srli_epi64(src,k,a,imm) ((__m512i)__builtin_keel_avx512_masksrliq((__m512i)(src),(signed char)(k),(__m512i)(a),(imm)))
+#define _mm512_mask_srli_epi64(src,k,a,imm) _mm512_mask_srl_epi64((src),(k),(a),((__m128i){(unsigned int)(imm),0}))
 #define _mm512_maskz_srli_epi64(k,a,imm) _mm512_mask_srli_epi64(((__m512i){0}),(k),(a),(imm))
 #define _mm512_srli_epi64(a,imm) _mm512_mask_srli_epi64(((__m512i){0}),0xff,(a),(imm))
-#define _mm512_mask_srai_epi64(src,k,a,imm) ((__m512i)__builtin_keel_avx512_masksraiq((__m512i)(src),(signed char)(k),(__m512i)(a),(imm)))
+#define _mm512_mask_srai_epi64(src,k,a,imm) _mm512_mask_sra_epi64((src),(k),(a),((__m128i){(unsigned int)(imm),0}))
 #define _mm512_maskz_srai_epi64(k,a,imm) _mm512_mask_srai_epi64(((__m512i){0}),(k),(a),(imm))
 #define _mm512_srai_epi64(a,imm) _mm512_mask_srai_epi64(((__m512i){0}),0xff,(a),(imm))
 #define _mm512_mask_sll_epi64(src,k,a,count) ((__m512i)__builtin_keel_avx512_masksllq((__m512i)(src),(signed char)(k),(__m512i)(a),(__m128i)(count)))
