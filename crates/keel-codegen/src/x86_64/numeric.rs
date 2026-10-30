@@ -45,6 +45,16 @@ impl FunctionCompiler<'_> {
 
 impl FunctionCompiler<'_> {
     pub(super) fn native_f16c(&mut self, id: Intrinsic, args: &[Value], result: Option<Value>) {
+        // AVX512F+VL provides the same unmasked conversion when F16C is disabled.
+        let opcode = |name: &str| {
+            if self.features.f16c {
+                Opcode::parse(name).expect("F16C conversion")
+            } else {
+                avx512_mask::opcode(name, false)
+            }
+        };
+        let from_half = opcode("vcvtph2ps");
+        let to_half = opcode("vcvtps2ph");
         match id {
             Intrinsic::X86F16cPhToPs128 | Intrinsic::X86F16cPhToPs256 => {
                 if id == Intrinsic::X86F16cPhToPs128 {
@@ -58,17 +68,14 @@ impl FunctionCompiler<'_> {
                 }
                 let ty = self.func.value_type(result.unwrap());
                 let d = self.def_freg(result);
-                self.emit(
-                    Opcode::parse("vcvtph2ps").unwrap(),
-                    [asm_arg(simd(d, ty)), asm_arg(xmm(FS1))],
-                );
+                self.emit(from_half, [asm_arg(simd(d, ty)), asm_arg(xmm(FS1))]);
                 self.def_done(result, d);
             }
             Intrinsic::X86F16cPsToPh128 | Intrinsic::X86F16cPsToPh256 => {
                 let r = self.use_freg(args[0], FS1);
                 let mode = iconst(self.func, args[1]).expect("validated rounding");
                 self.emit(
-                    Opcode::parse("vcvtps2ph").unwrap(),
+                    to_half,
                     [
                         asm_arg(xmm(FS0)),
                         asm_arg(simd(r, self.ty(args[0]))),

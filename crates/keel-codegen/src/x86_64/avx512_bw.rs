@@ -29,7 +29,7 @@ pub(super) fn validate(
     Ok(())
 }
 impl FunctionCompiler<'_> {
-    fn avx512_bw_stage_mask(&mut self, mask: Value) {
+    pub(super) fn avx512_bw_stage_mask(&mut self, mask: Value) {
         let source = self.use_reg(mask, S0);
         let (name, register) = match self.ty(mask) {
             Type::I64 => ("kmovq", r64(source)),

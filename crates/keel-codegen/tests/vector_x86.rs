@@ -938,3 +938,12 @@ mod x86_avx512_cd;
 
 #[path = "vector_x86/x86_avx512_bw.rs"]
 mod x86_avx512_bw;
+
+#[path = "vector_x86/x86_avx512_vl_fma.rs"]
+mod x86_avx512_vl_fma;
+
+#[path = "vector_x86/x86_avx512_dq_convert.rs"]
+mod x86_avx512_dq_convert;
+
+#[path = "vector_x86/x86_avx512_bw_mask.rs"]
+mod x86_avx512_bw_mask;

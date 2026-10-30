@@ -160,6 +160,21 @@ fn f16c_requires_features_and_well_typed_constant_rounding() {
     minimal = minimal.with_features("avx").unwrap();
     minimal.f16c = true;
     object(&s, SelectionTier::Full, AllocationTier::Full, true, minimal).unwrap();
+    let evex = Features::NONE.with_features("avx512f,avx512vl").unwrap();
+    assert!(!evex.f16c);
+    object(&s, SelectionTier::Full, AllocationTier::Full, true, evex).unwrap();
+    for disabled in ["-avx512vl", "-avx512vl,-avx512f"] {
+        assert!(
+            object(
+                &s,
+                SelectionTier::Full,
+                AllocationTier::Full,
+                true,
+                evex.with_features(disabled).unwrap(),
+            )
+            .is_err()
+        );
+    }
     for missing in [0, 1] {
         let mut features = Features::for_level(CpuLevel::V3);
         if missing == 0 {
@@ -211,15 +226,21 @@ fn native_f16c_all_half_patterns_rounding_and_flags() {
     let d = common::temp("f16c-native");
     fs::create_dir_all(&d).unwrap();
     fs::write(d.join("f16c.c"), harness()).unwrap();
-    for s in [
-        SelectionTier::Baseline,
-        SelectionTier::Trees,
-        SelectionTier::Full,
-    ] {
+    let mut configurations = vec![
+        (Features::for_level(CpuLevel::V3), SelectionTier::Baseline),
+        (Features::for_level(CpuLevel::V3), SelectionTier::Trees),
+        (Features::for_level(CpuLevel::V3), SelectionTier::Full),
+    ];
+    if std::is_x86_feature_detected!("avx512f") && std::is_x86_feature_detected!("avx512vl") {
+        configurations.push((
+            Features::NONE.with_features("avx512f,avx512vl").unwrap(),
+            SelectionTier::Full,
+        ));
+    }
+    for (features, s) in configurations {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (b, _) =
-                    object(&source(), s, a, empty, Features::for_level(CpuLevel::V3)).unwrap();
+                let (b, _) = object(&source(), s, a, empty, features).unwrap();
                 fs::write(d.join("f16c.o"), b).unwrap();
                 common::command(
                     Command::new("clang")

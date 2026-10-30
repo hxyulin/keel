@@ -2370,10 +2370,298 @@ pub enum Intrinsic {
     X86Avx512CdBroadcastmb512 = 1522,
     #[doc = "AVX512CD mask-source broadcast. Broadcast the zero-extended low byte or word to every qword or dword lane; narrow widths require AVX512VL."]
     X86Avx512CdBroadcastmw512 = 1523,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmadd132ps128 = 1524,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmadd132pd128 = 1525,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmadd213ps128 = 1526,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmadd213pd128 = 1527,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmadd231ps128 = 1528,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmadd231pd128 = 1529,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmsub132ps128 = 1530,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmsub132pd128 = 1531,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmsub213ps128 = 1532,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmsub213pd128 = 1533,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmsub231ps128 = 1534,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmsub231pd128 = 1535,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfnmadd132ps128 = 1536,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfnmadd132pd128 = 1537,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfnmadd213ps128 = 1538,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfnmadd213pd128 = 1539,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfnmadd231ps128 = 1540,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfnmadd231pd128 = 1541,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfnmsub132ps128 = 1542,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfnmsub132pd128 = 1543,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfnmsub213ps128 = 1544,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfnmsub213pd128 = 1545,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfnmsub231ps128 = 1546,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfnmsub231pd128 = 1547,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmaddsub132ps128 = 1548,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmaddsub132pd128 = 1549,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmaddsub213ps128 = 1550,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmaddsub213pd128 = 1551,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmaddsub231ps128 = 1552,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmaddsub231pd128 = 1553,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmsubadd132ps128 = 1554,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmsubadd132pd128 = 1555,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmsubadd213ps128 = 1556,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmsubadd213pd128 = 1557,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmsubadd231ps128 = 1558,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmsubadd231pd128 = 1559,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmadd132ps256 = 1560,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmadd132pd256 = 1561,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmadd213ps256 = 1562,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmadd213pd256 = 1563,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmadd231ps256 = 1564,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmadd231pd256 = 1565,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmsub132ps256 = 1566,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmsub132pd256 = 1567,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmsub213ps256 = 1568,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmsub213pd256 = 1569,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmsub231ps256 = 1570,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmsub231pd256 = 1571,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfnmadd132ps256 = 1572,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfnmadd132pd256 = 1573,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfnmadd213ps256 = 1574,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfnmadd213pd256 = 1575,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfnmadd231ps256 = 1576,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfnmadd231pd256 = 1577,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfnmsub132ps256 = 1578,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfnmsub132pd256 = 1579,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfnmsub213ps256 = 1580,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfnmsub213pd256 = 1581,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfnmsub231ps256 = 1582,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfnmsub231pd256 = 1583,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmaddsub132ps256 = 1584,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmaddsub132pd256 = 1585,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmaddsub213ps256 = 1586,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmaddsub213pd256 = 1587,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmaddsub231ps256 = 1588,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmaddsub231pd256 = 1589,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmsubadd132ps256 = 1590,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmsubadd132pd256 = 1591,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmsubadd213ps256 = 1592,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmsubadd213pd256 = 1593,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmsubadd231ps256 = 1594,
+    #[doc = "Masked narrow packed FMA with explicit operand order and independent inactive merge. Requires AVX512F and AVX512VL; uses MXCSR without ER or SAE."]
+    X86Avx512VlVfmsubadd231pd256 = 1595,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvtqq2pd128 = 1596,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvtuqq2pd128 = 1597,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvtqq2ps128 = 1598,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvtuqq2ps128 = 1599,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvtpd2qq128 = 1600,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvtpd2uqq128 = 1601,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvtps2qq128 = 1602,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvtps2uqq128 = 1603,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvttpd2qq128 = 1604,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvttpd2uqq128 = 1605,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvttps2qq128 = 1606,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvttps2uqq128 = 1607,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvtqq2pd256 = 1608,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvtuqq2pd256 = 1609,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvtqq2ps256 = 1610,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvtuqq2ps256 = 1611,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvtpd2qq256 = 1612,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvtpd2uqq256 = 1613,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvtps2qq256 = 1614,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvtps2uqq256 = 1615,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvttpd2qq256 = 1616,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvttpd2uqq256 = 1617,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvttps2qq256 = 1618,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvttps2uqq256 = 1619,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvtqq2pd512 = 1620,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvtuqq2pd512 = 1621,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvtqq2ps512 = 1622,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvtuqq2ps512 = 1623,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvtpd2qq512 = 1624,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvtpd2uqq512 = 1625,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvtps2qq512 = 1626,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvtps2uqq512 = 1627,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvttpd2qq512 = 1628,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvttpd2uqq512 = 1629,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvttps2qq512 = 1630,
+    #[doc = "Masked AVX512DQ qword and floating conversion. Narrow forms require AVX512VL and use MXCSR; only 512-bit forms accept architectural rounding or SAE controls."]
+    X86Avx512DqVcvttps2uqq512 = 1631,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwCmpb128 = 1632,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwCmpub128 = 1633,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwTestb128 = 1634,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwTestnb128 = 1635,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwMovb2m128 = 1636,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwMovm2b128 = 1637,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwCmpw128 = 1638,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwCmpuw128 = 1639,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwTestw128 = 1640,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwTestnw128 = 1641,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwMovw2m128 = 1642,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwMovm2w128 = 1643,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwCmpb256 = 1644,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwCmpub256 = 1645,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwTestb256 = 1646,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwTestnb256 = 1647,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwMovb2m256 = 1648,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwMovm2b256 = 1649,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwCmpw256 = 1650,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwCmpuw256 = 1651,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwTestw256 = 1652,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwTestnw256 = 1653,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwMovw2m256 = 1654,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwMovm2w256 = 1655,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwCmpb512 = 1656,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwCmpub512 = 1657,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwTestb512 = 1658,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwTestnb512 = 1659,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwMovb2m512 = 1660,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwMovm2b512 = 1661,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwCmpw512 = 1662,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwCmpuw512 = 1663,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwTestw512 = 1664,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwTestnw512 = 1665,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwMovw2m512 = 1666,
+    #[doc = "AVX512BW byte/word comparison, test, or mask conversion. Scalar masks retain every lane; narrow forms require AVX512VL."]
+    X86Avx512BwMovm2w512 = 1667,
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 1524] = [
+    pub const ALL: [Intrinsic; 1668] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -3898,6 +4186,150 @@ impl Intrinsic {
         Intrinsic::X86Avx512CdBroadcastmw256,
         Intrinsic::X86Avx512CdBroadcastmb512,
         Intrinsic::X86Avx512CdBroadcastmw512,
+        Intrinsic::X86Avx512VlVfmadd132ps128,
+        Intrinsic::X86Avx512VlVfmadd132pd128,
+        Intrinsic::X86Avx512VlVfmadd213ps128,
+        Intrinsic::X86Avx512VlVfmadd213pd128,
+        Intrinsic::X86Avx512VlVfmadd231ps128,
+        Intrinsic::X86Avx512VlVfmadd231pd128,
+        Intrinsic::X86Avx512VlVfmsub132ps128,
+        Intrinsic::X86Avx512VlVfmsub132pd128,
+        Intrinsic::X86Avx512VlVfmsub213ps128,
+        Intrinsic::X86Avx512VlVfmsub213pd128,
+        Intrinsic::X86Avx512VlVfmsub231ps128,
+        Intrinsic::X86Avx512VlVfmsub231pd128,
+        Intrinsic::X86Avx512VlVfnmadd132ps128,
+        Intrinsic::X86Avx512VlVfnmadd132pd128,
+        Intrinsic::X86Avx512VlVfnmadd213ps128,
+        Intrinsic::X86Avx512VlVfnmadd213pd128,
+        Intrinsic::X86Avx512VlVfnmadd231ps128,
+        Intrinsic::X86Avx512VlVfnmadd231pd128,
+        Intrinsic::X86Avx512VlVfnmsub132ps128,
+        Intrinsic::X86Avx512VlVfnmsub132pd128,
+        Intrinsic::X86Avx512VlVfnmsub213ps128,
+        Intrinsic::X86Avx512VlVfnmsub213pd128,
+        Intrinsic::X86Avx512VlVfnmsub231ps128,
+        Intrinsic::X86Avx512VlVfnmsub231pd128,
+        Intrinsic::X86Avx512VlVfmaddsub132ps128,
+        Intrinsic::X86Avx512VlVfmaddsub132pd128,
+        Intrinsic::X86Avx512VlVfmaddsub213ps128,
+        Intrinsic::X86Avx512VlVfmaddsub213pd128,
+        Intrinsic::X86Avx512VlVfmaddsub231ps128,
+        Intrinsic::X86Avx512VlVfmaddsub231pd128,
+        Intrinsic::X86Avx512VlVfmsubadd132ps128,
+        Intrinsic::X86Avx512VlVfmsubadd132pd128,
+        Intrinsic::X86Avx512VlVfmsubadd213ps128,
+        Intrinsic::X86Avx512VlVfmsubadd213pd128,
+        Intrinsic::X86Avx512VlVfmsubadd231ps128,
+        Intrinsic::X86Avx512VlVfmsubadd231pd128,
+        Intrinsic::X86Avx512VlVfmadd132ps256,
+        Intrinsic::X86Avx512VlVfmadd132pd256,
+        Intrinsic::X86Avx512VlVfmadd213ps256,
+        Intrinsic::X86Avx512VlVfmadd213pd256,
+        Intrinsic::X86Avx512VlVfmadd231ps256,
+        Intrinsic::X86Avx512VlVfmadd231pd256,
+        Intrinsic::X86Avx512VlVfmsub132ps256,
+        Intrinsic::X86Avx512VlVfmsub132pd256,
+        Intrinsic::X86Avx512VlVfmsub213ps256,
+        Intrinsic::X86Avx512VlVfmsub213pd256,
+        Intrinsic::X86Avx512VlVfmsub231ps256,
+        Intrinsic::X86Avx512VlVfmsub231pd256,
+        Intrinsic::X86Avx512VlVfnmadd132ps256,
+        Intrinsic::X86Avx512VlVfnmadd132pd256,
+        Intrinsic::X86Avx512VlVfnmadd213ps256,
+        Intrinsic::X86Avx512VlVfnmadd213pd256,
+        Intrinsic::X86Avx512VlVfnmadd231ps256,
+        Intrinsic::X86Avx512VlVfnmadd231pd256,
+        Intrinsic::X86Avx512VlVfnmsub132ps256,
+        Intrinsic::X86Avx512VlVfnmsub132pd256,
+        Intrinsic::X86Avx512VlVfnmsub213ps256,
+        Intrinsic::X86Avx512VlVfnmsub213pd256,
+        Intrinsic::X86Avx512VlVfnmsub231ps256,
+        Intrinsic::X86Avx512VlVfnmsub231pd256,
+        Intrinsic::X86Avx512VlVfmaddsub132ps256,
+        Intrinsic::X86Avx512VlVfmaddsub132pd256,
+        Intrinsic::X86Avx512VlVfmaddsub213ps256,
+        Intrinsic::X86Avx512VlVfmaddsub213pd256,
+        Intrinsic::X86Avx512VlVfmaddsub231ps256,
+        Intrinsic::X86Avx512VlVfmaddsub231pd256,
+        Intrinsic::X86Avx512VlVfmsubadd132ps256,
+        Intrinsic::X86Avx512VlVfmsubadd132pd256,
+        Intrinsic::X86Avx512VlVfmsubadd213ps256,
+        Intrinsic::X86Avx512VlVfmsubadd213pd256,
+        Intrinsic::X86Avx512VlVfmsubadd231ps256,
+        Intrinsic::X86Avx512VlVfmsubadd231pd256,
+        Intrinsic::X86Avx512DqVcvtqq2pd128,
+        Intrinsic::X86Avx512DqVcvtuqq2pd128,
+        Intrinsic::X86Avx512DqVcvtqq2ps128,
+        Intrinsic::X86Avx512DqVcvtuqq2ps128,
+        Intrinsic::X86Avx512DqVcvtpd2qq128,
+        Intrinsic::X86Avx512DqVcvtpd2uqq128,
+        Intrinsic::X86Avx512DqVcvtps2qq128,
+        Intrinsic::X86Avx512DqVcvtps2uqq128,
+        Intrinsic::X86Avx512DqVcvttpd2qq128,
+        Intrinsic::X86Avx512DqVcvttpd2uqq128,
+        Intrinsic::X86Avx512DqVcvttps2qq128,
+        Intrinsic::X86Avx512DqVcvttps2uqq128,
+        Intrinsic::X86Avx512DqVcvtqq2pd256,
+        Intrinsic::X86Avx512DqVcvtuqq2pd256,
+        Intrinsic::X86Avx512DqVcvtqq2ps256,
+        Intrinsic::X86Avx512DqVcvtuqq2ps256,
+        Intrinsic::X86Avx512DqVcvtpd2qq256,
+        Intrinsic::X86Avx512DqVcvtpd2uqq256,
+        Intrinsic::X86Avx512DqVcvtps2qq256,
+        Intrinsic::X86Avx512DqVcvtps2uqq256,
+        Intrinsic::X86Avx512DqVcvttpd2qq256,
+        Intrinsic::X86Avx512DqVcvttpd2uqq256,
+        Intrinsic::X86Avx512DqVcvttps2qq256,
+        Intrinsic::X86Avx512DqVcvttps2uqq256,
+        Intrinsic::X86Avx512DqVcvtqq2pd512,
+        Intrinsic::X86Avx512DqVcvtuqq2pd512,
+        Intrinsic::X86Avx512DqVcvtqq2ps512,
+        Intrinsic::X86Avx512DqVcvtuqq2ps512,
+        Intrinsic::X86Avx512DqVcvtpd2qq512,
+        Intrinsic::X86Avx512DqVcvtpd2uqq512,
+        Intrinsic::X86Avx512DqVcvtps2qq512,
+        Intrinsic::X86Avx512DqVcvtps2uqq512,
+        Intrinsic::X86Avx512DqVcvttpd2qq512,
+        Intrinsic::X86Avx512DqVcvttpd2uqq512,
+        Intrinsic::X86Avx512DqVcvttps2qq512,
+        Intrinsic::X86Avx512DqVcvttps2uqq512,
+        Intrinsic::X86Avx512BwCmpb128,
+        Intrinsic::X86Avx512BwCmpub128,
+        Intrinsic::X86Avx512BwTestb128,
+        Intrinsic::X86Avx512BwTestnb128,
+        Intrinsic::X86Avx512BwMovb2m128,
+        Intrinsic::X86Avx512BwMovm2b128,
+        Intrinsic::X86Avx512BwCmpw128,
+        Intrinsic::X86Avx512BwCmpuw128,
+        Intrinsic::X86Avx512BwTestw128,
+        Intrinsic::X86Avx512BwTestnw128,
+        Intrinsic::X86Avx512BwMovw2m128,
+        Intrinsic::X86Avx512BwMovm2w128,
+        Intrinsic::X86Avx512BwCmpb256,
+        Intrinsic::X86Avx512BwCmpub256,
+        Intrinsic::X86Avx512BwTestb256,
+        Intrinsic::X86Avx512BwTestnb256,
+        Intrinsic::X86Avx512BwMovb2m256,
+        Intrinsic::X86Avx512BwMovm2b256,
+        Intrinsic::X86Avx512BwCmpw256,
+        Intrinsic::X86Avx512BwCmpuw256,
+        Intrinsic::X86Avx512BwTestw256,
+        Intrinsic::X86Avx512BwTestnw256,
+        Intrinsic::X86Avx512BwMovw2m256,
+        Intrinsic::X86Avx512BwMovm2w256,
+        Intrinsic::X86Avx512BwCmpb512,
+        Intrinsic::X86Avx512BwCmpub512,
+        Intrinsic::X86Avx512BwTestb512,
+        Intrinsic::X86Avx512BwTestnb512,
+        Intrinsic::X86Avx512BwMovb2m512,
+        Intrinsic::X86Avx512BwMovm2b512,
+        Intrinsic::X86Avx512BwCmpw512,
+        Intrinsic::X86Avx512BwCmpuw512,
+        Intrinsic::X86Avx512BwTestw512,
+        Intrinsic::X86Avx512BwTestnw512,
+        Intrinsic::X86Avx512BwMovw2m512,
+        Intrinsic::X86Avx512BwMovm2w512,
     ];
 }
 
@@ -5418,5 +5850,149 @@ macro_rules! x86_intrinsics {
             | $crate::Intrinsic::X86Avx512CdBroadcastmw256
             | $crate::Intrinsic::X86Avx512CdBroadcastmb512
             | $crate::Intrinsic::X86Avx512CdBroadcastmw512
+            | $crate::Intrinsic::X86Avx512VlVfmadd132ps128
+            | $crate::Intrinsic::X86Avx512VlVfmadd132pd128
+            | $crate::Intrinsic::X86Avx512VlVfmadd213ps128
+            | $crate::Intrinsic::X86Avx512VlVfmadd213pd128
+            | $crate::Intrinsic::X86Avx512VlVfmadd231ps128
+            | $crate::Intrinsic::X86Avx512VlVfmadd231pd128
+            | $crate::Intrinsic::X86Avx512VlVfmsub132ps128
+            | $crate::Intrinsic::X86Avx512VlVfmsub132pd128
+            | $crate::Intrinsic::X86Avx512VlVfmsub213ps128
+            | $crate::Intrinsic::X86Avx512VlVfmsub213pd128
+            | $crate::Intrinsic::X86Avx512VlVfmsub231ps128
+            | $crate::Intrinsic::X86Avx512VlVfmsub231pd128
+            | $crate::Intrinsic::X86Avx512VlVfnmadd132ps128
+            | $crate::Intrinsic::X86Avx512VlVfnmadd132pd128
+            | $crate::Intrinsic::X86Avx512VlVfnmadd213ps128
+            | $crate::Intrinsic::X86Avx512VlVfnmadd213pd128
+            | $crate::Intrinsic::X86Avx512VlVfnmadd231ps128
+            | $crate::Intrinsic::X86Avx512VlVfnmadd231pd128
+            | $crate::Intrinsic::X86Avx512VlVfnmsub132ps128
+            | $crate::Intrinsic::X86Avx512VlVfnmsub132pd128
+            | $crate::Intrinsic::X86Avx512VlVfnmsub213ps128
+            | $crate::Intrinsic::X86Avx512VlVfnmsub213pd128
+            | $crate::Intrinsic::X86Avx512VlVfnmsub231ps128
+            | $crate::Intrinsic::X86Avx512VlVfnmsub231pd128
+            | $crate::Intrinsic::X86Avx512VlVfmaddsub132ps128
+            | $crate::Intrinsic::X86Avx512VlVfmaddsub132pd128
+            | $crate::Intrinsic::X86Avx512VlVfmaddsub213ps128
+            | $crate::Intrinsic::X86Avx512VlVfmaddsub213pd128
+            | $crate::Intrinsic::X86Avx512VlVfmaddsub231ps128
+            | $crate::Intrinsic::X86Avx512VlVfmaddsub231pd128
+            | $crate::Intrinsic::X86Avx512VlVfmsubadd132ps128
+            | $crate::Intrinsic::X86Avx512VlVfmsubadd132pd128
+            | $crate::Intrinsic::X86Avx512VlVfmsubadd213ps128
+            | $crate::Intrinsic::X86Avx512VlVfmsubadd213pd128
+            | $crate::Intrinsic::X86Avx512VlVfmsubadd231ps128
+            | $crate::Intrinsic::X86Avx512VlVfmsubadd231pd128
+            | $crate::Intrinsic::X86Avx512VlVfmadd132ps256
+            | $crate::Intrinsic::X86Avx512VlVfmadd132pd256
+            | $crate::Intrinsic::X86Avx512VlVfmadd213ps256
+            | $crate::Intrinsic::X86Avx512VlVfmadd213pd256
+            | $crate::Intrinsic::X86Avx512VlVfmadd231ps256
+            | $crate::Intrinsic::X86Avx512VlVfmadd231pd256
+            | $crate::Intrinsic::X86Avx512VlVfmsub132ps256
+            | $crate::Intrinsic::X86Avx512VlVfmsub132pd256
+            | $crate::Intrinsic::X86Avx512VlVfmsub213ps256
+            | $crate::Intrinsic::X86Avx512VlVfmsub213pd256
+            | $crate::Intrinsic::X86Avx512VlVfmsub231ps256
+            | $crate::Intrinsic::X86Avx512VlVfmsub231pd256
+            | $crate::Intrinsic::X86Avx512VlVfnmadd132ps256
+            | $crate::Intrinsic::X86Avx512VlVfnmadd132pd256
+            | $crate::Intrinsic::X86Avx512VlVfnmadd213ps256
+            | $crate::Intrinsic::X86Avx512VlVfnmadd213pd256
+            | $crate::Intrinsic::X86Avx512VlVfnmadd231ps256
+            | $crate::Intrinsic::X86Avx512VlVfnmadd231pd256
+            | $crate::Intrinsic::X86Avx512VlVfnmsub132ps256
+            | $crate::Intrinsic::X86Avx512VlVfnmsub132pd256
+            | $crate::Intrinsic::X86Avx512VlVfnmsub213ps256
+            | $crate::Intrinsic::X86Avx512VlVfnmsub213pd256
+            | $crate::Intrinsic::X86Avx512VlVfnmsub231ps256
+            | $crate::Intrinsic::X86Avx512VlVfnmsub231pd256
+            | $crate::Intrinsic::X86Avx512VlVfmaddsub132ps256
+            | $crate::Intrinsic::X86Avx512VlVfmaddsub132pd256
+            | $crate::Intrinsic::X86Avx512VlVfmaddsub213ps256
+            | $crate::Intrinsic::X86Avx512VlVfmaddsub213pd256
+            | $crate::Intrinsic::X86Avx512VlVfmaddsub231ps256
+            | $crate::Intrinsic::X86Avx512VlVfmaddsub231pd256
+            | $crate::Intrinsic::X86Avx512VlVfmsubadd132ps256
+            | $crate::Intrinsic::X86Avx512VlVfmsubadd132pd256
+            | $crate::Intrinsic::X86Avx512VlVfmsubadd213ps256
+            | $crate::Intrinsic::X86Avx512VlVfmsubadd213pd256
+            | $crate::Intrinsic::X86Avx512VlVfmsubadd231ps256
+            | $crate::Intrinsic::X86Avx512VlVfmsubadd231pd256
+            | $crate::Intrinsic::X86Avx512DqVcvtqq2pd128
+            | $crate::Intrinsic::X86Avx512DqVcvtuqq2pd128
+            | $crate::Intrinsic::X86Avx512DqVcvtqq2ps128
+            | $crate::Intrinsic::X86Avx512DqVcvtuqq2ps128
+            | $crate::Intrinsic::X86Avx512DqVcvtpd2qq128
+            | $crate::Intrinsic::X86Avx512DqVcvtpd2uqq128
+            | $crate::Intrinsic::X86Avx512DqVcvtps2qq128
+            | $crate::Intrinsic::X86Avx512DqVcvtps2uqq128
+            | $crate::Intrinsic::X86Avx512DqVcvttpd2qq128
+            | $crate::Intrinsic::X86Avx512DqVcvttpd2uqq128
+            | $crate::Intrinsic::X86Avx512DqVcvttps2qq128
+            | $crate::Intrinsic::X86Avx512DqVcvttps2uqq128
+            | $crate::Intrinsic::X86Avx512DqVcvtqq2pd256
+            | $crate::Intrinsic::X86Avx512DqVcvtuqq2pd256
+            | $crate::Intrinsic::X86Avx512DqVcvtqq2ps256
+            | $crate::Intrinsic::X86Avx512DqVcvtuqq2ps256
+            | $crate::Intrinsic::X86Avx512DqVcvtpd2qq256
+            | $crate::Intrinsic::X86Avx512DqVcvtpd2uqq256
+            | $crate::Intrinsic::X86Avx512DqVcvtps2qq256
+            | $crate::Intrinsic::X86Avx512DqVcvtps2uqq256
+            | $crate::Intrinsic::X86Avx512DqVcvttpd2qq256
+            | $crate::Intrinsic::X86Avx512DqVcvttpd2uqq256
+            | $crate::Intrinsic::X86Avx512DqVcvttps2qq256
+            | $crate::Intrinsic::X86Avx512DqVcvttps2uqq256
+            | $crate::Intrinsic::X86Avx512DqVcvtqq2pd512
+            | $crate::Intrinsic::X86Avx512DqVcvtuqq2pd512
+            | $crate::Intrinsic::X86Avx512DqVcvtqq2ps512
+            | $crate::Intrinsic::X86Avx512DqVcvtuqq2ps512
+            | $crate::Intrinsic::X86Avx512DqVcvtpd2qq512
+            | $crate::Intrinsic::X86Avx512DqVcvtpd2uqq512
+            | $crate::Intrinsic::X86Avx512DqVcvtps2qq512
+            | $crate::Intrinsic::X86Avx512DqVcvtps2uqq512
+            | $crate::Intrinsic::X86Avx512DqVcvttpd2qq512
+            | $crate::Intrinsic::X86Avx512DqVcvttpd2uqq512
+            | $crate::Intrinsic::X86Avx512DqVcvttps2qq512
+            | $crate::Intrinsic::X86Avx512DqVcvttps2uqq512
+            | $crate::Intrinsic::X86Avx512BwCmpb128
+            | $crate::Intrinsic::X86Avx512BwCmpub128
+            | $crate::Intrinsic::X86Avx512BwTestb128
+            | $crate::Intrinsic::X86Avx512BwTestnb128
+            | $crate::Intrinsic::X86Avx512BwMovb2m128
+            | $crate::Intrinsic::X86Avx512BwMovm2b128
+            | $crate::Intrinsic::X86Avx512BwCmpw128
+            | $crate::Intrinsic::X86Avx512BwCmpuw128
+            | $crate::Intrinsic::X86Avx512BwTestw128
+            | $crate::Intrinsic::X86Avx512BwTestnw128
+            | $crate::Intrinsic::X86Avx512BwMovw2m128
+            | $crate::Intrinsic::X86Avx512BwMovm2w128
+            | $crate::Intrinsic::X86Avx512BwCmpb256
+            | $crate::Intrinsic::X86Avx512BwCmpub256
+            | $crate::Intrinsic::X86Avx512BwTestb256
+            | $crate::Intrinsic::X86Avx512BwTestnb256
+            | $crate::Intrinsic::X86Avx512BwMovb2m256
+            | $crate::Intrinsic::X86Avx512BwMovm2b256
+            | $crate::Intrinsic::X86Avx512BwCmpw256
+            | $crate::Intrinsic::X86Avx512BwCmpuw256
+            | $crate::Intrinsic::X86Avx512BwTestw256
+            | $crate::Intrinsic::X86Avx512BwTestnw256
+            | $crate::Intrinsic::X86Avx512BwMovw2m256
+            | $crate::Intrinsic::X86Avx512BwMovm2w256
+            | $crate::Intrinsic::X86Avx512BwCmpb512
+            | $crate::Intrinsic::X86Avx512BwCmpub512
+            | $crate::Intrinsic::X86Avx512BwTestb512
+            | $crate::Intrinsic::X86Avx512BwTestnb512
+            | $crate::Intrinsic::X86Avx512BwMovb2m512
+            | $crate::Intrinsic::X86Avx512BwMovm2b512
+            | $crate::Intrinsic::X86Avx512BwCmpw512
+            | $crate::Intrinsic::X86Avx512BwCmpuw512
+            | $crate::Intrinsic::X86Avx512BwTestw512
+            | $crate::Intrinsic::X86Avx512BwTestnw512
+            | $crate::Intrinsic::X86Avx512BwMovw2m512
+            | $crate::Intrinsic::X86Avx512BwMovm2w512
     };
 }

@@ -131,7 +131,9 @@ use std::fmt::Write;
 mod avx256;
 mod avx512;
 mod avx512_bw;
+mod avx512_bw_mask;
 mod avx512_convert;
+mod avx512_dq_convert;
 mod avx512_float;
 mod avx512_fma;
 mod avx512_indexed;
@@ -1188,6 +1190,10 @@ impl<'a> FunctionCompiler<'a> {
                 }
             }
             if let InstData::Intrinsic { id, args } = func.inst_data(inst) {
+                if id.x86_avx512_bw_mask().is_some() {
+                    avx512_bw_mask::validate(func, *id, args, pipeline.selector.x86_features())
+                        .map_err(|message| err(message.into()))?;
+                }
                 if id.x86_avx512_bw_core().is_some() {
                     avx512_bw::validate(func, *id, args, pipeline.selector.x86_features())
                         .map_err(|message| err(message.into()))?;
@@ -1257,6 +1263,10 @@ impl<'a> FunctionCompiler<'a> {
                 }
                 if id.x86_avx512_fma_opcode().is_some() {
                     avx512_fma::validate(func, *id, args, pipeline.selector.x86_features())
+                        .map_err(|s| err(s.into()))?;
+                }
+                if id.x86_avx512_dq_convert().is_some() {
+                    avx512_dq_convert::validate(func, *id, args, pipeline.selector.x86_features())
                         .map_err(|s| err(s.into()))?;
                 }
                 if id.x86_avx512_vl_convert().is_some() {
@@ -1615,8 +1625,10 @@ impl<'a> FunctionCompiler<'a> {
                 }
                 if id.is_x86_f16c() {
                     let features = pipeline.selector.x86_features();
-                    if !(features.avx && features.f16c) {
-                        return Err(err("F16C intrinsic requires AVX and F16C features".into()));
+                    if !(features.avx && features.f16c || features.avx512f && features.avx512vl) {
+                        return Err(err(
+                            "half conversion requires AVX and F16C, or AVX512F and AVX512VL".into(),
+                        ));
                     }
                     if id.has_f16c_rounding()
                         && !args
@@ -3217,6 +3229,9 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Intrinsic { id, ref args } if id.x86_packed_search().is_some() => {
                 self.native_packed_search(id, args, result)
             }
+            InstData::Intrinsic { id, ref args } if id.x86_avx512_bw_mask().is_some() => {
+                self.native_avx512_bw_mask(id, args, result);
+            }
             InstData::Intrinsic { id, ref args } if id.x86_avx512_bw_core().is_some() => {
                 self.native_avx512_bw(id, args, result);
             }
@@ -3258,6 +3273,9 @@ impl<'a> FunctionCompiler<'a> {
             }
             InstData::Intrinsic { id, ref args } if id.x86_avx512_fma_opcode().is_some() => {
                 self.native_avx512_fma(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args } if id.x86_avx512_dq_convert().is_some() => {
+                self.native_avx512_dq_convert(id, args, result)
             }
             InstData::Intrinsic { id, ref args } if id.x86_avx512_vl_convert().is_some() => {
                 self.native_avx512_vl_convert(id, args, result)

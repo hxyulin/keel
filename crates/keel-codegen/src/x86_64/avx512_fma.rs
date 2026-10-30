@@ -8,10 +8,10 @@ pub(super) fn validate(
     args: &[Value],
     features: keel_asm_ir::x86::Features,
 ) -> Result<(), &'static str> {
-    if !features.avx512f {
-        return Err("packed AVX512 FMA requires AVX512F");
+    if !features.avx512f || (id.x86_avx512_vl_fma().is_some() && !features.avx512vl) {
+        return Err("packed AVX512 FMA requires AVX512F and narrow forms require AVX512VL");
     }
-    if args.len() != 6
+    if args.len() != id.info().params.len()
         || args
             .iter()
             .zip(id.info().params)
@@ -19,7 +19,9 @@ pub(super) fn validate(
     {
         return Err("packed AVX512 FMA signature mismatch");
     }
-    if !iconst(func, args[5]).is_some_and(|control| matches!(control, 4 | 8..=11)) {
+    if id.x86_avx512_vl_fma().is_none()
+        && !iconst(func, args[5]).is_some_and(|control| matches!(control, 4 | 8..=11))
+    {
         return Err("AVX512 FMA control must be iconst.i32 4 or8..=11");
     }
     Ok(())
@@ -46,7 +48,12 @@ impl FunctionCompiler<'_> {
         )
         .expect("AVX512 FMA opcode");
         opcode.options.mask = Some(1);
-        let control = iconst(self.func, args[5]).expect("validated FMA control");
+        let width = (self.ty(args[0]).bytes().expect("FMA vector width") * 8) as u16;
+        let control = if args.len() == 5 {
+            4
+        } else {
+            iconst(self.func, args[5]).expect("validated FMA control")
+        };
         if control != 4 {
             opcode.options.rounding = Some(match control & 3 {
                 0 => Rounding::Nearest,
@@ -58,15 +65,22 @@ impl FunctionCompiler<'_> {
         self.emit(
             Opcode::Evex(opcode),
             [
-                asm_arg(simd_width(FS0, 512)),
-                asm_arg(simd_width(FS1, 512)),
-                asm_arg(simd_width(FS2, 512)),
+                asm_arg(simd_width(FS0, width)),
+                asm_arg(simd_width(FS1, width)),
+                asm_arg(simd_width(FS2, width)),
             ],
         );
         // Hardware ties its inactive destination to arithmetic operand a. Copy
         // only active results into the separate merge value after the FMA, so
         // inactive arithmetic neither executes nor changes merge payloads.
-        let merge_move = if self.ty(args[0]) == Type::Vector(keel_ir::VectorType::F64x8) {
+        let merge_move = if matches!(
+            self.ty(args[0]),
+            Type::Vector(
+                keel_ir::VectorType::F64x2
+                    | keel_ir::VectorType::F64x4
+                    | keel_ir::VectorType::F64x8
+            )
+        ) {
             "vmovupd"
         } else {
             "vmovups"
@@ -74,15 +88,18 @@ impl FunctionCompiler<'_> {
         self.emit(
             avx512_mask::opcode(merge_move, true),
             [
-                asm_arg(simd_width(MERGE, 512)),
-                asm_arg(simd_width(FS0, 512)),
+                asm_arg(simd_width(MERGE, width)),
+                asm_arg(simd_width(FS0, width)),
             ],
         );
         let d = self.def_freg(result);
         if d != MERGE {
             self.emit(
                 movs(self.ty(args[0])),
-                [asm_arg(simd_width(d, 512)), asm_arg(simd_width(MERGE, 512))],
+                [
+                    asm_arg(simd_width(d, width)),
+                    asm_arg(simd_width(MERGE, width)),
+                ],
             );
         }
         self.def_done(result, d);

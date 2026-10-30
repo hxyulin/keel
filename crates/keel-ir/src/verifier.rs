@@ -1806,7 +1806,7 @@ impl Verifier<'_> {
                         );
                     }
                 }
-                if id.x86_avx512_fma_opcode().is_some()
+                if (id.x86_avx512_fma_opcode().is_some() && id.x86_avx512_vl_fma().is_none())
                     || id.x86_avx512_scalar_fma_opcode().is_some()
                 {
                     let control =
@@ -1840,6 +1840,26 @@ impl Verifier<'_> {
                             });
                     if !control.is_some_and(|n| (0..=255).contains(&n)) {
                         self.inst_error(inst, "AVX512VL half conversion requires an imm8".into());
+                    }
+                }
+                if id
+                    .x86_avx512_dq_convert()
+                    .is_some_and(|(_, width, _, _)| width == 512)
+                {
+                    let control =
+                        args.get(3)
+                            .and_then(|&arg| match func.value_def(func.resolve(arg)) {
+                                ValueDef::Result(i, _) => match func.inst_data(i) {
+                                    InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                    _ => None,
+                                },
+                                _ => None,
+                            });
+                    if !control.is_some_and(|n| id.valid_x86_avx512_dq_convert_control(n)) {
+                        self.inst_error(
+                            inst,
+                            "invalid AVX512DQ conversion rounding/SAE control".into(),
+                        );
                     }
                 }
                 if id.is_x86_avx512_convert() {
@@ -1893,6 +1913,25 @@ impl Verifier<'_> {
                         self.inst_error(
                             inst,
                             "AVX512 comparison SAE control must be iconst.i32 4 or 8".into(),
+                        );
+                    }
+                }
+                if id.x86_avx512_bw_mask().is_some_and(|descriptor| {
+                    descriptor.kind == crate::intrinsic::X86Avx512BwMaskKind::Compare
+                }) {
+                    let control =
+                        args.get(3)
+                            .and_then(|&arg| match func.value_def(func.resolve(arg)) {
+                                ValueDef::Result(i, _) => match func.inst_data(i) {
+                                    InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                    _ => None,
+                                },
+                                _ => None,
+                            });
+                    if !control.is_some_and(|value| (0..=7).contains(&value)) {
+                        self.inst_error(
+                            inst,
+                            "AVX512BW comparison predicate must be iconst.i32 in 0..=7".into(),
                         );
                     }
                 }
