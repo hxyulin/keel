@@ -8,6 +8,8 @@ FAMILIES = {'aes', 'packed_shift', 'saturating', 'packed_conversion', 'value'}
 SCALARS = {'i8': 'I8', 'i16': 'I16', 'ptr': 'Ptr', 'i64': 'I64', 'i32': 'I32', 'u64': 'I64', 'f32': 'F32', 'f64': 'F64'}
 VECTORS = {'i8x16', 'u8x16', 'i16x8', 'u16x8', 'i32x4', 'i64x2',
            'i32x16', 'i64x8', 'f32x16', 'f64x8', 'f32x4', 'f64x2', 'i8x32', 'i16x16', 'i32x8', 'i64x4', 'f32x8', 'f64x4'}
+# Some architectural operations have independent data and exception controls.
+VALUE_EXTRA_CONTROLS = {}
 VALUE_CONTROLS = {
     'avx512_fp_cmp_imm5': ({'X86Avx512Cmpps', 'X86Avx512Cmppd'},
                          3, 31, 31, 'AVX512 floating comparison predicate must be an integer constant expression in 0..31'),
@@ -42,6 +44,22 @@ VALUE_CONTROLS = {
                              'SSE4.2 string control must be an integer constant expression in 0..255'),
 }
 CONTROL_ALLOWED_VALUES = {'gather_scale': [1, 2, 4, 8]}
+# Reviewed AVX512 data controls and independent rounding/exception controls.
+VALUE_CONTROLS.update({
+    'avx512_cvt_rc': ({'X86Avx512Vcvtps2udq', 'X86Avx512Vcvtudq2ps', 'X86Avx512Vcvtpd2ps', 'X86Avx512Vcvtps2dq', 'X86Avx512Vcvtdq2ps', 'X86Avx512Vcvtpd2dq', 'X86Avx512Vcvtpd2udq'}, 3, 11, 15, 'AVX512 control must be an integer constant expression in the declared range'),
+    'avx512_cvt_exact': ({'X86Avx512Vcvtdq2pd', 'X86Avx512Vcvtudq2pd'}, 3, 4, 15, 'AVX512 control must be an integer constant expression in the declared range'),
+    'avx512_cvt_sae': ({'X86Avx512Vcvttps2udq', 'X86Avx512Vcvttpd2udq', 'X86Avx512Vcvttpd2dq', 'X86Avx512Vcvttps2dq', 'X86Avx512Vcvtph2ps', 'X86Avx512Vcvtps2pd'}, 3, 8, 15, 'AVX512 control must be an integer constant expression in the declared range'),
+    'avx512_cvt_half': ({'X86Avx512Vcvtps2ph'}, 3, 12, 15, 'AVX512 control must be an integer constant expression in the declared range'),
+    'avx512_special_sae': ({'X86Avx512Getexppd', 'X86Avx512Getexpps'}, 3, 8, 15, 'AVX512 control must be an integer constant expression in the declared range'),
+    'avx512_mant_controls': ({'X86Avx512Getmantps', 'X86Avx512Getmantpd'}, 4, 8, 15, 'AVX512 control must be an integer constant expression in the declared range'),
+    'avx512_scalef_rc': ({'X86Avx512Scalefps', 'X86Avx512Scalefpd'}, 4, 11, 15, 'AVX512 control must be an integer constant expression in the declared range'),
+    'avx512_roundscale_controls': ({'X86Avx512Roundscalepd', 'X86Avx512Roundscaleps'}, 4, 8, 15, 'AVX512 control must be an integer constant expression in the declared range'),
+    'avx512_fixup_controls': ({'X86Avx512Fixupimmps', 'X86Avx512Fixupimmpd'}, 5, 8, 15, 'AVX512 control must be an integer constant expression in the declared range'),
+    'avx512_ternary_imm': ({'X86Avx512MaskTernlogq', 'X86Avx512MaskTernlogd'}, 5, 255, 255, 'AVX512 control must be an integer constant expression in the declared range'),
+    'avx512_rotate_imm': ({'X86Avx512MaskRolq', 'X86Avx512MaskRord', 'X86Avx512MaskRold', 'X86Avx512MaskRorq'}, 3, 255, 255, 'AVX512 control must be an integer constant expression in the declared range'),
+})
+CONTROL_ALLOWED_VALUES.update({'avx512_cvt_rc': [4, 8, 9, 10, 11], 'avx512_cvt_exact': [4], 'avx512_cvt_sae': [4, 8], 'avx512_cvt_half': [0, 1, 2, 3, 4, 8, 9, 10, 11, 12], 'avx512_special_sae': [4, 8], 'avx512_mant_controls': [4, 8], 'avx512_scalef_rc': [4, 8, 9, 10, 11], 'avx512_roundscale_controls': [4, 8], 'avx512_fixup_controls': [4, 8]})
+VALUE_EXTRA_CONTROLS.update({'avx512_mant_controls': [(3, 15, 15, 'AVX512 immediate must be an integer constant expression in the declared range', [])], 'avx512_roundscale_controls': [(3, 255, 255, 'AVX512 immediate must be an integer constant expression in the declared range', [])], 'avx512_fixup_controls': [(4, 255, 255, 'AVX512 fixup control must be an integer constant expression in 0..255', [])]})
 CONTROLS = {'none', 'imm8', 'u64_count'} | VALUE_CONTROLS.keys()
 
 
@@ -145,6 +163,9 @@ def validate(schema, root):
                 index = VALUE_CONTROLS[control][1]
                 if len(params) != index + 1 or params[index] != 'i32':
                     raise ValueError(f'value control requires a trailing i32 parameter at index {index}')
+                for extra_index, *_ in VALUE_EXTRA_CONTROLS.get(control, []):
+                    if extra_index >= len(params) or params[extra_index] != 'i32':
+                        raise ValueError(f'value control requires an i32 parameter at index {extra_index}')
     return rows
 
 
@@ -158,7 +179,7 @@ def generate(schema, root):
              '#[derive(Clone, Copy)]', 'enum Binding {',
              '    Aes(Intrinsic),', '    PackedShift(Intrinsic, VectorType, bool),',
              '    Saturating(Intrinsic, bool, bool),', '    PackedConversion(Intrinsic),',
-             "    Value(Intrinsic, Option<&'static ImmediateControl>),", '}', '', '#[rustfmt::skip]', 'fn lookup(base: &str) -> Option<Binding> {',
+             "    Value(Intrinsic, &'static [ImmediateControl]),", '}', '', '#[rustfmt::skip]', 'fn lookup(base: &str) -> Option<Binding> {',
              '    Some(match base {']
     for row in rows:
         variant = 'Intrinsic::' + row['intrinsic']
@@ -174,11 +195,14 @@ def generate(schema, root):
         elif row['family'] == 'packed_conversion':
             value = f'Binding::PackedConversion({variant})'
         else:
-            control = 'None'
+            controls = []
             if row['control'] != 'none':
                 _, index, maximum, mask, diagnostic = VALUE_CONTROLS[row['control']]
-                allowed = CONTROL_ALLOWED_VALUES.get(row['control'], [])
-                control = f'Some(&ImmediateControl {{ allowed_values: &{allowed}, index: {index}, maximum: {maximum}, mask: {mask}, diagnostic: {json.dumps(diagnostic)} }})'
+                recipes = [(index, maximum, mask, diagnostic, CONTROL_ALLOWED_VALUES.get(row['control'], []))]
+                recipes += VALUE_EXTRA_CONTROLS.get(row['control'], [])
+                for index, maximum, mask, diagnostic, allowed in recipes:
+                    controls.append(f'ImmediateControl {{ allowed_values: &{allowed}, index: {index}, maximum: {maximum}, mask: {mask}, diagnostic: {json.dumps(diagnostic)} }}')
+            control = '&[' + ', '.join(controls) + ']'
             value = f'Binding::Value({variant}, {control})'
         lines.append(f'        {json.dumps(row["builtin"])} => {value},')
     lines += ['        _ => return None,', '    })', '}', '',
@@ -188,7 +212,7 @@ def generate(schema, root):
         ('packed_shift_builtin', 'PackedShift(id, shape, immediate)', '(Intrinsic, VectorType, bool)', '(id, shape, immediate)'),
         ('saturating_builtin', 'Saturating(id, unsigned, word)', '(Intrinsic, bool, bool)', '(id, unsigned, word)'),
         ('packed_conversion_builtin', 'PackedConversion(id)', 'Intrinsic', 'id'),
-        ('semantic_builtin', 'Value(id, control)', "(Intrinsic, Option<&'static ImmediateControl>)", '(id, control)'),
+        ('semantic_builtin', 'Value(id, control)', "(Intrinsic, &'static [ImmediateControl])", '(id, control)'),
     ]:
         signature = f'pub(crate) fn {name}(base: &str) -> Option<{ty}> {{'
         if len(signature) > 100:

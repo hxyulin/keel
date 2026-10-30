@@ -25,7 +25,7 @@ class VendorBindingTests(unittest.TestCase):
         self.assertEqual({family: sum(row['family'] == family for row in rows)
                           for family in vendor_bindings.FAMILIES},
                          {'aes': 6, 'packed_shift': 32, 'saturating': 8,
-                          'packed_conversion': 3, 'value': 321})
+                          'packed_conversion': 3, 'value': 375})
         source = vendor_bindings.generate(self.schema, generate.ROOT)
         self.assertEqual(source.count(' => Binding::'), len(names))
         self.assertIn('pub(crate) fn recognized(', source)
@@ -116,3 +116,13 @@ class VendorBindingTests(unittest.TestCase):
         row.update(params=[], result='i32')
         source = vendor_bindings.generate(schema, generate.ROOT)
         self.assertIn('&[], &[Type::I32])', source)
+
+    def test_independent_data_immediates_keep_their_type_checks(self):
+        for control in ['avx512_mant_controls', 'avx512_roundscale_controls', 'avx512_fixup_controls']:
+            schema = copy.deepcopy(self.schema)
+            row = next(row for row in schema['bindings'] if row['control'] == control)
+            index = vendor_bindings.VALUE_EXTRA_CONTROLS[control][0][0]
+            row['params'][index] = 'f32'
+            with self.subTest(control=control):
+                with self.assertRaisesRegex(ValueError, f'i32 parameter at index {index}'):
+                    vendor_bindings.validate(schema, generate.ROOT)

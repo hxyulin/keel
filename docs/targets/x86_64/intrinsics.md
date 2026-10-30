@@ -698,6 +698,70 @@ Dword/single forms use sixteen lanes and `i16` masks; qword/double forms use
 eight lanes and `i8` masks. All vectors are 512 bits. These bit transfers
 preserve floating NaN payloads and require AVX512F without AVX2 or AVX512VL.
 
+## AVX512F conversions
+
+Raw packed conversions take `(merge, mask, input, control)` and return the
+merge vector's type. They cover signed/unsigned dwords to single/double,
+single/double to signed/unsigned dwords, single to double and double to single,
+and binary16 storage to/from single. Binary16 uses `i16x16` bits. Double-to-dword
+and double-to-single results have eight lanes and occupy 32 bytes.
+
+Inactive lanes preserve merge bits and suppress arithmetic exceptions.
+Conversions retain their architectural invalid-result and MXCSR behavior;
+they do not use the portable scalar conversion's saturation contract. Rounded
+forms use control 4 for MXCSR or 8..11 for static nearest/down/up/zero with SAE.
+Truncating forms and floating widening accept 4 or 8. Exact dword-to-double
+conversion accepts only 4. Single-to-half accepts 0..4 with optional bit 3 for
+SAE. Each form rejects controls unsupported by its encoding.
+
+The corresponding `_mm512_cvt*`, masked, mask-zero and explicit-rounding C
+wrappers use the same contracts. Architectural controls are integer constant
+expressions; data and exception controls are checked independently.
+
+## AVX512F floating special operations
+
+The typed `x86_avx512_{getexp,getmant,scalef,rcp14,rsqrt14,roundscale,fixupimm}{ps,pd}`
+intrinsics operate on `f32x16` or `f64x8` and use `i16` or `i8` masks.
+Their first two arguments are the merge source and scalar mask. Inactive lanes
+preserve the merge bits and suppress floating exceptions. All operations stay
+pinned relative to MXCSR effects and require AVX512F.
+
+Get-exponent, get-mantissa and roundscale take one input vector. Scalef takes
+two. Fixup takes a floating input and an `i32x16` or `i64x8` response table;
+its merge source is also the instruction's first mathematical operand.
+Get-mantissa takes a constant control in 0..15. Roundscale and fixup take a
+constant immediate in 0..255.
+
+Except for reciprocal14 and reciprocal-square-root14, the final argument
+selects exception or rounding control. Value 4 uses the current direction;
+value 8 suppresses exceptions. Scalef instead accepts 4 or 8..11, where
+8..11 select nearest, down, up or zero rounding with exceptions suppressed.
+Reciprocal14 and reciprocal-square-root14 expose the hardware approximation,
+including MXCSR-dependent special-value handling; they are not replacements
+for correctly rounded division or square root.
+
+## AVX512F integer controls
+
+Typed AVX512F integer intrinsics provide masked ternary logic, immediate and
+per-lane left/right rotations, raw variable logical/arithmetic shifts, absolute
+value, and signed/unsigned even-dword widening multiplication. Dword operations
+use `i32x16` and `i16` masks; qword operations use `i64x8` and `i8` masks.
+Inactive lanes preserve the independent merge vector. Ternary logic selects
+truth-table bit `(A << 2) | (B << 1) | C` independently for each input bit.
+Its immediate and the immediate rotation counts must be constant `i32` bytes
+in 0..255. Rotations reduce counts modulo lane width. Raw variable shifts
+saturate oversized counts: logical shifts produce zero and arithmetic shifts
+produce the sign fill. Portable `vshl`/`vushr`/`vsshr` retain their separate
+modulo-count contract.
+
+`x86_avx512_test{d,q}` returns a scalar mask where active lanes have a nonzero
+bitwise AND of their inputs. `x86_avx512_testn{d,q}` returns the complementary
+zero-AND test within the input mask. Both take `(a, b, mask)` and preserve the
+SSA mask. `x86_avx512_mask{muldq,muludq}` multiplies even-indexed dword lanes
+into eight qword results using signed or unsigned interpretation. Absolute
+value retains the minimum signed value's bit pattern. These operations are
+pure bit computations and require AVX512F without AVX512DQ, AVX2 or AVX512VL.
+
 ## SHA-256
 
 `shaintrin.h`, also included by `immintrin.h`, exposes
@@ -792,8 +856,15 @@ intermediates and comma expressions are rejected. AES-NI uses the same
 evaluator.
 
 `__has_builtin(__builtin_ia32_pclmulqdq128)` reports frontend support on x86-64
-regardless of CPU features and is false on ARM. Other CLMUL widths and
-automatic polynomial recognition are unsupported.
+regardless of CPU features and is false on ARM. Automatic polynomial
+recognition is unsupported.
+
+The wide `_mm256_clmulepi64_epi128` and `_mm512_clmulepi64_epi128` wrappers
+use `x86_vpclmulqdq256` and `x86_vpclmulqdq512`. Their two inputs and result
+are `i64x4` or `i64x8`, with a constant `i32` control in 0..255. Each 128-bit
+lane computes an independent carryless product, using control bits 0 and 4.
+They require VPCLMULQDQ and AVX; the 512-bit form also requires AVX512F.
+Live operands retain their original bits even when their registers overlap.
 
 ### Tests
 

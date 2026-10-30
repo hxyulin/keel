@@ -1760,7 +1760,7 @@ impl<'a> Parser<'a> {
                 loc,
             ));
         }
-        if let Some((id, control)) = crate::x86_builtins::semantic_builtin(base) {
+        if let Some((id, controls)) = crate::x86_builtins::semantic_builtin(base) {
             if self.target != Target::X86_64LinuxGnu {
                 return Err(Error::new(loc, "x86 value builtin requires x86-64"));
             }
@@ -1768,7 +1768,7 @@ impl<'a> Parser<'a> {
             let info = id.info();
             let mut args = self.builtin_args(info.params.len(), loc)?;
             for (i, (&expected, arg)) in info.params.iter().zip(&mut args).enumerate() {
-                if let Some(control) = control.filter(|control| i == control.index) {
+                if let Some(control) = controls.iter().find(|control| i == control.index) {
                     let Some(value) = integer_constant_control(arg, self.c_layout).filter(|n| {
                         (0..=control.maximum).contains(n)
                             && (control.allowed_values.is_empty()

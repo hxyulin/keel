@@ -642,3 +642,189 @@ fn avx512_indexed_and_packed_memory_headers_validate_shapes_and_controls() {
     }
     assert!(parse(&source, Target::Aarch64LinuxGnu).is_err());
 }
+
+#[test]
+fn avx512_conversion_special_and_integer_headers_check_independent_controls() {
+    let mut source = String::from("#include <immintrin.h>\n");
+    for (api, input, output) in [
+        ("cvtepi32_ps", "__m512i", "__m512"),
+        ("cvtepu32_ps", "__m512i", "__m512"),
+        ("cvtepi32_pd", "__m256i", "__m512d"),
+        ("cvtepu32_pd", "__m256i", "__m512d"),
+        ("cvtps_epi32", "__m512", "__m512i"),
+        ("cvtps_epu32", "__m512", "__m512i"),
+        ("cvttps_epi32", "__m512", "__m512i"),
+        ("cvttps_epu32", "__m512", "__m512i"),
+        ("cvtpd_epi32", "__m512d", "__m256i"),
+        ("cvtpd_epu32", "__m512d", "__m256i"),
+        ("cvttpd_epi32", "__m512d", "__m256i"),
+        ("cvttpd_epu32", "__m512d", "__m256i"),
+        ("cvtps_pd", "__m256", "__m512d"),
+        ("cvtpd_ps", "__m512d", "__m256"),
+        ("cvtph_ps", "__m256i", "__m512"),
+        ("cvtps_ph", "__m512", "__m256i"),
+    ] {
+        let extra = if api == "cvtps_ph" { ",4" } else { "" };
+        source += &format!(
+            "{output} {api}_all({input} a){{return _mm512_{api}(a{extra});}}\n{output} {api}_merge({output} s,{input} a){{return _mm512_mask_{api}(s,0x55,a{extra});}}\n{output} {api}_zero({input} a){{return _mm512_maskz_{api}(0x55,a{extra});}}\n"
+        );
+        let rounded = match api {
+            "cvtepi32_ps" => Some("cvt_roundepi32_ps"),
+            "cvtepu32_ps" => Some("cvt_roundepu32_ps"),
+            "cvtps_epi32" => Some("cvt_roundps_epi32"),
+            "cvtps_epu32" => Some("cvt_roundps_epu32"),
+            "cvttps_epi32" => Some("cvtt_roundps_epi32"),
+            "cvttps_epu32" => Some("cvtt_roundps_epu32"),
+            "cvtpd_epi32" => Some("cvt_roundpd_epi32"),
+            "cvtpd_epu32" => Some("cvt_roundpd_epu32"),
+            "cvttpd_epi32" => Some("cvtt_roundpd_epi32"),
+            "cvttpd_epu32" => Some("cvtt_roundpd_epu32"),
+            "cvtps_pd" => Some("cvt_roundps_pd"),
+            "cvtpd_ps" => Some("cvt_roundpd_ps"),
+            "cvtph_ps" => Some("cvt_roundph_ps"),
+            "cvtps_ph" => Some("cvt_roundps_ph"),
+            _ => None,
+        };
+        if let Some(rounded) = rounded {
+            source += &format!(
+                "{output} {rounded}_merge({output} s,{input} a){{return _mm512_mask_{rounded}(s,0x55,a,8);}}\n"
+            );
+        }
+    }
+    for (suffix, ty, table) in [("ps", "__m512", "__m512i"), ("pd", "__m512d", "__m512i")] {
+        for op in [
+            "getexp",
+            "getmant",
+            "scalef",
+            "rcp14",
+            "rsqrt14",
+            "roundscale",
+            "fixupimm",
+        ] {
+            let operands = match op {
+                "getmant" => "a,_MM_MANT_NORM_p5_2,_MM_MANT_SIGN_nan",
+                "scalef" => "a,b",
+                "roundscale" => "a,0x20",
+                "fixupimm" => "b,c,0x80",
+                _ => "a",
+            };
+            let merge = if op == "fixupimm" { "a" } else { "s" };
+            source += &format!(
+                "{ty} {op}_{suffix}({ty} s,{ty} a,{ty} b,{table} c){{return _mm512_mask_{op}_{suffix}({merge},0x55,{operands});}}\n"
+            );
+            if !matches!(op, "rcp14" | "rsqrt14") {
+                source += &format!(
+                    "{ty} {op}_round_{suffix}({ty} s,{ty} a,{ty} b,{table} c){{return _mm512_mask_{op}_round_{suffix}({merge},0x55,{operands},8);}}\n"
+                );
+            }
+        }
+    }
+    for bits in [32, 64] {
+        for op in ["rol", "ror", "rolv", "rorv", "sllv", "srlv", "srav", "abs"] {
+            let operands = if op == "abs" {
+                "a"
+            } else if matches!(op, "rol" | "ror") {
+                "a,255"
+            } else {
+                "a,b"
+            };
+            source += &format!(
+                "__m512i {op}_{bits}(__m512i s,__m512i a,__m512i b){{return _mm512_mask_{op}_epi{bits}(s,0x55,{operands});}}\n"
+            );
+        }
+        source += &format!(
+            "__m512i tern_{bits}(__m512i a,__m512i b,__m512i c){{return _mm512_mask_ternarylogic_epi{bits}(a,0x55,b,c,0xca);}}\nunsigned test_{bits}(__m512i a,__m512i b){{return _mm512_mask_test_epi{bits}_mask(0x55,a,b)|_mm512_mask_testn_epi{bits}_mask(0x55,a,b);}}\n"
+        );
+    }
+    source += "__m512i mul_signed(__m512i s,__m512i a,__m512i b){return _mm512_mask_mul_epi32(s,0x55,a,b);}\n__m512i mul_unsigned(__m512i s,__m512i a,__m512i b){return _mm512_mask_mul_epu32(s,0x55,a,b);}\n";
+    let target = Target::X86_64LinuxGnu;
+    let mut module = parse(&source, target).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    keel_opt::optimize(&mut module).unwrap();
+    let features = Features::NONE.with_features("avx512f").unwrap();
+    let selector = FeatureSelector {
+        inner: &SelectionTier::Full,
+        features,
+    };
+    let pipeline = CodegenPipeline {
+        selector: &selector,
+        allocator: &AllocationTier::Full,
+    };
+    let program = keel_codegen::compile_program_with_pipeline(&module, target, &pipeline).unwrap();
+    keel_asm::x86::assemble_program_object_with_features(&program, features).unwrap();
+    for expression in [
+        "_mm512_mask_getmant_round_ps(a,1,a,n,0,8)",
+        "_mm512_mask_getmant_round_ps(a,1,a,0,0,n)",
+        "_mm512_mask_roundscale_round_ps(a,1,a,n,8)",
+        "_mm512_mask_roundscale_round_ps(a,1,a,0,n)",
+        "_mm512_mask_roundscale_round_ps(a,1,a,256,8)",
+        "_mm512_mask_roundscale_round_ps(a,1,a,0,9)",
+    ] {
+        let invalid =
+            format!("#include <immintrin.h>\n__m512 f(__m512 a,int n){{return {expression};}}");
+        assert!(parse(&invalid, target).is_err(), "accepted {expression}");
+    }
+}
+
+#[test]
+fn avx512_ternary_wrapper_evaluates_operands_once() {
+    let source = r#"
+#include <immintrin.h>
+int ternary_evaluations;
+static __m512i get_vector(const void*p){ternary_evaluations++;return _mm512_loadu_si512(p);}
+static __mmask16 get_mask(void){ternary_evaluations++;return 0xa55a;}
+void ternary_once(const void*a,const void*b,const void*c,void*out){
+ _mm512_storeu_si512(out,_mm512_mask_ternarylogic_epi32(get_vector(a),get_mask(),get_vector(b),get_vector(c),0x96));
+}
+"#;
+    let mut module = parse(source, Target::X86_64LinuxGnu).unwrap();
+    keel_opt::optimize(&mut module).unwrap();
+    let features = Features::NONE.with_features("avx512f").unwrap();
+    let selector = FeatureSelector {
+        inner: &SelectionTier::Full,
+        features,
+    };
+    let pipeline = CodegenPipeline {
+        selector: &selector,
+        allocator: &AllocationTier::Full,
+    };
+    let program =
+        keel_codegen::compile_program_with_pipeline(&module, Target::X86_64LinuxGnu, &pipeline)
+            .unwrap();
+    let object = keel_asm::x86::assemble_program_object_with_features(&program, features).unwrap();
+    if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
+        #[cfg(target_arch = "x86_64")]
+        if !std::is_x86_feature_detected!("avx512f") {
+            eprintln!("SKIP native ternary header: AVX512F unavailable");
+            return;
+        }
+        let directory =
+            std::env::temp_dir().join(format!("keel-avx512-ternary-c-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("code.o"), object).unwrap();
+        fs::write(directory.join("harness.c"),r#"
+#include <stdint.h>
+extern int ternary_evaluations;
+extern void ternary_once(const void*,const void*,const void*,void*);
+int main(void){uint32_t a[16],b[16],c[16],out[16];for(unsigned i=0;i<16;i++){a[i]=i*0x1234567u;b[i]=~a[i];c[i]=i*0x9e3779b9u;}ternary_once(a,b,c,out);if(ternary_evaluations!=4)return 1;for(unsigned i=0;i<16;i++){uint32_t want=(0xa55au>>i)&1?a[i]^b[i]^c[i]:a[i];if(out[i]!=want)return 2;}return 0;}
+"#).unwrap();
+        let output = Command::new("cc")
+            .arg(directory.join("harness.c"))
+            .arg(directory.join("code.o"))
+            .arg("-o")
+            .arg(directory.join("run"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            Command::new(directory.join("run"))
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+}
