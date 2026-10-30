@@ -34,6 +34,7 @@ mod gvn;
 mod if_convert;
 mod inline;
 mod report;
+pub use inline::InlineBudget;
 pub use inline::{InlineReport, InlineSkip, run_with_report as inline_with_report};
 pub use inline::{
     required_inline_asm, required_inline_asm_with_c_bodies, required_inline_asm_with_c_definitions,
@@ -120,6 +121,19 @@ pub trait Pass: Sync {
         changed.clear();
         changed.resize(module.functions.len(), result);
         Some(result)
+    }
+
+    /// Module dispatch with Full's pipeline-owned expansion allowance.
+    /// The default preserves custom-pass dispatch and change tracking.
+    fn run_module_with_inline_budget(
+        &self,
+        module: &mut Module,
+        enabled: &dyn Fn(&Function) -> bool,
+        sites: Option<&mut Vec<InlineSite>>,
+        changed: &mut Vec<bool>,
+        _budget: &mut InlineBudget,
+    ) -> Option<bool> {
+        self.run_module_for_functions(module, enabled, sites, changed)
     }
 
     /// Whether the function is scheduled for this invocation. Checked before
@@ -931,14 +945,30 @@ fn execute_pipeline(
     let _clear = ClearAnalyses;
     let mut canonical = vec![false; module.functions.len()];
     let mut versions = Versions::new(module.functions.len());
+    let has_full_inlining = passes
+        .iter()
+        .any(|pass| pass.name() == "inline-cheap-reserve");
+    let mut inline_budget = if has_full_inlining {
+        InlineBudget::new(module)
+    } else {
+        InlineBudget::default()
+    };
     for (pipeline_index, &pass) in passes.iter().enumerate() {
         profiling::scope!("pass", pass.name());
         let before = reporting.then(|| IrCounts::module(module));
         let mut inline_sites = reporting.then(Vec::new);
         let start = reporting.then(Instant::now);
-        let module_changed =
-            pass.run_module_tracked(module, inline_sites.as_mut(), &mut versions.changed);
+        let module_changed = pass.run_module_with_inline_budget(
+            module,
+            &|f| pass.enabled_for(f),
+            inline_sites.as_mut(),
+            &mut versions.changed,
+            &mut inline_budget,
+        );
         let pass_ns = start.map_or(0, |start| start.elapsed().as_nanos());
+        if has_full_inlining && let Some(report) = report.as_deref_mut() {
+            report.inline_budget = Some(inline_budget.clone());
+        }
         if let Some(changed) = module_changed {
             let old_len = versions.version.len();
             versions.module_changed(&mut canonical);

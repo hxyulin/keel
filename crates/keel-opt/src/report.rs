@@ -108,6 +108,8 @@ pub struct PassObservation {
 }
 #[derive(Debug, Default)]
 pub struct OptimizationReport {
+    /// Pipeline-entry allowance and cumulative conservative Full expansion charges.
+    pub inline_budget: Option<crate::InlineBudget>,
     pub invocations: Vec<PassObservation>,
 }
 /// JSON string escaping, also used for arbitrary function names.
@@ -187,7 +189,11 @@ impl OptimizationReport {
             }
             out.push_str("]}");
         }
-        out.push_str("]}\n");
+        out.push(']');
+        if let Some(budget) = &self.inline_budget {
+            write!(out, ",\"inline_budget\":{{\"limit\":{},\"used\":{},\"reserve_limit\":{},\"reserve_used\":{}}}", budget.limit, budget.used, crate::inline::CHEAP_MODULE_GROWTH, budget.reserve_used).unwrap();
+        }
+        out.push_str("}\n");
         out
     }
 }

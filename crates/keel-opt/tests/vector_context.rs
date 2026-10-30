@@ -346,6 +346,7 @@ fn legacy_report_and_options_exhaustive_literals_compile_and_schema_is_unchanged
     } = &observation;
     let report = OptimizationReport {
         invocations: vec![observation],
+        ..Default::default()
     };
     let json = report.to_json();
     assert!(json.starts_with("{\"schema_version\":2,\"invocations\":["));
@@ -361,7 +362,8 @@ fn legacy_report_and_options_exhaustive_literals_compile_and_schema_is_unchanged
     assert_eq!(explicit, report.to_json_with_context(context));
     assert_eq!(
         OptimizationReport {
-            invocations: vec![]
+            invocations: vec![],
+            ..Default::default()
         }
         .to_json(),
         "{\"schema_version\":2,\"invocations\":[]}\n"

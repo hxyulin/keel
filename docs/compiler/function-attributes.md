@@ -205,7 +205,9 @@ these three soft thresholds, but cannot bypass legality or the hard safeguards:
 - At most 128 expanded original call sites per caller per invocation.
 - At most 2,048 estimated added IR instructions per caller per invocation.
 - At most 16,384 estimated added IR instructions across the module per invocation,
-  or 65,536 in Full's `inline-cheap-reserve` policy.
+  for policies other than Full. Full shares the greater of 65,536 and one quarter
+  of pipeline-entry layout instructions across all its inlining rounds. A separate
+  cheap-helper reserve allows 4,096 instructions and 256 sites across those rounds.
 - At most 65,536 bytes of callee stack slots, and at most 65,536 bytes of added
   summed slot/snapshot sizes per caller per invocation (excluding backend frame
   alignment and spills).
@@ -214,8 +216,13 @@ The IR estimate includes two glue instructions and a conservative byte-based
 by-value copy allowance. Bounds cap expansion, not the original module's size
 or existing caller frame. Templates and callsite lists are frozen at pass entry;
 cloned calls are not revisited in the same invocation. Budgets are consumed in
-module/function layout order, deterministically for a given input. Repeated
-explicit invocations each receive a fresh bounded budget.
+module/function layout order outside Full. Full keeps its tiny-helper priority
+phase, then takes one original site per caller per sweep within each phase.
+This is deterministic for a given input. A new pipeline execution receives a
+fresh Full allowance; repeated Full passes inside it share charges. Cleanup
+never refunds charges, and cloned IR never enlarges the allowance. Caller
+instruction, site-count and stack-growth ledgers still reset per invocation;
+the recursive caller frame check observes slots from earlier rounds.
 
 `keel_opt::inline_with_report` returns `InlineReport { changed, skipped }` with
 caller, callee, original instruction handle and reason for skipped explicit

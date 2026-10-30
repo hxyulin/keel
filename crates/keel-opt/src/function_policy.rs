@@ -31,6 +31,23 @@ impl Pass for ScopedPass<'_> {
         self.pass
             .run_module_for_functions(module, &|f| self.enabled_for(f), sites, changed)
     }
+    fn run_module_with_inline_budget(
+        &self,
+        module: &mut Module,
+        _enabled: &dyn Fn(&Function) -> bool,
+        sites: Option<&mut Vec<crate::InlineSite>>,
+        changed: &mut Vec<bool>,
+        budget: &mut crate::InlineBudget,
+    ) -> Option<bool> {
+        self.pass.run_module_with_inline_budget(
+            module,
+            &|f| self.enabled_for(f),
+            sites,
+            changed,
+            budget,
+        )
+    }
+
     fn deterministic(&self) -> bool {
         self.pass.deterministic()
     }

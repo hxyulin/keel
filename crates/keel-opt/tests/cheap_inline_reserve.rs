@@ -287,3 +287,88 @@ fn guarded_hinted_leaves_precede_ordinary_growth_without_expanding_budgets() {
     let (_, sites) = run(&source, PASS);
     assert_eq!(sites.last().unwrap().outcome, "caller_call_count_budget");
 }
+
+fn run_pipeline(source: &str, passes: &[&str]) -> (Module, OptimizationReport) {
+    let mut module = keel_ir::parse(source).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let mut report = OptimizationReport::default();
+    keel_opt::run_passes_for_target_with_report(
+        &mut module,
+        passes,
+        keel_opt::VectorTarget::Portable,
+        &mut report,
+    )
+    .unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    (module, report)
+}
+
+#[test]
+fn ordinary_full_sites_take_turns_before_module_exhaustion() {
+    let source = saturated().replace("alwaysinline local", "local")
+        + &leaf("late_helper", 16, "local", false)
+        + &caller("late_user", "late_helper", 1);
+    let (_, sites) = run(&source, PASS);
+    let late = sites.iter().position(|s| s.caller == "late_user").unwrap();
+    assert_eq!(sites[late].outcome, "inlined");
+    assert_eq!(
+        late, 32,
+        "each earlier caller gets one turn before the late caller"
+    );
+    assert!(
+        sites
+            .iter()
+            .any(|s| s.outcome == "module_instruction_growth_budget")
+    );
+}
+
+#[test]
+fn full_rounds_share_charges_even_when_cleanup_removes_cloned_ir() {
+    let source = saturated();
+    let (expanded, once) = run_pipeline(&source, &[PASS]);
+    let (module, repeated) = run_pipeline(&source, &[PASS, "dce", PASS, "dce", PASS]);
+    let first = once.inline_budget.unwrap();
+    let budget = repeated.inline_budget.as_ref().unwrap();
+    assert_eq!(budget.limit, first.limit);
+    assert_eq!(
+        budget.used, first.used,
+        "cleanup must not refund clone work"
+    );
+    assert!(budget.used <= budget.limit);
+    assert!(
+        count(&module) < count(&expanded),
+        "the cleanup must actually remove IR in this regression"
+    );
+    let unobserved = {
+        let mut module = keel_ir::parse(&source).unwrap();
+        keel_opt::run_passes(&mut module, &[PASS, "dce", PASS, "dce", PASS]).unwrap();
+        module
+    };
+    assert_eq!(module.to_string(), unobserved.to_string());
+    assert!(repeated.to_json().contains("\"inline_budget\""));
+}
+
+#[test]
+fn full_allowance_uses_entry_ir_not_definition_count_or_later_growth() {
+    let source = saturated();
+    let (_, baseline) = run_pipeline(&source, &[PASS]);
+    let mut padded = source.clone();
+    for i in 0..8192 {
+        padded += &caller(&format!("empty{i}"), "constructor", 0);
+    }
+    let (_, empty) = run_pipeline(&padded, &[PASS]);
+    assert_eq!(
+        baseline.inline_budget.as_ref().unwrap().limit,
+        empty.inline_budget.as_ref().unwrap().limit
+    );
+
+    // This body is removed by DCE, but its pipeline-entry size remains the basis.
+    let large = source + &leaf("large_input", 300_000, "noinline", false);
+    let input = keel_ir::parse(&large).unwrap();
+    let expected = count(&input) / 4;
+    let (_, report) = run_pipeline(&large, &["dce", PASS, PASS]);
+    let budget = report.inline_budget.unwrap();
+    assert_eq!(budget.limit, expected);
+    assert!(budget.limit > 65_536);
+    assert!(budget.used <= budget.limit);
+}

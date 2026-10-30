@@ -3,7 +3,7 @@
 //! pass entry: newly cloned calls are not reconsidered, so growth and recursion
 //! cannot recursively reconsider cloned sites. Full schedules bounded tiny
 //! alwaysinline and guarded, writing hinted leaves first. Each phase otherwise
-//! retains layout order. Other
+//! takes turns across callers. Other
 //! policies consume budgets in layout order. ABI by-value arguments get a fresh snapshot.
 //! Instruction growth bounds the increase in layout instructions before cleanup;
 //! the removed call pays for the jump entering the cloned body.
@@ -13,6 +13,34 @@ use keel_ir::{
     BinaryOp, BlockCall, DebugScope, EntityRef, Function, InsertPoint, Inst, InstData, Intrinsic,
     Module, Purpose, Symbol, Type,
 };
+
+/// Conservative Full expansion allowance shared by one optimization pipeline.
+/// Charges cloned IR before cleanup; it is never replenished by simplification.
+#[derive(Debug, Clone, Default)]
+pub struct InlineBudget {
+    /// Ordinary allowance fixed from pipeline-entry IR.
+    pub limit: usize,
+    /// Ordinary instructions charged so far.
+    pub used: usize,
+    /// Cheap-helper reserve instructions charged so far.
+    pub reserve_used: usize,
+    reserve_sites: usize,
+}
+impl InlineBudget {
+    pub(crate) fn new(module: &Module) -> Self {
+        let instructions = module
+            .functions
+            .iter()
+            .map(|f| f.layout_insts().count())
+            .fold(0usize, usize::saturating_add);
+        Self {
+            limit: FULL_MAX_MODULE_GROWTH.max(instructions / FULL_GROWTH_INPUT_DIVISOR),
+            used: 0,
+            reserve_used: 0,
+            reserve_sites: 0,
+        }
+    }
+}
 
 pub struct Inline;
 impl Pass for Inline {
@@ -284,7 +312,7 @@ impl Pass for InlineNoninterposable {
     }
 }
 
-/// Full policy: allow a larger module growth budget, then fairly retry cheap
+/// Full policy: share an input-scaled module allowance, then fairly retry cheap
 /// helper sites denied only by module growth. Caller and legality limits match
 /// the ordinary policy.
 pub struct InlineCheapReserve;
@@ -297,6 +325,34 @@ impl Pass for InlineCheapReserve {
     }
     fn run(&self, _: &mut Function) -> bool {
         false
+    }
+    fn run_module_with_inline_budget(
+        &self,
+        module: &mut Module,
+        enabled: &dyn Fn(&Function) -> bool,
+        sites: Option<&mut Vec<InlineSite>>,
+        changed: &mut Vec<bool>,
+        budget: &mut InlineBudget,
+    ) -> Option<bool> {
+        let callers = module
+            .functions
+            .iter()
+            .filter(|f| enabled(f))
+            .map(|f| f.name.clone())
+            .collect();
+        let report = run_observed_policy_budgeted(
+            module,
+            sites,
+            InlinePolicy {
+                experimental: false,
+                admit_noninterposable: true,
+                cheap_reserve: true,
+                cost: InlineCost::Default,
+            },
+            Some(&callers),
+            budget,
+        );
+        Some(report.changed_callers(module, changed))
     }
     fn run_module(&self, module: &mut Module) -> Option<bool> {
         Some(run_observed_policy(module, None, false, true, true).changed)
@@ -346,7 +402,7 @@ impl Pass for InlineCheapReserve {
 }
 
 const CHEAP_SITE_GROWTH: usize = 48;
-const CHEAP_MODULE_GROWTH: usize = 4096;
+pub(crate) const CHEAP_MODULE_GROWTH: usize = 4096;
 const CHEAP_MODULE_SITES: usize = 256;
 
 // A cheap predicate or guarded single slow-call wrapper, independent of names
@@ -411,6 +467,8 @@ const MAX_CALLS: usize = 128;
 const CALL_SITE_COST: usize = 5;
 const MAX_MODULE_GROWTH: usize = 16_384;
 const FULL_MAX_MODULE_GROWTH: usize = 65_536;
+// Charge at most 25% of entry IR above the small-module floor, across all rounds.
+const FULL_GROWTH_INPUT_DIVISOR: usize = 4;
 const HARD_STACK: u64 = 65_536;
 // Every inlined site gets its own slots, and each recursion level pays for
 // all of them. Cap the whole frame of a caller in a call cycle, measured
@@ -1080,9 +1138,24 @@ fn run_observed_policy(
 
 fn run_observed_policy_scoped(
     module: &mut Module,
+    sites: Option<&mut Vec<InlineSite>>,
+    policy: InlinePolicy,
+    callers: Option<&FxHashSet<String>>,
+) -> InlineReport {
+    let mut budget = if policy.cheap_reserve {
+        InlineBudget::new(module)
+    } else {
+        InlineBudget::default()
+    };
+    run_observed_policy_budgeted(module, sites, policy, callers, &mut budget)
+}
+
+fn run_observed_policy_budgeted(
+    module: &mut Module,
     mut sites: Option<&mut Vec<InlineSite>>,
     policy: InlinePolicy,
     callers: Option<&FxHashSet<String>>,
+    shared: &mut InlineBudget,
 ) -> InlineReport {
     let InlinePolicy {
         experimental,
@@ -1091,7 +1164,7 @@ fn run_observed_policy_scoped(
         cost: cost_policy,
     } = policy;
     let module_growth_limit = if cheap_reserve {
-        FULL_MAX_MODULE_GROWTH
+        shared.limit
     } else {
         MAX_MODULE_GROWTH
     };
@@ -1207,8 +1280,11 @@ fn run_observed_policy_scoped(
     // until then the module's own definition is the pass-entry body.
     let mut frozen: Vec<Option<Box<Function>>> = Vec::new();
     frozen.resize_with(module.functions.len(), || None);
+    // Templates retain their pass-entry bodies even when used as callers.
+    // Only their immutable cost is cached; caller ledgers stay live below.
+    let mut template_costs = vec![None; module.functions.len()];
     let mut report = InlineReport::default();
-    let mut module_growth = 0;
+    let mut module_growth = if cheap_reserve { shared.used } else { 0 };
     let mut module_reserve_sites = 0;
     let tiny_templates: FxHashSet<_> = templates
         .values()
@@ -1262,21 +1338,54 @@ fn run_observed_policy_scoped(
     // module growth enter the separate retry queue; cloned calls never enter it.
     let mut schedule = Vec::new();
     for phase in 0..if admit_noninterposable { 2 } else { 1 } {
-        for (index, calls) in original_sites.iter().enumerate() {
-            if callers.is_some_and(|names| !names.contains(&module.functions[index].name)) {
-                continue;
+        let mut queues: std::collections::VecDeque<_> = original_sites
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| {
+                callers.is_none_or(|names| names.contains(&module.functions[*index].name))
+            })
+            .map(|(index, calls)| {
+                (
+                    index,
+                    calls
+                        .iter()
+                        .copied()
+                        .filter(|call| {
+                            !admit_noninterposable
+                                || priority_sites[index].contains(call) == (phase == 0)
+                        })
+                        .collect::<std::collections::VecDeque<_>>(),
+                )
+            })
+            .filter(|(_, calls)| !calls.is_empty())
+            .collect();
+        while let Some((index, mut calls)) = queues.pop_front() {
+            if cheap_reserve {
+                schedule.push((
+                    index,
+                    calls.pop_front().expect("nonempty caller queue"),
+                    false,
+                ));
+            } else {
+                schedule.extend(calls.drain(..).map(|call| (index, call, false)));
             }
-            for &call in calls {
-                if !admit_noninterposable || priority_sites[index].contains(&call) == (phase == 0) {
-                    schedule.push((index, call, false));
-                }
+            if !calls.is_empty() {
+                queues.push_back((index, calls));
             }
         }
     }
     let ordinary_end = schedule.len();
     let mut deferred = vec![Vec::new(); module.functions.len()];
-    let mut cheap_growth = 0;
-    let mut cheap_sites = 0;
+    let mut cheap_growth = if cheap_reserve {
+        shared.reserve_used
+    } else {
+        0
+    };
+    let mut cheap_sites = if cheap_reserve {
+        shared.reserve_sites
+    } else {
+        0
+    };
     let mut cursor = 0;
     loop {
         if cheap_reserve && cursor == ordinary_end {
@@ -1432,7 +1541,8 @@ fn run_observed_policy_scoped(
         // continuation only receives moved instructions and parameters.
         // Counting all callee instructions also covers unreachable blocks
         // that the dominator traversal may omit. Snapshot IR is additional.
-        let (cost, stack_cost) = inline_cost(callee);
+        let (cost, stack_cost) =
+            *template_costs[callee_index].get_or_insert_with(|| inline_cost(callee));
         let recursive_stack_ok = !recursive[index]
             || stack_cost == 0
             || caller
@@ -1574,6 +1684,12 @@ fn run_observed_policy_scoped(
         report.changed = true;
         report.callers.push(index);
         ledgers[index] = (growth, reserve_sites, count, stack_growth);
+    }
+    if cheap_reserve {
+        let budget = shared;
+        budget.used = module_growth;
+        budget.reserve_used = cheap_growth;
+        budget.reserve_sites = cheap_sites;
     }
     report
 }
