@@ -989,3 +989,12 @@ mod x86_avx512_bw_mask_alu;
 
 #[path = "vector_x86/x86_avx512_vl_indexed.rs"]
 mod x86_avx512_vl_indexed;
+
+#[path = "vector_x86/x86_avx512_bw_misc.rs"]
+mod x86_avx512_bw_misc;
+
+#[path = "vector_x86/x86_avx512_vl_integer.rs"]
+mod x86_avx512_vl_integer;
+
+#[path = "vector_x86/x86_avx512_bw_permute.rs"]
+mod x86_avx512_bw_permute;

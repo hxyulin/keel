@@ -3478,10 +3478,138 @@ pub enum Intrinsic {
     X86Avx512BwKortestq = 2076,
     #[doc = "AVX512BW scalar mask algebra. Tests return ZF in bit zero and CF in bit one; unpack concatenates low halves."]
     X86Avx512BwKunpckdq = 2077,
+    #[doc = "AVX512BW byte and word permutation. Shuffles retain independent 128-bit lanes; word table permutations span the vector. Mask merge is independent of all live inputs."]
+    X86Avx512BwPshufb128 = 2078,
+    #[doc = "AVX512BW byte and word permutation. Shuffles retain independent 128-bit lanes; word table permutations span the vector. Mask merge is independent of all live inputs."]
+    X86Avx512BwPalignr128 = 2079,
+    #[doc = "AVX512BW byte and word permutation. Shuffles retain independent 128-bit lanes; word table permutations span the vector. Mask merge is independent of all live inputs."]
+    X86Avx512BwPshufhw128 = 2080,
+    #[doc = "AVX512BW byte and word permutation. Shuffles retain independent 128-bit lanes; word table permutations span the vector. Mask merge is independent of all live inputs."]
+    X86Avx512BwPshuflw128 = 2081,
+    #[doc = "AVX512BW byte and word permutation. Shuffles retain independent 128-bit lanes; word table permutations span the vector. Mask merge is independent of all live inputs."]
+    X86Avx512BwPermw128 = 2082,
+    #[doc = "AVX512BW byte and word permutation. Shuffles retain independent 128-bit lanes; word table permutations span the vector. Mask merge is independent of all live inputs."]
+    X86Avx512BwPermt2w128 = 2083,
+    #[doc = "AVX512BW byte and word permutation. Shuffles retain independent 128-bit lanes; word table permutations span the vector. Mask merge is independent of all live inputs."]
+    X86Avx512BwPshufb256 = 2084,
+    #[doc = "AVX512BW byte and word permutation. Shuffles retain independent 128-bit lanes; word table permutations span the vector. Mask merge is independent of all live inputs."]
+    X86Avx512BwPalignr256 = 2085,
+    #[doc = "AVX512BW byte and word permutation. Shuffles retain independent 128-bit lanes; word table permutations span the vector. Mask merge is independent of all live inputs."]
+    X86Avx512BwPshufhw256 = 2086,
+    #[doc = "AVX512BW byte and word permutation. Shuffles retain independent 128-bit lanes; word table permutations span the vector. Mask merge is independent of all live inputs."]
+    X86Avx512BwPshuflw256 = 2087,
+    #[doc = "AVX512BW byte and word permutation. Shuffles retain independent 128-bit lanes; word table permutations span the vector. Mask merge is independent of all live inputs."]
+    X86Avx512BwPermw256 = 2088,
+    #[doc = "AVX512BW byte and word permutation. Shuffles retain independent 128-bit lanes; word table permutations span the vector. Mask merge is independent of all live inputs."]
+    X86Avx512BwPermt2w256 = 2089,
+    #[doc = "AVX512BW byte and word permutation. Shuffles retain independent 128-bit lanes; word table permutations span the vector. Mask merge is independent of all live inputs."]
+    X86Avx512BwPshufb512 = 2090,
+    #[doc = "AVX512BW byte and word permutation. Shuffles retain independent 128-bit lanes; word table permutations span the vector. Mask merge is independent of all live inputs."]
+    X86Avx512BwPalignr512 = 2091,
+    #[doc = "AVX512BW byte and word permutation. Shuffles retain independent 128-bit lanes; word table permutations span the vector. Mask merge is independent of all live inputs."]
+    X86Avx512BwPshufhw512 = 2092,
+    #[doc = "AVX512BW byte and word permutation. Shuffles retain independent 128-bit lanes; word table permutations span the vector. Mask merge is independent of all live inputs."]
+    X86Avx512BwPshuflw512 = 2093,
+    #[doc = "AVX512BW byte and word permutation. Shuffles retain independent 128-bit lanes; word table permutations span the vector. Mask merge is independent of all live inputs."]
+    X86Avx512BwPermw512 = 2094,
+    #[doc = "AVX512BW byte and word permutation. Shuffles retain independent 128-bit lanes; word table permutations span the vector. Mask merge is independent of all live inputs."]
+    X86Avx512BwPermt2w512 = 2095,
+    #[doc = "Shift bytes independently within each 128-bit lane, zeroing the lane for counts at least sixteen."]
+    X86Avx512BwPslldq512 = 2096,
+    #[doc = "Shift bytes independently within each 128-bit lane, zeroing the lane for counts at least sixteen."]
+    X86Avx512BwPsrldq512 = 2097,
+    #[doc = "AVX512BW absolute value, broadcast, blend or sum of absolute differences. Encoded width controls feature legality; absolute value wraps at the signed minimum."]
+    X86Avx512BwPabsb128 = 2098,
+    #[doc = "AVX512BW absolute value, broadcast, blend or sum of absolute differences. Encoded width controls feature legality; absolute value wraps at the signed minimum."]
+    X86Avx512BwPabsw128 = 2099,
+    #[doc = "AVX512BW absolute value, broadcast, blend or sum of absolute differences. Encoded width controls feature legality; absolute value wraps at the signed minimum."]
+    X86Avx512BwBroadcastb128 = 2100,
+    #[doc = "AVX512BW absolute value, broadcast, blend or sum of absolute differences. Encoded width controls feature legality; absolute value wraps at the signed minimum."]
+    X86Avx512BwBroadcastw128 = 2101,
+    #[doc = "AVX512BW absolute value, broadcast, blend or sum of absolute differences. Encoded width controls feature legality; absolute value wraps at the signed minimum."]
+    X86Avx512BwBlendb128 = 2102,
+    #[doc = "AVX512BW absolute value, broadcast, blend or sum of absolute differences. Encoded width controls feature legality; absolute value wraps at the signed minimum."]
+    X86Avx512BwBlendw128 = 2103,
+    #[doc = "AVX512BW absolute value, broadcast, blend or sum of absolute differences. Encoded width controls feature legality; absolute value wraps at the signed minimum."]
+    X86Avx512BwPsadbw128 = 2104,
+    #[doc = "AVX512BW absolute value, broadcast, blend or sum of absolute differences. Encoded width controls feature legality; absolute value wraps at the signed minimum."]
+    X86Avx512BwDbsad128 = 2105,
+    #[doc = "AVX512BW absolute value, broadcast, blend or sum of absolute differences. Encoded width controls feature legality; absolute value wraps at the signed minimum."]
+    X86Avx512BwPabsb256 = 2106,
+    #[doc = "AVX512BW absolute value, broadcast, blend or sum of absolute differences. Encoded width controls feature legality; absolute value wraps at the signed minimum."]
+    X86Avx512BwPabsw256 = 2107,
+    #[doc = "AVX512BW absolute value, broadcast, blend or sum of absolute differences. Encoded width controls feature legality; absolute value wraps at the signed minimum."]
+    X86Avx512BwBroadcastb256 = 2108,
+    #[doc = "AVX512BW absolute value, broadcast, blend or sum of absolute differences. Encoded width controls feature legality; absolute value wraps at the signed minimum."]
+    X86Avx512BwBroadcastw256 = 2109,
+    #[doc = "AVX512BW absolute value, broadcast, blend or sum of absolute differences. Encoded width controls feature legality; absolute value wraps at the signed minimum."]
+    X86Avx512BwBlendb256 = 2110,
+    #[doc = "AVX512BW absolute value, broadcast, blend or sum of absolute differences. Encoded width controls feature legality; absolute value wraps at the signed minimum."]
+    X86Avx512BwBlendw256 = 2111,
+    #[doc = "AVX512BW absolute value, broadcast, blend or sum of absolute differences. Encoded width controls feature legality; absolute value wraps at the signed minimum."]
+    X86Avx512BwPsadbw256 = 2112,
+    #[doc = "AVX512BW absolute value, broadcast, blend or sum of absolute differences. Encoded width controls feature legality; absolute value wraps at the signed minimum."]
+    X86Avx512BwDbsad256 = 2113,
+    #[doc = "AVX512BW absolute value, broadcast, blend or sum of absolute differences. Encoded width controls feature legality; absolute value wraps at the signed minimum."]
+    X86Avx512BwPabsb512 = 2114,
+    #[doc = "AVX512BW absolute value, broadcast, blend or sum of absolute differences. Encoded width controls feature legality; absolute value wraps at the signed minimum."]
+    X86Avx512BwPabsw512 = 2115,
+    #[doc = "AVX512BW absolute value, broadcast, blend or sum of absolute differences. Encoded width controls feature legality; absolute value wraps at the signed minimum."]
+    X86Avx512BwBroadcastb512 = 2116,
+    #[doc = "AVX512BW absolute value, broadcast, blend or sum of absolute differences. Encoded width controls feature legality; absolute value wraps at the signed minimum."]
+    X86Avx512BwBroadcastw512 = 2117,
+    #[doc = "AVX512BW absolute value, broadcast, blend or sum of absolute differences. Encoded width controls feature legality; absolute value wraps at the signed minimum."]
+    X86Avx512BwBlendb512 = 2118,
+    #[doc = "AVX512BW absolute value, broadcast, blend or sum of absolute differences. Encoded width controls feature legality; absolute value wraps at the signed minimum."]
+    X86Avx512BwBlendw512 = 2119,
+    #[doc = "AVX512BW absolute value, broadcast, blend or sum of absolute differences. Encoded width controls feature legality; absolute value wraps at the signed minimum."]
+    X86Avx512BwPsadbw512 = 2120,
+    #[doc = "AVX512BW absolute value, broadcast, blend or sum of absolute differences. Encoded width controls feature legality; absolute value wraps at the signed minimum."]
+    X86Avx512BwDbsad512 = 2121,
+    #[doc = "AVX512VL integer operation with independent masked merge and immutable inputs. Multiplication uses even dword lanes; mask tests clear unused high bits."]
+    X86Avx512VlPabsd128 = 2122,
+    #[doc = "AVX512VL integer operation with independent masked merge and immutable inputs. Multiplication uses even dword lanes; mask tests clear unused high bits."]
+    X86Avx512VlPabsq128 = 2123,
+    #[doc = "AVX512VL integer operation with independent masked merge and immutable inputs. Multiplication uses even dword lanes; mask tests clear unused high bits."]
+    X86Avx512VlPmuldq128 = 2124,
+    #[doc = "AVX512VL integer operation with independent masked merge and immutable inputs. Multiplication uses even dword lanes; mask tests clear unused high bits."]
+    X86Avx512VlPmuludq128 = 2125,
+    #[doc = "AVX512VL integer operation with independent masked merge and immutable inputs. Multiplication uses even dword lanes; mask tests clear unused high bits."]
+    X86Avx512VlPternlogd128 = 2126,
+    #[doc = "AVX512VL integer operation with independent masked merge and immutable inputs. Multiplication uses even dword lanes; mask tests clear unused high bits."]
+    X86Avx512VlPternlogq128 = 2127,
+    #[doc = "AVX512VL integer operation with independent masked merge and immutable inputs. Multiplication uses even dword lanes; mask tests clear unused high bits."]
+    X86Avx512VlPtestmd128 = 2128,
+    #[doc = "AVX512VL integer operation with independent masked merge and immutable inputs. Multiplication uses even dword lanes; mask tests clear unused high bits."]
+    X86Avx512VlPtestmq128 = 2129,
+    #[doc = "AVX512VL integer operation with independent masked merge and immutable inputs. Multiplication uses even dword lanes; mask tests clear unused high bits."]
+    X86Avx512VlPtestnmd128 = 2130,
+    #[doc = "AVX512VL integer operation with independent masked merge and immutable inputs. Multiplication uses even dword lanes; mask tests clear unused high bits."]
+    X86Avx512VlPtestnmq128 = 2131,
+    #[doc = "AVX512VL integer operation with independent masked merge and immutable inputs. Multiplication uses even dword lanes; mask tests clear unused high bits."]
+    X86Avx512VlPabsd256 = 2132,
+    #[doc = "AVX512VL integer operation with independent masked merge and immutable inputs. Multiplication uses even dword lanes; mask tests clear unused high bits."]
+    X86Avx512VlPabsq256 = 2133,
+    #[doc = "AVX512VL integer operation with independent masked merge and immutable inputs. Multiplication uses even dword lanes; mask tests clear unused high bits."]
+    X86Avx512VlPmuldq256 = 2134,
+    #[doc = "AVX512VL integer operation with independent masked merge and immutable inputs. Multiplication uses even dword lanes; mask tests clear unused high bits."]
+    X86Avx512VlPmuludq256 = 2135,
+    #[doc = "AVX512VL integer operation with independent masked merge and immutable inputs. Multiplication uses even dword lanes; mask tests clear unused high bits."]
+    X86Avx512VlPternlogd256 = 2136,
+    #[doc = "AVX512VL integer operation with independent masked merge and immutable inputs. Multiplication uses even dword lanes; mask tests clear unused high bits."]
+    X86Avx512VlPternlogq256 = 2137,
+    #[doc = "AVX512VL integer operation with independent masked merge and immutable inputs. Multiplication uses even dword lanes; mask tests clear unused high bits."]
+    X86Avx512VlPtestmd256 = 2138,
+    #[doc = "AVX512VL integer operation with independent masked merge and immutable inputs. Multiplication uses even dword lanes; mask tests clear unused high bits."]
+    X86Avx512VlPtestmq256 = 2139,
+    #[doc = "AVX512VL integer operation with independent masked merge and immutable inputs. Multiplication uses even dword lanes; mask tests clear unused high bits."]
+    X86Avx512VlPtestnmd256 = 2140,
+    #[doc = "AVX512VL integer operation with independent masked merge and immutable inputs. Multiplication uses even dword lanes; mask tests clear unused high bits."]
+    X86Avx512VlPtestnmq256 = 2141,
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 2078] = [
+    pub const ALL: [Intrinsic; 2142] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -5560,6 +5688,70 @@ impl Intrinsic {
         Intrinsic::X86Avx512BwKtestq,
         Intrinsic::X86Avx512BwKortestq,
         Intrinsic::X86Avx512BwKunpckdq,
+        Intrinsic::X86Avx512BwPshufb128,
+        Intrinsic::X86Avx512BwPalignr128,
+        Intrinsic::X86Avx512BwPshufhw128,
+        Intrinsic::X86Avx512BwPshuflw128,
+        Intrinsic::X86Avx512BwPermw128,
+        Intrinsic::X86Avx512BwPermt2w128,
+        Intrinsic::X86Avx512BwPshufb256,
+        Intrinsic::X86Avx512BwPalignr256,
+        Intrinsic::X86Avx512BwPshufhw256,
+        Intrinsic::X86Avx512BwPshuflw256,
+        Intrinsic::X86Avx512BwPermw256,
+        Intrinsic::X86Avx512BwPermt2w256,
+        Intrinsic::X86Avx512BwPshufb512,
+        Intrinsic::X86Avx512BwPalignr512,
+        Intrinsic::X86Avx512BwPshufhw512,
+        Intrinsic::X86Avx512BwPshuflw512,
+        Intrinsic::X86Avx512BwPermw512,
+        Intrinsic::X86Avx512BwPermt2w512,
+        Intrinsic::X86Avx512BwPslldq512,
+        Intrinsic::X86Avx512BwPsrldq512,
+        Intrinsic::X86Avx512BwPabsb128,
+        Intrinsic::X86Avx512BwPabsw128,
+        Intrinsic::X86Avx512BwBroadcastb128,
+        Intrinsic::X86Avx512BwBroadcastw128,
+        Intrinsic::X86Avx512BwBlendb128,
+        Intrinsic::X86Avx512BwBlendw128,
+        Intrinsic::X86Avx512BwPsadbw128,
+        Intrinsic::X86Avx512BwDbsad128,
+        Intrinsic::X86Avx512BwPabsb256,
+        Intrinsic::X86Avx512BwPabsw256,
+        Intrinsic::X86Avx512BwBroadcastb256,
+        Intrinsic::X86Avx512BwBroadcastw256,
+        Intrinsic::X86Avx512BwBlendb256,
+        Intrinsic::X86Avx512BwBlendw256,
+        Intrinsic::X86Avx512BwPsadbw256,
+        Intrinsic::X86Avx512BwDbsad256,
+        Intrinsic::X86Avx512BwPabsb512,
+        Intrinsic::X86Avx512BwPabsw512,
+        Intrinsic::X86Avx512BwBroadcastb512,
+        Intrinsic::X86Avx512BwBroadcastw512,
+        Intrinsic::X86Avx512BwBlendb512,
+        Intrinsic::X86Avx512BwBlendw512,
+        Intrinsic::X86Avx512BwPsadbw512,
+        Intrinsic::X86Avx512BwDbsad512,
+        Intrinsic::X86Avx512VlPabsd128,
+        Intrinsic::X86Avx512VlPabsq128,
+        Intrinsic::X86Avx512VlPmuldq128,
+        Intrinsic::X86Avx512VlPmuludq128,
+        Intrinsic::X86Avx512VlPternlogd128,
+        Intrinsic::X86Avx512VlPternlogq128,
+        Intrinsic::X86Avx512VlPtestmd128,
+        Intrinsic::X86Avx512VlPtestmq128,
+        Intrinsic::X86Avx512VlPtestnmd128,
+        Intrinsic::X86Avx512VlPtestnmq128,
+        Intrinsic::X86Avx512VlPabsd256,
+        Intrinsic::X86Avx512VlPabsq256,
+        Intrinsic::X86Avx512VlPmuldq256,
+        Intrinsic::X86Avx512VlPmuludq256,
+        Intrinsic::X86Avx512VlPternlogd256,
+        Intrinsic::X86Avx512VlPternlogq256,
+        Intrinsic::X86Avx512VlPtestmd256,
+        Intrinsic::X86Avx512VlPtestmq256,
+        Intrinsic::X86Avx512VlPtestnmd256,
+        Intrinsic::X86Avx512VlPtestnmq256,
     ];
 }
 
@@ -7634,5 +7826,69 @@ macro_rules! x86_intrinsics {
             | $crate::Intrinsic::X86Avx512BwKtestq
             | $crate::Intrinsic::X86Avx512BwKortestq
             | $crate::Intrinsic::X86Avx512BwKunpckdq
+            | $crate::Intrinsic::X86Avx512BwPshufb128
+            | $crate::Intrinsic::X86Avx512BwPalignr128
+            | $crate::Intrinsic::X86Avx512BwPshufhw128
+            | $crate::Intrinsic::X86Avx512BwPshuflw128
+            | $crate::Intrinsic::X86Avx512BwPermw128
+            | $crate::Intrinsic::X86Avx512BwPermt2w128
+            | $crate::Intrinsic::X86Avx512BwPshufb256
+            | $crate::Intrinsic::X86Avx512BwPalignr256
+            | $crate::Intrinsic::X86Avx512BwPshufhw256
+            | $crate::Intrinsic::X86Avx512BwPshuflw256
+            | $crate::Intrinsic::X86Avx512BwPermw256
+            | $crate::Intrinsic::X86Avx512BwPermt2w256
+            | $crate::Intrinsic::X86Avx512BwPshufb512
+            | $crate::Intrinsic::X86Avx512BwPalignr512
+            | $crate::Intrinsic::X86Avx512BwPshufhw512
+            | $crate::Intrinsic::X86Avx512BwPshuflw512
+            | $crate::Intrinsic::X86Avx512BwPermw512
+            | $crate::Intrinsic::X86Avx512BwPermt2w512
+            | $crate::Intrinsic::X86Avx512BwPslldq512
+            | $crate::Intrinsic::X86Avx512BwPsrldq512
+            | $crate::Intrinsic::X86Avx512BwPabsb128
+            | $crate::Intrinsic::X86Avx512BwPabsw128
+            | $crate::Intrinsic::X86Avx512BwBroadcastb128
+            | $crate::Intrinsic::X86Avx512BwBroadcastw128
+            | $crate::Intrinsic::X86Avx512BwBlendb128
+            | $crate::Intrinsic::X86Avx512BwBlendw128
+            | $crate::Intrinsic::X86Avx512BwPsadbw128
+            | $crate::Intrinsic::X86Avx512BwDbsad128
+            | $crate::Intrinsic::X86Avx512BwPabsb256
+            | $crate::Intrinsic::X86Avx512BwPabsw256
+            | $crate::Intrinsic::X86Avx512BwBroadcastb256
+            | $crate::Intrinsic::X86Avx512BwBroadcastw256
+            | $crate::Intrinsic::X86Avx512BwBlendb256
+            | $crate::Intrinsic::X86Avx512BwBlendw256
+            | $crate::Intrinsic::X86Avx512BwPsadbw256
+            | $crate::Intrinsic::X86Avx512BwDbsad256
+            | $crate::Intrinsic::X86Avx512BwPabsb512
+            | $crate::Intrinsic::X86Avx512BwPabsw512
+            | $crate::Intrinsic::X86Avx512BwBroadcastb512
+            | $crate::Intrinsic::X86Avx512BwBroadcastw512
+            | $crate::Intrinsic::X86Avx512BwBlendb512
+            | $crate::Intrinsic::X86Avx512BwBlendw512
+            | $crate::Intrinsic::X86Avx512BwPsadbw512
+            | $crate::Intrinsic::X86Avx512BwDbsad512
+            | $crate::Intrinsic::X86Avx512VlPabsd128
+            | $crate::Intrinsic::X86Avx512VlPabsq128
+            | $crate::Intrinsic::X86Avx512VlPmuldq128
+            | $crate::Intrinsic::X86Avx512VlPmuludq128
+            | $crate::Intrinsic::X86Avx512VlPternlogd128
+            | $crate::Intrinsic::X86Avx512VlPternlogq128
+            | $crate::Intrinsic::X86Avx512VlPtestmd128
+            | $crate::Intrinsic::X86Avx512VlPtestmq128
+            | $crate::Intrinsic::X86Avx512VlPtestnmd128
+            | $crate::Intrinsic::X86Avx512VlPtestnmq128
+            | $crate::Intrinsic::X86Avx512VlPabsd256
+            | $crate::Intrinsic::X86Avx512VlPabsq256
+            | $crate::Intrinsic::X86Avx512VlPmuldq256
+            | $crate::Intrinsic::X86Avx512VlPmuludq256
+            | $crate::Intrinsic::X86Avx512VlPternlogd256
+            | $crate::Intrinsic::X86Avx512VlPternlogq256
+            | $crate::Intrinsic::X86Avx512VlPtestmd256
+            | $crate::Intrinsic::X86Avx512VlPtestmq256
+            | $crate::Intrinsic::X86Avx512VlPtestnmd256
+            | $crate::Intrinsic::X86Avx512VlPtestnmq256
     };
 }

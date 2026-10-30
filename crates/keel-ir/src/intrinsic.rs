@@ -21,6 +21,9 @@ mod generated_query;
 #[path = "generated/intrinsic_registry.rs"]
 mod generated_registry;
 pub use generated_registry::Intrinsic;
+#[path = "intrinsic/avx512_bw_misc.rs"]
+mod avx512_bw_misc;
+pub use avx512_bw_misc::{X86Avx512BwMisc, X86Avx512BwMiscKind};
 #[path = "intrinsic/avx512_bw_mask_alu.rs"]
 mod avx512_bw_mask_alu;
 pub use avx512_bw_mask_alu::{X86Avx512BwMaskAlu, X86Avx512BwMaskAluKind};
@@ -43,8 +46,11 @@ pub use avx512_bw::{X86Avx512BwCore, X86Avx512BwKind};
 #[path = "intrinsic/avx512_bw_mask.rs"]
 mod avx512_bw_mask;
 pub use avx512_bw_mask::{X86Avx512BwMask, X86Avx512BwMaskKind};
+#[path = "intrinsic/avx512_bw_permute.rs"]
+mod avx512_bw_permute;
 #[path = "intrinsic/avx512_bw_shift.rs"]
 mod avx512_bw_shift;
+pub use avx512_bw_permute::{X86Avx512BwPermute, X86Avx512BwPermuteKind};
 #[path = "intrinsic/avx512_vl_indexed.rs"]
 mod avx512_vl_indexed;
 #[path = "intrinsic/avx512_vl_pack.rs"]
@@ -67,6 +73,10 @@ pub use avx512_vl_shift::{X86Avx512VlShift, X86Avx512VlShiftKind};
 #[path = "intrinsic/avx512_bw_mul.rs"]
 mod avx512_bw_mul;
 pub use avx512_bw_mul::X86Avx512BwMul;
+
+#[path = "intrinsic/avx512_vl_integer.rs"]
+mod avx512_vl_integer;
+pub use avx512_vl_integer::{X86Avx512VlInteger, X86Avx512VlIntegerKind};
 
 #[derive(Debug)]
 pub struct IntrinsicInfo {
@@ -713,6 +723,12 @@ impl Intrinsic {
 
     /// The byte immediate operand, when the operation has one.
     pub fn x86_avx512_integer_control(self) -> Option<usize> {
+        if self
+            .x86_avx512_vl_integer()
+            .is_some_and(|d| d.kind == X86Avx512VlIntegerKind::Ternary)
+        {
+            return Some(5);
+        }
         match self {
             Self::X86Avx512MaskTernlogd | Self::X86Avx512MaskTernlogq => Some(5),
             Self::X86Avx512MaskRold
@@ -1568,6 +1584,29 @@ impl Intrinsic {
     pub fn info(self) -> IntrinsicInfo {
         const MEM: &[Type] = &[Type::Ptr, Type::Ptr, Type::I64];
         let (name, params, returns, pure): (_, &'static [Type], &'static [Type], _) = match self {
+            Intrinsic::X86Avx512VlPabsd128
+            | Intrinsic::X86Avx512VlPabsq128
+            | Intrinsic::X86Avx512VlPmuldq128
+            | Intrinsic::X86Avx512VlPmuludq128
+            | Intrinsic::X86Avx512VlPternlogd128
+            | Intrinsic::X86Avx512VlPternlogq128
+            | Intrinsic::X86Avx512VlPtestmd128
+            | Intrinsic::X86Avx512VlPtestmq128
+            | Intrinsic::X86Avx512VlPtestnmd128
+            | Intrinsic::X86Avx512VlPtestnmq128
+            | Intrinsic::X86Avx512VlPabsd256
+            | Intrinsic::X86Avx512VlPabsq256
+            | Intrinsic::X86Avx512VlPmuldq256
+            | Intrinsic::X86Avx512VlPmuludq256
+            | Intrinsic::X86Avx512VlPternlogd256
+            | Intrinsic::X86Avx512VlPternlogq256
+            | Intrinsic::X86Avx512VlPtestmd256
+            | Intrinsic::X86Avx512VlPtestmq256
+            | Intrinsic::X86Avx512VlPtestnmd256
+            | Intrinsic::X86Avx512VlPtestnmq256 => {
+                let d = self.x86_avx512_vl_integer().expect("VL integer descriptor");
+                (d.name, d.params, d.returns, true)
+            }
             Intrinsic::X86Avx512BwAddb128
             | Intrinsic::X86Avx512BwSubb128
             | Intrinsic::X86Avx512BwAddsb128
@@ -1749,6 +1788,31 @@ impl Intrinsic {
             | Intrinsic::X86Avx512VlRorvd256
             | Intrinsic::X86Avx512VlRorvq256 => {
                 let descriptor = self.x86_avx512_vl_shift().expect("VL shift descriptor");
+                (descriptor.name, descriptor.params, descriptor.returns, true)
+            }
+            Intrinsic::X86Avx512BwPshufb128
+            | Intrinsic::X86Avx512BwPalignr128
+            | Intrinsic::X86Avx512BwPshufhw128
+            | Intrinsic::X86Avx512BwPshuflw128
+            | Intrinsic::X86Avx512BwPermw128
+            | Intrinsic::X86Avx512BwPermt2w128
+            | Intrinsic::X86Avx512BwPshufb256
+            | Intrinsic::X86Avx512BwPalignr256
+            | Intrinsic::X86Avx512BwPshufhw256
+            | Intrinsic::X86Avx512BwPshuflw256
+            | Intrinsic::X86Avx512BwPermw256
+            | Intrinsic::X86Avx512BwPermt2w256
+            | Intrinsic::X86Avx512BwPshufb512
+            | Intrinsic::X86Avx512BwPalignr512
+            | Intrinsic::X86Avx512BwPshufhw512
+            | Intrinsic::X86Avx512BwPshuflw512
+            | Intrinsic::X86Avx512BwPermw512
+            | Intrinsic::X86Avx512BwPermt2w512
+            | Intrinsic::X86Avx512BwPslldq512
+            | Intrinsic::X86Avx512BwPsrldq512 => {
+                let descriptor = self
+                    .x86_avx512_bw_permute()
+                    .expect("BW permutation descriptor");
                 (descriptor.name, descriptor.params, descriptor.returns, true)
             }
             Intrinsic::X86Avx512BwSlliw128
@@ -8652,6 +8716,35 @@ impl Intrinsic {
                 &[Type::I8],
                 false,
             ),
+            Intrinsic::X86Avx512BwPabsb128
+            | Intrinsic::X86Avx512BwPabsw128
+            | Intrinsic::X86Avx512BwBroadcastb128
+            | Intrinsic::X86Avx512BwBroadcastw128
+            | Intrinsic::X86Avx512BwBlendb128
+            | Intrinsic::X86Avx512BwBlendw128
+            | Intrinsic::X86Avx512BwPsadbw128
+            | Intrinsic::X86Avx512BwDbsad128
+            | Intrinsic::X86Avx512BwPabsb256
+            | Intrinsic::X86Avx512BwPabsw256
+            | Intrinsic::X86Avx512BwBroadcastb256
+            | Intrinsic::X86Avx512BwBroadcastw256
+            | Intrinsic::X86Avx512BwBlendb256
+            | Intrinsic::X86Avx512BwBlendw256
+            | Intrinsic::X86Avx512BwPsadbw256
+            | Intrinsic::X86Avx512BwDbsad256
+            | Intrinsic::X86Avx512BwPabsb512
+            | Intrinsic::X86Avx512BwPabsw512
+            | Intrinsic::X86Avx512BwBroadcastb512
+            | Intrinsic::X86Avx512BwBroadcastw512
+            | Intrinsic::X86Avx512BwBlendb512
+            | Intrinsic::X86Avx512BwBlendw512
+            | Intrinsic::X86Avx512BwPsadbw512
+            | Intrinsic::X86Avx512BwDbsad512 => {
+                let d = self
+                    .x86_avx512_bw_misc()
+                    .expect("BW miscellaneous descriptor");
+                (d.name, d.params, d.returns, true)
+            }
             Intrinsic::X86Avx512BwKandd
             | Intrinsic::X86Avx512BwKandnd
             | Intrinsic::X86Avx512BwKord
@@ -14859,6 +14952,8 @@ impl Intrinsic {
             || self.x86_avx512_bw_core().is_some()
             || self.x86_avx512_bw_mask().is_some()
             || self.x86_avx512_vl_shift().is_some()
+            || self.x86_avx512_bw_permute().is_some()
+            || self.x86_avx512_vl_integer().is_some()
             || self.x86_avx512_bw_shift().is_some()
             || self.x86_avx512_bw_pack().is_some()
             || self.x86_avx512_bw_convert().is_some()
@@ -14866,6 +14961,7 @@ impl Intrinsic {
             || self.is_x86_avx512_mask()
             || self.is_x86_avx512_indexed()
             || self.x86_avx512_special().is_some()
+            || self.x86_avx512_bw_misc().is_some()
             || self.x86_avx512_bw_mask_alu().is_some()
             || self.x86_avx512_dq_mask_alu().is_some()
             || self.x86_avx512_dq_special().is_some()

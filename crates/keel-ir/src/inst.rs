@@ -956,6 +956,27 @@ impl InstData {
             }
             Self::VaArg { .. } | Self::AggregateVaArg { .. } => ReadWrite,
             Self::Intrinsic { id, .. } => match id {
+                Intrinsic::X86Avx512VlPabsd128
+                | Intrinsic::X86Avx512VlPabsq128
+                | Intrinsic::X86Avx512VlPmuldq128
+                | Intrinsic::X86Avx512VlPmuludq128
+                | Intrinsic::X86Avx512VlPternlogd128
+                | Intrinsic::X86Avx512VlPternlogq128
+                | Intrinsic::X86Avx512VlPtestmd128
+                | Intrinsic::X86Avx512VlPtestmq128
+                | Intrinsic::X86Avx512VlPtestnmd128
+                | Intrinsic::X86Avx512VlPtestnmq128
+                | Intrinsic::X86Avx512VlPabsd256
+                | Intrinsic::X86Avx512VlPabsq256
+                | Intrinsic::X86Avx512VlPmuldq256
+                | Intrinsic::X86Avx512VlPmuludq256
+                | Intrinsic::X86Avx512VlPternlogd256
+                | Intrinsic::X86Avx512VlPternlogq256
+                | Intrinsic::X86Avx512VlPtestmd256
+                | Intrinsic::X86Avx512VlPtestmq256
+                | Intrinsic::X86Avx512VlPtestnmd256
+                | Intrinsic::X86Avx512VlPtestnmq256 => None,
+
                 Intrinsic::X86Avx512BwPmovsxbw128
                 | Intrinsic::X86Avx512BwPmovzxbw128
                 | Intrinsic::X86Avx512BwPmovwb128
@@ -987,6 +1008,30 @@ impl InstData {
                 | Intrinsic::X86Avx512BwPmovswbStore512
                 | Intrinsic::X86Avx512BwPmovuswbStore512 => Write,
 
+                Intrinsic::X86Avx512BwPabsb128
+                | Intrinsic::X86Avx512BwPabsw128
+                | Intrinsic::X86Avx512BwBroadcastb128
+                | Intrinsic::X86Avx512BwBroadcastw128
+                | Intrinsic::X86Avx512BwBlendb128
+                | Intrinsic::X86Avx512BwBlendw128
+                | Intrinsic::X86Avx512BwPsadbw128
+                | Intrinsic::X86Avx512BwDbsad128
+                | Intrinsic::X86Avx512BwPabsb256
+                | Intrinsic::X86Avx512BwPabsw256
+                | Intrinsic::X86Avx512BwBroadcastb256
+                | Intrinsic::X86Avx512BwBroadcastw256
+                | Intrinsic::X86Avx512BwBlendb256
+                | Intrinsic::X86Avx512BwBlendw256
+                | Intrinsic::X86Avx512BwPsadbw256
+                | Intrinsic::X86Avx512BwDbsad256
+                | Intrinsic::X86Avx512BwPabsb512
+                | Intrinsic::X86Avx512BwPabsw512
+                | Intrinsic::X86Avx512BwBroadcastb512
+                | Intrinsic::X86Avx512BwBroadcastw512
+                | Intrinsic::X86Avx512BwBlendb512
+                | Intrinsic::X86Avx512BwBlendw512
+                | Intrinsic::X86Avx512BwPsadbw512
+                | Intrinsic::X86Avx512BwDbsad512 => None,
                 Intrinsic::X86Avx512BwKandd
                 | Intrinsic::X86Avx512BwKandnd
                 | Intrinsic::X86Avx512BwKord
@@ -1170,6 +1215,26 @@ impl InstData {
                 | Intrinsic::X86Avx512VlRolvq256
                 | Intrinsic::X86Avx512VlRorvd256
                 | Intrinsic::X86Avx512VlRorvq256 => None,
+                Intrinsic::X86Avx512BwPshufb128
+                | Intrinsic::X86Avx512BwPalignr128
+                | Intrinsic::X86Avx512BwPshufhw128
+                | Intrinsic::X86Avx512BwPshuflw128
+                | Intrinsic::X86Avx512BwPermw128
+                | Intrinsic::X86Avx512BwPermt2w128
+                | Intrinsic::X86Avx512BwPshufb256
+                | Intrinsic::X86Avx512BwPalignr256
+                | Intrinsic::X86Avx512BwPshufhw256
+                | Intrinsic::X86Avx512BwPshuflw256
+                | Intrinsic::X86Avx512BwPermw256
+                | Intrinsic::X86Avx512BwPermt2w256
+                | Intrinsic::X86Avx512BwPshufb512
+                | Intrinsic::X86Avx512BwPalignr512
+                | Intrinsic::X86Avx512BwPshufhw512
+                | Intrinsic::X86Avx512BwPshuflw512
+                | Intrinsic::X86Avx512BwPermw512
+                | Intrinsic::X86Avx512BwPermt2w512
+                | Intrinsic::X86Avx512BwPslldq512
+                | Intrinsic::X86Avx512BwPsrldq512 => None,
                 Intrinsic::X86Avx512BwSlliw128
                 | Intrinsic::X86Avx512BwSllw128
                 | Intrinsic::X86Avx512BwSllvw128
@@ -3021,6 +3086,7 @@ impl InstData {
             Self::Neon { .. } => true,
             Self::Intrinsic { id, .. } => {
                 !((id.x86_avx512_bw_core().is_some() && id.info().pure)
+                    || id.x86_avx512_bw_misc().is_some()
                     || id.x86_avx512_bw_mask_alu().is_some()
                     || id.x86_avx512_dq_mask_alu().is_some()
                     || id.x86_avx512_dq_special().is_some_and(|d| {
@@ -3029,7 +3095,9 @@ impl InstData {
                     || id.x86_avx512_dq_lane().is_some()
                     || id.x86_avx512_dq_bridge().is_some()
                     || id.x86_avx512_bw_mask().is_some()
+                    || id.x86_avx512_vl_integer().is_some()
                     || id.x86_avx512_vl_shift().is_some()
+                    || id.x86_avx512_bw_permute().is_some()
                     || id.x86_avx512_bw_shift().is_some()
                     || id.x86_avx512_bw_pack().is_some()
                     || (id.x86_avx512_bw_convert().is_some() && id.info().pure)

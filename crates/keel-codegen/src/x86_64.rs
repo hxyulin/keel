@@ -134,8 +134,10 @@ mod avx512_bw;
 mod avx512_bw_convert;
 mod avx512_bw_mask;
 mod avx512_bw_mask_alu;
+mod avx512_bw_misc;
 mod avx512_bw_mul;
 mod avx512_bw_pack;
+mod avx512_bw_permute;
 mod avx512_bw_shift;
 mod avx512_convert;
 mod avx512_dq_bridge;
@@ -161,6 +163,7 @@ mod avx512_scalar_fma;
 mod avx512_scalar_move;
 mod avx512_special;
 mod avx512_vl_convert;
+mod avx512_vl_integer;
 mod avx512_vl_shift;
 mod gather;
 mod mmx_value;
@@ -1221,8 +1224,16 @@ impl<'a> FunctionCompiler<'a> {
                     avx512_bw_mul::validate(func, *id, args, pipeline.selector.x86_features())
                         .map_err(|message| err(message.into()))?;
                 }
+                if id.x86_avx512_vl_integer().is_some() {
+                    avx512_vl_integer::validate(func, *id, args, pipeline.selector.x86_features())
+                        .map_err(|s| err(s.into()))?;
+                }
                 if id.x86_avx512_vl_shift().is_some() {
                     avx512_vl_shift::validate(func, *id, args, pipeline.selector.x86_features())
+                        .map_err(|message| err(message.into()))?;
+                }
+                if id.x86_avx512_bw_permute().is_some() {
+                    avx512_bw_permute::validate(func, *id, args, pipeline.selector.x86_features())
                         .map_err(|message| err(message.into()))?;
                 }
                 if id.x86_avx512_bw_shift().is_some() {
@@ -1302,6 +1313,10 @@ impl<'a> FunctionCompiler<'a> {
                 }
                 if id.x86_avx512_fma_opcode().is_some() {
                     avx512_fma::validate(func, *id, args, pipeline.selector.x86_features())
+                        .map_err(|s| err(s.into()))?;
+                }
+                if id.x86_avx512_bw_misc().is_some() {
+                    avx512_bw_misc::validate(func, *id, args, pipeline.selector.x86_features())
                         .map_err(|s| err(s.into()))?;
                 }
                 if id.x86_avx512_bw_mask_alu().is_some() {
@@ -3297,8 +3312,14 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Intrinsic { id, ref args } if id.x86_avx512_bw_mul().is_some() => {
                 self.native_avx512_bw_mul(id, args, result);
             }
+            InstData::Intrinsic { id, ref args } if id.x86_avx512_vl_integer().is_some() => {
+                self.native_avx512_vl_integer(id, args, result)
+            }
             InstData::Intrinsic { id, ref args } if id.x86_avx512_vl_shift().is_some() => {
                 self.native_avx512_vl_shift(id, args, result);
+            }
+            InstData::Intrinsic { id, ref args } if id.x86_avx512_bw_permute().is_some() => {
+                self.native_avx512_bw_permute(id, args, result)
             }
             InstData::Intrinsic { id, ref args } if id.x86_avx512_bw_shift().is_some() => {
                 self.native_avx512_bw_shift(id, args, result);
@@ -3347,6 +3368,9 @@ impl<'a> FunctionCompiler<'a> {
             }
             InstData::Intrinsic { id, ref args } if id.x86_avx512_fma_opcode().is_some() => {
                 self.native_avx512_fma(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args } if id.x86_avx512_bw_misc().is_some() => {
+                self.native_avx512_bw_misc(id, args, result)
             }
             InstData::Intrinsic { id, ref args } if id.x86_avx512_bw_mask_alu().is_some() => {
                 self.native_avx512_bw_mask_alu(id, args, result)

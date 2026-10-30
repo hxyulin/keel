@@ -1719,6 +1719,26 @@ impl Verifier<'_> {
                     }
                 }
                 if id
+                    .x86_avx512_bw_misc()
+                    .is_some_and(|d| d.kind == crate::intrinsic::X86Avx512BwMiscKind::Dbsad)
+                {
+                    let control =
+                        args.get(4)
+                            .and_then(|&v| match func.value_def(func.resolve(v)) {
+                                ValueDef::Result(i, _) => match func.inst_data(i) {
+                                    InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                    _ => None,
+                                },
+                                _ => None,
+                            });
+                    if !control.is_some_and(|n| (0..=255).contains(&n)) {
+                        self.inst_error(
+                            inst,
+                            "BW DBSAD requires an imm8 constant in 0..=255".into(),
+                        );
+                    }
+                }
+                if id
                     .x86_avx512_bw_mask_alu()
                     .is_some_and(|d| d.kind == crate::intrinsic::X86Avx512BwMaskAluKind::Shift)
                 {
@@ -1986,6 +2006,26 @@ impl Verifier<'_> {
                         self.inst_error(
                             inst,
                             "AVX512 comparison SAE control must be iconst.i32 4 or 8".into(),
+                        );
+                    }
+                }
+                if let Some(index) = id
+                    .x86_avx512_bw_permute()
+                    .and_then(|d| d.kind.control_index())
+                {
+                    let control =
+                        args.get(index)
+                            .and_then(|&arg| match func.value_def(func.resolve(arg)) {
+                                ValueDef::Result(i, _) => match func.inst_data(i) {
+                                    InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                    _ => None,
+                                },
+                                _ => None,
+                            });
+                    if !control.is_some_and(|n| (0..=255).contains(&n)) {
+                        self.inst_error(
+                            inst,
+                            "BW shuffle control must be iconst.i32 in 0..=255".into(),
                         );
                     }
                 }
