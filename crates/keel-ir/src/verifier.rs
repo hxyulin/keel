@@ -1859,6 +1859,26 @@ impl Verifier<'_> {
                         );
                     }
                 }
+                if matches!(
+                    id,
+                    Intrinsic::X86Avx512CmpRoundps | Intrinsic::X86Avx512CmpRoundpd
+                ) {
+                    let control =
+                        args.get(4)
+                            .and_then(|&arg| match func.value_def(func.resolve(arg)) {
+                                ValueDef::Result(i, _) => match func.inst_data(i) {
+                                    InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                    _ => None,
+                                },
+                                _ => None,
+                            });
+                    if !matches!(control, Some(4 | 8)) {
+                        self.inst_error(
+                            inst,
+                            "AVX512 comparison SAE control must be iconst.i32 4 or 8".into(),
+                        );
+                    }
+                }
                 if id.is_x86_avx512_compare() {
                     let control =
                         args.get(2)

@@ -27,6 +27,13 @@ pub(super) fn validate(
     {
         return Err("AVX512 floating predicate must be iconst.i32 in0..=31");
     }
+    if matches!(
+        id,
+        Intrinsic::X86Avx512CmpRoundps | Intrinsic::X86Avx512CmpRoundpd
+    ) && !matches!(iconst(func, args[4]), Some(4 | 8))
+    {
+        return Err("AVX512 comparison SAE control must be iconst.i32 4 or 8");
+    }
     Ok(())
 }
 

@@ -14,13 +14,20 @@ impl FunctionCompiler<'_> {
             self.avx512_stage_vector(args[0], FS0);
             self.avx512_stage_vector(args[1], FS1);
             self.avx512_stage_mask(args[2]);
-            let name = if id == X86Avx512Cmpps {
+            let name = if matches!(id, X86Avx512Cmpps | X86Avx512CmpRoundps) {
                 "vcmpps"
             } else {
                 "vcmppd"
             };
+            let mut compare = opcode(name, true);
+            if args.len() == 5 && iconst(self.func, args[4]) == Some(8) {
+                let Opcode::Evex(ref mut op) = compare else {
+                    unreachable!()
+                };
+                op.options.rounding = Some(keel_asm_ir::x86::evex::Rounding::Sae);
+            }
             self.emit(
-                opcode(name, true),
+                compare,
                 [
                     asm_arg(k1()),
                     asm_arg(simd_width(FS0, 512)),

@@ -102,6 +102,8 @@ impl Intrinsic {
             self,
             Self::X86Avx512Cmpps
                 | Self::X86Avx512Cmppd
+                | Self::X86Avx512CmpRoundps
+                | Self::X86Avx512CmpRoundpd
                 | Self::X86Avx512MaskAddps
                 | Self::X86Avx512MaskAddpd
                 | Self::X86Avx512MaskSubps
@@ -120,7 +122,13 @@ impl Intrinsic {
     }
 
     pub fn is_x86_avx512_float_compare(self) -> bool {
-        matches!(self, Self::X86Avx512Cmpps | Self::X86Avx512Cmppd)
+        matches!(
+            self,
+            Self::X86Avx512Cmpps
+                | Self::X86Avx512Cmppd
+                | Self::X86Avx512CmpRoundps
+                | Self::X86Avx512CmpRoundpd
+        )
     }
 
     /// AVX512F gathers/scatters preserve immutable SSA indices, data and masks.
@@ -936,6 +944,18 @@ impl Intrinsic {
             | Self::X86Avx512MaskLoadInsertf64x4 => 32,
             _ => return None,
         })
+    }
+
+    pub fn is_x86_avx512_scalar_move(self) -> bool {
+        matches!(
+            self,
+            Self::X86Avx512MaskMovess
+                | Self::X86Avx512MaskMovesd
+                | Self::X86Avx512MaskLoadss
+                | Self::X86Avx512MaskLoadsd
+                | Self::X86Avx512MaskStoress
+                | Self::X86Avx512MaskStoresd
+        )
     }
 
     pub fn info(self) -> IntrinsicInfo {
@@ -2380,6 +2400,52 @@ impl Intrinsic {
                     Type::I32,
                 ],
                 &[Type::Vector(VectorType::F64x8)],
+                false,
+            ),
+            Intrinsic::X86Avx512MaskMovess => (
+                "x86_avx512_maskmovess",
+                &[
+                    Type::Vector(VectorType::F32x4),
+                    Type::I8,
+                    Type::Vector(VectorType::F32x4),
+                    Type::Vector(VectorType::F32x4),
+                ],
+                &[Type::Vector(VectorType::F32x4)],
+                true,
+            ),
+            Intrinsic::X86Avx512MaskMovesd => (
+                "x86_avx512_maskmovesd",
+                &[
+                    Type::Vector(VectorType::F64x2),
+                    Type::I8,
+                    Type::Vector(VectorType::F64x2),
+                    Type::Vector(VectorType::F64x2),
+                ],
+                &[Type::Vector(VectorType::F64x2)],
+                true,
+            ),
+            Intrinsic::X86Avx512MaskLoadss => (
+                "x86_avx512_maskloadss",
+                &[Type::Ptr, Type::Vector(VectorType::F32x4), Type::I8],
+                &[Type::Vector(VectorType::F32x4)],
+                false,
+            ),
+            Intrinsic::X86Avx512MaskLoadsd => (
+                "x86_avx512_maskloadsd",
+                &[Type::Ptr, Type::Vector(VectorType::F64x2), Type::I8],
+                &[Type::Vector(VectorType::F64x2)],
+                false,
+            ),
+            Intrinsic::X86Avx512MaskStoress => (
+                "x86_avx512_maskstoress",
+                &[Type::Ptr, Type::Vector(VectorType::F32x4), Type::I8],
+                &[],
+                false,
+            ),
+            Intrinsic::X86Avx512MaskStoresd => (
+                "x86_avx512_maskstoresd",
+                &[Type::Ptr, Type::Vector(VectorType::F64x2), Type::I8],
+                &[],
                 false,
             ),
             Intrinsic::X86Avx512MaskMulld => (
@@ -5053,6 +5119,30 @@ impl Intrinsic {
                     Type::Vector(VectorType::F64x8),
                     Type::Vector(VectorType::F64x8),
                     Type::I8,
+                    Type::I32,
+                ],
+                &[Type::I8],
+                false,
+            ),
+            Intrinsic::X86Avx512CmpRoundps => (
+                "x86_avx512_cmproundps",
+                &[
+                    Type::Vector(VectorType::F32x16),
+                    Type::Vector(VectorType::F32x16),
+                    Type::I16,
+                    Type::I32,
+                    Type::I32,
+                ],
+                &[Type::I16],
+                false,
+            ),
+            Intrinsic::X86Avx512CmpRoundpd => (
+                "x86_avx512_cmproundpd",
+                &[
+                    Type::Vector(VectorType::F64x8),
+                    Type::Vector(VectorType::F64x8),
+                    Type::I8,
+                    Type::I32,
                     Type::I32,
                 ],
                 &[Type::I8],
@@ -10718,6 +10808,7 @@ impl Intrinsic {
             || self.is_x86_avx512_indexed()
             || self.x86_avx512_special().is_some()
             || self.is_x86_avx512_convert()
+            || self.is_x86_avx512_scalar_move()
             || self.x86_avx512_packed_opcode().is_some()
             || self.x86_avx512_scalar_convert().is_some()
             || self.x86_avx512_scalar().is_some()

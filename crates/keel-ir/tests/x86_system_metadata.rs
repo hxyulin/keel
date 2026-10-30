@@ -453,6 +453,14 @@ fn all_numeric_ids_and_inventory_order_stay_stable() {
         Intrinsic::X86Avx512MaskLoadInserti64x4,
         Intrinsic::X86Avx512MaskLoadInsertf32x4,
         Intrinsic::X86Avx512MaskLoadInsertf64x4,
+        Intrinsic::X86Avx512MaskMovess,
+        Intrinsic::X86Avx512MaskMovesd,
+        Intrinsic::X86Avx512MaskLoadss,
+        Intrinsic::X86Avx512MaskLoadsd,
+        Intrinsic::X86Avx512MaskStoress,
+        Intrinsic::X86Avx512MaskStoresd,
+        Intrinsic::X86Avx512CmpRoundps,
+        Intrinsic::X86Avx512CmpRoundpd,
     ];
     assert_eq!(Intrinsic::ALL.len(), expected.len() + extensions.len());
     assert_eq!(&Intrinsic::ALL[expected.len()..], extensions);

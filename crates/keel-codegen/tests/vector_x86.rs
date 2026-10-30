@@ -914,3 +914,6 @@ mod x86_avx512_packed;
 
 #[path = "vector_x86/x86_avx512_lane.rs"]
 mod x86_avx512_lane;
+
+#[path = "vector_x86/x86_avx512_scalar_move.rs"]
+mod x86_avx512_scalar_move;

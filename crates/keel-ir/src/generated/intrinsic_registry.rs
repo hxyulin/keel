@@ -1832,10 +1832,26 @@ pub enum Intrinsic {
     X86Avx512MaskLoadInsertf32x4 = 1253,
     #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
     X86Avx512MaskLoadInsertf64x4 = 1254,
+    #[doc = "AVX512F scalar bit transfer. Only mask bit zero is observed. Register upper lanes come from passthrough; memory loads zero upper lanes even when inactive. Memory accesses exactly four or eight bytes and suppress inactive access."]
+    X86Avx512MaskMovess = 1255,
+    #[doc = "AVX512F scalar bit transfer. Only mask bit zero is observed. Register upper lanes come from passthrough; memory loads zero upper lanes even when inactive. Memory accesses exactly four or eight bytes and suppress inactive access."]
+    X86Avx512MaskMovesd = 1256,
+    #[doc = "AVX512F scalar bit transfer. Only mask bit zero is observed. Register upper lanes come from passthrough; memory loads zero upper lanes even when inactive. Memory accesses exactly four or eight bytes and suppress inactive access."]
+    X86Avx512MaskLoadss = 1257,
+    #[doc = "AVX512F scalar bit transfer. Only mask bit zero is observed. Register upper lanes come from passthrough; memory loads zero upper lanes even when inactive. Memory accesses exactly four or eight bytes and suppress inactive access."]
+    X86Avx512MaskLoadsd = 1258,
+    #[doc = "AVX512F scalar bit transfer. Only mask bit zero is observed. Register upper lanes come from passthrough; memory loads zero upper lanes even when inactive. Memory accesses exactly four or eight bytes and suppress inactive access."]
+    X86Avx512MaskStoress = 1259,
+    #[doc = "AVX512F scalar bit transfer. Only mask bit zero is observed. Register upper lanes come from passthrough; memory loads zero upper lanes even when inactive. Memory accesses exactly four or eight bytes and suppress inactive access."]
+    X86Avx512MaskStoresd = 1260,
+    #[doc = "Packed AVX512F comparison with predicate 0..31 and SAE control 4 or 8."]
+    X86Avx512CmpRoundps = 1261,
+    #[doc = "Packed AVX512F comparison with predicate 0..31 and SAE control 4 or 8."]
+    X86Avx512CmpRoundpd = 1262,
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 1255] = [
+    pub const ALL: [Intrinsic; 1263] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -3091,6 +3107,14 @@ impl Intrinsic {
         Intrinsic::X86Avx512MaskLoadInserti64x4,
         Intrinsic::X86Avx512MaskLoadInsertf32x4,
         Intrinsic::X86Avx512MaskLoadInsertf64x4,
+        Intrinsic::X86Avx512MaskMovess,
+        Intrinsic::X86Avx512MaskMovesd,
+        Intrinsic::X86Avx512MaskLoadss,
+        Intrinsic::X86Avx512MaskLoadsd,
+        Intrinsic::X86Avx512MaskStoress,
+        Intrinsic::X86Avx512MaskStoresd,
+        Intrinsic::X86Avx512CmpRoundps,
+        Intrinsic::X86Avx512CmpRoundpd,
     ];
 }
 
@@ -4342,5 +4366,13 @@ macro_rules! x86_intrinsics {
             | $crate::Intrinsic::X86Avx512MaskLoadInserti64x4
             | $crate::Intrinsic::X86Avx512MaskLoadInsertf32x4
             | $crate::Intrinsic::X86Avx512MaskLoadInsertf64x4
+            | $crate::Intrinsic::X86Avx512MaskMovess
+            | $crate::Intrinsic::X86Avx512MaskMovesd
+            | $crate::Intrinsic::X86Avx512MaskLoadss
+            | $crate::Intrinsic::X86Avx512MaskLoadsd
+            | $crate::Intrinsic::X86Avx512MaskStoress
+            | $crate::Intrinsic::X86Avx512MaskStoresd
+            | $crate::Intrinsic::X86Avx512CmpRoundps
+            | $crate::Intrinsic::X86Avx512CmpRoundpd
     };
 }

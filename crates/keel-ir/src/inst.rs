@@ -1087,6 +1087,9 @@ impl InstData {
                 | Intrinsic::X86Avx512MaskStoreExtractf64x4 => Write,
                 crate::x86_system_intrinsics!(all) => id.generated_system_memory_effects(),
                 crate::x86_query_intrinsics!(all) => id.generated_query_memory_effects(),
+                Intrinsic::X86Avx512MaskMovess | Intrinsic::X86Avx512MaskMovesd => None,
+                Intrinsic::X86Avx512MaskLoadss | Intrinsic::X86Avx512MaskLoadsd => Read,
+                Intrinsic::X86Avx512MaskStoress | Intrinsic::X86Avx512MaskStoresd => Write,
                 id @ (Intrinsic::X86Avx512MaskMulld
                 | Intrinsic::X86Avx512MaskMinsd
                 | Intrinsic::X86Avx512MaskMinud
@@ -1334,6 +1337,8 @@ impl InstData {
                 Intrinsic::X86Avx512MaskStoreps | Intrinsic::X86Avx512MaskStorepd => Write,
                 Intrinsic::X86Avx512Cmpps
                 | Intrinsic::X86Avx512Cmppd
+                | Intrinsic::X86Avx512CmpRoundps
+                | Intrinsic::X86Avx512CmpRoundpd
                 | Intrinsic::X86Avx512MaskAddps
                 | Intrinsic::X86Avx512MaskAddpd
                 | Intrinsic::X86Avx512MaskSubps
@@ -2188,7 +2193,8 @@ impl InstData {
             | Self::Trap => true,
             Self::Neon { .. } => true,
             Self::Intrinsic { id, .. } => {
-                !((id.x86_avx512_packed_opcode().is_some() && id.info().pure)
+                !((id.is_x86_avx512_scalar_move() && id.info().pure)
+                    || (id.x86_avx512_packed_opcode().is_some() && id.info().pure)
                     || (id.is_x86_avx512_integer_convert() && id.info().pure)
                     || (id.is_x86_avx512_lane() && id.info().pure)
                     || id.is_x86_avx512_mask_alu()
