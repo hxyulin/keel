@@ -41,7 +41,7 @@ fn command(cmd: &mut Command) {
 fn runtime_queries_reject_unknown_nonliteral_and_foreign_names() {
     for argument in [
         "name",
-        "\"avx512dq\"",
+        "\"avx512vbmi\"",
         "\"unknown\"",
         "\"avx\\0suffix\"",
         "L\"avx\"",
@@ -67,7 +67,9 @@ fn runtime_queries_reject_unknown_nonliteral_and_foreign_names() {
         Target::Aarch64AppleDarwin,
         Target::Wasm32UnknownUnknown,
     ] {
-        for feature in ["avx", "avx512f", "avx512vl"] {
+        for feature in [
+            "avx", "avx512f", "avx512vl", "avx512dq", "avx512bw", "avx512cd",
+        ] {
             assert!(
                 frontend(
                     &format!("int f(void){{return __builtin_cpu_supports(\"{feature}\");}}"),
@@ -102,7 +104,7 @@ fn runtime_queries_reject_unknown_nonliteral_and_foreign_names() {
 #[test]
 fn safe_xcr0_queries_do_not_enable_unguarded_xgetbv() {
     let mut module = frontend(
-        "int avx(void){return __builtin_cpu_supports(\"avx\");} int foundation(void){return __builtin_cpu_supports(\"avx512f\");} int vl(void){return __builtin_cpu_supports(\"avx512vl\");}",
+        "int avx(void){return __builtin_cpu_supports(\"avx\");} int foundation(void){return __builtin_cpu_supports(\"avx512f\");} int vl(void){return __builtin_cpu_supports(\"avx512vl\");} int dq(void){return __builtin_cpu_supports(\"avx512dq\");} int bw(void){return __builtin_cpu_supports(\"avx512bw\");} int cd(void){return __builtin_cpu_supports(\"avx512cd\");}",
         Target::X86_64LinuxGnu,
     )
     .unwrap();
@@ -110,6 +112,7 @@ fn safe_xcr0_queries_do_not_enable_unguarded_xgetbv() {
     let encoding = module_features(&module, baseline).unwrap();
     assert!(!baseline.xsave && !baseline.avx);
     assert!(encoding.xsave && !encoding.avx && !encoding.avx512f && !encoding.avx512vl);
+    assert!(!encoding.avx512dq && !encoding.avx512bw && !encoding.avx512cd);
     let selector = FeatureSelector {
         inner: &SelectionTier::Baseline,
         features: baseline,
@@ -251,6 +254,18 @@ fn runtime_avx512_queries_do_not_grant_branch_permissions() {
             "avx512vl",
             "void f(__m128i*out,__m128i*a,__m128i*b){if(__builtin_cpu_supports(\"avx512vl\"))*out=_mm_mask_add_epi32(*a,15,*a,*b);}",
         ),
+        (
+            "avx512dq",
+            "void f(__m512i*out,__m512i*a,__m512i*b){if(__builtin_cpu_supports(\"avx512dq\"))*out=_mm512_add_epi32(*a,*b);}",
+        ),
+        (
+            "avx512bw",
+            "void f(__m512i*out,__m512i*a,__m512i*b){if(__builtin_cpu_supports(\"avx512bw\"))*out=_mm512_add_epi32(*a,*b);}",
+        ),
+        (
+            "avx512cd",
+            "void f(__m512i*out,__m512i*a,__m512i*b){if(__builtin_cpu_supports(\"avx512cd\"))*out=_mm512_add_epi32(*a,*b);}",
+        ),
     ] {
         let source = format!("#include <immintrin.h>\n{operation}\n");
         let mut module = frontend(&source, Target::X86_64LinuxGnu).unwrap();
@@ -260,6 +275,10 @@ fn runtime_avx512_queries_do_not_grant_branch_permissions() {
             }
             let encoding = module_features(&module, baseline).unwrap();
             assert!(!encoding.avx512f && !encoding.avx512vl, "{name}");
+            assert!(
+                !encoding.avx512dq && !encoding.avx512bw && !encoding.avx512cd,
+                "{name}"
+            );
             assert!(
                 keel_codegen::compile_program_with_pipeline(
                     &module,

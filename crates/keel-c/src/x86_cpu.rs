@@ -119,6 +119,27 @@ pub(crate) const FEATURES: &[Feature] = &[
         state: VectorState::Avx512,
     },
     Feature {
+        name: "avx512dq",
+        leaf: 7,
+        register: Register::Ebx,
+        mask: (1 << 16) | (1 << 17),
+        state: VectorState::Avx512,
+    },
+    Feature {
+        name: "avx512bw",
+        leaf: 7,
+        register: Register::Ebx,
+        mask: (1 << 16) | (1 << 30),
+        state: VectorState::Avx512,
+    },
+    Feature {
+        name: "avx512cd",
+        leaf: 7,
+        register: Register::Ebx,
+        mask: (1 << 16) | (1 << 28),
+        state: VectorState::Avx512,
+    },
+    Feature {
         name: "aes",
         leaf: 1,
         register: Register::Ecx,
@@ -309,8 +330,8 @@ mod tests {
         assert!(lookup("arbitrary").is_none());
     }
     #[test]
-    fn foundation_and_vl_require_every_vector_state_component() {
-        for name in ["avx512f", "avx512vl"] {
+    fn foundation_and_extensions_require_every_vector_state_component() {
+        for name in ["avx512f", "avx512vl", "avx512dq", "avx512bw", "avx512cd"] {
             assert!(all().supports(name));
             for bit in [1, 2, 5, 6, 7] {
                 let mut snapshot = all();
@@ -336,13 +357,40 @@ mod tests {
         let mut snapshot = all();
         snapshot.leaf7[1] &= !(1 << 16);
         assert!(!snapshot.supports("avx512f"));
-        assert!(
-            !snapshot.supports("avx512vl"),
-            "VL also requires foundation"
-        );
+        for name in ["avx512vl", "avx512dq", "avx512bw", "avx512cd"] {
+            assert!(!snapshot.supports(name), "{name} also requires foundation");
+        }
         let mut snapshot = all();
         snapshot.leaf7[1] &= !(1 << 31);
         assert!(snapshot.supports("avx512f"));
         assert!(!snapshot.supports("avx512vl"));
+    }
+    #[test]
+    fn avx512_extension_bits_are_independent() {
+        let extensions = [
+            ("avx512vl", 31),
+            ("avx512dq", 17),
+            ("avx512bw", 30),
+            ("avx512cd", 28),
+        ];
+        for (name, bit) in extensions {
+            assert_eq!(lookup(name).unwrap().state, VectorState::Avx512);
+            let mut snapshot = all();
+            snapshot.leaf7[1] = (1 << 16) | (1 << bit);
+            assert!(snapshot.supports("avx512f"));
+            assert!(snapshot.supports(name), "{name}");
+            for (other, _) in extensions {
+                assert_eq!(
+                    snapshot.supports(other),
+                    other == name,
+                    "{name} must not imply {other}"
+                );
+            }
+            snapshot.leaf7[1] = 1 << 16;
+            assert!(!snapshot.supports(name), "{name}: missing own bit {bit}");
+            assert!(snapshot.supports("avx512f"));
+            snapshot.leaf7[1] = 1 << bit;
+            assert!(!snapshot.supports(name), "{name}: missing foundation bit");
+        }
     }
 }

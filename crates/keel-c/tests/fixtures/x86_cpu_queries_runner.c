@@ -3,7 +3,7 @@ extern void cpu_initialize(void);
 extern int dispatch_add(int *,const int *,const int *);
 #define QUERY(name) extern int query_##name(void);
 QUERY(monitor) QUERY(sse) QUERY(sse2) QUERY(sse3) QUERY(ssse3) QUERY(sse41) QUERY(sse42)
-QUERY(avx) QUERY(avx2) QUERY(avx512f) QUERY(avx512vl) QUERY(aes) QUERY(pclmul) QUERY(popcnt) QUERY(bmi)
+QUERY(avx) QUERY(avx2) QUERY(avx512f) QUERY(avx512vl) QUERY(avx512dq) QUERY(avx512bw) QUERY(avx512cd) QUERY(aes) QUERY(pclmul) QUERY(popcnt) QUERY(bmi)
 QUERY(bmi2) QUERY(cx16) QUERY(movbe) QUERY(lzcnt) QUERY(xsave) QUERY(fma) QUERY(f16c)
 static void cpuid(unsigned leaf,unsigned out[4]) {
   __asm__ volatile("cpuid":"=a"(out[0]),"=b"(out[1]),"=c"(out[2]),"=d"(out[3]):"a"(leaf),"c"(0));
@@ -15,7 +15,10 @@ static const struct Query queries[]={
  ROW(ssse3,1,2,9,0),ROW(sse41,1,2,19,0),ROW(sse42,1,2,20,0),
  ROW(avx,1,2,28,6),ROW(avx2,7,1,5,6),
  {"avx512f",query_avx512f,7,1,1U<<16,0xe6},
- {"avx512vl",query_avx512vl,7,1,(1U<<16)|(1U<<31),0xe6},ROW(aes,1,2,25,0),
+ {"avx512vl",query_avx512vl,7,1,(1U<<16)|(1U<<31),0xe6},
+ {"avx512dq",query_avx512dq,7,1,(1U<<16)|(1U<<17),0xe6},
+ {"avx512bw",query_avx512bw,7,1,(1U<<16)|(1U<<30),0xe6},
+ {"avx512cd",query_avx512cd,7,1,(1U<<16)|(1U<<28),0xe6},ROW(aes,1,2,25,0),
  ROW(pclmul,1,2,1,0),ROW(popcnt,1,2,23,0),ROW(bmi,7,1,3,0),
  ROW(bmi2,7,1,8,0),ROW(cx16,1,2,13,0),ROW(movbe,1,2,22,0),
  ROW(lzcnt,0x80000001U,2,5,0),{"xsave",query_xsave,1,2,(1U<<26)|(1U<<27),0},ROW(fma,1,2,12,6),ROW(f16c,1,2,29,6)
