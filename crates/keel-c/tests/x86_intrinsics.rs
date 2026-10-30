@@ -1699,3 +1699,15 @@ mod x86_avx512_bw_mask_alu;
 
 #[path = "x86_intrinsics/x86_avx512_vl_indexed.rs"]
 mod x86_avx512_vl_indexed;
+
+#[path = "x86_intrinsics/x86_avx512_bw_misc.rs"]
+mod x86_avx512_bw_misc;
+
+#[path = "x86_intrinsics/x86_avx512_memory.rs"]
+mod x86_avx512_memory;
+
+#[path = "x86_intrinsics/x86_avx512_vl_integer.rs"]
+mod x86_avx512_vl_integer;
+
+#[path = "x86_intrinsics/x86_avx512_bw_permute.rs"]
+mod x86_avx512_bw_permute;

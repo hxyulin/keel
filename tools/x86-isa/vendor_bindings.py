@@ -145,6 +145,34 @@ VALUE_CONTROLS['gather_scale'][0].update({
 VALUE_CONTROLS['avx512bw_mask_shift_imm8'] = (
     {'X86Avx512Bw' + op + lane for op in ['Kshiftl', 'Kshiftr'] for lane in ['d', 'q']},
     1, 255, 255, 'AVX512BW mask shift requires an integer constant in 0..255')
+VALUE_CONTROLS['avx512bw_permute_imm4'] = ({
+    'X86Avx512BwPalignr128',
+    'X86Avx512BwPalignr256',
+    'X86Avx512BwPalignr512',
+}, 4, 255, 255, 'AVX512 instruction control must be an integer constant in 0..255')
+VALUE_CONTROLS['avx512bw_permute_imm3'] = ({
+    'X86Avx512BwPshufhw128',
+    'X86Avx512BwPshufhw256',
+    'X86Avx512BwPshufhw512',
+    'X86Avx512BwPshuflw128',
+    'X86Avx512BwPshuflw256',
+    'X86Avx512BwPshuflw512',
+}, 3, 255, 255, 'AVX512 instruction control must be an integer constant in 0..255')
+VALUE_CONTROLS['avx512bw_permute_imm1'] = ({
+    'X86Avx512BwPslldq512',
+    'X86Avx512BwPsrldq512',
+}, 1, 255, 255, 'AVX512 instruction control must be an integer constant in 0..255')
+VALUE_CONTROLS['avx512bw_dbsad_imm8'] = ({
+    'X86Avx512BwDbsad128',
+    'X86Avx512BwDbsad256',
+    'X86Avx512BwDbsad512',
+}, 4, 255, 255, 'AVX512 instruction control must be an integer constant in 0..255')
+VALUE_CONTROLS['avx512vl_ternary_imm8'] = ({
+    'X86Avx512VlPternlogd128',
+    'X86Avx512VlPternlogd256',
+    'X86Avx512VlPternlogq128',
+    'X86Avx512VlPternlogq256',
+}, 5, 255, 255, 'AVX512 instruction control must be an integer constant in 0..255')
 CONTROLS = {'none', 'imm8', 'u64_count'} | VALUE_CONTROLS.keys()
 
 # Reviewed C wrappers can have stricter controls than their raw typed operation.

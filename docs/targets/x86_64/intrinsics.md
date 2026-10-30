@@ -1224,6 +1224,25 @@ without touching the nominal whole vector. All forms require F plus VL,
 without BW or DQ. C exposes masked and mask-zero register forms, compressed
 stores and masked/mask-zero expanding loads.
 
+VL integer names also include `pabsd`, `pabsq`, `pmuldq`, `pmuludq`,
+`pternlogd`, `pternlogq`, `ptestmd`, `ptestmq`, `ptestnmd` and `ptestnmq`,
+followed by 128 or 256. Absolute value wraps at the signed minimum.
+Multiplication takes dword inputs and produces qwords from the even dword
+lanes, with signed or unsigned interpretation. Ternary logic takes
+`(merge, mask, a, b, c, imm8)` and uses index `(a_bit<<2)|(b_bit<<1)|c_bit`
+into the truth table. Its merge is independent of its three logical inputs.
+Tests take `(a, b, execution_mask)` and return an `i8` with a bit for each
+nonzero AND result, or each zero result for TESTN. Unused high bits are zero.
+All these operations are pure and require F plus VL without DQ or BW.
+
+C aligned masked loads and stores for narrow dword, qword, float and double
+vectors share the existing typed memory paths. Callers must provide the
+alignment required by the aligned API. Inactive lanes still suppress memory
+accesses. Narrow unmasked integer load/store names for byte, word, dword and
+qword containers alias existing 16/32-byte transports; they grant no AVX-512
+permission and need no BW or VL feature. Each pointer, value and mask argument
+is evaluated once.
+
 ## AVX512DQ operations
 
 Typed `x86_avx512dq_` operations provide low qword multiplication and
@@ -1650,3 +1669,24 @@ C exposes the 32- and 64-bit mask APIs, including flag-result pointer forms.
 Scalar mask conversions and 4/8-byte mask loads and stores use ordinary
 scalar operations and remain legal without BW. Their arguments are evaluated
 once, and memory accesses use exactly the mask width.
+
+BW byte shuffles and word half-shuffles operate independently within each
+128-bit lane. Byte alignment concatenates the second source below the first
+within that lane, shifts by an immediate byte count, and returns zero for
+counts at least 32. Unmasked 512-bit byte shifts also stay within 128-bit
+lanes and return zero for counts at least 16. Word table permutations instead
+select across the full vector; two-table permutations take independent
+`(merge, mask, a, index, b)` inputs. C exposes the merge-A, merge-index and
+zero forms without modifying any live source. All immediate controls are
+integer constants in 0..255 after the C int conversion.
+
+BW absolute value, scalar byte/word broadcasts and blends use destination-lane
+masks. Absolute value wraps at the signed minimum. Broadcast APIs taking an
+XMM input use only its low byte or word; scalar set1 forms narrow their scalar
+argument before broadcasting. SAD produces one unsigned qword sum for each
+eight-byte block. Double-block SAD shuffles the second input's dwords within
+each 128-bit lane, then sums four unsigned byte differences per word: within
+each 64-bit block, first-source windows start at byte offsets 0, 0, 4, 4 and
+second-source windows at 0, 1, 2, 3. Its mask selects produced word lanes.
+These operations require F plus BW, adding VL for narrow encodings. Existing
+narrow unmasked APIs retain their legacy feature requirements.
