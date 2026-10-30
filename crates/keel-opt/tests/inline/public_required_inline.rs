@@ -173,3 +173,46 @@ block0:
         assert_eq!(callees, vec!["leaf"; leaf_calls], "@{name}");
     }
 }
+
+#[test]
+fn required_cleanup_keeps_dead_ineligible_and_tail_sites_out_of_validation() {
+    for dead_call in ["call @public_body()\n return", "return_call @public_body()"] {
+        let mut module = keel_ir::parse(&format!(
+            r#"
+func @caller() {{
+block0:
+ v0 = call @gate()
+ brif v0, block1, block2
+block1:
+ {dead_call}
+block2:
+ return
+}}
+func @gate() -> i8 alwaysinline local {{
+block0:
+ v0 = iconst.i8 0
+ return v0
+}}
+func @public_body() alwaysinline {{
+block0:
+ return
+}}
+"#
+        ))
+        .unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        // Without C ownership, a live call to this public mandatory body is
+        // illegal. The gate makes it dead before eager validation reaches it.
+        keel_opt::required_inline_asm(&mut module).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        let caller = &module.functions[0];
+        assert!(
+            !caller.layout_insts().any(|(_, inst)| matches!(
+                caller.inst_data(inst),
+                InstData::Call { .. } | InstData::ReturnCall { .. }
+            )),
+            "dead site survived: {dead_call}"
+        );
+        assert_eq!(caller.blocks().count(), 1);
+    }
+}

@@ -2116,97 +2116,8 @@ pub fn required_inline_asm_with_c_definitions(
         .filter(|(_, r)| *r)
         .map(|(f, _)| f.name.clone())
         .collect();
-    let mut expanded = 0usize;
-    // Expansion edits only the caller, so definitions keep their indices and
-    // the functions before the caller have no mandatory sites left.
-    let mut index_of: FxHashMap<String, usize> = FxHashMap::default();
-    for (index, function) in module.functions.iter().enumerate() {
-        index_of.entry(function.name.clone()).or_insert(index);
-    }
-    let mut first = 0;
-    loop {
-        let mut next = None;
-        for (index, caller) in module.functions.iter().enumerate().skip(first) {
-            for (_, call) in caller.layout_insts() {
-                let reference = match caller.inst_data(call) {
-                    InstData::Call { func, .. }
-                    | InstData::ReturnCall { func, .. }
-                    | InstData::Invoke { func, .. } => *func,
-                    _ => continue,
-                };
-                let decl = caller.callee(reference);
-                let definition = index_of.get(decl.name.as_str()).copied();
-                if !decl.attrs.alwaysinline
-                    && !definition.is_some_and(|i| module.functions[i].attrs.alwaysinline)
-                {
-                    continue;
-                }
-                let fail = |why: &str| {
-                    format!(
-                        "required inlining of @{} in @{} failed: {why}",
-                        decl.name, caller.name
-                    )
-                };
-                if !matches!(caller.inst_data(call), InstData::Call { .. }) {
-                    return Err(fail("unsupported call instruction"));
-                }
-                let target = definition.ok_or_else(|| fail("no definition"))?;
-                let callee = &module.functions[target];
-                if recursive.contains(&callee.name) {
-                    return Err(fail("recursive callee"));
-                }
-                if caller.sig.returns_twice || caller.personality.is_some() {
-                    return Err(fail("unsupported caller"));
-                }
-                if decl.attrs.noinline {
-                    return Err(fail("noinline conflicts with always_inline"));
-                }
-                if decl.sig != callee.sig {
-                    return Err(fail("ABI signature mismatch"));
-                }
-                // Unannotated mandatory wrappers are compiled in the caller's
-                // permission context. Every copied operation still passes the
-                // backend's local legality checks. Explicit callee permissions
-                // cannot be erased this way.
-                if !callee.attrs.target_features.is_empty()
-                    && !caller
-                        .attrs
-                        .target_features
-                        .permits_inlining(&callee.attrs.target_features)
-                {
-                    return Err(fail("target feature mismatch"));
-                }
-                let reason = if definitions.contains(&callee.name.as_str()) {
-                    body_eligibility_reason(callee, FrameSemantics::CRequiredInline)
-                } else {
-                    eligibility_reason_with_frames(callee, true, FrameSemantics::CRequiredInline)
-                };
-                if let Some(reason) = reason {
-                    return Err(fail(reason));
-                }
-                expanded = expanded
-                    .checked_add(callee.layout_insts().count())
-                    .ok_or_else(|| fail("growth overflow"))?;
-                if expanded > 1_000_000 {
-                    return Err(fail(
-                        "required inline growth exceeds one million instructions",
-                    ));
-                }
-                next = Some((index, call, target));
-                break;
-            }
-            if next.is_some() {
-                break;
-            }
-        }
-        let Some((index, call, target)) = next else {
-            break;
-        };
-        first = index;
-        let (caller, callee) = two_functions(&mut module.functions, index, target);
-        inline_call(caller, call, callee);
-        crate::phi_simplify::run(caller);
-        crate::simplify_cfg::run(caller);
+    if sites.iter().any(|sites| !sites.is_empty()) {
+        expand_required_with_fallback(module, definitions, &recursive, 1_000_000)?;
     }
     if !inline_only.is_empty() {
         for name in inline_only {
@@ -2282,9 +2193,288 @@ pub fn required_inline_asm_with_c_definitions(
     Ok(())
 }
 
+#[derive(Clone, Copy)]
+enum RequiredCleanup {
+    PerCall,
+    PerCaller,
+}
+
+fn expand_required_with_fallback(
+    module: &mut Module,
+    definitions: &[&str],
+    recursive: &FxHashSet<String>,
+    limit: usize,
+) -> Result<(), String> {
+    // Inlining mutates only function bodies and their local imports. Keep the
+    // original templates and budget accounting for an eager retry: deferred
+    // cleanup can leave an invalid call in code that eager cleanup removes.
+    let original = module.functions.clone();
+    if expand_required_calls(
+        module,
+        definitions,
+        recursive,
+        limit,
+        RequiredCleanup::PerCaller,
+    )
+    .is_err()
+    {
+        module.functions = original;
+        return expand_required_calls(
+            module,
+            definitions,
+            recursive,
+            limit,
+            RequiredCleanup::PerCall,
+        );
+    }
+    Ok(())
+}
+
+fn expand_required_calls(
+    module: &mut Module,
+    definitions: &[&str],
+    recursive: &FxHashSet<String>,
+    limit: usize,
+    cleanup: RequiredCleanup,
+) -> Result<(), String> {
+    let mut expanded = 0usize;
+    // Expansion edits only the caller, so definitions keep their indices and
+    // the functions before the caller have no mandatory sites left.
+    let mut index_of: FxHashMap<String, usize> = FxHashMap::default();
+    for (index, function) in module.functions.iter().enumerate() {
+        index_of.entry(function.name.clone()).or_insert(index);
+    }
+    for first in 0..module.functions.len() {
+        let mut dirty = false;
+        loop {
+            let mut next = None;
+            let caller = &module.functions[first];
+            for (_, call) in caller.layout_insts() {
+                let reference = match caller.inst_data(call) {
+                    InstData::Call { func, .. }
+                    | InstData::ReturnCall { func, .. }
+                    | InstData::Invoke { func, .. } => *func,
+                    _ => continue,
+                };
+                let decl = caller.callee(reference);
+                let definition = index_of.get(decl.name.as_str()).copied();
+                if !decl.attrs.alwaysinline
+                    && !definition.is_some_and(|i| module.functions[i].attrs.alwaysinline)
+                {
+                    continue;
+                }
+                let fail = |why: &str| {
+                    format!(
+                        "required inlining of @{} in @{} failed: {why}",
+                        decl.name, caller.name
+                    )
+                };
+                if !matches!(caller.inst_data(call), InstData::Call { .. }) {
+                    return Err(fail("unsupported call instruction"));
+                }
+                let target = definition.ok_or_else(|| fail("no definition"))?;
+                let callee = &module.functions[target];
+                if recursive.contains(&callee.name) {
+                    return Err(fail("recursive callee"));
+                }
+                if caller.sig.returns_twice || caller.personality.is_some() {
+                    return Err(fail("unsupported caller"));
+                }
+                if decl.attrs.noinline {
+                    return Err(fail("noinline conflicts with always_inline"));
+                }
+                if decl.sig != callee.sig {
+                    return Err(fail("ABI signature mismatch"));
+                }
+                // Unannotated mandatory wrappers are compiled in the caller's
+                // permission context. Every copied operation still passes the
+                // backend's local legality checks. Explicit callee permissions
+                // cannot be erased this way.
+                if !callee.attrs.target_features.is_empty()
+                    && !caller
+                        .attrs
+                        .target_features
+                        .permits_inlining(&callee.attrs.target_features)
+                {
+                    return Err(fail("target feature mismatch"));
+                }
+                let reason = if definitions.contains(&callee.name.as_str()) {
+                    body_eligibility_reason(callee, FrameSemantics::CRequiredInline)
+                } else {
+                    eligibility_reason_with_frames(callee, true, FrameSemantics::CRequiredInline)
+                };
+                if let Some(reason) = reason {
+                    return Err(fail(reason));
+                }
+                expanded = expanded
+                    .checked_add(callee.layout_insts().count())
+                    .ok_or_else(|| fail("growth overflow"))?;
+                if expanded > limit {
+                    return Err(fail(
+                        "required inline growth exceeds one million instructions",
+                    ));
+                }
+                next = Some((call, target));
+                break;
+            }
+            let Some((call, target)) = next else {
+                if dirty {
+                    crate::phi_simplify::run(&mut module.functions[first]);
+                    crate::simplify_cfg::run(&mut module.functions[first]);
+                    dirty = false;
+                    // Cleanup can expose or remove sites. Finish this caller
+                    // before its body can become a later caller's template.
+                    continue;
+                }
+                break;
+            };
+            let (caller, callee) = two_functions(&mut module.functions, first, target);
+            inline_call(caller, call, callee);
+            match cleanup {
+                RequiredCleanup::PerCall => {
+                    crate::phi_simplify::run(caller);
+                    crate::simplify_cfg::run(caller);
+                }
+                RequiredCleanup::PerCaller => dirty = true,
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod policy_tests {
     use super::*;
+
+    fn gated_call(target: &str) -> Module {
+        keel_ir::parse(&format!(
+            "decl @missing() alwaysinline\n\
+             func @caller() {{\nblock0:\n v0 = call @gate()\n brif v0, block1, block2\n\
+             block1:\n call @{target}()\n return\nblock2:\n return\n}}\n\
+             func @gate() -> i8 alwaysinline local {{\nblock0:\n v0 = iconst.i8 0\n return v0\n}}\n\
+             func @heavy() alwaysinline local {{\nblock0:\n v0 = iconst.i64 0\n v1 = iconst.i64 1\n return\n}}"
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn deferred_required_cleanup_retries_calls_that_become_dead() {
+        let mut module = gated_call("missing");
+        keel_ir::verify_module(&module).unwrap();
+        let mut eager = module.clone();
+        let recursive = FxHashSet::default();
+        assert!(
+            expand_required_calls(
+                &mut module.clone(),
+                &[],
+                &recursive,
+                1_000_000,
+                RequiredCleanup::PerCaller
+            )
+            .is_err(),
+            "the deferred scan still sees the dead missing definition"
+        );
+        expand_required_calls(
+            &mut eager,
+            &[],
+            &recursive,
+            1_000_000,
+            RequiredCleanup::PerCall,
+        )
+        .unwrap();
+        expand_required_with_fallback(&mut module, &[], &recursive, 1_000_000).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        assert_eq!(module.to_string(), eager.to_string());
+    }
+
+    #[test]
+    fn deferred_required_cleanup_retries_calls_after_a_trapping_wrapper() {
+        let mut module = keel_ir::parse(
+            "decl @missing() alwaysinline\n\
+             func @caller() {\nblock0:\n call @stop()\n call @missing()\n return\n}\n\
+             func @stop() alwaysinline local {\nblock0:\n trap\n}",
+        )
+        .unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        let mut eager = module.clone();
+        let recursive = FxHashSet::default();
+        expand_required_calls(
+            &mut eager,
+            &[],
+            &recursive,
+            1_000_000,
+            RequiredCleanup::PerCall,
+        )
+        .unwrap();
+        expand_required_with_fallback(&mut module, &[], &recursive, 1_000_000).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        assert_eq!(module.to_string(), eager.to_string());
+    }
+
+    #[test]
+    fn deferred_required_cleanup_restores_growth_accounting_on_retry() {
+        let mut module = gated_call("heavy");
+        let recursive = FxHashSet::default();
+        let mut eager = module.clone();
+        // The gate costs two instructions; the dead heavy call must not
+        // consume the remaining budget when the original algorithm retries.
+        assert!(
+            expand_required_calls(
+                &mut module.clone(),
+                &[],
+                &recursive,
+                2,
+                RequiredCleanup::PerCaller
+            )
+            .is_err()
+        );
+        expand_required_calls(&mut eager, &[], &recursive, 2, RequiredCleanup::PerCall).unwrap();
+        expand_required_with_fallback(&mut module, &[], &recursive, 2).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        assert_eq!(module.to_string(), eager.to_string());
+
+        let mut eager = gated_call("heavy");
+        let mut retried = eager.clone();
+        let error = expand_required_calls(&mut eager, &[], &recursive, 1, RequiredCleanup::PerCall)
+            .unwrap_err();
+        assert_eq!(
+            expand_required_with_fallback(&mut retried, &[], &recursive, 1).unwrap_err(),
+            error
+        );
+        assert_eq!(retried.to_string(), eager.to_string());
+    }
+
+    #[test]
+    fn deferred_required_cleanup_finishes_templates_before_later_callers() {
+        let mut module = keel_ir::parse(
+            "func @outer() -> i64 alwaysinline local {\nblock0:\n v0 = call @inner()\n return v0\n}\n\
+             func @caller() -> i64 {\nblock0:\n v0 = call @outer()\n return v0\n}\n\
+             func @inner() -> i64 alwaysinline local {\nblock0:\n v0 = iconst.i64 7\n return v0\n}"
+        ).unwrap();
+        expand_required_calls(
+            &mut module,
+            &[],
+            &FxHashSet::default(),
+            1_000_000,
+            RequiredCleanup::PerCaller,
+        )
+        .unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        for f in &module.functions {
+            assert_eq!(
+                f.blocks().count(),
+                1,
+                "@{} retains unmerged inline blocks",
+                f.name
+            );
+            assert!(
+                !f.layout_insts()
+                    .any(|(_, i)| matches!(f.inst_data(i), InstData::Call { .. })),
+                "@{} retains a required call",
+                f.name
+            );
+        }
+    }
 
     #[test]
     fn importing_an_existing_callee_preserves_its_ordered_policy_once() {
