@@ -293,9 +293,9 @@ python3 tools/x86-isa/vendor_coverage.py --reference-dir /path/to/pinned/headers
 The checker reports definitions and macros in the seven SSE–AVX2 headers,
 `crc32intrin.h` and `avx512fintrin.h`, and compares them with compiler-owned
 headers and private fragments. The pinned SSE–AVX2 non-MMX public-name
-inventory has no missing candidates. The AVX512F report lists remaining API
-gaps separately. This is a name check, not proof of signature, feature,
-immediate, ABI or semantic conformance. MMX entries are reported separately.
+and AVX512F inventories have no missing candidates. This is a name check,
+not proof of signature, feature, immediate, ABI or semantic conformance. MMX
+entries are reported separately.
 C++ overloads, 32-bit x86, AVX-512 extensions beyond AVX512F, AMX and unlisted
 headers are outside the inventory.
 
@@ -658,6 +658,32 @@ changing NaN payloads or exception flags. Ceiling and floor retain ROUNDSCALE
 exception behavior. `mullox_epi64` uses wrapping unsigned multiplication and
 scalar lane lowering; it does not require AVX512DQ. Undefined-value aliases
 choose a permitted zero value, whose bits callers must not depend on.
+
+### Horizontal reductions
+
+The unmasked and masked `reduce_{add,mul,and,or,min,max}` integer wrappers
+cover dword and qword lanes. Signed and unsigned min/max keep distinct
+comparisons. Add and multiply wrap at the lane width. The add, bitwise and
+extrema wrappers reuse typed IR reductions; multiplication uses a balanced
+product tree and does not require AVX512DQ.
+
+Floating `reduce_{add,mul,min,max}_{ps,pd}` wrappers use a fixed balanced
+tree. At strides N/2, N/4, down to 1, lane i combines with lane i+stride,
+with the lower lane as the first operand. Only the live lower prefix executes
+arithmetic at each step. Raw x86 min/max select the second operand for equal
+or unordered inputs. MXCSR rounding, denormal controls and exception effects
+remain observable. These wrappers do not reassociate the tree or suppress
+exceptions. Vendor implementations can choose different reduction orders;
+NaNs, signed zeros and rounding-sensitive inputs need not produce identical
+bits across compilers.
+
+Masked reductions replace inactive lanes before arithmetic. Identities are
+zero for add and OR, one for multiply, all bits set for AND, the largest
+value for integer minimum, and the smallest value for integer maximum.
+Floating minimum and maximum use positive and negative infinity. An empty
+mask returns the identity without arithmetic on inactive input values. Each
+argument is evaluated once. All reduction interfaces require AVX512F
+transport and do not require AVX512BW, DQ, VL or AVX2.
 
 ### Scalar masks
 

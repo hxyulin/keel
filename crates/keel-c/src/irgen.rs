@@ -4839,6 +4839,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     mask,
                 )
             }
+            Builtin::VectorReduce(op) => ins.vector_reduce(op, vals[0]),
             Builtin::VectorSplat => ins.vsplat(e.ty.ir_with_layout(self.g.p.c_layout), vals[0]),
             Builtin::VectorShuffle => ins.vshuffle(
                 vals[0],

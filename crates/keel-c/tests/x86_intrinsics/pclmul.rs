@@ -1306,3 +1306,45 @@ fn avx512_comparison_sae_headers_check_both_controls() {
         );
     }
 }
+
+#[test]
+fn avx512_reduction_builtins_check_shapes_and_target() {
+    let target = Target::X86_64LinuxGnu;
+    for (shape, scalar) in [("i32x16", "int"), ("i64x8", "long long")] {
+        for op in ["add", "and", "or", "smin", "smax", "umin", "umax"] {
+            let name = format!("__builtin_keel_avx512_reduce_{op}_{shape}");
+            let source = format!(
+                "_Static_assert(__has_builtin({name}),\"reduction support\");typedef {scalar} V __attribute__((vector_size(64)));{scalar} f(V a){{return {name}(a);}}"
+            );
+            let module = parse(&source, target).unwrap();
+            keel_ir::verify_module(&module).unwrap();
+            assert!(module.to_string().contains("vreduce"));
+        }
+    }
+    for invalid in [
+        "int f(int a){return __builtin_keel_avx512_reduce_add_i32x16(a);}",
+        "typedef int V __attribute__((vector_size(32)));int f(V a){return __builtin_keel_avx512_reduce_add_i32x16(a);}",
+        "typedef long long V __attribute__((vector_size(64)));int f(V a){return __builtin_keel_avx512_reduce_add_i32x16(a);}",
+        "int f(void){return __builtin_keel_avx512_reduce_add_i32x16();}",
+        "typedef int V __attribute__((vector_size(64)));int f(V a){return __builtin_keel_avx512_reduce_add_i32x16(a,a);}",
+    ] {
+        assert!(parse(invalid, target).is_err(), "{invalid}");
+    }
+    for unavailable in [
+        "__builtin_keel_avx512_reduce_mul_i32x16",
+        "__builtin_keel_avx512_reduce_add_i32x8",
+        "__builtin_keel_avx512_reduce_add_f32x16",
+    ] {
+        parse(
+            &format!("_Static_assert(!__has_builtin({unavailable}),\"closed builtin names\");"),
+            target,
+        )
+        .unwrap();
+    }
+    parse(
+        "_Static_assert(!__has_builtin(__builtin_keel_avx512_reduce_add_i32x16),\"x86 only\");",
+        Target::Aarch64LinuxGnu,
+    )
+    .unwrap();
+    assert!(parse("typedef int V __attribute__((vector_size(64)));int f(V a){return __builtin_keel_avx512_reduce_add_i32x16(a);}", Target::Aarch64LinuxGnu).is_err());
+}

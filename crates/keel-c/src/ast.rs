@@ -171,6 +171,8 @@ pub enum GenericAtomicOp {
 pub enum Builtin {
     /// Two equal vector inputs followed by constant lane indices.
     VectorShuffle,
+    /// Typed integer reduction using the portable IR reduction contract.
+    VectorReduce(keel_ir::VectorReduceOp),
     Pclmulqdq(keel_ir::Intrinsic, u8),
     /// Checked legacy AES-NI builtin with canonical i64x2 operands.
     X86Aes(Intrinsic),

@@ -1760,6 +1760,26 @@ impl<'a> Parser<'a> {
                 loc,
             ));
         }
+        if let Some((op, shape)) = x86_reduction_builtin(base) {
+            if self.target != Target::X86_64LinuxGnu {
+                return Err(Error::new(loc, "x86 reduction builtin requires x86-64"));
+            }
+            self.require_native_layout(loc, "x86 reduction builtins")?;
+            let args = self.builtin_args(1, loc)?;
+            let expected = self.x86_value_type(keel_ir::Type::Vector(shape));
+            if args[0].ty != expected {
+                return Err(Error::new(
+                    args[0].loc,
+                    "x86 reduction builtin has the wrong vector type",
+                ));
+            }
+            let result = self.x86_value_type(shape.lane_type());
+            return Ok(mk(
+                ExprKind::Builtin(Builtin::VectorReduce(op), self.slice(&args)),
+                result,
+                loc,
+            ));
+        }
         if let Some((id, controls)) = crate::x86_builtins::semantic_builtin(base) {
             if self.target != Target::X86_64LinuxGnu {
                 return Err(Error::new(loc, "x86 value builtin requires x86-64"));
@@ -3547,6 +3567,31 @@ fn memory_builtin_const(sugar: &Sugar<'_>, defs: &[TypedefDef<'_>]) -> bool {
         Sugar::Typedef(i) => memory_builtin_const(&defs[*i].sugar, defs),
         _ => false,
     }
+}
+
+/// Compiler-owned AVX512F wrappers reuse wrapping and signed/unsigned IR reductions.
+/// Names and shapes are deliberately closed so `__has_builtin` matches parsing.
+pub(crate) fn x86_reduction_builtin(
+    name: &str,
+) -> Option<(keel_ir::VectorReduceOp, keel_ir::VectorType)> {
+    use keel_ir::{VectorReduceOp as R, VectorType as V};
+    let (operation, shape) = name.strip_prefix("keel_avx512_reduce_")?.split_once('_')?;
+    let operation = match operation {
+        "add" => R::Add,
+        "and" => R::And,
+        "or" => R::Or,
+        "smin" => R::Smin,
+        "smax" => R::Smax,
+        "umin" => R::Umin,
+        "umax" => R::Umax,
+        _ => return None,
+    };
+    let shape = match shape {
+        "i32x16" => V::I32x16,
+        "i64x8" => V::I64x8,
+        _ => return None,
+    };
+    Some((operation, shape))
 }
 
 /// Fixed-type GCC overflow families: int, long and long long, signed or

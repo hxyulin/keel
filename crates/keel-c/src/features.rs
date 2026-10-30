@@ -91,7 +91,7 @@ fn builtin(name: &str, target: Target) -> bool {
             )
         });
     };
-    if crate::x86_builtins::recognized(base) {
+    if crate::x86_builtins::recognized(base) || crate::expr::x86_reduction_builtin(base).is_some() {
         return target == Target::X86_64LinuxGnu;
     }
     if matches!(
