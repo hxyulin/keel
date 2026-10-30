@@ -985,7 +985,16 @@ static __inline__ __attribute__((always_inline)) unsigned char _kortestc_mask16_
 #define _mm512_cmpord_pd_mask(a,b) _mm512_cmp_pd_mask((a),(b),7)
 #define _mm512_mask_cmpord_pd_mask(k,a,b) _mm512_mask_cmp_pd_mask((k),(a),(b),7)
 
+/* Packed comparison SAE controls are independent of the predicate. */
+#define _mm512_mask_cmp_round_ps_mask(k,a,b,p,r) ((__mmask16)__builtin_keel_avx512_cmproundps((__m512)(a),(__m512)(b),(short)(k),(p),(r)))
+#define _mm512_cmp_round_ps_mask(a,b,p,r) _mm512_mask_cmp_round_ps_mask(0xffff,(a),(b),(p),(r))
+#define _mm512_mask_cmp_round_pd_mask(k,a,b,p,r) ((__mmask8)__builtin_keel_avx512_cmproundpd((__m512d)(a),(__m512d)(b),(signed char)(k),(p),(r)))
+#define _mm512_cmp_round_pd_mask(a,b,p,r) _mm512_mask_cmp_round_pd_mask(0xff,(a),(b),(p),(r))
+
 #include <__keel_avx512_permute.h>
 #include <__keel_avx512_packed.h>
 #include <__keel_avx512_lane.h>
+#include <__keel_avx512_construct.h>
+#include <__keel_avx512_scalar_move.h>
+#include <__keel_avx512_compat.h>
 #endif

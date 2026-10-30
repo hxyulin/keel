@@ -1205,3 +1205,104 @@ fn avx512_named_comparison_headers_match_system_masks() {
         );
     }
 }
+
+#[test]
+fn avx512_comparison_sae_headers_check_both_controls() {
+    let target = Target::X86_64LinuxGnu;
+    let mut source = String::from(
+        "#include <immintrin.h>\nvoid compare_sae(const void*a,const void*b,unsigned*out){\n",
+    );
+    let mut oracle = source.clone().replace("compare_sae", "reference_sae");
+    let mut count = 0;
+    for suffix in ["ps", "pd"] {
+        for predicate in [0, 1, 31] {
+            for sae in [4, 8] {
+                let expression = format!(
+                    "_mm512_mask_cmp_round_{suffix}_mask(0xa55a,_mm512_loadu_{suffix}(a),_mm512_loadu_{suffix}(b),{predicate},{sae})"
+                );
+                let line = format!("out[{count}]={expression};\n");
+                source += &line;
+                oracle += &line;
+                count += 1;
+            }
+        }
+    }
+    source += "}\n";
+    oracle += "}\n";
+    for (predicate, sae) in [("32", "8"), ("p", "8"), ("0", "9"), ("0", "r")] {
+        let invalid = format!(
+            "#include <immintrin.h>\n__mmask16 f(__m512 a,int p,int r){{return _mm512_cmp_round_ps_mask(a,a,{predicate},{sae});}}"
+        );
+        assert!(
+            parse(&invalid, target).is_err(),
+            "predicate {predicate}, SAE {sae}"
+        );
+    }
+    let mut module = parse(&source, target).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    keel_opt::optimize(&mut module).unwrap();
+    let features = Features::NONE.with_features("avx512f").unwrap();
+    let selector = FeatureSelector {
+        inner: &SelectionTier::Full,
+        features,
+    };
+    let pipeline = CodegenPipeline {
+        selector: &selector,
+        allocator: &AllocationTier::Full,
+    };
+    let program = keel_codegen::x86_64::compile_program_with_pipeline(
+        &module,
+        &keel_codegen::x86_64::REGISTERS,
+        &pipeline,
+    )
+    .unwrap();
+    let object = keel_asm::x86::assemble_program_object_with_features(&program, features).unwrap();
+    let denied = FeatureSelector {
+        inner: &SelectionTier::Full,
+        features: Features::NONE.with_features("avx2").unwrap(),
+    };
+    assert!(
+        keel_codegen::x86_64::compile_program_with_pipeline(
+            &module,
+            &keel_codegen::x86_64::REGISTERS,
+            &CodegenPipeline {
+                selector: &denied,
+                allocator: &AllocationTier::Full
+            }
+        )
+        .is_err()
+    );
+    if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
+        #[cfg(target_arch = "x86_64")]
+        if !std::is_x86_feature_detected!("avx512f") {
+            return;
+        }
+        let directory =
+            std::env::temp_dir().join(format!("keel-avx512-compare-sae-c-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("code.o"), object).unwrap();
+        let harness = format!(
+            "#include <immintrin.h>\n#include <stdint.h>\n#include <string.h>\n{oracle}\nextern void compare_sae(const void*,const void*,unsigned*);\nint main(void){{uint64_t a[8]={{0x7ff0000000000001ULL,0x7fc123457f800001ULL,0x8000000000000000ULL}},b[8]={{0}};unsigned got[{count}],want[{count}];_mm_setcsr(0x1f80);reference_sae(a,b,want);unsigned flags=_mm_getcsr()&63;_mm_setcsr(0x1f80);compare_sae(a,b,got);return memcmp(got,want,sizeof(got))||flags!=(_mm_getcsr()&63);}}\n"
+        );
+        fs::write(directory.join("harness.c"), harness).unwrap();
+        let output = Command::new("cc")
+            .args(["-O1", "-mavx512f", "-frounding-math"])
+            .arg(directory.join("harness.c"))
+            .arg(directory.join("code.o"))
+            .arg("-o")
+            .arg(directory.join("run"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            Command::new(directory.join("run"))
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+}

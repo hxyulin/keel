@@ -91,6 +91,9 @@ VALUE_CONTROLS['avx512_block_lane_3_1'] = ({'X86Avx512MaskExtractf64x4', 'X86Avx
 VALUE_CONTROLS['avx512_block_lane_4_3'] = ({'X86Avx512MaskInserti32x4', 'X86Avx512MaskLoadInserti32x4', 'X86Avx512MaskLoadInsertf32x4', 'X86Avx512MaskInsertf32x4'}, 4, 3, 3, 'AVX512 instruction control must be a supported integer constant')
 VALUE_CONTROLS['avx512_block_lane_4_1'] = ({'X86Avx512MaskLoadInsertf64x4', 'X86Avx512MaskInserti64x4', 'X86Avx512MaskInsertf64x4', 'X86Avx512MaskLoadInserti64x4'}, 4, 1, 1, 'AVX512 instruction control must be a supported integer constant')
 CONTROL_ALLOWED_VALUES.update({'avx512_packed_round_4_11': [4, 8, 9, 10, 11], 'avx512_packed_round_3_11': [4, 8, 9, 10, 11], 'avx512_packed_round_4_8': [4, 8]})
+VALUE_CONTROLS['avx512_compare_sae'] = ({'X86Avx512CmpRoundps', 'X86Avx512CmpRoundpd'}, 4, 8, 15, 'AVX512 comparison SAE control must be an integer constant equal to 4 or 8')
+CONTROL_ALLOWED_VALUES['avx512_compare_sae'] = [4, 8]
+VALUE_EXTRA_CONTROLS['avx512_compare_sae'] = [(3, 31, 31, 'AVX512 comparison predicate must be an integer constant in 0..31', [])]
 CONTROLS = {'none', 'imm8', 'u64_count'} | VALUE_CONTROLS.keys()
 
 

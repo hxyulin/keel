@@ -1620,3 +1620,12 @@ mod x86_avx512_permute;
 
 #[path = "x86_intrinsics/x86_avx512_lane.rs"]
 mod x86_avx512_lane;
+
+#[path = "x86_intrinsics/x86_avx512_scalar_move.rs"]
+mod x86_avx512_scalar_move;
+
+#[path = "x86_intrinsics/x86_avx512_construct.rs"]
+mod x86_avx512_construct;
+
+#[path = "x86_intrinsics/x86_avx512_compat.rs"]
+mod x86_avx512_compat;

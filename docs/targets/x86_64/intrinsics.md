@@ -290,13 +290,14 @@ mentioned only in comments, documentation, or calls inside another wrapper:
 python3 tools/x86-isa/vendor_coverage.py --reference-dir /path/to/pinned/headers
 ```
 
-The checker reports definitions and macros in the seven SSE–AVX2 headers plus
-`crc32intrin.h`, and compares them with compiler-owned headers and private
-fragments. The pinned non-MMX public-name inventory has no missing candidates.
-That is a name check, not proof of signature, feature, immediate, ABI or
-semantic conformance. MMX entries are reported separately. C++ overloads,
-32-bit x86, unlisted AVX-512 intrinsics, AMX and unlisted headers are outside
-the subset.
+The checker reports definitions and macros in the seven SSE–AVX2 headers,
+`crc32intrin.h` and `avx512fintrin.h`, and compares them with compiler-owned
+headers and private fragments. The pinned SSE–AVX2 non-MMX public-name
+inventory has no missing candidates. The AVX512F report lists remaining API
+gaps separately. This is a name check, not proof of signature, feature,
+immediate, ABI or semantic conformance. MMX entries are reported separately.
+C++ overloads, 32-bit x86, AVX-512 extensions beyond AVX512F, AMX and unlisted
+headers are outside the inventory.
 
 ### Function permissions and runtime CPU queries
 
@@ -631,6 +632,33 @@ multiply, divide and square root use the raw masked operations with every
 lane enabled. Each argument is evaluated once. All memory accesses cover
 exactly 64 bytes.
 
+### Constructors and width casts
+
+`set` constructors place the last argument in lane zero; `setr` places the
+first argument there. `set4` and `setr4` repeat their four values in the same
+orders. Byte and word constructors, including `set1`, use AVX512F value
+transport without requiring AVX512BW. Each scalar argument is evaluated once.
+Existing unmasked dword, qword and floating `set1` constructors retain their
+constant-folding path.
+
+Width casts preserve the low 128 or 256 bits. Widening casts make no promise
+about upper lanes; use the corresponding `zext` interface to require zero
+upper lanes. Low-scalar getters copy the first dword, float or double without
+numeric conversion. Floating constructors and casts preserve lane bits,
+including NaN payloads. These interfaces reuse the existing vector and lane
+operations and require no additional ISA extension.
+
+The legacy `lo` conversion and indexed-memory aliases use the lower 256 bits
+of their wide input. `cvtpd_pslo` zeroes its upper 256 result bits, including
+masked calls. Masked FP widening executes only active lanes, so inactive
+signaling NaNs do not raise exceptions. Zero-masked FIXUP retains original A
+for active responses before zeroing inactive lanes. Floating absolute value
+clears sign bits without
+changing NaN payloads or exception flags. Ceiling and floor retain ROUNDSCALE
+exception behavior. `mullox_epi64` uses wrapping unsigned multiplication and
+scalar lane lowering; it does not require AVX512DQ. Undefined-value aliases
+choose a permitted zero value, whose bits callers must not depend on.
+
 ### Scalar masks
 
 `immintrin.h` defines `__mmask16` for sixteen dword lanes and `__mmask8`
@@ -658,7 +686,12 @@ and `pd` has eight. `_mm512_mask_cmp_ps_mask` and
 `_mm512_mask_cmp_pd_mask` accept an input mask followed by two vectors and a
 constant predicate in 0..31. Their unmasked `_mm512_cmp_ps_mask` and
 `_mm512_cmp_pd_mask` forms enable every lane. Predicates retain the x86
-ordered/unordered and signaling distinctions.
+ordered/unordered and signaling distinctions. The `_mm512_{mask_,}cmp_round_`
+`{ps,pd}_mask` forms take an independent SAE control: 4 observes MXCSR and
+8 suppresses floating exceptions. The predicate remains a separate constant
+in 0..31. Inactive lanes and SAE suppress both status updates and exception
+traps. The typed IR forms are `x86_avx512_cmpround{ps,pd}` with two vectors,
+an execution mask, predicate and SAE control.
 
 `_mm512_mask_{add,sub,mul,div}_{ps,pd}` and
 `_mm512_mask_sqrt_{ps,pd}` preserve the merge source in inactive lanes.
@@ -835,6 +868,17 @@ These operations require AVX512F without AVX512VL or separate FMA permission.
 
 The scalar C masked, mask3, mask-zero and explicit-rounding interfaces retain
 these upper-lane rules. Each mathematical argument is evaluated once.
+
+The scalar bit-transfer interfaces use `x86_avx512_maskmove{ss,sd}`,
+`x86_avx512_maskload{ss,sd}` and `x86_avx512_maskstore{ss,sd}`.
+The C wrappers are `_mm_mask_move_ss/sd`, `_mm_mask_load_ss/sd` and
+`_mm_mask_store_ss/sd`, with mask-zero forms for moves and loads.
+Only mask bit zero controls the low lane. Register moves always copy upper
+XMM bits from their passthrough source. Memory loads instead zero upper XMM
+bits, including when the low lane preserves its merge value. Active memory
+accesses read or write exactly four or eight bytes at unaligned addresses;
+inactive lanes do not access memory. These operations transfer bits without
+changing MXCSR, including signaling-NaN payloads with exceptions unmasked.
 
 ## Scalar EVEX conversions and flag comparisons
 
