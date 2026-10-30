@@ -1916,6 +1916,26 @@ impl Verifier<'_> {
                         );
                     }
                 }
+                if id.x86_avx512_bw_shift().is_some_and(|descriptor| {
+                    descriptor.kind == crate::intrinsic::X86Avx512BwShiftKind::Immediate
+                }) {
+                    let control =
+                        args.get(3)
+                            .and_then(|&arg| match func.value_def(func.resolve(arg)) {
+                                ValueDef::Result(i, _) => match func.inst_data(i) {
+                                    InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                    _ => None,
+                                },
+                                _ => None,
+                            });
+                    if !control.is_some_and(|value| (0..=255).contains(&value)) {
+                        self.inst_error(
+                            inst,
+                            "AVX512BW immediate word shift count must be iconst.i32 in 0..=255"
+                                .into(),
+                        );
+                    }
+                }
                 if id.x86_avx512_bw_mask().is_some_and(|descriptor| {
                     descriptor.kind == crate::intrinsic::X86Avx512BwMaskKind::Compare
                 }) {

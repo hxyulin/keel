@@ -7,7 +7,7 @@ use keel_codegen::{
     x86_features::{FeatureSelector, Features, module_features},
 };
 use keel_ir::{InstData, Intrinsic, MemoryEffects, Type, intrinsic::X86Avx512BwKind};
-use std::{fs, process::Command};
+use std::fs;
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -147,7 +147,7 @@ fn bw_core_native_scalar_alias_spill_and_guard_page_oracles() {
                 && std::is_x86_feature_detected!("avx512vl")
             {
                 let exe = dir.join(name);
-                let linked = Command::new("cc")
+                let linked = std::process::Command::new("cc")
                     .arg(dir.join("runner.c"))
                     .arg(path)
                     .arg("-o")
@@ -159,7 +159,7 @@ fn bw_core_native_scalar_alias_spill_and_guard_page_oracles() {
                     "{}",
                     String::from_utf8_lossy(&linked.stderr)
                 );
-                let output = Command::new(exe).output().unwrap();
+                let output = std::process::Command::new(exe).output().unwrap();
                 assert!(
                     output.status.success(),
                     "{allocation:?} spilled={spilled}: {output:?}"

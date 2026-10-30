@@ -25,10 +25,15 @@ pub use generated_registry::Intrinsic;
 mod avx512_bw;
 #[path = "intrinsic/avx512_vl_fma.rs"]
 mod avx512_vl_fma;
+#[path = "intrinsic/avx512_vl_special.rs"]
+mod avx512_vl_special;
 pub use avx512_bw::{X86Avx512BwCore, X86Avx512BwKind};
 #[path = "intrinsic/avx512_bw_mask.rs"]
 mod avx512_bw_mask;
 pub use avx512_bw_mask::{X86Avx512BwMask, X86Avx512BwMaskKind};
+#[path = "intrinsic/avx512_bw_shift.rs"]
+mod avx512_bw_shift;
+pub use avx512_bw_shift::{X86Avx512BwShift, X86Avx512BwShiftKind};
 
 #[derive(Debug)]
 pub struct IntrinsicInfo {
@@ -62,6 +67,25 @@ impl X86Avx512PermuteKind {
 }
 
 impl Intrinsic {
+    /// DQ sign-bit extraction and zero/all-one lane expansion.
+    pub fn x86_avx512_dq_bridge(self) -> Option<(&'static str, VectorType)> {
+        Some(match self {
+            Self::X86Avx512DqMovd2m128 => ("vpmovd2m", VectorType::I32x4),
+            Self::X86Avx512DqMovq2m128 => ("vpmovq2m", VectorType::I64x2),
+            Self::X86Avx512DqMovm2d128 => ("vpmovm2d", VectorType::I32x4),
+            Self::X86Avx512DqMovm2q128 => ("vpmovm2q", VectorType::I64x2),
+            Self::X86Avx512DqMovd2m256 => ("vpmovd2m", VectorType::I32x8),
+            Self::X86Avx512DqMovq2m256 => ("vpmovq2m", VectorType::I64x4),
+            Self::X86Avx512DqMovm2d256 => ("vpmovm2d", VectorType::I32x8),
+            Self::X86Avx512DqMovm2q256 => ("vpmovm2q", VectorType::I64x4),
+            Self::X86Avx512DqMovd2m512 => ("vpmovd2m", VectorType::I32x16),
+            Self::X86Avx512DqMovq2m512 => ("vpmovq2m", VectorType::I64x8),
+            Self::X86Avx512DqMovm2d512 => ("vpmovm2d", VectorType::I32x16),
+            Self::X86Avx512DqMovm2q512 => ("vpmovm2q", VectorType::I64x8),
+            _ => return None,
+        })
+    }
+
     /// Conflict detection, packed leading-zero count and mask broadcasts, requiring AVX512CD.
     pub fn x86_avx512_cd(self) -> Option<(&'static str, VectorType)> {
         Some(match self {
@@ -565,6 +589,9 @@ impl Intrinsic {
 
     /// Native opcode, optional immediate index and optional rounding/SAE index.
     pub fn x86_avx512_special(self) -> Option<(&'static str, Option<usize>, Option<usize>)> {
+        if let Some((opcode, _, immediate)) = self.x86_avx512_vl_special() {
+            return Some((opcode, immediate, None));
+        }
         Some(match self {
             Self::X86Avx512Getexpps => ("vgetexpps", None, Some(3)),
             Self::X86Avx512Getexppd => ("vgetexppd", None, Some(3)),
@@ -1616,6 +1643,36 @@ impl Intrinsic {
             | Intrinsic::X86Avx512BwMovw2m512
             | Intrinsic::X86Avx512BwMovm2w512 => {
                 let descriptor = self.x86_avx512_bw_mask().expect("BW mask descriptor");
+                (descriptor.name, descriptor.params, descriptor.returns, true)
+            }
+            Intrinsic::X86Avx512BwSlliw128
+            | Intrinsic::X86Avx512BwSllw128
+            | Intrinsic::X86Avx512BwSllvw128
+            | Intrinsic::X86Avx512BwSrliw128
+            | Intrinsic::X86Avx512BwSrlw128
+            | Intrinsic::X86Avx512BwSrlvw128
+            | Intrinsic::X86Avx512BwSraiw128
+            | Intrinsic::X86Avx512BwSraw128
+            | Intrinsic::X86Avx512BwSravw128
+            | Intrinsic::X86Avx512BwSlliw256
+            | Intrinsic::X86Avx512BwSllw256
+            | Intrinsic::X86Avx512BwSllvw256
+            | Intrinsic::X86Avx512BwSrliw256
+            | Intrinsic::X86Avx512BwSrlw256
+            | Intrinsic::X86Avx512BwSrlvw256
+            | Intrinsic::X86Avx512BwSraiw256
+            | Intrinsic::X86Avx512BwSraw256
+            | Intrinsic::X86Avx512BwSravw256
+            | Intrinsic::X86Avx512BwSlliw512
+            | Intrinsic::X86Avx512BwSllw512
+            | Intrinsic::X86Avx512BwSllvw512
+            | Intrinsic::X86Avx512BwSrliw512
+            | Intrinsic::X86Avx512BwSrlw512
+            | Intrinsic::X86Avx512BwSrlvw512
+            | Intrinsic::X86Avx512BwSraiw512
+            | Intrinsic::X86Avx512BwSraw512
+            | Intrinsic::X86Avx512BwSravw512 => {
+                let descriptor = self.x86_avx512_bw_shift().expect("BW shift descriptor");
                 (descriptor.name, descriptor.params, descriptor.returns, true)
             }
             Intrinsic::X86Avx512MaskTernlogd => (
@@ -2899,6 +2956,37 @@ impl Intrinsic {
                 &[Type::Vector(VectorType::F64x8)],
                 false,
             ),
+            Intrinsic::X86Avx512VlGetexpps128
+            | Intrinsic::X86Avx512VlGetexppd128
+            | Intrinsic::X86Avx512VlGetmantps128
+            | Intrinsic::X86Avx512VlGetmantpd128
+            | Intrinsic::X86Avx512VlScalefps128
+            | Intrinsic::X86Avx512VlScalefpd128
+            | Intrinsic::X86Avx512VlRcp14ps128
+            | Intrinsic::X86Avx512VlRcp14pd128
+            | Intrinsic::X86Avx512VlRsqrt14ps128
+            | Intrinsic::X86Avx512VlRsqrt14pd128
+            | Intrinsic::X86Avx512VlRoundscaleps128
+            | Intrinsic::X86Avx512VlRoundscalepd128
+            | Intrinsic::X86Avx512VlFixupimmps128
+            | Intrinsic::X86Avx512VlFixupimmpd128
+            | Intrinsic::X86Avx512VlGetexpps256
+            | Intrinsic::X86Avx512VlGetexppd256
+            | Intrinsic::X86Avx512VlGetmantps256
+            | Intrinsic::X86Avx512VlGetmantpd256
+            | Intrinsic::X86Avx512VlScalefps256
+            | Intrinsic::X86Avx512VlScalefpd256
+            | Intrinsic::X86Avx512VlRcp14ps256
+            | Intrinsic::X86Avx512VlRcp14pd256
+            | Intrinsic::X86Avx512VlRsqrt14ps256
+            | Intrinsic::X86Avx512VlRsqrt14pd256
+            | Intrinsic::X86Avx512VlRoundscaleps256
+            | Intrinsic::X86Avx512VlRoundscalepd256
+            | Intrinsic::X86Avx512VlFixupimmps256
+            | Intrinsic::X86Avx512VlFixupimmpd256 => {
+                let info = avx512_vl_special::info(self);
+                (info.name, info.params, info.returns, info.pure)
+            }
             Intrinsic::X86Avx512Getexpps => (
                 "x86_avx512_getexpps",
                 &[
@@ -7686,6 +7774,78 @@ impl Intrinsic {
                 ],
                 &[Type::Vector(VectorType::I64x8)],
                 false,
+            ),
+            Intrinsic::X86Avx512DqMovd2m128 => (
+                "x86_avx512dq_movd2m128",
+                &[Type::Vector(VectorType::I32x4)],
+                &[Type::I8],
+                true,
+            ),
+            Intrinsic::X86Avx512DqMovq2m128 => (
+                "x86_avx512dq_movq2m128",
+                &[Type::Vector(VectorType::I64x2)],
+                &[Type::I8],
+                true,
+            ),
+            Intrinsic::X86Avx512DqMovm2d128 => (
+                "x86_avx512dq_movm2d128",
+                &[Type::I8],
+                &[Type::Vector(VectorType::I32x4)],
+                true,
+            ),
+            Intrinsic::X86Avx512DqMovm2q128 => (
+                "x86_avx512dq_movm2q128",
+                &[Type::I8],
+                &[Type::Vector(VectorType::I64x2)],
+                true,
+            ),
+            Intrinsic::X86Avx512DqMovd2m256 => (
+                "x86_avx512dq_movd2m256",
+                &[Type::Vector(VectorType::I32x8)],
+                &[Type::I8],
+                true,
+            ),
+            Intrinsic::X86Avx512DqMovq2m256 => (
+                "x86_avx512dq_movq2m256",
+                &[Type::Vector(VectorType::I64x4)],
+                &[Type::I8],
+                true,
+            ),
+            Intrinsic::X86Avx512DqMovm2d256 => (
+                "x86_avx512dq_movm2d256",
+                &[Type::I8],
+                &[Type::Vector(VectorType::I32x8)],
+                true,
+            ),
+            Intrinsic::X86Avx512DqMovm2q256 => (
+                "x86_avx512dq_movm2q256",
+                &[Type::I8],
+                &[Type::Vector(VectorType::I64x4)],
+                true,
+            ),
+            Intrinsic::X86Avx512DqMovd2m512 => (
+                "x86_avx512dq_movd2m512",
+                &[Type::Vector(VectorType::I32x16)],
+                &[Type::I16],
+                true,
+            ),
+            Intrinsic::X86Avx512DqMovq2m512 => (
+                "x86_avx512dq_movq2m512",
+                &[Type::Vector(VectorType::I64x8)],
+                &[Type::I8],
+                true,
+            ),
+            Intrinsic::X86Avx512DqMovm2d512 => (
+                "x86_avx512dq_movm2d512",
+                &[Type::I16],
+                &[Type::Vector(VectorType::I32x16)],
+                true,
+            ),
+            Intrinsic::X86Avx512DqMovm2q512 => (
+                "x86_avx512dq_movm2q512",
+                &[Type::I8],
+                &[Type::Vector(VectorType::I64x8)],
+                true,
             ),
             Intrinsic::X86Avx512Vcvtdq2ps => (
                 "x86_avx512_vcvtdq2ps",
@@ -13759,9 +13919,11 @@ impl Intrinsic {
             || self.is_x86_sha256()
             || self.x86_avx512_bw_core().is_some()
             || self.x86_avx512_bw_mask().is_some()
+            || self.x86_avx512_bw_shift().is_some()
             || self.is_x86_avx512_mask()
             || self.is_x86_avx512_indexed()
             || self.x86_avx512_special().is_some()
+            || self.x86_avx512_dq_bridge().is_some()
             || self.x86_avx512_dq_convert().is_some()
             || self.x86_avx512_vl_convert().is_some()
             || self.is_x86_avx512_convert()

@@ -7,8 +7,8 @@ pub(super) fn validate(
     args: &[Value],
     features: keel_asm_ir::x86::Features,
 ) -> Result<(), &'static str> {
-    if !features.avx512f {
-        return Err("AVX512 floating special operation requires AVX512F");
+    if !features.avx512f || (id.x86_avx512_vl_special().is_some() && !features.avx512vl) {
+        return Err("AVX512 floating special requires AVX512F and narrow forms require AVX512VL");
     }
     if args.len() != id.info().params.len()
         || args
@@ -36,11 +36,20 @@ impl FunctionCompiler<'_> {
         result: Option<Value>,
     ) {
         let (name, immediate, control) = id.x86_avx512_special().expect("special intrinsic");
-        self.avx512_stage_vector(args[0], FS0);
-        self.avx512_stage_vector(args[2], FS1);
+        let width = (self.ty(args[0]).bytes().expect("floating vector width") * 8) as u16;
+        let independent_fixup =
+            id.x86_avx512_vl_special().is_some() && name.starts_with("vfixupimm");
         let binary = name.starts_with("vscalef") || name.starts_with("vfixupimm");
-        if binary {
-            self.avx512_stage_vector(args[3], FS2);
+        if independent_fixup {
+            self.avx512_stage_vector(args[2], FS0);
+            self.avx512_stage_vector(args[3], FS1);
+            self.avx512_stage_vector(args[4], FS2);
+        } else {
+            self.avx512_stage_vector(args[0], FS0);
+            self.avx512_stage_vector(args[2], FS1);
+            if binary {
+                self.avx512_stage_vector(args[3], FS2);
+            }
         }
         self.avx512_stage_mask(args[1]);
         let mut op = EvexOpcode::parse(name).expect("AVX512F special opcode");
@@ -59,9 +68,9 @@ impl FunctionCompiler<'_> {
                 _ => unreachable!("validated SAE"),
             };
         }
-        let d = asm_arg(simd_width(FS0, 512));
-        let a = asm_arg(simd_width(FS1, 512));
-        let b = asm_arg(simd_width(FS2, 512));
+        let d = asm_arg(simd_width(FS0, width));
+        let a = asm_arg(simd_width(FS1, width));
+        let b = asm_arg(simd_width(FS2, width));
         match (binary, immediate) {
             (false, None) => self.emit(Opcode::Evex(op), [d, a]),
             (false, Some(index)) => self.emit(
@@ -83,13 +92,37 @@ impl FunctionCompiler<'_> {
                 ],
             ),
         }
+        let result_scratch = if independent_fixup {
+            // Original SSA operands remain in their allocated registers or spills.
+            // Load merge after the instruction so only reserved scratch registers
+            // are used, even in a function containing only 128-bit vectors.
+            self.avx512_stage_vector(args[0], FS1);
+            let move_opcode = if matches!(
+                self.ty(args[0]),
+                Type::Vector(keel_ir::VectorType::F64x2 | keel_ir::VectorType::F64x4)
+            ) {
+                "vmovupd"
+            } else {
+                "vmovups"
+            };
+            self.emit(
+                avx512_mask::opcode(move_opcode, true),
+                [
+                    asm_arg(simd_width(FS1, width)),
+                    asm_arg(simd_width(FS0, width)),
+                ],
+            );
+            FS1
+        } else {
+            FS0
+        };
         let dest = self.def_freg(result);
-        if dest != FS0 {
+        if dest != result_scratch {
             self.emit(
                 movs(self.ty(args[0])),
                 [
-                    asm_arg(simd_width(dest, 512)),
-                    asm_arg(simd_width(FS0, 512)),
+                    asm_arg(simd_width(dest, width)),
+                    asm_arg(simd_width(result_scratch, width)),
                 ],
             );
         }

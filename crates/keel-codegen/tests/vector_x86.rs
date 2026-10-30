@@ -947,3 +947,12 @@ mod x86_avx512_dq_convert;
 
 #[path = "vector_x86/x86_avx512_bw_mask.rs"]
 mod x86_avx512_bw_mask;
+
+#[path = "vector_x86/x86_avx512_dq_mask.rs"]
+mod x86_avx512_dq_mask;
+
+#[path = "vector_x86/x86_avx512_vl_special.rs"]
+mod x86_avx512_vl_special;
+
+#[path = "vector_x86/x86_avx512_bw_shift.rs"]
+mod x86_avx512_bw_shift;

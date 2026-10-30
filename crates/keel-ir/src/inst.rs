@@ -956,6 +956,45 @@ impl InstData {
             }
             Self::VaArg { .. } | Self::AggregateVaArg { .. } => ReadWrite,
             Self::Intrinsic { id, .. } => match id {
+                Intrinsic::X86Avx512BwSlliw128
+                | Intrinsic::X86Avx512BwSllw128
+                | Intrinsic::X86Avx512BwSllvw128
+                | Intrinsic::X86Avx512BwSrliw128
+                | Intrinsic::X86Avx512BwSrlw128
+                | Intrinsic::X86Avx512BwSrlvw128
+                | Intrinsic::X86Avx512BwSraiw128
+                | Intrinsic::X86Avx512BwSraw128
+                | Intrinsic::X86Avx512BwSravw128
+                | Intrinsic::X86Avx512BwSlliw256
+                | Intrinsic::X86Avx512BwSllw256
+                | Intrinsic::X86Avx512BwSllvw256
+                | Intrinsic::X86Avx512BwSrliw256
+                | Intrinsic::X86Avx512BwSrlw256
+                | Intrinsic::X86Avx512BwSrlvw256
+                | Intrinsic::X86Avx512BwSraiw256
+                | Intrinsic::X86Avx512BwSraw256
+                | Intrinsic::X86Avx512BwSravw256
+                | Intrinsic::X86Avx512BwSlliw512
+                | Intrinsic::X86Avx512BwSllw512
+                | Intrinsic::X86Avx512BwSllvw512
+                | Intrinsic::X86Avx512BwSrliw512
+                | Intrinsic::X86Avx512BwSrlw512
+                | Intrinsic::X86Avx512BwSrlvw512
+                | Intrinsic::X86Avx512BwSraiw512
+                | Intrinsic::X86Avx512BwSraw512
+                | Intrinsic::X86Avx512BwSravw512 => None,
+                Intrinsic::X86Avx512DqMovd2m128
+                | Intrinsic::X86Avx512DqMovq2m128
+                | Intrinsic::X86Avx512DqMovm2d128
+                | Intrinsic::X86Avx512DqMovm2q128
+                | Intrinsic::X86Avx512DqMovd2m256
+                | Intrinsic::X86Avx512DqMovq2m256
+                | Intrinsic::X86Avx512DqMovm2d256
+                | Intrinsic::X86Avx512DqMovm2q256
+                | Intrinsic::X86Avx512DqMovd2m512
+                | Intrinsic::X86Avx512DqMovq2m512
+                | Intrinsic::X86Avx512DqMovm2d512
+                | Intrinsic::X86Avx512DqMovm2q512 => None,
                 Intrinsic::X86Avx512BwCmpb128
                 | Intrinsic::X86Avx512BwCmpub128
                 | Intrinsic::X86Avx512BwTestb128
@@ -1479,7 +1518,35 @@ impl InstData {
                 | Intrinsic::X86Avx512ExpandLoadq
                 | Intrinsic::X86Avx512ExpandLoadps
                 | Intrinsic::X86Avx512ExpandLoadpd => Read,
-                Intrinsic::X86Avx512Getexpps
+                Intrinsic::X86Avx512VlGetexpps128
+                | Intrinsic::X86Avx512VlGetexppd128
+                | Intrinsic::X86Avx512VlGetmantps128
+                | Intrinsic::X86Avx512VlGetmantpd128
+                | Intrinsic::X86Avx512VlScalefps128
+                | Intrinsic::X86Avx512VlScalefpd128
+                | Intrinsic::X86Avx512VlRcp14ps128
+                | Intrinsic::X86Avx512VlRcp14pd128
+                | Intrinsic::X86Avx512VlRsqrt14ps128
+                | Intrinsic::X86Avx512VlRsqrt14pd128
+                | Intrinsic::X86Avx512VlRoundscaleps128
+                | Intrinsic::X86Avx512VlRoundscalepd128
+                | Intrinsic::X86Avx512VlFixupimmps128
+                | Intrinsic::X86Avx512VlFixupimmpd128
+                | Intrinsic::X86Avx512VlGetexpps256
+                | Intrinsic::X86Avx512VlGetexppd256
+                | Intrinsic::X86Avx512VlGetmantps256
+                | Intrinsic::X86Avx512VlGetmantpd256
+                | Intrinsic::X86Avx512VlScalefps256
+                | Intrinsic::X86Avx512VlScalefpd256
+                | Intrinsic::X86Avx512VlRcp14ps256
+                | Intrinsic::X86Avx512VlRcp14pd256
+                | Intrinsic::X86Avx512VlRsqrt14ps256
+                | Intrinsic::X86Avx512VlRsqrt14pd256
+                | Intrinsic::X86Avx512VlRoundscaleps256
+                | Intrinsic::X86Avx512VlRoundscalepd256
+                | Intrinsic::X86Avx512VlFixupimmps256
+                | Intrinsic::X86Avx512VlFixupimmpd256
+                | Intrinsic::X86Avx512Getexpps
                 | Intrinsic::X86Avx512Getexppd
                 | Intrinsic::X86Avx512Getmantps
                 | Intrinsic::X86Avx512Getmantpd
@@ -2610,7 +2677,9 @@ impl InstData {
             Self::Neon { .. } => true,
             Self::Intrinsic { id, .. } => {
                 !((id.x86_avx512_bw_core().is_some() && id.info().pure)
+                    || id.x86_avx512_dq_bridge().is_some()
                     || id.x86_avx512_bw_mask().is_some()
+                    || id.x86_avx512_bw_shift().is_some()
                     || (id.is_x86_avx512_scalar_move() && id.info().pure)
                     || (id.x86_avx512_packed_opcode().is_some() && id.info().pure)
                     || (id.is_x86_avx512_integer_convert() && id.info().pure)
