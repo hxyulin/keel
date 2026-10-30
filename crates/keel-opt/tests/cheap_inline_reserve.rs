@@ -35,7 +35,7 @@ fn caller(name: &str, callee: &str, count: usize) -> String {
 }
 fn saturated() -> String {
     let mut s = leaf("constructor", 16, "alwaysinline local", false);
-    for i in 0..32 {
+    for i in 0..96 {
         s += &caller(&format!("budget{i}"), "constructor", 128);
     }
     s
@@ -70,7 +70,7 @@ fn module_growth_is_exactly_bounded_and_late_callers_get_a_turn() {
             .all(|s| s.experimental_net_growth == Some(32))
     );
     assert_eq!(count(&baseline) - count(&before), 16_384);
-    assert_eq!(count(&m) - count(&before), 65_536 + 4096);
+    assert_eq!(count(&m) - count(&before), 196_608 + 4096);
     assert_eq!(
         sites
             .iter()
@@ -277,7 +277,7 @@ fn guarded_hinted_leaves_precede_ordinary_growth_without_expanding_budgets() {
     let (m, sites) = run(&source, PASS);
     assert_eq!(sites.first().unwrap().caller, "late");
     assert_eq!(sites.first().unwrap().outcome, "inlined");
-    assert!(count(&m) - count(&before) <= 65_536);
+    assert!(count(&m) - count(&before) <= 196_608);
     assert!(admitted(&sites).is_empty());
     let source = helper.to_owned()
         + &late.replace(
@@ -312,7 +312,7 @@ fn ordinary_full_sites_take_turns_before_module_exhaustion() {
     let late = sites.iter().position(|s| s.caller == "late_user").unwrap();
     assert_eq!(sites[late].outcome, "inlined");
     assert_eq!(
-        late, 32,
+        late, 96,
         "each earlier caller gets one turn before the late caller"
     );
     assert!(
@@ -324,7 +324,7 @@ fn ordinary_full_sites_take_turns_before_module_exhaustion() {
 
 #[test]
 fn full_rounds_share_charges_even_when_cleanup_removes_cloned_ir() {
-    let source = saturated();
+    let source = saturated() + &caller("overflow", "constructor", 128);
     let (expanded, once) = run_pipeline(&source, &[PASS]);
     let (module, repeated) = run_pipeline(&source, &[PASS, "dce", PASS, "dce", PASS]);
     let first = once.inline_budget.unwrap();
@@ -338,6 +338,12 @@ fn full_rounds_share_charges_even_when_cleanup_removes_cloned_ir() {
     assert!(
         count(&module) < count(&expanded),
         "the cleanup must actually remove IR in this regression"
+    );
+    assert!(
+        module.functions.iter().any(|f| f
+            .layout_insts()
+            .any(|(_, i)| matches!(f.inst_data(i), keel_ir::InstData::Call { .. }))),
+        "later rounds must leave calls denied by the exhausted shared allowance"
     );
     let unobserved = {
         let mut module = keel_ir::parse(&source).unwrap();
@@ -363,12 +369,34 @@ fn full_allowance_uses_entry_ir_not_definition_count_or_later_growth() {
     );
 
     // This body is removed by DCE, but its pipeline-entry size remains the basis.
-    let large = source + &leaf("large_input", 300_000, "noinline", false);
-    let input = keel_ir::parse(&large).unwrap();
-    let expected = count(&input) / 4;
-    let (_, report) = run_pipeline(&large, &["dce", PASS, PASS]);
+    let mut input = keel_ir::parse(&(source + &leaf("large_input", 2, "noinline", false))).unwrap();
+    let large = input
+        .functions
+        .iter_mut()
+        .find(|f| f.name == "large_input")
+        .unwrap();
+    // Bound per-block cleanup work while exercising a module above the floor.
+    for _ in 0..450 {
+        let block = large.create_block();
+        for i in 0..1000 {
+            large
+                .ins(keel_ir::InsertPoint::End(block))
+                .iconst(keel_ir::Type::I32, i);
+        }
+        large.ins(keel_ir::InsertPoint::End(block)).return_(&[]);
+    }
+    let expected = count(&input) / 2;
+    let mut report = OptimizationReport::default();
+    keel_opt::run_passes_for_target_with_report(
+        &mut input,
+        &["dce", PASS, PASS],
+        keel_opt::VectorTarget::Portable,
+        &mut report,
+    )
+    .unwrap();
+    keel_ir::verify_module(&input).unwrap();
     let budget = report.inline_budget.unwrap();
     assert_eq!(budget.limit, expected);
-    assert!(budget.limit > 65_536);
+    assert!(budget.limit > 196_608);
     assert!(budget.used <= budget.limit);
 }

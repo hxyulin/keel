@@ -34,7 +34,7 @@ impl InlineBudget {
             .map(|f| f.layout_insts().count())
             .fold(0usize, usize::saturating_add);
         Self {
-            limit: FULL_MAX_MODULE_GROWTH.max(instructions / FULL_GROWTH_INPUT_DIVISOR),
+            limit: FULL_MIN_MODULE_GROWTH.max(instructions / FULL_GROWTH_INPUT_DIVISOR),
             used: 0,
             reserve_used: 0,
             reserve_sites: 0,
@@ -466,9 +466,10 @@ const MAX_CALLS: usize = 128;
 // costs no more than its call does not count against MAX_CALLS.
 const CALL_SITE_COST: usize = 5;
 const MAX_MODULE_GROWTH: usize = 16_384;
-const FULL_MAX_MODULE_GROWTH: usize = 65_536;
-// Charge at most 25% of entry IR above the small-module floor, across all rounds.
-const FULL_GROWTH_INPUT_DIVISOR: usize = 4;
+// Preserve the old three Full rounds' aggregate allowance for small modules.
+const FULL_MIN_MODULE_GROWTH: usize = 196_608;
+// Charge at most 50% of entry IR above the small-module floor, across all rounds.
+const FULL_GROWTH_INPUT_DIVISOR: usize = 2;
 const HARD_STACK: u64 = 65_536;
 // Every inlined site gets its own slots, and each recursion level pays for
 // all of them. Cap the whole frame of a caller in a call cycle, measured

@@ -205,7 +205,7 @@ these three soft thresholds, but cannot bypass legality or the hard safeguards:
 - At most 128 expanded original call sites per caller per invocation.
 - At most 2,048 estimated added IR instructions per caller per invocation.
 - At most 16,384 estimated added IR instructions across the module per invocation,
-  for policies other than Full. Full shares the greater of 65,536 and one quarter
+  for policies other than Full. Full shares the greater of 196,608 and one half
   of pipeline-entry layout instructions across all its inlining rounds. A separate
   cheap-helper reserve allows 4,096 instructions and 256 sites across those rounds.
 - At most 65,536 bytes of callee stack slots, and at most 65,536 bytes of added
