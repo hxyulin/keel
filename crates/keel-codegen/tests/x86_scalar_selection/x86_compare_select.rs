@@ -73,6 +73,31 @@ fn adjacent_single_use_compare_selects_keep_flags_without_boolean() {
     }
 }
 #[test]
+fn compare_select_crosses_integer_negation_without_materializing_boolean() {
+    for ty in ["i32", "i64"] {
+        let src = format!(
+            "func @f({ty}) -> {ty} cc(c) {{
+block0(v0: {ty}):
+ v1 = iconst.{ty} 0
+ v2 = icmp.slt v0, v1
+ v3 = ineg v0
+ v4 = select v2, v3, v0
+ return v4
+}}"
+        );
+        for sel in [SelectionTier::Baseline, SelectionTier::Full] {
+            for alloc in [AllocationTier::Fast, AllocationTier::Full] {
+                for pools in [&SPILLED, &ONE, &keel_codegen::x86_64::REGISTERS] {
+                    let (text, _) = compile(&src, sel, alloc, pools);
+                    assert!(text.contains("\tcmovl\t"), "{text}");
+                    assert!(!text.contains("\tsetl\t"), "{text}");
+                    assert!(!text.contains("\ttest\t"), "{text}");
+                }
+            }
+        }
+    }
+}
+#[test]
 fn shared_and_nonadjacent_conditions_remain_materialized() {
     for shared in [false, true] {
         let src = select("f", "i64", "icmp.slt", shared);
@@ -81,6 +106,28 @@ fn shared_and_nonadjacent_conditions_remain_materialized() {
         } else {
             src.replace(" v5 = select", " v9 = iconst.i64 3\n v5 = select")
         };
+        let (text, _) = compile(&src, SelectionTier::Full, AllocationTier::Full, &SPILLED);
+        assert!(text.contains("\tsetl\t"), "{text}");
+    }
+}
+#[test]
+fn compare_select_does_not_cross_effects_or_consume_shared_negated_condition() {
+    for middle in ["v9 = load.i64 v4", "v9 = ineg v0"] {
+        let shared = middle.contains("ineg");
+        let src = format!(
+            "func @f(i64, i64, i64, i64, ptr) -> i64 cc(c) {{
+block0(v0: i64, v1: i64, v2: i64, v3: i64, v4: ptr):
+ v5 = icmp.slt v0, v1
+ {middle}
+ v6 = select v5, v9, v3
+ {}
+}}",
+            if shared {
+                "v7 = uext.i64 v5\n v8 = xor v6, v7\n return v8"
+            } else {
+                "return v6"
+            }
+        );
         let (text, _) = compile(&src, SelectionTier::Full, AllocationTier::Full, &SPILLED);
         assert!(text.contains("\tsetl\t"), "{text}");
     }
@@ -195,6 +242,17 @@ fn native_comparisons_match_c_with_nan_signed_zero_spills_and_shared_conditions(
                         String::new()
                     }
                 );
+                if !float && !shared {
+                    let delayed = format!("delayed_{name}");
+                    ir += &select(&delayed, ty, &format!("icmp.{cc}"), false).replace(
+                        "v5 = select v4, v2, v3",
+                        "v9 = ineg v2\n v5 = select v4, v9, v3",
+                    );
+                    c += &format!("extern uint64_t {delayed}({ct}, {ct}, uint64_t, uint64_t);\n");
+                    checks += &format!(
+                        "{{ {setup} uint64_t x=0x123456789abcdef0ULL+i,y=0xfedcba9876543210ULL-j; uint64_t e=({expression})?-x:y; if({delayed}(a,b,x,y)!=e) {{ puts(\"{delayed}\"); return 4; }} }} }}\n"
+                    );
+                }
             }
         }
     }
@@ -211,6 +269,23 @@ fn native_comparisons_match_c_with_nan_signed_zero_spills_and_shared_conditions(
                 if cc == "eq" { "!" } else { "!!" }
             );
         }
+    }
+    for bits in [32, 64] {
+        let name = format!("abs{bits}");
+        ir += &format!(
+            "func @{name}(i{bits}) -> i{bits} cc(c) {{
+block0(v0: i{bits}):
+ v1 = iconst.i{bits} 0
+ v2 = icmp.slt v0, v1
+ v3 = ineg v0
+ v4 = select v2, v3, v0
+ return v4
+}}\n"
+        );
+        c += &format!("extern uint{bits}_t {name}(uint{bits}_t);\n");
+        checks += &format!(
+            "{{ const uint{bits}_t vals[]={{0,1,2,UINT{bits}_MAX,UINT{bits}_MAX-1,(uint{bits}_t)1<<({bits}-1),((uint{bits}_t)1<<({bits}-1))-1}}; for(unsigned i=0;i<7;i++) {{ uint{bits}_t x=vals[i],e=(x>>({bits}-1))?(uint{bits}_t)(0-x):x; if({name}(x)!=e) return 3; }} }}\n"
+        );
     }
     c += &format!("int main(void) {{ {checks} return 0; }}");
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("compare-select-native");

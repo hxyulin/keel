@@ -5,7 +5,7 @@
 use crate::regalloc::{Constraint, OperandKind, ValuePart};
 use keel_ir::fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use keel_ir::{
-    BinaryOp, ConvertOp, EntityRef, Function, Inst, InstData, IntCC, Type, Value, ValueDef,
+    BinaryOp, ConvertOp, EntityRef, Function, Inst, InstData, IntCC, Type, UnaryOp, Value, ValueDef,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -354,21 +354,51 @@ impl Selection {
         self.fuse_compare_pairs(func, folds, crate::fold::fused_compare_pairs(func, uses))
     }
 
-    /// Only adjacent single-use scalar compares: move their inputs to the
-    /// select's allocation boundary before suppressing the Boolean definition.
+    /// Move single-use scalar compare inputs to the select's allocation boundary.
+    /// Integer negation may separate the pair, as in an absolute-value select.
     pub(crate) fn fuse_x86_selects(
         &mut self,
         func: &Function,
         folds: impl Fn(&InstData) -> Vec<Value>,
         uses: &[u8],
+        has_inline_asm: bool,
     ) {
         let mut pairs = Vec::new();
         for block in func.blocks() {
-            for pair in func.block_insts(block).windows(2) {
-                let [compare, select] = [pair[0], pair[1]];
+            let insts = func.block_insts(block);
+            for (end, &select) in insts.iter().enumerate().skip(1) {
                 let InstData::Select { args } = *func.inst_data(select) else {
                     continue;
                 };
+                let mut compare = insts[end - 1];
+                if end >= 2
+                    && !has_inline_asm
+                    && matches!(
+                        func.inst_data(compare),
+                        InstData::Unary {
+                            op: UnaryOp::Ineg,
+                            ..
+                        }
+                    )
+                    && matches!(
+                        func.value_type(func.first_result(compare)),
+                        Type::I32 | Type::I64
+                    )
+                    && !self.covered(compare)
+                    && !self.matches.contains_key(&compare)
+                    && !self.has_constraint(compare)
+                    && func.inst_loc(compare).map(|l| (l.file, l.line))
+                        == func.inst_loc(select).map(|l| (l.file, l.line))
+                    && matches!(func.inst_data(insts[end - 2]), InstData::Icmp { .. })
+                    && !self.matches.contains_key(&insts[end - 2])
+                    && func.inst_loc(insts[end - 2]).map(|l| (l.file, l.line))
+                        == func.inst_loc(select).map(|l| (l.file, l.line))
+                {
+                    // Re-emit the compare after NEG, which overwrites FLAGS.
+                    // Its SSA inputs remain live through the select via the
+                    // operand override installed by fuse_compare_pairs.
+                    compare = insts[end - 2];
+                }
                 if !matches!(
                     func.value_type(func.resolve(args[1])),
                     Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Ptr

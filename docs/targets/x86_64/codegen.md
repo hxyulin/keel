@@ -134,6 +134,16 @@ ANDN and BLSI/BLSMSK/BLSR fusion are not selected. Allocation follows the
 unfused IR use graph, so reading through a producer could read a register that
 was already reused. The compiler does not select MULX, PEXT or PDEP.
 
+## Scalar compare and select
+
+A single-use scalar comparison can feed a scalar integer or pointer select
+directly, without materializing its Boolean result. The pair must be adjacent,
+or an integer comparison may cross one i32/i64 negation. The latter covers
+absolute-value selects and keeps the comparison inputs live until the select.
+It does not cross memory accesses, source-location or allocation constraints,
+and is disabled in functions with inline assembly. Memory-operand comparisons
+keep their existing staging boundary.
+
 ## Memory operand folding
 
 Tree and Full selection fold some loads into their consumer. Every fold keeps

@@ -1658,7 +1658,7 @@ impl<'a> FunctionCompiler<'a> {
             HashSet::default()
         };
         if present.select {
-            selection.fuse_x86_selects(func, |data| folds(func, data), uses);
+            selection.fuse_x86_selects(func, |data| folds(func, data), uses, present.inline_asm);
         }
         let packed_absolute_values = if present.vector_select {
             crate::packed_absolute::select(&facts, &mut selection)
