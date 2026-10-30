@@ -1657,7 +1657,7 @@ impl Verifier<'_> {
                     if !mode.is_some_and(|n| (0..256).contains(&n)) {
                         self.inst_error(
                             inst,
-                            "packed string control must be iconst.i32 in0..=255".into(),
+                            "packed string control must be iconst.i32 in 0..=255".into(),
                         );
                     }
                 }
@@ -1682,6 +1682,23 @@ impl Verifier<'_> {
                         }
                     }
                 }
+                if let Some((index, max)) = id.x86_avx512_lane_control() {
+                    let control =
+                        args.get(index)
+                            .and_then(|&arg| match func.value_def(func.resolve(arg)) {
+                                ValueDef::Result(i, _) => match func.inst_data(i) {
+                                    InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                    _ => None,
+                                },
+                                _ => None,
+                            });
+                    if !control.is_some_and(|n| (0..=max).contains(&n)) {
+                        self.inst_error(
+                            inst,
+                            "AVX512 lane control must be constant in its instruction range".into(),
+                        );
+                    }
+                }
                 if id.has_x86_avx512_mask_shift_control() {
                     let control =
                         args.get(1)
@@ -1695,7 +1712,7 @@ impl Verifier<'_> {
                     if !control.is_some_and(|n| (0..256).contains(&n)) {
                         self.inst_error(
                             inst,
-                            "word mask shift control must be iconst.i32 in0..=255".into(),
+                            "word mask shift control must be iconst.i32 in 0..=255".into(),
                         );
                     }
                 }
@@ -1712,8 +1729,22 @@ impl Verifier<'_> {
                     if !control.is_some_and(|n| (0..256).contains(&n)) {
                         self.inst_error(
                             inst,
-                            "AVX512 integer control must be iconst.i32 in0..=255".into(),
+                            "AVX512 integer control must be iconst.i32 in 0..=255".into(),
                         );
+                    }
+                }
+                if let Some(index) = id.x86_avx512_packed_control() {
+                    let value =
+                        args.get(index)
+                            .and_then(|&arg| match func.value_def(func.resolve(arg)) {
+                                ValueDef::Result(i, _) => match func.inst_data(i) {
+                                    InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                    _ => None,
+                                },
+                                _ => None,
+                            });
+                    if !value.is_some_and(|value| id.valid_x86_avx512_packed_control(value)) {
+                        self.inst_error(inst, "invalid packed AVX512 SAE/rounding control".into());
                     }
                 }
                 if let Some((_, index)) = id.x86_avx512_scalar_convert() {
@@ -1753,6 +1784,26 @@ impl Verifier<'_> {
                                 "invalid scalar EVEX immediate or SAE/rounding control".into(),
                             );
                         }
+                    }
+                }
+                if let Some(index) = id
+                    .x86_avx512_permute()
+                    .and_then(|(_, kind)| kind.control_index())
+                {
+                    let control =
+                        args.get(index)
+                            .and_then(|&arg| match func.value_def(func.resolve(arg)) {
+                                ValueDef::Result(i, _) => match func.inst_data(i) {
+                                    InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                    _ => None,
+                                },
+                                _ => None,
+                            });
+                    if !control.is_some_and(|n| (0..=255).contains(&n)) {
+                        self.inst_error(
+                            inst,
+                            "AVX512 permutation control must be iconst.i32 in 0..=255".into(),
+                        );
                     }
                 }
                 if id.x86_avx512_fma_opcode().is_some()
@@ -1839,9 +1890,9 @@ impl Verifier<'_> {
                         self.inst_error(
                             inst,
                             if id.is_x86_pclmul() {
-                                "PCLMULQDQ control must be iconst.i32 in0..=255".into()
+                                "PCLMULQDQ control must be iconst.i32 in 0..=255".into()
                             } else {
-                                "AVX dot control must be iconst.i32 in0..=255".into()
+                                "AVX dot control must be iconst.i32 in 0..=255".into()
                             },
                         );
                     }

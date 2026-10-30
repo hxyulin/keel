@@ -906,3 +906,11 @@ mod x86_avx512_scalar_convert;
 
 #[path = "vector_x86/x86_avx512_integer_convert.rs"]
 mod x86_avx512_integer_convert;
+#[path = "vector_x86/x86_avx512_permute.rs"]
+mod x86_avx512_permute;
+
+#[path = "vector_x86/x86_avx512_packed.rs"]
+mod x86_avx512_packed;
+
+#[path = "vector_x86/x86_avx512_lane.rs"]
+mod x86_avx512_lane;

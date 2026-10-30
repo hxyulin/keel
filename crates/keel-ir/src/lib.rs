@@ -60,7 +60,7 @@ pub use inst::{
     BinaryOp, BlockCall, Clause, ConvertOp, FloatCC, InstData, IntCC, Ordering, OverflowOp, RmwOp,
     Symbol, UnaryOp,
 };
-pub use intrinsic::{Intrinsic, IntrinsicInfo};
+pub use intrinsic::{Intrinsic, IntrinsicInfo, X86Avx512PermuteKind};
 pub use layout::Layout;
 pub use memory::{MemoryEffects, MemoryFlags};
 pub use module::Module;

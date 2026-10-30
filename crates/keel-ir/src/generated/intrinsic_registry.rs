@@ -1566,10 +1566,276 @@ pub enum Intrinsic {
     X86Avx512MaskStorePmovusqd = 1120,
     #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
     X86Avx512MaskStorePmovusqw = 1121,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vpermd = 1122,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vpermq = 1123,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vpermps = 1124,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vpermpd = 1125,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vpermi2d = 1126,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vpermi2q = 1127,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vpermi2ps = 1128,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vpermi2pd = 1129,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vpermt2d = 1130,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vpermt2q = 1131,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vpermt2ps = 1132,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vpermt2pd = 1133,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vpermilps = 1134,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vpermilpd = 1135,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512VpermilpsImm = 1136,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512VpermilpdImm = 1137,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512VpermqImm = 1138,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512VpermpdImm = 1139,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vshufps = 1140,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vshufpd = 1141,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vpshufd = 1142,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vshufi32x4 = 1143,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vshufi64x2 = 1144,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vshuff32x4 = 1145,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vshuff64x2 = 1146,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Valignd = 1147,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Valignq = 1148,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vpunpckldq = 1149,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vpunpcklqdq = 1150,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vunpcklps = 1151,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vunpcklpd = 1152,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vpunpckhdq = 1153,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vpunpckhqdq = 1154,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vunpckhps = 1155,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vunpckhpd = 1156,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vmovshdup = 1157,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vmovsldup = 1158,
+    #[doc = "Pure AVX512F masked register permutation with independent merge. Runtime indices use the instruction-defined modulo and lane-local selectors; inactive lanes retain merge bits, including NaN payloads."]
+    X86Avx512Vmovddup = 1159,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskMulld = 1160,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskMinsd = 1161,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskMinud = 1162,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskMaxsd = 1163,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskMaxud = 1164,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskAndd = 1165,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskAndnd = 1166,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskOrd = 1167,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskXord = 1168,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskMinsq = 1169,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskMinuq = 1170,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskMaxsq = 1171,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskMaxuq = 1172,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskAndq = 1173,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskAndnq = 1174,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskOrq = 1175,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskXorq = 1176,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskAddRoundps = 1177,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskAddRoundpd = 1178,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskSubRoundps = 1179,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskSubRoundpd = 1180,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskMulRoundps = 1181,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskMulRoundpd = 1182,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskDivRoundps = 1183,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskDivRoundpd = 1184,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskSqrtRoundps = 1185,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskSqrtRoundpd = 1186,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskMinps = 1187,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskMinpd = 1188,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskMaxps = 1189,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskMaxpd = 1190,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskMoved = 1191,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512Blendd = 1192,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskMoveq = 1193,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512Blendq = 1194,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskMoveps = 1195,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512Blendps = 1196,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskMovepd = 1197,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512Blendpd = 1198,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskAlignedLoadd = 1199,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskAlignedStored = 1200,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskAlignedLoadq = 1201,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskAlignedStoreq = 1202,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskAlignedLoadps = 1203,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskAlignedStoreps = 1204,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskAlignedLoadpd = 1205,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512MaskAlignedStorepd = 1206,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512StreamLoaddq = 1207,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512StreamStoredq = 1208,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512StreamStoreps = 1209,
+    #[doc = "Packed AVX512F arithmetic or movement. Masked lanes merge independently. Raw FP retains MXCSR behavior; aligned and streaming memory forms require 64-byte alignment."]
+    X86Avx512StreamStorepd = 1210,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskSllid = 1211,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskSlliq = 1212,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskSrlid = 1213,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskSrliq = 1214,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskSraid = 1215,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskSraiq = 1216,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskSlld = 1217,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskSllq = 1218,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskSrld = 1219,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskSrlq = 1220,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskSrad = 1221,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskSraq = 1222,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskPbroadcastd = 1223,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskPbroadcastq = 1224,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskBroadcastss = 1225,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskBroadcastsd = 1226,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskLoadPbroadcastd = 1227,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskLoadPbroadcastq = 1228,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskLoadBroadcastss = 1229,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskLoadBroadcastsd = 1230,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskBroadcasti32x4 = 1231,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskBroadcasti64x4 = 1232,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskBroadcastf32x4 = 1233,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskBroadcastf64x4 = 1234,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskLoadBroadcasti32x4 = 1235,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskLoadBroadcasti64x4 = 1236,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskLoadBroadcastf32x4 = 1237,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskLoadBroadcastf64x4 = 1238,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskExtracti32x4 = 1239,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskExtracti64x4 = 1240,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskExtractf32x4 = 1241,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskExtractf64x4 = 1242,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskStoreExtracti32x4 = 1243,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskStoreExtracti64x4 = 1244,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskStoreExtractf32x4 = 1245,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskStoreExtractf64x4 = 1246,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskInserti32x4 = 1247,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskInserti64x4 = 1248,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskInsertf32x4 = 1249,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskInsertf64x4 = 1250,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskLoadInserti32x4 = 1251,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskLoadInserti64x4 = 1252,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskLoadInsertf32x4 = 1253,
+    #[doc = "Masked AVX512F shift, broadcast or lane transfer. Immediate controls use the instruction lane range; shared shifts use only the low 64-bit count and saturate oversized counts. Memory transfers retain native masked tuple access semantics."]
+    X86Avx512MaskLoadInsertf64x4 = 1254,
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 1122] = [
+    pub const ALL: [Intrinsic; 1255] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -2692,6 +2958,139 @@ impl Intrinsic {
         Intrinsic::X86Avx512MaskStorePmovusqb,
         Intrinsic::X86Avx512MaskStorePmovusqd,
         Intrinsic::X86Avx512MaskStorePmovusqw,
+        Intrinsic::X86Avx512Vpermd,
+        Intrinsic::X86Avx512Vpermq,
+        Intrinsic::X86Avx512Vpermps,
+        Intrinsic::X86Avx512Vpermpd,
+        Intrinsic::X86Avx512Vpermi2d,
+        Intrinsic::X86Avx512Vpermi2q,
+        Intrinsic::X86Avx512Vpermi2ps,
+        Intrinsic::X86Avx512Vpermi2pd,
+        Intrinsic::X86Avx512Vpermt2d,
+        Intrinsic::X86Avx512Vpermt2q,
+        Intrinsic::X86Avx512Vpermt2ps,
+        Intrinsic::X86Avx512Vpermt2pd,
+        Intrinsic::X86Avx512Vpermilps,
+        Intrinsic::X86Avx512Vpermilpd,
+        Intrinsic::X86Avx512VpermilpsImm,
+        Intrinsic::X86Avx512VpermilpdImm,
+        Intrinsic::X86Avx512VpermqImm,
+        Intrinsic::X86Avx512VpermpdImm,
+        Intrinsic::X86Avx512Vshufps,
+        Intrinsic::X86Avx512Vshufpd,
+        Intrinsic::X86Avx512Vpshufd,
+        Intrinsic::X86Avx512Vshufi32x4,
+        Intrinsic::X86Avx512Vshufi64x2,
+        Intrinsic::X86Avx512Vshuff32x4,
+        Intrinsic::X86Avx512Vshuff64x2,
+        Intrinsic::X86Avx512Valignd,
+        Intrinsic::X86Avx512Valignq,
+        Intrinsic::X86Avx512Vpunpckldq,
+        Intrinsic::X86Avx512Vpunpcklqdq,
+        Intrinsic::X86Avx512Vunpcklps,
+        Intrinsic::X86Avx512Vunpcklpd,
+        Intrinsic::X86Avx512Vpunpckhdq,
+        Intrinsic::X86Avx512Vpunpckhqdq,
+        Intrinsic::X86Avx512Vunpckhps,
+        Intrinsic::X86Avx512Vunpckhpd,
+        Intrinsic::X86Avx512Vmovshdup,
+        Intrinsic::X86Avx512Vmovsldup,
+        Intrinsic::X86Avx512Vmovddup,
+        Intrinsic::X86Avx512MaskMulld,
+        Intrinsic::X86Avx512MaskMinsd,
+        Intrinsic::X86Avx512MaskMinud,
+        Intrinsic::X86Avx512MaskMaxsd,
+        Intrinsic::X86Avx512MaskMaxud,
+        Intrinsic::X86Avx512MaskAndd,
+        Intrinsic::X86Avx512MaskAndnd,
+        Intrinsic::X86Avx512MaskOrd,
+        Intrinsic::X86Avx512MaskXord,
+        Intrinsic::X86Avx512MaskMinsq,
+        Intrinsic::X86Avx512MaskMinuq,
+        Intrinsic::X86Avx512MaskMaxsq,
+        Intrinsic::X86Avx512MaskMaxuq,
+        Intrinsic::X86Avx512MaskAndq,
+        Intrinsic::X86Avx512MaskAndnq,
+        Intrinsic::X86Avx512MaskOrq,
+        Intrinsic::X86Avx512MaskXorq,
+        Intrinsic::X86Avx512MaskAddRoundps,
+        Intrinsic::X86Avx512MaskAddRoundpd,
+        Intrinsic::X86Avx512MaskSubRoundps,
+        Intrinsic::X86Avx512MaskSubRoundpd,
+        Intrinsic::X86Avx512MaskMulRoundps,
+        Intrinsic::X86Avx512MaskMulRoundpd,
+        Intrinsic::X86Avx512MaskDivRoundps,
+        Intrinsic::X86Avx512MaskDivRoundpd,
+        Intrinsic::X86Avx512MaskSqrtRoundps,
+        Intrinsic::X86Avx512MaskSqrtRoundpd,
+        Intrinsic::X86Avx512MaskMinps,
+        Intrinsic::X86Avx512MaskMinpd,
+        Intrinsic::X86Avx512MaskMaxps,
+        Intrinsic::X86Avx512MaskMaxpd,
+        Intrinsic::X86Avx512MaskMoved,
+        Intrinsic::X86Avx512Blendd,
+        Intrinsic::X86Avx512MaskMoveq,
+        Intrinsic::X86Avx512Blendq,
+        Intrinsic::X86Avx512MaskMoveps,
+        Intrinsic::X86Avx512Blendps,
+        Intrinsic::X86Avx512MaskMovepd,
+        Intrinsic::X86Avx512Blendpd,
+        Intrinsic::X86Avx512MaskAlignedLoadd,
+        Intrinsic::X86Avx512MaskAlignedStored,
+        Intrinsic::X86Avx512MaskAlignedLoadq,
+        Intrinsic::X86Avx512MaskAlignedStoreq,
+        Intrinsic::X86Avx512MaskAlignedLoadps,
+        Intrinsic::X86Avx512MaskAlignedStoreps,
+        Intrinsic::X86Avx512MaskAlignedLoadpd,
+        Intrinsic::X86Avx512MaskAlignedStorepd,
+        Intrinsic::X86Avx512StreamLoaddq,
+        Intrinsic::X86Avx512StreamStoredq,
+        Intrinsic::X86Avx512StreamStoreps,
+        Intrinsic::X86Avx512StreamStorepd,
+        Intrinsic::X86Avx512MaskSllid,
+        Intrinsic::X86Avx512MaskSlliq,
+        Intrinsic::X86Avx512MaskSrlid,
+        Intrinsic::X86Avx512MaskSrliq,
+        Intrinsic::X86Avx512MaskSraid,
+        Intrinsic::X86Avx512MaskSraiq,
+        Intrinsic::X86Avx512MaskSlld,
+        Intrinsic::X86Avx512MaskSllq,
+        Intrinsic::X86Avx512MaskSrld,
+        Intrinsic::X86Avx512MaskSrlq,
+        Intrinsic::X86Avx512MaskSrad,
+        Intrinsic::X86Avx512MaskSraq,
+        Intrinsic::X86Avx512MaskPbroadcastd,
+        Intrinsic::X86Avx512MaskPbroadcastq,
+        Intrinsic::X86Avx512MaskBroadcastss,
+        Intrinsic::X86Avx512MaskBroadcastsd,
+        Intrinsic::X86Avx512MaskLoadPbroadcastd,
+        Intrinsic::X86Avx512MaskLoadPbroadcastq,
+        Intrinsic::X86Avx512MaskLoadBroadcastss,
+        Intrinsic::X86Avx512MaskLoadBroadcastsd,
+        Intrinsic::X86Avx512MaskBroadcasti32x4,
+        Intrinsic::X86Avx512MaskBroadcasti64x4,
+        Intrinsic::X86Avx512MaskBroadcastf32x4,
+        Intrinsic::X86Avx512MaskBroadcastf64x4,
+        Intrinsic::X86Avx512MaskLoadBroadcasti32x4,
+        Intrinsic::X86Avx512MaskLoadBroadcasti64x4,
+        Intrinsic::X86Avx512MaskLoadBroadcastf32x4,
+        Intrinsic::X86Avx512MaskLoadBroadcastf64x4,
+        Intrinsic::X86Avx512MaskExtracti32x4,
+        Intrinsic::X86Avx512MaskExtracti64x4,
+        Intrinsic::X86Avx512MaskExtractf32x4,
+        Intrinsic::X86Avx512MaskExtractf64x4,
+        Intrinsic::X86Avx512MaskStoreExtracti32x4,
+        Intrinsic::X86Avx512MaskStoreExtracti64x4,
+        Intrinsic::X86Avx512MaskStoreExtractf32x4,
+        Intrinsic::X86Avx512MaskStoreExtractf64x4,
+        Intrinsic::X86Avx512MaskInserti32x4,
+        Intrinsic::X86Avx512MaskInserti64x4,
+        Intrinsic::X86Avx512MaskInsertf32x4,
+        Intrinsic::X86Avx512MaskInsertf64x4,
+        Intrinsic::X86Avx512MaskLoadInserti32x4,
+        Intrinsic::X86Avx512MaskLoadInserti64x4,
+        Intrinsic::X86Avx512MaskLoadInsertf32x4,
+        Intrinsic::X86Avx512MaskLoadInsertf64x4,
     ];
 }
 
@@ -3810,5 +4209,138 @@ macro_rules! x86_intrinsics {
             | $crate::Intrinsic::X86Avx512MaskStorePmovusqb
             | $crate::Intrinsic::X86Avx512MaskStorePmovusqd
             | $crate::Intrinsic::X86Avx512MaskStorePmovusqw
+            | $crate::Intrinsic::X86Avx512Vpermd
+            | $crate::Intrinsic::X86Avx512Vpermq
+            | $crate::Intrinsic::X86Avx512Vpermps
+            | $crate::Intrinsic::X86Avx512Vpermpd
+            | $crate::Intrinsic::X86Avx512Vpermi2d
+            | $crate::Intrinsic::X86Avx512Vpermi2q
+            | $crate::Intrinsic::X86Avx512Vpermi2ps
+            | $crate::Intrinsic::X86Avx512Vpermi2pd
+            | $crate::Intrinsic::X86Avx512Vpermt2d
+            | $crate::Intrinsic::X86Avx512Vpermt2q
+            | $crate::Intrinsic::X86Avx512Vpermt2ps
+            | $crate::Intrinsic::X86Avx512Vpermt2pd
+            | $crate::Intrinsic::X86Avx512Vpermilps
+            | $crate::Intrinsic::X86Avx512Vpermilpd
+            | $crate::Intrinsic::X86Avx512VpermilpsImm
+            | $crate::Intrinsic::X86Avx512VpermilpdImm
+            | $crate::Intrinsic::X86Avx512VpermqImm
+            | $crate::Intrinsic::X86Avx512VpermpdImm
+            | $crate::Intrinsic::X86Avx512Vshufps
+            | $crate::Intrinsic::X86Avx512Vshufpd
+            | $crate::Intrinsic::X86Avx512Vpshufd
+            | $crate::Intrinsic::X86Avx512Vshufi32x4
+            | $crate::Intrinsic::X86Avx512Vshufi64x2
+            | $crate::Intrinsic::X86Avx512Vshuff32x4
+            | $crate::Intrinsic::X86Avx512Vshuff64x2
+            | $crate::Intrinsic::X86Avx512Valignd
+            | $crate::Intrinsic::X86Avx512Valignq
+            | $crate::Intrinsic::X86Avx512Vpunpckldq
+            | $crate::Intrinsic::X86Avx512Vpunpcklqdq
+            | $crate::Intrinsic::X86Avx512Vunpcklps
+            | $crate::Intrinsic::X86Avx512Vunpcklpd
+            | $crate::Intrinsic::X86Avx512Vpunpckhdq
+            | $crate::Intrinsic::X86Avx512Vpunpckhqdq
+            | $crate::Intrinsic::X86Avx512Vunpckhps
+            | $crate::Intrinsic::X86Avx512Vunpckhpd
+            | $crate::Intrinsic::X86Avx512Vmovshdup
+            | $crate::Intrinsic::X86Avx512Vmovsldup
+            | $crate::Intrinsic::X86Avx512Vmovddup
+            | $crate::Intrinsic::X86Avx512MaskMulld
+            | $crate::Intrinsic::X86Avx512MaskMinsd
+            | $crate::Intrinsic::X86Avx512MaskMinud
+            | $crate::Intrinsic::X86Avx512MaskMaxsd
+            | $crate::Intrinsic::X86Avx512MaskMaxud
+            | $crate::Intrinsic::X86Avx512MaskAndd
+            | $crate::Intrinsic::X86Avx512MaskAndnd
+            | $crate::Intrinsic::X86Avx512MaskOrd
+            | $crate::Intrinsic::X86Avx512MaskXord
+            | $crate::Intrinsic::X86Avx512MaskMinsq
+            | $crate::Intrinsic::X86Avx512MaskMinuq
+            | $crate::Intrinsic::X86Avx512MaskMaxsq
+            | $crate::Intrinsic::X86Avx512MaskMaxuq
+            | $crate::Intrinsic::X86Avx512MaskAndq
+            | $crate::Intrinsic::X86Avx512MaskAndnq
+            | $crate::Intrinsic::X86Avx512MaskOrq
+            | $crate::Intrinsic::X86Avx512MaskXorq
+            | $crate::Intrinsic::X86Avx512MaskAddRoundps
+            | $crate::Intrinsic::X86Avx512MaskAddRoundpd
+            | $crate::Intrinsic::X86Avx512MaskSubRoundps
+            | $crate::Intrinsic::X86Avx512MaskSubRoundpd
+            | $crate::Intrinsic::X86Avx512MaskMulRoundps
+            | $crate::Intrinsic::X86Avx512MaskMulRoundpd
+            | $crate::Intrinsic::X86Avx512MaskDivRoundps
+            | $crate::Intrinsic::X86Avx512MaskDivRoundpd
+            | $crate::Intrinsic::X86Avx512MaskSqrtRoundps
+            | $crate::Intrinsic::X86Avx512MaskSqrtRoundpd
+            | $crate::Intrinsic::X86Avx512MaskMinps
+            | $crate::Intrinsic::X86Avx512MaskMinpd
+            | $crate::Intrinsic::X86Avx512MaskMaxps
+            | $crate::Intrinsic::X86Avx512MaskMaxpd
+            | $crate::Intrinsic::X86Avx512MaskMoved
+            | $crate::Intrinsic::X86Avx512Blendd
+            | $crate::Intrinsic::X86Avx512MaskMoveq
+            | $crate::Intrinsic::X86Avx512Blendq
+            | $crate::Intrinsic::X86Avx512MaskMoveps
+            | $crate::Intrinsic::X86Avx512Blendps
+            | $crate::Intrinsic::X86Avx512MaskMovepd
+            | $crate::Intrinsic::X86Avx512Blendpd
+            | $crate::Intrinsic::X86Avx512MaskAlignedLoadd
+            | $crate::Intrinsic::X86Avx512MaskAlignedStored
+            | $crate::Intrinsic::X86Avx512MaskAlignedLoadq
+            | $crate::Intrinsic::X86Avx512MaskAlignedStoreq
+            | $crate::Intrinsic::X86Avx512MaskAlignedLoadps
+            | $crate::Intrinsic::X86Avx512MaskAlignedStoreps
+            | $crate::Intrinsic::X86Avx512MaskAlignedLoadpd
+            | $crate::Intrinsic::X86Avx512MaskAlignedStorepd
+            | $crate::Intrinsic::X86Avx512StreamLoaddq
+            | $crate::Intrinsic::X86Avx512StreamStoredq
+            | $crate::Intrinsic::X86Avx512StreamStoreps
+            | $crate::Intrinsic::X86Avx512StreamStorepd
+            | $crate::Intrinsic::X86Avx512MaskSllid
+            | $crate::Intrinsic::X86Avx512MaskSlliq
+            | $crate::Intrinsic::X86Avx512MaskSrlid
+            | $crate::Intrinsic::X86Avx512MaskSrliq
+            | $crate::Intrinsic::X86Avx512MaskSraid
+            | $crate::Intrinsic::X86Avx512MaskSraiq
+            | $crate::Intrinsic::X86Avx512MaskSlld
+            | $crate::Intrinsic::X86Avx512MaskSllq
+            | $crate::Intrinsic::X86Avx512MaskSrld
+            | $crate::Intrinsic::X86Avx512MaskSrlq
+            | $crate::Intrinsic::X86Avx512MaskSrad
+            | $crate::Intrinsic::X86Avx512MaskSraq
+            | $crate::Intrinsic::X86Avx512MaskPbroadcastd
+            | $crate::Intrinsic::X86Avx512MaskPbroadcastq
+            | $crate::Intrinsic::X86Avx512MaskBroadcastss
+            | $crate::Intrinsic::X86Avx512MaskBroadcastsd
+            | $crate::Intrinsic::X86Avx512MaskLoadPbroadcastd
+            | $crate::Intrinsic::X86Avx512MaskLoadPbroadcastq
+            | $crate::Intrinsic::X86Avx512MaskLoadBroadcastss
+            | $crate::Intrinsic::X86Avx512MaskLoadBroadcastsd
+            | $crate::Intrinsic::X86Avx512MaskBroadcasti32x4
+            | $crate::Intrinsic::X86Avx512MaskBroadcasti64x4
+            | $crate::Intrinsic::X86Avx512MaskBroadcastf32x4
+            | $crate::Intrinsic::X86Avx512MaskBroadcastf64x4
+            | $crate::Intrinsic::X86Avx512MaskLoadBroadcasti32x4
+            | $crate::Intrinsic::X86Avx512MaskLoadBroadcasti64x4
+            | $crate::Intrinsic::X86Avx512MaskLoadBroadcastf32x4
+            | $crate::Intrinsic::X86Avx512MaskLoadBroadcastf64x4
+            | $crate::Intrinsic::X86Avx512MaskExtracti32x4
+            | $crate::Intrinsic::X86Avx512MaskExtracti64x4
+            | $crate::Intrinsic::X86Avx512MaskExtractf32x4
+            | $crate::Intrinsic::X86Avx512MaskExtractf64x4
+            | $crate::Intrinsic::X86Avx512MaskStoreExtracti32x4
+            | $crate::Intrinsic::X86Avx512MaskStoreExtracti64x4
+            | $crate::Intrinsic::X86Avx512MaskStoreExtractf32x4
+            | $crate::Intrinsic::X86Avx512MaskStoreExtractf64x4
+            | $crate::Intrinsic::X86Avx512MaskInserti32x4
+            | $crate::Intrinsic::X86Avx512MaskInserti64x4
+            | $crate::Intrinsic::X86Avx512MaskInsertf32x4
+            | $crate::Intrinsic::X86Avx512MaskInsertf64x4
+            | $crate::Intrinsic::X86Avx512MaskLoadInserti32x4
+            | $crate::Intrinsic::X86Avx512MaskLoadInserti64x4
+            | $crate::Intrinsic::X86Avx512MaskLoadInsertf32x4
+            | $crate::Intrinsic::X86Avx512MaskLoadInsertf64x4
     };
 }
