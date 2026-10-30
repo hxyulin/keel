@@ -204,3 +204,114 @@ fn vl_fma_has_raw_effects_and_requires_vl_per_function() {
     let disabled = source.replace("i8) {", "i8) target_features(\"-avx512vl\") {");
     assert!(compile(&disabled, Features::NONE.with_features("avx512vl").unwrap()).is_err());
 }
+
+#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+#[test]
+fn vl_fma_preserves_allocated_xmm12_in_128_bit_functions() {
+    use keel_codegen::regalloc::{Allocation, AllocationInput, Loc, RegisterAllocator};
+    use keel_ir::EntityRef;
+    struct PinXmm12;
+    impl RegisterAllocator for PinXmm12 {
+        fn name(&self) -> &'static str {
+            "pin-xmm12"
+        }
+        fn allocate(&self, input: &AllocationInput<'_>) -> Allocation {
+            let empty = AllocationInput {
+                pools: &EMPTY,
+                ..*input
+            };
+            let mut allocation = AllocationTier::Full.allocate(&empty);
+            // Exercise a legal XMM12 home without depending on spill-cost choices.
+            let load = input
+                .func
+                .layout_insts()
+                .find_map(|(_, inst)| {
+                    matches!(input.func.inst_data(inst), InstData::Load { .. }).then_some(inst)
+                })
+                .unwrap();
+            let value = input.func.inst_results(load)[0];
+            allocation.locs[0][value.index()] = Some(Loc::FReg(12));
+            allocation
+        }
+    }
+    if !std::is_x86_feature_detected!("avx512vl") {
+        return;
+    }
+    let source = "func @pressure(ptr,ptr,ptr,ptr,ptr,i8) {\n\
+block0(v0:ptr,v1:ptr,v2:ptr,v3:ptr,v4:ptr,v5:i8):\n\
+ v7 = load.f32x4 align 1 v1\n\
+ v8 = load.f32x4 align 1 v2\n\
+ v9 = load.f32x4 align 1 v3\n\
+ v10 = load.f32x4 align 1 v4\n\
+ v6 = load.f32x4 align 1 v0\n\
+ v11 = intrinsic x86_avx512vl_vfmadd213ps128(v6,v5,v7,v8,v9)\n\
+ store align 1 v11,v4\n\
+ v12 = iconst.i64 16\n\
+ v13 = ptradd v4,v12\n\
+ store align 1 v6,v13\n\
+ v14 = ptradd v13,v12\n\
+ store align 1 v7,v14\n\
+ v15 = ptradd v14,v12\n\
+ store align 1 v8,v15\n\
+ v16 = ptradd v15,v12\n\
+ store align 1 v9,v16\n\
+ v17 = ptradd v16,v12\n\
+ store align 1 v10,v17\n\
+ return\n}\n";
+    let mut module = keel_ir::parse(source).unwrap();
+    keel_opt::optimize(&mut module).unwrap();
+    let pools = Pools {
+        float_caller_saved: &[12],
+        ..EMPTY
+    };
+    let features = Features::NONE.with_features("avx512vl").unwrap();
+    let selector = FeatureSelector {
+        inner: &SelectionTier::Full,
+        features,
+    };
+    let directory = std::env::temp_dir().join(format!("keel-vl-fma-xmm12-{}", std::process::id()));
+    fs::create_dir_all(&directory).unwrap();
+    fs::write(directory.join("oracle.c"), r#"
+#include <string.h>
+extern void pressure(const void*,const void*,const void*,const void*,void*,unsigned char);
+int main(void) {
+    float merge[4]={31,37,41,43}, a[4]={2,3,4,5}, b[4]={7,11,13,17}, c[4]={19,23,29,31};
+    float sentinel[4]={-17,-19,-23,-29}, active[4]={33,56,81,116}, out[24];
+    unsigned char masks[]={0,5,15};
+    for(unsigned j=0;j<3;j++) {
+        memset(out,0,sizeof(out));memcpy(out,sentinel,16);
+        pressure(merge,a,b,c,out,masks[j]);
+        for(unsigned lane=0;lane<4;lane++) if(out[lane]!=((masks[j]>>lane)&1?active[lane]:merge[lane])) return 1;
+        if(memcmp(out+4,merge,16)||memcmp(out+8,a,16)||memcmp(out+12,b,16)||memcmp(out+16,c,16)||memcmp(out+20,sentinel,16)) return 2;
+    }
+    return 0;
+}
+"#).unwrap();
+    {
+        let pipeline = CodegenPipeline {
+            selector: &selector,
+            allocator: &PinXmm12,
+        };
+        let program =
+            keel_codegen::x86_64::compile_program_with_pipeline(&module, &pools, &pipeline)
+                .unwrap();
+        let object =
+            keel_asm::x86::assemble_program_object_with_features(&program, features).unwrap();
+        fs::write(directory.join("fma.o"), object).unwrap();
+        let output = Command::new("cc")
+            .arg(directory.join("oracle.c"))
+            .arg(directory.join("fma.o"))
+            .arg("-o")
+            .arg(directory.join("run"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let output = Command::new(directory.join("run")).output().unwrap();
+        assert!(output.status.success(), "pinned XMM12: {}", output.status);
+    }
+    fs::remove_dir_all(directory).unwrap();
+}

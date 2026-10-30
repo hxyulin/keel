@@ -1,7 +1,6 @@
 //! FMA keeps encoded operand order and merges inactive bits independently.
 use super::*;
 use keel_asm_ir::x86::evex::{EvexOpcode, Rounding};
-const MERGE: u8 = 12;
 pub(super) fn validate(
     func: &Function,
     id: Intrinsic,
@@ -33,12 +32,7 @@ impl FunctionCompiler<'_> {
         args: &[Value],
         result: Option<Value>,
     ) {
-        for (value, scratch) in [
-            (args[0], MERGE),
-            (args[2], FS0),
-            (args[3], FS1),
-            (args[4], FS2),
-        ] {
+        for (value, scratch) in [(args[2], FS0), (args[3], FS1), (args[4], FS2)] {
             self.avx512_stage_vector(value, scratch);
         }
         self.avx512_stage_mask(args[1]);
@@ -73,6 +67,8 @@ impl FunctionCompiler<'_> {
         // Hardware ties its inactive destination to arithmetic operand a. Copy
         // only active results into the separate merge value after the FMA, so
         // inactive arithmetic neither executes nor changes merge payloads.
+        // FS1 is now free. XMM12 can hold a live value in a 128-bit function.
+        self.avx512_stage_vector(args[0], FS1);
         let merge_move = if matches!(
             self.ty(args[0]),
             Type::Vector(
@@ -88,17 +84,17 @@ impl FunctionCompiler<'_> {
         self.emit(
             avx512_mask::opcode(merge_move, true),
             [
-                asm_arg(simd_width(MERGE, width)),
+                asm_arg(simd_width(FS1, width)),
                 asm_arg(simd_width(FS0, width)),
             ],
         );
         let d = self.def_freg(result);
-        if d != MERGE {
+        if d != FS1 {
             self.emit(
                 movs(self.ty(args[0])),
                 [
                     asm_arg(simd_width(d, width)),
-                    asm_arg(simd_width(MERGE, width)),
+                    asm_arg(simd_width(FS1, width)),
                 ],
             );
         }
