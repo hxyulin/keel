@@ -622,7 +622,16 @@ software oracle and the FIPS 197 AES-128 example. Native execution needs an
 AES-capable x86-64 Linux host; on macOS arm64 the tests cover encoding,
 frontend and feature diagnostics only.
 
-## AVX512F scalar masks
+## AVX512F wrappers
+
+`immintrin.h` provides 512-bit zero and broadcast constructors, equal-width
+casts, aligned and unaligned loads/stores, dword/qword add/subtract, dword
+low multiply, and integer bitwise operations. Unmasked floating add, subtract,
+multiply, divide and square root use the raw masked operations with every
+lane enabled. Each argument is evaluated once. All memory accesses cover
+exactly 64 bytes.
+
+### Scalar masks
 
 `immintrin.h` defines `__mmask16` for sixteen dword lanes and `__mmask8`
 for eight qword lanes. Bit zero controls the lowest-addressed lane. The

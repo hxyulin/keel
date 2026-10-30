@@ -438,3 +438,135 @@ fn avx512_floating_mask_headers_and_predicates() {
     keel_asm::x86::assemble_program_object_with_features(&program, selector.features).unwrap();
     assert!(parse(&source, Target::Aarch64LinuxGnu).is_err());
 }
+
+#[test]
+fn avx512_unmasked_headers_native_and_single_evaluation() {
+    let mut source = String::from("#include <immintrin.h>\nint evaluations;\n");
+    let mut harness = String::from(
+        "#include <immintrin.h>\n#include <string.h>\n#include <stdint.h>\nextern int evaluations;\n",
+    );
+    let mut cases = String::new();
+    for (suffix, ty) in [("ps", "__m512"), ("pd", "__m512d")] {
+        source += &format!(
+            "static {ty} get_{suffix}(const void*p){{evaluations++;return _mm512_loadu_{suffix}(p);}}\n"
+        );
+        for op in ["add", "sub", "mul", "div", "sqrt"] {
+            let name = format!("unmasked_{op}_{suffix}");
+            let inputs = if op == "sqrt" {
+                format!("get_{suffix}(a)")
+            } else {
+                format!("get_{suffix}(a),get_{suffix}(b)")
+            };
+            source += &format!(
+                "void {name}(const void*a,const void*b,void*out){{{ty} r=_mm512_{op}_{suffix}({inputs});_mm512_storeu_{suffix}(out,r);}}\n"
+            );
+            harness += &format!("extern void {name}(const void*,const void*,void*);\n");
+            let expected = if op == "sqrt" {
+                format!("_mm512_sqrt_{suffix}(a)")
+            } else {
+                format!("_mm512_{op}_{suffix}(a,b)")
+            };
+            let count = if op == "sqrt" { 1 } else { 2 };
+            cases += &format!(
+                "{{{ty} a=_mm512_set1_{suffix}(9),b=_mm512_set1_{suffix}(2),want={expected},out;evaluations=0;{name}(&a,&b,&out);if(evaluations!={count}||memcmp(&want,&out,64))return 1;}}\n"
+            );
+        }
+        source += &format!(
+            "void constructor_{suffix}(void*out){{_mm512_store_{suffix}(out,_mm512_set1_{suffix}(3));}}\nvoid zero_{suffix}(void*out){{_mm512_store_{suffix}(out,_mm512_setzero_{suffix}());}}\nvoid aligned_{suffix}(const void*p,void*out){{_mm512_store_{suffix}(out,_mm512_load_{suffix}(p));}}\n"
+        );
+        for (name, expected) in [
+            ("constructor", format!("_mm512_set1_{suffix}(3)")),
+            ("zero", format!("_mm512_setzero_{suffix}()")),
+        ] {
+            harness += &format!("extern void {name}_{suffix}(void*);\n");
+            cases += &format!(
+                "{{{ty} out,want={expected};{name}_{suffix}(&out);if(memcmp(&want,&out,64))return 2;}}\n"
+            );
+        }
+    }
+    for (op, bits) in [
+        ("add", 32),
+        ("sub", 32),
+        ("mullo", 32),
+        ("add", 64),
+        ("sub", 64),
+    ] {
+        let name = format!("integer_{op}_{bits}");
+        source += &format!(
+            "void {name}(const void*a,const void*b,void*out){{_mm512_storeu_si512(out,_mm512_{op}_epi{bits}(_mm512_loadu_si512(a),_mm512_loadu_si512(b)));}}\n"
+        );
+        harness += &format!("extern void {name}(const void*,const void*,void*);\n");
+        cases += &format!(
+            "{{__m512i a=_mm512_set1_epi{bits}(-123),b=_mm512_set1_epi{bits}(31),want=_mm512_{op}_epi{bits}(a,b),out;{name}(&a,&b,&out);if(memcmp(&want,&out,64))return 3;}}\n"
+        );
+    }
+    for op in ["and", "or", "xor", "andnot"] {
+        let name = format!("bits_{op}");
+        source += &format!(
+            "void {name}(const void*a,const void*b,void*out){{_mm512_storeu_si512(out,_mm512_{op}_si512(_mm512_loadu_si512(a),_mm512_loadu_si512(b)));}}\n"
+        );
+        harness += &format!("extern void {name}(const void*,const void*,void*);\n");
+        cases += &format!(
+            "{{__m512i a=_mm512_set1_epi64(-123),b=_mm512_set1_epi64(31),want=_mm512_{op}_si512(a,b),out;{name}(&a,&b,&out);if(memcmp(&want,&out,64))return 4;}}\n"
+        );
+    }
+    source += "void integer_zero(void*out){_mm512_store_si512(out,_mm512_setzero_si512());}\nvoid casts(const void*p,void*out){__m512i a=_mm512_load_si512(p);__m512 b=_mm512_castsi512_ps(a);__m512d c=_mm512_castps_pd(b);a=_mm512_castpd_si512(c);c=_mm512_castsi512_pd(a);b=_mm512_castpd_ps(c);_mm512_store_si512(out,_mm512_castps_si512(b));}\n";
+    harness += "extern void integer_zero(void*),casts(const void*,void*);\n";
+    cases += "{__m512i a=_mm512_set1_epi64(-123),out,want=_mm512_setzero_si512();integer_zero(&out);if(memcmp(&want,&out,64))return 5;casts(&a,&out);if(memcmp(&a,&out,64))return 6;}\n";
+    harness += &format!("int main(void){{{cases}return 0;}}\n");
+    let original = parse(&source, Target::X86_64LinuxGnu).unwrap();
+    keel_ir::verify_module(&original).unwrap();
+    let features = Features::NONE.with_features("avx512f").unwrap();
+    let directory =
+        std::env::temp_dir().join(format!("keel-avx512-unmasked-c-{}", std::process::id()));
+    fs::create_dir_all(&directory).unwrap();
+    fs::write(directory.join("harness.c"), harness).unwrap();
+    for (tier, allocator) in [
+        (SelectionTier::Baseline, AllocationTier::Fast),
+        (SelectionTier::Full, AllocationTier::Full),
+    ] {
+        let mut module = original.clone();
+        keel_opt::optimize(&mut module).unwrap();
+        let selector = FeatureSelector {
+            inner: &tier,
+            features,
+        };
+        let pipeline = CodegenPipeline {
+            selector: &selector,
+            allocator: &allocator,
+        };
+        let program =
+            keel_codegen::compile_program_with_pipeline(&module, Target::X86_64LinuxGnu, &pipeline)
+                .unwrap();
+        let object =
+            keel_asm::x86::assemble_program_object_with_features(&program, features).unwrap();
+        fs::write(directory.join("code.o"), object).unwrap();
+        if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
+            #[cfg(target_arch = "x86_64")]
+            if !std::is_x86_feature_detected!("avx512f") {
+                eprintln!("SKIP native unmasked headers: AVX512F unavailable");
+                continue;
+            }
+            let output = Command::new("cc")
+                .args(["-mavx512f", "-O2"])
+                .arg(directory.join("harness.c"))
+                .arg(directory.join("code.o"))
+                .arg("-o")
+                .arg(directory.join("run"))
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(
+                Command::new(directory.join("run"))
+                    .status()
+                    .unwrap()
+                    .success(),
+                "{tier:?}"
+            );
+        }
+    }
+}

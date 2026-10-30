@@ -116,7 +116,10 @@ __m128 compare(__m128 a,__m128 b) { return _mm_cmplt_ps(a,b); }
 #[test]
 fn every_header_function_can_emit_an_object() {
     let target = Target::X86_64LinuxGnu;
-    for (header, level) in [("smmintrin.h", CpuLevel::V2), ("immintrin.h", CpuLevel::V3)] {
+    for (header, level, extensions) in [
+        ("smmintrin.h", CpuLevel::V2, "monitor"),
+        ("immintrin.h", CpuLevel::V3, "monitor,avx512f"),
+    ] {
         let source = keel_c::preprocess(
             &format!("#include <{header}>\n"),
             "headers.c",
@@ -140,7 +143,9 @@ fn every_header_function_can_emit_an_object() {
         keel_ir::verify_module(&module).unwrap();
         program(
             &module,
-            Features::for_level(level).with_features("monitor").unwrap(),
+            Features::for_level(level)
+                .with_features(extensions)
+                .unwrap(),
         )
         .unwrap();
     }
