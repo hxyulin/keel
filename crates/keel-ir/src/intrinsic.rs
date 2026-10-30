@@ -21,6 +21,9 @@ mod generated_query;
 #[path = "generated/intrinsic_registry.rs"]
 mod generated_registry;
 pub use generated_registry::Intrinsic;
+#[path = "intrinsic/avx512_dq_mask_alu.rs"]
+mod avx512_dq_mask_alu;
+pub use avx512_dq_mask_alu::{X86Avx512DqMaskAlu, X86Avx512DqMaskAluKind};
 #[path = "intrinsic/avx512_dq_special.rs"]
 mod avx512_dq_special;
 pub use avx512_dq_special::{X86Avx512DqSpecial, X86Avx512DqSpecialKind};
@@ -39,8 +42,11 @@ mod avx512_bw_mask;
 pub use avx512_bw_mask::{X86Avx512BwMask, X86Avx512BwMaskKind};
 #[path = "intrinsic/avx512_bw_shift.rs"]
 mod avx512_bw_shift;
+#[path = "intrinsic/avx512_vl_pack.rs"]
+mod avx512_vl_pack;
 #[path = "intrinsic/avx512_vl_permute.rs"]
 mod avx512_vl_permute;
+pub use avx512_vl_pack::{X86Avx512VlPack, X86Avx512VlPackKind};
 #[path = "intrinsic/avx512_vl_shift.rs"]
 mod avx512_vl_shift;
 pub use avx512_bw_shift::{X86Avx512BwShift, X86Avx512BwShiftKind};
@@ -48,6 +54,9 @@ pub use avx512_vl_permute::X86Avx512VlPermute;
 #[path = "intrinsic/avx512_bw_pack.rs"]
 mod avx512_bw_pack;
 pub use avx512_bw_pack::X86Avx512BwPack;
+#[path = "intrinsic/avx512_bw_convert.rs"]
+mod avx512_bw_convert;
+pub use avx512_bw_convert::{X86Avx512BwConvert, X86Avx512BwConvertKind};
 pub use avx512_vl_shift::{X86Avx512VlShift, X86Avx512VlShiftKind};
 #[path = "intrinsic/avx512_bw_mul.rs"]
 mod avx512_bw_mul;
@@ -284,6 +293,9 @@ impl Intrinsic {
 
     /// AVX512F compression/expansion uses scalar masks and immutable SSA inputs.
     pub fn is_x86_avx512_pack(self) -> bool {
+        if self.x86_avx512_vl_pack().is_some() {
+            return true;
+        }
         matches!(
             self,
             Self::X86Avx512Compressd
@@ -306,6 +318,9 @@ impl Intrinsic {
     }
 
     pub fn is_x86_avx512_compress_store(self) -> bool {
+        if let Some(descriptor) = self.x86_avx512_vl_pack() {
+            return descriptor.kind == X86Avx512VlPackKind::CompressStore;
+        }
         matches!(
             self,
             Self::X86Avx512CompressStored
@@ -316,6 +331,9 @@ impl Intrinsic {
     }
 
     pub fn is_x86_avx512_expand_load(self) -> bool {
+        if let Some(descriptor) = self.x86_avx512_vl_pack() {
+            return descriptor.kind == X86Avx512VlPackKind::ExpandLoad;
+        }
         matches!(
             self,
             Self::X86Avx512ExpandLoadd
@@ -1807,6 +1825,49 @@ impl Intrinsic {
                     .expect("BW pack/unpack descriptor");
                 (descriptor.name, descriptor.params, descriptor.returns, true)
             }
+            Intrinsic::X86Avx512BwPmovsxbw128
+            | Intrinsic::X86Avx512BwPmovsxbwLoad128
+            | Intrinsic::X86Avx512BwPmovzxbw128
+            | Intrinsic::X86Avx512BwPmovzxbwLoad128
+            | Intrinsic::X86Avx512BwPmovwb128
+            | Intrinsic::X86Avx512BwPmovwbStore128
+            | Intrinsic::X86Avx512BwPmovswb128
+            | Intrinsic::X86Avx512BwPmovswbStore128
+            | Intrinsic::X86Avx512BwPmovuswb128
+            | Intrinsic::X86Avx512BwPmovuswbStore128
+            | Intrinsic::X86Avx512BwPmovsxbw256
+            | Intrinsic::X86Avx512BwPmovsxbwLoad256
+            | Intrinsic::X86Avx512BwPmovzxbw256
+            | Intrinsic::X86Avx512BwPmovzxbwLoad256
+            | Intrinsic::X86Avx512BwPmovwb256
+            | Intrinsic::X86Avx512BwPmovwbStore256
+            | Intrinsic::X86Avx512BwPmovswb256
+            | Intrinsic::X86Avx512BwPmovswbStore256
+            | Intrinsic::X86Avx512BwPmovuswb256
+            | Intrinsic::X86Avx512BwPmovuswbStore256
+            | Intrinsic::X86Avx512BwPmovsxbw512
+            | Intrinsic::X86Avx512BwPmovsxbwLoad512
+            | Intrinsic::X86Avx512BwPmovzxbw512
+            | Intrinsic::X86Avx512BwPmovzxbwLoad512
+            | Intrinsic::X86Avx512BwPmovwb512
+            | Intrinsic::X86Avx512BwPmovwbStore512
+            | Intrinsic::X86Avx512BwPmovswb512
+            | Intrinsic::X86Avx512BwPmovswbStore512
+            | Intrinsic::X86Avx512BwPmovuswb512
+            | Intrinsic::X86Avx512BwPmovuswbStore512 => {
+                let descriptor = self
+                    .x86_avx512_bw_convert()
+                    .expect("BW conversion descriptor");
+                (
+                    descriptor.name,
+                    descriptor.params,
+                    descriptor.returns,
+                    !matches!(
+                        descriptor.kind,
+                        X86Avx512BwConvertKind::WidenLoad | X86Avx512BwConvertKind::NarrowStore
+                    ),
+                )
+            }
             Intrinsic::X86Avx512MaskTernlogd => (
                 "x86_avx512_maskternlogd",
                 &[
@@ -2960,6 +3021,45 @@ impl Intrinsic {
             ),
             x86_system_intrinsics!(all) => return self.generated_system_info().unwrap(),
             x86_query_intrinsics!(all) => return self.generated_query_info().unwrap(),
+            Intrinsic::X86Avx512VlCompressd128
+            | Intrinsic::X86Avx512VlExpandd128
+            | Intrinsic::X86Avx512VlCompressStored128
+            | Intrinsic::X86Avx512VlExpandLoadd128
+            | Intrinsic::X86Avx512VlCompressq128
+            | Intrinsic::X86Avx512VlExpandq128
+            | Intrinsic::X86Avx512VlCompressStoreq128
+            | Intrinsic::X86Avx512VlExpandLoadq128
+            | Intrinsic::X86Avx512VlCompressps128
+            | Intrinsic::X86Avx512VlExpandps128
+            | Intrinsic::X86Avx512VlCompressStoreps128
+            | Intrinsic::X86Avx512VlExpandLoadps128
+            | Intrinsic::X86Avx512VlCompresspd128
+            | Intrinsic::X86Avx512VlExpandpd128
+            | Intrinsic::X86Avx512VlCompressStorepd128
+            | Intrinsic::X86Avx512VlExpandLoadpd128
+            | Intrinsic::X86Avx512VlCompressd256
+            | Intrinsic::X86Avx512VlExpandd256
+            | Intrinsic::X86Avx512VlCompressStored256
+            | Intrinsic::X86Avx512VlExpandLoadd256
+            | Intrinsic::X86Avx512VlCompressq256
+            | Intrinsic::X86Avx512VlExpandq256
+            | Intrinsic::X86Avx512VlCompressStoreq256
+            | Intrinsic::X86Avx512VlExpandLoadq256
+            | Intrinsic::X86Avx512VlCompressps256
+            | Intrinsic::X86Avx512VlExpandps256
+            | Intrinsic::X86Avx512VlCompressStoreps256
+            | Intrinsic::X86Avx512VlExpandLoadps256
+            | Intrinsic::X86Avx512VlCompresspd256
+            | Intrinsic::X86Avx512VlExpandpd256
+            | Intrinsic::X86Avx512VlCompressStorepd256
+            | Intrinsic::X86Avx512VlExpandLoadpd256 => {
+                let descriptor = self.x86_avx512_vl_pack().expect("VL pack descriptor");
+                let pure = matches!(
+                    descriptor.kind,
+                    X86Avx512VlPackKind::Compress | X86Avx512VlPackKind::Expand
+                );
+                (descriptor.name, descriptor.params, descriptor.returns, pure)
+            }
             Intrinsic::X86Avx512Compressd => (
                 "x86_avx512_compressd",
                 &[
@@ -8539,6 +8639,73 @@ impl Intrinsic {
                 &[Type::Vector(VectorType::F64x2), Type::I8, Type::I32],
                 &[Type::I8],
                 false,
+            ),
+            Intrinsic::X86Avx512DqKandb => (
+                "x86_avx512dq_kandb",
+                &[Type::I8, Type::I8],
+                &[Type::I8],
+                true,
+            ),
+            Intrinsic::X86Avx512DqKandnb => (
+                "x86_avx512dq_kandnb",
+                &[Type::I8, Type::I8],
+                &[Type::I8],
+                true,
+            ),
+            Intrinsic::X86Avx512DqKorb => (
+                "x86_avx512dq_korb",
+                &[Type::I8, Type::I8],
+                &[Type::I8],
+                true,
+            ),
+            Intrinsic::X86Avx512DqKxorb => (
+                "x86_avx512dq_kxorb",
+                &[Type::I8, Type::I8],
+                &[Type::I8],
+                true,
+            ),
+            Intrinsic::X86Avx512DqKxnorb => (
+                "x86_avx512dq_kxnorb",
+                &[Type::I8, Type::I8],
+                &[Type::I8],
+                true,
+            ),
+            Intrinsic::X86Avx512DqKnotb => ("x86_avx512dq_knotb", &[Type::I8], &[Type::I8], true),
+            Intrinsic::X86Avx512DqKshiftlb => (
+                "x86_avx512dq_kshiftlb",
+                &[Type::I8, Type::I32],
+                &[Type::I8],
+                true,
+            ),
+            Intrinsic::X86Avx512DqKshiftrb => (
+                "x86_avx512dq_kshiftrb",
+                &[Type::I8, Type::I32],
+                &[Type::I8],
+                true,
+            ),
+            Intrinsic::X86Avx512DqKtestb => (
+                "x86_avx512dq_ktestb",
+                &[Type::I8, Type::I8],
+                &[Type::I8],
+                true,
+            ),
+            Intrinsic::X86Avx512DqKortestb => (
+                "x86_avx512dq_kortestb",
+                &[Type::I8, Type::I8],
+                &[Type::I8],
+                true,
+            ),
+            Intrinsic::X86Avx512DqKaddb => (
+                "x86_avx512dq_kaddb",
+                &[Type::I8, Type::I8],
+                &[Type::I8],
+                true,
+            ),
+            Intrinsic::X86Avx512DqKaddw => (
+                "x86_avx512dq_kaddw",
+                &[Type::I16, Type::I16],
+                &[Type::I16],
+                true,
             ),
             Intrinsic::X86Avx512Vcvtdq2ps => (
                 "x86_avx512_vcvtdq2ps",
@@ -14615,10 +14782,12 @@ impl Intrinsic {
             || self.x86_avx512_vl_shift().is_some()
             || self.x86_avx512_bw_shift().is_some()
             || self.x86_avx512_bw_pack().is_some()
+            || self.x86_avx512_bw_convert().is_some()
             || self.x86_avx512_bw_mul().is_some()
             || self.is_x86_avx512_mask()
             || self.is_x86_avx512_indexed()
             || self.x86_avx512_special().is_some()
+            || self.x86_avx512_dq_mask_alu().is_some()
             || self.x86_avx512_dq_special().is_some()
             || self.x86_avx512_dq_lane().is_some()
             || self.x86_avx512_dq_bridge().is_some()

@@ -115,7 +115,7 @@ int main(void){{
 fn packed_lane_metadata_feature_permissions_and_signatures() {
     let ids: Vec<_> = Intrinsic::ALL
         .into_iter()
-        .filter(|id| id.is_x86_avx512_pack())
+        .filter(|id| id.is_x86_avx512_pack() && id.x86_avx512_vl_pack().is_none())
         .collect();
     assert_eq!(ids.len(), 16);
     for id in ids {

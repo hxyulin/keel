@@ -956,6 +956,49 @@ impl InstData {
             }
             Self::VaArg { .. } | Self::AggregateVaArg { .. } => ReadWrite,
             Self::Intrinsic { id, .. } => match id {
+                Intrinsic::X86Avx512BwPmovsxbw128
+                | Intrinsic::X86Avx512BwPmovzxbw128
+                | Intrinsic::X86Avx512BwPmovwb128
+                | Intrinsic::X86Avx512BwPmovswb128
+                | Intrinsic::X86Avx512BwPmovuswb128
+                | Intrinsic::X86Avx512BwPmovsxbw256
+                | Intrinsic::X86Avx512BwPmovzxbw256
+                | Intrinsic::X86Avx512BwPmovwb256
+                | Intrinsic::X86Avx512BwPmovswb256
+                | Intrinsic::X86Avx512BwPmovuswb256
+                | Intrinsic::X86Avx512BwPmovsxbw512
+                | Intrinsic::X86Avx512BwPmovzxbw512
+                | Intrinsic::X86Avx512BwPmovwb512
+                | Intrinsic::X86Avx512BwPmovswb512
+                | Intrinsic::X86Avx512BwPmovuswb512 => None,
+                Intrinsic::X86Avx512BwPmovsxbwLoad128
+                | Intrinsic::X86Avx512BwPmovzxbwLoad128
+                | Intrinsic::X86Avx512BwPmovsxbwLoad256
+                | Intrinsic::X86Avx512BwPmovzxbwLoad256
+                | Intrinsic::X86Avx512BwPmovsxbwLoad512
+                | Intrinsic::X86Avx512BwPmovzxbwLoad512 => Read,
+                Intrinsic::X86Avx512BwPmovwbStore128
+                | Intrinsic::X86Avx512BwPmovswbStore128
+                | Intrinsic::X86Avx512BwPmovuswbStore128
+                | Intrinsic::X86Avx512BwPmovwbStore256
+                | Intrinsic::X86Avx512BwPmovswbStore256
+                | Intrinsic::X86Avx512BwPmovuswbStore256
+                | Intrinsic::X86Avx512BwPmovwbStore512
+                | Intrinsic::X86Avx512BwPmovswbStore512
+                | Intrinsic::X86Avx512BwPmovuswbStore512 => Write,
+
+                Intrinsic::X86Avx512DqKandb
+                | Intrinsic::X86Avx512DqKandnb
+                | Intrinsic::X86Avx512DqKorb
+                | Intrinsic::X86Avx512DqKxorb
+                | Intrinsic::X86Avx512DqKxnorb
+                | Intrinsic::X86Avx512DqKnotb
+                | Intrinsic::X86Avx512DqKshiftlb
+                | Intrinsic::X86Avx512DqKshiftrb
+                | Intrinsic::X86Avx512DqKtestb
+                | Intrinsic::X86Avx512DqKortestb
+                | Intrinsic::X86Avx512DqKaddb
+                | Intrinsic::X86Avx512DqKaddw => None,
                 Intrinsic::X86Avx512BwPacksswb128
                 | Intrinsic::X86Avx512BwPackuswb128
                 | Intrinsic::X86Avx512BwPackssdw128
@@ -1649,6 +1692,38 @@ impl InstData {
                         Barrier
                     }
                 }
+                Intrinsic::X86Avx512VlCompressd128
+                | Intrinsic::X86Avx512VlExpandd128
+                | Intrinsic::X86Avx512VlCompressq128
+                | Intrinsic::X86Avx512VlExpandq128
+                | Intrinsic::X86Avx512VlCompressps128
+                | Intrinsic::X86Avx512VlExpandps128
+                | Intrinsic::X86Avx512VlCompresspd128
+                | Intrinsic::X86Avx512VlExpandpd128
+                | Intrinsic::X86Avx512VlCompressd256
+                | Intrinsic::X86Avx512VlExpandd256
+                | Intrinsic::X86Avx512VlCompressq256
+                | Intrinsic::X86Avx512VlExpandq256
+                | Intrinsic::X86Avx512VlCompressps256
+                | Intrinsic::X86Avx512VlExpandps256
+                | Intrinsic::X86Avx512VlCompresspd256
+                | Intrinsic::X86Avx512VlExpandpd256 => None,
+                Intrinsic::X86Avx512VlCompressStored128
+                | Intrinsic::X86Avx512VlCompressStoreq128
+                | Intrinsic::X86Avx512VlCompressStoreps128
+                | Intrinsic::X86Avx512VlCompressStorepd128
+                | Intrinsic::X86Avx512VlCompressStored256
+                | Intrinsic::X86Avx512VlCompressStoreq256
+                | Intrinsic::X86Avx512VlCompressStoreps256
+                | Intrinsic::X86Avx512VlCompressStorepd256 => Write,
+                Intrinsic::X86Avx512VlExpandLoadd128
+                | Intrinsic::X86Avx512VlExpandLoadq128
+                | Intrinsic::X86Avx512VlExpandLoadps128
+                | Intrinsic::X86Avx512VlExpandLoadpd128
+                | Intrinsic::X86Avx512VlExpandLoadd256
+                | Intrinsic::X86Avx512VlExpandLoadq256
+                | Intrinsic::X86Avx512VlExpandLoadps256
+                | Intrinsic::X86Avx512VlExpandLoadpd256 => Read,
                 Intrinsic::X86Avx512Compressd
                 | Intrinsic::X86Avx512Compressq
                 | Intrinsic::X86Avx512Compressps
@@ -2890,6 +2965,7 @@ impl InstData {
             Self::Neon { .. } => true,
             Self::Intrinsic { id, .. } => {
                 !((id.x86_avx512_bw_core().is_some() && id.info().pure)
+                    || id.x86_avx512_dq_mask_alu().is_some()
                     || id.x86_avx512_dq_special().is_some_and(|d| {
                         d.kind == crate::intrinsic::X86Avx512DqSpecialKind::Fpclass
                     })
@@ -2899,6 +2975,7 @@ impl InstData {
                     || id.x86_avx512_vl_shift().is_some()
                     || id.x86_avx512_bw_shift().is_some()
                     || id.x86_avx512_bw_pack().is_some()
+                    || (id.x86_avx512_bw_convert().is_some() && id.info().pure)
                     || id.x86_avx512_bw_mul().is_some()
                     || (id.is_x86_avx512_scalar_move() && id.info().pure)
                     || (id.x86_avx512_packed_opcode().is_some() && id.info().pure)

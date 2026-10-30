@@ -3218,10 +3218,158 @@ pub enum Intrinsic {
     X86Avx512BwUnpcklwd512 = 1946,
     #[doc = "Pure masked AVX512BW saturating pack or interleaving unpack. Each 128-bit block operates independently. PACKUS inputs are signed; destination lanes saturate to unsigned. Narrow forms require AVX512VL."]
     X86Avx512BwUnpckhwd512 = 1947,
+    #[doc = "Pure AVX512DQ scalar mask operation. Byte/word arithmetic wraps; byte shifts saturate at eight bits. Test results pack ZF in bit zero and CF in bit one. Requires no VL or BW."]
+    X86Avx512DqKandb = 1948,
+    #[doc = "Pure AVX512DQ scalar mask operation. Byte/word arithmetic wraps; byte shifts saturate at eight bits. Test results pack ZF in bit zero and CF in bit one. Requires no VL or BW."]
+    X86Avx512DqKandnb = 1949,
+    #[doc = "Pure AVX512DQ scalar mask operation. Byte/word arithmetic wraps; byte shifts saturate at eight bits. Test results pack ZF in bit zero and CF in bit one. Requires no VL or BW."]
+    X86Avx512DqKorb = 1950,
+    #[doc = "Pure AVX512DQ scalar mask operation. Byte/word arithmetic wraps; byte shifts saturate at eight bits. Test results pack ZF in bit zero and CF in bit one. Requires no VL or BW."]
+    X86Avx512DqKxorb = 1951,
+    #[doc = "Pure AVX512DQ scalar mask operation. Byte/word arithmetic wraps; byte shifts saturate at eight bits. Test results pack ZF in bit zero and CF in bit one. Requires no VL or BW."]
+    X86Avx512DqKxnorb = 1952,
+    #[doc = "Pure AVX512DQ scalar mask operation. Byte/word arithmetic wraps; byte shifts saturate at eight bits. Test results pack ZF in bit zero and CF in bit one. Requires no VL or BW."]
+    X86Avx512DqKnotb = 1953,
+    #[doc = "Pure AVX512DQ scalar mask operation. Byte/word arithmetic wraps; byte shifts saturate at eight bits. Test results pack ZF in bit zero and CF in bit one. Requires no VL or BW."]
+    X86Avx512DqKshiftlb = 1954,
+    #[doc = "Pure AVX512DQ scalar mask operation. Byte/word arithmetic wraps; byte shifts saturate at eight bits. Test results pack ZF in bit zero and CF in bit one. Requires no VL or BW."]
+    X86Avx512DqKshiftrb = 1955,
+    #[doc = "Pure AVX512DQ scalar mask operation. Byte/word arithmetic wraps; byte shifts saturate at eight bits. Test results pack ZF in bit zero and CF in bit one. Requires no VL or BW."]
+    X86Avx512DqKtestb = 1956,
+    #[doc = "Pure AVX512DQ scalar mask operation. Byte/word arithmetic wraps; byte shifts saturate at eight bits. Test results pack ZF in bit zero and CF in bit one. Requires no VL or BW."]
+    X86Avx512DqKortestb = 1957,
+    #[doc = "Pure AVX512DQ scalar mask operation. Byte/word arithmetic wraps; byte shifts saturate at eight bits. Test results pack ZF in bit zero and CF in bit one. Requires no VL or BW."]
+    X86Avx512DqKaddb = 1958,
+    #[doc = "Pure AVX512DQ scalar mask operation. Byte/word arithmetic wraps; byte shifts saturate at eight bits. Test results pack ZF in bit zero and CF in bit one. Requires no VL or BW."]
+    X86Avx512DqKaddw = 1959,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlCompressd128 = 1960,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlExpandd128 = 1961,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlCompressStored128 = 1962,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlExpandLoadd128 = 1963,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlCompressq128 = 1964,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlExpandq128 = 1965,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlCompressStoreq128 = 1966,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlExpandLoadq128 = 1967,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlCompressps128 = 1968,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlExpandps128 = 1969,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlCompressStoreps128 = 1970,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlExpandLoadps128 = 1971,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlCompresspd128 = 1972,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlExpandpd128 = 1973,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlCompressStorepd128 = 1974,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlExpandLoadpd128 = 1975,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlCompressd256 = 1976,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlExpandd256 = 1977,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlCompressStored256 = 1978,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlExpandLoadd256 = 1979,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlCompressq256 = 1980,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlExpandq256 = 1981,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlCompressStoreq256 = 1982,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlExpandLoadq256 = 1983,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlCompressps256 = 1984,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlExpandps256 = 1985,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlCompressStoreps256 = 1986,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlExpandLoadps256 = 1987,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlCompresspd256 = 1988,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlExpandpd256 = 1989,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlCompressStorepd256 = 1990,
+    #[doc = "Narrow AVX512F+VL lane compression/expansion. Compression selects source lanes; expansion selects destination positions. Memory accesses only the packed prefix selected by valid mask bits, including no access for a zero mask."]
+    X86Avx512VlExpandLoadpd256 = 1991,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovsxbw128 = 1992,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovsxbwLoad128 = 1993,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovzxbw128 = 1994,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovzxbwLoad128 = 1995,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovwb128 = 1996,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovwbStore128 = 1997,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovswb128 = 1998,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovswbStore128 = 1999,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovuswb128 = 2000,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovuswbStore128 = 2001,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovsxbw256 = 2002,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovsxbwLoad256 = 2003,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovzxbw256 = 2004,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovzxbwLoad256 = 2005,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovwb256 = 2006,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovwbStore256 = 2007,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovswb256 = 2008,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovswbStore256 = 2009,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovuswb256 = 2010,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovuswbStore256 = 2011,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovsxbw512 = 2012,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovsxbwLoad512 = 2013,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovzxbw512 = 2014,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovzxbwLoad512 = 2015,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovwb512 = 2016,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovwbStore512 = 2017,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovswb512 = 2018,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovswbStore512 = 2019,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovuswb512 = 2020,
+    #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
+    X86Avx512BwPmovuswbStore512 = 2021,
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 1948] = [
+    pub const ALL: [Intrinsic; 2022] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -5170,6 +5318,80 @@ impl Intrinsic {
         Intrinsic::X86Avx512BwUnpckhbw512,
         Intrinsic::X86Avx512BwUnpcklwd512,
         Intrinsic::X86Avx512BwUnpckhwd512,
+        Intrinsic::X86Avx512DqKandb,
+        Intrinsic::X86Avx512DqKandnb,
+        Intrinsic::X86Avx512DqKorb,
+        Intrinsic::X86Avx512DqKxorb,
+        Intrinsic::X86Avx512DqKxnorb,
+        Intrinsic::X86Avx512DqKnotb,
+        Intrinsic::X86Avx512DqKshiftlb,
+        Intrinsic::X86Avx512DqKshiftrb,
+        Intrinsic::X86Avx512DqKtestb,
+        Intrinsic::X86Avx512DqKortestb,
+        Intrinsic::X86Avx512DqKaddb,
+        Intrinsic::X86Avx512DqKaddw,
+        Intrinsic::X86Avx512VlCompressd128,
+        Intrinsic::X86Avx512VlExpandd128,
+        Intrinsic::X86Avx512VlCompressStored128,
+        Intrinsic::X86Avx512VlExpandLoadd128,
+        Intrinsic::X86Avx512VlCompressq128,
+        Intrinsic::X86Avx512VlExpandq128,
+        Intrinsic::X86Avx512VlCompressStoreq128,
+        Intrinsic::X86Avx512VlExpandLoadq128,
+        Intrinsic::X86Avx512VlCompressps128,
+        Intrinsic::X86Avx512VlExpandps128,
+        Intrinsic::X86Avx512VlCompressStoreps128,
+        Intrinsic::X86Avx512VlExpandLoadps128,
+        Intrinsic::X86Avx512VlCompresspd128,
+        Intrinsic::X86Avx512VlExpandpd128,
+        Intrinsic::X86Avx512VlCompressStorepd128,
+        Intrinsic::X86Avx512VlExpandLoadpd128,
+        Intrinsic::X86Avx512VlCompressd256,
+        Intrinsic::X86Avx512VlExpandd256,
+        Intrinsic::X86Avx512VlCompressStored256,
+        Intrinsic::X86Avx512VlExpandLoadd256,
+        Intrinsic::X86Avx512VlCompressq256,
+        Intrinsic::X86Avx512VlExpandq256,
+        Intrinsic::X86Avx512VlCompressStoreq256,
+        Intrinsic::X86Avx512VlExpandLoadq256,
+        Intrinsic::X86Avx512VlCompressps256,
+        Intrinsic::X86Avx512VlExpandps256,
+        Intrinsic::X86Avx512VlCompressStoreps256,
+        Intrinsic::X86Avx512VlExpandLoadps256,
+        Intrinsic::X86Avx512VlCompresspd256,
+        Intrinsic::X86Avx512VlExpandpd256,
+        Intrinsic::X86Avx512VlCompressStorepd256,
+        Intrinsic::X86Avx512VlExpandLoadpd256,
+        Intrinsic::X86Avx512BwPmovsxbw128,
+        Intrinsic::X86Avx512BwPmovsxbwLoad128,
+        Intrinsic::X86Avx512BwPmovzxbw128,
+        Intrinsic::X86Avx512BwPmovzxbwLoad128,
+        Intrinsic::X86Avx512BwPmovwb128,
+        Intrinsic::X86Avx512BwPmovwbStore128,
+        Intrinsic::X86Avx512BwPmovswb128,
+        Intrinsic::X86Avx512BwPmovswbStore128,
+        Intrinsic::X86Avx512BwPmovuswb128,
+        Intrinsic::X86Avx512BwPmovuswbStore128,
+        Intrinsic::X86Avx512BwPmovsxbw256,
+        Intrinsic::X86Avx512BwPmovsxbwLoad256,
+        Intrinsic::X86Avx512BwPmovzxbw256,
+        Intrinsic::X86Avx512BwPmovzxbwLoad256,
+        Intrinsic::X86Avx512BwPmovwb256,
+        Intrinsic::X86Avx512BwPmovwbStore256,
+        Intrinsic::X86Avx512BwPmovswb256,
+        Intrinsic::X86Avx512BwPmovswbStore256,
+        Intrinsic::X86Avx512BwPmovuswb256,
+        Intrinsic::X86Avx512BwPmovuswbStore256,
+        Intrinsic::X86Avx512BwPmovsxbw512,
+        Intrinsic::X86Avx512BwPmovsxbwLoad512,
+        Intrinsic::X86Avx512BwPmovzxbw512,
+        Intrinsic::X86Avx512BwPmovzxbwLoad512,
+        Intrinsic::X86Avx512BwPmovwb512,
+        Intrinsic::X86Avx512BwPmovwbStore512,
+        Intrinsic::X86Avx512BwPmovswb512,
+        Intrinsic::X86Avx512BwPmovswbStore512,
+        Intrinsic::X86Avx512BwPmovuswb512,
+        Intrinsic::X86Avx512BwPmovuswbStore512,
     ];
 }
 
@@ -7114,5 +7336,79 @@ macro_rules! x86_intrinsics {
             | $crate::Intrinsic::X86Avx512BwUnpckhbw512
             | $crate::Intrinsic::X86Avx512BwUnpcklwd512
             | $crate::Intrinsic::X86Avx512BwUnpckhwd512
+            | $crate::Intrinsic::X86Avx512DqKandb
+            | $crate::Intrinsic::X86Avx512DqKandnb
+            | $crate::Intrinsic::X86Avx512DqKorb
+            | $crate::Intrinsic::X86Avx512DqKxorb
+            | $crate::Intrinsic::X86Avx512DqKxnorb
+            | $crate::Intrinsic::X86Avx512DqKnotb
+            | $crate::Intrinsic::X86Avx512DqKshiftlb
+            | $crate::Intrinsic::X86Avx512DqKshiftrb
+            | $crate::Intrinsic::X86Avx512DqKtestb
+            | $crate::Intrinsic::X86Avx512DqKortestb
+            | $crate::Intrinsic::X86Avx512DqKaddb
+            | $crate::Intrinsic::X86Avx512DqKaddw
+            | $crate::Intrinsic::X86Avx512VlCompressd128
+            | $crate::Intrinsic::X86Avx512VlExpandd128
+            | $crate::Intrinsic::X86Avx512VlCompressStored128
+            | $crate::Intrinsic::X86Avx512VlExpandLoadd128
+            | $crate::Intrinsic::X86Avx512VlCompressq128
+            | $crate::Intrinsic::X86Avx512VlExpandq128
+            | $crate::Intrinsic::X86Avx512VlCompressStoreq128
+            | $crate::Intrinsic::X86Avx512VlExpandLoadq128
+            | $crate::Intrinsic::X86Avx512VlCompressps128
+            | $crate::Intrinsic::X86Avx512VlExpandps128
+            | $crate::Intrinsic::X86Avx512VlCompressStoreps128
+            | $crate::Intrinsic::X86Avx512VlExpandLoadps128
+            | $crate::Intrinsic::X86Avx512VlCompresspd128
+            | $crate::Intrinsic::X86Avx512VlExpandpd128
+            | $crate::Intrinsic::X86Avx512VlCompressStorepd128
+            | $crate::Intrinsic::X86Avx512VlExpandLoadpd128
+            | $crate::Intrinsic::X86Avx512VlCompressd256
+            | $crate::Intrinsic::X86Avx512VlExpandd256
+            | $crate::Intrinsic::X86Avx512VlCompressStored256
+            | $crate::Intrinsic::X86Avx512VlExpandLoadd256
+            | $crate::Intrinsic::X86Avx512VlCompressq256
+            | $crate::Intrinsic::X86Avx512VlExpandq256
+            | $crate::Intrinsic::X86Avx512VlCompressStoreq256
+            | $crate::Intrinsic::X86Avx512VlExpandLoadq256
+            | $crate::Intrinsic::X86Avx512VlCompressps256
+            | $crate::Intrinsic::X86Avx512VlExpandps256
+            | $crate::Intrinsic::X86Avx512VlCompressStoreps256
+            | $crate::Intrinsic::X86Avx512VlExpandLoadps256
+            | $crate::Intrinsic::X86Avx512VlCompresspd256
+            | $crate::Intrinsic::X86Avx512VlExpandpd256
+            | $crate::Intrinsic::X86Avx512VlCompressStorepd256
+            | $crate::Intrinsic::X86Avx512VlExpandLoadpd256
+            | $crate::Intrinsic::X86Avx512BwPmovsxbw128
+            | $crate::Intrinsic::X86Avx512BwPmovsxbwLoad128
+            | $crate::Intrinsic::X86Avx512BwPmovzxbw128
+            | $crate::Intrinsic::X86Avx512BwPmovzxbwLoad128
+            | $crate::Intrinsic::X86Avx512BwPmovwb128
+            | $crate::Intrinsic::X86Avx512BwPmovwbStore128
+            | $crate::Intrinsic::X86Avx512BwPmovswb128
+            | $crate::Intrinsic::X86Avx512BwPmovswbStore128
+            | $crate::Intrinsic::X86Avx512BwPmovuswb128
+            | $crate::Intrinsic::X86Avx512BwPmovuswbStore128
+            | $crate::Intrinsic::X86Avx512BwPmovsxbw256
+            | $crate::Intrinsic::X86Avx512BwPmovsxbwLoad256
+            | $crate::Intrinsic::X86Avx512BwPmovzxbw256
+            | $crate::Intrinsic::X86Avx512BwPmovzxbwLoad256
+            | $crate::Intrinsic::X86Avx512BwPmovwb256
+            | $crate::Intrinsic::X86Avx512BwPmovwbStore256
+            | $crate::Intrinsic::X86Avx512BwPmovswb256
+            | $crate::Intrinsic::X86Avx512BwPmovswbStore256
+            | $crate::Intrinsic::X86Avx512BwPmovuswb256
+            | $crate::Intrinsic::X86Avx512BwPmovuswbStore256
+            | $crate::Intrinsic::X86Avx512BwPmovsxbw512
+            | $crate::Intrinsic::X86Avx512BwPmovsxbwLoad512
+            | $crate::Intrinsic::X86Avx512BwPmovzxbw512
+            | $crate::Intrinsic::X86Avx512BwPmovzxbwLoad512
+            | $crate::Intrinsic::X86Avx512BwPmovwb512
+            | $crate::Intrinsic::X86Avx512BwPmovwbStore512
+            | $crate::Intrinsic::X86Avx512BwPmovswb512
+            | $crate::Intrinsic::X86Avx512BwPmovswbStore512
+            | $crate::Intrinsic::X86Avx512BwPmovuswb512
+            | $crate::Intrinsic::X86Avx512BwPmovuswbStore512
     };
 }

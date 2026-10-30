@@ -974,3 +974,12 @@ mod x86_avx512_dq_special;
 
 #[path = "vector_x86/x86_avx512_vl_permute.rs"]
 mod x86_avx512_vl_permute;
+
+#[path = "vector_x86/x86_avx512_dq_mask_alu.rs"]
+mod x86_avx512_dq_mask_alu;
+
+#[path = "vector_x86/x86_avx512_vl_pack.rs"]
+mod x86_avx512_vl_pack;
+
+#[path = "vector_x86/x86_avx512_bw_convert.rs"]
+mod x86_avx512_bw_convert;
