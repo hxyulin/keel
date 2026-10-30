@@ -831,6 +831,7 @@ fn inlineable_target_intrinsic(id: Intrinsic) -> bool {
         || id.is_x86_avx512_mask()
         || id.is_x86_avx512_indexed()
         || id.x86_avx512_special().is_some()
+        || id.x86_avx512_bw_mask_alu().is_some()
         || id.x86_avx512_dq_mask_alu().is_some()
         || id.x86_avx512_dq_special().is_some()
         || id.x86_avx512_dq_lane().is_some()

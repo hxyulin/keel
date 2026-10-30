@@ -9,10 +9,10 @@ pub(super) fn validate(
     args: &[Value],
     features: keel_asm_ir::x86::Features,
 ) -> Result<(), &'static str> {
-    if !features.avx512f {
-        return Err("AVX512 indexed memory requires AVX512F");
+    if !features.avx512f || (id.x86_avx512_vl_indexed().is_some() && !features.avx512vl) {
+        return Err("AVX512 indexed memory requires AVX512F and narrow forms require AVX512VL");
     }
-    if args.len() != 5
+    if args.len() != id.info().params.len()
         || args
             .iter()
             .zip(id.info().params)
@@ -21,7 +21,7 @@ pub(super) fn validate(
         return Err("AVX512 indexed memory signature mismatch");
     }
     if !iconst(func, args[4]).is_some_and(|scale| matches!(scale, 1 | 2 | 4 | 8)) {
-        return Err("indexed memory scale must be iconst.i32 in1,2,4,8");
+        return Err("indexed memory scale must be iconst.i32 in 1, 2, 4, 8");
     }
     Ok(())
 }
@@ -55,11 +55,18 @@ impl FunctionCompiler<'_> {
             .bytes()
             .expect("lane width") as u16
             * 8;
-        let name = id
-            .info()
-            .name
-            .strip_prefix("x86_avx512_")
-            .expect("indexed intrinsic name");
+        let name = if let Some(descriptor) = id.x86_avx512_vl_indexed() {
+            // Encoded length follows the VSIB index/data pair, not merely the
+            // destination container. Qword indices with dword data can use a
+            // YMM index and an XMM result. The 128-bit form also clears the
+            // unused upper two dword result lanes, even when K1 is zero.
+            descriptor.opcode
+        } else {
+            id.info()
+                .name
+                .strip_prefix("x86_avx512_")
+                .expect("indexed intrinsic name")
+        };
         if id.is_x86_avx512_scatter() {
             self.emit(
                 opcode(name, true),

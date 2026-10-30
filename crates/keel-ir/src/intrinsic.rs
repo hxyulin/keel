@@ -21,6 +21,9 @@ mod generated_query;
 #[path = "generated/intrinsic_registry.rs"]
 mod generated_registry;
 pub use generated_registry::Intrinsic;
+#[path = "intrinsic/avx512_bw_mask_alu.rs"]
+mod avx512_bw_mask_alu;
+pub use avx512_bw_mask_alu::{X86Avx512BwMaskAlu, X86Avx512BwMaskAluKind};
 #[path = "intrinsic/avx512_dq_mask_alu.rs"]
 mod avx512_dq_mask_alu;
 pub use avx512_dq_mask_alu::{X86Avx512DqMaskAlu, X86Avx512DqMaskAluKind};
@@ -42,8 +45,11 @@ mod avx512_bw_mask;
 pub use avx512_bw_mask::{X86Avx512BwMask, X86Avx512BwMaskKind};
 #[path = "intrinsic/avx512_bw_shift.rs"]
 mod avx512_bw_shift;
+#[path = "intrinsic/avx512_vl_indexed.rs"]
+mod avx512_vl_indexed;
 #[path = "intrinsic/avx512_vl_pack.rs"]
 mod avx512_vl_pack;
+pub use avx512_vl_indexed::X86Avx512VlIndexed;
 #[path = "intrinsic/avx512_vl_permute.rs"]
 mod avx512_vl_permute;
 pub use avx512_vl_pack::{X86Avx512VlPack, X86Avx512VlPackKind};
@@ -256,6 +262,9 @@ impl Intrinsic {
 
     /// AVX512F gathers/scatters preserve immutable SSA indices, data and masks.
     pub fn is_x86_avx512_indexed(self) -> bool {
+        if self.x86_avx512_vl_indexed().is_some() {
+            return true;
+        }
         matches!(
             self,
             Self::X86Avx512Vpgatherdd
@@ -278,6 +287,9 @@ impl Intrinsic {
     }
 
     pub fn is_x86_avx512_scatter(self) -> bool {
+        if let Some(descriptor) = self.x86_avx512_vl_indexed() {
+            return descriptor.scatter;
+        }
         matches!(
             self,
             Self::X86Avx512Vpscatterdd
@@ -8640,6 +8652,33 @@ impl Intrinsic {
                 &[Type::I8],
                 false,
             ),
+            Intrinsic::X86Avx512BwKandd
+            | Intrinsic::X86Avx512BwKandnd
+            | Intrinsic::X86Avx512BwKord
+            | Intrinsic::X86Avx512BwKxord
+            | Intrinsic::X86Avx512BwKxnord
+            | Intrinsic::X86Avx512BwKnotd
+            | Intrinsic::X86Avx512BwKshiftld
+            | Intrinsic::X86Avx512BwKshiftrd
+            | Intrinsic::X86Avx512BwKaddd
+            | Intrinsic::X86Avx512BwKtestd
+            | Intrinsic::X86Avx512BwKortestd
+            | Intrinsic::X86Avx512BwKunpckwd
+            | Intrinsic::X86Avx512BwKandq
+            | Intrinsic::X86Avx512BwKandnq
+            | Intrinsic::X86Avx512BwKorq
+            | Intrinsic::X86Avx512BwKxorq
+            | Intrinsic::X86Avx512BwKxnorq
+            | Intrinsic::X86Avx512BwKnotq
+            | Intrinsic::X86Avx512BwKshiftlq
+            | Intrinsic::X86Avx512BwKshiftrq
+            | Intrinsic::X86Avx512BwKaddq
+            | Intrinsic::X86Avx512BwKtestq
+            | Intrinsic::X86Avx512BwKortestq
+            | Intrinsic::X86Avx512BwKunpckdq => {
+                let d = self.x86_avx512_bw_mask_alu().expect("BW mask descriptor");
+                (d.name, d.params, d.returns, true)
+            }
             Intrinsic::X86Avx512DqKandb => (
                 "x86_avx512dq_kandb",
                 &[Type::I8, Type::I8],
@@ -8883,6 +8922,46 @@ impl Intrinsic {
                 &[Type::Vector(VectorType::I16x16)],
                 false,
             ),
+            Intrinsic::X86Avx512VlVpgatherdd128
+            | Intrinsic::X86Avx512VlVpscatterdd128
+            | Intrinsic::X86Avx512VlVgatherdps128
+            | Intrinsic::X86Avx512VlVscatterdps128
+            | Intrinsic::X86Avx512VlVpgatherdq128
+            | Intrinsic::X86Avx512VlVpscatterdq128
+            | Intrinsic::X86Avx512VlVgatherdpd128
+            | Intrinsic::X86Avx512VlVscatterdpd128
+            | Intrinsic::X86Avx512VlVpgatherqd128
+            | Intrinsic::X86Avx512VlVpscatterqd128
+            | Intrinsic::X86Avx512VlVgatherqps128
+            | Intrinsic::X86Avx512VlVscatterqps128
+            | Intrinsic::X86Avx512VlVpgatherqq128
+            | Intrinsic::X86Avx512VlVpscatterqq128
+            | Intrinsic::X86Avx512VlVgatherqpd128
+            | Intrinsic::X86Avx512VlVscatterqpd128
+            | Intrinsic::X86Avx512VlVpgatherdd256
+            | Intrinsic::X86Avx512VlVpscatterdd256
+            | Intrinsic::X86Avx512VlVgatherdps256
+            | Intrinsic::X86Avx512VlVscatterdps256
+            | Intrinsic::X86Avx512VlVpgatherdq256
+            | Intrinsic::X86Avx512VlVpscatterdq256
+            | Intrinsic::X86Avx512VlVgatherdpd256
+            | Intrinsic::X86Avx512VlVscatterdpd256
+            | Intrinsic::X86Avx512VlVpgatherqd256
+            | Intrinsic::X86Avx512VlVpscatterqd256
+            | Intrinsic::X86Avx512VlVgatherqps256
+            | Intrinsic::X86Avx512VlVscatterqps256
+            | Intrinsic::X86Avx512VlVpgatherqq256
+            | Intrinsic::X86Avx512VlVpscatterqq256
+            | Intrinsic::X86Avx512VlVgatherqpd256
+            | Intrinsic::X86Avx512VlVscatterqpd256 => {
+                let descriptor = self.x86_avx512_vl_indexed().expect("VL VSIB descriptor");
+                (
+                    descriptor.name,
+                    descriptor.params,
+                    descriptor.returns,
+                    false,
+                )
+            }
             Intrinsic::X86Avx512Vpgatherdd => (
                 "x86_avx512_vpgatherdd",
                 &[
@@ -14787,6 +14866,7 @@ impl Intrinsic {
             || self.is_x86_avx512_mask()
             || self.is_x86_avx512_indexed()
             || self.x86_avx512_special().is_some()
+            || self.x86_avx512_bw_mask_alu().is_some()
             || self.x86_avx512_dq_mask_alu().is_some()
             || self.x86_avx512_dq_special().is_some()
             || self.x86_avx512_dq_lane().is_some()

@@ -133,6 +133,7 @@ mod avx512;
 mod avx512_bw;
 mod avx512_bw_convert;
 mod avx512_bw_mask;
+mod avx512_bw_mask_alu;
 mod avx512_bw_mul;
 mod avx512_bw_pack;
 mod avx512_bw_shift;
@@ -1301,6 +1302,10 @@ impl<'a> FunctionCompiler<'a> {
                 }
                 if id.x86_avx512_fma_opcode().is_some() {
                     avx512_fma::validate(func, *id, args, pipeline.selector.x86_features())
+                        .map_err(|s| err(s.into()))?;
+                }
+                if id.x86_avx512_bw_mask_alu().is_some() {
+                    avx512_bw_mask_alu::validate(func, *id, args, pipeline.selector.x86_features())
                         .map_err(|s| err(s.into()))?;
                 }
                 if id.x86_avx512_dq_mask_alu().is_some() {
@@ -3342,6 +3347,9 @@ impl<'a> FunctionCompiler<'a> {
             }
             InstData::Intrinsic { id, ref args } if id.x86_avx512_fma_opcode().is_some() => {
                 self.native_avx512_fma(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args } if id.x86_avx512_bw_mask_alu().is_some() => {
+                self.native_avx512_bw_mask_alu(id, args, result)
             }
             InstData::Intrinsic { id, ref args } if id.x86_avx512_dq_mask_alu().is_some() => {
                 self.native_avx512_dq_mask_alu(id, args, result)

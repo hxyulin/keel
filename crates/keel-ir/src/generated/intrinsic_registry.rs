@@ -3366,10 +3366,122 @@ pub enum Intrinsic {
     X86Avx512BwPmovuswb512 = 2020,
     #[doc = "Masked AVX512BW byte/word conversion with encoded-width feature legality and exact active-byte memory accesses. Register narrowing at 128 bits always zeros the upper eight result bytes. VPMOVUSWB interprets source words as unsigned."]
     X86Avx512BwPmovuswbStore512 = 2021,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVpgatherdd128 = 2022,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVpscatterdd128 = 2023,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVgatherdps128 = 2024,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVscatterdps128 = 2025,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVpgatherdq128 = 2026,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVpscatterdq128 = 2027,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVgatherdpd128 = 2028,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVscatterdpd128 = 2029,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVpgatherqd128 = 2030,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVpscatterqd128 = 2031,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVgatherqps128 = 2032,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVscatterqps128 = 2033,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVpgatherqq128 = 2034,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVpscatterqq128 = 2035,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVgatherqpd128 = 2036,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVscatterqpd128 = 2037,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVpgatherdd256 = 2038,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVpscatterdd256 = 2039,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVgatherdps256 = 2040,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVscatterdps256 = 2041,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVpgatherdq256 = 2042,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVpscatterdq256 = 2043,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVgatherdpd256 = 2044,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVscatterdpd256 = 2045,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVpgatherqd256 = 2046,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVpscatterqd256 = 2047,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVgatherqps256 = 2048,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVscatterqps256 = 2049,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVpgatherqq256 = 2050,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVpscatterqq256 = 2051,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVgatherqpd256 = 2052,
+    #[doc = "Masked indexed memory access with signed indices, exact active-lane accesses and explicit encoded-width feature legality."]
+    X86Avx512VlVscatterqpd256 = 2053,
+    #[doc = "AVX512BW scalar mask algebra. Tests return ZF in bit zero and CF in bit one; unpack concatenates low halves."]
+    X86Avx512BwKandd = 2054,
+    #[doc = "AVX512BW scalar mask algebra. Tests return ZF in bit zero and CF in bit one; unpack concatenates low halves."]
+    X86Avx512BwKandnd = 2055,
+    #[doc = "AVX512BW scalar mask algebra. Tests return ZF in bit zero and CF in bit one; unpack concatenates low halves."]
+    X86Avx512BwKord = 2056,
+    #[doc = "AVX512BW scalar mask algebra. Tests return ZF in bit zero and CF in bit one; unpack concatenates low halves."]
+    X86Avx512BwKxord = 2057,
+    #[doc = "AVX512BW scalar mask algebra. Tests return ZF in bit zero and CF in bit one; unpack concatenates low halves."]
+    X86Avx512BwKxnord = 2058,
+    #[doc = "AVX512BW scalar mask algebra. Tests return ZF in bit zero and CF in bit one; unpack concatenates low halves."]
+    X86Avx512BwKnotd = 2059,
+    #[doc = "AVX512BW scalar mask algebra. Tests return ZF in bit zero and CF in bit one; unpack concatenates low halves."]
+    X86Avx512BwKshiftld = 2060,
+    #[doc = "AVX512BW scalar mask algebra. Tests return ZF in bit zero and CF in bit one; unpack concatenates low halves."]
+    X86Avx512BwKshiftrd = 2061,
+    #[doc = "AVX512BW scalar mask algebra. Tests return ZF in bit zero and CF in bit one; unpack concatenates low halves."]
+    X86Avx512BwKaddd = 2062,
+    #[doc = "AVX512BW scalar mask algebra. Tests return ZF in bit zero and CF in bit one; unpack concatenates low halves."]
+    X86Avx512BwKtestd = 2063,
+    #[doc = "AVX512BW scalar mask algebra. Tests return ZF in bit zero and CF in bit one; unpack concatenates low halves."]
+    X86Avx512BwKortestd = 2064,
+    #[doc = "AVX512BW scalar mask algebra. Tests return ZF in bit zero and CF in bit one; unpack concatenates low halves."]
+    X86Avx512BwKunpckwd = 2065,
+    #[doc = "AVX512BW scalar mask algebra. Tests return ZF in bit zero and CF in bit one; unpack concatenates low halves."]
+    X86Avx512BwKandq = 2066,
+    #[doc = "AVX512BW scalar mask algebra. Tests return ZF in bit zero and CF in bit one; unpack concatenates low halves."]
+    X86Avx512BwKandnq = 2067,
+    #[doc = "AVX512BW scalar mask algebra. Tests return ZF in bit zero and CF in bit one; unpack concatenates low halves."]
+    X86Avx512BwKorq = 2068,
+    #[doc = "AVX512BW scalar mask algebra. Tests return ZF in bit zero and CF in bit one; unpack concatenates low halves."]
+    X86Avx512BwKxorq = 2069,
+    #[doc = "AVX512BW scalar mask algebra. Tests return ZF in bit zero and CF in bit one; unpack concatenates low halves."]
+    X86Avx512BwKxnorq = 2070,
+    #[doc = "AVX512BW scalar mask algebra. Tests return ZF in bit zero and CF in bit one; unpack concatenates low halves."]
+    X86Avx512BwKnotq = 2071,
+    #[doc = "AVX512BW scalar mask algebra. Tests return ZF in bit zero and CF in bit one; unpack concatenates low halves."]
+    X86Avx512BwKshiftlq = 2072,
+    #[doc = "AVX512BW scalar mask algebra. Tests return ZF in bit zero and CF in bit one; unpack concatenates low halves."]
+    X86Avx512BwKshiftrq = 2073,
+    #[doc = "AVX512BW scalar mask algebra. Tests return ZF in bit zero and CF in bit one; unpack concatenates low halves."]
+    X86Avx512BwKaddq = 2074,
+    #[doc = "AVX512BW scalar mask algebra. Tests return ZF in bit zero and CF in bit one; unpack concatenates low halves."]
+    X86Avx512BwKtestq = 2075,
+    #[doc = "AVX512BW scalar mask algebra. Tests return ZF in bit zero and CF in bit one; unpack concatenates low halves."]
+    X86Avx512BwKortestq = 2076,
+    #[doc = "AVX512BW scalar mask algebra. Tests return ZF in bit zero and CF in bit one; unpack concatenates low halves."]
+    X86Avx512BwKunpckdq = 2077,
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 2022] = [
+    pub const ALL: [Intrinsic; 2078] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -5392,6 +5504,62 @@ impl Intrinsic {
         Intrinsic::X86Avx512BwPmovswbStore512,
         Intrinsic::X86Avx512BwPmovuswb512,
         Intrinsic::X86Avx512BwPmovuswbStore512,
+        Intrinsic::X86Avx512VlVpgatherdd128,
+        Intrinsic::X86Avx512VlVpscatterdd128,
+        Intrinsic::X86Avx512VlVgatherdps128,
+        Intrinsic::X86Avx512VlVscatterdps128,
+        Intrinsic::X86Avx512VlVpgatherdq128,
+        Intrinsic::X86Avx512VlVpscatterdq128,
+        Intrinsic::X86Avx512VlVgatherdpd128,
+        Intrinsic::X86Avx512VlVscatterdpd128,
+        Intrinsic::X86Avx512VlVpgatherqd128,
+        Intrinsic::X86Avx512VlVpscatterqd128,
+        Intrinsic::X86Avx512VlVgatherqps128,
+        Intrinsic::X86Avx512VlVscatterqps128,
+        Intrinsic::X86Avx512VlVpgatherqq128,
+        Intrinsic::X86Avx512VlVpscatterqq128,
+        Intrinsic::X86Avx512VlVgatherqpd128,
+        Intrinsic::X86Avx512VlVscatterqpd128,
+        Intrinsic::X86Avx512VlVpgatherdd256,
+        Intrinsic::X86Avx512VlVpscatterdd256,
+        Intrinsic::X86Avx512VlVgatherdps256,
+        Intrinsic::X86Avx512VlVscatterdps256,
+        Intrinsic::X86Avx512VlVpgatherdq256,
+        Intrinsic::X86Avx512VlVpscatterdq256,
+        Intrinsic::X86Avx512VlVgatherdpd256,
+        Intrinsic::X86Avx512VlVscatterdpd256,
+        Intrinsic::X86Avx512VlVpgatherqd256,
+        Intrinsic::X86Avx512VlVpscatterqd256,
+        Intrinsic::X86Avx512VlVgatherqps256,
+        Intrinsic::X86Avx512VlVscatterqps256,
+        Intrinsic::X86Avx512VlVpgatherqq256,
+        Intrinsic::X86Avx512VlVpscatterqq256,
+        Intrinsic::X86Avx512VlVgatherqpd256,
+        Intrinsic::X86Avx512VlVscatterqpd256,
+        Intrinsic::X86Avx512BwKandd,
+        Intrinsic::X86Avx512BwKandnd,
+        Intrinsic::X86Avx512BwKord,
+        Intrinsic::X86Avx512BwKxord,
+        Intrinsic::X86Avx512BwKxnord,
+        Intrinsic::X86Avx512BwKnotd,
+        Intrinsic::X86Avx512BwKshiftld,
+        Intrinsic::X86Avx512BwKshiftrd,
+        Intrinsic::X86Avx512BwKaddd,
+        Intrinsic::X86Avx512BwKtestd,
+        Intrinsic::X86Avx512BwKortestd,
+        Intrinsic::X86Avx512BwKunpckwd,
+        Intrinsic::X86Avx512BwKandq,
+        Intrinsic::X86Avx512BwKandnq,
+        Intrinsic::X86Avx512BwKorq,
+        Intrinsic::X86Avx512BwKxorq,
+        Intrinsic::X86Avx512BwKxnorq,
+        Intrinsic::X86Avx512BwKnotq,
+        Intrinsic::X86Avx512BwKshiftlq,
+        Intrinsic::X86Avx512BwKshiftrq,
+        Intrinsic::X86Avx512BwKaddq,
+        Intrinsic::X86Avx512BwKtestq,
+        Intrinsic::X86Avx512BwKortestq,
+        Intrinsic::X86Avx512BwKunpckdq,
     ];
 }
 
@@ -7410,5 +7578,61 @@ macro_rules! x86_intrinsics {
             | $crate::Intrinsic::X86Avx512BwPmovswbStore512
             | $crate::Intrinsic::X86Avx512BwPmovuswb512
             | $crate::Intrinsic::X86Avx512BwPmovuswbStore512
+            | $crate::Intrinsic::X86Avx512VlVpgatherdd128
+            | $crate::Intrinsic::X86Avx512VlVpscatterdd128
+            | $crate::Intrinsic::X86Avx512VlVgatherdps128
+            | $crate::Intrinsic::X86Avx512VlVscatterdps128
+            | $crate::Intrinsic::X86Avx512VlVpgatherdq128
+            | $crate::Intrinsic::X86Avx512VlVpscatterdq128
+            | $crate::Intrinsic::X86Avx512VlVgatherdpd128
+            | $crate::Intrinsic::X86Avx512VlVscatterdpd128
+            | $crate::Intrinsic::X86Avx512VlVpgatherqd128
+            | $crate::Intrinsic::X86Avx512VlVpscatterqd128
+            | $crate::Intrinsic::X86Avx512VlVgatherqps128
+            | $crate::Intrinsic::X86Avx512VlVscatterqps128
+            | $crate::Intrinsic::X86Avx512VlVpgatherqq128
+            | $crate::Intrinsic::X86Avx512VlVpscatterqq128
+            | $crate::Intrinsic::X86Avx512VlVgatherqpd128
+            | $crate::Intrinsic::X86Avx512VlVscatterqpd128
+            | $crate::Intrinsic::X86Avx512VlVpgatherdd256
+            | $crate::Intrinsic::X86Avx512VlVpscatterdd256
+            | $crate::Intrinsic::X86Avx512VlVgatherdps256
+            | $crate::Intrinsic::X86Avx512VlVscatterdps256
+            | $crate::Intrinsic::X86Avx512VlVpgatherdq256
+            | $crate::Intrinsic::X86Avx512VlVpscatterdq256
+            | $crate::Intrinsic::X86Avx512VlVgatherdpd256
+            | $crate::Intrinsic::X86Avx512VlVscatterdpd256
+            | $crate::Intrinsic::X86Avx512VlVpgatherqd256
+            | $crate::Intrinsic::X86Avx512VlVpscatterqd256
+            | $crate::Intrinsic::X86Avx512VlVgatherqps256
+            | $crate::Intrinsic::X86Avx512VlVscatterqps256
+            | $crate::Intrinsic::X86Avx512VlVpgatherqq256
+            | $crate::Intrinsic::X86Avx512VlVpscatterqq256
+            | $crate::Intrinsic::X86Avx512VlVgatherqpd256
+            | $crate::Intrinsic::X86Avx512VlVscatterqpd256
+            | $crate::Intrinsic::X86Avx512BwKandd
+            | $crate::Intrinsic::X86Avx512BwKandnd
+            | $crate::Intrinsic::X86Avx512BwKord
+            | $crate::Intrinsic::X86Avx512BwKxord
+            | $crate::Intrinsic::X86Avx512BwKxnord
+            | $crate::Intrinsic::X86Avx512BwKnotd
+            | $crate::Intrinsic::X86Avx512BwKshiftld
+            | $crate::Intrinsic::X86Avx512BwKshiftrd
+            | $crate::Intrinsic::X86Avx512BwKaddd
+            | $crate::Intrinsic::X86Avx512BwKtestd
+            | $crate::Intrinsic::X86Avx512BwKortestd
+            | $crate::Intrinsic::X86Avx512BwKunpckwd
+            | $crate::Intrinsic::X86Avx512BwKandq
+            | $crate::Intrinsic::X86Avx512BwKandnq
+            | $crate::Intrinsic::X86Avx512BwKorq
+            | $crate::Intrinsic::X86Avx512BwKxorq
+            | $crate::Intrinsic::X86Avx512BwKxnorq
+            | $crate::Intrinsic::X86Avx512BwKnotq
+            | $crate::Intrinsic::X86Avx512BwKshiftlq
+            | $crate::Intrinsic::X86Avx512BwKshiftrq
+            | $crate::Intrinsic::X86Avx512BwKaddq
+            | $crate::Intrinsic::X86Avx512BwKtestq
+            | $crate::Intrinsic::X86Avx512BwKortestq
+            | $crate::Intrinsic::X86Avx512BwKunpckdq
     };
 }

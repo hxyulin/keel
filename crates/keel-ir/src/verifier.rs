@@ -1719,6 +1719,26 @@ impl Verifier<'_> {
                     }
                 }
                 if id
+                    .x86_avx512_bw_mask_alu()
+                    .is_some_and(|d| d.kind == crate::intrinsic::X86Avx512BwMaskAluKind::Shift)
+                {
+                    let control =
+                        args.get(1)
+                            .and_then(|&v| match func.value_def(func.resolve(v)) {
+                                ValueDef::Result(i, _) => match func.inst_data(i) {
+                                    InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                    _ => None,
+                                },
+                                _ => None,
+                            });
+                    if !control.is_some_and(|n| (0..=255).contains(&n)) {
+                        self.inst_error(
+                            inst,
+                            "BW mask shift requires a constant in 0..=255".into(),
+                        );
+                    }
+                }
+                if id
                     .x86_avx512_dq_mask_alu()
                     .is_some_and(|d| d.kind == crate::intrinsic::X86Avx512DqMaskAluKind::Shift)
                 {
@@ -2083,7 +2103,7 @@ impl Verifier<'_> {
                     if !scale.is_some_and(|n| matches!(n, 1 | 2 | 4 | 8)) {
                         self.inst_error(
                             inst,
-                            "indexed memory scale must be iconst.i32 in1,2,4,8".into(),
+                            "indexed memory scale must be iconst.i32 in 1, 2, 4, 8".into(),
                         );
                     }
                 }

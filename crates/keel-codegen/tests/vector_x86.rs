@@ -983,3 +983,9 @@ mod x86_avx512_vl_pack;
 
 #[path = "vector_x86/x86_avx512_bw_convert.rs"]
 mod x86_avx512_bw_convert;
+
+#[path = "vector_x86/x86_avx512_bw_mask_alu.rs"]
+mod x86_avx512_bw_mask_alu;
+
+#[path = "vector_x86/x86_avx512_vl_indexed.rs"]
+mod x86_avx512_vl_indexed;

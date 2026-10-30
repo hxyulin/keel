@@ -987,7 +987,31 @@ impl InstData {
                 | Intrinsic::X86Avx512BwPmovswbStore512
                 | Intrinsic::X86Avx512BwPmovuswbStore512 => Write,
 
-                Intrinsic::X86Avx512DqKandb
+                Intrinsic::X86Avx512BwKandd
+                | Intrinsic::X86Avx512BwKandnd
+                | Intrinsic::X86Avx512BwKord
+                | Intrinsic::X86Avx512BwKxord
+                | Intrinsic::X86Avx512BwKxnord
+                | Intrinsic::X86Avx512BwKnotd
+                | Intrinsic::X86Avx512BwKshiftld
+                | Intrinsic::X86Avx512BwKshiftrd
+                | Intrinsic::X86Avx512BwKaddd
+                | Intrinsic::X86Avx512BwKtestd
+                | Intrinsic::X86Avx512BwKortestd
+                | Intrinsic::X86Avx512BwKunpckwd
+                | Intrinsic::X86Avx512BwKandq
+                | Intrinsic::X86Avx512BwKandnq
+                | Intrinsic::X86Avx512BwKorq
+                | Intrinsic::X86Avx512BwKxorq
+                | Intrinsic::X86Avx512BwKxnorq
+                | Intrinsic::X86Avx512BwKnotq
+                | Intrinsic::X86Avx512BwKshiftlq
+                | Intrinsic::X86Avx512BwKshiftrq
+                | Intrinsic::X86Avx512BwKaddq
+                | Intrinsic::X86Avx512BwKtestq
+                | Intrinsic::X86Avx512BwKortestq
+                | Intrinsic::X86Avx512BwKunpckdq
+                | Intrinsic::X86Avx512DqKandb
                 | Intrinsic::X86Avx512DqKandnb
                 | Intrinsic::X86Avx512DqKorb
                 | Intrinsic::X86Avx512DqKxorb
@@ -2022,6 +2046,38 @@ impl InstData {
                 | Intrinsic::X86Avx512Vcvtpd2ps
                 | Intrinsic::X86Avx512Vcvtph2ps
                 | Intrinsic::X86Avx512Vcvtps2ph => Barrier,
+                Intrinsic::X86Avx512VlVpgatherdd128
+                | Intrinsic::X86Avx512VlVgatherdps128
+                | Intrinsic::X86Avx512VlVpgatherdq128
+                | Intrinsic::X86Avx512VlVgatherdpd128
+                | Intrinsic::X86Avx512VlVpgatherqd128
+                | Intrinsic::X86Avx512VlVgatherqps128
+                | Intrinsic::X86Avx512VlVpgatherqq128
+                | Intrinsic::X86Avx512VlVgatherqpd128
+                | Intrinsic::X86Avx512VlVpgatherdd256
+                | Intrinsic::X86Avx512VlVgatherdps256
+                | Intrinsic::X86Avx512VlVpgatherdq256
+                | Intrinsic::X86Avx512VlVgatherdpd256
+                | Intrinsic::X86Avx512VlVpgatherqd256
+                | Intrinsic::X86Avx512VlVgatherqps256
+                | Intrinsic::X86Avx512VlVpgatherqq256
+                | Intrinsic::X86Avx512VlVgatherqpd256 => Read,
+                Intrinsic::X86Avx512VlVpscatterdd128
+                | Intrinsic::X86Avx512VlVscatterdps128
+                | Intrinsic::X86Avx512VlVpscatterdq128
+                | Intrinsic::X86Avx512VlVscatterdpd128
+                | Intrinsic::X86Avx512VlVpscatterqd128
+                | Intrinsic::X86Avx512VlVscatterqps128
+                | Intrinsic::X86Avx512VlVpscatterqq128
+                | Intrinsic::X86Avx512VlVscatterqpd128
+                | Intrinsic::X86Avx512VlVpscatterdd256
+                | Intrinsic::X86Avx512VlVscatterdps256
+                | Intrinsic::X86Avx512VlVpscatterdq256
+                | Intrinsic::X86Avx512VlVscatterdpd256
+                | Intrinsic::X86Avx512VlVpscatterqd256
+                | Intrinsic::X86Avx512VlVscatterqps256
+                | Intrinsic::X86Avx512VlVpscatterqq256
+                | Intrinsic::X86Avx512VlVscatterqpd256 => Write,
                 Intrinsic::X86Avx512Vpgatherdd
                 | Intrinsic::X86Avx512Vpgatherdq
                 | Intrinsic::X86Avx512Vpgatherqd
@@ -2965,6 +3021,7 @@ impl InstData {
             Self::Neon { .. } => true,
             Self::Intrinsic { id, .. } => {
                 !((id.x86_avx512_bw_core().is_some() && id.info().pure)
+                    || id.x86_avx512_bw_mask_alu().is_some()
                     || id.x86_avx512_dq_mask_alu().is_some()
                     || id.x86_avx512_dq_special().is_some_and(|d| {
                         d.kind == crate::intrinsic::X86Avx512DqSpecialKind::Fpclass
