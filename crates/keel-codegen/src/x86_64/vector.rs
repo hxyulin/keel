@@ -216,8 +216,8 @@ pub(super) fn lower(func: &Function, features: keel_asm_ir::x86::Features) -> Co
         if touches_d {
             return false;
         }
-        if matches!(data, InstData::Fma { .. }) {
-            return features.avx && features.fma;
+        if let InstData::Fma { args } = data {
+            return native_fma_legal(func.value_type(func.resolve(args[0])), features);
         }
         if avx512_float::keep(func, data, features)
             || avx512::keep(func, data, features)

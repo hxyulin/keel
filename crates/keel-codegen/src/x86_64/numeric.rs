@@ -19,7 +19,14 @@ impl FunctionCompiler<'_> {
             Type::Vector(_) => "pd",
             _ => unreachable!("verified FMA shape"),
         };
-        let op = Opcode::parse(&format!("vfmadd213{suffix}")).unwrap();
+        let name = format!("vfmadd213{suffix}");
+        let op = if ty.vector().is_some_and(|shape| shape.bytes() == 64) {
+            Opcode::Evex(
+                keel_asm_ir::x86::evex::EvexOpcode::parse(&name).expect("AVX512F FMA opcode"),
+            )
+        } else {
+            Opcode::parse(&name).expect("FMA opcode")
+        };
         self.emit(
             op,
             [

@@ -737,6 +737,15 @@ fn unsupported(func: &Function, inst: Inst) -> Option<&'static str> {
     })
 }
 
+fn native_fma_legal(ty: Type, features: keel_asm_ir::x86::Features) -> bool {
+    ty != Type::F80
+        && if ty.vector().is_some_and(|s| s.bytes() == 64) {
+            features.avx512f
+        } else {
+            features.avx && features.fma
+        }
+}
+
 /// Instructions that clobber the caller-saved registers: calls, and the
 /// operations that are calls to libc or libgcc (`i128` division).
 fn is_call(func: &Function, data: &InstData, features: keel_asm_ir::x86::Features) -> bool {
@@ -750,7 +759,7 @@ fn is_call(func: &Function, data: &InstData, features: keel_asm_ir::x86::Feature
         // clobbers name only the GPRs used by a reduced kernel call sequence.
         InstData::InlineAsm { asm, .. } => asm.inputs.contains(&keel_ir::AsmOperand::StackPointer),
         InstData::Fma { args } => {
-            func.value_type(func.resolve(args[0])) == Type::F80 || !(features.avx && features.fma)
+            !native_fma_legal(func.value_type(func.resolve(args[0])), features)
         }
         InstData::Intrinsic { id, .. } => {
             matches!(
@@ -2785,7 +2794,7 @@ impl<'a> FunctionCompiler<'a> {
                 self.unary(op, arg, d);
                 self.def_done(result, d);
             }
-            InstData::Fma { args } if self.features.avx && self.features.fma => {
+            InstData::Fma { args } if native_fma_legal(self.ty(args[0]), self.features) => {
                 self.native_fma(args, result)
             }
             InstData::Fma { args } => {

@@ -58,9 +58,14 @@ Byte and word arithmetic continues through portable lane lowering.
 
 `f32x16` and `f64x8` add, subtract, multiply, divide and square root use
 unmasked packed ZMM instructions under AVX512F. Source order matches the
-scalar operations, including subtraction and division. These recipes do not
-require FMA permission or combine multiply and add. Other floating operations
-use portable lane lowering. C accepts `float` and `double` vectors with
+scalar operations, including subtraction and division. Negation, absolute
+value and copy-sign operate on sign bits, preserving NaN payloads. Ceiling,
+floor, truncation and ties-to-even rounding use fixed rounding controls.
+
+Explicit 512-bit `fma` uses AVX512F and rounds once. It does not require the
+independent FMA permission used by scalar, 128-bit and 256-bit instructions.
+Ordinary multiply and add remain separate. Other floating operations use
+portable lane lowering. C accepts `float` and `double` vectors with
 `vector_size(64)`; `immintrin.h` defines `__m512` and `__m512d`.
 
 ## Shuffles
