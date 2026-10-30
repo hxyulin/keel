@@ -914,6 +914,85 @@ conversion names. Shortened masked widening loads are available through
 compiler-owned `__keel_mm512_mask_loadu_cvt...` wrappers. These loads preserve
 the same inactive-element fault suppression as the typed memory operation.
 
+## Packed AVX512F arithmetic and movement
+
+Typed masked integer primitives include dword low multiplication, signed and
+unsigned dword/qword min/max, and dword/qword AND, AND-NOT, OR and XOR.
+They take a merge vector, scalar mask and two inputs. Mask moves take a merge
+vector, mask and input. Blends take a mask and two vectors. These register
+operations preserve every inactive lane bit and require AVX512F.
+
+The `x86_avx512_mask{add,sub,mul,div,sqrt}round{ps,pd}` intrinsics add a
+final rounding control to the raw masked floating operations. Controls 4 and
+8..11 select MXCSR rounding or nearest/down/up/zero with SAE.
+`x86_avx512_mask{min,max}{ps,pd}` take control 4 or 8 and preserve vendor
+min/max semantics, including source-order NaN selection and zero ties. They
+remain distinct from portable IEEE minimum/maximum. Raw floating operations
+stay pinned relative to MXCSR, and inactive lanes suppress exceptions.
+
+`x86_avx512_maskalignedload{d,q,ps,pd}` and matching aligned stores require
+64-byte aligned addresses. Active lanes access their full lane widths;
+inactive lanes do not access memory. Streaming load `streamloaddq` and
+streaming stores `streamstore{dq,ps,pd}` require 64-byte alignment and access
+exactly 64 bytes. Streaming stores do not insert an implicit fence. These
+alignment contracts belong to the dedicated instructions; ordinary IR loads
+and stores continue to support unaligned addresses.
+
+### Permutations and shuffles
+
+Typed foundation permutations support full-width dword/qword lookup, two-table
+lookup, local `permil` controls, immediate qword lookup, paired shuffles,
+quarter-block shuffles, dword/qword alignment, unpacking and floating duplicate
+operations. Every form takes an independent merge source and scalar mask.
+Immediate controls are constant `i32` values in 0..255. Index interpretation,
+128-bit lane boundaries and ignored control bits follow the selected x86
+instruction rather than the portable shuffle contract.
+
+The C header exposes the unmasked, mask and mask-zero standard wrappers.
+Two-table `mask2` wrappers merge from the index vector; `mask` wrappers merge
+from the first table. Reused arguments are evaluated once. These operations
+require AVX512F and do not require AVX2 or AVX512VL.
+
+### Shared counts, broadcasts and lane blocks
+
+Typed foundation immediate shifts take a constant `i32` byte in 0..255.
+Shared-count shifts take an `i64x2` count and use only its low 64 bits; the
+upper 64 bits are ignored. Dword and qword logical/arithmetic shifts saturate
+oversized counts, as do the raw per-lane shift intrinsics. Inactive result
+lanes preserve the merge source.
+
+Scalar broadcasts accept `i32`, `i64`, `f32` or `f64` and return the matching
+512-bit shape. Block broadcasts repeat `i32x4`, `i64x4`, `f32x4` or `f64x4`
+across the result. Pure register block forms stage one exact 16-/32-byte
+block for the foundation memory broadcast instruction. Direct memory forms
+use 4-/8-byte scalar or 16-/32-byte block operands.
+
+Quarter extraction/insertion supports `i32x4` and `f32x4`, with constant lane
+indices 0..3. Half extraction/insertion supports `i64x4` and `f64x4`, with
+indices 0..1. Extract results use an `i8` mask whose low four bits control
+the four output elements. Insert masks control all sixteen dword or eight
+qword destination lanes. The raw insert contract separates the merge source
+from the full-width base vector. Memory extract destinations write only
+selected elements within the exact 16-/32-byte short output.
+
+Memory broadcasts suppress accesses to source elements without any active
+replicated result lane. A zero mask suppresses all broadcast input access.
+Memory extract and insert instructions use the E6NF contract and do not
+guarantee fault suppression. Supply an accessible full 16-/32-byte tuple even
+with a zero mask or mask bits outside the inserted block. Extract masks
+preserve inactive destination elements but do not make inaccessible parts
+of the tuple safe to reference. All transfers preserve
+floating bit patterns and require AVX512F without AVX512DQ, BW, VL or AVX2.
+The DQ `extract/insert{i,f}64x2` forms are outside this instruction set.
+
+The C header provides unmasked, masked and mask-zero immediate/shared shifts,
+scalar and block broadcasts, and quarter/half extract/insert wrappers. Masked
+integer `set1` uses the scalar broadcast routes; existing unmasked constructors
+retain their constant-folding behavior. Pointer-only broadcast and insert
+helpers use compiler-owned `__keel_mm512_mask_load_...` names. Extract stores
+use `__keel_mm512_mask_store_extract...`. These helpers retain the native
+memory contracts above and evaluate each argument once.
+
 ## SHA-256
 
 `shaintrin.h`, also included by `immintrin.h`, exposes

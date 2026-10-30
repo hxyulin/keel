@@ -6,7 +6,7 @@ use keel_codegen::{
 use keel_ir::Target;
 use std::{fs, process::Command};
 const CONTROLS: [u8; 8] = [0, 1, 16, 17, 238, 239, 254, 255];
-fn parse(s: &str, target: Target) -> Result<keel_ir::Module, String> {
+pub(super) fn parse(s: &str, target: Target) -> Result<keel_ir::Module, String> {
     let s = keel_c::preprocess(
         s,
         "pclmul.c",
@@ -1107,6 +1107,85 @@ extern void scalar_fma_once(const void*,const void*,const void*,void*),unsigned_
 int main(void){uint32_t a[4]={0x40000000,0x7f812345,0x80000000,0xdeadbeef},b[4]={0x40400000,1,2,3},c[4]={0x40800000,4,5,6},out[4];unsigned masks[]={0xfe,0xff};for(unsigned j=0;j<2;j++){scalar_fma_mask=masks[j];scalar_fma_evaluations=0;scalar_fma_once(a,b,c,out);if(scalar_fma_evaluations!=4||memcmp(out+1,a+1,12)||out[0]!=(j?0x41200000:0x40800000))return 1;}uint64_t upper[2]={0,0xfff0123456789abcULL},wide[2];unsigned_widen(upper,~0ULL,wide);double want=0x1p64;if(memcmp(wide,&want,8)||wide[1]!=upper[1])return 2;uint64_t x[8];unsigned char bytes[12];for(unsigned i=0;i<8;i++)x[i]=~0ULL;memset(bytes,0xa5,12);byte_narrow(x,bytes+2);if(bytes[0]!=0xa5||bytes[1]!=0xa5||bytes[10]!=0xa5||bytes[11]!=0xa5)return 3;for(unsigned i=2;i<10;i++)if(bytes[i]!=255)return 4;return 0;}
 "#).unwrap();
         let output = Command::new("cc")
+            .arg(directory.join("harness.c"))
+            .arg(directory.join("code.o"))
+            .arg("-o")
+            .arg(directory.join("run"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            Command::new(directory.join("run"))
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+}
+
+#[test]
+fn avx512_named_comparison_headers_match_system_masks() {
+    let mut source = String::from(
+        "#include <immintrin.h>\nvoid named_masks(const void*pa,const void*pb,unsigned*out){__m512i ai=_mm512_loadu_si512(pa),bi=_mm512_loadu_si512(pb);__m512 af=_mm512_loadu_ps(pa),bf=_mm512_loadu_ps(pb);__m512d ad=_mm512_loadu_pd(pa),bd=_mm512_loadu_pd(pb);\n",
+    );
+    let mut reference = String::new();
+    let mut count = 0;
+    for suffix in ["epi32", "epu32", "epi64", "epu64", "ps", "pd"] {
+        let relations: &[&str] = if suffix == "ps" || suffix == "pd" {
+            &["eq", "lt", "le", "unord", "neq", "nlt", "nle", "ord"]
+        } else {
+            &["eq", "lt", "le", "neq", "ge", "gt"]
+        };
+        let (a, b) = if suffix == "ps" {
+            ("af", "bf")
+        } else if suffix == "pd" {
+            ("ad", "bd")
+        } else {
+            ("ai", "bi")
+        };
+        for relation in relations {
+            let expression = format!("_mm512_mask_cmp{relation}_{suffix}_mask(0xa55a,{a},{b})");
+            source += &format!("out[{count}]={expression};\n");
+            reference += &format!("want[{count}]={expression};\n");
+            count += 1;
+        }
+    }
+    source += "}\n";
+    let mut module = parse(&source, Target::X86_64LinuxGnu).unwrap();
+    keel_opt::optimize(&mut module).unwrap();
+    let features = Features::NONE.with_features("avx512f").unwrap();
+    let selector = FeatureSelector {
+        inner: &SelectionTier::Full,
+        features,
+    };
+    let pipeline = CodegenPipeline {
+        selector: &selector,
+        allocator: &AllocationTier::Full,
+    };
+    let program =
+        keel_codegen::compile_program_with_pipeline(&module, Target::X86_64LinuxGnu, &pipeline)
+            .unwrap();
+    let object = keel_asm::x86::assemble_program_object_with_features(&program, features).unwrap();
+    if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
+        #[cfg(target_arch = "x86_64")]
+        if !std::is_x86_feature_detected!("avx512f") {
+            eprintln!("SKIP native named masks: AVX512F unavailable");
+            return;
+        }
+        let directory =
+            std::env::temp_dir().join(format!("keel-avx512-named-masks-c-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("code.o"), object).unwrap();
+        let harness = format!(
+            "#include <immintrin.h>\n#include <stdint.h>\n#include <string.h>\nextern void named_masks(const void*,const void*,unsigned*);\nint main(void){{uint32_t a[16],b[16],edge[]={{0x80000000u,0x7fffffffu,0u,0xffffffffu}};unsigned out[{count}],want[{count}];for(unsigned i=0;i<16;i++){{a[i]=edge[i%4];b[i]=edge[(i+1)%4];}}__m512i ai=_mm512_loadu_si512(a),bi=_mm512_loadu_si512(b);__m512 af=_mm512_loadu_ps(a),bf=_mm512_loadu_ps(b);__m512d ad=_mm512_loadu_pd(a),bd=_mm512_loadu_pd(b);{reference}named_masks(a,b,out);return memcmp(out,want,sizeof(out))!=0;}}\n"
+        );
+        fs::write(directory.join("harness.c"), harness).unwrap();
+        let output = Command::new("cc")
+            .args(["-O2", "-mavx512f"])
             .arg(directory.join("harness.c"))
             .arg(directory.join("code.o"))
             .arg("-o")

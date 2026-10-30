@@ -1612,3 +1612,11 @@ fn packed_integer_families_match_vendor_and_scalar_oracles() {
         directory.display()
     );
 }
+
+#[path = "x86_intrinsics/x86_avx512_packed.rs"]
+mod x86_avx512_packed;
+#[path = "x86_intrinsics/x86_avx512_permute.rs"]
+mod x86_avx512_permute;
+
+#[path = "x86_intrinsics/x86_avx512_lane.rs"]
+mod x86_avx512_lane;
