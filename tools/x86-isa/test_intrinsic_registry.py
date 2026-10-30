@@ -23,15 +23,15 @@ class IntrinsicRegistryTests(unittest.TestCase):
         expected = [line.split('|') for line in fixture.read_text().splitlines()
                     if not line.startswith('#')]
         self.assertEqual([r['variant'] for r in rows[:len(expected)]], [r[0] for r in expected])
-        self.assertEqual([r['variant'] for r in rows[len(expected):]], ['LifetimeStart', 'LifetimeEnd', 'X86CpuXcr0'])
+        self.assertEqual(len(rows), len(expected))
         self.assertEqual([r['variant'] for r in sorted(rows, key=lambda r: r['inventory'])[:len(expected)]],
                          [r[1] for r in expected])
         source = intrinsic_registry.generate(self.schema, self.families)
-        self.assertIn('ALL: [Intrinsic; 822]', source)
+        self.assertIn(f'ALL: [Intrinsic; {len(expected)}]', source)
         self.assertIn('X86Lgdt = 774,', source)
         self.assertIn('X86Swapgs = 818,', source)
         self.assertIn('X86CpuXcr0 = 821,', source)
-        self.assertEqual(len(re.findall(r'^    [A-Z][A-Za-z0-9]* = [0-9]+,$', source, re.M)), 822)
+        self.assertEqual(len(re.findall(r'^    [A-Z][A-Za-z0-9]* = [0-9]+,$', source, re.M)), len(expected))
 
     def test_x86_pattern_matches_frozen_inventory_and_excludes_portable_entries(self):
         source = intrinsic_registry.generate(self.schema, self.families)
@@ -39,7 +39,7 @@ class IntrinsicRegistryTests(unittest.TestCase):
         fixture = ROOT.parents[1] / 'crates/keel-ir/tests/fixtures/intrinsic-inventory.txt'
         expected = [line.split('|')[0] for line in fixture.read_text().splitlines()
                     if not line.startswith('#') and line.startswith('X86')]
-        self.assertEqual(re.findall(r'\$crate::Intrinsic::(\w+)', pattern), expected + ['X86CpuXcr0'])
+        self.assertEqual(re.findall(r'\$crate::Intrinsic::(\w+)', pattern), expected)
         self.assertNotIn('LifetimeStart', pattern)
         self.assertNotIn('Memcpy', pattern)
 
