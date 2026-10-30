@@ -132,7 +132,9 @@ mod avx256;
 mod avx512;
 mod avx512_float;
 mod avx512_float_mask;
+mod avx512_indexed;
 mod avx512_mask;
+mod avx512_pack;
 mod avx512_reduce;
 mod gather;
 mod mmx_value;
@@ -1163,6 +1165,14 @@ impl<'a> FunctionCompiler<'a> {
                 }
             }
             if let InstData::Intrinsic { id, args } = func.inst_data(inst) {
+                if id.is_x86_avx512_pack() {
+                    avx512_pack::validate(func, *id, args, pipeline.selector.x86_features())
+                        .map_err(|s| err(s.into()))?;
+                }
+                if id.is_x86_avx512_indexed() {
+                    avx512_indexed::validate(func, *id, args, pipeline.selector.x86_features())
+                        .map_err(|s| err(s.into()))?;
+                }
                 if id.is_x86_avx512_mask() {
                     avx512_mask::validate(func, *id, args, pipeline.selector.x86_features())
                         .map_err(|s| err(s.into()))?;
@@ -3108,6 +3118,12 @@ impl<'a> FunctionCompiler<'a> {
             }
             InstData::Intrinsic { id, ref args } if id.x86_packed_search().is_some() => {
                 self.native_packed_search(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args } if id.is_x86_avx512_pack() => {
+                self.native_avx512_pack(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args } if id.is_x86_avx512_indexed() => {
+                self.native_avx512_indexed(id, args, result)
             }
             InstData::Intrinsic { id, ref args } if id.is_x86_avx512_mask() => {
                 self.native_avx512_mask(id, args, result)

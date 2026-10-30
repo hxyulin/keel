@@ -1032,10 +1032,74 @@ pub enum Intrinsic {
     X86Avx512MaskStoreps = 853,
     #[doc = "Masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress memory accesses or floating exceptions. Raw arithmetic observes MXCSR."]
     X86Avx512MaskStorepd = 854,
+    #[doc = "Masked AVX512F indexed memory operation. Signed indices are multiplied by scale; inactive lanes do not access memory. Original indices, source and scalar mask remain unchanged. Faulting operations may partially complete."]
+    X86Avx512Vpgatherdd = 855,
+    #[doc = "Masked AVX512F indexed memory operation. Signed indices are multiplied by scale; inactive lanes do not access memory. Original indices, source and scalar mask remain unchanged. Faulting operations may partially complete."]
+    X86Avx512Vpgatherdq = 856,
+    #[doc = "Masked AVX512F indexed memory operation. Signed indices are multiplied by scale; inactive lanes do not access memory. Original indices, source and scalar mask remain unchanged. Faulting operations may partially complete."]
+    X86Avx512Vpgatherqd = 857,
+    #[doc = "Masked AVX512F indexed memory operation. Signed indices are multiplied by scale; inactive lanes do not access memory. Original indices, source and scalar mask remain unchanged. Faulting operations may partially complete."]
+    X86Avx512Vpgatherqq = 858,
+    #[doc = "Masked AVX512F indexed memory operation. Signed indices are multiplied by scale; inactive lanes do not access memory. Original indices, source and scalar mask remain unchanged. Faulting operations may partially complete."]
+    X86Avx512Vgatherdps = 859,
+    #[doc = "Masked AVX512F indexed memory operation. Signed indices are multiplied by scale; inactive lanes do not access memory. Original indices, source and scalar mask remain unchanged. Faulting operations may partially complete."]
+    X86Avx512Vgatherdpd = 860,
+    #[doc = "Masked AVX512F indexed memory operation. Signed indices are multiplied by scale; inactive lanes do not access memory. Original indices, source and scalar mask remain unchanged. Faulting operations may partially complete."]
+    X86Avx512Vgatherqps = 861,
+    #[doc = "Masked AVX512F indexed memory operation. Signed indices are multiplied by scale; inactive lanes do not access memory. Original indices, source and scalar mask remain unchanged. Faulting operations may partially complete."]
+    X86Avx512Vgatherqpd = 862,
+    #[doc = "Masked AVX512F indexed memory operation. Signed indices are multiplied by scale; inactive lanes do not access memory. Original indices, source and scalar mask remain unchanged. Faulting operations may partially complete."]
+    X86Avx512Vpscatterdd = 863,
+    #[doc = "Masked AVX512F indexed memory operation. Signed indices are multiplied by scale; inactive lanes do not access memory. Original indices, source and scalar mask remain unchanged. Faulting operations may partially complete."]
+    X86Avx512Vpscatterdq = 864,
+    #[doc = "Masked AVX512F indexed memory operation. Signed indices are multiplied by scale; inactive lanes do not access memory. Original indices, source and scalar mask remain unchanged. Faulting operations may partially complete."]
+    X86Avx512Vpscatterqd = 865,
+    #[doc = "Masked AVX512F indexed memory operation. Signed indices are multiplied by scale; inactive lanes do not access memory. Original indices, source and scalar mask remain unchanged. Faulting operations may partially complete."]
+    X86Avx512Vpscatterqq = 866,
+    #[doc = "Masked AVX512F indexed memory operation. Signed indices are multiplied by scale; inactive lanes do not access memory. Original indices, source and scalar mask remain unchanged. Faulting operations may partially complete."]
+    X86Avx512Vscatterdps = 867,
+    #[doc = "Masked AVX512F indexed memory operation. Signed indices are multiplied by scale; inactive lanes do not access memory. Original indices, source and scalar mask remain unchanged. Faulting operations may partially complete."]
+    X86Avx512Vscatterdpd = 868,
+    #[doc = "Masked AVX512F indexed memory operation. Signed indices are multiplied by scale; inactive lanes do not access memory. Original indices, source and scalar mask remain unchanged. Faulting operations may partially complete."]
+    X86Avx512Vscatterqps = 869,
+    #[doc = "Masked AVX512F indexed memory operation. Signed indices are multiplied by scale; inactive lanes do not access memory. Original indices, source and scalar mask remain unchanged. Faulting operations may partially complete."]
+    X86Avx512Vscatterqpd = 870,
+    #[doc = "AVX512F packed lane operation. Compression keeps selected source lanes in order; expansion consumes packed lanes in order. Packed memory accesses exactly popcount(mask) elements and suppresses all access for a zero mask."]
+    X86Avx512Compressd = 871,
+    #[doc = "AVX512F packed lane operation. Compression keeps selected source lanes in order; expansion consumes packed lanes in order. Packed memory accesses exactly popcount(mask) elements and suppresses all access for a zero mask."]
+    X86Avx512Compressq = 872,
+    #[doc = "AVX512F packed lane operation. Compression keeps selected source lanes in order; expansion consumes packed lanes in order. Packed memory accesses exactly popcount(mask) elements and suppresses all access for a zero mask."]
+    X86Avx512Compressps = 873,
+    #[doc = "AVX512F packed lane operation. Compression keeps selected source lanes in order; expansion consumes packed lanes in order. Packed memory accesses exactly popcount(mask) elements and suppresses all access for a zero mask."]
+    X86Avx512Compresspd = 874,
+    #[doc = "AVX512F packed lane operation. Compression keeps selected source lanes in order; expansion consumes packed lanes in order. Packed memory accesses exactly popcount(mask) elements and suppresses all access for a zero mask."]
+    X86Avx512Expandd = 875,
+    #[doc = "AVX512F packed lane operation. Compression keeps selected source lanes in order; expansion consumes packed lanes in order. Packed memory accesses exactly popcount(mask) elements and suppresses all access for a zero mask."]
+    X86Avx512Expandq = 876,
+    #[doc = "AVX512F packed lane operation. Compression keeps selected source lanes in order; expansion consumes packed lanes in order. Packed memory accesses exactly popcount(mask) elements and suppresses all access for a zero mask."]
+    X86Avx512Expandps = 877,
+    #[doc = "AVX512F packed lane operation. Compression keeps selected source lanes in order; expansion consumes packed lanes in order. Packed memory accesses exactly popcount(mask) elements and suppresses all access for a zero mask."]
+    X86Avx512Expandpd = 878,
+    #[doc = "AVX512F packed lane operation. Compression keeps selected source lanes in order; expansion consumes packed lanes in order. Packed memory accesses exactly popcount(mask) elements and suppresses all access for a zero mask."]
+    X86Avx512CompressStored = 879,
+    #[doc = "AVX512F packed lane operation. Compression keeps selected source lanes in order; expansion consumes packed lanes in order. Packed memory accesses exactly popcount(mask) elements and suppresses all access for a zero mask."]
+    X86Avx512CompressStoreq = 880,
+    #[doc = "AVX512F packed lane operation. Compression keeps selected source lanes in order; expansion consumes packed lanes in order. Packed memory accesses exactly popcount(mask) elements and suppresses all access for a zero mask."]
+    X86Avx512CompressStoreps = 881,
+    #[doc = "AVX512F packed lane operation. Compression keeps selected source lanes in order; expansion consumes packed lanes in order. Packed memory accesses exactly popcount(mask) elements and suppresses all access for a zero mask."]
+    X86Avx512CompressStorepd = 882,
+    #[doc = "AVX512F packed lane operation. Compression keeps selected source lanes in order; expansion consumes packed lanes in order. Packed memory accesses exactly popcount(mask) elements and suppresses all access for a zero mask."]
+    X86Avx512ExpandLoadd = 883,
+    #[doc = "AVX512F packed lane operation. Compression keeps selected source lanes in order; expansion consumes packed lanes in order. Packed memory accesses exactly popcount(mask) elements and suppresses all access for a zero mask."]
+    X86Avx512ExpandLoadq = 884,
+    #[doc = "AVX512F packed lane operation. Compression keeps selected source lanes in order; expansion consumes packed lanes in order. Packed memory accesses exactly popcount(mask) elements and suppresses all access for a zero mask."]
+    X86Avx512ExpandLoadps = 885,
+    #[doc = "AVX512F packed lane operation. Compression keeps selected source lanes in order; expansion consumes packed lanes in order. Packed memory accesses exactly popcount(mask) elements and suppresses all access for a zero mask."]
+    X86Avx512ExpandLoadpd = 886,
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 855] = [
+    pub const ALL: [Intrinsic; 887] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -1891,6 +1955,38 @@ impl Intrinsic {
         Intrinsic::X86Avx512MaskLoadpd,
         Intrinsic::X86Avx512MaskStoreps,
         Intrinsic::X86Avx512MaskStorepd,
+        Intrinsic::X86Avx512Vpgatherdd,
+        Intrinsic::X86Avx512Vpgatherdq,
+        Intrinsic::X86Avx512Vpgatherqd,
+        Intrinsic::X86Avx512Vpgatherqq,
+        Intrinsic::X86Avx512Vgatherdps,
+        Intrinsic::X86Avx512Vgatherdpd,
+        Intrinsic::X86Avx512Vgatherqps,
+        Intrinsic::X86Avx512Vgatherqpd,
+        Intrinsic::X86Avx512Vpscatterdd,
+        Intrinsic::X86Avx512Vpscatterdq,
+        Intrinsic::X86Avx512Vpscatterqd,
+        Intrinsic::X86Avx512Vpscatterqq,
+        Intrinsic::X86Avx512Vscatterdps,
+        Intrinsic::X86Avx512Vscatterdpd,
+        Intrinsic::X86Avx512Vscatterqps,
+        Intrinsic::X86Avx512Vscatterqpd,
+        Intrinsic::X86Avx512Compressd,
+        Intrinsic::X86Avx512Compressq,
+        Intrinsic::X86Avx512Compressps,
+        Intrinsic::X86Avx512Compresspd,
+        Intrinsic::X86Avx512Expandd,
+        Intrinsic::X86Avx512Expandq,
+        Intrinsic::X86Avx512Expandps,
+        Intrinsic::X86Avx512Expandpd,
+        Intrinsic::X86Avx512CompressStored,
+        Intrinsic::X86Avx512CompressStoreq,
+        Intrinsic::X86Avx512CompressStoreps,
+        Intrinsic::X86Avx512CompressStorepd,
+        Intrinsic::X86Avx512ExpandLoadd,
+        Intrinsic::X86Avx512ExpandLoadq,
+        Intrinsic::X86Avx512ExpandLoadps,
+        Intrinsic::X86Avx512ExpandLoadpd,
     ];
 }
 
@@ -2742,5 +2838,37 @@ macro_rules! x86_intrinsics {
             | $crate::Intrinsic::X86Avx512MaskLoadpd
             | $crate::Intrinsic::X86Avx512MaskStoreps
             | $crate::Intrinsic::X86Avx512MaskStorepd
+            | $crate::Intrinsic::X86Avx512Vpgatherdd
+            | $crate::Intrinsic::X86Avx512Vpgatherdq
+            | $crate::Intrinsic::X86Avx512Vpgatherqd
+            | $crate::Intrinsic::X86Avx512Vpgatherqq
+            | $crate::Intrinsic::X86Avx512Vgatherdps
+            | $crate::Intrinsic::X86Avx512Vgatherdpd
+            | $crate::Intrinsic::X86Avx512Vgatherqps
+            | $crate::Intrinsic::X86Avx512Vgatherqpd
+            | $crate::Intrinsic::X86Avx512Vpscatterdd
+            | $crate::Intrinsic::X86Avx512Vpscatterdq
+            | $crate::Intrinsic::X86Avx512Vpscatterqd
+            | $crate::Intrinsic::X86Avx512Vpscatterqq
+            | $crate::Intrinsic::X86Avx512Vscatterdps
+            | $crate::Intrinsic::X86Avx512Vscatterdpd
+            | $crate::Intrinsic::X86Avx512Vscatterqps
+            | $crate::Intrinsic::X86Avx512Vscatterqpd
+            | $crate::Intrinsic::X86Avx512Compressd
+            | $crate::Intrinsic::X86Avx512Compressq
+            | $crate::Intrinsic::X86Avx512Compressps
+            | $crate::Intrinsic::X86Avx512Compresspd
+            | $crate::Intrinsic::X86Avx512Expandd
+            | $crate::Intrinsic::X86Avx512Expandq
+            | $crate::Intrinsic::X86Avx512Expandps
+            | $crate::Intrinsic::X86Avx512Expandpd
+            | $crate::Intrinsic::X86Avx512CompressStored
+            | $crate::Intrinsic::X86Avx512CompressStoreq
+            | $crate::Intrinsic::X86Avx512CompressStoreps
+            | $crate::Intrinsic::X86Avx512CompressStorepd
+            | $crate::Intrinsic::X86Avx512ExpandLoadd
+            | $crate::Intrinsic::X86Avx512ExpandLoadq
+            | $crate::Intrinsic::X86Avx512ExpandLoadps
+            | $crate::Intrinsic::X86Avx512ExpandLoadpd
     };
 }

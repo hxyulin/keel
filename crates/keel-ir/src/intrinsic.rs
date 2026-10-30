@@ -101,11 +101,411 @@ impl Intrinsic {
         matches!(self, Self::X86Avx512Cmpps | Self::X86Avx512Cmppd)
     }
 
+    /// AVX512F gathers/scatters preserve immutable SSA indices, data and masks.
+    pub fn is_x86_avx512_indexed(self) -> bool {
+        matches!(
+            self,
+            Self::X86Avx512Vpgatherdd
+                | Self::X86Avx512Vpgatherdq
+                | Self::X86Avx512Vpgatherqd
+                | Self::X86Avx512Vpgatherqq
+                | Self::X86Avx512Vgatherdps
+                | Self::X86Avx512Vgatherdpd
+                | Self::X86Avx512Vgatherqps
+                | Self::X86Avx512Vgatherqpd
+                | Self::X86Avx512Vpscatterdd
+                | Self::X86Avx512Vpscatterdq
+                | Self::X86Avx512Vpscatterqd
+                | Self::X86Avx512Vpscatterqq
+                | Self::X86Avx512Vscatterdps
+                | Self::X86Avx512Vscatterdpd
+                | Self::X86Avx512Vscatterqps
+                | Self::X86Avx512Vscatterqpd
+        )
+    }
+
+    pub fn is_x86_avx512_scatter(self) -> bool {
+        matches!(
+            self,
+            Self::X86Avx512Vpscatterdd
+                | Self::X86Avx512Vpscatterdq
+                | Self::X86Avx512Vpscatterqd
+                | Self::X86Avx512Vpscatterqq
+                | Self::X86Avx512Vscatterdps
+                | Self::X86Avx512Vscatterdpd
+                | Self::X86Avx512Vscatterqps
+                | Self::X86Avx512Vscatterqpd
+        )
+    }
+
+    /// AVX512F compression/expansion uses scalar masks and immutable SSA inputs.
+    pub fn is_x86_avx512_pack(self) -> bool {
+        matches!(
+            self,
+            Self::X86Avx512Compressd
+                | Self::X86Avx512Compressq
+                | Self::X86Avx512Compressps
+                | Self::X86Avx512Compresspd
+                | Self::X86Avx512Expandd
+                | Self::X86Avx512Expandq
+                | Self::X86Avx512Expandps
+                | Self::X86Avx512Expandpd
+                | Self::X86Avx512CompressStored
+                | Self::X86Avx512CompressStoreq
+                | Self::X86Avx512CompressStoreps
+                | Self::X86Avx512CompressStorepd
+                | Self::X86Avx512ExpandLoadd
+                | Self::X86Avx512ExpandLoadq
+                | Self::X86Avx512ExpandLoadps
+                | Self::X86Avx512ExpandLoadpd
+        )
+    }
+
+    pub fn is_x86_avx512_compress_store(self) -> bool {
+        matches!(
+            self,
+            Self::X86Avx512CompressStored
+                | Self::X86Avx512CompressStoreq
+                | Self::X86Avx512CompressStoreps
+                | Self::X86Avx512CompressStorepd
+        )
+    }
+
+    pub fn is_x86_avx512_expand_load(self) -> bool {
+        matches!(
+            self,
+            Self::X86Avx512ExpandLoadd
+                | Self::X86Avx512ExpandLoadq
+                | Self::X86Avx512ExpandLoadps
+                | Self::X86Avx512ExpandLoadpd
+        )
+    }
+
     pub fn info(self) -> IntrinsicInfo {
         const MEM: &[Type] = &[Type::Ptr, Type::Ptr, Type::I64];
         let (name, params, returns, pure): (_, &'static [Type], &'static [Type], _) = match self {
             x86_system_intrinsics!(all) => return self.generated_system_info().unwrap(),
             x86_query_intrinsics!(all) => return self.generated_query_info().unwrap(),
+            Intrinsic::X86Avx512Compressd => (
+                "x86_avx512_compressd",
+                &[
+                    Type::Vector(VectorType::I32x16),
+                    Type::I16,
+                    Type::Vector(VectorType::I32x16),
+                ],
+                &[Type::Vector(VectorType::I32x16)],
+                true,
+            ),
+            Intrinsic::X86Avx512Compressq => (
+                "x86_avx512_compressq",
+                &[
+                    Type::Vector(VectorType::I64x8),
+                    Type::I8,
+                    Type::Vector(VectorType::I64x8),
+                ],
+                &[Type::Vector(VectorType::I64x8)],
+                true,
+            ),
+            Intrinsic::X86Avx512Compressps => (
+                "x86_avx512_compressps",
+                &[
+                    Type::Vector(VectorType::F32x16),
+                    Type::I16,
+                    Type::Vector(VectorType::F32x16),
+                ],
+                &[Type::Vector(VectorType::F32x16)],
+                true,
+            ),
+            Intrinsic::X86Avx512Compresspd => (
+                "x86_avx512_compresspd",
+                &[
+                    Type::Vector(VectorType::F64x8),
+                    Type::I8,
+                    Type::Vector(VectorType::F64x8),
+                ],
+                &[Type::Vector(VectorType::F64x8)],
+                true,
+            ),
+            Intrinsic::X86Avx512Expandd => (
+                "x86_avx512_expandd",
+                &[
+                    Type::Vector(VectorType::I32x16),
+                    Type::I16,
+                    Type::Vector(VectorType::I32x16),
+                ],
+                &[Type::Vector(VectorType::I32x16)],
+                true,
+            ),
+            Intrinsic::X86Avx512Expandq => (
+                "x86_avx512_expandq",
+                &[
+                    Type::Vector(VectorType::I64x8),
+                    Type::I8,
+                    Type::Vector(VectorType::I64x8),
+                ],
+                &[Type::Vector(VectorType::I64x8)],
+                true,
+            ),
+            Intrinsic::X86Avx512Expandps => (
+                "x86_avx512_expandps",
+                &[
+                    Type::Vector(VectorType::F32x16),
+                    Type::I16,
+                    Type::Vector(VectorType::F32x16),
+                ],
+                &[Type::Vector(VectorType::F32x16)],
+                true,
+            ),
+            Intrinsic::X86Avx512Expandpd => (
+                "x86_avx512_expandpd",
+                &[
+                    Type::Vector(VectorType::F64x8),
+                    Type::I8,
+                    Type::Vector(VectorType::F64x8),
+                ],
+                &[Type::Vector(VectorType::F64x8)],
+                true,
+            ),
+            Intrinsic::X86Avx512CompressStored => (
+                "x86_avx512_compressstored",
+                &[Type::Ptr, Type::Vector(VectorType::I32x16), Type::I16],
+                &[],
+                false,
+            ),
+            Intrinsic::X86Avx512CompressStoreq => (
+                "x86_avx512_compressstoreq",
+                &[Type::Ptr, Type::Vector(VectorType::I64x8), Type::I8],
+                &[],
+                false,
+            ),
+            Intrinsic::X86Avx512CompressStoreps => (
+                "x86_avx512_compressstoreps",
+                &[Type::Ptr, Type::Vector(VectorType::F32x16), Type::I16],
+                &[],
+                false,
+            ),
+            Intrinsic::X86Avx512CompressStorepd => (
+                "x86_avx512_compressstorepd",
+                &[Type::Ptr, Type::Vector(VectorType::F64x8), Type::I8],
+                &[],
+                false,
+            ),
+            Intrinsic::X86Avx512ExpandLoadd => (
+                "x86_avx512_expandloadd",
+                &[Type::Ptr, Type::Vector(VectorType::I32x16), Type::I16],
+                &[Type::Vector(VectorType::I32x16)],
+                false,
+            ),
+            Intrinsic::X86Avx512ExpandLoadq => (
+                "x86_avx512_expandloadq",
+                &[Type::Ptr, Type::Vector(VectorType::I64x8), Type::I8],
+                &[Type::Vector(VectorType::I64x8)],
+                false,
+            ),
+            Intrinsic::X86Avx512ExpandLoadps => (
+                "x86_avx512_expandloadps",
+                &[Type::Ptr, Type::Vector(VectorType::F32x16), Type::I16],
+                &[Type::Vector(VectorType::F32x16)],
+                false,
+            ),
+            Intrinsic::X86Avx512ExpandLoadpd => (
+                "x86_avx512_expandloadpd",
+                &[Type::Ptr, Type::Vector(VectorType::F64x8), Type::I8],
+                &[Type::Vector(VectorType::F64x8)],
+                false,
+            ),
+            Intrinsic::X86Avx512Vpgatherdd => (
+                "x86_avx512_vpgatherdd",
+                &[
+                    Type::Ptr,
+                    Type::Vector(VectorType::I32x16),
+                    Type::Vector(VectorType::I32x16),
+                    Type::I16,
+                    Type::I32,
+                ],
+                &[Type::Vector(VectorType::I32x16)],
+                false,
+            ),
+            Intrinsic::X86Avx512Vpgatherdq => (
+                "x86_avx512_vpgatherdq",
+                &[
+                    Type::Ptr,
+                    Type::Vector(VectorType::I32x8),
+                    Type::Vector(VectorType::I64x8),
+                    Type::I8,
+                    Type::I32,
+                ],
+                &[Type::Vector(VectorType::I64x8)],
+                false,
+            ),
+            Intrinsic::X86Avx512Vpgatherqd => (
+                "x86_avx512_vpgatherqd",
+                &[
+                    Type::Ptr,
+                    Type::Vector(VectorType::I64x8),
+                    Type::Vector(VectorType::I32x8),
+                    Type::I8,
+                    Type::I32,
+                ],
+                &[Type::Vector(VectorType::I32x8)],
+                false,
+            ),
+            Intrinsic::X86Avx512Vpgatherqq => (
+                "x86_avx512_vpgatherqq",
+                &[
+                    Type::Ptr,
+                    Type::Vector(VectorType::I64x8),
+                    Type::Vector(VectorType::I64x8),
+                    Type::I8,
+                    Type::I32,
+                ],
+                &[Type::Vector(VectorType::I64x8)],
+                false,
+            ),
+            Intrinsic::X86Avx512Vgatherdps => (
+                "x86_avx512_vgatherdps",
+                &[
+                    Type::Ptr,
+                    Type::Vector(VectorType::I32x16),
+                    Type::Vector(VectorType::F32x16),
+                    Type::I16,
+                    Type::I32,
+                ],
+                &[Type::Vector(VectorType::F32x16)],
+                false,
+            ),
+            Intrinsic::X86Avx512Vgatherdpd => (
+                "x86_avx512_vgatherdpd",
+                &[
+                    Type::Ptr,
+                    Type::Vector(VectorType::I32x8),
+                    Type::Vector(VectorType::F64x8),
+                    Type::I8,
+                    Type::I32,
+                ],
+                &[Type::Vector(VectorType::F64x8)],
+                false,
+            ),
+            Intrinsic::X86Avx512Vgatherqps => (
+                "x86_avx512_vgatherqps",
+                &[
+                    Type::Ptr,
+                    Type::Vector(VectorType::I64x8),
+                    Type::Vector(VectorType::F32x8),
+                    Type::I8,
+                    Type::I32,
+                ],
+                &[Type::Vector(VectorType::F32x8)],
+                false,
+            ),
+            Intrinsic::X86Avx512Vgatherqpd => (
+                "x86_avx512_vgatherqpd",
+                &[
+                    Type::Ptr,
+                    Type::Vector(VectorType::I64x8),
+                    Type::Vector(VectorType::F64x8),
+                    Type::I8,
+                    Type::I32,
+                ],
+                &[Type::Vector(VectorType::F64x8)],
+                false,
+            ),
+            Intrinsic::X86Avx512Vpscatterdd => (
+                "x86_avx512_vpscatterdd",
+                &[
+                    Type::Ptr,
+                    Type::Vector(VectorType::I32x16),
+                    Type::Vector(VectorType::I32x16),
+                    Type::I16,
+                    Type::I32,
+                ],
+                &[],
+                false,
+            ),
+            Intrinsic::X86Avx512Vpscatterdq => (
+                "x86_avx512_vpscatterdq",
+                &[
+                    Type::Ptr,
+                    Type::Vector(VectorType::I32x8),
+                    Type::Vector(VectorType::I64x8),
+                    Type::I8,
+                    Type::I32,
+                ],
+                &[],
+                false,
+            ),
+            Intrinsic::X86Avx512Vpscatterqd => (
+                "x86_avx512_vpscatterqd",
+                &[
+                    Type::Ptr,
+                    Type::Vector(VectorType::I64x8),
+                    Type::Vector(VectorType::I32x8),
+                    Type::I8,
+                    Type::I32,
+                ],
+                &[],
+                false,
+            ),
+            Intrinsic::X86Avx512Vpscatterqq => (
+                "x86_avx512_vpscatterqq",
+                &[
+                    Type::Ptr,
+                    Type::Vector(VectorType::I64x8),
+                    Type::Vector(VectorType::I64x8),
+                    Type::I8,
+                    Type::I32,
+                ],
+                &[],
+                false,
+            ),
+            Intrinsic::X86Avx512Vscatterdps => (
+                "x86_avx512_vscatterdps",
+                &[
+                    Type::Ptr,
+                    Type::Vector(VectorType::I32x16),
+                    Type::Vector(VectorType::F32x16),
+                    Type::I16,
+                    Type::I32,
+                ],
+                &[],
+                false,
+            ),
+            Intrinsic::X86Avx512Vscatterdpd => (
+                "x86_avx512_vscatterdpd",
+                &[
+                    Type::Ptr,
+                    Type::Vector(VectorType::I32x8),
+                    Type::Vector(VectorType::F64x8),
+                    Type::I8,
+                    Type::I32,
+                ],
+                &[],
+                false,
+            ),
+            Intrinsic::X86Avx512Vscatterqps => (
+                "x86_avx512_vscatterqps",
+                &[
+                    Type::Ptr,
+                    Type::Vector(VectorType::I64x8),
+                    Type::Vector(VectorType::F32x8),
+                    Type::I8,
+                    Type::I32,
+                ],
+                &[],
+                false,
+            ),
+            Intrinsic::X86Avx512Vscatterqpd => (
+                "x86_avx512_vscatterqpd",
+                &[
+                    Type::Ptr,
+                    Type::Vector(VectorType::I64x8),
+                    Type::Vector(VectorType::F64x8),
+                    Type::I8,
+                    Type::I32,
+                ],
+                &[],
+                false,
+            ),
             Intrinsic::X86Avx512Cmpps => (
                 "x86_avx512_cmpps",
                 &[
@@ -5785,6 +6185,8 @@ impl Intrinsic {
             || self.is_x86_fp_compare()
             || self.is_x86_sha256()
             || self.is_x86_avx512_mask()
+            || self.is_x86_avx512_indexed()
+            || self.is_x86_avx512_pack()
             || self.x86_aes_opcode().is_some()
             || self.is_x86_pure_bits()
             || self.is_x86_fp_misc()

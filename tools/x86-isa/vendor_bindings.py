@@ -24,7 +24,7 @@ VALUE_CONTROLS = {
     'cmp_imm5': ({'X86AvxVcmpps128', 'X86AvxVcmppd128', 'X86AvxVcmpss', 'X86AvxVcmpsd',
                  'X86AvxVcmpps256', 'X86AvxVcmppd256'},
                  2, 31, 31, 'AVX comparison predicate must be an integer constant expression in 0..31'),
-    'gather_scale': ({'X86Avx2Vgatherdps128', 'X86Avx2Vgatherdps256',
+    'gather_scale': ({'X86Avx512Vpgatherdd', 'X86Avx512Vpgatherdq', 'X86Avx512Vpgatherqd', 'X86Avx512Vpgatherqq', 'X86Avx512Vgatherdps', 'X86Avx512Vgatherdpd', 'X86Avx512Vgatherqps', 'X86Avx512Vgatherqpd', 'X86Avx512Vpscatterdd', 'X86Avx512Vpscatterdq', 'X86Avx512Vpscatterqd', 'X86Avx512Vpscatterqq', 'X86Avx512Vscatterdps', 'X86Avx512Vscatterdpd', 'X86Avx512Vscatterqps', 'X86Avx512Vscatterqpd', 'X86Avx2Vgatherdps128', 'X86Avx2Vgatherdps256',
                       'X86Avx2Vgatherdpd128', 'X86Avx2Vgatherdpd256',
                       'X86Avx2Vgatherqps128', 'X86Avx2Vgatherqps256',
                       'X86Avx2Vgatherqpd128', 'X86Avx2Vgatherqpd256',

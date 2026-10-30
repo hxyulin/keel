@@ -393,7 +393,7 @@ bitwise operations and comparisons, including compound assignments; see
 [GNU vector mode](../../frontends/c/extensions.md#gnu-vector-mode-scalar-broadcasts) for conversion checks
 and remaining scalar-shift/cross-domain limits. Constructor functions remain
 available for explicit element conversions. AVX-512 support is limited to the
-operations listed here; scatter operations are unsupported. The C restrictions on vector varargs, unions and by-value x86
+operations listed here. The C restrictions on vector varargs, unions and by-value x86
 aggregates apply; see [GNU vector mode](../../frontends/c/extensions.md).
 
 <a id="c-x86-intrinsics-bounded-sse2-packed-shifts"></a>
@@ -667,6 +667,36 @@ MXCSR; these raw operations remain pinned through optimization.
 `_mm512_mask_loadu_{ps,pd}` and `_mm512_mask_storeu_{ps,pd}` access only
 active lanes and accept unaligned addresses. All these wrappers require
 AVX512F permission.
+
+### Indexed memory
+
+AVX512F supports eight gather and eight scatter forms. Dword or qword
+signed indices address dword/qword integer or single/double floating elements.
+The data and index vectors have the widths required by each instruction;
+qword-index dword-data forms use eight data lanes. Scale is an integer constant
+1, 2, 4 or 8. Scalar mask bits select active lanes. Inactive lanes suppress
+memory access, while inactive gather lanes preserve the merge source.
+SSA masks and indices remain unchanged after the operation. A fault may leave
+partial memory effects, as on the instruction itself. The intrinsics do not
+provide a signal-handler resume ABI or expose partially cleared hardware masks.
+
+### Compression and expansion
+
+The typed `x86_avx512_compress{d,q,ps,pd}` intrinsics take a merge vector,
+scalar mask and input vector. They pack selected input lanes into the low
+result lanes in source order. Result lanes above `popcount(mask)` preserve
+the corresponding merge lanes. `x86_avx512_expand{d,q,ps,pd}` has the same
+signature and consumes the packed input prefix into selected result lanes;
+inactive result lanes preserve the merge source.
+
+`x86_avx512_compressstore{d,q,ps,pd}(ptr, value, mask)` writes the packed
+prefix. `x86_avx512_expandload{d,q,ps,pd}(ptr, merge, mask)` reads a packed
+prefix and returns the expanded vector. Memory forms access exactly
+`popcount(mask)` contiguous elements, even when mask bits select high lanes.
+A zero mask suppresses every memory access. Addresses may be unaligned.
+Dword/single forms use sixteen lanes and `i16` masks; qword/double forms use
+eight lanes and `i8` masks. All vectors are 512 bits. These bit transfers
+preserve floating NaN payloads and require AVX512F without AVX2 or AVX512VL.
 
 ## SHA-256
 

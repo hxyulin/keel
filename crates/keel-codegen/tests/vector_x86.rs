@@ -876,3 +876,8 @@ mod x86_avx512_reduce;
 
 #[path = "vector_x86/x86_avx512_convert.rs"]
 mod x86_avx512_convert;
+#[path = "vector_x86/x86_avx512_indexed.rs"]
+mod x86_avx512_indexed;
+
+#[path = "vector_x86/x86_avx512_pack.rs"]
+mod x86_avx512_pack;

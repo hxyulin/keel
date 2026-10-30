@@ -1716,7 +1716,7 @@ impl Verifier<'_> {
                         );
                     }
                 }
-                if id.is_x86_gather() {
+                if id.is_x86_gather() || id.is_x86_avx512_indexed() {
                     let scale = args
                         .get(4)
                         .and_then(|&a| match func.value_def(func.resolve(a)) {
@@ -1729,7 +1729,7 @@ impl Verifier<'_> {
                     if !scale.is_some_and(|n| matches!(n, 1 | 2 | 4 | 8)) {
                         self.inst_error(
                             inst,
-                            "AVX2 gather scale must be iconst.i32 in1,2,4,8".into(),
+                            "indexed memory scale must be iconst.i32 in1,2,4,8".into(),
                         );
                     }
                 }

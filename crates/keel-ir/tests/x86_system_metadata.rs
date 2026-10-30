@@ -16,7 +16,7 @@ fn all_numeric_ids_and_inventory_order_stay_stable() {
         .map(|id| (format!("{id:?}"), *id as usize))
         .collect();
     let expected: Vec<_> = fixture(include_str!("fixtures/intrinsic-inventory.txt")).collect();
-    assert_eq!(Intrinsic::ALL.len(), expected.len() + 36);
+    assert_eq!(Intrinsic::ALL.len(), expected.len() + 68);
     assert_eq!(
         &Intrinsic::ALL[expected.len()..],
         &[
@@ -55,7 +55,39 @@ fn all_numeric_ids_and_inventory_order_stay_stable() {
             Intrinsic::X86Avx512MaskLoadps,
             Intrinsic::X86Avx512MaskLoadpd,
             Intrinsic::X86Avx512MaskStoreps,
-            Intrinsic::X86Avx512MaskStorepd
+            Intrinsic::X86Avx512MaskStorepd,
+            Intrinsic::X86Avx512Vpgatherdd,
+            Intrinsic::X86Avx512Vpgatherdq,
+            Intrinsic::X86Avx512Vpgatherqd,
+            Intrinsic::X86Avx512Vpgatherqq,
+            Intrinsic::X86Avx512Vgatherdps,
+            Intrinsic::X86Avx512Vgatherdpd,
+            Intrinsic::X86Avx512Vgatherqps,
+            Intrinsic::X86Avx512Vgatherqpd,
+            Intrinsic::X86Avx512Vpscatterdd,
+            Intrinsic::X86Avx512Vpscatterdq,
+            Intrinsic::X86Avx512Vpscatterqd,
+            Intrinsic::X86Avx512Vpscatterqq,
+            Intrinsic::X86Avx512Vscatterdps,
+            Intrinsic::X86Avx512Vscatterdpd,
+            Intrinsic::X86Avx512Vscatterqps,
+            Intrinsic::X86Avx512Vscatterqpd,
+            Intrinsic::X86Avx512Compressd,
+            Intrinsic::X86Avx512Compressq,
+            Intrinsic::X86Avx512Compressps,
+            Intrinsic::X86Avx512Compresspd,
+            Intrinsic::X86Avx512Expandd,
+            Intrinsic::X86Avx512Expandq,
+            Intrinsic::X86Avx512Expandps,
+            Intrinsic::X86Avx512Expandpd,
+            Intrinsic::X86Avx512CompressStored,
+            Intrinsic::X86Avx512CompressStoreq,
+            Intrinsic::X86Avx512CompressStoreps,
+            Intrinsic::X86Avx512CompressStorepd,
+            Intrinsic::X86Avx512ExpandLoadd,
+            Intrinsic::X86Avx512ExpandLoadq,
+            Intrinsic::X86Avx512ExpandLoadps,
+            Intrinsic::X86Avx512ExpandLoadpd,
         ]
     );
     assert_eq!(

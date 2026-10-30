@@ -570,3 +570,75 @@ fn avx512_unmasked_headers_native_and_single_evaluation() {
         }
     }
 }
+
+#[test]
+fn avx512_indexed_and_packed_memory_headers_validate_shapes_and_controls() {
+    let mut source = String::from("#include <immintrin.h>\n");
+    for (bits, suffix, index, data, mask) in [
+        (32, "epi32", "__m512i", "__m512i", "__mmask16"),
+        (32, "epi64", "__m256i", "__m512i", "__mmask8"),
+        (64, "epi32", "__m512i", "__m256i", "__mmask8"),
+        (64, "epi64", "__m512i", "__m512i", "__mmask8"),
+        (32, "ps", "__m512i", "__m512", "__mmask16"),
+        (32, "pd", "__m256i", "__m512d", "__mmask8"),
+        (64, "ps", "__m512i", "__m256", "__mmask8"),
+        (64, "pd", "__m512i", "__m512d", "__mmask8"),
+    ] {
+        for scale in [1, 2, 4, 8] {
+            source += &format!(
+                "{data} gather_{bits}_{suffix}_{scale}(void*p,{index} i,{data} s,{mask} k){{return _mm512_mask_i{bits}gather_{suffix}(s,k,i,p,{scale});}}\nvoid scatter_{bits}_{suffix}_{scale}(void*p,{index} i,{data} a,{mask} k){{_mm512_mask_i{bits}scatter_{suffix}(p,k,i,a,{scale});}}\n"
+            );
+        }
+        source += &format!(
+            "{data} allgather_{bits}_{suffix}(void*p,{index} i){{return _mm512_i{bits}gather_{suffix}(i,p,4);}}\nvoid allscatter_{bits}_{suffix}(void*p,{index} i,{data} a){{_mm512_i{bits}scatter_{suffix}(p,i,a,4);}}\n"
+        );
+    }
+    for (suffix, data, mask) in [
+        ("epi32", "__m512i", "__mmask16"),
+        ("epi64", "__m512i", "__mmask8"),
+        ("ps", "__m512", "__mmask16"),
+        ("pd", "__m512d", "__mmask8"),
+    ] {
+        for op in ["compress", "expand"] {
+            source += &format!(
+                "{data} {op}_{suffix}({data} s,{mask} k,{data} a){{return _mm512_mask_{op}_{suffix}(s,k,a);}}\n{data} {op}zero_{suffix}({mask} k,{data} a){{return _mm512_maskz_{op}_{suffix}(k,a);}}\n"
+            );
+        }
+        source += &format!(
+            "void packedstore_{suffix}(void*p,{mask} k,{data} a){{_mm512_mask_compressstoreu_{suffix}(p,k,a);}}\n{data} packedload_{suffix}(void*p,{mask} k,{data} s){{return _mm512_mask_expandloadu_{suffix}(s,k,p);}}\n{data} packedloadzero_{suffix}(void*p,{mask} k){{return _mm512_maskz_expandloadu_{suffix}(k,p);}}\n"
+        );
+    }
+    let target = Target::X86_64LinuxGnu;
+    let mut module = parse(&source, target).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    keel_opt::optimize(&mut module).unwrap();
+    let features = Features::NONE.with_features("avx512f").unwrap();
+    assert!(!features.avx2);
+    let selector = FeatureSelector {
+        inner: &SelectionTier::Full,
+        features,
+    };
+    let pipeline = CodegenPipeline {
+        selector: &selector,
+        allocator: &AllocationTier::Full,
+    };
+    let program = keel_codegen::compile_program_with_pipeline(&module, target, &pipeline).unwrap();
+    keel_asm::x86::assemble_program_object_with_features(&program, features).unwrap();
+    for scale in ["0", "3", "16", "-1", "n"] {
+        for op in ["gather", "scatter"] {
+            let body = if op == "gather" {
+                format!("return _mm512_mask_i32gather_epi32(a,k,i,p,{scale});")
+            } else {
+                format!("_mm512_mask_i32scatter_epi32(p,k,i,a,{scale});return a;")
+            };
+            let invalid = format!(
+                "#include <immintrin.h>\n__m512i f(void*p,__m512i i,__m512i a,__mmask16 k,int n){{{body}}}"
+            );
+            assert!(
+                parse(&invalid, target).is_err(),
+                "{op} accepted scale {scale}"
+            );
+        }
+    }
+    assert!(parse(&source, Target::Aarch64LinuxGnu).is_err());
+}

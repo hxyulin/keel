@@ -360,6 +360,38 @@ fn lookup(base: &str) -> Option<Binding> {
         "keel_avx512_maskloadpd" => Binding::Value(Intrinsic::X86Avx512MaskLoadpd, None),
         "keel_avx512_maskstoreps" => Binding::Value(Intrinsic::X86Avx512MaskStoreps, None),
         "keel_avx512_maskstorepd" => Binding::Value(Intrinsic::X86Avx512MaskStorepd, None),
+        "keel_avx512_vpgatherdd" => Binding::Value(Intrinsic::X86Avx512Vpgatherdd, Some(&ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" })),
+        "keel_avx512_vpgatherdq" => Binding::Value(Intrinsic::X86Avx512Vpgatherdq, Some(&ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" })),
+        "keel_avx512_vpgatherqd" => Binding::Value(Intrinsic::X86Avx512Vpgatherqd, Some(&ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" })),
+        "keel_avx512_vpgatherqq" => Binding::Value(Intrinsic::X86Avx512Vpgatherqq, Some(&ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" })),
+        "keel_avx512_vgatherdps" => Binding::Value(Intrinsic::X86Avx512Vgatherdps, Some(&ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" })),
+        "keel_avx512_vgatherdpd" => Binding::Value(Intrinsic::X86Avx512Vgatherdpd, Some(&ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" })),
+        "keel_avx512_vgatherqps" => Binding::Value(Intrinsic::X86Avx512Vgatherqps, Some(&ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" })),
+        "keel_avx512_vgatherqpd" => Binding::Value(Intrinsic::X86Avx512Vgatherqpd, Some(&ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" })),
+        "keel_avx512_vpscatterdd" => Binding::Value(Intrinsic::X86Avx512Vpscatterdd, Some(&ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" })),
+        "keel_avx512_vpscatterdq" => Binding::Value(Intrinsic::X86Avx512Vpscatterdq, Some(&ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" })),
+        "keel_avx512_vpscatterqd" => Binding::Value(Intrinsic::X86Avx512Vpscatterqd, Some(&ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" })),
+        "keel_avx512_vpscatterqq" => Binding::Value(Intrinsic::X86Avx512Vpscatterqq, Some(&ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" })),
+        "keel_avx512_vscatterdps" => Binding::Value(Intrinsic::X86Avx512Vscatterdps, Some(&ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" })),
+        "keel_avx512_vscatterdpd" => Binding::Value(Intrinsic::X86Avx512Vscatterdpd, Some(&ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" })),
+        "keel_avx512_vscatterqps" => Binding::Value(Intrinsic::X86Avx512Vscatterqps, Some(&ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" })),
+        "keel_avx512_vscatterqpd" => Binding::Value(Intrinsic::X86Avx512Vscatterqpd, Some(&ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" })),
+        "keel_avx512_compressd" => Binding::Value(Intrinsic::X86Avx512Compressd, None),
+        "keel_avx512_compressq" => Binding::Value(Intrinsic::X86Avx512Compressq, None),
+        "keel_avx512_compressps" => Binding::Value(Intrinsic::X86Avx512Compressps, None),
+        "keel_avx512_compresspd" => Binding::Value(Intrinsic::X86Avx512Compresspd, None),
+        "keel_avx512_expandd" => Binding::Value(Intrinsic::X86Avx512Expandd, None),
+        "keel_avx512_expandq" => Binding::Value(Intrinsic::X86Avx512Expandq, None),
+        "keel_avx512_expandps" => Binding::Value(Intrinsic::X86Avx512Expandps, None),
+        "keel_avx512_expandpd" => Binding::Value(Intrinsic::X86Avx512Expandpd, None),
+        "keel_avx512_compressstored" => Binding::Value(Intrinsic::X86Avx512CompressStored, None),
+        "keel_avx512_compressstoreq" => Binding::Value(Intrinsic::X86Avx512CompressStoreq, None),
+        "keel_avx512_compressstoreps" => Binding::Value(Intrinsic::X86Avx512CompressStoreps, None),
+        "keel_avx512_compressstorepd" => Binding::Value(Intrinsic::X86Avx512CompressStorepd, None),
+        "keel_avx512_expandloadd" => Binding::Value(Intrinsic::X86Avx512ExpandLoadd, None),
+        "keel_avx512_expandloadq" => Binding::Value(Intrinsic::X86Avx512ExpandLoadq, None),
+        "keel_avx512_expandloadps" => Binding::Value(Intrinsic::X86Avx512ExpandLoadps, None),
+        "keel_avx512_expandloadpd" => Binding::Value(Intrinsic::X86Avx512ExpandLoadpd, None),
         _ => return None,
     })
 }
@@ -729,6 +761,38 @@ const _: () = {
     assert!(Intrinsic::X86Avx512MaskLoadpd as u16 == 852);
     assert!(Intrinsic::X86Avx512MaskStoreps as u16 == 853);
     assert!(Intrinsic::X86Avx512MaskStorepd as u16 == 854);
+    assert!(Intrinsic::X86Avx512Vpgatherdd as u16 == 855);
+    assert!(Intrinsic::X86Avx512Vpgatherdq as u16 == 856);
+    assert!(Intrinsic::X86Avx512Vpgatherqd as u16 == 857);
+    assert!(Intrinsic::X86Avx512Vpgatherqq as u16 == 858);
+    assert!(Intrinsic::X86Avx512Vgatherdps as u16 == 859);
+    assert!(Intrinsic::X86Avx512Vgatherdpd as u16 == 860);
+    assert!(Intrinsic::X86Avx512Vgatherqps as u16 == 861);
+    assert!(Intrinsic::X86Avx512Vgatherqpd as u16 == 862);
+    assert!(Intrinsic::X86Avx512Vpscatterdd as u16 == 863);
+    assert!(Intrinsic::X86Avx512Vpscatterdq as u16 == 864);
+    assert!(Intrinsic::X86Avx512Vpscatterqd as u16 == 865);
+    assert!(Intrinsic::X86Avx512Vpscatterqq as u16 == 866);
+    assert!(Intrinsic::X86Avx512Vscatterdps as u16 == 867);
+    assert!(Intrinsic::X86Avx512Vscatterdpd as u16 == 868);
+    assert!(Intrinsic::X86Avx512Vscatterqps as u16 == 869);
+    assert!(Intrinsic::X86Avx512Vscatterqpd as u16 == 870);
+    assert!(Intrinsic::X86Avx512Compressd as u16 == 871);
+    assert!(Intrinsic::X86Avx512Compressq as u16 == 872);
+    assert!(Intrinsic::X86Avx512Compressps as u16 == 873);
+    assert!(Intrinsic::X86Avx512Compresspd as u16 == 874);
+    assert!(Intrinsic::X86Avx512Expandd as u16 == 875);
+    assert!(Intrinsic::X86Avx512Expandq as u16 == 876);
+    assert!(Intrinsic::X86Avx512Expandps as u16 == 877);
+    assert!(Intrinsic::X86Avx512Expandpd as u16 == 878);
+    assert!(Intrinsic::X86Avx512CompressStored as u16 == 879);
+    assert!(Intrinsic::X86Avx512CompressStoreq as u16 == 880);
+    assert!(Intrinsic::X86Avx512CompressStoreps as u16 == 881);
+    assert!(Intrinsic::X86Avx512CompressStorepd as u16 == 882);
+    assert!(Intrinsic::X86Avx512ExpandLoadd as u16 == 883);
+    assert!(Intrinsic::X86Avx512ExpandLoadq as u16 == 884);
+    assert!(Intrinsic::X86Avx512ExpandLoadps as u16 == 885);
+    assert!(Intrinsic::X86Avx512ExpandLoadpd as u16 == 886);
 };
 
 #[cfg(test)]
@@ -1077,6 +1141,38 @@ mod tests {
             (Intrinsic::X86Avx512MaskLoadpd, &[Type::Ptr, Type::Vector(VectorType::F64x8), Type::I8], &[Type::Vector(VectorType::F64x8)]),
             (Intrinsic::X86Avx512MaskStoreps, &[Type::Ptr, Type::Vector(VectorType::F32x16), Type::I16], &[]),
             (Intrinsic::X86Avx512MaskStorepd, &[Type::Ptr, Type::Vector(VectorType::F64x8), Type::I8], &[]),
+            (Intrinsic::X86Avx512Vpgatherdd, &[Type::Ptr, Type::Vector(VectorType::I32x16), Type::Vector(VectorType::I32x16), Type::I16, Type::I32], &[Type::Vector(VectorType::I32x16)]),
+            (Intrinsic::X86Avx512Vpgatherdq, &[Type::Ptr, Type::Vector(VectorType::I32x8), Type::Vector(VectorType::I64x8), Type::I8, Type::I32], &[Type::Vector(VectorType::I64x8)]),
+            (Intrinsic::X86Avx512Vpgatherqd, &[Type::Ptr, Type::Vector(VectorType::I64x8), Type::Vector(VectorType::I32x8), Type::I8, Type::I32], &[Type::Vector(VectorType::I32x8)]),
+            (Intrinsic::X86Avx512Vpgatherqq, &[Type::Ptr, Type::Vector(VectorType::I64x8), Type::Vector(VectorType::I64x8), Type::I8, Type::I32], &[Type::Vector(VectorType::I64x8)]),
+            (Intrinsic::X86Avx512Vgatherdps, &[Type::Ptr, Type::Vector(VectorType::I32x16), Type::Vector(VectorType::F32x16), Type::I16, Type::I32], &[Type::Vector(VectorType::F32x16)]),
+            (Intrinsic::X86Avx512Vgatherdpd, &[Type::Ptr, Type::Vector(VectorType::I32x8), Type::Vector(VectorType::F64x8), Type::I8, Type::I32], &[Type::Vector(VectorType::F64x8)]),
+            (Intrinsic::X86Avx512Vgatherqps, &[Type::Ptr, Type::Vector(VectorType::I64x8), Type::Vector(VectorType::F32x8), Type::I8, Type::I32], &[Type::Vector(VectorType::F32x8)]),
+            (Intrinsic::X86Avx512Vgatherqpd, &[Type::Ptr, Type::Vector(VectorType::I64x8), Type::Vector(VectorType::F64x8), Type::I8, Type::I32], &[Type::Vector(VectorType::F64x8)]),
+            (Intrinsic::X86Avx512Vpscatterdd, &[Type::Ptr, Type::Vector(VectorType::I32x16), Type::Vector(VectorType::I32x16), Type::I16, Type::I32], &[]),
+            (Intrinsic::X86Avx512Vpscatterdq, &[Type::Ptr, Type::Vector(VectorType::I32x8), Type::Vector(VectorType::I64x8), Type::I8, Type::I32], &[]),
+            (Intrinsic::X86Avx512Vpscatterqd, &[Type::Ptr, Type::Vector(VectorType::I64x8), Type::Vector(VectorType::I32x8), Type::I8, Type::I32], &[]),
+            (Intrinsic::X86Avx512Vpscatterqq, &[Type::Ptr, Type::Vector(VectorType::I64x8), Type::Vector(VectorType::I64x8), Type::I8, Type::I32], &[]),
+            (Intrinsic::X86Avx512Vscatterdps, &[Type::Ptr, Type::Vector(VectorType::I32x16), Type::Vector(VectorType::F32x16), Type::I16, Type::I32], &[]),
+            (Intrinsic::X86Avx512Vscatterdpd, &[Type::Ptr, Type::Vector(VectorType::I32x8), Type::Vector(VectorType::F64x8), Type::I8, Type::I32], &[]),
+            (Intrinsic::X86Avx512Vscatterqps, &[Type::Ptr, Type::Vector(VectorType::I64x8), Type::Vector(VectorType::F32x8), Type::I8, Type::I32], &[]),
+            (Intrinsic::X86Avx512Vscatterqpd, &[Type::Ptr, Type::Vector(VectorType::I64x8), Type::Vector(VectorType::F64x8), Type::I8, Type::I32], &[]),
+            (Intrinsic::X86Avx512Compressd, &[Type::Vector(VectorType::I32x16), Type::I16, Type::Vector(VectorType::I32x16)], &[Type::Vector(VectorType::I32x16)]),
+            (Intrinsic::X86Avx512Compressq, &[Type::Vector(VectorType::I64x8), Type::I8, Type::Vector(VectorType::I64x8)], &[Type::Vector(VectorType::I64x8)]),
+            (Intrinsic::X86Avx512Compressps, &[Type::Vector(VectorType::F32x16), Type::I16, Type::Vector(VectorType::F32x16)], &[Type::Vector(VectorType::F32x16)]),
+            (Intrinsic::X86Avx512Compresspd, &[Type::Vector(VectorType::F64x8), Type::I8, Type::Vector(VectorType::F64x8)], &[Type::Vector(VectorType::F64x8)]),
+            (Intrinsic::X86Avx512Expandd, &[Type::Vector(VectorType::I32x16), Type::I16, Type::Vector(VectorType::I32x16)], &[Type::Vector(VectorType::I32x16)]),
+            (Intrinsic::X86Avx512Expandq, &[Type::Vector(VectorType::I64x8), Type::I8, Type::Vector(VectorType::I64x8)], &[Type::Vector(VectorType::I64x8)]),
+            (Intrinsic::X86Avx512Expandps, &[Type::Vector(VectorType::F32x16), Type::I16, Type::Vector(VectorType::F32x16)], &[Type::Vector(VectorType::F32x16)]),
+            (Intrinsic::X86Avx512Expandpd, &[Type::Vector(VectorType::F64x8), Type::I8, Type::Vector(VectorType::F64x8)], &[Type::Vector(VectorType::F64x8)]),
+            (Intrinsic::X86Avx512CompressStored, &[Type::Ptr, Type::Vector(VectorType::I32x16), Type::I16], &[]),
+            (Intrinsic::X86Avx512CompressStoreq, &[Type::Ptr, Type::Vector(VectorType::I64x8), Type::I8], &[]),
+            (Intrinsic::X86Avx512CompressStoreps, &[Type::Ptr, Type::Vector(VectorType::F32x16), Type::I16], &[]),
+            (Intrinsic::X86Avx512CompressStorepd, &[Type::Ptr, Type::Vector(VectorType::F64x8), Type::I8], &[]),
+            (Intrinsic::X86Avx512ExpandLoadd, &[Type::Ptr, Type::Vector(VectorType::I32x16), Type::I16], &[Type::Vector(VectorType::I32x16)]),
+            (Intrinsic::X86Avx512ExpandLoadq, &[Type::Ptr, Type::Vector(VectorType::I64x8), Type::I8], &[Type::Vector(VectorType::I64x8)]),
+            (Intrinsic::X86Avx512ExpandLoadps, &[Type::Ptr, Type::Vector(VectorType::F32x16), Type::I16], &[Type::Vector(VectorType::F32x16)]),
+            (Intrinsic::X86Avx512ExpandLoadpd, &[Type::Ptr, Type::Vector(VectorType::F64x8), Type::I8], &[Type::Vector(VectorType::F64x8)]),
         ];
         for &(intrinsic, params, result) in signatures {
             assert_eq!(intrinsic.info().params, params, "{intrinsic:?}");

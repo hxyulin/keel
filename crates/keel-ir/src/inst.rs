@@ -958,6 +958,38 @@ impl InstData {
             Self::Intrinsic { id, .. } => match id {
                 crate::x86_system_intrinsics!(all) => id.generated_system_memory_effects(),
                 crate::x86_query_intrinsics!(all) => id.generated_query_memory_effects(),
+                Intrinsic::X86Avx512Compressd
+                | Intrinsic::X86Avx512Compressq
+                | Intrinsic::X86Avx512Compressps
+                | Intrinsic::X86Avx512Compresspd
+                | Intrinsic::X86Avx512Expandd
+                | Intrinsic::X86Avx512Expandq
+                | Intrinsic::X86Avx512Expandps
+                | Intrinsic::X86Avx512Expandpd => None,
+                Intrinsic::X86Avx512CompressStored
+                | Intrinsic::X86Avx512CompressStoreq
+                | Intrinsic::X86Avx512CompressStoreps
+                | Intrinsic::X86Avx512CompressStorepd => Write,
+                Intrinsic::X86Avx512ExpandLoadd
+                | Intrinsic::X86Avx512ExpandLoadq
+                | Intrinsic::X86Avx512ExpandLoadps
+                | Intrinsic::X86Avx512ExpandLoadpd => Read,
+                Intrinsic::X86Avx512Vpgatherdd
+                | Intrinsic::X86Avx512Vpgatherdq
+                | Intrinsic::X86Avx512Vpgatherqd
+                | Intrinsic::X86Avx512Vpgatherqq
+                | Intrinsic::X86Avx512Vgatherdps
+                | Intrinsic::X86Avx512Vgatherdpd
+                | Intrinsic::X86Avx512Vgatherqps
+                | Intrinsic::X86Avx512Vgatherqpd => Read,
+                Intrinsic::X86Avx512Vpscatterdd
+                | Intrinsic::X86Avx512Vpscatterdq
+                | Intrinsic::X86Avx512Vpscatterqd
+                | Intrinsic::X86Avx512Vpscatterqq
+                | Intrinsic::X86Avx512Vscatterdps
+                | Intrinsic::X86Avx512Vscatterdpd
+                | Intrinsic::X86Avx512Vscatterqps
+                | Intrinsic::X86Avx512Vscatterqpd => Write,
                 Intrinsic::X86Avx512MaskLoadps | Intrinsic::X86Avx512MaskLoadpd => Read,
                 Intrinsic::X86Avx512MaskStoreps | Intrinsic::X86Avx512MaskStorepd => Write,
                 Intrinsic::X86Avx512Cmpps
@@ -1780,7 +1812,7 @@ impl InstData {
             Self::Intrinsic { id, .. } => {
                 !(id.is_x86_bmi()
                     || id.is_x86_sha256()
-                    || (id.is_x86_avx512_mask() && id.info().pure)
+                    || ((id.is_x86_avx512_mask() || id.is_x86_avx512_pack()) && id.info().pure)
                     || id.x86_aes_opcode().is_some()
                     || id.is_x86_pure_bits()
                     || id.is_x86_legacy_sign_mask()
