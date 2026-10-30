@@ -682,7 +682,7 @@ fn asm_template(
             continue;
         }
         if let Some(m) = chars.next_if(|c| c.is_ascii_alphabetic()) {
-            if !(if x86 { "bwkqcan" } else { "wxsdqhbc" }).contains(m) {
+            if !(if x86 { "bwkqcanxtg" } else { "wxsdqhbc" }).contains(m) {
                 return Err(Error::new(
                     loc,
                     format!("unsupported asm template modifier `%{m}`"),
@@ -832,7 +832,7 @@ fn asm_register_type(code: &str, ty: Ty<'_>, loc: Loc) -> R<()> {
         code if asm_fixed_register(code).is_some() => asm_gpr_type(ty),
         "w" | "x" | "v" => {
             matches!(ty, Ty::Float | Ty::Double)
-                || matches!(ty, Ty::Vector(_, shape) if matches!(shape.bytes(), 8 | 16 | 32))
+                || matches!(ty, Ty::Vector(_, shape) if matches!(shape.bytes(), 8 | 16 | 32 | 64))
         }
         _ => false,
     };

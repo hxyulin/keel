@@ -294,6 +294,7 @@ impl PhysReg {
                 keel_asm_ir::x86::RegisterClass::Gpr
                     | keel_asm_ir::x86::RegisterClass::Xmm
                     | keel_asm_ir::x86::RegisterClass::Ymm
+                    | keel_asm_ir::x86::RegisterClass::Zmm
             )
         {
             return Ok(Self {
@@ -451,6 +452,12 @@ mod tests {
             PhysReg::parse("ah").unwrap(),
             PhysReg::parse("rax").unwrap()
         );
+        for number in [0, 15, 16, 31] {
+            let zmm = PhysReg::parse(&format!("zmm{number}")).unwrap();
+            assert_eq!(zmm, PhysReg::parse(&format!("xmm{number}")).unwrap());
+            assert_eq!(zmm, PhysReg::parse(&format!("ymm{number}")).unwrap());
+        }
+        assert!(PhysReg::parse("zmm32").is_err());
         assert_ne!(
             PhysReg::parse("x0").unwrap(),
             PhysReg::parse("rax").unwrap()

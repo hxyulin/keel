@@ -268,7 +268,7 @@ fn unsupported_and_impossible_contracts_are_diagnosed() {
         ("asm(\"\" ::: \"rsp\");", "stack or frame pointer"),
         ("asm(\"\" ::: \"ebp\");", "stack or frame pointer"),
         ("asm(\"\" ::: \"x0\");", "another architecture"),
-        ("asm(\"\" ::: \"zmm0\");", "unknown register"),
+        ("asm(\"\" ::: \"zmm32\");", "unknown register"),
         ("asm(\"%h0\" :: \"r\"(x));", "modifier"),
     ] {
         let source = format!("void f(long x){{{body}}}");
@@ -1062,5 +1062,123 @@ fn simd_constraints_keep_opaque_outputs_and_full_width_live_values() {
         "void f(float x){asm(\"\"::\"r\"(x));}",
     ] {
         assert!(compile(source, false).is_err(), "{source}");
+    }
+}
+
+#[test]
+fn zmm_c_inline_asm_preserves_values_aliases_and_exact_widths() {
+    let source = r#"
+typedef unsigned int V128 __attribute__((vector_size(16)));
+typedef unsigned int V256 __attribute__((vector_size(32)));
+typedef unsigned int V512 __attribute__((vector_size(64)));
+#define F __attribute__((target("avx512f")))
+F void zmm_add(const void *a,void *b,void *c) {
+ V512 x=*(const V512*)a,y=x; asm("vpaddd %g0,%g0,%g0" : "+x"(y)); *(V512*)b=y; *(V512*)c=x;
+}
+F void zmm_fixed(const void *a,void *b,void *c) {
+ V512 x=*(const V512*)a,y=x; asm("vpaddd %0,%0,%0" : "+v"(y) : : "xmm16"); *(V512*)b=y; *(V512*)c=x;
+}
+F void zmm_early(const void *a,void *b,void *c) {
+ V512 x=*(const V512*)a,y; asm("vpaddd %1,%1,%0" : "=&v"(y) : "x"(x) : "zmm31"); *(V512*)b=y; *(V512*)c=x;
+}
+F void high_xmm(const void *a,void *b,void *c) {
+ V128 x=*(const V128*)a,y=x; asm("/* %x0 */" : "+x"(y) : : "xmm31"); *(V128*)b=y; *(V128*)c=x;
+}
+F void high_ymm(const void *a,void *b,void *c) {
+ V256 x=*(const V256*)a,y=x; asm("/* %t0 */" : "+v"(y) : : "ymm31"); *(V256*)b=y; *(V256*)c=x;
+}
+F void zmm_xmm_clobber(const void *a,void *b,void *c) {
+ V512 x=*(const V512*)a; asm("pxor %%xmm4,%%xmm4" : : : "xmm4"); *(V512*)b=x; *(V512*)c=x;
+}
+F void zmm_ymm_clobber(const void *a,void *b,void *c) {
+ V512 x=*(const V512*)a; asm("vxorps %%ymm4,%%ymm4,%%ymm4" : : : "ymm4"); *(V512*)b=x; *(V512*)c=x;
+}
+F void zmm_zmm_clobber(const void *a,void *b,void *c) {
+ V512 x=*(const V512*)a; asm("vpxord %%zmm4,%%zmm4,%%zmm4" : : : "zmm4"); *(V512*)b=x; *(V512*)c=x;
+}
+F void zmm_mixed(const void *a,void *b,void *c) {
+ V128 x=*(const V128*)a,p=x; V256 y=*(const V256*)a,q=y; V512 z=*(const V512*)a,r=z;
+ asm("/* %x0 %t1 %g2 */" : "+x"(p), "+v"(q), "+x"(r) : : "xmm16","ymm17","zmm18");
+ *(V128*)b=p; *(V128*)c=x; *(V256*)((char*)b+16)=q; *(V256*)((char*)c+16)=y; *(V512*)((char*)b+48)=r; *(V512*)((char*)c+48)=z;
+}
+"#;
+    let raw = compile(source, false).unwrap();
+    keel_ir::verify_module(&raw).unwrap();
+    let empty = Pools {
+        caller_saved: &[],
+        callee_saved: &[],
+        float_caller_saved: &[],
+        float_callee_saved: &[],
+    };
+    let encoding = keel_codegen::x86_features::module_features(&raw, Features::NONE).unwrap();
+    assert!(encoding.avx512f && !encoding.avx512vl && !encoding.avx2);
+    let dir = std::env::temp_dir().join(format!("keel-c-zmm-asm-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("runner.c"),
+        include_str!("../../keel-codegen/tests/x86_asm_clobbers/zmm_runner.c"),
+    )
+    .unwrap();
+    for optimize in [false, true] {
+        let mut module = raw.clone();
+        if optimize {
+            keel_opt::optimize(&mut module).unwrap();
+        }
+        let selector = FeatureSelector {
+            inner: &SelectionTier::Full,
+            features: Features::NONE,
+        };
+        for allocation in [AllocationTier::Fast, AllocationTier::Full] {
+            for (spilled, pools) in [(false, &keel_codegen::x86_64::REGISTERS), (true, &empty)] {
+                let pipeline = CodegenPipeline {
+                    selector: &selector,
+                    allocator: &allocation,
+                };
+                let text =
+                    keel_codegen::x86_64::compile_with_pipeline(&module, pools, &pipeline).unwrap();
+                let program =
+                    keel_codegen::x86_64::compile_program_with_pipeline(&module, pools, &pipeline)
+                        .unwrap();
+                let object =
+                    keel_asm::x86::assemble_program_object_with_features(&program, encoding)
+                        .unwrap();
+                assert_eq!(
+                    object,
+                    keel_asm::x86::assemble_object_with_features(&text, encoding).unwrap()
+                );
+                let name = format!("{allocation:?}-{spilled}-{optimize}");
+                let object_path = dir.join(format!("{name}.o"));
+                std::fs::write(&object_path, object).unwrap();
+                #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+                if std::is_x86_feature_detected!("avx512f") {
+                    let executable = dir.join(name);
+                    let linked = std::process::Command::new("cc")
+                        .arg(dir.join("runner.c"))
+                        .arg(object_path)
+                        .arg("-o")
+                        .arg(&executable)
+                        .output()
+                        .unwrap();
+                    assert!(
+                        linked.status.success(),
+                        "{}",
+                        String::from_utf8_lossy(&linked.stderr)
+                    );
+                    let output = std::process::Command::new(executable).output().unwrap();
+                    assert!(
+                        output.status.success(),
+                        "{allocation:?} spilled={spilled} optimized={optimize}: {output:?}"
+                    );
+                }
+            }
+        }
+    }
+    for source in [
+        "void f(void) { asm(\"\" : : : \"zmm31\"); }",
+        "typedef int V __attribute__((vector_size(64))); void f(V *p) { V x=*p; asm(\"\" : \"+x\"(x)); *p=x; }",
+        "__attribute__((target(\"no-avx512f\"))) void f(void) { asm(\"\" : : : \"xmm16\"); }",
+    ] {
+        let module = compile(source, false).unwrap();
+        assert!(keel_codegen::compile(&module, Target::X86_64LinuxGnu).is_err());
     }
 }

@@ -382,3 +382,154 @@ entry:
         assert!(text.contains(&format!("# id {}\n", index << 32)), "{text}");
     }
 }
+
+fn zmm_source() -> String {
+    let mut source = String::new();
+    for (name, ty, template, constraints) in [
+        ("zmm_add", "i32x16", "vpaddd %1,%0,%0", "=w,0"),
+        (
+            "zmm_fixed",
+            "i32x16",
+            "vpaddd %1,%0,%0",
+            "={zmm31},0,~{xmm16}",
+        ),
+        (
+            "zmm_early",
+            "i32x16",
+            "vpaddd %1,%1,%0",
+            "=&{zmm31},{zmm16}",
+        ),
+        (
+            "high_xmm",
+            "i32x4",
+            "vmovdqa64 %%zmm16,%%zmm31",
+            "={xmm31},{xmm16}",
+        ),
+        (
+            "high_ymm",
+            "i32x8",
+            "vmovdqa64 %%zmm16,%%zmm31",
+            "={ymm31},{ymm16}",
+        ),
+    ] {
+        source += &format!(
+            "func @{name}(ptr,ptr,ptr) target_features(\"avx512f\") {{\nentry(v0:ptr,v1:ptr,v2:ptr):\n v3 = load.{ty} align 1 v0\n v4 = asm \"{template}\", \"{constraints}\"(v3) -> {ty}\n store align 1 v4,v1\n store align 1 v3,v2\n return\n}}\n"
+        );
+    }
+    for (name, template, clobber) in [
+        ("zmm_xmm_clobber", "pxor %%xmm4,%%xmm4", "xmm4"),
+        ("zmm_ymm_clobber", "vxorps %%ymm4,%%ymm4,%%ymm4", "ymm4"),
+        ("zmm_zmm_clobber", "vpxord %%zmm4,%%zmm4,%%zmm4", "zmm4"),
+    ] {
+        source += &format!(
+            "func @{name}(ptr,ptr,ptr) target_features(\"avx512f\") {{\nentry(v0:ptr,v1:ptr,v2:ptr):\n v3 = load.i32x16 align 1 v0\n asm \"{template}\", \"~{{{clobber}}}\"()\n store align 1 v3,v1\n store align 1 v3,v2\n return\n}}\n"
+        );
+    }
+    source += "func @zmm_mixed(ptr,ptr,ptr) target_features(\"avx512f\") {\nentry(v0:ptr,v1:ptr,v2:ptr):\n v3 = load.i32x4 align 1 v0\n v4 = load.i32x8 align 1 v0\n v5 = load.i32x16 align 1 v0\n v6,v7,v8 = asm \"/* mixed %x0 %t1 %g2 */\", \"={xmm0},={ymm1},={zmm31},0,1,2,~{xmm16},~{ymm17},~{zmm18}\"(v3,v4,v5) -> (i32x4,i32x8,i32x16)\n store align 1 v6,v1\n store align 1 v3,v2\n v9 = iconst.i64 16\n v10 = ptradd v1,v9\n v11 = ptradd v2,v9\n store align 1 v7,v10\n store align 1 v4,v11\n v12 = iconst.i64 48\n v13 = ptradd v1,v12\n v14 = ptradd v2,v12\n store align 1 v8,v13\n store align 1 v5,v14\n return\n}\n";
+    source
+}
+
+#[test]
+fn zmm_inline_asm_exact_transport_high_registers_and_aliases() {
+    use keel_codegen::x86_features::Features;
+    let features = Features::NONE.with_features("avx512f").unwrap();
+    assert!(!features.avx512vl && !features.avx2);
+    let dir = std::env::temp_dir().join(format!("keel-zmm-asm-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("runner.c"),
+        include_str!("x86_asm_clobbers/zmm_runner.c"),
+    )
+    .unwrap();
+    for selector in [SelectionTier::Baseline, SelectionTier::Full] {
+        for allocator in [
+            &AllocationTier::Fast as &dyn RegisterAllocator,
+            &AllocationTier::Full,
+            &SimdClobberHome,
+        ] {
+            for spilled in [false, true] {
+                let (object, text) =
+                    compile_source(&zmm_source(), selector, allocator, spilled, features);
+                assert!(text.contains("zmm31") && text.contains("zmm16"), "{text}");
+                let name = format!("{selector:?}-{}-{spilled}", allocator.name());
+                let object_path = dir.join(format!("{name}.o"));
+                std::fs::write(&object_path, object).unwrap();
+                #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+                if std::is_x86_feature_detected!("avx512f") {
+                    let executable = dir.join(name);
+                    let linked = std::process::Command::new("cc")
+                        .arg(dir.join("runner.c"))
+                        .arg(object_path)
+                        .arg("-o")
+                        .arg(&executable)
+                        .output()
+                        .unwrap();
+                    assert!(
+                        linked.status.success(),
+                        "{}",
+                        String::from_utf8_lossy(&linked.stderr)
+                    );
+                    let output = std::process::Command::new(executable).output().unwrap();
+                    assert!(
+                        output.status.success(),
+                        "{selector:?}/{} spilled={spilled}: {output:?}",
+                        allocator.name()
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn zmm_inline_asm_rejects_feature_and_register_alias_conflicts() {
+    for (constraints, ty, template) in [
+        ("=&{zmm31},{xmm31}", "i32x16", ""),
+        ("={zmm31},0,~{ymm31}", "i32x16", ""),
+        ("={zmm16},={xmm16},0", "i32x16", ""),
+        ("=w,0", "i32x4", "%g0"),
+    ] {
+        let results = if constraints.contains("},=") {
+            format!("v1,v2 = asm \"{template}\", \"{constraints}\"(v0) -> ({ty},{ty})")
+        } else {
+            format!("v1 = asm \"{template}\", \"{constraints}\"(v0) -> {ty}")
+        };
+        let module = keel_ir::parse(&format!("func @bad({ty}) target_features(\"avx512f\") {{\nentry(v0:{ty}):\n {results}\n return\n}}\n")).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        assert!(
+            keel_codegen::x86_64::compile(&module).is_err(),
+            "{constraints}"
+        );
+    }
+    // An enabled sibling cannot grant permissions to a baseline or locally
+    // disabled function, including an asm with no typed vector operands.
+    for attrs in ["", "target_features(\"-avx512f\")"] {
+        for clobber in ["xmm16", "ymm31", "zmm31"] {
+            let module = keel_ir::parse(&format!("func @enabled() target_features(\"avx512f\") {{\nentry:\n return\n}}\nfunc @bad() {attrs} {{\nentry:\n asm \"\", \"~{{{clobber}}}\"()\n return\n}}\n")).unwrap();
+            assert!(keel_codegen::x86_64::compile(&module).is_err());
+            if !attrs.is_empty() {
+                let features = keel_codegen::x86_features::Features::NONE
+                    .with_features("avx512f")
+                    .unwrap();
+                let selector = keel_codegen::x86_features::FeatureSelector {
+                    inner: &SelectionTier::Full,
+                    features,
+                };
+                let pipeline = CodegenPipeline {
+                    selector: &selector,
+                    allocator: &AllocationTier::Full,
+                };
+                assert!(
+                    keel_codegen::x86_64::compile_program_with_pipeline(
+                        &module,
+                        &keel_codegen::x86_64::REGISTERS,
+                        &pipeline,
+                    )
+                    .is_err()
+                );
+            }
+        }
+    }
+    let source = zmm_source().replace("target_features(\"avx512f\")", "");
+    assert!(keel_codegen::x86_64::compile(&keel_ir::parse(&source).unwrap()).is_err());
+}

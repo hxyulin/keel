@@ -21,22 +21,35 @@ Register operands accept integers through 64 bits, pointers and the bounded
 aggregate representation described below. Register constraints are
 `r` and x86-64 `q`, and fixed `a`, `b`, `c`, `d`, `S`, `D` for RAX, RBX, RCX, RDX, RSI, RDI.
 SIMD constraints `x` and `v` accept `float`, `double`, and the frontend's
-128/256-bit vector types. Both use registers 0–15; `v` does not enable EVEX
-register allocation. The shared IR represents them with `w` (`FloatReg`) and
-also accepts 64-bit vectors. Scalar integer SIMD operands, MMX, x87, ZMM and
-registers 16–31 are outside this operand contract. Named
+128/256/512-bit vector types. Both allocate registers 0–15. The shared IR
+represents them with `w` (`FloatReg`) and also accepts 64-bit vectors. Scalar
+integer SIMD operands, MMX and x87 are outside this operand contract. Named
 [local register variables](#local-register-variables) are GPR-only.
 
 SIMD templates use `%xmmN` for scalar and 64/128-bit operands, `%ymmN` for
-256-bit operands. `%x0` selects the XMM view; `%t0` selects the YMM view of a
-256-bit operand. GPR width modifiers cannot select SIMD register views.
-XMM/YMM spellings alias the same physical register in explicit IR operands and
-clobbers. A 256-bit operand requires AVX; instruction-specific requirements
-(such as AVX2 for `vpaddd`) remain checked by the assembler.
+256-bit operands and `%zmmN` for 512-bit operands. `%x0` selects the XMM view;
+`%t0` selects the YMM view of a 256/512-bit operand, and `%g0` selects the ZMM
+view of a 512-bit operand. GPR width modifiers cannot select SIMD register views.
+XMM/YMM/ZMM spellings alias the same physical register in explicit IR operands
+and C/IR clobbers, including registers 16–31 when the function enables AVX512F.
+Explicit fixed SIMD operands are available through the shared IR; C `x`/`v`
+operands keep the low-register allocation policy. A 256-bit operand requires
+AVX; a 512-bit operand or high SIMD register requires AVX512F. These permissions
+are resolved per function. Instruction-specific requirements, including AVX512VL
+for narrow EVEX instructions, remain checked by the assembler. Literal template
+instructions are checked against the final assembly feature set, which can be
+the union of several functions' permissions. That check does not establish
+per-function legality for literal instruction text. The local checks described
+here cover typed operands and explicit register constraints and clobbers.
+
+Compiler-generated transport for an explicit high XMM/YMM operand uses its
+ZMM alias and a padded 64-byte staging home, so transport needs AVX512F without
+AVX512VL. Only the operand's typed prefix is defined; the asm template must use
+a supported instruction form for its chosen register view.
 
 Inputs are snapshotted before any asm operand register is initialized. Results
 are captured before original register homes are restored. SIMD staging and
-clobber preservation retain the whole live payload, including YMM upper halves;
+clobber preservation retain the whole live payload, including all 64 bytes of live ZMM values;
 result writeback uses each result's own width. Matching SIMD inputs/results
 require identical IR types. Early-clobber, conflicting-register and clobber
 checks apply independently to GPR and SIMD registers. Empty/comment-only

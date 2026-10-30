@@ -31,12 +31,15 @@ fn available(r: u8, frame: Option<u8>) -> bool {
 pub(super) fn plan(
     module: &Module,
     func: &Function,
-    asm: &InlineAsm,
-    args: &[Value],
+    inst: Inst,
     frame: Option<u8>,
     unique: u64,
     simd_bits: u16,
+    avx512f: bool,
 ) -> Result<Plan, String> {
+    let InstData::InlineAsm { asm, args } = func.inst_data(inst) else {
+        unreachable!("inline asm planning requires an inline asm instruction");
+    };
     for (&constraint, &arg) in asm.inputs.iter().zip(args) {
         if constraint == Constraint::Imm
             && let Some((symbol, _)) = keel_ir::symbolic_immediate(func, arg)
@@ -108,12 +111,12 @@ pub(super) fn plan(
             };
         }
     }
-    let mut taken = [[false; 16]; 2];
+    let mut taken = [[false; 32]; 2];
     for c in &asm.clobbers {
         if let AsmClobber::Reg(r) = c {
             if r.arch != AsmArch::X86
                 || if r.float {
-                    r.num >= 16
+                    r.num >= if avx512f { 32 } else { 16 }
                 } else {
                     !available(r.num, frame)
                 }
@@ -134,8 +137,8 @@ pub(super) fn plan(
         if !((ty.is_int() && ty != Type::I128) || ty == Type::Ptr || simd) {
             return Err(format!("unsupported x86 asm operand type {ty}"));
         }
-        if ty.is_vector() && !matches!(ty.bytes(), Some(8 | 16 | 32)) {
-            return Err("x86 asm supports only 64/128/256-bit vectors".into());
+        if ty.is_vector() && !matches!(ty.bytes(), Some(8 | 16 | 32 | 64)) {
+            return Err("x86 asm supports only 64/128/256/512-bit vectors".into());
         }
         match *op {
             Constraint::Reg if !simd => {}
@@ -148,7 +151,7 @@ pub(super) fn plan(
                 if r.arch != AsmArch::X86
                     || r.float != simd
                     || if r.float {
-                        r.num >= 16
+                        r.num >= if avx512f { 32 } else { 16 }
                     } else {
                         !available(r.num, frame)
                     }
@@ -239,7 +242,7 @@ pub(super) fn plan(
     let text = substitute(func, asm, args, &regs, unique)?;
     // Staging uses RAX, while operand initialization and template outputs can
     // overwrite their assigned homes. A memory/flags clobber changes no GPR.
-    let mut overwritten = [[false; 16]; 2];
+    let mut overwritten = [[false; 32]; 2];
     for c in &asm.clobbers {
         if let AsmClobber::Reg(r) = c {
             overwritten[usize::from(r.float)][r.num as usize] = true;
@@ -255,20 +258,39 @@ pub(super) fn plan(
         overwritten[1][FS0 as usize] = true;
     }
     let saved_regs: Vec<_> = (0..16).filter(|&r| overwritten[0][r as usize]).collect();
-    let saved_simd: Vec<_> = (0..16).filter(|&r| overwritten[1][r as usize]).collect();
+    let saved_simd: Vec<_> = (0..32).filter(|&r| overwritten[1][r as usize]).collect();
+    // High SIMD registers have no legacy/VEX transport. Preserve them through
+    // their ZMM aliases so compiler-generated moves need F without VL.
+    let simd_bits = if saved_simd.iter().any(|&r| r >= 16) {
+        512
+    } else {
+        simd_bits
+    };
     let simd_home = saved_regs.len() * 8;
     let mut bytes = simd_home + saved_simd.len() * usize::from(simd_bits / 8);
-    let mut home = |ty: Type| {
+    let mut home = |ty: Type, reg: Option<PhysReg>| {
         let bits = ty.bytes().unwrap_or(8).max(8) as u16 * 8;
         let offset = bytes;
-        bytes += usize::from(bits / 8);
+        // Narrow explicit high-register inputs/results use a full ZMM move
+        // against an allocated 64-byte home. Only the typed prefix is defined.
+        bytes += if reg.is_some_and(|r| r.float && r.num >= 16) {
+            64
+        } else {
+            usize::from(bits / 8)
+        };
         Home { offset, bits }
     };
     let inputs = args
         .iter()
-        .map(|&arg| home(func.value_type(func.resolve(arg))))
+        .enumerate()
+        .map(|(i, &arg)| home(func.value_type(func.resolve(arg)), regs[n + i]))
         .collect();
-    let outputs = asm.outputs.iter().map(|&(_, ty)| home(ty)).collect();
+    let outputs = asm
+        .outputs
+        .iter()
+        .enumerate()
+        .map(|(i, &(_, ty))| home(ty, regs[i]))
+        .collect();
     if saved_regs.is_empty() && saved_simd.is_empty() && n == 0 {
         bytes = 0;
     }
@@ -366,19 +388,17 @@ fn substitute(
             };
             if r.float {
                 let bits = match modifier {
-                    None => {
-                        if ty.bytes() == Some(32) {
-                            256
-                        } else {
-                            128
-                        }
-                    }
+                    None => (ty.bytes().unwrap_or(8) as u16 * 8).max(128),
                     Some('x') => 128,
                     Some('t') => 256,
+                    Some('g') => 512,
                     _ => return Err("unsupported x86 asm SIMD register modifier".into()),
                 };
-                if bits == 256 && ty.bytes() != Some(32) {
+                if bits == 256 && !matches!(ty.bytes(), Some(32 | 64)) {
                     return Err("asm YMM modifier requires a 256-bit operand".into());
+                }
+                if bits == 512 && ty.bytes() != Some(64) {
+                    return Err("asm ZMM modifier requires a 512-bit operand".into());
                 }
                 write!(text, "%{}", simd_width(r.num, bits)).unwrap();
                 continue;
@@ -550,12 +570,14 @@ impl FunctionCompiler<'_> {
         for &(r, i) in &plan.initializers {
             let src = mem(self, plan.inputs[i]);
             if r.float {
+                let bits = if r.num >= 16 {
+                    512
+                } else {
+                    plan.inputs[i].bits
+                };
                 self.emit(
-                    move_bits(plan.inputs[i].bits),
-                    [
-                        asm_arg(simd_width(r.num, plan.inputs[i].bits)),
-                        asm_arg(src),
-                    ],
+                    move_bits(bits),
+                    [asm_arg(simd_width(r.num, bits)), asm_arg(sized(src, bits))],
                 );
             } else {
                 self.emit(Opcode::Mov, [asm_arg(r64(r.num)), asm_arg(src)]);
@@ -577,11 +599,12 @@ impl FunctionCompiler<'_> {
         for (i, slot) in plan.outputs.iter().enumerate() {
             let Some(r) = plan.regs[i] else { continue };
             if r.float {
+                let bits = if r.num >= 16 { 512 } else { slot.bits };
                 self.emit(
-                    move_bits(slot.bits),
+                    move_bits(bits),
                     [
-                        asm_arg(mem(self, *slot)),
-                        asm_arg(simd_width(r.num, slot.bits)),
+                        asm_arg(sized(mem(self, *slot), bits)),
+                        asm_arg(simd_width(r.num, bits)),
                     ],
                 );
             } else {

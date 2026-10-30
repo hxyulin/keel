@@ -1979,7 +1979,7 @@ impl<'a> FunctionCompiler<'a> {
         let mut function_index = None;
         let mut inline_asm_plans = HashMap::default();
         for (_, inst) in func.layout_insts() {
-            if let InstData::InlineAsm { asm, args } = func.inst_data(inst) {
+            if matches!(func.inst_data(inst), InstData::InlineAsm { .. }) {
                 let function_index = *function_index.get_or_insert_with(|| {
                     module
                         .functions
@@ -1991,11 +1991,11 @@ impl<'a> FunctionCompiler<'a> {
                 let plan = inline_asm::plan(
                     module,
                     func,
-                    asm,
-                    args,
+                    inst,
                     frame_register,
                     (function_index << 32) | inst.index() as u64,
                     simd_bits,
+                    pipeline.selector.x86_features().avx512f,
                 )
                 .map_err(err)?;
                 inline_asm_plans.insert(inst, plan);
