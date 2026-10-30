@@ -123,14 +123,21 @@ reserved stable base; incoming arguments and unwind state keep the original
 frame reference. SysV has no callee-saved SIMD registers, so values live
 across calls are preserved by the caller.
 
-Named 128- and 256-bit arguments share SIMD0–7 with scalar floating
-arguments; overflow slots are 16- or 32-byte aligned, and results use SIMD0.
+Named 128-, 256- and 512-bit arguments share SIMD0–7 with scalar floating
+arguments. Overflow slots align to the vector width, and results use SIMD0.
 Unnamed 128-bit variadic values use the SIMD save area when available, then
-16-byte aligned overflow storage; unnamed 256-bit values always use 32-byte
-aligned overflow storage. 64-bit vectors are rejected in `va_arg`.
-Single-vector aggregate wrappers use the SSE/SSEUP class, MEMORY aggregates
-use byval/sret, and GNU empty-member 256-bit layouts that Clang and GCC
-classify differently are rejected.
+16-byte aligned overflow storage. Unnamed 256- and 512-bit values always use
+32- and 64-byte aligned overflow storage. 64-bit vectors are rejected in
+`va_arg`.
+
+A single-vector aggregate wrapper uses one XMM, YMM or ZMM register when
+registers remain available. MEMORY aggregates use byval/sret. Wide wrappers
+with empty members require explicit `x86_vector_abi(gnu)` or
+`x86_vector_abi(clang)` when the producers disagree: GCC uses the vector
+register, while Clang uses MEMORY. Untagged ambiguous wrappers are rejected.
+The same classification governs direct, indirect and tail calls and returns.
+Tagged 512-bit aggregate `va_arg` requires a matching variadic signature and
+an uninterrupted local `va_start` provenance proof.
 
 Gather and sign-masked memory operations keep inactive-lane fault
 suppression. The byte-mask non-temporal store needs a fully writable 16-byte

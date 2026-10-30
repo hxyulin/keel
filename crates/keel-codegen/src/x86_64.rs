@@ -412,7 +412,7 @@ pub(crate) fn compile_output(
         |producer, layout, unnamed| {
             producer.and_then(|p| sysv::producer_aggregate(layout,p)).is_some_and(|policy| {
             matches!(policy, sysv::ProducerAggregate::Memory)
-                || (unnamed && matches!(policy, sysv::ProducerAggregate::Vector(ty) if ty.bytes()==Some(32)))
+                || (unnamed && matches!(policy, sysv::ProducerAggregate::Vector(ty) if ty.bytes().is_some_and(|n| n>=32)))
         })
         },
     )?;
@@ -540,6 +540,13 @@ fn validate_vector_abi(module: &Module) -> Result<(), CodegenError> {
     }
     const F64X1_ABI: &str = "f64x1 SysV C ABI is unsupported: observed GCC and Clang use stack arguments, with GCC hidden-sret versus Clang XMM scalar returns; use pointer/scalar f64 boundaries or private cc(fast)";
     let f64x1 = Type::Vector(keel_ir::VectorType::F64x1);
+    fn contains_zmm(layout: &Layout) -> bool {
+        match layout {
+            Layout::Scalar(t) => t.vector().is_some_and(|shape| shape.bytes() == 64),
+            Layout::Struct(fields) => fields.iter().any(contains_zmm),
+            Layout::Array(element, _) => contains_zmm(element),
+        }
+    }
     fn contains_f64x1(layout: &Layout) -> bool {
         match layout {
             Layout::Scalar(ty) => *ty == Type::Vector(keel_ir::VectorType::F64x1),
@@ -605,7 +612,7 @@ fn validate_vector_abi(module: &Module) -> Result<(), CodegenError> {
                     && sysv::ambiguous_vector_wrapper(l)
             })
         }) {
-            return Err(CodegenError {func:name.into(),message:"256-bit vector wrapper with empty aggregate members has compiler-dependent SysV ABI (Clang MEMORY versus GCC YMM); use a true single-member wrapper".into()});
+            return Err(CodegenError {func:name.into(),message:"wide vector wrapper with empty aggregate members has compiler-dependent SysV ABI; use x86_vector_abi or a true single-member wrapper".into()});
         }
         // Independent 125-layout GCC/Clang/expected-register primary probes
         // establish recursive natural D8 fixed and named-variadic boundaries.
@@ -680,17 +687,19 @@ fn validate_vector_abi(module: &Module) -> Result<(), CodegenError> {
                     purpose: Purpose::ByVal(layout.clone()),
                 };
                 check(&f.name, &f.sig, &[&param])?;
-                if contains_f64x1(layout) {
+                if contains_f64x1(layout) || (x86_vector_abi.is_some() && contains_zmm(layout)) {
                     if !x86_vector_abi.is_some_and(|p| {
                         sysv::producer_aggregate(layout, p).is_some()
                             && f.has_x86_va_arg_provenance(inst, p)
                     }) {
-                        return Err(CodegenError { func: f.name.clone(), message: "aggregate f64x1 va_arg requires explicit matching current-signature local provenance".into() });
+                        return Err(CodegenError { func: f.name.clone(), message: "producer-sensitive aggregate va_arg requires explicit matching current-signature local provenance".into() });
                     }
                 } else if x86_vector_abi.is_some() {
                     return Err(CodegenError {
                         func: f.name.clone(),
-                        message: "aggregate producer metadata requires an f64x1 layout".into(),
+                        message:
+                            "aggregate producer metadata requires an f64x1 or 512-bit vector layout"
+                                .into(),
                     });
                 }
             }

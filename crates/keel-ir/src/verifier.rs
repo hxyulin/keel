@@ -1350,10 +1350,10 @@ impl Verifier<'_> {
                     );
                 }
                 if let Some(abi) = x86_vector_abi
-                    && (!layout_contains_f64x1(layout)
+                    && (!(layout_contains_f64x1(layout) || layout_contains_zmm(layout))
                         || !func.has_x86_va_arg_provenance(inst, *abi))
                 {
-                    self.inst_error(inst, "tagged aggregate va_arg requires an f64x1 layout and matching local current-signature provenance".into());
+                    self.inst_error(inst, "tagged aggregate va_arg requires an f64x1 or 512-bit vector layout and matching local current-signature provenance".into());
                 }
             }
             InstData::VaArg {
@@ -2220,6 +2220,14 @@ fn check_convert(op: ConvertOp, from: Type, to: Type) -> Result<(), &'static str
         ConvertOp::PtrToInt => "converts ptr to i64",
         ConvertOp::IntToPtr => "converts i64 to ptr",
     })
+}
+
+fn layout_contains_zmm(layout: &crate::Layout) -> bool {
+    match layout {
+        crate::Layout::Scalar(t) => t.vector().is_some_and(|shape| shape.bytes() == 64),
+        crate::Layout::Struct(fields) => fields.iter().any(layout_contains_zmm),
+        crate::Layout::Array(elem, _) => layout_contains_zmm(elem),
+    }
 }
 
 fn layout_contains_f64x1(layout: &crate::Layout) -> bool {

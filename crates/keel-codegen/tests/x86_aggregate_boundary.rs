@@ -115,3 +115,6 @@ int main(void) {
     assert!(Command::new(dir.join("oracle")).status().unwrap().success());
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[path = "x86_aggregate_boundary/x86_zmm_wrappers.rs"]
+mod x86_zmm_wrappers;

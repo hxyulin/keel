@@ -10,8 +10,9 @@
 //!   one XMM register or a 16-byte stack slot aligned to 16.
 //! - Once a class runs out, its arguments go on the stack in order, each in
 //!   its own 8-byte slot: unlike Apple arm64, the stack is never packed.
-//! - Variadic arguments are placed exactly like named ones, in registers
-//!   first. The caller passes an upper bound on the number of vector
+//! - Unnamed 256- and 512-bit variadic vectors always use aligned overflow
+//!   storage. Other variadic arguments use registers first, like named ones.
+//!   The caller passes an upper bound on the number of vector
 //!   registers used in `al`, so the callee knows whether to save them.
 //!
 //! Structs (`byval`), by [`classify`]: a struct of up to 16 bytes is split
@@ -55,7 +56,7 @@ pub enum Class {
 }
 
 /// A recursively nested single SIMD field uses SSE followed by SSEUP:
-/// one physical XMM/YMM register, not one register per eightbyte. At256 bits,
+/// one physical XMM/YMM/ZMM register, not one register per eightbyte. Wide values
 /// require a true single-member chain: Clang and GCC disagree about zero-size
 /// sibling members even when the flattened leaves and layout are identical.
 /// Other vector-containing aggregates supported here are MEMORY (>16bytes).
@@ -69,7 +70,7 @@ pub fn vector_wrapper(layout: &Layout) -> Option<Type> {
         }
     }
     let ty = register_vector(layout)?;
-    if ty.bytes() == Some(32) && !single_member(layout) {
+    if ty.bytes().is_some_and(|n| n >= 32) && !single_member(layout) {
         return None;
     }
     Some(ty)
@@ -82,7 +83,7 @@ pub fn register_vector(layout: &Layout) -> Option<Type> {
     // placement is inspected. Bound expansion by physical register size first;
     // zero-sized members remain in the AST for the separate producer policy.
     let size = layout.checked_size()?;
-    if !matches!(size, 8 | 16 | 32) || layout.align() != size {
+    if !matches!(size, 8 | 16 | 32 | 64) || layout.align() != size {
         return None;
     }
     match layout.leaves().as_slice() {
@@ -93,14 +94,14 @@ pub fn register_vector(layout: &Layout) -> Option<Type> {
     }
 }
 
-/// GNU zero-size aggregate members are ABI-origin sensitive at256 bits:
-/// GCC uses YMM while Clang uses MEMORY. The IR has no producer-ABI tag, so
-/// this layout must fail closed instead of choosing either external convention.
+/// GNU zero-size aggregate members are ABI-origin sensitive for wide vectors:
+/// GCC uses a vector register while Clang uses MEMORY. Without an explicit
+/// producer tag, this layout must fail closed.
 pub fn ambiguous_vector_wrapper(layout: &Layout) -> bool {
-    layout.size() == 32
-        && layout.align() == 32
+    matches!(layout.size(), 32 | 64)
+        && layout.align() == layout.size()
         && vector_wrapper(layout).is_none()
-        && matches!(layout.leaves().as_slice(),[(0,t)] if t.is_vector() && t.bytes()==Some(32))
+        && matches!(layout.leaves().as_slice(),[(0,t)] if t.is_vector() && t.bytes().is_some_and(|n| u64::from(n)==layout.size()))
 }
 
 /// The bounded mixed-D8 stage: two immediate, naturally aligned eightbytes.
@@ -230,7 +231,14 @@ pub fn producer_aggregate(layout: &Layout, producer: X86VectorAbi) -> Option<Pro
             _ => false,
         }
     }
-    if matches!(layout, Layout::Scalar(_)) || !declares_f64x1(layout) {
+    fn declares_512(l: &Layout) -> bool {
+        match l {
+            Layout::Scalar(t) => t.is_vector() && t.bytes() == Some(64),
+            Layout::Struct(fields) => fields.iter().any(declares_512),
+            Layout::Array(elem, _) => declares_512(elem),
+        }
+    }
+    if matches!(layout, Layout::Scalar(_)) || !(declares_f64x1(layout) || declares_512(layout)) {
         return None;
     }
     let size = layout.checked_size()?;
@@ -250,9 +258,8 @@ pub fn producer_aggregate(layout: &Layout, producer: X86VectorAbi) -> Option<Pro
     if size == 0 {
         return Some(ProducerAggregate::Eightbytes(vec![]));
     }
-    // Every currently representable vector is at most 32 bytes. Larger
-    // objects cannot be single-register/SSEUP wrappers.
-    if size > 32 {
+    // Objects larger than one ZMM register cannot be SSE/SSEUP wrappers.
+    if size > 64 {
         return Some(ProducerAggregate::Memory);
     }
     let leaves = layout.leaves();
@@ -265,7 +272,10 @@ pub fn producer_aggregate(layout: &Layout, producer: X86VectorAbi) -> Option<Pro
             .is_some_and(|n| u64::from(n) == layout.size() && u64::from(n) == layout.align())
     {
         return Some(
-            if ty.bytes() == Some(32) && producer == X86VectorAbi::Clang && !single(layout) {
+            if ty.bytes().is_some_and(|n| n >= 32)
+                && producer == X86VectorAbi::Clang
+                && !single(layout)
+            {
                 ProducerAggregate::Memory
             } else {
                 ProducerAggregate::Vector(*ty)

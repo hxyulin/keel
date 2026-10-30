@@ -96,3 +96,22 @@ fn aggregate_uses_same_current_signature_provenance_proof() {
         assert_eq!(keel_ir::verify_module(&m).is_ok(), expected);
     }
 }
+
+#[test]
+fn aggregate_zmm_va_arg_requires_matching_local_provenance() {
+    for producer in ["gnu", "clang"] {
+        let source = format!(
+            "func @read(i64,...) x86_vector_abi({producer}) {{\n ss0=stack_slot 24, align 8\n ss1=stack_slot 64, align 64\nentry(v0:i64):\n v1=stack_addr ss0\n intrinsic va_start(v1)\n v2=va_arg_aggregate {{i64x8}},v1,ss1 x86_vector_abi({producer})\n return\n}}\n"
+        );
+        let module = keel_ir::parse(&source).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        let other = if producer == "gnu" { "clang" } else { "gnu" };
+        let invalid = source.replace(
+            &format!("v1,ss1 x86_vector_abi({producer})"),
+            &format!("v1,ss1 x86_vector_abi({other})"),
+        );
+        assert!(keel_ir::verify_module(&keel_ir::parse(&invalid).unwrap()).is_err());
+        let invalid = source.replace(" intrinsic va_start(v1)\n", "");
+        assert!(keel_ir::verify_module(&keel_ir::parse(&invalid).unwrap()).is_err());
+    }
+}

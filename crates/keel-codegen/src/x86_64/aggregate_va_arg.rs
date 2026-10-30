@@ -24,9 +24,9 @@ impl FunctionCompiler<'_> {
             _ => None,
         };
         let classes = match policy {
-            // Unnamed 256-bit values are always overflow-only, including
-            // producer wrappers whose ordinary named placement is in YMM.
-            sysv::ProducerAggregate::Vector(ty) if ty.bytes() != Some(32) => {
+            // Unnamed wide vectors are overflow-only, including wrappers
+            // whose ordinary named placement uses YMM or ZMM.
+            sysv::ProducerAggregate::Vector(ty) if ty.bytes().is_some_and(|n| n < 32) => {
                 Some(vec![sysv::Class::Sse])
             }
             sysv::ProducerAggregate::Eightbytes(classes)
