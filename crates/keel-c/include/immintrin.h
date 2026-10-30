@@ -16,4 +16,6 @@ typedef long long __m512i __attribute__((vector_size(64), aligned(64)));
 #define _mm256_clmulepi64_epi128(a,b,control) ((__m256i)__builtin_ia32_pclmulqdq256((__m256i)(a),(__m256i)(b),(control)))
 #define _mm512_clmulepi64_epi128(a,b,control) ((__m512i)__builtin_ia32_pclmulqdq512((__m512i)(a),(__m512i)(b),(control)))
 
+#include <__keel_avx512f.h>
+
 #endif /* _KEEL_IMMINTRIN_H */

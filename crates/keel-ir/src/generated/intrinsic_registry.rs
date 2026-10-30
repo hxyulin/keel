@@ -976,10 +976,34 @@ pub enum Intrinsic {
     X86Vpclmulqdq256 = 825,
     #[doc = "Independent 128-bit lane carryless products selected by imm8 bits 0 and 4."]
     X86Vpclmulqdq512 = 826,
+    #[doc = "AVX512F scalar-mask operation. Mask bit i controls lane i; inactive memory lanes do not access memory."]
+    X86Avx512Cmpd = 827,
+    #[doc = "AVX512F scalar-mask operation. Mask bit i controls lane i; inactive memory lanes do not access memory."]
+    X86Avx512Cmpq = 828,
+    #[doc = "AVX512F scalar-mask operation. Mask bit i controls lane i; inactive memory lanes do not access memory."]
+    X86Avx512Cmpud = 829,
+    #[doc = "AVX512F scalar-mask operation. Mask bit i controls lane i; inactive memory lanes do not access memory."]
+    X86Avx512Cmpuq = 830,
+    #[doc = "AVX512F scalar-mask operation. Mask bit i controls lane i; inactive memory lanes do not access memory."]
+    X86Avx512MaskAddd = 831,
+    #[doc = "AVX512F scalar-mask operation. Mask bit i controls lane i; inactive memory lanes do not access memory."]
+    X86Avx512MaskAddq = 832,
+    #[doc = "AVX512F scalar-mask operation. Mask bit i controls lane i; inactive memory lanes do not access memory."]
+    X86Avx512MaskSubd = 833,
+    #[doc = "AVX512F scalar-mask operation. Mask bit i controls lane i; inactive memory lanes do not access memory."]
+    X86Avx512MaskSubq = 834,
+    #[doc = "AVX512F scalar-mask operation. Mask bit i controls lane i; inactive memory lanes do not access memory."]
+    X86Avx512MaskLoadd = 835,
+    #[doc = "AVX512F scalar-mask operation. Mask bit i controls lane i; inactive memory lanes do not access memory."]
+    X86Avx512MaskLoadq = 836,
+    #[doc = "AVX512F scalar-mask operation. Mask bit i controls lane i; inactive memory lanes do not access memory."]
+    X86Avx512MaskStored = 837,
+    #[doc = "AVX512F scalar-mask operation. Mask bit i controls lane i; inactive memory lanes do not access memory."]
+    X86Avx512MaskStoreq = 838,
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 827] = [
+    pub const ALL: [Intrinsic; 839] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -1807,6 +1831,18 @@ impl Intrinsic {
         Intrinsic::X86Sha256rnds2,
         Intrinsic::X86Vpclmulqdq256,
         Intrinsic::X86Vpclmulqdq512,
+        Intrinsic::X86Avx512Cmpd,
+        Intrinsic::X86Avx512Cmpq,
+        Intrinsic::X86Avx512Cmpud,
+        Intrinsic::X86Avx512Cmpuq,
+        Intrinsic::X86Avx512MaskAddd,
+        Intrinsic::X86Avx512MaskAddq,
+        Intrinsic::X86Avx512MaskSubd,
+        Intrinsic::X86Avx512MaskSubq,
+        Intrinsic::X86Avx512MaskLoadd,
+        Intrinsic::X86Avx512MaskLoadq,
+        Intrinsic::X86Avx512MaskStored,
+        Intrinsic::X86Avx512MaskStoreq,
     ];
 }
 
@@ -2630,5 +2666,17 @@ macro_rules! x86_intrinsics {
             | $crate::Intrinsic::X86Sha256rnds2
             | $crate::Intrinsic::X86Vpclmulqdq256
             | $crate::Intrinsic::X86Vpclmulqdq512
+            | $crate::Intrinsic::X86Avx512Cmpd
+            | $crate::Intrinsic::X86Avx512Cmpq
+            | $crate::Intrinsic::X86Avx512Cmpud
+            | $crate::Intrinsic::X86Avx512Cmpuq
+            | $crate::Intrinsic::X86Avx512MaskAddd
+            | $crate::Intrinsic::X86Avx512MaskAddq
+            | $crate::Intrinsic::X86Avx512MaskSubd
+            | $crate::Intrinsic::X86Avx512MaskSubq
+            | $crate::Intrinsic::X86Avx512MaskLoadd
+            | $crate::Intrinsic::X86Avx512MaskLoadq
+            | $crate::Intrinsic::X86Avx512MaskStored
+            | $crate::Intrinsic::X86Avx512MaskStoreq
     };
 }

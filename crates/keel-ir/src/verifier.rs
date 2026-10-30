@@ -1661,6 +1661,23 @@ impl Verifier<'_> {
                         );
                     }
                 }
+                if id.is_x86_avx512_compare() {
+                    let control =
+                        args.get(2)
+                            .and_then(|&arg| match func.value_def(func.resolve(arg)) {
+                                ValueDef::Result(i, _) => match func.inst_data(i) {
+                                    InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                    _ => None,
+                                },
+                                _ => None,
+                            });
+                    if !control.is_some_and(|n| (0..8).contains(&n)) {
+                        self.inst_error(
+                            inst,
+                            "AVX512 integer predicate must be iconst.i32 in0..=7".into(),
+                        );
+                    }
+                }
                 if id.is_x86_pclmul() || id.has_x86_dot_control() {
                     let mode = args
                         .get(2)

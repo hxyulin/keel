@@ -16,7 +16,7 @@ fn all_numeric_ids_and_inventory_order_stay_stable() {
         .map(|id| (format!("{id:?}"), *id as usize))
         .collect();
     let expected: Vec<_> = fixture(include_str!("fixtures/intrinsic-inventory.txt")).collect();
-    assert_eq!(Intrinsic::ALL.len(), expected.len() + 8);
+    assert_eq!(Intrinsic::ALL.len(), expected.len() + 20);
     assert_eq!(
         &Intrinsic::ALL[expected.len()..],
         &[
@@ -27,7 +27,19 @@ fn all_numeric_ids_and_inventory_order_stay_stable() {
             Intrinsic::X86Sha256msg2,
             Intrinsic::X86Sha256rnds2,
             Intrinsic::X86Vpclmulqdq256,
-            Intrinsic::X86Vpclmulqdq512
+            Intrinsic::X86Vpclmulqdq512,
+            Intrinsic::X86Avx512Cmpd,
+            Intrinsic::X86Avx512Cmpq,
+            Intrinsic::X86Avx512Cmpud,
+            Intrinsic::X86Avx512Cmpuq,
+            Intrinsic::X86Avx512MaskAddd,
+            Intrinsic::X86Avx512MaskAddq,
+            Intrinsic::X86Avx512MaskSubd,
+            Intrinsic::X86Avx512MaskSubq,
+            Intrinsic::X86Avx512MaskLoadd,
+            Intrinsic::X86Avx512MaskLoadq,
+            Intrinsic::X86Avx512MaskStored,
+            Intrinsic::X86Avx512MaskStoreq
         ]
     );
     assert_eq!(

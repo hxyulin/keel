@@ -313,3 +313,66 @@ fn floating512_c_shapes_and_header_aliases() {
     keel_ir::verify_module(&parse(direct, Target::X86_64LinuxGnu).unwrap()).unwrap();
     assert!(parse(direct, Target::Aarch64LinuxGnu).is_err());
 }
+
+#[test]
+fn avx512_scalar_mask_headers_and_predicate_controls() {
+    let mut source = String::from("#include <immintrin.h>\n");
+    for (bits, mask) in [(32, "__mmask16"), (64, "__mmask8")] {
+        for sign in ["i", "u"] {
+            for predicate in 0..8 {
+                source += &format!(
+                    "{mask} cmp_{bits}_{sign}_{predicate}(__m512i a,__m512i b){{return _mm512_cmp_ep{sign}{bits}_mask(a,b,{predicate});}}\n"
+                );
+            }
+        }
+        for op in ["add", "sub"] {
+            source += &format!(
+                "__m512i {op}_{bits}(__m512i s,{mask} k,__m512i a,__m512i b){{return _mm512_mask_{op}_epi{bits}(s,k,a,b);}}\n"
+            );
+        }
+        source += &format!(
+            "__m512i load_{bits}(void*p,__m512i s,{mask} k){{return _mm512_mask_loadu_epi{bits}(s,k,p);}}\nvoid store_{bits}(void*p,__m512i a,{mask} k){{_mm512_mask_storeu_epi{bits}(p,k,a);}}\n"
+        );
+    }
+    let module = parse(&source, Target::X86_64LinuxGnu).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let ir = module.to_string();
+    for suffix in [
+        "cmpd",
+        "cmpq",
+        "cmpud",
+        "cmpuq",
+        "maskaddd",
+        "maskaddq",
+        "masksubd",
+        "masksubq",
+        "maskloadd",
+        "maskloadq",
+        "maskstored",
+        "maskstoreq",
+    ] {
+        assert!(
+            ir.contains(&format!("x86_avx512_{suffix}")),
+            "missing {suffix}: {ir}"
+        );
+    }
+    for predicate in ["-1", "8", "k"] {
+        let bad = format!(
+            "#include <immintrin.h>\n__mmask16 f(__m512i a,__m512i b,int k){{return _mm512_cmp_epi32_mask(a,b,{predicate});}}"
+        );
+        assert!(parse(&bad, Target::X86_64LinuxGnu).is_err(), "{predicate}");
+    }
+    let selector = FeatureSelector {
+        inner: &SelectionTier::Full,
+        features: Features::NONE.with_features("avx512f").unwrap(),
+    };
+    let pipeline = CodegenPipeline {
+        selector: &selector,
+        allocator: &AllocationTier::Full,
+    };
+    let program =
+        keel_codegen::compile_program_with_pipeline(&module, Target::X86_64LinuxGnu, &pipeline)
+            .unwrap();
+    keel_asm::x86::assemble_program_object_with_features(&program, selector.features).unwrap();
+    assert!(parse(&source, Target::Aarch64LinuxGnu).is_err());
+}

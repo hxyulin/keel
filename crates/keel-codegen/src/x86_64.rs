@@ -131,6 +131,7 @@ use std::fmt::Write;
 mod avx256;
 mod avx512;
 mod avx512_float;
+mod avx512_mask;
 mod gather;
 mod mmx_value;
 mod mxcsr_access;
@@ -1151,6 +1152,10 @@ impl<'a> FunctionCompiler<'a> {
                 }
             }
             if let InstData::Intrinsic { id, args } = func.inst_data(inst) {
+                if id.is_x86_avx512_mask() {
+                    avx512_mask::validate(func, *id, args, pipeline.selector.x86_features())
+                        .map_err(|s| err(s.into()))?;
+                }
                 if id.is_x86_pclmul() {
                     pclmul::validate(func, *id, args, pipeline.selector.x86_features())
                         .map_err(|s| err(s.into()))?;
@@ -3089,6 +3094,9 @@ impl<'a> FunctionCompiler<'a> {
             }
             InstData::Intrinsic { id, ref args } if id.x86_packed_search().is_some() => {
                 self.native_packed_search(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args } if id.is_x86_avx512_mask() => {
+                self.native_avx512_mask(id, args, result)
             }
             InstData::Intrinsic { id, ref args } if id.is_x86_pclmul() => {
                 self.native_pclmul(id, args, result)

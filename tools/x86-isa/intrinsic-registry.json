@@ -826,6 +826,18 @@
     {"id": 823, "variant": "X86Sha256msg2", "inventory": 823, "metadata": "handwritten", "doc": "Typed SHA-256 vector operation."},
     {"id": 824, "variant": "X86Sha256rnds2", "inventory": 824, "metadata": "handwritten", "doc": "Typed SHA-256 vector operation."},
     {"id": 825, "variant": "X86Vpclmulqdq256", "inventory": 825, "metadata": "handwritten", "doc": "Independent 128-bit lane carryless products selected by imm8 bits 0 and 4."},
-    {"id": 826, "variant": "X86Vpclmulqdq512", "inventory": 826, "metadata": "handwritten", "doc": "Independent 128-bit lane carryless products selected by imm8 bits 0 and 4."}
+    {"id": 826, "variant": "X86Vpclmulqdq512", "inventory": 826, "metadata": "handwritten", "doc": "Independent 128-bit lane carryless products selected by imm8 bits 0 and 4."},
+    {"id": 827, "variant": "X86Avx512Cmpd", "inventory": 827, "metadata": "handwritten", "doc": "AVX512F scalar-mask operation. Mask bit i controls lane i; inactive memory lanes do not access memory."},
+    {"id": 828, "variant": "X86Avx512Cmpq", "inventory": 828, "metadata": "handwritten", "doc": "AVX512F scalar-mask operation. Mask bit i controls lane i; inactive memory lanes do not access memory."},
+    {"id": 829, "variant": "X86Avx512Cmpud", "inventory": 829, "metadata": "handwritten", "doc": "AVX512F scalar-mask operation. Mask bit i controls lane i; inactive memory lanes do not access memory."},
+    {"id": 830, "variant": "X86Avx512Cmpuq", "inventory": 830, "metadata": "handwritten", "doc": "AVX512F scalar-mask operation. Mask bit i controls lane i; inactive memory lanes do not access memory."},
+    {"id": 831, "variant": "X86Avx512MaskAddd", "inventory": 831, "metadata": "handwritten", "doc": "AVX512F scalar-mask operation. Mask bit i controls lane i; inactive memory lanes do not access memory."},
+    {"id": 832, "variant": "X86Avx512MaskAddq", "inventory": 832, "metadata": "handwritten", "doc": "AVX512F scalar-mask operation. Mask bit i controls lane i; inactive memory lanes do not access memory."},
+    {"id": 833, "variant": "X86Avx512MaskSubd", "inventory": 833, "metadata": "handwritten", "doc": "AVX512F scalar-mask operation. Mask bit i controls lane i; inactive memory lanes do not access memory."},
+    {"id": 834, "variant": "X86Avx512MaskSubq", "inventory": 834, "metadata": "handwritten", "doc": "AVX512F scalar-mask operation. Mask bit i controls lane i; inactive memory lanes do not access memory."},
+    {"id": 835, "variant": "X86Avx512MaskLoadd", "inventory": 835, "metadata": "handwritten", "doc": "AVX512F scalar-mask operation. Mask bit i controls lane i; inactive memory lanes do not access memory."},
+    {"id": 836, "variant": "X86Avx512MaskLoadq", "inventory": 836, "metadata": "handwritten", "doc": "AVX512F scalar-mask operation. Mask bit i controls lane i; inactive memory lanes do not access memory."},
+    {"id": 837, "variant": "X86Avx512MaskStored", "inventory": 837, "metadata": "handwritten", "doc": "AVX512F scalar-mask operation. Mask bit i controls lane i; inactive memory lanes do not access memory."},
+    {"id": 838, "variant": "X86Avx512MaskStoreq", "inventory": 838, "metadata": "handwritten", "doc": "AVX512F scalar-mask operation. Mask bit i controls lane i; inactive memory lanes do not access memory."}
   ]
 }

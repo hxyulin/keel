@@ -32,6 +32,7 @@ pub fn get(name: &Path) -> Option<&'static str> {
         "avxintrin.h" => include_str!("../include/avxintrin.h"),
         "avx2intrin.h" => include_str!("../include/avx2intrin.h"),
         "__keel_sse2_conversions.h" => include_str!("../include/__keel_sse2_conversions.h"),
+        "__keel_avx512f.h" => include_str!("../include/__keel_avx512f.h"),
         "shaintrin.h" => include_str!("../include/shaintrin.h"),
         "__keel_aes.h" => include_str!("../include/__keel_aes.h"),
         "fmaintrin.h" => include_str!("../include/fmaintrin.h"),

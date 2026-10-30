@@ -295,7 +295,8 @@ The checker reports definitions and macros in the seven SSE–AVX2 headers plus
 fragments. The pinned non-MMX public-name inventory has no missing candidates.
 That is a name check, not proof of signature, feature, immediate, ABI or
 semantic conformance. MMX entries are reported separately. C++ overloads,
-32-bit x86, AVX-512, AMX and unlisted headers are outside the subset.
+32-bit x86, unlisted AVX-512 intrinsics, AMX and unlisted headers are outside
+the subset.
 
 ### Function permissions and runtime CPU queries
 
@@ -391,8 +392,8 @@ expressions support bounded lossless scalar broadcasts for arithmetic, integer
 bitwise operations and comparisons, including compound assignments; see
 [GNU vector mode](../../frontends/c/extensions.md#gnu-vector-mode-scalar-broadcasts) for conversion checks
 and remaining scalar-shift/cross-domain limits. Constructor functions remain
-available for explicit element conversions. AVX-512 and scatter operations
-are unsupported. The C restrictions on vector varargs, unions and by-value x86
+available for explicit element conversions. AVX-512 support is limited to the
+operations listed here; scatter operations are unsupported. The C restrictions on vector varargs, unions and by-value x86
 aggregates apply; see [GNU vector mode](../../frontends/c/extensions.md).
 
 <a id="c-x86-intrinsics-bounded-sse2-packed-shifts"></a>
@@ -620,6 +621,28 @@ The codegen test checks all six operations against an independent GF(256)
 software oracle and the FIPS 197 AES-128 example. Native execution needs an
 AES-capable x86-64 Linux host; on macOS arm64 the tests cover encoding,
 frontend and feature diagnostics only.
+
+## AVX512F scalar masks
+
+`immintrin.h` defines `__mmask16` for sixteen dword lanes and `__mmask8`
+for eight qword lanes. Bit zero controls the lowest-addressed lane. The
+wrappers require `avx512f` permission in the enclosing function.
+
+| Wrappers | Behavior |
+| --- | --- |
+| `_mm512_cmp_epi32_mask`, `_mm512_cmp_epi64_mask` | Signed comparison to a scalar mask |
+| `_mm512_cmp_epu32_mask`, `_mm512_cmp_epu64_mask` | Unsigned comparison to a scalar mask |
+| `_mm512_mask_add_epi32`, `_mm512_mask_add_epi64` | Add active lanes; preserve `src` elsewhere |
+| `_mm512_mask_sub_epi32`, `_mm512_mask_sub_epi64` | Subtract active lanes; preserve `src` elsewhere |
+| `_mm512_mask_loadu_epi32`, `_mm512_mask_loadu_epi64` | Load active lanes; preserve `src` elsewhere |
+| `_mm512_mask_storeu_epi32`, `_mm512_mask_storeu_epi64` | Store active lanes only |
+
+Comparison predicates must be integer constant expressions in 0..7:
+equal, less than, less or equal, false, not equal, greater or equal,
+greater than, and true, respectively. Masked memory accepts unaligned
+addresses. Inactive lanes do not access memory. The wrappers use Keel-private
+builtins with reviewed typed signatures; they do not claim vendor builtin
+compatibility.
 
 ## SHA-256
 

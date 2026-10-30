@@ -958,6 +958,8 @@ impl InstData {
             Self::Intrinsic { id, .. } => match id {
                 crate::x86_system_intrinsics!(all) => id.generated_system_memory_effects(),
                 crate::x86_query_intrinsics!(all) => id.generated_query_memory_effects(),
+                Intrinsic::X86Avx512MaskLoadd | Intrinsic::X86Avx512MaskLoadq => Read,
+                Intrinsic::X86Avx512MaskStored | Intrinsic::X86Avx512MaskStoreq => Write,
                 Intrinsic::X86FmaVfmadd132pd128
                 | Intrinsic::X86FmaVfmadd132pd256
                 | Intrinsic::X86FmaVfmadd132ps128
@@ -1605,6 +1607,14 @@ impl InstData {
                 | Intrinsic::X86Sse42Crc32b
                 | Intrinsic::X86Sse42Crc32w
                 | Intrinsic::X86Sse42Crc32d
+                | Intrinsic::X86Avx512Cmpd
+                | Intrinsic::X86Avx512Cmpq
+                | Intrinsic::X86Avx512Cmpud
+                | Intrinsic::X86Avx512Cmpuq
+                | Intrinsic::X86Avx512MaskAddd
+                | Intrinsic::X86Avx512MaskAddq
+                | Intrinsic::X86Avx512MaskSubd
+                | Intrinsic::X86Avx512MaskSubq
                 | Intrinsic::X86Sha256msg1
                 | Intrinsic::X86Sha256msg2
                 | Intrinsic::X86Sha256rnds2
@@ -1756,6 +1766,7 @@ impl InstData {
             Self::Intrinsic { id, .. } => {
                 !(id.is_x86_bmi()
                     || id.is_x86_sha256()
+                    || (id.is_x86_avx512_mask() && id.info().pure)
                     || id.x86_aes_opcode().is_some()
                     || id.is_x86_pure_bits()
                     || id.is_x86_legacy_sign_mask()
