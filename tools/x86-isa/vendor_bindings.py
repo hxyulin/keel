@@ -97,6 +97,13 @@ VALUE_EXTRA_CONTROLS['avx512_compare_sae'] = [(3, 31, 31, 'AVX512 comparison pre
 VALUE_CONTROLS['avx512_fp_cmp_imm5'][0].update(['X86Avx512VlCmppd128', 'X86Avx512VlCmppd256', 'X86Avx512VlCmpps128', 'X86Avx512VlCmpps256'])
 VALUE_CONTROLS['avx512_vl_int_cmp_imm3'] = ({'X86Avx512VlCmpud256', 'X86Avx512VlCmpq128', 'X86Avx512VlCmpq256', 'X86Avx512VlCmpuq256', 'X86Avx512VlCmpd256', 'X86Avx512VlCmpud128', 'X86Avx512VlCmpd128', 'X86Avx512VlCmpuq128'}, 3, 7, 7, 'AVX512VL integer comparison predicate must be an integer constant in 0..7')
 VALUE_CONTROLS['avx512_vl_half_imm8'] = ({'X86Avx512VlVcvtps2ph128', 'X86Avx512VlVcvtps2ph256'}, 3, 255, 255, 'AVX512VL half rounding immediate must be an integer constant in 0..255')
+
+
+VALUE_CONTROLS['avx512dq_cvt_rc'] = ({'X86Avx512Dq' + op + '512' for op in ['Vcvtqq2pd', 'Vcvtuqq2pd', 'Vcvtqq2ps', 'Vcvtuqq2ps', 'Vcvtpd2qq', 'Vcvtpd2uqq', 'Vcvtps2qq', 'Vcvtps2uqq']}, 3, 11, 15, 'AVX512DQ rounding control must be a supported integer constant')
+VALUE_CONTROLS['avx512dq_cvt_sae'] = ({'X86Avx512Dq' + op + '512' for op in ['Vcvttpd2qq', 'Vcvttpd2uqq', 'Vcvttps2qq', 'Vcvttps2uqq']}, 3, 8, 15, 'AVX512DQ SAE control must be an integer constant equal to 4 or 8')
+CONTROL_ALLOWED_VALUES.update({'avx512dq_cvt_rc': [4, 8, 9, 10, 11], 'avx512dq_cvt_sae': [4, 8]})
+VALUE_CONTROLS['avx512bw_cmp_imm3'] = ({'X86Avx512Bw' + op + lane + str(width) for op in ['Cmp', 'Cmpu'] for lane in ['b', 'w'] for width in [128, 256, 512]}, 3, 7, 7, 'AVX512BW comparison predicate must be an integer constant in 0..7')
+
 CONTROLS = {'none', 'imm8', 'u64_count'} | VALUE_CONTROLS.keys()
 
 

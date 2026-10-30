@@ -134,6 +134,36 @@ fn vendor_float_wrappers_keep_effects_and_validate_controls() {
             "{error}"
         );
     }
+    let half_source = "#include <immintrin.h>\n\
+        __attribute__((target(\"avx512f,avx512vl,no-f16c\"))) __m128 h128(__m128i a){return _mm_cvtph_ps(a);}\n\
+        __attribute__((target(\"avx512f,avx512vl,no-f16c\"))) __m256 h256(__m128i a){return _mm256_cvtph_ps(a);}\n\
+        __attribute__((target(\"avx512f,avx512vl,no-f16c\"))) __m128i f128(__m128 a){return _mm_cvtps_ph(a,12);}\n\
+        __attribute__((target(\"avx512f,avx512vl,no-f16c\"))) __m128i f256(__m256 a){return _mm256_cvtps_ph(a,255);}\n";
+    let mut module = frontend(half_source).unwrap();
+    keel_opt::optimize(&mut module).unwrap();
+    let selector = FeatureSelector {
+        inner: &SelectionTier::Full,
+        features: Features::NONE,
+    };
+    keel_codegen::compile_program_with_pipeline(
+        &module,
+        Target::X86_64LinuxGnu,
+        &pipeline(&selector, &AllocationTier::Full),
+    )
+    .unwrap();
+    // A neighboring function cannot borrow another function's VL permission.
+    let module = frontend(&format!(
+        "{half_source}\n__m128 denied(__m128i a){{return _mm_cvtph_ps(a);}}"
+    ))
+    .unwrap();
+    assert!(
+        keel_codegen::compile_program_with_pipeline(
+            &module,
+            Target::X86_64LinuxGnu,
+            &pipeline(&selector, &AllocationTier::Full),
+        )
+        .is_err()
+    );
     // Merely including declarations does not grant or require optional ISA bits.
     let module = frontend("#include <immintrin.h>\nint f(void){return 1;}").unwrap();
     let selector = FeatureSelector {

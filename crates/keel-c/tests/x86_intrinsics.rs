@@ -1656,3 +1656,10 @@ mod x86_avx512_dq_bits;
 
 #[path = "x86_intrinsics/x86_avx512_bw.rs"]
 mod x86_avx512_bw;
+
+#[path = "x86_intrinsics/x86_avx512_bw_mask.rs"]
+mod x86_avx512_bw_mask;
+#[path = "x86_intrinsics/x86_avx512_dq_convert.rs"]
+mod x86_avx512_dq_convert;
+#[path = "x86_intrinsics/x86_avx512_vl_fma.rs"]
+mod x86_avx512_vl_fma;

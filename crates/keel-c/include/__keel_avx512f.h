@@ -1008,4 +1008,7 @@ static __inline__ __attribute__((always_inline)) unsigned char _kortestc_mask16_
 #include <__keel_avx512_cd.h>
 #include <__keel_avx512_dq_bits.h>
 #include <__keel_avx512_bw.h>
+#include <__keel_avx512_vl_fma.h>
+#include <__keel_avx512_dq_convert.h>
+#include <__keel_avx512_bw_mask.h>
 #endif

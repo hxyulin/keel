@@ -90,7 +90,8 @@ expanded into separately rounded multiplication and addition or a libm call.
 
 `f16cintrin.h` exposes `_mm{,256}_cvtph_ps`, `_mm{,256}_cvtps_ph`,
 `_cvtsh_ss` and `_cvtss_sh` through the existing F16C IR. These require F16C
-permission. Packed conversion to half returns an `__m128i`; the 128-bit float
+permission or AVX512F plus AVX512VL; the latter uses EVEX conversions when
+F16C is disabled. Packed conversion to half returns an `__m128i`; the 128-bit float
 source form zeroes its upper 64 result bits. The rounding argument must be an
 integer constant expression in 0..255. Bits 7:3 are ignored and the IR receives
 bits 2:0; bit 2 selects MXCSR rounding. The `_MM_FROUND_*` constants are
@@ -884,8 +885,8 @@ one, with all other bits zero. ZF means `(a | b) == 0`; CF means
 `(a | b) == 0xffff`. The `x86_avx512_ktestw` helper uses the same encoding for
 ZF meaning `(a & b) == 0` and CF meaning `((~a) & b) == 0`. The latter uses
 an AVX512F AND/AND-NOT and KORTEST recipe. The independent hardware KTESTW
-instruction requires AVX512DQ and remains outside this imported instruction
-set. No architectural FLAGS value becomes an SSA value. These pure helpers
+instruction requires AVX512DQ; the typed helper keeps its F-only recipe.
+No architectural FLAGS value becomes an SSA value. These pure helpers
 return only the two specified predicate bits and require no AVX512BW or DQ.
 C mask-test wrappers return ZF and write CF through an `unsigned char *`,
 accessing exactly one byte.
@@ -1135,7 +1136,17 @@ exceptions. Inactive converted lanes preserve merge bits and suppress native
 floating exceptions, including where a vendor header uses an unmasked
 conversion followed by a selection. All conversions remain pinned to MXCSR.
 
-## AVX512DQ multiply and floating bitwise operations
+Narrow packed FMA names use `x86_avx512vl_` followed by the opcode and width.
+They cover `vfmadd`, `vfmsub`, `vfnmadd`, `vfnmsub`, `vfmaddsub` and
+`vfmsubadd`, each with operand orders 132, 213 and 231, `ps`/`pd` lanes,
+and 128-/256-bit widths. Each takes `(merge, i8 mask, a, b, c)` and returns
+the vector. Active lanes use one fused rounding; inactive lanes retain the
+independent merge input and suppress exceptions. They use MXCSR and accept
+no ER/SAE operand. They require AVX512F plus AVX512VL without FMA permission.
+The corresponding standard C mask, mask3 and mask-zero wrappers preserve
+their specified merge source and evaluate each operand once.
+
+## AVX512DQ operations
 
 Typed `x86_avx512dq_` operations provide low qword multiplication and
 `andps`, `andpd`, `andnps`, `andnpd`, `orps`, `orpd`, `xorps` and `xorpd`
@@ -1156,6 +1167,24 @@ require DQ. Direct DQ builtins expose the separately gated native operations.
 Portable `vimul` on `i64x8` uses native `vpmullq` when DQ is enabled and retains
 its scalar wrapping implementation with F alone. The `mullox_epi64`
 compatibility wrappers retain their F-only contract.
+
+Packed qword/float conversions use `x86_avx512dq_` plus the native opcode and
+128, 256 or 512. Signed and unsigned qword integers convert to and from
+single or double precision, with rounded and truncating float-to-integer
+forms. Each takes `(merge, i8 mask, input)`; 512-bit forms append an `i32`
+control. Rounded controls are 4 or 8..11 for current MXCSR direction or
+nearest/down/up/zero with SAE. Truncating controls are 4 or 8. Narrow forms
+use MXCSR and have no ER/SAE operand. All forms require F plus DQ; narrow
+forms also require VL.
+
+Qword-to-single conversion produces two, four or eight low float lanes.
+The 128-bit form always zeroes its upper two float lanes, including for
+mask zero. Single-to-qword conversion consumes two low floats at 128 bits,
+four at 256 bits and eight at 512 bits. Inactive converted lanes retain
+merge bits and suppress exceptions. Invalid active float-to-integer lanes
+retain native indefinite results. These conversions remain pinned relative
+to MXCSR. Standard C interfaces include unmasked, masked and mask-zero
+forms, plus 512-bit rounding and SAE forms.
 
 ## AVX512CD conflict and leading-zero count
 
@@ -1373,3 +1402,18 @@ and zero-masked arithmetic, move and unaligned memory interfaces. New 512-bit
 unmasked arithmetic and unaligned memory interfaces use the same typed forms
 with all lane bits set. Existing SSE/AVX2 unmasked interfaces keep their prior
 contracts. `__mmask32` and `__mmask64` retain all 32 or 64 mask bits.
+
+Byte and word comparison names are `cmpb`/`cmpw` for signed lanes and
+`cmpub`/`cmpuw` for unsigned lanes, followed by the vector width. They take
+`(a, b, write_mask, i32 predicate)` and return a scalar mask. Predicates
+0..7 mean equal, less, less-or-equal, false, not-equal, greater-or-equal,
+greater and true. `testb`/`testw` test whether each lane's `a & b` is nonzero;
+`testnb`/`testnw` test whether it is zero. These take `(a, b, write_mask)`.
+Mask bits outside the lane count are zero in every result.
+
+`movb2m`/`movw2m` extract each input lane's sign bit to a scalar mask.
+`movm2b`/`movm2w` expand each mask bit to an all-ones or zero lane. These
+pure operations use the same vector shapes, scalar mask widths and feature
+permissions as BW arithmetic. Scalar transfers preserve all 64 byte-mask
+bits for a 512-bit vector. C exposes comparisons, tests and conversions at
+all three widths.
